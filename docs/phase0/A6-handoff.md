@@ -14,7 +14,7 @@
 
 **Interfaces:** None introduced. The checker's register input (`{"commands": [{"id", "pattern", "classification"}]}`, full-line regex match) is a test-side format; A6 proposes that A2's approved command register be machine-readable in a form that maps onto it, so V-S7 (a) and (b) use the same source.
 
-**Limitations:** No product code exists, so no criterion has been run against an implementation. No lab IED exists (owner, via A1), so no slice result can exceed `simulated`. The documented-behaviour layer of the simulator waits on A2's cited register. Cross-review of A2's command register and A3's threat model is pending: neither draft was on a pushed branch or in the project files when this handoff was written.
+**Limitations:** No product code exists, so no criterion has been run against an implementation. No lab IED exists (owner, via A1), so no slice result can exceed `simulated`. The documented-behaviour layer of the simulator waits on A2's cited register. Cross-review of A2's command register and A3's threat model was pending when this handoff was written, because neither draft had been pushed. It is now done: see [A6-cross-review.md](A6-cross-review.md) (R-A2-1 to R-A2-4 and R-A3-1 to R-A3-6; A4 and A5 were reviewed there too).
 
 **Risks:** Parser and simulator both derive from OEM documentation, so a documentation error passes every simulated test (Device simulator plan, item 4). Thresholds marked *(proposed)* are A6 starting values, not evidence-based.
 
@@ -27,4 +27,4 @@
 
 **Files changed:** `docs/verification.md`, `docs/phase0/A6-handoff.md`, `tests/integration/README.md`, `tests/integration/experiments/`, `tests/safety/README.md`, `tests/safety/recording_simulator/`, `tests/security/README.md`.
 
-**Reviewer(s) and outcome:** A1 integration review pending. A6 does not review its own work.
+**Reviewer(s) and outcome:** A1 integration review, 2026-10-23: accepted for Phase 0. A1 re-ran E-01 and the simulator self-test, and both reproduced. Decisions are recorded in [agent-handoffs.md](../agent-handoffs.md) under Handoff P0-A6. A6 does not review its own work.
