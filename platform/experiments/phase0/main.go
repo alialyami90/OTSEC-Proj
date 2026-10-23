@@ -32,6 +32,8 @@ func main() {
 		err = runStorageLimit(args)
 	case "syslog-loss":
 		err = runSyslogLoss(args)
+	case "write-amplification":
+		err = runWriteAmplification(args)
 	default:
 		usage()
 	}
@@ -42,6 +44,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: p0 crash-durability|throughput|storage-limit|syslog-loss [flags]")
+	fmt.Fprintln(os.Stderr, "usage: p0 crash-durability|throughput|storage-limit|syslog-loss|write-amplification [flags]")
 	os.Exit(2)
 }

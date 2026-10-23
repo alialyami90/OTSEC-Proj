@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -154,8 +153,8 @@ func killWriterAt(self, path, syncMode string, batch int, delay time.Duration) (
 		lastCh <- last
 	}()
 	time.Sleep(delay)
-	cmd.Process.Signal(syscall.SIGKILL)
-	last := <-lastCh // pipe drained to EOF: every ack the child wrote is counted
+	cmd.Process.Kill() // SIGKILL on Unix, TerminateProcess on Windows
+	last := <-lastCh   // pipe drained to EOF: every ack the child wrote is counted
 	cmd.Wait()
 	return last, nil
 }

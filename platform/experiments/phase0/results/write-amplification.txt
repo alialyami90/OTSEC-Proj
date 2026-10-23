@@ -1,0 +1,9 @@
+# 2026-10-23T17:28:28Z go version go1.26.0 linux/amd64 Linux 6.18.44-fc-v153 x86_64 cpus=4
+# filesystem for scratch: ext4
+write-amplification: 20000 events per configuration, payload=368 bytes, synchronous=FULL
+wal settings                       batch  bytes/event  amplification
+default (autocheckpoint 1000)          1         9532          25.9x
+default (autocheckpoint 1000)         10         2082           5.7x
+bounded, auto_vacuum=INCREMENTAL       1        10627          28.9x
+bounded, auto_vacuum=INCREMENTAL      10         2631           7.2x
+bounded, auto_vacuum=INCREMENTAL     100         1047           2.8x

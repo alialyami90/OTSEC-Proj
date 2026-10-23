@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -143,7 +142,7 @@ func startReceiver(self, role, addr, out string, delay time.Duration, extra ...s
 }
 
 func (p *receiverProc) kill() {
-	p.cmd.Process.Signal(syscall.SIGKILL)
+	p.cmd.Process.Kill() // SIGKILL on Unix, TerminateProcess on Windows
 	p.cmd.Wait()
 }
 

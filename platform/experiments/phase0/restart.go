@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // restartCase checks recovery as a restarted process would do it, which
@@ -207,12 +206,4 @@ func lastSeq(path string) int64 {
 	var n int64
 	db.QueryRow("SELECT COALESCE(MAX(seq),0) FROM events").Scan(&n)
 	return n
-}
-
-func fsFree(dir string) int64 {
-	var st syscall.Statfs_t
-	if syscall.Statfs(dir, &st) != nil {
-		return -1
-	}
-	return int64(st.Bavail) * st.Bsize
 }

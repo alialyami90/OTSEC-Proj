@@ -29,6 +29,7 @@ else
 fi
 
 { env_line; "$work/p0" syslog-loss -runs 10 -dir "$work/scratch"; } 2>&1 | tee results/syslog-loss.txt
+{ env_line; "$work/p0" write-amplification -dir "$work/scratch"; } 2>&1 | tee results/write-amplification.txt
 
 {
 	env_line
