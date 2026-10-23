@@ -1,0 +1,53 @@
+== goose-normal
+labeled attack frames: none
+labeled frames flagged: 0/0
+other flagged frames: 0
+== goose-disturbance-busbar
+labeled attack frames: none
+labeled frames flagged: 0/0
+other flagged frames: 0
+== goose-disturbance-breaker-failure
+labeled attack frames: none
+labeled frames flagged: 0/0
+other flagged frames: 0
+== goose-disturbance-underfrequency
+labeled attack frames: none
+labeled frames flagged: 0/0
+other flagged frames: 0
+== goose-ms-as1
+labeled attack frames: [542, 784]
+labeled frames flagged: 2/2
+other flagged frames: 2
+  frame    542 LABELED LIED10CTRL/LLN0$Status stnum-jump,new-state-sqnum-nonzero,new-state-stale-t
+  frame    593 other   LIED10CTRL/LLN0$Status stnum-regress
+  frame    784 LABELED LIED12CTRL/LLN0$Status stnum-jump,new-state-sqnum-nonzero,new-state-stale-t
+  frame    814 other   LIED12CTRL/LLN0$Status stnum-regress
+== goose-ms-as2
+labeled attack frames: [534, 774]
+labeled frames flagged: 2/2
+other flagged frames: 2
+  frame    534 LABELED LIED10CTRL/LLN0$Status stnum-jump,new-state-stale-t
+  frame    585 other   LIED10CTRL/LLN0$Status stnum-regress
+  frame    774 LABELED LIED12CTRL/LLN0$Status stnum-jump,new-state-stale-t
+  frame    804 other   LIED12CTRL/LLN0$Status stnum-regress
+== goose-ms-as3
+labeled attack frames: [534, 774]
+labeled frames flagged: 2/2
+other flagged frames: 2
+  frame    534 LABELED LIED10CTRL/LLN0$Status stnum-jump
+  frame    585 other   LIED10CTRL/LLN0$Status stnum-regress
+  frame    774 LABELED LIED12CTRL/LLN0$Status stnum-jump
+  frame    804 other   LIED12CTRL/LLN0$Status stnum-regress
+== goose-ms-as4
+labeled attack frames: [556]
+labeled frames flagged: 1/1
+other flagged frames: 1
+  frame    556 LABELED LIED10CTRL/LLN0$Status sqnum-gap,same-state-t-changed
+  frame    607 other   LIED10CTRL/LLN0$Status sqnum-gap,same-state-t-changed
+== goose-composite
+labeled attack frames: [542, 792]
+labeled frames flagged: 1/2
+other flagged frames: 2
+  frame    542 LABELED LIED11CTRL/LLN0$Status stnum-jump
+  frame    593 other   LIED11CTRL/LLN0$Status stnum-regress
+  frame    822 other   LIED11CTRL/LLN0$Status stnum-regress

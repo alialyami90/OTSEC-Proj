@@ -1,0 +1,256 @@
+[
+  {
+    "source": "iec104.pcap frame 25",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 1)",
+      "record_digest": "07564c08f3d366b4ff0c5ec3311eadc8e67f26006764467787cab50837f93365",
+      "origin": "device",
+      "kind": "protocol-event",
+      "source": {
+        "asset_id": "iec104:ca10",
+        "stream_id": "iec104:ca10:ioa13",
+        "stream_seq": 1
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "c75d170884070d",
+        "native_encoding": "hex",
+        "format": "iec60870-cp56time2a",
+        "wall_clock": "2013-07-04T08:23:24.007",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": null,
+        "quality": {
+          "invalid": false,
+          "summer_time": false,
+          "scope": "record"
+        },
+        "flags": [
+          "two-digit-year:century-assumed-2000"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "07564c08f3d366b4ff0c5ec3311eadc8e67f26006764467787cab50837f93365",
+          "length": 7
+        },
+        "fields": {
+          "typeid": "M_SP_TB_1",
+          "ioa": "13",
+          "spi": "On"
+        }
+      },
+      "normalized": {
+        "subject": "ioa:13",
+        "value": "On",
+        "category": "unmapped"
+      },
+      "evidence_class": "public-capture (simulated or lab origin, see SOURCE.md)"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true
+    }
+  },
+  {
+    "source": "dnp3-digitalbond-part1.pcap frame 40",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 1)",
+      "record_digest": "3b43a265aa4e51fe7f7c180af63fca7fc82422384380e74c66b1f66b8e0527a8",
+      "origin": "device",
+      "kind": "protocol-event",
+      "source": {
+        "asset_id": "dnp3:outstation",
+        "stream_id": "dnp3:outstation:g2",
+        "stream_seq": 1
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "g51v1=e2437d87ff00;g2v3.rel=0000",
+        "native_encoding": "hex",
+        "format": "dnp3-g51v1-cto+g2v3-relative",
+        "wall_clock": "2004-10-11T10:16:34.018",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": null,
+        "quality": {
+          "scope": "record"
+        },
+        "flags": [
+          "relative-to-cto"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "3b43a265aa4e51fe7f7c180af63fca7fc82422384380e74c66b1f66b8e0527a8",
+          "length": 6
+        },
+        "fields": {
+          "group": "2",
+          "variation": "3",
+          "index": "1",
+          "value": "1",
+          "flags": "Online"
+        }
+      },
+      "normalized": {
+        "subject": "bi:1",
+        "value": "1",
+        "category": "unmapped"
+      },
+      "evidence_class": "public-capture (simulated or lab origin, see SOURCE.md)"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true
+    }
+  },
+  {
+    "source": "goose-normal.pcapng frame 1",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 1)",
+      "record_digest": "1133459ff0b8cee2f2ee31cc91eb8565d51929fadc712cc66ed8907d1c40ad64",
+      "origin": "device",
+      "kind": "protocol-event",
+      "source": {
+        "asset_id": "goose:LIED10",
+        "stream_id": "goose:LIED10CTRL/LLN0$Status",
+        "stream_seq": 1
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "5cd3d9ac8395810a",
+        "native_encoding": "hex",
+        "format": "iec61850-utctime",
+        "wall_clock": "2019-05-09T07:41:32.514",
+        "offset": "+00:00",
+        "offset_basis": "format",
+        "utc": "2019-05-09T07:41:32.514Z",
+        "resolution_ns": 59,
+        "accuracy_ns": 976562,
+        "quality": {
+          "leap_seconds_known": false,
+          "clock_failure": false,
+          "sync": "synchronized",
+          "time_accuracy_bits": 10,
+          "scope": "record"
+        },
+        "flags": []
+      },
+      "native": {
+        "evidence": {
+          "sha256": "1133459ff0b8cee2f2ee31cc91eb8565d51929fadc712cc66ed8907d1c40ad64",
+          "length": 8
+        },
+        "fields": {
+          "stNum": "1",
+          "sqNum": "0"
+        }
+      },
+      "normalized": {
+        "subject": "LIED10CTRL/LLN0$Status",
+        "value": "stNum=1",
+        "category": "unmapped"
+      },
+      "evidence_class": "public-capture (simulated or lab origin, see SOURCE.md)"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true
+    }
+  },
+  {
+    "source": "A2 excerpt of SEL-751 manual Figure 10.17",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 1)",
+      "record_digest": "92cbe36277a70da6bac83913530efb21d67361be995d9ee35a570d96b3b4055c",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder1",
+        "stream_id": "sel751:feeder1:ser",
+        "stream_seq": 1
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": null,
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": null,
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": null,
+        "accuracy_ns": null,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "row-time-columns-not-documented-yet"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "92cbe36277a70da6bac83913530efb21d67361be995d9ee35a570d96b3b4055c",
+          "length": 68
+        },
+        "fields": {
+          "report.Date": "02/28/2007",
+          "report.Time": "16:34:28",
+          "report.Time Source": "Internal",
+          "ELEMENT": "51P1P",
+          "STATE": "Asserted"
+        },
+        "context": {
+          "report_header_sha256": "cbe8a0eea6faa095ccfc67366edda2ba3dcdc222acaab187c0f498e97794cc12"
+        }
+      },
+      "normalized": {
+        "subject": "51P1P",
+        "value": "Asserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true
+    }
+  }
+]
