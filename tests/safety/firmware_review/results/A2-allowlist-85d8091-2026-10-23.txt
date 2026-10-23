@@ -1,4 +1,4 @@
-// A2 allowlist at 954fd86 vs SEL-751 IM 20260910 Appendix A, run 2026-10-23T18:48:59Z, class: desk
+// A2 allowlist at 85d8091 vs SEL-751 IM 20260910 Appendix A, run 2026-10-23T18:50:18Z, class: desk
 {
   "rows_parsed": 84,
   "fixes": {
@@ -90,9 +90,7 @@
         "F2",
         "F5"
       ],
-      "problems": [
-        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
-      ]
+      "problems": []
     },
     {
       "branch": "R500",
@@ -103,9 +101,7 @@
         "F2",
         "F5"
       ],
-      "problems": [
-        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
-      ]
+      "problems": []
     },
     {
       "branch": "R402",
@@ -116,9 +112,7 @@
         "F2",
         "F5"
       ],
-      "problems": [
-        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
-      ]
+      "problems": []
     },
     {
       "branch": "R401",
@@ -128,9 +122,7 @@
         "F1",
         "F2"
       ],
-      "problems": [
-        "F1,F2 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
-      ]
+      "problems": []
     },
     {
       "branch": "R400",
@@ -140,11 +132,9 @@
         "F1",
         "F2"
       ],
-      "problems": [
-        "F1,F2 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
-      ]
+      "problems": []
     }
   ],
-  "pass": false
+  "pass": true
 }
-// exit 1
+// exit 0
