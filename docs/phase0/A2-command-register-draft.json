@@ -383,6 +383,16 @@
    "status": "documented-untested",
    "notes": "Read-only by documentation, but DENIED: deferred by A1 to the SEL-400 family's Phase 4 expansion. SEL-751 field list not documented; the S32 example has wrong data-line checksums (D25).",
    "side_effects": "None documented. Denied until a family profile and checksum-correct source exist."
+  },
+  {
+   "id": "sel.cas.candidate",
+   "pattern": "(?i)\\s*CAS\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "access_level": "any (S35)",
+   "citation": "S35 AG95-04 (CAS configuration message, any access level); S22 Appendix A firmware history (CAS response corrupted after a settings change, fixed R300-V3/R202-V1)",
+   "status": "documented-untested",
+   "notes": "Read-only by documentation but DENIED: deferred with CSE to Phase 4 (A1). Would let a collector learn the relay's own CSE layout.",
+   "side_effects": "None documented. Output is firmware-dependent and was corrupted on some firmware."
   }
  ]
 }

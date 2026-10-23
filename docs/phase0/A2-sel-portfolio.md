@@ -120,3 +120,33 @@ All entries are documented-untested.
 
 These relays therefore report security events only through the SER (SALARM, password access), which the platform must poll. A collector restart that retries without closing the previous session can take every Telnet session on an SEL-751 after two attempts. That locks engineers out of Telnet until `TIDLE` expires (D9, D18). Backoff should assume that a session left open is held until `TIDLE`, which defaults to 15 minutes on the SEL-751.
 
+## 9. Manuals supplied at 17:22 (owner answers, 2026-10-23)
+
+| ID | Document | Date code | What it settles |
+| --- | --- | --- | --- |
+| S35 | SEL Application Guide AG95-04, *Compressed ASCII Commands* | 20030425 | General Compressed ASCII format and the `CAS` self-description command (below). It does **not** give the `CSE` field list. |
+| S36 | SEL-3530 RTAC Instruction Manual (bundled RTAC content) | 20241217 / 20260925 | RTAC hardware. The SEL-3530 is discontinued (owner); the SEL-3350 replaces it. |
+| S37 | SEL-3555-2 RTAC Instruction Manual | 20250730 / 20260925 | RTAC hardware |
+| S38 | SEL-3505/3505-3 RTAC Instruction Manual | 20241217 / 20260925 | RTAC hardware |
+| S39 | SEL-3350-1 Automation Controller Instruction Manual | 20260928 | Successor platform to the SEL-3530 |
+| S40 | SEL-3610 Port Server, SEL-3620 Ethernet Security Gateway, SEL-3622 Security Gateway Instruction Manual | 20241010 | Section 7 "Proxy Services and Password Management", Table 7.2 "SEL-3620 IED Proxy Capabilities", Appendix E user-based accounts. This is A3's Q1 material (per-user access to IEDs through a gateway); not read further by A2. |
+| S41 | SEL-735 Power Quality and Revenue Meter Instruction Manual | 20250711 | Meter class. SEL ASCII over Telnet with `MAXACC` and Compressed ASCII, so the same adapter pattern as the relays applies (keyword search only). |
+| S42 | SEL-2401, SEL-2404, SEL-2407 Satellite-Synchronized Clock Instruction Manuals | 20250918, 20191119, 20250918 | Clocks with a serial port and IRIG-B outputs. No SNMP, Syslog or Telnet found (keyword search), so no network collection path; the inventory comes from operator entry. |
+
+**Not in the folder:** an SEL Fast Message protocol document. A2 does not need one for slice 1, because binary Fast messages are blocked at the transport (D5). The SEL-2730M manual is still missing.
+
+### Compressed ASCII from S35
+
+- **Format:** `<STX>` starts each response and `<ETX>` ends it. Lines end with `<CR>` or `<CR><LF>`. Text fields are quoted, and quotes embedded in text are doubled. Numbers are unquoted.
+- **Checksum:** "the sum of the first byte on a line (first byte following `<STX>`, `<CR>`, or `<CR><LF>`) through the comma preceding the checksum". This is the same rule A2 tested on the S22 and S32 examples.
+- **Standard replies:**
+  - `"No Data Available","0668"`
+  - `"Invalid Parameter(s)","07BC"`
+  - `"Invalid Data","0461"`, meaning the data "failed an integrity test"
+  - `"Success","02D9"`
+- **`CAS`** returns, for each compressed command, its name, the minimum access level, and each label line followed by a type line. Types are `I` (integer), `F` (float) and `mS` (string of up to m characters). `CAS` "can be entered at any command access level". This is how a collector could learn a relay's own `CSE` layout instead of assuming the SEL-400 layout.
+- **S22 firmware history:** "Resolved an issue where the CAS command response was corrupted after a setting change. This issue interfered with real-time automation controller (RTAC) event collection" (fixed in R300-V3 and R202-V1). So `CAS` output must itself pass checksum validation, and its answer is firmware-dependent.
+- **Inconsistent checksums in S35's own examples:** A2 checked 12 example lines in S35, and 7 match the rule. These do not: `"Invalid Data","0461"` (computes 04D1), `"Success","02D9"` (0349), `"CME",1,"0171"` (01A2), and two CHI data lines. A6 should not use them as positive fixtures. This is the third SEL document with internally inconsistent examples (D25).
+
+`CAS` and `CSE` stay unregistered (deferred with `CSE` to Phase 4, per A1). If `CSE` is approved later, the sequence would be: `CAS` → validate checksums → check that the `CSE` labels match a profile → `CSE`. Any mismatch is a `parse_error`.
+
