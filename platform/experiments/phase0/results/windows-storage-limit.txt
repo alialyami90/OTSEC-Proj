@@ -1,0 +1,57 @@
+# Source: job log of GitHub Actions run 40006949610, job 120597175606 (workflow_dispatch at 830a0f4), transcribed with log timestamps removed. Artifact a5-windows-results (zip sha256 d8bd421e9eefdf42b84636d14310ce75838d5a04781e4f2f4cab8a7e2b5efccc) holds the original files; this environment cannot reach its download host.
+# Runner: windows-2025-vs2026 image 20261021.278.1, Azure westus3, runs as runneradmin (elevated). Evidence class: simulated (hosted VM, not SEL-3355-2 hardware).
+# 2026-10-23T19:02:47Z Microsoft Windows Server 2025 Datacenter 10.0.26100 build 26100 cpu=Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+# scratch filesystem: NTFS disk: Msft Virtual Disk bus=SAS
+# full-filesystem cases on a 16 MB NTFS VHDX
+case 1: application quota via PRAGMA max_page_count=256 (1 MiB at 4 KiB pages)
+  writes stopped after 2530 acked events; error: database or disk is full (13)
+  WAL file size at stop: 4128272 bytes (WAL is NOT bounded by max_page_count)
+  read back: integrity=ok count=2530 max_seq=2530 (acked events lost: 0)
+  after pruning oldest half: 1260 more events accepted before quota again (database or disk is full (13))
+
+case 2: real full filesystem in <16 MB NTFS VHDX>, default WAL settings (autocheckpoint 1000 pages)
+  writes stopped after 2500 acked events; error: database or disk is full (13)
+  at stop: main db 704512 bytes, WAL 4132416 bytes
+  read back: integrity=ok count=2500 max_seq=2500 (acked events lost: 0)
+  prune oldest half while disk is full (one transaction): FAILED: database or disk is full (13)
+  released 512 KiB reserve file
+  prune oldest half after release (one transaction): ok
+  wal_checkpoint(TRUNCATE): FAILED: database or disk is full (13)
+  after recovery: 0 more events accepted before full again (database or disk is full (13))
+  reopen: integrity=ok count=1250 max_seq=2500
+
+case 2: real full filesystem in <16 MB NTFS VHDX>, bounded WAL (autocheckpoint 64 pages, journal_size_limit 256 KiB)
+  writes stopped after 11180 acked events; error: database or disk is full (13)
+  at stop: main db 4567040 bytes, WAL 267856 bytes
+  read back: integrity=ok count=11180 max_seq=11180 (acked events lost: 0)
+  prune oldest half while disk is full (one transaction): FAILED: database or disk is full (13)
+  released 512 KiB reserve file
+  prune oldest half after release (one transaction): FAILED: database or disk is full (13)
+  wal_checkpoint(TRUNCATE): FAILED: database or disk is full (13)
+  after recovery: 320 more events accepted before full again (database or disk is full (13))
+  reopen: integrity=ok count=11500 max_seq=11500
+
+case 2: real full filesystem in <16 MB NTFS VHDX>, bounded WAL (autocheckpoint 64 pages, journal_size_limit 256 KiB), incremental pruning
+  writes stopped after 11180 acked events; error: database or disk is full (13)
+  at stop: main db 4567040 bytes, WAL 267856 bytes
+  read back: integrity=ok count=11180 max_seq=11180 (acked events lost: 0)
+  prune oldest half while disk is full (50 events per transaction, 0 pruned): FAILED: database or disk is full (13)
+  released 512 KiB reserve file
+  prune oldest half after release (50 events per transaction, 5590 pruned): ok
+  wal_checkpoint(TRUNCATE): ok
+  after recovery: 6850 more events accepted before full again (database or disk is full (13))
+  reopen: integrity=ok count=12440 max_seq=18030
+
+case 3: restart recovery in <16 MB NTFS VHDX>, auto_vacuum=NONE (default), 3 exhaustions, writer process dies at SQLITE_FULL each time
+  round  events-written  writer-exit                         pruned  fs-free-after  reserve-recreated  integrity  contiguous  acked-present  capacity-regained
+      1           11180  died on SQLITE_FULL (seq 1-11180)     5590         266240  ok                 ok         true        true           true
+      2             110  died on SQLITE_FULL (seq 11181-11290)    2850         266240  ok                 ok         true        true           false
+      3             110  died on SQLITE_FULL (seq 11291-11400)    1480         266240  ok                 ok         true        true           false
+  result: FAIL (2 of 3 rounds; capacity-regained means the run after a recovery wrote at least half of what that recovery pruned)
+
+case 3: restart recovery in <16 MB NTFS VHDX>, auto_vacuum=INCREMENTAL, 3 exhaustions, writer process dies at SQLITE_FULL each time
+  round  events-written  writer-exit                         pruned  fs-free-after  reserve-recreated  integrity  contiguous  acked-present  capacity-regained
+      1           11170  died on SQLITE_FULL (seq 1-11170)     5585        2555904  ok                 ok         true        true           true
+      2            5590  died on SQLITE_FULL (seq 11171-16760)    5587        2551808  ok                 ok         true        true           true
+      3            5580  died on SQLITE_FULL (seq 16761-22340)    5584        2555904  ok                 ok         true        true           true
+  result: PASS (every exhaustion recovered at startup, reserve re-created, capacity regained each time)

@@ -1,0 +1,19 @@
+# Source: job log of GitHub Actions run 40006949610, job 120597175606 (workflow_dispatch at 830a0f4), transcribed with log timestamps removed. Artifact a5-windows-results (zip sha256 d8bd421e9eefdf42b84636d14310ce75838d5a04781e4f2f4cab8a7e2b5efccc) holds the original files; this environment cannot reach its download host.
+# Runner: windows-2025-vs2026 image 20261021.278.1, Azure westus3, runs as runneradmin (elevated). Evidence class: simulated (hosted VM, not SEL-3355-2 hardware).
+# 2026-10-23T19:04:29Z Microsoft Windows Server 2025 Datacenter 10.0.26100 build 26100 cpu=Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+# scratch filesystem: NTFS disk: Msft Virtual Disk bus=SAS
+syslog-loss, part 1: plain TCP (RFC 6587 octet counting), collector SIGKILLed mid-stream
+A message counts as 'sent' when conn.Write returned nil, which is all a
+plain TCP syslog sender can know.
+scenario                       runs  sent-ok(min/max)  received(min/max)  lost(min/max)  runs-with-loss
+paced 1/ms, fast collector       10      193/198            193/197            0/1       2/10
+burst, fast collector            10    13971/15148        13900/15044         64/104     10/10
+burst, slow collector 1ms/msg    10     3410/3767           199/210         3203/3568    10/10
+
+syslog-loss, part 2: acked transport (collector acks after recording), collector
+SIGKILLed and restarted 3 times while 20000 events are forwarded; sender resends
+everything not yet acked after each reconnect. The first collector instance also
+crashes right after recording event 2500, before acking it.
+  events=20000 collector-kills=3 connections=5 elapsed=304ms
+  recorded=20045 distinct=20000 missing=0 duplicates=45
+  result: no loss; duplicates are expected and must be removed downstream by event id
