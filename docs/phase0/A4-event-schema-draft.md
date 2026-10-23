@@ -27,7 +27,7 @@
   "schema": "otsec.event/0.1-draft",
   "event_id": "0192b7e0-…",            // UUIDv7, assigned at first durable write; stable for all re-forwarding
   "origin": "device",                   // "device" | "platform"; set by the collector, never from content
-  "kind": "ser",                        // "ser" | "syslog" | "protocol-event" | "telemetry-health" | "ids-alert"
+  "kind": "ser",                        // "ser" | "soe-log" | "device-log" | "syslog" | "host-event" | "device-status" | "protocol-event" | "telemetry-health" | "ids-alert"; open set (ADR-0006: all OT device classes)
   "source": {
     "asset_id": "…",                    // A1/A2 asset identity contract; the SUBJECT of the event
     "asset_binding": {"method": "adapter-target", "confidence": "configured"},   // R1.5; "asserted" when a relaying sender names the subject
@@ -172,6 +172,8 @@ The forwarder reads from A5's durable outbox in `stream_seq` order and keeps a c
 
 Experiment E-A4-03 (`results/relp-ack-trial{1,2,3}.md`): 1,500 messages acknowledged by a stock rsyslog imrelp receiver, receiver crashed with SIGKILL. With rsyslog's default queues, only 29 to 31 of the 1,500 acknowledged messages had been stored (about 98% loss of acknowledged data, 3 of 3 trials). With Direct queues and an output that confirms each write, 0 acknowledged messages were lost (3 of 3). **A RELP acknowledgement is only as strong as the receiver's queue configuration.** Mode A therefore also requires a documented receiver configuration (Direct or disk-assisted queues with the ack issued after persistence) and a test against it. This is `simulated`, localhost, process crash only; host power loss and page-cache loss are not tested.
 
+A1 ruling at the Phase 0 exit gate: mode A is the only mode allowed for a destination marked `required`; mode B is allowed only for `best-effort` destinations, with the replay window.
+
 For the site-to-central hop, A5's own acknowledged channel is the better tool than Syslog; the profile above is for the platform-to-third-party-collector hop.
 
 ### Answer to A3 on TB5 and AP-9
@@ -185,6 +187,8 @@ Mode A needs exactly one inbound grammar: RELP server frames `TXNR SP COMMAND SP
 - Re-forwarded device Syslog is always wrapped (device bytes in `dtext`/`dtext_b64`), never relayed raw, so a device cannot forge platform messages upstream.
 
 ### SEL telemetry sources by device type (ADR-0006 scope)
+
+ADR-0006 puts every OT device class in scope, so the schema does not assume an SER row. `kind` is an open set: a record from an RTAC SOE log, a clock's event log, a switch or gateway Syslog message, a Windows or Linux host event, or a clock status poll uses the same envelope. The byte-exact `native` evidence, the separate time fields, and `source.sender`/`origin_auth` apply unchanged. Only `collection.parser` and `native.fields` are kind-specific. Host events (Windows Event Log XML, journald JSON) are structured natively, so `native.span` points into the stored structured record instead of into a text line.
 
 The owner set the scope to all SEL OT device types before other vendors. This table records, per SEL device type in the supplied manuals, where its events come from and what the receiver has to cope with. Every row is `documented-untested`: it comes from the SEL instruction manuals in the owner's folder, and no device has been observed. "Not found" means a text search of that manual found nothing, not that the product lacks the feature in every firmware.
 
