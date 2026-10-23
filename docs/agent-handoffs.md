@@ -245,3 +245,10 @@ Missing for the ADR-0006 table: SEL-3620/-3622 gateway, RTAC hardware (SEL-3530/
 6. Facts: site computer model and OS (A5 proposes SEL-3355-2: TPM, mirrored SSD, AMT disabled or kept off the WAN, ~17 s/day drift without a time source); expected WAN outage duration; whether central may reach IEDs directly; the upstream Syslog collector product; the HMI and historian software in use on Windows hosts.
 
 **Integration note (A1):** non-SEL second-family references in A2, A4 and A6 Phase 0 documents (SIPROTEC/Relion contrast, second-vendor fixture requests) are out of scope per ADR-0006; A1 removes or marks them superseded when merging those branches.
+
+#### A1 rulings on A2 manual findings (PR #2 fe0fd7b, 9278a2d) — 2026-10-23
+Checked against SEL-751 IM Table 7.67 (SHOW command, all forms Access Level 1) and SEL-400 series IM Table 14.50 (CSE, Levels 1, B, P, A, O, 2).
+1. **`SHO G` and `SHO P 1`: approved** for the C3 register as exact lines with no `s` setting-name argument, classified read-only, Level 1. Conditions: (a) A2 cites Table 2.5 showing Port 1 is the Ethernet port on the SEL-751; (b) the output is stored as configuration evidence and treated as sensitive (it contains addresses and `FTPUSER`), and A2 confirms from the manual that no password value is printed; (c) A6 adds the `s`-argument and other-port variants to the deny corpus. What the collector does when MAXACC on the collection port is above 1 waits for the owner's MAXACC decision; until then it records and warns, it does not refuse.
+2. **`CSE` (400 series): deferred.** The first slice is SEL-751 only and 400-series register entries belong to that family's Phase 4 expansion. Keep `CSE` as a candidate, `documented-untested`, with D25 (Figure 9.17 checksums) recorded. The Compressed ASCII documentation is on the owner request list.
+3. **RTAC as the Q5 contrast: accepted** with A2's corrected reason; ADR-0006 item 6 and `docs/architecture.md` Q5 updated.
+4. **D18–D25:** accepted into A2's risk list; A1 will fold the ones that affect the slice into `docs/architecture.md` at integration.
