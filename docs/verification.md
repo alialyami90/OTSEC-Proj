@@ -197,7 +197,7 @@ None of these can be closed on simulators or fixtures. A6 will not mark them pas
 | H-11 | Power cut (or forced VM power-off) on the actual site storage while committing at the shipped `synchronous` level; acknowledged events survive. | Page-cache and device write-cache behaviour; SIGKILL cannot show it (E-02). | R8.7, V-S6 |
 | H-12 | On a lab SEL-751 with Port 1 `LANG := SPANISH`, send `QUI` at Level 0 and record the reply byte for byte (read-only, no `ACC`). | Whether English names are accepted on a Spanish port, and the Spanish error text, are undocumented; this decides which V-S17 case is real. | V-S17 |
 | H-13 | On a lab SEL-751 with an English port, send `QUI` at Level 0 and capture the reply byte for byte, with `DATE_F` set to each of its values (read-only; `DATE_F` changed only by the owner on a lab unit). Also capture a `SHO P 1` reply. | The IM documents no QUIT reply and no `SHO P 1` output; the probe grammar and the port-settings parser rest on assumed layouts until a capture exists. Collection from a real device needs this first (ADR-0005). | V-S16, V-S17 |
-| H-14 | On Windows 10/11 IoT Enterprise LTSC (the site platform node's OS; a VM is enough for the software half): re-run E-02 with Process Monitor in place of strace (every acknowledgement preceded by `FlushFileBuffers` on the database and WAL), and E-03 and E-04 on a small NTFS volume with the writer killed by `TerminateProcess`. Then a power cut on each hardware model the site platform node ships on (H-11, C-24). | The site OS differs from the Linux runs in flush, locking, and disk-full behaviour (C-22). Ownership (A5 proposal, 2026-10-23): A5's `p0.exe` and `run.ps1` (PR #3) are implementer evidence; A6 owns H-14 as the independent check with its own scripts and the Process Monitor trace. A5's W-1 ran on a hosted Windows Server 2025 runner (run 40006949610). It is real and correctly transcribed, but it is not the H-14 software half (F-011). A6's own harness is `tests/integration/h14/` with workflow `a6-windows-h14` (A1 authorized it 2026-10-23 as Phase 0 close-out). It has not run yet; the result will be F-012. Pass criterion as built: at `FULL` every acknowledgement is preceded by a flush of the WAL, and the database file is flushed at checkpoints. In WAL mode SQLite syncs the database only when checkpointing, so "the database and WAL before every acknowledgement" above is stricter than SQLite's design and is not what is tested. | R8.7, V-S9 |
+| H-14 | On Windows 10/11 IoT Enterprise LTSC (the site platform node's OS; a VM is enough for the software half): re-run E-02 with Process Monitor in place of strace (every acknowledgement preceded by `FlushFileBuffers` on the database and WAL), and E-03 and E-04 on a small NTFS volume with the writer killed by `TerminateProcess`. Then a power cut on each hardware model the site platform node ships on (H-11, C-24). | The site OS differs from the Linux runs in flush, locking, and disk-full behaviour (C-22). Ownership (A5 proposal, 2026-10-23): A5's `p0.exe` and `run.ps1` (PR #3) are implementer evidence; A6 owns H-14 as the independent check with its own scripts and the Process Monitor trace. A5's W-1 ran on a hosted Windows Server 2025 runner (run 40006949610). It is real and correctly transcribed, but it is not the H-14 software half (F-011). A6's own harness is `tests/integration/h14/` with workflow `a6-windows-h14` (A1 authorized it 2026-10-23 as Phase 0 close-out). First run, 2026-10-23 (run 40015873447, Windows Server 2025, `simulated`): the flush part passes and the recovery part did not complete (F-012). Still open: recovery on NTFS, a Windows 10/11 client edition (in particular LTSC 2021, build 19044), and the product binary as the thing under test. Pass criterion as built: at `FULL` every acknowledgement is preceded by a flush of the WAL, and the database file is flushed at checkpoints. In WAL mode SQLite syncs the database only when checkpointing, so "the database and WAL before every acknowledgement" above is stricter than SQLite's design and is not what is tested. | R8.7, V-S9 |
 
 ## Safety and security blockers
 
@@ -236,6 +236,32 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 ## Findings log
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
+
+### F-012 — 2026-10-23 — H-14 on Windows: at `FULL` every acknowledgement follows a WAL flush; the recovery part did not complete
+
+- **Tested:** A6's own H-14 harness (`tests/integration/h14/`, merged in PR #20 at `3355408`). A1 dispatched it as workflow `a6-windows-h14`, run 40015873447. A6 transcribed the result from the job log: [run-40015873447-2026-10-23.txt](../tests/integration/h14/results/run-40015873447-2026-10-23.txt). The artifact (ETL traces) could not be fetched from this environment.
+- **Setup:**
+  - **Host:** Windows Server 2025 Datacenter 24H2, build 26100.33650, a GitHub-hosted VM. This is not Windows 10/11 IoT Enterprise LTSC, so the result is `simulated` and says nothing about LTSC 2021 (build 19044).
+  - **Account:** the scripts under test ran as a temporary account in Users only, `h14svc1246`, confirmed non-admin by the script itself and by group membership. The separate logon worked, so the Basic User fallback was not used.
+  - **Store and engine:** a 64 MB NTFS VHDX. Python 3.12.10 with SQLite 3.49.1 (win32 VFS), not the product's Go driver.
+  - **Trace:** ETW Microsoft-Windows-Kernel-File.
+- **Result, part 1 (Windows E-02):**
+  - **`FULL`: PASS.** All 300 acknowledgements were preceded by a `FlushFileBuffers` on the WAL, issued by the writer (0 without). There were 320 WAL flushes and 10 database-file flushes, at checkpoints.
+  - **Gates:** both positive controls were seen, all 301 markers in order, 0 lost events, and no store flushes from other processes.
+  - **`NORMAL`:** 280 of 300 acknowledgements had no flush, with up to 28 in a row. The only flushes were the 20 WAL and 10 database flushes at checkpoints. This matches E-02 on Linux, where 1,011 of 1,016 were unsynced.
+  - **`OFF`:** no store flushes at all.
+  - **ETW mapping:** the run confirmed the event mapping the harness assumed: 12 = Create with FileName, and 21 = Flush with FileObject.
+- **Result, part 2 (E-03, E-04, R-A5-5): did not complete.** `recovery_rounds.py` died about two minutes in. The parent's own check after a recovery got `sqlite3.OperationalError: disk I/O error` on `PRAGMA integrity_check`.
+  - The script prints its results only at the end, so which scenario and round failed is not in the log. This is a harness defect: an error in the check should be recorded as an observation, and each round printed as it finishes.
+  - The cause is unknown. One hypothesis (`desk`, unverified): a fresh connection on a full NTFS volume cannot create or grow the `-shm` file that SQLite uses for the WAL index. On Linux tmpfs that cannot fail in the same way. If that is the cause, opening the store at full disk can fail on Windows, which would contradict E-03's Linux result that reads survive.
+  - Per A1's scope for a re-run (fixes to the ETW mapping or the logon path only), A6 has not changed the harness. A fix to part 2 needs A1's decision.
+- **What this shows:** on this Windows build, SQLite at `synchronous=FULL` in WAL mode issues a flush of the WAL before each commit returns, under a non-admin account. That is the precondition for power-loss durability; C-22's storage half moves from `simulated (Linux)` to `simulated (Windows Server 2025)` for the flush ordering only.
+- **What this does not show:**
+  - that the disk or controller honours the flush (H-11, C-24);
+  - behaviour on LTSC 2021;
+  - that the product's driver (`modernc.org/sqlite`, a translation of the same C code with its own system-call layer) does the same. The product binary must be the thing under test in a later run;
+  - full-disk recovery on NTFS (part 2).
+- **Evidence class:** `simulated`.
 
 ### F-011 — 2026-10-23 — A5's Windows run (W-1) is real and correctly transcribed, but it is not H-14
 

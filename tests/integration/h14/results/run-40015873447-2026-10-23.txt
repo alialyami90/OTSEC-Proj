@@ -1,0 +1,27 @@
+A6 H-14 software half, first run. Transcribed by A6 from the job log of GitHub Actions run 40015873447,
+job 120627668787 (workflow a6-windows-h14, workflow_dispatch by A1 at main 3355408, 2026-10-23T20:00:40Z),
+read through the GitHub API. The artifact a6-windows-h14 (zip sha256
+1736f65185a92a2dd56dda9997b3f27b92ea287c5b3bde57294ca6b80140800f, 21 files) holds the ETL traces and reports;
+this environment cannot reach its download host, so only what the log prints is recorded here.
+Evidence class: simulated (GitHub-hosted VM).
+
+Host (identity.json): Windows Server 2025 Datacenter, EditionID ServerDatacenter, DisplayVersion 24H2,
+build 26100.33650, InstallationType Server. Python 3.12.10, SQLite 3.49.1 (Python's sqlite3, win32 VFS).
+Account under test: runnervmdaln5\h14svc1246, temporary, Users only, AccountInAdministrators false,
+RunAs separate-account (Start-Process -Credential worked; the runas fallback was not used).
+Store volume: 64 MB NTFS VHDX. Trace: ETW Microsoft-Windows-Kernel-File, keywords 0xB0, level 5.
+
+Part 1, flush trace (flush_analyse.py reports, selected fields verbatim)
+mode    writer_is_admin  synchronous  markers  controls(begin/end)  events_lost  wal_flushes  db_flushes  acks_without_wal_flush  acks_without_any_store_flush  longest_unflushed_run  other_pid_store_flushes  problems  verdict
+FULL    false            2            301      1/1                  0            320          10          0                       0                             0                      0                        []        PASS
+NORMAL  false            1            301      1/1                  0            20           10          280                     280                           28                     0                        []        CONTRAST
+OFF     false            0            301      1/1                  0            0            0           300                     300                           300                    0                        []        CONTRAST
+ETW mapping confirmed by the run: event 12 task "Create" with FileName and FileObject; event 21 task "Flush"
+with FileObject, FileKey, Irp, IssuingThreadId. Kernel-File events in the FULL trace: 12 = 19954, 21 = 716.
+
+Part 2, recovery rounds: did not complete. recovery_rounds.py (running as h14svc1246) exited 1 at
+20:04:02Z with a traceback from the parent's post-recovery check:
+  File "C:\h14-39d8c5b5\bin\recovery_rounds.py", line 220, in scenario: st = state(path, last or 0)
+  File "...", line 186, in state: integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+  sqlite3.OperationalError: disk I/O error
+The script prints its JSON only at the end, so the scenario and round that failed are not in the log.
