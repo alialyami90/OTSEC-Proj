@@ -231,3 +231,14 @@ A1 spot-read of the SEL-751 IM (A2 and A6 must read and cite the source themselv
 - Consequence for risk 1: the collector's own access level can destroy the evidence it collects. The exact-line register and egress check are the only platform-side barriers; this is now `documented-untested`, not inferred.
 
 Missing for the ADR-0006 table: SEL-3620/-3622 gateway, RTAC hardware (SEL-3530/-3555/-3505), SEL-735, SEL-3610, SEL-ICON, SEL-2401/-2407, and the SEL Fast Message protocol documentation (for A2 D5).
+
+### Open owner items — 2026-10-23
+**Decision posted to the owner (A3 raised):** whether deployment guidance should recommend, require, or omit `MAXACC := 1` on the SEL-751 port the collector uses (factory default on the Ethernet port is 2; `FASTOP := N` default; FTP has its own `FTPACC`, default 2). A1 recommends "recommend and check": the deployment guide recommends it and the platform reads port settings at Level 1 and warns when the collection port allows Level 2. It does not stop `SER C`/`SER R` (Level 1); the register and egress check remain the platform barrier. A3 also notes the relay's password-bypass jumper as a physical-access risk for the threat model.
+
+**Consolidated document and fact request to the owner (A2, A3, A5):**
+1. SEL Fast Message protocol documentation (A2, register and D5).
+2. SEL-3620 / SEL-3622 security gateway and SEL-2730M switch manuals (A3, engineering-access path and network-device credentials).
+3. RTAC hardware manual: SEL-3530, SEL-3555, or SEL-3505 (A2 Q5 contrast; A5 site computer option).
+4. SEL application note on SSD lifetime / write endurance for SEL-3355 class computers (A5, SQLite WAL sizing).
+5. SEL-735 meter, SEL-3610 port server, SEL-2401/2407 clocks manuals (A2, device classes in ADR-0006).
+6. Facts: site computer model and OS (A5 proposes SEL-3355-2: TPM, mirrored SSD, AMT disabled or kept off the WAN, ~17 s/day drift without a time source); expected WAN outage duration; whether central may reach IEDs directly; the upstream Syslog collector product; the HMI and historian software in use on Windows hosts.
