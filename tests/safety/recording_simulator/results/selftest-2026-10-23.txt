@@ -1,4 +1,4 @@
-# Run 2026-10-23T16:53:35Z, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
+# Run 2026-10-23T16:56:27Z, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
 test_allowed_commands_are_not_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_allowed_commands_are_not_violations) ... ok
 test_control_bytes_are_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_control_bytes_are_caught) ... ok
 test_exactly_the_expected_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_exactly_the_expected_violations) ... ok
@@ -24,6 +24,8 @@ test_spanish_port_defeats_an_english_collector (tests.safety.recording_simulator
 test_third_telnet_session_refused (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_third_telnet_session_refused) ... ok
 test_three_failures_pulse_salarm (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_three_failures_pulse_salarm) ... ok
 test_well_behaved_collector_passes (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_well_behaved_collector_passes) ... ok
+test_accepted_replies_proceed_to_collect (tests.safety.recording_simulator.test_sel751_language.ProbeGrammar.test_accepted_replies_proceed_to_collect) ... ok
+test_near_misses_stop_before_acc (tests.safety.recording_simulator.test_sel751_language.ProbeGrammar.test_near_misses_stop_before_acc) ... ok
 test_english_port_collects (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_english_port_collects) ... ok
 test_lang_missing_from_output_is_refused (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_lang_missing_from_output_is_refused) ... ok
 test_maxacc_1_but_ftp_and_http_still_warn (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_maxacc_1_but_ftp_and_http_still_warn) ... ok
@@ -33,7 +35,7 @@ test_spanish_rejecting_english_stops_at_the_probe (tests.safety.recording_simula
 test_allowed_verbs_are_same_or_absent_in_spanish (tests.safety.recording_simulator.test_sel751_language.ThreeLetterCollisions.test_allowed_verbs_are_same_or_absent_in_spanish) ... ok
 
 ----------------------------------------------------------------------
-Ran 32 tests in 8.547s
+Ran 34 tests in 11.587s
 
 OK
 

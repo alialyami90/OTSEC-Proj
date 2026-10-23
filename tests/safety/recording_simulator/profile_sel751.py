@@ -30,7 +30,8 @@ Documented (p. = manual page):
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
-ASSUMED (not stated in the manual): commands are case-insensitive; no
+ASSUMED (not stated in the manual): the QUIT reply (see quit_reply);
+commands are case-insensitive; no
 character echo; an unmodelled but valid command gets a placeholder; the
 response text of clear commands is a placeholder; the layout of SHO P 1
 output (no figure in the manual shows it) follows the SHO example on p. 7.78
@@ -93,7 +94,7 @@ def _settings(name):
 
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
-                 port1=None, spanish_accepts_english=False):
+                 port1=None, spanish_accepts_english=False, quit_reply=None):
         self.password = password          # None models "Level 1 password disabled"
         self.level = 0
         self.awaiting = None              # level being authenticated for, or None
@@ -105,6 +106,10 @@ class SEL751DocResponder:
         # Port 1 settings: Table 4.104 factory defaults, then any overrides.
         # An override value of None removes the setting from the output.
         self.spanish_accepts_english = spanish_accepts_english  # undocumented
+        # The IM documents no QUIT reply. None: the prompt only; "header": a
+        # Table 7.16 header, then "Level 0", then the prompt (as ACC answers,
+        # p. 7.32); bytes: sent verbatim, for near-miss tests.
+        self.quit_reply = quit_reply
         self.port1 = _settings("port1-defaults-table-4-104.txt")
         for name, value in (port1 or {}).items():
             if value is None:
@@ -183,6 +188,10 @@ class SEL751DocResponder:
         if verb == "QUI":
             self.level = 0
             self.quit_sent = True
+            if self.quit_reply == "header":
+                return Reply(CRLF + self._header() + CRLF + b"Level 0" + self._prompt())
+            if isinstance(self.quit_reply, bytes):
+                return Reply(self.quit_reply)
             return Reply(self._prompt())
         if verb == "ID":
             return Reply(CRLF + self.id + self._prompt())

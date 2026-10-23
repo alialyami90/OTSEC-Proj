@@ -33,6 +33,13 @@ import sim  # noqa: E402
 PASSWORD = b"canary-acc-7b2c"
 REGISTER = check.load_register(os.path.join(HERE, "sel751-collector-register.json"))
 PROMPT_ENDS = (b"Password: ?", b"\r\n=>>", b"\r\n=>", b"\r\n=")
+# A6's reading of the ADR-0005 probe grammar (A1, 4eba849): an optional
+# Table 7.16 header (p. 7.31), an optional "Level 0" line, the "=" prompt, and
+# nothing else. The exact grammar is the Phase 1 C2 brief's; this one only
+# stands in for it.
+PROBE_OK = re.compile(
+    rb"\r\n(?:[ -~]{1,80}Date: [0-9/]{10} +Time: \d\d:\d\d:\d\d\.\d{3}\r\n"
+    rb"[ -~]{1,80}Time Source: [A-Za-z]+\r\n\r\n)?(?:Level 0\r\n)?=")
 
 
 async def until_prompt(reader, ends=PROMPT_ENDS):
@@ -51,7 +58,7 @@ async def reference_collector(reader, writer, outcome):
         return await until_prompt(reader)
 
     await until_prompt(reader, b"=")  # greeting: Telnet negotiation, then "="
-    if await send(b"QUI") != b"\r\n=":
+    if not PROBE_OK.fullmatch(await send(b"QUI")):
         outcome["alarm"] = "language probe rejected"
         return
     reply = await send(b"ACC")
@@ -83,12 +90,13 @@ async def naive_collector(reader, writer, outcome):
         await send(line)
 
 
-async def collect(port1, accepts_english, collector=None):
+async def collect(port1, accepts_english, collector=None, quit_reply=None):
     with tempfile.TemporaryDirectory() as tmp:
         log = os.path.join(tmp, "rec.jsonl")
         rec = sim.Recorder(log)
         cfg = sim.Config(telnet=True, responder_factory=profile_sel751.factory(
-            password=PASSWORD, port1=port1, spanish_accepts_english=accepts_english))
+            password=PASSWORD, port1=port1, spanish_accepts_english=accepts_english,
+            quit_reply=quit_reply))
         server = await sim.start_tcp(rec, "127.0.0.1", 0, cfg)
         reader, writer = await asyncio.open_connection("127.0.0.1", server.sockets[0].getsockname()[1])
         outcome = {}
@@ -105,8 +113,8 @@ async def collect(port1, accepts_english, collector=None):
     return outcome, events, lines, raw, check.check(events, REGISTER)
 
 
-def run(port1=None, accepts_english=False, collector=None):
-    return asyncio.run(collect(port1, accepts_english, collector))
+def run(port1=None, accepts_english=False, collector=None, quit_reply=None):
+    return asyncio.run(collect(port1, accepts_english, collector, quit_reply))
 
 
 class SpanishPort(unittest.TestCase):
@@ -149,6 +157,34 @@ class SpanishPort(unittest.TestCase):
         outcome, events, lines, raw, report = run(port1={"LANG": None})
         self.assertIn("LANG", outcome["alarm"])
         self.assertFalse(any(line.startswith("SER") for line in lines))
+
+
+class ProbeGrammar(unittest.TestCase):
+    """The probe reply must match the grammar exactly; near misses fail closed."""
+
+    def test_accepted_replies_proceed_to_collect(self):
+        for reply in (None, "header", b"\r\nLevel 0\r\n="):
+            outcome, events, lines, raw, report = run(quit_reply=reply)
+            self.assertNotIn("alarm", outcome, reply)
+            self.assertIn("SER", lines, reply)
+
+    def test_near_misses_stop_before_acc(self):
+        header = (b"\r\n751" + b" " * 39 + b"Date: 10/23/2026 Time: 16:00:00.000\r\n"
+                  b"FEEDER RELAY" + b" " * 30 + b"Time Source: Internal\r\n\r\n")
+        near_misses = [
+            b"\r\nInvalid Command\r\n=",               # English rejection text
+            b"\r\nComando invalido\r\n=",              # some other-language rejection
+            b"\r\nLevel 1\r\n=",                       # wrong level
+            b"\r\nLevel 0 \r\n=",                      # trailing space
+            b"\r\n=\r\n=",                             # two prompts
+            header + b"Level 0\r\nWARNING\r\n=",         # extra line after the header
+            header[:-2] + b"Level 0\r\n=",               # header without its blank line
+        ]
+        for reply in near_misses:
+            outcome, events, lines, raw, report = run(quit_reply=reply)
+            self.assertEqual(lines, ["QUI"], reply)
+            self.assertIn("probe", outcome.get("alarm", ""), reply)
+            self.assertNotIn(PASSWORD.decode(), raw)
 
 
 class ThreeLetterCollisions(unittest.TestCase):
