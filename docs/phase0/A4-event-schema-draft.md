@@ -164,7 +164,7 @@ The owner's answer (2026-10-23): assume a generic Syslog-compliant collector and
 
 | Transport | Standard | Confidentiality and integrity | What the sender learns about delivery | Max message | Use |
 | --- | --- | --- | --- | --- | --- |
-| RELP, optionally over TLS | rsyslog RELP | With TLS only | Per-message `200 OK`, only as strong as the receiver's queue configuration (E-A4-03) | Receiver setting | Mode A, the only mode for `required` destinations (A1) |
+| RELP, optionally over TLS | rsyslog RELP | With TLS only | Per-message `200 OK`, only as strong as the receiver's queue configuration (E-A4-03) | Receiver setting | Mode A. Only RELP over TLS may serve a `required` destination (A1): plain RELP acks could be forged on the path and would advance the cursor and pruning, so plain RELP is `best-effort` |
 | TLS, octet-counted | RFC 5425 | Yes; server authenticated; client certificate where the collector supports it | Nothing beyond TCP: the replay window W covers loss on reconnect | 2048 default, up to what the collector accepts | Mode B, `best-effort` |
 | TCP, octet-counted or LF-framed | RFC 6587 | None | Nothing beyond TCP; replay window as mode B | As TLS | Mode C, `best-effort`, inside a protected network only |
 | UDP | RFC 5426 | None | Nothing; loss is invisible to both ends | 2048 default; 480 (IPv4) or 1180 (IPv6) when the path or collector is unknown, per RFC 5426 | Mode D, `best-effort`, legacy collectors only; a `telemetry-health` counter records every message sent so a collector-side count can expose loss |
@@ -189,7 +189,7 @@ Experiment E-A4-03 (`results/relp-ack-trial{1,2,3}.md`): 1,500 messages acknowle
 
 A6 reproduced E-A4-03 independently (R-A4-3): 12 of 12 runs with Direct queues and confirmed writes lost nothing, including kill-after-300, kill-after-2900, and an omfile sink. Limit: SIGKILL of the receiver does not test power loss, so whether an acknowledged write survives a host power cut (fsync behaviour) is untested.
 
-A1 ruling at the Phase 0 exit gate: mode A is the only mode allowed for a destination marked `required`; mode B is allowed only for `best-effort` destinations, with the replay window.
+A1 ruling at the Phase 0 exit gate, tightened after the owner's answers: only mode A over TLS may serve a destination marked `required`. Plain RELP, modes B, C and D, and the RFC 3164 rendering are `best-effort`, with the replay window where TCP is used. Counting a non-RELP collector as `required` would be an owner decision to accept undetectable loss.
 
 For the site-to-central hop, A5's own acknowledged channel is the better tool than Syslog; the profile above is for the platform-to-third-party-collector hop.
 
