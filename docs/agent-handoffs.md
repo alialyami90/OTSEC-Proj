@@ -195,3 +195,6 @@ Full text: last section of `docs/phase0/A5-platform-feasibility.md` on branch `c
 - **R7.1 deviation accepted** in ADR-0002: modules are released together as one signed artifact; the owner may override.
 - **Privilege-separated collector process** adopted in ADR-0002, consistent with A3's credential model.
 - **Owner questions** (site hardware/OS, WAN outage durations, central direct IED access) go into the exit report; until answered, the design assumes Linux amd64/arm64, a 72 h outage floor, and never.
+
+### Owner-supplied evidence — 2026-10-23
+The project owner supplied six SEL data sheets (SEL-751 date code 20260910, SEL-311L, SEL-400G, SEL-411L, SEL-451, SEL-787-2/-3/-4). Copies, text extractions, and A1's reading notes: `/mnt/project-files/phase0/datasheets-SEL/` (`README-A1.md`). Class: OEM document, `documented-untested`. They are data sheets, not instruction manuals, so B-07 (command tables and example outputs) stays open. A2 and A6 read the PDFs themselves rather than relying on A1's notes. Items for A6: SEL-751 time accuracy for V-S3; SEL-311L single Telnet host session for V-S13; possible Spanish-language serial output for V-S2/V-S15.
