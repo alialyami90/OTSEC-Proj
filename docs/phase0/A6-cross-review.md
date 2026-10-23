@@ -116,6 +116,12 @@ A6 replaced `frames()` with hand-built sequences, eight cases labeled by constru
 
 The 10/11 result on the synthesized dataset holds for that dataset. These rules on their own would be noisy on a PRP station and blind to a takeover. **Requested before any detection claim:** state per-rule false-positive conditions (sensor loss, PRP, restart, rollover); key the state on source MAC and APPID as well as `gocbRef`; add a heartbeat-absence check against timeAllowedToLive; add a baseline of known control blocks; and score detections by event, not by frame. This is Phase 4 input and does not block the slice.
 
+### A4 re-check, 2026-10-23 (`74a64eb`, `7c7fa49`)
+
+- **R-A4-1: closed.** A4's new key, `sel_ser.alignment_key`, hashes from DATE to the end of the line. A6 extended its case file with an end-to-end mode: each read is rendered as a whole SER report, parsed with A4's `parse_report` (DATE_F = MDY), and keyed with A4's `alignment_key`. It also added a seventh case with identical rows. All 7 pass ([results](../../tests/integration/reviews/A4/results/ser-alignment-7c7fa49.json)). The whole-line key still fails 4 of 7, which confirms the cases have teeth.
+- **R-A4-2: closed.** On an ambiguous match, `align_full` keeps the smallest overlap and returns how many of the leading added rows may be duplicates. In case A7 it returns `ambiguous` with both candidate rows. A4 documents the cost: a buffer of identical periodic rows re-emits flagged duplicates.
+- **R-A4-3, R-A4-4:** recorded in A4's docs with their limits. Closed for Phase 0. R-A4-4's list of requirements is the precondition for any GOOSE detection claim in Phase 4.
+
 ### R-A4-5 — Smaller items
 
 - **RTAC Syslog times (A4's suggestion):** accepted into V-S3 as a negative case. When MSG carries the event time, the event time is never taken from HEADER (9.4 s apart in the manual's example).
