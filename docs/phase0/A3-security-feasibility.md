@@ -127,6 +127,7 @@ CredentialRef (stored centrally and at the node; contains no secret)
 - **Read path:** only the transport layer may resolve a ref, in-process, at connect time. For in-band authentication (SEL), the secret is sent only through a credential slot that the egress check opens immediately after the documented `Password:` prompt, and never otherwise (A6 R-A3-3).
 - **Write-time validation:** a credential value must be printable ASCII (0x20–0x7E), within a bounded length, and must not match any register or deny-corpus entry, so the credential store cannot be used to smuggle a command into the slot.
 - Adapters receive a connected session, not a secret. The secret never appears in adapter results, logs, audit records, errors, transcripts, environment variables, command lines, or crash dumps.
+- **Windows nodes (ADR-0007):** no machine-scope DPAPI, because any process on the node could decrypt it. Use user-scope DPAPI under the collector's own service account, or a TPM-backed CNG key whose ACL names only the collector's service SID. Restrict the store file to that SID. Local Administrators or SYSTEM remain able to act as the service; that residual risk is recorded in AP-1.
 - **No read-back:** no role, including admin, can retrieve a stored secret.
 - **Ceiling:** the node refuses to store a credential whose `access_level` exceeds the register's maximum for that device family (AP-4).
 - **Rotation of IED credentials is out of slice 1** (HR-5).
