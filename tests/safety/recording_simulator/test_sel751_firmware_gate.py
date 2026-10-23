@@ -37,7 +37,8 @@ from test_sel751_language import PROBE_OK, until_prompt  # noqa: E402
 
 PASSWORD = b"canary-acc-91f0"
 REGISTER = check.load_register(os.path.join(HERE, "sel751-collector-register.json"))
-FIXED = b"SEL-751-R301-V2-Z009005-D20220607"   # Figure 7.38; on the A6 test allowlist
+FIXED = b"SEL-751-R501-V0-Z104101-D20260910"   # "allow" in A2's allowlist (2585fd9), by inferred inheritance
+FIGURE_7_38 = b"SEL-751-R301-V2-Z009005-D20220607"  # "deny" in A2's allowlist
 PRE_FIX = b"SEL-751-R300-V2-Z008004-D20200921"  # before "Telnet traffic could cause a diagnostic restart" was fixed (R300-V3)
 ALLOWLIST = {FIXED}
 DEFECT = "SEL-751 R300-V2: Telnet traffic could cause a diagnostic restart (fixed R300-V3, D20210104)"
@@ -129,7 +130,7 @@ def run(collector, inventory_fid, **profile):
 
 class FirmwareGate(unittest.TestCase):
     def test_listed_firmware_collects(self):
-        outcome, lines, effects, sessions, raw, report = run(gated, FIXED)
+        outcome, lines, effects, sessions, raw, report = run(gated, FIXED, fid=FIXED)
         self.assertEqual(lines, ["QUI", "ID", "ACC", "SER", "QUI"])
         self.assertTrue(report["pass"], report["violations"])
 
@@ -174,9 +175,14 @@ class FirmwareGate(unittest.TestCase):
     def test_fid_line_checksum_rule(self):
         # The profile's recomputed FID line verifies under the documented rule;
         # with the original Figure 7.38 FID it reproduces the printed checksum.
-        r = profile_sel751.SEL751DocResponder(None, fid=FIXED)
+        r = profile_sel751.SEL751DocResponder(None, fid=FIGURE_7_38)
         self.assertIn(b'"FID=SEL-751-R301-V2-Z009005-D20220607","08AF"', r.id)
-        self.assertEqual(fid_from_id(r.id), FIXED)
+        self.assertEqual(fid_from_id(r.id), FIGURE_7_38)
+
+    def test_figure_7_38_firmware_is_not_collected(self):
+        # The manual's own example FID is on a branch A2 denies (R301).
+        outcome, lines, effects, sessions, raw, report = run(gated, FIGURE_7_38)
+        self.assertEqual(sessions, 0)
 
 
 if __name__ == "__main__":

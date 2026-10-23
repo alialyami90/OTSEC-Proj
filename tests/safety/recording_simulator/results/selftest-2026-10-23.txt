@@ -1,4 +1,4 @@
-# Run 2026-10-23T17:29:50Z, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
+# Run 2026-10-23T17:45:32Z, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
 test_allowed_commands_are_not_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_allowed_commands_are_not_violations) ... ok
 test_control_bytes_are_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_control_bytes_are_caught) ... ok
 test_exactly_the_expected_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_exactly_the_expected_violations) ... ok
@@ -36,13 +36,14 @@ test_allowed_verbs_are_same_or_absent_in_spanish (tests.safety.recording_simulat
 test_bad_id_checksum_is_treated_as_unknown (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_bad_id_checksum_is_treated_as_unknown) ... ok
 test_device_fid_differs_from_inventory_stops_at_level0 (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_device_fid_differs_from_inventory_stops_at_level0) ... ok
 test_fid_line_checksum_rule (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_fid_line_checksum_rule) ... ok
+test_figure_7_38_firmware_is_not_collected (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_figure_7_38_firmware_is_not_collected) ... ok
 test_id_probe_alone_exposes_a_pre_fix_unit (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_id_probe_alone_exposes_a_pre_fix_unit) ... ok
 test_listed_firmware_collects (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_listed_firmware_collects) ... ok
 test_negative_control_ungated_collector_is_caught (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_negative_control_ungated_collector_is_caught) ... ok
 test_pre_fix_firmware_in_inventory_is_never_contacted (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_pre_fix_firmware_in_inventory_is_never_contacted) ... ok
 
 ----------------------------------------------------------------------
-Ran 41 tests in 13.464s
+Ran 42 tests in 13.935s
 
 OK
 
@@ -51,6 +52,6 @@ test_allow_corpus_read_only (tests.safety.register_review.test_register.Register
 test_deny_corpus_never_read_only (tests.safety.register_review.test_register.RegisterReview.test_deny_corpus_never_read_only) ... ok
 
 ----------------------------------------------------------------------
-Ran 2 tests in 0.004s
+Ran 2 tests in 0.005s
 
 OK
