@@ -315,6 +315,8 @@ Level 2 includes `STA C`/`R` ("Clears the self-test status and restarts the rela
 
 **Language trap (D16, now documented).** With `LANG := SPANISH`, the Spanish column of the Command Summary shows `SER D o R` = "Borrar los datos SER" (clear the SER), while in English `SER D` only lists chattering elements (Table 7.64). Other renamings: `QUIT`→`SAL`, `SHO`→`MOS`, `STA`→`EST`, `TAR`→`BAN`, `DATE`→`FEC`, `TIME`→`HORA`, `SET`→`AJU`, `OPE`→`ABR`, `CLO`→`CER`. The register is valid for English only. SEL's own communications processors require the port language set to English (Appendix C note).
 
+**Ruling (A1, ADR-0005, from A6 F-006):** the adapter reads `LANG` with `SHO P 1` before any `SER` command, and refuses to collect unless it reads `LANG := ENGLISH`, failing closed with an alarm. `FTPACC` or `HTTPACC` above 1 is warned like `MAXACC`. One gap remains: in Spanish `SHO` is `MOS` and `QUIT` is `SAL`. On a Spanish-mode relay, `SHO P 1` may therefore return an error, which correctly fails closed. But `QUI` may also fail to drop the session to Level 0 (D18). A2 proposes sending `QUI` once at Level 0 before `ACC`. It is valid there in English (Table 7.59), so a rejection reveals a non-English port before any elevation. Whether a Spanish-mode relay accepts English command names is not documented (`unknown`).
+
 ### 15.4 SER (answers A6 C-06 and A4's questions for the SEL-751)
 
 - Bare `SER` returns all rows, up to 1,024. "Row 1 is the most recently triggered row and row 1024 is the oldest" (Table 7.63). Forms: `SER row1`, `SER row1 row2`, `SER date1`, `SER date1 date2` (date format per `DATE_F`). A4's observation that a plain read returns only 20 records applies to the SEL-400 series, not the SEL-751.
