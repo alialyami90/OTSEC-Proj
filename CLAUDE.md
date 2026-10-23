@@ -6,6 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The repository currently contains no code. No language, toolchain, or test runner has been chosen yet. Once one is, record the build, lint, test, and single-test commands here. The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
+Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
+
+## UI/UX design work: use the impeccable skill, and only there
+
+The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing, or refining screens, layouts, interaction flows, UX copy, and visual surfaces under `ui/` (owned by A5). It is not used for anything else in this repository. Architecture, adapters, telemetry, detection, security, platform runtime, deployment, tests, and documentation are engineering work governed by the brief below and never routed through impeccable.
+
+- For a UI/UX task, invoke the skill (`anthropic-skills:impeccable`, or `/impeccable <command>`) before designing or editing UI. Run its context loader once per session from the repository root with `sh <skill-dir>/scripts/impeccable context`; in this environment the launcher is not executable directly and must be run through `sh`.
+- `PRODUCT.md` at the repository root is the product-truth authority the skill reads. It records users, purpose, positioning, constraints, and evidence. Facts in it are labeled `[brief]`, `[inferred]`, or `[open]`; confirm inferred items with the owner before relying on them. Update it with `/impeccable init`; never overwrite it silently.
+- No `DESIGN.md` exists yet. The first real surface is built through the skill's new-work flow, which establishes the visual world and writes `DESIGN.md`. Do not create `DESIGN.md` by hand.
+- The brief's constraint stands: the UI is the minimum needed to verify end-to-end workflows until foundational workflows are proven. Use the skill's Operate mode for app screens; keep scope tight.
+- Never fabricate evidence (device outputs, screenshots, customers, benchmarks) for a UI or marketing surface. `PRODUCT.md` records that none exists.
+
 ---
 
 # Project: Modular OT Cybersecurity Platform
