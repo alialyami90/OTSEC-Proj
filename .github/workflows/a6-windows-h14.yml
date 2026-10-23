@@ -1,0 +1,38 @@
+# A6 independent check H-14 (software half) on Windows/NTFS. A1 authorized it on
+# 2026-10-23 as Phase 0 close-out for C-22. It can only be started by hand
+# (workflow_dispatch) and is not a project CI pipeline.
+#
+# run_h14.ps1 creates a temporary local non-admin account on this throwaway VM.
+# The scripts under test run as that account. The runner's admin account only
+# starts the ETW Kernel-File trace and attaches the VHDX volumes. The scripts
+# are A6's own (tests/integration/h14/); no A5 or product code is built or run.
+# Results are `simulated` (GitHub-hosted Windows Server VM). They are printed
+# to the job log and uploaded as an artifact.
+name: a6-windows-h14
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  h14:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parser self-test
+        shell: pwsh
+        run: python -I -m unittest discover -s tests/integration/h14 -p "test_*.py" -v
+      - name: Run H-14
+        shell: pwsh
+        run: ./tests/integration/h14/run_h14.ps1 -Python (Get-Command python).Source -Out "$env:RUNNER_TEMP\h14" -CreateTempUser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: a6-windows-h14
+          path: |
+            ${{ runner.temp }}/h14/*.json
+            ${{ runner.temp }}/h14/*.txt
+            ${{ runner.temp }}/h14/*.etl
