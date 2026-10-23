@@ -43,6 +43,7 @@ Owner instruction (project thread, 2026-10-23). SEL product facts below are A1 r
 
 - "Supported" means SEL devices whose capabilities can meet the project requirements; support is assessed per family against those requirements.
 - Servers and historians typically run Windows with HMI or historian software. Windows host coverage (event logs and host health) is therefore in scope as a vendor-neutral mechanism; how events are collected (native forwarding versus an installed agent) is a trust-boundary decision for A3.
+- *Owner decision 2026-10-23 (raised by A3):* Windows server, historian and HMI events are collected by **host push**. Sites configure each host to send its events (for example Windows Event Forwarding or a syslog forwarder the site already approves); the platform only receives them, holds no Windows credentials, and installs no agent. The platform alerts when an expected host stops sending. Platform pull and platform-installed agents are out of scope unless the owner revisits this.
 - The owner supplied SEL instruction manuals and data sheets (`/mnt/project-files/phase0/manuals-SEL/`, `datasheets-SEL/`); the family table in `docs/architecture.md` now cites them, replacing A1's recollection where a document exists.
 
 ## Open objections
