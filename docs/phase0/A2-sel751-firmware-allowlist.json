@@ -2,7 +2,7 @@
  "allowlist": "SEL-751 firmware allowlist for collection (D27)",
  "owner": "A2",
  "date": "2026-10-23",
- "status": "Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently.",
+ "status": "Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently. UPDATE 2026-10-23 18:48Z: the owner accepted the inheritance inference as an owner risk (ADR-0005). The allowed entries are classed 'inferred (owner-accepted)', never 'documented'.",
  "source": "S22 SEL-751 Instruction Manual date code 20260910, Appendix A firmware revision history (FID String / Summary of Revisions table). Extracted by A2 with pdftotext; lineage taken from each row's 'Includes all the functions of' clause.",
  "rule_applied": "A1 (ADR-0005 6d82243): collect only from allowlisted FIDs that carry every communications-restart fix. Appendix A records each fix only on the branches where SEL shipped it, and never says whether other branches had the defect. Each branch's first release (V0) has no 'Includes' clause, so inheritance across branches is not documented. Treating a fix as inherited by a branch whose V0 is dated after the fix is an INFERENCE, marked as such. It needs SEL confirmation before it counts as documented.",
  "fid_match": "Match the full FID string: SEL-751-R<branch>-V<n>-Z<...>-D<date>, with V >= min_version on an allowed branch and the Z and D fields equal to an Appendix A row. Any FID not in Appendix A (later releases, special builds, SEL-751A) is unknown and fails closed.",
@@ -91,7 +91,8 @@
    "status": "allow",
    "min_version": "V0",
    "basis": "Released after every fix; F8 listed. F1-F7 by inheritance (inferred).",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "inferred (owner-accepted)"
   },
   {
    "branch": "R500",
@@ -100,7 +101,8 @@
    "status": "allow",
    "min_version": "V0",
    "basis": "F7 listed at V0; F1-F6 by inheritance (inferred). V1 adds F8 (recommended, not required).",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "inferred (owner-accepted)"
   },
   {
    "branch": "R402",
@@ -111,7 +113,8 @@
    "basis": "F6 listed at V2; F1-F5 by inheritance (inferred). F7 (web server DoS) is not listed on R402.",
    "conditions": [
     "F7: require EHTTP := N, verified with SHO P 1, until SEL confirms R402 was not affected"
-   ]
+   ],
+   "evidence_class": "inferred (owner-accepted)"
   },
   {
    "branch": "R401",
@@ -122,7 +125,8 @@
    "basis": "F4 at V0, F5 at V1, F6 at V5; F1-F3 by inheritance (inferred). F7 not listed.",
    "conditions": [
     "F7: require EHTTP := N"
-   ]
+   ],
+   "evidence_class": "inferred (owner-accepted)"
   },
   {
    "branch": "R400",
@@ -133,7 +137,8 @@
    "basis": "F4 at V2, F5 at V3, F6 at V7; F1-F3 by inheritance (inferred). F7 not listed.",
    "conditions": [
     "F7: require EHTTP := N"
-   ]
+   ],
+   "evidence_class": "inferred (owner-accepted)"
   },
   {
    "branch": "R302",
@@ -144,7 +149,8 @@
    "basis": "F3 at V0, F4 at V3. F5 (communications-port access, collector traffic) and F6 not listed; latest V9 D20260831.",
    "conditions": [
     "Ask SEL whether R302 had the F5 and F6 defects"
-   ]
+   ],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R301",
@@ -153,7 +159,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "No restart fixes listed; F3, F4 and F5 not listed; latest V5 D20230428.",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R300",
@@ -162,7 +169,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "F2 at V3; F3, F4 and F5 not listed; latest V9 D20230428.",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R202",
@@ -171,7 +179,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "F2 at V1; F3, F4 and F5 not listed; latest V5 D20220826.",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R201",
@@ -180,7 +189,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "F2 never listed (Telnet restart).",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R200",
@@ -189,7 +199,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "F1 at V3; F2 never listed.",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   },
   {
    "branch": "R100-R113",
@@ -198,7 +209,8 @@
    "status": "deny",
    "min_version": "-",
    "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0).",
-   "conditions": []
+   "conditions": [],
+   "evidence_class": "documented (fix not listed on branch)"
   }
  ],
  "not_covered": [

@@ -366,7 +366,7 @@ The machine-readable list is `A2-sel751-firmware-allowlist.json`. Its source is 
 | R301, R300, R202 | deny | – | The crafted-Ethernet, BPDU and communications-port fixes are not listed |
 | R201, R200, R100–R113 | deny | – | The Telnet restart fix is never listed |
 
-**Caveat.** Appendix A records each fix only on the branches where SEL shipped it. A branch's V0 row has no "Includes" clause, so it never states whether an older defect existed on that branch. "Allow" therefore rests on an **inference**: a branch whose V0 is dated after a fix is assumed to contain that fix. SEL confirmation would make it documented.
+**Caveat.** Appendix A records each fix only on the branches where SEL shipped it. A branch's V0 row has no "Includes" clause, so it never states whether an older defect existed on that branch. "Allow" therefore rests on an **inference**: a branch whose V0 is dated after a fix is assumed to contain that fix. SEL confirmation would make it documented. **The owner accepted this inference as an owner risk on 2026-10-23 (ADR-0005). The allowed entries carry the evidence class `inferred (owner-accepted)`, not `documented`.**
 
 FIDs not in Appendix A fail closed: later releases, the SEL-751A, and special builds.
 
