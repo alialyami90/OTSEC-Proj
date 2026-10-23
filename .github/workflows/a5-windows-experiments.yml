@@ -10,6 +10,11 @@
 name: a5-windows-experiments
 on:
   workflow_dispatch:
+  # Runs on A5's branch only when this file changes, so it can be run before
+  # the workflow is on the default branch (owner chose this route 2026-10-23).
+  push:
+    branches: [claude/project-thread-xni3ff]
+    paths: [.github/workflows/a5-windows-experiments.yml]
 permissions:
   contents: read
 jobs:
