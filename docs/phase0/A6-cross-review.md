@@ -86,3 +86,31 @@ A2's and A1's review of A6's tooling was correct on both points. `check.py` now 
 ### Blocker raised from this review
 
 **B-07:** the SEL manual bodies (command tables, example outputs) cannot be read from this environment. The network policy denies `selinc.com` (A6 confirmed: proxy `CONNECT` 403), and A2 could read only front matter from mirrors. The documented-behaviour layer of the simulator, the `documented-example` fixtures, and every register entry still marked "located, not read" are blocked until the owner uploads the SEL-751 instruction manual (and the SEL-300G and SEL-421 sections A2 cites) or allows `selinc.com` in the environment's network policy.
+
+## A5 findings (PR #3, `claude/project-thread-xni3ff` at `26c08cb`, and `A5-platform-feasibility.md`)
+
+Requested by A1 with focus on the methods of E-A5-1 and E-A5-3. A6 built A5's experiment binary from `26c08cb` and ran two independent experiments against it and against the same SQLite engine. Overall outcome: **accepted for Phase 0.** The persistence recommendation holds and A6 evidence supports `synchronous=FULL`, but three claims need narrower wording and one contract contradiction must be settled.
+
+### R-A5-1 — E-A5-1 cannot distinguish `NORMAL` from `FULL`; E-02 can (holds with limits)
+
+E-A5-1 reports 0 failures in all four modes. SIGKILL leaves the page cache intact, so a commit that never reached the disk still survives. A5 states this limit. A6 experiment E-02 checks the precondition for power-loss safety directly by running A5's own writer under strace ([script](../../tests/integration/experiments/fsync_before_ack.py), [results](../../tests/integration/experiments/results/E-02-2026-10-23.json)):
+
+- At `NORMAL`, 1,011 of 1,016 acknowledgements had no fsync since the previous one, with up to 454 acknowledgements between syncs.
+- At `FULL`, every acknowledgement (0 of 680 unsynced) followed an fsync.
+
+So `NORMAL`'s "PASS" in E-A5-1 is not evidence of durability, and acknowledged events at `NORMAL` can be lost on power failure. This supports A5's choice of `FULL` for evidence and audit. **Requested change:** §4 and §8 should not cite E-A5-1 as meeting R8.7 for `NORMAL`. Any stream run at `NORMAL` must be declared non-durable on power loss. A6 adds hardware test H-11 (power cut on site storage).
+
+### R-A5-2 — Restart while the disk is full: reads survive, pruning does not (extends E-A5-3)
+
+E-A5-3 recovers a full store with the writer still running. A6 experiment E-03 kills the writer at `SQLITE_FULL` and opens the store in a new process with the disk still full ([script](../../tests/integration/experiments/store_restart_while_full.py), [results](../../tests/integration/experiments/results/E-03-2026-10-23.json); 3 trials per configuration, Python's sqlite3 binding over SQLite 3.45). In both default and bounded-WAL configurations, the restarted process opened the store, read every acknowledged event, passed `integrity_check`, and ran a forwarder-style range read. Deleting 50 rows failed with `SQLITE_FULL` every time. So a forwarder can still drain after a crash at full disk, but nothing can be pruned until space is freed. **Requested change:** the reserve release must be a startup step, not only a runtime reaction, and the reserve must be re-created after recovery. Phase 2 must test a second exhaustion after a recovery that consumed the reserve. V-S9 gains a restart-while-full case.
+
+### R-A5-3 — Pruning only confirmed events contradicts a target that can never confirm (contract contradiction)
+
+§5 says eviction never removes an event a required consumer has not confirmed, and that over RFC 5425 the confirmed cursor can never advance. If an RFC 5425 syslog target is a required consumer, nothing is ever prunable, the SER quota fills, and polling stops permanently. Today that is the default deployment. **Requested change:** the Phase 1 contract must state per target whether it is a required consumer, and what retires an event for a target that cannot confirm (for example age beyond the replay window, recorded as "delivered unconfirmed"). This is part of B-03 and needs A1, A4, and A5 together.
+
+### R-A5-4 — Smaller items
+
+- E-A5-3 ran on tmpfs, which has no root-reserved blocks. On ext4, a writer running as root consumes the reserved blocks and fills the disk for the whole node. Requested: the store lives on a dedicated filesystem and the writer runs as non-root, both asserted at startup.
+- With per-event commits, E-03 measured about 9 KB of WAL per 368-byte event before a checkpoint (about 450 events filled 4 MiB at default settings). This is fine with the bounded WAL A5 recommends. It is one more reason the default settings must never ship.
+- E-A5-4 agrees with A6 E-01 and adds the acknowledged-transport result: 0 missing and 1 duplicate across 3 collector kills. **Holds.**
+- The R8.3 sizing arithmetic (about 1.3 GB for 72 h at 10 events/s) is consistent with E-03's main-database growth of about 410 bytes per event. **Holds.**

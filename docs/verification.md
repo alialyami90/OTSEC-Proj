@@ -37,6 +37,7 @@ These are the assumptions in the brief, the first vertical slice, and the skelet
 | C-15 | Killing a session revokes access (E1 T8). | **Disproved** by A6 probe T9 (3/3 runs): the same key re-establishes a working tunnel immediately after the kill. | R2.5 tests must show re-authentication denied after revocation. | A3 | R2.5 |
 | C-16 | Audit tampering on a node is detected within one sync interval (A3 AP-17). | Records not yet forwarded can be rewritten with their hash chain by root on the node; the window equals the WAN outage. | Stated window, or an anchor root cannot rewrite. | A3, A5 | R8.3, audit |
 | C-17 | Device credentials can be injected below the recorder and egress check (A3 AP-2). | SEL authentication is in-band: the password is a line in the same session after `ACC`. If the device shows no `Password:` prompt, the secret line is executed as a command; whatever the credential store holds is sent unchecked. | Egress permits the credential slot only right after the documented prompt; credential values validated at write time against the register and deny corpus. Simulator `before-prompt` verdict tests the first half. | A3, A2 | V-S10, V-S11, V-S13 |
+| C-18 | Only events confirmed by every required consumer may be pruned (A5 §5). | Over RFC 5425 the confirmed cursor never advances (A5's own §5, A6 E-01). If an RFC 5425 target is a required consumer, nothing is ever prunable, the quota fills, and SER polling stops permanently. | Contract states per target whether it is required and what retires an event for a target that cannot confirm. | A1, A4, A5 | B-03, V-S9 |
 
 ## Verification matrix
 
@@ -89,7 +90,7 @@ How each requirement in [requirements.md](requirements.md) will be verified. "Sl
 | R8.4 | See R8.3 and V-S6. | | N | partial | defined |
 | R8.5 | An unenrolled or revoked node cannot send or receive data; certificate rotation without downtime. | `tests/security/` | N | no | defined |
 | R8.6 | See V-S6. | | N | yes | defined |
-| R8.7 | `kill -9` of any process at random points during collection and forwarding loses zero events committed to the local store; upgrade then rollback leaves stored data readable. | Fault injection loop, ≥100 iterations *(proposed)*. `tests/integration/` | N | yes (crash only) | defined |
+| R8.7 | `kill -9` of any process at random points during collection and forwarding loses zero events committed to the local store (process crash only; power-loss durability additionally requires an fsync before every acknowledgement, checked by E-02, and hardware test H-11); upgrade then rollback leaves stored data readable. | Fault injection loop, ≥100 iterations *(proposed)*. `tests/integration/` | N | yes (crash only) | defined |
 | R8.8 | See V-S9. | | N | yes | defined |
 
 ### Principles (cross-cutting checks)
@@ -131,7 +132,7 @@ Ground-truth sources named below:
 | V-S6 | Interruption and reconnection do not lose events. | ≥100 randomized interruptions *(proposed)* of the simulator link, the upstream link, and process kills. Pass: zero events lost between simulator and local durable store; every stored event appears in GT-RX at least once after reconnect; duplicates in GT-RX identifiable by event ID; measured upstream unconfirmed window ≤ the contract's stated window. | GT-REC (what the device served), local store, GT-RX | Delivery semantics hold on the platform side. | Nothing device-specific; this criterion can be fully closed in simulation once B-03 is resolved. |
 | V-S7 | No unauthorized IED write operations are issued. | Independent sources (C-03): (a) static check that every command line the adapter can construct is a read-only register entry, and the register passes A6's deny corpus ([tests/safety/register_review/](../tests/safety/register_review/)); (b) `check.py` over GT-REC for the whole test suite run, plus a 24 h soak *(proposed)*, reports zero violations, including `non-printable` and `before-prompt`; (c) the adapter's transcript agrees with GT-REC byte for byte; (d) for Telnet families, a capture of the simulator link decodes to the same lines. Pass: all applicable sources, binary. | Register (GT-DOC citations), deny corpus, GT-REC | The adapter never sends anything outside the register, including under fault injection; this does not rely on the adapter's own transcript. | That the register's read-only classifications are correct on real firmware, and device-side confirmation that settings and SER buffer were unchanged (H-08). |
 | V-S8 | Raw device evidence is preserved. | Pass: for every normalized event, the raw bytes are retrievable and their hash equals the hash of the bytes GT-REC shows the simulator sent; raw is persisted before parsing, so a forced parser failure still leaves raw evidence. | GT-REC | Evidence chain from wire to store is intact. | Nothing device-specific. |
-| V-S9 | Storage exhaustion is controlled. | Fill the local store. Pass: alarm at the configured threshold before the limit; zero un-forwarded native records evicted; behaviour at the limit matches the contract. | Local store contents, GT-RX | Fully closable in simulation. | Nothing device-specific. |
+| V-S9 | Storage exhaustion is controlled. | Fill the local store. Pass: alarm at the configured threshold before the limit; zero un-forwarded native records evicted; behaviour at the limit matches the contract; after a kill at full disk and restart with the disk still full, every acknowledged event is readable and forwardable, and the store recovers to accepting writes without operator action (E-03 shows the read half holds and pruning needs the reserve). | Local store contents, GT-RX | Fully closable in simulation. | Nothing device-specific. |
 | V-S10 | Only register-approved commands, with validated parameters, reach a device. | Feed the adapter every non-register command, every register command with a disallowed parameter (including clear or reset variants, C-01), shell metacharacters, embedded CR/LF, escape bytes, and over-length input. Pass: GT-REC shows zero bytes for every rejected input; every rejection audited. | Register, GT-REC | Parameter validation holds. | Whether the device would have interpreted an accepted line differently from the documentation. |
 | V-S11 | Credentials do not leak. | Run the full slice suite with canary credentials. Pass: zero occurrences of the canary in logs, events, audit, forwarded messages (GT-RX), crash output, process arguments, or GT-REC (which never records passwords). | Canary scan output | Fully closable in simulation. | Nothing device-specific. |
 | V-S12 | Telemetry failures are observable. | Simulator injects: unreachable, auth failure, timeout, hang mid-output, malformed output; harness injects upstream down and store full. Pass: each produces a distinct health event within 60 s *(proposed)*; none yields a success status. | Harness injection log | Fully closable in simulation. | Real device failure signatures (H-04, H-05). |
@@ -165,6 +166,7 @@ None of these can be closed on simulators or fixtures. A6 will not mark them pas
 | H-08 | Settings and SER buffer unchanged after 24 h of collection; device-side record of commands issued. | Proves V-S7 (b). | V-S7 |
 | H-09 | Lowest access level that permits each approved command, and every other operation that level permits. | Device permission model (C-12). | V-S5 |
 | H-10 | Timestamp behaviour across time-source loss and DST change. | Device clock behaviour (C-05). | V-S3 |
+| H-11 | Power cut (or forced VM power-off) on the actual site storage while committing at the shipped `synchronous` level; acknowledged events survive. | Page-cache and device write-cache behaviour; SIGKILL cannot show it (E-02). | R8.7, V-S6 |
 
 ## Safety and security blockers
 
@@ -203,6 +205,14 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 ## Findings log
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
+
+### F-004 — 2026-10-23 — Cross-review of A5 persistence experiments (E-A5-1, E-A5-3)
+
+- **Tested:** whether A5's crash-durability and storage-limit evidence supports the persistence recommendation. Full record: [phase0/A6-cross-review.md](phase0/A6-cross-review.md), section "A5 findings".
+- **How:** E-02 ran A5's own writer (built from `26c08cb`) under strace and counted acknowledgements not preceded by an fsync ([results](../tests/integration/experiments/results/E-02-2026-10-23.json)). E-03 killed a writer at `SQLITE_FULL` and reopened the store with the disk still full, three trials each for default and bounded WAL ([results](../tests/integration/experiments/results/E-03-2026-10-23.json)).
+- **Result:** at `NORMAL`, 1,011 of 1,016 acknowledgements were unsynced; at `FULL`, 0 of 680. After restart at full disk, open, read, integrity check, and range read succeeded in 6 of 6 trials, and pruning failed in 6 of 6.
+- **Evidence class:** `simulated`.
+- **Disproves:** E-A5-1 as evidence of durability for `NORMAL`. A5's recommendation of `FULL` for evidence and audit stands. Raised C-18 (pruning vs a never-confirming target) and H-11.
 
 ### F-003 — 2026-10-23 — Cross-review of A2 and A3 Phase 0 drafts
 
