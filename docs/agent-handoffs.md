@@ -237,8 +237,11 @@ Missing for the ADR-0006 table: SEL-3620/-3622 gateway, RTAC hardware (SEL-3530/
 
 **Consolidated document and fact request to the owner (A2, A3, A5):**
 1. SEL Fast Message protocol documentation (A2, register and D5).
+1a. SEL Compressed ASCII documentation, including the CSE command format (A2, parser design for machine-readable SER).
 2. SEL-3620 / SEL-3622 security gateway and SEL-2730M switch manuals (A3, engineering-access path and network-device credentials).
 3. RTAC hardware manual: SEL-3530, SEL-3555, or SEL-3505 (A2 Q5 contrast; A5 site computer option).
 4. SEL application note on SSD lifetime / write endurance for SEL-3355 class computers (A5, SQLite WAL sizing).
 5. SEL-735 meter, SEL-3610 port server, SEL-2401/2407 clocks manuals (A2, device classes in ADR-0006).
 6. Facts: site computer model and OS (A5 proposes SEL-3355-2: TPM, mirrored SSD, AMT disabled or kept off the WAN, ~17 s/day drift without a time source); expected WAN outage duration; whether central may reach IEDs directly; the upstream Syslog collector product; the HMI and historian software in use on Windows hosts.
+
+**Integration note (A1):** non-SEL second-family references in A2, A4 and A6 Phase 0 documents (SIPROTEC/Relion contrast, second-vendor fixture requests) are out of scope per ADR-0006; A1 removes or marks them superseded when merging those branches.
