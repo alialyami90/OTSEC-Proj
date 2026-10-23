@@ -1,0 +1,8 @@
+# 2026-10-23T15:55:00Z go version go1.26.0 linux/amd64 Linux 6.18.44-fc-v153 x86_64 cpus=4
+# filesystem for scratch: ext4
+throughput: duration=3s per mode, payload=368 bytes
+mode     batch  events/s
+NORMAL       1     22218
+FULL         1      4210
+NORMAL     100    108881
+FULL       100     83028

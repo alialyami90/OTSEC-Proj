@@ -1,0 +1,17 @@
+# 2026-10-23T15:55:12Z go version go1.26.0 linux/amd64 Linux 6.18.44-fc-v153 x86_64 cpus=4
+# filesystem for scratch: ext4
+syslog-loss, part 1: plain TCP (RFC 6587 octet counting), collector SIGKILLed mid-stream
+A message counts as 'sent' when conn.Write returned nil, which is all a
+plain TCP syslog sender can know.
+scenario                       runs  sent-ok(min/max)  received(min/max)  lost(min/max)  runs-with-loss
+paced 1/ms, fast collector       10      216/257            215/256            1/1       10/10
+burst, fast collector            10    18484/40842        16135/39793         62/12891   10/10
+burst, slow collector 1ms/msg    10    40525/42153          252/260        40267/41901   10/10
+
+syslog-loss, part 2: acked transport (collector acks after recording), collector
+SIGKILLed and restarted 3 times while 20000 events are forwarded; sender resends
+everything not yet acked after each reconnect. The first collector instance also
+crashes right after recording event 2500, before acking it.
+  events=20000 collector-kills=3 connections=5 elapsed=175ms
+  recorded=20001 distinct=20000 missing=0 duplicates=1
+  result: no loss; duplicates are expected and must be removed downstream by event id
