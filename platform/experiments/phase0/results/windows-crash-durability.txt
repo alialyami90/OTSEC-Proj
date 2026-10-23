@@ -1,0 +1,11 @@
+# Source: job log of GitHub Actions run 40006949610, job 120597175606 (workflow_dispatch at 830a0f4), transcribed with log timestamps removed. Artifact a5-windows-results (zip sha256 d8bd421e9eefdf42b84636d14310ce75838d5a04781e4f2f4cab8a7e2b5efccc) holds the original files; this environment cannot reach its download host.
+# Runner: windows-2025-vs2026 image 20261021.278.1, Azure westus3, runs as runneradmin (elevated). Evidence class: simulated (hosted VM, not SEL-3355-2 hardware).
+# 2026-10-23T18:54:37Z Microsoft Windows Server 2025 Datacenter 10.0.26100 build 26100 cpu=Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+# scratch filesystem: NTFS disk: Msft Virtual Disk bus=SAS
+crash-durability: iterations=100 max-run=2s seed=1
+mode            batch  runs  failures  acked(min/max)  committed-not-acked(max)
+NORMAL              1   100         0     452/7272     1
+FULL                1   100         0       3/452      1
+NORMAL            100   100         0       0/87600    100
+FULL              100   100         0       0/26200    100
+result: PASS (no acknowledged event lost, no gaps, integrity ok in every run)

@@ -6,7 +6,7 @@ Everything here ran in a cloud container against local files and loopback socket
 
 ## Reproduce
 
-On Windows, `run.ps1` runs the same experiments and writes `results/windows-*.txt` (full-disk cases need an elevated prompt; see the script header). The manual-only `a5-windows-experiments` workflow runs it on a GitHub-hosted Windows runner once Actions is available on the account. For site-node evidence (A6 H-14), run it on a dedicated NTFS volume under a non-admin account, with Process Monitor capturing `FlushFileBuffers` on the database and WAL.
+On Windows, `run.ps1` runs the same experiments and writes `results/windows-*.txt` (full-disk cases need an elevated prompt; see the script header). The manual-only `a5-windows-experiments` workflow runs it on a GitHub-hosted Windows runner. The first run (2026-10-23, Windows Server 2025) is in `results/windows-*.txt`, transcribed from the job log. For site-node evidence (A6 H-14), run it on a dedicated NTFS volume under a non-admin account, with Process Monitor capturing `FlushFileBuffers` on the database and WAL.
 
 ```sh
 sh platform/experiments/phase0/run.sh                  # all experiments, writes results/*.txt
