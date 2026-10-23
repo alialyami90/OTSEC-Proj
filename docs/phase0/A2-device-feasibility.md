@@ -350,3 +350,23 @@ Level 2 includes `STA C`/`R` ("Clears the self-test status and restarts the rela
 | Bad-password effect on SEL-751 | SEL-300G only | SALARM 1 s; by default drives OUT101 and is logged in the SER |
 | Fast Operate on Telnet | open-source inference | supported on Port 1 Telnet; blocked when `FASTOP := N` (default) |
 | UTC offset | unknown | local time; `UTC_OFF` only with SNTP; DST rules in Global settings |
+
+### 15.7 Firmware allowlist for collection (D27; A1 ruling ADR-0005, 6d82243)
+
+The machine-readable list is `A2-sel751-firmware-allowlist.json`. Its source is S22 Appendix A. A6 checks it independently.
+
+| Branch | Status | From | Basis |
+| --- | --- | --- | --- |
+| R501 | allow | V0 | Released after every listed fix |
+| R500 | allow | V0 (V1 recommended) | Web-server DoS fix at V0 |
+| R402 | allow with condition | V2 | Ethernet lock-up fix at V2. The web-server DoS fix is not listed for R402, so `EHTTP := N` is required, checked with `SHO P 1` |
+| R401 | allow with condition | V5 | BPDU fix at V0, communications-port fix at V1, lock-up fix at V5. Same `EHTTP` condition |
+| R400 | allow with condition | V7 | BPDU fix at V2, communications-port fix at V3, lock-up fix at V7. Same `EHTTP` condition |
+| R302 | deny | – | The communications-port restart fix (collector traffic) is not listed. Ask SEL |
+| R301, R300, R202 | deny | – | The crafted-Ethernet, BPDU and communications-port fixes are not listed |
+| R201, R200, R100–R113 | deny | – | The Telnet restart fix is never listed |
+
+**Caveat.** Appendix A records each fix only on the branches where SEL shipped it. A branch's V0 row has no "Includes" clause, so it never states whether an older defect existed on that branch. "Allow" therefore rests on an **inference**: a branch whose V0 is dated after a fix is assumed to contain that fix. SEL confirmation would make it documented.
+
+FIDs not in Appendix A fail closed: later releases, the SEL-751A, and special builds.
+

@@ -1,0 +1,210 @@
+{
+ "allowlist": "SEL-751 firmware allowlist for collection (D27)",
+ "owner": "A2",
+ "date": "2026-10-23",
+ "status": "draft for A1 ruling and A6 independent check",
+ "source": "S22 SEL-751 Instruction Manual date code 20260910, Appendix A firmware revision history (FID String / Summary of Revisions table). Extracted by A2 with pdftotext; lineage taken from each row's 'Includes all the functions of' clause.",
+ "rule_applied": "A1 (ADR-0005 6d82243): collect only from allowlisted FIDs that carry every communications-restart fix. Appendix A records each fix only on the branches where SEL shipped it, and never says whether other branches had the defect. Each branch's first release (V0) has no 'Includes' clause, so inheritance across branches is not documented. Treating a fix as inherited by a branch whose V0 is dated after the fix is an INFERENCE, marked as such. It needs SEL confirmation before it counts as documented.",
+ "fid_match": "Match the full FID string: SEL-751-R<branch>-V<n>-Z<...>-D<date>, with V >= min_version on an allowed branch and the Z and D fields equal to an Appendix A row. Any FID not in Appendix A (later releases, special builds, SEL-751A) is unknown and fails closed.",
+ "fixes": {
+  "F1": {
+   "what": "certain Ethernet traffic could cause diagnostic restarts",
+   "listed_on": [
+    "R112-V2 (D20170814)",
+    "R200-V3 (D20170814)"
+   ],
+   "date": "20170814",
+   "collector_traffic": true
+  },
+  "F2": {
+   "what": "rare issue where Telnet traffic could cause a diagnostic restart",
+   "listed_on": [
+    "R300-V3 (D20210104)",
+    "R202-V1 (D20210104)"
+   ],
+   "date": "20210104",
+   "collector_traffic": true
+  },
+  "F3": {
+   "what": "deliberately crafted Ethernet traffic could cause a diagnostic restart",
+   "listed_on": [
+    "R302-V0 (D20220826)"
+   ],
+   "date": "20220826",
+   "collector_traffic": false
+  },
+  "F4": {
+   "what": "BPDU packet of invalid size could cause a diagnostic restart",
+   "listed_on": [
+    "R302-V3 (D20240122)",
+    "R400-V2 (D20240308)",
+    "R401-V0 (D20240308)"
+   ],
+   "date": "20240122",
+   "collector_traffic": false
+  },
+  "F5": {
+   "what": "accessing the relay via communications ports (among other operations) could cause a diagnostic restart",
+   "listed_on": [
+    "R400-V3 (D20240930)",
+    "R401-V1 (D20240930)"
+   ],
+   "date": "20240930",
+   "collector_traffic": true
+  },
+  "F6": {
+   "what": "Ethernet port could lock up in switched mode under heavy network traffic",
+   "listed_on": [
+    "R400-V7 (D20250731)",
+    "R401-V5 (D20250731)",
+    "R402-V2 (D20250731)"
+   ],
+   "date": "20250731",
+   "collector_traffic": false
+  },
+  "F7": {
+   "what": "denial-of-service condition in the web server could trigger diagnostic restarts",
+   "listed_on": [
+    "R500-V0 (D20260327)"
+   ],
+   "date": "20260327",
+   "collector_traffic": false
+  },
+  "F8": {
+   "what": "maliciously crafted CID file could cause the relay to disable (needs a file write, which the collector never does)",
+   "listed_on": [
+    "R400-V9",
+    "R401-V7",
+    "R402-V4",
+    "R500-V1",
+    "R501-V0 (all D20260910)"
+   ],
+   "date": "20260910",
+   "collector_traffic": false
+  }
+ },
+ "branches": [
+  {
+   "branch": "R501",
+   "first_fid": "SEL-751-R501-V0-Z104101-D20260910",
+   "first_date": "20260910",
+   "status": "allow",
+   "min_version": "V0",
+   "basis": "Released after every fix; F8 listed. F1-F7 by inheritance (inferred).",
+   "conditions": []
+  },
+  {
+   "branch": "R500",
+   "first_fid": "SEL-751-R500-V0-Z103101-D20260327",
+   "first_date": "20260327",
+   "status": "allow",
+   "min_version": "V0",
+   "basis": "F7 listed at V0; F1-F6 by inheritance (inferred). V1 adds F8 (recommended, not required).",
+   "conditions": []
+  },
+  {
+   "branch": "R402",
+   "first_fid": "SEL-751-R402-V0-Z102100-D20241231",
+   "first_date": "20241231",
+   "status": "allow-with-condition",
+   "min_version": "V2",
+   "basis": "F6 listed at V2; F1-F5 by inheritance (inferred). F7 (web server DoS) is not listed on R402.",
+   "conditions": [
+    "F7: require EHTTP := N, verified with SHO P 1, until SEL confirms R402 was not affected"
+   ]
+  },
+  {
+   "branch": "R401",
+   "first_fid": "SEL-751-R401-V0-Z101100-D20240308",
+   "first_date": "20240308",
+   "status": "allow-with-condition",
+   "min_version": "V5",
+   "basis": "F4 at V0, F5 at V1, F6 at V5; F1-F3 by inheritance (inferred). F7 not listed.",
+   "conditions": [
+    "F7: require EHTTP := N"
+   ]
+  },
+  {
+   "branch": "R400",
+   "first_fid": "SEL-751-R400-V0-Z100100-D20230315",
+   "first_date": "20230315",
+   "status": "allow-with-condition",
+   "min_version": "V7",
+   "basis": "F4 at V2, F5 at V3, F6 at V7; F1-F3 by inheritance (inferred). F7 not listed.",
+   "conditions": [
+    "F7: require EHTTP := N"
+   ]
+  },
+  {
+   "branch": "R302",
+   "first_fid": "SEL-751-R302-V0-Z010005-D20220826",
+   "first_date": "20220826",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F3 at V0, F4 at V3. F5 (communications-port access, collector traffic) and F6 not listed; latest V9 D20260831.",
+   "conditions": [
+    "Ask SEL whether R302 had the F5 and F6 defects"
+   ]
+  },
+  {
+   "branch": "R301",
+   "first_fid": "SEL-751-R301-V0-Z009005-D20220107",
+   "first_date": "20220107",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "No restart fixes listed; F3, F4 and F5 not listed; latest V5 D20230428.",
+   "conditions": []
+  },
+  {
+   "branch": "R300",
+   "first_fid": "SEL-751-R300-V0-Z008004-D20200331",
+   "first_date": "20200331",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F2 at V3; F3, F4 and F5 not listed; latest V9 D20230428.",
+   "conditions": []
+  },
+  {
+   "branch": "R202",
+   "first_fid": "SEL-751-R202-V0-Z007003-D20200331",
+   "first_date": "20200331",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F2 at V1; F3, F4 and F5 not listed; latest V5 D20220826.",
+   "conditions": []
+  },
+  {
+   "branch": "R201",
+   "first_fid": "SEL-751-R201-V0-Z007003-D20180420",
+   "first_date": "20180420",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F2 never listed (Telnet restart).",
+   "conditions": []
+  },
+  {
+   "branch": "R200",
+   "first_fid": "SEL-751-R200-V2-Z007003-D20170315",
+   "first_date": "20170315",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F1 at V3; F2 never listed.",
+   "conditions": []
+  },
+  {
+   "branch": "R100-R113",
+   "first_fid": "SEL-751-various",
+   "first_date": "2011-2022",
+   "status": "deny",
+   "min_version": "-",
+   "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0).",
+   "conditions": []
+  }
+ ],
+ "not_covered": [
+  "Any SEL-751 FID released after date code 20260910",
+  "SEL-751A (a different product with its own manual and FIDs)",
+  "Special or custom firmware whose FID is not in Appendix A",
+  "Bootloader (SLBT/BOOTLDR) versions: not assessed"
+ ]
+}
