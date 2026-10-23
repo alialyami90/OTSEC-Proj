@@ -17,7 +17,8 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 4. The privileged collector process (ADR-0002) runs as a separate Windows service under its own virtual service account; only that account can read the credential store. Credentials at rest are protected with the TPM (for example DPAPI with machine-bound keys or TPM-sealed keys); A3 to choose and threat-model.
 5. Durability evidence from Linux does not transfer. A5 repeats E-A5-1, A6 E-02 (acknowledged commits unsynced under NORMAL vs FULL) and E-03/E-04 (full-disk recovery) on Windows/NTFS before ADR-0004 is relied on for Windows. Until then ADR-0004's durability claims are `inferred` for Windows.
 6. Time: the node takes time from the site time source (SEL-2488 or IRIG via the owner's clocks); without one, the ~17 s/day drift makes local timestamps unusable for correlation, so loss of time sync raises an alarm.
-7. Intel AMT on the SEL-3355-2 is disabled or kept off every routable network (deployment precondition, A5 §12).
+7. Device sessions originate only at site nodes. The owner stated (2026-10-23) that the customer's central HMI server may reach relays while central cybersecurity servers may not; the platform's central role is a cybersecurity server and never connects to devices. The HMI server's relay traffic is an existing authorized path that the IDS models, not a platform path.
+8. Intel AMT on the SEL-3355-2 is disabled or kept off every routable network (deployment precondition, A5 §12).
 
 ## Consequences
 
