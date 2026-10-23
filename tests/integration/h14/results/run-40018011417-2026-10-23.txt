@@ -1,0 +1,43 @@
+A6 H-14 software half, second run (part 2 diagnostics, PR #22). Transcribed by A6 from the job log of
+GitHub Actions run 40018011417, job 120634990932 (workflow a6-windows-h14, workflow_dispatch by A1 at main
+81977bb, 2026-10-23; step "Run H-14" 20:17:16Z to 20:18:40Z), read through the GitHub API. The artifact
+a6-windows-h14 (zip sha256 029ac811563bb1f0a5a4e7ccc25b1f6126c9984fb628a792382f032a866c4e96, 21 files,
+artifact ID 12528509126) holds the ETL traces and reports; this environment cannot reach its download host,
+so only what the log prints is recorded here.
+Evidence class: simulated (GitHub-hosted VM).
+
+Host (identity.json): Windows Server 2025 Datacenter, EditionID ServerDatacenter, DisplayVersion 24H2,
+build 26100.33650, InstallationType Server. Python 3.12.10, SQLite 3.49.1 (Python's sqlite3, win32 VFS).
+Account under test: runnervmdaln5\h14svc3908, temporary, Users only, AccountInAdministrators false,
+RunAs separate-account (Start-Process -Credential worked; the runas fallback was not used).
+Volumes: 64 MB NTFS VHDX (part 1), 16 MB NTFS VHDX (part 2). Trace: ETW Microsoft-Windows-Kernel-File,
+keywords 0xB0, level 5. Parser self-test: 8 tests, OK.
+
+Part 1, flush trace (flush_analyse.py reports, selected fields verbatim)
+mode    writer_is_admin  synchronous  markers  controls(begin/end)  events_lost  wal_flushes  db_flushes  acks_without_wal_flush  acks_without_any_store_flush  longest_unflushed_run  other_pid_store_flushes  problems  verdict
+FULL    false            2            301      1/1                  0            320          10          0                       0                             0                      0                        []        PASS
+NORMAL  false            1            301      1/1                  0            20           10          280                     280                           28                     0                        []        CONTRAST
+OFF     false            0            301      1/1                  0            0            0           300                     300                           300                    0                        []        CONTRAST
+Kernel-File events in the FULL trace: 12 (Create) = 18992, 21 (Flush) = 714. Field names as in run 40015873447.
+
+Part 2, recovery rounds (recovery-output.txt as printed in the log; ROUND and ERROR lines verbatim)
+ROUND {"scenario": "NONE/half", "round": 1, "written": 11160, "seq": [1, 11160], "writer": "FULL OperationalError database or disk is full", "writer_stderr": null, "capacity_regained": true, "probe_at_full": {"sizes_before": {"fs_free": 0, "db": 4562944, "wal": 267856, "shm": 32768}, "read_only": "ok count=11160 max=11160", "read_write": "ok count=11160 max=11160", "sizes_after": {"fs_free": 0, "db": 4562944, "wal": 267856, "shm": 32768}}, "recovery": {"read_at_full": [11160, 11160], "integrity_at_full": "ok", "cut": 5580, "prune_before_release": "OperationalError: database or disk is full", "pruned": 5580}, "recovery_done": true, "reserve": "ok", "recovery_error": null, "probe_after_recovery": {"sizes_before": {"fs_free": 262144, "db": 4603904, "wal": null, "shm": null}, "read_only": "ok count=5580 max=11160", "read_write": "ok count=5580 max=11160", "sizes_after": {"fs_free": 262144, "db": 4603904, "wal": null, "shm": null}}, "integrity": "ok", "min": 5581, "max": 11160, "count": 5580, "cursor": 9160, "contiguous": true, "acked_present": true, "fs_free": 262144, "pruned": 5580, "pass": true}
+ERROR {"scenario": "NONE/half", "round": 2, "step": "state check", "sizes": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}, "exception": "OperationalError: disk I/O error", "partial_round": {"round": 2, "written": 90, "seq": [11161, 11250], "writer": "FULL OperationalError database or disk is full", "writer_stderr": null, "capacity_regained": false, "probe_at_full": {"sizes_before": {"fs_free": 0, "db": 4603904, "wal": 230776, "shm": 32768}, "read_only": "OperationalError: disk I/O error", "read_write": "OperationalError: disk I/O error", "sizes_after": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}}, "recovery": null, "recovery_done": false, "reserve": "not reached", "recovery_error": "Traceback (most recent call last):\n  File \"<string>\", line 7, in <module>\nsqlite3.OperationalError: disk I/O error", "probe_after_recovery": {"sizes_before": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}, "read_only": "OperationalError: disk I/O error", "read_write": "OperationalError: disk I/O error", "sizes_after": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}}}}
+ERROR {"scenario": "INCREMENTAL/half", "round": 0, "step": "setup", "sizes": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}, "exception": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\h14-082bb485\\\\h14full\\\\data\\\\e04\\\\events.db'"}
+ERROR {"scenario": "INCREMENTAL/cursor", "round": 0, "step": "setup", "sizes": {"fs_free": 28672, "db": 4603904, "wal": 230776, "shm": 0}, "exception": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\h14-082bb485\\\\h14full\\\\data\\\\e04\\\\events.db'"}
+
+RESULT line, fields other than the rounds and errors already shown above:
+  identity {"pid": 2944, "user": "h14svc3908", "is_admin": false}, platform win32, python 3.12.10,
+  sqlite 3.49.1, batch 10, lag 2000.
+  NONE/half:          rounds 1 (round 1) + error in round 2, pass null, r_a5_5_holds null
+  INCREMENTAL/half:   rounds 0, error at setup,             pass null, r_a5_5_holds null
+  INCREMENTAL/cursor: rounds 0, error at setup,             pass null, r_a5_5_holds null
+recovery_rounds.py stderr: empty. The step exited without error (run conclusion: success).
+
+Notes by A6 (not part of the log):
+- "line 7" in the recovery traceback is line 7 of the RECOVERY program string in recovery_rounds.py
+  (line 1 is the empty line after the opening quotes): `db.execute(p)` for the first pragma,
+  "PRAGMA journal_mode=WAL", the first statement that touches the store. The reserve file is removed
+  only after that, so it was never released.
+- Round 2: the probe's two opens ran between sizes_before (-shm 32768, 0 bytes free) and sizes_after
+  (-shm 0, 28672 bytes free). Which of the two left the -shm at 0 bytes is not recorded.
