@@ -170,9 +170,40 @@ pkill -f "sshd: $USER_NAME" ; wait "$holder" 2>/dev/null
 eof=$(cat "$WORK/eof" 2>/dev/null || echo none)
 lat=$(python3 -c "print('%.3f' % (float('$eof') - $t_kill))" 2>/dev/null || echo n/a)
 after=$(python3 "$HERE/probe.py" 127.0.0.1 15001 "READ SER")
-result T8 "kill of session process closes held app connection; new use fails" \
+result T8 "termination: kill of session process closes held app connection" \
   "eof_after_s=$lat; new connection: $after" \
   "$([ "$lat" != n/a ] && [ "$after" != "REPLY OK DATA" ] && echo 1 || echo 0)"
+
+# --- T9 (A6 probe): killing the session is not revocation --------------------
+# Limitation check: the same key immediately re-establishes access after T8.
+tunnel 15009 "$APPROVED_IED" "$APPROVED_PORT"
+out=$(python3 "$HERE/probe.py" 127.0.0.1 15009 "READ SER")
+result T9 "LIMITATION CHECK (A6): after kill, same key re-establishes access" "$out" \
+  "$([ "$out" = "REPLY OK DATA" ] && echo 1 || echo 0)"
+
+# --- T9r: revocation = remove the authorization, then terminate sessions ------
+: > "$WORK/ak/$USER_NAME"
+pkill -f "sshd: $USER_NAME"; sleep 1
+held=$(python3 "$HERE/probe.py" 127.0.0.1 15009 "READ SER")
+out=$("${SSH[@]}" -N -o ConnectTimeout=5 "$USER_NAME@127.0.0.1" 2>&1 & p=$!; sleep 2; kill $p 2>/dev/null; wait $p 2>/dev/null)
+result T9r "revocation: key removed + sessions killed -> held tunnel dead and re-authentication denied" \
+  "held tunnel: $held; reconnect: '${out//$'\n'/ }'" \
+  "$([ "$held" != "REPLY OK DATA" ] && [[ "$out" == *"Permission denied"* ]] && echo 1 || echo 0)"
+# Restore the key so later checks run authenticated.
+printf 'restrict,port-forwarding,permitopen="%s:%d",command="/bin/false" %s\n' \
+  "$APPROVED_IED" "$APPROVED_PORT" "$(cat "$WORK/user_key.pub")" > "$WORK/ak/$USER_NAME"
+
+# --- T10 (A6 probe): stdio forwarding (-W) to an unapproved device -------------
+out=$(printf 'READ SER\n' | timeout 5 "${SSH[@]}" -W "$OTHER_IED:$APPROVED_PORT" "$USER_NAME@127.0.0.1" 2>&1)
+n=$(ied_lines other connect)
+result T10 "-W to unapproved device refused; 0 connects" "out='${out//$'\n'/ }'; device connects=$n" \
+  "$([[ "$out" != *"OK DATA"* ]] && [[ "$out" != *"Permission denied"* ]] && [ "$n" = 0 ] && echo 1 || echo 0)"
+
+# --- T11 (A6 probe): sftp subsystem refused -----------------------------------
+out=$(printf 'ls /\n' | timeout 5 sftp -b - -i "$WORK/user_key" -P "$SSHD_PORT" -o BatchMode=yes \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$USER_NAME@127.0.0.1" 2>&1); rc=$?
+result T11 "sftp subsystem refused" "rc=$rc out='${out//$'\n'/ }'" \
+  "$([ $rc != 0 ] && [[ "$out" != *"/etc"* ]] && [[ "$out" != *"Permission denied"* ]] && echo 1 || echo 0)"
 
 echo "# sshd evidence (refusals):"
 grep -Ei 'refus|prohibit|not permitted|denied|Received request' "$WORK/sshd.log" | sed 's/^/#   /' | head -20

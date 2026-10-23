@@ -31,7 +31,11 @@ Exit status 0 when all checks match expectations. Recorded output: `results-2026
 | T5 | Reverse forward refused; nothing listens on the gateway. |
 | T6 | Limitation check: a `WRITE` line passes through the approved tunnel and reaches the device. Destination pinning does not constrain operations. |
 | T7 | Limitation check: the device sees only the gateway's address, so per-user attribution exists only in gateway audit. |
-| T8 | Killing the per-session `sshd` processes closes a held application connection and stops new use. Latency recorded. |
+| T8 | Termination: killing the per-session `sshd` processes closes a held application connection. Latency recorded. |
+| T9 | Limitation check (A6 probe): after T8, the same key immediately re-establishes access. Killing sessions is termination, not revocation. |
+| T9r | Revocation: remove the key from the authorized keys, then kill sessions; re-authentication is denied. The decisive evidence is the `Permission denied (publickey)` on reconnect (the "held tunnel" probe only shows the local listener is gone). |
+| T10 | `ssh -W` stdio forward to an unapproved device refused; 0 connections at the device (A6 probe). |
+| T11 | sftp subsystem refused (A6 probe). |
 
 ## Limits
 

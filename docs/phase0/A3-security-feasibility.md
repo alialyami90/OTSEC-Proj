@@ -52,7 +52,7 @@ Not obtained: full normative texts of IEC 62443-3-3, IEC 62351-3/-8/-9/-14, and 
 | Attribution at device | Device sees gateway address only (E1 T7). | Same, unless per-user device accounts are injected. | Device sees workstation; attribution only in platform audit. | Same as P-aware. |
 | Credential exposure | Engineer typically holds device credentials. | Gateway can inject; engineer never sees them. | Can be injected on workstation, or engineer holds them. | Gateway holds all (SEL-3620 model `[doc]`): concentrates risk (AP-1). |
 | Endpoint risk | Engineer's own laptop talks to IEDs (bad). | Engineer's laptop only sees a terminal. | Engineer's laptop only sees pixels; workstation is a new high-value asset to harden and patch. | Low on client side. |
-| Revocation | Kill session process; E1 T8 closed held connection in 0.014 s `[exp-sim]`. | Same. | Broker disconnect plus firewall rule removal; untested. | Vendor dependent. |
+| Revocation | Kill session process is *termination* only: E1 T8 closed a held connection in 0.013–0.014 s, but T9 shows the same key reconnects at once. Revocation needs the authorization removed first; T9r (key removed, then sessions killed) denies re-authentication `[exp-sim]`. | Same. | Broker disconnect plus authorization and firewall rule removal; untested. | Vendor dependent. |
 | Insecure downstream visible | Must be labelled separately. | Yes, gateway knows the transport. | Must be labelled separately. | Yes. |
 | Build effort for us | Low. | Medium. | Medium: broker, recording, workstation hardening, licences. | High per vendor, or buy. |
 
@@ -116,7 +116,9 @@ CredentialRef (stored centrally and at the node; contains no secret)
 ```
 
 - **Write path:** the admin UI encrypts the secret to the target node's public key in the browser or API edge; central stores and relays ciphertext only; the node decrypts into its local store, encrypted at rest under a node-bound key (TPM-sealed where the hardware has one; otherwise a root-only key file, which is weaker and must be recorded as such).
-- **Read path:** only the transport layer may resolve a ref, in-process, at connect time. Adapters receive a connected session, not a secret. The secret never appears in adapter results, logs, audit records, errors, transcripts, environment variables, command lines, or crash dumps.
+- **Read path:** only the transport layer may resolve a ref, in-process, at connect time. For in-band authentication (SEL), the secret is sent only through a credential slot that the egress check opens immediately after the documented `Password:` prompt, and never otherwise (A6 R-A3-3).
+- **Write-time validation:** a credential value must be printable ASCII (0x20–0x7E), within a bounded length, and must not match any register or deny-corpus entry, so the credential store cannot be used to smuggle a command into the slot.
+- Adapters receive a connected session, not a secret. The secret never appears in adapter results, logs, audit records, errors, transcripts, environment variables, command lines, or crash dumps.
 - **No read-back:** no role, including admin, can retrieve a stored secret.
 - **Ceiling:** the node refuses to store a credential whose `access_level` exceeds the register's maximum for that device family (AP-4).
 - **Rotation of IED credentials is out of slice 1** (HR-5).
@@ -130,10 +132,12 @@ Interfaces affected: A2's adapter invocation contract takes a `CredentialRef` id
 | L1 | Authorization: only `collector` may invoke `device-read`; `device-write` does not exist in slice 1. | Human misuse, AP-15. | A3 | Enumerate API with each role's token. |
 | L2 | Signed command register: every operation classified, reviewed by A2 (source) and A6 (safety). | Wrong classification reaching code. | A2, A6 review | Register signature check; review record. |
 | L3 | Adapter renders bytes only from register templates and typed parameters. | Injection, free-form commands (AP-3). | A2 | Parameter fuzzing. |
-| L4 | Transport egress allowlist: a separate code path checks the exact rendered bytes against the register pattern before sending; fails closed. | L3 bugs, elevation commands (AP-4). | A3 (shared with A2) | Mutation test with L3 disabled. |
+| L4 | Transport egress check, a separate component that checks the **final bytes written to the socket** (after encoding, line terminator, and Telnet escaping) against the register, phase-aware (auth, operate, close), with a credential slot opened only by the documented password prompt; fails closed. | L3 bugs, elevation commands (AP-4), binary frames (D5). | A3 (shared with A2) | Mutation test with L3 disabled. |
 | L5 | Device-native least privilege: the stored credential is for the lowest level that can read SER. | Everything above, *if* the device separates read from write at that level. | A2 facts; A3 policy | Lab IED only (hardware). Unknown until A2 reports (HR-2). |
 | L6 | Site firewall: node may reach each IED only on the port its register operations need. | Use of other device services (e.g. FTP or MMS write paths). | A5 deploy | Connection attempts to other ports fail. |
 | L7 | Independent observation: recording device simulator in tests (A6); IDS rule for write-class commands from the node in deployment (A4). | Anything that got through. | A6, A4 | V-S7. |
+
+**Independence (A6 R-A3-1, accepted).** These layers are not seven independent barriers for slice 1. L2, L3, L4 and the L7 test oracle all derive from the register, so an over-broad register pattern passes all of them together. L5 fails for SEL (Level 1 is not read-only, A2 D1). L6 is the same port as the read. L1 constrains humans, not the collector. What is independent: against adapter bugs, L3 and L4 (separate components); against register errors, only the A2/A6 review and A6's deny corpus (`tests/safety/register_review/` on A6's branch). A3 therefore proposes that **passing A6's deny corpus is a release gate for every register change**, and that L7 in deployment be counted only for transports an IDS can read (Telnet yes, SSH no; A6 C-03).
 
 ### 4.4 Audit event minimum fields (draft, for A1 to merge with A4's event schema)
 
@@ -172,7 +176,7 @@ Never present: secrets, full configurations, raw device output (that belongs to 
 
 ## 5. Experiment E1: SSH gateway controls (`[exp-sim]`)
 
-Location: `modules/access/experiments/e1-ssh-forward-controls/` (README, `run.sh`, mocks, recorded output `results-2026-10-23.txt`). OpenSSH 9.6p1 on loopback; mock line-oriented "IEDs" log every byte received. Run three times after A1's review fix (real `/bin/bash` login shell, added T4b); 10/10 checks passed on each run.
+Location: `modules/access/experiments/e1-ssh-forward-controls/` (README, `run.sh`, mocks, recorded output `results-2026-10-23.txt`). OpenSSH 9.6p1 on loopback; mock line-oriented "IEDs" log every byte received. Run three times after A1's and A6's reviews (real `/bin/bash` login shell, T4b, A6's probes T9–T11, and T9r); 14/14 checks passed on each run.
 
 | Check | Result |
 | --- | --- |
@@ -185,7 +189,11 @@ Location: `modules/access/experiments/e1-ssh-forward-controls/` (README, `run.sh
 | T5 reverse forward refused; nothing listening on the gateway | pass |
 | T6 **limitation:** a `WRITE` line passes through the approved tunnel and reaches the device | confirmed |
 | T7 **limitation:** the device sees only the gateway's address | confirmed |
-| T8 killing the session process closed a held application connection in 0.014 s; new connections fail | pass |
+| T8 termination: killing the session process closed a held application connection in 0.013–0.014 s | pass |
+| T9 (A6) **limitation:** after the kill, the same key re-establishes access at once, so T8 is termination, not revocation | confirmed |
+| T9r revocation: key removed from authorized keys, then sessions killed → re-authentication denied | pass |
+| T10 (A6) `ssh -W` stdio forward to an unapproved device refused, 0 connections | pass |
+| T11 (A6) sftp subsystem refused | pass |
 
 What E1 does not show: behaviour with real IEDs or real engineering tools; anything about Telnet, FTP, or serial; revocation in a production gateway (we killed processes by name); session expiry (OpenSSH has no native session lifetime, so expiry must be an external timer using the same kill path). An early run produced false "passes" for T4 and T5 because authentication was failing; the T0 precondition was added to prevent that and is worth copying into A6's harness. A1's review found that the first version's T4 refusal came from the account's `nologin` shell rather than an sshd or key restriction; the account now has a real shell and T4b was added. A production gateway must still be tested the same way (ForceCommand or forced key command, `PermitTTY no`, with a real shell).
 
@@ -241,7 +249,7 @@ A1 ruled slice 1 provisionally `encrypted-authenticated` only. A2 found no nativ
 A2 reviewed §8.1 for IED compatibility and found it compatible with these adjustments, which A3 accepts. Sequence per A2 (SEL-300G quick start, SEL-421 Table 4.3, open-source client; `documented-untested`): CR, expect `=`; `ACC`, expect `Password:`; password line, expect `=>`.
 
 - **Phase-aware egress check (L4).** The transport has three phases: *auth*, *operate*, *close*. `ACC` is accepted only in auth and `QUI` only in close; either one from an adapter is a violation (abort, audit). Adapters in slice 1 can therefore send only `ID` and `SER` lines.
-- **Password line.** Exempt from the line allowlist, still subject to the 0x20–0x7E byte filter, and must contain no CR or LF. Its bytes are replaced by the redaction marker in the transcript (HR-3 ruling).
+- **Password line.** Exempt from the line allowlist only through the prompt-gated credential slot (§4.2); if the `Password:` prompt does not arrive, the secret is never sent and the session aborts (A6 R-A3-3: on a relay with passwords disabled the secret would otherwise execute as a command). Still subject to the 0x20–0x7E byte filter, and must contain no CR or LF. Its bytes are replaced by the redaction marker in the transcript (HR-3 ruling).
 - **Auth outcome by prompt.** `=>` is success. A bare `=` or a second `Password:` is failure: the credential is suspended and nothing more is sent (D2). `=>>` or a prompt with a level letter is an unexpected level: send `QUI`, close, alarm. `ACC` that goes straight to `=>` (the level's password is disabled; A2's unverified recollection) is treated as success but raised as a security finding on that asset.
 - **Mid-operation level drop.** If the prompt falls back to `=` during operate (idle timeout), the invocation fails; `ACC` is never re-sent in the same invocation.
 - **`ID` runs after auth**, since whether it works at Level 0 is unknown.
@@ -256,10 +264,10 @@ These become acceptance tests for A6's recording simulator: one test per prompt 
 
 ### Handoff P0-A3 — A3 — 2026-10-23
 **Completed:** Threat model v0 (scope, assumptions, assets, 10 trust boundaries for T1 and T2, 11 actors, 21 Q7 attack paths each with mitigation, enforcement point, falsifiable test, and ATT&CK for ICS IDs; 18 controls with IEC 62443-3-3 and IEC 62351 alignment; 7 open high-risk concerns). Q1 comparison of P-tcp, P-aware, W, and G with recommendation and settling experiments X1–X4. Drafts: authorization boundary, credential reference model, read-only enforcement layers L1–L7, audit minimum fields, insecure-downstream policy, failure behaviour. Experiment E1.
-**Evidence:** ABB 1MRS758280 rev C; Siemens SSA-899560; SEL-3620 product page and data sheet; IEC TS 62351-8 preview (titles only); ATT&CK for ICS list retrieved 2026-10-23; E1 scripts and `results-2026-10-23.txt` (`simulated`, loopback mocks, three runs, 10/10 after A1's review fix).
+**Evidence:** ABB 1MRS758280 rev C; Siemens SSA-899560; SEL-3620 product page and data sheet; IEC TS 62351-8 preview (titles only); ATT&CK for ICS list retrieved 2026-10-23; E1 scripts and `results-2026-10-23.txt` (`simulated`, loopback mocks, three runs, 14/14 after A1's and A6's reviews).
 **Interfaces:** none approved. Drafts for Phase 1: `CredentialRef`, operation classes, role matrix, audit fields, `downstream_security`.
 **Limitations:** no hardware; no vendor engineering software exercised; standards mapped at requirement-title level only; IEC 62351-8 role names unverified; A2 device facts not yet received.
 **Risks:** HR-1 to HR-7 in the threat model; the most consequential are HR-2 (device access levels) and AP-7 (central as fleet-wide command path).
 **Dependencies:** A2: facts received; enforcement points decided in §8. A1: take HR-8 (slice-1 downstream transport) to the owner. A4: AP-20 forwarding rules, HR-3. A5: write the agreed site-to-central rules into the runtime proposal. A6: cross-review of this file and the threat model; adopt E1's T0 precondition pattern. A1: rulings on R8.5 and HR-3; transfer section 7 proposals.
 **Files changed:** `docs/threat-model.md`, `docs/phase0/A3-security-feasibility.md`, `modules/access/experiments/e1-ssh-forward-controls/` (README.md, run.sh, mock_ied.py, probe.py, results-2026-10-23.txt).
-**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A2 (IED compatibility): compatible with adjustments, applied in §8.3; agrees with the HR-8 recommendation. A6 (independent security review) requested; not yet reviewed.
+**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A2 (IED compatibility): compatible with adjustments, applied in §8.3; agrees with the HR-8 recommendation. A6 (independent security review): accepted for Phase 0 with changes R-A3-1 to R-A3-5, applied (layer independence restated, revocation vs termination with E1 T9/T9r/T10/T11, prompt-gated credential slot, TB5 acknowledgement open with A4, AP-17 window stated).
