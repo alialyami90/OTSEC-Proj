@@ -27,6 +27,9 @@ Documented (p. = manual page):
   SHO P n (Level 1) shows the settings of port n; Port 1 is Ethernet and
     carries MAXACC, LANG, FTPACC and HTTPACC (Table 7.67 p. 7.77;
     Table 4.104 p. 4.249-4.251, factory defaults)
+  Firmware revision history lists fixed defects where communications could
+    cause a diagnostic restart, for example "Telnet traffic" (fixed
+    R300-V3 and R202-V1, D20210104); triggers undocumented (A2 D27)
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
@@ -86,6 +89,19 @@ def _load(name):
         return f.read().replace(b"\r\n", b"\n").rstrip(b"\n").replace(b"\n", CRLF)
 
 
+def _replace_id_field(block, field, checksum_ok=True):
+    """Replace the ID line whose field starts like `field` and recompute its
+    checksum: the 16-bit byte sum through the comma before it (SEL AG95-04)."""
+    name = field.split(b"=", 1)[0] + b"="
+    lines = block.split(CRLF)
+    for i, line in enumerate(lines):
+        if line.startswith(b'"' + name):
+            body = b'"' + field + b'",'
+            total = (sum(body) + (0 if checksum_ok else 1)) & 0xFFFF
+            lines[i] = body + b'"%04X"' % total
+    return CRLF.join(lines)
+
+
 def _settings(name):
     with open(os.path.join(DOC, name)) as f:
         pairs = (line.split(":=", 1) for line in f if ":=" in line)
@@ -94,13 +110,22 @@ def _settings(name):
 
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
-                 port1=None, spanish_accepts_english=False, quit_reply=None):
+                 port1=None, spanish_accepts_english=False, quit_reply=None,
+                 fid=None, fid_checksum_ok=True, vulnerable=None):
         self.password = password          # None models "Level 1 password disabled"
         self.level = 0
         self.awaiting = None              # level being authenticated for, or None
         self.attempts = 0
         self.ser = _load("ser-fig-10-16.txt") if ser == "example" else None
         self.id = _load("id-fig-7-38.txt")
+        if fid is not None:
+            self.id = _replace_id_field(self.id, b"FID=" + fid, fid_checksum_ok)
+        # vulnerable: text naming a documented firmware defect in which
+        # communications traffic could cause a diagnostic restart (A2 D27,
+        # firmware history in the IM). Its trigger is undocumented, so any
+        # session that reaches such a unit is recorded as a device effect.
+        self.vulnerable = vulnerable
+        self.exposed = False
         self.rid, self.tid = rid, tid
         self.quit_sent = False
         # Port 1 settings: Table 4.104 factory defaults, then any overrides.
@@ -168,6 +193,16 @@ class SEL751DocResponder:
         return Reply(out, secret=True, accepted=ok, effects=effects)
 
     def handle(self, line):
+        reply = self._handle(line)
+        if self.vulnerable and not self.exposed:
+            self.exposed = True
+            reply.effects = list(reply.effects) + [self._exposure()]
+        return reply
+
+    def _exposure(self):
+        return f"traffic reached firmware with a documented diagnostic-restart defect: {self.vulnerable}"
+
+    def _handle(self, line):
         from sim import Reply
         if self.awaiting is not None:
             return self._password_reply(line)
@@ -243,10 +278,13 @@ class SEL751DocResponder:
         return None
 
     def on_close(self):
+        effects = []
+        if self.vulnerable and not self.exposed:
+            effects.append(self._exposure())
         if self.level > 0:
-            return [f"session closed at Access Level {self.level} without QUIT; relay stays "
-                    "elevated until TIDLE expires (p. 7.16)"]
-        return []
+            effects.append(f"session closed at Access Level {self.level} without QUIT; relay stays "
+                           "elevated until TIDLE expires (p. 7.16)")
+        return effects
 
 
 def factory(**kwargs):
