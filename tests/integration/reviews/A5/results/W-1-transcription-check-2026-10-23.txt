@@ -1,0 +1,21 @@
+A6 check of A5 W-1 result files (PR #16 head 7fdae6a) against the GitHub Actions job log
+Date: 2026-10-23. Evidence class of the results being checked: simulated (hosted Windows Server 2025 VM).
+
+Source of truth used: job 120597175606 of run 40006949610, log read through the GitHub API
+(get_job_logs). The run: workflow_dispatch by alialyami90, head 830a0f4 on
+claude/project-thread-xni3ff, conclusion success. The artifact zip could not be downloaded from
+this environment (blob host refused by the egress proxy), so the artifact itself was not checked;
+its digest in the log (d8bd421e...5efccc) matches the digest cited in each file header.
+
+Method: A6 copied the result lines from the job log body (timestamps stripped) into one file,
+concatenated the five PR files in run order (crash-durability, throughput, storage-limit,
+syslog-loss, write-amplification) with their two "# Source"/"# Runner" header lines removed,
+and ran diff.
+
+Result: identical, 98 of 98 lines. Header facts also match the log: image windows-2025-vs2026
+20261021.278.1, Azure westus3, Windows Server 2025 Datacenter 10.0.26100, commit 830a0f4,
+GOCACHE under C:\Users\runneradmin (the runner account).
+
+Not checked: that run.ps1 at 830a0f4 is what produced these lines beyond the log showing
+`./run.ps1 -Exe "$env:RUNNER_TEMP\p0.exe" -Iterations 100`; that the account was elevated
+(inferred from runneradmin and from the VHDX cases running, which run.ps1 does only when elevated).
