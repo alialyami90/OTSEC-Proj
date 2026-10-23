@@ -260,14 +260,69 @@ Parsing experiments are now possible on the documented-example fixtures, but the
 
 ## 14. Handoff P0-A2 — A2 — 2026-10-23
 
-**Completed:** candidate ranking (section 2); SEL-751 capability matrix and draft command register (`docs/device-capabilities.md`, `A2-command-register-draft.json`); SSH feasibility (section 5); device-side safety risks D1–D14 (section 6); native SER format as far as documented (section 7); Q2 (section 8); Q5 and a draft adapter interface (section 9); simulator source list (section 10).
-**Evidence:** sources S1–S22 in section 1. S16–S21 are owner-supplied data sheets; S22 is the owner-supplied SEL-751 instruction manual (date code 20260910), read on 2026-10-23 (section 15). Documentation and open-source code only; no hardware, no simulator, no captures.
-**Interfaces:** draft invocation and result envelope (section 9), proposal only. No contract introduced or modified.
-**Limitations:** Every capability is at best `documented-untested`. The `CSE` output format is not in S22. Fixtures are manual transcriptions, one of which (Figure 3.20) is internally inconsistent.
-**Risks:** Level 1 is not read-only (D1, D3, section 15.3); bad passwords pulse SALARM, which by default closes OUT101 and writes the SER (D2, D15); unquit sessions stay elevated (D18); a wrong password makes the next line a password (D19); Spanish `SER D` clears the SER (D16); Fast Operate bytes on the same port (D5); cleartext Telnet with shared passwords (D7); FTP writes settings (D8); SER ring-buffer loss (D10).
-**Dependencies:** A3 decides the credential and enforcement points for D1, D2, D4, D5, D7. A4 consumes section 7 for the event schema. A6 builds the simulator from section 10 and verifies the register. A1 decides primary and contrast families, transfers the interface draft into Phase 1 contract work, and approves or rejects the proposed `SHO G` and `SHO P 1` register entries.
-**Files changed:** `docs/phase0/A2-device-feasibility.md`, `docs/phase0/A2-command-register-draft.json`, `docs/device-capabilities.md`, `tests/fixtures/ied/sel/751/documented-example/` (3 fixtures and `SOURCE.md`).
-**Reviewer(s) and outcome:** A6 and A3 per CLAUDE.md 5.6; pending.
+**Completed:**
+- Candidate ranking (section 2; superseded by ADR-0006, SEL only).
+- SEL-751 capability matrix and command register (`docs/device-capabilities.md`, `A2-command-register-draft.json`).
+- SSH feasibility (section 5).
+- Device-side safety risks D1–D27 (section 6; D20–D25 are in `A2-sel-portfolio.md`).
+- Native SER format (sections 7 and 15.4).
+- Q2 (section 8).
+- Q5 and a draft adapter interface (section 9; contrast family is now the SEL RTAC).
+- Simulator source list (section 10).
+- SEL-751 manual results (section 15).
+- SEL-751 firmware allowlist (section 15.7, `A2-sel751-firmware-allowlist.json`).
+- SEL portfolio by device class (`A2-sel-portfolio.md`).
+
+**Evidence:**
+- Sources S1–S22 are in section 1, and S23–S43 are in `A2-sel-portfolio.md`. S16–S43 are owner-supplied SEL data sheets and manuals; S22 is the SEL-751 instruction manual, date code 20260910.
+- This is documentation and open-source code only: no hardware and no captures. The simulator work is A6's.
+
+**Interfaces:** the draft invocation and result envelope (section 9) is a proposal only. No contract was introduced or modified. The register moves to `contracts/` as C3 in Phase 1 (A1).
+
+**Limitations:**
+- Every capability is at best `documented-untested`.
+- The allowlist's allowed branches are `inferred (owner-accepted)`.
+- The `CSE` field list for the SEL-751 is not documented, so `CSE` and `CAS` are deferred.
+- Fixtures are manual transcriptions. Figure 3.20, the Figure 9.17 data lines and several AG95-04 examples are internally inconsistent.
+
+**Risks:**
+- Level 1 is not read-only (D1, D3, section 15.3).
+- Bad passwords pulse SALARM, which by default closes OUT101 and writes the SER (D2, D15).
+- Unquit sessions stay elevated (D18).
+- After a wrong password, the next line counts as another password (D19).
+- If the password is disabled, the password line runs as a command (D26).
+- In Spanish mode, `SER D` clears the SER (D16; ruled: refuse unless `LANG := ENGLISH`, with a Level 0 `QUI` probe).
+- Communications traffic restarted relays on older firmware (D27; ruled: FID allowlist).
+- Fast Operate bytes share the port (D5).
+- Telnet is cleartext with shared passwords (D7).
+- FTP can write settings (D8).
+- The SER ring buffer can lose rows (D10).
+
+**Dependencies:** none outstanding for Phase 0. A1's rulings are recorded in ADR-0005: `SHO G` and `SHO P 1` approved; `CSE` deferred; LANG fail-closed; the `QUI` probe; the allowlist with the `EHTTP` condition. Phase 1 waits on the owner.
+
+**Files changed:**
+- `docs/phase0/A2-device-feasibility.md`
+- `docs/phase0/A2-command-register-draft.json`
+- `docs/phase0/A2-sel-portfolio.md`
+- `docs/phase0/A2-sel751-firmware-allowlist.json`
+- `docs/device-capabilities.md`
+- `tests/fixtures/ied/sel/` (`751/`, `400-series/`, `rtac/` documented-example fixtures, each with `SOURCE.md`)
+
+Merged in PR #2 (85d8091) and PR #8.
+
+**Reviewer(s) and outcome:**
+- **A6 (device safety and correctness):** accepted for Phase 0. Record: `docs/phase0/A6-cross-review.md`, section "A2 findings" (commit 89745c6). R-A2-1 to R-A2-4 were dispositioned as follows:
+  - R-A2-1 holds: deny-by-default, and every widening must pass A6's corpus.
+  - R-A2-2 addressed: a `side_effects` field was added to every register entry.
+  - R-A2-3 addressed: dedup by snapshot alignment, ambiguous offsets reported as gaps (section 7).
+  - R-A2-4 accepted: Telnet only, so V-S14 does not apply and the cleartext credential is a recorded residual risk.
+- **A6 later re-checks:**
+  - Follow-up re-check: both corpora pass, snapshot dedup confirmed (`docs/agent-handoffs.md`).
+  - The register at bb6f850 passes 112 deny and 6 allow lines, and its read-only set equals A6's allow corpus.
+  - The firmware allowlist passed A6's independent `check_allowlist.py` at 27ed082, and again at 76e5940 after the evidence-class change (85d8091).
+  - Figure 9.17 transcriptions match byte for byte across three manuals.
+- **A3 (security-sensitive behaviour):** no review of P0-A2 recorded yet. A3's file records only A2's review of A3 (A3 §8.3) and A3's adoption of A2's facts for HR-2 and L5. Pending until A3 records it.
+- **A1:** integration review accepted for Phase 0 (`docs/agent-handoffs.md`).
 
 ## 15. SEL-751 instruction manual results (S22, date code 20260910)
 
