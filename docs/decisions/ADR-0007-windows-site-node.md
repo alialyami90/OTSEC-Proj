@@ -33,6 +33,8 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 - File locking, path, and fsync semantics differ on Windows; the store and reserve-file logic need Windows tests.
 - No SSD endurance data: WAL and pruning design must keep write amplification low and the node reports SSD wear (SMART) where readable; A5 to estimate writes per day from the event-rate assumptions.
 
+- The edition actually installed decides support: "Windows 11 Pro IoT LTSC" is not a Microsoft edition name. Per A5's cited lifecycle data (A5 findings §15), Windows 11 Pro 24H2 left support on 2026-10-14, while Windows 11 IoT Enterprise LTSC 2024 runs to 2034-10-11. The node reads `EditionID` and `DisplayVersion` and labels itself by lifecycle date (A6 V-S20); an unknown edition is labelled "OS support unknown".
+
 ## Verification
 
 A6 adds Windows runs of the durability and recovery tests and a service-isolation test (the main service account cannot read the credential store). Results are `simulated` on a Windows VM until run on SEL-3355-2 hardware.
