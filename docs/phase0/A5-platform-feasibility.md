@@ -314,6 +314,27 @@ Committing one event at a time costs about 29 times the payload. **Group commit*
 - **Central HMI server reaching relays** is an existing, authorized customer path (zenon). The platform's central role is a cybersecurity server and never connects to devices (ADR-0007 item 7), so the invariants in section 2 hold.
 - **Dedicated 3355-2:** A1 assumes the platform does not share a host with zenon. If it ever had to, the store's quotas and the collector's session limits would need to be re-examined against zenon's own use of the relays' sessions.
 
+## 14. A5 review of ADR-0007 (proposed), 2026-10-23
+
+A1 assigned ADR-0007 to A5 to review and drive. This review covers the version on claude/project-thread-hperik that has items 1 to 9. I agree with items 2, 7 and 8 as written. The changes I propose for A1 to transfer are below.
+
+| Item | Proposed change | Reason |
+| --- | --- | --- |
+| 1 (dedicated host) | Keep the assumption, and add a consequence for co-hosting. If the platform ever shared a host with zenon, the platform and zenon would draw on the same relay session slots (for example 2 Telnet sessions on a SEL-751). Both would also have to fit one application-control policy and one patch and reboot schedule | Answers A1's request to check the assumption. The owner has not yet confirmed a dedicated host (question in the A5 thread) |
+| 3 (SCM supervision) | Add: "SCM recovery delays do not enforce device session limits. The collector keeps a durable record of each open device session and, after an unclean exit, does not reconnect before the device's `TIDLE`" (section 13) | SCM delays are fixed per failure count and know nothing about devices. Two unclean restarts within `TIDLE` can lock everyone out of Telnet on a 751 (A2) |
+| 4 (credentials) | Replace "DPAPI with machine-bound keys" with A3's AP-1 rule: user-scope DPAPI under the collector's account, or a TPM-backed CNG key whose ACL names only the collector's service SID; the store file's ACL is limited to that SID | Any process on the machine can decrypt machine-scope DPAPI. A3 has already ruled it out (a10550b) |
+| 5 (Windows durability evidence) | Add E-A5-6 (write amplification). Record that the harness exists (`run.ps1`, staged `p0.exe`). The `FlushFileBuffers` check is A6's H-14 (Process Monitor) | A5 owns the harness as implementer evidence and A6 owns the independent check. Results from a VM or hosted runner are `simulated` |
+| 6 (time) | Add the synchronization source and an alarm threshold. Windows Time synchronizes by NTP from the site clock (the SEL-2488 serves NTP), and an offset above 1 s, or no successful sync within 1 h, raises an alarm | Both numbers are a starting proposal, not derived from evidence. Without a threshold the alarm cannot be tested |
+| 9 (hardening) | Add three operational consequences. (a) BitLocker uses a TPM-only protector so the node restarts unattended after a patch reboot. TPM plus PIN would leave the node off line until someone types the PIN. The owner holds the recovery key, because firmware or BIOS updates can trigger BitLocker recovery and stop an unattended boot. (b) Application control (WDAC or AppLocker) requires Authenticode-signed platform binaries, and the upgrade procedure updates the policy before the binary switch. (c) Without a domain, local service and admin accounts are managed by the platform's own deployment procedure | These turn hardening into steps that can be tested. Each of (a) and (b) can otherwise leave a node down after routine maintenance |
+| Consequences | Add the SSD estimate from section 13. Per-event commits write about 10.6 KB per event and 100-event groups about 1 KB, so group commit is required. Add the antivirus exclusion of the data directory as an owner policy decision | Answers the ADR's request for a writes-per-day estimate |
+
+Proposed experiments for ADR-0007, all `simulated` until run on SEL-3355-2 hardware:
+
+1. **W-1:** `run.ps1` on Windows/NTFS. It covers E-A5-1, E-A5-3 with the restart rounds, and E-A5-6. Owner: A5. Waiting on where it runs.
+2. **W-2:** A6 H-14. Process Monitor confirms `FlushFileBuffers` on the database and WAL before every acknowledgement at `FULL`, on a dedicated volume under a non-admin service account. Owner: A6.
+3. **W-3:** service isolation. Decrypting the credential store from any service account other than the collector's fails, and the IED-facing NIC is unreachable except from the collector service. Owners: A3 and A6.
+4. **W-4:** maintenance survival on a SEL-3355-2. A patch reboot and a BIOS update with BitLocker on and application control enforced end with the node collecting again, with no human present. Owner: A5, with the owner's hardware.
+
 ## Handoff P0-A5 — A5 — 2026-10-23
 
 **Completed:** runtime shape comparison and recommendation (section 2, answers Q6); toolchain and UI stack recommendation (section 3); persistence, outbox semantics, and storage-full policy (section 5); site-to-central transport, instruction allowlist, and enrollment outline (section 6); node runtime, upgrade, and observability outline (section 7); five experiments.
