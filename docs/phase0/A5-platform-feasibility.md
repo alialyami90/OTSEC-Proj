@@ -240,9 +240,34 @@ The node validates every bundle against its own local register and limits, so a 
 
 ## 11. Open questions for the owner
 
-1. What hardware and operating system will site nodes run on? (Linux x86-64 and arm64 assumed; Windows only if confirmed.)
+1. What hardware and operating system will site nodes run on? If it is the SEL-3355-2, section 12 covers most of this; the remaining question is which OS you would install.
 2. How long do WAN outages at your sites last in practice? (72 h is the current acceptance floor.)
 3. Do any sites require central to reach IEDs directly? (The design assumes never.)
+
+## 12. Owner-supplied SEL documentation (added 2026-10-23)
+
+The owner added SEL manuals and data sheets on their device. Everything below is `documented-untested`: read from those PDFs by text extraction, nothing exercised. Sources: SEL-3355-2 data sheet (date code 20260521), SEL-2488 instruction manual (20260918), SEL-311L-0-6 instruction manual (20260129), SEL-751 (20260910) and SEL-451 400-series (20260730) instruction manuals, ACSELERATOR RTAC SEL-5033 programming reference (20260925).
+
+### SEL-3355-2 as a candidate site node
+
+If the owner intends the SEL-3355-2 automation controller as site hardware, it answers most of open question 1:
+
+| Data sheet says | Effect on this proposal |
+| --- | --- |
+| x86-64 (Intel Xeon E3-1505L or E3-1505M, quad core), 4 to 64 GB DDR4 ECC | linux/amd64 is the primary build target; ample headroom for the runtime |
+| Supported OS: Windows 8, 10, 11 IoT LTSC, Windows Server 2012 to 2025; RHEL 6 to 9, AlmaLinux 8 to 10, Ubuntu LTS 16.04 to 26.04, SUSE 15 and 16, CentOS 6 and 7 | Linux recommended (systemd hardening in section 7); keep the windows/amd64 build [E-A5-5] as an option only if the owner runs Windows |
+| Infineon SLM 9670AQ TPM 2.0 | The node's enrollment key can be generated in and bound to the TPM (section 6, A3's B-04) |
+| Industrial SSD options (SLC 30 to 250 GB, pSLC 120 to 480 GB, 3D TLC 240 to 7680 GB), hot-swap, RAID 0, 1, 5, 10; SEL publishes an application note on SSD lifetimes | The store goes on a dedicated, mirrored (RAID 1) volume. `synchronous=FULL` plus WAL traffic consumes SSD write endurance, so bytes written per event must be measured against the drive's rating in Phase 2 (A6 measured about 9 KB of WAL per event at default settings) |
+| Real-time clock drift 200 ppm (about 17 s/day free running); IRIG-B input through an SEL-3390S8 card | The node must be time-synchronized (IRIG-B, or NTP or PTP from a station clock) and alarm when it is not; an unsynchronized node will drift into mTLS failures and wrong receive times (section 6) |
+| Alarm contact and watchdog under SEL SysMon; the OS table footnote gives Linux "limited support for system Alarm, Watchdog, and AUX LEDs" | Driving the hardware alarm contact from node health is attractive but unproven on Linux; verify before relying on it |
+| Intel AMT v11, accessible through ETH1 | An out-of-band management path below the OS. It must be disabled, or ETH1 kept off every WAN and IED-facing network. Flag for A3 (Q7) |
+
+### Syslog sources in the SEL documentation
+
+- SEL-2488 satellite clock: remote syslog follows RFC 3164 with a UTC offset added to the timestamp, to up to three destinations; "the port number is fixed to the default port for the Syslog Protocol (514) and cannot be changed". The node therefore needs an RFC 3164 listener on port 514, which is a privileged port: grant the listener `CAP_NET_BIND_SERVICE` through systemd rather than running it as root. The transport is not stated beyond the port; UDP is likely [inferred], which puts it in the drop-and-count row of the storage-full table.
+- SEL-311L: "The SEL-311L does not support Syslog functionality."
+- SEL-751 and SEL-451 manuals: the word "syslog" does not occur in the extracted text, while "Sequential Events" occurs over 40 times in each. This is an absence in documentation, not proof; A2 to confirm. If it holds, these relays reach the platform through SER polling only, and risk 4 (TCP syslog backpressure on devices) does not apply to them.
+- RTAC (SEL-5033): has a `SyslogCollector` library that receives syslog into the RTAC logic engine. An RTAC can therefore sit between devices and the platform as a syslog source or aggregator; its outbound transport was not checked.
 
 ## Handoff P0-A5 — A5 — 2026-10-23
 
