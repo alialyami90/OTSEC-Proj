@@ -6,6 +6,8 @@ Everything here ran in a cloud container against local files and loopback socket
 
 ## Reproduce
 
+On Windows, `run.ps1` runs the same experiments and writes `results/windows-*.txt` (full-disk cases need an elevated prompt; see the script header). The `a5-windows-experiments` workflow runs it on a GitHub-hosted Windows runner.
+
 ```sh
 sh platform/experiments/phase0/run.sh                  # all experiments, writes results/*.txt
 ITERATIONS=20 sh platform/experiments/phase0/run.sh   # quicker crash run
@@ -21,6 +23,7 @@ Needs Go 1.24 or later on the path; `go.mod` requires 1.26 (the SQLite driver ne
 | E-A5-2 | `p0 throughput` | What does `synchronous=FULL` and per-event commit cost against `NORMAL` and batching? | [results/throughput.txt](results/throughput.txt) |
 | E-A5-3 | `p0 storage-limit` | What happens at an application quota and at a real full filesystem, can the store recover, and does recovery at startup survive repeated exhaustion? | [results/storage-limit.txt](results/storage-limit.txt) |
 | E-A5-4 | `p0 syslog-loss` | How many events does a plain TCP syslog forwarder lose, without any error, when the collector dies? What does an application-level ack change? | [results/syslog-loss.txt](results/syslog-loss.txt) |
+| E-A5-6 | `p0 write-amplification` | How many bytes does the store hand to the OS per stored event, by WAL settings and commit size (SSD endurance)? | [results/write-amplification.txt](results/write-amplification.txt) |
 | E-A5-5 | `run.sh` cross-build step | Does the candidate stack produce static binaries for site hardware targets with no C toolchain? | [results/cross-build.txt](results/cross-build.txt) |
 
 ## What these experiments do not show

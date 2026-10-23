@@ -271,6 +271,49 @@ If the owner intends the SEL-3355-2 automation controller as site hardware, it a
 - SEL-751 and SEL-451 manuals: the word "syslog" does not occur in the extracted text, while "Sequential Events" occurs over 40 times in each. This is an absence in documentation, not proof; A2 to confirm. If it holds, these relays reach the platform through SER polling only, and risk 4 (TCP syslog backpressure on devices) does not apply to them.
 - RTAC (SEL-5033): has a `SyslogCollector` library that receives syslog into the RTAC logic engine. An RTAC can therefore sit between devices and the platform as a syslog source or aggregator; its outbound transport was not checked.
 
+## 13. Windows site node (owner answer and ADR-0007, added 2026-10-23)
+
+The owner confirmed that sites use the SEL-3355-2 running Windows 10 Pro or Windows 11 Pro IoT LTSC. A1's ADR-0007 makes `windows/amd64` the primary build. It also requires the durability and full-disk evidence to be repeated on Windows/NTFS before ADR-0004 is relied on there. This section covers what changes from sections 5 to 7. Everything is `[inferred]` or `[doc]` until the Windows runs land.
+
+### Evidence status on Windows
+
+- The harness now builds and runs on Windows. Process kill uses `TerminateProcess`, which is the same as SIGKILL for this purpose: the OS cache survives, so it is still not a power-loss test. Free space uses `GetDiskFreeSpaceExW`. `run.ps1` repeats E-A5-1 to E-A5-4 and puts the full-disk cases on a 16 MB NTFS VHDX when elevated.
+- A6's E-02 (no fsync between acknowledgements under `NORMAL`) used strace, which has no direct Windows equivalent. The Windows equivalent needs an ETW or Process Monitor trace of `FlushFileBuffers`. That is for A6. Until then, the `NORMAL` versus `FULL` throughput ratio on Windows is only indirect evidence that `FULL` flushes.
+- Where the runs happen is the owner's choice (decision card in the A5 thread): a GitHub Actions Windows runner, the owner's Windows PC, or a real SEL-3355-2. Results stay `simulated` until they come from SEL-3355-2 hardware.
+
+### What changes from the Linux outline
+
+| Topic | Linux outline (sections 5 to 7) | Windows site node |
+| --- | --- | --- |
+| Supervision | systemd units | Service Control Manager. The node and the collector are separate services, each with recovery actions. SCM restart delays are fixed per failure count, so they cannot enforce IED session limits by themselves (next row) |
+| Session-limit restarts (risk 5) | Restart backoff | The rule becomes OS independent. Before connecting, the collector durably records "session open to device X at time T" and clears the record after a clean quit. On start, if a record is present, it waits until T plus the device's `TIDLE` before reconnecting, and raises an alarm |
+| Process identity | Dedicated users | Virtual service accounts (for example `NT SERVICE\otsec-collector`), so permissions can be granted to one service and no other |
+| IED route only from the collector (A3 C-A5-1) | Firewall by user ID | Windows Defender Firewall rules can be scoped to a service. Block outbound to IED subnets for everything, then allow it only for the collector service. Outbound is allowed by default on Windows, so the block rule is mandatory. `[doc]`, untested |
+| Device credentials at rest | TPM-bound | Machine-scope DPAPI must **not** be used: any process on the machine can decrypt machine-scope DPAPI, so the main service could read credentials. Use user-scope DPAPI under the collector's account, or a TPM-backed key (Microsoft Platform Crypto Provider) whose ACL names only the collector. Flag for A3: ADR-0007 item 4 says "DPAPI with machine-bound keys" |
+| Syslog on port 514 | `CAP_NET_BIND_SERVICE` | No privilege needed on Windows. The inbound firewall rule is scoped to the listener service and to the known source addresses |
+| Store files | Dedicated filesystem, non-root | Dedicated NTFS volume on the mirrored SSDs. Antivirus scanning of the database and WAL can cause locking errors and slow commits. Whether to exclude the data directory is the owner's security-policy decision, not ours |
+| Upgrade and rollback | Two binary slots and a symlink | Windows locks a running .exe, so two install directories are needed anyway. Switch the service's image path, keep expand-then-contract migrations, and sign releases (Authenticode) as well as the offline release signature |
+| OS patching | Distribution updates | The owner's LTSC patch process is a dependency. The node must treat a patch reboot as an ordinary restart, and its crash-safety already covers that |
+| Time | Station clock | Windows Time synchronized to the site clock (the SEL-2488 serves NTP), with an alarm when unsynchronized (ADR-0007 item 6) |
+
+### SSD write load (ADR-0007 asks for writes per day)
+
+`p0 write-amplification` counts bytes the store hands to the OS per stored event under `synchronous=FULL`, including WAL frames and the checkpoint copy. It is a lower bound on SSD wear, because the controller adds its own amplification. Linux result [E-A5-6, `results/write-amplification.txt`]:
+
+| WAL settings | Events per commit | Bytes per event (368-byte payload) |
+| --- | --- | --- |
+| Bounded, `auto_vacuum=INCREMENTAL` | 1 | about 10,600 |
+| Bounded, `auto_vacuum=INCREMENTAL` | 10 | about 2,600 |
+| Bounded, `auto_vacuum=INCREMENTAL` | 100 | about 1,050 |
+
+Committing one event at a time costs about 29 times the payload. **Group commit** fixes most of that without weakening the semantics. Events arriving within a short window (for example 100 ms) are committed in one transaction, and each is acknowledged only after that commit. At an assumed sustained 10 events/s `[inferred]`, the result is about 9 GB/day with per-event commits, about 2.3 GB/day with 10-event groups, and about 0.9 GB/day with 100-event groups. Over 10 years that is roughly 33, 8 or 3 TB written. Without SEL's SSD-lifetime note, this must be compared with the specific drive's rated TBW once the drive model is known. The node also reports SSD wear (SMART) where Windows exposes it. The Windows numbers will come from the same experiment in `run.ps1`.
+
+### Other owner answers that touch the platform
+
+- **WAN outages** are treated as faults, since sites run N-1 redundancy. Local buffering stays as a safety net. The outage-tolerance sizing floor (section 5) is A1's to set, and the arithmetic there still applies.
+- **Central HMI server reaching relays** is an existing, authorized customer path (zenon). The platform's central role is a cybersecurity server and never connects to devices (ADR-0007 item 7), so the invariants in section 2 hold.
+- **Dedicated 3355-2:** A1 assumes the platform does not share a host with zenon. If it ever had to, the store's quotas and the collector's session limits would need to be re-examined against zenon's own use of the relays' sessions.
+
 ## Handoff P0-A5 — A5 — 2026-10-23
 
 **Completed:** runtime shape comparison and recommendation (section 2, answers Q6); toolchain and UI stack recommendation (section 3); persistence, outbox semantics, and storage-full policy (section 5); site-to-central transport, instruction allowlist, and enrollment outline (section 6); node runtime, upgrade, and observability outline (section 7); five experiments.
