@@ -6,7 +6,7 @@ The full project brief, engineering principles, team structure, and operating pr
 
 ## Status
 
-Phase 0 (evidence and assumption challenge) has not started. No language, toolchain, or runtime has been selected. The directories below hold placeholders and skeleton documents only.
+Phase 0 (evidence and assumption challenge) is in progress; task briefs are in [docs/agent-handoffs.md](docs/agent-handoffs.md). No language, toolchain, or runtime has been selected. The directories below hold placeholders and skeleton documents only.
 
 ## Layout and ownership
 

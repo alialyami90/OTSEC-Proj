@@ -1,15 +1,70 @@
 # Architecture
 
-Owner: A1. Status: **Phase 0 not started. No architecture has been selected.** Nothing in this document is decided until it is recorded in an ADR under [decisions/](decisions/).
+Owner: A1. Status: **Phase 0 in progress (2026-10-23). Provisional architecture drafted by A1; no architecture is selected until recorded in an ADR under [decisions/](decisions/).** Sections marked *provisional* are A1's working position, to be confirmed or overturned by the Phase 0 findings of A2–A6.
 
 ## System boundary
 
-To be defined in Phase 0. The boundary must state:
+*Provisional, A1, 2026-10-23.* Zone names follow IEC 62443-3-2 zone and conduit terminology (alignment, not certification).
 
-- What the platform observes (network segments, device interfaces, log sources).
-- What the platform may touch (approved read-only operations only, by default).
-- What the platform must never do (control or write operations on protection and control functions without separate, explicit authorization).
-- Where the platform sits relative to substation LAN, station bus, process bus, engineering network, and enterprise/WAN.
+### Where the platform sits
+
+```text
+ Enterprise / control-centre zone          ┌───────────────────────────┐
+   upstream Syslog / SIEM  ◄── TLS ─────── │ Central server (optional) │ ◄── operators, admins (upstream authn)
+                                           └─────────────▲─────────────┘
+ ─────────────── WAN (intermittent) ─────────────────────┼─────────────────────── conduit C1 (mTLS, site-initiated)
+ Substation security-services zone         ┌─────────────┴─────────────┐
+                                           │ Site node                 │
+                                           │  collector + store/forward│
+                                           │  adapter executor (creds) │
+                                           │  passive sensor (later)   │
+                                           └───┬───────────────────▲───┘
+ ──────────────────────────────────────────────┼───────────────────┼────────── conduit C2: approved read-only
+ Station bus / substation LAN                  │ C2 (read-only     │ C3 (receive-only   device interfaces only
+   IEDs, RTU/gateway, HMI, eng. workstation ◄──┘  adapter traffic) │  SPAN/TAP, later)  conduit C3: no transmit
+ Process bus (SV/GOOSE): out of scope for the first slice; visibility documented by A4.
+```
+
+In single-server deployment the central and site roles run on one host; the conduits stay logically the same.
+
+### What the platform observes
+
+- Device-generated Syslog sent to the site node (R4.1).
+- SER and identification data retrieved by approved read-only adapter commands over C2 (R4.2, R1.2, R5).
+- Later milestones: mirrored traffic on C3 (R6), configuration files (R3), engineering session traffic (R2).
+
+### What the platform may touch
+
+- Only commands in the approved command register (`docs/device-capabilities.md`) classified `read-only`, invoked through the adapter executor, on devices the owner has listed for collection. Default for every device is "not collected".
+
+### What the platform must never do
+
+- Issue control operations (for example DNP3 operate, IEC 61850 control, GOOSE publication), settings writes, firmware uploads, or buffer-clearing commands, through any monitoring path.
+- Perform active discovery or scanning on production networks without explicit, per-scan owner authorization.
+- Transmit on a passive sensor interface.
+- Let the central server or WAN reach a device directly. Central may change a site node's policy only within limits the site enforces locally (A3/A5 to define the allowed instruction set).
+- Sit in the protection or control path. If every platform component stops, protection, control, and SCADA continue unchanged (R8 constraint).
+
+## Provisional runtime shape
+
+*Provisional, A1, pending P0-A5 (runtime) and P0-A3 (trust boundaries).*
+
+| Option | Summary | A1 assessment before evidence |
+| --- | --- | --- |
+| A. Modular monolith | One codebase and one process per node; modules are in-process packages behind contract interfaces; the same build runs in `site`, `central`, or `single` role with modules enabled per role. | Simplest to build, test, and upgrade (P8, P9). Weakness: device credentials and device-facing code share a process with everything else. |
+| B. Service per module | Each module is its own deployable service with network APIs and a broker. | Adds network, broker, and version-skew failure modes at every site with no requirement that needs them yet. Not justified by R7 alone (R7 asks for modularity, not distribution). |
+| C. Monolith plus isolated executors | Option A, plus a small number of separate OS processes where a security boundary is needed: the adapter executor (holds device credentials, speaks to IEDs, accepts only register-listed command IDs) and, later, the packet sensor (Zeek or Suricata run as external processes anyway). | A1's working position. The split is justified by privilege separation (Q7, P4), not scale. Each extra process must name the boundary it enforces. |
+
+## Critical dependencies for the first slice
+
+| Deliverable | Depends on | Blocks |
+| --- | --- | --- |
+| Toolchain and runtime ADR (A5 → A1) | P0-A5 | All Phase 2 code |
+| Primary IED family, SER format, command register (A2) | Owner input on hardware or real outputs; OEM docs | Event schema, adapter contract, device simulator |
+| Event and timestamp schema (A4) | A2 SER format plus a second vendor's format | Outbox idempotency key (A5), forwarding profile, V-S2/V-S3 |
+| Credential reference and read-only enforcement points (A3) | A2 transports and access levels; A5 process model | Adapter contract, V-S5/V-S7 |
+| Outbox and delivery semantics (A5) | A4 event identity | V-S4/V-S6 |
+| Device simulator and write-detection method (A6) | A2 command register and SER examples | Independent verification of the whole slice |
 
 ## Alternatives under evaluation
 
@@ -53,10 +108,6 @@ Contracts required for the first vertical slice (to be approved in Phase 1):
 - Persistent data ownership.
 - Audit event format.
 - API versioning and compatibility expectations.
-
-## Critical dependencies
-
-To be filled in Phase 0. Expected shape: which module depends on which contract, and which investigations block which contracts.
 
 ## Phase 0 exit gate
 
