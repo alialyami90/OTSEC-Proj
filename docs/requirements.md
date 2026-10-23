@@ -127,3 +127,12 @@ These apply to every requirement above and are restated here for traceability.
 | P10 | No fabricated validation. Never claim hardware testing, security verification, or protocol compatibility without evidence. |
 
 Applicable standards for alignment (not certification claims): IEC 62443, IEC 62351, NIST SP 800-82, MITRE ATT&CK for ICS.
+
+## Owner answers (2026-10-23)
+
+- Site computer: SEL-3355-2 with Windows 10 Pro or Windows 11 Pro IoT LTSC (ADR-0007).
+- WAN: outages are not tolerated; sites have N-1 redundancy. R8 store-and-forward stays as fault handling.
+- Central access: the central HMI server may reach relays; central cybersecurity servers may not. The platform's central role never connects to devices.
+- Upstream Syslog: assume any standards-compliant collector and support all types (ADR-0004 amendment).
+- HMI and historian software: COPA-DATA zenon HMI Energy Edition on Windows (non-SEL; Windows events by host push, ADR-0006).
+- SEL-3530 is discontinued; the SEL-3350 replaces it.

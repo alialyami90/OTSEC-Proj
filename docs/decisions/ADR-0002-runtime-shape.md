@@ -29,7 +29,7 @@ Option C, narrowly:
 2. Separate processes only for: (a) the **IED collector**, which runs as its own OS user, alone can resolve device credentials, and alone has a route to the IED network; (b) **Zeek or Suricata** when R6 work starts. Each additional process must name the boundary it enforces in a later ADR.
 3. Invariants that make Q6 "yes": only site nodes talk to IEDs; sites are the system of record; every site–central connection is opened by the site; loss of central never stops local collection, storage, or site-configured forwarding.
 4. Central's instruction surface is the allowlist in A5 §6 and A3 §1.6: signed, typed policy bundles bounded by a site-local ceiling; no exec channel; no path to IED credentials; no request that touches a device.
-5. No broker and no orchestrator; systemd supervision.
+5. No broker and no orchestrator; systemd supervision. *(Site node: Windows Service Control Manager instead, ADR-0007.)*
 
 **R7.1 interpretation.** Modules are independently developed, tested, enabled, and disabled, and are *released together* as one signed, versioned artifact. A6 can only verify combinations that ship, and an untested mix of module versions at an OT site is a reliability risk. If the owner requires independent per-module upgrades on a node, this ADR is superseded and option B or plugin loading must be costed.
 

@@ -57,16 +57,16 @@ Owner scope change, 2026-10-23 ([ADR-0006](decisions/ADR-0006-device-coverage-an
 | Device class | SEL families (source) | Vendor-neutral coverage from the start | SEL-specific read path (to be classified by A2) |
 | --- | --- | --- | --- |
 | Protective relays, IEDs | SEL-751, SEL-787-2/-3/-4, SEL-311L, SEL-400 series (400G, 411L, 451) — instruction manuals supplied by owner | Passive observation; no Syslog on these relays (SEL-751 IM: no SSH, Syslog, or TLS) | SEL ASCII over Telnet or serial: `ID` (Access Level 0), `SER` (Level 1) — SEL-751 IM Tables 7.43, 7.63 |
-| RTUs, automation controllers | SEL RTAC, configured with acSELerator RTAC SEL-5033 (IM supplied); RTAC hardware manuals (SEL-3530/3555/3505) not supplied | Syslog | SSH, Syslog, SNMP, HTTPS, LDAP, REST API appear in SEL-5033 IM and Programming Reference; classification pending |
+| RTUs, automation controllers | SEL RTAC: SEL-3350 (replaces the discontinued SEL-3530, owner 2026-10-23), SEL-3555-2, SEL-3505, SEL-3530 (installed base); hardware IMs and acSELerator RTAC SEL-5033 IM supplied | Syslog | SSH, Syslog, SNMP, HTTPS, LDAP, REST API appear in SEL-5033 IM, Programming Reference, and SEL-3555-2 IM; classification pending (A2) |
 | Ethernet switches | SEL-2731, -2741, -2743, -2744 (2731 and 2741 manuals supplied); RSTP-managed or OT SDN-managed | Syslog (RSTP User's Guide, SDN User's Guide) | RSTP-managed: SNMP, HTTPS; SDN-managed: via SEL-5056 flow controller (IM supplied) |
-| Routers, security gateways, firewalls | SEL-3620/-3622 (A1 recollection; no manual supplied) | Syslog | Unknown until manual supplied |
-| Time servers and clocks | SEL-2488 (IM and data sheet supplied) | Syslog; passive PTP/NTP observation | SNMP, HTTPS, LDAP/RADIUS appear in SEL-2488 IM; classification pending |
-| Servers and computers | SEL-3355-2 (IM and data sheet supplied); typically Windows | Syslog where configured; passive observation | Windows event collection and hardware management (SNMP/HTTPS in SEL-3355-2 IM); host-agent trust decision needed (A3) |
-| Engineering workstations, HMIs | Windows hosts (often SEL-3355 hardware) running HMI software | As servers | As servers |
-| Historians | Windows hosts running historian software (non-SEL software, owner 2026-10-23) | Passive observation; Windows events | Windows event collection only, until a later vendor phase for the historian product |
+| Routers, security gateways, firewalls | SEL-3620/-3622 (IM 20241010, shared with SEL-3610, supplied) | Syslog (documented in IM) | SSH, SNMP, HTTPS appear in IM; classification pending (A2, A3) |
+| Time servers and clocks | SEL-2488 (IM and data sheet supplied); SEL-2401, SEL-2404, SEL-2407 satellite clocks (IMs supplied) | SEL-2488: Syslog (RFC 3164, fixed port 514, A5/A4); passive PTP/NTP observation. SEL-2401/2404/2407: A1 grep of the IMs finds no Syslog, SSH, Telnet, SNMP, or NTP, so operator-entered data and passive observation only (A2 to confirm) | SEL-2488: SNMP, HTTPS, LDAP/RADIUS in IM; classification pending |
+| Servers and computers | SEL-3355-2 (IM and data sheet supplied), Windows 10/11 IoT LTSC (owner 2026-10-23); also the platform's site node (ADR-0007) | Windows events by host push (owner decision, ADR-0006); passive observation | Hardware management (SNMP/HTTPS in SEL-3355-2 IM); classification pending |
+| Engineering workstations, HMIs | Windows hosts (SEL-3355-2) running COPA-DATA zenon HMI Energy Edition (owner 2026-10-23; non-SEL software) | As servers | As servers; zenon-specific logs wait for a later vendor phase |
+| Historians | Windows hosts; historian product as named by the owner (zenon, 2026-10-23) | Passive observation; Windows events by host push | Windows event collection only, until a later vendor phase for the historian product |
 | SDN flow controller | SEL-5056 (IM supplied) | Syslog | SNMP, HTTPS, REST appear in IM; classification pending |
-| Meters | SEL-735 (A1 recollection; no manual supplied) | Passive observation | Unknown until manual supplied |
-| Port servers, serial equipment | SEL-3610, SEL-ICON (A1 recollection; no manual supplied) | Syslog | Unknown until manual supplied |
+| Meters | SEL-735 (IM 20250711 supplied) | Passive observation; A1 grep finds no Syslog or SSH in the IM | Telnet and SER appear in IM (SEL ASCII family, like the relays); classification pending (A2) |
+| Port servers, serial equipment | SEL-3610 (IM shared with SEL-3620/3622, supplied); SEL-ICON (no manual) | Syslog (documented in shared IM) | SSH, SNMP, HTTPS in shared IM; classification pending (A2) |
 
 "Supported" (owner clarification, 2026-10-23): an SEL family is in scope for support to the extent its native capabilities can meet the project requirements; where a family lacks a capability (for example SEL-751 has no Syslog or SSH), the requirement is met by another path or recorded as a limitation for that family.
 
@@ -146,12 +146,12 @@ Deferred until after the slice: site-to-central message set and central instruct
 | SEL Level 1 behaviour, ALARM pulse, session limits on SEL-751 specifically | Documented for SEL-300G or SEL-311L only | Manual, then H-02 to H-04 |
 | Relay CPU and communications load from polling | `unknown` | H-05 |
 | Power-loss durability of the store | Untested; process-crash only at `synchronous=FULL` | H-11 |
-| Substation event rates and real WAN outage durations | Inferred; 72 h floor assumed | Owner input |
-| Site node hardware and OS | Linux amd64/arm64 assumed | Owner input |
-| Central never needs direct IED access | Assumed (ADR-0002 invariant) | Owner input |
-| Upstream collector supports RELP with the tested queue configuration | `unknown` | Owner's collector details |
+| Substation event rates and real WAN outage durations | Owner 2026-10-23: WAN outage is not tolerated and sites have N-1 redundancy, so an outage is a fault, not normal operation. Store-and-forward stays (R8); the 72 h buffer floor is kept as a fault allowance, not a sizing target. Event rates still inferred | H-tests on real site traffic |
+| Site node hardware and OS | **Settled by owner 2026-10-23:** SEL-3355-2 with Windows 10/11 IoT LTSC. Consequences in ADR-0007 (proposed); Linux evidence for durability does not transfer | ADR-0007 experiments on Windows |
+| Central never needs direct IED access | **Confirmed by owner 2026-10-23:** the central HMI server may reach relays, central cybersecurity servers may not. The platform's central role never connects to devices; all device sessions originate at site nodes. The HMI server's relay traffic is an existing authorized path the IDS must model | Settled |
+| Upstream collector supports RELP with the tested queue configuration | Owner 2026-10-23: assume any standards-compliant Syslog collector and support all types. The forwarder offers RELP/TLS (only mode allowed as `required`), RFC 5425 TLS, RFC 6587 TCP, and RFC 5426 UDP (all `best-effort`; UDP and plain TCP labelled insecure) per ADR-0004 | A6 interoperability tests per transport |
 | IEC 62351-8 role names; IEC 62443-3-3 requirement mapping | Mapped at title level from secondary knowledge | Normative texts |
-| Contrast family (SIPROTEC 5 or Relion 615) identity and SOE access | `unknown` | Their manuals |
+| Contrast family (SIPROTEC 5 or Relion 615) identity and SOE access | Superseded by ADR-0006 (SEL RTAC is the contrast) | — |
 
 ## Phase 0 exit gate
 

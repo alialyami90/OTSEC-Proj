@@ -39,3 +39,9 @@ SQLite (WAL); PostgreSQL; embedded key-value stores; a custom append-only log; a
 ## Open objections
 
 None. Tracked: B-03 is an entry condition for the Phase 1 forwarding contract.
+
+## Amendments (2026-10-23, owner answers)
+
+- **Upstream collector:** the owner asks to assume any standards-compliant Syslog collector and support all types. The forwarder provides RELP over TLS, RFC 5425 (TLS), RFC 6587 (TCP, octet-counting framing), and RFC 5426 (UDP). Only RELP over TLS may be a `required` target (item 6). The others are `best-effort`; plain TCP and UDP are labelled insecure wherever the target appears. A generic collector without RELP therefore never blocks pruning.
+- **WAN:** WAN outage is not tolerated and sites have N-1 redundancy, so an outage is a fault. Store-and-forward and the storage-full policy stay; buffer sizing keeps the 72 h fault allowance.
+- **Windows site node:** durability claims in items 1, 7, and 8 are evidenced on Linux only; see ADR-0007 for the Windows re-test.

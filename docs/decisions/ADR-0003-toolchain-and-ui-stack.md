@@ -23,7 +23,7 @@ Go, Rust, Python, Java, TypeScript/Node (A5 §3 table). UI: plain server-rendere
 ## Decision
 
 - **Runtime language: Go**, toolchain pinned in `go.mod` (`go` and `toolchain` directives; currently 1.26, required by `modernc.org/sqlite`). Release builds use a pre-installed pinned toolchain, not an automatic download.
-- **Build:** `CGO_ENABLED=0 go build -trimpath`; linux/amd64 and linux/arm64 targets; windows only if the owner confirms Windows site hosts.
+- **Build:** `CGO_ENABLED=0 go build -trimpath`; linux/amd64 and linux/arm64 targets; windows only if the owner confirms Windows site hosts. *(Confirmed 2026-10-23: windows/amd64 is the site-node target, ADR-0007.)*
 - **Test:** `go test ./...` with `-race` in CI; golden-file parser tests from fixtures with `SOURCE.md`; `go test -fuzz` targets for every parser of device output.
 - **Lint and supply chain:** `gofmt` enforced, `go vet`, `staticcheck`, `govulncheck`; every new third-party module is justified in a PR description and listed in the next ADR touching dependencies.
 - **Verification tooling** (A6, `tests/`): Python 3 with pinned dependencies is permitted and is never shipped (B-06 ruling). Oracle independence rests on the no-import rule.

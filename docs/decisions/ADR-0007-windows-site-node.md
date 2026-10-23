@@ -1,0 +1,31 @@
+# ADR-0007: Windows site node on SEL-3355-2
+
+- Status: proposed (owner fact accepted; technical consequences need A5 experiments and A3/A6 review)
+- Date: 2026-10-23
+- Deciders: project owner (site hardware and OS), A1 (consequences); owner of the follow-up work: A5, reviewers A3 and A6
+- Related: ADR-0002, ADR-0003, ADR-0004, ADR-0005; R8
+
+## Context
+
+ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64 and linux/arm64 builds, durability evidence gathered with strace on Linux). On 2026-10-23 the owner stated that sites use the SEL-3355-2 computer with Windows 10 Pro or Windows 11 Pro IoT LTSC. A5 had already proposed the SEL-3355-2 (TPM 2.0, mirrored SSD; Intel AMT on ETH1 must be disabled or isolated; RTC drift about 200 ppm, ~17 s/day, without a time source). SEL's SSD-lifetime application note is not available (owner).
+
+## Decision
+
+1. The site node runs on an SEL-3355-2 under the owner's Windows build. **Assumption:** the platform gets a dedicated SEL-3355-2 and does not share a host with the zenon HMI or historian; co-hosting would need its own decision, because a fault in either would affect the other.
+2. `windows/amd64` becomes the primary build target (ADR-0003 item amended); linux targets stay for the central node and for CI.
+3. Supervision uses the Windows Service Control Manager with restart-on-failure and backoff, replacing systemd (ADR-0002 item 5); restart backoff must still respect IED session limits.
+4. The privileged collector process (ADR-0002) runs as a separate Windows service under its own virtual service account; only that account can read the credential store. Credentials at rest are protected with the TPM (for example DPAPI with machine-bound keys or TPM-sealed keys); A3 to choose and threat-model.
+5. Durability evidence from Linux does not transfer. A5 repeats E-A5-1, A6 E-02 (acknowledged commits unsynced under NORMAL vs FULL) and E-03/E-04 (full-disk recovery) on Windows/NTFS before ADR-0004 is relied on for Windows. Until then ADR-0004's durability claims are `inferred` for Windows.
+6. Time: the node takes time from the site time source (SEL-2488 or IRIG via the owner's clocks); without one, the ~17 s/day drift makes local timestamps unusable for correlation, so loss of time sync raises an alarm.
+7. Intel AMT on the SEL-3355-2 is disabled or kept off every routable network (deployment precondition, A5 §12).
+
+## Consequences
+
+- Windows 10 Pro (non-LTSC) left Microsoft support in October 2025; Windows 10/11 IoT Enterprise LTSC editions have longer support. Deployment guidance should prefer an LTSC edition; the owner's OS patch process becomes a dependency for the node's own security.
+- Windows host events from the site node itself are collected by host push like any other Windows host (ADR-0006).
+- File locking, path, and fsync semantics differ on Windows; the store and reserve-file logic need Windows tests.
+- No SSD endurance data: WAL and pruning design must keep write amplification low and the node reports SSD wear (SMART) where readable; A5 to estimate writes per day from the event-rate assumptions.
+
+## Verification
+
+A6 adds Windows runs of the durability and recovery tests and a service-isolation test (the main service account cannot read the credential store). Results are `simulated` on a Windows VM until run on SEL-3355-2 hardware.
