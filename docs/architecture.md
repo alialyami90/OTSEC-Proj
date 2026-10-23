@@ -45,6 +45,10 @@ In single-server deployment the central and site roles run on one host; the cond
 - Let the central server or WAN reach a device directly. Central may change a site node's policy only within limits the site enforces locally (A3/A5 to define the allowed instruction set).
 - Sit in the protection or control path. If every platform component stops, protection, control, and SCADA continue unchanged (R8 constraint).
 
+### Evidence ceiling for the first slice
+
+Owner decision, 2026-10-23: no lab IED and no real device outputs are available. The first slice is built and verified against OEM documentation and a device simulator only. No capability in this milestone can be classified above `documented-untested` or `simulated`. A6 builds the simulator independently from A2's cited documents, not from A2's code, so a misreading is not shared by parser and simulator.
+
 ## Provisional runtime shape
 
 *Provisional, A1, pending P0-A5 (runtime) and P0-A3 (trust boundaries).*
