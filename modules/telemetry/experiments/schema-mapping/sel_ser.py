@@ -6,6 +6,7 @@ one item: a row, a relay message, or a parse error. Nothing is skipped, so a
 report in an unexpected layout yields errors, never zero rows and a pass
 (A2 review finding 1).
 """
+import hashlib
 import re
 
 DATE_FORMATS = ("MDY", "YMD", "DMY")
@@ -72,7 +73,7 @@ def parse_report(raw, date_f):
                 "wall_clock": f"{y}-{mo}-{d}T{tod.decode()}"}
         collapsed = b" ".join(rest.split())
         if collapsed in RELAY_MESSAGES:
-            items.append({**item, "type": "relay-message",
+            items.append({**item, "type": "relay-message", "key_offset": m.start(2),
                           "fields": {**base, "MESSAGE": collapsed.decode()},
                           "flags": ["layout-unconfirmed"]})
             continue
@@ -80,6 +81,15 @@ def parse_report(raw, date_f):
         if not es:
             items.append({**item, "type": "parse-error", "reason": "no ELEMENT and STATE"})
             continue
-        items.append({**item, "type": "row",
+        items.append({**item, "type": "row", "key_offset": m.start(2),
                       "fields": {**base, "ELEMENT": es.group(1).decode(), "STATE": es.group(2).decode()}})
     return header, items
+
+
+def alignment_key(item):
+    """Digest of the row's native bytes from the DATE field to the end of the
+    line, without the row number or trailing CR. The SEL-751 numbers row 1 as
+    the newest, so the number changes on every new event (A6 R-A4-1).
+    Parse errors key on the whole line, so they still align by content."""
+    line = item["line"].rstrip(b"\r")
+    return "sha256:" + hashlib.sha256(line[item.get("key_offset", 0):]).hexdigest()

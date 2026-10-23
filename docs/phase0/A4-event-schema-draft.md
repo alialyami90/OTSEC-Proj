@@ -68,7 +68,7 @@
     "evidence": {"sha256": "…", "length": 4211, "store": "evidence://…"},   // whole transcript or datagram
     "span": {"offset": 1022, "length": 61},                                  // this record's bytes inside it
     "context": {"report_header_span": {"offset": 0, "length": 180}},          // header that applies to every row
-    "record_digest": "sha256:…",          // digest of the span bytes; used only for snapshot alignment
+    "alignment_key": "sha256:…",          // ring-buffer sources only: digest of the row bytes WITHOUT the row number (A6 R-A4-1); used only for snapshot alignment
     "fields": {"ELEMENT": "51P1P", "STATE": "Asserted"}   // verbatim strings, vendor names unchanged
   },
   "normalized": {
@@ -112,12 +112,12 @@ DST fall-back (V-S3 negative case): when a local wall-clock time falls inside a 
 
 A per-row key (device, timestamp, element, state) merges genuinely separate identical rows (A6 C-13, A2 section 7). The proposal is to align each read against the previous read of the same stream:
 
-1. Each read is a chronological list of rows, compared by `record_digest` (the digest of the row's native bytes).
-2. Find the smallest `d` such that `prev[d:]` is a prefix of `new` with at least one row of overlap. The rows after the overlap are new. Rows identical within one snapshot stay separate records.
+1. Each read is a chronological list of rows, compared by `alignment_key`: the digest of the row's native bytes from the DATE field to the end of the line, excluding the row number. The SEL-751 numbers row 1 as the newest (Table 7.63), so every new event renumbers every row; with the number in the key, 3 of A6's 6 consecutive-read cases reported false gaps and re-ingested the whole buffer (A6 R-A4-1, accepted by A1 for C5). The native bytes, number included, stay in evidence.
+2. Find `d` such that `prev[d:]` is a prefix of `new` with at least one row of overlap. The rows after the overlap are new. Rows identical within one snapshot stay separate records.
 3. If no `d` fits, the buffer wrapped past the previous read, was cleared (`SER C`), rows were removed (chatter deletion), or the relay restarted. Emit a `telemetry-health` gap event; store all rows of the new read with `flags: ["gap-before"]`.
-4. If more than one `d` fits (periodic identical rows with no anchoring row), use the largest overlap and emit an `alignment-ambiguous` event so the choice is visible.
+4. If more than one `d` fits (periodic identical rows with no anchoring row), use the smallest overlap, so every row that may be new is kept; flag the extra rows `possible-duplicate` and emit an `alignment-ambiguous` event (A6 R-A4-2). Cost: a buffer of identical periodic rows re-emits flagged possible duplicates on every poll; that is visible noise, not loss.
 
-Prototype: `modules/telemetry/experiments/schema-mapping/align.py`, 10 unit tests passing (`results/test_align.txt`), including identical rows, wrap, clear, middle deletion, and the ambiguous case. A6's V-S4 should own the independent version of these tests.
+Prototype: `modules/telemetry/experiments/schema-mapping/align.py` with keys from `sel_ser.alignment_key`, 13 unit tests passing (`results/test_align.txt`), including identical rows, wrap, clear, middle deletion, the ambiguous case, and SEL-751 renumbering. A6's independent harness (`tests/integration/reviews/A4/ser_alignment_cases.py`, PR #6) passes 6 of 6 against this `align.py` with the row number excluded (`results/a6-ser-alignment.txt`). A6's V-S4 should own the independent version of these tests.
 
 Behaviour when the device re-sends its whole history: every row of the overlap is recognized by alignment and not stored again; nothing is forwarded twice from that read. If the device re-sends history after a restart with different row bytes (for example a changed date format), alignment fails and a gap event is raised; the history is stored again with `gap-before`, and duplicates downstream are then visible by content but not suppressed. That is the deliberate choice: a duplicate the analyst can see is better than an event silently dropped.
 

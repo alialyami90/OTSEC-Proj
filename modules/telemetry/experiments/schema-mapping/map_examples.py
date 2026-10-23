@@ -116,16 +116,18 @@ SEL_DOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documented",
 SEL_DATE_F = "MDY"
 
 
-def event(kind, asset, stream, seq, device_time, raw, fields, subject, value, evidence_class=None):
+def event(kind, asset, stream, seq, device_time, raw, fields, subject, value, evidence_class=None,
+          alignment_key=None):
     # seq is this example's position only. The real stream_seq is assigned at
     # durable write and continues across reports of the same stream (A2 review
     # finding 4), so it is left as a placeholder here.
     return {
         "schema": SCHEMA,
         "event_id": f"(assigned at first durable write; example {seq})",
-        # Digest of the native row bytes. Used to align consecutive snapshots
-        # (C-13); it is not a uniqueness key, identical rows share it.
-        "record_digest": hashlib.sha256(raw).hexdigest(),
+        # Ring-buffer sources only: digest of the row without its row number,
+        # used to align consecutive snapshots (C-13, A6 R-A4-1). Not a
+        # uniqueness key; identical rows share it.
+        "alignment_key": alignment_key,
         "origin": "device", "kind": kind,
         "source": {"asset_id": asset, "stream_id": stream, "stream_seq": "(assigned at durable write)"},
         "received": {"utc": None, "resolution_ns": 1000, "clock": {"sync": "unknown"}},
@@ -189,7 +191,7 @@ def main(cache, out_path):
             subject, value = f["ELEMENT"], f["STATE"]
         native = {k: v for k, v in f.items() if k != "wall_clock"}
         e = event("ser", "sel751:feeder-relay", "sel751:feeder-relay:ser", seq, t, line,
-                  native, subject, value, "documented-untested")
+                  native, subject, value, "documented-untested", sel_ser.alignment_key(it))
         e["collection"] = {"native_position": f["#"], "parse_status": "ok"}
         e["native"]["span"] = {"offset": it["offset"], "length": len(line)}
         e["native"]["context"] = {"report_header_sha256": hashlib.sha256(header).hexdigest(),

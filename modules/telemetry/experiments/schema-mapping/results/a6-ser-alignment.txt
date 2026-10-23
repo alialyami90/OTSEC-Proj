@@ -1,0 +1,16 @@
+A6 harness tests/integration/reviews/A4/ser_alignment_cases.py from origin/claude/project-thread-u7odvk (0a20f69), run against this directory's align.py.
+
+whole-line digest (A4 record_digest): 3/6 pass
+   A1-no-new-events expect ok 0 got ok 0 PASS
+   A2-one-new-event-renumbers-all-rows expect ok 1 got gap 9 FAIL
+   A3-row-number-gains-a-digit expect ok 2 got gap 11 FAIL
+   A4-buffer-full-oldest-dropped expect ok 2 got gap 8 FAIL
+   A5-buffer-cleared-then-one-event expect gap 1 got gap 1 PASS
+   A6-window-shorter-than-new-events (SEL-400 default 20 rows) expect gap 4 got gap 4 PASS
+digest without the row number: 6/6 pass
+   A1-no-new-events expect ok 0 got ok 0 PASS
+   A2-one-new-event-renumbers-all-rows expect ok 1 got ok 1 PASS
+   A3-row-number-gains-a-digit expect ok 2 got ok 2 PASS
+   A4-buffer-full-oldest-dropped expect ok 2 got ok 2 PASS
+   A5-buffer-cleared-then-one-event expect gap 1 got gap 1 PASS
+   A6-window-shorter-than-new-events (SEL-400 default 20 rows) expect gap 4 got gap 4 PASS

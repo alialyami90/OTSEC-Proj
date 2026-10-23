@@ -4,7 +4,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 1)",
-      "record_digest": "07564c08f3d366b4ff0c5ec3311eadc8e67f26006764467787cab50837f93365",
+      "alignment_key": null,
       "origin": "device",
       "kind": "protocol-event",
       "source": {
@@ -67,7 +67,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 1)",
-      "record_digest": "3b43a265aa4e51fe7f7c180af63fca7fc82422384380e74c66b1f66b8e0527a8",
+      "alignment_key": null,
       "origin": "device",
       "kind": "protocol-event",
       "source": {
@@ -130,7 +130,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 1)",
-      "record_digest": "1133459ff0b8cee2f2ee31cc91eb8565d51929fadc712cc66ed8907d1c40ad64",
+      "alignment_key": null,
       "origin": "device",
       "kind": "protocol-event",
       "source": {
@@ -192,7 +192,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 1)",
-      "record_digest": "17a3967c69ba758a4fb272c18c57b1391c59e381e4536237d759ec058acecbfd",
+      "alignment_key": "sha256:1caaf49fb21226069b72cc6efeff83e0b95f1331da18ac854b3f9d7ff6b69ed7",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -269,7 +269,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 2)",
-      "record_digest": "53415080faa3afbf5958484ec9c1c4b7dc8760055f7f2c28915f9d765d9923ed",
+      "alignment_key": "sha256:82cb472bff263d8dfa1b5812bbd62fa85f3ac3fb309ea7a51d60ae2647989163",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -346,7 +346,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 3)",
-      "record_digest": "c02480243431c79be57a91c2011293d51443c0c6feeb926243a6422345418f27",
+      "alignment_key": "sha256:44e2efd36f40e29f33d745d6fb6d0c1889c7df66adb3d3c6520808ce9196becb",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -423,7 +423,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 4)",
-      "record_digest": "d738282c847473b991db053022148885c6ebdf71b9b3ecbc41ba971a6c633a5d",
+      "alignment_key": "sha256:ff2b48a0c42cbeeefae3b951db3f613c59af4020b5895361231a67f3102072a9",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -500,7 +500,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 5)",
-      "record_digest": "bd53c57a756b256e510ed60c0468aa7c8f40d4ce5e5952a21c081ddb75bf0ba5",
+      "alignment_key": "sha256:3b643e0992481975b9184a50be96ab047b9fe6e658efdaaed2aa25b08d0f09d3",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -577,7 +577,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 6)",
-      "record_digest": "191dd3da7484aad988c3705e532552ea3dba87c1aa0c8b366b64e46b8f98f69a",
+      "alignment_key": "sha256:769fbfd976d171803d7ea5fbfe820b08f2dc98cb3d23f5cf7179d3384ef35fbd",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -654,7 +654,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 7)",
-      "record_digest": "c731d94f03768498e556691aa14a6938b675a6f02c85a0ff6d25174308f0b9c5",
+      "alignment_key": "sha256:438f81afbcc7bd821658f562dd38be1a628481584f2ade07da171839e2b369d9",
       "origin": "device",
       "kind": "ser",
       "source": {
@@ -731,7 +731,7 @@
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 8)",
-      "record_digest": "1fdf02521670bf916e02004105d8dfefecd188b9ab983ead88eadcde04c23d1c",
+      "alignment_key": "sha256:35cd52b2d5f9259811a66656691b2acf30b81d80b46821150f542d6cc9559e96",
       "origin": "device",
       "kind": "ser",
       "source": {
