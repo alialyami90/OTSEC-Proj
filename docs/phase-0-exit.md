@@ -49,6 +49,11 @@ A1 authorized this as Phase 0 close-out, because it closes C-22, which was raise
 
 So on Windows the reserve-first order in ADR-0004 item 8 is load-bearing, not just tidy. Any open of a full store before the reserve is released risks leaving the store unopenable until space is freed outside SQLite. That includes a recovery step that reads first, a UI or support tool, or another process. Whether releasing the reserve then clears the condition is likely but untested.
 
+A6 tried to disprove this reading and could not. W-1 case 3 never opens the store at full disk, so it neither confirms nor contradicts F-013. A6 named two residual gaps, and both are carried into Phase 1:
+
+- **Unchecked delete.** `restart.go` ignores the error from deleting the reserve. If the delete fails, the store is opened at full disk with no signal.
+- **No reserve left to release.** ADR-0004 item 8 says a node whose reserve cannot be re-created alarms and does not collect. The next startup then has no reserve to release, which is exactly F-013's condition. V-S9's "readable with the disk still full" clause has no answer for that case yet.
+
 Consequences:
 
 - **C-22:** for the site node, E-03's read-at-full result is contradicted, not only unverified.
@@ -156,7 +161,10 @@ Also unverified: whether the firmware a relay reports is honest, and the IEC 623
    - an independent NTFS run of the reserve-first startup order, `INCREMENTAL` and R-A5-5, as a non-admin account;
    - the product binary as the thing under test;
    - an LTSC client edition.
-   The C2/storage contract must state that startup releases the reserve before the store is first opened, and that no other process opens the store before recovery completes (ADR-0004 item 8, F-013).
+   The C2/storage contract must state three things (ADR-0004 item 8, F-013):
+   - startup releases the reserve before the store is first opened, and a failed release is an error, not a silent continue;
+   - no other process opens the store before recovery completes;
+   - what startup does when there is no reserve to release.
 4. Classification of the remaining SEL families in the device table.
 5. A3's register changes for C3 (`A3-review-A2.md`):
    - C-A2-1: `ACC` and `QUI` move to a non-invocable session-control class.
