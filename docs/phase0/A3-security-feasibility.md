@@ -246,6 +246,10 @@ A2 reviewed §8.1 for IED compatibility and found it compatible with these adjus
 - **Mid-operation level drop.** If the prompt falls back to `=` during operate (idle timeout), the invocation fails; `ACC` is never re-sent in the same invocation.
 - **`ID` runs after auth**, since whether it works at Level 0 is unknown.
 
+- **Telnet options (A2 cross-review, part 2).** No SEL document read covers option negotiation; the open-source SEL client refuses every option (WONT to DO, DONT to WILL), which matches this design. Whether the SEL-751 works this way is unknown and is a hardware test. Expect the relay to echo the command line even with options refused (unverified).
+- **Inbound bytes are preserved exactly.** The byte filter is outbound only. Inbound, the Telnet layer strips only IAC sequences; NUL (0x00), XON (0x11) and every other byte the relay sends are kept in the transcript, as the SEL client's code notes they matter. Parsers treat them as hostile input (AP-11).
+- **HR-8:** A2 agrees with option (a) for simulator and lab only, and (b) serial as the production recommendation.
+
 These become acceptance tests for A6's recording simulator: one test per prompt outcome above, plus `ACC` or `QUI` injected through an adapter.
 
 ## 9. Handoff
@@ -258,4 +262,4 @@ These become acceptance tests for A6's recording simulator: one test per prompt 
 **Risks:** HR-1 to HR-7 in the threat model; the most consequential are HR-2 (device access levels) and AP-7 (central as fleet-wide command path).
 **Dependencies:** A2: facts received; enforcement points decided in §8. A1: take HR-8 (slice-1 downstream transport) to the owner. A4: AP-20 forwarding rules, HR-3. A5: write the agreed site-to-central rules into the runtime proposal. A6: cross-review of this file and the threat model; adopt E1's T0 precondition pattern. A1: rulings on R8.5 and HR-3; transfer section 7 proposals.
 **Files changed:** `docs/threat-model.md`, `docs/phase0/A3-security-feasibility.md`, `modules/access/experiments/e1-ssh-forward-controls/` (README.md, run.sh, mock_ied.py, probe.py, results-2026-10-23.txt).
-**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A2 (IED compatibility) part 1: compatible with adjustments, applied in §8.3. A6 (independent security review) requested; not yet reviewed.
+**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A2 (IED compatibility): compatible with adjustments, applied in §8.3; agrees with the HR-8 recommendation. A6 (independent security review) requested; not yet reviewed.
