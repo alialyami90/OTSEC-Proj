@@ -117,7 +117,9 @@ Primary family, SEL-751. What is documented:
 - Date format: unverified recollection that SEL relays have a date-format setting (MDY/YMD); `unknown`.
 - Control bytes in relay output: the open-source SEL client patches Python's Telnet reader specifically so it does not drop NUL (0x00) and 0x11 (XON) bytes received from the relay, with the comment "Don't eat the Null Characters, They're Important!" (S10 `support/telnet.py`). Inbound control bytes are therefore expected and must survive into the byte-exact transcript; what they mean is `unknown` until the manual is read.
 
-Implications for A4's schema: keep the full report (header and rows) byte-exact as the native record; carry report-level time source beside each row; do not use row numbers as identity; derive a duplicate key from device identity plus device timestamp, element and state, and expect legitimate repeats (same element, same state, same millisecond is possible after chatter suppression); represent "time zone unknown" explicitly.
+Implications for A4's schema: keep the full report (header and rows) byte-exact as the native record; carry report-level time source beside each row; do not use row numbers as identity; represent "time zone unknown" explicitly.
+
+Duplicate handling (corrected after A6 cross-review, C-13): a per-row key of device identity, timestamp, element and state is wrong. `SER` returns the whole buffer on every read, and two genuinely separate rows can carry identical values, so such a key would merge them. New rows must instead be found by aligning snapshots: compare the new read with the previous one as ordered sequences, find where the previous read's newest rows reappear in the new read, and treat only the rows after that overlap as new. Rows that are identical within one snapshot are kept as separate records. If no overlap is found, the buffer has wrapped past the previous read, been cleared (`SER C`), or the relay restarted. That is a gap and must be reported as one, not resolved by guessing.
 
 ## 8. Q2: Can all desired IED configuration data be safely retrieved?
 
