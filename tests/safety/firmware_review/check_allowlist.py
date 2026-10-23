@@ -5,7 +5,11 @@ manual's text, splits it into one record per FID row, and finds every row
 whose notes match each restart or lock-up fix by A6's own phrase list. It
 then compares the rows found with the rows A2 lists for that fix, and checks
 that every "allow" branch's minimum version is at or after each
-collector-traffic fix A6 finds on that branch.
+collector-traffic fix A6 finds on that branch. A fix that is not listed on
+an allowed branch rests on inheritance; the owner accepted that as a risk
+(A1, 2026-10-23, ADR-0005), so the branch entry must carry the evidence class
+"inferred (owner-accepted)". A plain "inferred" fails. Exit status 1 if any
+fix disagrees, any minimum version is too low, or any class is missing.
 
 Run: python3 -I tests/safety/firmware_review/check_allowlist.py <751_IM text> <allowlist.json>
 Classification: desk (documentation only).
@@ -27,6 +31,7 @@ FIXES = {
     "F7": r"denial-of-service condition in the web\s+server that could trigger diagnostic restarts",
 }
 COLLECTOR_TRAFFIC = {"F1", "F2", "F5"}  # A6: Telnet/Ethernet/comms access, which a collector generates
+OWNER_ACCEPTED = "inferred (owner-accepted)"
 
 
 def rows(text):
@@ -62,17 +67,23 @@ def main(manual, allowlist):
         if not b["status"].startswith("allow"):
             continue
         minv = int(b["min_version"].lstrip("V"))
-        problems = []
+        problems, inherited = [], []
         for k in sorted(COLLECTOR_TRAFFIC):
             on_branch = [int(x.split("-V")[1]) for x in found[k] if x.startswith(b["branch"] + "-")]
             if on_branch and min(on_branch) > minv:
                 problems.append(f"{k} fixed at V{min(on_branch)} but min_version is V{minv}")
             if not on_branch:
-                problems.append(f"{k} not listed on {b['branch']} (inherited, inferred)")
+                inherited.append(k)
+        if inherited and OWNER_ACCEPTED not in json.dumps(b):
+            problems.append(f"{','.join(inherited)} inherited but the entry does not carry the class {OWNER_ACCEPTED!r}")
         report["branches"].append({"branch": b["branch"], "status": b["status"],
-                                   "min_version": b["min_version"], "notes": problems})
+                                   "min_version": b["min_version"], "inherited": inherited,
+                                   "problems": problems})
+    report["pass"] = (all(f["agree"] for f in report["fixes"].values())
+                      and not any(b["problems"] for b in report["branches"]))
     print(json.dumps(report, indent=2))
+    return 0 if report["pass"] else 1
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    sys.exit(main(*sys.argv[1:3]))

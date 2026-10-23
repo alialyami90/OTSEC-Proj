@@ -1,4 +1,4 @@
-// A2 allowlist at 2585fd9 vs SEL-751 IM 20260910 Appendix A, run 2026-10-23T17:45:08Z, class: desk
+// A2 allowlist at 954fd86 vs SEL-751 IM 20260910 Appendix A, run 2026-10-23T18:48:59Z, class: desk
 {
   "rows_parsed": 84,
   "fixes": {
@@ -85,49 +85,66 @@
       "branch": "R501",
       "status": "allow",
       "min_version": "V0",
-      "notes": [
-        "F1 not listed on R501 (inherited, inferred)",
-        "F2 not listed on R501 (inherited, inferred)",
-        "F5 not listed on R501 (inherited, inferred)"
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": [
+        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
       ]
     },
     {
       "branch": "R500",
       "status": "allow",
       "min_version": "V0",
-      "notes": [
-        "F1 not listed on R500 (inherited, inferred)",
-        "F2 not listed on R500 (inherited, inferred)",
-        "F5 not listed on R500 (inherited, inferred)"
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": [
+        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
       ]
     },
     {
       "branch": "R402",
       "status": "allow-with-condition",
       "min_version": "V2",
-      "notes": [
-        "F1 not listed on R402 (inherited, inferred)",
-        "F2 not listed on R402 (inherited, inferred)",
-        "F5 not listed on R402 (inherited, inferred)"
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": [
+        "F1,F2,F5 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
       ]
     },
     {
       "branch": "R401",
       "status": "allow-with-condition",
       "min_version": "V5",
-      "notes": [
-        "F1 not listed on R401 (inherited, inferred)",
-        "F2 not listed on R401 (inherited, inferred)"
+      "inherited": [
+        "F1",
+        "F2"
+      ],
+      "problems": [
+        "F1,F2 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
       ]
     },
     {
       "branch": "R400",
       "status": "allow-with-condition",
       "min_version": "V7",
-      "notes": [
-        "F1 not listed on R400 (inherited, inferred)",
-        "F2 not listed on R400 (inherited, inferred)"
+      "inherited": [
+        "F1",
+        "F2"
+      ],
+      "problems": [
+        "F1,F2 inherited but the entry does not carry the class 'inferred (owner-accepted)'"
       ]
     }
-  ]
+  ],
+  "pass": false
 }
+// exit 1
