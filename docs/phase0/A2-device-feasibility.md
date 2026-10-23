@@ -321,7 +321,10 @@ Merged in PR #2 (85d8091) and PR #8.
   - The register at bb6f850 passes 112 deny and 6 allow lines, and its read-only set equals A6's allow corpus.
   - The firmware allowlist passed A6's independent `check_allowlist.py` at 27ed082, and again at 76e5940 after the evidence-class change (85d8091).
   - Figure 9.17 transcriptions match byte for byte across three manuals.
-- **A3 (security-sensitive behaviour):** no review of P0-A2 recorded yet. A3's file records only A2's review of A3 (A3 §8.3) and A3's adoption of A2's facts for HR-2 and L5. Pending until A3 records it.
+- **A3 (security-sensitive behaviour):** accepted for Phase 0. Record: `docs/phase0/A3-review-A2.md` (commit 8241e1d, PR #14). A3 raised three changes, C-A2-1 to C-A2-3. None blocks Phase 0 close-out; all three are carried into the Phase 1 register:
+  - C-A2-1: `ACC` and `QUI` get a non-invocable classification (such as `session-control`), sent only by the transport's probe, auth and close phases.
+  - C-A2-2: the firmware allowlist ships in the same signed register package, and the FID check fails closed when it is missing, unsigned or unparseable.
+  - C-A2-3: echo redaction of the password stays mandatory until a hardware capture shows Telnet does not echo it.
 - **A1:** integration review accepted for Phase 0 (`docs/agent-handoffs.md`).
 
 ## 15. SEL-751 instruction manual results (S22, date code 20260910)
