@@ -252,3 +252,13 @@ Checked against SEL-751 IM Table 7.67 (SHOW command, all forms Access Level 1) a
 2. **`CSE` (400 series): deferred.** The first slice is SEL-751 only and 400-series register entries belong to that family's Phase 4 expansion. Keep `CSE` as a candidate, `documented-untested`, with D25 (Figure 9.17 checksums) recorded. The Compressed ASCII documentation is on the owner request list.
 3. **RTAC as the Q5 contrast: accepted** with A2's corrected reason; ADR-0006 item 6 and `docs/architecture.md` Q5 updated.
 4. **D18–D25:** accepted into A2's risk list; A1 will fold the ones that affect the slice into `docs/architecture.md` at integration.
+
+#### A1 rulings on A6 SEL-751 notes (b354d01) and A5 follow-up (9f14154, 5465af5) — 2026-10-23
+- **C-19 accepted** into ADR-0005: after a failed password the adapter closes the connection without sending `QUI`; if `ACC` reaches Level 1 with no prompt, the credential is not sent. A2 implements this in the session driver; A6's simulator profile is the test.
+- **C-20 accepted:** manual figures are `documented-example`, not byte-level ground truth; parsers must not depend on figure checksums being self-consistent, and each fixture records which checksums verify.
+- **`TAR R` (Level 1, p. 7.82)** is state-changing (target reset) and must stay out of the register; A6 confirms it is in the deny corpus.
+- **B-03 / C-18 (delivery and retirement):** already ruled in ADR-0004 item 6 (required vs best-effort targets, replay-window retirement, audited admin retirement); A5's per-consumer `required` flag implements it. B-03 closes when C5/C6 contract text carries these semantics in Phase 1.
+- **R-A3-4 (ack channel):** already ruled: mode A only for `required` targets, with an ack-only parser that can advance only the forwarding cursor (TB5 wording per A6/A4). Closes with C6 contract text.
+- **A5 durability changes:** ADR-0004 item 8 amended with `auto_vacuum=INCREMENTAL` at creation and the startup recovery order; items 6 and 7 already match A5's (1) and (3).
+- **A5 §12:** SEL-3355-2 as candidate site node noted (`documented-untested`); AMT isolation and RTC drift recorded; site computer choice is on the owner request list.
+- **Support gate** in docs/verification.md (per SEL family and device class) accepted for Phase 1.

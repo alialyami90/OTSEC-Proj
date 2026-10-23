@@ -32,7 +32,8 @@ A2 sources S1–S15; SEL data sheets supplied by the owner (`/mnt/project-files/
 - Credential ceiling Level 1; one authentication attempt per invocation; a failed login suspends the credential until an operator clears it (avoids the ALARM pulse, A2 D2).
 - The credential slot opens only after the documented password prompt; sent authentication bytes are redacted in the transcript (HR-3 ruling).
 - Transport egress check on the final socket bytes: exact register lines only, printable ASCII plus CR/LF (A2 D5).
-- One session per device at a time, always closed with `QUI` (single Telnet session on some models, A2 D9).
+- One session per device at a time (single Telnet session on some models, A2 D9). A successful session ends with `QUI`. *Amended 2026-10-23 (A6 C-19, SEL-751 IM 20260910 p. 7.33):* after a failed password the relay reads the next line as another attempt, so the adapter sends nothing more and closes the TCP connection; it never sends `QUI` after a failure.
+- *Amended 2026-10-23 (A6, p. 7.33):* if `ACC` reaches Level 1 without a password prompt (Level 1 password disabled), the credential is not sent and the session is flagged for review.
 - In this milestone credentials are lab-only test values; collection from any real device needs separate owner authorization.
 
 ## Consequences
