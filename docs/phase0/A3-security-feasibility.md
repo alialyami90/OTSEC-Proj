@@ -148,7 +148,7 @@ Audit records are a separate stream from device events but use the same timestam
 | `audit_id` | Globally unique. |
 | `node_id`, `seq` | Per-node monotonic sequence; gaps are detectable (AP-17). |
 | `prev_hash` | Hash of the previous record on this node (chain). |
-| `time` | UTC, with precision and clock sync state (same model as A4's collector receive time). |
+| `time` | Same shape as A4's `received` field: `utc`, `resolution_ns`, `clock.sync`, `clock.source` (A4 draft schema, PR #4; A4 sees no conflict with this table). |
 | `actor` | `{type: human\|collector\|node\|system, id, role, auth_method, session_id}`. |
 | `action` | Enum, e.g. `auth.login`, `auth.fail`, `role.grant`, `policy.apply`, `credential.replace`, `device.session.open`, `device.op`, `device.session.close`, `enroll.*`, `forward.config`, `audit.export`, `clock.change`, `storage.alarm`, `service.start`, `service.stop`. |
 | `target` | `{asset_id, address, transport, downstream_security}` for device actions. |
@@ -203,7 +203,7 @@ What E1 does not show: behaviour with real IEDs or real engineering tools; anyth
 - **A2**: answered all five questions (A2 findings §11). Enforcement-point decisions for D1, D2, D4–D10 are in §8.
 - **A6** `[peer]`: incorporated B-04, B-05, C-08, C-12 and mapped AP-1, AP-4, AP-12, AP-20 to V-S11, C-12, V-S14, V-S15. Cross-review requested.
 - **A6 items routed by A1** (from `A6-handoff.md`): B-04 credential storage on site nodes → section 4.2 and AP-1, SC-5; B-05/C-07 device identity trust, no unconfirmed TOFU, bind reported identity to host key, fail closed on change → section 4.5 and AP-12, SC-8; C-08 device output as untrusted input reaching the SIEM → AP-11, AP-20, SC-14, SC-16; C-12 collector credential may permit more than monitoring → AP-4, HR-2, layer L5, `CredentialRef.access_level` ceiling. For plaintext transports (Telnet, FTP) B-05 cannot be met by the transport at all: identity can only be checked *after* credentials are sent. A3 proposes that A1 treat this as a residual risk to accept per device, or exclude plaintext-only devices from slice 1.
-- **A4**: not yet contacted directly. Needs: AP-20 forwarding rules (octet-counted RFC 5425 framing, escaping), "no secrets or configurations forwarded", and agreement on HR-3 (login phase not byte-exact evidence) and on sharing the timestamp model with audit records.
+- **A4** `[peer]`: replied 2026-10-23 (A4 findings §5, PR #4). Forwarding mode A is RELP over TLS with a bounded response grammar and a parser whose only output is acknowledged txnrs (TB5, AP-9 updated). AP-20 is implemented in A4's profile: octet counting, device text only in escaped SD, base64 for non-printable bytes, origin set by the collector; 0 forged messages in 10 hostile cases against stock rsyslog, versus 2 of 10 with newline framing (`[exp-sim]`, A4's experiment). HR-3 accepted with two conditions (marker carries no derivative of the secret; echoed password characters redacted too). Audit `time` reuses A4's `received` shape. Original requests were: AP-20 forwarding rules (octet-counted RFC 5425 framing, escaping), "no secrets or configurations forwarded", and agreement on HR-3 (login phase not byte-exact evidence) and on sharing the timestamp model with audit records.
 
 ## 7. Proposals for A1-owned documents
 
