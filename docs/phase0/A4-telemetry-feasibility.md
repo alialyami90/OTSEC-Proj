@@ -177,4 +177,22 @@ Offered to A1 for the Phase 0 exit gate's list of five.
 
 **Files changed:** `docs/phase0/A4-telemetry-feasibility.md`, `docs/phase0/A4-event-schema-draft.md`, `tests/fixtures/network/public-ot-captures/{MANIFEST.tsv,SOURCE.md}`, `modules/telemetry/experiments/{ids-coverage,syslog-framing,relp-ack,schema-mapping}/`.
 
-**Reviewer(s) and outcome:** A6 (detection accuracy, verification) and A2 (protocol interpretation) requested; pending. A4 has not reviewed its own work as independent evidence.
+**Reviewer(s) and outcome:** A4 has not reviewed its own work as independent evidence. The cross-reviews are complete:
+
+- **A6** (detection accuracy, verification; `docs/phase0/A6-cross-review.md`, "A4 findings", reviewed at `74ae579`, re-checked at `7c7fa49`):
+  - R-A4-1, must fix: the SER alignment key included the SEL-751 row number, which renumbers on every new event. With that key, 3 of A6's 6 consecutive-read cases reported false gaps. Fixed in `74a64eb`: `alignment_key` excludes the row number. A6's harness passes 6 of 6 (`schema-mapping/results/a6-ser-alignment.txt`), and A1 accepted the change for C5. **Closed.**
+  - R-A4-2: on an ambiguous overlap, keep the most rows and flag possible duplicates. Adopted in `74a64eb` (`align_full`). **Closed.** A6's re-check ran end to end with A4's `parse_report` and `alignment_key` and added a seventh case. All 7 pass, and the old whole-line key fails 4 of 7.
+  - R-A4-3: A6 reproduced E-A4-03 independently. 12 of 12 runs with Direct queues lost nothing. Power loss is untested, and that limit is recorded in the schema draft section 5. **Closed for Phase 0.**
+  - R-A4-4: the GOOSE checks failed all 8 of A6's hand-labeled adversarial cases. Recorded in section 4 as Phase 4 input, not a slice blocker (A1). **Closed for Phase 0.**
+  - R-A4-5: the RTAC HEADER-versus-MSG time case was added to V-S3, and the V-S3 cases in schema draft section 3 were found consistent. The DNP3 4 h offset remains an inference. **Closed.**
+- **A2** (protocol interpretation; `/mnt/project-files/phase0/A2/A2-review-A4-schema-mapping.md`): the CP56Time2a, DNP3 CTO plus relative time, and IEC 61850 UtcTime decoding were judged correct. Five findings were addressed in `4d73987`:
+  - Silent row loss on an unexpected layout or `DATE_F`: every line is now a row, a relay message, or a parse error, and `DATE_F` is a required input.
+  - Relay power-up and settings-change rows are matched explicitly.
+  - `accuracy_ns` is null under `Time Source: Internal`.
+  - `stream_seq` is assigned at durable write, not per report.
+  - `SOURCE.md` notes that A2's and A4's copies of Figure 10.16 came from the same tool.
+  
+  `test_sel_ser.py` has 12 tests, all passing. **Closed.**
+- **A3**: the HR-3 conditions and the TB5 ack-only grammar were accepted (A1 rulings). AP-22 added `source.sender` and `source.origin_auth`; A4 proposed the value set `none | tls-server-only | tls-mutual | session`.
+
+A1 decided the forwarding mode policy at the exit gate and tightened it afterwards: only RELP over TLS may serve a `required` destination, and every other mode is `best-effort`.
