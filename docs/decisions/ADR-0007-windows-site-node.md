@@ -18,7 +18,7 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 5. Durability evidence from Linux does not transfer. A5 repeats E-A5-1, A6 E-02 (acknowledged commits unsynced under NORMAL vs FULL) and E-03/E-04 (full-disk recovery) on Windows/NTFS before ADR-0004 is relied on for Windows. Until then ADR-0004's durability claims are `inferred` for Windows. A5 adds E-A5-6 (write amplification) and experiments W-1 to W-4 (A5 §14); A6 owns H-14 (flush check with Process Monitor). Group commit is required: about 10.6 KB written per event committed singly versus about 1 KB per event at 100-event groups (A5 estimate).
 6. Time: the node takes time from the site time source (SEL-2488 or IRIG via the owner's clocks); without one, the ~17 s/day drift makes local timestamps unusable for correlation, so loss of time sync raises an alarm. Proposed threshold (A5): offset above 1 s or no successful sync within 1 h, NTP from the SEL-2488.
 7. Device sessions originate only at site nodes. The owner stated (2026-10-23) that the customer's central HMI server may reach relays while central cybersecurity servers may not; the platform's central role is a cybersecurity server and never connects to devices. The HMI server's relay traffic is an existing authorized path that the IDS models, not a platform path.
-8. Intel AMT on the SEL-3355-2 is disabled or kept off every routable network (deployment precondition, A5 §12).
+8. Any out-of-band management controller on the platform machine (Intel AMT on the SEL-3355-2; iDRAC, iLO, IPMI or Redfish on other servers) is disabled or kept off every routable network; checked at commissioning (A3 AP-24, PR #9).
 
 9. Node hardening (A3 HR-9): service-SID firewall rules so only the collector service reaches the IED-facing NIC; WDAC or AppLocker application control; BitLocker with TPM; no domain join; Windows IoT Enterprise LTSC preferred. *Owner decision 2026-10-23:* plain Windows 10 Pro is also allowed as an owner-accepted risk; such a node is labelled "OS out of support" on the node, in the asset view, and in reports, and the installer warns rather than refuses.
 
@@ -34,6 +34,8 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 - No SSD endurance data: WAL and pruning design must keep write amplification low and the node reports SSD wear (SMART) where readable; A5 to estimate writes per day from the event-rate assumptions.
 
 - The edition actually installed decides support: "Windows 11 Pro IoT LTSC" is not a Microsoft edition name. Per A5's cited lifecycle data (A5 findings §15), Windows 11 Pro 24H2 left support on 2026-10-14, while Windows 11 IoT Enterprise LTSC 2024 runs to 2034-10-11. The node reads `EditionID` and `DisplayVersion` and labels itself by lifecycle date (A6 V-S20); an unknown edition is labelled "OS support unknown".
+
+- Power-cut durability depends on the drive's write cache and power-loss protection, so H-11 runs per hardware and drive model offered (A6 C-24). The node reports its hardware and drive model; a model without an H-11 result is labelled "storage durability unverified", the same way V-S20 labels the OS (A1 ruling, A5 implements).
 
 ## Verification
 

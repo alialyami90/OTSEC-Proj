@@ -1,6 +1,6 @@
 # Architecture
 
-Owner: A1. Status: **Phase 0 exit gate passed with conditions (2026-10-23).** Decisions are recorded in ADR-0002 to ADR-0005 under [decisions/](decisions/). Phase 0 evidence lives on the agent branches listed in [agent-handoffs.md](agent-handoffs.md); every result in Phase 0 is `documented-untested` or `simulated`.
+Owner: A1. Status: **Phase 0 exit gate passed with conditions (2026-10-23).** Decisions are recorded in ADR-0002 to ADR-0007 under [decisions/](decisions/). Phase 0 evidence is merged to `main` (`docs/phase0/`, experiments under `modules/`, `platform/`, `tests/`), indexed in [agent-handoffs.md](agent-handoffs.md); every result in Phase 0 is `documented-untested` or `simulated`.
 
 ## System boundary
 
@@ -58,7 +58,7 @@ Owner scope change, 2026-10-23 ([ADR-0006](decisions/ADR-0006-device-coverage-an
 | --- | --- | --- | --- |
 | Protective relays, IEDs | SEL-751, SEL-787-2/-3/-4, SEL-311L, SEL-400 series (400G, 411L, 451) — instruction manuals supplied by owner | Passive observation; no Syslog on these relays (SEL-751 IM: no SSH, Syslog, or TLS) | SEL ASCII over Telnet or serial: `ID` (Access Level 0), `SER` (Level 1) — SEL-751 IM Tables 7.43, 7.63 |
 | RTUs, automation controllers | SEL RTAC: SEL-3350 (replaces the discontinued SEL-3530, owner 2026-10-23), SEL-3555-2, SEL-3505, SEL-3530 (installed base); hardware IMs and acSELerator RTAC SEL-5033 IM supplied | Syslog | SSH, Syslog, SNMP, HTTPS, LDAP, REST API appear in SEL-5033 IM, Programming Reference, and SEL-3555-2 IM; classification pending (A2) |
-| Ethernet switches | SEL-2731, -2741, -2743, -2744 (2731 and 2741 manuals supplied); RSTP-managed or OT SDN-managed | Syslog (RSTP User's Guide, SDN User's Guide) | RSTP-managed: SNMP, HTTPS; SDN-managed: via SEL-5056 flow controller (IM supplied) |
+| Ethernet switches | SEL-2730M, -2731, -2741, -2743, -2744 (2730M, 2731 and 2741 manuals supplied; 2730M classified by A2 in PR #8: HTTPS, RFC 3164 Syslog over UDP 514, four roles including Monitor, SNMPv1/v2c/v3 with v3 recommended); RSTP-managed or OT SDN-managed | Syslog (RSTP User's Guide, SDN User's Guide) | RSTP-managed: SNMP, HTTPS; SDN-managed: via SEL-5056 flow controller (IM supplied) |
 | Routers, security gateways, firewalls | SEL-3620/-3622 (IM 20241010, shared with SEL-3610, supplied) | Syslog (documented in IM) | SSH, SNMP, HTTPS appear in IM; classification pending (A2, A3) |
 | Time servers and clocks | SEL-2488 (IM and data sheet supplied); SEL-2401, SEL-2404, SEL-2407 satellite clocks (IMs supplied) | SEL-2488: Syslog (RFC 3164, fixed port 514, A5/A4); passive PTP/NTP observation. SEL-2401/2404/2407: A1 grep of the IMs finds no Syslog, SSH, Telnet, SNMP, or NTP, so operator-entered data and passive observation only (A2 to confirm) | SEL-2488: SNMP, HTTPS, LDAP/RADIUS in IM; classification pending |
 | Servers and computers | SEL-3355-2 (IM and data sheet supplied), Windows 10/11 IoT LTSC (owner 2026-10-23); also the platform's site node (ADR-0007) | Windows events by host push (owner decision, ADR-0006); passive observation | Hardware management (SNMP/HTTPS in SEL-3355-2 IM); classification pending |
@@ -169,4 +169,4 @@ Conditions before Phase 2 code:
 1. B-02: the approved register (C3) is approved with citations read from the SEL-751 manual, not only located (needs the manual, B-07).
 2. B-04: C7 credential storage accepted by A3 and reviewed by A6.
 3. B-03: C5 and C6 approved, including the required/best-effort rule and the mode A receiver configuration.
-4. The five agent branches are merged to `main` so contracts are written against one tree.
+4. ~~The five agent branches are merged to `main` so contracts are written against one tree.~~ **Met 2026-10-23:** all six Phase 0 PRs (#1–#6) merged to `main` with owner approval; merged tree passes 67 tests (5 environment-gated tests pass when pointed at the SEL-751 manual text, register, and allowlist).
