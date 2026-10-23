@@ -4,7 +4,8 @@ Owner: A6. Independent OT safety verification. Nothing here may target productio
 
 ## Contents
 
-- [recording_simulator/](recording_simulator/): SSH endpoint that records every byte a collector sends, and `check.py`, which classifies each received line against a command register. Oracle for V-S5, V-S7 (b), V-S10, V-S13, V-S14. Class `simulated`.
+- [recording_simulator/](recording_simulator/): SSH or raw TCP/Telnet endpoint that records every byte a collector sends (in-band passwords recorded as auth events, never stored), and `check.py`, which classifies each received line against a command register and flags non-printable bytes and lines sent before the prompt. Oracle for V-S5, V-S7 (b), V-S10, V-S13, V-S14. Class `simulated`.
+- [register_review/](register_review/): A6's independent deny and allow corpora. Run against any command register with `OTSEC_REGISTER=<register.json> python3 -m unittest tests/safety/register_review/test_register.py`. A register change that makes any deny-corpus line read-only fails. Standard library only.
 
 Run the self-test (Python 3.9+, test-only dependency pinned in `recording_simulator/requirements.txt`):
 

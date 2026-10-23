@@ -2,6 +2,8 @@
 
 Uses selftest-register.json, a synthetic register with neutral command names.
 It is not a device command register and says nothing about any real device.
+Two scenarios: SSH transport, and raw TCP with Telnet negotiation and an
+in-band password exchange (the shape of SEL ASCII sessions, with neutral names).
 
 Run from the repository root:
   python -m unittest tests/safety/recording_simulator/test_selftest.py
@@ -97,7 +99,7 @@ class RecordingSimulatorSelfTest(unittest.TestCase):
         self.assertEqual(self.by_text.get("UNLISTED-CMD"), "unregistered")
 
     def test_control_bytes_are_caught(self):
-        self.assertEqual(self.by_text.get("SHOW-EVENTS \x1b[2J"), "control-bytes")
+        self.assertEqual(self.by_text.get("SHOW-EVENTS \x1b[2J"), "non-printable")
 
     def test_exactly_the_expected_violations(self):
         self.assertEqual(len(self.report["violations"]), 3)
@@ -111,6 +113,92 @@ class RecordingSimulatorSelfTest(unittest.TestCase):
         for ev in self.events:
             self.assertNotIn(PASSWORD, json.dumps(ev))
             self.assertNotIn("wrong", ev.get("text", ""))
+
+
+INBAND_PASSWORD = b"canary-inband-91c2"
+PROMPT = b"SIM> "
+
+
+async def _tcp_scenario(log_path):
+    recorder = sim.Recorder(log_path)
+    cfg = sim.Config(inband_auth_command=b"LOGIN", inband_password=INBAND_PASSWORD,
+                     response_delay=0.1, telnet=True)
+    server = await sim.start_tcp(recorder, "127.0.0.1", 0, cfg)
+    port = server.sockets[0].getsockname()[1]
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    received = bytearray()
+
+    async def until(marker, count=1):
+        for _ in range(count):
+            received.extend(await asyncio.wait_for(reader.readuntil(marker), 5))
+
+    async def send(data, marker=PROMPT, count=1):
+        writer.write(data)
+        await until(marker, count)
+
+    await until(PROMPT)
+    # WILL TERMINAL-TYPE, DO ECHO: the simulator must refuse both.
+    writer.write(bytes([0xFF, 0xFB, 0x18, 0xFF, 0xFD, 0x01]))
+    received.extend(await asyncio.wait_for(reader.readexactly(6), 5))
+    await send(b"LOGIN\r\n", b"Password: ")
+    await send(b"wrongpw\r\n")                      # failed in-band auth
+    await send(b"LOGIN\r\x00", b"Password: ")       # Telnet CR NUL terminator
+    await send(INBAND_PASSWORD + b"\r\n")
+    await send(b"SHOW-EVENTS\r\n")                   # allowed
+    await send(b"\xa5\xe0SHOW-EVENTS\r\n")           # binary prefix on the ASCII port
+    await send(b"SHOW-ID\r\nSHOW-EVENTS 3\r\n", count=2)  # pipelined, no wait
+    await send(b"SHOW-ID\xff\xff\r\n")               # IAC IAC is a literal 0xFF
+    writer.close()
+    await writer.wait_closed()
+    await asyncio.sleep(0.3)
+    server.close()
+    await server.wait_closed()
+    recorder.close()
+    return bytes(received)
+
+
+class TelnetInbandSelfTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        log = os.path.join(cls.tmp.name, "rec.jsonl")
+        cls.received = asyncio.run(_tcp_scenario(log))
+        with open(log) as f:
+            cls.raw_log = f.read()
+        cls.events = [json.loads(line) for line in cls.raw_log.splitlines()]
+        register = check.load_register(os.path.join(HERE, "selftest-register.json"))
+        cls.report = check.check(cls.events, register)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def verdicts(self):
+        return sorted((v["text"], v["verdict"]) for v in self.report["violations"])
+
+    def test_telnet_options_refused_and_logged(self):
+        self.assertIn(bytes([0xFF, 0xFE, 0x18, 0xFF, 0xFC, 0x01]), self.received)
+        self.assertEqual(self.report["telnet_sequences"], 2)
+
+    def test_inband_password_is_auth_event_not_line(self):
+        auths = [e for e in self.events if e["event"] == "auth"]
+        self.assertEqual([a["accepted"] for a in auths], [False, True])
+        self.assertEqual(self.report["failed_auth_per_session"], {1: 1})
+
+    def test_passwords_never_recorded(self):
+        self.assertNotIn(INBAND_PASSWORD.decode(), self.raw_log)
+        self.assertNotIn("wrongpw", self.raw_log)
+
+    def test_cr_nul_terminator_recognised(self):
+        terms = {e["text"]: e["term"] for e in self.events if e["event"] == "line"}
+        self.assertEqual(terms.get("LOGIN"), "CRNUL")  # last LOGIN line wins
+
+    def test_expected_violations_only(self):
+        self.assertEqual(self.verdicts(), sorted([
+            ("SHOW-EVENTS 3", "before-prompt"),
+            ("SHOW-ID\xff", "non-printable"),
+            ("\xa5\xe0SHOW-EVENTS", "non-printable"),
+        ]))
 
 
 if __name__ == "__main__":

@@ -7,8 +7,13 @@ test_line_split_across_reads_is_reassembled (tests.safety.recording_simulator.te
 test_password_never_recorded (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_password_never_recorded) ... ok
 test_smuggled_line_is_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_smuggled_line_is_caught) ... ok
 test_state_changing_parameter_is_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_state_changing_parameter_is_caught) ... ok
+test_cr_nul_terminator_recognised (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_cr_nul_terminator_recognised) ... ok
+test_expected_violations_only (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_expected_violations_only) ... ok
+test_inband_password_is_auth_event_not_line (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_inband_password_is_auth_event_not_line) ... ok
+test_passwords_never_recorded (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_passwords_never_recorded) ... ok
+test_telnet_options_refused_and_logged (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_telnet_options_refused_and_logged) ... ok
 
 ----------------------------------------------------------------------
-Ran 8 tests in 0.414s
+Ran 13 tests in 1.610s
 
 OK

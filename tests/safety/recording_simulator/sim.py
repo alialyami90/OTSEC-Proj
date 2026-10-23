@@ -1,4 +1,4 @@
-"""Recording device simulator: an SSH endpoint that logs every byte it receives.
+"""Recording device simulator: logs every byte a collector sends to a "device".
 
 Purpose (V-S7, V-S10, V-S13): prove what a collector actually sent to a device
 without trusting the collector's own transcript. Point the adapter under test
@@ -9,14 +9,29 @@ with a fixed placeholder and never imitates real device output, so nothing it
 produces may be used as device evidence. It must not share code with any
 module under test.
 
+Transports:
+  ssh   SSH server, password authentication, exec and interactive shell.
+  tcp   Raw TCP line service. With --telnet, Telnet IAC negotiation is removed
+        from the data stream and recorded separately. Use this for device
+        families with no SSH (A2 found none documented for SEL relays).
+
+In-band authentication (--inband-auth-command, --inband-password): devices such
+as SEL relays authenticate inside the session (send ACC, answer "Password:").
+The line after the auth command is recorded as an auth event (accepted or not,
+and its length), never as a command line, and its bytes are never stored.
+
 Records, one JSON object per line:
   session_open / session_close   session id, peer address
-  auth                           username and whether it was accepted (never the password)
-  exec                           the exec command, raw bytes as base64 and latin-1 text
-  chunk                          every raw read from an interactive shell, as base64
-  line                           each shell line, split on CR, LF, or CRLF
+  auth                           username or in-band, accepted; never the secret
+  exec                           SSH exec command, raw bytes as base64 and latin-1 text
+  line                           each received line: raw bytes, the terminator seen
+                                 (CRLF, CR, LF, CRNUL, or none), and before_prompt,
+                                 true when the line arrived before the simulator had
+                                 answered the previous one and shown a prompt
+  telnet                         Telnet IAC sequences, base64 (tcp --telnet only)
 
-Run: python sim.py --port 2222 --log rec.jsonl --user collector --password <canary>
+Run: python sim.py --transport tcp --telnet --port 2323 --log rec.jsonl \
+       --inband-auth-command ACC --inband-password <canary>
 """
 
 import argparse
@@ -28,8 +43,9 @@ import time
 
 import asyncssh
 
-PROMPT = b"\r\nSIM> "
 PLACEHOLDER = b"\r\n[recording simulator: placeholder output, not device data]"
+IAC, SB, SE = 0xFF, 0xFA, 0xF0
+WILL_WONT_DO_DONT = range(0xFB, 0xFF)
 
 
 class Recorder:
@@ -53,20 +69,155 @@ def _raw(data):
 
 
 def split_lines(buf):
-    """Split complete lines off buf on CR, LF, or CRLF. Returns (lines, rest)."""
-    lines = []
-    start = i = 0
+    """Split complete lines off buf. Returns ([(line, terminator)], rest).
+
+    Terminators: CRLF, CR NUL (Telnet), CR, LF. A CR at the very end of buf is
+    held back until the next byte shows whether LF or NUL follows.
+    """
+    lines, start, i = [], 0, 0
     while i < len(buf):
-        if buf[i] in b"\r\n":
-            lines.append(buf[start:i])
-            if buf[i:i + 2] == b"\r\n":
-                i += 1
+        b = buf[i]
+        if b == 0x0D:
+            if i + 1 == len(buf):
+                break
+            nxt = buf[i + 1]
+            term = {0x0A: "CRLF", 0x00: "CRNUL"}.get(nxt, "CR")
+            lines.append((buf[start:i], term))
+            i += 2 if term != "CR" else 1
+            start = i
+            continue
+        if b == 0x0A:
+            lines.append((buf[start:i], "LF"))
             start = i + 1
         i += 1
     return lines, buf[start:]
 
 
-class _Server(asyncssh.SSHServer):
+class TelnetFilter:
+    """Removes Telnet IAC sequences from a byte stream, keeping state across reads.
+
+    Option negotiation is answered by refusing every option (WILL -> DONT,
+    DO -> WONT), the minimal compliant behaviour, so clients fall back to
+    plain NVT. Refusals are returned for the caller to send.
+    """
+
+    def __init__(self):
+        self.state, self.seq = "data", b""
+
+    def feed(self, data):
+        """Returns (data bytes, IAC sequences seen, refusal bytes to send)."""
+        out, seqs = bytearray(), []
+        for b in data:
+            if self.state == "data":
+                if b == IAC:
+                    self.state, self.seq = "iac", bytes([b])
+                else:
+                    out.append(b)
+            elif self.state == "iac":
+                if b == IAC:            # escaped 0xFF is data
+                    out.append(b)
+                    self.state = "data"
+                    continue
+                self.seq += bytes([b])
+                if b in WILL_WONT_DO_DONT:
+                    self.state = "opt"
+                elif b == SB:
+                    self.state = "sb"
+                else:
+                    seqs.append(self.seq)
+                    self.state = "data"
+            elif self.state == "opt":
+                seqs.append(self.seq + bytes([b]))
+                self.state = "data"
+            elif self.state == "sb":
+                self.seq += bytes([b])
+                if b == IAC:
+                    self.state = "sb_iac"
+            elif self.state == "sb_iac":
+                self.seq += bytes([b])
+                if b == SE:
+                    seqs.append(self.seq)
+                    self.state = "data"
+                else:
+                    self.state = "sb"
+        replies = b"".join(
+            bytes([IAC, {0xFB: 0xFE, 0xFD: 0xFC}[q[1]], q[2]])
+            for q in seqs if len(q) == 3 and q[1] in (0xFB, 0xFD))
+        return bytes(out), seqs, replies
+
+
+class Session:
+    """Line handling shared by all transports. `write` sends bytes to the client."""
+
+    def __init__(self, recorder, session_id, write, cfg):
+        self.rec, self.id, self._write, self.cfg = recorder, session_id, write, cfg
+        self.buf = b""
+        self.ready = False
+        self.awaiting_password = False
+        self.queue = asyncio.Queue()
+        self.worker = asyncio.create_task(self._work())
+
+    def start(self):
+        self._write(self.cfg.prompt)
+        self.ready = True
+
+    def feed(self, data):
+        lines, self.buf = split_lines(self.buf + data)
+        for line, term in lines:
+            before_prompt = not self.ready
+            self.ready = False
+            self.queue.put_nowait((line, term, before_prompt))
+
+    async def _work(self):
+        while True:
+            line, term, before_prompt = await self.queue.get()
+            if self.cfg.response_delay:
+                await asyncio.sleep(self.cfg.response_delay)
+            if self.awaiting_password:
+                self.awaiting_password = False
+                self.rec.write("auth", session=self.id, inband=True,
+                               accepted=line == self.cfg.inband_password,
+                               length=len(line), before_prompt=before_prompt)
+                out = b""
+            else:
+                self.rec.write("line", session=self.id, term=term,
+                               before_prompt=before_prompt, **_raw(line))
+                if self.cfg.inband_auth_command and line == self.cfg.inband_auth_command:
+                    self.awaiting_password = True
+                    self._write(b"\r\nPassword: ")
+                    self.ready = self.queue.empty()
+                    self.queue.task_done()
+                    continue
+                out = PLACEHOLDER if line.strip() else b""
+            self._write(out + self.cfg.prompt)
+            self.ready = self.queue.empty()
+            self.queue.task_done()
+
+    async def close(self):
+        await self.queue.join()
+        self.worker.cancel()
+        if self.buf:
+            # A CR held back by split_lines is a complete CR-terminated line.
+            line, term = ((self.buf[:-1], "CR") if self.buf.endswith(b"\r")
+                          else (self.buf, "none"))
+            self.rec.write("line", session=self.id, term=term,
+                           before_prompt=not self.ready, **_raw(line))
+            self.buf = b""
+
+
+class Config:
+    def __init__(self, prompt=b"\r\nSIM> ", inband_auth_command=None,
+                 inband_password=None, response_delay=0.0, telnet=False):
+        self.prompt = prompt
+        self.inband_auth_command = inband_auth_command
+        self.inband_password = inband_password
+        self.response_delay = response_delay
+        self.telnet = telnet
+
+
+# --- SSH transport ------------------------------------------------------------
+
+class _SSHServer(asyncssh.SSHServer):
     def __init__(self, recorder, user, password):
         self._rec, self._user, self._password = recorder, user, password
         self.session = None
@@ -89,57 +240,110 @@ class _Server(asyncssh.SSHServer):
 
     def validate_password(self, username, password):
         ok = username == self._user and password == self._password
-        self._rec.write("auth", session=self.session, username=username, accepted=ok)
+        self._rec.write("auth", session=self.session, inband=False,
+                        username=username, accepted=ok)
         return ok
 
 
-async def _handle(process, recorder):
-    session = process.get_extra_info("sim_session")
+async def _ssh_process(process, recorder, cfg):
+    sid = process.get_extra_info("sim_session")
     if process.command is not None:
-        recorder.write("exec", session=session, **_raw(process.command.encode("latin-1")))
+        recorder.write("exec", session=sid, **_raw(process.command.encode("latin-1")))
         process.stdout.write(PLACEHOLDER + b"\r\n")
         process.exit(0)
         return
-    process.stdout.write(PROMPT)
-    buf = b""
+    session = Session(recorder, sid, process.stdout.write, cfg)
+    session.start()
     try:
         while True:
             data = await process.stdin.read(4096)
             if not data:
                 break
-            recorder.write("chunk", session=session, b64=base64.b64encode(data).decode())
-            lines, buf = split_lines(buf + data)
-            for line in lines:
-                recorder.write("line", session=session, **_raw(line))
-                process.stdout.write((PLACEHOLDER if line.strip() else b"") + PROMPT)
+            session.feed(data)
     except asyncssh.BreakReceived:
-        recorder.write("break", session=session)
-    if buf:
-        recorder.write("line", session=session, unterminated=True, **_raw(buf))
+        recorder.write("break", session=sid)
+    await session.close()
     process.exit(0)
 
 
-async def start(recorder, host, port, user, password, host_key=None):
-    """Start the simulator. Returns the asyncssh server; port 0 picks a free port."""
+async def start_ssh(recorder, host, port, user, password, cfg=None, host_key=None):
+    """Start the SSH transport. Returns the server; port 0 picks a free port."""
+    cfg = cfg or Config()
     key = host_key or asyncssh.generate_private_key("ssh-ed25519")
     return await asyncssh.create_server(
-        lambda: _Server(recorder, user, password), host, port,
+        lambda: _SSHServer(recorder, user, password), host, port,
         server_host_keys=[key],
-        process_factory=lambda p: _handle(p, recorder),
+        process_factory=lambda p: _ssh_process(p, recorder, cfg),
         encoding=None, line_editor=False)
+
+
+start = start_ssh  # name used by the original self-test
+
+
+# --- Raw TCP / Telnet transport -----------------------------------------------
+
+async def start_tcp(recorder, host, port, cfg=None):
+    """Start the raw TCP (optionally Telnet) transport. Returns an asyncio server."""
+    cfg = cfg or Config()
+
+    async def handle(reader, writer):
+        sid = recorder.new_session()
+        recorder.write("session_open", session=sid,
+                       peer=str(writer.get_extra_info("peername")))
+        session = Session(recorder, sid, writer.write, cfg)
+        telnet = TelnetFilter() if cfg.telnet else None
+        session.start()
+        try:
+            while True:
+                data = await reader.read(4096)
+                if not data:
+                    break
+                if telnet:
+                    data, seqs, replies = telnet.feed(data)
+                    for s in seqs:
+                        recorder.write("telnet", session=sid,
+                                       b64=base64.b64encode(s).decode())
+                    if replies:
+                        writer.write(replies)
+                session.feed(data)
+        except ConnectionError as exc:
+            recorder.write("transport_error", session=sid, error=str(exc))
+        await session.close()
+        writer.close()
+        recorder.write("session_close", session=sid, error=None)
+
+    return await asyncio.start_server(handle, host, port)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--transport", choices=("ssh", "tcp"), default="ssh")
+    ap.add_argument("--telnet", action="store_true", help="tcp only: strip and log IAC")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2222)
     ap.add_argument("--log", required=True)
-    ap.add_argument("--user", required=True)
-    ap.add_argument("--password", required=True)
+    ap.add_argument("--user", help="ssh only")
+    ap.add_argument("--password", help="ssh only")
+    ap.add_argument("--prompt", default="\r\nSIM> ")
+    ap.add_argument("--inband-auth-command")
+    ap.add_argument("--inband-password")
+    ap.add_argument("--response-delay", type=float, default=0.0,
+                    help="seconds before answering; lines sent meanwhile are before_prompt")
     args = ap.parse_args()
+    if args.transport == "ssh" and not (args.user and args.password):
+        ap.error("--transport ssh needs --user and --password")
+    cfg = Config(
+        prompt=args.prompt.encode("latin-1"),
+        inband_auth_command=(args.inband_auth_command or "").encode("latin-1") or None,
+        inband_password=(args.inband_password or "").encode("latin-1") or None,
+        response_delay=args.response_delay, telnet=args.telnet)
 
     async def run():
-        await start(Recorder(args.log), args.host, args.port, args.user, args.password)
+        rec = Recorder(args.log)
+        if args.transport == "ssh":
+            await start_ssh(rec, args.host, args.port, args.user, args.password, cfg)
+        else:
+            await start_tcp(rec, args.host, args.port, cfg)
         await asyncio.Event().wait()
 
     asyncio.run(run())

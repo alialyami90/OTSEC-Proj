@@ -1,17 +1,29 @@
 """Check a recording simulator log against a command register.
 
 Every command line the simulator received must fully match a register entry
-classified read-only. Anything else is a violation: a line matching a
-state-changing entry, a line matching no entry, or a line containing control
-bytes. Empty lines (a bare Enter to wake a prompt) are allowed.
+classified read-only. Anything else is a violation:
 
-Also reports, for V-S13: failed authentication attempts per session and the
-peak number of concurrent sessions.
+  non-printable    the line holds a byte outside 0x20-0x7E. Checked here, not
+                   left to the register, because binary messages (for example
+                   SEL Fast Operate, which starts with 0xA5) can share a port
+                   with the ASCII command interface.
+  state-changing   the line matches a register entry classified state-changing
+  unregistered     the line matches no entry
+  before-prompt    the line (or an in-band password) arrived before the device
+                   had answered the previous line and shown a prompt, so the
+                   device could read it as the answer to a question
+  break-signal     an SSH break was sent
+
+Empty lines (a bare Enter to wake a prompt) are allowed. Telnet negotiation is
+recorded by the simulator separately and is not a command.
+
+Also reports, for V-S13: failed authentication attempts (transport and in-band)
+per session and the peak number of concurrent sessions.
 
 Register format (JSON): {"commands": [{"id": "...", "pattern": "<regex>",
-"classification": "read-only" | "state-changing"}]}. Patterns are matched with
-re.fullmatch against the line exactly as received, so parameters are part of
-the classification (challenge C-01 in docs/verification.md).
+"classification": "read-only" | "state-changing"}]}; other fields are ignored.
+Patterns are matched with re.fullmatch against the line exactly as received,
+so parameters are part of the classification (C-01 in docs/verification.md).
 
 Run: python check.py --log rec.jsonl --register register.json
 Exit status: 0 if no violations, 1 otherwise.
@@ -22,7 +34,7 @@ import json
 import re
 import sys
 
-CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+NONPRINTABLE = re.compile(r"[^\x20-\x7e]")
 
 
 def load_register(path):
@@ -36,8 +48,8 @@ def load_register(path):
 
 
 def classify(text, register):
-    if CONTROL.search(text):
-        return "control-bytes", None
+    if NONPRINTABLE.search(text):
+        return "non-printable", None
     hits = [e for e in register if e["regex"].fullmatch(text)]
     if any(e["classification"] == "state-changing" for e in hits):
         return "state-changing", [e["id"] for e in hits]
@@ -49,6 +61,7 @@ def classify(text, register):
 def check(events, register):
     commands, violations = [], []
     failed_auth, open_sessions, peak = {}, set(), 0
+    telnet_sequences = 0
     for ev in events:
         kind = ev["event"]
         if kind == "session_open":
@@ -56,13 +69,22 @@ def check(events, register):
             peak = max(peak, len(open_sessions))
         elif kind == "session_close":
             open_sessions.discard(ev["session"])
-        elif kind == "auth" and not ev["accepted"]:
-            failed_auth[ev["session"]] = failed_auth.get(ev["session"], 0) + 1
+        elif kind == "telnet":
+            telnet_sequences += 1
+        elif kind == "auth":
+            if not ev["accepted"]:
+                failed_auth[ev["session"]] = failed_auth.get(ev["session"], 0) + 1
+            if ev.get("before_prompt"):
+                violations.append({"session": ev["session"], "via": "inband-auth",
+                                   "text": "", "verdict": "before-prompt",
+                                   "register_ids": None})
         elif kind in ("exec", "line"):
             text = ev["text"]
-            if kind == "line" and not text.strip():
+            if kind == "line" and not text.strip() and not NONPRINTABLE.search(text):
                 continue
             verdict, ids = classify(text, register)
+            if verdict == "read-only" and ev.get("before_prompt"):
+                verdict = "before-prompt"
             row = {"session": ev["session"], "via": kind, "text": text,
                    "verdict": verdict, "register_ids": ids}
             commands.append(row)
@@ -77,6 +99,7 @@ def check(events, register):
         "violations": violations,
         "failed_auth_per_session": failed_auth,
         "peak_concurrent_sessions": peak,
+        "telnet_sequences": telnet_sequences,
         "pass": not violations,
     }
 

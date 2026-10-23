@@ -1,0 +1,6 @@
+# Lines a SEL collector is expected to send; each must classify read-only
+# under A2's draft register. Changes here need A2 and A6 agreement.
+ACC
+QUI
+ID
+SER

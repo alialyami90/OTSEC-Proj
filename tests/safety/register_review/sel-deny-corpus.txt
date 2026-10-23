@@ -1,0 +1,66 @@
+# A6 independent negative corpus for SEL ASCII command registers.
+# Every line below must NOT classify as read-only. Built by A6 from A2's
+# cited sources (SEL-300G Quick-Start 20060731 Tables 4 and 5) and from
+# recalled SEL behaviour marked (recalled); these are command strings, not
+# device output. One line per case; \xNN escapes are decoded before checking.
+SER C
+ser c
+SER  C
+SER C\t
+SERC
+SER 1 C
+SER D
+SER 10
+SER;SET
+ SER
+SER 
+HIS C
+HIS
+TRI
+TRIG
+MET RD
+MET RP
+MET RE
+MET RM
+MET
+PRO R
+TAR R
+TAR
+STA C
+STA
+2AC
+BAC
+PAC
+AAC
+OAC
+CAL
+acc
+ACC 
+ACC\x00
+ID 
+id
+OPE
+OPE 1
+CLO
+PUL OUT101
+CON RB01
+SET
+SET L
+PAS
+PAS 2
+COP 1 2
+GRO 2
+R_S
+L_D
+FIL WRITE SET_1.TXT
+LDP C
+DAT 01/01/2026
+TIM 00:00:00
+IRI
+LOO
+ANA
+POR 3
+QUI\r
+\xa5\xe0SER
+SER\xff
+SER\x1b[2J
