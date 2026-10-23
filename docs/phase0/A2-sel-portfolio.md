@@ -106,3 +106,17 @@ Each directory has a `SOURCE.md`.
   - D20–D22 test cases.
   - Two new negative and dialect fixtures.
   - Load on the RTAC (D22) is a hardware-only test.
+
+## 8. Relay session limits and Syslog (for A5)
+
+All entries are documented-untested.
+
+| Family | Concurrent sessions on the Ethernet port | Syslog on the relay | Evidence |
+| --- | --- | --- | --- |
+| SEL-751 | 2 Telnet, 2 FTP, 7 IEC 61850, 5 DNP3, 2 Modbus, 2 C37.118, 1 SNTP, 1 PTP | none; "syslog" does not occur in the manual, and Table 7.5 lists no Syslog | S22 Table 7.5 and its footnote |
+| SEL-787-4 | 2 Telnet, 2 FTP, 5 DNP3, 2 Modbus (Port 1 footnote) | none; "syslog" does not occur in the manual | S34, Port 1 footnote near Table 7.5 equivalent |
+| SEL-400 series (451, 411L, 400G) | 3 Telnet, 1 FTP, 7 MMS, 6 DNP, 2 Modbus, 1 HTTP, 2 PTP, 1 SNTP, 2 synchrophasor | none; "syslog" does not occur in the manual | S32 Table C.2 p. C.6 |
+| SEL-311L | 1 Telnet host session (data sheet) | "The SEL-311L does not support Syslog functionality" (as quoted by A5 from S33) | S17; S33 |
+
+These relays therefore report security events only through the SER (SALARM, password access), which the platform must poll. A collector restart that retries without closing the previous session can take every Telnet session on an SEL-751 after two attempts. That locks engineers out of Telnet until `TIDLE` expires (D9, D18). Backoff should assume that a session left open is held until `TIDLE`, which defaults to 15 minutes on the SEL-751.
+

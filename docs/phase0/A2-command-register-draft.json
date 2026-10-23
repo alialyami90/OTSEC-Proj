@@ -1,57 +1,388 @@
 {
-  "register": "SEL ASCII (SEL-751 reference model) approved command register, Phase 0 draft",
-  "owner": "A2",
-  "status": "draft, not approved; for A6 checker (V-S7) and A1 review",
-  "date": "2026-10-23 (revised after reading S22)",
-  "sources": "See docs/phase0/A2-device-feasibility.md section 1 (S1..S22). S22 = SEL-751 Instruction Manual, date code 20260910 (owner-supplied); page numbers below refer to it.",
-  "matching": "Each pattern is a Python re.fullmatch against one received line. Allowed entries are exact canonical forms the adapter may send. Denied entries document known dangerous lines and are case-insensitive and abbreviation-tolerant on purpose. Any line matching no entry is a violation (deny by default).",
-  "not_representable_as_lines": [
-    "The password line sent after ACC prompts 'Password:'. It must be logged by the simulator as an auth event, never as a command line, and never stored in clear.",
-    "Binary SEL Fast messages (0xA5 prefix, S10). Covered by sel.binary.any_non_ascii below only if the log decodes bytes as latin-1; the checker's CONTROL class misses 0x80-0xFF."
-  ],
-  "language": "Valid only for LANG := ENGLISH on the port. With LANG := SPANISH command names differ and 'SER D' clears the SER (S22 Command Summary p.6). The adapter must confirm English before sending anything other than ID/ACC/QUI.",
-  "commands": [
-    {"id": "sel.session.acc", "pattern": "ACC", "classification": "read-only", "access_level": "0 -> 1", "citation": "S22 Table 7.17 p.7.32; password behaviour p.7.33", "status": "documented-untested", "notes": "Changes session access level only. One attempt per invocation (risk D2).", "side_effects": "Changes session access level 0 to 1. Three wrong passwords pulse SALARM for 1 s (S22 p.7.33); factory default OUT101 := HALARM OR SALARM (S22 Table 4.83) closes the alarm contact, and SER4 := SALARM (S22 Table 4.122) records it in the SER. One attempt per session; no further ACC after a failure. Sent only by the transport auth phase."},
-    {"id": "sel.session.qui", "pattern": "QUI", "classification": "read-only", "access_level": "any -> 0", "citation": "S22 Table 7.59 p.7.73 (Access Level 0)", "status": "documented-untested", "notes": "Sent at end of every session.", "side_effects": "Returns to Level 0. Without QUIT a Telnet session stays at its elevated level until TIDLE expires (S22 p.7.15-7.16 Telnet Server note)."},
-    {"id": "sel.id", "pattern": "ID", "classification": "read-only", "access_level": "0", "citation": "S22 Table 7.43 and Figure 7.38 p.7.64; Figure 3.20 p.3.14", "status": "documented-untested", "notes": "Fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL, display package lines, and on IEC 61850 models iedName/type/configVersion. Per-line checksum = 4-hex sum of characters of '\"KEY=value\",' (verified on all 10 lines of Figure 7.38).", "side_effects": "None documented. Occupies the session for the response."},
-    {"id": "sel.ser.read_all", "pattern": "SER", "classification": "read-only", "access_level": "1", "citation": "S22 Table 7.63 p.7.75 ('Displays a chronological progression of all available SER rows (as many as 1024 rows). Row 1 is the most recently triggered row'); Figure 10.16 p.10.40", "status": "documented-untested", "notes": "On SEL-751 bare SER returns all rows (unlike A4's report for SEL-400 series). Row/date range forms exist (Table 7.63) but stay denied until needed.", "side_effects": "None documented. Returns up to the full ring buffer (1,024 rows on SEL-751, S4), so every read repeats rows already collected."},
-    {"id": "sel.settings.show_global", "pattern": "SHO G", "classification": "read-only", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'SHO G Displays the global settings' (Level 1); S22 Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH, DATE_F)", "status": "documented-untested", "side_effects": "None documented.", "notes": "PROPOSED WIDENING (needs A1/A6 approval): needed to state a UTC offset and DST rule for SER local times (A4 request)."},
-    {"id": "sel.settings.show_port1", "pattern": "SHO P 1", "classification": "read-only", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'SHO P n Displays the port settings' (Level 1); S22 Port 1 settings (ETELNET, MAXACC, LANG, TPORT, TIDLE, FASTOP, EFTPSERV, FTPACC)", "status": "documented-untested", "side_effects": "None documented.", "notes": "PROPOSED WIDENING (needs A1/A6 approval): lets the collector verify MAXACC, FASTOP, LANG and FTPACC before collecting."},
-    {"id": "sel.access.elevate", "pattern": "(?i)\\s*(2AC|BAC|PAC|AAC|OAC|CAL)\\b.*", "classification": "state-changing", "citation": "S22 Table 7.17 (2AC Level 1, CAL Level 2); S7 Table 5.4 (PAC, AAC, OAC on SEL-400)", "status": "documented-untested", "notes": "Access elevation. Collector holds no Level B/P/A/O/2 password; a failed attempt still counts toward the ALARM pulse (D2).", "side_effects": "2AC: SALARM pulses after successful Level 2 access or if access is denied (S22 p.7.33)."},
-    {"id": "sel.ser.clear", "pattern": "(?i)\\s*SER\\w*\\s+C\\b.*", "classification": "state-changing", "citation": "S22 Table 7.63 p.7.75 'SER C or R  Clears/resets the SER records'  Access Level 1", "status": "documented-untested", "notes": "Level 1. Covers C and R.", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.ser.d", "pattern": "(?i)\\s*SER\\w*\\s+D\\b.*", "classification": "state-changing", "citation": "S22 Table 7.64 p.7.76 (English: lists chattering elements, Level 1); Command Summary p.6 (Spanish 'SER D o R' clears SER data)", "status": "documented-untested", "notes": "Read-only in English but CLEARS the SER when LANG := SPANISH. Kept denied.", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.ser.other_args", "pattern": "(?i)\\s*SER\\w*\\s+.+", "classification": "state-changing", "citation": "deny-by-default for unread argument forms", "status": "unknown", "notes": "Placeholder so every SER argument form is a violation until classified.", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.his.clear", "pattern": "(?i)\\s*HIS\\w*\\s+(\\S+\\s+)?(C|R|CA|RA)\\b.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'HIS C or R Clears or resets the history buffer' (Level 1); also HIS HIF C/R/CA/RA, HIS IGF C", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.tri", "pattern": "(?i)\\s*TRI\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): TRI, TRI HIF (Level 1); S22 Table 7.77", "status": "documented-untested", "notes": "Level 1 command that creates an event report and consumes limited event storage (D1).", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.met.reset", "pattern": "(?i)\\s*MET\\w*\\s+R(D|E|M|P)\\b.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): MET RD, RE, RM, RP reset metering (Level 1)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.pro.reset", "pattern": "(?i)\\s*PRO\\w*\\s+R\\b.*", "classification": "state-changing", "citation": "S1 Table 4 (SEL-300G only)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.tar.reset", "pattern": "(?i)\\s*TAR\\w*\\s+R\\b.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'TAR R Resets any latched targets' (Level 1)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.sta.args", "pattern": "(?i)\\s*STA\\w*\\s+\\S.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'STA C or R Clears the self-test status and restarts the relay' (Level 2); STA S is a display", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.breaker.ope", "pattern": "(?i)\\s*OPE\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): OPE (Level 2 on SEL-751)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.breaker.clo", "pattern": "(?i)\\s*CLO\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): CLO (Level 2 on SEL-751)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.output.pul", "pattern": "(?i)\\s*PUL\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): PUL OUTnnn (Level 2); S22 Table 7.58", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.control.con", "pattern": "(?i)\\s*CON\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): CON RBnn k (Level 2)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.settings.set", "pattern": "(?i)\\s*SET\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): SET ... (Level 2); S22 Table 7.65", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.settings.pas", "pattern": "(?i)\\s*PAS\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): PAS 1, PAS 2 (Level 2), PAS C (Level C); S22 Table 7.52", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.settings.copy", "pattern": "(?i)\\s*COP\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): COPY m n (Level 2)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.settings.group", "pattern": "(?i)\\s*GRO\\w*\\s+\\S.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): GROUP n changes the active group (Level 2); bare GROUP displays (Level 1)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.defaults.r_s", "pattern": "(?i)\\s*R_S.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): R_S (Level 2); S22 Table 7.62", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.firmware.l_d", "pattern": "(?i)\\s*L_D.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): L_D (Level 2); S22 Table 7.46", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.file", "pattern": "(?i)\\s*FIL\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): FIL DIR/READ/SHOW (Level 1, READ uses Ymodem binary transfer per S22 p.7.87), FIL WRITE (Level 2)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.ldp.clear", "pattern": "(?i)\\s*LDP\\w*\\s+C\\b.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'LDP C Clears load profile data' (Level 1)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.clock.set", "pattern": "(?i)\\s*(DAT|TIM)\\w*\\s+\\S.*", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): DATE <date>, TIME <time> set the clock (Level 1); S22 Tables 7.27, 7.76", "status": "documented-untested", "notes": "Would corrupt SER time stamps.", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.irig", "pattern": "(?i)\\s*IRI\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'IRIG Forces synchronization of internal control clock' (Level 1)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.loopback", "pattern": "(?i)\\s*LOO\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): LOO ... (Level 2)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.analog_test", "pattern": "(?i)\\s*ANA\\w*(\\s.*)?", "classification": "state-changing", "citation": "S22 SEL-751 Relay Command Summary (end of manual): ANA c p t tests analog output (Level 2)", "status": "documented-untested", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.port.transparent", "pattern": "(?i)\\s*POR\\w*(\\s.*)?", "classification": "state-changing", "citation": "S7 Table 5.3 (Level 1 'establish transparent connections', SEL-400 series); command name is recollection", "status": "unknown", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.binary.any_non_ascii", "pattern": "(?s).*[\\x80-\\xff].*", "classification": "state-changing", "citation": "S10 commands.py (Fast Operate 0xA5E0, 0xA5E3; 0xA5B5; 0xA5B9)", "status": "documented-untested (secondary source)", "notes": "Adapter transport must send only 0x20-0x7E plus CR LF.", "side_effects": "State change or unknown effect; see classification and notes. Never sent."},
-    {"id": "sel.sum.clear", "pattern": "(?i)\\s*SUM\\w*\\s+(C|R)\\b.*", "classification": "state-changing", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'SUM C or R Resets the event summary buffer' (Level 1)", "status": "documented-untested", "side_effects": "Clears event summaries."},
-    {"id": "sel.com.clear", "pattern": "(?i)\\s*COM\\w*\\s+(PTP\\s+)?(C|R)\\b.*", "classification": "state-changing", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): COM C, COM C A/B, COM PTP C or R (Level 1)", "status": "documented-untested", "side_effects": "Clears communications records or PTP statistics."},
-    {"id": "sel.goose.clear", "pattern": "(?i)\\s*(GOO|FGS)\\w*\\s+S\\s+\\S+\\s+C\\b.*", "classification": "state-changing", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): GOOSE S n C, GOOSE S ALL C, FGS S n C, FGS S ALL C (Level 1)", "status": "documented-untested", "side_effects": "Clears GOOSE statistics."},
-    {"id": "sel.ping", "pattern": "(?i)\\s*PIN\\w*(\\s.*)?", "classification": "state-changing", "access_level": "1", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 'PING x.x.x.x t' (Level 1)", "status": "documented-untested", "side_effects": "Makes the relay emit ICMP traffic; not a read."},
-    {"id": "sel.breaker.data", "pattern": "(?i)\\s*BRE\\w*\\s+(R|W)\\b.*", "classification": "state-changing", "access_level": "2", "citation": "S22 SEL-751 Relay Command Summary (end of manual): BRE R resets, BRE W preloads breaker data (Level 2)", "status": "documented-untested", "side_effects": "Changes breaker wear data."},
-    {"id": "sel.thermal", "pattern": "(?i)\\s*THE\\w*\\s+(P|R)\\b.*", "classification": "state-changing", "access_level": "2", "citation": "S22 SEL-751 Relay Command Summary (end of manual): THE P, THE R (Level 2)", "status": "documented-untested", "side_effects": "Changes thermal capacity state."},
-    {"id": "sel.disconnect", "pattern": "(?i)\\s*89(C|O)\\w*(\\s.*)?", "classification": "state-changing", "access_level": "2", "citation": "S22 SEL-751 Relay Command Summary (end of manual): 89C, 89O (Level 2); S22 Tables 7.18-7.19", "status": "documented-untested", "side_effects": "Operates disconnects."},
-    {"id": "sel.misc.level2", "pattern": "(?i)\\s*(AFT|HSR\\s+C|INI\\w*|PARTNO|TEST\\s+DB\\s+\\S+)\\b.*", "classification": "state-changing", "access_level": "2", "citation": "S22 SEL-751 Relay Command Summary (end of manual): AFT, HSR C, INI HIF, PARTNO (Level 2)", "status": "documented-untested", "side_effects": "Tests, resets or changes device data."}
-  ]
+ "register": "SEL ASCII (SEL-751 reference model) approved command register, Phase 0 draft",
+ "owner": "A2",
+ "status": "draft; A1 approved SHO G and SHO P 1 on 2026-10-23 (docs/agent-handoffs.md, commit 4481653 on claude/project-thread-hperik); A6 re-review pending",
+ "date": "2026-10-23 (revised after reading S22; re-cited to S22 table numbers; SHO G and SHO P 1 approved by A1)",
+ "sources": "See docs/phase0/A2-device-feasibility.md section 1 (S1..S22). S22 = SEL-751 Instruction Manual, date code 20260910 (owner-supplied); page numbers below refer to it.",
+ "matching": "Each pattern is a Python re.fullmatch against one received line. Allowed entries are exact canonical forms the adapter may send. Denied entries document known dangerous lines and are case-insensitive and abbreviation-tolerant on purpose. Any line matching no entry is a violation (deny by default).",
+ "not_representable_as_lines": [
+  "The password line sent after ACC prompts 'Password:'. It must be logged by the simulator as an auth event, never as a command line, and never stored in clear.",
+  "Binary SEL Fast messages (0xA5 prefix, S10). Covered by sel.binary.any_non_ascii below only if the log decodes bytes as latin-1; the checker's CONTROL class misses 0x80-0xFF."
+ ],
+ "language": "Valid only for LANG := ENGLISH on the port. With LANG := SPANISH command names differ and 'SER D' clears the SER (S22 Command Summary p.6). The adapter must confirm English before sending anything other than ID/ACC/QUI.",
+ "commands": [
+  {
+   "id": "sel.session.acc",
+   "pattern": "ACC",
+   "classification": "read-only",
+   "access_level": "0 -> 1",
+   "citation": "S22 Table 7.17 p.7.32; password behaviour p.7.33",
+   "status": "documented-untested",
+   "notes": "Changes session access level only. One attempt per invocation (risk D2).",
+   "side_effects": "Changes session access level 0 to 1. Three wrong passwords pulse SALARM for 1 s (S22 p.7.33); factory default OUT101 := HALARM OR SALARM (S22 Table 4.83) closes the alarm contact, and SER4 := SALARM (S22 Table 4.122) records it in the SER. One attempt per session; no further ACC after a failure. Sent only by the transport auth phase. If the Level 1 password is disabled, ACC goes straight to '=>' with no prompt (S22 p.7.33); the adapter sends the password only after seeing 'Password: ?', otherwise the password would be executed as a command and logged (D26, raised by A6)."
+  },
+  {
+   "id": "sel.session.qui",
+   "pattern": "QUI",
+   "classification": "read-only",
+   "access_level": "any -> 0",
+   "citation": "S22 Table 7.59 p.7.73 (Access Level 0)",
+   "status": "documented-untested",
+   "notes": "Sent at end of every session.",
+   "side_effects": "Returns to Level 0. Without QUIT a Telnet session stays at its elevated level until TIDLE expires (S22 p.7.15-7.16 Telnet Server note)."
+  },
+  {
+   "id": "sel.id",
+   "pattern": "ID",
+   "classification": "read-only",
+   "access_level": "0",
+   "citation": "S22 Table 7.43 and Figure 7.38 p.7.64; Figure 3.20 p.3.14",
+   "status": "documented-untested",
+   "notes": "Fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL, display package lines, and on IEC 61850 models iedName/type/configVersion. Per-line checksum = 4-hex sum of characters of '\"KEY=value\",' (verified on all 10 lines of Figure 7.38).",
+   "side_effects": "None documented. Occupies the session for the response."
+  },
+  {
+   "id": "sel.ser.read_all",
+   "pattern": "SER",
+   "classification": "read-only",
+   "access_level": "1",
+   "citation": "S22 Table 7.63 p.7.75 ('Displays a chronological progression of all available SER rows (as many as 1024 rows). Row 1 is the most recently triggered row'); Figure 10.16 p.10.40",
+   "status": "documented-untested",
+   "notes": "On SEL-751 bare SER returns all rows (unlike A4's report for SEL-400 series). Row/date range forms exist (Table 7.63) but stay denied until needed.",
+   "side_effects": "None documented. Returns up to the full ring buffer (1,024 rows on SEL-751, S4), so every read repeats rows already collected."
+  },
+  {
+   "id": "sel.settings.show_global",
+   "pattern": "SHO G",
+   "classification": "read-only",
+   "access_level": "1",
+   "citation": "S22 Table 7.67 p.7.77 ('SHO G s Shows global settings', Access Level 1); S22 Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH, DATE_F)",
+   "status": "documented-untested",
+   "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+   "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. Needed to state UTC offset and DST rule for SER local times. Output is sensitive configuration evidence. No password-bearing setting appears in any S22 settings sheet (A2 searched every ':=' line for pass/pwd/key/secret/community/auth: none); passwords are set only with PAS (Table 7.52) and are not settings. S22 prints no example SHO G output."
+  },
+  {
+   "id": "sel.settings.show_port1",
+   "pattern": "SHO P 1",
+   "classification": "read-only",
+   "access_level": "1",
+   "citation": "S22 Table 7.67 p.7.77 ('SHO P n s Shows serial port settings. n specifies the port', Access Level 1); Port 1 is Ethernet per S22 Table 7.1 p.7.1; Port 1 settings sheet (ETELNET, MAXACC, LANG, TPORT, TCBAN, TIDLE, FASTOP, EFTPSERV, FTPACC, FTPUSER, HTTPACC)",
+   "status": "documented-untested",
+   "side_effects": "None documented. Output contains addresses and FTPUSER; store as sensitive evidence.",
+   "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. The port number is always explicit (bare SHO P shows the active port). Lets the collector record MAXACC, FASTOP, LANG, FTPACC and HTTPACC before collecting; per A1, MAXACC above 1 is recorded and warned, not refused (owner decision pending). Output includes IP addresses and FTPUSER (a user name, not a password); no password-bearing setting exists in the Port 1 sheet. A1 asked for Table 2.5 as the Port 1 citation, but S22 Table 2.5 covers the Port 4 communications card; Table 7.1 is the correct citation."
+  },
+  {
+   "id": "sel.access.elevate",
+   "pattern": "(?i)\\s*(2AC|BAC|PAC|AAC|OAC|CAL)\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.17 (2AC Level 1, CAL Level 2); S7 Table 5.4 (PAC, AAC, OAC on SEL-400)",
+   "status": "documented-untested",
+   "notes": "Access elevation. Collector holds no Level B/P/A/O/2 password; a failed attempt still counts toward the ALARM pulse (D2).",
+   "side_effects": "2AC: SALARM pulses after successful Level 2 access or if access is denied (S22 p.7.33)."
+  },
+  {
+   "id": "sel.ser.clear",
+   "pattern": "(?i)\\s*SER\\w*\\s+C\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.63 p.7.75 'SER C or R  Clears/resets the SER records'  Access Level 1",
+   "status": "documented-untested",
+   "notes": "Level 1. Covers C and R.",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.ser.d",
+   "pattern": "(?i)\\s*SER\\w*\\s+D\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.64 p.7.76 (English: lists chattering elements, Level 1); Command Summary p.6 (Spanish 'SER D o R' clears SER data)",
+   "status": "documented-untested",
+   "notes": "Read-only in English but CLEARS the SER when LANG := SPANISH. Kept denied.",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.ser.other_args",
+   "pattern": "(?i)\\s*SER\\w*\\s+.+",
+   "classification": "state-changing",
+   "citation": "deny-by-default for unread argument forms",
+   "status": "unknown",
+   "notes": "Placeholder so every SER argument form is a violation until classified.",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.his.clear",
+   "pattern": "(?i)\\s*HIS\\w*\\s+(\\S+\\s+)?(C|R|CA|RA)\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.37 p.7.60 (HIS C/R), Table 7.38 (HIS HIF C/R/CA/RA), Table 7.39; Command Summary (Level 1)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.tri",
+   "pattern": "(?i)\\s*TRI\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.77 p.7.86 (TRI), Table 7.78 (TRI HIF); Level 1",
+   "status": "documented-untested",
+   "notes": "Level 1 command that creates an event report and consumes limited event storage (D1).",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.met.reset",
+   "pattern": "(?i)\\s*MET\\w*\\s+R(D|E|M|P)\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.50 p.7.67 (MET RD/RE/RM/RP); Level 1",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.pro.reset",
+   "pattern": "(?i)\\s*PRO\\w*\\s+R\\b.*",
+   "classification": "state-changing",
+   "citation": "S1 Table 4 (SEL-300G only)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.tar.reset",
+   "pattern": "(?i)\\s*TAR\\w*\\s+R\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.72 p.7.82 (TAR R resets latched targets); Level 1",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.sta.args",
+   "pattern": "(?i)\\s*STA\\w*\\s+\\S.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.68 p.7.80 (STA C/R clears self-test status and restarts the relay, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.breaker.ope",
+   "pattern": "(?i)\\s*OPE\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Command Summary (OPE, Level 2); no dedicated table in Section 7 index",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.breaker.clo",
+   "pattern": "(?i)\\s*CLO\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Command Summary (CLO, Level 2); no dedicated table in Section 7 index",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.output.pul",
+   "pattern": "(?i)\\s*PUL\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.58 p.7.73 (PUL OUTnnn, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.control.con",
+   "pattern": "(?i)\\s*CON\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.24 p.7.49 (CONTROL, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.settings.set",
+   "pattern": "(?i)\\s*SET\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.65 p.7.76 (SET, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.settings.pas",
+   "pattern": "(?i)\\s*PAS\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.52 p.7.69 (PAS 1/2 Level 2, PAS C Level C)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.settings.copy",
+   "pattern": "(?i)\\s*COP\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.25 p.7.50 (COPY, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.settings.group",
+   "pattern": "(?i)\\s*GRO\\w*\\s+\\S.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.35 p.7.59 (GROUP n changes active group, Level 2; bare GROUP displays, Level 1)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.defaults.r_s",
+   "pattern": "(?i)\\s*R_S.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.62 p.7.75 (R_S restore factory defaults, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.firmware.l_d",
+   "pattern": "(?i)\\s*L_D.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.46 p.7.65 (L_D load firmware, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.file",
+   "pattern": "(?i)\\s*FIL\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.29 p.7.53 (FILE DIR/READ/SHOW Level 1, FILE WRITE Level 2); Table 7.85 (Ymodem files)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.ldp.clear",
+   "pattern": "(?i)\\s*LDP\\w*\\s+C\\b.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.47 p.7.65 (LDP C clears load profile, Level 1)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.clock.set",
+   "pattern": "(?i)\\s*(DAT|TIM)\\w*\\s+\\S.*",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.27 p.7.50 (DATE), Table 7.76 p.7.85 (TIME); setting forms Level 1",
+   "status": "documented-untested",
+   "notes": "Would corrupt SER time stamps.",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.irig",
+   "pattern": "(?i)\\s*IRI\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.45 p.7.64 (IRI forces clock synchronization, Level 1)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.loopback",
+   "pattern": "(?i)\\s*LOO\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.49 p.7.66 (LOO, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.analog_test",
+   "pattern": "(?i)\\s*ANA\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S22 Table 7.20 p.7.37 (ANALOG, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.port.transparent",
+   "pattern": "(?i)\\s*POR\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "citation": "S7 Table 5.3 (Level 1 'establish transparent connections', SEL-400 series); command name is recollection",
+   "status": "unknown",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.binary.any_non_ascii",
+   "pattern": "(?s).*[\\x80-\\xff].*",
+   "classification": "state-changing",
+   "citation": "S10 commands.py (Fast Operate 0xA5E0, 0xA5E3; 0xA5B5; 0xA5B9)",
+   "status": "documented-untested (secondary source)",
+   "notes": "Adapter transport must send only 0x20-0x7E plus CR LF.",
+   "side_effects": "State change or unknown effect; see classification and notes. Never sent."
+  },
+  {
+   "id": "sel.sum.clear",
+   "pattern": "(?i)\\s*SUM\\w*\\s+(C|R)\\b.*",
+   "classification": "state-changing",
+   "access_level": "1",
+   "citation": "S22 Table 7.70 p.7.81 (SUM C/R resets event summary buffer, Level 1)",
+   "status": "documented-untested",
+   "side_effects": "Clears event summaries."
+  },
+  {
+   "id": "sel.com.clear",
+   "pattern": "(?i)\\s*COM\\w*\\s+(PTP\\s+)?(C|R)\\b.*",
+   "classification": "state-changing",
+   "access_level": "1",
+   "citation": "S22 Table 7.23 p.7.48 (COM C), Table 7.21 p.7.42 (COM PTP C/R); Level 1",
+   "status": "documented-untested",
+   "side_effects": "Clears communications records or PTP statistics."
+  },
+  {
+   "id": "sel.goose.clear",
+   "pattern": "(?i)\\s*(GOO|FGS)\\w*\\s+S\\s+\\S+\\s+C\\b.*",
+   "classification": "state-changing",
+   "access_level": "1",
+   "citation": "S22 Table 7.32 p.7.55 (GOOSE S n C), Table 7.30 p.7.53 (FGS S n C); Level 1",
+   "status": "documented-untested",
+   "side_effects": "Clears GOOSE statistics."
+  },
+  {
+   "id": "sel.ping",
+   "pattern": "(?i)\\s*PIN\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "access_level": "1",
+   "citation": "S22 Command Summary (PING x.x.x.x t, Level 1); no dedicated table in Section 7 index",
+   "status": "documented-untested",
+   "side_effects": "Makes the relay emit ICMP traffic; not a read."
+  },
+  {
+   "id": "sel.breaker.data",
+   "pattern": "(?i)\\s*BRE\\w*\\s+(R|W)\\b.*",
+   "classification": "state-changing",
+   "access_level": "2",
+   "citation": "S22 Command Summary (BRE R/W, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "Changes breaker wear data."
+  },
+  {
+   "id": "sel.thermal",
+   "pattern": "(?i)\\s*THE\\w*\\s+(P|R)\\b.*",
+   "classification": "state-changing",
+   "access_level": "2",
+   "citation": "S22 Table 7.75 p.7.85 (THE P/R, Level 2)",
+   "status": "documented-untested",
+   "side_effects": "Changes thermal capacity state."
+  },
+  {
+   "id": "sel.disconnect",
+   "pattern": "(?i)\\s*89(C|O)\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "access_level": "2",
+   "citation": "S22 Table 7.18 p.7.33 (89CLOSE), Table 7.19 p.7.35 (89OPEN); Level 2",
+   "status": "documented-untested",
+   "side_effects": "Operates disconnects."
+  },
+  {
+   "id": "sel.misc.level2",
+   "pattern": "(?i)\\s*(AFT|HSR\\s+C|INI\\w*|PARTNO|TEST\\s+DB\\s+\\S+)\\b.*",
+   "classification": "state-changing",
+   "access_level": "2",
+   "citation": "S22 Table 7.41 p.7.63 (HSR C), Table 7.44 p.7.64 (INI HIF), Table 7.74 p.7.83 (TEST DB); Command Summary (AFT, PARTNO); Level 2",
+   "status": "documented-untested",
+   "side_effects": "Tests, resets or changes device data."
+  },
+  {
+   "id": "sel.cse.candidate",
+   "pattern": "(?i)\\s*CSE\\w*(\\s.*)?",
+   "classification": "state-changing",
+   "access_level": "1",
+   "citation": "S22 Table C.2 (CSE, Level 1); S32 Table 14.50 p.14.27 and Figure 9.17 p.9.30 (SEL-400 series)",
+   "status": "documented-untested",
+   "notes": "Read-only by documentation, but DENIED: deferred by A1 to the SEL-400 family's Phase 4 expansion. SEL-751 field list not documented; the S32 example has wrong data-line checksums (D25).",
+   "side_effects": "None documented. Denied until a family profile and checksum-correct source exist."
+  }
+ ]
 }
