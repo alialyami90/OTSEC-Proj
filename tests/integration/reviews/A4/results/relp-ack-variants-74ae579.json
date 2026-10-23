@@ -1,0 +1,206 @@
+{
+  "rsyslog": "rsyslogd  8.2312.0 (aka 2023.12)",
+  "messages": 3000,
+  "window": 128,
+  "classification": "simulated",
+  "rows": [
+    {
+      "rep": 0,
+      "trial": "default-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 28,
+      "acked_not_stored": 1472,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": false
+    },
+    {
+      "rep": 0,
+      "trial": "direct-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 0,
+      "trial": "direct-confirm-kill-after-300",
+      "sent": 301,
+      "acked": 300,
+      "stored": 300,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 0,
+      "trial": "direct-confirm-kill-after-2900",
+      "sent": 2901,
+      "acked": 2900,
+      "stored": 2900,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 0,
+      "trial": "direct-omfile",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 0,
+      "trial": "direct-omfile-flush",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 1,
+      "trial": "default-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 33,
+      "acked_not_stored": 1467,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": false
+    },
+    {
+      "rep": 1,
+      "trial": "direct-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 1,
+      "trial": "direct-confirm-kill-after-300",
+      "sent": 301,
+      "acked": 300,
+      "stored": 300,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 1,
+      "trial": "direct-confirm-kill-after-2900",
+      "sent": 2901,
+      "acked": 2900,
+      "stored": 2900,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 1,
+      "trial": "direct-omfile",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 1,
+      "trial": "direct-omfile-flush",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 2,
+      "trial": "default-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 33,
+      "acked_not_stored": 1467,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": false
+    },
+    {
+      "rep": 2,
+      "trial": "direct-queues",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 2,
+      "trial": "direct-confirm-kill-after-300",
+      "sent": 301,
+      "acked": 300,
+      "stored": 300,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 2,
+      "trial": "direct-confirm-kill-after-2900",
+      "sent": 2901,
+      "acked": 2900,
+      "stored": 2900,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 2,
+      "trial": "direct-omfile",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    },
+    {
+      "rep": 2,
+      "trial": "direct-omfile-flush",
+      "sent": 1501,
+      "acked": 1500,
+      "stored": 1500,
+      "acked_not_stored": 0,
+      "stored_not_acked": 0,
+      "parser_violations": 0,
+      "pass": true
+    }
+  ]
+}

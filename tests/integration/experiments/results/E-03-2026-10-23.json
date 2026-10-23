@@ -1,0 +1,230 @@
+{
+  "experiment": "E-03 store restart while disk full",
+  "classification": "simulated",
+  "python": "3.13.17",
+  "sqlite": "3.45.1",
+  "trials": [
+    {
+      "config": "default-wal",
+      "acked": 453,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 40960,
+        "-wal": 4120576,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            453,
+            453
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 227
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    },
+    {
+      "config": "default-wal",
+      "acked": 453,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 40960,
+        "-wal": 4120576,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            453,
+            453
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 227
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    },
+    {
+      "config": "default-wal",
+      "acked": 453,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 40960,
+        "-wal": 4120576,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            453,
+            453
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 227
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    },
+    {
+      "config": "bounded-wal",
+      "acked": 9451,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 3887104,
+        "-wal": 274432,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            9451,
+            9451
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 4726
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    },
+    {
+      "config": "bounded-wal",
+      "acked": 9451,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 3887104,
+        "-wal": 274432,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            9451,
+            9451
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 4726
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    },
+    {
+      "config": "bounded-wal",
+      "acked": 9451,
+      "writer_error": "FULL OperationalError database or disk is full",
+      "free_bytes_at_restart": 0,
+      "files": {
+        "db": 3887104,
+        "-wal": 274432,
+        "-shm": 32768
+      },
+      "steps": {
+        "open": {
+          "ok": true,
+          "value": "wal"
+        },
+        "count_max": {
+          "ok": true,
+          "value": [
+            9451,
+            9451
+          ]
+        },
+        "integrity": {
+          "ok": true,
+          "value": "ok"
+        },
+        "forwarder_read": {
+          "ok": true,
+          "value": 4726
+        },
+        "prune_50_forwarded": {
+          "ok": false,
+          "error": "OperationalError: database or disk is full"
+        }
+      },
+      "acked_events_readable": true
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "_comment": "Synthetic register for the simulator self-test only. Neutral command names; not a device register and not evidence about any device.",
+  "commands": [
+    {
+      "id": "login",
+      "pattern": "LOGIN",
+      "classification": "read-only"
+    },
+    {
+      "id": "show-id",
+      "pattern": "SHOW-ID",
+      "classification": "read-only"
+    },
+    {
+      "id": "show-events",
+      "pattern": "SHOW-EVENTS( [0-9]{1,4})?",
+      "classification": "read-only"
+    },
+    {
+      "id": "show-events-clear",
+      "pattern": "SHOW-EVENTS CLEAR",
+      "classification": "state-changing"
+    }
+  ]
+}

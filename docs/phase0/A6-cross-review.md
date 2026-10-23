@@ -1,0 +1,163 @@
+# A6 cross-review of P0-A2, P0-A3, P0-A4 and P0-A5 (CLAUDE.md 5.6)
+
+Reviewer: A6. Date: 2026-10-23. Reviewed:
+
+- A3: `docs/threat-model.md`, `docs/phase0/A3-security-feasibility.md`, `modules/access/experiments/e1-ssh-forward-controls/` at `f08abf9` on `claude/project-thread-qj1j9d` (PR #1).
+- A2: `docs/phase0/A2-device-feasibility.md`, `docs/phase0/A2-command-register-draft.json`, `docs/device-capabilities.md` at the head of `claude/project-thread-8k8qrr` (PR #2) on 2026-10-23.
+
+Method: try to disprove each claim with tests where possible, otherwise by checking it against the cited source or against the other agent's draft. Outcome per item: **holds**, **holds with limits**, **disproved**, or **open**. Nothing here is hardware evidence.
+
+## Outcome summary
+
+| Draft | Outcome | Blocking for Phase 1? |
+| --- | --- | --- |
+| A3 threat model v0 | Accepted as the Phase 0 threat model with six findings. One claim disproved (L1–L7 are not seven independent layers for the slice). One scoping error (T8 shows termination, not revocation). | No. R-A3-1 and R-A3-3 must be resolved in the Phase 1 read-only enforcement ADR. |
+| A3 experiment E1 | Reproduced 3 of 3 runs, 9 of 9 checks. Three extra A6 probes pass 3 of 3. | No. |
+| A2 register draft | Accepted for Phase 0. The four allowed lines (`ACC`, `QUI`, `ID`, `SER`) are exact and pass A6's 61-line deny corpus with zero read-only classifications. | No, but Phase 2 cannot start without B-07 (manual text). |
+| A4 telemetry and detection (PR #4) | One defect: SER alignment as specified reports a false gap and re-adds every row on each new SEL-751 event (R-A4-1). RELP result reproduced. GOOSE rules fail 8 of 8 adversarial cases. | R-A4-1 must be fixed in the C5 event contract before V-S4 can pass. The rest is input to Phase 4 IDS. |
+| A2 feasibility findings | Accepted with four findings. SSH-not-native and Level-1-is-not-read-only are significant and change A6 criteria (V-S7, V-S13, V-S14). | No. |
+
+## A3 findings
+
+### R-A3-1 — L1–L7 are not seven independent layers for the slice (disproved as stated)
+
+Claim (A3 §4.3, AP-5): read-only is enforced by seven independent layers. Tested against the slice's real path, a CLI write sent over the approved collection session:
+
+- **L2, L3, L4, and the L7 test oracle all derive from the same register.** A too-broad allowed pattern (for example a future `SER( .*)?` to admit row ranges) passes all four at once. They are independent against adapter bugs, not against register errors.
+- **L5 does not hold for the primary family.** A2 reports that SEL Level 1, the level needed for `SER`, also permits `TRI` (creates an event report), elevation attempts (`2AC`, `BAC`), and on SEL-400 series transparent port connections. The device cannot enforce read-only for us (this was HR-2 as a risk; A2's evidence makes it a fact at `documented-untested`).
+- **L6 adds nothing against this path.** A write over the same Telnet session uses the same port as the read.
+- **L7 in deployment (IDS) is protocol-dependent.** Over Telnet it can see command lines; over SSH (if a gateway is used) it cannot (A6 C-03).
+- **L1** stops humans, not the collector identity, which is the only identity that does device I/O in slice 1.
+
+Effective independent prevention for the slice: L1 for humans, and L3 and L4 against adapter bugs, which are common-mode with the register. Against register errors the only checks not derived from the register are A2/A6 review and A6's independent corpus ([tests/safety/register_review/](../../tests/safety/register_review/)). **Requested change:** restate AP-5 and §4.3 with this common-mode analysis. Make "A6 deny corpus passes" a gate for every register change, and require L4 to be a separate component that checks the final bytes written to the socket, after encoding, line terminator, and Telnet escaping. A check on the command string before those steps does not see what the device receives.
+
+### R-A3-2 — E1 T8 shows termination, not revocation (scope error)
+
+E1 T8 reports "new use fails" after killing the session process. A6 probe T9 shows why: the held connection was closed, but the same key immediately re-established a working tunnel (`REPLY OK DATA`, 3 of 3 runs). The "new use fails" in T8 is the user's local `ssh -L` listener dying, not the gateway refusing. Revocation requires removing the authorization (key, certificate, or grant) and then killing the sessions; E1 shows only the second half. **Requested change:** reword AP-6 and the Q1 table's revocation row; A6 will require R2.5 tests to show re-authentication denied after revocation, not only session teardown.
+
+Other E1 checks hold: A6 T10 (`ssh -W` stdio forward to an unapproved device: refused, 0 connections at that device) and T11 (sftp subsystem: refused) pass 3 of 3. Evidence: [tests/security/reviews/A3-E1/](../../tests/security/reviews/A3-E1/) (patch and three result files; `simulated`, OpenSSH 9.6p1 loopback).
+
+### R-A3-3 — Credential injection "below the recorder" does not fit in-band authentication
+
+AP-2 and §4.2 assume the secret is resolved by the transport at connect time, below the transcript recorder and the egress check. On SEL relays the password is an in-band line: `ACC`, then a `Password:` prompt, then the secret as the next line of the same session (A2 §10 and §11). The egress check must therefore pass one line that is not in the register. That exception is a bypass path:
+
+- If the device does not show `Password:` (for example passwords disabled on the relay, which A6 recalls is possible by jumper on some SEL models; unverified), the secret line is executed as a command.
+- Whatever the credential store holds is sent unchecked in that slot. An administrator, or anyone who can write the credential store, can place a command there.
+
+**Requested change:** the egress check permits the credential slot only when the documented password prompt has just been received, and never otherwise. The credential value is validated at write time: printable ASCII, bounded length, and not matching any register or deny-corpus entry. The recording simulator now records this exchange as an auth event and flags any line or password sent before the prompt (`before-prompt` verdict).
+
+### R-A3-4 — Forwarding "accepts nothing back" conflicts with acknowledged delivery
+
+TB5 and AP-9 say the forwarder accepts nothing from the collector beyond the TLS handshake. A6 E-01 shows delivery needs an application-level acknowledgement (B-03). An acknowledging transport such as RELP means parsing responses from a less-trusted collector. **Requested change:** A3 and A4 agree on one of two options. Either accept a minimal, strictly parsed acknowledgement channel, with AP-9's test changed to "anything other than a well-formed ack is ignored and alarmed". Or keep TB5 one-way and accept a documented unconfirmed window. A1 decides; this is an input to B-03.
+
+### R-A3-5 — AP-17 detection window equals the WAN outage
+
+AP-17 claims central detects an edited or deleted audit record "within one sync interval". A root attacker on a node can rewrite every record not yet forwarded, including the hash chain, and central cannot tell. With R8.3's 72 h *(proposed)* outage, the undetectable window is 72 h. **Requested change:** state the window, and consider a local anchor the node's root cannot rewrite (TPM monotonic counter or write-once media) or periodic anchoring to a site-local second device.
+
+### R-A3-6 — Standards and ATT&CK citations
+
+Spot-checked the ATT&CK for ICS IDs against attack.mitre.org on 2026-10-23: T1694.001/.002, T1692.001/.002, T1691.002, T0859, T0886, T0866, T0832, T0811, T0882 match A3's table. The IEC 62443-3-3 SR titles used match A6's recollection of the SR list; A6 has not read the normative text either. **Holds.**
+
+### A3 items that hold
+
+The Q7 answer (yes, the platform is an attack path by construction) and the 20-path table are sound. Each row has a falsifiable test, and the tests map onto V-S5, V-S7, V-S11, V-S14, and V-S15 without conflict. The slice rule that no human role can trigger device I/O (AP-15) removes the hardest privilege-separation case and is endorsed. The T0 precondition pattern is adopted: every A6 denial test includes a positive control showing the path works when it should.
+
+## A2 findings
+
+### R-A2-1 — Register: allowed set is tight; deny entries are labels only
+
+A6 ran the draft register through `check.py` with an independent corpus of 60 lines (case, whitespace, abbreviation, argument, separator, binary-prefix, and escape variants; [tests/safety/register_review/sel-deny-corpus.txt](../../tests/safety/register_review/sel-deny-corpus.txt)). Zero deny-corpus lines classify read-only, and all four allow-corpus lines do. Evidence: [tests/safety/register_review/results/A2-draft-2026-10-23.txt](../../tests/safety/register_review/results/A2-draft-2026-10-23.txt) (`desk`). Because classification is deny-by-default, the safety of the register rests entirely on the four allowed patterns. The deny entries only improve violation labels. **Holds.** Every future widening of an allowed pattern (for example `SER` row ranges) must pass the corpus.
+
+### R-A2-2 — `ACC` is classified read-only but has device side effects
+
+`ACC` changes session state and starts a password exchange whose failures close the ALARM contact after three attempts (A2 D2, SEL-300G). Its classification is defensible, but V-S13 must bound it. A6 criterion: at most one failed in-band authentication per session, and no further `ACC` after a failure. **Requested change:** add a `side_effects` field to register entries so that this kind of constraint is machine-checkable.
+
+### R-A2-3 — SER duplicate key will merge legitimate repeats
+
+A2 §7 says row numbers are positional and identical rows (same element, state, and millisecond) are possible, while proposing a duplicate key of device, timestamp, element, and state. With `SER` returning the whole buffer on every poll, a per-row key cannot tell "same row seen again" from "a new identical row". It will silently drop the second, which violates R4.4. **Requested change (A4 with A2):** de-duplicate by aligning consecutive buffer snapshots, matching the longest overlapping suffix and prefix of ordered rows, instead of by a per-row key. Treat an ambiguous alignment as a gap event. A6 adds this case to V-S4 (C-13).
+
+### R-A2-4 — Transport is Telnet: V-S14 does not apply, and credentials cross the LAN in clear
+
+With no documented SSH on SEL relays, the slice transport is Telnet. Device identity cannot be authenticated (V-S14 is not applicable to this family), and the shared Level 1 password is visible to anyone on the station LAN (A3 AP-12, HR-1). A6 updates V-S14 to apply only to transports with server authentication. For Telnet families, the residual risk is recorded per device and identity drift is detectable only from `ID` output, which is spoofable. On the positive side, V-S7 gains a fourth independent source: a lab packet capture can read the command lines.
+
+### Simulator and checker changes made in response
+
+A2's and A1's review of A6's tooling was correct on both points. `check.py` now flags any byte outside 0x20–0x7E itself, without relying on the register or on latin-1 decoding. The simulator has a raw TCP transport with Telnet option refusal and IAC removal, CR NUL line endings, and in-band authentication recorded as an auth event with the secret never stored. It also has a `before-prompt` check for lines sent before the device answered. Self-test: 13 of 13 pass, 3 runs ([results](../../tests/safety/recording_simulator/results/selftest-2026-10-23.txt)).
+
+### Blocker raised from this review
+
+**B-07:** the SEL manual bodies (command tables, example outputs) cannot be read from this environment. The network policy denies `selinc.com` (A6 confirmed: proxy `CONNECT` 403), and A2 could read only front matter from mirrors. The documented-behaviour layer of the simulator, the `documented-example` fixtures, and every register entry still marked "located, not read" are blocked until the owner uploads the SEL-751 instruction manual (and the SEL-300G and SEL-421 sections A2 cites) or allows `selinc.com` in the environment's network policy.
+
+## A4 findings (PR #4, `claude/project-thread-ix2tu3` at `74ae579`)
+
+A4 asked for review of detection accuracy (CLAUDE.md 5.6). A6 ran A4's code only as the thing under test; expected results are hand-derived (GT-HAND) in A6 scripts under [tests/integration/reviews/A4/](../../tests/integration/reviews/A4/).
+
+### R-A4-1 — The SER alignment key includes the row number, so every new event looks like a gap (disproved as specified)
+
+`record_digest` is the SHA-256 of the whole native row, including the `#` column. The SEL-751 numbers rows so that "Row 1 is the most recently triggered row" (IM 20260910 Table 7.63, p. 7.75), and Figure 10.16 prints them oldest first, counting down to 1. Each new event therefore renumbers every row already shown, no digest matches the previous read, and `align` returns `gap` with every row as added. A6 built six consecutive-read cases from its own Figure 10.16 transcription ([ser_alignment_cases.py](../../tests/integration/reviews/A4/ser_alignment_cases.py), [results](../../tests/integration/reviews/A4/results/ser-alignment-74ae579.json)). With A4's key, 3 of 6 fail: one new event gives `gap` and 9 rows added instead of `ok` and 1, and the buffer-full case gives 8 instead of 2. With the same `align` and a key that leaves out the row number, 6 of 6 pass. So the algorithm holds and the key is wrong. Consequences if shipped: a false gap event on every poll that finds new rows, and every stored SER row re-ingested on every such poll. **Requested:** the alignment key is the row without its row number and the separating whitespace (the native bytes stay the evidence, unchanged), and the C5 contract says so. The renumbered layout from row 10 up is ASSUMED, so H-07 must confirm it.
+
+### R-A4-2 — On ambiguity, `align` keeps the reading that adds the fewest rows
+
+When more than one offset fits, A4 picks the largest overlap, which adds the fewest rows, and flags `ambiguous`. If the other reading was true, real events are dropped with only a flag to show it. The brief says never to discard native event information silently, and V-S4 says an ambiguous overlap is never resolved by choosing one. **Requested:** on `ambiguous`, add the rows of the smallest overlap (the most rows) and mark the extra ones as possible duplicates, so the mistake can be undone. Low frequency on SEL relays, because rows carry millisecond times, but it matters for any source whose rows have no time.
+
+### R-A4-3 — RELP acknowledgements (E-A4-03): reproduced, with one limit
+
+A6 re-ran A4's experiment unchanged 3 times and added variants: a kill after 300 and after 2,900 messages, and stock `omfile` output with Direct queues, with and without `flushOnTXEnd` ([relp_ack_variants.py](../../tests/integration/reviews/A4/relp_ack_variants.py), [results](../../tests/integration/reviews/A4/results/relp-ack-variants-74ae579.json); rsyslog 8.2312.0). Default queues lost 1,467 to 1,472 of 1,500 acknowledged messages in every run. Every Direct-queue configuration lost none, in all 12 runs. **Holds.** Limit: the receiver was SIGKILLed, which leaves the page cache intact, and neither the sink nor `omfile` was set to fsync. So this proves the ack follows the write for a process crash, not power loss (the same limit as E-02). B-03 still needs the receiver's sync setting stated for any receiver the platform runs itself.
+
+### R-A4-4 — GOOSE sequence rules: 8 of 8 adversarial cases fail
+
+A6 replaced `frames()` with hand-built sequences, eight cases labeled by construction ([goose_seq_cases.py](../../tests/integration/reviews/A4/goose_seq_cases.py), [results](../../tests/integration/reviews/A4/results/goose-seq-cases-74ae579.json)).
+- **Benign, flagged as attacks:** a frame dropped by the sensor, PRP's duplicate copies of each frame seen on one sensor (every second frame flagged), a publisher restart with stNum back to 1, and 32-bit sqNum rollover.
+- **Attacks missed:**
+  - A well-formed injection (stNum+1, sqNum 0, fresh `t`). The alert falls on the next legitimate frame (`stnum-regress`), not on the injected one.
+  - An injection before the first legitimate frame.
+  - A takeover where the legitimate publisher goes silent. Nothing flags this, because there is no check on timeAllowedToLive or on a missing heartbeat.
+  - A new `gocbRef` never seen before.
+
+The 10/11 result on the synthesized dataset holds for that dataset. These rules on their own would be noisy on a PRP station and blind to a takeover. **Requested before any detection claim:** state per-rule false-positive conditions (sensor loss, PRP, restart, rollover); key the state on source MAC and APPID as well as `gocbRef`; add a heartbeat-absence check against timeAllowedToLive; add a baseline of known control blocks; and score detections by event, not by frame. This is Phase 4 input and does not block the slice.
+
+### A4 re-check, 2026-10-23 (`74a64eb`, `7c7fa49`)
+
+- **R-A4-1: closed.** A4's new key, `sel_ser.alignment_key`, hashes from DATE to the end of the line. A6 extended its case file with an end-to-end mode: each read is rendered as a whole SER report, parsed with A4's `parse_report` (DATE_F = MDY), and keyed with A4's `alignment_key`. It also added a seventh case with identical rows. All 7 pass ([results](../../tests/integration/reviews/A4/results/ser-alignment-7c7fa49.json)). The whole-line key still fails 4 of 7, which confirms the cases have teeth.
+- **R-A4-2: closed.** On an ambiguous match, `align_full` keeps the smallest overlap and returns how many of the leading added rows may be duplicates. In case A7 it returns `ambiguous` with both candidate rows. A4 documents the cost: a buffer of identical periodic rows re-emits flagged duplicates.
+- **R-A4-3, R-A4-4:** recorded in A4's docs with their limits. Closed for Phase 0. R-A4-4's list of requirements is the precondition for any GOOSE detection claim in Phase 4.
+
+### R-A4-5 — Smaller items
+
+- **RTAC Syslog times (A4's suggestion):** accepted into V-S3 as a negative case. When MSG carries the event time, the event time is never taken from HEADER (9.4 s apart in the manual's example).
+- **V-S3 cases in schema draft section 3:** consistent with V-S3 (verbatim native time, offset `unknown` with `utc` null, never padding resolution). A6 has not yet compared the DNP3 4 h offset inference against a capture; it stays an inference.
+
+## A5 findings (PR #3, `claude/project-thread-xni3ff` at `26c08cb`, and `A5-platform-feasibility.md`)
+
+Requested by A1 with focus on the methods of E-A5-1 and E-A5-3. A6 built A5's experiment binary from `26c08cb` and ran two independent experiments against it and against the same SQLite engine. Overall outcome: **accepted for Phase 0.** The persistence recommendation holds and A6 evidence supports `synchronous=FULL`, but three claims need narrower wording and one contract contradiction must be settled.
+
+### R-A5-1 — E-A5-1 cannot distinguish `NORMAL` from `FULL`; E-02 can (holds with limits)
+
+E-A5-1 reports 0 failures in all four modes. SIGKILL leaves the page cache intact, so a commit that never reached the disk still survives. A5 states this limit. A6 experiment E-02 checks the precondition for power-loss safety directly by running A5's own writer under strace ([script](../../tests/integration/experiments/fsync_before_ack.py), [results](../../tests/integration/experiments/results/E-02-2026-10-23.json)):
+
+- At `NORMAL`, 1,011 of 1,016 acknowledgements had no fsync since the previous one, with up to 454 acknowledgements between syncs.
+- At `FULL`, every acknowledgement (0 of 680 unsynced) followed an fsync.
+
+So `NORMAL`'s "PASS" in E-A5-1 is not evidence of durability, and acknowledged events at `NORMAL` can be lost on power failure. This supports A5's choice of `FULL` for evidence and audit. **Requested change:** §4 and §8 should not cite E-A5-1 as meeting R8.7 for `NORMAL`. Any stream run at `NORMAL` must be declared non-durable on power loss. A6 adds hardware test H-11 (power cut on site storage).
+
+### R-A5-2 — Restart while the disk is full: reads survive, pruning does not (extends E-A5-3)
+
+E-A5-3 recovers a full store with the writer still running. A6 experiment E-03 kills the writer at `SQLITE_FULL` and opens the store in a new process with the disk still full ([script](../../tests/integration/experiments/store_restart_while_full.py), [results](../../tests/integration/experiments/results/E-03-2026-10-23.json); 3 trials per configuration, Python's sqlite3 binding over SQLite 3.45). In both default and bounded-WAL configurations, the restarted process opened the store, read every acknowledged event, passed `integrity_check`, and ran a forwarder-style range read. Deleting 50 rows failed with `SQLITE_FULL` every time. So a forwarder can still drain after a crash at full disk, but nothing can be pruned until space is freed. **Requested change:** the reserve release must be a startup step, not only a runtime reaction, and the reserve must be re-created after recovery. Phase 2 must test a second exhaustion after a recovery that consumed the reserve. V-S9 gains a restart-while-full case.
+
+### R-A5-3 — Pruning only confirmed events contradicts a target that can never confirm (contract contradiction)
+
+§5 says eviction never removes an event a required consumer has not confirmed, and that over RFC 5425 the confirmed cursor can never advance. If an RFC 5425 syslog target is a required consumer, nothing is ever prunable, the SER quota fills, and polling stops permanently. Today that is the default deployment. **Requested change:** the Phase 1 contract must state per target whether it is a required consumer, and what retires an event for a target that cannot confirm (for example age beyond the replay window, recorded as "delivered unconfirmed"). This is part of B-03 and needs A1, A4, and A5 together.
+
+### R-A5-4 — Smaller items
+
+- E-A5-3 ran on tmpfs, which has no root-reserved blocks. On ext4, a writer running as root consumes the reserved blocks and fills the disk for the whole node. Requested: the store lives on a dedicated filesystem and the writer runs as non-root, both asserted at startup.
+- With per-event commits, E-03 measured about 9 KB of WAL per 368-byte event before a checkpoint (about 450 events filled 4 MiB at default settings). This is fine with the bounded WAL A5 recommends. It is one more reason the default settings must never ship.
+- E-A5-4 agrees with A6 E-01 and adds the acknowledged-transport result: 0 missing and 1 duplicate across 3 collector kills. **Holds.**
+- The R8.3 sizing arithmetic (about 1.3 GB for 72 h at 10 events/s) is consistent with E-03's main-database growth of about 410 bytes per event. **Holds.**
+
+### A5 re-check, 2026-10-23 (`9f14154`)
+
+- **R-A5-1:** `NORMAL` is withdrawn as durability evidence; only `FULL` runs count. **Closed.**
+- **R-A5-2:** E-A5-3 case 3 adds startup recovery (release reserve, prune in batches of 50, `incremental_vacuum(32)` with a checkpoint between steps, re-create reserve) over 3 exhaustions. A6 re-implemented it independently as E-04 (Python sqlite3, not A5's Go code), 5 exhaustions, with the writer SIGKILLed rather than exiting ([script](../../tests/integration/experiments/store_recovery_rounds.py), [results](../../tests/integration/experiments/results/E-04-store-recovery-rounds-2026-10-23.json)). It agrees with A5: `auto_vacuum=INCREMENTAL` passes every round with about 4,070 events per run after recovery; `NONE` regains 27 to 56 events per run (A5 measured 100). **Closed**, with R-A5-5 and one condition: `auto_vacuum` can only be set before the first table exists (or by a full `VACUUM`, which needs free space), so it is a store-creation requirement. A store created without it cannot be fixed at full disk, and the startup check should refuse to run on one.
+- **R-A5-3:** each consumer now has a `required` flag; targets that cannot confirm are never required and get a time-bounded replay window. This matches A1's ADR-0004 item 6 ruling. **Closed at design level**; it closes fully when the C5/C6 contract text carries it.
+- **R-A5-5 (new):** E-04 killed one recovery after its prune committed and before the vacuum, then restarted it. Each run pruned "the oldest half" of what it found, so that round pruned 75% of the store (6,112 of 8,156). A crash loop during recovery would keep halving the store. In the experiments "half" stands in for "forwarded", but the production rule must compute the prune boundary from durable state (the required consumers' confirmed cursors and the retention policy), so a repeated recovery prunes nothing new. **Requested:** a Phase 2 test that kills recovery at each step and checks that no unforwarded event is pruned. A5's suggestion stands: the second-exhaustion test with the capacity-regained condition goes into the Phase 2 suite (V-S9).

@@ -1,0 +1,57 @@
+# Run 2026-10-23T17:45:32Z, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
+test_allowed_commands_are_not_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_allowed_commands_are_not_violations) ... ok
+test_control_bytes_are_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_control_bytes_are_caught) ... ok
+test_exactly_the_expected_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_exactly_the_expected_violations) ... ok
+test_failed_auth_and_concurrency_are_reported (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_failed_auth_and_concurrency_are_reported) ... ok
+test_line_split_across_reads_is_reassembled (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_line_split_across_reads_is_reassembled) ... ok
+test_password_never_recorded (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_password_never_recorded) ... ok
+test_smuggled_line_is_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_smuggled_line_is_caught) ... ok
+test_state_changing_parameter_is_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_state_changing_parameter_is_caught) ... ok
+test_cr_nul_terminator_recognised (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_cr_nul_terminator_recognised) ... ok
+test_expected_violations_only (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_expected_violations_only) ... ok
+test_inband_password_is_auth_event_not_line (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_inband_password_is_auth_event_not_line) ... ok
+test_passwords_never_recorded (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_passwords_never_recorded) ... ok
+test_telnet_options_refused_and_logged (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_telnet_options_refused_and_logged) ... ok
+test_figure_3_20_was_edited_after_capture (tests.safety.recording_simulator.test_sel751_profile.DocumentedIdExamples.test_figure_3_20_was_edited_after_capture) ... ok
+test_figure_7_38_is_self_consistent (tests.safety.recording_simulator.test_sel751_profile.DocumentedIdExamples.test_figure_7_38_is_self_consistent) ... ok
+test_close_without_quit_leaves_relay_elevated (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_close_without_quit_leaves_relay_elevated) ... ok
+test_level0_cannot_read_ser (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_level0_cannot_read_ser) ... ok
+test_line_after_failed_password_is_a_second_attempt (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_line_after_failed_password_is_a_second_attempt) ... ok
+test_password_disabled_executes_the_secret_as_a_command (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_password_disabled_executes_the_secret_as_a_command) ... ok
+test_ser_clear_at_level1_changes_device_state (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_ser_clear_at_level1_changes_device_state) ... ok
+test_show_port1_serves_access_settings (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_show_port1_serves_access_settings) ... ok
+test_spanish_port_defeats_an_english_collector (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_spanish_port_defeats_an_english_collector) ... ok
+test_third_telnet_session_refused (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_third_telnet_session_refused) ... ok
+test_three_failures_pulse_salarm (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_three_failures_pulse_salarm) ... ok
+test_well_behaved_collector_passes (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_well_behaved_collector_passes) ... ok
+test_accepted_replies_proceed_to_collect (tests.safety.recording_simulator.test_sel751_language.ProbeGrammar.test_accepted_replies_proceed_to_collect) ... ok
+test_near_misses_stop_before_acc (tests.safety.recording_simulator.test_sel751_language.ProbeGrammar.test_near_misses_stop_before_acc) ... ok
+test_english_port_collects (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_english_port_collects) ... ok
+test_lang_missing_from_output_is_refused (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_lang_missing_from_output_is_refused) ... ok
+test_maxacc_1_but_ftp_and_http_still_warn (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_maxacc_1_but_ftp_and_http_still_warn) ... ok
+test_negative_control_naive_collector_is_caught (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_negative_control_naive_collector_is_caught) ... ok
+test_spanish_accepting_english_refused_before_ser (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_spanish_accepting_english_refused_before_ser) ... ok
+test_spanish_rejecting_english_stops_at_the_probe (tests.safety.recording_simulator.test_sel751_language.SpanishPort.test_spanish_rejecting_english_stops_at_the_probe) ... ok
+test_allowed_verbs_are_same_or_absent_in_spanish (tests.safety.recording_simulator.test_sel751_language.ThreeLetterCollisions.test_allowed_verbs_are_same_or_absent_in_spanish) ... ok
+test_bad_id_checksum_is_treated_as_unknown (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_bad_id_checksum_is_treated_as_unknown) ... ok
+test_device_fid_differs_from_inventory_stops_at_level0 (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_device_fid_differs_from_inventory_stops_at_level0) ... ok
+test_fid_line_checksum_rule (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_fid_line_checksum_rule) ... ok
+test_figure_7_38_firmware_is_not_collected (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_figure_7_38_firmware_is_not_collected) ... ok
+test_id_probe_alone_exposes_a_pre_fix_unit (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_id_probe_alone_exposes_a_pre_fix_unit) ... ok
+test_listed_firmware_collects (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_listed_firmware_collects) ... ok
+test_negative_control_ungated_collector_is_caught (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_negative_control_ungated_collector_is_caught) ... ok
+test_pre_fix_firmware_in_inventory_is_never_contacted (tests.safety.recording_simulator.test_sel751_firmware_gate.FirmwareGate.test_pre_fix_firmware_in_inventory_is_never_contacted) ... ok
+
+----------------------------------------------------------------------
+Ran 42 tests in 13.935s
+
+OK
+
+# Register review, deny 135 / allow 6, A6 minimal register
+test_allow_corpus_read_only (tests.safety.register_review.test_register.RegisterReview.test_allow_corpus_read_only) ... ok
+test_deny_corpus_never_read_only (tests.safety.register_review.test_register.RegisterReview.test_deny_corpus_never_read_only) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.005s
+
+OK

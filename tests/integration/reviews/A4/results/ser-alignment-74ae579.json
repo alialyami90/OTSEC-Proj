@@ -1,0 +1,106 @@
+{
+  "reviewed": "modules/telemetry/experiments/schema-mapping/align.py at 74ae579",
+  "classification": "simulated",
+  "keys": {
+    "whole-line digest (A4 record_digest)": [
+      {
+        "case": "A1-no-new-events",
+        "expect": "ok",
+        "got": "ok",
+        "expect_added": 0,
+        "got_added": 0,
+        "pass": true
+      },
+      {
+        "case": "A2-one-new-event-renumbers-all-rows",
+        "expect": "ok",
+        "got": "gap",
+        "expect_added": 1,
+        "got_added": 9,
+        "pass": false
+      },
+      {
+        "case": "A3-row-number-gains-a-digit",
+        "expect": "ok",
+        "got": "gap",
+        "expect_added": 2,
+        "got_added": 11,
+        "pass": false
+      },
+      {
+        "case": "A4-buffer-full-oldest-dropped",
+        "expect": "ok",
+        "got": "gap",
+        "expect_added": 2,
+        "got_added": 8,
+        "pass": false
+      },
+      {
+        "case": "A5-buffer-cleared-then-one-event",
+        "expect": "gap",
+        "got": "gap",
+        "expect_added": 1,
+        "got_added": 1,
+        "pass": true
+      },
+      {
+        "case": "A6-window-shorter-than-new-events (SEL-400 default 20 rows)",
+        "expect": "gap",
+        "got": "gap",
+        "expect_added": 4,
+        "got_added": 4,
+        "pass": true
+      }
+    ],
+    "digest without the row number": [
+      {
+        "case": "A1-no-new-events",
+        "expect": "ok",
+        "got": "ok",
+        "expect_added": 0,
+        "got_added": 0,
+        "pass": true
+      },
+      {
+        "case": "A2-one-new-event-renumbers-all-rows",
+        "expect": "ok",
+        "got": "ok",
+        "expect_added": 1,
+        "got_added": 1,
+        "pass": true
+      },
+      {
+        "case": "A3-row-number-gains-a-digit",
+        "expect": "ok",
+        "got": "ok",
+        "expect_added": 2,
+        "got_added": 2,
+        "pass": true
+      },
+      {
+        "case": "A4-buffer-full-oldest-dropped",
+        "expect": "ok",
+        "got": "ok",
+        "expect_added": 2,
+        "got_added": 2,
+        "pass": true
+      },
+      {
+        "case": "A5-buffer-cleared-then-one-event",
+        "expect": "gap",
+        "got": "gap",
+        "expect_added": 1,
+        "got_added": 1,
+        "pass": true
+      },
+      {
+        "case": "A6-window-shorter-than-new-events (SEL-400 default 20 rows)",
+        "expect": "gap",
+        "got": "gap",
+        "expect_added": 4,
+        "got_added": 4,
+        "pass": true
+      }
+    ]
+  }
+}

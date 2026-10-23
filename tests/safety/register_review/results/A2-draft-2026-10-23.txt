@@ -1,0 +1,17 @@
+# Register review run 2026-10-23, class: desk. Deny corpus extended from SEL-751 manual 20260910. Registers: A2 draft at 52a30ba on claude/project-thread-8k8qrr, then A6 sel751-collector-register.json
+## /tmp/claude-0/a2-reg3.json
+test_allow_corpus_read_only (tests.safety.register_review.test_register.RegisterReview.test_allow_corpus_read_only) ... ok
+test_deny_corpus_never_read_only (tests.safety.register_review.test_register.RegisterReview.test_deny_corpus_never_read_only) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.005s
+
+OK
+## tests/safety/recording_simulator/sel751-collector-register.json
+test_allow_corpus_read_only (tests.safety.register_review.test_register.RegisterReview.test_allow_corpus_read_only) ... ok
+test_deny_corpus_never_read_only (tests.safety.register_review.test_register.RegisterReview.test_deny_corpus_never_read_only) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.002s
+
+OK

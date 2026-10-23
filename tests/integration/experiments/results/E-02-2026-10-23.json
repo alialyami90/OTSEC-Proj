@@ -1,0 +1,21 @@
+{
+  "experiment": "E-02 fsync before acknowledgement",
+  "classification": "simulated",
+  "writer": "A5 p0 writer, batch 1",
+  "results": [
+    {
+      "synchronous": "NORMAL",
+      "acks": 1016,
+      "syncs": 12,
+      "acks_without_sync": 1011,
+      "max_acks_between_syncs": 454
+    },
+    {
+      "synchronous": "FULL",
+      "acks": 680,
+      "syncs": 690,
+      "acks_without_sync": 0,
+      "max_acks_between_syncs": 1
+    }
+  ]
+}

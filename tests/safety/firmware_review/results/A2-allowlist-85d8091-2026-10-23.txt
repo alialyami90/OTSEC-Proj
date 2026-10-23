@@ -1,0 +1,140 @@
+// A2 allowlist at 85d8091 vs SEL-751 IM 20260910 Appendix A, run 2026-10-23T18:50:18Z, class: desk
+{
+  "rows_parsed": 84,
+  "fixes": {
+    "F1": {
+      "a6_found": [
+        "R112-V2",
+        "R200-V3"
+      ],
+      "a2_listed": [
+        "R112-V2",
+        "R200-V3"
+      ],
+      "agree": true
+    },
+    "F2": {
+      "a6_found": [
+        "R202-V1",
+        "R300-V3"
+      ],
+      "a2_listed": [
+        "R202-V1",
+        "R300-V3"
+      ],
+      "agree": true
+    },
+    "F3": {
+      "a6_found": [
+        "R302-V0"
+      ],
+      "a2_listed": [
+        "R302-V0"
+      ],
+      "agree": true
+    },
+    "F4": {
+      "a6_found": [
+        "R302-V3",
+        "R400-V2",
+        "R401-V0"
+      ],
+      "a2_listed": [
+        "R302-V3",
+        "R400-V2",
+        "R401-V0"
+      ],
+      "agree": true
+    },
+    "F5": {
+      "a6_found": [
+        "R400-V3",
+        "R401-V1"
+      ],
+      "a2_listed": [
+        "R400-V3",
+        "R401-V1"
+      ],
+      "agree": true
+    },
+    "F6": {
+      "a6_found": [
+        "R400-V7",
+        "R401-V5",
+        "R402-V2"
+      ],
+      "a2_listed": [
+        "R400-V7",
+        "R401-V5",
+        "R402-V2"
+      ],
+      "agree": true
+    },
+    "F7": {
+      "a6_found": [
+        "R500-V0"
+      ],
+      "a2_listed": [
+        "R500-V0"
+      ],
+      "agree": true
+    }
+  },
+  "branches": [
+    {
+      "branch": "R501",
+      "status": "allow",
+      "min_version": "V0",
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": []
+    },
+    {
+      "branch": "R500",
+      "status": "allow",
+      "min_version": "V0",
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": []
+    },
+    {
+      "branch": "R402",
+      "status": "allow-with-condition",
+      "min_version": "V2",
+      "inherited": [
+        "F1",
+        "F2",
+        "F5"
+      ],
+      "problems": []
+    },
+    {
+      "branch": "R401",
+      "status": "allow-with-condition",
+      "min_version": "V5",
+      "inherited": [
+        "F1",
+        "F2"
+      ],
+      "problems": []
+    },
+    {
+      "branch": "R400",
+      "status": "allow-with-condition",
+      "min_version": "V7",
+      "inherited": [
+        "F1",
+        "F2"
+      ],
+      "problems": []
+    }
+  ],
+  "pass": true
+}
+// exit 0

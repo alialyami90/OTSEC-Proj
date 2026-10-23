@@ -1,0 +1,161 @@
+{
+  "reviewed": "modules/telemetry/experiments/ids-coverage/goose_seq_check.py at 74ae579",
+  "classification": "simulated",
+  "cases": [
+    {
+      "case": "benign: one retransmission lost in capture",
+      "attack_frames": [],
+      "flagged": [
+        5
+      ],
+      "missed": [],
+      "false_alarms": [
+        5
+      ],
+      "reasons": {
+        "5": [
+          "sqnum-gap"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "benign: PRP duplicate copies (LAN A and LAN B on one sensor)",
+      "attack_frames": [],
+      "flagged": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "missed": [],
+      "false_alarms": [
+        2,
+        4,
+        6,
+        8
+      ],
+      "reasons": {
+        "2": [
+          "sqnum-gap"
+        ],
+        "4": [
+          "sqnum-gap"
+        ],
+        "6": [
+          "sqnum-gap"
+        ],
+        "8": [
+          "sqnum-gap"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "benign: publishing IED restarted (stNum back to 1)",
+      "attack_frames": [],
+      "flagged": [
+        4
+      ],
+      "missed": [],
+      "false_alarms": [
+        4
+      ],
+      "reasons": {
+        "4": [
+          "stnum-regress"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "benign: sqNum 32-bit rollover",
+      "attack_frames": [],
+      "flagged": [
+        3
+      ],
+      "missed": [],
+      "false_alarms": [
+        3
+      ],
+      "reasons": {
+        "3": [
+          "sqnum-gap"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "attack: injected state change with correct stNum+1, sqNum 0, fresh t",
+      "attack_frames": [
+        4
+      ],
+      "flagged": [
+        5
+      ],
+      "missed": [
+        4
+      ],
+      "false_alarms": [
+        5
+      ],
+      "reasons": {
+        "5": [
+          "stnum-regress"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "attack: injection before the first legitimate frame in the capture",
+      "attack_frames": [
+        1
+      ],
+      "flagged": [
+        2
+      ],
+      "missed": [
+        1
+      ],
+      "false_alarms": [
+        2
+      ],
+      "reasons": {
+        "2": [
+          "stnum-regress"
+        ]
+      },
+      "pass": false
+    },
+    {
+      "case": "attack: takeover; legitimate publisher silenced (no later legitimate frames)",
+      "attack_frames": [
+        4,
+        5,
+        6
+      ],
+      "flagged": [],
+      "missed": [
+        4,
+        5,
+        6
+      ],
+      "false_alarms": [],
+      "reasons": {},
+      "pass": false
+    },
+    {
+      "case": "attack: new gocbRef not in any baseline",
+      "attack_frames": [
+        4
+      ],
+      "flagged": [],
+      "missed": [
+        4
+      ],
+      "false_alarms": [],
+      "reasons": {},
+      "pass": false
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+# A6 independent negative corpus for SEL ASCII command registers.
+# Every line below must NOT classify as read-only. Built by A6 from A2's
+# cited sources (SEL-300G Quick-Start 20060731 Tables 4 and 5) and from
+# recalled SEL behaviour marked (recalled); these are command strings, not
+# device output. One line per case; \xNN escapes are decoded before checking.
+SER C
+ser c
+SER  C
+SER C\t
+SERC
+SER 1 C
+SER D
+SER 10
+SER;SET
+ SER
+SER 
+HIS C
+HIS
+TRI
+TRIG
+MET RD
+MET RP
+MET RE
+MET RM
+MET
+PRO R
+TAR R
+TAR
+STA C
+STA
+2AC
+BAC
+PAC
+AAC
+OAC
+CAL
+acc
+ACC 
+ACC\x00
+ID 
+id
+OPE
+OPE 1
+CLO
+PUL OUT101
+CON RB01
+SET
+SET L
+PAS
+PAS 2
+COP 1 2
+GRO 2
+R_S
+L_D
+FIL WRITE SET_1.TXT
+LDP C
+DAT 01/01/2026
+TIM 00:00:00
+IRI
+LOO
+ANA
+POR 3
+QUI\r
+\xa5\xe0SER
+SER\xff
+SER\x1b[2J
+# Added 2026-10-23 from the SEL-751 Instruction Manual (date code 20260910),
+# Level 1 commands that clear or reset device data, transcribed by A6.
+SER R
+HIS R
+HIS CA
+HIS RA
+HIS HIF C
+HIS IGF C
+SUM C
+SUM R
+COM C
+COM C A
+COM PTP C
+COM PTP R
+FGS S 1 C
+FGS S ALL C
+GOOSE S ALL C
+MET D R
+MET M R
+TAR R
+STA R
+2ACCESS
+89C 1
+89O 1
+TEST DB OFF
+Y
+# Added 2026-10-23 for A1's approval of SHO G and SHO P 1 as exact lines
+# (SEL-751 IM 20260910 Table 7.67, p. 7.77). The s argument and other ports
+# are outside the approval; bare SHO P defaults to the active port.
+SHO G 50P1P
+SHO G LANG
+SHO G;SET
+SHO G 
+SHO  G
+SHOW G
+sho g
+SHO P
+SHO P 1 LANG
+SHO P 1 PASS
+SHO P 1;SET
+SHO P 1 
+SHO P 2
+SHO P 3
+SHO P 4
+SHO P F
+SHO P 1A
+SHO P 10
+SHO
+SHO 1
+SHO L 1
+SHO R
+SHO F
+SHO I
+SHO M
+SHO E 1
+SHO DNP 1
+# Added 2026-10-23: Spanish command names and Spanish clear arguments
+# (SEL-751 Command Summary, Spanish column). The register is English-only
+# (ADR-0005), so none of these may classify read-only.
+SER B
+HIS D
+HIS HIF D
+HIS HIF DT
+HIS HIF RT
+SAL
+MOS
+MOS G
+MOS P 1
+MED
+MED RD
+BAN R
+AJU
+ABR
+CER
+EST
+EST R
+INT R
+FEC 01/01/2026
+HORA 00:00:00
+GRUPO 2
+89A 1
+AYUDA
