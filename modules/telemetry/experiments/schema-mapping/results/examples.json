@@ -188,16 +188,16 @@
     }
   },
   {
-    "source": "A2 excerpt of SEL-751 manual Figure 10.17",
+    "source": "SEL-751 manual Figure 10.16 row #8",
     "event": {
       "schema": "otsec.event/0.1-draft",
       "event_id": "(assigned at first durable write; example 1)",
-      "record_digest": "92cbe36277a70da6bac83913530efb21d67361be995d9ee35a570d96b3b4055c",
+      "record_digest": "17a3967c69ba758a4fb272c18c57b1391c59e381e4536237d759ec058acecbfd",
       "origin": "device",
       "kind": "ser",
       "source": {
-        "asset_id": "sel751:feeder1",
-        "stream_id": "sel751:feeder1:ser",
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
         "stream_seq": 1
       },
       "received": {
@@ -208,37 +208,42 @@
         }
       },
       "device_time": {
-        "native": null,
+        "native": "02/28/2007 13:54:09.602",
         "native_encoding": "text",
         "format": "sel-ascii-ser-row",
-        "wall_clock": null,
+        "wall_clock": "2007-02-28T13:54:09.602",
         "offset": "unknown",
         "offset_basis": "none",
         "utc": null,
-        "resolution_ns": null,
-        "accuracy_ns": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
         "quality": {
           "time_source": "Internal",
           "scope": "report"
         },
         "flags": [
-          "row-time-columns-not-documented-yet"
+          "date-format-assumed:DATE_F=MDY"
         ]
       },
       "native": {
         "evidence": {
-          "sha256": "92cbe36277a70da6bac83913530efb21d67361be995d9ee35a570d96b3b4055c",
-          "length": 68
+          "sha256": "17a3967c69ba758a4fb272c18c57b1391c59e381e4536237d759ec058acecbfd",
+          "length": 67
         },
         "fields": {
-          "report.Date": "02/28/2007",
-          "report.Time": "16:34:28",
-          "report.Time Source": "Internal",
+          "#": "8",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:09.602",
           "ELEMENT": "51P1P",
           "STATE": "Asserted"
         },
+        "span": {
+          "offset": 323,
+          "length": 67
+        },
         "context": {
-          "report_header_sha256": "cbe8a0eea6faa095ccfc67366edda2ba3dcdc222acaab187c0f498e97794cc12"
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
         }
       },
       "normalized": {
@@ -250,7 +255,520 @@
     },
     "checks": {
       "native preserved": true,
-      "utc only when offset known": true
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #7",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 2)",
+      "record_digest": "53415080faa3afbf5958484ec9c1c4b7dc8760055f7f2c28915f9d765d9923ed",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 2
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:09.602",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:09.602",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "53415080faa3afbf5958484ec9c1c4b7dc8760055f7f2c28915f9d765d9923ed",
+          "length": 67
+        },
+        "fields": {
+          "#": "7",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:09.602",
+          "ELEMENT": "51AP",
+          "STATE": "Asserted"
+        },
+        "span": {
+          "offset": 391,
+          "length": 67
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "51AP",
+        "value": "Asserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #6",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 3)",
+      "record_digest": "c02480243431c79be57a91c2011293d51443c0c6feeb926243a6422345418f27",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 3
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.003",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.003",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "c02480243431c79be57a91c2011293d51443c0c6feeb926243a6422345418f27",
+          "length": 67
+        },
+        "fields": {
+          "#": "6",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.003",
+          "ELEMENT": "51P1T",
+          "STATE": "Asserted"
+        },
+        "span": {
+          "offset": 459,
+          "length": 67
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "51P1T",
+        "value": "Asserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #5",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 4)",
+      "record_digest": "d738282c847473b991db053022148885c6ebdf71b9b3ecbc41ba971a6c633a5d",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 4
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.003",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.003",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "d738282c847473b991db053022148885c6ebdf71b9b3ecbc41ba971a6c633a5d",
+          "length": 67
+        },
+        "fields": {
+          "#": "5",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.003",
+          "ELEMENT": "TRIP",
+          "STATE": "Asserted"
+        },
+        "span": {
+          "offset": 527,
+          "length": 67
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "TRIP",
+        "value": "Asserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #4",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 5)",
+      "record_digest": "bd53c57a756b256e510ed60c0468aa7c8f40d4ce5e5952a21c081ddb75bf0ba5",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 5
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.219",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.219",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "bd53c57a756b256e510ed60c0468aa7c8f40d4ce5e5952a21c081ddb75bf0ba5",
+          "length": 69
+        },
+        "fields": {
+          "#": "4",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.219",
+          "ELEMENT": "51P1P",
+          "STATE": "Deasserted"
+        },
+        "span": {
+          "offset": 595,
+          "length": 69
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "51P1P",
+        "value": "Deasserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #3",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 6)",
+      "record_digest": "191dd3da7484aad988c3705e532552ea3dba87c1aa0c8b366b64e46b8f98f69a",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 6
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.219",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.219",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "191dd3da7484aad988c3705e532552ea3dba87c1aa0c8b366b64e46b8f98f69a",
+          "length": 69
+        },
+        "fields": {
+          "#": "3",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.219",
+          "ELEMENT": "51AP",
+          "STATE": "Deasserted"
+        },
+        "span": {
+          "offset": 665,
+          "length": 69
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "51AP",
+        "value": "Deasserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #2",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 7)",
+      "record_digest": "c731d94f03768498e556691aa14a6938b675a6f02c85a0ff6d25174308f0b9c5",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 7
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.236",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.236",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "c731d94f03768498e556691aa14a6938b675a6f02c85a0ff6d25174308f0b9c5",
+          "length": 69
+        },
+        "fields": {
+          "#": "2",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.236",
+          "ELEMENT": "51P1T",
+          "STATE": "Deasserted"
+        },
+        "span": {
+          "offset": 735,
+          "length": 69
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "51P1T",
+        "value": "Deasserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
+    }
+  },
+  {
+    "source": "SEL-751 manual Figure 10.16 row #1",
+    "event": {
+      "schema": "otsec.event/0.1-draft",
+      "event_id": "(assigned at first durable write; example 8)",
+      "record_digest": "1fdf02521670bf916e02004105d8dfefecd188b9ab983ead88eadcde04c23d1c",
+      "origin": "device",
+      "kind": "ser",
+      "source": {
+        "asset_id": "sel751:feeder-relay",
+        "stream_id": "sel751:feeder-relay:ser",
+        "stream_seq": 8
+      },
+      "received": {
+        "utc": null,
+        "resolution_ns": 1000,
+        "clock": {
+          "sync": "unknown"
+        }
+      },
+      "device_time": {
+        "native": "02/28/2007 13:54:10.511",
+        "native_encoding": "text",
+        "format": "sel-ascii-ser-row",
+        "wall_clock": "2007-02-28T13:54:10.511",
+        "offset": "unknown",
+        "offset_basis": "none",
+        "utc": null,
+        "resolution_ns": 1000000,
+        "accuracy_ns": 1000000,
+        "quality": {
+          "time_source": "Internal",
+          "scope": "report"
+        },
+        "flags": [
+          "date-format-assumed:DATE_F=MDY"
+        ]
+      },
+      "native": {
+        "evidence": {
+          "sha256": "1fdf02521670bf916e02004105d8dfefecd188b9ab983ead88eadcde04c23d1c",
+          "length": 69
+        },
+        "fields": {
+          "#": "1",
+          "DATE": "02/28/2007",
+          "TIME": "13:54:10.511",
+          "ELEMENT": "TRIP",
+          "STATE": "Deasserted"
+        },
+        "span": {
+          "offset": 805,
+          "length": 69
+        },
+        "context": {
+          "report_header_sha256": "e5242215a9dc6b0396a139a1890eb54fbe575c52f434a484b9440b057c5f9098",
+          "report_header_length": 323
+        }
+      },
+      "normalized": {
+        "subject": "TRIP",
+        "value": "Deasserted",
+        "category": "unmapped"
+      },
+      "evidence_class": "documented-untested"
+    },
+    "checks": {
+      "native preserved": true,
+      "utc only when offset known": true,
+      "no digits finer than declared resolution/accuracy": true,
+      "span resolves to native row": true
     }
   }
 ]

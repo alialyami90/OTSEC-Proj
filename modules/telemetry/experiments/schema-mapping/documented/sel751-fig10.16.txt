@@ -1,0 +1,18 @@
+=>SER 8 <Enter>
+
+SEL-751                                   Date: 02/28/2007   Time: 16:34:28
+FEEDER RELAY                               Time Source: Internal
+
+Serial No = 2007XXXXXXXXXXX
+FID = SEL-751-R100-V0-Z001001-D20070410                 CID = 5052
+
+#        DATE          TIME               ELEMENT             STATE
+8     02/28/2007   13:54:09.602   51P1P                    Asserted
+7     02/28/2007   13:54:09.602   51AP                     Asserted
+6     02/28/2007   13:54:10.003   51P1T                    Asserted
+5     02/28/2007   13:54:10.003   TRIP                     Asserted
+4     02/28/2007   13:54:10.219   51P1P                    Deasserted
+3     02/28/2007   13:54:10.219   51AP                     Deasserted
+2     02/28/2007   13:54:10.236   51P1T                    Deasserted
+1     02/28/2007   13:54:10.511   TRIP                     Deasserted
+=>

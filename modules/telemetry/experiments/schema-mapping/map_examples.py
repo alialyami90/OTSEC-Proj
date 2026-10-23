@@ -1,5 +1,5 @@
-"""Map native timestamps taken from public captures, plus A2's documented SEL
-SER excerpt, into the draft event schema (docs/phase0/A4-event-schema-draft.md)
+"""Map native timestamps taken from public captures, plus the SEL-751 manual's
+example SER report (documented/sel751-fig10.16.txt), into the draft event schema (docs/phase0/A4-event-schema-draft.md)
 and check the schema's invariants. Throwaway experiment, not product code.
 
 Usage: python3 -I map_examples.py <capture-cache> <out.json>
@@ -7,6 +7,8 @@ Usage: python3 -I map_examples.py <capture-cache> <out.json>
 import datetime
 import hashlib
 import json
+import os
+import re
 import subprocess
 import sys
 
@@ -104,13 +106,24 @@ def iec61850_utctime(hexstr):
     }
 
 
-def sel_ser_documented():
-    """A2's documented excerpt (SEL-751 manual Figure 10.17, as quoted in
-    A2-device-feasibility.md section 7). Row-level time columns were not read,
-    so they are carried as unknown rather than invented."""
-    header = "Date: 02/28/2007 Time: 16:34:28 Time Source: Internal"
-    row = "51P1P Asserted"
-    return header, row
+SEL_DOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documented", "sel751-fig10.16.txt")
+SER_ROW = re.compile(rb"^(\d+)\s+(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\S+)\s+(\S.*?)\s*$")
+
+
+def sel_ser_rows(raw):
+    """Split the SEL-751 manual example (Figure 10.16) into header context and
+    rows with byte spans. Assumes DATE_F = MDY, which the report does not
+    state; the assumption is recorded as a flag on every row."""
+    rows, offset = [], 0
+    header_end = None
+    for line in raw.split(b"\n"):
+        m = SER_ROW.match(line)
+        if m:
+            if header_end is None:
+                header_end = offset
+            rows.append((offset, line, m))
+        offset += len(line) + 1
+    return raw[:header_end], rows
 
 
 def event(kind, asset, stream, seq, device_time, raw, fields, subject, value, evidence_class=None):
@@ -160,32 +173,43 @@ def main(cache, out_path):
     results.append((event("protocol-event", "goose:LIED10", "goose:LIED10CTRL/LLN0$Status", 1, t,
                           bytes.fromhex(ut), {"stNum": "1", "sqNum": "0"}, "LIED10CTRL/LLN0$Status",
                           "stNum=1"), bytes.fromhex(ut), "goose-normal.pcapng frame 1"))
-    header, row = sel_ser_documented()
-    raw = (header + "\n" + row).encode()
-    t = {"native": None, "native_encoding": "text", "format": "sel-ascii-ser-row",
-         "wall_clock": None, "offset": "unknown", "offset_basis": "none", "utc": None,
-         "resolution_ns": None, "accuracy_ns": None,
-         "quality": {"time_source": "Internal", "scope": "report"},
-         "flags": ["row-time-columns-not-documented-yet"]}
-    e = event("ser", "sel751:feeder1", "sel751:feeder1:ser", 1, t, raw,
-              {"report.Date": "02/28/2007", "report.Time": "16:34:28", "report.Time Source": "Internal",
-               "ELEMENT": "51P1P", "STATE": "Asserted"}, "51P1P", "Asserted", "documented-untested")
-    e["native"]["context"] = {"report_header_sha256": hashlib.sha256(header.encode()).hexdigest()}
-    results.append((e, raw, "A2 excerpt of SEL-751 manual Figure 10.17"))
+    raw = open(SEL_DOC, "rb").read()
+    header, rows = sel_ser_rows(raw)
+    for seq, (off, line, m) in enumerate(rows, start=1):
+        num, date, tod, element, state = (g.decode() for g in m.groups())
+        mm, dd, yyyy = date.split("/")
+        t = {"native": f"{date} {tod}", "native_encoding": "text", "format": "sel-ascii-ser-row",
+             "wall_clock": f"{yyyy}-{mm}-{dd}T{tod}", "offset": "unknown", "offset_basis": "none",
+             "utc": None, "resolution_ns": 1_000_000, "accuracy_ns": 1_000_000,
+             "quality": {"time_source": "Internal", "scope": "report"},
+             "flags": ["date-format-assumed:DATE_F=MDY"]}
+        e = event("ser", "sel751:feeder-relay", "sel751:feeder-relay:ser", seq, t, line,
+                  {"#": num, "DATE": date, "TIME": tod, "ELEMENT": element, "STATE": state},
+                  element, state, "documented-untested")
+        e["native"]["span"] = {"offset": off, "length": len(line)}
+        e["native"]["context"] = {"report_header_sha256": hashlib.sha256(header).hexdigest(),
+                                  "report_header_length": len(header)}
+        results.append((e, line, f"SEL-751 manual Figure 10.16 row #{num}"))
     report = []
     for e, raw, src in results:
         if e["evidence_class"] is None:
             e["evidence_class"] = "public-capture (simulated or lab origin, see SOURCE.md)"
-        c = checks(e, raw) if e["device_time"]["wall_clock"] else [
-            ("native preserved", hashlib.sha256(raw).hexdigest() == e["native"]["evidence"]["sha256"]),
-            ("utc only when offset known", e["device_time"]["utc"] is None)]
+        c = checks(e, raw)
+        span = e["native"].get("span")
+        if span:
+            doc = open(SEL_DOC, "rb").read()
+            c.append(("span resolves to native row", doc[span["offset"]:span["offset"] + span["length"]] == raw))
         report.append({"source": src, "event": e, "checks": {k: v for k, v in c}})
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2)
     for r in report:
         print(r["source"], "->", r["event"]["device_time"]["format"], r["event"]["device_time"]["wall_clock"],
               r["event"]["device_time"]["offset"], r["checks"])
-    sys.exit(0 if all(all(r["checks"].values()) for r in report) else 1)
+    sel = [r for r in report if r["event"]["kind"] == "ser"]
+    same_ms = [r for r in sel if r["event"]["device_time"]["native"] == "02/28/2007 13:54:09.602"]
+    print(f"SEL rows mapped: {len(sel)}; rows sharing 13:54:09.602 kept separate: {len(same_ms)}")
+    ok = all(all(r["checks"].values()) for r in report) and len(sel) == 8 and len(same_ms) == 2
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

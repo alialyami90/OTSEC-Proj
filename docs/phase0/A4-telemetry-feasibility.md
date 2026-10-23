@@ -35,6 +35,8 @@ No hard language requirement for A5 follows from this work (section 7).
 | E10 | A2 findings section 7 (SEL-751 SER), PR #2 commit `9a84ef8` | 2026-10-23 | SER format | `documented-untested` via A2 |
 | E11 | A6 verification draft, A6 cross-review, A3 threat model draft | 2026-10-23 | Requirements on schema and forwarder | project drafts |
 
+Update 2026-10-23: the owner supplied SEL manuals and datasheets (SEL-751 IM 20260910, SEL-400 series IM 20260730, SEL-311L, SEL-2488 IM 20260918, SEL-3355-2, SEL-2731, SEL-2741, SEL-5033, SEL-5056, and others). SER format, time model, and Syslog facts from them are in the schema draft section 3 and section 4 and are `documented-untested`.
+
 Limits: OEM documentation sites, IETF, Zeek and Suricata documentation sites are blocked by the environment's egress policy. RFC and IEEE 1815 statements below are from the standards as I know them and are marked "not re-read". No second vendor's proprietary SER text export could be read; the multi-vendor check therefore uses standard protocol encodings that several vendors implement. GE, Siemens, and ABB native SER exports remain `unknown`.
 
 ## 2. SER-to-Syslog normalization (Q3)
@@ -141,7 +143,9 @@ Offered to A1 for the Phase 0 exit gate's list of five.
 
 | Item | Status |
 | --- | --- |
-| SEL-751 SER row layout (time columns, millisecond formatting, date-format setting) | `unknown`; needs the manual (A2) or real output (B-01) |
+| SEL-751 SER row layout | Resolved from the owner-supplied manual (Figure 10.16): `#`, `DATE`, `TIME` (hh:mm:ss.mmm), `ELEMENT`, `STATE`; date format follows `DATE_F`. `documented-untested`; real Telnet bytes still unknown (B-01) |
+| SEL relay time offset | Resolved from the manuals: relays keep local time; SEL-751 applies `UTC_OFF` only under SNTP; SEL-400 series derives local time from `UTCOFF` and DST settings. The SER output never carries the offset, so the adapter must read settings to state one |
+| SEL relays emitting Syslog | None found: no Syslog in the SEL-751, SEL-400 series, or SEL-2731/2741 manuals, and the SEL-311L manual states "The SEL-311L does not support Syslog functionality." Device Syslog in this portfolio comes from the SEL-2488 clock (RFC 3164 over UDP 514 only), SEL-5056, and SEL-5033 software |
 | Whether SEL Telnet echoes password characters (affects HR-3 redaction) | `unknown`; A2 |
 | GE, Siemens, ABB proprietary SER exports | `unknown`; OEM sites blocked |
 | IEEE 1815 DNP3 time defined as UTC | recollection, not re-read; capture evidence shows deployments using local time anyway |
@@ -155,7 +159,7 @@ Offered to A1 for the Phase 0 exit gate's list of five.
 
 **Completed:** Telemetry feasibility and engine evaluation (this document); draft event schema, snapshot-alignment duplicate handling, and Syslog forwarding profile ([A4-event-schema-draft.md](A4-event-schema-draft.md)); four experiments: E-A4-01 engine coverage plus GOOSE checks, E-A4-02 Syslog framing and escaping against rsyslog, E-A4-03 RELP acknowledgement vs storage under receiver crash, and the schema mapping with snapshot alignment tests.
 
-**Evidence:** `modules/telemetry/experiments/ids-coverage/results/` (coverage table, GOOSE check output, tool versions); `modules/telemetry/experiments/syslog-framing/results/framing.md`; `modules/telemetry/experiments/relp-ack/results/relp-ack-trial{1,2,3}.md`; `modules/telemetry/experiments/schema-mapping/results/examples.json` and `test_align.txt`. Captures are fetched by hash from the sources in `tests/fixtures/network/public-ot-captures/`. All `simulated`.
+**Evidence:** `modules/telemetry/experiments/ids-coverage/results/` (coverage table, GOOSE check output, tool versions); `modules/telemetry/experiments/syslog-framing/results/framing.md`; `modules/telemetry/experiments/relp-ack/results/relp-ack-trial{1,2,3}.md`; `modules/telemetry/experiments/schema-mapping/results/examples.json` (now including all 8 rows of the SEL-751 manual example in `documented/`) and `test_align.txt`. Captures are fetched by hash from the sources in `tests/fixtures/network/public-ot-captures/`. All `simulated`.
 
 **Interfaces:** Proposed (draft, not contract): event record `otsec.event/0.1-draft`; forwarding profile `otsec-syslog/0.1` with modes A (RELP/TLS) and B (RFC 5425 with replay window); `telemetry-health` event names; evidence preservation requirements EP-1 to EP-9. Uses A2's adapter result envelope (`transcript`, byte spans, `invocation_id`) and A5's outbox position.
 
