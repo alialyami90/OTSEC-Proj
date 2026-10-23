@@ -9,7 +9,7 @@
   "The password line sent after ACC prompts 'Password:'. It must be logged by the simulator as an auth event, never as a command line, and never stored in clear.",
   "Binary SEL Fast messages (0xA5 prefix, S10). Covered by sel.binary.any_non_ascii below only if the log decodes bytes as latin-1; the checker's CONTROL class misses 0x80-0xFF."
  ],
- "language": "ENGLISH ONLY. Valid only for LANG := ENGLISH on the port. With LANG := SPANISH, command names differ and 'SER D' clears the SER ('SER D o R  Borrar los datos SER', S22 Command Summary); 'SHO' becomes 'MOS' and 'QUIT' becomes 'SAL'. Ruling (A1, ADR-0005 401ebd7, from A6 F-006): the adapter reads LANG with 'SHO P 1' before any SER command and refuses to collect, failing closed with an alarm, unless the output parses as English port settings with LANG := ENGLISH. An 'Invalid Command' or any unparseable response counts as not English. A2 proposal for A1: send 'QUI' once at Level 0 before 'ACC'. In English it is valid at Level 0 (S22 Table 7.59). If a Spanish-mode relay rejects it, the adapter learns that before elevating and closes without 'ACC'. This also covers the D18 problem that 'QUI' might not de-elevate a Spanish-mode session. Whether a Spanish-mode relay accepts English names is not documented (unknown). FTPACC or HTTPACC above 1 gets the same warning as MAXACC.",
+ "language": "ENGLISH ONLY. Valid only for LANG := ENGLISH on the port. With LANG := SPANISH, command names differ and 'SER D' clears the SER ('SER D o R  Borrar los datos SER', S22 Command Summary); 'SHO' becomes 'MOS' and 'QUIT' becomes 'SAL'. Ruling (A1, ADR-0005 401ebd7, from A6 F-006): the adapter reads LANG with 'SHO P 1' before any SER command and refuses to collect, failing closed with an alarm, unless the output parses as English port settings with LANG := ENGLISH. An 'Invalid Command' or any unparseable response counts as not English. Accepted by A1 (ADR-0005 4687c17): send 'QUI' once at Level 0 before 'ACC'. In English it is valid at Level 0 (S22 Table 7.59). If a Spanish-mode relay rejects it, the adapter learns that before elevating and closes without 'ACC'. This also covers the D18 problem that 'QUI' might not de-elevate a Spanish-mode session. Whether a Spanish-mode relay accepts English names is not documented (unknown). FTPACC or HTTPACC above 1 gets the same warning as MAXACC.",
  "commands": [
   {
    "id": "sel.session.acc",
@@ -28,7 +28,7 @@
    "access_level": "any -> 0",
    "citation": "S22 Table 7.59 p.7.73 (Access Level 0)",
    "status": "documented-untested",
-   "notes": "Sent at end of every session.",
+   "notes": "Sent twice per session. (1) Once at Level 0 before ACC as the language probe: if rejected, close without elevating and raise the LANG alarm (A1, ADR-0005 4687c17). (2) At the end of every session, followed by a TCP close. No Spanish command starts with QUI. Probe behaviour on a Spanish-mode relay is simulated, not proven.",
    "side_effects": "Returns to Level 0. Without QUIT a Telnet session stays at its elevated level until TIDLE expires (S22 p.7.15-7.16 Telnet Server note)."
   },
   {
