@@ -20,6 +20,8 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 7. Device sessions originate only at site nodes. The owner stated (2026-10-23) that the customer's central HMI server may reach relays while central cybersecurity servers may not; the platform's central role is a cybersecurity server and never connects to devices. The HMI server's relay traffic is an existing authorized path that the IDS models, not a platform path.
 8. Intel AMT on the SEL-3355-2 is disabled or kept off every routable network (deployment precondition, A5 §12).
 
+9. Node hardening (A3 HR-9): service-SID firewall rules so only the collector service reaches the IED-facing NIC; WDAC or AppLocker application control; BitLocker with TPM; no domain join; Windows IoT Enterprise LTSC only (pending owner confirmation that no node runs plain Windows 10 Pro).
+
 ## Consequences
 
 - Windows 10 Pro (non-LTSC) left Microsoft support in October 2025; Windows 10/11 IoT Enterprise LTSC editions have longer support. Deployment guidance should prefer an LTSC edition; the owner's OS patch process becomes a dependency for the node's own security.
