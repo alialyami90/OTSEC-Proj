@@ -36,6 +36,11 @@ func runStorageLimit(args []string) error {
 			return err
 		}
 	}
+	for _, av := range []bool{false, true} {
+		if err := restartCase(*enospcDir, 3, av); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

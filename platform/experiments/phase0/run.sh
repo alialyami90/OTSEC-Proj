@@ -22,7 +22,7 @@ env_line() {
 { env_line; "$work/p0" throughput -dir "$work/scratch"; } 2>&1 | tee results/throughput.txt
 
 if mount -t tmpfs -o size=4m tmpfs "$work/full" 2>/dev/null; then
-	{ env_line; "$work/p0" storage-limit -dir "$work/scratch" -enospc-dir "$work/full"; } \
+	{ env_line; "$work/p0" storage-limit -dir "$work/scratch" -enospc-dir "$work/full" | sed "s|$work/full|<4 MiB tmpfs>|"; } \
 		2>&1 | tee results/storage-limit.txt
 else
 	{ env_line; "$work/p0" storage-limit -dir "$work/scratch"; } 2>&1 | tee results/storage-limit.txt

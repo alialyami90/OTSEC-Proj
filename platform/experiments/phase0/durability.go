@@ -22,11 +22,19 @@ func runWriter(args []string) error {
 	path := fs.String("db", "", "database path")
 	syncMode := fs.String("sync", "FULL", "PRAGMA synchronous value")
 	batch := fs.Int("batch", 1, "events per transaction")
+	tuned := fs.Bool("tuned", false, "apply the bounded-WAL pragmas")
 	fs.Parse(args)
 
 	db, err := openStore(*path, *syncMode)
 	if err != nil {
 		return err
+	}
+	if *tuned {
+		for _, p := range tunedPragmas {
+			if _, err := db.Exec(p); err != nil {
+				return err
+			}
+		}
 	}
 	for {
 		last, err := insertBatch(db, *batch, time.Now().UnixNano())
