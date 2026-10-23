@@ -25,6 +25,13 @@ pruned 0 rows (and, in cursor mode, nothing above the cursor is gone).
 This models ADR-0004's rule; it is not the product's store. Uses Python's
 sqlite3 and imports no A5 code. Classification: simulated.
 
+Output: one `ROUND {json}` line per finished round, `ERROR {json}` if a step
+raises (the scenario then stops; the error records scenario, round, step,
+free space and the db, -wal and -shm sizes), and a final `RESULT {json}`.
+Each round also probes a fresh read-only and a fresh read-write connection
+(one SELECT each) at full disk and again after recovery, with file sizes,
+to test whether opening the store needs space it cannot get.
+
 Run (Windows, as the non-admin account; <dir> is on the small NTFS volume):
   python -I recovery_rounds.py --dir <dir>
 Run (Linux, root, mounts its own 4 MiB tmpfs):
@@ -139,7 +146,7 @@ def make_reserve(path):
 
 def run_writer(path, batch, lag):
     child = subprocess.Popen([sys.executable, "-I", "-c", WRITER, path, str(batch), str(lag), *PRAGMAS],
-                             stdout=subprocess.PIPE, text=True)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     first_seq = last = None
     err = None
     for line in child.stdout:
@@ -151,7 +158,8 @@ def run_writer(path, batch, lag):
             first_seq = last - batch + 1
     child.kill()  # SIGKILL on Linux, TerminateProcess on Windows
     child.wait()
-    return first_seq, last, err
+    stderr = child.stderr.read().strip()
+    return first_seq, last, err, stderr[-2000:] if stderr else None
 
 
 def run_recovery(path, reserve, mode, kill_after_prune):
@@ -178,7 +186,39 @@ def run_recovery(path, reserve, mode, kill_after_prune):
             reserve_ok = f"{type(exc).__name__}: {exc}"
             if os.path.exists(reserve):
                 os.remove(reserve)
-    return info, done, reserve_ok, err[-300:] if err else None
+    return info, done, reserve_ok, err[-2000:] if err else None
+
+
+def sizes(work):
+    out = {"fs_free": shutil.disk_usage(work).free}
+    for key, name in (("db", "events.db"), ("wal", "events.db-wal"), ("shm", "events.db-shm")):
+        p = os.path.join(work, name)
+        out[key] = os.path.getsize(p) if os.path.exists(p) else None
+    return out
+
+
+def fresh_read(path, read_only):
+    """Open a new connection and run one SELECT; return 'ok ...' or the exception."""
+    try:
+        if read_only:
+            db = sqlite3.connect("file:" + path.replace("\\", "/") + "?mode=ro", uri=True)
+        else:
+            db = sqlite3.connect(path)
+        try:
+            n, hi = db.execute("SELECT COUNT(*), MAX(seq) FROM events").fetchone()
+        finally:
+            db.close()
+        return f"ok count={n} max={hi}"
+    except sqlite3.Error as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
+def probe(work, path):
+    """Fresh read-only, then read-write, connection with file sizes around them (the -shm hypothesis)."""
+    before = sizes(work)
+    ro = fresh_read(path, True)
+    rw = fresh_read(path, False)
+    return {"sizes_before": before, "read_only": ro, "read_write": rw, "sizes_after": sizes(work)}
 
 
 def state(path, last_acked):
@@ -193,52 +233,80 @@ def state(path, last_acked):
 
 
 def scenario(work, auto_vacuum, mode, kill_round, rounds, batch, lag):
+    name = f"{'INCREMENTAL' if auto_vacuum else 'NONE'}/{mode}"
     path = os.path.join(work, "events.db")
     reserve = os.path.join(work, "reserve.bin")
-    for name in os.listdir(work):
-        os.remove(os.path.join(work, name))
-    make_reserve(reserve)
-    db = sqlite3.connect(path, isolation_level=None)
-    if auto_vacuum:
-        db.execute("PRAGMA auto_vacuum=INCREMENTAL")  # must precede the first table
-    db.execute("CREATE TABLE events(seq INTEGER PRIMARY KEY AUTOINCREMENT, native BLOB NOT NULL)")
-    db.execute("CREATE TABLE cursor(consumer TEXT PRIMARY KEY, seq INTEGER NOT NULL)")
-    db.execute("INSERT INTO cursor VALUES ('fwd', 0)")
-    db.close()
+    result = {"auto_vacuum": "INCREMENTAL" if auto_vacuum else "NONE", "prune": mode,
+              "recovery_killed_in_round": kill_round, "rounds": []}
+    out = result["rounds"]
+    r, step = 0, "setup"
+    try:
+        for f in os.listdir(work):
+            os.remove(os.path.join(work, f))
+        make_reserve(reserve)
+        db = sqlite3.connect(path, isolation_level=None)
+        if auto_vacuum:
+            db.execute("PRAGMA auto_vacuum=INCREMENTAL")  # must precede the first table
+        db.execute("CREATE TABLE events(seq INTEGER PRIMARY KEY AUTOINCREMENT, native BLOB NOT NULL)")
+        db.execute("CREATE TABLE cursor(consumer TEXT PRIMARY KEY, seq INTEGER NOT NULL)")
+        db.execute("INSERT INTO cursor VALUES ('fwd', 0)")
+        db.close()
 
-    out, prev_pruned = [], None
-    for r in range(1, rounds + 1):
-        first, last, werr = run_writer(path, batch, lag)
-        written = 0 if first is None else last - first + 1
-        row = {"round": r, "written": written, "seq": [first, last], "writer": werr}
-        row["capacity_regained"] = prev_pruned is None or 2 * written >= prev_pruned
-        killed = None
-        if r == kill_round:
-            killed, _, _, _ = run_recovery(path, reserve, mode, kill_after_prune=True)
-            row["killed_recovery"] = killed
-        info, done, reserve_ok, rerr = run_recovery(path, reserve, mode, kill_after_prune=False)
-        st = state(path, last or 0)
-        row.update({"recovery": info, "recovery_done": done, "reserve": reserve_ok,
-                    "recovery_error": rerr, **st, "fs_free": shutil.disk_usage(work).free})
-        row["pruned"] = ((info or {}).get("pruned") or 0) + ((killed or {}).get("pruned") or 0)
-        if mode == "cursor":
-            # Nothing above the persisted boundary may be gone.
-            row["above_cursor_intact"] = st["min"] == (info or {}).get("cut", -1) + 1
-            if killed is not None:
+        prev_pruned = None
+        for r in range(1, rounds + 1):
+            step = "writer"
+            first, last, werr, wstderr = run_writer(path, batch, lag)
+            written = 0 if first is None else last - first + 1
+            row = {"round": r, "written": written, "seq": [first, last], "writer": werr,
+                   "writer_stderr": wstderr}
+            out.append(row)
+            row["capacity_regained"] = prev_pruned is None or 2 * written >= prev_pruned
+            step = "probe after writer died at full disk"
+            row["probe_at_full"] = probe(work, path)
+            killed = None
+            if r == kill_round:
+                step = "recovery killed after prune"
+                killed, _, _, kerr = run_recovery(path, reserve, mode, kill_after_prune=True)
+                row["killed_recovery"] = killed
+                row["killed_recovery_stderr"] = kerr
+            step = "recovery"
+            info, done, reserve_ok, rerr = run_recovery(path, reserve, mode, kill_after_prune=False)
+            row.update({"recovery": info, "recovery_done": done, "reserve": reserve_ok, "recovery_error": rerr})
+            step = "probe after recovery and reserve re-created"
+            row["probe_after_recovery"] = probe(work, path)
+            step = "state check"
+            st = state(path, last or 0)
+            row.update({**st, "fs_free": shutil.disk_usage(work).free})
+            row["pruned"] = ((info or {}).get("pruned") or 0) + ((killed or {}).get("pruned") or 0)
+            if mode == "cursor":
+                # Nothing above the persisted boundary may be gone.
+                row["above_cursor_intact"] = st["min"] == (info or {}).get("cut", -1) + 1
+                if killed is not None:
+                    row["restart_pruned"] = (info or {}).get("pruned")
+                    row["r_a5_5_holds"] = row["restart_pruned"] == 0 and row["above_cursor_intact"]
+            elif killed is not None:
                 row["restart_pruned"] = (info or {}).get("pruned")
-                row["r_a5_5_holds"] = row["restart_pruned"] == 0 and row["above_cursor_intact"]
-        elif killed is not None:
-            row["restart_pruned"] = (info or {}).get("pruned")
-            row["r_a5_5_holds"] = row["restart_pruned"] == 0
-        row["pass"] = bool(done and reserve_ok == "ok" and st["integrity"] == "ok" and st["contiguous"]
-                           and st["acked_present"] and row["capacity_regained"]
-                           and row.get("above_cursor_intact", True))
-        out.append(row)
-        prev_pruned = row["pruned"]
-    return {"auto_vacuum": "INCREMENTAL" if auto_vacuum else "NONE", "prune": mode,
-            "recovery_killed_in_round": kill_round, "rounds": out,
-            "pass": all(x["pass"] for x in out),
-            "r_a5_5_holds": None if kill_round is None else all(x.get("r_a5_5_holds", True) for x in out)}
+                row["r_a5_5_holds"] = row["restart_pruned"] == 0
+            row["pass"] = bool(done and reserve_ok == "ok" and st["integrity"] == "ok" and st["contiguous"]
+                               and st["acked_present"] and row["capacity_regained"]
+                               and row.get("above_cursor_intact", True))
+            print("ROUND " + json.dumps({"scenario": name, **row}), flush=True)
+            prev_pruned = row["pruned"]
+    except Exception as exc:  # an observation, not a crash: record where and with what sizes
+        try:
+            sz = sizes(work)
+        except OSError as e2:
+            sz = f"sizes unavailable: {e2}"
+        result["error"] = {"scenario": name, "round": r, "step": step, "sizes": sz,
+                           "exception": f"{type(exc).__name__}: {exc}"}
+        if out and out[-1]["round"] == r and "pass" not in out[-1]:
+            result["error"]["partial_round"] = out[-1]  # includes the probes taken before the error
+        print("ERROR " + json.dumps(result["error"]), flush=True)
+    complete = "error" not in result and len(out) == rounds
+    result["pass"] = all(x.get("pass") for x in out) if complete else None
+    result["r_a5_5_holds"] = (None if kill_round is None or not complete
+                              else all(x.get("r_a5_5_holds", True) for x in out))
+    return result
 
 
 def main():
@@ -267,7 +335,7 @@ def main():
         if mount:
             subprocess.run(["umount", mount], check=False)
             os.rmdir(mount)
-    print(json.dumps({
+    print("RESULT " + json.dumps({
         "experiment": "H-14 part 2: startup recovery over repeated exhaustion (E-03, E-04, R-A5-5)",
         "classification": "simulated",
         "identity": identity(),
@@ -278,7 +346,7 @@ def main():
         "scenarios": results,
         "expected": "NONE/half: pass false (capacity not regained). INCREMENTAL/half: pass true, "
                     "r_a5_5_holds false (double prune). INCREMENTAL/cursor: pass true, r_a5_5_holds true",
-    }, indent=2))
+    }), flush=True)
 
 
 if __name__ == "__main__":
