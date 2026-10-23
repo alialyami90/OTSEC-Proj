@@ -1,4 +1,4 @@
-# A6 cross-review of P0-A2 and P0-A3 (CLAUDE.md 5.6)
+# A6 cross-review of P0-A2, P0-A3, P0-A4 and P0-A5 (CLAUDE.md 5.6)
 
 Reviewer: A6. Date: 2026-10-23. Reviewed:
 
@@ -14,6 +14,7 @@ Method: try to disprove each claim with tests where possible, otherwise by check
 | A3 threat model v0 | Accepted as the Phase 0 threat model with six findings. One claim disproved (L1–L7 are not seven independent layers for the slice). One scoping error (T8 shows termination, not revocation). | No. R-A3-1 and R-A3-3 must be resolved in the Phase 1 read-only enforcement ADR. |
 | A3 experiment E1 | Reproduced 3 of 3 runs, 9 of 9 checks. Three extra A6 probes pass 3 of 3. | No. |
 | A2 register draft | Accepted for Phase 0. The four allowed lines (`ACC`, `QUI`, `ID`, `SER`) are exact and pass A6's 61-line deny corpus with zero read-only classifications. | No, but Phase 2 cannot start without B-07 (manual text). |
+| A4 telemetry and detection (PR #4) | One defect: SER alignment as specified reports a false gap and re-adds every row on each new SEL-751 event (R-A4-1). RELP result reproduced. GOOSE rules fail 8 of 8 adversarial cases. | R-A4-1 must be fixed in the C5 event contract before V-S4 can pass. The rest is input to Phase 4 IDS. |
 | A2 feasibility findings | Accepted with four findings. SSH-not-native and Level-1-is-not-read-only are significant and change A6 criteria (V-S7, V-S13, V-S14). | No. |
 
 ## A3 findings
@@ -86,6 +87,39 @@ A2's and A1's review of A6's tooling was correct on both points. `check.py` now 
 ### Blocker raised from this review
 
 **B-07:** the SEL manual bodies (command tables, example outputs) cannot be read from this environment. The network policy denies `selinc.com` (A6 confirmed: proxy `CONNECT` 403), and A2 could read only front matter from mirrors. The documented-behaviour layer of the simulator, the `documented-example` fixtures, and every register entry still marked "located, not read" are blocked until the owner uploads the SEL-751 instruction manual (and the SEL-300G and SEL-421 sections A2 cites) or allows `selinc.com` in the environment's network policy.
+
+## A4 findings (PR #4, `claude/project-thread-ix2tu3` at `74ae579`)
+
+A4 asked for review of detection accuracy (CLAUDE.md 5.6). A6 ran A4's code only as the thing under test; expected results are hand-derived (GT-HAND) in A6 scripts under [tests/integration/reviews/A4/](../../tests/integration/reviews/A4/).
+
+### R-A4-1 — The SER alignment key includes the row number, so every new event looks like a gap (disproved as specified)
+
+`record_digest` is the SHA-256 of the whole native row, including the `#` column. The SEL-751 numbers rows so that "Row 1 is the most recently triggered row" (IM 20260910 Table 7.63, p. 7.75), and Figure 10.16 prints them oldest first, counting down to 1. Each new event therefore renumbers every row already shown, no digest matches the previous read, and `align` returns `gap` with every row as added. A6 built six consecutive-read cases from its own Figure 10.16 transcription ([ser_alignment_cases.py](../../tests/integration/reviews/A4/ser_alignment_cases.py), [results](../../tests/integration/reviews/A4/results/ser-alignment-74ae579.json)). With A4's key, 3 of 6 fail: one new event gives `gap` and 9 rows added instead of `ok` and 1, and the buffer-full case gives 8 instead of 2. With the same `align` and a key that leaves out the row number, 6 of 6 pass. So the algorithm holds and the key is wrong. Consequences if shipped: a false gap event on every poll that finds new rows, and every stored SER row re-ingested on every such poll. **Requested:** the alignment key is the row without its row number and the separating whitespace (the native bytes stay the evidence, unchanged), and the C5 contract says so. The renumbered layout from row 10 up is ASSUMED, so H-07 must confirm it.
+
+### R-A4-2 — On ambiguity, `align` keeps the reading that adds the fewest rows
+
+When more than one offset fits, A4 picks the largest overlap, which adds the fewest rows, and flags `ambiguous`. If the other reading was true, real events are dropped with only a flag to show it. The brief says never to discard native event information silently, and V-S4 says an ambiguous overlap is never resolved by choosing one. **Requested:** on `ambiguous`, add the rows of the smallest overlap (the most rows) and mark the extra ones as possible duplicates, so the mistake can be undone. Low frequency on SEL relays, because rows carry millisecond times, but it matters for any source whose rows have no time.
+
+### R-A4-3 — RELP acknowledgements (E-A4-03): reproduced, with one limit
+
+A6 re-ran A4's experiment unchanged 3 times and added variants: a kill after 300 and after 2,900 messages, and stock `omfile` output with Direct queues, with and without `flushOnTXEnd` ([relp_ack_variants.py](../../tests/integration/reviews/A4/relp_ack_variants.py), [results](../../tests/integration/reviews/A4/results/relp-ack-variants-74ae579.json); rsyslog 8.2312.0). Default queues lost 1,467 to 1,472 of 1,500 acknowledged messages in every run. Every Direct-queue configuration lost none, in all 12 runs. **Holds.** Limit: the receiver was SIGKILLed, which leaves the page cache intact, and neither the sink nor `omfile` was set to fsync. So this proves the ack follows the write for a process crash, not power loss (the same limit as E-02). B-03 still needs the receiver's sync setting stated for any receiver the platform runs itself.
+
+### R-A4-4 — GOOSE sequence rules: 8 of 8 adversarial cases fail
+
+A6 replaced `frames()` with hand-built sequences, eight cases labeled by construction ([goose_seq_cases.py](../../tests/integration/reviews/A4/goose_seq_cases.py), [results](../../tests/integration/reviews/A4/results/goose-seq-cases-74ae579.json)).
+- **Benign, flagged as attacks:** a frame dropped by the sensor, PRP's duplicate copies of each frame seen on one sensor (every second frame flagged), a publisher restart with stNum back to 1, and 32-bit sqNum rollover.
+- **Attacks missed:**
+  - A well-formed injection (stNum+1, sqNum 0, fresh `t`). The alert falls on the next legitimate frame (`stnum-regress`), not on the injected one.
+  - An injection before the first legitimate frame.
+  - A takeover where the legitimate publisher goes silent. Nothing flags this, because there is no check on timeAllowedToLive or on a missing heartbeat.
+  - A new `gocbRef` never seen before.
+
+The 10/11 result on the synthesized dataset holds for that dataset. These rules on their own would be noisy on a PRP station and blind to a takeover. **Requested before any detection claim:** state per-rule false-positive conditions (sensor loss, PRP, restart, rollover); key the state on source MAC and APPID as well as `gocbRef`; add a heartbeat-absence check against timeAllowedToLive; add a baseline of known control blocks; and score detections by event, not by frame. This is Phase 4 input and does not block the slice.
+
+### R-A4-5 — Smaller items
+
+- **RTAC Syslog times (A4's suggestion):** accepted into V-S3 as a negative case. When MSG carries the event time, the event time is never taken from HEADER (9.4 s apart in the manual's example).
+- **V-S3 cases in schema draft section 3:** consistent with V-S3 (verbatim native time, offset `unknown` with `utc` null, never padding resolution). A6 has not yet compared the DNP3 4 h offset inference against a capture; it stays an inference.
 
 ## A5 findings (PR #3, `claude/project-thread-xni3ff` at `26c08cb`, and `A5-platform-feasibility.md`)
 
