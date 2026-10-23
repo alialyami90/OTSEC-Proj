@@ -2,7 +2,7 @@
 
 Owner: A6 (independent verification and OT safety). A6 writes this document independently of the implementing agents and actively attempts to disprove their claims.
 
-Status: **Phase 0 draft (2026-10-23).** No lab IED exists; every slice result can reach `simulated` at most. Acceptance criteria below are proposed by A6 and become binding when A1 approves them at the Phase 0 exit gate. Numeric thresholds marked *(proposed)* are starting values for A1 and the owning agent to confirm or replace with evidence. No product code exists, so nothing below has been verified against an implementation. Executed so far: experiment E-01 and the recording simulator self-test, both `simulated`.
+Status: **Phase 0 draft (2026-10-23).** No lab IED exists; every slice result can reach `simulated` at most. A1 accepted the criteria below as the Phase 0 baseline on 2026-10-23. Numeric thresholds marked *(proposed)* stay proposed until the owning agent confirms or replaces them with evidence in Phase 1. No product code exists, so nothing below has been verified against an implementation. Executed so far: experiment E-01 and the recording simulator self-test, both `simulated`.
 
 ## Rules
 
@@ -142,7 +142,7 @@ At A1's request the simulator is built by A6 from A2's *cited documentation*, no
 2. **Documented-behaviour layer (planned, after A2's register lands).** Replace the placeholder response with documentation-derived responses: for each register command, the output printed in the cited manual section (GT-EX), the documented prompt string, pagination, and documented error text. Fault modes from V-S12 and V-S15 are injected by configuration.
 3. **Independence rules.** A6 reads the manual section A2 cites, not A2's interpretation of it. Where A6 and A2 read the same page differently, the disagreement is logged as a finding and resolved by A1 per CLAUDE.md 5.7.
 4. **Residual risk that simulation cannot remove.** Parser and simulator still derive from the same documents. An error or omission in the OEM manual, or a difference between documented and real firmware output, passes every simulated test. This is why every V-S row above keeps a hardware-dependent column, and why no device family may be described as supported until H-01, H-07, H-08, and H-09 are run.
-5. **Fixture classification.** Documentation examples are neither real device output nor synthesized test data. A6 proposes a fourth fixture class, `documented-example`, with a `SOURCE.md` citing the document, revision, and page, and a rule that such fixtures support only `simulated` claims. This needs A1 approval because [tests/fixtures/README.md](../tests/fixtures/README.md) currently allows only real or sanitized real material.
+5. **Fixture classification.** Documentation examples are neither real device output nor synthesized test data. A6 proposes a fourth fixture class, `documented-example`, with a `SOURCE.md` citing the document, revision, and page, and a rule that such fixtures support only `simulated` claims. A1 approved this class on 2026-10-23 and updated [tests/fixtures/README.md](../tests/fixtures/README.md): A2 and A6 transcribe independently, and differences are logged as findings.
 
 ## Tests that require real equipment
 
@@ -169,10 +169,10 @@ These block acceptance of the milestone named. They do not block Phase 0 or Phas
 | --- | --- | --- | --- | --- |
 | B-01 | No primary evidence exists: the project owner confirmed (via A1, 2026-10-23) there is no lab IED and no real device outputs. The slice can be accepted only as `simulated`; V-S1, V-S2, V-S7, and V-S13 keep open hardware-dependent parts, and no device family may be called supported. | Any claim beyond `simulated` | A6, 2026-10-23 | open: accepted constraint for Phase 2; closes only with hardware |
 | B-02 | The approved command register is empty. No adapter command may be implemented until its full command line, parameters, access level, and classification are registered with an OEM citation (C-01, C-12). | Phase 2 implementation start for A2 | A6, 2026-10-23 | open |
-| B-03 | Forwarding delivery semantics are undefined, and E-01 shows transport success does not imply delivery. V-S6 cannot be tested until the contract defines the confirmed position, replay, de-duplication key, and unconfirmed window. | Phase 1 contract approval | A6, 2026-10-23 | open |
+| B-03 | Forwarding delivery semantics are undefined, and E-01 shows transport success does not imply delivery. V-S6 cannot be tested until the contract defines the confirmed position, replay, de-duplication key, and unconfirmed window. | Phase 1 contract approval | A6, 2026-10-23 | open: A1 made it an entry condition for Phase 1 contract approval (2026-10-23) |
 | B-04 | No design for storing device credentials on a site node. The slice requires them, and they are a direct path into IEDs (Q7, C-12). | Phase 2 acceptance | A6, 2026-10-23 | open: A3 |
-| B-05 | No device identity trust model; trust-on-first-use of SSH host keys would accept a substituted device (C-07). | Phase 1 contract approval | A6, 2026-10-23 | open: A3 |
-| B-06 | Test-harness language is undecided pending the toolchain ADR. The recording simulator prototype uses Python 3 and asyncssh 2.24.1 as test-only tooling. A6 recommends A1 permit the verification harness to use a different language from the implementation where that strengthens oracle independence. | Phase 1 harness build | A6, 2026-10-23 | open: A1 decision |
+| B-05 | No device identity trust model; trust-on-first-use of SSH host keys would accept a substituted device (C-07). | Phase 1 contract approval | A6, 2026-10-23 | open: A1 made it an entry condition for Phase 1 contract approval (2026-10-23) |
+| B-06 | Test-harness language is undecided pending the toolchain ADR. The recording simulator prototype uses Python 3 and asyncssh 2.24.1 as test-only tooling. A6 recommends A1 permit the verification harness to use a different language from the implementation where that strengthens oracle independence. | Phase 1 harness build | A6, 2026-10-23 | resolved: A1 approved Python with pinned deps for verification tooling under `tests/`, independent of the implementation toolchain; independence rests on the no-import rule (2026-10-23) |
 
 ## Proposed architecture-critical risks (A6 input to the Phase 0 exit gate)
 
