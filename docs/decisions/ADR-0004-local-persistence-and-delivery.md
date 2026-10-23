@@ -15,7 +15,7 @@ SQLite (WAL); PostgreSQL; embedded key-value stores; a custom append-only log; a
 
 ## Evidence
 
-- E-A5-1: 400 SIGKILL runs, 0 acknowledged events lost, 0 gaps, integrity ok (A1 re-ran 100: same result). Process crash only; power loss untested.
+- E-A5-1: 400 SIGKILL runs, 0 acknowledged events lost, 0 gaps, integrity ok (A1 re-ran 100 kills, 25 per mode: same result). Process crash only; power loss untested.
 - E-A5-3: default WAL settings wedge a full store; bounded WAL plus reserve file plus incremental pruning recovers it (A1 reproduced).
 - E-A5-4 and A6 E-01: unacknowledged syslog loses events in every run; an application-level acknowledgement gives 0 missing and expected duplicates (A1 reproduced both).
 
