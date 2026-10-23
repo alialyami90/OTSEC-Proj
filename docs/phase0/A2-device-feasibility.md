@@ -115,6 +115,7 @@ Primary family, SEL-751. What is documented:
 - Row identity: rows come from a ring buffer, so any row number is positional and changes as new entries arrive. Whether rows carry a monotonic sequence number, counter or overrun marker (A6 C-06) is not shown in anything I read: `unknown`.
 - Time zone or UTC offset: `unknown`.
 - Date format: unverified recollection that SEL relays have a date-format setting (MDY/YMD); `unknown`.
+- Control bytes in relay output: the open-source SEL client patches Python's Telnet reader specifically so it does not drop NUL (0x00) and 0x11 (XON) bytes received from the relay, with the comment "Don't eat the Null Characters, They're Important!" (S10 `support/telnet.py`). Inbound control bytes are therefore expected and must survive into the byte-exact transcript; what they mean is `unknown` until the manual is read.
 
 Implications for A4's schema: keep the full report (header and rows) byte-exact as the native record; carry report-level time source beside each row; do not use row numbers as identity; derive a duplicate key from device identity plus device timestamp, element and state, and expect legitimate repeats (same element, same state, same millisecond is possible after chatter suppression); represent "time zone unknown" explicitly.
 
