@@ -10,6 +10,8 @@ Everything here is from documents and open-source code. No device was contacted.
 
 ## 0. Answers in brief
 
+> Update after reading the SEL-751 instruction manual (S22): see section 15. Every point below is now confirmed for the SEL-751 from the manual, with one correction. On the SEL-751, failed passwords pulse the SALARM Relay Word bit, which drives the alarm contact OUT101 by factory default and is recorded in the SER by factory default.
+
 1. **Primary family: SEL relays that speak SEL ASCII, with the SEL-751 feeder relay as the reference model.** Contrasting second family: an IEC 61850 MMS server IED that exposes its sequence of events as an IEC 61850 log (reference device to be fixed between Siemens SIPROTEC 5 and ABB Relion 615 once their manuals are read). Section 2.
 2. **SSH is not a documented native transport for the SEL relay candidates.** The documents I could read list Telnet, FTP and HTTP on the relay Ethernet port. SSH appears only on SEL gateways and automation controllers (SEL-3620, SEL RTAC) that sit in front of relays. The brief's "SSH to an IED" example does not hold for this family; the realistic first-slice path is Telnet (cleartext) from a site-local collector, flagged as an insecure downstream connection. Section 5.
 3. **Access Level 1 is not a read-only level.** On SEL relays it permits commands that trigger event reports, and on some models it permits clearing records or resetting meters, opening transparent connections to other ports, and starting elevation to breaker or settings levels. Read-only must be enforced by an allowlist of complete command lines, not by the device's access level. Section 6.
@@ -46,6 +48,9 @@ Consequence: for most commands I can cite the manual section that defines them, 
 | S19 | SEL-451 Data Sheet, supplied by the owner (`451_DS_20250731.pdf`) | date code 20250731 | full text | OEM document |
 | S20 | SEL-411L Data Sheet, supplied by the owner (`411L_DS_20250731.pdf`) | date code 20250731 | full text | OEM document |
 | S21 | SEL-787-2/-3/-4 Data Sheet, supplied by the owner (`787-2-3-4_DS_20250501.pdf`) | date code 20250501 | full text | OEM document |
+| S22 | **SEL-751 Feeder Protection Relay Instruction Manual**, supplied by the owner (`OTSEC\Manuals\SEL\751_IM_20260910.pdf`) | date code 20260910 | Section 7 (access levels, Telnet, command tables), Section 4 port and global settings, Section 10 SER, Appendix C, Command Summary; extracted by A2 with `pdftotext` | OEM document |
+
+**S22 supersedes S2 and S3 for the SEL-751.** Section 15 records what it settles; where earlier sections say "section located, content not read", section 15 is authoritative.
 
 S16–S21 were added on 2026-10-23 after the first draft. A1 had extracted and summarised them; A2 re-extracted each PDF with `pdftotext -layout` and checked every claim used here against its own extraction, not against A1's notes. They are data sheets: they have no command tables, access-level tables or example outputs, so they do not replace the instruction manuals.
 
@@ -99,22 +104,24 @@ Each risk names its source. "Unknown" means the documents that would settle it a
 | ID | Risk | Evidence | Proposed control | Owner of control |
 | --- | --- | --- | --- | --- |
 | D1 | **Level 1 is not read-only.** On SEL-300G, Level 1 includes `TRI` (trigger an event report) as well as view commands, and Level 1 can issue `2AC` and `BAC` to request higher levels. | S1 Table 5 | Allowlist of full command lines; `TRI` denied; no elevation command other than `ACC` ever sent. | A2 adapter, A3 enforcement point, A6 test |
-| D2 | **Bad password closes the ALARM contact.** "If the requested password is incorrectly entered three times, the relay closes the ALARM contact for one second and remains at Access Level 0." Alarm contacts are commonly wired to SCADA or annunciators. Behaviour on SEL-751 unknown. | S1 | One authentication attempt per invocation. On failure, mark the device credential suspended until an operator clears it; never retry automatically; never probe default passwords. | A2, A3 |
+| D2 | **Bad password closes the ALARM contact.** "If the requested password is incorrectly entered three times, the relay closes the ALARM contact for one second and remains at Access Level 0." Alarm contacts are commonly wired to SCADA or annunciators. **SEL-751 (S22): confirmed and worse.** Three wrong passwords pulse SALARM for 1 s; so does every successful Level 2 or C access. By factory default SALARM drives OUT101 and is logged as SER4 (section 15.1). | S1, S22 | One authentication attempt per invocation. On failure, mark the device credential suspended until an operator clears it; never retry automatically; never probe default passwords. | A2, A3 |
 | D3 | **Data-clearing and reset commands exist with short forms.** SEL-300G Table 4 lists `HIS C` (clears event report and history), `SER C` (clears the SER buffer), `PRO R`, `MET RD`, `MET RP`, `MET RE`, `MET RM` (reset demand, peak, energy, max/min). `HIS C` is Level 2 there; the levels of the others are not stated in the quick start. SEL-751A has an equivalent table (S2 Table 10.1, not read). `TAR R` (A6's recollection) is not in S1 and is unconfirmed. | S1, S2 | Deny by default; register only parameter forms read from the manual table. | A2 |
 | D4 | **Control and settings commands live on the same session at higher levels.** `OPE`, `CLO`, `PUL` at Level B; `CON`, `SET`, `PAS` at Level 2 (SEL-300G). SEL-751A also has `R_S` (restore factory defaults) and `L_D` (load firmware). | S1, S2 | Collector never holds Level B or 2 passwords, so elevation fails at the password prompt even if an elevation line slipped through. Note: that failure itself counts toward D2. | A3 credential model |
-| D5 | **Binary SEL Fast messages share the ASCII port.** The open-source client builds Fast Operate messages beginning `0xA5 0xE0` (remote bit) and `0xA5 0xE3` (breaker bit), plus `0xA5 0xB5` (acknowledge event report) and `0xA5 0xB9` (clear status bits). The SEL-751 data sheet confirms the shared channel: "Binary and ASCII protocols operate simultaneously over the same communications lines" (S16 Table 6), and the SEL-311L lists its single Telnet host session as supporting "SEL ASCII, SEL Compressed ASCII, Fast Meter and Fast Operate" (S17). So on at least one model a Telnet session accepts Fast Operate. Whether this is gated by access level or a port setting is unknown. | S16, S17; S10 (secondary) | Transport-level byte filter: the adapter may send only printable ASCII (0x20–0x7E) plus CR and LF. A6 to test that any other byte aborts the session before transmission. | A2, A6 |
+| D5 | **Binary SEL Fast messages share the ASCII port.** The open-source client builds Fast Operate messages beginning `0xA5 0xE0` (remote bit) and `0xA5 0xE3` (breaker bit), plus `0xA5 0xB5` (acknowledge event report) and `0xA5 0xB9` (clear status bits). The SEL-751 data sheet confirms the shared channel: "Binary and ASCII protocols operate simultaneously over the same communications lines" (S16 Table 6), and the SEL-311L lists its single Telnet host session as supporting "SEL ASCII, SEL Compressed ASCII, Fast Meter and Fast Operate" (S17). So on at least one model a Telnet session accepts Fast Operate. S22 settles it for the SEL-751: Fast Operate is supported on Port 1 Telnet and gated by the port setting `FASTOP`, which defaults to `N` (blocked). | S16, S17, S22; S10 (secondary) | Transport-level byte filter: the adapter may send only printable ASCII (0x20–0x7E) plus CR and LF. A6 to test that any other byte aborts the session before transmission. | A2, A6 |
 | D6 | **Transparent connections at Level 1 on SEL-400 series.** Level 1 permits "View data and settings and establish transparent connections", i.e. bridging the session to another port. This is a pivot path (Q7). Not documented for SEL-751 in what I read. | S7 Table 5.3 | Keep SEL-400 series out of slice 1; deny any port or transparent-connection command; A3 to track as a Q7 path. | A3 |
 | D7 | **Cleartext transport and shared per-level passwords.** Telnet and FTP carry the Level 1 password in clear (S5, S7). Passwords are per access level, not per user ("Set unique passwords for each access level", S5), so the relay cannot attribute a login to a person. | S5, S6, S7 | Collector in the relay's zone; platform audit carries the user attribution; insecure-downstream flag shown to users. Per-user accounts need a gateway (S8). | A3 |
 | D8 | **FTP and the web server are write paths.** FTP: FTP logins use the access-level user names (ACC, 2AC, …) and the SEL-451-6 FTP service transfers settings files "to and from the relay". Whether a Level 1 FTP login can write is unknown. The SEL-751 web server uploads relay firmware "(available at Access Level 2)" (S16). | S5, S7, S16 | FTP is out of slice 1. Before any FTP use, read S3 Table 7.56 and get A6 to test Level 1 write refusal on a simulator, then on hardware. | A2 |
-| D9 | **Session and port contention.** SEL-311L allows exactly one Telnet host session, one Telnet-to-card session and one FTP session (S17), so a collector holding the Telnet session locks out an engineer on that path. The SEL-751 data sheet gives no session count (S16); its Telnet limit and idle timeout are in S3 Table 4.84 (not read). MMS allows up to 7 client sessions on SEL-451-6 (S5) and 6 on SEL-311L (S17); a collector consumes one. An occupied session could block an engineer during an incident. | S17, S3 (located), S5 | Short sessions, always `QUI`, one session per device at a time, minimum interval between invocations, never hold a session open. | A2, A5 |
+| D9 | **Session and port contention.** SEL-311L allows exactly one Telnet host session, one Telnet-to-card session and one FTP session (S17), so a collector holding the Telnet session locks out an engineer on that path. SEL-751 Port 1 supports two concurrent Telnet sessions, and `TIDLE` defaults to 15 minutes (S22, section 15.2). MMS allows up to 7 client sessions on SEL-451-6 (S5) and 6 on SEL-311L (S17); a collector consumes one. An occupied session could block an engineer during an incident. | S17, S3 (located), S5 | Short sessions, always `QUI`, one session per device at a time, minimum interval between invocations, never hold a session open. | A2, A5 |
 | D10 | **SER ring buffer overwrite.** SEL-751 keeps the latest 1,024 SER entries (S4, S16); SEL-451, SEL-411L and SEL-400G keep 1,000 (S5, S18–S20); SEL-311L keeps the last 512 (S17). Entries older than that are gone. A chattering-element auto-removal feature exists (S2/S3 Table 7.40 `SER D`, content not read). `SER C` empties the buffer. | S4, S5, S16–S20, S2, S3 | Poll interval sized to the expected event rate; overlap detection on every read; loss or a buffer reset must be reported as a telemetry gap, not hidden. | A2, A4 |
 | D11 | **Processing load on the relay.** No CPU or communications-load guidance found in what I read. | none | Conservative rate limits until measured on hardware; listed as a hardware-only test. | A6 |
 | D12 | **Firmware variance.** Output formats differ by model and firmware. The firmware identifier (FID) is returned by the ID command (S10; S2 Figure 3.5 located). | S10, S2 | Parse only on FIDs that a capability profile lists; otherwise run identification only and report "unsupported firmware". | A2 |
 | D13 | **Default passwords are shipped.** "This device is shipped with default passwords" (S1); factory defaults are tabulated (S2 Table 7.34). | S1, S2 | Never test defaults (that is credential guessing and trips D2). Recommend operators change them; out of platform scope. | A3 |
 | D14 | (Contrast family) **Enabling IEC 61850 reports is a write.** A client reserves a report control block and sets `RptEna` (S13); a collector doing so changes device state and can collide with the SCADA client that owns the block. Log queries are a read service and several clients can query one log (S12). The pure-Go MMS client S11 also exposes control operations and file delete. | S11, S12, S13 | For family 2 use log queries and nameplate reads only. Wrap any MMS library in a facade that exposes read services only, and have A6 test that control, write and file-delete services are unreachable. | A2, A6 |
-| D15 | **The collector's own logins may appear in the SER.** SEL-400G SER records "setting changes, relay start-up, password access" (S18); SEL-311L SER may include "relay setting changes, and relay power-up" (S17). Each collection login could therefore create SER rows that the next read collects. SEL-751 behaviour unknown. | S17, S18 | Correlate SER rows with the platform's own session audit records and tag self-generated rows; never suppress them. A4 and A6 to include the case. | A2, A4 |
-| D16 | **Serial port language is configurable.** SEL-751: "Choose English or Spanish for your serial ports" (S16). ASCII output, including SER and ID text, may be in Spanish. | S16 | The parser accepts only the language a profile was built for and otherwise fails with `parse_error`; it never guesses. | A2 |
+| D15 | **The collector's own logins may appear in the SER.** SEL-400G SER records "setting changes, relay start-up, password access" (S18); SEL-311L SER may include "relay setting changes, and relay power-up" (S17). Each collection login could therefore create SER rows that the next read collects. **SEL-751 (S22): confirmed for alarms.** Denied access pulses SALARM, which is SER4 by default, so failed logins create SER rows. The manual does not say a successful Level 1 login is recorded. | S17, S18, S22 | Correlate SER rows with the platform's own session audit records and tag self-generated rows; never suppress them. A4 and A6 to include the case. | A2, A4 |
+| D16 | **Port language is configurable.** SEL-751: "Choose English or Spanish for your serial ports" (S16). ASCII output, including SER and ID text, may be in Spanish. **S22 shows command names change too, and Spanish `SER D` clears the SER** (section 15.3). | S16, S22 | The parser accepts only the language a profile was built for and otherwise fails with `parse_error`; it never guesses. | A2 |
 | D17 | (Contrast option on SEL) **MMS authentication uses the Level 2 password.** SEL-400G: when MMS authentication is enabled, "The client request must be accompanied by the Access Level 2 password" (S18). A collector using MMS on such a relay would have to hold a settings-level password, which A3's Level 1 credential ceiling forbids. | S18 | MMS collection from SEL relays with MMS authentication enabled is incompatible with the slice's credential model; do not use it. | A3 |
+| D18 | **Elevated sessions persist.** SEL-751: without `QUIT`, "the relay remains at an elevated access level until TIDLE expires" (S22). Whether a new connection inherits that level is not stated. | S22 | Always `QUI` before closing. The auth phase reads the first prompt before sending anything: on `=>` or `=>>` it sends `QUI`, closes and alarms; it never collects on a session it did not elevate itself. | A2, A3, A6 |
+| D19 | **After a wrong password, the next line is a password.** The relay re-prompts `Password: ?` up to three times (S22 p. 7.33), so any line sent then, including `QUI`, is consumed as another attempt and moves toward the SALARM pulse. A6 reached the same conclusion independently from its simulator. | S22 (inference from the documented re-prompt; A6 concurs) | On any `Password: ?` re-prompt, close the TCP connection without sending another byte. Never send `QUI` at a password prompt. | A2, A3, A6 |
 
 ## 7. Native SER record format (for A4)
 
@@ -196,19 +203,23 @@ Enforcement points the envelope implies (for A3 and A6): the register lookup and
 
 ## 10. Simulator source material (for A6)
 
-A6 builds the simulator independently from these locations. All are OEM manual examples, so anything built from them is `simulated`, and the examples themselves are `documented-untested`, not captures. The SEL-751 mirror copy's date code was not visible to me; record the date code from whichever copy you use.
+A6 builds the simulator independently from these locations. All are OEM manual examples, so anything built from them is `simulated`, and the examples themselves are `documented-untested`, not captures. Updated for S22 (SEL-751 Instruction Manual, date code 20260910, owner-supplied); page numbers are the manual's own.
 
-| Behaviour | Document | Revision | Location |
-| --- | --- | --- | --- |
-| ID command response | SEL-751A Instruction Manual PM751A-01-NB | 20130329 | Figure 3.5 "Device Response to the ID Command", p. 3.4 |
-| ID command definition | SEL-751 Instruction Manual | see above | Table 7.24 "Identification Command" (ManualsLib p. 489) |
-| ID line format and checksum | selprotopy 0.1.3 `protocol/parser/common.py` | 0.1.3 | lines of the form `"FID=…","XXXX"` where XXXX is a hex checksum over the quoted field; fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL (secondary source; confirm against Figure 3.5) |
-| Access commands and prompts | SEL-751 Instruction Manual; SEL-421 Instruction Manual | see above | Table 7.8 "Access Commands" (p. 470); SEL-421 Table 4.3 prompts `=`, `=>`, `==>`, `=>>` |
-| Bad-password behaviour | SEL-300G Quick-Start | 20060731 | password paragraph after Table 5 |
-| SER command forms | SEL-751 Instruction Manual | see above | Table 7.39 (p. 497), Table 7.40 `SER D` (p. 497) |
-| SER report example | SEL-751 Instruction Manual | see above | Figure 10.17 "Example Sequential Events Recorder (SER) Event Report" (p. 619) |
-| Commands that clear data | SEL-751A Instruction Manual | 20130329 | Table 10.1 "Serial Port Commands That Clear Relay Data Buffers", p. 10.5; SEL-300G Quick-Start Table 4 |
-| Command/level summary | SEL-300G Quick-Start | 20060731 | Table 5 |
+| Behaviour | Document | Location |
+| --- | --- | --- |
+| ID command response | S22 | Figure 7.38 "ID Command Response", p. 7.64 (checksums consistent). Do **not** use Figure 3.20, p. 3.14: 6 of 12 checksums are wrong (section 15.5). |
+| ID command definition and level | S22 | Table 7.43, p. 7.64 (Level 0) |
+| Access commands, prompts, password exchange | S22 | Table 7.17, p. 7.32; access-level text and examples, pp. 7.29–7.33 |
+| `QUIT` | S22 | Table 7.59, p. 7.73 |
+| SER command forms | S22 | Table 7.63; `SER D` Table 7.64; `No Data Available` text, p. 7.75 |
+| SER report header | S22 | Table 7.16 |
+| SER report example | S22 | Figure 10.16, p. 10.40 |
+| All commands with access levels (English and Spanish) | S22 | Command Summary at the back of the manual |
+| Port 1 settings (`MAXACC`, `FASTOP`, `LANG`, `TIDLE`, `TCBAN`) | S22 | Section 4, Port 1 settings table; concurrency in Table 7.5 footnote |
+| Compressed ASCII and checksum rule | S22 | Appendix C, Table C.2 |
+| Bad-password behaviour on another model, for contrast | SEL-300G Quick-Start, 20060731 | password paragraph after Table 5 |
+
+Fixtures already transcribed by A2 are in `tests/fixtures/ied/sel/751/documented-example/` with `SOURCE.md`. A6 should transcribe its own copies and compare.
 
 ## 11. Answers to A3's questions
 
@@ -226,30 +237,108 @@ No hard requirement for Python or C found. SEL ASCII is a line protocol over Tel
 
 ## 13. Unsupported assumptions and open items
 
+Updated after S22. Rows settled by the manual are listed in section 15.6 and removed here.
+
 | Item | Status | What would settle it |
 | --- | --- | --- |
-| Contents of SEL-751 Tables 7.8, 7.24, 7.39, 7.40, 4.84, 7.56, 10.x and Figures 3.5, 10.17 | section located, not read | SEL-751 manual text (owner upload or `selinc.com` allowed in network policy) |
-| Access level required for `ID` | unknown (Level 0 or 1) | S3 Table 7.24 |
-| Access level and exact forms of `SER C`, `TAR R`, `STA` variants | unknown | S3 command tables |
-| SER row numbering, sequence counter, overrun marker | unknown | S3 Figure 10.17 and Table 7.39; then hardware |
-| Telnet session limit, idle timeout, port number on SEL-751 | unknown (SEL-311L: 1 Telnet host session, S17) | S3 Table 4.84 |
-| Behaviour of Fast Operate bytes on a Telnet session | unknown | SEL Fast Operate documentation; then hardware |
-| Bad-password ALARM behaviour on SEL-751 | unknown (documented for SEL-300G) | S3 access-level section; then hardware |
-| Compressed ASCII SER command, fields, access level | unknown | SEL-751 manual |
-| Whether SEL-751 SER records password access (D15) | unknown (yes on SEL-400G, S18) | SEL-751 manual |
+| `CSE` (Compressed ASCII SER) output format | unknown; command and level documented (S22 Table C.2) | SEL Compressed ASCII documentation, or a capture |
+| Whether a new Telnet connection inherits an unquit elevated level (D18) | unknown | SEL support or hardware test |
+| Whether a successful Level 1 login is recorded in the SER (D15) | not documented in S22 | hardware test |
+| Relay line endings and control bytes in ASCII output | unknown | capture |
 | Relay CPU and communications load from polling | unknown | hardware only |
 | Identity and SOE on family 2 reference device | unknown | SIPROTEC 5 or Relion 615 manuals and PIXIT |
-| DNP3 event-buffer behaviour with a second master | unverified recollection | SEL-751 DNP3 device profile |
+| DNP3 event-buffer behaviour with a second master | unverified recollection | SEL-751 DNP3 device profile (in S22) |
+| Whether `SHO G` and `SHO P 1` output contains passwords or other secrets | believed not (passwords are set with `PAS`, not shown) but unverified | read the `SHO` examples in S22; A3 review |
 
-No parsing experiment was run: I could not read the example outputs verbatim, and writing an output by hand would be fabricated evidence. No fixtures were added to `tests/fixtures/ied/`.
+Parsing experiments are now possible on the documented-example fixtures, but they show only that a parser matches the manual. They are not interoperability evidence.
 
 ## 14. Handoff P0-A2 — A2 — 2026-10-23
 
 **Completed:** candidate ranking (section 2); SEL-751 capability matrix and draft command register (`docs/device-capabilities.md`, `A2-command-register-draft.json`); SSH feasibility (section 5); device-side safety risks D1–D14 (section 6); native SER format as far as documented (section 7); Q2 (section 8); Q5 and a draft adapter interface (section 9); simulator source list (section 10).
-**Evidence:** sources S1–S21 in section 1 (S16–S21 are owner-supplied data sheets added after the first draft). Documentation and open-source code only; no hardware, no simulator, no captures.
+**Evidence:** sources S1–S22 in section 1. S16–S21 are owner-supplied data sheets; S22 is the owner-supplied SEL-751 instruction manual (date code 20260910), read on 2026-10-23 (section 15). Documentation and open-source code only; no hardware, no simulator, no captures.
 **Interfaces:** draft invocation and result envelope (section 9), proposal only. No contract introduced or modified.
-**Limitations:** SEL-751 manual body text unreadable from this environment, so most command details are "section located, content not read". Every capability is at best `documented-untested`.
-**Risks:** Level 1 is not read-only (D1, D3); bad passwords pulse ALARM (D2); Fast Operate bytes on the same port (D5); cleartext Telnet with shared passwords (D7); FTP writes settings (D8); SER ring-buffer loss (D10).
-**Dependencies:** A3 decides the credential and enforcement points for D1, D2, D4, D5, D7. A4 consumes section 7 for the event schema. A6 builds the simulator from section 10 and verifies the register. A1 decides primary and contrast families and transfers the interface draft into Phase 1 contract work. The owner can unblock the manual reading.
-**Files changed:** `docs/phase0/A2-device-feasibility.md`, `docs/phase0/A2-command-register-draft.json`, `docs/device-capabilities.md`.
+**Limitations:** Every capability is at best `documented-untested`. The `CSE` output format is not in S22. Fixtures are manual transcriptions, one of which (Figure 3.20) is internally inconsistent.
+**Risks:** Level 1 is not read-only (D1, D3, section 15.3); bad passwords pulse SALARM, which by default closes OUT101 and writes the SER (D2, D15); unquit sessions stay elevated (D18); a wrong password makes the next line a password (D19); Spanish `SER D` clears the SER (D16); Fast Operate bytes on the same port (D5); cleartext Telnet with shared passwords (D7); FTP writes settings (D8); SER ring-buffer loss (D10).
+**Dependencies:** A3 decides the credential and enforcement points for D1, D2, D4, D5, D7. A4 consumes section 7 for the event schema. A6 builds the simulator from section 10 and verifies the register. A1 decides primary and contrast families, transfers the interface draft into Phase 1 contract work, and approves or rejects the proposed `SHO G` and `SHO P 1` register entries.
+**Files changed:** `docs/phase0/A2-device-feasibility.md`, `docs/phase0/A2-command-register-draft.json`, `docs/device-capabilities.md`, `tests/fixtures/ied/sel/751/documented-example/` (3 fixtures and `SOURCE.md`).
 **Reviewer(s) and outcome:** A6 and A3 per CLAUDE.md 5.6; pending.
+
+## 15. SEL-751 instruction manual results (S22, date code 20260910)
+
+Read on 2026-10-23 from the owner-supplied manual. Everything here is `documented-untested` for the SEL-751 and that manual revision. Page numbers are the manual's own.
+
+### 15.1 Session model
+
+- Prompts: `=` (Level 0), `=>` (Level 1), `=>>` (Level 2), plus restricted Level C (p. 7.29–7.30). The SEL-751 has Levels 0, 1, 2 and C only (no B, P, A, O).
+- `ACC` (Level 0) moves to Level 1, `2AC` (Level 1) to Level 2, and `CAL` (Level 2) to Level C (Table 7.17, p. 7.32). `QUIT` returns to Level 0 with no password check (Table 7.59, p. 7.73). `ID` works at Level 0 (Table 7.43, p. 7.64).
+- Password exchange: `Password: ?` prompt. A correct password returns a header plus `Level 1` and `=>`. A wrong password re-prompts, up to three times; "If the requested password is incorrectly entered three times, the relay pulses the SALARM Relay Word bit for one second and remains at Access Level 0" (p. 7.33).
+- Passwords can be disabled, in which case `ACC` goes straight to Level 1 with no prompt (p. 7.33). A main-board jumper also bypasses passwords up to the port's `MAXACC` level. Even then, "the alarm contact still closes momentarily when accessing Level 2 and Level C" (Section 2, password jumper).
+- "The relay pulses the SALARM Relay Word bit for one second after a successful Level 2 or Level C access, or if access is denied" (p. 7.33).
+- Factory defaults: `OUT101 := HALARM OR SALARM` (Table 4.83), so SALARM closes the alarm output; `SER4 := SALARM` (Table 4.122), so SALARM pulses are written to the SER. Consequence: on a relay with factory defaults, each failed login burst (D2) both raises the alarm contact and creates SER rows (D15).
+- Commands are case-insensitive and may be shortened to their first three letters (Command Summary, p. 1; p. 7.31). Responses: `Invalid Access Level` or `Invalid Command` (p. 7.31).
+- Telnet: "Use the QUIT command prior to closing the Telnet-to-Host session to set the relay to Access Level 0. Otherwise, the relay remains at an elevated access level until TIDLE expires" (Telnet Server note, Section 7). `EXIT` terminates a Telnet session from any level.
+
+New risk **D18, inherited elevation.** The manual says an unquit Telnet session stays elevated until `TIDLE` (default 15 min). Whether a new connection can inherit that level is not stated. The auth phase must therefore read the first prompt before sending anything: on `=>` or `=>>` send `QUI`, close and alarm, and never collect on an elevated session. On a `Password: ?` re-prompt, close without sending anything (D19). This matches A3's prompt check.
+
+### 15.2 Port 1 (Ethernet) settings that govern collection
+
+From the Port 1 settings table (Section 4, `SET P 1`; factory defaults shown):
+
+| Setting | Range | Default | Collection relevance |
+| --- | --- | --- | --- |
+| `ETELNET` | Y, N | Y | Telnet on or off. |
+| `MAXACC` | 1, 2, C | 2 | Highest access level reachable on this port. **Setting `MAXACC := 1` makes the relay itself refuse Level 2 on Port 1**: device-native L5 enforcement. Trade-off: engineers then need another port for settings work. |
+| `LANG` | ENGLISH, SPANISH | ENGLISH | Also applies to the web server. Command names change in Spanish (D16). |
+| `TPORT` | 23, 1025–65534 | 23 | Telnet TCP port. |
+| `TCBAN` | 254 characters | `TERMINAL SERVER` | Connect banner sent before the prompt; the session driver must skip it. |
+| `TIDLE` | 1–30 min | 15 | Telnet idle timeout (D18). |
+| `FASTOP` | Y, N | N | "Set FASTOP := N to block binary Fast Operate messages". **The default blocks binary control on the port**, the device-native half of D5. |
+| `EFTPSERV`, `FTPACC` | Y/N; 1, 2, C | Y; 2 | FTP is on by default with a Level 2 ceiling (D8). |
+
+- Concurrency: "PORT 1 concurrently supports two Modbus, five DNP3 LAN/WAN, two FTP, two Telnet, one SNTP, one PTP, two C37.118 protocol (synchrophasor data), and seven IEC 61850 sessions" (Table 7.5 footnote). So a collector uses one of **two** Telnet sessions (D9).
+- Protocols on Port 1: Modbus TCP, FTP, IEC 61850, DNP3, SNTP, EtherNet/IP, PTP, Telnet (SEL ASCII, Compressed ASCII, Fast Meter, Fast Operate, Fast SER, Fast Message), HTTP web server, C37.118, PRP, HSR, RSTP (Table 7.5). There is no SSH, TLS or HTTPS; the web server is reached at `http://IPADDR` "for unsecure HTTP communication" (Section 7).
+- "Factory-default settings for the Ethernet ports disable all Ethernet protocols except Telnet, HTTP, and PING" (Section 7).
+- Serial ports support XON/XOFF flow control (Section 4). XON, XOFF and CAN act on the ASCII stream only (Appendix C).
+
+Recommended asset-owner settings for a relay the platform collects from (proposal for A3 and A1; the platform cannot change them and must not try): `MAXACC := 1` on the collection port, `FASTOP := N`, `LANG := ENGLISH`, and `EFTPSERV := N` or `FTPACC := 1`. With the proposed `SHO P 1` register entry, the collector can verify these read-only before every collection and refuse to collect if they differ.
+
+### 15.3 Level 1 is not read-only: the documented list
+
+From the Command Summary, these SEL-751 **Level 1** commands change state or act outside the relay: `SER C`/`SER R` (clears SER, also Table 7.63), `HIS C`/`R`, `HIS HIF C`/`R`/`CA`/`RA`, `HIS IGF C`, `SUM C`/`R`, `TAR R` (resets latched targets), `LDP C`, `MET RD`/`RE`/`RM`/`RP`, `COM C` and `COM PTP C`/`R`, `GOOSE S … C`, `FGS S … C`, `DATE <date>` and `TIME <time>` (set the clock, which corrupts SER time stamps), `IRIG` (forces time synchronization), `TRI` and `TRI HIF` (trigger event capture), `PING` (relay emits ICMP), `FIL READ` (Ymodem binary transfer) and `2AC`. A6's recollections in C-01 are confirmed: `SER C`, `HIS C` and `TAR R` all clear or reset, and on the SEL-751 all three are Level 1.
+
+Level 2 includes `STA C`/`R` ("Clears the self-test status and restarts the relay"), `OPE`, `CLO`, `PUL`, `CON`, `89C`/`89O`, `SET`, `PAS`, `COPY`, `GROUP n`, `FIL WRITE`, `L_D`, `R_S`, `LOO`, `ANA`, `BRE R`/`W`, `THE P`/`R`, `AFT`, `HSR C`, `INI HIF` and `PARTNO`.
+
+**Language trap (D16, now documented).** With `LANG := SPANISH`, the Spanish column of the Command Summary shows `SER D o R` = "Borrar los datos SER" (clear the SER), while in English `SER D` only lists chattering elements (Table 7.64). Other renamings: `QUIT`→`SAL`, `SHO`→`MOS`, `STA`→`EST`, `TAR`→`BAN`, `DATE`→`FEC`, `TIME`→`HORA`, `SET`→`AJU`, `OPE`→`ABR`, `CLO`→`CER`. The register is valid for English only. SEL's own communications processors require the port language set to English (Appendix C note).
+
+### 15.4 SER (answers A6 C-06 and A4's questions for the SEL-751)
+
+- Bare `SER` returns all rows, up to 1,024. "Row 1 is the most recently triggered row and row 1024 is the oldest" (Table 7.63). Forms: `SER row1`, `SER row1 row2`, `SER date1`, `SER date1 date2` (date format per `DATE_F`). A4's observation that a plain read returns only 20 records applies to the SEL-400 series, not the SEL-751.
+- Empty buffer: the relay responds `No Data Available` (p. 7.75).
+- Row content: "Each entry in the SER includes the SER row number, date, time, element name, and element state" (p. 10.40). **There is no sequence number, counter or overrun marker; the row number is positional** (C-06 answered).
+- Element and state text are configurable: `ALIAS` settings rename up to 64 elements and their states, e.g. `ALIAS2:= PB02 FP_LOCK PICKUP DROPOUT` (p. 10.40). The parser must not assume a fixed vocabulary.
+- System rows: the relay adds rows for "Relay Powered Up" and "Relay Settings Changed" (p. 10.39).
+- Header (Table 7.16): `[RID]  Date: … Time: hh:mm:ss.sss` / `[TID]  Time Source: internal|external`. Time Source is "internal if no time-code input is attached and external if an input is attached", so it reports presence of an input, not lock quality. Date display order follows `DATE_F` (MDY, YMD or DMY). The SER example header also carries `Serial No`, `FID` and `CID`.
+- Example (Figure 10.16, p. 10.40), transcribed as a `documented-example` fixture in `tests/fixtures/ied/sel/751/documented-example/ser-report-fig10-16.txt`. Rows are listed oldest first with descending row numbers, times to milliseconds, and two rows share the timestamp `13:54:09.602`.
+- Time base: SER times are relay local time. `UTC_OFF` (−24 to +24 h, 0.25 h steps) is used only when SNTP sets the clock: "When a time source other than SNTP is updating the relay time, the UTC_OFF setting is not considered because the other time sources are defined as local time." Automatic DST follows `DST_BEGM` … `DST_ENDH` (Table 4.90, p. 4.230–4.231). Rows carry no DST flag, so local times in the repeated hour at the end of DST are ambiguous. Stating a UTC offset requires reading the Global settings, hence the proposed `SHO G` register entry.
+- The SER is also available as a read-only file in `/REPORTS` over FTP or MMS (p. 10.40, Table 7.80). That path is out of slice 1 (D8).
+- Machine paths (Appendix C): `CSE` is the Compressed ASCII SER command at Level 1 (Table C.2). SEL's own RTAC collects SER with `CSE` (Table C.5). Compressed ASCII lines carry a checksum computed "by numerically summing all of the bytes that precede the checksum field" (Appendix C). The `CSE` output format is not given in this manual (`unknown`). Fast SER is unsolicited binary that a communications processor enables and disables with binary commands, so it stays out (section 7.1).
+
+### 15.5 Identification
+
+- `ID` response, Figure 7.38 (p. 7.64): fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL, SEL DISPLAY PACKAGE, CUSTOMER DISPLAY PACKAGE. Each line has the form `"KEY=value","XXXX"`. A2 verified that all 10 checksums equal the 4-digit hex sum of the characters of `"KEY=value",`, which confirms the checksum rule from an OEM source.
+- Figure 3.20 (p. 3.14) shows a different field set: no SPECIAL, plus `"iedName =TEMPLATE"`, `"type =SEL_751"` and `"configVersion =…"` on IEC 61850 models. **6 of its 12 checksums do not match their lines in the manual itself.** For example, the same `"DEVID=SEL-751"` line carries `0408` there but `03C7` in Figure 7.38; the difference is 0x41, an `A`, suggesting the figure was edited from an SEL-751A example. Finding: OEM examples can be internally inconsistent. A simulator built from Figure 3.20 would emit bad checksums, and the parser must reject them. Both figures are fixtures; Figure 3.20 is a negative case.
+- The SPECIAL field determines "hardware and firmware compatibility of the relay" (p. 7.63). `CFG.TXT` over FTP also carries RELAYTYPE, FID, BFID and PARTNO (Figure 7.46).
+
+### 15.6 Status changes from this reading
+
+| Item | Before | After |
+| --- | --- | --- |
+| SSH on SEL-751 | `unknown` | `unsupported` per Table 7.5 (Port 1 protocol list has no SSH) |
+| Access level for `ID` | unknown | 0 |
+| `SER C` level | unknown | 1 (clears) |
+| `TAR R` | A6 recollection | documented, Level 1 |
+| SER sequence counter (C-06) | unknown | none; row number is positional |
+| Telnet sessions on SEL-751 | unknown | 2 |
+| Bad-password effect on SEL-751 | SEL-300G only | SALARM 1 s; by default drives OUT101 and is logged in the SER |
+| Fast Operate on Telnet | open-source inference | supported on Port 1 Telnet; blocked when `FASTOP := N` (default) |
+| UTC offset | unknown | local time; `UTC_OFF` only with SNTP; DST rules in Global settings |
