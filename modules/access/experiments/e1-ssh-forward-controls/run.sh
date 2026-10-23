@@ -42,7 +42,9 @@ echo "# E1 run $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "# $(ssh -V 2>&1) | kernel $(uname -r)"
 
 # --- setup -----------------------------------------------------------------
-id "$USER_NAME" >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin "$USER_NAME"
+# A real login shell on purpose: refusals in T4/T4b must come from sshd and key
+# restrictions, not from a nologin shell (A1 review note on the first version).
+id "$USER_NAME" >/dev/null 2>&1 || useradd -M -s /bin/bash "$USER_NAME"
 # No password, but not "locked" (sshd refuses locked accounts when UsePAM=no).
 usermod -p "*" "$USER_NAME"
 mkdir -p /run/sshd
@@ -122,6 +124,11 @@ result T3 "other port on approved device refused; 0 connects" "$out; device conn
 # --- T4: shell / remote command is refused -----------------------------------
 out=$("${SSH[@]}" "$USER_NAME@127.0.0.1" 'echo SHELL_OK' 2>&1); rc=$?
 result T4 "authenticated, but remote command refused (no SHELL_OK)" "rc=$rc output='${out//$'\n'/ }'" \
+  "$([[ "$out" != *SHELL_OK* ]] && [[ "$out" != *"Permission denied"* ]] && echo 1 || echo 0)"
+
+# --- T4b: interactive shell with a forced TTY is refused --------------------
+out=$(printf 'echo SHELL_OK\nexit\n' | timeout 10 "${SSH[@]}" -tt "$USER_NAME@127.0.0.1" 2>&1); rc=$?
+result T4b "authenticated, but interactive shell refused (no SHELL_OK, no TTY)" "rc=$rc output='${out//$'\n'/ }'" \
   "$([[ "$out" != *SHELL_OK* ]] && [[ "$out" != *"Permission denied"* ]] && echo 1 || echo 0)"
 
 # --- T5: reverse tunnel (bastion -> user) is refused -------------------------

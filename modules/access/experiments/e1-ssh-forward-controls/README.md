@@ -8,7 +8,7 @@ For engineering access (R2) and attack path AP-6 in `docs/threat-model.md`: can 
 
 ## Setup
 
-`run.sh` (needs root) creates a throwaway local user, a key restricted with `restrict,port-forwarding,permitopen="127.0.0.2:9100",command="/bin/false"`, and an `sshd` on `127.0.0.1:22022` with forwarding limited to local, no listen, no agent, no X11, no tunnel, no TTY. `mock_ied.py` runs three line-oriented listeners (approved device, another device, another port on the approved device) and logs every connection and line it receives. `probe.py` sends one line and reports the reply. Everything is removed on exit.
+`run.sh` (needs root) creates a throwaway local user with a real `/bin/bash` login shell, a key restricted with `restrict,port-forwarding,permitopen="127.0.0.2:9100",command="/bin/false"`, and an `sshd` on `127.0.0.1:22022` with forwarding limited to local, no listen, no agent, no X11, no tunnel, no TTY. `mock_ied.py` runs three line-oriented listeners (approved device, another device, another port on the approved device) and logs every connection and line it receives. `probe.py` sends one line and reports the reply. Everything is removed on exit.
 
 ## Run
 
@@ -26,7 +26,8 @@ Exit status 0 when all checks match expectations. Recorded output: `results-2026
 | T1 | Approved device:port reachable through a local forward. |
 | T2 | Another device is refused, and that device logs zero connections. |
 | T3 | Another port on the approved device is refused, zero connections. |
-| T4 | Remote command refused after successful authentication. (Observed refusal comes from the account's `nologin` shell, which is the layer that runs the key's forced command; both layers deny.) |
+| T4 | Remote command refused after successful authentication. The test account has a real `/bin/bash` login shell, so the refusal comes from the key's forced `command="/bin/false"`, not from a `nologin` shell. (The first version used `nologin`, which masked the key restriction; A1 flagged this in review.) |
+| T4b | Interactive shell with a forced TTY (`ssh -tt`) refused: PTY allocation denied and no shell output. |
 | T5 | Reverse forward refused; nothing listens on the gateway. |
 | T6 | Limitation check: a `WRITE` line passes through the approved tunnel and reaches the device. Destination pinning does not constrain operations. |
 | T7 | Limitation check: the device sees only the gateway's address, so per-user attribution exists only in gateway audit. |
