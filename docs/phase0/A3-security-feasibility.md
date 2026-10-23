@@ -236,6 +236,18 @@ A1 ruled slice 1 provisionally `encrypted-authenticated` only. A2 found no nativ
 
 **A3 recommendation:** for slice 1, which runs against a simulator and recorded fixtures only, use (a) and label everything `plaintext-unauthenticated` with lab-only credentials. Make production use of Telnet collection conditional on the owner's explicit decision, with (b) as the recommended production path for this family. This keeps slice 1 moving without the team accepting a production security risk on its own authority.
 
+### 8.3 SEL transport phases (A2 cross-review, part 1, 2026-10-23)
+
+A2 reviewed §8.1 for IED compatibility and found it compatible with these adjustments, which A3 accepts. Sequence per A2 (SEL-300G quick start, SEL-421 Table 4.3, open-source client; `documented-untested`): CR, expect `=`; `ACC`, expect `Password:`; password line, expect `=>`.
+
+- **Phase-aware egress check (L4).** The transport has three phases: *auth*, *operate*, *close*. `ACC` is accepted only in auth and `QUI` only in close; either one from an adapter is a violation (abort, audit). Adapters in slice 1 can therefore send only `ID` and `SER` lines.
+- **Password line.** Exempt from the line allowlist, still subject to the 0x20–0x7E byte filter, and must contain no CR or LF. Its bytes are replaced by the redaction marker in the transcript (HR-3 ruling).
+- **Auth outcome by prompt.** `=>` is success. A bare `=` or a second `Password:` is failure: the credential is suspended and nothing more is sent (D2). `=>>` or a prompt with a level letter is an unexpected level: send `QUI`, close, alarm. `ACC` that goes straight to `=>` (the level's password is disabled; A2's unverified recollection) is treated as success but raised as a security finding on that asset.
+- **Mid-operation level drop.** If the prompt falls back to `=` during operate (idle timeout), the invocation fails; `ACC` is never re-sent in the same invocation.
+- **`ID` runs after auth**, since whether it works at Level 0 is unknown.
+
+These become acceptance tests for A6's recording simulator: one test per prompt outcome above, plus `ACC` or `QUI` injected through an adapter.
+
 ## 9. Handoff
 
 ### Handoff P0-A3 — A3 — 2026-10-23
@@ -246,4 +258,4 @@ A1 ruled slice 1 provisionally `encrypted-authenticated` only. A2 found no nativ
 **Risks:** HR-1 to HR-7 in the threat model; the most consequential are HR-2 (device access levels) and AP-7 (central as fleet-wide command path).
 **Dependencies:** A2: facts received; enforcement points decided in §8. A1: take HR-8 (slice-1 downstream transport) to the owner. A4: AP-20 forwarding rules, HR-3. A5: write the agreed site-to-central rules into the runtime proposal. A6: cross-review of this file and the threat model; adopt E1's T0 precondition pattern. A1: rulings on R8.5 and HR-3; transfer section 7 proposals.
 **Files changed:** `docs/threat-model.md`, `docs/phase0/A3-security-feasibility.md`, `modules/access/experiments/e1-ssh-forward-controls/` (README.md, run.sh, mock_ied.py, probe.py, results-2026-10-23.txt).
-**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A6 (independent security review) and A2 (IED compatibility) requested; not yet reviewed.
+**Reviewer(s) and outcome:** A1 accepted P0-A3 on 2026-10-23 after re-running E1; review note on T4 fixed (real login shell, T4b added). A2 (IED compatibility) part 1: compatible with adjustments, applied in §8.3. A6 (independent security review) requested; not yet reviewed.
