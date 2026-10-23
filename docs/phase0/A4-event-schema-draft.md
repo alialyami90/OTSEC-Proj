@@ -172,6 +172,8 @@ The forwarder reads from A5's durable outbox in `stream_seq` order and keeps a c
 
 Experiment E-A4-03 (`results/relp-ack-trial{1,2,3}.md`): 1,500 messages acknowledged by a stock rsyslog imrelp receiver, receiver crashed with SIGKILL. With rsyslog's default queues, only 29 to 31 of the 1,500 acknowledged messages had been stored (about 98% loss of acknowledged data, 3 of 3 trials). With Direct queues and an output that confirms each write, 0 acknowledged messages were lost (3 of 3). **A RELP acknowledgement is only as strong as the receiver's queue configuration.** Mode A therefore also requires a documented receiver configuration (Direct or disk-assisted queues with the ack issued after persistence) and a test against it. This is `simulated`, localhost, process crash only; host power loss and page-cache loss are not tested.
 
+A6 reproduced E-A4-03 independently (R-A4-3): 12 of 12 runs with Direct queues and confirmed writes lost nothing, including kill-after-300, kill-after-2900, and an omfile sink. Limit: SIGKILL of the receiver does not test power loss, so whether an acknowledged write survives a host power cut (fsync behaviour) is untested.
+
 A1 ruling at the Phase 0 exit gate: mode A is the only mode allowed for a destination marked `required`; mode B is allowed only for `best-effort` destinations, with the replay window.
 
 For the site-to-central hop, A5's own acknowledged channel is the better tool than Syslog; the profile above is for the platform-to-third-party-collector hop.
