@@ -50,6 +50,25 @@ In single-server deployment the central and site roles run on one host; the cond
 
 Owner decision, 2026-10-23: no lab IED and no real device outputs are available. The first slice is built and verified against OEM documentation and a device simulator only. No capability in this milestone can be classified above `documented-untested` or `simulated`. A6 builds the simulator independently from A2's cited documents, not from A2's code, so a misreading is not shared by parser and simulator.
 
+## Device coverage and vendor strategy
+
+Owner scope change, 2026-10-23 ([ADR-0006](decisions/ADR-0006-device-coverage-and-vendor-strategy.md)): every OT device class is in scope, and vendor-specific support is built for SEL first, family by family. The architecture already separates class- and vendor-neutral parts (collector process, register, adapter envelope, store, forwarder) from per-family parts (session driver, parser, capability profile), so the change adds profiles and adapters, not new runtime components.
+
+| Device class | Example SEL families (A1 recollection; A2 to confirm) | Vendor-neutral coverage from the start | Likely SEL-specific read path (to be evidenced) |
+| --- | --- | --- | --- |
+| Protective relays, IEDs | SEL-700, -300, -400 series | Syslog if emitted; passive observation | SEL ASCII `ID`, `SER` over Telnet or serial (slice 1) |
+| RTUs, automation controllers, communications processors | SEL RTAC (SEL-3530, -3555, -3505), SEL-2030/-2032, SEL-2411 | Syslog | SSH and Syslog on RTAC (A2 S9); SOE log |
+| Ethernet switches | SEL-2730M, SEL-2740S (SDN) | Syslog; passive LLDP/ARP observation | SNMP or web/API reads, to be classified |
+| Routers, security gateways, firewalls | SEL-3620, SEL-3622 | Syslog (SEL-3620 exports command logs, A2 S8) | Syslog, configuration export, to be classified |
+| Time servers and clocks | SEL-2488, SEL-2401/-2407 | Passive PTP/NTP observation; Syslog | SNMP or web status, to be classified |
+| Servers and computers | SEL-3350, -3355, -3360 | Syslog; passive observation | OS-level event collection; needs a host trust decision (A3) |
+| Engineering workstations and HMIs | SEL-3355 running vendor software | Syslog; passive observation | Same as servers |
+| Historians | No SEL historian confirmed | Passive observation; received logs | None until a later vendor phase |
+| Meters | SEL-735 | Passive observation | SEL ASCII or Modbus reads, to be classified |
+| Port servers, serial equipment | SEL-3610, SEL-ICON | Syslog | To be investigated |
+
+Every active read path in the last column is an adapter: registered operations, read-only classification with citations, per-device approval, and the same enforcement layers as the relay adapter. A device class is "supported" only per SEL family and only at the evidence class `docs/verification.md` requires.
+
 ## Runtime shape
 
 Decided in [ADR-0002](decisions/ADR-0002-runtime-shape.md): one Go binary (ADR-0003) running as `site`, `central`, or `all-in-one`; modules as packages behind `contracts/`; separate OS processes only for the IED collector (sole holder of device credentials and of the route to the IED network) and, later, Zeek. No broker, no orchestrator. Persistence and delivery in [ADR-0004](decisions/ADR-0004-local-persistence-and-delivery.md): SQLite WAL per data-owning module, commit before acknowledgement, at-least-once with `(node_id, stream, seq)`, required vs best-effort forwarding targets.
@@ -76,7 +95,7 @@ Decided in [ADR-0002](decisions/ADR-0002-runtime-shape.md): one Go binary (ADR-0
 | Q2 | Can all desired configuration be safely retrieved? | **No, not all, and not by one mechanism.** SEL Level 1 shows settings as text; native settings files sit behind FTP, which also writes; passwords need Level 2 and are never retrieved. R3 needs per-family rows stating what is retrievable, how, and at what level. (`documented-untested`) | A2 §8 |
 | Q3 | Can vendors' SER records be accurately normalized? | **Structurally yes, semantically no.** One schema held four native time encodings losslessly when it keeps native time verbatim, separates resolution from accuracy, allows offset "unknown", and scopes time quality. Meaning needs per-device mapping tables. (`simulated` for protocol encodings, `documented-untested` for SEL) | A4 §2 |
 | Q4 | Can passive monitoring see enough for IDS? | **Only per site, with stated placement.** Zeek 8.0.4 and Suricata 7.0.3 decode DNP3 and Modbus but not IEC 61850 MMS, GOOSE, or IEC 104. PRP, SPAN loss, encryption, and serial links further limit visibility. Zeek plus own decoders proposed for Phase 4. (`simulated`) | A4 §3, §4 |
-| Q5 | Can one adapter framework cover vendor behaviour? | **Plausibly yes,** if the shared part is the invocation/result envelope plus enforcement, and session drivers stay per family. Test in Phase 1: implement SEL against the envelope, write the MMS profile on paper, count special cases. (inferred) | A2 §9 |
+| Q5 | Can one adapter framework cover vendor behaviour? | **Plausibly yes,** if the shared part is the invocation/result envelope plus enforcement, and session drivers stay per family. Test in Phase 1: implement the SEL relay profile against the envelope, write a second SEL class (RTAC, per ADR-0006) on paper, count special cases. (inferred) | A2 §9 |
 | Q6 | Can centralized and distributed share a foundation? | **Yes,** under four invariants: only sites talk to IEDs; sites are system of record; site-initiated connections; loss of central never stops a site. (`simulated` store evidence; design otherwise) | A5 §2, ADR-0002 |
 | Q7 | Could the platform become an attack path into OT? | **Yes, by construction.** 21 attack paths with mitigations and falsifiable tests; most consequential: device access levels that do not separate read from write, the node credential store, central as a fleet command path. None implemented. | A3 threat model |
 
@@ -104,7 +123,7 @@ Only what the first slice needs. Each contract carries a version identifier and 
 
 | ID | Contract | Draft source | Owner | Reviewers |
 | --- | --- | --- | --- | --- |
-| C1 | Asset identity and device capability profile, including evidence source and confidence per attribute, `downstream_security`, and transport identity binding where the transport has one | A2 §9, A3 §4.5, A6 C-07 | A2 | A3, A6, A4 |
+| C1 | Asset identity and device capability profile, including device class and vendor/product family (ADR-0006), evidence source and confidence per attribute, `downstream_security`, and transport identity binding where the transport has one | A2 §9, A3 §4.5, A6 C-07 | A2 | A3, A6, A4 |
 | C2 | Adapter invocation and result envelope, limits, closed error taxonomy, transcript with byte spans and redaction markers | A2 §9, A3 HR-3 ruling, A4 EP-1..EP-9 | A2 | A3, A4, A6 |
 | C3 | Approved command register format (machine-readable, exact lines, citation, classification) | A2 register JSON, A6 checker | A1 (format), A2 (content) | A6 (deny corpus gate), A3 |
 | C4 | Event and timestamp schema `otsec.event/0.1` and evidence-preservation rules EP-1..EP-9 | A4 schema draft | A4 | A2, A6, A5 |

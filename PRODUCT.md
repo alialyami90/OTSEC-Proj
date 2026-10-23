@@ -53,6 +53,8 @@ delegated: the project owner chose (2026-10-23) to defer the UI stack to A5's Ph
 
 `[brief]` Capabilities are the eight requirement groups R1–R8 in `docs/requirements.md`. None is implemented yet.
 
+`[owner, 2026-10-23]` Scope covers all OT device classes, not only IEDs: relays and IEDs, RTUs and automation controllers, communications processors, switches, routers and security gateways, time servers and clocks, servers, engineering workstations and HMIs, historians, meters, and port servers. Vendor-specific support is built for SEL products first, family by family; other vendors come after the SEL product is complete (ADR-0006). The UI must therefore show device class and vendor, and make per-family support level (evidence class) visible rather than implying support for every device it lists.
+
 `[brief]` Hard constraints:
 
 - No unapproved active scanning or disruptive operations on production equipment.
@@ -68,7 +70,7 @@ delegated: the project owner chose (2026-10-23) to defer the UI stack to A5's Ph
 
 `[brief]` UI scope constraint: the interface is the minimum needed to verify end-to-end workflows. Elaborate UI is deferred until foundational workflows are proven.
 
-`[open]` Runtime language, UI stack, persistence, IDS engine (Zeek, Suricata, or other), and deployment shape (modular monolith with edge components versus alternatives) are all undecided pending Phase 0 evidence.
+`[decided, 2026-10-23]` Runtime: Go modular monolith with a separate collector process (ADR-0002, ADR-0003); persistence: SQLite (ADR-0004); UI: server-rendered HTML from the binary, no Node toolchain (ADR-0003). `[open]` IDS engine (Zeek provisionally, Phase 4).
 
 ## Brand Commitments
 

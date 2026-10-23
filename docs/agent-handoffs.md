@@ -216,3 +216,6 @@ Full text: `/mnt/project-files/phase0/A4-handoff.md`; findings in `docs/phase0/A
 - **SD-ID:** the slice uses the documentation PEN 32473 (RFC 5612) in structured-data IDs; registering a real IANA PEN is an owner action before any production use.
 - **Licences:** recorded in ADR-0003 (libiec61850 and lib60870 not linked without a licence decision).
 - **IDS engine:** Zeek as a separate process is the provisional direction for Phase 4; no ADR until R6 work starts.
+
+### Owner scope change — 2026-10-23
+The owner widened scope to all OT device classes with SEL as the only vendor for vendor-specific support until the SEL product is complete. Recorded in ADR-0006, `docs/requirements.md` R1.6/R1.7, the scope update section of `CLAUDE.md`, `PRODUCT.md`, and `docs/architecture.md` "Device coverage and vendor strategy". Effects on Phase 1 briefs: A2 organizes candidates and capability matrices by SEL product family and device class and confirms A1's SEL product list; the Q5 contrast exercise uses an SEL RTAC instead of SIPROTEC/Relion; A3 adds network-device and host credentials and any host agent to the threat model; A4 makes the schema accept non-SER native records (switch/gateway Syslog, Windows events, clock status); A6 states support per SEL family and device class. The first slice (ADR-0005) is unchanged.

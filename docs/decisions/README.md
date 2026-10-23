@@ -15,3 +15,4 @@ Use [ADR-0000-template.md](ADR-0000-template.md).
 | [0003](ADR-0003-toolchain-and-ui-stack.md) | Toolchain and UI stack | accepted |
 | [0004](ADR-0004-local-persistence-and-delivery.md) | Local persistence and delivery semantics | accepted |
 | [0005](ADR-0005-first-slice-scenario-and-transport.md) | First vertical slice scenario and downstream transport | accepted |
+| [0006](ADR-0006-device-coverage-and-vendor-strategy.md) | Device coverage scope and vendor strategy (SEL first) | accepted |
