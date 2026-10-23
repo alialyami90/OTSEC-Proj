@@ -10,7 +10,7 @@ This report closes Phase 0 (Establish evidence and challenge assumptions). It fo
 
 ## Implemented (deliverables on `main`)
 
-All Phase 0 work is merged to `main`: PRs #1 to #6 at 18:55Z, with the owner's approval, follow-ups #7 to #10 at 19:05Z, and review-record close-outs #11 to #13 at 19:08Z.
+All Phase 0 work is merged to `main`: PRs #1 to #6 at 18:55Z, with the owner's approval, follow-ups #7 to #10 at 19:05Z, and review-record close-outs #11 to #14 at 19:08Z to 19:09Z.
 
 | Brief | Deliverable required by the brief | Where it is on `main` | Done |
 | --- | --- | --- | --- |
@@ -39,7 +39,7 @@ These were checked by someone other than the author. Every result here is `simul
   - The alignment key included the row number.
   - NORMAL sync was taken as durability evidence.
   - Pruning deadlocked behind a target that never confirms.
-- **Other cross-reviews:** A2 reviewed A3 for IED compatibility (`A3-security-feasibility.md` §8.3) and A4's parser. A3 reviewed A5 (`A3-review-A5.md`).
+- **Other cross-reviews:** A2 reviewed A3 for IED compatibility (`A3-security-feasibility.md` §8.3) and A4's parser. A3 reviewed A5 (`A3-review-A5.md`) and A2 (`A3-review-A2.md`).
 - **Register:** A2's register passes A6's independent 135-line deny corpus, with nothing classified read-only, and its read-only set equals A6's allow corpus.
 - **Firmware allowlist:** A6 checked A2's SEL-751 firmware allowlist independently against the 84 firmware rows in Appendix A. All 7 restart fixes appear on exactly the rows A2 lists (`tests/safety/firmware_review/`).
 - **Merged tree:** on `main` after the merge, 67 tests pass. The 5 environment-gated tests also pass when given the SEL-751 manual text, the register and the allowlist (5 passed, 141 subtests).
@@ -54,7 +54,7 @@ These were checked by someone other than the author. Every result here is `simul
 | Required contracts defined | C1 to C8 in `docs/architecture.md`, with owners and reviewers |
 | Objective acceptance criteria | V-S1 to V-S20 and the R/P matrix in `docs/verification.md` |
 | Unsupported assumptions marked | `docs/architecture.md` "Unsupported assumptions" |
-| Phase 0 branches merged to one tree | PRs #1 to #13 merged to `main` |
+| Phase 0 branches merged to one tree | PRs #1 to #14 merged to `main` |
 
 Gate decision: **passed with conditions** (A1, 2026-10-23). Three conditions are Phase 1 deliverables by design, not Phase 0 gaps. They must close before Phase 2 code starts:
 
@@ -89,7 +89,7 @@ These A1 safety rulings also bind the slice. All are recorded in ADR-0004 and AD
 
 - **Windows durability evidence:** pending the A5 run in progress (see above).
 - **Device classification:** a full classification of every supplied SEL family in the `docs/architecture.md` device table is not done. Phase 0 asked only for the slice family and the RTAC contrast. The table marks the remaining rows "classification pending". This is planned SEL-family work, not a Phase 0 gap.
-- **Review records:** A2, A4 and A6 corrected their stale "pending" reviewer lines (PRs #11 to #13). *Open at close:* A3's cross-review of A2 (security-sensitive behaviour, required by the cross-review table) had not been recorded. A1 asked A3 for it, and this line is updated when it lands.
+- **Review records:** A2, A4 and A6 corrected their stale "pending" reviewer lines (PRs #11 to #13). A3's cross-review of A2 (security-sensitive behaviour), which had not been recorded, is now in `docs/phase0/A3-review-A2.md` (PR #14): accepted for Phase 0 with three changes for the Phase 1 register contract (C-A2-1 to C-A2-3, below).
 
 ## Unverified assumptions
 
@@ -120,6 +120,10 @@ Also unverified: whether the firmware a relay reports is honest, and the IEC 623
    - the standing condition and migration date for nodes on an unsupported OS.
 3. Windows results, if the run finishes after sign-off, and ADR-0007 moving from proposed to accepted.
 4. Classification of the remaining SEL families in the device table.
+5. A3's register changes for C3 (`A3-review-A2.md`):
+   - C-A2-1: `ACC` and `QUI` move to a non-invocable session-control class.
+   - C-A2-2: the firmware allowlist ships inside the signed register package and fails closed if missing or unsigned.
+   - C-A2-3: echo redaction (HR-3) stays mandatory until a capture shows no echo.
 
 ## Owner sign-off
 
