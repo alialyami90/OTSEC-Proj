@@ -20,6 +20,11 @@ as SEL relays authenticate inside the session (send ACC, answer "Password:").
 The line after the auth command is recorded as an auth event (accepted or not,
 and its length), never as a command line, and its bytes are never stored.
 
+Profiles: the default responder answers every command with a placeholder.
+--profile sel-751-doc answers from SEL-751 instruction manual examples and
+documented behaviour (profile_sel751.py); its output is documentation, not
+device capture.
+
 Records, one JSON object per line:
   session_open / session_close   session id, peer address
   auth                           username or in-band, accepted; never the secret
@@ -29,6 +34,9 @@ Records, one JSON object per line:
                                  true when the line arrived before the simulator had
                                  answered the previous one and shown a prompt
   telnet                         Telnet IAC sequences, base64 (tcp --telnet only)
+  device_effect                  a documented device state change the session caused
+                                 (profile only), with its manual citation
+  session_refused                connection beyond --max-sessions
 
 Run: python sim.py --transport tcp --telnet --port 2323 --log rec.jsonl \
        --inband-auth-command ACC --inband-password <canary>
@@ -146,19 +154,55 @@ class TelnetFilter:
         return bytes(out), seqs, replies
 
 
+class Reply:
+    """What a responder answers to one line.
+
+    secret: the line was consumed as a password; the session records an auth
+    event instead of the line. effects: device state changes the line caused,
+    recorded as device_effect events (each a short text with its citation).
+    """
+
+    def __init__(self, out=b"", secret=False, accepted=None, effects=()):
+        self.out, self.secret, self.accepted, self.effects = out, secret, accepted, list(effects)
+
+
+class PlaceholderResponder:
+    """Default responder: a fixed placeholder for every command, never device-like."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.awaiting = False
+
+    def greeting(self):
+        return self.cfg.prompt
+
+    def handle(self, line):
+        if self.awaiting:
+            self.awaiting = False
+            return Reply(self.cfg.prompt, secret=True,
+                         accepted=line == self.cfg.inband_password)
+        if self.cfg.inband_auth_command and line == self.cfg.inband_auth_command:
+            self.awaiting = True
+            return Reply(b"\r\nPassword: ")
+        return Reply((PLACEHOLDER if line.strip() else b"") + self.cfg.prompt)
+
+    def on_close(self):
+        return []
+
+
 class Session:
     """Line handling shared by all transports. `write` sends bytes to the client."""
 
     def __init__(self, recorder, session_id, write, cfg):
         self.rec, self.id, self._write, self.cfg = recorder, session_id, write, cfg
+        self.responder = cfg.responder_factory(cfg)
         self.buf = b""
         self.ready = False
-        self.awaiting_password = False
         self.queue = asyncio.Queue()
         self.worker = asyncio.create_task(self._work())
 
     def start(self):
-        self._write(self.cfg.prompt)
+        self._write(self.responder.greeting())
         self.ready = True
 
     def feed(self, data):
@@ -168,28 +212,25 @@ class Session:
             self.ready = False
             self.queue.put_nowait((line, term, before_prompt))
 
+    def _effects(self, effects):
+        for e in effects:
+            self.rec.write("device_effect", session=self.id, effect=e)
+
     async def _work(self):
         while True:
             line, term, before_prompt = await self.queue.get()
             if self.cfg.response_delay:
                 await asyncio.sleep(self.cfg.response_delay)
-            if self.awaiting_password:
-                self.awaiting_password = False
+            reply = self.responder.handle(line)
+            if reply.secret:
                 self.rec.write("auth", session=self.id, inband=True,
-                               accepted=line == self.cfg.inband_password,
-                               length=len(line), before_prompt=before_prompt)
-                out = b""
+                               accepted=reply.accepted, length=len(line),
+                               before_prompt=before_prompt)
             else:
                 self.rec.write("line", session=self.id, term=term,
                                before_prompt=before_prompt, **_raw(line))
-                if self.cfg.inband_auth_command and line == self.cfg.inband_auth_command:
-                    self.awaiting_password = True
-                    self._write(b"\r\nPassword: ")
-                    self.ready = self.queue.empty()
-                    self.queue.task_done()
-                    continue
-                out = PLACEHOLDER if line.strip() else b""
-            self._write(out + self.cfg.prompt)
+            self._effects(reply.effects)
+            self._write(reply.out)
             self.ready = self.queue.empty()
             self.queue.task_done()
 
@@ -203,16 +244,20 @@ class Session:
             self.rec.write("line", session=self.id, term=term,
                            before_prompt=not self.ready, **_raw(line))
             self.buf = b""
+        self._effects(self.responder.on_close())
 
 
 class Config:
     def __init__(self, prompt=b"\r\nSIM> ", inband_auth_command=None,
-                 inband_password=None, response_delay=0.0, telnet=False):
+                 inband_password=None, response_delay=0.0, telnet=False,
+                 responder_factory=PlaceholderResponder, max_sessions=None):
         self.prompt = prompt
         self.inband_auth_command = inband_auth_command
         self.inband_password = inband_password
         self.response_delay = response_delay
         self.telnet = telnet
+        self.responder_factory = responder_factory
+        self.max_sessions = max_sessions
 
 
 # --- SSH transport ------------------------------------------------------------
@@ -285,11 +330,18 @@ start = start_ssh  # name used by the original self-test
 async def start_tcp(recorder, host, port, cfg=None):
     """Start the raw TCP (optionally Telnet) transport. Returns an asyncio server."""
     cfg = cfg or Config()
+    active = set()
 
     async def handle(reader, writer):
         sid = recorder.new_session()
-        recorder.write("session_open", session=sid,
-                       peer=str(writer.get_extra_info("peername")))
+        peer = str(writer.get_extra_info("peername"))
+        if cfg.max_sessions is not None and len(active) >= cfg.max_sessions:
+            recorder.write("session_refused", session=sid, peer=peer,
+                           limit=cfg.max_sessions)
+            writer.close()
+            return
+        active.add(sid)
+        recorder.write("session_open", session=sid, peer=peer)
         session = Session(recorder, sid, writer.write, cfg)
         telnet = TelnetFilter() if cfg.telnet else None
         session.start()
@@ -310,6 +362,7 @@ async def start_tcp(recorder, host, port, cfg=None):
             recorder.write("transport_error", session=sid, error=str(exc))
         await session.close()
         writer.close()
+        active.discard(sid)
         recorder.write("session_close", session=sid, error=None)
 
     return await asyncio.start_server(handle, host, port)
@@ -327,6 +380,10 @@ def main():
     ap.add_argument("--prompt", default="\r\nSIM> ")
     ap.add_argument("--inband-auth-command")
     ap.add_argument("--inband-password")
+    ap.add_argument("--profile", choices=("placeholder", "sel-751-doc"), default="placeholder",
+                    help="sel-751-doc answers from SEL-751 manual examples (profile_sel751.py)")
+    ap.add_argument("--profile-password", help="sel-751-doc: Level 1 password; omit to model passwords disabled")
+    ap.add_argument("--max-sessions", type=int, help="tcp only: refuse connections beyond this count")
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
     args = ap.parse_args()
@@ -336,7 +393,12 @@ def main():
         prompt=args.prompt.encode("latin-1"),
         inband_auth_command=(args.inband_auth_command or "").encode("latin-1") or None,
         inband_password=(args.inband_password or "").encode("latin-1") or None,
-        response_delay=args.response_delay, telnet=args.telnet)
+        response_delay=args.response_delay, telnet=args.telnet,
+        max_sessions=args.max_sessions)
+    if args.profile == "sel-751-doc":
+        import profile_sel751
+        cfg.responder_factory = profile_sel751.factory(
+            password=(args.profile_password or "").encode("latin-1") or None)
 
     async def run():
         rec = Recorder(args.log)

@@ -1,0 +1,10 @@
+{
+  "_comment": "A6's independent minimal register for an SEL-751 SER collector, written from the SEL-751 Instruction Manual (date code 20260910), not from A2's register. Used by the documented-profile tests. Allowed lines only; everything else is a violation by default.",
+  "commands": [
+    {"id": "acc", "pattern": "ACC", "classification": "read-only", "citation": "Table 7.17, p. 7.32 (Level 0 -> 1)"},
+    {"id": "qui", "pattern": "QUI", "classification": "read-only", "citation": "Table 7.59, p. 7.73"},
+    {"id": "id", "pattern": "ID", "classification": "read-only", "citation": "Table 7.43, p. 7.64 (Level 0)"},
+    {"id": "ser", "pattern": "SER", "classification": "read-only", "citation": "Table 7.63, p. 7.75 (Level 1)"},
+    {"id": "ser-clear", "pattern": "(?i)\\s*SER\\w*\\s+[CR]\\b.*", "classification": "state-changing", "citation": "Table 7.63, p. 7.75: SER C or R clears at Level 1"}
+  ]
+}

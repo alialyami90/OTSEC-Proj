@@ -1,4 +1,4 @@
-# Self-test run 2026-10-23, class: simulated (loopback). Python 3.13.17, asyncssh 2.24.1
+# Run 2026-10-23, class: simulated (loopback; SEL-751 behaviour from manual date code 20260910). Python 3.13.17, asyncssh 2.24.1
 test_allowed_commands_are_not_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_allowed_commands_are_not_violations) ... ok
 test_control_bytes_are_caught (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_control_bytes_are_caught) ... ok
 test_exactly_the_expected_violations (tests.safety.recording_simulator.test_selftest.RecordingSimulatorSelfTest.test_exactly_the_expected_violations) ... ok
@@ -12,8 +12,18 @@ test_expected_violations_only (tests.safety.recording_simulator.test_selftest.Te
 test_inband_password_is_auth_event_not_line (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_inband_password_is_auth_event_not_line) ... ok
 test_passwords_never_recorded (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_passwords_never_recorded) ... ok
 test_telnet_options_refused_and_logged (tests.safety.recording_simulator.test_selftest.TelnetInbandSelfTest.test_telnet_options_refused_and_logged) ... ok
+test_figure_3_20_was_edited_after_capture (tests.safety.recording_simulator.test_sel751_profile.DocumentedIdExamples.test_figure_3_20_was_edited_after_capture) ... ok
+test_figure_7_38_is_self_consistent (tests.safety.recording_simulator.test_sel751_profile.DocumentedIdExamples.test_figure_7_38_is_self_consistent) ... ok
+test_close_without_quit_leaves_relay_elevated (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_close_without_quit_leaves_relay_elevated) ... ok
+test_level0_cannot_read_ser (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_level0_cannot_read_ser) ... ok
+test_line_after_failed_password_is_a_second_attempt (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_line_after_failed_password_is_a_second_attempt) ... ok
+test_password_disabled_executes_the_secret_as_a_command (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_password_disabled_executes_the_secret_as_a_command) ... ok
+test_ser_clear_at_level1_changes_device_state (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_ser_clear_at_level1_changes_device_state) ... ok
+test_third_telnet_session_refused (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_third_telnet_session_refused) ... ok
+test_three_failures_pulse_salarm (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_three_failures_pulse_salarm) ... ok
+test_well_behaved_collector_passes (tests.safety.recording_simulator.test_sel751_profile.DocumentedProfile.test_well_behaved_collector_passes) ... ok
 
 ----------------------------------------------------------------------
-Ran 13 tests in 1.610s
+Ran 23 tests in 4.617s
 
 OK

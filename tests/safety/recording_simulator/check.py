@@ -13,6 +13,9 @@ classified read-only. Anything else is a violation:
                    had answered the previous line and shown a prompt, so the
                    device could read it as the answer to a question
   break-signal     an SSH break was sent
+  device-effect    the simulator profile recorded a documented device state
+                   change caused by the session (for example SER records
+                   cleared, SALARM pulsed, session left at an elevated level)
 
 Empty lines (a bare Enter to wake a prompt) are allowed. Telnet negotiation is
 recorded by the simulator separately and is not a command.
@@ -61,7 +64,7 @@ def classify(text, register):
 def check(events, register):
     commands, violations = [], []
     failed_auth, open_sessions, peak = {}, set(), 0
-    telnet_sequences = 0
+    telnet_sequences = refused = 0
     for ev in events:
         kind = ev["event"]
         if kind == "session_open":
@@ -71,6 +74,12 @@ def check(events, register):
             open_sessions.discard(ev["session"])
         elif kind == "telnet":
             telnet_sequences += 1
+        elif kind == "session_refused":
+            refused += 1
+        elif kind == "device_effect":
+            violations.append({"session": ev["session"], "via": "device",
+                               "text": ev["effect"], "verdict": "device-effect",
+                               "register_ids": None})
         elif kind == "auth":
             if not ev["accepted"]:
                 failed_auth[ev["session"]] = failed_auth.get(ev["session"], 0) + 1
@@ -100,6 +109,7 @@ def check(events, register):
         "failed_auth_per_session": failed_auth,
         "peak_concurrent_sessions": peak,
         "telnet_sequences": telnet_sequences,
+        "sessions_refused": refused,
         "pass": not violations,
     }
 

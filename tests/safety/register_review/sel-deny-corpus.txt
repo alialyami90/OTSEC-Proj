@@ -64,3 +64,29 @@ QUI\r
 \xa5\xe0SER
 SER\xff
 SER\x1b[2J
+# Added 2026-10-23 from the SEL-751 Instruction Manual (date code 20260910),
+# Level 1 commands that clear or reset device data, transcribed by A6.
+SER R
+HIS R
+HIS CA
+HIS RA
+HIS HIF C
+HIS IGF C
+SUM C
+SUM R
+COM C
+COM C A
+COM PTP C
+COM PTP R
+FGS S 1 C
+FGS S ALL C
+GOOSE S ALL C
+MET D R
+MET M R
+TAR R
+STA R
+2ACCESS
+89C 1
+89O 1
+TEST DB OFF
+Y
