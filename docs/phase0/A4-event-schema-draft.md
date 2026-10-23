@@ -145,20 +145,35 @@ Residual limit: SEL-751 exposes no sequence counter (A2), so a gap smaller than 
 
 ## 5. Syslog forwarding profile (deliverable 3)
 
-Draft profile `otsec-syslog/0.1`. Evidence: `modules/telemetry/experiments/syslog-framing/` (injection) and `modules/telemetry/experiments/relp-ack/` (acknowledgement semantics).
+Draft profile `otsec-syslog/0.1`. Evidence: `modules/telemetry/experiments/syslog-framing/` (injection, and every transport in `results/transports.md`) and `modules/telemetry/experiments/relp-ack/` (acknowledgement semantics).
+
+The owner's answer (2026-10-23): assume a generic Syslog-compliant collector and prepare for all types. The forwarder therefore offers every standard transport and two message formats, and states for each what it guarantees, rather than assuming one SIEM.
 
 ### Message format
 
-- RFC 5424 syntax, always octet-counted framing (RFC 6587 section 3.4.1, which RFC 5425 mandates). Newline framing is never offered: with a stock rsyslog receiver, one device record containing an LF produced two parsed messages, the second a forgery with attacker-chosen hostname and MSGID (`results/framing.md`, cases `embedded-lf-forgery` and `embedded-crlf-forgery`).
+- RFC 5424 syntax by default. Over TCP, octet-counted framing (RFC 6587 section 3.4.1, which RFC 5425 mandates) is the default. LF framing (RFC 6587 section 3.4.2) is offered only for collectors that cannot count octets, and is safe only because of the next rule: the profile never puts a control character in a message, so an LF can only be the frame end. The encoder asserts this per message. Without that rule, a stock rsyslog receiver turned one device record containing an LF into two parsed messages, the second a forgery with attacker-chosen hostname and MSGID (`results/framing.md`, naive encoder).
 - HEADER `TIMESTAMP` is the collector receive time (`received.utc`), never the device time. RFC 5424 requires an offset in TIMESTAMP, and device offsets are often unknown; putting local device time there would make every SIEM treat it as UTC.
 - `HOSTNAME` is the node id, `APP-NAME` is `otsec`, `MSGID` is the event kind (`SER`, `SYSLOG`, `HEALTH`, `ALERT`).
 - Structured data `[otsec@PEN …]` carries `eid` (event_id), `seq` (stream_seq), `stream`, `origin`, `asset`, `dts` (device_time.native verbatim), `dfmt`, `dutc` (only when known), `doff`, `dres`, `dacc`, `dsync`, `tsrc`, `subj`, `val`, `cat`. `PEN` must be an IANA Private Enterprise Number before production; experiments use 32473 (RFC 5612 documentation number).
 - Device-originated text appears only inside SD-PARAM values, escaped per RFC 5424 section 6.3.3 (`"`, `\`, `]`). Any value that is not printable UTF-8 (control characters, ANSI escapes, NUL, invalid UTF-8) is sent as `dtext_b64` instead of `dtext`. MSG is a platform-written printable summary, never device bytes.
 - Results with rsyslog 8.2312 as the independent receiver, 10 hostile cases: the naive encoder let 2 of 10 cases forge a message and the 10 KB case was split into 2 messages; the profile produced exactly one message per record in every case, 0 forged, the `origin` value intact, and the device bytes recovered exactly from SD in all 9 cases that fit.
 
+- RFC 3164-compatible rendering, for collectors that do not parse RFC 5424: `<PRI>Mmm dd hh:mm:ss node otsec: [otsec@PEN …] summary`. The HEADER time is the receive time at 1 s with no year or zone, as RFC 3164 allows nothing better, so the full receive time travels as `rcv` and every other field is the same SD element written as text inside MSG. The collector sees it as text; nothing is lost, but the collector must parse MSG to use the fields. Limit 1024 octets (RFC 3164).
+
+### Transports
+
+| Transport | Standard | Confidentiality and integrity | What the sender learns about delivery | Max message | Use |
+| --- | --- | --- | --- | --- | --- |
+| RELP, optionally over TLS | rsyslog RELP | With TLS only | Per-message `200 OK`, only as strong as the receiver's queue configuration (E-A4-03) | Receiver setting | Mode A, the only mode for `required` destinations (A1) |
+| TLS, octet-counted | RFC 5425 | Yes; server authenticated; client certificate where the collector supports it | Nothing beyond TCP: the replay window W covers loss on reconnect | 2048 default, up to what the collector accepts | Mode B, `best-effort` |
+| TCP, octet-counted or LF-framed | RFC 6587 | None | Nothing beyond TCP; replay window as mode B | As TLS | Mode C, `best-effort`, inside a protected network only |
+| UDP | RFC 5426 | None | Nothing; loss is invisible to both ends | 2048 default; 480 (IPv4) or 1180 (IPv6) when the path or collector is unknown, per RFC 5426 | Mode D, `best-effort`, legacy collectors only; a `telemetry-health` counter records every message sent so a collector-side count can expose loss |
+
+Result (`results/transports.md`, rsyslog 8.2312 as the receiver, one instance listening on all four): the 10 hostile cases over UDP at 2048 and 480 octets, TCP octet-counted, TCP LF-framed, TLS, and RELP, in RFC 5424, plus RFC 3164 over UDP and LF-framed TCP: 80 sends, each parsed as exactly one message, 0 forged, the `origin` value intact, device bytes recovered exactly or replaced by the `dtext_omitted` reference (the 10 KB case), and every RELP send acknowledged. Limits: localhost, one receiver implementation, and the experiment's SD element carries fewer fields than the full profile. With the full field list, a 480-octet UDP limit leaves little room for device text, so most device text there will travel as a reference.
+
 ### Size
 
-- Default maximum message size 2048 octets, the size every RFC 5425 receiver must accept; configurable per collector up to what it is known to accept (8192 is the RFC's SHOULD).
+- Default maximum message size 2048 octets, the size every RFC 5425 receiver must accept; configurable per collector up to what it is known to accept (8192 is the RFC's SHOULD). UDP and RFC 3164 limits are in the transport table.
 - Over the limit, the device text parameter is replaced by `dtext_omitted="1" dlen="…" dsha256="…"`; event identity, time, and origin fields are never cut. The full record stays in the evidence store. A `telemetry-health` counter records each omission. Never split, never silently truncate.
 
 ### Delivery semantics (B-03, C-04, TB5)

@@ -63,3 +63,30 @@ def naive_message(event):
     text = event["device_bytes"].decode("utf-8", "replace")
     return (f"<{event['pri']}>1 {event['received_at']} {event['collector']} otsec - "
             f"{event['msgid']} - {text}").encode() + b"\n"
+
+
+def legacy_3164_message(event, max_octets=1024):
+    """RFC 3164-style rendering for collectors that do not parse RFC 5424.
+    The HEADER carries second-resolution, yearless time (RFC 3164 4.1.2), so
+    every time and identity field travels inside MSG as the same SD element
+    the RFC 5424 profile uses; the collector sees it as text. 1024 is the RFC
+    3164 limit."""
+    t = event["received_at"]  # e.g. 2026-10-23T15:00:00.123456Z
+    month = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()[int(t[5:7]) - 1]
+    head = f"<{event['pri']}>{month} {int(t[8:10]):2d} {t[11:19]} {event['collector']} otsec: "
+    fixed = (f'[{SD_ID} eid="{event["event_id"]}" rcv="{t}" origin="{event["origin"]}" '
+             f'asset="{sd_escape(event["asset_id"])}" dts="{sd_escape(event["device_ts_native"])}" '
+             f'dprec="{event["precision"]}" doff="{event["offset"]}" ')
+    msg = " " + event["summary"]
+    budget = max_octets - len((head + fixed + "]" + msg).encode()) - 1
+    out = (head + fixed + device_text_param(event["device_bytes"], budget) + "]" + msg).encode()
+    assert len(out) <= max_octets, len(out)
+    return out
+
+
+def lf_frame(msg):
+    """RFC 6587 3.4.2 non-transparent framing. Safe only because the profile
+    never puts a control character in a message (device text that is not
+    printable UTF-8 is base64-encoded); checked, not assumed."""
+    assert b"\n" not in msg and b"\x00" not in msg, "LF or NUL in message"
+    return msg + b"\n"
