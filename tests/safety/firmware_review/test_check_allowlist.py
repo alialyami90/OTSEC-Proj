@@ -42,9 +42,7 @@ class ClassCheck(unittest.TestCase):
             self.base = json.load(f)
 
     def test_plain_inferred_fails(self):
-        a = json.loads(json.dumps(self.base))
-        for b in a["branches"]:
-            b["basis"] = b["basis"].replace("(owner-accepted)", "")
+        a = json.loads(json.dumps(self.base).replace(check_allowlist.OWNER_ACCEPTED, "inferred"))
         self.assertEqual(run(a)[0], 1)
 
     def test_owner_accepted_class_passes(self):
