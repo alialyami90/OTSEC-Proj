@@ -1,45 +1,188 @@
 # Verification
 
-Owner: A6 (independent verification and OT safety). A6 writes this document independently of the implementing agents and actively attempts to disprove their claims. Status: **no verification performed. No acceptance criteria approved yet.**
+Owner: A6 (independent verification and OT safety). A6 writes this document independently of the implementing agents and actively attempts to disprove their claims.
+
+Status: **Phase 0 draft (2026-10-23).** No lab IED exists; every slice result can reach `simulated` at most. Acceptance criteria below are proposed by A6 and become binding when A1 approves them at the Phase 0 exit gate. Numeric thresholds marked *(proposed)* are starting values for A1 and the owning agent to confirm or replace with evidence. No product code exists, so nothing below has been verified against an implementation. Executed so far: experiment E-01 and the recording simulator self-test, both `simulated`.
 
 ## Rules
 
 - A test result is reported only with reproducible output committed under `tests/`.
-- Every result states whether it ran against hardware, a simulator, or recorded fixtures.
+- Every result states its evidence class: `hardware`, `simulated` (simulator, emulator, loopback), `fixture` (recorded real or sanitized real output), or `desk` (document analysis only, nothing executed). These map onto the capability classes in [device-capabilities.md](device-capabilities.md); a `simulated` or `fixture` result never supports a `hardware-verified` claim.
 - A critical unresolved safety or security failure blocks milestone acceptance regardless of other progress.
 - Claims by implementing agents are inputs to verification, not evidence.
+- **Oracle independence.** A6 tests must not import the implementation's parsers, normalizers, or schema helpers to compute expected results. Expected values come from the raw fixture, the OEM document, or a hand-built ground-truth file committed next to the fixture. A test that compares the implementation with itself is not verification.
+- **Negative tests are mandatory.** Every criterion that says "only", "never", or "no" has at least one test that tries to make the forbidden thing happen.
+- Recalled vendor facts in this document (for example SEL command behaviour) are marked *recalled*. They are leads for A2 to confirm against an OEM manual, not evidence.
+
+## Challenged assumptions
+
+These are the assumptions in the brief, the first vertical slice, and the skeleton docs that A6 considers unproven or wrong as currently stated. Each lists what evidence would settle it. Owners must respond in a handoff; A6 does not close an item on a reply alone.
+
+| ID | Assumption under challenge | Why A6 doubts it | Evidence that settles it | Owner | Affects |
+| --- | --- | --- | --- | --- | --- |
+| C-01 | A command is read-only or state-changing by its verb. | Classification depends on parameters and access level. *Recalled:* on SEL relays `SER` displays the SER buffer while `SER C` clears it; `HIS C` clears event history; `TAR R` resets targets. A verb allowlist would admit all of them. | Approved command register entries that classify the full command line, parameters included, with an OEM manual section cited for each. Adapter test proving an unlisted parameter is rejected before any byte is sent. | A2 | R5.3, R5.7, V-S5, V-S10 |
+| C-02 | A read-only session has no effect on the device. | Logging in can itself change device state or plant signals. *Recalled:* SEL relays pulse the ALARM contact on entry to access level 2 and after repeated failed passwords, and that contact is often wired to SCADA alarms. Devices limit concurrent sessions, so a collector holding a session can lock out an engineer during an incident. Failed-login lockout thresholds can be tripped by retries. Communication processor load is unmeasured. | Hardware test per device family: alarm-contact and SCADA-point observation during collector login and logout at the access level the adapter uses; concurrent-session limit; lockout threshold; CPU or comm-load reading during collection at the planned poll rate. | A2 with A6 | P1, R5.4, V-S13, H-02..H-05 |
+| C-03 | "No write operations observed on the wire" (old V-S7) can be checked. | The slice collects over SSH, which is encrypted, so a passive tap sees no commands. | V-S7 restated below to use three independent sources: the adapter's own transcript, a device-side record (device command or access log if the family has one, otherwise a lab-only terminating SSH recorder in front of the lab IED), and a static check of the command register. | A6 | V-S7 |
+| C-04 | A forwarder that writes to an RFC 5425 (TLS) collector without errors has delivered the events. | **Disproved by experiment E-01** (simulated): in 5 of 5 trials, 100 of 150 frames were accepted by the sender's TLS socket without error and never reached the collector, because the collector reset the connection with data still buffered. TLS and TCP give no application-level acknowledgement. | Forwarding contract must state delivery semantics explicitly: durable local store first, at-least-once replay from the last *confirmed* position, a stable event ID so the receiver can de-duplicate, and either an acknowledging transport (for example RELP) or a documented unconfirmed window. | A4 (transport), A5 (store and replay) | R4.6, R4.7, R8.6, V-S4, V-S6 |
+| C-05 | Timestamp precision can be "preserved" by carrying a normalized timestamp. | Device SER timestamps may be local time with no UTC offset, depend on the device's time source (IRIG-B, SNTP, PTP, or free-running), and may be ambiguous across a DST change. Normalizing to UTC can invent an offset; padding to microseconds invents precision. | Event schema carries the native timestamp string verbatim, the declared native precision, the source of any timezone assumption, the device time-sync status if obtainable, and the collector receive time as a separate field. Tests in V-S3. | A4 | R4.4, V-S3 |
+| C-06 | Missing SER records can be detected. | SER buffers are finite and typically circular. If the device exposes no sequence number or record counter, a gap from buffer overrun or an operator clearing the buffer is indistinguishable from a quiet period. | A2 documents per family whether a sequence number, record count, or buffer-overrun indicator exists. Where none exists, the limitation is recorded and V-S4 reports gap detection as unsupported for that family rather than passing. | A2, A4 | R4.7, V-S4 |
+| C-07 | The device's self-reported identity is the asset identity. | Model, serial, and firmware returned by an ID command are claims by the device. A replaced, spoofed, or compromised device at the same address can report anything. Trust-on-first-use of SSH host keys silently accepts a substituted device. | Asset identity binds reported attributes to the transport identity (SSH host key or certificate) and network address. A host-key change fails closed before credentials are sent and raises an event. Test V-S14. | A3 (trust), A2 (attributes) | R1.2, R1.5, V-S1, V-S14 |
+| C-08 | Device output is trusted input. | A malicious IED or an on-path attacker controls everything the parser reads, and that content is forwarded to the upstream SIEM. Embedded newlines, syslog framing, terminal escape sequences, or oversized output can inject forged upstream events or exhaust memory. | Fuzz and hostile-input tests in V-S15; output size and line-length limits in the adapter contract. | A2 (parser), A4 (forwarder) | R4.6, R5.5, Q7 |
+| C-09 | A passive sensor sees the traffic it needs. | In PRP networks a sensor on one LAN sees half the paths and a sensor on both sees duplicates; SPAN ports drop under load; encrypted protocols hide content. | Out of scope for the first slice. R6 criteria below require a measured visibility statement per sensor placement. | A4 | R6.1, R6.6 |
+| C-10 | The first slice can be accepted against "a representative lab IED". | **Confirmed false** by the project owner (via A1): no lab IED, no real outputs. Without them V-S1 and V-S2 can only be `simulated`. Documentation examples and a simulator built from them share any error in the manual. | Hardware, or real sanitized outputs with `SOURCE.md`. Until then, every slice result is labelled `simulated` with its hardware-dependent remainder. | A2, project owner | Blocker B-01 |
+| C-11 | A passive sensor or a collector cannot affect the protection network. | A misconfigured sensor interface can transmit (ARP, DHCP, IPv6 router solicitation, LLDP). A collector polling many devices adds traffic to a station bus shared with time-critical GOOSE and sampled values. | Sensor test: zero frames sourced from the sensor's monitoring interface over a 24 h capture *(proposed)*. Collector traffic budget per device and per segment, measured in the lab. | A4 (sensor), A5 (collector scheduling) | P1, R6.1, H-06 |
+| C-12 | Monitoring credentials are low-risk. | The site node must hold device credentials to collect SER, which makes it a path into IEDs (Q7). If the lowest access level that permits SER also permits any state change, monitoring and engineering privileges are not separated at the device. | A2 lists, per family, the lowest access level that permits each approved command and what else that level permits (hardware-checked). A3 defines credential storage, scope, and rotation. | A2, A3 | P4, R2.6, V-S5, V-S11 |
 
 ## Verification matrix
 
-Maps each requirement in [requirements.md](requirements.md) to how it will be verified. Column "Needs hardware" marks tests that cannot be completed on fixtures or simulators alone.
+How each requirement in [requirements.md](requirements.md) will be verified. "Slice" marks rows the first vertical slice must pass; other rows are recorded now so later milestones cannot redefine the bar. "HW" means the criterion cannot be closed without real equipment: `Y` required, `P` partly testable on fixtures but final result needs hardware, `N` not needed.
 
-| Requirement | Acceptance criterion (measurable) | Test location | Needs hardware | Status |
-| --- | --- | --- | --- | --- |
-| R1.x | to be defined | | | not defined |
-| R2.x | to be defined | | | not defined |
-| R3.x | to be defined | | | not defined |
-| R4.x | to be defined | | | not defined |
-| R5.x | to be defined | | | not defined |
-| R6.x | to be defined | | | not defined |
-| R7.x | to be defined | | | not defined |
-| R8.x | to be defined | | | not defined |
+| Req | Acceptance criterion (measurable) | Method and test location | HW | Slice | Status |
+| --- | --- | --- | --- | --- | --- |
+| R1.1 | Inventory built only from passive observation or register-approved read commands. Zero packets sent to any address not in an approved target list. | Capture all traffic from the platform host during a discovery run; diff destinations against the target list. `tests/safety/` | P | yes (single device) | defined |
+| R1.2 | For each supported family, manufacturer, model, firmware, and serial reported by the platform equal the values on the device's nameplate or front panel and in its native ID output, field by field. | Ground-truth file written by hand from the device, compared field by field. `tests/integration/` | Y | yes | defined |
+| R1.3 | Loss of device reachability is reported as a health event within the poll interval plus 60 s *(proposed)*; recovery likewise. | Fault injection: drop the device link in the lab or simulator. `tests/integration/` | P | yes | defined |
+| R1.4 | Every stored event, configuration, alert, and session references exactly one asset ID, or is explicitly marked unattributed. Zero events attributed to the wrong asset in a two-device test. | Two-device fixture set with overlapping event content. `tests/integration/` | P | yes | defined |
+| R1.5 | Every asset attribute carries its evidence source and an identification confidence; attributes with no source are rejected by the contract tests. | Contract test against the asset schema. `tests/integration/` | N | yes | defined |
+| R2.1 | Per access method, a recorded decision (ADR) on proxy versus remote workstation, with a demonstrated session for each supported method. | Lab session per method. `tests/security/` | Y | no | defined |
+| R2.2 | Access without valid upstream authentication is denied in 100% of attempts across the negative test set (no credentials, expired, revoked, wrong realm). | `tests/security/` | N | no | defined |
+| R2.3 | Every downstream session whose transport lacks encryption or device authentication is labelled insecure in the session record and in the UI before the session opens. | Lab session over Telnet versus SSH. `tests/security/` | Y | no | defined |
+| R2.4 | Permission matrix (user × device × operation) is enforced: for a generated matrix, every denied cell is denied and every allowed cell is allowed. | Table-driven test. `tests/security/` | N | partial (monitoring vs collection) | defined |
+| R2.5 | Revoking a live session terminates downstream traffic within 5 s *(proposed)*; expired sessions cannot be resumed; every session has start, end, actor, target, and termination reason in the audit log. | `tests/security/` with packet capture on the downstream side. | P | no | defined |
+| R2.6 | A monitoring-role principal cannot reach any state-changing operation through any interface (API, UI, adapter, scheduled job). | Exhaustive negative test over the operation list. `tests/security/` | N | yes | defined |
+| R2.7 | No listening service on the platform forwards to an IED except inside an authorized session; external port scan of the platform shows only declared ports. | Port inventory and scan of the platform host only (never of IEDs). `tests/security/` | N | yes | defined |
+| R3.1 | Retrieved configuration is byte-identical to the file obtained by the OEM tool from the same device at the same time, or every difference is explained. | Lab comparison. `tests/integration/` | Y | no | defined |
+| R3.2 | Each baseline version is immutable, signed or hashed, and attributed; modifying a stored baseline is detected by verification. | Tamper test. `tests/security/` | N | no | defined |
+| R3.3 | On a labelled set of configuration pairs, every known semantic change is reported and every known non-semantic change (reordering, whitespace, timestamps) is not. Report precision and recall; target 100% on the labelled set. | Labelled pairs, real files only. `tests/integration/` | P | no | defined |
+| R3.4 | A change inside an authorized maintenance window is correlated to it; the same change outside any window raises an unexpected-change alert. | `tests/integration/` | N | no | defined |
+| R3.5 | Original retrieved files are stored unmodified; hash at retrieval equals hash at audit. Zero write operations to the device during retrieval (see V-S7 method). | `tests/safety/` | Y | no | defined |
+| R4.1 | Syslog in RFC 3164 and RFC 5424 form, over UDP and TCP/TLS, is received; malformed messages are stored raw and flagged, never dropped. | Replay of real device syslog fixtures plus malformed set. `tests/integration/` | P | yes | defined |
+| R4.2 | SER records retrieved from the device equal the records shown by the device's own SER display at the same moment, count and content. | Lab reconciliation. `tests/integration/` | Y | yes | defined |
+| R4.3 | Every native field maps to a schema field or to a preserved raw-attributes map; zero native fields lost. | Field-coverage test per fixture. `tests/integration/` | P | yes | defined |
+| R4.4 | See V-S3 and V-S8. | | P | yes | defined |
+| R4.5 | See R1.4. | | P | yes | defined |
+| R4.6 | See V-S6. Forwarded messages parse as valid RFC 5424 at an independent receiver. | Independent receiver, not the project's own code. `tests/integration/` | N | yes | defined |
+| R4.7 | See V-S4, V-S6, V-S9. | | P | yes | defined |
+| R5.1 | A second device family can be added without changing the adapter contract or other adapters (measured by diff scope). | Review at the second family. | P | no | defined |
+| R5.2 | Each adapter declares a capability version; invoking an operation the declared capability lacks returns a typed "unsupported" result, not an error or a guess. | Contract test. `tests/integration/` | N | yes | defined |
+| R5.3 | See V-S10. | | N | yes | defined |
+| R5.4 | Timeouts, retries, and rate limits are configured per device family; tests prove a hung device is abandoned at the timeout, retries never exceed the family's lockout threshold minus one, and requests never exceed the rate limit. | Simulated slow and hung device. `tests/safety/` | P | yes | defined |
+| R5.5 | Prompt, pagination, truncated output, and disconnect mid-output each produce either a complete parse or a typed partial-result error with the raw bytes preserved. | Fixture-driven. `tests/integration/` | P | yes | defined |
+| R5.6 | Parser tests run only on fixtures with a `SOURCE.md`; at least three real or sanitized outputs per supported command. | Fixture lint. `tests/integration/` | N | yes | defined |
+| R5.7 | See V-S5 and V-S10. | | N | yes | defined |
+| R6.1 | Per sensor placement, a written visibility statement measured against a labelled capture: protocols identified, fraction of flows observed. | Labelled captures. `tests/integration/` | P | no | defined |
+| R6.2 | Baseline built from a benign capture produces zero alerts when replayed against a held-out benign capture from the same network *(target to be revised with real data)*. | `tests/integration/` | P | no | defined |
+| R6.3 | Each detection is tested with at least one labelled malicious sample and one benign near-miss. | `tests/integration/` | P | no | defined |
+| R6.4 | Report detection rate, false-positive rate, and alert latency per rule on the labelled set. | `tests/integration/` | P | no | defined |
+| R6.5 | Every alert links to the packets or events that triggered it, and those can be retrieved. | `tests/integration/` | N | no | defined |
+| R6.6 | See R6.1; PRP, encryption, and unsupported-protocol limitations listed per deployment. | Review. | N | no | defined |
+| R7.1 | Disabling any one module leaves the others' tests passing; a module can be upgraded with the others unchanged. | CI matrix. `tests/integration/` | N | partial | defined |
+| R7.2 | Every cross-module call goes through a versioned contract with contract tests on both sides. | Static dependency check. `tests/integration/` | N | yes | defined |
+| R8.1 | Single-server install from documented steps on a clean host reaches a working slice. | Scripted install. `tests/integration/` | N | yes | defined |
+| R8.2 | Collection node and central server exchange events over an authenticated channel; see V-S6. | `tests/integration/` | N | no | defined |
+| R8.3 | A site keeps collecting and storing with the WAN down for 72 h *(proposed)* and reconciles on reconnect with no loss. | Simulated partition. `tests/integration/` | N | no | defined |
+| R8.4 | See R8.3 and V-S6. | | N | partial | defined |
+| R8.5 | An unenrolled or revoked node cannot send or receive data; certificate rotation without downtime. | `tests/security/` | N | no | defined |
+| R8.6 | See V-S6. | | N | yes | defined |
+| R8.7 | `kill -9` of any process at random points during collection and forwarding loses zero events committed to the local store; upgrade then rollback leaves stored data readable. | Fault injection loop, ≥100 iterations *(proposed)*. `tests/integration/` | N | yes (crash only) | defined |
+| R8.8 | See V-S9. | | N | yes | defined |
+
+### Principles (cross-cutting checks)
+
+| Principle | Check |
+| --- | --- |
+| P1 OT safety | V-S7, V-S13, C-02, C-11 hardware tests; no test in this repository targets production equipment. |
+| P2 Read-only default | V-S5, V-S10; default configuration contains no state-changing command. |
+| P3 Evidence before assumptions | Every capability row and test result carries an evidence class; fixture lint rejects fixtures without `SOURCE.md`. |
+| P4 Least privilege | R2.4, R2.6, C-12. |
+| P5 Secure failure | V-S12 (telemetry failures observable), V-S14 (fail closed on identity mismatch), R2.5. |
+| P6 Deterministic verification | Tests run offline from committed fixtures with fixed seeds; flaky tests are failures, not retries. |
+| P7 Interoperability proven | A device family is listed as supported only with hardware-class results for V-S1, V-S2, V-S7. |
+| P8 Complexity justified | A6 reviews ADRs for unmeasured performance or scale claims. |
+| P9 Maintainability | Out of A6 scope beyond test readability. |
+| P10 No fabricated validation | A6 audits each milestone report against committed test output. |
 
 ## First vertical slice acceptance criteria
 
 Target (brief, Phase 2): collect native SER records from a representative lab IED and securely forward them to an upstream Syslog collector, with local asset identification and evidence preservation.
 
-Criteria to be made measurable before Phase 2 begins:
+**Constraint confirmed by the project owner (via A1, 2026-10-23): there is no lab IED and there are no real device outputs.** The slice is therefore verified against OEM documentation and a device simulator only. The highest evidence class any slice result can reach is `simulated`. Each criterion below states what a passing simulator run proves, and what remains unproven until hardware exists. A milestone report that drops the second column misstates the result.
 
-| ID | Claim to verify | Independent test | Status |
+Ground-truth sources named below:
+
+- **GT-DOC:** the OEM manual section cited by A2 in the approved command register or capability matrix (document title, revision, section, page).
+- **GT-EX:** a documentation example (sample command output printed in an OEM manual), transcribed into a fixture by A6 with a `SOURCE.md` naming the page. These are `documented-example` fixtures, not device output (see "Device simulator plan").
+- **GT-HAND:** a hand-written expected-results file A6 derives from GT-EX without running project code.
+- **GT-REC:** the recording simulator's byte log ([tests/safety/recording_simulator/](../tests/safety/recording_simulator/)).
+- **GT-RX:** an independent upstream receiver that is not project code (for example a stock rsyslog or syslog-ng instance), whose received-message log is the ground truth for forwarding.
+
+| ID | Claim | Test and pass condition | Ground truth | Simulator run proves | Remains hardware-dependent |
+| --- | --- | --- | --- | --- | --- |
+| V-S1 | Asset identity is correct. | Simulator returns the GT-EX identification output. Pass: every attribute the platform reports equals GT-HAND field by field (binary per field, 100% required); every attribute carries its source; zero attributes reported that the output does not contain. | GT-EX, GT-HAND | The parser reads the documented ID format correctly and attaches provenance. | That real firmware prints the documented format; serial, firmware string, and model naming on an actual unit (H-01). |
+| V-S2 | Normalized events match native events. | Simulator returns GT-EX SER outputs (at least three examples, from at least two document sections or revisions if they exist). Pass: record count equal; 100% of native fields mapped or preserved raw; order identical to native order; zero invented records. | GT-EX, GT-HAND | Normalization is lossless and order-preserving for the documented format. | Real output variants (firmware differences, localized text, chattering suppression notes, buffer-overrun markers) and reconciliation against the device's own display (H-07). |
+| V-S3 | Timestamp precision is preserved. | Pass (binary, each): native timestamp string stored byte-for-byte; declared precision equals the documented native precision, never padded; forwarded timestamp no more precise than native; offset recorded as "unknown" when the device gives none; collector receive time is a separate field. Negative cases fed by the simulator: no offset, a time inside a DST fall-back hour, a documented time-quality flag set to unsynchronized (if the format has one). | GT-DOC (precision, time-quality fields), GT-HAND | Schema and normalizer handle every documented timestamp form without inventing precision or offset. | Actual device clock behaviour on time-source loss and DST (H-10). |
+| V-S4 | Duplicates and gaps are handled per contract. | Simulator serves overlapping SER windows and a window with records removed. Pass: zero duplicate stored events after overlap; forwarded duplicates share one stable event ID; removed records reported as a gap where GT-DOC documents a sequence number or counter, and "gap detection unsupported" otherwise (C-06). | GT-DOC, GT-HAND | De-duplication and gap logic are correct for the documented record identity fields. | Whether the real buffer behaves as documented under overrun and after an operator clears it (H-07). |
+| V-S5 | Monitoring permissions cannot invoke state-changing operations. | For every register operation and every API endpoint, call as a monitoring principal. Pass: 100% of state-changing operations denied and audited; GT-REC shows zero bytes reached the simulator for each denied call. | Register, GT-REC | Platform-side authorization holds. | Which device access level the collector credential really has, and what else it permits (H-09, C-12). |
+| V-S6 | Interruption and reconnection do not lose events. | ≥100 randomized interruptions *(proposed)* of the simulator link, the upstream link, and process kills. Pass: zero events lost between simulator and local durable store; every stored event appears in GT-RX at least once after reconnect; duplicates in GT-RX identifiable by event ID; measured upstream unconfirmed window ≤ the contract's stated window. | GT-REC (what the device served), local store, GT-RX | Delivery semantics hold on the platform side. | Nothing device-specific; this criterion can be fully closed in simulation once B-03 is resolved. |
+| V-S7 | No unauthorized IED write operations are issued. | Three sources (C-03): (a) static check that every command line the adapter can construct is a read-only register entry; (b) `check.py` over GT-REC for the whole test suite run, plus a 24 h soak *(proposed)*, reports zero violations; (c) the adapter's transcript agrees with GT-REC byte for byte. Pass: all three, binary. | Register (GT-DOC citations), GT-REC | The adapter never sends anything outside the register, including under fault injection; this does not rely on the adapter's own transcript. | That the register's read-only classifications are correct on real firmware, and device-side confirmation that settings and SER buffer were unchanged (H-08). |
+| V-S8 | Raw device evidence is preserved. | Pass: for every normalized event, the raw bytes are retrievable and their hash equals the hash of the bytes GT-REC shows the simulator sent; raw is persisted before parsing, so a forced parser failure still leaves raw evidence. | GT-REC | Evidence chain from wire to store is intact. | Nothing device-specific. |
+| V-S9 | Storage exhaustion is controlled. | Fill the local store. Pass: alarm at the configured threshold before the limit; zero un-forwarded native records evicted; behaviour at the limit matches the contract. | Local store contents, GT-RX | Fully closable in simulation. | Nothing device-specific. |
+| V-S10 | Only register-approved commands, with validated parameters, reach a device. | Feed the adapter every non-register command, every register command with a disallowed parameter (including clear or reset variants, C-01), shell metacharacters, embedded CR/LF, escape bytes, and over-length input. Pass: GT-REC shows zero bytes for every rejected input; every rejection audited. | Register, GT-REC | Parameter validation holds. | Whether the device would have interpreted an accepted line differently from the documentation. |
+| V-S11 | Credentials do not leak. | Run the full slice suite with canary credentials. Pass: zero occurrences of the canary in logs, events, audit, forwarded messages (GT-RX), crash output, process arguments, or GT-REC (which never records passwords). | Canary scan output | Fully closable in simulation. | Nothing device-specific. |
+| V-S12 | Telemetry failures are observable. | Simulator injects: unreachable, auth failure, timeout, hang mid-output, malformed output; harness injects upstream down and store full. Pass: each produces a distinct health event within 60 s *(proposed)*; none yields a success status. | Harness injection log | Fully closable in simulation. | Real device failure signatures (H-04, H-05). |
+| V-S13 | The collector's device sessions are safe. | Pass: `check.py` reports peak concurrent sessions ≤ 1 per device, failed authentications per run below the documented lockout threshold, and every session closed; poll rate and output size within the limits in the capability matrix. | GT-REC, GT-DOC (session and lockout limits) | The collector respects the documented limits. | Whether the documented limits, alarm-contact behaviour, and CPU impact match a real unit (H-02..H-05). |
+| V-S14 | Device identity mismatch fails closed. | Restart the simulator with a different host key. Pass: GT-REC shows no successful authentication for that connection, collection stops for that device, and an identity-change event is raised. | GT-REC | Fully closable in simulation. | Nothing device-specific. |
+| V-S15 | Hostile device output is contained. | Simulator returns oversized output, overlong lines, terminal escape sequences, embedded CR/LF and syslog framing, invalid encodings, and records formatted as another device's events. Pass: no crash or hang beyond the timeout; zero extra or forged messages in GT-RX; raw input preserved and flagged. | GT-RX, GT-REC | Fully closable in simulation. | Nothing device-specific. |
+
+### Device simulator plan
+
+At A1's request the simulator is built by A6 from A2's *cited documentation*, not from A2's code or fixtures, so the parser and the simulator do not inherit the same misreading.
+
+1. **Recording layer (built).** [tests/safety/recording_simulator/](../tests/safety/recording_simulator/): an SSH endpoint that logs every byte received per session, plus `check.py`, which classifies each received line against a register JSON by full-line regex. Self-test: 8 of 8 passing ([results](../tests/safety/recording_simulator/results/selftest-2026-10-23.txt)), covering an allowed command, a clear-style parameter, a newline-smuggled second command, an escape sequence in a parameter, a line split across reads, failed-login counting, peak concurrency, and that passwords are never recorded. Class `simulated`.
+2. **Documented-behaviour layer (planned, after A2's register lands).** Replace the placeholder response with documentation-derived responses: for each register command, the output printed in the cited manual section (GT-EX), the documented prompt string, pagination, and documented error text. Fault modes from V-S12 and V-S15 are injected by configuration.
+3. **Independence rules.** A6 reads the manual section A2 cites, not A2's interpretation of it. Where A6 and A2 read the same page differently, the disagreement is logged as a finding and resolved by A1 per CLAUDE.md 5.7.
+4. **Residual risk that simulation cannot remove.** Parser and simulator still derive from the same documents. An error or omission in the OEM manual, or a difference between documented and real firmware output, passes every simulated test. This is why every V-S row above keeps a hardware-dependent column, and why no device family may be described as supported until H-01, H-07, H-08, and H-09 are run.
+5. **Fixture classification.** Documentation examples are neither real device output nor synthesized test data. A6 proposes a fourth fixture class, `documented-example`, with a `SOURCE.md` citing the document, revision, and page, and a rule that such fixtures support only `simulated` claims. This needs A1 approval because [tests/fixtures/README.md](../tests/fixtures/README.md) currently allows only real or sanitized real material.
+
+## Tests that require real equipment
+
+None of these can be closed on simulators or fixtures. A6 will not mark them passed without a dated hardware log naming the device, firmware, and procedure. All run on lab equipment only, never on production devices.
+
+| ID | Test | Why hardware | Linked |
 | --- | --- | --- | --- |
-| V-S1 | Asset identity is correct against OEM documentation and actual device information. | | not defined |
-| V-S2 | Normalized events match native events (fields, values, order). | | not defined |
-| V-S3 | Timestamp precision is preserved end to end. | | not defined |
-| V-S4 | Duplicate and missing events are detected and handled per contract. | | not defined |
-| V-S5 | Monitoring permissions cannot invoke state-changing operations. | | not defined |
-| V-S6 | Network interruption and reconnection do not lose or duplicate events beyond contract limits. | | not defined |
-| V-S7 | No unauthorized IED write operations are issued (observed on the wire or device log). | | not defined |
-| V-S8 | Raw device evidence is preserved alongside normalized output. | | not defined |
+| H-01 | Identity ground truth from nameplate, front panel, and native ID output. | Ground truth exists only on the device. | V-S1 |
+| H-02 | Alarm contact and SCADA point observation during collector login, collection, and logout at the adapter's access level; repeated failed-password attempts. | Side effects are device behaviour (C-02). | V-S13 |
+| H-03 | Concurrent-session limit and whether a collector session blocks an engineer's login. | Device limit. | V-S13 |
+| H-04 | Failed-login lockout threshold and lockout duration. | Device limit; sets the retry ceiling. | R5.4 |
+| H-05 | Device CPU or communication load at the planned poll rate and at 10× that rate. | Device limit. | R5.4, P1 |
+| H-06 | Collector and sensor traffic on a station-bus segment carrying time-critical traffic; sensor transmits nothing. | Network behaviour (C-11). | P1, R6.1 |
+| H-07 | SER reconciliation: device SER display versus collected and forwarded events, including a burst that approaches buffer capacity. | Buffer behaviour (C-06). | V-S2, V-S4 |
+| H-08 | Settings and SER buffer unchanged after 24 h of collection; device-side record of commands issued. | Proves V-S7 (b). | V-S7 |
+| H-09 | Lowest access level that permits each approved command, and every other operation that level permits. | Device permission model (C-12). | V-S5 |
+| H-10 | Timestamp behaviour across time-source loss and DST change. | Device clock behaviour (C-05). | V-S3 |
+
+## Safety and security blockers
+
+These block acceptance of the milestone named. They do not block Phase 0 or Phase 1 design work.
+
+| ID | Blocker | Affects | Raised | Status |
+| --- | --- | --- | --- | --- |
+| B-01 | No primary evidence exists: the project owner confirmed (via A1, 2026-10-23) there is no lab IED and no real device outputs. The slice can be accepted only as `simulated`; V-S1, V-S2, V-S7, and V-S13 keep open hardware-dependent parts, and no device family may be called supported. | Any claim beyond `simulated` | A6, 2026-10-23 | open: accepted constraint for Phase 2; closes only with hardware |
+| B-02 | The approved command register is empty. No adapter command may be implemented until its full command line, parameters, access level, and classification are registered with an OEM citation (C-01, C-12). | Phase 2 implementation start for A2 | A6, 2026-10-23 | open |
+| B-03 | Forwarding delivery semantics are undefined, and E-01 shows transport success does not imply delivery. V-S6 cannot be tested until the contract defines the confirmed position, replay, de-duplication key, and unconfirmed window. | Phase 1 contract approval | A6, 2026-10-23 | open |
+| B-04 | No design for storing device credentials on a site node. The slice requires them, and they are a direct path into IEDs (Q7, C-12). | Phase 2 acceptance | A6, 2026-10-23 | open: A3 |
+| B-05 | No device identity trust model; trust-on-first-use of SSH host keys would accept a substituted device (C-07). | Phase 1 contract approval | A6, 2026-10-23 | open: A3 |
+| B-06 | Test-harness language is undecided pending the toolchain ADR. The recording simulator prototype uses Python 3 and asyncssh 2.24.1 as test-only tooling. A6 recommends A1 permit the verification harness to use a different language from the implementation where that strengthens oracle independence. | Phase 1 harness build | A6, 2026-10-23 | open: A1 decision |
+
+## Proposed architecture-critical risks (A6 input to the Phase 0 exit gate)
+
+A1 consolidates the five risks the gate requires. A6 proposes these, ranked by consequence:
+
+1. **Read-only collection has device side effects** (C-01, C-02, C-12). Consequence: a monitoring feature changes device state, trips a SCADA alarm, or locks out an engineer. Owner: A2.
+2. **The platform holds a path into IEDs** (C-07, C-08, C-12, B-04, B-05). Stored credentials, a spoofable device identity, and hostile device output each give an attacker leverage. Owner: A3.
+3. **No primary device evidence** (C-10, B-01). Every interoperability claim in the first slice is currently unprovable beyond `simulated`. Owner: A2 with the project owner.
+4. **Delivery guarantees are weaker than the requirements assume** (C-04, E-01, B-03). Owner: A4 and A5.
+5. **Timestamp and ordering fidelity across vendors** (C-05, C-06, Q3). Owner: A4 with A2.
 
 ## Independent validation methods (from the brief, section 7)
 
@@ -51,14 +194,22 @@ Criteria to be made measurable before Phase 2 begins:
 - Distributed operation: simulate site disconnection, process termination, delayed events, and reconnection.
 - OT safety: verify passive functions generate no control/write commands and approved reads stay within tested limits.
 
-## Safety and security blockers
-
-| ID | Blocker | Affects | Raised | Status |
-| --- | --- | --- | --- | --- |
-| (none yet) | | | | |
-
 ## Findings log
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
-(none yet)
+### F-002 — 2026-10-23 — Recording simulator detects writes independently of the adapter
+
+- **Tested:** whether a byte-recording SSH endpoint plus a register checker can detect forbidden command lines without relying on the sender's transcript.
+- **How:** self-test with a synthetic neutral register; an asyncssh client sends allowed commands, a clear-style parameter, a newline-smuggled command, an escape sequence, and a line split across two reads; one failed login; two concurrent sessions.
+- **Result:** 8 of 8 assertions pass: the three forbidden lines are caught with the right verdicts, the split line is reassembled and allowed, one failed login and a peak of two sessions are reported, and the password appears nowhere in the recording.
+- **Evidence:** [tests/safety/recording_simulator/results/selftest-2026-10-23.txt](../tests/safety/recording_simulator/results/selftest-2026-10-23.txt). Class `simulated`.
+- **Disproves:** nothing; it establishes the V-S7 (b) and V-S10 oracle. It has not yet been run against any adapter.
+
+### F-001 — 2026-10-23 — E-01: TLS syslog write success does not imply delivery
+
+- **Tested:** whether a forwarder can treat error-free writes to an RFC 5425 (syslog over TLS, octet-counted) collector as delivered.
+- **How:** loopback TLS collector reads 50 frames, stops reading while the forwarder writes 100 more, then resets the connection as a crashed collector would. Five trials. Script: [tests/integration/experiments/syslog_tls_delivery_gap.py](../tests/integration/experiments/syslog_tls_delivery_gap.py).
+- **Result:** 5 of 5 trials: forwarder recorded 150 successful writes, collector received 50, 100 frames lost with no error at write time. The first error surfaced only on a later write (`ConnectionResetError`).
+- **Evidence:** [tests/integration/experiments/results/E-01-2026-10-23.json](../tests/integration/experiments/results/E-01-2026-10-23.json). Class `simulated` (Python 3.13.17, OpenSSL 3.0.13, Linux loopback). The size of the loss window depends on socket buffer sizes, which on real hosts can reach megabytes.
+- **Disproves:** the implicit assumption that RFC 5425 forwarding alone satisfies R4.7 "retransmission" and V-S6. Raised as C-04 and B-03.

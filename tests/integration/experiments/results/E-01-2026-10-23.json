@@ -1,0 +1,42 @@
+{
+  "experiment": "E-01 syslog TLS delivery gap",
+  "classification": "simulated",
+  "python": "3.13.17",
+  "openssl": "OpenSSL 3.0.13 30 Jan 2024",
+  "frame_bytes": 71,
+  "k_read": 50,
+  "m_written_while_stalled": 100,
+  "trials": [
+    {
+      "collector_received": 50,
+      "forwarder_write_ok": 150,
+      "lost_silently": 100,
+      "first_error": "ConnectionResetError"
+    },
+    {
+      "collector_received": 50,
+      "forwarder_write_ok": 150,
+      "lost_silently": 100,
+      "first_error": "ConnectionResetError"
+    },
+    {
+      "collector_received": 50,
+      "forwarder_write_ok": 150,
+      "lost_silently": 100,
+      "first_error": "ConnectionResetError"
+    },
+    {
+      "collector_received": 50,
+      "forwarder_write_ok": 150,
+      "lost_silently": 100,
+      "first_error": "ConnectionResetError"
+    },
+    {
+      "collector_received": 50,
+      "forwarder_write_ok": 150,
+      "lost_silently": 100,
+      "first_error": "ConnectionResetError"
+    }
+  ],
+  "claim_disproved": true
+}
