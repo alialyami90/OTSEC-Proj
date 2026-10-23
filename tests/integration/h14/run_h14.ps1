@@ -180,13 +180,13 @@ try {
 	}
 
 	# --- 2. recovery rounds --------------------------------------------------
+	# ROUND/ERROR/RESULT lines, one JSON object each (recovery_rounds.py header).
 	$code = Invoke-AsAccount @("-I", (Join-Path $bin "recovery_rounds.py"), "--dir", (Join-Path $fullDir "e04")) `
-		(Join-Path $Out "recovery-report.json") (Join-Path $Out "recovery.err.txt") 1800
-	Get-Content (Join-Path $Out "recovery-report.json") | Write-Host
-	if ($code -ne 0) {
-		Get-Content (Join-Path $Out "recovery.err.txt") | Write-Host
-		throw "recovery_rounds.py exited $code"
-	}
+		(Join-Path $Out "recovery-output.txt") (Join-Path $Out "recovery.err.txt") 1800
+	Get-Content (Join-Path $Out "recovery-output.txt") | Write-Host
+	Write-Host "--- recovery_rounds.py stderr ---"
+	Get-Content (Join-Path $Out "recovery.err.txt") | Write-Host
+	if ($code -ne 0) { throw "recovery_rounds.py exited $code" }
 } finally {
 	if ($trace) { logman stop $trace -ets | Out-Null }
 	$os.RunAs = $script:runAs
