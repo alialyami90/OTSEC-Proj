@@ -279,7 +279,29 @@ The owner confirmed that sites use the SEL-3355-2 running Windows 10 Pro or Wind
 
 - The harness now builds and runs on Windows. Process kill uses `TerminateProcess`, which is the same as SIGKILL for this purpose: the OS cache survives, so it is still not a power-loss test. Free space uses `GetDiskFreeSpaceExW`. `run.ps1` repeats E-A5-1 to E-A5-4 and puts the full-disk cases on a 16 MB NTFS VHDX when elevated.
 - A6's E-02 (no fsync between acknowledgements under `NORMAL`) used strace, which has no direct Windows equivalent. The Windows equivalent needs an ETW or Process Monitor trace of `FlushFileBuffers`. That is for A6. Until then, the `NORMAL` versus `FULL` throughput ratio on Windows is only indirect evidence that `FULL` flushes.
-- Where the runs happen is the owner's choice (decision card in the A5 thread): a GitHub Actions Windows runner, the owner's Windows PC, or a real SEL-3355-2. Results stay `simulated` until they come from SEL-3355-2 hardware.
+- The owner chose a GitHub Actions Windows runner. The first run with a runner assigned completed on 2026-10-23 (run 40006949610, `results/windows-*.txt`). Results stay `simulated` until they come from SEL-3355-2 hardware.
+
+### Windows results (W-1), 2026-10-23 `[simulated]`
+
+Hosted runner: Windows Server 2025 Datacenter (build 26100) on an Azure VM, NTFS on a virtual disk, with the full-disk cases on a 16 MB NTFS VHDX. The result files are transcribed from the job log because this environment cannot reach the artifact's download host. The log and the artifact digest are cited in each file's header.
+
+| Experiment | Windows result | Same as Linux? |
+| --- | --- | --- |
+| E-A5-1 crash durability, 100 kills per mode via `TerminateProcess` | PASS in all 400 runs: no acknowledged event lost, no gaps, `integrity_check` ok | Yes |
+| E-A5-2 throughput (events/s, NORMAL/1, FULL/1, NORMAL/100, FULL/100) | 895, **92**, 5,242, 676 | Ratios differ. A `FULL` per-event commit costs about 11 ms on this virtual disk, against about 0.24 ms on the Linux container |
+| E-A5-3 cases 1 and 2 (quota, real full NTFS volume) | Same pattern. Default WAL settings or a single large prune leave the store full after recovery; bounded WAL plus 50-event pruning recovers, and 6,850 more events were accepted afterwards | Yes |
+| E-A5-3 case 3 (three exhaustions, writer dies each time, startup recovery) | `auto_vacuum=NONE` FAIL (capacity not regained in rounds 2 and 3). `auto_vacuum=INCREMENTAL` PASS (about 5,590 events regained each round, reserve re-created) | Yes |
+| E-A5-4 syslog loss | Plain TCP lost events with no error in every burst run (64 to 104 per run; 3,203 to 3,568 with a slow collector). The acked transport lost none (45 duplicates across 3 collector kills) | Yes |
+| E-A5-6 write amplification | 10,627, 2,631 and 1,047 bytes per event for 1, 10 and 100 events per commit | Identical to the byte |
+
+What this changes:
+
+- **ADR-0004's store settings carry over to NTFS.** Every pass and fail in E-A5-1 and E-A5-3 reproduced on Windows, including the failure modes that drove the design (no space regained without `auto_vacuum=INCREMENTAL`, and a single large prune using up the reserve).
+- **Group commit is now required for throughput as well as wear.** At about 92 events/s for per-event `FULL` commits, a SER burst after reconnection, or a syslog storm, would outrun a node whose disk flushes this slowly. 100-event groups reached 676 events/s. The SEL-3355-2's industrial SSDs may flush much faster than an Azure virtual disk, but that is unmeasured. The node should therefore size its commit window from the flush latency it measures at start-up, rather than from a constant.
+- **The NORMAL-to-FULL gap (about 10 times) is indirect evidence that `FULL` reaches `FlushFileBuffers` on Windows.** It is not proof. A6's W-2 / H-14 Process Monitor trace is still needed.
+- **The write-amplification figure measures SQLite, not NTFS.** Identical byte counts on two operating systems show the counter sees only what SQLite asks the OS to write. NTFS's own journal and metadata writes, and the SSD controller's amplification, are on top, so the SSD estimate below remains a lower bound.
+
+Not shown by this run: power loss (`TerminateProcess` leaves the OS cache intact), the non-admin service account that H-14 asks for (the runner is an elevated administrator), Windows 10/11 IoT LTSC client editions, Defender or application-control interference on a hardened image, and any SEL-3355-2 storage.
 
 ### What changes from the Linux outline
 
@@ -306,13 +328,13 @@ The owner confirmed that sites use the SEL-3355-2 running Windows 10 Pro or Wind
 | Bounded, `auto_vacuum=INCREMENTAL` | 10 | about 2,600 |
 | Bounded, `auto_vacuum=INCREMENTAL` | 100 | about 1,050 |
 
-Committing one event at a time costs about 29 times the payload. **Group commit** fixes most of that without weakening the semantics. Events arriving within a short window (for example 100 ms) are committed in one transaction, and each is acknowledged only after that commit. At an assumed sustained 10 events/s `[inferred]`, the result is about 9 GB/day with per-event commits, about 2.3 GB/day with 10-event groups, and about 0.9 GB/day with 100-event groups. Over 10 years that is roughly 33, 8 or 3 TB written. Without SEL's SSD-lifetime note, this must be compared with the specific drive's rated TBW once the drive model is known. The node also reports SSD wear (SMART) where Windows exposes it. The Windows numbers will come from the same experiment in `run.ps1`.
+Committing one event at a time costs about 29 times the payload. **Group commit** fixes most of that without weakening the semantics. Events arriving within a short window (for example 100 ms) are committed in one transaction, and each is acknowledged only after that commit. At an assumed sustained 10 events/s `[inferred]`, the result is about 9 GB/day with per-event commits, about 2.3 GB/day with 10-event groups, and about 0.9 GB/day with 100-event groups. Over 10 years that is roughly 33, 8 or 3 TB written. Without SEL's SSD-lifetime note, this must be compared with the specific drive's rated TBW once the drive model is known. The node also reports SSD wear (SMART) where Windows exposes it. The Windows run gave the same bytes per event (section 13, W-1), so the estimate applies to both systems.
 
 ### Other owner answers that touch the platform
 
 - **WAN outages** are treated as faults, since sites run N-1 redundancy. Local buffering stays as a safety net. The outage-tolerance sizing floor (section 5) is A1's to set, and the arithmetic there still applies.
 - **Central HMI server reaching relays** is an existing, authorized customer path (zenon). The platform's central role is a cybersecurity server and never connects to devices (ADR-0007 item 7), so the invariants in section 2 hold.
-- **Dedicated 3355-2:** A1 assumes the platform does not share a host with zenon. If it ever had to, the store's quotas and the collector's session limits would need to be re-examined against zenon's own use of the relays' sessions.
+- **Dedicated host (owner confirmed, via A1, 2026-10-23):** each site gets its own machine for the platform, never shared with the zenon host. The SEL-3355-2 is the reference model, but other servers are allowed. AMT, TPM, SSD and RTC checks are therefore done per model at commissioning (ADR-0007 item 1).
 
 ## 14. A5 review of ADR-0007 (proposed), 2026-10-23
 
@@ -320,7 +342,7 @@ A1 assigned ADR-0007 to A5 to review and drive. This review covers the version o
 
 | Item | Proposed change | Reason |
 | --- | --- | --- |
-| 1 (dedicated host) | Keep the assumption, and add a consequence for co-hosting. If the platform ever shared a host with zenon, the platform and zenon would draw on the same relay session slots (for example 2 Telnet sessions on a SEL-751). Both would also have to fit one application-control policy and one patch and reboot schedule | Answers A1's request to check the assumption. The owner has not yet confirmed a dedicated host (question in the A5 thread) |
+| 1 (dedicated host) | Keep the assumption, and add a consequence for co-hosting. If the platform ever shared a host with zenon, the platform and zenon would draw on the same relay session slots (for example 2 Telnet sessions on a SEL-751). Both would also have to fit one application-control policy and one patch and reboot schedule | Answers A1's request to check the assumption. The owner has since confirmed a dedicated machine per site (section 13) |
 | 3 (SCM supervision) | Add: "SCM recovery delays do not enforce device session limits. The collector keeps a durable record of each open device session and, after an unclean exit, does not reconnect before the device's `TIDLE`" (section 13) | SCM delays are fixed per failure count and know nothing about devices. Two unclean restarts within `TIDLE` can lock everyone out of Telnet on a 751 (A2) |
 | 4 (credentials) | Replace "DPAPI with machine-bound keys" with A3's AP-1 rule: user-scope DPAPI under the collector's account, or a TPM-backed CNG key whose ACL names only the collector's service SID; the store file's ACL is limited to that SID | Any process on the machine can decrypt machine-scope DPAPI. A3 has already ruled it out (a10550b) |
 | 5 (Windows durability evidence) | Add E-A5-6 (write amplification). Record that the harness exists (`run.ps1`, staged `p0.exe`). The `FlushFileBuffers` check is A6's H-14 (Process Monitor) | A5 owns the harness as implementer evidence and A6 owns the independent check. Results from a VM or hosted runner are `simulated` |
@@ -330,7 +352,7 @@ A1 assigned ADR-0007 to A5 to review and drive. This review covers the version o
 
 Proposed experiments for ADR-0007, all `simulated` until run on SEL-3355-2 hardware:
 
-1. **W-1:** `run.ps1` on Windows/NTFS. It covers E-A5-1, E-A5-3 with the restart rounds, and E-A5-6. Owner: A5. Waiting on where it runs.
+1. **W-1:** `run.ps1` on Windows/NTFS. It covers E-A5-1, E-A5-3 with the restart rounds, and E-A5-6. Owner: A5. **Done 2026-10-23 on a hosted Windows Server 2025 runner, `simulated`. Every Linux result reproduced (section 13).**
 2. **W-2:** A6 H-14. Process Monitor confirms `FlushFileBuffers` on the database and WAL before every acknowledgement at `FULL`, on a dedicated volume under a non-admin service account. Owner: A6.
 3. **W-3:** service isolation. Decrypting the credential store from any service account other than the collector's fails, and the IED-facing NIC is unreachable except from the collector service. Owners: A3 and A6.
 4. **W-4:** maintenance survival on a SEL-3355-2. A patch reboot and a BIOS update with BitLocker on and application control enforced end with the node collecting again, with no human present. Owner: A5, with the owner's hardware.
