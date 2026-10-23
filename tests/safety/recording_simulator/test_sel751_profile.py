@@ -142,6 +142,23 @@ class DocumentedProfile(unittest.TestCase):
             login + [(b"SHO P 1\r\n", b"=>"), (b"QUI\r\n", b"\r\n=")], port1={"MAXACC": None})
         self.assertNotIn(b"MAXACC", out)
 
+    def test_spanish_port_defeats_an_english_collector(self):
+        # For V-S17. With LANG := SPANISH the collector's own SHO P 1 and QUI
+        # are not Spanish commands (MOS, SAL), so it cannot read LANG and
+        # cannot leave Level 1; and SER D, a read in English, clears the SER.
+        login = [(b"ACC\r\n", b"Password: ?"), (PASSWORD + b"\r\n", b"=>")]
+        spanish = {"LANG": "SPANISH"}
+        events, raw, out, report = run(
+            login + [(b"SHO P 1\r\n", b"=>"), (b"QUI\r\n", b"=>")], port1=spanish)
+        self.assertIn(b"Invalid Command", out)
+        self.assertNotIn(b"LANG", out)
+        effects = [e["effect"] for e in events if e["event"] == "device_effect"]
+        self.assertTrue(any("TIDLE" in e for e in effects), effects)
+        events, raw, out, report = run(
+            login + [(b"SER D\r\n", b"=>"), (b"SER\r\n", b"=>")], port1=spanish)
+        self.assertIn(b"No Data Available", out)
+        self.assertIn("device-effect", verdicts(report))
+
     def test_level0_cannot_read_ser(self):
         events, raw, out, report = run([(b"SER\r\n", b"\r\n=")])
         self.assertIn(b"Invalid Access Level", out)

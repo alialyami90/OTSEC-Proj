@@ -1,4 +1,4 @@
-# A2 register at bb6f850 (re-cited to SEL-751 IM 20260910), run 2026-10-23T16:47:05Z with deny corpus 112 lines, allow corpus 6 lines
+# A2 register at 986238b, run 2026-10-23T16:53:02Z with deny corpus 135 lines, allow corpus 6 lines
 test_allow_corpus_read_only (tests.safety.register_review.test_register.RegisterReview.test_allow_corpus_read_only) ... ok
 test_deny_corpus_never_read_only (tests.safety.register_review.test_register.RegisterReview.test_deny_corpus_never_read_only) ... ok
 

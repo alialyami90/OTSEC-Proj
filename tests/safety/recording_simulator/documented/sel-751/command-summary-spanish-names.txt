@@ -1,0 +1,60 @@
+# English and Spanish command names, SEL-751 Instruction Manual date code
+# 20260910, Command Summary (English and Spanish columns, last pages of the
+# manual). Transcribed by A6 from pdftotext output. Names only: the argument
+# letters also change in Spanish (C "clear" becomes D, for example
+# `SER D o R`, `HIS D o R`, `HIS HIF DT o RT`), so a matching name does not
+# mean matching arguments. documented-example, not device output.
+# english spanish
+2AC 2AC
+89C 89C
+89O 89A
+ACC ACC
+AFT AFT
+ANA ANA
+BRE INT
+CAL CAL
+CEV CEV
+CLO CER
+COM COM
+CON CON
+COPY COPY
+COU COU
+DATE FEC
+ETH ETH
+EVE EVE
+FGS FGS
+FIL FIL
+GOOSE GOOSE
+GROUP GRUPO
+HELP AYUDA
+HIS HIS
+HSG HSG
+HSR HSR
+ID ID
+INI INI
+IRIG IRIG
+LDP LDP
+LOG LOG
+LOO LOO
+L_D L_D
+MAC MAC
+MET MED
+OPE ABR
+PARTNO PARTNO
+PAS PAS
+PRP PRP
+PUL PUL
+QUIT SAL
+RSTP RSTP
+R_S R_S
+SER SER
+SET AJU
+SHO MOS
+STA EST
+SUM SUM
+TAR BAN
+TEST TEST
+THE THE
+TIME HORA
+TRI TRI
+VEC VEC

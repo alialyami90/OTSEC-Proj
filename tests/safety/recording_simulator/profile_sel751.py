@@ -27,11 +27,16 @@ Documented (p. = manual page):
   SHO P n (Level 1) shows the settings of port n; Port 1 is Ethernet and
     carries MAXACC, LANG, FTPACC and HTTPACC (Table 7.67 p. 7.77;
     Table 4.104 p. 4.249-4.251, factory defaults)
+  Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
+    Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
 ASSUMED (not stated in the manual): commands are case-insensitive; no
 character echo; an unmodelled but valid command gets a placeholder; the
 response text of clear commands is a placeholder; the layout of SHO P 1
-output (no figure in the manual shows it) follows the SHO example on p. 7.78.
+output (no figure in the manual shows it) follows the SHO example on p. 7.78
+and the SEL-400 `SHO P 5` example; with LANG := SPANISH the English names of
+commands that have a different Spanish name are rejected with the English
+error text.
 """
 
 import os
@@ -43,6 +48,17 @@ DOC = os.path.join(HERE, "documented", "sel-751")
 CRLF = b"\r\n"
 PROMPTS = {0: b"=", 1: b"=>", 2: b"=>>"}
 UNMODELLED = b"[simulator: command not modelled from documentation]"
+# ASSUMED layout for SHO P 1: section headings, KEY := value columns, and
+# quoted strings follow the SEL-400 Series IM 20260730 `SHO P 5` example
+# (p. 15.49) and the SEL-751 `SHO` example (p. 7.78). Heading names and where
+# each section starts are A6's guess from Table 4.104's order.
+PORT1_SECTIONS = {
+    "EPORT": "Protocol Selection", "IPADDR": "IP Configuration",
+    "ETELNET": "Telnet Configuration", "EFTPSERV": "FTP Configuration",
+    "E61850": "IEC 61850 Configuration", "EMOD": "Modbus Configuration",
+    "EHTTP": "HTTP Server Configuration", "ERSTP": "RSTP Configuration",
+    "EFGTX": "Other Protocols",
+}
 
 # (pattern on the upper-cased line, minimum level, effect text with citation)
 LEVEL1_EFFECTS = [
@@ -77,7 +93,7 @@ def _settings(name):
 
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
-                 port1=None):
+                 port1=None, spanish_accepts_english=False):
         self.password = password          # None models "Level 1 password disabled"
         self.level = 0
         self.awaiting = None              # level being authenticated for, or None
@@ -88,6 +104,7 @@ class SEL751DocResponder:
         self.quit_sent = False
         # Port 1 settings: Table 4.104 factory defaults, then any overrides.
         # An override value of None removes the setting from the output.
+        self.spanish_accepts_english = spanish_accepts_english  # undocumented
         self.port1 = _settings("port1-defaults-table-4-104.txt")
         for name, value in (port1 or {}).items():
             if value is None:
@@ -96,10 +113,22 @@ class SEL751DocResponder:
                 self.port1[name] = value
 
     def _show_port1(self):
-        cells = [f"{n:<8} := {v}".encode() for n, v in self.port1.items()]
-        rows = [b"".join(c.ljust(27) for c in cells[i:i + 3]).rstrip()
-                for i in range(0, len(cells), 3)]
-        return CRLF + b"Port 1" + CRLF + CRLF + CRLF.join(rows) + CRLF
+        out, cells = [b"Port 1"], []
+
+        def flush():
+            out.extend(b"".join(c.ljust(max(27, len(c) + 2)) for c in cells[i:i + 3]).rstrip()
+                       for i in range(0, len(cells), 3))
+            cells.clear()
+
+        for name, value in self.port1.items():
+            if name in PORT1_SECTIONS:
+                flush()
+                out += [b"", PORT1_SECTIONS[name].encode(), b""]
+            if " " in value or not value:
+                value = '"' + value + '"'
+            cells.append(f"{name:<8} := {value}".encode())
+        flush()
+        return CRLF + CRLF.join(out) + CRLF
 
     def _prompt(self):
         return CRLF + PROMPTS[self.level]
@@ -141,6 +170,10 @@ class SEL751DocResponder:
         if not text:
             return Reply(self._prompt())
         verb = text.split()[0][:3]
+        if self.port1.get("LANG") == "SPANISH":
+            reply = self._spanish(text, verb)
+            if reply is not None:
+                return reply
         if verb == "ACC":
             if self.password is None:
                 self.level = max(self.level, 1)
@@ -175,6 +208,30 @@ class SEL751DocResponder:
             body = self.ser if self.ser is not None else b"No Data Available"
             return Reply(CRLF + body + self._prompt())
         return Reply(CRLF + UNMODELLED + self._prompt())
+
+    def _spanish(self, text, verb):
+        """Port LANG := SPANISH: commands that differ from English (Command
+        Summary, English/Spanish table). Returns None to fall through to the
+        English handling for commands that are the same in both (ACC, ID, SER)."""
+        from sim import Reply
+        if verb in ("QUI", "SHO") and not self.spanish_accepts_english:
+            # Spanish names are SAL and MOS. Whether the English name is also
+            # accepted is undocumented; spanish_accepts_english picks a case.
+            return Reply(CRLF + b"Invalid Command" + self._prompt())
+        if verb == "SAL":
+            self.level, self.quit_sent = 0, True
+            return Reply(self._prompt())
+        if verb == "MOS":
+            if self.level < 1:
+                return Reply(CRLF + b"Invalid Access Level" + self._prompt())
+            if text == "MOS P 1":
+                return Reply(self._show_port1() + self._prompt())
+            return Reply(CRLF + UNMODELLED + self._prompt())
+        if self.level >= 1 and re.fullmatch(r"SER\w*\s+[DR]\b.*", text):
+            self.ser = None
+            return Reply(CRLF + UNMODELLED + self._prompt(),
+                         effects=["SER records cleared: Spanish 'SER D o R' (Command Summary)"])
+        return None
 
     def on_close(self):
         if self.level > 0:

@@ -120,3 +120,29 @@ SHO I
 SHO M
 SHO E 1
 SHO DNP 1
+# Added 2026-10-23: Spanish command names and Spanish clear arguments
+# (SEL-751 Command Summary, Spanish column). The register is English-only
+# (ADR-0005), so none of these may classify read-only.
+SER B
+HIS D
+HIS HIF D
+HIS HIF DT
+HIS HIF RT
+SAL
+MOS
+MOS G
+MOS P 1
+MED
+MED RD
+BAN R
+AJU
+ABR
+CER
+EST
+EST R
+INT R
+FEC 01/01/2026
+HORA 00:00:00
+GRUPO 2
+89A 1
+AYUDA
