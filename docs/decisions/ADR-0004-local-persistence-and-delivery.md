@@ -26,11 +26,14 @@ SQLite (WAL); PostgreSQL; embedded key-value stores; a custom append-only log; a
 3. **Two identities, never conflated:** transport idempotency key `(node_id, stream, seq)`; content-level duplicate handling for re-read device history by aligning overlapping SER snapshots (A6 C-13), owned by A4.
 4. **Site to central:** at-least-once; central upserts by the transport key and returns the highest contiguous committed `seq`; the site advances its confirmed cursor only on that answer.
 5. **Upstream syslog:** "forwarded" means "confirmed" only on an acknowledging transport. For RFC 5425 targets the contract states a replay window and an `event_id` for downstream deduplication, and the platform reports such targets as unconfirmed. TB5: upstream may return only transport acknowledgements in a fixed grammar (A1 ruling on the A6 cross-review).
-6. **Storage-full policy** per stream class as in A5 §5, with A3's additions: separate quotas; SER polling stops with an alarm stating the stop time and device-buffer overwrite estimate; UDP syslog drops are counted, persisted, and forwarded; audit-full makes privileged operations fail closed.
+6. **Required and best-effort targets (A6 C-18).** Each forwarding target is declared `required` or `best-effort`. Pruning waits only for `required` targets. A target that cannot confirm delivery (plain RFC 5425) can only be `best-effort`: it keeps a replay window by time, and events older than the window are prunable for it. A `required` target unreachable beyond a configured period raises an alarm; collection stops only when the quota is reached, with the alarm A3 specified; an admin may retire a target, which is audited. Without this rule a default syslog target would eventually stop SER polling permanently.
+7. **Durability mode.** `synchronous=FULL` for every stream whose acknowledgement advances a device cursor or confirms delivery. A6 E-02 showed NORMAL leaves acknowledged commits unsynced (1,011 of 1,016) while FULL left none (0 of 680); E-A5-1 cannot distinguish the two, so it is evidence for FULL only.
+8. **Startup recovery.** The reserve file is released and incremental pruning attempted at startup when the store is at quota, not only while running (A6 E-03: after a crash at full disk, reads and draining work but pruning fails until space is freed).
+9. **Storage-full policy** per stream class as in A5 §5, with A3's additions: separate quotas; SER polling stops with an alarm stating the stop time and device-buffer overwrite estimate; UDP syslog drops are counted, persisted, and forwarded; audit-full makes privileged operations fail closed.
 
 ## Consequences
 
-- R8.7 crash criterion is evidenced for process crash; power loss needs real site storage (A6).
+- R8.7 crash criterion is evidenced for process crash at FULL; power loss needs real site storage (A6 H-11).
 - Thresholds (70/85/95 %), 72 h outage floor, and certificate lifetime remain proposals pending owner input on WAN outage durations.
 
 ## Open objections
