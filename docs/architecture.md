@@ -1,6 +1,6 @@
 # Architecture
 
-Owner: A1. Status: **Phase 0 exit gate passed with conditions (2026-10-23).** Decisions are recorded in ADR-0002 to ADR-0005 under [decisions/](decisions/). Phase 0 evidence lives on the agent branches listed in [agent-handoffs.md](agent-handoffs.md); every result in Phase 0 is `documented-untested` or `simulated`.
+Owner: A1. Status: **Phase 0 exit gate passed with conditions (2026-10-23).** Decisions are recorded in ADR-0002 to ADR-0007 under [decisions/](decisions/). Phase 0 evidence is merged to `main` (`docs/phase0/`, experiments under `modules/`, `platform/`, `tests/`), indexed in [agent-handoffs.md](agent-handoffs.md); every result in Phase 0 is `documented-untested` or `simulated`.
 
 ## System boundary
 
@@ -169,4 +169,4 @@ Conditions before Phase 2 code:
 1. B-02: the approved register (C3) is approved with citations read from the SEL-751 manual, not only located (needs the manual, B-07).
 2. B-04: C7 credential storage accepted by A3 and reviewed by A6.
 3. B-03: C5 and C6 approved, including the required/best-effort rule and the mode A receiver configuration.
-4. The five agent branches are merged to `main` so contracts are written against one tree.
+4. ~~The five agent branches are merged to `main` so contracts are written against one tree.~~ **Met 2026-10-23:** all six Phase 0 PRs (#1–#6) merged to `main` with owner approval; merged tree passes 67 tests (5 environment-gated tests pass when pointed at the SEL-751 manual text, register, and allowlist).
