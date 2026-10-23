@@ -4,9 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-The repository currently contains no code. No language, toolchain, or test runner has been chosen yet. Once one is, record the build, lint, test, and single-test commands here. The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
+The repository contains no product code yet. Phase 0 is complete (exit gate passed with conditions, 2026-10-23); the runtime language is Go (ADR-0003) with Python for verification tooling only. Record the build, lint, test, and single-test commands here when the first module skeleton lands. The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
 Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
+
+## Scope update from the project owner (2026-10-23)
+
+This amends the brief below; where they differ, this section wins. Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strategy.md) and `docs/requirements.md` (R1.6, R1.7).
+
+- **All OT device classes are in scope**, not only IEDs: protective relays and other IEDs, RTUs and automation controllers, communications processors, switches, routers and security gateways, time servers and clocks, servers, engineering workstations and HMIs, historians, meters, and port servers. Asset management, monitoring, event collection, and configuration baselines apply to every class wherever a safe read-only mechanism exists.
+- **SEL first.** Vendor-specific support is built for SEL products, family by family, until the owner declares SEL coverage complete. Other vendors follow after that. Non-SEL devices get vendor-neutral coverage only (passive observation, received Syslog, operator-entered data) until then.
+- Principles are unchanged: read-only by default, evidence classification per SEL family, and no claim of support without evidence (P7).
 
 ## UI/UX design work: use the impeccable skill, and only there
 

@@ -6,7 +6,7 @@ The full project brief, engineering principles, team structure, and operating pr
 
 ## Status
 
-Phase 0 (evidence and assumption challenge) has not started. No language, toolchain, or runtime has been selected. The directories below hold placeholders and skeleton documents only.
+Phase 0 (evidence and assumption challenge) passed its exit gate with conditions on 2026-10-23; see [docs/architecture.md](docs/architecture.md#phase-0-exit-gate). Runtime, toolchain (Go), persistence, and the first slice scenario are decided in ADR-0002 to ADR-0005. No product code exists yet; Phase 1 (contracts) is next. Scope covers all OT device classes, SEL first ([ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strategy.md)). Everything so far is `documented-untested` or `simulated`.
 
 ## Layout and ownership
 

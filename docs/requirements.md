@@ -1,6 +1,6 @@
 # Requirements
 
-Source: the project brief in [CLAUDE.md](../CLAUDE.md), sections 1 and 2. This document restates the requirements in a form that can be traced to acceptance criteria in [verification.md](verification.md). Requirement IDs are stable; do not renumber.
+Source: the project brief in [CLAUDE.md](../CLAUDE.md), sections 1 and 2, as amended by the owner's scope change of 2026-10-23 (device classes and SEL-first vendor strategy, [ADR-0006](decisions/ADR-0006-device-coverage-and-vendor-strategy.md)). This document restates the requirements in a form that can be traced to acceptance criteria in [verification.md](verification.md). Requirement IDs are stable; do not renumber.
 
 Status legend for each requirement: `not started` | `investigating` | `contracted` | `implemented` | `verified`.
 
@@ -13,6 +13,10 @@ Status legend for each requirement: `not started` | `investigating` | `contracte
 | R1.3 | Monitor connectivity, health, and communication behavior where observable. | not started |
 | R1.4 | Correlate network activity, configurations, security events, and access sessions to assets. | not started |
 | R1.5 | Track identification confidence, evidence sources, and detection limitations. | not started |
+| R1.6 | Cover all OT device classes: protective relays and other IEDs; RTUs, automation controllers, and communications processors; Ethernet switches; routers, security gateways, and firewalls; time servers and satellite clocks; servers and computers; engineering workstations and HMIs; historians; meters; port servers and serial communications equipment. Each asset records its device class. (Added 2026-10-23, owner scope change, ADR-0006.) | not started |
+| R1.7 | Vendor-specific support is built for SEL products first, family by family, until the owner declares SEL coverage complete; other vendors follow. Non-SEL devices are covered by vendor-neutral mechanisms only (passive observation, received Syslog, Windows host events, operator-entered data) until then. "Supported" means an SEL family whose capabilities can meet the project requirements, assessed per family. (Added 2026-10-23, ADR-0006.) | not started |
+
+Scope note (ADR-0006): R3, R4, and R5 apply to every device class in R1.6, not only IEDs, wherever a safe read-only mechanism exists (for example switch and gateway configurations, clock status, Windows event logs). "IED" in R3–R5 is read as "device" for those classes. Active queries to any class follow R5.3 and R5.7.
 
 ## R2 — Secure engineering and remote access
 
@@ -103,6 +107,8 @@ Constraint: no microservices by default. Compare a modular monolith with deploya
 
 Constraint: failure of the cybersecurity platform must not compromise protection or control functions.
 
+Clarification of R8.5 (A1 ruling, 2026-10-23, on A3 HR-5): "credential rotation" means credentials and certificates the platform owns (node certificates, enrollment keys, platform service accounts, upstream collector credentials). Rotating a password or key stored on an IED is a state-changing device operation; it belongs to privileged engineering access (R2) and is outside the first slice.
+
 ## Mandatory engineering principles
 
 These apply to every requirement above and are restated here for traceability.
@@ -121,3 +127,12 @@ These apply to every requirement above and are restated here for traceability.
 | P10 | No fabricated validation. Never claim hardware testing, security verification, or protocol compatibility without evidence. |
 
 Applicable standards for alignment (not certification claims): IEC 62443, IEC 62351, NIST SP 800-82, MITRE ATT&CK for ICS.
+
+## Owner answers (2026-10-23)
+
+- Site computer: SEL-3355-2 with Windows 10 Pro or Windows 11 Pro IoT LTSC (ADR-0007).
+- WAN: outages are not tolerated; sites have N-1 redundancy. R8 store-and-forward stays as fault handling.
+- Central access: the central HMI server may reach relays; central cybersecurity servers may not. The platform's central role never connects to devices.
+- Upstream Syslog: assume any standards-compliant collector and support all types (ADR-0004 amendment).
+- HMI and historian software: COPA-DATA zenon HMI Energy Edition on Windows (non-SEL; Windows events by host push, ADR-0006).
+- SEL-3530 is discontinued; the SEL-3350 replaces it.
