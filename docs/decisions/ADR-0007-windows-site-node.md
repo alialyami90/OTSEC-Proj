@@ -35,6 +35,8 @@ ADR-0002 to ADR-0004 assumed a Linux site node (systemd supervision, linux/amd64
 
 - The edition actually installed decides support: "Windows 11 Pro IoT LTSC" is not a Microsoft edition name. Per A5's cited lifecycle data (A5 findings §15), Windows 11 Pro 24H2 left support on 2026-10-14, while Windows 11 IoT Enterprise LTSC 2024 runs to 2034-10-11. The node reads `EditionID` and `DisplayVersion` and labels itself by lifecycle date (A6 V-S20); an unknown edition is labelled "OS support unknown".
 
+- Power-cut durability depends on the drive's write cache and power-loss protection, so H-11 runs per hardware and drive model offered (A6 C-24). The node reports its hardware and drive model; a model without an H-11 result is labelled "storage durability unverified", the same way V-S20 labels the OS (A1 ruling, A5 implements).
+
 ## Verification
 
 A6 adds Windows runs of the durability and recovery tests and a service-isolation test (the main service account cannot read the credential store). Results are `simulated` on a Windows VM until run on SEL-3355-2 hardware.
