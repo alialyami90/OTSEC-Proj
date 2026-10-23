@@ -12,6 +12,10 @@ import re
 import subprocess
 import sys
 
+# -I drops the script's directory from sys.path; sel_ser.py is ours.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sel_ser  # noqa: E402
+
 SCHEMA = "otsec.event/0.1-draft"
 
 
@@ -107,26 +111,15 @@ def iec61850_utctime(hexstr):
 
 
 SEL_DOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documented", "sel751-fig10.16.txt")
-SER_ROW = re.compile(rb"^(\d+)\s+(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\S+)\s+(\S.*?)\s*$")
-
-
-def sel_ser_rows(raw):
-    """Split the SEL-751 manual example (Figure 10.16) into header context and
-    rows with byte spans. Assumes DATE_F = MDY, which the report does not
-    state; the assumption is recorded as a flag on every row."""
-    rows, offset = [], 0
-    header_end = None
-    for line in raw.split(b"\n"):
-        m = SER_ROW.match(line)
-        if m:
-            if header_end is None:
-                header_end = offset
-            rows.append((offset, line, m))
-        offset += len(line) + 1
-    return raw[:header_end], rows
+# The Figure 10.16 report does not print DATE_F. The product reads it from
+# SHO G (A1-approved); this example assumes MDY and flags every row.
+SEL_DATE_F = "MDY"
 
 
 def event(kind, asset, stream, seq, device_time, raw, fields, subject, value, evidence_class=None):
+    # seq is this example's position only. The real stream_seq is assigned at
+    # durable write and continues across reports of the same stream (A2 review
+    # finding 4), so it is left as a placeholder here.
     return {
         "schema": SCHEMA,
         "event_id": f"(assigned at first durable write; example {seq})",
@@ -134,7 +127,7 @@ def event(kind, asset, stream, seq, device_time, raw, fields, subject, value, ev
         # (C-13); it is not a uniqueness key, identical rows share it.
         "record_digest": hashlib.sha256(raw).hexdigest(),
         "origin": "device", "kind": kind,
-        "source": {"asset_id": asset, "stream_id": stream, "stream_seq": seq},
+        "source": {"asset_id": asset, "stream_id": stream, "stream_seq": "(assigned at durable write)"},
         "received": {"utc": None, "resolution_ns": 1000, "clock": {"sync": "unknown"}},
         "device_time": device_time,
         "native": {"evidence": {"sha256": hashlib.sha256(raw).hexdigest(), "length": len(raw)},
@@ -174,24 +167,39 @@ def main(cache, out_path):
                           bytes.fromhex(ut), {"stNum": "1", "sqNum": "0"}, "LIED10CTRL/LLN0$Status",
                           "stNum=1"), bytes.fromhex(ut), "goose-normal.pcapng frame 1"))
     raw = open(SEL_DOC, "rb").read()
-    header, rows = sel_ser_rows(raw)
-    for seq, (off, line, m) in enumerate(rows, start=1):
-        num, date, tod, element, state = (g.decode() for g in m.groups())
-        mm, dd, yyyy = date.split("/")
-        t = {"native": f"{date} {tod}", "native_encoding": "text", "format": "sel-ascii-ser-row",
-             "wall_clock": f"{yyyy}-{mm}-{dd}T{tod}", "offset": "unknown", "offset_basis": "none",
-             "utc": None, "resolution_ns": 1_000_000, "accuracy_ns": 1_000_000,
+    header, items = sel_ser.parse_report(raw, SEL_DATE_F)
+    for seq, it in enumerate(items, start=1):
+        line = it["line"]
+        if it["type"] == "parse-error":
+            results.append(({"kind": "ser", "parse_status": "failed", "reason": it["reason"],
+                             "evidence_class": "documented-untested"}, line, f"SEL-751 manual line at {it['offset']}"))
+            continue
+        f = it["fields"]
+        # "Time Source: Internal" means no time input is attached, so the
+        # 1 ms figure is resolution only; accuracy to true time is unknown
+        # (A2 review finding 3).
+        t = {"native": f"{f['DATE']} {f['TIME']}", "native_encoding": "text", "format": "sel-ascii-ser-row",
+             "wall_clock": f["wall_clock"], "offset": "unknown", "offset_basis": "none",
+             "utc": None, "resolution_ns": 1_000_000, "accuracy_ns": None,
              "quality": {"time_source": "Internal", "scope": "report"},
-             "flags": ["date-format-assumed:DATE_F=MDY"]}
+             "flags": [f"date-format-assumed:DATE_F={SEL_DATE_F}"] + it.get("flags", [])}
+        if it["type"] == "relay-message":
+            subject, value = "relay", f["MESSAGE"]
+        else:
+            subject, value = f["ELEMENT"], f["STATE"]
+        native = {k: v for k, v in f.items() if k != "wall_clock"}
         e = event("ser", "sel751:feeder-relay", "sel751:feeder-relay:ser", seq, t, line,
-                  {"#": num, "DATE": date, "TIME": tod, "ELEMENT": element, "STATE": state},
-                  element, state, "documented-untested")
-        e["native"]["span"] = {"offset": off, "length": len(line)}
+                  native, subject, value, "documented-untested")
+        e["collection"] = {"native_position": f["#"], "parse_status": "ok"}
+        e["native"]["span"] = {"offset": it["offset"], "length": len(line)}
         e["native"]["context"] = {"report_header_sha256": hashlib.sha256(header).hexdigest(),
                                   "report_header_length": len(header)}
-        results.append((e, line, f"SEL-751 manual Figure 10.16 row #{num}"))
+        results.append((e, line, f"SEL-751 manual Figure 10.16 row #{f['#']}"))
     report = []
     for e, raw, src in results:
+        if e.get("parse_status") == "failed":
+            report.append({"source": src, "event": e, "checks": {"parse ok": False}})
+            continue
         if e["evidence_class"] is None:
             e["evidence_class"] = "public-capture (simulated or lab origin, see SOURCE.md)"
         c = checks(e, raw)
@@ -203,6 +211,9 @@ def main(cache, out_path):
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2)
     for r in report:
+        if "device_time" not in r["event"]:
+            print(r["source"], "-> PARSE ERROR", r["event"]["reason"])
+            continue
         print(r["source"], "->", r["event"]["device_time"]["format"], r["event"]["device_time"]["wall_clock"],
               r["event"]["device_time"]["offset"], r["checks"])
     sel = [r for r in report if r["event"]["kind"] == "ser"]
