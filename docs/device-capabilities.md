@@ -1,6 +1,6 @@
 # Device Capabilities
 
-Owner: A2. Reviewed by A6 (device safety and correctness) and A3 (security-sensitive behaviour). Status: **Phase 0 draft (2026-10-23). One family assessed from documentation only; nothing tested on hardware or a simulator.** Updated the same day from the owner-supplied SEL-751 instruction manual (S22). Sources S1–S22 and risks D1–D19 are defined in [phase0/A2-device-feasibility.md](phase0/A2-device-feasibility.md).
+Owner: A2. Reviewed by A6 (device safety and correctness) and A3 (security-sensitive behaviour). Status: **Phase 0 draft (2026-10-23). One family assessed from documentation only; nothing tested on hardware or a simulator.** Updated the same day from the owner-supplied SEL-751 instruction manual (S22). Sources S1–S22 and risks D1–D19 are defined in [phase0/A2-device-feasibility.md](phase0/A2-device-feasibility.md); S23–S34 and D20–D25 in [phase0/A2-sel-portfolio.md](phase0/A2-sel-portfolio.md).
 
 Every capability claim in this document carries an evidence classification. A claim without a classification is invalid.
 
@@ -16,15 +16,20 @@ Every capability claim in this document carries an evidence classification. A cl
 
 A `simulated` result is never promoted to `hardware-verified` without a recorded hardware test.
 
-## Candidate IED families
+## Candidate families (SEL only, ADR-0006)
 
-To be proposed in Phase 0 by A2. Selection criteria: availability of a lab unit or sanitized real outputs, representativeness, availability of primary documentation, and OT safety of the read-only collection mechanism.
+Scope is SEL only until the owner declares the SEL product complete (ADR-0006). Families are listed by device class. The survey and its sources (S23–S34) are in [phase0/A2-sel-portfolio.md](phase0/A2-sel-portfolio.md). Selection criteria: a safe read-only mechanism, availability of primary documentation, representativeness, and lab availability.
 
-| Rank | Family | Vendor | Candidate firmware | Lab availability | Rationale |
+| Rank | Device class | SEL family | Candidate firmware | Lab availability | Rationale |
 | --- | --- | --- | --- | --- | --- |
-| 1 (primary, proposed) | SEL ASCII relays, reference model SEL-751 | Schweitzer Engineering Laboratories | unknown; FID gating per profile (D12) | none | Brief's own scenario (text command, parse output); manuals with ID response figure and example SER report (S2, S3); simple line protocol a simulator can reproduce; open-source reference client (S10). |
-| 2 (contrast, proposed) | IEC 61850 MMS server keeping SOE in an IEC 61850 log | SIPROTEC 5 (Siemens) or Relion 615 (ABB), to be fixed | unknown | none | No CLI; structured reads and log queries (S12); different vendor exercises normalization (Q3). Nothing about either device verified yet. |
-| 3 (deferred) | Modbus / proprietary-tool relays, e.g. GE Multilin UR | GE Vernova | unknown | none | Common, but SOE reached through proprietary tooling; not investigated. |
+| 1 (primary, slice 1) | Protective relay | SEL ASCII relays, reference model SEL-751 | unknown; FID gating per profile (D12) | none | Brief's own scenario (text command, parse output); full instruction manual supplied (S22); simple line protocol a simulator can reproduce. |
+| 2 (Q5 contrast, proposed) | Automation controller | SEL RTAC (SEL-5033 firmware) | unknown | none | Push-based: Syslog security and SOE events, named users and roles, two time stamps per message. Tests whether the envelope fits a source with no command/response. Not chosen for SSH: the RTAC has no device shell for monitoring (portfolio §3). |
+| 3 | Protective relay | SEL-400 series (SEL-451, SEL-411L, SEL-400G); SEL-787-4; SEL-311L | unknown | none | Same SEL ASCII adapter pattern with model-specific profiles; `CSE` documented for 400 series (S32). |
+| 4 | Time server | SEL-2488 | unknown | none | Passive Syslog with UTC offset, SNMP v2c/v3 read, Monitor role (S26). |
+| 5 | Ethernet switch | SEL-2731 / SEL-2741 with RSTP or OT SDN control plane | unknown | none | Passive Syslog, SNMP v2c/v3, Monitor role (S27–S29). SDN variant managed through SEL-5056 (S31, not read). |
+| 6 | Server / computer | SEL-3355-2 | n/a (Windows or Linux) | none | Vendor-neutral host coverage plus SEL SysMon SNMP agent extension for hardware health (S25). |
+
+The SIPROTEC 5 / Relion 615 contrast family from the first draft is dropped (ADR-0006).
 
 ## Capability matrix template
 
@@ -60,13 +65,17 @@ All rows are from documents. S22 is the SEL-751 Instruction Manual, date code 20
 | Known firmware differences | FID and SPECIAL identify model, firmware and compatibility | — | `documented-untested` | S22 p. 7.63 | Parse only for FIDs listed in a profile. |
 | Operational limitations and safety notes | 3 bad passwords and every Level 2/C access pulse SALARM 1 s, which by default closes OUT101 and is SER4; 2 concurrent Telnet sessions; `TIDLE` 15 min default and sessions stay elevated without `QUIT`; Fast Operate on Telnet gated by `FASTOP` (default N); `MAXACC` caps the port's access level; web server uploads firmware at Level 2 | — | `documented-untested` | S22 pp. 7.33, Table 7.5, Section 4 port and output settings; S16 | See risks D1–D19. Recommend owners set `MAXACC := 1` on the collection port. |
 
-### IEC 61850 MMS contrast family — reference device not fixed
+### SEL RTAC (Q5 contrast) — firmware: unknown
+
+All rows from S23 (RTAC SEL-5033 instruction manual, 20260925) unless stated.
 
 | Capability | Mechanism | Transport / auth | Classification | Evidence | Limitations |
 | --- | --- | --- | --- | --- | --- |
-| Asset identification | MMS read of nameplate data (LPHD / LLN0) | MMS over TCP; optional authentication on some devices (S5 for SEL-451-6) | `unknown` | — | Device not chosen. |
-| Event / SER retrieval | Log query (QueryLogAfter / QueryLogByTime) | MMS | `unknown` | S12 (logs hold SOE; multiple clients may query one log) | Report control blocks must not be enabled by the collector (D14). |
-| Syslog emission | security event logging over Syslog (SIPROTEC 5) | — | `unknown` | S14 (marketing page) | Not verified against a manual. |
+| Asset identification | Syslog hostname; SNMP agent (v2c/v3) | UDP Syslog (unauthenticated); SNMP v3 user | `documented-untested` | S23 Syslog p. 636; SNMP agent section | Syslog hostname is operator-set, so it is a weak identity. |
+| Event / SOE retrieval | Passive Syslog receipt of logged tags at or above a threshold; SOE log viewable in HTTPS web UI | RFC 3164, ≤1024 bytes, facility 23 | `documented-untested` | S23 pp. 636–637, 434; fixture `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt` | Only tags configured for logging are sent; UDP may drop; web UI also deletes logs (D21). |
+| Security event emission | `User_Logged_On` and `User_Logged_Off` logged by default; 11 User Sessions tags | Syslog | `documented-untested` | S23 p. 633 | Which tags are logged is project-specific. |
+| Available CLI commands | none on the device for monitoring; `AcRtacCmd` runs on the engineering PC | — | `unsupported` (device shell) | S24 Section 1 | No command register entries. |
+| Operational limitations and safety notes | account lockout after 3 failed attempts; watchdog risk under traffic load; logins can drive OUT101 if so configured | — | `documented-untested` | S23 pp. 434, 602–603, 633–635 | See D20–D23. |
 
 ## Approved command register
 
@@ -92,5 +101,8 @@ Sanitized real device outputs live under `tests/fixtures/ied/<vendor>/<model>/`.
 | `sel/751/documented-example/id-response-fig7-38.txt` | SEL-751 (manual example) | not stated in figure | S22 Figure 7.38, p. 7.64 | none (manual uses X placeholders) |
 | `sel/751/documented-example/id-response-fig3-20.txt` | SEL-751 (manual example), negative case | not stated | S22 Figure 3.20, p. 3.14 | none; 6 of 12 checksums wrong in the manual |
 | `sel/751/documented-example/ser-report-fig10-16.txt` | SEL-751 (manual example) | not stated | S22 Figure 10.16, p. 10.40 | none; column spacing not authoritative |
+
+| `sel/400-series/documented-example/cse-report-fig9-17.txt` | SEL-400 series (manual example, FID SEL-411L 2001) | as printed | S32 Figure 9.17, p. 9.30 | none; 7 of 9 checksums wrong in the manual (D25) |
+| `sel/rtac/documented-example/syslog-user-logon.txt` | SEL RTAC (manual example) | not stated | S23 p. 636 | none; hostname placeholder is the manual's |
 
 These are `documented-example` fixtures transcribed from the OEM manual (see their `SOURCE.md`). They are not device output and support at most `documented-untested` or `simulated` claims. No real device output exists yet.

@@ -1,0 +1,1 @@
+<190>Mar 21 2015 12:10:08 SEL-3530-xxxxxx RTAC Logger: 2015-03-21 12:09:58.593, Informational, Security, SystemTags. User_Logged_On, 'SEL logged on device via Web'.

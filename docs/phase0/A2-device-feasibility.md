@@ -58,6 +58,8 @@ Rules applied: an OEM document is `documented-untested` evidence for that model 
 
 ## 2. Candidate IED families, ranked
 
+> Superseded in part by ADR-0006 (SEL only). The family 2 contrast below (SIPROTEC 5 / Relion 615) is dropped; the contrast is now the SEL RTAC. See `A2-sel-portfolio.md` for the SEL families by device class.
+
 Selection criteria from `docs/device-capabilities.md`: lab availability, representativeness, primary documentation, OT safety of the read-only mechanism. Lab availability is "none" for every candidate, so documentation quality decides (A1, 2026-10-23).
 
 | Rank | Family | Collection mechanism for ID and SER | Why | Against |
