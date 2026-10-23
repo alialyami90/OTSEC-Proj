@@ -1,6 +1,6 @@
 # ADR-0003: Toolchain and UI stack
 
-- Status: proposed (A1, 2026-10-23; to be accepted at the Phase 0 exit gate)
+- Status: accepted (A1, Phase 0 exit gate, 2026-10-23)
 - Date: 2026-10-23
 - Deciders: A1, with A5 (proposer); UI stack delegated to this decision by the owner in `PRODUCT.md`
 - Related: P8, P9, R5.5, R5.6, R8.5, R8.7; `docs/phase0/A5-platform-feasibility.md` §3; A6 B-06; ADR-0002
@@ -34,6 +34,7 @@ Go, Rust, Python, Java, TypeScript/Node (A5 §3 table). UI: plain server-rendere
 
 - One static artifact per target; no interpreter or native wheel tree on site nodes.
 - Telnet support has no mature standalone Go library; a small RFC 854 client or the scrapligo transport must be written or vetted and tested against A6's Telnet simulator.
+- Licences: libiec61850 and lib60870 are GPLv3 or commercial (A4 §7); they must not be linked into the shipped binary without a licence decision. Zeek (BSD) and Suricata (GPLv2) run as separate processes.
 - A device path that only a Python or C library can serve would run as a separate collector process behind the same adapter contract (ADR-0002), not change the runtime language.
 
 ## Open objections

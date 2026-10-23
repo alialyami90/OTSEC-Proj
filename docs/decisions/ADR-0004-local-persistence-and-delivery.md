@@ -1,6 +1,6 @@
 # ADR-0004: Local persistence and delivery semantics
 
-- Status: proposed (A1, 2026-10-23; storage choice to be accepted at the Phase 0 exit gate; delivery semantics become a Phase 1 contract with A4 and A3)
+- Status: accepted (A1, Phase 0 exit gate, 2026-10-23)
 - Date: 2026-10-23
 - Deciders: A1, with A5 (proposer), A4 (forwarding), A3 (TB5), A6 (V-S6, V-S9)
 - Related: R4.4, R4.6, R4.7, R8.4, R8.6, R8.7, R8.8; A5 §5; A6 E-01, B-03, C-04, C-13; ADR-0002

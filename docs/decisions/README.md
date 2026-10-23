@@ -11,7 +11,7 @@ Use [ADR-0000-template.md](ADR-0000-template.md).
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](ADR-0001-repository-structure-and-ownership.md) | Repository structure and module ownership | accepted |
-| [0002](ADR-0002-runtime-shape.md) | Runtime shape: modular monolith with isolated collector and sensor processes | proposed |
-| [0003](ADR-0003-toolchain-and-ui-stack.md) | Toolchain and UI stack | proposed |
-| [0004](ADR-0004-local-persistence-and-delivery.md) | Local persistence and delivery semantics | proposed |
+| [0002](ADR-0002-runtime-shape.md) | Runtime shape: modular monolith with isolated collector and sensor processes | accepted |
+| [0003](ADR-0003-toolchain-and-ui-stack.md) | Toolchain and UI stack | accepted |
+| [0004](ADR-0004-local-persistence-and-delivery.md) | Local persistence and delivery semantics | accepted |
 | [0005](ADR-0005-first-slice-scenario-and-transport.md) | First vertical slice scenario and downstream transport | accepted |

@@ -1,6 +1,6 @@
 # ADR-0002: Runtime shape — modular monolith with isolated collector and sensor processes
 
-- Status: proposed (A1, 2026-10-23; to be accepted at the Phase 0 exit gate after A6 reliability and A3 trust-boundary review of P0-A5)
+- Status: accepted (A1, Phase 0 exit gate, 2026-10-23)
 - Date: 2026-10-23
 - Deciders: A1, with A5 (proposer) and A3 (trust boundaries)
 - Related: R7, R8, Q6, Q7; `docs/phase0/A5-platform-feasibility.md` §2, §6, §7; `docs/phase0/A3-security-feasibility.md` §4; ADR-0003, ADR-0004
@@ -39,6 +39,10 @@ Option C, narrowly:
 - The R8.2 replication path is exercised in R8.1 tests because all-in-one uses the same contract in-process.
 - Local IPC between the main process and the collector becomes a contract to secure and test (Phase 1).
 - A crash in a non-isolated module takes down the main process; mitigated by systemd restart with backoff, which must respect IED session limits (A5 §7, A2 D9).
+
+## Review record
+
+A6 reliability review of P0-A5 accepted it for Phase 0 (`docs/phase0/A6-cross-review.md`, commit 827fffc); A3 contributed and accepted the site-to-central rules (A3 §6). A1 reproduced E-A5-1, E-A5-3, E-A5-4.
 
 ## Open objections
 

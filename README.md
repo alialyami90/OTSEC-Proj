@@ -6,7 +6,7 @@ The full project brief, engineering principles, team structure, and operating pr
 
 ## Status
 
-Phase 0 (evidence and assumption challenge) is in progress; task briefs are in [docs/agent-handoffs.md](docs/agent-handoffs.md). No language, toolchain, or runtime has been selected. The directories below hold placeholders and skeleton documents only.
+Phase 0 (evidence and assumption challenge) passed its exit gate with conditions on 2026-10-23; see [docs/architecture.md](docs/architecture.md#phase-0-exit-gate). Runtime, toolchain (Go), persistence, and the first slice scenario are decided in ADR-0002 to ADR-0005. No product code exists yet; Phase 1 (contracts) is next. Everything so far is `documented-untested` or `simulated`.
 
 ## Layout and ownership
 
