@@ -33,6 +33,8 @@ The owner confirmed on 2026-10-23 that site nodes run Windows. All earlier stora
 
 New finding: committing each event on its own at `synchronous=FULL` reaches only 92 events per second on this disk. Batches of 100 reach 676 per second. So group commit is required for throughput as well as SSD wear (ADR-0007 item 5).
 
+A6 checked the run independently (F-011, PR #17). The result files match the job log on all 98 lines. A6 does not count it as the H-14 software half: it used A5's harness, had no flush trace, ran elevated, and ran on Windows Server 2025. A6 also notes that a start-up flush-latency measurement must never be read as proof of a healthy disk, because a cache that acknowledges flushes early looks fast exactly when commits are not durable.
+
 Still open:
 - H-14 (A6's independent check with a Process Monitor flush trace, as a non-admin service account; the runner was elevated).
 - H-11 (power cut on each hardware model).
