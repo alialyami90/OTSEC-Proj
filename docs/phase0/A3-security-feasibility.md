@@ -8,7 +8,7 @@ Evidence labels: `[doc]` read in an OEM document or standard; `[exp-sim]` shown 
 
 ## 1. Summary
 
-1. **Q7 (new attack path): yes.** The platform holds device credentials and sits on the IED network, so it is an attack path by construction. The threat model lists 23 paths, each with a mitigation, an enforcement point, and a falsifiable test. None is implemented or verified.
+1. **Q7 (new attack path): yes.** The platform holds device credentials and sits on the IED network, so it is an attack path by construction. The threat model lists 26 paths, each with a mitigation, an enforcement point, and a falsifiable test. None is implemented or verified.
 2. **Q1 (arbitrary engineering apps via proxy): no, not arbitrary ones.** A TCP-level proxy can pin *which device and port* a session reaches (E1 `[exp-sim]`) but cannot constrain *what operations* are sent over it (E1 T6), and the device then sees only the gateway's address (E1 T7). Vendor tools that use multi-channel protocols (ABB PCM600 needs FTP 20/21 plus MMS 102 `[doc]`) or discovery broadcasts are also likely to break under simple forwarding `[inferred]`. Recommended direction for Phase 4: a protocol-aware terminal gateway for CLI devices, controlled remote engineering workstations for vendor GUI tools, and destination-pinned TCP forwarding only as a labelled last resort. Settling it needs licensed vendor software and a lab IED (section 3.4).
 3. **Read-only must be enforced in seven independent layers**, not in the adapter alone (section 4.3). The weakest link is device-native: if the access level that reads SER can also change settings, the device gives us no protection (HR-2, A6 C-12).
 4. **In slice 1, no human role can trigger device I/O at all.** Collection runs under a non-human collector identity from site-local schedules. This removes the largest privilege-separation risk from the first milestone instead of mitigating it.
@@ -199,6 +199,7 @@ What E1 does not show: behaviour with real IEDs or real engineering tools; anyth
 
 ## 6. Coordination record
 
+- **A5 trust-boundary review (cross-review duty):** done 2026-10-23 in [A3-review-A5.md](A3-review-A5.md). Accepted for Phase 0 with conditions C-A5-1 to C-A5-9: collector-only IED route enforced by the OS, a policy signing key separate from central, forwarding targets from a site allowlist, a pinned central CA with no TLS-intercepting proxies, Intel AMT disabled (AP-24), bounded clock steps, and offline local auth.
 - **A5** `[peer]`: agreed six site-to-central rules (site-initiated mTLS, no exec channel, signed bundles under a site ceiling, credentials at site, offline-signed updates, independent site operation). A3 accepted A5's three amendments: anti-rollback floor, local listener on management interface only, storage-full policy. A3 review of the storage-full policy sent to A5: alarm must carry stop time and device-buffer overwrite estimate; separate quotas for syslog and SER (AP-19); drop counters persisted and forwarded. A5 leans to Go; acceptable from a security standpoint (memory safety, `x/crypto/ssh`).
 - **A2**: answered all five questions (A2 findings §11). Enforcement-point decisions for D1, D2, D4–D10 are in §8.
 - **A6** `[peer]`: incorporated B-04, B-05, C-08, C-12 and mapped AP-1, AP-4, AP-12, AP-20 to V-S11, C-12, V-S14, V-S15. Cross-review requested.
@@ -207,7 +208,7 @@ What E1 does not show: behaviour with real IEDs or real engineering tools; anyth
 
 ## 7. Proposals for A1-owned documents
 
-1. **`docs/architecture.md` Q-table:** Q1 → "partially answered: transparent proxying of arbitrary tools rejected; hybrid P-aware/W/P-tcp proposed; needs X1–X4 with lab and licences". Q7 → "answered yes; 23 paths with mitigations and tests in threat-model.md; none implemented".
+1. **`docs/architecture.md` Q-table:** Q1 → "partially answered: transparent proxying of arbitrary tools rejected; hybrid P-aware/W/P-tcp proposed; needs X1–X4 with lab and licences". Q7 → "answered yes; 26 paths with mitigations and tests in threat-model.md; none implemented".
 2. **Architecture-critical risks (exit gate)** from A3: (a) device access levels may not separate read from write (HR-2); (b) plaintext shared-password IEDs make the site node's credential store a single point of compromise (HR-1); (c) central server as a fleet-wide command path (AP-7); (d) engineering access cannot give per-operation control for arbitrary tools (HR-4); (e) device output as an injection vector into parsers and the SIEM (AP-11, AP-20).
 3. **Clarify R8.5:** "credential rotation" means platform credentials and certificates; IED credential rotation is a state-changing engineering operation outside slice 1 (HR-5).
 4. **ADR candidates:** (a) *Read-only enforcement in depth* (L1–L7), for Phase 1; (b) *Site-to-central trust and command surface* jointly with A5, for Phase 1; (c) *Engineering access approach*, Phase 4, after X1–X4.
@@ -289,7 +290,7 @@ Source: *SEL-751 Relay Instruction Manual*, date code 20260910, copy supplied by
 ## 9. Handoff
 
 ### Handoff P0-A3 — A3 — 2026-10-23
-**Completed:** Threat model v0 (scope, assumptions, assets, 10 trust boundaries for T1 and T2, 12 actors, 23 Q7 attack paths each with mitigation, enforcement point, falsifiable test, and ATT&CK for ICS IDs; 18 controls with IEC 62443-3-3 and IEC 62351 alignment; 7 open high-risk concerns). Q1 comparison of P-tcp, P-aware, W, and G with recommendation and settling experiments X1–X4. Drafts: authorization boundary, credential reference model, read-only enforcement layers L1–L7, audit minimum fields, insecure-downstream policy, failure behaviour. Experiment E1.
+**Completed:** Threat model v0 (scope, assumptions, assets, 10 trust boundaries for T1 and T2, 12 actors, 26 Q7 attack paths each with mitigation, enforcement point, falsifiable test, and ATT&CK for ICS IDs; 18 controls with IEC 62443-3-3 and IEC 62351 alignment; 7 open high-risk concerns). Q1 comparison of P-tcp, P-aware, W, and G with recommendation and settling experiments X1–X4. Drafts: authorization boundary, credential reference model, read-only enforcement layers L1–L7, audit minimum fields, insecure-downstream policy, failure behaviour. Experiment E1.
 **Evidence:** SEL-751 Instruction Manual date code 20260910 (owner-supplied, §8.4); ABB 1MRS758280 rev C; Siemens SSA-899560; SEL-3620 product page and data sheet; IEC TS 62351-8 preview (titles only); ATT&CK for ICS list retrieved 2026-10-23; E1 scripts and `results-2026-10-23.txt` (`simulated`, loopback mocks, three runs, 14/14 after A1's and A6's reviews).
 **Interfaces:** none approved. Drafts for Phase 1: `CredentialRef`, operation classes, role matrix, audit fields, `downstream_security`.
 **Limitations:** no hardware; no vendor engineering software exercised; standards mapped at requirement-title level only; IEC 62351-8 role names unverified; A2 device facts not yet received.
