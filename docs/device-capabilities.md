@@ -26,7 +26,7 @@ Scope is SEL only until the owner declares the SEL product complete (ADR-0006). 
 | 2 (Q5 contrast, proposed) | Automation controller | SEL RTAC (SEL-5033 firmware) | unknown | none | Push-based: Syslog security and SOE events, named users and roles, two time stamps per message. Tests whether the envelope fits a source with no command/response. Not chosen for SSH: the RTAC has no device shell for monitoring (portfolio §3). |
 | 3 | Protective relay | SEL-400 series (SEL-451, SEL-411L, SEL-400G); SEL-787-4; SEL-311L | unknown | none | Same SEL ASCII adapter pattern with model-specific profiles; `CSE` documented for 400 series (S32). |
 | 4 | Time server | SEL-2488 | unknown | none | Passive Syslog with UTC offset, SNMP v2c/v3 read, Monitor role (S26). |
-| 5 | Ethernet switch | SEL-2731 / SEL-2741 with RSTP or OT SDN control plane | unknown | none | Passive Syslog, SNMP v2c/v3, Monitor role (S27–S29). SDN variant managed through SEL-5056 (S31, not read). |
+| 5 | Ethernet switch | SEL-2730M; SEL-2731 / SEL-2741 with RSTP or OT SDN control plane | unknown | none | Passive Syslog, SNMP v2c/v3, Monitor role (S27–S29). SDN variant managed through SEL-5056 (S31, not read). |
 | 6 | Server / computer | SEL-3355-2 | n/a (Windows or Linux) | none | Vendor-neutral host coverage plus SEL SysMon SNMP agent extension for hardware health (S25). |
 
 The SIPROTEC 5 / Relion 615 contrast family from the first draft is dropped (ADR-0006).
