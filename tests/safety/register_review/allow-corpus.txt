@@ -4,3 +4,6 @@ ACC
 QUI
 ID
 SER
+# SHO G and SHO P 1 approved by A1 2026-10-23 (Table 7.67), exact lines only.
+SHO G
+SHO P 1

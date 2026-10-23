@@ -28,13 +28,13 @@ PASSWORD = b"canary-acc-5d1e"
 REGISTER = check.load_register(os.path.join(HERE, "sel751-collector-register.json"))
 
 
-async def drive(steps, password=PASSWORD, max_sessions=None, sessions=1):
+async def drive(steps, password=PASSWORD, max_sessions=None, sessions=1, port1=None):
     """steps: list of (bytes to send, prompt marker to wait for or None)."""
     with tempfile.TemporaryDirectory() as tmp:
         log = os.path.join(tmp, "rec.jsonl")
         rec = sim.Recorder(log)
         cfg = sim.Config(telnet=True, max_sessions=max_sessions,
-                         responder_factory=profile_sel751.factory(password=password))
+                         responder_factory=profile_sel751.factory(password=password, port1=port1))
         server = await sim.start_tcp(rec, "127.0.0.1", 0, cfg)
         port = server.sockets[0].getsockname()[1]
         conns, received = [], bytearray()
@@ -127,6 +127,20 @@ class DocumentedProfile(unittest.TestCase):
     def test_third_telnet_session_refused(self):
         events, raw, out, report = run([(b"ID\r\n", b"\r\n=")], max_sessions=2, sessions=3)
         self.assertEqual(report["sessions_refused"], 1)
+
+    def test_show_port1_serves_access_settings(self):
+        # For the MAXACC warning test (V-S16): the profile serves Table 4.104
+        # factory defaults, MAXACC := 2, unless the scenario overrides them.
+        login = [(b"ACC\r\n", b"Password: ?"), (PASSWORD + b"\r\n", b"=>")]
+        for port1, expect in ((None, b"MAXACC   := 2"), ({"MAXACC": "1"}, b"MAXACC   := 1"),
+                              ({"MAXACC": "C"}, b"MAXACC   := C")):
+            events, raw, out, report = run(
+                login + [(b"SHO P 1\r\n", b"=>"), (b"QUI\r\n", b"\r\n=")], port1=port1)
+            self.assertTrue(report["pass"], report["violations"])
+            self.assertIn(expect, out)
+        events, raw, out, report = run(
+            login + [(b"SHO P 1\r\n", b"=>"), (b"QUI\r\n", b"\r\n=")], port1={"MAXACC": None})
+        self.assertNotIn(b"MAXACC", out)
 
     def test_level0_cannot_read_ser(self):
         events, raw, out, report = run([(b"SER\r\n", b"\r\n=")])

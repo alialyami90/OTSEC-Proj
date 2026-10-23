@@ -5,6 +5,8 @@
     {"id": "qui", "pattern": "QUI", "classification": "read-only", "citation": "Table 7.59, p. 7.73"},
     {"id": "id", "pattern": "ID", "classification": "read-only", "citation": "Table 7.43, p. 7.64 (Level 0)"},
     {"id": "ser", "pattern": "SER", "classification": "read-only", "citation": "Table 7.63, p. 7.75 (Level 1)"},
+    {"id": "sho-g", "pattern": "SHO G", "classification": "read-only", "citation": "Table 7.67, p. 7.77 (Level 1); exact line, approved by A1 2026-10-23"},
+    {"id": "sho-p1", "pattern": "SHO P 1", "classification": "read-only", "citation": "Table 7.67, p. 7.77 (Level 1); exact line, approved by A1 2026-10-23"},
     {"id": "ser-clear", "pattern": "(?i)\\s*SER\\w*\\s+[CR]\\b.*", "classification": "state-changing", "citation": "Table 7.63, p. 7.75: SER C or R clears at Level 1"}
   ]
 }

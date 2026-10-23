@@ -90,3 +90,33 @@ STA R
 89O 1
 TEST DB OFF
 Y
+# Added 2026-10-23 for A1's approval of SHO G and SHO P 1 as exact lines
+# (SEL-751 IM 20260910 Table 7.67, p. 7.77). The s argument and other ports
+# are outside the approval; bare SHO P defaults to the active port.
+SHO G 50P1P
+SHO G LANG
+SHO G;SET
+SHO G 
+SHO  G
+SHOW G
+sho g
+SHO P
+SHO P 1 LANG
+SHO P 1 PASS
+SHO P 1;SET
+SHO P 1 
+SHO P 2
+SHO P 3
+SHO P 4
+SHO P F
+SHO P 1A
+SHO P 10
+SHO
+SHO 1
+SHO L 1
+SHO R
+SHO F
+SHO I
+SHO M
+SHO E 1
+SHO DNP 1

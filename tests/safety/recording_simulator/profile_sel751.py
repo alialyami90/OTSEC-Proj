@@ -24,10 +24,14 @@ Documented (p. = manual page):
     (p. 7.81), TAR R (p. 7.82), COM C (p. 7.49), COM PTP C|R, FGS/GOOSE S n C
   Telnet: two concurrent sessions on PORT 1 (p. 7.13); without QUIT the
     relay stays at the elevated level until TIDLE expires (p. 7.16)
+  SHO P n (Level 1) shows the settings of port n; Port 1 is Ethernet and
+    carries MAXACC, LANG, FTPACC and HTTPACC (Table 7.67 p. 7.77;
+    Table 4.104 p. 4.249-4.251, factory defaults)
 
 ASSUMED (not stated in the manual): commands are case-insensitive; no
 character echo; an unmodelled but valid command gets a placeholder; the
-response text of clear commands is a placeholder.
+response text of clear commands is a placeholder; the layout of SHO P 1
+output (no figure in the manual shows it) follows the SHO example on p. 7.78.
 """
 
 import os
@@ -65,8 +69,15 @@ def _load(name):
         return f.read().replace(b"\r\n", b"\n").rstrip(b"\n").replace(b"\n", CRLF)
 
 
+def _settings(name):
+    with open(os.path.join(DOC, name)) as f:
+        pairs = (line.split(":=", 1) for line in f if ":=" in line)
+        return {n.strip(): v.strip() for n, v in pairs}
+
+
 class SEL751DocResponder:
-    def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY"):
+    def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
+                 port1=None):
         self.password = password          # None models "Level 1 password disabled"
         self.level = 0
         self.awaiting = None              # level being authenticated for, or None
@@ -75,6 +86,20 @@ class SEL751DocResponder:
         self.id = _load("id-fig-7-38.txt")
         self.rid, self.tid = rid, tid
         self.quit_sent = False
+        # Port 1 settings: Table 4.104 factory defaults, then any overrides.
+        # An override value of None removes the setting from the output.
+        self.port1 = _settings("port1-defaults-table-4-104.txt")
+        for name, value in (port1 or {}).items():
+            if value is None:
+                self.port1.pop(name, None)
+            else:
+                self.port1[name] = value
+
+    def _show_port1(self):
+        cells = [f"{n:<8} := {v}".encode() for n, v in self.port1.items()]
+        rows = [b"".join(c.ljust(27) for c in cells[i:i + 3]).rstrip()
+                for i in range(0, len(cells), 3)]
+        return CRLF + b"Port 1" + CRLF + CRLF + CRLF.join(rows) + CRLF
 
     def _prompt(self):
         return CRLF + PROMPTS[self.level]
@@ -144,6 +169,8 @@ class SEL751DocResponder:
         if re.fullmatch(METER_RESET, text):
             return Reply(CRLF + b"Reset Metering Quantities (Y,N)?",
                          effects=["metering reset requested; relay asks for Y/N confirmation (p. 7.68)"])
+        if text == "SHO P 1":
+            return Reply(self._show_port1() + self._prompt())
         if text == "SER":
             body = self.ser if self.ser is not None else b"No Data Available"
             return Reply(CRLF + body + self._prompt())
