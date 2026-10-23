@@ -103,6 +103,8 @@ Constraint: no microservices by default. Compare a modular monolith with deploya
 
 Constraint: failure of the cybersecurity platform must not compromise protection or control functions.
 
+Clarification of R8.5 (A1 ruling, 2026-10-23, on A3 HR-5): "credential rotation" means credentials and certificates the platform owns (node certificates, enrollment keys, platform service accounts, upstream collector credentials). Rotating a password or key stored on an IED is a state-changing device operation; it belongs to privileged engineering access (R2) and is outside the first slice.
+
 ## Mandatory engineering principles
 
 These apply to every requirement above and are restated here for traceability.
