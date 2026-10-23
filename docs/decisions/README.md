@@ -14,3 +14,4 @@ Use [ADR-0000-template.md](ADR-0000-template.md).
 | [0002](ADR-0002-runtime-shape.md) | Runtime shape: modular monolith with isolated collector and sensor processes | proposed |
 | [0003](ADR-0003-toolchain-and-ui-stack.md) | Toolchain and UI stack | proposed |
 | [0004](ADR-0004-local-persistence-and-delivery.md) | Local persistence and delivery semantics | proposed |
+| [0005](ADR-0005-first-slice-scenario-and-transport.md) | First vertical slice scenario and downstream transport | accepted |
