@@ -1,15 +1,15 @@
-# A5 Phase 0 experiments on Windows/NTFS (ADR-0007 item 5). Runs only on
-# pushes to A5's experiment branch that touch the experiments; it is not a
-# project CI pipeline. Results are printed to the job log and uploaded as an
-# artifact; they are `simulated` evidence (GitHub-hosted Windows Server, not
-# SEL-3355-2 hardware).
+# A5 Phase 0 experiments on Windows/NTFS (ADR-0007 item 5). Manual only
+# (workflow_dispatch, available once this file is on the default branch); it
+# is not a project CI pipeline. Results are printed to the job log and
+# uploaded as an artifact; they are `simulated` evidence (GitHub-hosted
+# Windows Server, not SEL-3355-2 hardware).
+#
+# The first two push-triggered runs (2026-10-23) were never assigned a runner
+# and failed in about two seconds with no log, which points at the account's
+# Actions settings or billing rather than this workflow.
 name: a5-windows-experiments
 on:
-  push:
-    branches: [claude/project-thread-xni3ff]
-    paths:
-      - platform/experiments/phase0/**
-      - .github/workflows/a5-windows-experiments.yml
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
