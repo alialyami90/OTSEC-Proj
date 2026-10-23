@@ -29,8 +29,10 @@
   "origin": "device",                   // "device" | "platform"; set by the collector, never from content
   "kind": "ser",                        // "ser" | "syslog" | "protocol-event" | "telemetry-health" | "ids-alert"
   "source": {
-    "asset_id": "…",                    // A1/A2 asset identity contract
-    "asset_binding": {"method": "adapter-target", "confidence": "configured"},   // R1.5
+    "asset_id": "…",                    // A1/A2 asset identity contract; the SUBJECT of the event
+    "asset_binding": {"method": "adapter-target", "confidence": "configured"},   // R1.5; "asserted" when a relaying sender names the subject
+    "sender": {"address": "…", "asset_id": "…"},   // who delivered the bytes; never copied into asset_id for relaying senders (A3 AP-22)
+    "origin_auth": "session",           // A3 AP-22: "none" (UDP/TCP Syslog) | "tls-server-only" | "tls-mutual" | "session" (platform-initiated adapter read); unauthenticated events may alert but never drive automated actions
     "node_id": "site-a-node1",
     "stream_id": "…",                   // one native sequence space: asset + SER buffer, asset + log, syslog listener + sender
     "stream_seq": 18342                 // monotonic per (node, stream_id), assigned at durable write; A5's outbox position
@@ -199,11 +201,12 @@ The owner set the scope to all SEL OT device types before other vendors. This ta
 
 What this changes in the draft:
 
-1. `source.asset_binding` must allow "subject differs from sender", because both the RTAC and the SEL-5056 relay events about other assets. The subject's identity comes from a mapping (OpenFlow datapath id, RTAC tag name) and its confidence is recorded.
+1. `source.sender` and `source.asset_id` are separate fields, and `source.asset_binding` must allow "subject differs from sender" (confidence `asserted`), because both the RTAC and the SEL-5056 relay events about other assets. The subject's identity comes from a mapping (OpenFlow datapath id, RTAC tag name) and its confidence is recorded.
 2. A Syslog message can carry two device times (HEADER and an event time in MSG). The schema keeps both; `device_time` is the one closest to the event, and the choice is a per-source parser rule, not a guess at run time.
 3. The receiver needs lenient RFC 3164 parsing (space after PRI, year present or absent, offset present or absent), with every deviation recorded in `flags` rather than silently normalized.
-4. No SEL relay in the supplied manuals emits Syslog, so the vertical slice's SER path stays on A2's CLI adapter. The first device Syslog sources are the SEL-2488, the RTAC, the SEL-5056, and switches in RSTP mode.
-5. `CSE` (Compressed ASCII SER) returns rows newest first, with fields mapped by its label line (A2). A2 found that 7 of 9 checksums in the SEL-400 Figure 9.17 sample are wrong (D25), so a parser fixture from that figure can verify only the label lines. The RTAC Syslog fixture is A2's `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt` on PR #2.
+4. `source.origin_auth` (A3 AP-22) records how the sender was authenticated. The SEL-5056 manual documents only that the collector's certificate is installed as trusted on the SEL-5056, which authenticates the collector to the sender. It does not say the SEL-5056 presents a client certificate, so its TLS Syslog is `tls-server-only` (confidential and integrity-protected in transit, sender not authenticated) until mutual TLS is shown.
+5. No SEL relay in the supplied manuals emits Syslog, so the vertical slice's SER path stays on A2's CLI adapter. The first device Syslog sources are the SEL-2488, the RTAC, the SEL-5056, and switches in RSTP mode.
+6. `CSE` (Compressed ASCII SER) returns rows newest first, with fields mapped by its label line (A2). A2 found that 7 of 9 checksums in the SEL-400 Figure 9.17 sample are wrong (D25), so a parser fixture from that figure can verify only the label lines. The RTAC Syslog fixture is A2's `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt` on PR #2.
 
 ## 6. Platform events this schema implies
 
