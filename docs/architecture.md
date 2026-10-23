@@ -54,18 +54,21 @@ Owner decision, 2026-10-23: no lab IED and no real device outputs are available.
 
 Owner scope change, 2026-10-23 ([ADR-0006](decisions/ADR-0006-device-coverage-and-vendor-strategy.md)): every OT device class is in scope, and vendor-specific support is built for SEL first, family by family. The architecture already separates class- and vendor-neutral parts (collector process, register, adapter envelope, store, forwarder) from per-family parts (session driver, parser, capability profile), so the change adds profiles and adapters, not new runtime components.
 
-| Device class | Example SEL families (A1 recollection; A2 to confirm) | Vendor-neutral coverage from the start | Likely SEL-specific read path (to be evidenced) |
+| Device class | SEL families (source) | Vendor-neutral coverage from the start | SEL-specific read path (to be classified by A2) |
 | --- | --- | --- | --- |
-| Protective relays, IEDs | SEL-700, -300, -400 series | Syslog if emitted; passive observation | SEL ASCII `ID`, `SER` over Telnet or serial (slice 1) |
-| RTUs, automation controllers, communications processors | SEL RTAC (SEL-3530, -3555, -3505), SEL-2030/-2032, SEL-2411 | Syslog | SSH and Syslog on RTAC (A2 S9); SOE log |
-| Ethernet switches | SEL-2730M, SEL-2740S (SDN) | Syslog; passive LLDP/ARP observation | SNMP or web/API reads, to be classified |
-| Routers, security gateways, firewalls | SEL-3620, SEL-3622 | Syslog (SEL-3620 exports command logs, A2 S8) | Syslog, configuration export, to be classified |
-| Time servers and clocks | SEL-2488, SEL-2401/-2407 | Passive PTP/NTP observation; Syslog | SNMP or web status, to be classified |
-| Servers and computers | SEL-3350, -3355, -3360 | Syslog; passive observation | OS-level event collection; needs a host trust decision (A3) |
-| Engineering workstations and HMIs | SEL-3355 running vendor software | Syslog; passive observation | Same as servers |
-| Historians | No SEL historian confirmed | Passive observation; received logs | None until a later vendor phase |
-| Meters | SEL-735 | Passive observation | SEL ASCII or Modbus reads, to be classified |
-| Port servers, serial equipment | SEL-3610, SEL-ICON | Syslog | To be investigated |
+| Protective relays, IEDs | SEL-751, SEL-787-2/-3/-4, SEL-311L, SEL-400 series (400G, 411L, 451) — instruction manuals supplied by owner | Passive observation; no Syslog on these relays (SEL-751 IM: no SSH, Syslog, or TLS) | SEL ASCII over Telnet or serial: `ID` (Access Level 0), `SER` (Level 1) — SEL-751 IM Tables 7.43, 7.63 |
+| RTUs, automation controllers | SEL RTAC, configured with acSELerator RTAC SEL-5033 (IM supplied); RTAC hardware manuals (SEL-3530/3555/3505) not supplied | Syslog | SSH, Syslog, SNMP, HTTPS, LDAP, REST API appear in SEL-5033 IM and Programming Reference; classification pending |
+| Ethernet switches | SEL-2731, -2741, -2743, -2744 (2731 and 2741 manuals supplied); RSTP-managed or OT SDN-managed | Syslog (RSTP User's Guide, SDN User's Guide) | RSTP-managed: SNMP, HTTPS; SDN-managed: via SEL-5056 flow controller (IM supplied) |
+| Routers, security gateways, firewalls | SEL-3620/-3622 (A1 recollection; no manual supplied) | Syslog | Unknown until manual supplied |
+| Time servers and clocks | SEL-2488 (IM and data sheet supplied) | Syslog; passive PTP/NTP observation | SNMP, HTTPS, LDAP/RADIUS appear in SEL-2488 IM; classification pending |
+| Servers and computers | SEL-3355-2 (IM and data sheet supplied); typically Windows | Syslog where configured; passive observation | Windows event collection and hardware management (SNMP/HTTPS in SEL-3355-2 IM); host-agent trust decision needed (A3) |
+| Engineering workstations, HMIs | Windows hosts (often SEL-3355 hardware) running HMI software | As servers | As servers |
+| Historians | Windows hosts running historian software (non-SEL software, owner 2026-10-23) | Passive observation; Windows events | Windows event collection only, until a later vendor phase for the historian product |
+| SDN flow controller | SEL-5056 (IM supplied) | Syslog | SNMP, HTTPS, REST appear in IM; classification pending |
+| Meters | SEL-735 (A1 recollection; no manual supplied) | Passive observation | Unknown until manual supplied |
+| Port servers, serial equipment | SEL-3610, SEL-ICON (A1 recollection; no manual supplied) | Syslog | Unknown until manual supplied |
+
+"Supported" (owner clarification, 2026-10-23): an SEL family is in scope for support to the extent its native capabilities can meet the project requirements; where a family lacks a capability (for example SEL-751 has no Syslog or SSH), the requirement is met by another path or recorded as a limitation for that family.
 
 Every active read path in the last column is an adapter: registered operations, read-only classification with citations, per-device approval, and the same enforcement layers as the relay adapter. A device class is "supported" only per SEL family and only at the evidence class `docs/verification.md` requires.
 
@@ -105,7 +108,7 @@ Consolidated from proposals by A2, A3, A4, A5, A6.
 
 | # | Risk | Evidence | Mitigation in the architecture | What still needs hardware or owner input |
 | --- | --- | --- | --- | --- |
-| 1 | **"Read-only" collection is not guaranteed by the device.** SEL Access Level 1 permits `TRI`, elevation attempts, and possibly clears; binary Fast Operate (breaker control) shares the ASCII port; three bad passwords pulse the ALARM contact; some models allow a single Telnet session. | A2 D1–D9 and data-sheet follow-up; A6 C-01, C-02, C-12; A3 HR-2 | Exact-line register with deny-by-default; independent A6 deny corpus gates every register change; egress check on final socket bytes (printable ASCII + CR/LF only); credential ceiling Level 1; one auth attempt then suspend; one short session per device closed with `QUI`. | H-02 to H-05, H-08, H-09 on a lab relay. |
+| 1 | **"Read-only" collection is not guaranteed by the device.** SEL Access Level 1 permits `TRI`, elevation attempts, and clearing the SER buffer (`SER C` or `SER R` are Level 1 on SEL-751, IM Table 7.63); binary Fast Operate (breaker control) shares the ASCII port; three bad passwords pulse the ALARM contact; some models allow a single Telnet session. | A2 D1–D9 and data-sheet follow-up; A6 C-01, C-02, C-12; A3 HR-2 | Exact-line register with deny-by-default; independent A6 deny corpus gates every register change; egress check on final socket bytes (printable ASCII + CR/LF only); credential ceiling Level 1; one auth attempt then suspend; one short session per device closed with `QUI`. | H-02 to H-05, H-08, H-09 on a lab relay. |
 | 2 | **The platform is a path into IEDs.** Node credential store; central as a fleet command path; slice credentials cross the station LAN in cleartext and the relay cannot be cryptographically authenticated. | A3 HR-1, AP-7, HR-8; ADR-0005 | Separate collector process as sole credential reader; site-initiated mTLS with signed bundles under a site ceiling; no human-triggered device I/O; plaintext label plus per-device acknowledgement; owner accepted residual Telnet risks for the simulated slice only. | Owner authorization before any real device; production path (serial or gateway) undecided. |
 | 3 | **No primary device evidence.** No lab IED, no captures; SEL manual bodies are unreadable here; parser and simulator both derive from the same documents, so a documentation error passes every simulated test. | A6 B-01, B-07; A2 §1 | Every result labelled `simulated`; A2 and A6 transcribe documents independently; no family called "supported" until H-01, H-07, H-08, H-09 pass. | SEL-751 instruction manual; later a lab relay. |
 | 4 | **Delivery guarantees are weaker than the requirements assume.** RFC 5425 cannot confirm delivery; RELP confirms only with a specific receiver queue configuration; "prune only confirmed" plus an unconfirmable target would stop SER polling. | A6 E-01, A5 E-A5-4, A4 E-A4-03, A6 C-18 (all reproduced by A1 except C-18, which is analytical) | ADR-0004: commit before ack, at-least-once with stable `event_id`, required vs best-effort targets, mode A (RELP/TLS, tested receiver config) preferred, mode B (RFC 5425, replay window) best-effort only. | Owner's real upstream collector and its configuration. |
@@ -139,7 +142,7 @@ Deferred until after the slice: site-to-central message set and central instruct
 | Assumption | Status | What settles it |
 | --- | --- | --- |
 | The brief's example "SSH to an IED" | Not supported for SEL relays (A2; SEL-751 data sheet 20260910 lists no SSH) | Revisit per family |
-| SEL-751 command forms, access level of `ID`, Telnet session limit, SER row layout, date format, password echo | `unknown`: manual sections located but unread | SEL-751 instruction manual |
+| SEL-751 Telnet session limit, SER row layout details, password echo | Manual now supplied (SEL-751 IM 20260910); A2 to read and cite. Already read by A1: `ID` is Level 0, `SER` and `SER C/R` are Level 1, Telnet idle timeout `TIDLE` 1–30 min (default 15) | A2 transcription, A6 independent transcription |
 | SEL Level 1 behaviour, ALARM pulse, session limits on SEL-751 specifically | Documented for SEL-300G or SEL-311L only | Manual, then H-02 to H-04 |
 | Relay CPU and communications load from polling | `unknown` | H-05 |
 | Power-loss durability of the store | Untested; process-crash only at `synchronous=FULL` | H-11 |

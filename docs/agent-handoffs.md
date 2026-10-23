@@ -219,3 +219,15 @@ Full text: `/mnt/project-files/phase0/A4-handoff.md`; findings in `docs/phase0/A
 
 ### Owner scope change — 2026-10-23
 The owner widened scope to all OT device classes with SEL as the only vendor for vendor-specific support until the SEL product is complete. Recorded in ADR-0006, `docs/requirements.md` R1.6/R1.7, the scope update section of `CLAUDE.md`, `PRODUCT.md`, and `docs/architecture.md` "Device coverage and vendor strategy". Effects on Phase 1 briefs: A2 organizes candidates and capability matrices by SEL product family and device class and confirms A1's SEL product list; the Q5 contrast exercise uses an SEL RTAC instead of SIPROTEC/Relion; A3 adds network-device and host credentials and any host agent to the threat model; A4 makes the schema accept non-SER native records (switch/gateway Syslog, Windows events, clock status); A6 states support per SEL family and device class. The first slice (ADR-0005) is unchanged.
+
+### Owner-supplied SEL manuals — 2026-10-23
+The owner supplied 15 SEL instruction manuals and user's guides (SEL-751 IM date code 20260910, SEL-787-2/-3/-4, SEL-311L/-6, SEL-400G, SEL-411L, SEL-451-5, SEL-2488, SEL-2731, SEL-2741, SEL-3355-2, acSELerator RTAC SEL-5033, SEL-5056, Programming Reference, RSTP User's Guide, SDN User's Guide) and two more data sheets (SEL-2488, SEL-3355-2). PDFs and text extractions: `/mnt/project-files/phase0/manuals-SEL/`. Class: OEM document, `documented-untested`. **B-07 is unblocked for SEL-751.**
+
+A1 spot-read of the SEL-751 IM (A2 and A6 must read and cite the source themselves):
+- Table 7.43: `ID` is Access Level 0; Figure 7.38 prints an example ID response (candidate `documented-example` fixture).
+- Table 7.63: `SER` is Level 1 ("as many as 1024 rows", row 1 most recent); **`SER C` or `SER R` clears the SER records at Level 1**; argument forms `row1`, `row1 row2`, `date1`, `date1 date2` (dates follow `DATE_F`). `SER D` lists automatically removed chattering elements (Table 7.64).
+- Table 7.17 and following text: `ACC` (0→1), `2AC` (1→2), `CAL` (2→C); three incorrect passwords pulse `SALARM` for one second; `SALARM` also pulses after successful Level 2 or C access or a denied access. Factory example logic includes `OUT101 := HALARM OR SALARM` and `SER4 := SALARM`, so failed logins can drive the alarm output and appear in the SER.
+- Port settings: `ETELNET`, `TPORT`, `TIDLE` (1–30 min, default 15), Telnet `LANG` English or Spanish; factory default Ethernet enables only Telnet, HTTP, and PING. No SSH, Syslog, or TLS in the manual.
+- Consequence for risk 1: the collector's own access level can destroy the evidence it collects. The exact-line register and egress check are the only platform-side barriers; this is now `documented-untested`, not inferred.
+
+Missing for the ADR-0006 table: SEL-3620/-3622 gateway, RTAC hardware (SEL-3530/-3555/-3505), SEL-735, SEL-3610, SEL-ICON, SEL-2401/-2407, and the SEL Fast Message protocol documentation (for A2 D5).

@@ -39,6 +39,12 @@ Owner instruction (project thread, 2026-10-23). SEL product facts below are A1 r
 - A6's verification matrix states support per SEL family and per device class.
 - The SIPROTEC 5 / Relion 615 contrast family from Phase 0 is dropped from Phase 1.
 
+## Owner clarifications (2026-10-23, before merge)
+
+- "Supported" means SEL devices whose capabilities can meet the project requirements; support is assessed per family against those requirements.
+- Servers and historians typically run Windows with HMI or historian software. Windows host coverage (event logs and host health) is therefore in scope as a vendor-neutral mechanism; how events are collected (native forwarding versus an installed agent) is a trust-boundary decision for A3.
+- The owner supplied SEL instruction manuals and data sheets (`/mnt/project-files/phase0/manuals-SEL/`, `datasheets-SEL/`); the family table in `docs/architecture.md` now cites them, replacing A1's recollection where a document exists.
+
 ## Open objections
 
 None. Owner to confirm the class list and whether any non-SEL device must be deeply supported before the SEL product is complete.
