@@ -182,6 +182,28 @@ Mode A needs exactly one inbound grammar: RELP server frames `TXNR SP COMMAND SP
 - Each datagram or frame is persisted byte-exact before parsing; RFC 3164 and RFC 5424 are parsed into `device_time` per section 3; unparseable messages are kept with `parse_status: failed`.
 - Re-forwarded device Syslog is always wrapped (device bytes in `dtext`/`dtext_b64`), never relayed raw, so a device cannot forge platform messages upstream.
 
+### SEL telemetry sources by device type (ADR-0006 scope)
+
+The owner set the scope to all SEL OT device types before other vendors. This table records, per SEL device type in the supplied manuals, where its events come from and what the receiver has to cope with. Every row is `documented-untested`: it comes from the SEL instruction manuals in the owner's folder, and no device has been observed. "Not found" means a text search of that manual found nothing, not that the product lacks the feature in every firmware.
+
+| Device type | SEL product (manual) | Native event source | Syslog emitted | Transport, framing, TLS | Timestamp on the wire | Consequence for the schema and receiver |
+| --- | --- | --- | --- | --- | --- | --- |
+| Protective relay | SEL-751 (IM) | ASCII `SER` report, SER.TXT over FTP/MMS | Not found | n/a | Local time per row, µs in the Figure 10.16 sample; offset from UTC_OFF only under SNTP | Collected by A2's adapter; section 3 SEL-751 row and section 4 alignment |
+| Protective relay | SEL-400 series (SEL-451 IM) | ASCII `SER` (20 rows by default, `SER 1000` for all) | Not found | n/a | Local time; UTCOFF and DST settings | Section 3 SEL-400 row; collector must request the full buffer |
+| Protective relay | SEL-311L (IM) | ASCII `SER` | Manual: "does not support Syslog functionality" | n/a | Local time | Same as SEL-751 path |
+| Time server | SEL-2488 (IM 20260918) | Local event log (60,000 entries, ID, µs local time with offset) and Syslog | Yes, RFC 3164 "with offset" per text; sample has a year and no offset | UDP 514 only, fixed; no TLS | 1 s in the Syslog sample | Parser accepts both forms; its GNSS lock and holdover events become `device_time.quality` evidence for every relay it feeds |
+| Automation controller / RTU | SEL RTAC, ACSELERATOR RTAC SEL-5033 (IM 20260925) | SOE log (30,000 to 500,000 entries by platform) and Syslog; Tag Processor logging layout | Yes, RFC 3164 cited; facility fixed at 23; severity from a case-sensitive Logging Priority string, unknown strings become 6; 1024-byte limit; multiple destinations; local store of 10,000 messages | Transport for sending is not stated in that section; the Syslog Collector extension (R153+) listens on UDP or TCP | Two times: HEADER is send time at 1 s (`<190>Mar 21 2015 12:10:08`), MSG carries the event time at ms (`2015-03-21 12:09:58.593`), 10 s apart in the manual's own sample | `device_time` comes from the MSG event time, not the HEADER; the HEADER time is kept in `native.fields`. The RTAC can also re-forward other devices' Syslog, so an RTAC message may describe a different asset (`asset_binding` must not assume sender = subject). Release notes list several fixed defects where RTAC Syslog had "an incorrect time", so firmware version belongs in `collection.parser` context |
+| Network management | SEL-5056 SDN Flow Controller / NMS (IM 20261015) | Syslog for itself and for every managed SEL SDN switch | Yes, RFC 3164 or RFC 5424 selectable per destination; up to 3 destinations; severity threshold per destination | UDP or TCP/TLS; TLS needs the collector's X.509 certificate installed as trusted on the SEL-5056; port configurable (usually 514) | Sample `<131> Jul 19 10:15:54 ROBEMEINNB TopologyManager: ...`: no year, no offset, and a space after PRI that strict RFC 3164 parsers reject | First documented SEL source that can deliver over TLS, so it is the natural first test of the R4.1 TLS listener. Parser must tolerate the space after PRI. Switch events arrive from the SEL-5056's address, so the subject switch is in the MSG (OpenFlow datapath id) and binding again cannot assume sender = subject |
+| SDN switch | SEL-2741, SEL-2731 (IMs) | Via SEL-5056 (above) | Not found in the switch manuals | Via SEL-5056 | Via SEL-5056 | No direct switch listener needed for SEL SDN; a datapath-id-to-asset mapping is needed |
+| Station computer | SEL-3355-2 (IM) | Host operating system logs | Not found in the hardware manual | Depends on the installed OS | Depends on the OS | Treated as a general host: Windows Event Log or Linux journal collection is a separate source type, not yet designed |
+
+What this changes in the draft:
+
+1. `source.asset_binding` must allow "subject differs from sender", because both the RTAC and the SEL-5056 relay events about other assets. The subject's identity comes from a mapping (OpenFlow datapath id, RTAC tag name) and its confidence is recorded.
+2. A Syslog message can carry two device times (HEADER and an event time in MSG). The schema keeps both; `device_time` is the one closest to the event, and the choice is a per-source parser rule, not a guess at run time.
+3. The receiver needs lenient RFC 3164 parsing (space after PRI, year present or absent, offset present or absent), with every deviation recorded in `flags` rather than silently normalized.
+4. No SEL relay in the supplied manuals emits Syslog, so the vertical slice's SER path stays on A2's CLI adapter. The first device Syslog sources are the SEL-2488, the RTAC, and the SEL-5056.
+
 ## 6. Platform events this schema implies
 
 `origin: platform`, `kind: telemetry-health`. Each is observable, never silent (P5):
