@@ -1,0 +1,40 @@
+# A5 Phase 0 experiments on Windows/NTFS (ADR-0007 item 5). Manual only
+# (workflow_dispatch, available once this file is on the default branch); it
+# is not a project CI pipeline. Results are printed to the job log and
+# uploaded as an artifact; they are `simulated` evidence (GitHub-hosted
+# Windows Server, not SEL-3355-2 hardware).
+#
+# Three push-triggered runs on 2026-10-23 (17:29 and 18:48 UTC) were never
+# assigned a runner (runner_id 0, no log, about two seconds), which points at
+# the account's Actions settings or billing rather than this workflow.
+name: a5-windows-experiments
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: platform/experiments/phase0/go.mod
+          cache: false
+      - name: Build p0.exe
+        working-directory: platform/experiments/phase0
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          go vet ./...
+          go build -trimpath -o "$env:RUNNER_TEMP\p0.exe" .
+      - name: Run experiments
+        working-directory: platform/experiments/phase0
+        shell: pwsh
+        run: ./run.ps1 -Exe "$env:RUNNER_TEMP\p0.exe" -Iterations 100
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: a5-windows-results
+          path: platform/experiments/phase0/results/windows-*.txt
