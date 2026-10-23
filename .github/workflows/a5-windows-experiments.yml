@@ -4,17 +4,12 @@
 # uploaded as an artifact; they are `simulated` evidence (GitHub-hosted
 # Windows Server, not SEL-3355-2 hardware).
 #
-# The first two push-triggered runs (2026-10-23) were never assigned a runner
-# and failed in about two seconds with no log, which points at the account's
-# Actions settings or billing rather than this workflow.
+# Three push-triggered runs on 2026-10-23 (17:29 and 18:48 UTC) were never
+# assigned a runner (runner_id 0, no log, about two seconds), which points at
+# the account's Actions settings or billing rather than this workflow.
 name: a5-windows-experiments
 on:
   workflow_dispatch:
-  # Runs on A5's branch only when this file changes, so it can be run before
-  # the workflow is on the default branch (owner chose this route 2026-10-23).
-  push:
-    branches: [claude/project-thread-xni3ff]
-    paths: [.github/workflows/a5-windows-experiments.yml]
 permissions:
   contents: read
 jobs:
