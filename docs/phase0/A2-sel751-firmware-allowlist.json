@@ -2,7 +2,7 @@
  "allowlist": "SEL-751 firmware allowlist for collection (D27)",
  "owner": "A2",
  "date": "2026-10-23",
- "status": "draft for A1 ruling and A6 independent check",
+ "status": "Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently.",
  "source": "S22 SEL-751 Instruction Manual date code 20260910, Appendix A firmware revision history (FID String / Summary of Revisions table). Extracted by A2 with pdftotext; lineage taken from each row's 'Includes all the functions of' clause.",
  "rule_applied": "A1 (ADR-0005 6d82243): collect only from allowlisted FIDs that carry every communications-restart fix. Appendix A records each fix only on the branches where SEL shipped it, and never says whether other branches had the defect. Each branch's first release (V0) has no 'Includes' clause, so inheritance across branches is not documented. Treating a fix as inherited by a branch whose V0 is dated after the fix is an INFERENCE, marked as such. It needs SEL confirmation before it counts as documented.",
  "fid_match": "Match the full FID string: SEL-751-R<branch>-V<n>-Z<...>-D<date>, with V >= min_version on an allowed branch and the Z and D fields equal to an Appendix A row. Any FID not in Appendix A (later releases, special builds, SEL-751A) is unknown and fails closed.",
