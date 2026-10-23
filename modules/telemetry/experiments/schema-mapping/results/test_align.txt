@@ -1,0 +1,18 @@
+test_append (__main__.AlignTest.test_append) ... ok
+test_append_with_front_drop (__main__.AlignTest.test_append_with_front_drop) ... ok
+test_cleared_and_empty (__main__.AlignTest.test_cleared_and_empty) ... ok
+test_cleared_then_new_rows (__main__.AlignTest.test_cleared_then_new_rows) ... ok
+test_first_read (__main__.AlignTest.test_first_read) ... ok
+test_identical_rows_kept_separate (__main__.AlignTest.test_identical_rows_kept_separate) ... ok
+test_identical_rows_without_anchor_are_flagged (__main__.AlignTest.test_identical_rows_without_anchor_are_flagged) ... ok
+test_no_change (__main__.AlignTest.test_no_change) ... ok
+test_row_removed_from_middle (__main__.AlignTest.test_row_removed_from_middle) ... ok
+test_sel_cleared_is_a_gap (__main__.AlignTest.test_sel_cleared_is_a_gap) ... ok
+test_sel_renumbering_is_not_a_gap (__main__.AlignTest.test_sel_renumbering_is_not_a_gap) ... ok
+test_sel_row_number_gains_a_digit (__main__.AlignTest.test_sel_row_number_gains_a_digit) ... ok
+test_wrapped_past_previous_read (__main__.AlignTest.test_wrapped_past_previous_read) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.001s
+
+OK
