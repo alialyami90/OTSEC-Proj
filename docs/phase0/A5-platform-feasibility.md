@@ -335,6 +335,31 @@ Proposed experiments for ADR-0007, all `simulated` until run on SEL-3355-2 hardw
 3. **W-3:** service isolation. Decrypting the credential store from any service account other than the collector's fails, and the IED-facing NIC is unreachable except from the collector service. Owners: A3 and A6.
 4. **W-4:** maintenance survival on a SEL-3355-2. A patch reboot and a BIOS update with BitLocker on and application control enforced end with the node collecting again, with no human present. Owner: A5, with the owner's hardware.
 
+## 15. Windows editions and support end dates (for A6 V-S20), checked 2026-10-23
+
+These are taken from Microsoft lifecycle pages on 2026-10-23 [doc]. Microsoft gives times in Pacific Time with the last supported instant at 06:59:59 the day after the nominal date, so a test fixture should compare against that instant (14:59:59 UTC in winter, PST). "End of support" means the last date with security updates: the extended end date where there is one, otherwise the single end date.
+
+| Edition | Start | Mainstream end | End of security updates | Source |
+| --- | --- | --- | --- | --- |
+| Windows 10 Home and Pro, version 22H2 (last release) | 2022-10-18 | n/a | 2025-10-15 06:59:59 PT, ended | [Windows 10 Home and Pro](https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro) |
+| Windows 10 IoT Enterprise (non-LTSC), version 22H2 | 2022-10-18 | n/a | 2025-10-15 06:59:59 PT, ended | [Windows 10 IoT Enterprise](https://learn.microsoft.com/en-us/lifecycle/products/windows-10-iot-enterprise) |
+| Windows 10 Enterprise LTSC 2019 | 2018-11-13 | 2024-01-10 06:59:59 PT | 2029-01-10 06:59:59 PT | [Windows 10 Enterprise LTSC 2019](https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-ltsc-2019) |
+| Windows 10 IoT Enterprise LTSC 2019 | n/a | n/a | January 9, 2029 | [End of support 2029](https://learn.microsoft.com/en-us/lifecycle/end-of-support/end-of-support-2029) (product page not fetched) |
+| Windows 10 Enterprise LTSC 2021 (not IoT) | 2021-11-16 | 2027-01-13 06:59:59 PT | 2027-01-13 06:59:59 PT (no extended phase listed) | [Windows 10 Enterprise LTSC 2021](https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-ltsc-2021) |
+| Windows 10 IoT Enterprise LTSC 2021 | 2021-11-16 | 2027-01-13 06:59:59 PT | 2032-01-14 06:59:59 PT | [Windows 10 IoT Enterprise LTSC 2021](https://learn.microsoft.com/en-us/lifecycle/products/windows-10-iot-enterprise-ltsc-2021) |
+| Windows 11 Enterprise LTSC 2024 (not IoT) | n/a | n/a | October 9, 2029 (no extended phase) | [End of support 2029](https://learn.microsoft.com/en-us/lifecycle/end-of-support/end-of-support-2029) (product page not fetched) |
+| Windows 11 IoT Enterprise LTSC 2024 | 2024-10-01 | 2029-10-10 06:59:59 PT | 2034-10-11 06:59:59 PT | [Windows 11 IoT Enterprise LTSC 2024](https://learn.microsoft.com/en-us/lifecycle/products/windows-11-iot-enterprise-ltsc-2024) |
+| Windows 11 Home and Pro, version 24H2 | 2024-10-01 | n/a | 2026-10-14 06:59:59 PT, **ended nine days ago** | [Windows 11 Home and Pro](https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro) |
+| Windows 11 Home and Pro, version 25H2 | 2025-09-30 | n/a | 2027-10-13 06:59:59 PT | same |
+| Windows 11 Home and Pro, version 26H1 | 2026-02-10 | n/a | 2028-03-15 06:59:59 PT | same |
+| Windows 11 Home and Pro, version 26H2 | 2026-09-29 | n/a | 2028-10-10 06:59:59 PT | same |
+
+Notes:
+
+- A6's recollection is confirmed. Windows 10 Enterprise LTSC 2021 without IoT ends on 2027-01-13. The IoT edition of the same release runs to 2032-01-14, so edition detection must tell IoT from non-IoT. Both report build 19044.
+- Windows 11 **Pro** is supported per feature version, about 24 months each, not per product. A Windows 11 Pro node must therefore be labelled from its version (24H2, 25H2 and so on), and a node left on 24H2 went out of support on 2026-10-14. The owner described the OS as "Windows 11 Pro IoT LTSC"; that is not a Microsoft edition name, so the actual edition on each SEL-3355-2 must be read from the machine (`EditionID` and `DisplayVersion` under `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`). This matters because the two candidates, Windows 11 Pro and Windows 11 IoT Enterprise LTSC 2024, differ by about eight years of support.
+- Microsoft's paid Extended Security Updates for Windows 10 are not reflected on the lifecycle pages above and are out of scope for the label. A node on ESU would show "OS out of support" unless A1 decides otherwise.
+
 ## Handoff P0-A5 — A5 — 2026-10-23
 
 **Completed:** runtime shape comparison and recommendation (section 2, answers Q6); toolchain and UI stack recommendation (section 3); persistence, outbox semantics, and storage-full policy (section 5); site-to-central transport, instruction allowlist, and enrollment outline (section 6); node runtime, upgrade, and observability outline (section 7); five experiments.
