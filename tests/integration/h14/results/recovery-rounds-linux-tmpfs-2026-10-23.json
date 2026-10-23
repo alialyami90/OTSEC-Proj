@@ -1,0 +1,368 @@
+{
+  "experiment": "H-14 part 2: startup recovery over repeated exhaustion (E-03, E-04, R-A5-5)",
+  "classification": "simulated",
+  "identity": {
+    "pid": 314,
+    "user": "0",
+    "is_admin": true
+  },
+  "platform": "linux",
+  "python": "3.13.17",
+  "sqlite": "3.45.1",
+  "batch": 10,
+  "lag": 2000,
+  "scenarios": [
+    {
+      "auto_vacuum": "NONE",
+      "prune": "half",
+      "recovery_killed_in_round": null,
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8190,
+          "seq": [
+            1,
+            8190
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "recovery": {
+            "read_at_full": [
+              8190,
+              8190
+            ],
+            "integrity_at_full": "ok",
+            "cut": 4095,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 4095
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 4096,
+          "max": 8190,
+          "count": 4095,
+          "cursor": 6190,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 4095,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 100,
+          "seq": [
+            8191,
+            8290
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": false,
+          "recovery": {
+            "read_at_full": [
+              4195,
+              8290
+            ],
+            "integrity_at_full": "ok",
+            "cut": 6192,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 2097
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 6193,
+          "max": 8290,
+          "count": 2098,
+          "cursor": 6290,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 2097,
+          "pass": false
+        },
+        {
+          "round": 3,
+          "written": 100,
+          "seq": [
+            8291,
+            8390
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": false,
+          "recovery": {
+            "read_at_full": [
+              2198,
+              8390
+            ],
+            "integrity_at_full": "ok",
+            "cut": 7291,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 1099
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 7292,
+          "max": 8390,
+          "count": 1099,
+          "cursor": 6390,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 1099,
+          "pass": false
+        }
+      ],
+      "pass": false,
+      "r_a5_5_holds": null
+    },
+    {
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "half",
+      "recovery_killed_in_round": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8240,
+          "seq": [
+            1,
+            8240
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "recovery": {
+            "read_at_full": [
+              8240,
+              8240
+            ],
+            "integrity_at_full": "ok",
+            "cut": 4120,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 4120
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 4121,
+          "max": 8240,
+          "count": 4120,
+          "cursor": 6240,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 1953792,
+          "pruned": 4120,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 4110,
+          "seq": [
+            8241,
+            12350
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "killed_recovery": {
+            "read_at_full": [
+              8230,
+              12350
+            ],
+            "integrity_at_full": "ok",
+            "cut": 8235,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 4115
+          },
+          "recovery": {
+            "read_at_full": [
+              4115,
+              12350
+            ],
+            "integrity_at_full": "ok",
+            "cut": 10292,
+            "prune_before_release": "ok",
+            "pruned": 2057
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 10293,
+          "max": 12350,
+          "count": 2058,
+          "cursor": 10350,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2797568,
+          "pruned": 6172,
+          "restart_pruned": 2057,
+          "r_a5_5_holds": false,
+          "pass": true
+        },
+        {
+          "round": 3,
+          "written": 6160,
+          "seq": [
+            12351,
+            18510
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "recovery": {
+            "read_at_full": [
+              8218,
+              18510
+            ],
+            "integrity_at_full": "ok",
+            "cut": 14401,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 4109
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 14402,
+          "max": 18510,
+          "count": 4109,
+          "cursor": 16510,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 1957888,
+          "pruned": 4109,
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "r_a5_5_holds": false
+    },
+    {
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "cursor",
+      "recovery_killed_in_round": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8240,
+          "seq": [
+            1,
+            8240
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "recovery": {
+            "read_at_full": [
+              8240,
+              8240
+            ],
+            "integrity_at_full": "ok",
+            "cut": 6240,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 6240
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 6241,
+          "max": 8240,
+          "count": 2000,
+          "cursor": 6240,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6240,
+          "above_cursor_intact": true,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 6160,
+          "seq": [
+            8241,
+            14400
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "killed_recovery": {
+            "read_at_full": [
+              8160,
+              14400
+            ],
+            "integrity_at_full": "ok",
+            "cut": 12400,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 6160
+          },
+          "recovery": {
+            "read_at_full": [
+              2000,
+              14400
+            ],
+            "integrity_at_full": "ok",
+            "cut": 12400,
+            "prune_before_release": "ok",
+            "pruned": 0
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 12401,
+          "max": 14400,
+          "count": 2000,
+          "cursor": 12400,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "restart_pruned": 0,
+          "r_a5_5_holds": true,
+          "pass": true
+        },
+        {
+          "round": 3,
+          "written": 6160,
+          "seq": [
+            14401,
+            20560
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "capacity_regained": true,
+          "recovery": {
+            "read_at_full": [
+              8160,
+              20560
+            ],
+            "integrity_at_full": "ok",
+            "cut": 18560,
+            "prune_before_release": "OperationalError: database or disk is full",
+            "pruned": 6160
+          },
+          "recovery_done": true,
+          "reserve": "ok",
+          "recovery_error": null,
+          "integrity": "ok",
+          "min": 18561,
+          "max": 20560,
+          "count": 2000,
+          "cursor": 18560,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "r_a5_5_holds": true
+    }
+  ],
+  "expected": "NONE/half: pass false (capacity not regained). INCREMENTAL/half: pass true, r_a5_5_holds false (double prune). INCREMENTAL/cursor: pass true, r_a5_5_holds true"
+}
