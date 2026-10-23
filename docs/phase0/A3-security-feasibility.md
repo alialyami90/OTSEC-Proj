@@ -47,7 +47,7 @@ Not obtained: full normative texts of IEC 62443-3-3, IEC 62351-3/-8/-9/-14, and 
 | --- | --- | --- | --- | --- |
 | Works with arbitrary vendor tools | Only single-channel TCP tools. Likely breaks on FTP active data channel, UDP discovery, broadcasts, dynamic ports, serial/USB front ports `[inferred]`; ABB PCM600 needs FTP 20/21 plus MMS 102 `[doc]`. | CLI devices only. | Yes, if the tool runs on the workstation and reaches the device from there `[inferred]`. | Only the protocols the gateway implements. |
 | Destination control | Yes, per device:port (E1 T2, T3 `[exp-sim]`). | Yes. | Yes, via per-session firewall rules on the workstation's segment `[inferred]`. | Yes. |
-| Per-operation control (R2.4) | **No.** Any byte stream passes (E1 T6 `[exp-sim]`). | Possible for line-oriented CLIs (command allowlist). | No at protocol level; relies on device-native levels and on what the tool exposes. | Possible, if the gateway parses the protocol. |
+| Per-operation control (R2.4) | **No.** Any byte stream passes (E1 T6 `[exp-sim]`). | Possible for line-oriented CLIs (command allowlist). | No at protocol level; relies on device-native levels and on what the tool exposes. | Access-level granularity only. SEL-3620 passes unmatched commands straight to the relay (manual §7, `[doc]`). |
 | Session recording | Byte stream only; unreadable for binary or TLS protocols. | Full transcript. | Screen recording; human-reviewable but not machine-checkable. | Protocol-level log. |
 | Attribution at device | Device sees gateway address only (E1 T7). | Same, unless per-user device accounts are injected. | Device sees workstation; attribution only in platform audit. | Same as P-aware. |
 | Credential exposure | Engineer typically holds device credentials. | Gateway can inject; engineer never sees them. | Can be injected on workstation, or engineer holds them. | Gateway holds all (SEL-3620 model `[doc]`): concentrates risk (AP-1). |
@@ -55,6 +55,14 @@ Not obtained: full normative texts of IEC 62443-3-3, IEC 62351-3/-8/-9/-14, and 
 | Revocation | Kill session process is *termination* only: E1 T8 closed a held connection in 0.013–0.014 s, but T9 shows the same key reconnects at once. Revocation needs the authorization removed first; T9r (key removed, then sessions killed) denies re-authentication `[exp-sim]`. | Same. | Broker disconnect plus authorization and firewall rule removal; untested. | Vendor dependent. |
 | Insecure downstream visible | Must be labelled separately. | Yes, gateway knows the transport. | Must be labelled separately. | Yes. |
 | Build effort for us | Low. | Medium. | Medium: broker, recording, workstation hardening, licences. | High per vendor, or buy. |
+
+**SEL-3620 manual evidence (owner-supplied *SEL-3610/3620/3622 Instruction Manual*, date code 20241010, Section 7 "Proxy Services and Password Management"; `documented-untested`).** This settles what option G gives for SEL devices:
+
+- The proxy authenticates users (local, LDAP, RADIUS with multifactor) and maps groups to SEL access levels per device. It runs a script for `ACC`, `2AC`, `CAL` and the other level commands, injecting the relay password, so users never learn it. It blocks `PAS` ("Command not allowed"), and its "Commands and Devices" report plus Syslog give a per-user audit trail.
+- **It is not a command allowlist.** In the manual's words, if user input "does not match a script command, then the user input gets passed directly to the managed device", and binary mode passes everything. A user who is *not* granted a level is still let through if they know the device password: the level command goes to the relay unscripted.
+- The gateway holds the current passwords of every protected IED and can change them on a schedule (Section 7). That is a state-changing operation against the relays (HR-5) and concentrates credential risk (AP-1).
+
+So G improves authentication, attribution, and password secrecy, but per-operation control (R2.4) on SEL relays still comes only from the relay's own levels (and `MAXACC`) or from a command filter we would have to build (P-aware). This confirms HR-4.
 
 ### 3.3 Recommendation (proposal for an ADR in Phase 4, not now)
 
