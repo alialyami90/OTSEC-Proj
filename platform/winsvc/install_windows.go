@@ -61,7 +61,10 @@ func Install(opt InstallOptions) error {
 		return err
 	}
 	if opt.CollectorExe != "" {
-		if err := createService(m, CollectorService, opt.CollectorExe, "OTSEC collector"); err != nil {
+		if err := provision(pd); err != nil {
+			return err
+		}
+		if err := createService(m, CollectorService, opt.CollectorExe, "OTSEC collector", "run", "-data", DataDir(pd)); err != nil {
 			return err
 		}
 	}
@@ -216,6 +219,26 @@ func installConfig(src, pd string) error {
 	}
 	_, err = node.LoadConfig(dst)
 	return err
+}
+
+// provision writes the collector's first-start marker when neither of its
+// stores exists. The stores themselves are created by the collector under
+// its own account, because their key is user-scope DPAPI of that account,
+// which an administrator cannot create (A3).
+func provision(pd string) error {
+	for _, p := range CollectorStores(pd) {
+		if _, err := os.Lstat(p); err == nil {
+			return nil // an existing collector keeps its stores; no first start
+		}
+	}
+	f, err := os.OpenFile(ProvisionMarker(pd), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("winsvc: provision marker: %w", err)
+	}
+	return f.Close()
 }
 
 // serviceRequiredPrivilegesInfo is SERVICE_REQUIRED_PRIVILEGES_INFO.

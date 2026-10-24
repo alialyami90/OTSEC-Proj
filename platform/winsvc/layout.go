@@ -9,6 +9,9 @@
 //     user who pre-created a folder would own it and could rewrite its DACL;
 //   - copies the node configuration into OTSEC\config and loads it, so a
 //     configuration the node would refuse is refused at install;
+//   - when the collector binary is given, writes the collector's first-start
+//     marker if neither collector store exists, and installs otsec-collector
+//     with "run -data %ProgramData%\OTSEC" (A3);
 //   - installs otsec-node (and otsec-collector when its binary is given) as
 //     virtual service accounts NT SERVICE\<name>, with an unrestricted
 //     service SID, so the store and pipe DACLs and the peer checks can name
@@ -79,8 +82,9 @@ func sddl(grants ...grant) string {
 //	OTSEC                      node and collector may traverse
 //	OTSEC\config               node reads (its configuration)
 //	OTSEC\store                node full control: the C5 store and status
-//	OTSEC\collector            collector may traverse
+//	OTSEC\collector             collector reads (collector.json, A3)
 //	OTSEC\collector\credentials collector full control (A3 credential design)
+//	OTSEC\collector\state       collector full control (A3: failed-auth floor, collector_seq)
 //
 // SYSTEM and Administrators have full control everywhere; nobody else,
 // Users and Everyone included, has any access.
@@ -92,8 +96,30 @@ func Dirs(programData string) []Dir {
 		{root, sddl(grant{node, accessTraverse, false}, grant{coll, accessTraverse, false})},
 		{filepath.Join(root, "config"), sddl(grant{node, accessTraverse, true})},
 		{StoreDir(programData), sddl(grant{node, accessFull, true})},
-		{filepath.Join(root, "collector"), sddl(grant{coll, accessTraverse, false})},
+		{filepath.Join(root, "collector"), sddl(grant{coll, accessTraverse, true})},
 		{filepath.Join(root, "collector", "credentials"), sddl(grant{coll, accessFull, true})},
+		{filepath.Join(root, "collector", "state"), sddl(grant{coll, accessFull, true})},
+	}
+}
+
+// DataDir is the -data argument of the collector service (A3).
+func DataDir(programData string) string { return filepath.Join(programData, "OTSEC") }
+
+// ProvisionMarker is the empty file the installer writes so that the
+// collector, at its first start and under its own account, creates its
+// credential and state stores: only when both are absent and the marker is
+// present (A3). A missing store at any other time is lost state, never a
+// first start.
+func ProvisionMarker(programData string) string {
+	return filepath.Join(programData, "OTSEC", "collector", "state", "provision")
+}
+
+// CollectorStores are the collector's two stores; the marker is written
+// only when neither exists.
+func CollectorStores(programData string) []string {
+	return []string{
+		filepath.Join(programData, "OTSEC", "collector", "state", "state.json"),
+		filepath.Join(programData, "OTSEC", "collector", "credentials", "credentials.json"),
 	}
 }
 
