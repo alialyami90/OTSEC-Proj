@@ -79,7 +79,8 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/span-in-sent-bytes.json`: An observation span points at sent bytes.
 - `results/invalid/read-rows-exceeded-with-parsed-record.json`: `partial.read_rows_exceeded` with one SER row parsed (D1-12: nothing from such a read is parsed).
 - `results/invalid/read-rows-exceeded-without-detail.json`: `partial.read_rows_exceeded` without the row count and limit.
-- `results/invalid/ser-row-field-renamed.json`: A parsed `sel.ser.row` whose `element` field is named `bit` (RecordFields).
+- `results/invalid/ser-row-field-renamed.json`: A parsed `sel.ser.row` whose `ELEMENT` field is named `bit` (RecordFields).
+- `results/invalid/ser-row-field-names-lowercase.json`: A parsed `sel.ser.row` whose fields are named `row`, `date`, `time`, `element` and `state`. The names are the printed headings, case included (RecordFields, D1-25).
 - `results/invalid/no-operation-id.json`: A result that does not name its operation.
 - `results/invalid/wake-into-password-prompt.json`: The wake line end sent after `Password: ?` was received; it would be a password attempt (A3 change 7).
 - `results/invalid/quit-after-unconfirmed-password.json`: The password got no reply, then QUI was sent: into `Password: ?` that is a second attempt (C-19, D1-20; A3 P2, A6 P2).

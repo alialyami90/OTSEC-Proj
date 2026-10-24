@@ -33,6 +33,7 @@ SERIAL_OTHER = "SIM0000000000002"                # invented
 CID = "E754"                                      # shape from S22 Figure 7.38
 RED = b"[REDACTED]"
 REGISTER_REVISION = 2  # contracts/register/testdata/sel-751.json
+SER_FIELDS = ["#", "DATE", "TIME", "ELEMENT", "STATE"]  # the S22 Figure 10.16 header line, as printed
 STX, ETX = b"\x02", b"\x03"
 
 
@@ -202,9 +203,7 @@ class Session:
                 continue
             f = r.split()
             records.append({"kind": "sel.ser.row", "span": sp, "context_span": header, "parse_ok": True,
-                            "fields": [{"name": "row", "value": f[0]}, {"name": "date", "value": f[1]},
-                                       {"name": "time", "value": f[2]}, {"name": "element", "value": f[3]},
-                                       {"name": "state", "value": f[4]}]})
+                            "fields": [{"name": n, "value": v} for n, v in zip(SER_FIELDS, f)]})
         return records
 
     def quit(self):
@@ -709,7 +708,7 @@ def invalid_results(good):
     row1 = b"1    10/24/2026 09:09:59.000   IN101             Deasserted"
     f = row1.decode().split()
     r["records"] = [{"kind": "sel.ser.row", "span": {"offset": d.index(row1), "length": len(row1)}, "parse_ok": True,
-                     "fields": [{"name": n, "value": v} for n, v in zip(["row", "date", "time", "element", "state"], f)]}]
+                     "fields": [{"name": n, "value": v} for n, v in zip(SER_FIELDS, f)]}]
     out["read-rows-exceeded-with-parsed-record"] = r
 
     r = copy.deepcopy(good["partial.read_rows_exceeded"])
@@ -721,6 +720,11 @@ def invalid_results(good):
     out["ser-row-field-renamed"] = r
 
     r = copy.deepcopy(good["ok"])
+    for fld in r["records"][0]["fields"]:
+        fld["name"] = {"#": "row"}.get(fld["name"], fld["name"].lower())
+    out["ser-row-field-names-lowercase"] = r
+
+    r = copy.deepcopy(good["ok"])
     del r["operation_id"]
     out["no-operation-id"] = r
 
@@ -728,7 +732,7 @@ def invalid_results(good):
     for rec in r["records"]:
         if not rec["parse_ok"]:
             rec["parse_ok"] = True
-            rec["fields"] = [{"name": "row", "value": "3"}]
+            rec["fields"] = [{"name": "#", "value": "3"}]
     out["partial-without-unparsed-record"] = r
 
     r = copy.deepcopy(good["refused.language_not_english"])

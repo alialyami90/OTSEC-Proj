@@ -224,23 +224,23 @@
       "parse_ok": true,
       "fields": [
         {
-          "name": "row",
+          "name": "#",
           "value": "1"
         },
         {
-          "name": "date",
+          "name": "DATE",
           "value": "10/24/2026"
         },
         {
-          "name": "time",
+          "name": "TIME",
           "value": "09:10:01.251"
         },
         {
-          "name": "element",
+          "name": "ELEMENT",
           "value": "IN101"
         },
         {
-          "name": "state",
+          "name": "STATE",
           "value": "Deasserted"
         }
       ]
@@ -258,23 +258,23 @@
       "parse_ok": true,
       "fields": [
         {
-          "name": "row",
+          "name": "#",
           "value": "2"
         },
         {
-          "name": "date",
+          "name": "DATE",
           "value": "10/24/2026"
         },
         {
-          "name": "time",
+          "name": "TIME",
           "value": "09:10:01.004"
         },
         {
-          "name": "element",
+          "name": "ELEMENT",
           "value": "IN101"
         },
         {
-          "name": "state",
+          "name": "STATE",
           "value": "Asserted"
         }
       ]

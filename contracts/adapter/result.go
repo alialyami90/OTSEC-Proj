@@ -256,14 +256,16 @@ type Record struct {
 }
 
 // RecordFields names the fields of each record kind 0.1 defines, in order.
-// Values are verbatim device text. For sel.ser.row (S22 Figure 10.16): row
-// is the relay's row number, and row 1 is the newest; date is in the
-// relay's DATE_F order (S22 p. 7.31) and time is as printed; element and
-// state are the Relay Word bit and its printed state. A parsed record of
-// one of these kinds carries exactly these fields. Kinds not listed are a
+// Names are the column headings as the device prints them, so C4
+// native.fields copies them unchanged (D1-25), and values are verbatim
+// device text. For sel.ser.row (S22 Figure 10.16): # is the relay's row
+// number, and row 1 is the newest; DATE is in the relay's DATE_F order
+// (S22 p. 7.31) and TIME is as printed; ELEMENT and STATE are the Relay
+// Word bit and its printed state. A parsed record of one of these kinds
+// carries exactly these fields, case included. Kinds not listed are a
 // later minor's.
 var RecordFields = map[string][]string{
-	"sel.ser.row": {"row", "date", "time", "element", "state"},
+	"sel.ser.row": {"#", "DATE", "TIME", "ELEMENT", "STATE"},
 }
 
 // Field is one native field, verbatim.
