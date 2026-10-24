@@ -422,6 +422,9 @@ func TestStateRoundTrip(t *testing.T) {
 		`{"format":"otsec.normalize.ser-state/1","keys":[],"x":1}`,
 		`{"format":"otsec.normalize.ser-state/1","keys":[]} {}`,
 		`[]`,
+		`{"format":"otsec.normalize.ser-state/1","keys":[]}}`,
+		`{"format":"otsec.normalize.ser-state/1","keys":[]}]`,
+		`{"format":"otsec.normalize.ser-state/1","keys":[]}x`,
 	} {
 		if _, err := DecodeState([]byte(bad)); !errors.Is(err, ErrInput) {
 			t.Errorf("%s: %v", bad, err)

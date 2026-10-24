@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"otsec.local/otsec/contracts/event"
 )
@@ -52,7 +53,7 @@ func DecodeState(b []byte) ([]string, error) {
 	if err := dec.Decode(&d); err != nil {
 		return nil, fmt.Errorf("%w: state: %v", ErrInput, err)
 	}
-	if dec.More() {
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return nil, fmt.Errorf("%w: state has trailing data", ErrInput)
 	}
 	if d.Format != StateFormat || d.Keys == nil {

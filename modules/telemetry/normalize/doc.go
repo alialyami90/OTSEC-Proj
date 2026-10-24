@@ -66,7 +66,8 @@
 // state but adds no events (an empty read after rows, which is the one gap
 // at a clear, D1-7), Output.StateChanged is true and the state still has to
 // be kept: the node commits the health records first, then saves the state
-// on its own (A5), so a crash in between repeats the gap and never loses it.
+// on its own (agreed with A5, not yet built), so a crash in between repeats
+// the gap and never loses it.
 //
 // # What it leaves out
 //
