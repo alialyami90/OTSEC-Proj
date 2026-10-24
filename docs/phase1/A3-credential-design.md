@@ -4,7 +4,7 @@ Owner: A3. Reviewers: A6 (closes B-04), A5 (Windows runtime), A2 (device behavio
 
 This document says how a site node holds the device passwords it needs to collect SER, who can put them there, how they are used, rotated, suspended and revoked, and what remains exposed. It closes B-04 once A6 has reviewed it. It serves AP-1, AP-2, AP-25, C-12, C-17, HR-1 and V-S11.
 
-**Evidence.** Everything here is design. The C7 types and checks are implemented and tested (`go test ./contracts/authz`). Nothing has run on a Windows site image. The Windows mechanisms in section 3 are `[doc]` from Microsoft documentation or `[inferred]`, and each one has a test in section 10 that has to pass on the real image before the claim stands.
+**Evidence.** Everything here is design. The C7 types and checks are implemented and tested (`go test ./contracts/authz`). Nothing has run on a Windows site image. The Windows mechanisms in section 3 are `[doc]` from Microsoft documentation or `[inferred]`, and each one has a test in section 11 that has to pass on the real image before the claim stands.
 
 ## 1. What the node holds, and why it is a risk
 
@@ -38,7 +38,7 @@ The node asks the collector to do things only through the C7 IPC (`DecodeRequest
 **The key.** The credential store is encrypted with a key only the collector account can use. Two options are allowed, in this order:
 
 1. **A TPM-backed key** in the Microsoft Platform Crypto Provider, non-exportable, whose ACL names only `NT SERVICE\otsec-collector`. `[doc]` for the provider. Whether a virtual account's SID can be set on a Platform Crypto Provider key ACL is `[inferred]`, and is test T-2.
-2. **User-scope DPAPI** under the collector's virtual account (`CryptProtectData` without `CRYPTPROTECT_LOCAL_MACHINE`). `[doc]`. A virtual account has no password, so its DPAPI master key is protected by the machine's system DPAPI secret. That means SYSTEM and administrators can recover it, which is the residual in section 9. Other non-admin accounts cannot. `[inferred]`, test T-1.
+2. **User-scope DPAPI** under the collector's virtual account (`CryptProtectData` without `CRYPTPROTECT_LOCAL_MACHINE`). `[doc]`. A virtual account has no password, so its DPAPI master key is protected by the machine's system DPAPI secret. That means SYSTEM and administrators can recover it, which is the residual in section 10. Other non-admin accounts cannot. `[inferred]`, test T-1.
 
 **Never machine-scope DPAPI** (`CRYPTPROTECT_LOCAL_MACHINE`), because any process on the node can decrypt it (AP-1).
 
@@ -123,7 +123,18 @@ The platform never changes a password on a device. That is an engineering action
 
 0.1 has no central enrollment (an exclusion in the brief). The design keeps the route open without changing the store. Central would hold `CredentialRef`s and relay `SealedSecret`s sealed by the admin's client to the target node's collector key, so it would never be able to open them (AP-1). One collecting node per asset (A1 D1-3) means a credential lives on exactly one node. Moving collection is a re-install on the new node plus a revocation on the old one, recorded as `asset.collector_assign`.
 
-## 9. What remains exposed
+## 9. Node keys for forwarding (C6 TLS references)
+
+C6 targets name two TLS references, `trust_anchor_ref` and `client_credential_ref` (`TODO(A3 node key ref)`). Neither is a C7 `CredentialRef`. A `CredentialRef` is a device password held by the collector, bound to an asset, an endpoint and an access level. Forwarding runs in the node service, and W-3 keeps the collector off every network except the device networks. A node key reference is therefore its own kind:
+
+- **Syntax.** `nodekey_` followed by 8 to 40 lowercase letters or digits, opaque like a credential reference. It names one entry in the node's key register. The register is kept by the node service and lists, for each entry: kind (`tls-client` or `trust-anchors`), the node it is for, the certificate or CA set's SHA-256 fingerprint, a version, who installed it, and when.
+- **`tls-client`.** The private key lives in the Windows certificate store of `NT SERVICE\otsec-node`, as a non-exportable key (TPM Platform Crypto Provider where T-2 shows it works, otherwise a software key under user-scope DPAPI). Its ACL names only the node service account. The key is generated on the node: the node publishes a certificate request, never a key, and an admin has the central CA sign it. The collector service can neither read nor use it.
+- **`trust-anchors`.** A CA set used only for this platform's collectors, or a single collector certificate, optionally with SPKI pins on the target (C6-A3-3). It is public data whose integrity matters: whoever changes it decides which collector's acknowledgements can advance pruning.
+- **Who changes them.** Only a human `admin` installs, rotates or removes a node key or a trust-anchor set. The node writes a C8 `policy.apply` record naming the reference, its kind and the fingerprint, and the same applies to every target change (C6-A3-7). Removing the client key of a required or audit target makes that target invalid at load, which raises an alarm. It does not silently fall back to anything.
+- **Rotation.** A new version is installed next to the old one, the target is switched to it, and the old version is removed. Certificate expiry is reported as node health 30 days ahead (Phase 2).
+- **Contract.** This needs no change to C7 0.1, because C6 holds the references as strings. The `nodekey_` syntax and the key register's record become part of C7 0.2 when Phase 2 implements forwarding. Until then, C6 checks only that the string is present.
+
+## 10. What remains exposed
 
 | Residual | Why it remains | Where it is recorded |
 | --- | --- | --- |
@@ -136,7 +147,7 @@ The platform never changes a password on a device. That is an engineering action
 | Go cannot guarantee that every copy of a secret is wiped from memory. The garbage collector can copy buffers. | A language limit. The collector keeps secrets in byte slices it wipes, never in strings, and holds them for as short a time as it can. | V-S11 crash-output check. |
 | Crash dumps of the collector could contain a secret. | Windows Error Reporting writes dumps by default. | Phase 2: exclude the collector from WER dumps and disable local dumps for it (test T-5). |
 
-## 10. Tests for A6
+## 11. Tests for A6
 
 C7 unit tests that already pass:
 
