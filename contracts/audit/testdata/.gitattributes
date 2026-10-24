@@ -1,0 +1,3 @@
+# Audit chain test data is hashed byte for byte: the chain is SHA-256 over
+# the exact stored bytes, so no checkout may rewrite line endings.
+* -text
