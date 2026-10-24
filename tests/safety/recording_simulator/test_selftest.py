@@ -195,6 +195,7 @@ class TelnetInbandSelfTest(unittest.TestCase):
 
     def test_expected_violations_only(self):
         self.assertEqual(self.verdicts(), sorted([
+            ("", "auth-retry"),          # the second LOGIN after wrongpw
             ("SHOW-EVENTS 3", "before-prompt"),
             ("SHOW-ID\xff", "non-printable"),
             ("\xa5\xe0SHOW-EVENTS", "non-printable"),
