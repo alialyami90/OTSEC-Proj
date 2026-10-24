@@ -34,9 +34,19 @@ COLLECTOR_TRAFFIC = {"F1", "F2", "F5"}  # A6: Telnet/Ethernet/comms access, whic
 OWNER_ACCEPTED = "inferred (owner-accepted)"
 
 
+# Tables A.1 (R500) to A.5 (R100) hold the relay firmware rows; Table A.6
+# (SELBOOT) follows. Starting at the first "Firmware Revision History" (the
+# list of tables) also caught 5 FIDs from example outputs elsewhere in the
+# manual: 84 records instead of 79 (A6, 2026-10-24).
+TABLES_START = re.compile(r"Table A\.1\s+R500 Series Firmware Revision History \(Sheet 1")
+TABLES_END = re.compile(r"Table A\.6\s+SELBOOT Firmware Revision History \(Sheet 1")
+
+
 def rows(text):
-    start = text.index("Firmware Revision History") if "Firmware Revision History" in text else 0
-    body = text[start:]
+    start, end = TABLES_START.search(text), TABLES_END.search(text)
+    if not start or not end:
+        raise ValueError("Tables A.1 to A.5 not found in the manual text")
+    body = text[start.start():end.start()]
     hits = [m for m in FID.finditer(body)]
     out = []
     for i, m in enumerate(hits):
