@@ -67,25 +67,27 @@
 //     its output is released, and a mismatch suspends the credential with
 //     identity-mismatch.
 //   - At most one unconfirmed authentication per asset within FailureFloor
-//     of the last one (C7-A2-1, A1 D1-20). An authentication is unconfirmed
-//     from the moment the password is sent until the Level 1 prompt
-//     confirms it, so
-//     a timeout, a closed connection or a crash in between starts the floor
-//     just as a wrong password does. The floor is TIDLE plus one minute,
-//     where TIDLE is the
-//     port's idle timeout last read with SHO P 1, or 31 minutes when it is
-//     unknown. A new session inside TIDLE could otherwise land on the
-//     previous session's pending password prompt, so its first line would be
-//     a second attempt. A request inside the floor is refused with
-//     rate_limited before any connection, so a compromised main process
-//     cannot cycle install, clear and run fast enough to drive the relay's
-//     alarm contact (SALARM after three wrong passwords).
+//     of the last one (C7-A2-1, A1 D1-20 and its amendment). An
+//     authentication is unconfirmed from the moment ACC is sent until the
+//     Level 1 prompt (=>) confirms it, so a wrong password, a timeout, a
+//     closed connection or a crash in between starts the floor, and so does
+//     an ACC that is never answered. The relay may then sit at a pending
+//     "Password: ?", and whether it keeps that prompt across connections is
+//     unknown (A6 H-15 (a)). The floor is TIDLE plus one minute, where TIDLE
+//     is the port's idle timeout last read with SHO P 1, or 31 minutes when
+//     it is unknown. A new session inside TIDLE could otherwise land on the
+//     previous session's pending password prompt, so its first line, even
+//     the wake line end, would be a wrong password. A request inside the
+//     floor is refused with rate_limited before any connection, so a
+//     compromised main process cannot cycle install, clear and run fast
+//     enough to drive the relay's alarm contact (SALARM after three wrong
+//     passwords).
 //   - Durable collector state (C7-A5-3). The collector keeps the time of the
 //     last unconfirmed authentication per asset, and its collector sequence
 //     counter, in its own store. It flushes the attempt time before the
-//     slot sends the password, and the counter before it replies. A
-//     restart therefore does not reopen the floor. A failure time later than
-//     the clock counts as inside the floor, so a clock stepped backwards does
+//     transport sends ACC, and the counter before it replies. A restart
+//     therefore does not reopen the floor. A failure time later than the
+//     clock counts as inside the floor, so a clock stepped backwards does
 //     not reopen it either. If the state cannot be read or flushed, the
 //     collector refuses every run with collector_state_unavailable.
 //   - Trust anchors (C7-A6-7). When the node's trust anchors change, the

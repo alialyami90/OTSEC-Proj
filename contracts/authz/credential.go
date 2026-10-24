@@ -209,14 +209,16 @@ func FailureFloor(tidle time.Duration) time.Duration {
 // InsideFailureFloor reports whether a request for an asset must be refused
 // with rate_limited. lastFailure is the time of the last unconfirmed
 // authentication on that asset. The collector writes it to its durable state
-// before the credential slot sends the password, and clears it only when the
-// relay's Level 1 prompt confirms the login (C7-A2-1, re-check). A wrong
-// password, a timeout, a closed connection or a collector crash between the
-// password and that prompt therefore all start the floor: in each case the
-// relay may still sit at Password: ? until TIDLE expires. Because the state
-// is durable (C7-A5-3), the floor survives a restart. A time after now
-// counts as inside the floor: a clock stepped backwards must not reopen it.
-// Zero means no unconfirmed authentication is recorded.
+// before the transport sends ACC, and clears it only when the relay's Level 1
+// prompt (=>) confirms the login (C7-A2-1; D1-20 as amended for A6 C2 change
+// 14). A wrong password, an ACC that is never answered, and a timeout, a
+// closed connection or a collector crash anywhere between ACC and that prompt
+// therefore all start the floor: in each case the relay may still sit at
+// Password: ? until TIDLE expires, and may keep it across connections (H-15
+// (a), unknown). Because the state is durable (C7-A5-3), the floor survives a
+// restart. A time after now counts as inside the floor: a clock stepped
+// backwards must not reopen it. Zero means no unconfirmed authentication is
+// recorded.
 func InsideFailureFloor(lastFailure, now time.Time, floor time.Duration) bool {
 	if lastFailure.IsZero() {
 		return false
