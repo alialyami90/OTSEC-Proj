@@ -521,3 +521,169 @@ Full text: `tests/contract/README.md`, `docs/phase1/A6-chain.md`, and the A6 rev
 **Completed:** independent contract tests for C1 to C8; C2 probes as contract tests; the chain test across all nine links on Linux and Windows (run 40115458123; final run in `docs/phase-1-exit.md`); H-14 third run (F-014); hardware procedures prepared, not run.
 **Findings that changed contracts:** C2 dialogue rules (round 1), C1 endpoint `target` (D1-24), the floor starting at `ACC` (D1-20 amendment), the C2 faults in D1-25.
 **Open:** H-14 remaining cases; every H-item awaits the owner's authorization of a lab device.
+
+## Phase 2 task briefs (issued 2026-10-24)
+
+On 2026-10-24 at 19:15Z the owner accepted the Phase 1 exit and started Phase 2 ("Start Phase 2 now"; see [phase-1-exit.md](phase-1-exit.md)). Phase 2 builds one working slice: **a simulated SEL-751, then the collector, the node store, the forwarder and an upstream Syslog collector, with local asset identification and evidence preservation.** The decisions every brief relies on are D2-1 to D2-7 in [phase2/A1-decisions.md](phase2/A1-decisions.md).
+
+### Common rules for every Phase 2 brief
+
+- **No device.** Every endpoint is `target: simulated`, and the only device is A6's recording simulator. Lab devices, site machines and real credentials all need the owner's authorization through A1 (D1-24, D2-4, D2-5).
+- **Write only to owned paths** (D2-1). Contract changes are proposals to the contract's owner and A1. Each change bumps the contract's minor version and has its own PR with its reviewers.
+- **Dependencies:** standard library, plus `modernc.org/sqlite` and `golang.org/x/sys`. Anything else needs A1's approval first (D2-2).
+- **Tests:** unit tests next to the code, a fuzz target for every parser of device or network input (ADR-0003), and negative and failure tests. They run on the owner's PC first, then on Linux (D1-26, D2-7). Every evidence statement carries its class. Nothing in Phase 2 is `hardware-verified`.
+- **Small PRs.** Each PR is one step a reviewer can check. Branch from `main` and use your session's branch. Reviewers follow `CLAUDE.md` §5.6.
+- **Finish with a handoff** in the template at the top of this file.
+
+### Task P2-A1: Integration, CI and the Phase 2 gate
+- Objective and rationale: keep the slice integrable from the first PR, run the integration job, and decide the gate.
+- Owner agent: A1.
+- Required inputs and dependencies: D2-1 to D2-7 and `docs/phase-1-exit.md`.
+- Files or modules the agent may modify: `go.mod`, `go.sum`, `.github/workflows/ci.yml`, `contracts/README.md`, `contracts/version/`, `CLAUDE.md` "Repository state", and A1-owned docs.
+- Expected interfaces: none new. A1 reviews every module's seam with its neighbours.
+- Deliverable:
+  - the CI `integration` job (D2-3);
+  - a review of every PR that adds a dependency or crosses a module seam;
+  - the Phase 2 exit report in `docs/phase-2-exit.md`.
+- Acceptance tests: the integration job runs A6's end-to-end suite on Linux, against rsyslog with RELP.
+- Explicit exclusions: no module implementation.
+- Uncertainty or safety risks: A1 must not become the implementer of last resort (`CLAUDE.md` §4).
+
+### Task P2-A2: Telnet transport and the SEL-751 adapter
+- Objective and rationale: the first adapter that really talks to a device, implementing C2 exactly as ADR-0005 and D1-20 require.
+- Owner agent: A2.
+- Required inputs and dependencies: C1, C2 and C3 on `main`; ADR-0005; D1-16, D1-20 and D1-25; A6's recording simulator; the C6-A2 notes (no STX, ETX or CR LF in record bytes, and `DATE_F` from `SHO G`).
+- Files or modules the agent may modify: `modules/ied/telnet/`, `modules/ied/sel751/`, `tests/fixtures/ied/`, `docs/device-capabilities.md`, and `docs/phase2/A2-*.md`.
+- Expected interfaces:
+  - a function from a C2 `Invocation`, a resolved credential handle and a C1 profile to a C2 `Result`, which `Result.Validate` and `CheckAgainst` accept;
+  - a hook the collector calls before `ACC` is sent and when `=>` is seen, so A3 can keep the failed-auth floor durable;
+  - no other exported surface.
+- Deliverable:
+  - **Telnet client:** RFC 854 with every option refused (`WONT`/`DONT`), and bounded reads.
+  - **Session dialogue:** the D16 wake and language probe, the FID gate before `ACC`, `ACC` with the single-use credential slot and echo redaction, `SHO P 1` for the LANG, MAXACC, FTPACC and HTTPACC warnings, `ID`, `SER`, then `QUI`.
+  - **No QUI after a failed password:** close the connection instead (C-19).
+  - **No password prompt:** close and raise an alarm (AP-23).
+  - **Every line:** the C3 egress check on the final socket bytes.
+  - **Framing:** STX/ETX handling.
+  - **Parsers:** for `ID`, `SER` and `SHO P 1`, each with golden tests and a fuzz target.
+- Acceptance tests:
+  - every C2 golden transcript replays to its expected `Result`;
+  - against the simulator, A6's tests for the language probe, the FID gate, the session state and the firmware gate pass;
+  - fuzzing the parsers for 60 seconds per target finds no panic;
+  - no line outside the C3 register can reach the socket, shown by a test that tries.
+- Explicit exclusions: no SSH, no serial, no `SER` arguments, no families other than the SEL-751, no credential storage.
+- Uncertainty or safety risks:
+  - the language probe reply grammar and the pending-password behaviour are unconfirmed on hardware (H-12, H-15);
+  - mark them `simulated` wherever they appear.
+
+### Task P2-A3: The collector service and the security boundary
+- Objective and rationale: the only process that holds credentials and reaches devices. It must fail closed.
+- Owner agent: A3.
+- Required inputs and dependencies: C7 and C8; `docs/phase1/A3-credential-design.md` (host rules W-1 to W-4, tests T-1 to T-12); ADR-0007 items 4 and 9; D1-11, D1-20 and D1-24; D2-4 and D2-5.
+- Files or modules the agent may modify: `cmd/otsec-collector/`, `modules/security/`, `modules/access/` (unchanged in this phase), and `docs/phase2/A3-*.md`.
+- Expected interfaces:
+  - **IPC:** C7 over a named pipe on Windows and a Unix socket on Linux. Only the node service's identity may connect.
+  - **Client:** `collectorclient` for A5.
+  - **Results:** each run returns the C2 `Result` and the collector-reported audit facts.
+  - **Audit:** the node writes the audit records (C8, D1-11). The session-close record carries `transcript_sha256`.
+- Deliverable:
+  - the collector binary and service;
+  - the credential store: sealed install with the pinned fingerprint, then revoke and clear;
+  - durable collector state, written before `ACC` and cleared only on `=>`;
+  - checks in order before any connection: the role check, the `device-observed` refusal, the register signature, then the floor;
+  - one session per device;
+  - no `TIDLE` reconnect after an unclean exit (ADR-0007 item 3);
+  - the collector excluded from crash dumps (T-5).
+- Acceptance tests:
+  - T-1 to T-12 from the A3 design pass as automated tests, T-9b included in all three cases;
+  - a `monitor` principal cannot cause a run;
+  - a request with any field outside C7 is refused before any I/O;
+  - no secret is found in any byte the collector writes (T-5).
+- Explicit exclusions: no remote engineering access, no SSH proxying, and no central node.
+- Uncertainty or safety risks:
+  - an administrator or SYSTEM compromise of the node remains a residual risk (ADR-0007 item 4);
+  - the service-SID scoping is `[doc]` until it is tested on the owner's PC.
+
+### Task P2-A4: Normalization and the Syslog forwarder
+- Objective and rationale: native SER rows become C4 events without losing anything, and leave the node only with confirmation.
+- Owner agent: A4.
+- Required inputs and dependencies: C4, C5 and C6; D1-12, D1-14, D1-15, D1-21, D1-22 and D1-23; A4's RELP experiment from Phase 0; the A4 note on rendering `evc` through `Source.Simulated()`.
+- Files or modules the agent may modify: `modules/telemetry/`, `modules/detection/` (unchanged in this phase), `tests/fixtures/network/`, and `docs/phase2/A4-*.md`.
+- Expected interfaces:
+  - **Normalizer:** C2 parsed records plus the stored native bytes go to C4 events, with `native.fields` exactly as printed and `device_time` with native precision. Overlapping reads are aligned, so a row that was already seen is never emitted again.
+  - **Forwarder:** a C5 outbox consumer that renders C6 and sends over RELP/TLS. It advances its cursor only on a confirmed `durable_ack`.
+- Deliverable:
+  - both packages;
+  - a fuzz target for every parser;
+  - the receiving half of a RELP test server in Go for unit tests;
+  - `evc` rendered through `Source.Simulated()`.
+- Acceptance tests:
+  - for every SER golden, the events reconcile 1:1 with the native rows;
+  - re-reading with 0, 50 and 100 percent overlap emits no duplicate;
+  - the forwarder survives the receiver closing mid-batch, resumes from the cursor, and loses nothing;
+  - against rsyslog in the integration job, every event arrives exactly once, counting by `event_id`.
+- Explicit exclusions: no Syslog receiver (the `lab-only` UDP listener waits for the owner's plaintext Syslog decision), no IDS, and no Zeek or Suricata.
+- Uncertainty or safety risks: `durable_ack` depends on how the collector is configured (V-S6). The integration job's rsyslog configuration is the only evidence for it.
+
+### Task P2-A5: Node runtime, store, configuration and the minimal interface
+- Objective and rationale: the node keeps everything durably, recovers on its own and tells the operator what it is doing.
+- Owner agent: A5.
+- Required inputs and dependencies:
+  - C5 and its three lock conditions from A3;
+  - the alarm channel outside the store (C5-A3-5);
+  - ADR-0004 (item 8 order) and ADR-0007;
+  - W-1;
+  - D2-1, D2-4 and D2-6;
+  - the `Usage` and `CompactStep` conformance notes (V-S9).
+- Files or modules the agent may modify: `cmd/otsec/`, `platform/`, `deploy/`, `ui/`, and `docs/phase2/A5-*.md`.
+- Expected interfaces:
+  - the C5 implementation, which passes the C5 contract tests;
+  - the `otsec.nodeconfig/0.1` loader and a test helper (D2-6);
+  - the scheduler that sends runs through `collectorclient`, commits through C5 and hands results to A4's normalizer;
+  - an alarm sink.
+- Deliverable:
+  - the SQLite store: group commit, `synchronous=FULL`, `auto_vacuum=INCREMENTAL`, the reserve released before the first open, recovery that resumes, and quotas;
+  - the node binary, and both services under the SCM;
+  - the configuration with both `target` checks (D2-4);
+  - a read-only CLI: `otsec assets`, `otsec events` and `otsec health`.
+  - A minimal HTML view follows only after the slice passes end to end. It goes through the impeccable skill's new-work flow, which writes `DESIGN.md`.
+- Acceptance tests:
+  - the C5 contract tests and A6's D1-11 test pass against the real store;
+  - killing the process at every commit point loses no acknowledged event;
+  - startup is tested with the reserve present, with no reserve, and with the release failing;
+  - a `device-observed` configuration refuses to load.
+- Explicit exclusions: no central node, no site-to-central link, no upgrades or rollback, and no UI before the slice passes.
+- Uncertainty or safety risks: the four open H-14 cases (no reserve, failed release, Windows 10/11 client edition, the product binary) are what this work must close or carry.
+
+### Task P2-A6: End-to-end verification of the slice
+- Objective and rationale: an independent check that the slice does what it claims, and nothing it must not.
+- Owner agent: A6.
+- Required inputs and dependencies: the recording simulator, the D1-26 setup on the owner's PC, `docs/verification.md`, and every Phase 2 PR as it opens.
+- Files or modules the agent may modify: `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`, and `.github/workflows/a6-*.yml`.
+- Expected interfaces: none. A6 drives the built binaries from outside.
+- Deliverable:
+  - **The slice suite** (`tests/integration/slice/`):
+    - forwarded events reconcile 1:1 with the simulator's native rows (timestamps, order, no duplicates, no loss), with `evc="simulated"` on every event;
+    - the stored transcript's SHA-256 equals `transcript_sha256` in the audit chain.
+  - **Safety:** the simulator's recording shows only register lines (V-S7). No write command is ever sent.
+  - **Security:** negative tests for D2-4, D1-20 and the role checks.
+  - **Failure:** interruption and restart, covering the forwarder target down, the node killed, the collector killed between `ACC` and `=>`, and the store at quota (V-S6, V-S9).
+  - **Imports:** the D2-1 import-rule test.
+- Acceptance tests: each check fails on a deliberately broken build, as a mutation check.
+- Explicit exclusions: no hardware runs without the owner's authorization.
+- Uncertainty or safety risks: the simulator and the adapter both come from the same manuals, so agreement between them is not hardware evidence (risk 3).
+
+### Order
+
+1. A5's store and node configuration, and A3's collector and IPC, start at once and in parallel. A1 adds the integration job.
+2. A2 starts at once on the transport and parsers against replays. The adapter joins A3's collector once the IPC stub exists.
+3. A4 starts at once on the normalizer against goldens. The forwarder joins once A5 exposes the outbox.
+4. A6 writes the slice suite now against the simulator, and runs it at every integration step.
+
+### Phase 2 exit gate (A1 decides)
+
+- The slice suite passes on the owner's PC (Windows) and on Linux, rsyslog included, from one commit on `main`.
+- Every component above is merged, with its reviewers' records.
+- No safety or security objection is open.
+- The V-S checks in scope pass: V-S6, V-S7 and V-S9.
+- `docs/phase-2-exit.md` records what is `simulated`, and what needs a lab relay before it can be called supported.
