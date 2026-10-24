@@ -211,3 +211,14 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **Action:** A4 applies it in #42. A3 and A6 check the change when they re-check C6.
 
 - **Amendment (2026-10-24, A4 on #42).** Leaving out only the raw record does not close the concern: the normalized `subject`, `value` and `summary` still say which element picked up, and when. On a target with device content off, those three fields are left out as well. The setting is named `device_content` rather than `device_text`, because it covers everything derived from the device record. What remains is the event type, asset, times, severity and record hash, which is enough for an analyst to look the event up on the node. The `dtext_omitted="config"` marker and the once-only report apply to all of it.
+
+## D1-23. Every device-origin event says whether its device was real (2026-10-24)
+
+- **Question (A4, C2-A4):** a C4 event does not say whether its device was a real device or a simulator. A simulated SER read would be forwarded upstream looking exactly like a device read, which breaks principle 10 (no fabricated validation).
+- **Decision:** accepted as A4 proposes, as an additive C4 0.1 change before Phase 2 begins.
+  - `source.evidence_class` is required on every device-origin event, with the C1 values `device-observed` or `simulated`. An unknown value reads as `simulated`, because that is the weaker claim.
+  - For `adapter-poll` events it is set from C2 `Result.target`. For received Syslog it is set from the C1 endpoint, and an endpoint fed by a simulator or a replay is `simulated`.
+  - C6 renders it as `evc` on every message, so a SIEM can filter out simulated events. C6 never drops the field to make room, so a size failure stays a failure.
+  - The C4 golden examples carry `simulated`, because they are built from documented fixtures.
+- **Reviewers:** A6 (P10 and the chain test) and A2 (as the C2 producer). A4 makes the change in a new PR and adds `evc` to C6 there too.
+- **Why now:** Phase 2's first workflow runs only against the simulator. Every event it forwards must say so.
