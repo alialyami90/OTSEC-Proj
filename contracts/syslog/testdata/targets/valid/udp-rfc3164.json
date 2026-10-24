@@ -1,0 +1,13 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "legacy-udp",
+  "host": "192.0.2.50",
+  "port": 514,
+  "transport": "udp",
+  "format": "rfc3164",
+  "framing": "datagram",
+  "class": "best-effort",
+  "max_message_octets": 1024,
+  "facility": 16,
+  "replay_seconds": 60
+}

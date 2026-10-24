@@ -1,0 +1,17 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "legacy-tcp",
+  "host": "192.0.2.50",
+  "port": 514,
+  "transport": "tcp",
+  "format": "rfc5424",
+  "framing": "non-transparent",
+  "class": "best-effort",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "replay_seconds": 600,
+  "tls": {
+    "server_name": "siem.example.net",
+    "trust_anchor_ref": "site-a-ca"
+  }
+}

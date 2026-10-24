@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otsec.local/contracts/syslog/0.1/target.json",
+  "title": "otsec.syslog/0.1 target",
+  "description": "C6 forwarding target. Strict: unknown fields are rejected. Rules that need more than one field (required only on relp-tls, framing per transport, size limit per format and transport, TLS settings exactly on TLS transports, relp_window in mode A and replay_seconds in mode B) are enforced by Target.Validate in Go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "host", "port", "transport", "format", "framing", "class", "max_message_octets", "facility"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^otsec\\.syslog/0\\.(0|[1-9][0-9]{0,3})$"},
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$", "description": "Also the C5 ConsumerID."},
+    "host": {"type": "string", "pattern": "^[A-Za-z0-9.:\\[\\]-]{1,253}$"},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "transport": {"enum": ["relp-tls", "relp", "tls", "tcp", "udp"]},
+    "format": {"enum": ["rfc5424", "rfc3164"]},
+    "framing": {"enum": ["octet-counting", "non-transparent", "datagram", "relp"]},
+    "class": {"enum": ["required", "best-effort"], "description": "Also the C5 Delivery. required only with transport relp-tls (Go rule)."},
+    "max_message_octets": {"type": "integer", "minimum": 480, "maximum": 65535},
+    "facility": {"type": "integer", "minimum": 0, "maximum": 23},
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server_name", "trust_anchor_ref"],
+      "properties": {
+        "server_name": {"type": "string", "minLength": 1},
+        "trust_anchor_ref": {"type": "string", "minLength": 1, "description": "TODO(C7): C7 credential reference."},
+        "client_credential_ref": {"type": "string", "minLength": 1, "description": "TODO(C7): C7 credential reference."}
+      }
+    },
+    "relp_window": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "replay_seconds": {"type": "integer", "minimum": 1, "maximum": 604800}
+  }
+}

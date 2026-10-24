@@ -1,0 +1,13 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "siem-a",
+  "host": "siem.example.net",
+  "port": 2514,
+  "transport": "relp-tls",
+  "format": "rfc5424",
+  "framing": "relp",
+  "class": "required",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "relp_window": 128
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "relp-plain",
+  "host": "192.0.2.51",
+  "port": 20514,
+  "transport": "relp",
+  "format": "rfc5424",
+  "framing": "relp",
+  "class": "best-effort",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "relp_window": 64
+}

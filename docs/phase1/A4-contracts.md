@@ -46,6 +46,24 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 | A6 re-check S-2 | Second 60 is checked against 23:59 UTC when the offset is known, so `15:59:60` at `-08:00` validates and `23:59:60` at `-08:00` does not. With the offset unknown, any minute is accepted. | `checkLeap` in `validate.go`, `TestDeviceTimeLeapSecondAndInvalidTime` |
 | A6 re-check S-3 | `invalid-time` with a `wall_clock` present is rejected (`forbidden`). | same test |
 
+## C6 `otsec.syslog/0.1`: decisions
+
+| Topic | C6 | Why |
+| --- | --- | --- |
+| Delivery class | `required` only on `relp-tls`. Every other transport is `best-effort`. | ADR-0004 item 6 and the A1 ruling of 2026-10-23: plain RELP acknowledgements can be forged on the path and would advance pruning. |
+| Delivery modes | Mode A (RELP): the cursor advances on `200 OK` for that transaction only, with a window of 1 to 1,024. Mode B (everything else): nothing the receiver says advances it, and every reconnect re-sends the last `replay_seconds` (1 s to 7 days). | E-A4-03 showed that TCP and TLS give no delivery evidence. The window is by time (ADR-0004 item 6) and matches the C5 best-effort boundary (D1-5). |
+| Insecure transports | `tcp`, `udp` and `relp` are labelled insecure by `Target.Insecure`. | R2.3: an insecure downstream connection is identified wherever it is shown. |
+| Message | One canonical RFC 5424 rendering, or an RFC 3164-compatible one. Every event field goes in one SD element, `otsec@32473`. Device bytes appear only as escaped `dtext` or as `dtext_b64`, never verbatim in MSG. | A3 AP-20, and E-A4-02 and E-A4-04: device text cannot forge a header, a frame or an SD element. |
+| Header time | Node receive time, cut to 6 fraction digits (RFC 5424 TIME-SECFRAC). `rcv` keeps full precision. | The header cannot carry nanoseconds; no precision is lost from the event. |
+| Size | Never split, never cut. In order: replace device text with `dtext_omitted="1"`, then drop the MSG summary, then fail with `too-large`. The forwarder emits `forward.text-omitted` or `forward.too-large`, and advances past a too-large event only after that health event is accepted. | Acceptance test: "split or truncated only as the profile says, never silently". |
+| Framing | Octet counting by default on TCP and TLS. LF framing only on plain `tcp`, for collectors that cannot count octets. One datagram per message on UDP. | ADR-0004 names RFC 6587 octet counting. LF framing is an addition, offered best-effort and insecure only. A1, please confirm or remove it. |
+| Inbound (TB5) | `ParseRELPResponse` is the whole grammar a node accepts back: `rsp` and `serverclose`, bounded lengths, a transaction number that must be outstanding. | A3 TB5: the node parses nothing else from upstream. |
+| Versions (D1-13) | Every message carries `v` (the C6 identifier) and `ev` (the C4 identifier of the event). | A receiver can tell an unreadable version from a malformed event. |
+| Audit (C8) | Sealed bytes go unchanged in MSG, are never cut or split, and travel only with octet counting or RELP on a large enough target. TODO(C8): this lands with C8 or in C6 0.2. Until then, no target carries audit. | C8 forbids re-encoding sealed bytes. See [C8-A4](reviews/C8-A4.md). |
+| PEN | 32473 is the RFC 5612 documentation number and must be replaced before production. | ADR-0004 amendment. |
+
+Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), `TestOversize` (each size step and the failure), `TestHeaderTimestampAtMostSixDigits`, `TestHostileContent` (CR, LF, NUL, a BOM, U+2028, C1 controls, `]`, `"`, backslashes and invalid UTF-8 in device text), `TestGoldenRenderings`, `TestRenderReadBack` and `TestParseRELPResponse`. The examples are described in [contracts/syslog/testdata/NOTES.md](../../contracts/syslog/testdata/NOTES.md).
+
 ## Proposals for A1
 
 1. **Line endings of fixtures.** No `.gitattributes` exists, so a Windows checkout with `core.autocrlf=true` can rewrite LF to CRLF in `tests/fixtures/`, which changes every byte-exact fixture and its SHA-256. C4 works around it with a `-text` copy in `contracts/event/testdata/`. Proposed root `.gitattributes`: `tests/fixtures/** -text` and `**/testdata/*.txt -text`.
