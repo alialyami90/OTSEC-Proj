@@ -172,7 +172,7 @@ func buildChainSession(t *testing.T) (*chainRun, error) {
 			declared("device_class", "protective-relay"), declared("vendor", "sel"), declared("product_family", "sel-751"),
 			declared("firmware_id", allowedFID), declared("serial_number", chainSerial), declared("ip_address", "192.0.2.61"),
 		},
-		Endpoints: []asset.Endpoint{{ID: chainEndpoint, Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23,
+		Endpoints: []asset.Endpoint{{ID: chainEndpoint, Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23, Target: asset.Simulated,
 			DownstreamSecurity: asset.DownstreamSecurity{Level: asset.SecurityLevel("plaintext-unauthenticated"),
 				Acknowledgement: &asset.Acknowledgement{By: "admin:a6", At: "2026-10-24T11:00:00Z", Reason: "A6 chain test, simulated, lab only", Scope: asset.AckScope("lab-only")}}}},
 		IdentityBinding: asset.IdentityBinding{Method: asset.BindingMethod("device-reported"), Strength: asset.BindingStrength("spoofable"),
@@ -230,6 +230,16 @@ func chainC2Result(t *testing.T) {
 	}
 	if err := got.CheckLines(r.pkg, r.inv); err != nil {
 		t.Errorf("lines against the register: %v", err)
+	}
+	// D1-24: the result's target is the endpoint's; a simulator session
+	// reported as a device read is refused.
+	if err := got.CheckAgainst(r.inv, r.asset); err != nil {
+		t.Errorf("result against the invocation and asset: %v", err)
+	}
+	claimed := got
+	claimed.Target = asset.DeviceObserved
+	if claimed.CheckAgainst(r.inv, r.asset) == nil {
+		t.Error("a simulated session reported as device-observed passed CheckAgainst")
 	}
 	if string(got.Transcript.Data) != string(r.res.Transcript.Data) {
 		t.Fatal("transcript bytes changed through JSON")
