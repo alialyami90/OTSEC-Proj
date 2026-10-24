@@ -186,11 +186,10 @@ func (c *check) dialogue(r Result, code Code) {
 			// to 0 (D18, V-S13). It is never the first send after the
 			// password, and never follows an unanswered ACC, where a late
 			// "Password: ?" would take it as a wrong password (A3 change 12).
-			// There nothing is sent. The C7 floor does not cover the next
-			// session, because it starts at the password (D1-20); a relay
-			// left inside a late "Password: ?" is caught by the next
-			// session's first prompt (refused.session_pending_password) or
-			// cleared by TIDLE. Starting the floor at ACC is open (A6 C2
+			// There nothing is sent. The C7 floor does not hold the next
+			// session back, because it starts at the password (D1-20);
+			// the session left inside a late "Password: ?" ends at TIDLE
+			// (S22 p. 7.16). Starting the floor at ACC is open (A6 C2
 			// change 14).
 		case x.phase == PhaseProbe || x.phase == PhaseAuth:
 			if p != promptLevel0 {
