@@ -30,3 +30,7 @@ Fix: merge main, write a 0.2 target in `nodeconfigtest` with the three fields (`
 - A config with a `device-observed` endpoint, and one with a `device-observed` listener, are refused with `ErrDeviceObserved` (D2-4 node lock, independently of A5's unit test).
 - If should 2 is accepted, a `simulated` endpoint at a non-loopback address is refused.
 - A node killed after a quarantine alarm stays stopped for that asset after restart (see the quarantine notes to A5).
+
+## Re-check at `58560aa`: accepted
+
+Main is merged in, the helper writes C6 0.2 targets, and the platform and contract tests pass with the race detector, as does the Windows cross-build. A1 took should 2 as D2-10. The loader's `loopback` accepts only a 127.0.0.0/8 or `::1` IP literal with no zone, so a name, `localhost`, `127.1` and `::ffff:127.0.0.1` are refused, on listeners and on every endpoint that isn't inbound Syslog.
