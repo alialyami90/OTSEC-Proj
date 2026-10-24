@@ -1,5 +1,19 @@
 package event
 
+import "errors"
+
+// MaxAlignRows is the most records either read given to Align may hold (A1
+// decision D1-12). The gap path costs (n+1)(m+1) int32, so 2048 rows cost
+// about 16 MB. A C2 capability profile states its own max_read_rows at or
+// below this ceiling; a later minor may raise it when a family's evidence
+// calls for it.
+const MaxAlignRows = 2048
+
+// ErrAlignTooLong is returned by Align for a read longer than MaxAlignRows.
+// The producer treats that read as a failed parse: it keeps the bytes, emits
+// parse.failed, and aligns and stores nothing from it.
+var ErrAlignTooLong = errors.New("event: read longer than MaxAlignRows")
+
 // AlignStatus is the outcome of comparing two consecutive reads of a
 // ring-buffer source. Closed.
 type AlignStatus string
@@ -50,9 +64,11 @@ type AlignResult struct {
 //   - no d fits: gap. Records were removed or changed, the buffer was
 //     cleared, the device restarted, or the buffer wrapped past the previous
 //     read. The two reads are matched on their longest common subsequence,
-//     so records already stored are not stored again under new IDs. Records
-//     of the new read outside the match are added; those whose key also
-//     occurs in the previous read are PossibleDuplicates. Records of the
+//     so records already stored before the first new record are not stored
+//     again under new IDs. From the first record outside the match onwards,
+//     every record is added, because a ring buffer only appends; those that
+//     the match paired with an old record, or whose key occurs in the
+//     previous read, are PossibleDuplicates. Records of the
 //     previous read outside the match, after the first matched one, are
 //     Removed. Every added record that is not a possible duplicate carries
 //     gap-before, and the producer emits ser.gap.
@@ -67,12 +83,18 @@ type AlignResult struct {
 //
 // Identical records within one read stay separate records: alignment works
 // on positions, never on a per-record key.
-func Align(prev, next []string) AlignResult {
+//
+// A read longer than MaxAlignRows is refused with ErrAlignTooLong before
+// anything is allocated, whatever the caller checked (D1-12).
+func Align(prev, next []string) (AlignResult, error) {
+	if len(prev) > MaxAlignRows || len(next) > MaxAlignRows {
+		return AlignResult{}, ErrAlignTooLong
+	}
 	if prev == nil {
-		return AlignResult{Status: AlignStatusFirstRead, Added: indices(0, len(next))}
+		return AlignResult{Status: AlignStatusFirstRead, Added: indices(0, len(next))}, nil
 	}
 	if len(prev) == 0 {
-		return AlignResult{Status: AlignStatusOK, Added: indices(0, len(next))}
+		return AlignResult{Status: AlignStatusOK, Added: indices(0, len(next))}, nil
 	}
 	var fits []int
 	for d := 0; d < len(prev); d++ {
@@ -82,14 +104,14 @@ func Align(prev, next []string) AlignResult {
 		}
 	}
 	if len(fits) == 0 {
-		return realign(prev, next)
+		return realign(prev, next), nil
 	}
 	d := fits[len(fits)-1]
 	added := indices(len(prev)-d, len(next))
 	if len(fits) == 1 {
-		return AlignResult{Status: AlignStatusOK, Added: added}
+		return AlignResult{Status: AlignStatusOK, Added: added}, nil
 	}
-	return AlignResult{Status: AlignStatusAmbiguous, Added: added, PossibleDuplicates: added[:fits[len(fits)-1]-fits[0]]}
+	return AlignResult{Status: AlignStatusAmbiguous, Added: added, PossibleDuplicates: added[:fits[len(fits)-1]-fits[0]]}, nil
 }
 
 // realign matches two reads that do not overlap as a suffix and a prefix,
@@ -127,11 +149,18 @@ func realign(prev, next []string) AlignResult {
 	for _, k := range prev {
 		inPrev[k] = true
 	}
+	// A ring buffer only appends, so every record after the first new one is
+	// newer still, even when its key matches an old record: it is added, and
+	// flagged when the match makes it uncertain (A6 re-check S-1).
 	r := AlignResult{Status: AlignStatusGap, Added: []int{}}
+	firstNew := -1
 	for j := range next {
-		if !matchedNext[j] {
+		if firstNew < 0 && !matchedNext[j] {
+			firstNew = j
+		}
+		if firstNew >= 0 {
 			r.Added = append(r.Added, j)
-			if inPrev[next[j]] {
+			if matchedNext[j] || inPrev[next[j]] {
 				r.PossibleDuplicates = append(r.PossibleDuplicates, j)
 			}
 		}

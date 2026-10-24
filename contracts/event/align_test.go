@@ -1,6 +1,7 @@
 package event
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -28,7 +29,9 @@ func TestAlign(t *testing.T) {
 		// A6 C4 review change 1 (V-S4): records already stored are not
 		// stored again; the removed or changed record is reported.
 		{"record removed from the middle", []string{"a", "b", "c", "d"}, []string{"a", "c", "d", "e"}, AlignStatusGap, []int{3}, nil, []int{1}},
-		{"record changed in place", []string{"a", "b", "c"}, []string{"a", "B", "c", "d"}, AlignStatusGap, []int{1, 3}, nil, []int{1}},
+		{"record changed in place", []string{"a", "b", "c"}, []string{"a", "B", "c", "d"}, AlignStatusGap, []int{1, 2, 3}, []int{2}, []int{1}},
+		// A6 re-check S-1: 0' has 0's key but follows a new record, so it is new.
+		{"old key after a new record", []string{"1", "3", "0"}, []string{"4", "0", "5"}, AlignStatusGap, []int{0, 1, 2}, []int{1}, nil},
 		{"record missing at the end", []string{"a", "b", "c", "d"}, []string{"c"}, AlignStatusGap, nil, nil, []int{3}},
 		{"reordered", []string{"a", "x", "b"}, []string{"x", "a", "c"}, AlignStatusGap, []int{1, 2}, []int{1}, []int{2}},
 		{"empty to empty", []string{}, []string{}, AlignStatusOK, nil, nil, nil},
@@ -37,7 +40,10 @@ func TestAlign(t *testing.T) {
 	}
 	same := func(a, b []int) bool { return len(a) == len(b) && (len(a) == 0 || reflect.DeepEqual(a, b)) }
 	for _, c := range cases {
-		got := Align(c.prev, c.next)
+		got, err := Align(c.prev, c.next)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
 		if got.Status != c.status || !same(got.Added, c.added) || !same(got.PossibleDuplicates, c.dups) || !same(got.Removed, c.removed) {
 			t.Errorf("%s: got %+v, want status %s added %v dups %v removed %v", c.name, got, c.status, c.added, c.dups, c.removed)
 		}
@@ -54,7 +60,10 @@ func TestAlignNeverLosesOrRestores(t *testing.T) {
 	}
 	for _, prev := range reads {
 		for _, next := range reads {
-			r := Align(prev, next)
+			r, err := Align(prev, next)
+			if err != nil {
+				t.Fatal(err)
+			}
 			added := map[int]bool{}
 			for _, j := range r.Added {
 				if j < 0 || j >= len(next) || added[j] {
@@ -87,12 +96,50 @@ func TestAlignGoldenKeysSurviveRenumbering(t *testing.T) {
 		keys = append(keys, load(t, "testdata/valid/sel751-fig10-16-row"+n+".json").Native.AlignmentKey)
 	}
 	next := append(append([]string{}, keys...), "sha256:new-record")
-	got := Align(keys, next)
+	got, err := Align(keys, next)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != AlignStatusOK || !reflect.DeepEqual(got.Added, []int{8}) {
 		t.Fatalf("got %+v", got)
 	}
 	// Rows 8 and 7 share a timestamp but differ in element, so their keys differ.
 	if keys[0] == keys[1] {
 		t.Fatal("distinct rows produced the same key")
+	}
+}
+
+// D1-12: a read over MaxAlignRows on either side is refused before anything
+// is allocated; a read of exactly MaxAlignRows is aligned.
+func TestAlignRefusesOversizeRead(t *testing.T) {
+	rows := func(n int, tag string) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = tag
+		}
+		return out
+	}
+	big := rows(50000, "x")
+	limit := rows(MaxAlignRows, "y")
+	for _, c := range []struct {
+		name       string
+		prev, next []string
+	}{
+		{"oversize next", limit, big},
+		{"oversize prev", big, limit},
+		{"oversize next on first read", nil, big},
+		{"one over", limit, rows(MaxAlignRows+1, "z")},
+	} {
+		if _, err := Align(c.prev, c.next); !errors.Is(err, ErrAlignTooLong) {
+			t.Errorf("%s: got %v, want ErrAlignTooLong", c.name, err)
+		}
+		if a := testing.AllocsPerRun(5, func() { Align(c.prev, c.next) }); a != 0 {
+			t.Errorf("%s: %v allocations, want none", c.name, a)
+		}
+	}
+	// At the ceiling, the gap path runs: every key differs between the reads.
+	r, err := Align(limit, rows(MaxAlignRows, "w"))
+	if err != nil || r.Status != AlignStatusGap || len(r.Added) != MaxAlignRows {
+		t.Fatalf("at the ceiling: status %s, %d added, err %v", r.Status, len(r.Added), err)
 	}
 }

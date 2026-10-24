@@ -322,11 +322,18 @@ func checkDeviceTime(c *checker, t *DeviceTime) {
 	invalid := contains(t.Flags, "invalid-time")
 	var wall time.Time
 	wallOK, leap := false, false
+	defer func() {
+		if leap {
+			checkLeap(c, t, wall)
+		}
+	}()
 	switch {
 	case t.WallClock == "" && invalid:
 		// The native time could not be decoded; Native keeps it (EP-1).
 	case t.WallClock == "":
 		c.fail(CodeMissing, "device_time.wall_clock", "required unless the invalid-time flag is set")
+	case invalid:
+		c.fail(CodeForbidden, "device_time.wall_clock", "invalid-time means the native time has no decodable wall clock")
 	default:
 		wall, wallOK, leap = parseLocal(c, "device_time.wall_clock", t.WallClock, t.ResolutionNS)
 	}
@@ -391,8 +398,8 @@ func checkNormalized(c *checker, n *Normalized) {
 }
 
 // parseLocal parses a zone-less wall-clock time and checks its precision.
-// Second 60 is accepted at 23:59 only, as a leap second; it is reported in
-// leap and the returned time is not usable for arithmetic.
+// Second 60 is accepted as a leap second; it is reported in leap, and the
+// returned time is second 59 of the same minute.
 func parseLocal(c *checker, field, s string, resNS int64) (t time.Time, ok, leap bool) {
 	m := wallClockForm.FindStringSubmatch(s)
 	if m == nil {
@@ -401,10 +408,9 @@ func parseLocal(c *checker, field, s string, resNS int64) (t time.Time, ok, leap
 	}
 	check := s
 	if s[17:19] == "60" {
-		if s[11:16] != "23:59" {
-			c.fail(CodeTimeFormat, field, "%q: second 60 occurs only at 23:59", s)
-			return time.Time{}, false, false
-		}
+		// Local time: a leap second prints as 15:59:60 on a -08:00 clock, so
+		// any HH:MM is accepted here; checkLeap ties it to 23:59 UTC when the
+		// offset is known (A6 re-check S-2).
 		check, leap = s[:17]+"59"+s[19:], true
 	}
 	t, err := time.Parse("2006-01-02T15:04:05.999999999", check)
@@ -481,4 +487,19 @@ func contains(list []string, v string) bool {
 
 func (s *Span) inside(length int64) bool {
 	return s.Offset >= 0 && s.Length >= 0 && s.Offset+s.Length <= length
+}
+
+// checkLeap ties a leap second on a known offset to 23:59:60 UTC.
+func checkLeap(c *checker, t *DeviceTime, wall time.Time) {
+	m := offsetForm.FindStringSubmatch(t.Offset)
+	if m == nil {
+		return
+	}
+	off := time.Duration(atoi(m[2]))*time.Hour + time.Duration(atoi(m[3]))*time.Minute
+	if m[1] == "-" {
+		off = -off
+	}
+	if u := wall.Add(-off); u.Hour() != 23 || u.Minute() != 59 {
+		c.fail(CodeTimeFormat, "device_time.wall_clock", "%q at offset %s is not 23:59:60 UTC", t.WallClock, t.Offset)
+	}
 }

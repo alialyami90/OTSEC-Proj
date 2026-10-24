@@ -360,3 +360,40 @@ func TestReaderAcceptsLaterMinorAndUnknownFields(t *testing.T) {
 		t.Fatalf("kind is an open set: %v", err)
 	}
 }
+
+// A6 C4 re-check S-2 and S-3: a leap second is 23:59:60 in UTC, so on a
+// known offset it is checked after the offset is applied; and invalid-time
+// means there is no wall clock to give.
+func TestDeviceTimeLeapSecondAndInvalidTime(t *testing.T) {
+	for _, c := range []struct {
+		wall, offset string
+		ok           bool
+	}{
+		{"2016-12-31T15:59:60.602", "-08:00", true},
+		{"2016-12-31T23:59:60.602", "+00:00", true},
+		{"2017-01-01T05:29:60.602", "+05:30", true},
+		{"2016-12-31T23:59:60.602", "-08:00", false},
+		{"2016-12-31T15:59:60.602", "+00:00", false},
+		// With the offset unknown, the minute cannot be tied to UTC.
+		{"2016-12-31T15:59:60.602", "unknown", true},
+	} {
+		e := load(t, "testdata/valid/constructed-leap-second.json")
+		e.DeviceTime.WallClock, e.DeviceTime.Offset = c.wall, c.offset
+		if c.offset != "unknown" {
+			e.DeviceTime.OffsetBasis = BasisDeviceSetting
+		}
+		err := e.Validate()
+		if c.ok && err != nil {
+			t.Errorf("%s at %s: %v", c.wall, c.offset, err)
+		}
+		if !c.ok && !slices.Contains(Codes(err), CodeTimeFormat) {
+			t.Errorf("%s at %s: got %v, want %s", c.wall, c.offset, err, CodeTimeFormat)
+		}
+	}
+
+	e := load(t, "testdata/valid/constructed-invalid-date.json")
+	e.DeviceTime.WallClock = "2007-03-02T13:54:09.602"
+	if !slices.Contains(Codes(e.Validate()), CodeForbidden) {
+		t.Fatal("invalid-time with a wall_clock validated")
+	}
+}
