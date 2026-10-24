@@ -23,8 +23,8 @@ FID_OTHER = "SEL-751-R500-V1-Z103101-D20260910"  # S22 Table A.1 p. A.2
 # (contracts/adapter/testdata/results/valid/ok.json, an invented simulator
 # session shaped after S22 Figure 7.38): the FID value and the CID value in
 # the ID reply. C2's tests check that each span selects its value.
-FID_AT = 124
-CID_AT = 221
+FID_AT = 127
+CID_AT = 224
 
 
 def obs(value, cls, method, ref, at, span=None):

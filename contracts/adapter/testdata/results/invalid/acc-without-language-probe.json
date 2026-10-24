@@ -1,0 +1,125 @@
+{
+  "schema": "otsec.adapter/0.1",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 2,
+  "target": "simulated",
+  "status": "failed",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:01.0Z",
+  "transcript": {
+    "data": "DQoNCj1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPUFDQw0KQUNDDQpQYXNzd29yZDogPyBbUkVEQUNURURdDQoCDQoNClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDMNCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCkxldmVsIDENCgM9PlFVSQ0KUVVJDQoCDQpTRUwtNzUxICAgICAgICAgIERhdGU6IDEwLzI0LzIwMjYgIFRpbWU6IDA5OjE1OjA1DQpGRUVERVIgMSAgICAgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQoDPQ==",
+    "sha256": "18d9c14d3ff015db3ea1099d37d64f49b5df69ce63e5d431def5d73b566bb09f",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 5,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 9,
+        "length": 205,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 214,
+        "length": 5,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 219,
+        "length": 17,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.5Z"
+      },
+      {
+        "offset": 236,
+        "length": 12,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.6Z"
+      },
+      {
+        "offset": 248,
+        "length": 110,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.7Z"
+      },
+      {
+        "offset": 358,
+        "length": 5,
+        "dir": "tx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:00.8Z"
+      },
+      {
+        "offset": 363,
+        "length": 103,
+        "dir": "rx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:00.9Z"
+      }
+    ],
+    "redactions": [
+      {
+        "offset": 236,
+        "length": 10,
+        "reason": "credential",
+        "component": "transport"
+      }
+    ]
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "not-run",
+    "password_prompt": true,
+    "credential_sent": true,
+    "echo_scan": "performed",
+    "access_level": "1",
+    "quit_sent": true
+  },
+  "identity": {
+    "result": "match",
+    "items": [
+      {
+        "name": "firmware_id",
+        "expected": "SEL-751-R501-V0-Z104101-D20260910",
+        "observed": "SEL-751-R501-V0-Z104101-D20260910",
+        "span": {
+          "offset": 19,
+          "length": 33
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "failed.egress_violation"
+  }
+}

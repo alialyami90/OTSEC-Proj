@@ -1,7 +1,7 @@
 # A2 Phase 1 notes: C1 and C2
 
 - Task: P1-A2 (`docs/agent-handoffs.md`). Author: A2. Started 2026-10-24.
-- Contracts: C1 `otsec.asset/0.1` in `contracts/asset/`; C2 `otsec.adapter/0.1` in `contracts/adapter/` (next PR).
+- Contracts: C1 `otsec.asset/0.1` in `contracts/asset/`; C2 `otsec.adapter/0.1` in `contracts/adapter/`.
 - No device was contacted. Every device value in the examples is from the SEL-751 instruction manual (S22, date code 20260910) or invented and marked as such.
 
 ## C1 decisions
@@ -32,6 +32,20 @@
 | A profile for a family that takes a password carries `secret_policy`: lengths, an allowed set matched against the whole secret, and exactly one of `mnemonic_len` and `whole_word`. SEL-751: `[!-~]+`, 1 to 12, mnemonic 3. Tests check that it equals `authz.SecretPolicies["sel-751"]` and that `MaxSecretLen` agrees. | A1 D1-19 (S22 Table 7.54, Appendix N). |
 | Acknowledgement `by`, and the `ref` of an operator-entry observation, use C7's principal ID syntax. C1 keeps a copy of the pattern, and a test compares it with `authz.Principal.Validate`. | C7 merged (#38). C1 does not import `authz`, because `authz` needs to import C1 for `CredentialAllowed` and the profile. |
 
+## C2 decisions
+
+| Decision | Basis |
+| --- | --- |
+| The SEL-751 frames every message `<STX>` … `<CRLF><ETX>`. The transcript keeps both bytes; the probe grammar ignores them like XON, XOFF and NUL, and prompt detection treats them as line boundaries; no observation, warning or record span may include them. The examples are framed, and the prompt is placed directly after `ETX`. | S22 p. 7.28; my C6 review, finding 1. The prompt's position after `ETX` is an assumption, shared with A6's simulator, until H-13 has a capture. |
+| `RegisterLookup` implements `OperationLookup` over the C3 matcher. Operations are invocable at their register access level; session-control lines, deny rules and unknown IDs are refused alike. | C3 merged; C-A2-1. Tests use A2's `sel-751.json` content, not a stand-in. |
+| `Invocation.CheckAgainst(asset, profile)` refuses an invocation that is not the one the collector would build: a suspended asset (`refused.asset_suspended`), a credential where `CredentialAllowed` fails (`refused.credential_unavailable`), and any other asset, endpoint or profile, an expected identity other than the binding's declared values, a profile without `session_limits` or beyond the C2 ceilings, or a `min_interval_ms` below the profile's (`refused.limits`). An address-only binding compares nothing, so no C2 session runs on it. | D1-18, A6 C1 re-check R-1, AP-27. |
+| `principal_ref` is checked with `authz.Principal.Validate`; `credential_ref` is a C7 `cred_` ID, checked with a copy of C7's pattern that a test compares with `authz.CredentialRef.Validate`. C2 does not resolve the reference or check its binding: the collector does (`CredentialRef.Binds`). | C7 merged. `authz` does not export the pattern. |
+| **Review round 1 (A1, A3, A4, A6 at `e1d6374`).** `Result.Validate` now checks the session against the bytes (`dialogue.go`): every line after a prompt anchored at line start; the wake first, once, into silence; the auth phase ACC then exactly the marker after a received password prompt; nothing after the password until `=>` (or `=>>` for `unexpected_access_level`); an accepted probe and a probe-phase identity match before ACC; close phase QUI only; `access_level` the highest prompt received; QUI at the end of any session that reached Level 1. The one line not after a prompt is QUI after `failed.timeout` or `failed.response_too_large`, which D18 and V-S13 need. | A3 changes 1, 2, 4, 6, 7, 8; A6 changes 1, 2, 3, 5, 6, 7. I kept `access_level` as the highest level, not the last, so `failed.access_level_dropped` still records that Level 1 was reached; the bytes decide both. |
+| `Result.CheckLines(package, invocation)`: every sent line passes `Matcher.Permit` for its phase; operate lines are the invocation's line or an operation the register reads a precondition, warning or firmware condition with; `register_version` is the package revision. | A3 change 3. `SHO G` is refused, because nothing in the register reads with it yet. A4's `DATE_F` parsing needs it, so the register should name `sel.settings.show_global` as the read for `DATE_F` (C3 change, A2). |
+| `ValidateWith` refuses a credential on a Level 0 operation (`refused.limits_out_of_range`). `CheckAgainst` checks the asset first, refuses an operation the profile does not name (`refused.operation_not_invocable`), says "binding compares nothing" for an address-only binding, refuses a credential when `password_attempts` is not 1, and reports a mismatch with the asset as the new `refused.invocation_mismatch`. | A1 changes 1 to 4; A3 change 11; A6 change 11. |
+| New codes `refused.session_pending_password` (first thing received is `Password: ?`; nothing sent) and `partial.read_rows_exceeded` (D1-12: bytes kept, nothing parsed, detail gives count and limit). `error.detail` is at most 256 bytes of printable ASCII. A timeout after an unconfirmed password suspends nothing; the C7 floor covers it. | A3 changes 7 and 9; A4 change 1; A6 change 8. |
+| Results name their `operation_id`; `RecordFields` fixes the `sel.ser.row` field names; `Transcript.ReceivedAt` is a record's receive time; SER rows are newest first; 0.1 results decode strictly. | A4 changes 2, 3, 5, 6; A6 change 9. A4 change 4 (clock state) is a `doc.go` note: the producer takes it from the node's clock status. |
+
 ## B-05: what the identity binding proves
 
 The text is in `contracts/asset/doc.go`. In short:
@@ -48,5 +62,4 @@ The text is in `contracts/asset/doc.go`. In short:
 
 ## Open items for reviewers
 
-- A3: `Acknowledgement.By` and operator refs are TODO(C7) principal IDs.
 - A6: `testdata/generate.py` writes the examples. They are built from my own transcription, so A6's independent tests should not reuse them as ground truth (risk 3).

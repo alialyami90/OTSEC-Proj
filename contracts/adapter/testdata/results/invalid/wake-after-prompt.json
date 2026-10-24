@@ -1,0 +1,107 @@
+{
+  "schema": "otsec.adapter/0.1",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 2,
+  "target": "simulated",
+  "status": "refused",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.6Z",
+  "transcript": {
+    "data": "DQoNCj0NClFVSQ0KUVVJDQoCDQpTRUwtNzUxICAgICAgICAgIERhdGU6IDEwLzI0LzIwMjYgIFRpbWU6IDA5OjE1OjAwDQpGRUVERVIgMSAgICAgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQoDPUlEDQpJRA0KAiJGSUQ9U0VMLTc1MS1SNTAwLVYxLVoxMDMxMDEtRDIwMjYwOTEwIiwiMDAwMCINCiJCRklEPUJPT1RMRFItUjUwMC1WMC1aMDAwMDAwLUQyMDA5MDkyNSIsIjAwMDAiDQoiQ0lEPUU3NTQiLCIwMDAwIg0KIkRFVklEPUZFRURFUiAxIiwiMDAwMCINCiJERVZDT0RFPTkxIiwiMDAwMCINCiJQQVJUTk89NzUxNTAxQTFBNUEwWDhDMDgwIiwiMDAwMCINCgM9",
+    "sha256": "e037b361d5ad573e30ca4500b61db75afa60bc4ae0adbf4c449e7d7d5d31fb5b",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 5,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 7,
+        "length": 5,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 12,
+        "length": 103,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 115,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 119,
+        "length": 205,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.5Z"
+      }
+    ],
+    "redactions": []
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "accepted",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "0",
+    "quit_sent": false
+  },
+  "identity": {
+    "result": "mismatch",
+    "items": [
+      {
+        "name": "firmware_id",
+        "expected": "SEL-751-R501-V0-Z104101-D20260910",
+        "observed": "SEL-751-R500-V1-Z103101-D20260910",
+        "span": {
+          "offset": 131,
+          "length": 33
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "refused.identity_mismatch"
+  },
+  "observations": [
+    {
+      "name": "firmware_id",
+      "value": "SEL-751-R500-V1-Z103101-D20260910",
+      "span": {
+        "offset": 131,
+        "length": 33
+      }
+    }
+  ]
+}

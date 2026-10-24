@@ -1,0 +1,118 @@
+{
+  "schema": "otsec.adapter/0.1",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 2,
+  "target": "simulated",
+  "status": "failed",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:01.0Z",
+  "transcript": {
+    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPUFDQw0KQUNDDQpRVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowNQ0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz0=",
+    "sha256": "d5d5142b9feffbd1f9c260bb058b7c9eb3bf703aedb322a2b31f6a6c0a6fef68",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 5,
+        "length": 5,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 10,
+        "length": 103,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 113,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 117,
+        "length": 205,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.5Z"
+      },
+      {
+        "offset": 322,
+        "length": 5,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.6Z"
+      },
+      {
+        "offset": 327,
+        "length": 5,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.7Z"
+      },
+      {
+        "offset": 332,
+        "length": 5,
+        "dir": "tx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:00.8Z"
+      },
+      {
+        "offset": 337,
+        "length": 103,
+        "dir": "rx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:00.9Z"
+      }
+    ],
+    "redactions": []
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "accepted",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "0",
+    "quit_sent": true
+  },
+  "identity": {
+    "result": "match",
+    "items": [
+      {
+        "name": "firmware_id",
+        "expected": "SEL-751-R501-V0-Z104101-D20260910",
+        "observed": "SEL-751-R501-V0-Z104101-D20260910",
+        "span": {
+          "offset": 127,
+          "length": 33
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "failed.timeout"
+  }
+}

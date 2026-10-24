@@ -1,0 +1,51 @@
+{
+  "schema": "otsec.adapter/0.1",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 2,
+  "target": "simulated",
+  "status": "refused",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.2Z",
+  "transcript": {
+    "data": "DQoNCj0=",
+    "sha256": "5a7213ccdb9e94935618a40e7d0a6124705c5febb68dcd32e7e81dd3659268bf",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      }
+    ],
+    "redactions": []
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "not-run",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "1",
+    "quit_sent": false
+  },
+  "identity": {
+    "result": "not-checked"
+  },
+  "error": {
+    "code": "refused.session_elevated"
+  }
+}
