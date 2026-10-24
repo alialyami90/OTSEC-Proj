@@ -116,3 +116,12 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - Host names are refused, `localhost` included, so the check never depends on name resolution.
 - Forwarding targets are not covered, because the upstream collector is not a device.
 - Each lock gets its own negative test (A6). Lifting either lock follows D2-4: the owner authorizes a named lab device, and the authorization is recorded in a decision.
+
+## D2-11: The credential install path is a guessing oracle for a compromised node
+
+**Finding (A3, #90):** the node service holds the public half of the collector's install key. It can therefore seal any guess and install it under a new reference whose plaintext scope differs from the target's. The reuse rule replies `secret_rejected` exactly when the guess equals a stored secret, and SEL default passwords are well known. Any refusal that depends on equality leaks equality, however it is worded. The oracle goes away only when the node cannot originate an install.
+
+**Ruling:**
+- **Phase 2:** A3's durable install budget (10 installs per hour per node, refused with `rate_limited`, and no shared count in any reply) is accepted as an interim control. It is acceptable because every Phase 2 credential is a lab-only test value (D2-5), no secret of another scope exists, and D2-4 and D2-10 keep every endpoint on the simulator.
+- **Before any `device-observed` endpoint** (that is, before D2-4 or D2-10 is lifted), installs must be authenticated independently of the node. An administrator signs the install request with a key whose public half is pinned in the collector, and the signature binds the reference, the scope and a single-use nonce. The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. A3 designs this, and it is a C7 0.2 candidate.
+- This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
