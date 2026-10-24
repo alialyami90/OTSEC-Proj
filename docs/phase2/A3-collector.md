@@ -63,7 +63,9 @@ For an accepted run, the client checks the outcome:
 - The close record's `transcript_sha256` equals the result's transcript digest.
 - A result with any transcript bytes has a session.
 
-A failure, or a connection that ends before the outcome, is `ErrOutcomeUnknown`. It comes with the accepted reply, so the node still audits the decision and records the run as outcome unknown, never as succeeded.
+`Result.CheckLines`, the "no unauthorized line" oracle (C2 EP-4), runs in the collector before the outcome is sent (PR 3). It also runs on the node whenever the node sets `Client.Register` to return its own verified copy of the register package. If the node sets the hook but holds no package at the run's version, the outcome is `ErrOutcomeUnknown`. Test: `TestCheckLinesOnTheNode`.
+
+A failure, or a connection that ends before the outcome, is `ErrOutcomeUnknown`. It comes with the accepted reply, so the node still audits the decision and records the run as outcome unknown, never as succeeded. It must not treat the run as "nothing happened" either: ACC may have been sent. A retry is safe because the failed-auth floor is written before ACC (D1-20), so a retry is refused with `rate_limited` until the floor has passed.
 
 Tests: `TestReplyBreakingC7Refused` (9 cases), `TestBadOutcomeIsOutcomeUnknown` (13 cases), `TestLostOutcomeKeepsReply`, `TestInvalidRequestNotSent`.
 

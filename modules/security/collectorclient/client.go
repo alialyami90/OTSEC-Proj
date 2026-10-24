@@ -19,6 +19,7 @@ import (
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collectorwire"
 )
 
@@ -36,6 +37,15 @@ var ErrProtocol = errors.New("collectorclient: reply breaks C7")
 // Client sends requests to one collector.
 type Client struct {
 	dial func(ctx context.Context) (net.Conn, error)
+
+	// Register, when set, returns the node's own verified copy of the
+	// register package at a version, or nil if the node holds none. The
+	// client then runs Result.CheckLines on every run outcome against it, so
+	// the "no unauthorized line" oracle (C2 EP-4) also runs outside the
+	// collector. An outcome whose package the node cannot produce is
+	// ErrOutcomeUnknown. When Register is nil, CheckLines runs only in the
+	// collector, before the outcome is sent.
+	Register func(version uint64) *register.Package
 }
 
 // New returns a client for the collector at ep. ep.Peer is the identity the
@@ -128,7 +138,7 @@ func (c *Client) Do(ctx context.Context, req *authz.CollectorRequest) (Response,
 	if err != nil {
 		return resp, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
 	}
-	out, err := checkOutcome(req, reply, ob)
+	out, err := checkOutcome(req, reply, ob, c.Register)
 	if err != nil {
 		return resp, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
 	}
@@ -181,7 +191,7 @@ var invocationActions = map[audit.Action]bool{
 
 // checkOutcome applies C2 and C8 to an outcome and ties it to the request
 // and the reply.
-func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []byte) (*Outcome, error) {
+func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []byte, reg func(uint64) *register.Package) (*Outcome, error) {
 	o, err := collectorwire.DecodeOutcome(b)
 	if err != nil {
 		return nil, err
@@ -199,6 +209,18 @@ func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []b
 	if res.InvocationID != reply.InvocationID || res.OperationID != req.Run.OperationID || res.RegisterVersion != req.Run.RegisterVersion {
 		return nil, fmt.Errorf("result is for invocation %q, operation %q, register %d; the run was %q, %q, %d",
 			res.InvocationID, res.OperationID, res.RegisterVersion, reply.InvocationID, req.Run.OperationID, req.Run.RegisterVersion)
+	}
+	if reg != nil {
+		p := reg(req.Run.RegisterVersion)
+		if p == nil {
+			return nil, fmt.Errorf("no verified register package %d on the node to check the lines against", req.Run.RegisterVersion)
+		}
+		// CheckLines reads only the invocation's identity, operation and
+		// parameters, which the node knows from its own request.
+		inv := adapter.Invocation{InvocationID: reply.InvocationID, OperationID: req.Run.OperationID, Params: req.Run.Params}
+		if err := res.CheckLines(p, inv); err != nil {
+			return nil, fmt.Errorf("result: %w", err)
+		}
 	}
 
 	out := &Outcome{InvocationID: o.InvocationID, Result: res, ResultJSON: []byte(o.Result)}

@@ -15,6 +15,7 @@ import (
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
 )
@@ -158,6 +159,58 @@ func TestRunOutcomeChecked(t *testing.T) {
 	// The raw bytes are what the store seals.
 	if _, err := audit.Seal(o.Audit[0].Raw, 2, audit.Hash([]byte("previous record"))); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func sel751(t *testing.T) *register.Package {
+	t.Helper()
+	b, err := os.ReadFile("testdata/register-sel-751.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := register.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// With the node's own register package, the client runs CheckLines: the
+// result's lines pass, and a result that sent a line the register does not
+// permit for this run is outcome unknown. Without the package the node
+// claims to hold, the outcome cannot be checked.
+func TestCheckLinesOnTheNode(t *testing.T) {
+	p := sel751(t)
+	held := func(v uint64) *register.Package {
+		if v == p.Revision {
+			return p
+		}
+		return nil
+	}
+	c := scripted(t, mustJSON(t, accepted(10)), outcome(t, invocation, resultOK(t), session(t, 11)))
+	c.Register = held
+	if resp, err := c.Do(ctx(t), runReq()); err != nil || resp.Outcome == nil {
+		t.Fatalf("valid lines: %+v, %v", resp, err)
+	}
+
+	// The same result, claimed as the run of another operation: its SER line
+	// is not that operation's.
+	other := runReq()
+	other.Run.OperationID = "sel.id"
+	other.Run.CredentialRef = ""
+	res := json.RawMessage(strings.Replace(string(resultOK(t)), `"sel.ser.read_all"`, `"sel.id"`, 1))
+	c = scripted(t, mustJSON(t, accepted(10)), outcome(t, invocation, res, session(t, 11)))
+	c.Register = held
+	_, err := c.Do(ctx(t), other)
+	t.Logf("other operation: %v", err)
+	if !errors.Is(err, ErrOutcomeUnknown) || !strings.Contains(err.Error(), "lines") {
+		t.Fatalf("got %v, want ErrOutcomeUnknown from CheckLines", err)
+	}
+
+	c = scripted(t, mustJSON(t, accepted(10)), outcome(t, invocation, resultOK(t), session(t, 11)))
+	c.Register = func(uint64) *register.Package { return nil }
+	if _, err := c.Do(ctx(t), runReq()); !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("no package: %v", err)
 	}
 }
 
