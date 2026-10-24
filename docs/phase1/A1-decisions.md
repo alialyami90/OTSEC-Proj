@@ -129,3 +129,28 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 
 - **Question (A6, C4 re-check S-1, rated "should"):** a gap with repeated keys can lose a new record.
 - **Decision:** S-1 is required before #29 merges. Silently losing a native record breaks EP-1, and `Align` sits on the path of every SER read. S-2 (second 60 checked against local time, not UTC) and S-3 (`invalid-time` with a `wall_clock` present validates) are small, so A4 fixes them in the same change.
+
+## D1-15. Audit is forwarded only over RELP with TLS (2026-10-24)
+
+- **Question (A4, C8-A4, ADR-0004 item 6):** should the audit stream, or at least its checkpoints, require a `relp-tls` target?
+- **Decision:** yes, for the whole audit stream, not only its checkpoints.
+- **Rules:**
+  - C6 forwards audit records only to `relp-tls` targets. A configuration that names any other transport for audit is refused at load, with a reason code.
+  - An audit consumer is always a required consumer. Audit is pruned only after a RELP acknowledgement (C5-A3-2).
+- **Reason:**
+  - Off-node checkpoints are what cover the residual A3 named: a local administrator can bypass the node's own protections.
+  - Without an application-level acknowledgement, the node cannot tell a checkpoint that arrived from one that was lost. UDP, plain TCP and TLS-TCP all give no such acknowledgement.
+  - An unauthenticated target could also receive the chain.
+- **Other events:** they keep the targets ADR-0004 allows, with `forward.unconfirmed` raised where delivery cannot be confirmed.
+- **Action:** A4 writes this into C6. A3 notes it in C8. A6 adds a negative test: an audit target over UDP is refused.
+
+## D1-16. A node clock step becomes a C4 event (2026-10-24)
+
+- **Question (A4, C8-A4):** C8's `clock.change` has no C4 counterpart.
+- **Decision:** add `time.node-stepped` to C4's platform event types. It goes in alongside C6 as an additive 0.1 change, reviewed with C6, so it does not hold #29.
+
+## D1-17. Residual SER loss with repeated keys is documented, not hidden (2026-10-24)
+
+- **Note (A4, A6):** D1-14 closes the case A6 raised. One case remains that cannot be detected from the reads alone: when keys repeat, a new record identical to an old one, and placed before the first distinct new record, cannot be told apart from the old one.
+- **Decision:** C4's doc.go states the limitation. V-S4 reports the residual measured by A6's randomized model, and it is listed as an open risk in the Phase 1 exit document.
+- **Evidence:** SEL-751 SER rows carry millisecond timestamps, so identical rows need identical text in the same millisecond. Only a device run will show how often that happens.
