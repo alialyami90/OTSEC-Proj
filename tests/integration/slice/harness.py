@@ -81,10 +81,15 @@ def start_simulator(log, password, fid=ALLOWED_FID, extra=()):
     return Proc(argv + list(extra))
 
 
-def start_receiver(log, tls=None, extra=()):
+def start_receiver(log, tls=None, extra=(), permitted_peer=None):
+    """The RELP receiver. With tls it requires a client certificate that
+    chains to tls.ca and carries the permitted peer name, by default
+    TLSMaterial.PERMITTED_PEER: the only collector setup C6 0.2 commissions
+    (D2-9). It never runs in CA-only mode."""
     argv = [sys.executable, RECEIVER, "--port", "0", "--log", log]
     if tls:
-        argv += ["--cert", tls.server_cert, "--key", tls.server_key, "--ca", tls.ca, "--require-client-cert"]
+        argv += ["--cert", tls.server_cert, "--key", tls.server_key, "--ca", tls.ca, "--require-client-cert",
+                 "--permitted-peer", permitted_peer or tls.PERMITTED_PEER]
     return Proc(argv + list(extra))
 
 
@@ -104,9 +109,25 @@ def wait_for(pred, timeout=10.0, step=0.05):
 
 
 class TLSMaterial:
-    """A throwaway CA, a server certificate for localhost and 127.0.0.1, and a
-    client certificate, made with the openssl command line. Test values only,
-    created per test session and never committed."""
+    """A throwaway CA, a server certificate for localhost and 127.0.0.1, and
+    client certificates, made with the openssl command line. Test values only,
+    created per test session and never committed.
+
+    PERMITTED_PEER is the node name a collector permits (C6 0.2
+    durable_ack.permitted_peer). The client certificates cover the V-S6
+    refusals and both name paths of the peer check:
+
+      client       CA-signed, CN a6-slice-node, no SAN: accepted (CN path)
+      san_client   CA-signed, SAN DNS:a6-slice-node, CN a6-cn-other: accepted
+                   (SAN path; the CN is not consulted when a SAN is present)
+      san_shadow   CA-signed, SAN DNS:a6-other-node, CN a6-slice-node: refused
+                   (a SAN is present and does not match; the CN is ignored)
+      wrongname    CA-signed, CN a6-other-node: refused (V-S6, another name)
+      impostor     self-signed, CN a6-slice-node: refused (V-S6, no chain)
+      other        self-signed, CN a6-stranger: refused
+    """
+
+    PERMITTED_PEER = "a6-slice-node"
 
     def __init__(self, d):
         self.dir = d
@@ -115,6 +136,9 @@ class TLSMaterial:
         self.client_cert, self.client_key = os.path.join(d, "client.pem"), os.path.join(d, "client.key")
         self.other_cert, self.other_key = os.path.join(d, "other.pem"), os.path.join(d, "other.key")
         self.impostor_cert, self.impostor_key = os.path.join(d, "impostor.pem"), os.path.join(d, "impostor.key")
+        self.wrongname_cert, self.wrongname_key = os.path.join(d, "wrongname.pem"), os.path.join(d, "wrongname.key")
+        self.san_client_cert, self.san_client_key = os.path.join(d, "san-client.pem"), os.path.join(d, "san-client.key")
+        self.san_shadow_cert, self.san_shadow_key = os.path.join(d, "san-shadow.pem"), os.path.join(d, "san-shadow.key")
 
     @staticmethod
     def openssl():
@@ -139,7 +163,13 @@ class TLSMaterial:
                 (self.server_cert, self.server_key, "localhost",
                  ext("server.ext", "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n")),
                 (self.client_cert, self.client_key, "a6-slice-node",
-                 ext("client.ext", "extendedKeyUsage=clientAuth\n"))):
+                 ext("client.ext", "extendedKeyUsage=clientAuth\n")),
+                (self.wrongname_cert, self.wrongname_key, "a6-other-node",
+                 ext("client.ext", "extendedKeyUsage=clientAuth\n")),
+                (self.san_client_cert, self.san_client_key, "a6-cn-other",
+                 ext("san-client.ext", "subjectAltName=DNS:a6-slice-node\nextendedKeyUsage=clientAuth\n")),
+                (self.san_shadow_cert, self.san_shadow_key, "a6-slice-node",
+                 ext("san-shadow.ext", "subjectAltName=DNS:a6-other-node\nextendedKeyUsage=clientAuth\n"))):
             csr = key + ".csr"
             run("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
                 "-keyout", key, "-out", csr, "-subj", "/CN=" + cn)
@@ -166,7 +196,7 @@ global(workDirectory="{dir}")
 module(load="imrelp")
 input(type="imrelp" port="{port}" address="127.0.0.1" ruleset="slice"
       tls="on" tls.cacert="{ca}" tls.mycert="{cert}" tls.myprivkey="{key}"
-      tls.authmode="name" tls.permittedPeer=["a6-slice-node"])
+      tls.authmode="name" tls.permittedPeer=["{peer}"])
 template(name="raw" type="string" string="%rawmsg%\\n")
 ruleset(name="slice" queue.type="Direct") {{
   action(type="omfile" file="{out}" template="raw" asyncWriting="off"
@@ -198,7 +228,7 @@ class Rsyslog:
         self.conf = os.path.join(d, "rsyslog.conf")
         with open(self.conf, "w") as f:
             f.write(RSYSLOG_CONF.format(dir=d, port=self.port, ca=tls.ca, cert=tls.server_cert,
-                                        key=tls.server_key, out=self.out))
+                                        key=tls.server_key, out=self.out, peer=tls.PERMITTED_PEER))
         self.p = subprocess.Popen([rsyslogd(), "-n", "-f", self.conf, "-i", os.path.join(d, "rsyslog.pid")],
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         import socket

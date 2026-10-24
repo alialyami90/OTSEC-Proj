@@ -13,7 +13,20 @@ doc/relp.html; the frame grammar is C6 relp.go's, read from the other side):
   - for each "syslog" frame, appends the message to the log, flushes and
     fsyncs it, and only then answers "200 OK" (a durable acknowledgement);
   - answers "close" with an empty "rsp" and closes the connection;
-  - closes with "serverclose" on any frame that breaks the grammar.
+  - closes with "serverclose" on any frame that breaks the grammar, or the
+    session rules C6 relp.go writes by: the first frame is "open", and only
+    the first; the client offers commands=syslog; TXNRs run from 1 and
+    strictly increase; no number has a leading zero; a syslog message is at
+    most 65535 octets (C6 MaxMaxOctets). The oracle is stricter than the
+    forwarder it tests, never looser.
+
+Peer check (C6 0.2, D2-9): with --permitted-peer NAME the client certificate
+must chain to --ca and carry NAME exactly, read the way librelp's
+tls.authmode="name" reads it: the SAN dNSNames when the certificate has any,
+otherwise the subject CN. No wildcards. A client that fails is closed before
+any frame is read and logged as "peer_refused". There is no CA-only mode:
+--require-client-cert without --permitted-peer is refused at start, because
+that is imrelp's "certvalid", which C6 0.2 does not commission.
 
 Fault injection, counted over the process lifetime, for the failure tests
 (V-S6): --close-after N drops the connection when the Nth syslog frame
@@ -26,7 +39,8 @@ Log records, one JSON object per line:
   ready          host, port (also printed to stdout, so a harness can read the
                  port when --port 0)
   session_open   session, peer, tls (protocol and the client certificate's
-                 subject, when one was presented)
+                 subject and SAN dNSNames, when one was presented)
+  peer_refused   session, names (the names the peer check read), want
   open           session, txnr, offers (the client's open data)
   syslog         session, txnr, b64, text (latin-1), octets: the message as
                  received, written durably before the acknowledgement
@@ -36,7 +50,8 @@ Log records, one JSON object per line:
   session_close  session
 
 Run: python relp_receiver.py --port 0 --log recv.jsonl \\
-       --cert server.pem --key server.key --ca ca.pem --require-client-cert
+       --cert server.pem --key server.key --ca ca.pem --require-client-cert \\
+       --permitted-peer a6-slice-node
 """
 
 import argparse
@@ -49,6 +64,8 @@ import ssl
 import time
 
 MAX_DATALEN = 128 * 1024  # librelp's default maximum frame size
+MAX_SYSLOG_OCTETS = 65535  # C6 MaxMaxOctets: no forwarder sends more
+MAX_TXNR = 999999999
 
 
 class FrameError(Exception):
@@ -91,7 +108,7 @@ async def read_frame(reader):
         if datalen[:-1] != b"0":
             raise FrameError("DATALEN without data")
         return int(txnr), command.decode(), b""
-    if not datalen.isdigit():
+    if not datalen.isdigit() or (len(datalen) > 1 and datalen.startswith(b"0")):
         raise FrameError(f"bad DATALEN {datalen!r}")
     n = int(datalen)
     if n > MAX_DATALEN:
@@ -112,7 +129,8 @@ def rsp(txnr, status=b"200 OK", data=b""):
 
 
 class Receiver:
-    def __init__(self, log_path, close_after=None, reject_after=None, serverclose_after=None):
+    def __init__(self, log_path, close_after=None, reject_after=None, serverclose_after=None, permitted_peer=None):
+        self.permitted_peer = permitted_peer
         self._log = open(log_path, "a", buffering=1, encoding="utf-8")
         self._ids = itertools.count(1)
         self._frames = 0
@@ -130,25 +148,44 @@ class Receiver:
         sid = next(self._ids)
         info = {"peer": str(writer.get_extra_info("peername"))}
         sslobj = writer.get_extra_info("ssl_object")
+        cert = None
         if sslobj is not None:
             cert = sslobj.getpeercert()
             info["tls"] = {"version": sslobj.version(),
-                           "client_subject": dict(x[0] for x in cert.get("subject", ())) if cert else None}
+                           "client_subject": dict(x[0] for x in cert.get("subject", ())) if cert else None,
+                           "client_san_dns": [v for k, v in cert.get("subjectAltName", ()) if k == "DNS"] if cert else None}
         self.write("session_open", session=sid, **info)
+        if self.permitted_peer is not None:
+            names = peer_names(cert)
+            if self.permitted_peer not in names:
+                self.write("peer_refused", durable=True, session=sid, names=names, want=self.permitted_peer)
+                writer.close()
+                self.write("session_close", durable=True, session=sid)
+                return
         opened = False
+        last_txnr = 0
         try:
             while True:
                 frame = await read_frame(reader)
                 if frame is None:
                     break
                 txnr, command, data = frame
+                if not 1 <= txnr <= MAX_TXNR or txnr <= last_txnr:
+                    raise FrameError(f"TXNR {txnr} after {last_txnr}: client TXNRs start at 1 and strictly increase")
+                last_txnr = txnr
+                if not opened and command != "open":
+                    raise FrameError(f"{command} before open")
                 if command == "open":
+                    if opened:
+                        raise FrameError("second open in one session")
+                    if not offers_syslog(data):
+                        raise FrameError("open does not offer commands=syslog")
                     opened = True
                     self.write("open", session=sid, txnr=txnr, offers=data.decode("latin-1"))
                     writer.write(rsp(txnr, data=b"relp_version=0\nrelp_software=a6-relp-receiver\ncommands=syslog"))
                 elif command == "syslog":
-                    if not opened:
-                        raise FrameError("syslog before open")
+                    if len(data) > MAX_SYSLOG_OCTETS:
+                        raise FrameError(f"syslog message of {len(data)} octets, over {MAX_SYSLOG_OCTETS}")
                     self._frames += 1
                     n = self._frames
                     if n == self.close_after:
@@ -164,6 +201,7 @@ class Receiver:
                         self.write("unacked", durable=True, session=sid, txnr=txnr, octets=len(data),
                                    reason="reject-after")
                         writer.write(rsp(txnr, status=b"500 rejected by test"))
+                        await writer.drain()
                         continue
                     self.write("syslog", durable=True, session=sid, txnr=txnr, octets=len(data),
                                b64=base64.b64encode(data).decode(), text=data.decode("latin-1"))
@@ -191,6 +229,24 @@ class Receiver:
             self.write("session_close", durable=True, session=sid)
 
 
+def peer_names(cert):
+    """The names librelp's name mode checks: the SAN dNSNames if the
+    certificate has any, otherwise the subject CN. None or {} gives []."""
+    if not cert:
+        return []
+    san = [v for k, v in cert.get("subjectAltName", ()) if k == "DNS"]
+    if san:
+        return san
+    return [v for rdn in cert.get("subject", ()) for k, v in rdn if k == "commonName"]
+
+
+def offers_syslog(data):
+    for line in data.split(b"\n"):
+        if line.startswith(b"commands="):
+            return b"syslog" in line[len(b"commands="):].split(b",")
+    return False
+
+
 def tls_context(cert, key, ca=None, require_client_cert=False):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -202,7 +258,7 @@ def tls_context(cert, key, ca=None, require_client_cert=False):
 
 
 async def serve(args):
-    recv = Receiver(args.log, args.close_after, args.reject_after, args.serverclose_after)
+    recv = Receiver(args.log, args.close_after, args.reject_after, args.serverclose_after, args.permitted_peer)
     ctx = None
     if args.cert:
         ctx = tls_context(args.cert, args.key, args.ca, args.require_client_cert)
@@ -223,12 +279,17 @@ def main():
     ap.add_argument("--key", help="server key (PEM)")
     ap.add_argument("--ca", help="CA that signs client certificates")
     ap.add_argument("--require-client-cert", action="store_true")
+    ap.add_argument("--permitted-peer", help="the one client certificate name accepted (SAN dNSName, or CN without SAN)")
     ap.add_argument("--close-after", type=int)
     ap.add_argument("--reject-after", type=int)
     ap.add_argument("--serverclose-after", type=int)
     args = ap.parse_args()
     if bool(args.cert) != bool(args.key):
         ap.error("--cert and --key go together")
+    if args.require_client_cert != bool(args.permitted_peer):
+        ap.error("--require-client-cert needs --permitted-peer and the reverse: a CA-only check is certvalid (D2-9)")
+    if args.permitted_peer and not args.ca:
+        ap.error("--permitted-peer needs --ca")
     try:
         asyncio.run(serve(args))
     except KeyboardInterrupt:
