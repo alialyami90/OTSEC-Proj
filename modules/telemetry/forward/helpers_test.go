@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -372,7 +371,7 @@ func eids(t testing.TB, ms []relptest.Message) []string {
 	return out
 }
 
-// allKeys returns the eid of every event committed on stream.
+// keys returns the eid of every event committed on stream.
 func (m *memStore) keys(stream store.StreamID) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -383,4 +382,3 @@ func (m *memStore) keys(stream store.StreamID) []string {
 	return out
 }
 
-var _ net.Conn // net is used by the fuzz rig
