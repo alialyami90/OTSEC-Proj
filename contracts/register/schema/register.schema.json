@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.register/0.1",
+  "title": "otsec.register/0.1 command register package (C3)",
+  "description": "Structural schema only. Cross-field rules (unique IDs, citations naming a listed source, templates using exactly their declared parameters, no approved line matching a deny rule, every known firmware branch having a rule, preconditions read by an operation) are enforced by Package.Validate in contracts/register.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "family", "revision", "issued", "owner", "sources", "preconditions", "operations", "session_control", "denied", "firmware"],
+  "properties": {
+    "contract": {"const": "otsec.register/0.1"},
+    "family": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "issued": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "owner": {"type": "string", "minLength": 1},
+    "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+    "preconditions": {"type": "array", "items": {"$ref": "#/$defs/settingCheck"}},
+    "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/operation"}},
+    "session_control": {"type": "array", "items": {"$ref": "#/$defs/sessionLine"}},
+    "denied": {"type": "array", "items": {"$ref": "#/$defs/denyRule"}},
+    "firmware": {"$ref": "#/$defs/firmware"},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$"},
+    "literalLine": {"type": "string", "pattern": "^[A-Z0-9]+( [A-Z0-9]+)*$"},
+    "templateLine": {"type": "string", "pattern": "^[A-Z0-9]+( ([A-Z0-9]+|\\{[a-z][a-z0-9_]*\\}))*$"},
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["id", "title"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "title": {"type": "string", "minLength": 1}, "date_code": {"type": "string"}}
+    },
+    "citation": {
+      "type": "object", "additionalProperties": false, "required": ["source", "ref"],
+      "properties": {"source": {"type": "string", "minLength": 1}, "ref": {"type": "string", "minLength": 1}}
+    },
+    "citations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/citation"}},
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["class"],
+      "properties": {
+        "class": {"enum": ["hardware-verified", "documented-untested", "simulated", "inferred", "unsupported", "unknown"]},
+        "note": {"type": "string"}
+      }
+    },
+    "param": {
+      "type": "object", "additionalProperties": false, "required": ["name", "kind"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "kind": {"enum": ["uint", "enum"]},
+        "min": {"type": "integer", "minimum": 0},
+        "max": {"type": "integer", "minimum": 0},
+        "values": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[A-Z0-9]+$"}}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "uint"}}, "required": ["min", "max"], "not": {"required": ["values"]}},
+        {"properties": {"kind": {"const": "enum"}}, "required": ["values"], "not": {"anyOf": [{"required": ["min"]}, {"required": ["max"]}]}}
+      ]
+    },
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "classification", "line", "access_level", "citations", "evidence", "side_effects"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "classification": {"const": "read-only"},
+        "line": {"$ref": "#/$defs/templateLine"},
+        "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
+        "access_level": {"type": "string", "minLength": 1},
+        "citations": {"$ref": "#/$defs/citations"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "side_effects": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"}
+      }
+    },
+    "sessionLine": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "classification", "line", "phases", "access_level", "citations", "evidence", "side_effects"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "classification": {"const": "session-control"},
+        "line": {"$ref": "#/$defs/literalLine"},
+        "phases": {"type": "array", "minItems": 1, "items": {"enum": ["probe", "auth", "close"]}},
+        "access_level": {"type": "string", "minLength": 1},
+        "citations": {"$ref": "#/$defs/citations"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "side_effects": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"}
+      }
+    },
+    "denyRule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "classification", "pattern", "citations", "evidence", "side_effects"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "classification": {"enum": ["state-changing", "unknown"]},
+        "pattern": {"type": "string", "minLength": 1, "description": "RE2, anchored at both ends when compiled"},
+        "access_level": {"type": "string"},
+        "citations": {"$ref": "#/$defs/citations"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "side_effects": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"}
+      }
+    },
+    "settingCheck": {
+      "type": "object", "additionalProperties": false, "required": ["id", "setting", "equals", "read_by", "reason"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "setting": {"type": "string", "pattern": "^[A-Z0-9_]+$"},
+        "equals": {"type": "string", "minLength": 1},
+        "read_by": {"$ref": "#/$defs/id"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "firmware": {
+      "type": "object", "additionalProperties": false, "required": ["known", "branches"],
+      "properties": {
+        "known": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["fid", "branch", "version", "citation"],
+          "properties": {
+            "fid": {"type": "string", "minLength": 1},
+            "branch": {"type": "string", "minLength": 1},
+            "version": {"type": "integer", "minimum": 0},
+            "citation": {"$ref": "#/$defs/citation"}
+          }
+        }},
+        "branches": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["branch", "status", "min_version", "basis", "evidence"],
+          "properties": {
+            "branch": {"type": "string", "minLength": 1},
+            "status": {"enum": ["allow", "allow-with-condition", "deny"]},
+            "min_version": {"type": "integer", "minimum": 0},
+            "conditions": {"type": "array", "items": {"$ref": "#/$defs/settingCheck"}},
+            "basis": {"type": "string", "minLength": 1},
+            "evidence": {"$ref": "#/$defs/evidence"}
+          }
+        }},
+        "not_covered": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "envelope": {
+      "description": "Signed package. Verification rules are C7's.",
+      "type": "object", "additionalProperties": false, "required": ["contract", "algorithm", "key_id", "payload", "signature"],
+      "properties": {
+        "contract": {"const": "otsec.register/0.1"},
+        "algorithm": {"enum": ["ed25519"]},
+        "key_id": {"type": "string", "minLength": 1},
+        "payload": {"type": "string", "contentEncoding": "base64"},
+        "signature": {"type": "string", "contentEncoding": "base64"}
+      }
+    }
+  }
+}
