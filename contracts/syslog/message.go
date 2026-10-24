@@ -197,6 +197,11 @@ func Frame(msg []byte, f Framing) ([]byte, error) {
 }
 
 // MaxTXNR is the largest RELP transaction number (librelp wraps after it).
+// TXNRs are allocated in increasing order within one session, starting
+// with the open command, and never wrap: Window.Send refuses a TXNR that
+// does not increase. A forwarder that reaches MaxTXNR closes the session
+// once every transaction is answered and opens a new one, where TXNRs start
+// again from the open (C6-A3 re-check).
 const MaxTXNR = 999999999
 
 // FrameRELP builds the RELP "syslog" command frame for one message:
