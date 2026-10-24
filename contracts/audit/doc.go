@@ -19,7 +19,15 @@
 //     (C7-A5-2, VerifyCollectorSeq).
 //   - Session close. After a successful ACC, the session-close record has
 //     outcome failed with reason qui_not_sent when the collector could not
-//     send QUI before closing (C7-A6-2).
+//     send QUI before closing (C7-A6-2). Every session-close record carries
+//     transcript_sha256, the C2 result's transcript.sha256: the SHA-256 of
+//     the transcript exactly as stored, redactions included (A1 D1-25). The
+//     chain therefore covers the evidence: a verifier hashes the stored C2
+//     transcript and compares it with the record whose correlation_id is the
+//     invocation ID. The digest is known only when the session ends, so it
+//     is not on device.session.open, which audit before act requires first.
+//     It was added inside 0.1 by D1-25; no 0.1 reader was deployed without
+//     it.
 //   - What must be recorded: every collector request, accepted or refused,
 //     with the C7 refusal code; every C2 refusal and posture warning; every
 //     credential use, install, suspension, clearing and revocation; every
@@ -45,9 +53,11 @@
 // # What it leaves out
 //
 //   - Secrets, full configurations and raw device output. Values that need
-//     reconciling (parameters, bytes sent) appear only as SHA-256 digests. The
-//     raw transcript belongs to the C2 evidence, not to audit. ParseRecord
-//     rejects a record that carries a field named like a secret.
+//     reconciling (parameters, bytes sent, the session transcript) appear only
+//     as SHA-256 digests. The raw transcript belongs to the C2 evidence, not
+//     to audit. ParseRecord rejects a record that carries a field named like
+//     a secret, raw output, or any field whose name starts with "transcript"
+//     other than transcript_sha256.
 //   - Storage and retention (C5). A producer hands C5 a
 //     pending record (ValidatePending: no seq, no prev_hash). C5 seals it with
 //     Seal inside the commit transaction, in commit order, and stores the

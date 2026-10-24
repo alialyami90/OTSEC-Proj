@@ -58,7 +58,8 @@ func sliceRecords() []Record {
 		{Actor: collector, Action: ActionDevicePostureWarning, Outcome: OutcomeWarning, ReasonCode: "maxacc_above_1", Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
 		{Actor: collector, Action: ActionDeviceOp, Outcome: OutcomeSucceeded, Target: telnetTarget(), OperationID: "sel.ser.read_all", RegisterRevision: 6,
 			BytesSentDigest: "sha256:" + strings.Repeat("ab", 32), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
-		{Actor: collector, Action: ActionDeviceSessionClose, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
+		{Actor: collector, Action: ActionDeviceSessionClose, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71",
+			TranscriptSHA256: strings.Repeat("cd", 32)},
 		{Actor: collector, Action: ActionCollectorRequest, Outcome: OutcomeDenied, ReasonCode: string(authz.RefuseNotInvocable), CorrelationID: "req-20261024-0002"},
 	}
 	// The collector numbers every event it reports (C7-A5-2).
@@ -175,24 +176,32 @@ func TestRecordRules(t *testing.T) {
 		return r
 	}
 	bad := map[string]Record{
-		"plaintext transport labelled encrypted": mut(func(r *Record) { r.Target.DownstreamSecurity = authz.DownstreamEncryptedAuthenticated }),
-		"device action without label":            mut(func(r *Record) { r.Target.DownstreamSecurity = "" }),
-		"device action without target":           mut(func(r *Record) { r.Target = nil }),
-		"failed without reason":                  mut(func(r *Record) { r.Outcome = OutcomeFailed }),
-		"unknown action":                         mut(func(r *Record) { r.Action = "device.write" }),
-		"unknown outcome":                        mut(func(r *Record) { r.Outcome = "partly" }),
-		"other major":                            mut(func(r *Record) { r.Contract = "otsec.audit/1.0" }),
-		"seq zero":                               mut(func(r *Record) { r.Seq = 0 }),
-		"genesis hash after seq 1":               mut(func(r *Record) { r.PrevHash = GenesisPrevHash }),
-		"more precision than resolution":         mut(func(r *Record) { r.Time.UTC = "2026-10-24T11:40:00.123456789Z" }),
-		"local time":                             mut(func(r *Record) { r.Time.UTC = "2026-10-24T14:40:00.123456+03:00" }),
-		"digest not sha256":                      mut(func(r *Record) { r.BytesSentDigest = "md5:abc" }),
-		"detail too long":                        mut(func(r *Record) { r.Detail = strings.Repeat("x", 513) }),
-		"collector event without collector_seq":  mut(func(r *Record) { r.CollectorSeq = 0 }),
-		"device action without invocation ID":    mut(func(r *Record) { r.CorrelationID = "" }),
-		"clock sync outside the C4 enum":         mut(func(r *Record) { r.Time.Clock.Sync = "ok" }),
-		"upper-case node":                        mut(func(r *Record) { r.NodeID = "Site-A" }),
-		"asset ID that is not a C1 UUID":         mut(func(r *Record) { r.Target.AssetID = "site-a.relay.feeder-3" }),
+		"plaintext transport labelled encrypted":  mut(func(r *Record) { r.Target.DownstreamSecurity = authz.DownstreamEncryptedAuthenticated }),
+		"device action without label":             mut(func(r *Record) { r.Target.DownstreamSecurity = "" }),
+		"device action without target":            mut(func(r *Record) { r.Target = nil }),
+		"failed without reason":                   mut(func(r *Record) { r.Outcome = OutcomeFailed }),
+		"unknown action":                          mut(func(r *Record) { r.Action = "device.write" }),
+		"unknown outcome":                         mut(func(r *Record) { r.Outcome = "partly" }),
+		"other major":                             mut(func(r *Record) { r.Contract = "otsec.audit/1.0" }),
+		"seq zero":                                mut(func(r *Record) { r.Seq = 0 }),
+		"genesis hash after seq 1":                mut(func(r *Record) { r.PrevHash = GenesisPrevHash }),
+		"more precision than resolution":          mut(func(r *Record) { r.Time.UTC = "2026-10-24T11:40:00.123456789Z" }),
+		"local time":                              mut(func(r *Record) { r.Time.UTC = "2026-10-24T14:40:00.123456+03:00" }),
+		"digest not sha256":                       mut(func(r *Record) { r.BytesSentDigest = "md5:abc" }),
+		"detail too long":                         mut(func(r *Record) { r.Detail = strings.Repeat("x", 513) }),
+		"collector event without collector_seq":   mut(func(r *Record) { r.CollectorSeq = 0 }),
+		"device action without invocation ID":     mut(func(r *Record) { r.CorrelationID = "" }),
+		"clock sync outside the C4 enum":          mut(func(r *Record) { r.Time.Clock.Sync = "ok" }),
+		"upper-case node":                         mut(func(r *Record) { r.NodeID = "Site-A" }),
+		"asset ID that is not a C1 UUID":          mut(func(r *Record) { r.Target.AssetID = "site-a.relay.feeder-3" }),
+		"transcript digest on session open":       mut(func(r *Record) { r.TranscriptSHA256 = strings.Repeat("cd", 32) }),
+		"session close without transcript digest": mut(func(r *Record) { r.Action = ActionDeviceSessionClose }),
+		"transcript digest not lowercase hex": mut(func(r *Record) {
+			r.Action, r.TranscriptSHA256 = ActionDeviceSessionClose, strings.Repeat("CD", 32)
+		}),
+		"transcript digest with a prefix": mut(func(r *Record) {
+			r.Action, r.TranscriptSHA256 = ActionDeviceSessionClose, "sha256:"+strings.Repeat("cd", 32)
+		}),
 		"node record with collector_seq": mut(func(r *Record) {
 			r.Action, r.Outcome, r.Target, r.CorrelationID = ActionCollectorRequest, OutcomeInfo, nil, "req-1"
 		}),
@@ -236,6 +245,27 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 	}
 	for name, raw := range cases {
 		if raw == string(ok) {
+			t.Fatalf("%s: mutation did not apply", name)
+		}
+		if _, err := ParseRecord([]byte(raw)); !errors.Is(err, ErrRecordRejected) {
+			t.Fatalf("%s: got %v", name, err)
+		}
+	}
+	// The transcript digest is allowed, spelled exactly so and only on the
+	// session close; any other transcript-named field is content and is
+	// refused at any depth and in any case (D1-25).
+	closeRec := recs[7]
+	if _, err := ParseRecord(closeRec); err != nil || !bytes.Contains(closeRec, []byte(`"transcript_sha256":"`)) {
+		t.Fatalf("session close with its transcript digest: %v", err)
+	}
+	for name, raw := range map[string]string{
+		"transcript field":       strings.Replace(string(closeRec), `"outcome"`, `"transcript":"PSVTAgo=","outcome"`, 1),
+		"transcript content":     strings.Replace(string(closeRec), `"outcome"`, `"transcript_data":"PSVTAgo=","outcome"`, 1),
+		"nested transcript":      strings.Replace(string(closeRec), `"family":"sel-751"`, `"family":"sel-751","transcript_bytes":"x"`, 1),
+		"case-variant digest":    strings.Replace(string(closeRec), `"transcript_sha256"`, `"Transcript_SHA256"`, 1),
+		"digest on another type": strings.Replace(string(ok), `"outcome"`, `"transcript_sha256":"`+strings.Repeat("cd", 32)+`","outcome"`, 1),
+	} {
+		if raw == string(closeRec) || raw == string(ok) {
 			t.Fatalf("%s: mutation did not apply", name)
 		}
 		if _, err := ParseRecord([]byte(raw)); !errors.Is(err, ErrRecordRejected) {
