@@ -26,9 +26,19 @@ type AlignResult struct {
 // device appends at the end and drops from the front, so the new read
 // should equal prev[d:] followed by the added records, for some d.
 //
+// Capacity is the buffer's size in records (SEL-751: 1,024, S22 Table
+// 7.63), or 0 when it is not known.
+//
 // The rule (A6 C-13, R-A4-1, R-A4-2):
 //
 //   - prev nil: first read; every record is added.
+//   - prev empty (the device answered that its buffer is empty, for example
+//     SEL "No Data Available", S22 p. 7.75): ok, every record is added,
+//     unless the new read fills the buffer (len(next) >= capacity), when it
+//     may have wrapped since the empty read: gap. With capacity unknown (0)
+//     a non-empty read after an empty one is a gap: a false gap is visible,
+//     a missed one is not.
+//   - prev non-empty and next empty: gap (buffer cleared or device restart).
 //   - no d leaves an overlap of at least one record: gap. Every record of the
 //     new read is added with alignment gap-before, and the producer emits a
 //     ser.gap health event. Causes include a wrapped buffer, a cleared buffer,
@@ -42,9 +52,15 @@ type AlignResult struct {
 //
 // Identical records within one read stay separate records: alignment works
 // on positions, never on a per-record key.
-func Align(prev, next []string) AlignResult {
+func Align(prev, next []string, capacity int) AlignResult {
 	if prev == nil {
 		return AlignResult{Status: AlignStatusFirstRead, Added: indices(0, len(next))}
+	}
+	if len(prev) == 0 {
+		if len(next) == 0 || (capacity > 0 && len(next) < capacity) {
+			return AlignResult{Status: AlignStatusOK, Added: indices(0, len(next))}
+		}
+		return AlignResult{Status: AlignStatusGap, Added: indices(0, len(next))}
 	}
 	var fits []int
 	for d := 0; d < len(prev); d++ {
@@ -54,9 +70,6 @@ func Align(prev, next []string) AlignResult {
 		}
 	}
 	if len(fits) == 0 {
-		if len(prev) == 0 && len(next) == 0 {
-			return AlignResult{Status: AlignStatusOK}
-		}
 		return AlignResult{Status: AlignStatusGap, Added: indices(0, len(next))}
 	}
 	d := fits[len(fits)-1]

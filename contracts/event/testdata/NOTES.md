@@ -1,6 +1,6 @@
 # C4 golden examples
 
-Generated from the documented-example fixtures named below, then frozen. None of them is device output. Values that no document supplies (node ID, stream, asset ID, receive times, the RTAC sender address `192.0.2.10` from the RFC 5737 documentation range) are illustrative and say so here.
+Generated from the documented-example fixtures named below, then frozen. None of them is device output. Values that no document supplies are illustrative and say so here: node ID, stream, receive times, the invocation ID, the asset IDs and the RTAC sender address `192.0.2.40` (RFC 5737 documentation range). The asset IDs and the RTAC address are the ones in A2's C1 examples (PR #32), so the two contracts' examples describe the same assets. The operation ID `sel.ser.read_all` is the SER operation in C3's register (PR #27).
 
 `sel751-fig10-16.txt` is a byte-exact copy of A2's transcription `tests/fixtures/ied/sel/751/documented-example/ser-report-fig10-16.txt` (SEL-751 IM 20260910, Figure 10.16, `documented-example`). `TestFixtureCopyIsA2Transcription` keeps them identical; the copy is marked `-text` so a Windows checkout cannot change its bytes.
 
@@ -8,7 +8,7 @@ Generated from the documented-example fixtures named below, then frozen. None of
 
 | File | What it shows |
 | --- | --- |
-| `sel751-fig10-16-row1.json` … `row8.json` | The 8 rows of Figure 10.16, field by field: verbatim row bytes with their span in the report, SHA-256 of row and report, `native_position` = the relay's row number, alignment key without the row number, local time with offset `unknown` and no UTC, 1 ms resolution, accuracy unknown (the manual's ±1 ms is relative to the time source, so it is `accuracy_relative_ns`), report-scoped `Time Source: Internal`, `DATE_F` assumed MDY and flagged, category `unmapped`. Seq runs oldest first: row 8 is seq 1. Rows 8 and 7 share 13:54:09.602 and stay two events. |
+| `sel751-fig10-16-row1.json` … `row8.json` | The 8 rows of Figure 10.16, field by field: verbatim row bytes with their span in the report, SHA-256 of row and report, `native_position` = the relay's row number, alignment key over the bytes from DATE to the end of the row, `context_span` on the report header (`SEL-751 … CID = 5052`: Time Source, Serial No, FID, CID), evidence `ref` = `sha256:` + evidence SHA-256, invocation and operation IDs, local time with offset `unknown` and no UTC, 1 ms resolution, accuracy unknown (the manual's ±1 ms is relative to the time source, so it is `accuracy_relative_ns`), report-scoped `Time Source: Internal`, `DATE_F` assumed MDY and flagged, category `unmapped`. Seq runs oldest first: row 8 is seq 1. Rows 8 and 7 share 13:54:09.602 and stay two events. |
 | `sel751-row8-known-offset.json` | Row 8 as it would look after the adapter read `UTC_OFF` and the DST settings. The offset `-08:00` is illustrative, not from the manual. UTC is stated only because the offset is known, and equals wall clock minus offset. |
 | `rtac-syslog-user-logon.json` | The RTAC Syslog example (A2's fixture `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt`, SEL-5033 IM 20260925 p. 636). The event time is the millisecond time inside MSG; the HEADER send time, 9.4 s later, is kept only as a native field. Received over UDP, so `origin_auth` is `none`. |
 | `health-ser-gap.json` | A platform `ser.gap` event: the next read of the same SER stream had no overlap with the previous one. |
@@ -39,3 +39,6 @@ Each file is `sel751-fig10-16-row8.json` with one change (the platform case star
 | `no-asset-no-flag.json` | missing | no | An unresolved subject must carry `asset-unresolved`. |
 | `platform-event-with-native.json` | forbidden | no | Platform events carry no device record. |
 | `closed-enum-unknown.json` | enum | yes | `scope: site` is outside the closed set. |
+| `adapter-poll-without-invocation.json` | missing | no | An adapter poll must name its C2 invocation (and C3 operation). |
+| `context-span-outside-evidence.json` | evidence | no | The header span runs past the end of the report. |
+| `evidence-ref-mismatch.json` | evidence | no | The capture name is not `sha256:` + the evidence SHA-256 (C5 names captures by content). |

@@ -9,7 +9,7 @@
   "kind": "telemetry-health",
   "source": {
     "asset": {
-      "id": "sel751-feeder1",
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
       "binding": {
         "method": "adapter-target",
         "confidence": "configured"

@@ -9,25 +9,29 @@ func TestAlign(t *testing.T) {
 	cases := []struct {
 		name       string
 		prev, next []string
+		capacity   int
 		want       AlignResult
 	}{
-		{"first read", nil, []string{"a", "b"}, AlignResult{AlignStatusFirstRead, []int{0, 1}, 0}},
-		{"no change", []string{"a", "b"}, []string{"a", "b"}, AlignResult{AlignStatusOK, []int{}, 0}},
-		{"append", []string{"a", "b"}, []string{"a", "b", "c"}, AlignResult{AlignStatusOK, []int{2}, 0}},
-		{"append with front drop", []string{"a", "b", "c"}, []string{"b", "c", "d", "e"}, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
-		{"identical records anchored", []string{"a", "x"}, []string{"a", "x", "x", "x"}, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
+		{"first read", nil, []string{"a", "b"}, 1024, AlignResult{AlignStatusFirstRead, []int{0, 1}, 0}},
+		{"no change", []string{"a", "b"}, []string{"a", "b"}, 1024, AlignResult{AlignStatusOK, []int{}, 0}},
+		{"append", []string{"a", "b"}, []string{"a", "b", "c"}, 1024, AlignResult{AlignStatusOK, []int{2}, 0}},
+		{"append with front drop", []string{"a", "b", "c"}, []string{"b", "c", "d", "e"}, 1024, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
+		{"identical records anchored", []string{"a", "x"}, []string{"a", "x", "x", "x"}, 1024, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
 		// Overlap of 2 or 1 both fit: keep the possibly-new x, flag it (R-A4-2).
-		{"identical records unanchored", []string{"x", "x"}, []string{"x", "x", "y"}, AlignResult{AlignStatusAmbiguous, []int{1, 2}, 1}},
-		{"wrapped past previous read", []string{"a", "b"}, []string{"c", "d"}, AlignResult{AlignStatusGap, []int{0, 1}, 0}},
-		{"cleared then one record", []string{"a", "b"}, []string{"z"}, AlignResult{AlignStatusGap, []int{0}, 0}},
-		{"cleared and empty", []string{"a", "b"}, []string{}, AlignResult{AlignStatusGap, []int{}, 0}},
-		{"record removed from the middle", []string{"a", "b", "c"}, []string{"a", "c", "d"}, AlignResult{AlignStatusGap, []int{0, 1, 2}, 0}},
-		{"empty to empty", []string{}, []string{}, AlignResult{AlignStatusOK, nil, 0}},
-		{"empty to records", []string{}, []string{"a"}, AlignResult{AlignStatusGap, []int{0}, 0}},
-		{"shorter read than previous overlap", []string{"a", "b", "c", "d"}, []string{"c"}, AlignResult{AlignStatusGap, []int{0}, 0}},
+		{"identical records unanchored", []string{"x", "x"}, []string{"x", "x", "y"}, 1024, AlignResult{AlignStatusAmbiguous, []int{1, 2}, 1}},
+		{"wrapped past previous read", []string{"a", "b"}, []string{"c", "d"}, 1024, AlignResult{AlignStatusGap, []int{0, 1}, 0}},
+		{"cleared then one record", []string{"a", "b"}, []string{"z"}, 1024, AlignResult{AlignStatusGap, []int{0}, 0}},
+		{"cleared and empty", []string{"a", "b"}, []string{}, 1024, AlignResult{AlignStatusGap, []int{}, 0}},
+		{"record removed from the middle", []string{"a", "b", "c"}, []string{"a", "c", "d"}, 1024, AlignResult{AlignStatusGap, []int{0, 1, 2}, 0}},
+		{"empty to empty", []string{}, []string{}, 1024, AlignResult{AlignStatusOK, nil, 0}},
+		// SEL "No Data Available", then rows (A2 C4 review change 2).
+		{"empty to records", []string{}, []string{"a"}, 1024, AlignResult{AlignStatusOK, []int{0}, 0}},
+		{"empty to a full buffer", []string{}, []string{"a", "b", "c"}, 3, AlignResult{AlignStatusGap, []int{0, 1, 2}, 0}},
+		{"empty to records, capacity unknown", []string{}, []string{"a"}, 0, AlignResult{AlignStatusGap, []int{0}, 0}},
+		{"shorter read than previous overlap", []string{"a", "b", "c", "d"}, []string{"c"}, 1024, AlignResult{AlignStatusGap, []int{0}, 0}},
 	}
 	for _, c := range cases {
-		got := Align(c.prev, c.next)
+		got := Align(c.prev, c.next, c.capacity)
 		if got.Status != c.want.Status || got.PossibleDuplicates != c.want.PossibleDuplicates ||
 			len(got.Added) != len(c.want.Added) || (len(got.Added) > 0 && !reflect.DeepEqual(got.Added, c.want.Added)) {
 			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
@@ -44,7 +48,7 @@ func TestAlignGoldenKeysSurviveRenumbering(t *testing.T) {
 		keys = append(keys, load(t, "testdata/valid/sel751-fig10-16-row"+n+".json").Native.AlignmentKey)
 	}
 	next := append(append([]string{}, keys...), "sha256:new-record")
-	got := Align(keys, next)
+	got := Align(keys, next, 1024)
 	if got.Status != AlignStatusOK || !reflect.DeepEqual(got.Added, []int{8}) {
 		t.Fatalf("got %+v", got)
 	}

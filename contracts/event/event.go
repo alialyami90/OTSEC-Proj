@@ -116,15 +116,17 @@ type Source struct {
 
 // AssetRef refers to a C1 asset.
 //
-// TODO(C1): replace ID with the C1 asset ID type once C1 is merged. The
-// binding fields stay in C4: they describe how this event was attributed,
-// not the asset.
+// ID is a C1 asset ID: a lowercase RFC 9562 UUID, assigned at registration
+// and never derived from device content. TODO(C1): use asset.ValidAssetID
+// once C1 is merged (contracts/asset must not import this package; see the
+// C1 review, docs/phase1/reviews/C1-A4.md). The binding fields stay in C4:
+// they describe how this event was attributed, not the asset.
 type AssetRef struct {
 	ID      string  `json:"id"`
 	Binding Binding `json:"binding"`
 }
 
-var assetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+var assetIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // Binding records how the event was attributed to the asset.
 type Binding struct {
@@ -171,10 +173,17 @@ const (
 )
 
 // Collection describes how the record was obtained.
+//
+// For adapter-poll, InvocationID and OperationID are required: they tie the
+// event to its session, its audit records (C8) and its parser run (EP-4).
+// Native.Evidence is then the C2 result transcript as stored, which is
+// after redaction (C2 replaces a password with a fixed-length marker):
+// Evidence.SHA256 equals the C2 transcript SHA-256, and every span indexes
+// the stored bytes, not the bytes on the wire.
 type Collection struct {
 	Method         CollectionMethod `json:"method"`
-	InvocationID   string           `json:"invocation_id,omitempty"` // C2 invocation
-	OperationID    string           `json:"operation_id,omitempty"`  // TODO(C3): C3 operation ID type
+	InvocationID   string           `json:"invocation_id,omitempty"` // C2 invocation ID. TODO(C2): C2 type
+	OperationID    string           `json:"operation_id,omitempty"`  // C3 operation ID, for example "sel.ser.read_all". TODO(C3): C3 type
 	Parser         *Parser          `json:"parser,omitempty"`
 	NativePosition string           `json:"native_position,omitempty"` // the device's own row number or position, verbatim
 	Alignment      Alignment        `json:"alignment,omitempty"`
@@ -319,9 +328,17 @@ type Native struct {
 	Evidence Evidence `json:"evidence"`
 	// Span locates the record inside the evidence.
 	Span *Span `json:"span,omitempty"`
+	// ContextSpan locates, in the same evidence, the report-level context
+	// that applies to the record, such as the SEL SER report header with
+	// Time Source, Serial No, FID and CID. It is referenced, never copied
+	// into the event (EP-2); C1 observations point at the same bytes.
+	ContextSpan *Span `json:"context_span,omitempty"`
 	// AlignmentKey is set for ring-buffer records: "sha256:<hex>" of the
 	// record bytes without the device's row numbering (R-A4-1). The adapter
-	// computes it; it is not a uniqueness key.
+	// computes it; it is not a uniqueness key. For SEL ASCII SER rows the
+	// hashed bytes run from the first byte of the DATE field through the
+	// last byte before the line terminator (CR, LF or CR LF), with no
+	// trimming and no case or space normalization.
 	AlignmentKey string `json:"alignment_key,omitempty"`
 	// Fields are the parsed native fields, names and values as the device
 	// printed them, in order. Never a substitute for Bytes.
@@ -332,7 +349,7 @@ type Native struct {
 type Evidence struct {
 	SHA256 string `json:"sha256"`
 	Length int64  `json:"length"`
-	Ref    string `json:"ref,omitempty"` // evidence store reference (C5)
+	Ref    string `json:"ref,omitempty"` // C5 capture name: "sha256:" + SHA256 when set
 }
 
 // Span is a byte range inside the evidence.

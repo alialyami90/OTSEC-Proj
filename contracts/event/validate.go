@@ -70,7 +70,16 @@ var self = version.ID{Name: "event", Major: 0, Minor: 1}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
-func (e *Event) Validate() error {
+func (e *Event) Validate() error { return e.validate(false) }
+
+// ValidatePending checks an event a producer hands to the store, before the
+// store assigns its sequence number (C5). It applies every rule of Validate
+// except that id.seq must be 0: a producer never chooses seq. The store
+// writes the assigned seq into id before any reader can see the event, so a
+// stored event always carries its full ID and passes Validate.
+func (e *Event) ValidatePending() error { return e.validate(true) }
+
+func (e *Event) validate(pending bool) error {
 	c := &checker{}
 	if got, err := version.Parse(e.Schema); err != nil || !self.Accepts(got) {
 		c.fail(CodeSchema, "schema", "%q is not an otsec.event/0.x identifier", e.Schema)
@@ -81,7 +90,10 @@ func (e *Event) Validate() error {
 	if !e.ID.Stream.Valid() {
 		c.fail(CodeID, "id.stream", "%q is not a stream token", e.ID.Stream)
 	}
-	if e.ID.Seq == 0 {
+	switch {
+	case pending && e.ID.Seq != 0:
+		c.fail(CodeID, "id.seq", "a pending event has seq 0; the store assigns it")
+	case !pending && e.ID.Seq == 0:
 		c.fail(CodeID, "id.seq", "seq starts at 1")
 	}
 	if !tokenPattern.MatchString(string(e.Kind)) {
@@ -214,6 +226,9 @@ func checkCollection(c *checker, col *Collection) {
 	if col.Alignment != "" && !oneOf(col.Alignment, AlignFirstRead, AlignOK, AlignGapBefore, AlignPossibleDuplicate) {
 		c.fail(CodeEnum, "collection.alignment", "%q", col.Alignment)
 	}
+	if col.Method == MethodAdapterPoll && (col.InvocationID == "" || col.OperationID == "") {
+		c.fail(CodeMissing, "collection.invocation_id/operation_id", "adapter-poll events name their invocation and operation")
+	}
 	if col.Parser != nil && (col.Parser.Name == "" || col.Parser.Version == "") {
 		c.fail(CodeMissing, "collection.parser", "name and version are both required")
 	}
@@ -238,13 +253,19 @@ func checkNative(c *checker, n *Native) {
 	if !hexSHA256.MatchString(n.Evidence.SHA256) {
 		c.fail(CodeEvidence, "native.evidence.sha256", "not lowercase hex SHA-256")
 	}
+	if n.Evidence.Ref != "" && n.Evidence.Ref != "sha256:"+n.Evidence.SHA256 {
+		c.fail(CodeEvidence, "native.evidence.ref", "must be \"sha256:\" followed by evidence.sha256 (the C5 capture name)")
+	}
 	if n.Evidence.Length < 0 {
 		c.fail(CodeEvidence, "native.evidence.length", "negative")
 	}
 	if n.Span != nil {
-		if n.Span.Offset < 0 || n.Span.Length != n.RecordLength || n.Span.Offset+n.Span.Length > n.Evidence.Length {
+		if !n.Span.inside(n.Evidence.Length) || n.Span.Length != n.RecordLength {
 			c.fail(CodeEvidence, "native.span", "span must lie inside the evidence and match record_length")
 		}
+	}
+	if n.ContextSpan != nil && !n.ContextSpan.inside(n.Evidence.Length) {
+		c.fail(CodeEvidence, "native.context_span", "span must lie inside the evidence")
 	}
 	if n.AlignmentKey != "" && !alignKeyFormat.MatchString(n.AlignmentKey) {
 		c.fail(CodeEvidence, "native.alignment_key", "not sha256:<hex>")
@@ -411,4 +432,8 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Span) inside(length int64) bool {
+	return s.Offset >= 0 && s.Length >= 0 && s.Offset+s.Length <= length
 }

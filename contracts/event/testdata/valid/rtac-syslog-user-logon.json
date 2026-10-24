@@ -2,21 +2,21 @@
   "schema": "otsec.event/0.1",
   "id": {
     "node_id": "site-a-node1",
-    "stream": "syslog/192.0.2.10",
+    "stream": "syslog/192.0.2.40",
     "seq": 1
   },
   "origin": "device",
   "kind": "syslog",
   "source": {
     "asset": {
-      "id": "rtac-1",
+      "id": "c41f8a2d-6b0e-4e97-8d13-5a2c9f7b0e64",
       "binding": {
         "method": "sender-address",
         "confidence": "configured"
       }
     },
     "sender": {
-      "address": "192.0.2.10"
+      "address": "192.0.2.40"
     },
     "origin_auth": "none"
   },

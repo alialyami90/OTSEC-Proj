@@ -72,26 +72,29 @@ func TestValidExamples(t *testing.T) {
 // Each invalid example and the code it must produce. testdata/NOTES.md says
 // what each shows.
 var invalid = map[string]Code{
-	"precision-overclaim":          CodePrecision,
-	"received-precision-overclaim": CodePrecision,
-	"utc-with-unknown-offset":      CodeOffset,
-	"utc-inconsistent":             CodeOffset,
-	"known-offset-without-basis":   CodeOffset,
-	"bytes-tampered":               CodeEvidence,
-	"span-outside-evidence":        CodeEvidence,
-	"seq-zero":                     CodeID,
-	"node-id-uppercase":            CodeID,
-	"stream-with-colon":            CodeID,
-	"category-without-mapping":     CodeUnjustifiedMeaning,
-	"failed-parse-with-normalized": CodeForbidden,
-	"missing-native":               CodeMissing,
-	"received-without-z":           CodeTimeFormat,
-	"other-major":                  CodeSchema,
-	"device-event-platform-auth":   CodeEnum,
-	"content-field-configured":     CodeEnum,
-	"no-asset-no-flag":             CodeMissing,
-	"platform-event-with-native":   CodeForbidden,
-	"closed-enum-unknown":          CodeEnum,
+	"precision-overclaim":             CodePrecision,
+	"received-precision-overclaim":    CodePrecision,
+	"utc-with-unknown-offset":         CodeOffset,
+	"utc-inconsistent":                CodeOffset,
+	"known-offset-without-basis":      CodeOffset,
+	"bytes-tampered":                  CodeEvidence,
+	"span-outside-evidence":           CodeEvidence,
+	"seq-zero":                        CodeID,
+	"node-id-uppercase":               CodeID,
+	"stream-with-colon":               CodeID,
+	"category-without-mapping":        CodeUnjustifiedMeaning,
+	"failed-parse-with-normalized":    CodeForbidden,
+	"missing-native":                  CodeMissing,
+	"received-without-z":              CodeTimeFormat,
+	"other-major":                     CodeSchema,
+	"device-event-platform-auth":      CodeEnum,
+	"content-field-configured":        CodeEnum,
+	"no-asset-no-flag":                CodeMissing,
+	"platform-event-with-native":      CodeForbidden,
+	"closed-enum-unknown":             CodeEnum,
+	"adapter-poll-without-invocation": CodeMissing,
+	"context-span-outside-evidence":   CodeEvidence,
+	"evidence-ref-mismatch":           CodeEvidence,
 }
 
 func TestInvalidExamples(t *testing.T) {
@@ -218,6 +221,28 @@ func TestEventID(t *testing.T) {
 	long := NodeID(strings.Repeat("a", 64))
 	if long.Valid() || !NodeID(strings.Repeat("a", 63)).Valid() {
 		t.Error("node ID length limit is 63")
+	}
+}
+
+// A producer validates before the store assigns seq (C5): seq 0 is the only
+// pending value, and a stored event must have a real one.
+func TestValidatePending(t *testing.T) {
+	e := load(t, "testdata/valid/sel751-fig10-16-row8.json")
+	e.ID.Seq = 0
+	if err := e.ValidatePending(); err != nil {
+		t.Fatalf("pending event with seq 0: %v", err)
+	}
+	if !slices.Contains(Codes(e.Validate()), CodeID) {
+		t.Fatal("Validate accepted seq 0")
+	}
+	e.ID.Seq = 1
+	if !slices.Contains(Codes(e.ValidatePending()), CodeID) {
+		t.Fatal("ValidatePending accepted a producer-chosen seq")
+	}
+	e.ID.Seq = 0
+	e.Native.Evidence.Ref = "sha256:" + strings.Repeat("0", 64)
+	if !slices.Contains(Codes(e.ValidatePending()), CodeEvidence) {
+		t.Fatal("ValidatePending skipped a rule other than seq")
 	}
 }
 

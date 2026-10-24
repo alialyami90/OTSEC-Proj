@@ -18,12 +18,25 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 
 ## Golden examples and acceptance tests
 
-- All 8 rows of SEL-751 Figure 10.16 (A2's `documented-example`), mapped field by field, plus the RTAC Syslog example, a known-offset variant and a `ser.gap` platform event. Twenty invalid examples, one rule each. Details: [contracts/event/testdata/NOTES.md](../../contracts/event/testdata/NOTES.md).
+- All 8 rows of SEL-751 Figure 10.16 (A2's `documented-example`), mapped field by field, plus the RTAC Syslog example, a known-offset variant and a `ser.gap` platform event. Twenty-three invalid examples, one rule each. Details: [contracts/event/testdata/NOTES.md](../../contracts/event/testdata/NOTES.md).
 - Native round trip: `TestSERRoundTrip` checks that each row's bytes equal the fixture at the span, survive JSON marshalling, and that every row of the figure has exactly one event.
 - Precision: `TestPrecision` plus two invalid examples.
 - Schema drift: `TestSchemaMatchesTypes` fails if `schema/event.json` and the Go types disagree on any property or on which properties are required. The schema states structure; cross-field rules are enforced by `Validate`. The valid examples also validate against the schema with Python `jsonschema` 4.26 (run locally; CI does not install it).
 
+## Changes from C4 reviews
+
+| Review | Change | Done |
+| --- | --- | --- |
+| A2 ([C4-A2](reviews/C4-A2.md)) 1 | `adapter-poll` requires `invocation_id` and `operation_id`; the evidence is the C2 transcript as stored (after redaction), and spans index stored bytes. | `Validate`, `Collection` doc, invalid `adapter-poll-without-invocation` |
+| A2 2 | `Align(prev, next, capacity)`: an empty previous read followed by records is `ok`, unless the new read fills the buffer (then `gap`); with capacity unknown it stays `gap`. | `align.go`, three new cases |
+| A2 3 | Optional `native.context_span` for the report header, inside the same evidence. | Golden rows point at the SEL-751 header; invalid `context-span-outside-evidence` |
+| A2 4 | Alignment key bytes defined exactly: DATE through the last byte before CR, LF or CR LF, no trimming. | `Native.AlignmentKey` doc; the golden keys already follow it (A2 recomputed row 8) |
+| A2 note | Asset IDs are C1 lowercase UUIDs. | Pattern and examples switched; IDs match A2's C1 examples |
+| A5 ([C4-A5](reviews/C4-A5.md)) 1 | `ValidatePending` for producers before C5 assigns seq: every rule, with seq required to be 0. The store writes seq into `id` before any reader sees the event, so stored bodies carry the full ID. | `validate.go`, `TestValidatePending` |
+| A5 2 | `evidence.ref`, when set, equals `sha256:` + `evidence.sha256` (C5 capture name). | `Validate`, schema pattern, invalid `evidence-ref-mismatch` |
+
 ## Proposals for A1
 
 1. **Line endings of fixtures.** No `.gitattributes` exists, so a Windows checkout with `core.autocrlf=true` can rewrite LF to CRLF in `tests/fixtures/`, which changes every byte-exact fixture and its SHA-256. C4 works around it with a `-text` copy in `contracts/event/testdata/`. Proposed root `.gitattributes`: `tests/fixtures/** -text` and `**/testdata/*.txt -text`.
-2. **TODO(C1), TODO(C3).** `AssetRef.ID`, `Sender.AssetID` and `Collection.OperationID` are strings until C1 and C3 merge; the binding fields stay in C4 because they describe the attribution, not the asset.
+2. **TODO(C1), TODO(C2), TODO(C3).** `AssetRef.ID`, `Sender.AssetID`, `Collection.InvocationID` and `Collection.OperationID` are strings until C1, C2 and C3 merge; the binding fields stay in C4 because they describe the attribution, not the asset.
+3. **Node ID and the C1/C4 import cycle.** C4 will import `contracts/asset` for the asset ID, and C1 plans to import C4's `NodeID`. Go forbids the cycle. Proposed: move `NodeID` (and the stream token, which C5 also mirrors) into a leaf package such as `contracts/node`, owned like `contracts/version`. Details in [C1-A4](reviews/C1-A4.md) change 1.

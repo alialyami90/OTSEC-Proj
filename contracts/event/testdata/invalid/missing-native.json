@@ -9,7 +9,7 @@
   "kind": "ser",
   "source": {
     "asset": {
-      "id": "sel751-feeder1",
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
       "binding": {
         "method": "adapter-target",
         "confidence": "configured"
@@ -19,6 +19,8 @@
   },
   "collection": {
     "method": "adapter-poll",
+    "invocation_id": "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71",
+    "operation_id": "sel.ser.read_all",
     "parser": {
       "name": "sel-ascii-ser",
       "version": "0.1"

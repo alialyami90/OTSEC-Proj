@@ -9,10 +9,15 @@
 //     increasing by 1 per stream (ADR-0004 item 3). EventID.String is the
 //     canonical text form used wherever a single token is needed, such as the
 //     Syslog eid parameter (C6). NodeID and the stream token format are
-//     defined here and imported by C5, C6 and C8.
+//     defined here and imported by C5, C6 and C8. A producer checks an event
+//     with ValidatePending (seq 0) before the store assigns seq; the store
+//     writes seq into id before any reader sees the event.
 //   - Native evidence. Native bytes are carried verbatim (base64 in JSON) with
 //     their SHA-256, and located inside the capture they came from (EP-1 to
-//     EP-3). A record is never reconstructed from its parsed fields.
+//     EP-3). A record is never reconstructed from its parsed fields. For an
+//     adapter poll the capture is the C2 transcript as stored, after
+//     redaction, and the event names its invocation and operation. Report
+//     context such as the SER header is referenced by span, not copied.
 //   - The timestamp model. The device's own time text is kept verbatim.
 //     Resolution and accuracy are separate fields. The offset from UTC may be
 //     "unknown", and then no UTC time is stated. Time quality is scoped (record,
@@ -28,6 +33,8 @@
 //     (A6 C-13, R-A4-1, R-A4-2). Align compares consecutive reads by alignment
 //     key; the key is the record without its row number. A gap or an
 //     ambiguous overlap is reported as a platform health event, never hidden.
+//     An empty read followed by records is not a gap unless the new read
+//     fills the buffer.
 //   - Platform event types (Health), for gaps, loss, unsynchronized clocks,
 //     parse failures, silent senders and forwarding outcomes.
 //
@@ -38,8 +45,9 @@
 //     words and never implies a meaning it cannot justify.
 //   - IDS and protocol events (Phase 4), the store and outbox (C5), the
 //     Syslog rendering (C6), and any parser or device logic.
-//   - The asset reference shape is a placeholder until C1 is merged
-//     (TODO(C1)); the operation ID likewise waits for C3 (TODO(C3)).
+//   - The asset ID already follows C1 (a lowercase UUID) but is checked by a
+//     local pattern until C1 is merged (TODO(C1)); the invocation and
+//     operation IDs wait for C2 and C3 (TODO(C2), TODO(C3)).
 //
 // # Serves
 //
