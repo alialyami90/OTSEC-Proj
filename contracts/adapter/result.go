@@ -324,6 +324,10 @@ func DecodeResult(b []byte) (Result, error) {
 // asset, and a target equal to the endpoint's (D1-24). The collector copies
 // the endpoint's target into the result; a result that claims another far end
 // is refused, so a simulator session can never be reported as a device read.
+// Both the collector, before it replies, and the main process, before
+// anything reaches C1 or C4, run it with Validate and CheckLines: the main
+// process labels the evidence, so it does not rely on the collector's check
+// (A3 D1-24 review T-2).
 func (r Result) CheckAgainst(inv Invocation, a asset.Asset) error {
 	if r.InvocationID != inv.InvocationID || r.OperationID != inv.OperationID || inv.AssetID != a.AssetID {
 		return fmt.Errorf("adapter: result: not the result of invocation %s on asset %s", inv.InvocationID, a.AssetID)
