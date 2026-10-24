@@ -16,6 +16,13 @@
 //     encrypted-authenticated. Anything less needs a recorded per-device
 //     acknowledgement with its scope, and is labelled insecure wherever it
 //     appears.
+//   - Each endpoint's target: device-observed or simulated, whether a device
+//     or a simulator is behind it (D1-24). An admin sets it; it is never
+//     taken from the far end and never defaulted, in any minor. C2 copies it
+//     into Result.target and C4 into an event's evidence class (D1-23). A
+//     session or received value labelled device-observed needs an endpoint
+//     whose target is device-observed, and a simulator value one whose target
+//     is simulated.
 //   - The identity binding: which attributes the collector compares, and how
 //     strong that comparison is. See "What the identity binding proves" below.
 //   - A suspension that stops collection from the asset until an operator

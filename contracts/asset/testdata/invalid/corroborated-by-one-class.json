@@ -143,6 +143,7 @@
       "transport": "telnet",
       "host": "192.0.2.21",
       "port": 23,
+      "target": "simulated",
       "downstream_security": {
         "level": "plaintext-unauthenticated",
         "acknowledgement": {

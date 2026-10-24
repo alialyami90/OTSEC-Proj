@@ -60,7 +60,7 @@ def relay():
             declared("ip_address", "192.0.2.21"),
         ],
         "endpoints": [{
-            "id": "port1-telnet", "transport": "telnet", "host": "192.0.2.21", "port": 23,
+            "id": "port1-telnet", "transport": "telnet", "host": "192.0.2.21", "port": 23, "target": "simulated",
             "downstream_security": {
                 "level": "plaintext-unauthenticated",
                 "acknowledgement": {"by": "admin:lab-admin", "at": T0,
@@ -107,7 +107,7 @@ def rtac():
             declared("ip_address", "192.0.2.40"),
         ],
         "endpoints": [{
-            "id": "syslog-in", "transport": "syslog-udp", "host": "192.0.2.40", "port": 514,
+            "id": "syslog-in", "transport": "syslog-udp", "host": "192.0.2.40", "port": 514, "target": "simulated",
             "downstream_security": {
                 "level": "plaintext-unauthenticated",
                 "acknowledgement": {"by": "admin:lab-admin", "at": T0,
@@ -269,13 +269,13 @@ INVALID = {
     "missing-vendor": (relay, lambda a: a.update(attributes=[x for x in a["attributes"] if x["name"] != "vendor"])),
     "other-major": (relay, lambda a: a.update(schema="otsec.asset/1.0")),
     "serial-labelled-encrypted": (relay, lambda a: a["endpoints"].append({
-        "id": "port3-serial", "transport": "serial", "serial_device": "COM3",
+        "id": "port3-serial", "transport": "serial", "serial_device": "COM3", "target": "simulated",
         "downstream_security": {"level": "encrypted-authenticated"}})),
     "ssh-authenticated-without-pinned-key": (relay, lambda a: a["endpoints"].append({
-        "id": "gateway-ssh", "transport": "ssh", "host": "192.0.2.22", "port": 22,
+        "id": "gateway-ssh", "transport": "ssh", "host": "192.0.2.22", "port": 22, "target": "simulated",
         "downstream_security": {"level": "encrypted-authenticated"}})),
     "syslog-tls-authenticated-without-pinned-key": (rtac, lambda a: a["endpoints"].append({
-        "id": "syslog-tls-in", "transport": "syslog-tls", "host": "192.0.2.40", "port": 6514,
+        "id": "syslog-tls-in", "transport": "syslog-tls", "host": "192.0.2.40", "port": 6514, "target": "simulated",
         "downstream_security": {"level": "encrypted-authenticated"}})),
     "acknowledgement-without-scope": (relay, lambda a: a["endpoints"][0]["downstream_security"]["acknowledgement"].pop("scope")),
     "asset-id-from-device-content": (relay, lambda a: a.update(asset_id="sel-751-" + FID.lower())),
@@ -287,6 +287,13 @@ INVALID = {
         attributes=["serial_number"], pre_credential=["firmware_id"])),
     "address-only-with-pre-credential": (rtac, lambda a: a["identity_binding"].update(
         pre_credential=["ip_address"])),
+    "endpoint-without-target": (relay, lambda a: a["endpoints"][0].pop("target")),
+    "endpoint-target-documented": (relay, lambda a: a["endpoints"][0].update(target="documented")),
+    "later-minor-endpoint-target-unknown": (relay, lambda a: (a.update(schema="otsec.asset/0.3"),
+                                                               a["endpoints"][0].update(target="replay"))),
+    "device-value-without-device-endpoint": (relay, lambda a: attr(a, "firmware_id")["observations"].append(
+        obs(FID, "device-observed", "adapter-session", INV, T1, (FID_AT, 33)))),
+    "simulator-value-without-simulated-endpoint": (relay, lambda a: a["endpoints"][0].update(target="device-observed")),
 }
 
 INVALID_PROFILES = {

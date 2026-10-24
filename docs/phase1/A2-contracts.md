@@ -32,6 +32,8 @@
 | A profile for a family that takes a password carries `secret_policy`: lengths, an allowed set matched against the whole secret, and exactly one of `mnemonic_len` and `whole_word`. SEL-751: `[!-~]+`, 1 to 12, mnemonic 3. Tests check that it equals `authz.SecretPolicies["sel-751"]` and that `MaxSecretLen` agrees. | A1 D1-19 (S22 Table 7.54, Appendix N). |
 | Acknowledgement `by`, and the `ref` of an operator-entry observation, use C7's principal ID syntax. C1 keeps a copy of the pattern, and a test compares it with `authz.Principal.Validate`. | C7 merged (#38). C1 does not import `authz`, because `authz` needs to import C1 for `CredentialAllowed` and the profile. |
 
+| `Endpoint.target` (`device-observed` or `simulated`) is required in every minor. A missing or unknown value is refused, never defaulted. An `adapter-session` or `syslog-received` value labelled `device-observed` needs a `device-observed` endpoint, and a `simulator-session` value a `simulated` one. Every example endpoint is `simulated`. C2 `Result.CheckAgainst(invocation, asset)` refuses a result whose `target` differs from its endpoint's. | A1 D1-24 (from A6 on #59, and my finding 1 there). The cross-check on observations is mine: the target is only a useful label if a device value cannot sit behind a simulator endpoint. |
+
 ## C2 decisions
 
 | Decision | Basis |
