@@ -62,3 +62,17 @@ func syncDir(dir string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// CreateDir creates dir as a store directory, mode 0700. account is for
+// Windows; on Linux the installer runs the node as the directory's owner.
+// If dir exists, CreateDir changes nothing and returns checkDir's verdict.
+func CreateDir(dir, account string) error {
+	if _, err := os.Lstat(dir); err == nil {
+		return checkDir(dir)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return fmt.Errorf("create store directory %s: %w", dir, err)
+	}
+	// Mkdir applies the umask, which can only remove bits from 0700.
+	return checkDir(dir)
+}
