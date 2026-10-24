@@ -45,6 +45,8 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 | A6 re-check S-1, A1 D1-14 | On a gap, every record from the first unmatched one onwards is added, because a ring buffer only appends. Those the match paired with an old record, or whose key occurs in the previous read, are `PossibleDuplicates`. A new record with a repeated key is no longer lost. | `align.go`; A6's case `1 3 0 → 4 0′ 5` and the changed-in-place case updated |
 | A6 re-check S-2 | Second 60 is checked against 23:59 UTC when the offset is known, so `15:59:60` at `-08:00` validates and `23:59:60` at `-08:00` does not. With the offset unknown, any minute is accepted. | `checkLeap` in `validate.go`, `TestDeviceTimeLeapSecondAndInvalidTime` |
 | A6 re-check S-3 | `invalid-time` with a `wall_clock` present is rejected (`forbidden`). | same test |
+| A1 D1-16 (with C6) | New platform event type `time.node-stepped`: the node's own clock was stepped, so `received.utc` jumps. It pairs with C8 `clock.change`. Additive to 0.1, because the health set is open. | `event.go` |
+| A1 D1-17 (with C6) | The residual undetectable SER loss with repeated keys is stated in `Align`'s doc and in `doc.go`. | `align.go`, `doc.go` |
 
 ## C6 `otsec.syslog/0.1`: decisions
 
@@ -59,10 +61,10 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 | Framing | Octet counting by default on TCP and TLS. LF framing only on plain `tcp`, for collectors that cannot count octets. One datagram per message on UDP. | ADR-0004 names RFC 6587 octet counting. LF framing is an addition, offered best-effort and insecure only. A1, please confirm or remove it. |
 | Inbound (TB5) | `ParseRELPResponse` is the whole grammar a node accepts back: `rsp` and `serverclose`, bounded lengths, a transaction number that must be outstanding. | A3 TB5: the node parses nothing else from upstream. |
 | Versions (D1-13) | Every message carries `v` (the C6 identifier) and `ev` (the C4 identifier of the event). | A receiver can tell an unreadable version from a malformed event. |
-| Audit (C8) | Sealed bytes go unchanged in MSG, are never cut or split, and travel only with octet counting or RELP on a large enough target. TODO(C8): this lands with C8 or in C6 0.2. Until then, no target carries audit. | C8 forbids re-encoding sealed bytes. See [C8-A4](reviews/C8-A4.md). |
+| Audit (C8, D1-15) | A target with `audit: true` must be required `relp-tls` in RFC 5424 with `max_message_octets` at least 17,408 (a 16 KiB sealed record plus header). Any other audit target is refused at load with code `audit`. Sealed bytes go unchanged in MSG and are never cut or split. TODO(C8): the audit rendering lands with C8. | C8 forbids re-encoding sealed bytes, and only a RELP acknowledgement shows that a record or checkpoint left the node. See [C8-A4](reviews/C8-A4.md). |
 | PEN | 32473 is the RFC 5612 documentation number and must be replaced before production. | ADR-0004 amendment. |
 
-Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), `TestOversize` (each size step and the failure), `TestHeaderTimestampAtMostSixDigits`, `TestHostileContent` (CR, LF, NUL, a BOM, U+2028, C1 controls, `]`, `"`, backslashes and invalid UTF-8 in device text), `TestGoldenRenderings`, `TestRenderReadBack` and `TestParseRELPResponse`. The examples are described in [contracts/syslog/testdata/NOTES.md](../../contracts/syslog/testdata/NOTES.md).
+Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), `TestAuditOnlyOnRequiredRELPTLS` (D1-15), `TestOversize` (each size step and the failure), `TestHeaderTimestampAtMostSixDigits`, `TestHostileContent` (CR, LF, NUL, a BOM, U+2028, C1 controls, `]`, `"`, backslashes and invalid UTF-8 in device text), `TestGoldenRenderings`, `TestRenderReadBack` and `TestParseRELPResponse`. The examples are described in [contracts/syslog/testdata/NOTES.md](../../contracts/syslog/testdata/NOTES.md).
 
 ## Proposals for A1
 

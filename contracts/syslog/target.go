@@ -34,6 +34,11 @@ type Target struct {
 	// ReplaySeconds seconds. The C5 consumer for this target has the same
 	// window, so those events are never pruned before the replay.
 	ReplaySeconds int `json:"replay_seconds,omitempty"`
+	// Audit is set when the target also carries the node's C8 audit stream.
+	// Only a required relp-tls target in RFC 5424 with room for a whole
+	// sealed record may (A1 D1-15): an audit consumer is always required,
+	// and audit is pruned only after a RELP acknowledgement.
+	Audit bool `json:"audit,omitempty"`
 }
 
 // Transport is closed.
@@ -104,6 +109,14 @@ const (
 	MaxUDPOctets     = 65507
 	DefaultFacility  = 16 // local0
 	MaxReplaySeconds = 7 * 24 * 3600
+
+	// AuditRecordBytes is the largest sealed C8 record. TODO(C8): use
+	// audit.MaxRecordBytes once contracts/audit merges.
+	AuditRecordBytes = 16 << 10
+	// MinAuditOctets is the smallest max_message_octets of an audit target:
+	// a whole sealed record plus room for the header and the SD element
+	// that carries node, seq and hash.
+	MinAuditOctets = AuditRecordBytes + 1024
 )
 
 // Mode returns the delivery mode of the target's transport.
@@ -137,6 +150,7 @@ const (
 	CodeFrameUnsafe   Code = "frame-unsafe"   // LF or NUL in a message for non-transparent framing (Frame)
 	CodeRELPViolation Code = "relp-violation" // inbound bytes outside the TB5 grammar (ParseRELPResponse)
 	CodeEventInvalid  Code = "event-invalid"  // the C4 event failed its own validation (Render)
+	CodeAudit         Code = "audit"          // audit on a target that is not required relp-tls RFC 5424 with room for a record (D1-15)
 )
 
 // Error is one validation failure.
@@ -244,6 +258,18 @@ func (t *Target) Validate() error {
 	}
 	if t.MaxMessageOctets < MinMaxOctets || t.MaxMessageOctets > max {
 		fail(CodeSize, "max_message_octets", "%d is outside %d to %d", t.MaxMessageOctets, MinMaxOctets, max)
+	}
+	if t.Audit {
+		switch {
+		case t.Transport != TransportRELPTLS:
+			fail(CodeAudit, "audit", "audit goes only to relp-tls targets; %q gives no acknowledgement that a record or checkpoint arrived (D1-15)", t.Transport)
+		case t.Class != ClassRequired:
+			fail(CodeAudit, "audit", "an audit target is always required (D1-15)")
+		case t.Format != FormatRFC5424:
+			fail(CodeAudit, "audit", "audit records travel in the RFC 5424 MSG part")
+		case t.MaxMessageOctets < MinAuditOctets:
+			fail(CodeAudit, "audit", "max_message_octets %d cannot hold a whole sealed record; at least %d", t.MaxMessageOctets, MinAuditOctets)
+		}
 	}
 	usesTLS := t.Transport == TransportRELPTLS || t.Transport == TransportTLS
 	switch {

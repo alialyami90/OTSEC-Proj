@@ -62,10 +62,12 @@
 //     chain is verified over exactly those bytes. Its sealed bytes go
 //     unchanged into the RFC 5424 MSG part (MSG-ANY, no BOM), after an SD
 //     element that carries the node, seq and hash. It is never truncated,
-//     split or summarised; it travels only with octet counting or RELP, on a
-//     target whose max_message_octets holds audit.MaxRecordBytes plus the
-//     header. The rendering and the target rule are TODO(C8): they land
-//     with C8 or in C6 0.2, and until then no target carries audit.
+//     split or summarised. Audit goes only to a target with audit set,
+//     which must be required relp-tls in RFC 5424 with room for a whole
+//     sealed record (A1 D1-15): only a RELP acknowledgement shows that a
+//     record or checkpoint left the node, and audit is pruned only after
+//     one. Target.Validate refuses any other audit target. The rendering of
+//     an audit record is TODO(C8) and lands with C8.
 //   - The inbound grammar (TB5). The only bytes a node accepts from an
 //     upstream collector are TLS records and, in mode A, RELP responses:
 //     TXNR SP COMMAND SP DATALEN [SP DATA] LF, COMMAND rsp or serverclose,

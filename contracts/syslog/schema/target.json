@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://otsec.local/contracts/syslog/0.1/target.json",
   "title": "otsec.syslog/0.1 target",
-  "description": "C6 forwarding target. Strict: unknown fields are rejected. Rules that need more than one field (required only on relp-tls, framing per transport, size limit per format and transport, TLS settings exactly on TLS transports, relp_window in mode A and replay_seconds in mode B) are enforced by Target.Validate in Go.",
+  "description": "C6 forwarding target. Strict: unknown fields are rejected. Rules that need more than one field (required only on relp-tls, framing per transport, size limit per format and transport, TLS settings exactly on TLS transports, relp_window in mode A, replay_seconds in mode B, and audit only on required relp-tls) are enforced by Target.Validate in Go.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "name", "host", "port", "transport", "format", "framing", "class", "max_message_octets", "facility"],
@@ -28,6 +28,7 @@
       }
     },
     "relp_window": {"type": "integer", "minimum": 1, "maximum": 1024},
-    "replay_seconds": {"type": "integer", "minimum": 1, "maximum": 604800}
+    "replay_seconds": {"type": "integer", "minimum": 1, "maximum": 604800},
+    "audit": {"type": "boolean", "description": "The target also carries the C8 audit stream. Only a required relp-tls RFC 5424 target with max_message_octets of at least 17408 (A1 D1-15, Go rule)."}
   }
 }

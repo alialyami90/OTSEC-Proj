@@ -56,6 +56,7 @@ func TestValidTargets(t *testing.T) {
 		"tls-best-effort":        {ModeB, false},
 		"tcp-lf-insecure":        {ModeB, true},
 		"udp-rfc3164":            {ModeB, true},
+		"relp-tls-audit":         {ModeA, false},
 	}
 	files, _ := filepath.Glob("testdata/targets/valid/*.json")
 	if len(files) != len(want) {
@@ -70,22 +71,25 @@ func TestValidTargets(t *testing.T) {
 }
 
 var invalidTargets = map[string]Code{
-	"required-on-tls":       CodeRequiredClass,
-	"required-on-tcp":       CodeRequiredClass,
-	"required-on-udp":       CodeRequiredClass,
-	"required-on-relp":      CodeRequiredClass,
-	"tls-lf-framing":        CodeFraming,
-	"udp-octet-counting":    CodeFraming,
-	"size-below-floor":      CodeSize,
-	"rfc3164-over-1024":     CodeSize,
-	"relp-tls-without-tls":  CodeTLS,
-	"tcp-with-tls":          CodeTLS,
-	"mode-b-without-replay": CodeDelivery,
-	"relp-with-replay":      CodeDelivery,
-	"misspelt-class":        CodeUnknownField,
-	"case-variant-class":    CodeUnknownField,
-	"other-major":           CodeSchema,
-	"unknown-transport":     CodeEnum,
+	"required-on-tls":        CodeRequiredClass,
+	"required-on-tcp":        CodeRequiredClass,
+	"required-on-udp":        CodeRequiredClass,
+	"required-on-relp":       CodeRequiredClass,
+	"tls-lf-framing":         CodeFraming,
+	"udp-octet-counting":     CodeFraming,
+	"size-below-floor":       CodeSize,
+	"rfc3164-over-1024":      CodeSize,
+	"relp-tls-without-tls":   CodeTLS,
+	"tcp-with-tls":           CodeTLS,
+	"mode-b-without-replay":  CodeDelivery,
+	"relp-with-replay":       CodeDelivery,
+	"misspelt-class":         CodeUnknownField,
+	"case-variant-class":     CodeUnknownField,
+	"other-major":            CodeSchema,
+	"unknown-transport":      CodeEnum,
+	"audit-over-udp":         CodeAudit,
+	"audit-over-tls":         CodeAudit,
+	"audit-target-too-small": CodeAudit,
 }
 
 func TestInvalidTargets(t *testing.T) {
@@ -127,6 +131,32 @@ func TestRequiredOnlyOnRELPTLS(t *testing.T) {
 		if rejected != (tr != TransportRELPTLS) {
 			t.Errorf("required on %s: rejected %v (%v)", tr, rejected, err)
 		}
+	}
+}
+
+// A1 D1-15: the audit stream goes only to a required relp-tls target. Every
+// valid target of another transport is refused when it is given audit, even
+// with room for a whole record.
+func TestAuditOnlyOnRequiredRELPTLS(t *testing.T) {
+	for _, name := range []string{"relp-tls-required", "relp-plain-best-effort", "tls-best-effort", "tcp-lf-insecure", "udp-rfc3164"} {
+		tg := loadTarget(t, name)
+		tg.Audit, tg.Format = true, FormatRFC5424
+		tg.MaxMessageOctets = MinAuditOctets
+		err := tg.Validate()
+		rejected := slices.Contains(Codes(err), CodeAudit)
+		if rejected != (tg.Transport != TransportRELPTLS) {
+			t.Errorf("audit on %s: rejected %v (%v)", tg.Transport, rejected, err)
+		}
+	}
+	tg := loadTarget(t, "relp-tls-audit")
+	tg.Class = ClassBestEffort
+	if !slices.Contains(Codes(tg.Validate()), CodeAudit) {
+		t.Error("a best-effort audit target validated")
+	}
+	tg = loadTarget(t, "relp-tls-audit")
+	tg.MaxMessageOctets = MinAuditOctets - 1
+	if !slices.Contains(Codes(tg.Validate()), CodeAudit) {
+		t.Error("an audit target one octet too small validated")
 	}
 }
 

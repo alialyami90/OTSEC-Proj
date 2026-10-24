@@ -13,6 +13,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
 | `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure. |
 | `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure. |
+| `valid/relp-tls-audit.json` | | | Also carries the C8 audit stream: required relp-tls, RFC 5424, 17408 octets (D1-15). |
 | `invalid/required-on-tls.json` | required-class | no | RFC 5425 cannot confirm delivery. |
 | `invalid/required-on-tcp.json` | required-class | no | Neither can plain TCP. |
 | `invalid/required-on-udp.json` | required-class | no | Nor UDP. |
@@ -29,6 +30,9 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `invalid/case-variant-class.json` | unknown-field | yes | `CLASS` beside `class`: strictjson rejects case variants. |
 | `invalid/other-major.json` | schema | yes | `otsec.syslog/1.0`. |
 | `invalid/unknown-transport.json` | enum | yes | `dtls` is not a 0.1 transport. |
+| `invalid/audit-over-udp.json` | audit | no | Audit over UDP: no acknowledgement that a record or checkpoint arrived (D1-15, A6 negative test). |
+| `invalid/audit-over-tls.json` | audit | no | RFC 5425 TLS is authenticated but still unacknowledged. |
+| `invalid/audit-target-too-small.json` | audit | no | Required relp-tls, but 2048 octets cannot hold a 16 KiB sealed record. |
 
 ## Rendered messages
 

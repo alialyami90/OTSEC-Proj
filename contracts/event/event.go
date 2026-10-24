@@ -395,6 +395,7 @@ const (
 	HealthAlignmentAmbiguous  = "ser.alignment-ambiguous" // overlap ambiguous: possible duplicates flagged
 	HealthNativeLossIndicated = "native.loss-indicated"   // the device says it lost records (overflow, autoremoval)
 	HealthTimeUnsynchronized  = "time.unsynchronized"     // a source's clock is reported unsynchronized
+	HealthTimeNodeStepped     = "time.node-stepped"       // the node's own clock was stepped; received.utc jumps (D1-16, pairs with C8 clock.change)
 	HealthParseFailed         = "parse.failed"            // a record kept as bytes only
 	HealthSourceSilent        = "source.silent"           // a sender that normally talks has gone quiet
 	HealthDropCounted         = "intake.drop-counted"     // datagrams dropped and counted (storage full, rate limit)
