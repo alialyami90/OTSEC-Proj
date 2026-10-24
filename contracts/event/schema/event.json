@@ -38,7 +38,7 @@
           }
         },
         "origin_auth": {"enum": ["none", "tls-server-only", "tls-mutual", "session", "platform"]},
-        "evidence_class": {"enum": ["device-observed", "simulated"], "description": "Required on device events, absent on platform events (Go rule, D1-23)."}
+        "evidence_class": {"$ref": "#/$defs/token", "description": "device-observed or simulated in 0.1; open to later minors, whose new classes read as simulated. Required on device events, absent on platform events (Go rule, D1-23)."}
       }
     },
     "collection": {

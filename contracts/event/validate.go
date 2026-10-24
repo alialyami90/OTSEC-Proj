@@ -166,12 +166,17 @@ func checkDeviceEvent(c *checker, e *Event) {
 	if s.Sender != nil && strings.TrimSpace(s.Sender.Address) == "" {
 		c.fail(CodeMissing, "source.sender.address", "empty")
 	}
+	// evidence_class is open to later minors (D1-23): a class this reader
+	// does not know is kept and read as simulated through Source.Simulated.
+	// An event of this minor or earlier takes only the two values.
 	switch s.EvidenceClass {
 	case asset.DeviceObserved, asset.Simulated:
 	case "":
 		c.fail(CodeMissing, "source.evidence_class", "a device event says whether its device was real or a simulator (D1-23)")
 	default:
-		c.fail(CodeEnum, "source.evidence_class", "%q is not %s or %s", s.EvidenceClass, asset.DeviceObserved, asset.Simulated)
+		if got, err := version.Parse(e.Schema); err != nil || got.Minor <= self.Minor || !tokenPattern.MatchString(string(s.EvidenceClass)) {
+			c.fail(CodeEnum, "source.evidence_class", "%q is not %s or %s", s.EvidenceClass, asset.DeviceObserved, asset.Simulated)
+		}
 	}
 	if e.Health != nil {
 		c.fail(CodeForbidden, "health", "only platform events carry health")

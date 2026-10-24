@@ -92,7 +92,7 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 
 | Source | Change | Where |
 | --- | --- | --- |
-| [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
+| [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. The enum is open to later minors: a 0.1 event takes only the two values, and a later minor's new class is kept and read as simulated (A6 D1-23 review change 1). C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
 | C2-A4 changes 4 and 5 | For an adapter poll, `received.utc` is C2 `Transcript.ReceivedAt(record span)`. The resolution and clock state come from the node's clock status at the invocation's `ended_at`. | C4 `Received` doc, `doc.go` |
 
 ## Proposals for A1

@@ -109,8 +109,10 @@ type Source struct {
 	OriginAuth OriginAuth `json:"origin_auth"`
 	// EvidenceClass says whether the far end was a real device or a
 	// simulator (A1 D1-23, principle 10). Required on device events and
-	// absent on platform events. Only two C1 values are allowed:
-	// device-observed and simulated. It is set from configuration, never
+	// absent on platform events. In 0.1 it is device-observed or simulated
+	// (C1 values). The enum is open to later minors: a reader keeps an event
+	// with a class it does not know and reads it through Simulated. It is
+	// set from configuration, never
 	// from what the far end says: for adapter-poll from C2 Result.target,
 	// and for received Syslog from the C1 endpoint, where an endpoint fed
 	// by a simulator or a replay is simulated.

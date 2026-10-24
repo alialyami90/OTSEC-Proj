@@ -48,5 +48,5 @@ Each file is `sel751-fig10-16-row8.json` with one change (the two platform cases
 | `leap-second-with-utc.json` | offset | no | A leap-second record that states UTC. C4 does not convert second 60. |
 | `evidence-ref-mismatch.json` | evidence | no | The capture name is not `sha256:` + the evidence SHA-256 (C5 names captures by content). |
 | `evidence-class-missing.json` | missing | no | A device event that does not say whether its device was real or a simulator (D1-23). |
-| `evidence-class-not-observed.json` | enum | yes | `documented` is a C1 class, but an event's far end is `device-observed` or `simulated`, nothing else. |
+| `evidence-class-not-observed.json` | enum | no | `documented` is a C1 class, but a 0.1 event's far end is `device-observed` or `simulated`, nothing else. The schema covers every 0.x minor, and the enum is open to later minors, so only `Validate` refuses it. |
 | `platform-event-with-evidence-class.json` | forbidden | no | A platform event has no far end to classify. |

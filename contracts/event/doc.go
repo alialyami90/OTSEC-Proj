@@ -74,5 +74,7 @@
 //
 // Readers accept every 0.x minor and ignore unknown fields (not strict).
 // Kind, Health.Type, Flags, DeviceTime.Format and quality time sources are
-// open sets; every other enum is closed.
+// open sets. Source.EvidenceClass is open to later minors only: an event of
+// 0.1 takes device-observed or simulated, and a later minor's new class is
+// read as simulated (D1-23). Every other enum is closed.
 package event

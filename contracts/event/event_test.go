@@ -436,4 +436,18 @@ func TestSimulated(t *testing.T) {
 	if err := e.Validate(); err != nil {
 		t.Fatalf("device-observed refused: %v", err)
 	}
+	// The enum is open to later minors (A6 D1-23 review change 1): a 0.2
+	// class is kept and read as simulated; a 0.1 event takes only the two.
+	e.Source.EvidenceClass = "lab-replay"
+	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
+		t.Error("0.1 event with an unknown class validated")
+	}
+	e.Schema = "otsec.event/0.2"
+	if err := e.Validate(); err != nil || !e.Source.Simulated() {
+		t.Errorf("0.2 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
+	}
+	e.Source.EvidenceClass = "Not A Token"
+	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
+		t.Error("0.2 event with a malformed class validated")
+	}
 }
