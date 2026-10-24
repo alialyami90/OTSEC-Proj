@@ -1,0 +1,20 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "bad-pin",
+  "host": "siem.example.net",
+  "port": 6514,
+  "transport": "tls",
+  "format": "rfc5424",
+  "framing": "octet-counting",
+  "class": "best-effort",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "tls": {
+    "server_name": "siem.example.net",
+    "trust_anchor_ref": "site-a-ca",
+    "spki_sha256": [
+      "not-a-pin"
+    ]
+  },
+  "replay_seconds": 3600
+}

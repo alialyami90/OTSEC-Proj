@@ -35,7 +35,9 @@
 //     key; the key is the record without its row number. A gap or an
 //     ambiguous overlap is reported as a platform health event, never hidden.
 //     An empty read followed by records is not a gap (A1 D1-7). A full wrap
-//     between two reads is undetectable; Align's doc says when.
+//     between two reads is undetectable, and so is a new record identical
+//     to an old one ahead of the first distinct new record (A1 D1-17);
+//     Align's doc says when.
 //   - Platform event types (Health), for gaps, loss, unsynchronized clocks,
 //     parse failures, silent senders and forwarding outcomes.
 //   - Nothing is dropped for being hard to represent (EP-1). A record whose

@@ -1,0 +1,122 @@
+package store
+
+// ModuleID names a data-owning module, for example "ied", "telemetry" or
+// "security".
+type ModuleID string
+
+// DatabaseID names one database on a node.
+type DatabaseID string
+
+// Database is one store with its single writer. Other modules read it only
+// through interfaces the writer's module hands out (Outbox, CursorStore),
+// never by opening the file.
+type Database struct {
+	ID      DatabaseID
+	Writer  ModuleID
+	Streams []StreamSpec // each stream with its class; a stream has one class for life
+	Classes []StreamClass
+	Quotas  []Quota
+}
+
+// Layout is every database on a node.
+type Layout struct {
+	Databases []Database
+}
+
+// Validate checks per-module data ownership:
+//   - every database has an ID and exactly one writer;
+//   - a stream belongs to exactly one database;
+//   - every class a database holds has exactly one quota there;
+//   - audit is never in a database with any other class, so a full audit
+//     store cannot stop evidence collection and an evidence flood cannot
+//     stop audit.
+func (l Layout) Validate() error {
+	dbs := map[DatabaseID]bool{}
+	streams := map[StreamID]DatabaseID{}
+	audit := 0
+	for _, d := range l.Databases {
+		if d.ID == "" {
+			return errf(CodeInvalid, nil, "database with no ID")
+		}
+		if dbs[d.ID] {
+			return errf(CodeInvalid, nil, "database %s declared twice", d.ID)
+		}
+		dbs[d.ID] = true
+		if d.Writer == "" {
+			return errf(CodeInvalid, nil, "database %s has no writer", d.ID)
+		}
+		for _, s := range d.Streams {
+			if !s.ID.Valid() {
+				return errf(CodeInvalid, nil, "database %s: stream %q is not a valid stream token", d.ID, s.ID)
+			}
+			if other, ok := streams[s.ID]; ok {
+				return errf(CodeInvalid, nil, "stream %s is in databases %s and %s", s.ID, other, d.ID)
+			}
+			streams[s.ID] = d.ID
+		}
+		if len(d.Classes) == 0 {
+			return errf(CodeInvalid, nil, "database %s holds no class", d.ID)
+		}
+		classes := map[StreamClass]bool{}
+		for _, c := range d.Classes {
+			if _, err := ActionFor(c); err != nil {
+				return err
+			}
+			classes[c] = true
+		}
+		if classes[ClassAudit] && len(classes) > 1 {
+			return errf(CodeInvalid, nil, "database %s mixes audit with other classes", d.ID)
+		}
+		for _, s := range d.Streams {
+			if !classes[s.Class] {
+				return errf(CodeInvalid, nil, "database %s: stream %s has class %s, which the database does not hold", d.ID, s.ID, s.Class)
+			}
+			if s.Class == ClassAudit {
+				audit++
+			}
+		}
+		quotas := map[StreamClass]bool{}
+		for _, q := range d.Quotas {
+			if err := q.Validate(); err != nil {
+				return err
+			}
+			if !classes[q.Class] {
+				return errf(CodeInvalid, nil, "database %s: quota for class %s it does not hold", d.ID, q.Class)
+			}
+			if quotas[q.Class] {
+				return errf(CodeInvalid, nil, "database %s: two quotas for %s", d.ID, q.Class)
+			}
+			quotas[q.Class] = true
+		}
+		for c := range classes {
+			if !quotas[c] {
+				return errf(CodeInvalid, nil, "database %s: no quota for %s", d.ID, c)
+			}
+		}
+	}
+	if audit != 1 {
+		// The C8 chain is one per node (C5-A3-1).
+		return errf(CodeInvalid, nil, "layout has %d audit streams, exactly one required", audit)
+	}
+	return nil
+}
+
+// StreamSpec is a stream with its class. The class is a property of the
+// stream, not of each record: the Log refuses a record whose class differs
+// from its stream's (A6 review of C5, change 1).
+type StreamSpec struct {
+	ID    StreamID
+	Class StreamClass
+}
+
+// StreamClasses maps every stream of the layout to its class. It is what
+// NewLog takes.
+func (l Layout) StreamClasses() map[StreamID]StreamClass {
+	m := map[StreamID]StreamClass{}
+	for _, d := range l.Databases {
+		for _, s := range d.Streams {
+			m[s.ID] = s.Class
+		}
+	}
+	return m
+}

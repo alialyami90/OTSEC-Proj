@@ -209,6 +209,11 @@ func checkPlatformEvent(c *checker, e *Event) {
 			if !tokenPattern.MatchString(e.Health.Type) {
 				c.fail(CodeEnum, "health.type", "%q is not a health type token", e.Health.Type)
 			}
+			for k := range e.Health.Details {
+				if !detailKeyPattern.MatchString(k) {
+					c.fail(CodeEnum, "health.details", "key %q is not a detail key token; a key with '=' could not be split back from C6 hd=\"key=value\" (C6-A6-2)", k)
+				}
+			}
 			for i, r := range e.Health.Related {
 				if !r.NodeID.Valid() || !r.Stream.Valid() || r.Seq == 0 {
 					c.fail(CodeID, fmt.Sprintf("health.related[%d]", i), "%v is not a valid event ID", r)

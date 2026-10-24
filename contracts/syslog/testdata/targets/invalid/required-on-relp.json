@@ -1,0 +1,23 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "relp-plain",
+  "host": "192.0.2.51",
+  "port": 20514,
+  "transport": "relp",
+  "format": "rfc5424",
+  "framing": "relp",
+  "class": "required",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "relp_window": 64,
+  "durable_ack": {
+    "verified_utc": "2026-10-24T09:00:00Z",
+    "evidence_ref": "commissioning/siem-a/durable-ack"
+  },
+  "acknowledgement": {
+    "by": "admin-example",
+    "at": "2026-10-24T09:00:00Z",
+    "reason": "Lab collector on the isolated test segment; no TLS listener.",
+    "scope": "lab-only"
+  }
+}

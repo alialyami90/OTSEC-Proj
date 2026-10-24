@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otsec.local/contracts/syslog/0.1/target.json",
+  "title": "otsec.syslog/0.1 target",
+  "description": "C6 forwarding target. Strict: unknown fields are rejected. Rules that need more than one field (required only on relp-tls, framing per transport, size limit per format and transport, TLS settings exactly on TLS transports, relp_window in mode A, replay_seconds in mode B, audit only on required relp-tls, client_credential_ref on required and audit targets, durable_ack exactly on required targets, acknowledgement exactly on insecure transports) are enforced by Target.Validate in Go.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "host", "port", "transport", "format", "framing", "class", "max_message_octets", "facility"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^otsec\\.syslog/0\\.(0|[1-9][0-9]{0,3})$"},
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$", "description": "Also the C5 ConsumerID."},
+    "host": {"type": "string", "pattern": "^[A-Za-z0-9.:\\[\\]-]{1,253}$"},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "transport": {"enum": ["relp-tls", "relp", "tls", "tcp", "udp"]},
+    "format": {"enum": ["rfc5424", "rfc3164"]},
+    "framing": {"enum": ["octet-counting", "non-transparent", "datagram", "relp"]},
+    "class": {"enum": ["required", "best-effort"], "description": "Also the C5 Delivery. required only with transport relp-tls (Go rule)."},
+    "max_message_octets": {"type": "integer", "minimum": 480, "maximum": 65535},
+    "facility": {"type": "integer", "minimum": 0, "maximum": 23},
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server_name", "trust_anchor_ref"],
+      "properties": {
+        "server_name": {"type": "string", "minLength": 1},
+        "trust_anchor_ref": {"type": "string", "minLength": 1, "description": "A CA set used only for this platform's collectors. TODO(A3 node key ref)."},
+        "spki_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9+/]{43}=$"}, "description": "Base64 SHA-256 of the collector's SubjectPublicKeyInfo; when set, the key must match one."},
+        "client_credential_ref": {"type": "string", "minLength": 1, "description": "The node's TLS client key. Required on required and audit targets (Go rule). TODO(A3 node key ref)."}
+      }
+    },
+    "relp_window": {"type": "integer", "minimum": 1, "maximum": 1024},
+    "replay_seconds": {"type": "integer", "minimum": 1, "maximum": 604800},
+    "durable_ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified_utc", "evidence_ref"],
+      "description": "The passed commissioning check that the collector acknowledges only after a durable write. Required exactly on required targets (Go rule).",
+      "properties": {
+        "verified_utc": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"},
+        "evidence_ref": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}
+      }
+    },
+    "acknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by", "at", "reason", "scope"],
+      "description": "An admin's acceptance of an insecure target (tcp, udp, relp), with C1's shape. Required exactly on those transports (A1 D1-22, Go rule).",
+      "properties": {
+        "by": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$", "description": "A C7 human principal ID."},
+        "at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"},
+        "reason": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["lab-only"]}
+      }
+    },
+    "device_content": {"type": "boolean", "description": "Whether messages carry what is derived from the device record (dtext, subj, stype, val, cat, map, summary). Absent: on for relp-tls and tls, off for insecure transports (D1-22 and its amendment)."},
+    "audit": {"type": "boolean", "description": "The target also carries the C8 audit stream. Only a required relp-tls RFC 5424 target with max_message_octets of at least 17408 (A1 D1-15, Go rule)."}
+  }
+}
