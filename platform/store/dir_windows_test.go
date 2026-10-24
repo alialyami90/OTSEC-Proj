@@ -61,6 +61,9 @@ func TestDirDACLChecked(t *testing.T) {
 	if err := CreateDir(filepath.Join(t.TempDir(), "sddl"), "S-1-5-18)(A;OICI;FA;;;WD"); err == nil {
 		t.Fatal("CreateDir took SDDL in the account")
 	}
+	if err := CreateDir(filepath.Join(t.TempDir(), "alias"), "WD"); err == nil {
+		t.Fatal("CreateDir took the SDDL alias WD for Everyone")
+	}
 
 	// A junction to a good directory is refused (A3 #84 note 4).
 	junction := filepath.Join(t.TempDir(), "junction")

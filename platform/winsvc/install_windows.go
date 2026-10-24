@@ -148,12 +148,22 @@ func makeDir(d Dir) error {
 	if err != nil {
 		return fmt.Errorf("winsvc: %s: %w", d.Path, err)
 	}
-	if _, err := os.Lstat(d.Path); err == nil {
-		return checkDir(d, sd)
-	}
 	p, err := windows.UTF16PtrFromString(d.Path)
 	if err != nil {
 		return err
+	}
+	if _, err := os.Lstat(d.Path); err == nil {
+		// Users can create folders under %ProgramData%, so a junction or
+		// link planted at one of these paths is refused outright, before
+		// its target's descriptor is read (A3 #92 note 1).
+		attrs, err := windows.GetFileAttributes(p)
+		if err != nil {
+			return fmt.Errorf("winsvc: %s: %w", d.Path, err)
+		}
+		if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+			return fmt.Errorf("winsvc: %s exists and is not a plain directory; the installer stops (W-4)", d.Path)
+		}
+		return checkDir(d, sd)
 	}
 	sa := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
 	if err := windows.CreateDirectory(p, sa); err != nil {

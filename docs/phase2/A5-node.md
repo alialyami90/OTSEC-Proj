@@ -59,6 +59,8 @@ Linux container, Go 1.26. Commits are listed in each PR.
 - the installer and service, with A3's T-13 (W-1 to W-4);
 - `TestDirDACLChecked`, which also covers a junction and SDDL in the account (A3 #84 notes 1 and 4);
 - `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service.
+- the installer refuses a junction planted at any `OTSEC` path (A3 #92 note 1);
+- A3's collector creating and reopening its stores as `NT SERVICE\otsec-collector` (user-scope DPAPI), also after a reboot: whether the virtual account's profile is loaded under the SCM is inferred, not shown (A3 #92 note 2);
 - for A3's collector: `collector\public` (collector writes, node reads `install-key.json` by full path), the `otsec-collector` event log source, and the WER exclusion `otsec-collector.exe = 1` (T-5), which the collector refuses to start without.
 
 None of the Windows-only code has run.
@@ -70,4 +72,6 @@ None of the Windows-only code has run.
 - **W-3 "and every other program".** The installer blocks outbound Telnet for `otsec-node` only. Blocking it for every other program on the host is a site decision.
 - **Node-side `CheckLines`.** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector.
 - **SER row order.** A2's #85 puts the C2 example `ok.json` rows oldest first, as Figure 10.16 and A6's simulator do. Until #85 merges, the scheduler test rebuilds the read in that order; after it merges, the test uses `ok.json` as it is.
+- **A `collector_seq` that goes backwards** (A3 #92). A reinstall after both collector stores are lost restarts the collector's numbering at 1. Today the node writes each reply's `collector_seq` as given and checks only that the records within one reply rise (`collectorclient`). It does not compare across runs, so a restart shows only when `audit.VerifyCollectorSeq` finds duplicates. Follow-up: keep the highest `collector_seq` durably, and on a lower one raise an alarm and record the restart, rather than accepting it silently or reading it as a gap.
+- **A partial install** (for example, a refused collector configuration after the node service exists) leaves the node service and `node.json`. A rerun needs `otsec uninstall` and removing `OTSEC\config\node.json` by hand (A3 #92 note 3).
 - **Forwarding.** The forwarder is A4's, and runs against `Runtime.Store` and `Runtime.Log`. `node.Run` does not start it yet.

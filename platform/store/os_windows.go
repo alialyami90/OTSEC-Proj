@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -209,7 +210,11 @@ func CreateDir(dir, account string) error {
 	}
 	// account goes into SDDL, so it is parsed as a SID first and written
 	// back in canonical form: a string with SDDL syntax in it cannot add an
-	// entry (A3 #84 note 1).
+	// entry (A3 #84 note 1). StringToSid also takes SDDL aliases such as
+	// WD (Everyone), so only the S-1- form is accepted (A3 #92 note 4).
+	if !strings.HasPrefix(account, "S-1-") {
+		return fmt.Errorf("store directory account %q is not a SID in S-1- form", account)
+	}
 	sid, err := windows.StringToSid(account)
 	if err != nil {
 		return fmt.Errorf("store directory account %q is not a SID: %w", account, err)
