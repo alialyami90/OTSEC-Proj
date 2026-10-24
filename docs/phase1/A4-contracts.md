@@ -94,6 +94,14 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 | --- | --- | --- |
 | [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. The enum is open to later minors: a 0.1 event takes only the two values, and a later minor's new class is kept and read as simulated (A6 D1-23 review change 1). C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
 | C2-A4 changes 4 and 5 | For an adapter poll, `received.utc` is C2 `Transcript.ReceivedAt(record span)`. The resolution and clock state come from the node's clock status at the invocation's `ended_at`. | C4 `Received` doc, `doc.go` |
+| D1-24 and its amendment ([C1-D1-24-A4](reviews/C1-D1-24-A4.md)) | Received Syslog: `device-observed` only when both the arrival endpoint and the node listener are; a relayed message uses the relay's endpoint; an unknown sender takes the listener's target. | C4 `doc.go`, `Source.EvidenceClass` doc |
+| A6 chain notes, D1-25 | `device_time.native` for a format with separate date and time fields is the two printed values joined by one space (for `sel-ascii-ser-row`, C2 `DATE` and `TIME`). The row's own spacing stays in the native bytes. The goldens already follow this. | `DeviceTime.Native` doc |
+
+## RenderAudit (from the C8-A4 review)
+
+| Source | Change | Where |
+| --- | --- | --- |
+| [C8-A4](reviews/C8-A4.md) "Forwarding audit records", D1-15 | `RenderAudit(sealed, target)` puts a sealed C8 record unchanged into the RFC 5424 MSG part. The `otsec@32473` element carries `v`, `ac`, `node`, `seq` and `hash` (MSGID `AUDIT`). Severity is 4 for a denied, failed or warning outcome, and 5 otherwise. It refuses a target without `audit` (`audit`) and bytes that are not a valid C8 record (`audit-invalid`). `ParseAudit` refuses a message whose parameters, header, severity or hash disagree with the sealed bytes. A record at `audit.MaxRecordBytes` with the longest node ID fits in `MinAuditOctets` (16,723 of 17,408 octets), so `too-large` is a broken contract, never a big record. | `audit.go`, two audit goldens, `TestAuditRoundTripVerifiesChain` (chain verified over the bytes read back), `TestRenderAuditRefuses`, `TestParseAuditRefusesDisagreement`, `TestAuditFitsLargestRecord` |
 
 ## Proposals for A1
 

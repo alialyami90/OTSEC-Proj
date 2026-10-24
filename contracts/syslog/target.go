@@ -234,6 +234,7 @@ const (
 	CodeEventInvalid  Code = "event-invalid"   // the C4 event failed its own validation (Render)
 	CodeAudit         Code = "audit"           // audit on a target that is not required relp-tls RFC 5424 with room for a record (D1-15)
 	CodeAck           Code = "acknowledgement" // an insecure target without a complete acknowledgement, or a secure one with one (D1-22)
+	CodeAuditInvalid  Code = "audit-invalid"   // sealed bytes that are not a valid C8 record, or an audit message that disagrees with its record (RenderAudit, ParseAudit)
 )
 
 // Error is one validation failure.

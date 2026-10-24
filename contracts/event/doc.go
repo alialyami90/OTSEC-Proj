@@ -31,10 +31,20 @@
 //     (an RTAC, an SEL-5056) never becomes the subject: the subject is then
 //     bound with confidence "asserted" (A3 AP-22). Source.OriginAuth records
 //     how the sender was authenticated.
-//   - Real or simulated (A1 D1-23). Every device event carries
+//   - Real or simulated (A1 D1-23, D1-24). Every device event carries
 //     Source.EvidenceClass: device-observed or simulated. It is set from
 //     configuration, never from what the far end says, so a simulated read
-//     can never pass upstream as a device read (principle 10). Readers use
+//     can never pass upstream as a device read (principle 10). An
+//     adapter-poll event takes C2 Result.target, which CheckAgainst ties to
+//     the C1 endpoint's admin-set target. A received Syslog event from a
+//     known sender is device-observed only when both the C1 endpoint it
+//     arrived on and the node listener that received it are
+//     device-observed, otherwise simulated; a relayed message uses the
+//     relay's endpoint, not the subject's. An event from an unknown sender
+//     (asset-unresolved) takes the listener's target: device-observed would
+//     claim what nobody configured, and simulated would let a SIEM filter
+//     on evc hide the traffic an analyst most needs to see. The listener's
+//     target is node configuration (A5, Phase 2). Readers use
 //     Source.Simulated, which counts any value other than device-observed
 //     as simulated. C6 forwards it as evc.
 //   - Snapshot alignment for ring-buffer sources such as the SEL ASCII SER

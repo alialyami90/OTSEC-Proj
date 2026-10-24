@@ -112,10 +112,15 @@ type Source struct {
 	// absent on platform events. In 0.1 it is device-observed or simulated
 	// (C1 values). The enum is open to later minors: a reader keeps an event
 	// with a class it does not know and reads it through Simulated. It is
-	// set from configuration, never
-	// from what the far end says: for adapter-poll from C2 Result.target,
-	// and for received Syslog from the C1 endpoint, where an endpoint fed
-	// by a simulator or a replay is simulated.
+	// set from configuration, never from what the far end says: for
+	// adapter-poll from C2 Result.target, and for received Syslog from the
+	// endpoint it arrived on and the node listener that received it (D1-24
+	// and its amendment): device-observed only when both are, otherwise
+	// simulated, so a lab listener never forwards anything as
+	// device-observed. A relayed message takes the relay's endpoint, not the
+	// subject's, because the far end the node heard is the relay. A message
+	// from an unknown sender (asset-unresolved) has no endpoint and takes
+	// the listener's target alone.
 	EvidenceClass asset.EvidenceClass `json:"evidence_class,omitempty"`
 }
 
@@ -266,8 +271,13 @@ const (
 
 // DeviceTime is the device's own timestamp for the record.
 type DeviceTime struct {
-	// Native is the device's time exactly as it appeared: text, or lowercase
-	// hex for binary encodings.
+	// Native is the device's time as it appeared: text, or lowercase hex for
+	// binary encodings. When the device prints date and time as separate
+	// fields, Native is the two printed field values joined by one space,
+	// and Format names that join; the original spacing stays in the native
+	// record bytes. For sel-ascii-ser-row it is the C2 DATE and TIME fields,
+	// "02/28/2007 13:54:09.602", although the row has three spaces between
+	// them (A6 chain notes, D1-25).
 	Native         string         `json:"native"`
 	NativeEncoding NativeEncoding `json:"native_encoding"`
 	// Format names the decoding rule (open), for example sel-ascii-ser-row,
