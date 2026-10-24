@@ -348,6 +348,7 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 		// A refused result is kept as quarantine, never as events.
 		rep.Outcome = "quarantined"
 		s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, err.Error(), false)
+		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
 		return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the normalizer refused the result; kept as quarantine")
 	}
 	ser, hl, err := out.Records(event.Stream(stream), event.Stream(HealthStream))

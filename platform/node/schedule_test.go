@@ -527,6 +527,35 @@ func TestQuarantineWithoutUnauthorizedLine(t *testing.T) {
 	}
 }
 
+// A result A4's normalizer refuses is quarantined and, like every run,
+// ends with exactly one collection health event (A6 #92 nit 4).
+func TestNormalizerRefusalEndsWithOneHealthEvent(t *testing.T) {
+	c, dir := schedConfig(t, nil)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	f := &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		return collectorclient.Response{Reply: accepted(req, 1),
+			Outcome: &collectorclient.Outcome{InvocationID: "inv-refused", ResultJSON: []byte(`{}`)}}, nil
+	}}
+	s := newScheduler(t, r, f)
+	if rep := s.RunOnce(bg, 0); rep.Outcome != "quarantined" || rep.Alarm != AlarmResultRefused {
+		t.Fatalf("%+v", rep)
+	}
+	if n, _ := r.Store(QuarantineStream(relayID)).LastCommitted(bg, QuarantineStream(relayID)); n != 2 {
+		t.Fatalf("%d quarantine records", n)
+	}
+	hs, _ := r.Store(HealthStream).Read(bg, HealthStream, 0, 1000)
+	var got []string
+	for _, st := range hs {
+		if e, _ := event.Decode(st.Event); e.Health != nil && strings.HasPrefix(e.Health.Type, "collection.") {
+			got = append(got, e.Health.Type)
+		}
+	}
+	if len(got) != 1 || got[0] != HealthCollectionOutcomeUnknown {
+		t.Fatalf("collection health events %v", got)
+	}
+}
+
 // With less than QuarantineRoom left in adapter-evidence, no run is sent,
 // and the alarm is raised once for the condition, not once per run (A6).
 func TestNoQuarantineRoomSendsNothing(t *testing.T) {

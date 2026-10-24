@@ -28,9 +28,12 @@ func fileURI(path, query string) string {
 }
 
 // OpenReadOnly opens database id of node in dir for reading, alongside a
-// running node, for the read-only CLI. It takes no lock and writes nothing:
-// SQLite opens the file read-only, the connection is query_only, and every
-// transaction is refused before BEGIN. CommitBatch, SaveCursor and
+// running node, for the read-only CLI. It takes no lock and writes no
+// database content: SQLite opens the file read-only, the connection is
+// query_only, and every transaction is refused before BEGIN. Like any
+// SQLite reader of a WAL database, it creates an empty -wal when the node
+// is stopped and writes the -shm index; cmd/otsec's TestReadOnlyCommands
+// checks that nothing else is created or changed (A6 #92 nit 5). CommitBatch, SaveCursor and
 // SaveSourceCursor refuse too, because CheckSettings never runs. It refuses
 // a database that does not exist, rather than creating one, and one that
 // belongs to another node or database.
