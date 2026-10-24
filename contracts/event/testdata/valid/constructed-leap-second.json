@@ -1,0 +1,101 @@
+{
+  "schema": "otsec.event/0.1",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "sel751-feeder1/ser",
+    "seq": 1
+  },
+  "origin": "device",
+  "kind": "ser",
+  "source": {
+    "asset": {
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+      "binding": {
+        "method": "adapter-target",
+        "confidence": "configured"
+      }
+    },
+    "origin_auth": "session"
+  },
+  "collection": {
+    "method": "adapter-poll",
+    "invocation_id": "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71",
+    "operation_id": "sel.ser.read_all",
+    "parser": {
+      "name": "sel-ascii-ser",
+      "version": "0.1"
+    },
+    "native_position": "8",
+    "alignment": "first-read",
+    "parse_status": "ok"
+  },
+  "received": {
+    "utc": "2026-10-24T12:00:05.123456Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "device_time": {
+    "native": "12/31/2016 23:59:60.602",
+    "native_encoding": "text",
+    "format": "sel-ascii-ser-row",
+    "wall_clock": "2016-12-31T23:59:60.602",
+    "offset": "unknown",
+    "offset_basis": "none",
+    "resolution_ns": 1000000,
+    "quality": {
+      "time_source": "Internal",
+      "sync": "unknown",
+      "accuracy_relative_ns": 1000000,
+      "scope": "report"
+    },
+    "flags": [
+      "date-format-assumed:MDY"
+    ]
+  },
+  "native": {
+    "bytes": "OCAgICAgMTIvMzEvMjAxNiAgIDIzOjU5OjYwLjYwMiAgIDUxUDFQICAgICAgICAgICAgICAgICAgICBBc3NlcnRlZA==",
+    "record_sha256": "878107a993bfe9c3132c9530273c124aa66bb2ae935dec0ce3d7fbac19d60689",
+    "record_length": 67,
+    "evidence": {
+      "sha256": "878107a993bfe9c3132c9530273c124aa66bb2ae935dec0ce3d7fbac19d60689",
+      "length": 67,
+      "ref": "sha256:878107a993bfe9c3132c9530273c124aa66bb2ae935dec0ce3d7fbac19d60689"
+    },
+    "span": {
+      "offset": 0,
+      "length": 67
+    },
+    "alignment_key": "sha256:837473dbaf892b1805f370cee6eb70ca9858a1c59f44f80dd60872764b23bcff",
+    "fields": [
+      {
+        "name": "#",
+        "value": "8"
+      },
+      {
+        "name": "DATE",
+        "value": "12/31/2016"
+      },
+      {
+        "name": "TIME",
+        "value": "23:59:60.602"
+      },
+      {
+        "name": "ELEMENT",
+        "value": "51P1P"
+      },
+      {
+        "name": "STATE",
+        "value": "Asserted"
+      }
+    ]
+  },
+  "normalized": {
+    "subject": "51P1P",
+    "subject_type": "ser-element",
+    "value": "Asserted",
+    "category": "unmapped"
+  }
+}
