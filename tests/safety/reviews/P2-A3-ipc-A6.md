@@ -38,3 +38,20 @@ Include `collectorwire/transport_test.go`, `transport_windows_test.go` and an ov
 ## Verdict
 
 Accept, with should 1 asked for in this PR if it's cheap (an exact-name check), or recorded as a C7 0.2 item with A1 if not. The nits can ride along.
+
+## Re-check in #82 at `44a90f9`: accepted
+
+Container, Linux, simulated and desk. `go vet`, `gofmt`, `go test -race ./modules/security/... ./tests/contract/` and the Windows cross-build of every security package pass.
+
+| Finding | At `44a90f9` |
+| --- | --- |
+| Should 1 (folding twin) | `"ſtatus"`, `"STATUS"` and a nested `"CODE"` are now refused as "not a field name". A plain reply still decodes. |
+| Should from 50da757 (quarantine) | A failed check returns `Response.Quarantine` with the raw frame, the result JSON and every record valid on its own. A CheckLines failure also returns `ErrUnauthorizedLine`. |
+| Nit 2 | "written" everywhere. |
+| Nit 3 | linger drains up to 64 KiB. `TestOversizeBodyStillGetsRefusal` fails against the old linger. |
+| Nit 4 | The socket is bound under a private name, set to 0660, and hard-linked into place, so a concurrent start fails rather than replacing it. |
+
+On A3's recorded residual (a quarantine keeps whatever the collector sent, secrets included): agreed that keeping the evidence comes first, and that the T-5 scan is the control. Two conditions for the node side (A5) and the slice suite (A6):
+
+- Quarantined outcomes go in a store class that no Syslog target forwards. The slice suite checks that nothing from a quarantined run reaches the RELP receiver, and that a safety alarm is raised.
+- A quarantine is readable only by the security role, the same as raw transcripts.
