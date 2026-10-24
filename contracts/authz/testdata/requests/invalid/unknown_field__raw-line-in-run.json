@@ -1,0 +1,18 @@
+{
+  "contract": "otsec.authz/0.1",
+  "kind": "run",
+  "request_id": "req-20261024-0001",
+  "on_behalf_of": {
+    "type": "schedule",
+    "id": "sch-ser-751-feeder-3"
+  },
+  "policy_version": 3,
+  "run": {
+    "asset_id": "site-a.relay.feeder-3",
+    "operation_id": "sel.ser.read_all",
+    "params": {},
+    "credential_ref": "cred_7f3k2m9q4x",
+    "register_version": 12,
+    "line": "SER C"
+  }
+}

@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.authz/0.1/collector-request",
+  "title": "Collector request (C7). Strict: unknown fields, duplicate keys and trailing data are rejected. Only 'run' can lead to device I/O.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "kind",
+    "request_id",
+    "on_behalf_of",
+    "policy_version"
+  ],
+  "properties": {
+    "contract": {
+      "const": "otsec.authz/0.1"
+    },
+    "kind": {
+      "enum": [
+        "run",
+        "credential.install",
+        "credential.revoke",
+        "credential.clear_suspension"
+      ]
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "on_behalf_of": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "human",
+            "schedule",
+            "node",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$"
+        }
+      }
+    },
+    "policy_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "operation_id",
+        "params",
+        "credential_ref",
+        "register_version"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$",
+          "description": "C3 operation ID; must be a read-only operation in the active register"
+        },
+        "params": {
+          "type": "object",
+          "maxProperties": 8,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[\\x20-\\x7e]+$"
+          }
+        },
+        "credential_ref": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "register_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "credential_install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "sealed"
+      ],
+      "properties": {
+        "ref": {
+          "$ref": "otsec.authz/0.1/credential-ref"
+        },
+        "sealed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alg",
+            "recipient_key_id",
+            "ephemeral_public_key",
+            "nonce",
+            "ciphertext"
+          ],
+          "properties": {
+            "alg": {
+              "const": "x25519-hkdf-sha256-aes256gcm"
+            },
+            "recipient_key_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "ephemeral_public_key": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 44,
+              "maxLength": 44
+            },
+            "nonce": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 16,
+              "maxLength": 16
+            },
+            "ciphertext": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 24,
+              "maxLength": 108
+            }
+          }
+        }
+      }
+    },
+    "credential_revoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "reason"
+      ],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "reason": {
+          "enum": [
+            "rotated",
+            "compromised",
+            "asset-decommissioned",
+            "operator"
+          ]
+        }
+      }
+    },
+    "credential_clear_suspension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "version"
+      ],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "run"
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "schedule"
+            }
+          }
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.install"
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "human"
+            }
+          }
+        }
+      },
+      "required": [
+        "credential_install"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.revoke"
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "human"
+            }
+          }
+        }
+      },
+      "required": [
+        "credential_revoke"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.clear_suspension"
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "human"
+            }
+          }
+        }
+      },
+      "required": [
+        "credential_clear_suspension"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

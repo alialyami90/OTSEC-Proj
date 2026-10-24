@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.audit/0.1/record",
+  "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
+  "type": "object",
+  "required": [
+    "contract",
+    "node_id",
+    "seq",
+    "prev_hash",
+    "time",
+    "actor",
+    "action",
+    "outcome"
+  ],
+  "propertyNames": {
+    "not": {
+      "pattern": "^(?i:secret|password|passwd|pwd|passphrase|credential_value|private_key|raw_output|transcript)$"
+    }
+  },
+  "properties": {
+    "contract": {
+      "type": "string",
+      "pattern": "^otsec\\.audit/0\\.(0|[1-9][0-9]{0,3})$"
+    },
+    "node_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "TODO(C4)"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "time": {
+      "type": "object",
+      "required": [
+        "utc",
+        "resolution_ns",
+        "clock"
+      ],
+      "properties": {
+        "utc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "resolution_ns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clock": {
+          "type": "object",
+          "required": [
+            "sync",
+            "source",
+            "scope"
+          ],
+          "properties": {
+            "sync": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "TODO(C4): C4 platform timestamp"
+    },
+    "actor": {
+      "type": "object",
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "human",
+            "schedule",
+            "node",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "monitor",
+            "engineer",
+            "admin",
+            "security-auditor",
+            "collector"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "auth_method": {
+          "type": "string"
+        }
+      }
+    },
+    "action": {
+      "enum": [
+        "collector.request",
+        "device.session.open",
+        "device.session.close",
+        "credential.use",
+        "device.op",
+        "device.refused",
+        "device.posture_warning",
+        "credential.install",
+        "credential.revoke",
+        "credential.suspend",
+        "credential.clear_suspension",
+        "register.verify",
+        "register.activate",
+        "auth.login",
+        "auth.fail",
+        "auth.logout",
+        "role.grant",
+        "role.revoke",
+        "policy.apply",
+        "audit.chain.start",
+        "audit.checkpoint",
+        "audit.export",
+        "clock.change",
+        "storage.alarm",
+        "service.start",
+        "service.stop",
+        "store.mode_change",
+        "node.posture_change",
+        "node.migration_date",
+        "asset.collector_assign"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "allowed",
+        "denied",
+        "succeeded",
+        "failed",
+        "warning",
+        "info"
+      ]
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,47}$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "telnet",
+            "serial",
+            "ssh"
+          ]
+        },
+        "downstream_security": {
+          "enum": [
+            "encrypted-authenticated",
+            "encrypted-weak",
+            "plaintext-unauthenticated"
+          ]
+        },
+        "credential_ref": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "credential_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "family": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "properties": {
+          "transport": {
+            "enum": [
+              "telnet",
+              "serial"
+            ]
+          }
+        },
+        "required": [
+          "transport"
+        ]
+      },
+      "then": {
+        "required": [
+          "downstream_security"
+        ],
+        "properties": {
+          "downstream_security": {
+            "const": "plaintext-unauthenticated"
+          }
+        }
+      }
+    },
+    "operation_id": {
+      "type": "string"
+    },
+    "register_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "policy_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "params_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "bytes_sent_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 512
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "denied",
+              "failed",
+              "warning"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason_code"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "seq": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "prev_hash": {
+            "const": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "action": {
+            "const": "audit.chain.start"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "device.session.open",
+              "device.session.close",
+              "credential.use",
+              "device.op",
+              "device.refused",
+              "device.posture_warning"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "required": [
+              "asset_id",
+              "transport",
+              "downstream_security"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
