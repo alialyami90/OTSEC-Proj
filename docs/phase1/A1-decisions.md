@@ -173,3 +173,39 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - A2 adds the fields to #32.
   - A3 reads C7's limits from the profile.
   - A6 models re-prompting and persisted elevation in the recording simulator.
+
+## D1-19. The family secret policy lives on the C1 capability profile (2026-10-24)
+
+- **Question (A2 C7-A2-7, A6 C7 re-check):** `ValidateSecret` takes a `SecretPolicy` from its caller. A zero `MnemonicLen` silently selects whole-word mode, which lets `quiet123`, `close!` and `serial99` through, and a zero policy accepts anything. `Allowed` is matched unanchored.
+- **Decision:** the policy is a family fact with a citation, like `session_limits` (D1-18). It goes on the C1 capability profile as `secret_policy`, so the collector never builds it itself.
+  - A profile with an adapter operation above level `0` must carry a `secret_policy`. A zero or missing policy is a validation error, never "accept anything".
+  - Whole-word matching is an explicit mode. `MnemonicLen` 0 is invalid, not permissive.
+  - `Allowed` is matched against the whole secret (`^(?:…)$`).
+  - SEL-751: `[!-~]{1,12}`, mnemonic length 3 (S22, as cited by A2).
+- **Action:**
+  - A2 adds `secret_policy` to the C1 profile in #32.
+  - A3 makes the zero policy and zero `MnemonicLen` invalid and anchors `Allowed` in #38 now, and reads the policy from the profile once #32 merges (`TODO(C1)` until then).
+
+## D1-20. The failed-auth floor starts when the password is sent (2026-10-24)
+
+- **Question (A2, C7-A2-1 re-check):** C7 starts the floor only after a second `Password: ?`. A session can also end after the password is sent and before `=>` is seen: a timeout, a transport close or a collector crash. The relay may then still be at `Password: ?` or elevated until `TIDLE` expires (S22 p. 7.16, p. 7.33).
+- **Decision:** A2's fix. The collector writes the floor time durably before the slot sends the password, and clears it only when `=>` is confirmed. A crash at any point therefore leaves the floor in force. This blocks #38.
+- **Floor values:** once #32 merges, `FailureFloor` takes `session_limits.failed_auth_floor_ms` and `idle_timeout_ms` from the C1 profile. A `SHO P 1` reading may shorten the floor, never below the read `TIDLE` plus 1 minute. Not blocking.
+
+## D1-21. Q5 passes: push sources stay out of C2 (2026-10-24)
+
+- **Evidence:** `docs/phase1/A2-q5-rtac.md` (A2, documentation only; no RTAC contacted). The SEL RTAC fits C1 and C4 with three special cases, all in C1, and none in C2. Forcing it through C2 would take about nine.
+- **Decision:** accepted as a pass. C2 stays command/response only. A device that only sends (Syslog) is covered by C1, C6 and C4, and its profile names no adapter operation. A suspension stops adapter sessions, never reception (now in C1).
+- **Open for the owner, Phase 2:** production use of plaintext UDP Syslog (RTAC, SEL-2730M, SEL-2488). In 0.1 it is accepted for the lab only, as Telnet is (ADR-0005). It goes into the Phase 1 exit document as an owner decision.
+- **Deferred:** the `relays` endpoint marker (S3) until a site enables the RTAC Syslog Collector.
+
+## D1-22. Insecure forwarding targets need an acknowledged scope, and send no device text by default (2026-10-24)
+
+- **Question (A3 C6 item 5, raised by A4):** should `tcp`, `udp` and plain `relp` targets require an administrator-acknowledged scope, and leave out device text by default?
+- **Decision:** yes to both, as A4 recommends.
+  - **Scope.** A C6 target on any transport other than `relp-tls` or `tls` must carry an acknowledgement with the same shape as C1's insecure-endpoint acknowledgement: by, at, reason and scope. Setting or changing it is a C8 audit record. In 0.1 the only scope is `lab-only`, as in C1 (ADR-0005). A production scope for an insecure upstream link (for example `same-segment`) needs the owner's decision and a later minor. It joins the plaintext UDP Syslog question from D1-21 in the Phase 1 exit document.
+  - **Device text.** Each target has a `device_text` setting. It defaults to off on insecure transports and on for `relp-tls` and `tls`. Turning it on for an insecure target is part of the acknowledged scope.
+  - **Reporting.** Text left out by configuration is reported once, as the target's state at load and in its audit record, not as a `forward.text-omitted` event per message. `forward.text-omitted` stays for omission caused by size.
+  - The two insecure golden renderings change accordingly.
+- **Why:** without this, a SER row crosses the WAN in clear text by default, and the platform would open a weaker path than the one C1 already refuses for downstream links without an acknowledgement.
+- **Action:** A4 applies it in #42. A3 and A6 check the change when they re-check C6.
