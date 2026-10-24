@@ -80,7 +80,14 @@ This follows the A3 proposal, which A1 accepted for this brief (HR-9; handoff lo
   - Once the recorded date has passed, the severity rises to medium *(proposed)* and the condition says "migration date passed". Collection is still unaffected.
 - **Commissioning.** The OS end-of-support date is recorded at commissioning (A3, HR-9), so it is visible before the node first reports.
 
-## 4. Shape proposed for C1 (A2 decides)
+## 4. One collecting node per asset (A1 D1-3)
+
+- Each asset is collected by exactly one node in 0.x, as C1 records. A second node's request to collect an assigned asset is refused (A6 adds the negative test).
+- Moving collection to another node is an explicit operator action, recorded in the audit log (C8). There is no automatic collector failover before Phase 4.
+- Other nodes may still receive the asset's Syslog. Only collection is exclusive.
+- Why: two nodes polling one relay double its session load (V-S13), and would produce two event streams for the same SER rows.
+
+## 5. Shape proposed for C1 (A2 decides)
 
 ```json
 "posture": {

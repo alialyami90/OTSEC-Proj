@@ -19,7 +19,10 @@ type Stored struct {
 // not returned, and returns events of a stream in seq order with no gaps
 // except below the stream's prune point.
 type Outbox interface {
-	// Read returns up to max events of stream with seq > after.
+	// Read returns up to max events of stream with seq > after. If after is
+	// below the stream's prune point, it returns the first retained events
+	// with no error; the caller sees the jump in seq and reports the skipped
+	// range (C6: forward.unreachable).
 	Read(ctx context.Context, stream StreamID, after Seq, max int) ([]Stored, error)
 	// ReadCapture returns the capture an EvidenceRef names. It is held at
 	// least as long as any record that refers to it.
@@ -37,8 +40,9 @@ type CommitIndex interface {
 	FirstRetained(ctx context.Context, stream StreamID) (Seq, error)
 }
 
-// ConsumerID names a delivery target, for example one upstream Syslog
-// target or the central server.
+// ConsumerID names a delivery target: for Syslog, the C6 target name; for
+// site-to-central, the central server. Delivery uses the same strings as the
+// C6 target class.
 type ConsumerID string
 
 // Delivery says whether a consumer holds back pruning (ADR-0004 item 6).
@@ -46,7 +50,9 @@ type Delivery string
 
 const (
 	// Required: events are pruned only after this consumer confirmed them.
-	// Only a consumer on an acknowledging transport may be required.
+	// Only a consumer whose acknowledgement cannot be forged may be
+	// required: for Syslog that is a C6 target with transport relp-tls
+	// (plain RELP acknowledgements can be forged).
 	Required Delivery = "required"
 	// BestEffort: the consumer cannot confirm delivery (for example plain
 	// RFC 5425). Events older than its replay window are prunable for it.
@@ -84,8 +90,8 @@ func (c Consumer) Validate() error {
 }
 
 // Cursor is the position through which a consumer has confirmed delivery of
-// a stream. For a best-effort consumer it is the position sent, which is all
-// it can know.
+// a stream. For a best-effort consumer it is only the position sent: it tells
+// the forwarder where to resume and never makes anything prunable.
 type Cursor struct {
 	Consumer ConsumerID
 	Stream   StreamID
@@ -131,8 +137,12 @@ func (boundary) sealedBoundary()    {}
 // ComputeBoundary reads the persisted cursors of stream and returns the
 // highest seq every consumer allows to prune:
 //   - a required consumer allows up to its persisted cursor (none: 0);
-//   - a best-effort consumer allows up to the greater of its cursor and the
-//     last seq committed before now minus its replay window;
+//   - a best-effort consumer allows up to the last seq committed before now
+//     minus its replay window, whatever its cursor says: "sent" is not
+//     "delivered", and a reconnect must still find the window to replay (A4
+//     review of C5, change 1). The window is measured on the node's clock,
+//     so a forward clock step shortens it; C6's window is by time only, as
+//     ADR-0004 item 6 says;
 //   - the boundary is the lowest of these, and never above the last
 //     committed seq.
 //
@@ -174,7 +184,7 @@ func ComputeBoundary(ctx context.Context, cs CursorStore, idx CommitIndex, consu
 			if err != nil {
 				return nil, err
 			}
-			allow = max(allow, aged)
+			allow = aged
 		}
 		through = min(through, allow)
 	}

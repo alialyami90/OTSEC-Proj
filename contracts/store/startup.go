@@ -266,7 +266,11 @@ func (s *startup) run(ctx context.Context) {
 	}
 	s.r.Unlock = unlock
 	s.ok(StepLock, "")
+	s.fromInspect(ctx)
+}
 
+// fromInspect runs steps 2 to 8 with the lock already held.
+func (s *startup) fromInspect(ctx context.Context) {
 	exists, err := s.env.StoreExists(ctx)
 	if err != nil {
 		s.fail(StepInspect, AlarmOpenBlocked, err)
@@ -284,9 +288,6 @@ func (s *startup) run(ctx context.Context) {
 	}
 	s.ok(StepInspect, fmt.Sprintf("store=%t recovery=%t last-resort=%t", exists, hasRecovery, hasLast))
 
-	// After this switch, needRecovery and needLast say which reserves must
-	// be re-created at the end.
-	needRecovery, needLast := true, !hasLast
 	switch {
 	case hasRecovery:
 		if err := s.env.ReleaseReserve(ctx, ReserveRecovery); err != nil {
@@ -305,7 +306,6 @@ func (s *startup) run(ctx context.Context) {
 				s.fail(StepReleaseLastResort, AlarmReserveReleaseFailed, err)
 				return
 			}
-			needLast = true
 			s.ok(StepReleaseLastResort, "")
 		} else {
 			s.alarm(AlarmReserveMissing, StepReleaseLastResort, "last-resort reserve missing on an existing store")
@@ -343,7 +343,11 @@ func (s *startup) run(ctx context.Context) {
 		return
 	}
 	s.ok(StepIntegrity, "")
+	s.recover(ctx, st)
+}
 
+// recover runs steps 6 to 8 on an open, checked store and sets the mode.
+func (s *startup) recover(ctx context.Context, st RecoveryStore) {
 	if n, err := s.prune(ctx, st); err != nil {
 		s.degrade(StepPrune, AlarmPruneFailed, err)
 	} else {
@@ -357,14 +361,17 @@ func (s *startup) run(ctx context.Context) {
 
 	recreated := true
 	for _, r := range []struct {
-		need  bool
 		which Reserve
 		bytes int64
-	}{{needLast, ReserveLastResort, s.p.LastResortReserveBytes}, {needRecovery, ReserveRecovery, s.p.RecoveryReserveBytes}} {
-		if !r.need {
+	}{{ReserveLastResort, s.p.LastResortReserveBytes}, {ReserveRecovery, s.p.RecoveryReserveBytes}} {
+		has, err := s.env.ReserveExists(ctx, r.which)
+		if err == nil && has {
 			continue
 		}
-		if err := s.env.CreateReserve(ctx, r.which, r.bytes); err != nil {
+		if err == nil {
+			err = s.env.CreateReserve(ctx, r.which, r.bytes)
+		}
+		if err != nil {
 			s.degrade(StepRecreateReserves, AlarmReserveRecreateFailed, fmt.Errorf("%s reserve: %w", r.which, err))
 			recreated = false
 			break
@@ -376,8 +383,73 @@ func (s *startup) run(ctx context.Context) {
 
 	s.r.Mode = s.cap
 	if s.cap == ModeDrainOnly {
-		s.alarm(AlarmDrainOnly, "", "store open for forwarding only; collectors not started")
+		s.alarm(AlarmDrainOnly, "", "store open for forwarding and pruning only; no new events accepted")
 	}
+}
+
+// Resume is how a node leaves ModeBlocked or ModeDrainOnly without a restart.
+// prev is the Report the node is running under; the lock it holds is kept.
+//
+//   - From ModeBlocked, Resume re-runs steps 2 to 8. The node calls it when
+//     the volume's free space has changed (proposal: checked every 60 s),
+//     and it leaves ModeBlocked only when free space reaches the open
+//     headroom. It never opens the store below it.
+//   - From ModeDrainOnly, Resume re-runs steps 6 to 8 on the open store. The
+//     node calls it after forwarding has saved a cursor (proposal: at most
+//     every 60 s). It returns ModeCollecting only when pruning and compaction
+//     succeed and both reserves exist again.
+//   - From any other mode it returns prev unchanged: ModeCollecting needs
+//     nothing, and ModeFailed needs a restart.
+//
+// Every Report whose Mode differs from prev's is a ModeChange the node
+// reports as a health event and an audit record (ModeChangeOf).
+func Resume(ctx context.Context, env StartupEnv, p StartupPolicy, prev Report) Report {
+	if prev.Mode != ModeBlocked && prev.Mode != ModeDrainOnly {
+		return prev
+	}
+	s := &startup{env: env, p: p, r: &Report{Unlock: prev.Unlock}, cap: ModeCollecting}
+	s.now = time.Now()
+	if p.Now != nil {
+		s.now = p.Now()
+	}
+	if err := p.Validate(); err != nil {
+		s.fail(StepPolicy, AlarmSettingsInvalid, err)
+		return *s.r
+	}
+	if prev.Mode == ModeBlocked {
+		s.fromInspect(ctx)
+		return *s.r
+	}
+	s.r.Store = prev.Store
+	s.recover(ctx, prev.Store)
+	return *s.r
+}
+
+// AcceptsEvents reports whether a node in mode m may accept new events: start
+// collectors, poll SER, and accept Syslog. Only ModeCollecting does. In every
+// other mode the collector stops pulling from devices, so records stay in
+// the device's own buffer; if the buffer wraps meanwhile, the loss shows at
+// the next collection as a C4 ser.gap event, not as silence. Syslog
+// listeners refuse new data (stream) or drop and count it (datagram).
+func (m Mode) AcceptsEvents() bool { return m == ModeCollecting }
+
+// ModeChange is a change of the store's mode. The node emits it as a C4
+// platform health event (store.mode-changed) and as an audit record.
+// TODO(C8): the audit record shape.
+type ModeChange struct {
+	From, To Mode
+	At       time.Time
+	// Alarms are the alarms of the run that changed the mode; they say why.
+	Alarms []Alarm
+}
+
+// ModeChangeOf returns the change from prev to next, and false if the mode
+// did not change.
+func ModeChangeOf(prev, next Report, at time.Time) (ModeChange, bool) {
+	if prev.Mode == next.Mode {
+		return ModeChange{}, false
+	}
+	return ModeChange{From: prev.Mode, To: next.Mode, At: at, Alarms: next.Alarms}, true
 }
 
 // prune runs prune passes, one step per stream per pass, while usage is

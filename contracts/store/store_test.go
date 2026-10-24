@@ -317,10 +317,12 @@ func TestComputeBoundary(t *testing.T) {
 	if b.Through() != 4 {
 		t.Fatalf("required at 8, best-effort window ends at 4: got %d", b.Through())
 	}
-	f.SaveCursor(ctx, Cursor{"rfc5425", "s", 7})
+	// A best-effort cursor means "sent", not "delivered": it never makes
+	// events inside the replay window prunable (A4 review of C5, change 1).
+	f.SaveCursor(ctx, Cursor{"rfc5425", "s", 10})
 	b, _ = ComputeBoundary(ctx, f, f, []Consumer{req, be}, "s", f.now)
-	if b.Through() != 7 {
-		t.Fatalf("best-effort cursor 7 above its window: got %d", b.Through())
+	if b.Through() != 4 {
+		t.Fatalf("best-effort cursor 10 inside its window moved the boundary to %d, want 4", b.Through())
 	}
 	if _, err := ComputeBoundary(ctx, f, f, nil, "s", f.now); !isCode(err, CodeNoConsumers) {
 		t.Fatalf("no consumers: %v", err)
@@ -657,5 +659,88 @@ func TestNewLogRejectsBadNodeID(t *testing.T) {
 func TestKeyText(t *testing.T) {
 	if s := (Key{NodeID: "site-a-node1", Stream: "relay1/ser", Seq: 7}).String(); s != "site-a-node1:relay1/ser:7" {
 		t.Fatal(s)
+	}
+}
+
+func TestReleaseOfLastResortFailingStopsStartup(t *testing.T) {
+	f := existing()
+	f.reserves[ReserveRecovery] = false
+	f.fail["ReleaseReserve:last-resort"] = errInjected
+	r := RunStartup(context.Background(), f, policy())
+	if r.Mode != ModeFailed || indexOf(f.calls, "Open") >= 0 || !hasAlarm(r, AlarmReserveReleaseFailed) {
+		t.Fatalf("mode %s calls %v alarms %v", r.Mode, f.calls, r.Alarms)
+	}
+}
+
+func TestOnlyCollectingAcceptsEvents(t *testing.T) {
+	for m, want := range map[Mode]bool{ModeCollecting: true, ModeDrainOnly: false, ModeBlocked: false, ModeFailed: false} {
+		if m.AcceptsEvents() != want {
+			t.Errorf("%s.AcceptsEvents() = %v", m, !want)
+		}
+	}
+}
+
+// Leaving blocked: Resume opens the store only once free space reaches the
+// headroom, and keeps the lock it already holds.
+func TestResumeFromBlocked(t *testing.T) {
+	f := existing()
+	f.reserves[ReserveRecovery] = false
+	f.reserves[ReserveLastResort] = false
+	f.free = 28672
+	f.cursors["s"] = map[ConsumerID]Seq{"central": 200}
+	p := policy()
+	r := RunStartup(context.Background(), f, p)
+	if r.Mode != ModeBlocked {
+		t.Fatalf("mode %s", r.Mode)
+	}
+	again := Resume(context.Background(), f, p, r) // nothing freed yet
+	if again.Mode != ModeBlocked || indexOf(f.calls, "Open") >= 0 {
+		t.Fatalf("resumed without headroom: mode %s", again.Mode)
+	}
+	f.free = 1 << 20 // an operator freed space outside the store
+	f.calls = nil
+	next := Resume(context.Background(), f, p, again)
+	if next.Mode != ModeCollecting || indexOf(f.calls, "Lock") >= 0 || next.Unlock == nil {
+		t.Fatalf("mode %s calls %v", next.Mode, f.calls)
+	}
+	if c, ok := ModeChangeOf(again, next, f.now); !ok || c.From != ModeBlocked || c.To != ModeCollecting {
+		t.Fatalf("mode change %+v %v", c, ok)
+	}
+}
+
+// Leaving drain-only: once forwarding confirms events, Resume prunes them,
+// re-creates the reserves and allows collection again.
+func TestResumeFromDrainOnly(t *testing.T) {
+	f := existing()
+	f.reserves[ReserveRecovery] = false
+	f.limit = 200 * f.eventSize
+	p := policy()
+	p.PruneTarget = 0.5                         // pruning to 100 events frees room for the reserve
+	r := RunStartup(context.Background(), f, p) // nothing confirmed yet
+	if r.Mode != ModeDrainOnly {
+		t.Fatalf("mode %s", r.Mode)
+	}
+	if again := Resume(context.Background(), f, p, r); again.Mode != ModeDrainOnly {
+		t.Fatalf("left drain-only with nothing confirmed: %s", again.Mode)
+	}
+	if err := r.Store.SaveCursor(context.Background(), Cursor{"central", "s", 180}); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	next := Resume(context.Background(), f, p, r)
+	if next.Mode != ModeCollecting || !f.reserves[ReserveRecovery] || indexOf(f.calls, "Open") >= 0 {
+		t.Fatalf("mode %s reserves %v calls %v", next.Mode, f.reserves, f.calls)
+	}
+	if got := f.retained("s"); got[0] <= 1 || got[0] > 181 {
+		t.Fatalf("first retained %d", got[0])
+	}
+}
+
+func TestResumeLeavesOtherModesAlone(t *testing.T) {
+	for _, m := range []Mode{ModeCollecting, ModeFailed} {
+		f := existing()
+		if r := Resume(context.Background(), f, policy(), Report{Mode: m}); r.Mode != m || len(f.calls) != 0 {
+			t.Errorf("%s: %s %v", m, r.Mode, f.calls)
+		}
 	}
 }

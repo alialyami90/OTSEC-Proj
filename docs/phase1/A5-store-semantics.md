@@ -1,6 +1,6 @@
 # C5 `otsec.store/0.1`: store, outbox and delivery semantics
 
-Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24.
+Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24; revised for A4's review ([reviews/C5-A4.md](reviews/C5-A4.md)) and A1's decisions D1-3 to D1-5.
 
 C5 fixes how a site node keeps, acknowledges, recovers and prunes events. It is an in-process contract, so it consists of Go interfaces plus two pieces of contract-owned logic: the group-commit coordinator `Log` and the startup sequence `RunStartup`. Those two are in the contract because they are what make an early acknowledgement or an out-of-order startup impossible. Phase 2 writes the SQLite implementation behind the interfaces. The implementation does not reorder the steps.
 
@@ -29,13 +29,21 @@ Native evidence: a `Record` may point at a `Capture` (a whole SER report, a data
 ## 3. Outbox, cursors and pruning
 
 - **At-least-once.** `Outbox.Read` returns committed events in seq order, never one whose commit has not returned. Receivers de-duplicate by C4's event ID.
+- **Reading across a pruned range.** If `Read(after)` asks for seqs that have been pruned, it returns the first retained events with no error. The forwarder sees the jump in seq and reports the skipped range as C4 `forward.unreachable` (A4 review, change 3). This only happens to a best-effort consumer that was away longer than its window, because nothing a required consumer has not confirmed is ever pruned.
 - **Consumers** are declared `required` or `best-effort` (ADR-0004 item 6). A required consumer holds back pruning until it has confirmed delivery. A best-effort consumer, such as plain RFC 5425, has a replay window. Events older than the window are prunable as far as it is concerned. `Consumer.Validate` rejects a required consumer that has a window, and a best-effort consumer that has none.
+  - **Only an acknowledgement that cannot be forged makes a consumer required.** For Syslog that is a C6 target with transport `relp-tls`. Plain RELP acknowledgements can be forged by anyone on the path, so a plain RELP target is best-effort (A4 review, change 2).
+  - `ConsumerID` is the C6 target name for Syslog, and the central server for site-to-central. `Delivery` uses the same strings as C6's target class, `required` and `best-effort`.
 - **Cursors** are saved at `FULL` in the stream's own database. `SaveCursor` refuses to move a cursor backwards (`cursor-regress`) or past the last committed seq (`cursor-ahead`).
 - **The prune boundary comes only from persisted cursors (R-A5-5).** `Boundary` is sealed, and the only way to get one is `ComputeBoundary`. It reads `LoadCursors` from the database at the time of the call and takes the lowest of:
   - each required consumer's persisted cursor (0 if it has none);
-  - for each best-effort consumer, the higher of its cursor and the last seq committed before its replay window.
+  - for each best-effort consumer, the last seq committed before now minus its replay window, `LastCommittedBy(now − window)`, **whatever its cursor says**.
+
+  A best-effort cursor records what was sent, not what was delivered. It tells the forwarder where to resume, and it never makes an event prunable. So an open replay window is never pruned, which is A1's D1-5 and R-A5-5 (A4 review, change 1; `TestComputeBoundary`).
+
+  The window is measured on the node's clock against commit time. A forward clock step therefore shortens it, and a backward step lengthens it. C6's replay window is by time only (ADR-0004 item 6), so this is accepted rather than corrected; a clock step is already a C4 timing event (A4 review, note 4).
 
   `Pruner.PruneStep` accepts nothing but a `Boundary`, so a prune can never take an in-memory position, a step counter, or "the oldest half". `TestBoundaryIgnoresUnpersistedCursor` shows that a confirmed but unsaved cursor moves nothing. `TestInterruptedPruneNeverPassesCursor` kills a recovery part-way and restarts it, and it still prunes exactly up to the cursor.
+- **No forced prune.** C5 0.1 has no path that prunes past the boundary, under storage pressure or otherwise. A full store stops intake (section 6) and drains (section 4a). D1-5 requires any future forced prune to be an explicit loss with a gap marker and an audit record; it would need a C5 version change and A1's approval.
 - **A stream with no consumer is never pruned** (`no-consumers`). The site is the system of record (Q6), and V-S9 allows no un-forwarded native record to be evicted. A node with no upstream configured fills its quota and then applies the storage-full policy.
 - **Pruning happens in small transactions** (*(proposed)* 50 events), because one large delete can need more WAL than a full disk has (E-A5-3).
 
@@ -48,14 +56,30 @@ Native evidence: a `Record` may point at a `Capture` (a whole SER report, a data
 | 1 | `Lock`: exclusive use of the store's files for the life of the node. The lock fails if another process holds it. | `failed`. The store is not opened. Alarm `store-lock-failed`. |
 | 2 | Inspect without opening: does the store exist, and which reserves exist. | `failed`. Alarm `store-open-blocked`. |
 | 3 | Release the recovery reserve. `ReleaseReserve` returns success only once the file is gone. **A failed release stops startup.** | `failed`. Alarm `reserve-release-failed`. The store is not opened. |
-| 3' | If the store exists and the recovery reserve does not, release the last-resort reserve instead (section 5). | As step 3. |
+| 3' | If the store exists and the recovery reserve does not, release the last-resort reserve instead (section 5). | As step 3: a failed release of either reserve stops startup (D1-4; `TestReleaseOfLastResortFailingStopsStartup`). |
 | 4 | Check the free space against `OpenHeadroomBytes`. | `blocked`. The store is not opened. Alarm `store-open-blocked`. The lock is kept. |
 | 5 | `Open`, then `CheckSettings` (WAL, `FULL`, bounded WAL, created with `auto_vacuum=INCREMENTAL`; a store without it is refused, never altered), then `QuickCheck`. | `failed`, and the store is closed. Alarms `store-open-failed`, `store-settings-invalid` and `store-integrity-failed`. Nothing is pruned or repaired automatically, so evidence is preserved. |
 | 6 | While usage is above `PruneTarget` *(proposed 0.8)*, run one prune step per stream per pass. The boundary is recomputed before every step. | `drain-only`. Alarm `store-prune-failed`. |
 | 7 | `CompactStep` *(proposed 32 pages)* returns free pages to the filesystem with a checkpoint between steps. | `drain-only`. Alarm `store-compact-failed`. |
 | 8 | Re-create any released or missing reserve, the last-resort reserve first. `CreateReserve` is all or nothing. | `drain-only`. Alarm `reserve-recreate-failed`. |
 
-The node collects (`collecting`) only if every step passed and both reserves are back in place. In `drain-only`, the store is open and forwarding runs, so cursors can advance, but collectors do not start. The node retries steps 6 to 8 while draining and may start collectors once both reserves exist. Alarm `store-drain-only`.
+The node collects (`collecting`) only if every step passed and both reserves are back in place. Otherwise it ends in one of the states of section 4a.
+
+## 4a. Blocked and drain-only (A1 D1-4)
+
+| | `blocked` | `drain-only` |
+| --- | --- | --- |
+| Entered when | Step 4 finds free space below `OpenHeadroomBytes`. | The store opened, but step 6, 7 or 8 failed, or startup needed the last-resort reserve and could not put both reserves back. |
+| Store | Not opened. The lock from step 1 is held. | Open. Forwarding reads the outbox and saves cursors; pruning and compaction run. |
+| New events | None. | None. |
+| Exit | `Resume` re-runs steps 2 to 8 when free space changes, *(proposed)* checked every 60 s. It opens the store only once free space reaches the headroom, then goes to `collecting` or `drain-only` like a fresh startup. Free space comes from outside the store, from an operator or a removed file; an open attempt is never the way out. | `Resume` re-runs steps 6 to 8 on the open store after forwarding saves a cursor, *(proposed)* at most every 60 s. It goes to `collecting` only when pruning and compaction succeed and both reserves exist again. |
+| Tests | `TestStartupBlockedWithoutHeadroom`, `TestResumeFromBlocked` | `TestStartupDegradesToDrainOnly`, `TestResumeFromDrainOnly` |
+
+Common to both, and to `failed`:
+
+- **Collection stops at the device.** `Mode.AcceptsEvents` is true only in `collecting`. In every other mode the collector stops pulling SER, so records stay in the relay's own buffer. If that buffer wraps before collection resumes, the next collection reports the loss as a C4 `ser.gap` event, never as silence. Syslog stream listeners refuse new data, and datagram listeners drop and count it (section 6).
+- **Every mode change is reported** on the node's health surface, as a C4 platform event on `platform/health`, and as an audit record. `ModeChangeOf(prev, next, at)` gives the change with the alarms that caused it. The health type is `store.mode-changed` (to be confirmed with A4 as part of C4's open `store.*` set); the audit record's shape is C8's (`TODO(C8)`).
+- `failed` has no exit except a restart. `Resume` leaves `failed` and `collecting` unchanged (`TestResumeLeavesOtherModesAlone`).
 
 **Nothing else opens the store before recovery completes, or after.** The lock from step 1 is held for the life of the node. Support tools and the UI read through the node, never the files. Phase 2 has to choose the OS mechanism for this. *(proposed)* There are two layers:
 
