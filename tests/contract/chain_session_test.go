@@ -157,8 +157,8 @@ func buildChainSession(t *testing.T) (*chainRun, error) {
 	for _, row := range r.serRows {
 		f := strings.Fields(row)
 		r.res.Records = append(r.res.Records, adapter.Record{Kind: "sel.ser.row", Span: at(row, serStart), ContextSpan: &ctx, ParseOK: true,
-			Fields: []adapter.Field{{Name: "row", Value: f[0]}, {Name: "date", Value: f[1]}, {Name: "time", Value: f[2]},
-				{Name: "element", Value: f[3]}, {Name: "state", Value: f[4]}}})
+			Fields: []adapter.Field{{Name: "#", Value: f[0]}, {Name: "DATE", Value: f[1]}, {Name: "TIME", Value: f[2]},
+				{Name: "ELEMENT", Value: f[3]}, {Name: "STATE", Value: f[4]}}})
 	}
 
 	declared := func(name, value string) asset.Attribute {
