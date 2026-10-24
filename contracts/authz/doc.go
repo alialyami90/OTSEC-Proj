@@ -67,8 +67,9 @@
 //     its output is released, and a mismatch suspends the credential with
 //     identity-mismatch.
 //   - At most one unconfirmed authentication per asset within FailureFloor
-//     of the last one (C7-A2-1, A1 D1-20). An authentication is unconfirmed from the
-//     moment the password is sent until the Level 1 prompt confirms it, so
+//     of the last one (C7-A2-1, A1 D1-20). An authentication is unconfirmed
+//     from the moment the password is sent until the Level 1 prompt
+//     confirms it, so
 //     a timeout, a closed connection or a crash in between starts the floor
 //     just as a wrong password does. The floor is TIDLE plus one minute,
 //     where TIDLE is the
@@ -81,7 +82,8 @@
 //     alarm contact (SALARM after three wrong passwords).
 //   - Durable collector state (C7-A5-3). The collector keeps the time of the
 //     last unconfirmed authentication per asset, and its collector sequence
-//     counter, in its own store, and flushes both before it replies. A
+//     counter, in its own store. It flushes the attempt time before the
+//     slot sends the password, and the counter before it replies. A
 //     restart therefore does not reopen the floor. A failure time later than
 //     the clock counts as inside the floor, so a clock stepped backwards does
 //     not reopen it either. If the state cannot be read or flushed, the
