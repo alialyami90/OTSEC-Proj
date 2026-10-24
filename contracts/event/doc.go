@@ -19,10 +19,11 @@
 //     redaction, and the event names its invocation and operation. Report
 //     context such as the SER header is referenced by span, not copied.
 //   - The timestamp model. The device's own time text is kept verbatim.
-//     Resolution and accuracy are separate fields. The offset from UTC may be
-//     "unknown", and then no UTC time is stated. Time quality is scoped (record,
-//     report, device or stream). A rendered time may not carry more fractional
-//     digits than its resolution supports. The collector's receive time is a
+//     Resolution and accuracy are separate fields; resolution is the step of
+//     the time as printed, and coarser internal timing is an accuracy. The
+//     offset from UTC may be "unknown", and then no UTC time is stated. Time
+//     quality is scoped (record, report, device or stream). A rendered time
+//     may not carry more fractional digits than its resolution supports. The collector's receive time is a
 //     separate field. C8 audit records reuse DeviceTime and Received.
 //   - Who sent it and what it is about. Source.Asset is the subject (a C1 asset
 //     reference); Source.Sender is who delivered the bytes. A relaying sender
@@ -33,10 +34,16 @@
 //     (A6 C-13, R-A4-1, R-A4-2). Align compares consecutive reads by alignment
 //     key; the key is the record without its row number. A gap or an
 //     ambiguous overlap is reported as a platform health event, never hidden.
-//     An empty read followed by records is not a gap unless the new read
-//     fills the buffer.
+//     An empty read followed by records is not a gap (A1 D1-7). A full wrap
+//     between two reads is undetectable; Align's doc says when.
 //   - Platform event types (Health), for gaps, loss, unsynchronized clocks,
 //     parse failures, silent senders and forwarding outcomes.
+//   - Nothing is dropped for being hard to represent (EP-1). A record whose
+//     time cannot be decoded keeps Native with the invalid-time flag and no
+//     wall clock; a record that cannot be parsed keeps its native bytes with
+//     parse_status partial or failed and leaves out what it could not fill.
+//     Such an event is still valid, so a producer never has a reason to
+//     discard a record. Decode reads stored events strictly (A1 D1-9).
 //
 // # What it leaves out
 //

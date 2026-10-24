@@ -9,32 +9,71 @@ func TestAlign(t *testing.T) {
 	cases := []struct {
 		name       string
 		prev, next []string
-		capacity   int
-		want       AlignResult
+		status     AlignStatus
+		added      []int
+		dups       []int
+		removed    []int
 	}{
-		{"first read", nil, []string{"a", "b"}, 1024, AlignResult{AlignStatusFirstRead, []int{0, 1}, 0}},
-		{"no change", []string{"a", "b"}, []string{"a", "b"}, 1024, AlignResult{AlignStatusOK, []int{}, 0}},
-		{"append", []string{"a", "b"}, []string{"a", "b", "c"}, 1024, AlignResult{AlignStatusOK, []int{2}, 0}},
-		{"append with front drop", []string{"a", "b", "c"}, []string{"b", "c", "d", "e"}, 1024, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
-		{"identical records anchored", []string{"a", "x"}, []string{"a", "x", "x", "x"}, 1024, AlignResult{AlignStatusOK, []int{2, 3}, 0}},
+		{"first read", nil, []string{"a", "b"}, AlignStatusFirstRead, []int{0, 1}, nil, nil},
+		{"no change", []string{"a", "b"}, []string{"a", "b"}, AlignStatusOK, nil, nil, nil},
+		{"append", []string{"a", "b"}, []string{"a", "b", "c"}, AlignStatusOK, []int{2}, nil, nil},
+		{"append with front drop", []string{"a", "b", "c"}, []string{"b", "c", "d", "e"}, AlignStatusOK, []int{2, 3}, nil, nil},
+		{"identical records anchored", []string{"a", "x"}, []string{"a", "x", "x", "x"}, AlignStatusOK, []int{2, 3}, nil, nil},
 		// Overlap of 2 or 1 both fit: keep the possibly-new x, flag it (R-A4-2).
-		{"identical records unanchored", []string{"x", "x"}, []string{"x", "x", "y"}, 1024, AlignResult{AlignStatusAmbiguous, []int{1, 2}, 1}},
-		{"wrapped past previous read", []string{"a", "b"}, []string{"c", "d"}, 1024, AlignResult{AlignStatusGap, []int{0, 1}, 0}},
-		{"cleared then one record", []string{"a", "b"}, []string{"z"}, 1024, AlignResult{AlignStatusGap, []int{0}, 0}},
-		{"cleared and empty", []string{"a", "b"}, []string{}, 1024, AlignResult{AlignStatusGap, []int{}, 0}},
-		{"record removed from the middle", []string{"a", "b", "c"}, []string{"a", "c", "d"}, 1024, AlignResult{AlignStatusGap, []int{0, 1, 2}, 0}},
-		{"empty to empty", []string{}, []string{}, 1024, AlignResult{AlignStatusOK, nil, 0}},
-		// SEL "No Data Available", then rows (A2 C4 review change 2).
-		{"empty to records", []string{}, []string{"a"}, 1024, AlignResult{AlignStatusOK, []int{0}, 0}},
-		{"empty to a full buffer", []string{}, []string{"a", "b", "c"}, 3, AlignResult{AlignStatusGap, []int{0, 1, 2}, 0}},
-		{"empty to records, capacity unknown", []string{}, []string{"a"}, 0, AlignResult{AlignStatusGap, []int{0}, 0}},
-		{"shorter read than previous overlap", []string{"a", "b", "c", "d"}, []string{"c"}, 1024, AlignResult{AlignStatusGap, []int{0}, 0}},
+		{"identical records unanchored", []string{"x", "x"}, []string{"x", "x", "y"}, AlignStatusAmbiguous, []int{1, 2}, []int{1}, nil},
+		{"periodic tail", []string{"a", "a", "a"}, []string{"a", "a", "a", "a"}, AlignStatusAmbiguous, []int{1, 2, 3}, []int{1, 2}, nil},
+		{"wrapped past previous read", []string{"a", "b"}, []string{"c", "d"}, AlignStatusGap, []int{0, 1}, nil, nil},
+		{"cleared then one record", []string{"a", "b"}, []string{"z"}, AlignStatusGap, []int{0}, nil, nil},
+		{"cleared and empty", []string{"a", "b"}, []string{}, AlignStatusGap, nil, nil, nil},
+		// A6 C4 review change 1 (V-S4): records already stored are not
+		// stored again; the removed or changed record is reported.
+		{"record removed from the middle", []string{"a", "b", "c", "d"}, []string{"a", "c", "d", "e"}, AlignStatusGap, []int{3}, nil, []int{1}},
+		{"record changed in place", []string{"a", "b", "c"}, []string{"a", "B", "c", "d"}, AlignStatusGap, []int{1, 3}, nil, []int{1}},
+		{"record missing at the end", []string{"a", "b", "c", "d"}, []string{"c"}, AlignStatusGap, nil, nil, []int{3}},
+		{"reordered", []string{"a", "x", "b"}, []string{"x", "a", "c"}, AlignStatusGap, []int{1, 2}, []int{1}, []int{2}},
+		{"empty to empty", []string{}, []string{}, AlignStatusOK, nil, nil, nil},
+		// SEL "No Data Available", then rows (A1 D1-7, A6 question 4).
+		{"empty to records", []string{}, []string{"a", "b"}, AlignStatusOK, []int{0, 1}, nil, nil},
 	}
+	same := func(a, b []int) bool { return len(a) == len(b) && (len(a) == 0 || reflect.DeepEqual(a, b)) }
 	for _, c := range cases {
-		got := Align(c.prev, c.next, c.capacity)
-		if got.Status != c.want.Status || got.PossibleDuplicates != c.want.PossibleDuplicates ||
-			len(got.Added) != len(c.want.Added) || (len(got.Added) > 0 && !reflect.DeepEqual(got.Added, c.want.Added)) {
-			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
+		got := Align(c.prev, c.next)
+		if got.Status != c.status || !same(got.Added, c.added) || !same(got.PossibleDuplicates, c.dups) || !same(got.Removed, c.removed) {
+			t.Errorf("%s: got %+v, want status %s added %v dups %v removed %v", c.name, got, c.status, c.added, c.dups, c.removed)
+		}
+	}
+}
+
+// For every pair of reads: Added holds valid, distinct indices, and every
+// record of the new read that is not added is matched, one for one, by a
+// record of the previous read. So nothing is lost and nothing matched is
+// stored twice.
+func TestAlignNeverLosesOrRestores(t *testing.T) {
+	reads := [][]string{
+		{"a", "b", "c"}, {"b", "c", "d"}, {"x"}, {"a", "c"}, {"c", "a"}, {"a", "a", "b"}, {"b", "a", "a"}, {},
+	}
+	for _, prev := range reads {
+		for _, next := range reads {
+			r := Align(prev, next)
+			added := map[int]bool{}
+			for _, j := range r.Added {
+				if j < 0 || j >= len(next) || added[j] {
+					t.Fatalf("%v -> %v: bad Added %v", prev, next, r.Added)
+				}
+				added[j] = true
+			}
+			count := map[string]int{}
+			for _, k := range prev {
+				count[k]++
+			}
+			for j, k := range next {
+				if !added[j] {
+					if count[k] == 0 {
+						t.Errorf("%v -> %v: %q at %d neither added nor in the previous read", prev, next, k, j)
+					}
+					count[k]--
+				}
+			}
 		}
 	}
 }
@@ -48,7 +87,7 @@ func TestAlignGoldenKeysSurviveRenumbering(t *testing.T) {
 		keys = append(keys, load(t, "testdata/valid/sel751-fig10-16-row"+n+".json").Native.AlignmentKey)
 	}
 	next := append(append([]string{}, keys...), "sha256:new-record")
-	got := Align(keys, next, 1024)
+	got := Align(keys, next)
 	if got.Status != AlignStatusOK || !reflect.DeepEqual(got.Added, []int{8}) {
 		t.Fatalf("got %+v", got)
 	}

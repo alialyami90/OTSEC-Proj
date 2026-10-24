@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"otsec.local/otsec/contracts/node"
 )
 
 // TestSchemaMatchesTypes keeps schema/event.json and the Go types in step:
@@ -80,5 +82,30 @@ func compare(t *testing.T, path string, typ reflect.Type, node map[string]any, d
 	}
 	if !reflect.DeepEqual(goRequired, schemaRequired) && !(len(goRequired) == 0 && len(schemaRequired) == 0) {
 		t.Errorf("%s: required: Go %v, schema %v", path, goRequired, schemaRequired)
+	}
+}
+
+// The schema cannot import Go, so it repeats the node ID and stream patterns
+// of contracts/node; they must stay identical (A1 D1-1).
+func TestSchemaNodePatterns(t *testing.T) {
+	b, err := os.ReadFile("schema/event.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		Defs struct {
+			EventID struct {
+				Properties map[string]struct {
+					Pattern string `json:"pattern"`
+				} `json:"properties"`
+			} `json:"event_id"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(b, &root); err != nil {
+		t.Fatal(err)
+	}
+	p := root.Defs.EventID.Properties
+	if p["node_id"].Pattern != node.IDPattern || p["stream"].Pattern != node.StreamPattern {
+		t.Errorf("schema patterns %q, %q differ from contracts/node", p["node_id"].Pattern, p["stream"].Pattern)
 	}
 }

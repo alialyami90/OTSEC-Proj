@@ -18,7 +18,7 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 
 ## Golden examples and acceptance tests
 
-- All 8 rows of SEL-751 Figure 10.16 (A2's `documented-example`), mapped field by field, plus the RTAC Syslog example, a known-offset variant and a `ser.gap` platform event. Twenty-three invalid examples, one rule each. Details: [contracts/event/testdata/NOTES.md](../../contracts/event/testdata/NOTES.md).
+- All 8 rows of SEL-751 Figure 10.16 (A2's `documented-example`), mapped field by field, plus the RTAC Syslog example, a known-offset variant and a `ser.gap` platform event. Twenty-six invalid examples, one rule each, plus two constructed valid rows (invalid date, leap second). Details: [contracts/event/testdata/NOTES.md](../../contracts/event/testdata/NOTES.md).
 - Native round trip: `TestSERRoundTrip` checks that each row's bytes equal the fixture at the span, survive JSON marshalling, and that every row of the figure has exactly one event.
 - Precision: `TestPrecision` plus two invalid examples.
 - Schema drift: `TestSchemaMatchesTypes` fails if `schema/event.json` and the Go types disagree on any property or on which properties are required. The schema states structure; cross-field rules are enforced by `Validate`. The valid examples also validate against the schema with Python `jsonschema` 4.26 (run locally; CI does not install it).
@@ -28,15 +28,23 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 | Review | Change | Done |
 | --- | --- | --- |
 | A2 ([C4-A2](reviews/C4-A2.md)) 1 | `adapter-poll` requires `invocation_id` and `operation_id`; the evidence is the C2 transcript as stored (after redaction), and spans index stored bytes. | `Validate`, `Collection` doc, invalid `adapter-poll-without-invocation` |
-| A2 2 | `Align(prev, next, capacity)`: an empty previous read followed by records is `ok`, unless the new read fills the buffer (then `gap`); with capacity unknown it stays `gap`. | `align.go`, three new cases |
+| A2 2 | An empty previous read followed by records is `ok`. The capacity clause (a gap when the new read fills the buffer) was superseded by A1 D1-7, which records the undetectable full wrap in the doc instead. | `align.go`; `Align(prev, next)` keeps its two-argument form |
 | A2 3 | Optional `native.context_span` for the report header, inside the same evidence. | Golden rows point at the SEL-751 header; invalid `context-span-outside-evidence` |
 | A2 4 | Alignment key bytes defined exactly: DATE through the last byte before CR, LF or CR LF, no trimming. | `Native.AlignmentKey` doc; the golden keys already follow it (A2 recomputed row 8) |
 | A2 note | Asset IDs are C1 lowercase UUIDs. | Pattern and examples switched; IDs match A2's C1 examples |
 | A5 ([C4-A5](reviews/C4-A5.md)) 1 | `ValidatePending` for producers before C5 assigns seq: every rule, with seq required to be 0. The store writes seq into `id` before any reader sees the event, so stored bodies carry the full ID. | `validate.go`, `TestValidatePending` |
 | A5 2 | `evidence.ref`, when set, equals `sha256:` + `evidence.sha256` (C5 capture name). | `Validate`, schema pattern, invalid `evidence-ref-mismatch` |
 
+| A6 ([C4-A6](reviews/C4-A6.md)) 1 | On a gap, the two reads are matched on their longest common subsequence. Records already stored are never stored again. Unmatched records whose key appears in the previous read become `PossibleDuplicates` (now a list of indices). Records missing from the middle or end are returned in `Removed` for the `ser.gap` event. | `align.go`; the removed and changed cases from A6, plus `TestAlignNeverLosesOrRestores` over every pair of eight reads |
+| A6 2 | `resolution_ns` is defined as the step of the printed value. Coarser internal timing goes in the accuracy fields. A record that cannot be represented is kept, never dropped. | `DeviceTime` doc, `doc.go` |
+| A6 3 | `wall_clock` is absent exactly when `invalid-time` is set. Second 60 is accepted at 23:59 only, with no UTC. | `validate.go`, two constructed valid rows, invalid `wall-clock-missing` and `leap-second-with-utc` |
+| A6 Q4, A1 D1-7 | An empty previous read followed by records is `ok`. The undetectable full wrap is documented. | `align.go` |
+| A6 5, rated by A3 ([C4-A3](reviews/C4-A3.md)) | Closed table `AllowedOriginAuth`: `adapter-poll` allows `session`; `syslog-receive` and `host-push` allow `none`, `tls-server-only` and `tls-mutual`. Platform events allow `platform`. | `TestOriginAuthPairs` checks every pair; invalid `origin-auth-mismatch` |
+| A6 6, A1 D1-9 | Strict `Decode`: exact key spelling for each object's own fields, duplicate keys rejected (compared without case), no trailing data, no unknown fields in a 0.1 event. **One deviation, flagged to A1:** an event stamped with a later 0.x minor may carry new lowercase fields, and Decode ignores them, because contracts/README.md requires readers to accept later minors. | `decode.go`, `TestDecode`; every valid example goes through `Decode` |
+| A1 D1-1 | `contracts/node` holds `ID` and `Stream`. C4's `NodeID` and `Stream` are aliases of them. The schema's patterns are checked against the package constants. | `contracts/node`, `TestSchemaNodePatterns`, a row in contracts/README.md |
+
 ## Proposals for A1
 
 1. **Line endings of fixtures.** No `.gitattributes` exists, so a Windows checkout with `core.autocrlf=true` can rewrite LF to CRLF in `tests/fixtures/`, which changes every byte-exact fixture and its SHA-256. C4 works around it with a `-text` copy in `contracts/event/testdata/`. Proposed root `.gitattributes`: `tests/fixtures/** -text` and `**/testdata/*.txt -text`.
 2. **TODO(C1), TODO(C2), TODO(C3).** `AssetRef.ID`, `Sender.AssetID`, `Collection.InvocationID` and `Collection.OperationID` are strings until C1, C2 and C3 merge; the binding fields stay in C4 because they describe the attribution, not the asset.
-3. **Node ID and the C1/C4 import cycle.** C4 will import `contracts/asset` for the asset ID, and C1 plans to import C4's `NodeID`. Go forbids the cycle. Proposed: move `NodeID` (and the stream token, which C5 also mirrors) into a leaf package such as `contracts/node`, owned like `contracts/version`. Details in [C1-A4](reviews/C1-A4.md) change 1.
+3. **Node ID and the C1/C4 import cycle.** Decided in D1-1: `contracts/node` is added by this PR.

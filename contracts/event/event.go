@@ -5,31 +5,21 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"otsec.local/otsec/contracts/node"
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
 const Identifier = "otsec.event/0.1"
 
-// NodeID names a platform node. It is a lowercase DNS label (1 to 63
-// characters, letters, digits and inner hyphens), so it is valid as a Syslog
-// HOSTNAME and as a file name on Windows and Linux.
-type NodeID string
-
-var nodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-
-// Valid reports whether n is a well-formed node ID.
-func (n NodeID) Valid() bool { return nodeIDPattern.MatchString(string(n)) }
+// NodeID names a platform node: a lowercase DNS label, defined in
+// contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
+type NodeID = node.ID
 
 // Stream names one native sequence space on a node, for example one
-// device's SER buffer or one Syslog sender. 1 to 128 characters: lowercase
-// letters, digits, '.', '_', '/', '-', starting with a letter or digit. It
+// device's SER buffer or one Syslog sender. Defined in contracts/node; it
 // never contains ':', which separates the parts of EventID.String.
-type Stream string
-
-var streamPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,127}$`)
-
-// Valid reports whether s is a well-formed stream token.
-func (s Stream) Valid() bool { return streamPattern.MatchString(string(s)) }
+type Stream = node.Stream
 
 // EventID is the transport identity of an event (ADR-0004 item 3). Seq is
 // assigned at durable commit, starts at 1 and increases by exactly 1 per
@@ -228,8 +218,8 @@ const (
 
 // Received is when and how the node received or committed the record.
 type Received struct {
-	UTC          string `json:"utc"` // RFC 3339, UTC, Z suffix
-	ResolutionNS int64  `json:"resolution_ns"`
+	UTC          string `json:"utc"`           // RFC 3339, UTC, Z suffix
+	ResolutionNS int64  `json:"resolution_ns"` // the step of the node clock's reading
 	Clock        Clock  `json:"clock"`
 }
 
@@ -258,16 +248,25 @@ type DeviceTime struct {
 	// rfc3164, rfc5424, cp56time2a, iec61850-utctime, windows-systemtime.
 	Format string `json:"format"`
 	// WallClock is the decoded time on the device's clock face, without a
-	// zone: YYYY-MM-DDTHH:MM:SS with up to 9 fractional digits.
-	WallClock string `json:"wall_clock"`
+	// zone: YYYY-MM-DDTHH:MM:SS with up to 9 fractional digits. Second 60 is
+	// allowed only at 23:59 (a leap second); such a record states no UTC,
+	// which a consumer with the leap-second table may compute. WallClock is
+	// absent exactly when the native time cannot be decoded (flag
+	// invalid-time, for example 02/30/2007); Native still holds it.
+	WallClock string `json:"wall_clock,omitempty"`
 	// Offset is the device clock's offset from UTC, "+HH:MM", "-HH:MM", or
 	// "unknown". Never guessed.
 	Offset      string      `json:"offset"`
 	OffsetBasis OffsetBasis `json:"offset_basis"`
 	// UTC is WallClock minus Offset, RFC 3339 with Z. Present exactly when
-	// Offset is known.
+	// Offset is known and WallClock is present and not a leap second.
 	UTC string `json:"utc,omitempty"`
-	// ResolutionNS is the smallest step the native time can express.
+	// ResolutionNS is the step of the native time as printed: the smallest
+	// difference two printed values can show (1 ms for "13:54:09.602"). It
+	// bounds the digits of WallClock and UTC. A device whose internal timing
+	// is coarser than its printed digits (quarter-cycle processing printed
+	// in milliseconds) states that granularity in Quality.AccuracyRelativeNS
+	// or AccuracyNS, never by shrinking the printed digits.
 	ResolutionNS int64 `json:"resolution_ns"`
 	// AccuracyNS is the stated accuracy against true time, when the format or
 	// the time source states one. Nil means unknown, not zero.

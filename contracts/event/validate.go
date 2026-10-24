@@ -24,6 +24,7 @@ const (
 	CodeTimeFormat         Code = "time-format"         // a time string not in its required form
 	CodePrecision          Code = "precision"           // a time claims more fractional digits than its resolution
 	CodeOffset             Code = "offset"              // offset and UTC inconsistent, or UTC without a known offset
+	CodeDecode             Code = "decode"              // not one JSON object, a duplicate key, or a key in the wrong case (Decode)
 	CodeEvidence           Code = "evidence"            // native bytes, hashes, lengths or span inconsistent
 	CodeUnjustifiedMeaning Code = "unjustified-meaning" // a category without the mapping that assigned it
 )
@@ -114,6 +115,22 @@ func (e *Event) validate(pending bool) error {
 	return errors.Join(c.errs...)
 }
 
+// AllowedOriginAuth is the closed table of origin_auth values each
+// collection method can produce (A6 C4 review item 5, rated by A3 in
+// C4-A3.md). A producer bug that labels UDP Syslog as an authenticated
+// session is then rejected, because AP-22 decides from origin_auth how far
+// content is trusted. Platform events carry platform and nothing else.
+// adapter-poll has no TLS values: the strength of the link to the device is
+// C1's downstream_security, not an event field. tls-mutual proves who sent
+// the bytes, but until certificates are pinned to assets (C1 pinned-key) it
+// does not tie the sender to the bound asset, so the asset binding of such
+// an event is still sender-address.
+var AllowedOriginAuth = map[CollectionMethod][]OriginAuth{
+	MethodAdapterPoll:   {AuthSession},
+	MethodSyslogReceive: {AuthNone, AuthTLSServerOnly, AuthTLSMutual},
+	MethodHostPush:      {AuthNone, AuthTLSServerOnly, AuthTLSMutual},
+}
+
 func checkFlag(c *checker, field, f string) {
 	name, _, _ := strings.Cut(f, ":")
 	if !tokenPattern.MatchString(name) || strings.ContainsAny(f, "\x00\n\r") {
@@ -155,6 +172,9 @@ func checkDeviceEvent(c *checker, e *Event) {
 		c.fail(CodeMissing, "collection", "required on device events")
 	} else {
 		checkCollection(c, e.Collection)
+		if allowed, ok := AllowedOriginAuth[e.Collection.Method]; ok && !oneOf(s.OriginAuth, allowed...) {
+			c.fail(CodeEnum, "source.origin_auth", "%q cannot come from collection method %q (allowed: %v)", s.OriginAuth, e.Collection.Method, allowed)
+		}
 	}
 	if e.Native == nil {
 		c.fail(CodeMissing, "native", "device events keep their native evidence (EP-1)")
@@ -299,7 +319,18 @@ func checkDeviceTime(c *checker, t *DeviceTime) {
 	if t.AccuracyNS != nil && *t.AccuracyNS <= 0 {
 		c.fail(CodeMissing, "device_time.accuracy_ns", "must be positive when stated; omit when unknown")
 	}
-	wall, wallOK := parseLocal(c, "device_time.wall_clock", t.WallClock, t.ResolutionNS)
+	invalid := contains(t.Flags, "invalid-time")
+	var wall time.Time
+	wallOK, leap := false, false
+	switch {
+	case t.WallClock == "" && invalid:
+		// The native time could not be decoded; Native keeps it (EP-1).
+	case t.WallClock == "":
+		c.fail(CodeMissing, "device_time.wall_clock", "required unless the invalid-time flag is set")
+	default:
+		wall, wallOK, leap = parseLocal(c, "device_time.wall_clock", t.WallClock, t.ResolutionNS)
+	}
+	noUTC := t.WallClock == "" || leap
 	if !oneOf(t.OffsetBasis, BasisNone, BasisOnWire, BasisFormatUTC, BasisDeviceSetting, BasisOperator) {
 		c.fail(CodeEnum, "device_time.offset_basis", "%q", t.OffsetBasis)
 	}
@@ -316,7 +347,11 @@ func checkDeviceTime(c *checker, t *DeviceTime) {
 		if t.OffsetBasis == BasisNone {
 			c.fail(CodeOffset, "device_time.offset_basis", "a known offset states its basis")
 		}
-		if t.UTC == "" {
+		if noUTC {
+			if t.UTC != "" {
+				c.fail(CodeOffset, "device_time.utc", "no UTC for a record without a decodable wall clock or with a leap second")
+			}
+		} else if t.UTC == "" {
 			c.fail(CodeOffset, "device_time.utc", "required when the offset is known")
 		} else if utc, ok := checkUTC(c, "device_time.utc", t.UTC, t.ResolutionNS, false); ok && wallOK {
 			off := time.Duration(atoi(m[2]))*time.Hour + time.Duration(atoi(m[3]))*time.Minute
@@ -356,19 +391,29 @@ func checkNormalized(c *checker, n *Normalized) {
 }
 
 // parseLocal parses a zone-less wall-clock time and checks its precision.
-func parseLocal(c *checker, field, s string, resNS int64) (time.Time, bool) {
+// Second 60 is accepted at 23:59 only, as a leap second; it is reported in
+// leap and the returned time is not usable for arithmetic.
+func parseLocal(c *checker, field, s string, resNS int64) (t time.Time, ok, leap bool) {
 	m := wallClockForm.FindStringSubmatch(s)
 	if m == nil {
 		c.fail(CodeTimeFormat, field, "%q is not YYYY-MM-DDTHH:MM:SS[.fraction]", s)
-		return time.Time{}, false
+		return time.Time{}, false, false
 	}
-	t, err := time.Parse("2006-01-02T15:04:05.999999999", s)
+	check := s
+	if s[17:19] == "60" {
+		if s[11:16] != "23:59" {
+			c.fail(CodeTimeFormat, field, "%q: second 60 occurs only at 23:59", s)
+			return time.Time{}, false, false
+		}
+		check, leap = s[:17]+"59"+s[19:], true
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.999999999", check)
 	if err != nil {
 		c.fail(CodeTimeFormat, field, "%q: %v", s, err)
-		return time.Time{}, false
+		return time.Time{}, false, false
 	}
 	checkDigits(c, field, m[1], resNS)
-	return t, true
+	return t, !leap, leap
 }
 
 // checkUTC parses an RFC 3339 UTC time with a Z suffix and checks its precision.

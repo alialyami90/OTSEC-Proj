@@ -63,10 +63,91 @@ func TestValidExamples(t *testing.T) {
 		t.Fatalf("expected the golden examples, found %d", len(files))
 	}
 	for _, f := range files {
-		if err := load(t, f).Validate(); err != nil {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Decode(b); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
+}
+
+// Every (collection method, origin_auth) pair outside AllowedOriginAuth is
+// rejected, and every pair inside it is accepted (A6 C4 review item 5, rated
+// by A3 in C4-A3.md).
+func TestOriginAuthPairs(t *testing.T) {
+	methods := []CollectionMethod{MethodAdapterPoll, MethodSyslogReceive, MethodHostPush}
+	auths := []OriginAuth{AuthNone, AuthTLSServerOnly, AuthTLSMutual, AuthSession, AuthPlatform}
+	for _, m := range methods {
+		for _, a := range auths {
+			e := load(t, "testdata/valid/sel751-fig10-16-row8.json")
+			e.Collection.Method = m
+			e.Source.OriginAuth = a
+			allowed := slices.Contains(AllowedOriginAuth[m], a)
+			rejected := slices.Contains(Codes(e.Validate()), CodeEnum)
+			if allowed == rejected {
+				t.Errorf("%s with %s: allowed %v, rejected %v", m, a, allowed, rejected)
+			}
+		}
+	}
+	if !reflect.DeepEqual(AllowedOriginAuth[MethodAdapterPoll], []OriginAuth{AuthSession}) {
+		t.Error("adapter-poll must allow session only: its link strength is C1 downstream_security")
+	}
+}
+
+// Decode reads every event the same way (A1 D1-9, A6 C4 review item 6).
+func TestDecode(t *testing.T) {
+	b, err := os.ReadFile("testdata/valid/sel751-fig10-16-row8.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(raw []byte, after, text string) []byte {
+		i := bytes.Index(raw, []byte(after))
+		if i < 0 {
+			t.Fatalf("%q not in example", after)
+		}
+		i += len(after)
+		return append(append(append([]byte{}, raw[:i]...), text...), raw[i:]...)
+	}
+	rejected := map[string][]byte{
+		"case-variant duplicate":     insert(b, `"origin": "device",`, ` "ORIGIN": "platform",`),
+		"exact duplicate":            insert(b, `"origin": "device",`, ` "origin": "platform",`),
+		"nested duplicate":           insert(b, `"seq": 1`, `, "seq": 2`),
+		"case-variant key alone":     bytes.Replace(b, []byte(`"origin": "device"`), []byte(`"Origin": "device"`), 1),
+		"unknown field at 0.1":       insert(b, `"kind": "ser",`, ` "severity": "high",`),
+		"field of another object":    insert(b, `"kind": "ser",`, ` "seq": 5,`),
+		"trailing data":              append(append([]byte{}, b...), []byte(" {}")...),
+		"not an object":              []byte(`[]`),
+		"later minor, uppercase key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "Severity": "high",`),
+		"later minor, duplicate key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "severity": "a", "severity": "b",`),
+	}
+	for name, doc := range rejected {
+		if _, err := Decode(doc); !slices.Contains(Codes(err), CodeDecode) {
+			t.Errorf("%s: got %v, want %s", name, err, CodeDecode)
+		}
+	}
+	accepted := map[string][]byte{
+		"later minor, new field": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "severity": {"level": "high"},`),
+	}
+	for name, doc := range accepted {
+		if _, err := Decode(doc); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// health.details keys are free text, not field names.
+	g, err := os.ReadFile("testdata/valid/health-ser-gap.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(insert(g, `"details": {`, ` "Previous Read": "x",`)); err != nil {
+		t.Errorf("free-text details key: %v", err)
+	}
+	_ = doc
 }
 
 // Each invalid example and the code it must produce. testdata/NOTES.md says
@@ -95,6 +176,9 @@ var invalid = map[string]Code{
 	"adapter-poll-without-invocation": CodeMissing,
 	"context-span-outside-evidence":   CodeEvidence,
 	"evidence-ref-mismatch":           CodeEvidence,
+	"origin-auth-mismatch":            CodeEnum,
+	"wall-clock-missing":              CodeMissing,
+	"leap-second-with-utc":            CodeOffset,
 }
 
 func TestInvalidExamples(t *testing.T) {

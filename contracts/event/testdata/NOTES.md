@@ -12,6 +12,8 @@ Generated from the documented-example fixtures named below, then frozen. None of
 | `sel751-row8-known-offset.json` | Row 8 as it would look after the adapter read `UTC_OFF` and the DST settings. The offset `-08:00` is illustrative, not from the manual. UTC is stated only because the offset is known, and equals wall clock minus offset. |
 | `rtac-syslog-user-logon.json` | The RTAC Syslog example (A2's fixture `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt`, SEL-5033 IM 20260925 p. 636). The event time is the millisecond time inside MSG; the HEADER send time, 9.4 s later, is kept only as a native field. Received over UDP, so `origin_auth` is `none`. |
 | `health-ser-gap.json` | A platform `ser.gap` event: the next read of the same SER stream had no overlap with the previous one. |
+| `constructed-invalid-date.json` | **Constructed, not from the manual.** Row 8 with the date changed to `02/30/2007`. The native time is kept, `wall_clock` is absent, the flag is `invalid-time`, and parse status is `partial`. The record is kept, not dropped (EP-1). Its evidence is the row itself. |
+| `constructed-leap-second.json` | **Constructed, not from the manual.** Row 8 at `12/31/2016 23:59:60.602`. Second 60 is accepted at 23:59. No UTC is stated, so a consumer that has the leap-second table may convert it. |
 
 ## Invalid
 
@@ -41,4 +43,7 @@ Each file is `sel751-fig10-16-row8.json` with one change (the platform case star
 | `closed-enum-unknown.json` | enum | yes | `scope: site` is outside the closed set. |
 | `adapter-poll-without-invocation.json` | missing | no | An adapter poll must name its C2 invocation (and C3 operation). |
 | `context-span-outside-evidence.json` | evidence | no | The header span runs past the end of the report. |
+| `origin-auth-mismatch.json` | enum | no | An adapter poll labelled `origin_auth: none`. Only `session` fits `adapter-poll` (A3 C4-A3). |
+| `wall-clock-missing.json` | missing | no | No wall clock without the `invalid-time` flag. |
+| `leap-second-with-utc.json` | offset | no | A leap-second record that states UTC. C4 does not convert second 60. |
 | `evidence-ref-mismatch.json` | evidence | no | The capture name is not `sha256:` + the evidence SHA-256 (C5 names captures by content). |

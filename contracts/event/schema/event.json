@@ -72,12 +72,12 @@
     },
     "device_time": {
       "type": "object",
-      "required": ["native", "native_encoding", "format", "wall_clock", "offset", "offset_basis", "resolution_ns"],
+      "required": ["native", "native_encoding", "format", "offset", "offset_basis", "resolution_ns"],
       "properties": {
         "native": {"type": "string", "minLength": 1},
         "native_encoding": {"enum": ["text", "hex"]},
         "format": {"$ref": "#/$defs/token"},
-        "wall_clock": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?$"},
+        "wall_clock": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?$", "description": "Absent only with the invalid-time flag (Go rule)."},
         "offset": {"type": "string", "pattern": "^(unknown|[+-](0\\d|1[0-4]):[0-5]\\d)$"},
         "offset_basis": {"enum": ["none", "on-wire", "format-utc", "device-setting", "operator"]},
         "utc": {"$ref": "#/$defs/utc"},
@@ -158,7 +158,7 @@
       "type": "object",
       "required": ["node_id", "stream", "seq"],
       "properties": {
-        "node_id": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"},
+        "node_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"},
         "stream": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
         "seq": {"type": "integer", "minimum": 1}
       }
