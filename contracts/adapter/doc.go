@@ -98,10 +98,11 @@
 //   - Clock: C2 0.1 carries times only. The producer takes C4 received
 //     resolution_ns and clock.sync from the node's clock status at ended_at
 //     (A4 C2 review change 4).
-//   - Audit: the C8 device.* record for the invocation carries
-//     transcript.sha256, so a stored transcript can be checked against the
-//     audit chain (A3 change 10). The sha256 here detects corruption; the
-//     chain detects tampering.
+//   - Audit: the C8 record written at the end of the device session carries
+//     transcript_sha256, the transcript's sha256, so a stored transcript can
+//     be checked against the audit chain (A3 change 10, D1-25; the field is
+//     C8's). The sha256 here detects corruption; the chain detects
+//     tampering.
 //
 // # What it leaves out
 //

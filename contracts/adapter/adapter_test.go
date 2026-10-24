@@ -43,6 +43,7 @@ var resultWant = map[string]string{
 	"read-rows-exceeded-with-parsed-record": "parses no record (D1-12)",
 	"read-rows-exceeded-without-detail":     "needs a detail giving the row count",
 	"ser-row-field-renamed":                 "a sel.ser.row carries the fields",
+	"ser-row-field-names-lowercase":         "a sel.ser.row carries the fields",
 	"no-operation-id":                       "operation_id \"\" is not an operation ID",
 	"wake-into-password-prompt":             "only when nothing was received",
 	"quit-after-unconfirmed-password":       "no level prompt confirmed (C-19, D1-20)",
