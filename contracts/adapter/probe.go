@@ -39,7 +39,7 @@ import (
 //
 // Evidence: S22 Figure 1.4 (p. 1.12) shows QUIT answered by the two header
 // lines and "="; that example is from Level 1. The Level 0 reply, the echo
-// and any "Level 0" line are not documented (H-12). Until a hardware capture
+// and any "Level 0" line are not documented (H-13). Until a hardware capture
 // confirms the form, a reply this grammar rejects is refused, never guessed.
 var probeReply = regexp.MustCompile(`^` +
 	blank + `*` +
@@ -73,10 +73,10 @@ func ProbeReplyAccepted(rx []byte) bool {
 // NUL, XON and XOFF (S22 Appendix C), and the STX and ETX that frame every
 // message. S22 p. 7.28: "The relay transmits all messages in the following
 // format: <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
-// Where the prompt sits relative to ETX is not documented (H-12), so prompt
-// detection and the probe grammar ignore both wherever they occur. Records
-// and observations still point into the bytes as received, and never include
-// a framing byte.
+// Where the prompt sits relative to ETX is not documented (H-13), so the
+// probe grammar ignores both wherever they occur, and prompt detection
+// (promptOf) treats them as line boundaries. Records and observations still
+// point into the bytes as received, and never include a framing byte.
 func stripFraming(rx []byte) []byte {
 	return bytes.Map(func(r rune) rune {
 		switch r {

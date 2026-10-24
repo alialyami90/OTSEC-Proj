@@ -12,7 +12,7 @@ type Status string
 
 const (
 	StatusOK      Status = "ok"      // every step done, QUI sent
-	StatusPartial Status = "partial" // collected, but some records did not parse; raw bytes kept
+	StatusPartial Status = "partial" // collected, but some or all records were not parsed; raw bytes kept
 	StatusRefused Status = "refused" // the collector declined, by rule
 	StatusFailed  Status = "failed"  // something went wrong
 )
@@ -42,7 +42,8 @@ const (
 	// Before connecting. The collector checks these with no traffic.
 	RefusedNotInvocable          Code = "refused.operation_not_invocable"    // unknown, session-control, or denied operation (C-A2-1)
 	RefusedInvalidParams         Code = "refused.invalid_parameters"         // parameters do not fit the operation's grammar
-	RefusedLimits                Code = "refused.limits_out_of_range"        // malformed invocation or limits above the ceilings
+	RefusedLimits                Code = "refused.limits_out_of_range"        // malformed invocation, limits above the ceilings, or a credential a level 0 operation does not need
+	RefusedInvocationMismatch    Code = "refused.invocation_mismatch"        // not the invocation the collector builds for this asset and profile (CheckAgainst)
 	RefusedRegisterUnverified    Code = "refused.register_unverified"        // register package missing, unsigned or unparseable (C-A2-2)
 	RefusedFirmwareUndeclared    Code = "refused.firmware_undeclared"        // no declared FID on the asset (ADR-0005 (b), C-23)
 	RefusedFirmwareNotAllowed    Code = "refused.firmware_not_allowlisted"   // declared FID not allowed (AP-27)
@@ -54,9 +55,13 @@ const (
 	FailedConnect                Code = "failed.connect"                     // TCP or serial open failed after the allowed retries
 
 	// Connected, before authentication.
-	RefusedSessionElevated  Code = "refused.session_elevated"        // first prompt already "=>" or "=>>": a session left open (S22 p. 7.16, D18); nothing sent
-	RefusedLanguageProbe    Code = "refused.language_probe_rejected" // QUI reply did not match the probe grammar (ADR-0005)
-	RefusedIdentityMismatch Code = "refused.identity_mismatch"       // ID at Level 0 differs from the declared identity (AP-27, B-05)
+	RefusedSessionElevated Code = "refused.session_elevated" // first prompt already "=>" or "=>>": a session left open (S22 p. 7.16, D18); nothing sent
+	// RefusedSessionPendingPassword: the first thing received is "Password: ?",
+	// a session left inside the prompt (S22 p. 7.33). Nothing is sent, not
+	// even the wake, which would be a password attempt (A3 change 7).
+	RefusedSessionPendingPassword Code = "refused.session_pending_password"
+	RefusedLanguageProbe          Code = "refused.language_probe_rejected" // QUI reply did not match the probe grammar (ADR-0005)
+	RefusedIdentityMismatch       Code = "refused.identity_mismatch"       // ID at Level 0 differs from the declared identity (AP-27, B-05)
 
 	// The auth phase.
 	RefusedPasswordPromptAbsent Code = "refused.password_prompt_absent" // ACC reached Level 1 with no prompt: credential not sent (AP-23)
@@ -79,6 +84,10 @@ const (
 	FailedUnknown          Code = "failed.unknown"            // fallback for codes this reader does not know
 
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
+	// PartialReadRowsExceeded: the read has more rows than the profile's
+	// max_read_rows (D1-12). The bytes are kept and nothing from the read is
+	// parsed into a record, so nothing is aligned or stored as events.
+	PartialReadRowsExceeded Code = "partial.read_rows_exceeded"
 )
 
 type codeInfo struct {
@@ -92,36 +101,39 @@ type codeInfo struct {
 }
 
 var codes = map[Code]codeInfo{
-	RefusedNotInvocable:          {StageBeforeConnect, "", ""},
-	RefusedInvalidParams:         {StageBeforeConnect, "", ""},
-	RefusedLimits:                {StageBeforeConnect, "", ""},
-	RefusedRegisterUnverified:    {StageBeforeConnect, "", ""},
-	RefusedFirmwareUndeclared:    {StageBeforeConnect, "", ""},
-	RefusedFirmwareNotAllowed:    {StageBeforeConnect, "", ""},
-	RefusedAssetSuspended:        {StageBeforeConnect, "", ""},
-	RefusedCredentialUnavailable: {StageBeforeConnect, "", ""},
-	RefusedPlaintextNotAcked:     {StageBeforeConnect, "", ""},
-	RefusedSessionBusy:           {StageBeforeConnect, "", ""},
-	RefusedRateLimited:           {StageBeforeConnect, "", ""},
-	FailedConnect:                {StageBeforeConnect, "", ""},
-	RefusedSessionElevated:       {StageBeforeAuth, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
-	RefusedLanguageProbe:         {StageBeforeAuth, asset.SuspendLanguageNotEnglish, ""},
-	RefusedIdentityMismatch:      {StageBeforeAuth, asset.SuspendIdentityMismatch, ""},
-	RefusedPasswordPromptAbsent:  {StageAuth, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
-	FailedAuthRejected:           {StageAuth, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
-	FailedUnexpectedLevel:        {StageAuth, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
-	RefusedLanguageNotEnglish:    {StageAfterAuth, asset.SuspendLanguageNotEnglish, ""},
-	RefusedFirmwareCondition:     {StageAfterAuth, asset.SuspendFirmwareNotAllowed, ""},
-	FailedIdentityMismatchLate:   {StageAfterAuth, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
-	FailedAccessLevelDropped:     {StageAfterAuth, "", ""},
-	FailedDeviceError:            {StageAfterAuth, "", ""},
-	FailedTimeout:                {StageAny, "", ""},
-	FailedTransportClosed:        {StageAny, "", ""},
-	FailedResponseTooLarge:       {StageAny, "", ""},
-	FailedEgressViolation:        {StageAny, "", ""},
-	FailedInternal:               {StageAny, "", ""},
-	FailedUnknown:                {StageAny, "", ""},
-	PartialParseErrors:           {StageAfterAuth, "", ""},
+	RefusedNotInvocable:           {StageBeforeConnect, "", ""},
+	RefusedInvalidParams:          {StageBeforeConnect, "", ""},
+	RefusedLimits:                 {StageBeforeConnect, "", ""},
+	RefusedRegisterUnverified:     {StageBeforeConnect, "", ""},
+	RefusedFirmwareUndeclared:     {StageBeforeConnect, "", ""},
+	RefusedFirmwareNotAllowed:     {StageBeforeConnect, "", ""},
+	RefusedAssetSuspended:         {StageBeforeConnect, "", ""},
+	RefusedCredentialUnavailable:  {StageBeforeConnect, "", ""},
+	RefusedPlaintextNotAcked:      {StageBeforeConnect, "", ""},
+	RefusedSessionBusy:            {StageBeforeConnect, "", ""},
+	RefusedRateLimited:            {StageBeforeConnect, "", ""},
+	FailedConnect:                 {StageBeforeConnect, "", ""},
+	RefusedSessionElevated:        {StageBeforeAuth, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
+	RefusedSessionPendingPassword: {StageBeforeAuth, "", ""}, // as elevated: TIDLE clears it
+	RefusedInvocationMismatch:     {StageBeforeConnect, "", ""},
+	RefusedLanguageProbe:          {StageBeforeAuth, asset.SuspendLanguageNotEnglish, ""},
+	RefusedIdentityMismatch:       {StageBeforeAuth, asset.SuspendIdentityMismatch, ""},
+	RefusedPasswordPromptAbsent:   {StageAuth, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
+	FailedAuthRejected:            {StageAuth, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
+	FailedUnexpectedLevel:         {StageAuth, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
+	RefusedLanguageNotEnglish:     {StageAfterAuth, asset.SuspendLanguageNotEnglish, ""},
+	RefusedFirmwareCondition:      {StageAfterAuth, asset.SuspendFirmwareNotAllowed, ""},
+	FailedIdentityMismatchLate:    {StageAfterAuth, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
+	FailedAccessLevelDropped:      {StageAfterAuth, "", ""},
+	FailedDeviceError:             {StageAfterAuth, "", ""},
+	FailedTimeout:                 {StageAny, "", ""},
+	FailedTransportClosed:         {StageAny, "", ""},
+	FailedResponseTooLarge:        {StageAny, "", ""},
+	FailedEgressViolation:         {StageAny, "", ""},
+	FailedInternal:                {StageAny, "", ""},
+	FailedUnknown:                 {StageAny, "", ""},
+	PartialParseErrors:            {StageAfterAuth, "", ""},
+	PartialReadRowsExceeded:       {StageAfterAuth, "", ""},
 }
 
 // Codes lists every code in the 0.1 taxonomy.
@@ -171,4 +183,10 @@ func (c Code) Suspends() asset.SuspensionReason { return codes[c.Effective()].su
 // password was sent, so the credential may be exposed or wrong: a rejected
 // password, a wrong level after a password, and an identity mismatch after
 // authentication (C1-A3-5).
+//
+// A timeout or a closed connection after the password, before any level
+// prompt, suspends nothing. The relay may still be in "Password: ?" or may
+// have counted a failure (H-15, H-04). The C7 failed-auth floor covers it: the
+// floor starts when the password is sent and clears only when "=>" is
+// confirmed (D1-20), so the next session waits it out (A6 C2 review change 8).
 func (c Code) SuspendsCredential() asset.SuspensionReason { return codes[c.Effective()].credential }

@@ -32,6 +32,7 @@ SERIAL = "SIM0000000000001"                      # invented
 SERIAL_OTHER = "SIM0000000000002"                # invented
 CID = "E754"                                      # shape from S22 Figure 7.38
 RED = b"[REDACTED]"
+REGISTER_REVISION = 2  # contracts/register/testdata/sel-751.json
 STX, ETX = b"\x02", b"\x03"
 
 
@@ -167,14 +168,21 @@ class Session:
         self.p1_start = start
         return start
 
-    def ser(self, serial=SERIAL, bad_row=False, prompt=b"=>"):
+    def ser(self, serial=SERIAL, bad_row=False, prompt=b"=>", n_rows=None):
         self.tx("operate", b"SER\r\n")
+        # Row 1 is the newest (S22 Figure 10.16).
         rows = [
-            "1    10/24/2026 09:10:01.004   IN101             Asserted",
-            "2    10/24/2026 09:10:01.251   IN101             Deasserted",
+            "1    10/24/2026 09:10:01.251   IN101             Deasserted",
+            "2    10/24/2026 09:10:01.004   IN101             Asserted",
         ]
         if bad_row:
             rows.append("3    10/24/2026 09:1#:0?.###   IN102             Asserted")
+        if n_rows is not None:
+            # Invented rows, one second apart, newest first.
+            secs = [9 * 3600 + 10 * 60 - i for i in range(1, n_rows + 1)]
+            rows = ["%-4d 10/24/2026 %02d:%02d:%02d.000   IN101             %s"
+                    % (i, t // 3600, t // 60 % 60, t % 60, ("Asserted", "Deasserted")[i % 2])
+                    for i, t in zip(range(1, n_rows + 1), secs)]
         text = framed(b"SER\r\n", "\r\n"
                 "SEL-751          Date: 10/24/2026  Time: 09:15:04.112\r\n"
                 "FEEDER 1         Time Source: Internal\r\n\r\n"
@@ -210,8 +218,9 @@ class Session:
         r = {
             "schema": schema,
             "invocation_id": INV,
+            "operation_id": "sel.ser.read_all",
             "adapter": {"id": "sel-751-ascii", "version": "0.1.0-example"},
-            "register_version": 0 if code == "refused.register_unverified" else 7,  # invented
+            "register_version": 0 if code == "refused.register_unverified" else REGISTER_REVISION,
             "target": "simulated",
             "status": status,
             "started_at": ts(0),
@@ -255,18 +264,23 @@ def maxacc_warning(s):
             "span": s.span("MAXACC  := 2", s.p1_start)}
 
 
-def full(bad_row=False, echo=False):
+def full(bad_row=False, echo=False, n_rows=None):
     s = Session()
     items, fid_span = to_level1(s, echo=echo)
     s.sho_p1()
     w = maxacc_warning(s)
-    recs = s.ser(bad_row=bad_row)
+    recs = s.ser(bad_row=bad_row, n_rows=n_rows)
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
     s.quit()
     obs = [{"name": "firmware_id", "value": FID, "span": fid_span},
            {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
            {"name": "serial_number", "value": SERIAL, "span": ser_span}]
+    if n_rows is not None:
+        # More rows than max_read_rows: the bytes are kept, nothing is parsed.
+        r = s.result("partial", "partial.read_rows_exceeded", {"result": "match", "items": items}, obs, [w])
+        r["error"]["detail"] = "%d rows; profile sel-751-ascii max_read_rows is 1024 (D1-12)" % n_rows
+        return r
     status, code = ("partial", "partial.parse_errors") if bad_row else ("ok", None)
     return s.result(status, code, {"result": "match", "items": items}, obs, [w], recs)
 
@@ -277,12 +291,13 @@ BEFORE_CONNECT = [
     "refused.operation_not_invocable", "refused.invalid_parameters", "refused.limits_out_of_range",
     "refused.register_unverified", "refused.firmware_undeclared", "refused.firmware_not_allowlisted",
     "refused.asset_suspended", "refused.credential_unavailable", "refused.plaintext_not_acknowledged",
-    "refused.session_busy", "refused.rate_limited", "failed.connect",
+    "refused.session_busy", "refused.rate_limited", "failed.connect", "refused.invocation_mismatch",
 ]
 
 
 def results():
-    out = {"ok": full(), "ok-with-echo": full(echo=True), "partial.parse_errors": full(bad_row=True)}
+    out = {"ok": full(), "ok-with-echo": full(echo=True), "partial.parse_errors": full(bad_row=True),
+           "partial.read_rows_exceeded": full(n_rows=1025)}
 
     for code in BEFORE_CONNECT:
         out[code] = Session().result(code.split(".")[0], code)
@@ -291,6 +306,11 @@ def results():
     s.connect(prompt=b"\r\n=>")  # a session left at Level 1 (S22 p. 7.16): nothing more is sent
     s.facts["access_level"] = "1"
     out["refused.session_elevated"] = s.result("refused", "refused.session_elevated")
+
+    s = Session()
+    s.facts.update(connected=True, access_level="0")
+    s.rx("probe", b"\r\nPassword: ? ")  # a session left inside the prompt: nothing is sent, not even the wake
+    out["refused.session_pending_password"] = s.result("refused", "refused.session_pending_password")
 
     s = Session()
     s.connect()
@@ -436,6 +456,109 @@ def refresh(r):
 
 def invalid_results(good):
     out = {}
+    fid_item = lambda sp: {"result": "match", "items": [item("firmware_id", FID, FID, sp)]}
+
+    # Session rules checked against the bytes (A3 and A6 C2 reviews).
+    s = Session()
+    s.facts.update(connected=True, wake_sent=True, access_level="0")
+    s.rx("probe", b"\r\nPassword: ? ")
+    s.tx("probe", b"\r\n")  # the wake into a password prompt is a password attempt
+    out["wake-into-password-prompt"] = s.result("refused", "refused.session_pending_password")
+
+    s = Session()
+    s.connect(); s.probe(); sp = s.ident(); s.acc()
+    off = s.tx("auth", RED + b"\r\n")  # no reply: the relay may still be in "Password: ?"
+    s.redactions.append({"offset": off, "length": len(RED), "reason": "credential", "component": "transport"})
+    s.facts.update(credential_sent=True, echo_scan="performed")
+    s.quit()
+    s.facts["access_level"] = "0"
+    out["quit-after-unconfirmed-password"] = s.result("failed", "failed.timeout", fid_item(sp))
+
+    s = Session()
+    s.connect(); s.probe(); sp = s.ident(); s.acc()
+    off = s.tx("auth", RED + b"\r\nQUI\r\n")
+    s.redactions.append({"offset": off, "length": len(RED), "reason": "credential", "component": "transport"})
+    s.facts.update(credential_sent=True, echo_scan="performed")
+    s.rx("auth", b"\r\nPassword: ? ")
+    out["credential-and-quit-in-one-segment"] = s.result("failed", "failed.auth_rejected", fid_item(sp))
+
+    s = Session()
+    s.connect(); s.probe(); sp = s.ident()
+    s.tx("auth", b"ACC\r\n")
+    s.rx("auth", b"ACC\r\n=")  # no password prompt
+    s.facts["password_prompt"] = True
+    s.password()
+    s.quit()
+    out["credential-without-password-prompt"] = s.result("refused", "refused.password_prompt_absent", fid_item(sp))
+
+    s = Session()
+    s.connect(); s.probe(); sp = s.ident()
+    s.tx("auth", b"2AC\r\n")
+    s.rx("auth", b"2AC\r\n" + STX + b"Invalid Command\r\n" + ETX + b"=")
+    s.quit()
+    out["auth-line-not-acc"] = s.result("refused", "refused.password_prompt_absent", fid_item(sp))
+
+    s = Session()
+    s.connect(); s.ident(); s.acc(); s.password()  # no QUI language probe before ACC
+    s.quit()
+    out["acc-without-language-probe"] = s.result("failed", "failed.egress_violation", fid_item(s.span(FID, s.id_start)))
+
+    s = Session()
+    items, _ = to_level1(s)
+    s.sho_p1()
+    s.tx("operate", b"SER\r\n")
+    s.rx("operate", b"SER\r\n" + STX + b"\r\nSEL-751   ")
+    s.tx("operate", b"SER\r\n")  # again, with no prompt between
+    s.rx("operate", framed(b"SER\r\n", b"Invalid Command\r\n", b"=>"))
+    s.quit()
+    out["operate-line-without-prompt"] = s.result("failed", "failed.device_error", {"result": "match", "items": items})
+
+    s = Session()
+    items, _ = to_level1(s)
+    s.tx("operate", b"SHO P 1\r\n")
+    s.rx("operate", b"SHO P 1\r\n" + STX + b"Port 1\r\n\r\nMAXACC  :=")  # a setting, not the "=" prompt
+    s.tx("operate", b"SER\r\n")
+    s.rx("operate", framed(b"SER\r\n", b"Invalid Command\r\n", b"=>"))
+    s.quit()
+    out["setting-read-as-prompt"] = s.result("failed", "failed.device_error", {"result": "match", "items": items})
+
+    s = Session()
+    items, _ = to_level1(s)
+    s.sho_p1()
+    s.tx("close", b"ACC\r\n")
+    s.rx("close", b"ACC\r\n=>")
+    s.facts["quit_sent"] = True
+    out["close-line-not-quit"] = s.result("failed", "failed.egress_violation", {"result": "match", "items": items},
+                                          warnings=[maxacc_warning(s)])
+
+    s = Session()
+    items, _ = to_level1(s)
+    s.sho_p1()
+    s.tx("operate", b"SER\r\n")
+    s.rx("operate", b"SER\r\n" + STX + b"\r\nSEL-751   ")  # then the step timeout, and no QUI
+    out["timeout-at-level1-without-quit"] = s.result("failed", "failed.timeout", {"result": "match", "items": items},
+                                                     warnings=[maxacc_warning(s)])
+
+    s = Session()
+    s.connect()  # "=" received: not elevated
+    s.facts["access_level"] = "1"
+    out["elevated-with-level0-prompt"] = s.result("refused", "refused.session_elevated")
+
+    r = copy.deepcopy(good["ok"])
+    r["session"]["access_level"] = "2"
+    out["access-level-without-prompt"] = r
+
+    r = copy.deepcopy(good["ok"])
+    r["identity"]["items"] = [it for it in r["identity"]["items"] if it["name"] == "serial_number"]
+    out["identity-only-after-password"] = r
+
+    r = copy.deepcopy(good["failed.timeout"])
+    r["error"]["detail"] = "SER reply:\r\nSEL-751   "
+    out["detail-with-device-text"] = r
+
+    r = copy.deepcopy(good["ok"])
+    r["added_in_0_2"] = {"x": 1}
+    out["unknown-field-in-own-minor"] = r
 
     def mut(name, f, rehash=False):
         r = copy.deepcopy(good["ok"])
@@ -567,6 +690,26 @@ def invalid_results(good):
     r["error"]["code"] = "failed.internal"
     r["status"] = "failed"
     out["probe-rejected-wrong-code"] = r
+
+    r = copy.deepcopy(good["partial.read_rows_exceeded"])
+    d = base64.b64decode(r["transcript"]["data"])
+    row1 = b"1    10/24/2026 09:09:59.000   IN101             Deasserted"
+    f = row1.decode().split()
+    r["records"] = [{"kind": "sel.ser.row", "span": {"offset": d.index(row1), "length": len(row1)}, "parse_ok": True,
+                     "fields": [{"name": n, "value": v} for n, v in zip(["row", "date", "time", "element", "state"], f)]}]
+    out["read-rows-exceeded-with-parsed-record"] = r
+
+    r = copy.deepcopy(good["partial.read_rows_exceeded"])
+    del r["error"]["detail"]
+    out["read-rows-exceeded-without-detail"] = r
+
+    r = copy.deepcopy(good["ok"])
+    r["records"][0]["fields"][3]["name"] = "bit"
+    out["ser-row-field-renamed"] = r
+
+    r = copy.deepcopy(good["ok"])
+    del r["operation_id"]
+    out["no-operation-id"] = r
 
     r = copy.deepcopy(good["partial.parse_errors"])
     for rec in r["records"]:

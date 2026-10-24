@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/internal/strictjson"
@@ -16,9 +17,12 @@ import (
 // Result is what the collector reports for one invocation. It is written
 // once, at the end of the invocation, and never edited.
 type Result struct {
-	Schema       string     `json:"schema"`
-	InvocationID string     `json:"invocation_id"`
-	Adapter      AdapterRef `json:"adapter"`
+	Schema       string `json:"schema"`
+	InvocationID string `json:"invocation_id"`
+	// OperationID is the invocation's operation, so that a result can be
+	// reconciled on its own (V-S8; C4 collection.operation_id).
+	OperationID string     `json:"operation_id"`
+	Adapter     AdapterRef `json:"adapter"`
 	// RegisterVersion is the verified register package that permitted every
 	// line in the transcript (the C7 run's register_version, EP-4). 0 only
 	// with refused.register_unverified.
@@ -77,6 +81,26 @@ type Segment struct {
 	At     string    `json:"at"` // when the chunk was sent or received, RFC 3339 UTC
 }
 
+// ReceivedAt is when the bytes of sp were received: the At of the receive
+// segment that holds its last byte. C4 uses it as received.utc for an
+// adapter-poll event. It is "" for an empty span or one that ends in sent
+// bytes.
+func (t Transcript) ReceivedAt(sp Span) string {
+	if sp.Length <= 0 {
+		return ""
+	}
+	last := sp.Offset + sp.Length - 1
+	for _, sg := range t.Segments {
+		if last >= sg.Offset && last < sg.Offset+sg.Length {
+			if sg.Dir != Received {
+				return ""
+			}
+			return sg.At
+		}
+	}
+	return ""
+}
+
 // Direction of a segment. Closed.
 type Direction string
 
@@ -133,16 +157,19 @@ type SessionFacts struct {
 	// LanguageProbe is the outcome of the QUI probe: accepted, rejected or
 	// not-run (no connection, or a profile without a probe).
 	LanguageProbe ProbeOutcome `json:"language_probe"`
-	// PasswordPrompt: the device sent its password prompt after ACC.
+	// PasswordPrompt: the bytes received after ACC end with the password
+	// prompt.
 	PasswordPrompt bool `json:"password_prompt"`
 	// CredentialSent: the credential left the node, once, in the slot that
 	// only the prompt opens.
 	CredentialSent bool `json:"credential_sent"`
-	// EchoScan: the transport scanned the auth-phase received bytes for the
-	// secret. "performed" whenever a credential was sent (C-A2-3).
+	// EchoScan: the transport scanned every byte received after the password
+	// for the secret, to the end of the session. "performed" whenever a
+	// credential was sent (C-A2-3).
 	EchoScan EchoScan `json:"echo_scan"`
-	// AccessLevel is the highest level the prompts showed: "0", "1", "2" or
-	// "C" for SEL; "" when not connected.
+	// AccessLevel is the highest level the received prompts showed: "0",
+	// "1" or "2" for SEL; "0" when connected and no higher prompt was seen,
+	// "" when not connected.
 	AccessLevel string `json:"access_level"`
 	// QuitSent: QUI was sent in the close phase.
 	QuitSent bool `json:"quit_sent"`
@@ -212,8 +239,11 @@ type Warning struct {
 
 // Record is one parsed record: its kind, its bytes, and its fields as the
 // device printed them. Parsers are Phase 2; this is only the envelope.
+//
+// A record was received at Transcript.ReceivedAt(Span): the time of the
+// receive segment that holds its last byte.
 type Record struct {
-	Kind   string  `json:"kind"` // e.g. "sel.ser.row", "sel.id.line"
+	Kind   string  `json:"kind"` // a RecordFields kind, e.g. "sel.ser.row"
 	Span   Span    `json:"span"`
 	Fields []Field `json:"fields,omitempty"`
 	// ContextSpan is the report header that applies to the record (C4
@@ -222,6 +252,17 @@ type Record struct {
 	// ParseOK is false for a record the parser could not read; its bytes are
 	// still referenced (EP-1).
 	ParseOK bool `json:"parse_ok"`
+}
+
+// RecordFields names the fields of each record kind 0.1 defines, in order.
+// Values are verbatim device text. For sel.ser.row (S22 Figure 10.16): row
+// is the relay's row number, and row 1 is the newest; date is in the
+// relay's DATE_F order (S22 p. 7.31) and time is as printed; element and
+// state are the Relay Word bit and its printed state. A parsed record of
+// one of these kinds carries exactly these fields. Kinds not listed are a
+// later minor's.
+var RecordFields = map[string][]string{
+	"sel.ser.row": {"row", "date", "time", "element", "state"},
 }
 
 // Field is one native field, verbatim.
@@ -257,10 +298,20 @@ var (
 // DecodeResult parses and validates a result. Decoding is strict except for
 // forward compatibility (strictjson.Forward, D1-10): case-variant and
 // duplicate keys are rejected, unknown exact-case fields are ignored.
+//
+// A result of this package's own minor or earlier is decoded with
+// strictjson.Decode as well, so a writer bug in 0.1 is caught (A6 C2 review
+// change 9; the same rule as C1 and C4).
 func DecodeResult(b []byte) (Result, error) {
 	var r Result
 	if err := strictjson.Forward(b, &r); err != nil {
 		return Result{}, fmt.Errorf("adapter: result: %w", err)
+	}
+	if id, err := version.Parse(r.Schema); err == nil && id.Name == self.Name && id.Major == self.Major && id.Minor <= self.Minor {
+		var own Result
+		if err := strictjson.Decode(b, &own); err != nil {
+			return Result{}, fmt.Errorf("adapter: result: %w", err)
+		}
 	}
 	return r, r.Validate()
 }
@@ -274,6 +325,9 @@ func (r Result) Validate() error {
 	c := &check{later: id.Minor > self.Minor}
 	if !uuidPattern.MatchString(r.InvocationID) {
 		c.fail("invocation_id %q is not a lowercase UUID", r.InvocationID)
+	}
+	if !operationIDPattern.MatchString(r.OperationID) {
+		c.fail("operation_id %q is not an operation ID", r.OperationID)
 	}
 	if !adapterIDText.MatchString(r.Adapter.ID) || r.Adapter.Version == "" {
 		c.fail("adapter id and version are required (EP-4)")
@@ -289,7 +343,11 @@ func (r Result) Validate() error {
 		c.fail("register_version is required: the register package that permitted the lines (EP-4)")
 	}
 	t := r.Transcript
-	c.transcript(t)
+	if !c.transcript(t) {
+		// The bytes cannot be cut into segments, so no rule about them
+		// can be checked.
+		return c.err()
+	}
 	c.session(r, code)
 	c.identity(r, code)
 	for i, o := range r.Observations {
@@ -317,6 +375,15 @@ func (r Result) Validate() error {
 				c.fail("records[%d].fields[%d].name is empty", i, j)
 			}
 		}
+		if want, ok := RecordFields[rec.Kind]; ok && rec.ParseOK {
+			names := make([]string, len(rec.Fields))
+			for j, f := range rec.Fields {
+				names[j] = f.Name
+			}
+			if !slices.Equal(names, want) {
+				c.fail("records[%d]: a %s carries the fields %v, not %v", i, rec.Kind, want, names)
+			}
+		}
 	}
 	if code == PartialParseErrors {
 		bad := false
@@ -325,6 +392,16 @@ func (r Result) Validate() error {
 		}
 		if !bad {
 			c.fail("partial.parse_errors needs at least one record with parse_ok false")
+		}
+	}
+	if code == PartialReadRowsExceeded {
+		for i, rec := range r.Records {
+			if rec.ParseOK {
+				c.fail("records[%d]: partial.read_rows_exceeded keeps the bytes but parses no record (D1-12)", i)
+			}
+		}
+		if r.Error.Detail == "" {
+			c.fail("partial.read_rows_exceeded needs a detail giving the row count and the limit")
 		}
 	}
 	if r.Status == StatusOK {
@@ -354,6 +431,11 @@ func (c *check) status(r Result) Code {
 		c.fail("status %q needs an error code", r.Status)
 		return FailedUnknown
 	}
+	// The detail is the collector's own words: bounded printable ASCII, never
+	// device text, which belongs in spans (A3 change 9; C8 refuses CR and LF).
+	if d := r.Error.Detail; len(d) > MaxDetailLen || !printable(d) {
+		c.fail("error.detail must be at most %d bytes of printable ASCII", MaxDetailLen)
+	}
 	code := r.Error.Code
 	if !code.Known() {
 		if !c.later {
@@ -368,7 +450,8 @@ func (c *check) status(r Result) Code {
 }
 
 // transcript checks the bytes, the hash, the exact cover and the redactions.
-func (c *check) transcript(t Transcript) {
+// It reports whether the segments cover the bytes exactly.
+func (c *check) transcript(t Transcript) bool {
 	sum := sha256.Sum256(t.Data)
 	if !hexSHA256.MatchString(t.SHA256) || hex.EncodeToString(sum[:]) != t.SHA256 {
 		c.fail("transcript.sha256 does not match the data")
@@ -396,8 +479,21 @@ func (c *check) transcript(t Transcript) {
 			c.fail("%s.at is not an RFC 3339 UTC time", p)
 		}
 	}
+	covered := next == int64(len(t.Data))
+	for _, s := range t.Segments {
+		covered = covered && s.Offset >= 0 && s.Length > 0 && s.Offset+s.Length <= int64(len(t.Data))
+	}
 	if next != int64(len(t.Data)) {
 		c.fail("transcript.segments cover %d bytes but the data has %d; spans must cover the bytes exactly", next, len(t.Data))
+	}
+	if !covered {
+		return false
+	}
+	var credAt int64 = -1
+	for _, rd := range t.Redactions {
+		if rd.Reason == RedactCredential {
+			credAt = rd.Offset
+		}
 	}
 	for i, rd := range t.Redactions {
 		p := fmt.Sprintf("transcript.redactions[%d]", i)
@@ -418,8 +514,10 @@ func (c *check) transcript(t Transcript) {
 				c.fail("%s: a credential redaction lies in a sent auth-phase segment", p)
 			}
 		case RedactEcho:
-			if seg.Dir != Received || seg.Phase != PhaseAuth {
-				c.fail("%s: an echo redaction lies in a received auth-phase segment", p)
+			// Anywhere the device may print the password back after it
+			// was sent, to the end of the session (A3 change 8).
+			if seg.Dir != Received || credAt < 0 || rd.Offset < credAt {
+				c.fail("%s: an echo redaction lies in a received segment after the credential", p)
 			}
 		default:
 			c.fail("%s.reason %q is not credential or echo", p, rd.Reason)
@@ -431,6 +529,7 @@ func (c *check) transcript(t Transcript) {
 			}
 		}
 	}
+	return true
 }
 
 // session checks the session facts against the transcript and the code.
@@ -479,13 +578,10 @@ func (c *check) session(r Result, code Code) {
 	if (s.CredentialSent || s.PasswordPrompt) && !has(PhaseAuth, Sent) {
 		c.fail("session: a prompt or credential needs a sent auth-phase segment")
 	}
-	if s.QuitSent != has(PhaseClose, Sent) {
-		c.fail("session: quit_sent must match a sent close-phase segment")
-	}
 	if s.LanguageProbe == ProbeRejected && code != RefusedLanguageProbe {
 		c.fail("session: a rejected probe ends with %s", RefusedLanguageProbe)
 	}
-	c.probe(t, s)
+	c.dialogue(r, code)
 
 	switch code.Stage() {
 	case StageBeforeConnect:
@@ -503,7 +599,7 @@ func (c *check) session(r Result, code Code) {
 		if !s.Connected || !s.QuitSent || s.LanguageProbe == ProbeRejected {
 			c.fail("status ok needs a connected session that ended with QUI (V-S13)")
 		}
-	case PartialParseErrors:
+	case PartialParseErrors, PartialReadRowsExceeded:
 		if !s.QuitSent {
 			c.fail("a partial result still ends with QUI (V-S13)")
 		}
@@ -531,9 +627,6 @@ func (c *check) session(r Result, code Code) {
 	case FailedAuthRejected:
 		if !s.CredentialSent || s.QuitSent {
 			c.fail("%s: the credential was sent and QUI was not (C-19)", code)
-		}
-		if lastSentIsCredential(t) == false {
-			c.fail("%s: nothing may be sent after a rejected password (C-19)", code)
 		}
 	case FailedUnexpectedLevel:
 		if !s.QuitSent {
@@ -596,6 +689,27 @@ func (c *check) identity(r Result, code Code) {
 			c.fail("a credential was sent without an identity check (AP-27)")
 		}
 	}
+	// AP-27: the password goes only to the device we meant, so a match read
+	// at Level 0, before the auth phase, must precede it. Items read later,
+	// such as the SER header serial, are checked as well.
+	if r.Session.CredentialSent {
+		var firstAuth int64 = -1
+		for _, sg := range r.Transcript.Segments {
+			if sg.Phase == PhaseAuth && sg.Dir == Sent {
+				firstAuth = sg.Offset
+				break
+			}
+		}
+		pre := false
+		for _, it := range id.Items {
+			sg, ok := segmentAt(r.Transcript, it.Span.Offset, it.Span.Length)
+			pre = pre || (it.Expected == it.Observed && ok && sg.Phase == PhaseProbe && sg.Dir == Received &&
+				(firstAuth < 0 || it.Span.Offset < firstAuth))
+		}
+		if !pre {
+			c.fail("a credential was sent, so a matching identity item read in the probe phase must precede it (AP-27)")
+		}
+	}
 	if (code == RefusedIdentityMismatch || code == FailedIdentityMismatchLate) && id.Result != IdentityMismatch {
 		c.fail("%s needs identity.result mismatch", code)
 	}
@@ -630,6 +744,18 @@ func (c *check) rxSpan(path string, sp Span, t Transcript) {
 	}
 }
 
+// MaxDetailLen bounds error.detail.
+const MaxDetailLen = 256
+
+func printable(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 func segmentAt(t Transcript, off, n int64) (Segment, bool) {
 	for _, sg := range t.Segments {
 		if off >= sg.Offset && off+n <= sg.Offset+sg.Length && n > 0 {
@@ -637,26 +763,6 @@ func segmentAt(t Transcript, off, n int64) (Segment, bool) {
 		}
 	}
 	return Segment{}, false
-}
-
-// lastSentIsCredential reports whether the last sent segment holds the
-// credential redaction.
-func lastSentIsCredential(t Transcript) bool {
-	var last *Segment
-	for i := range t.Segments {
-		if t.Segments[i].Dir == Sent {
-			last = &t.Segments[i]
-		}
-	}
-	if last == nil {
-		return false
-	}
-	for _, rd := range t.Redactions {
-		if rd.Reason == RedactCredential && rd.Offset >= last.Offset && rd.Offset+rd.Length <= last.Offset+last.Length {
-			return true
-		}
-	}
-	return false
 }
 
 type check struct {
@@ -680,94 +786,4 @@ func contains[T comparable](xs []T, x T) bool {
 		}
 	}
 	return false
-}
-
-// probe checks the probe phase against the transcript. Every probe line
-// follows a received "=" prompt (A3, C3 re-check); a bare line end that
-// wakes the port is not a line. The reply to the QUI probe, up to the next
-// send, matches the probe grammar exactly when language_probe is accepted.
-func (c *check) probe(t Transcript, s SessionFacts) {
-	var rx []byte // received since the last send
-	probed := false
-	wakes, sent := 0, 0
-	for i, sg := range t.Segments {
-		if sg.Phase != PhaseProbe {
-			break
-		}
-		b := t.Data[sg.Offset : sg.Offset+sg.Length]
-		if sg.Dir == Received {
-			rx = append(rx, b...)
-			continue
-		}
-		if probed {
-			c.probeOutcome(rx, s)
-			probed = false
-		}
-		if isWake(b) {
-			// Only as the first send, and only while no prompt has been seen.
-			if sent > 0 || endsWithAnyPrompt(rx) {
-				c.fail("transcript.segments[%d]: the wake line end is sent once, first, before any prompt", i)
-			}
-			wakes++
-			sent++
-			rx = nil
-			continue
-		}
-		sent++
-		line := bytes.TrimRight(b, "\r\n")
-		if !endsWithPrompt(rx, "=") {
-			c.fail("transcript.segments[%d]: probe line %q sent before the \"=\" prompt", i, line)
-		}
-		probed = bytes.Equal(line, []byte("QUI"))
-		rx = nil
-	}
-	if (wakes == 1) != s.WakeSent || wakes > 1 {
-		c.fail("session: wake_sent must match exactly one wake line end in the probe phase (found %d)", wakes)
-	}
-	if probed {
-		c.probeOutcome(rx, s)
-	} else if s.LanguageProbe != ProbeNotRun && !c.sawProbe(t) {
-		c.fail("session: language_probe %s but no QUI probe in the probe phase", s.LanguageProbe)
-	}
-}
-
-func (c *check) probeOutcome(reply []byte, s SessionFacts) {
-	ok := ProbeReplyAccepted(reply)
-	switch {
-	case s.LanguageProbe == ProbeAccepted && !ok:
-		c.fail("session: language_probe accepted, but the reply does not match the probe grammar")
-	case s.LanguageProbe == ProbeRejected && ok:
-		c.fail("session: language_probe rejected, but the reply matches the probe grammar")
-	case s.LanguageProbe == ProbeNotRun:
-		c.fail("session: a QUI probe was sent, so language_probe is accepted or rejected")
-	}
-}
-
-func (c *check) sawProbe(t Transcript) bool {
-	for _, sg := range t.Segments {
-		if sg.Phase == PhaseProbe && sg.Dir == Sent &&
-			bytes.Equal(bytes.TrimRight(t.Data[sg.Offset:sg.Offset+sg.Length], "\r\n"), []byte("QUI")) {
-			return true
-		}
-	}
-	return false
-}
-
-// isWake reports whether a sent segment is the bare line end that wakes the
-// port.
-func isWake(b []byte) bool {
-	return bytes.Equal(b, []byte("\r\n")) || bytes.Equal(b, []byte("\r")) || bytes.Equal(b, []byte("\n"))
-}
-
-// endsWithAnyPrompt reports whether rx ends with any access-level prompt.
-func endsWithAnyPrompt(rx []byte) bool {
-	return endsWithPrompt(rx, "=") || endsWithPrompt(rx, "=>") || endsWithPrompt(rx, "=>>")
-}
-
-// endsWithPrompt reports whether rx ends with the prompt, ignoring the
-// stream bytes framingBytes removes and trailing spaces.
-func endsWithPrompt(rx []byte, prompt string) bool {
-	clean := stripFraming(rx)
-	clean = bytes.TrimRight(clean, " ")
-	return bytes.HasSuffix(clean, []byte(prompt)) && !bytes.HasSuffix(clean, []byte(">"+prompt))
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
@@ -198,44 +199,60 @@ func (r RegisterLookup) Invocable(id string, params map[string]string) (string, 
 
 // CheckAgainst checks that the invocation is the one the collector builds
 // for this asset and its capability profile: the same asset, one of its
-// endpoints, its profile, the binding's declared values as the expected
-// identity, a credential only where C1 allows one (asset.CredentialAllowed,
-// A6 C1 R-1), and limits no looser than the profile's session_limits (D1-18).
-// The profile's own limits must sit within the ceilings here. The first
-// failure is returned with the code the collector reports.
+// endpoints, its profile, an operation the profile names, the binding's
+// declared values as the expected identity, a credential only where C1 allows
+// one (asset.CredentialAllowed, A6 C1 R-1) and the profile takes one
+// password attempt, and limits no looser than the profile's session_limits
+// (D1-18). The profile's own limits must sit within the ceilings here. The
+// first failure is returned with the code the collector reports. The asset is
+// checked first, so that a wrong asset is never reported as a suspension or
+// a binding problem (A1 C2 review change 4).
 func (inv Invocation) CheckAgainst(a asset.Asset, p asset.CapabilityProfile) error {
 	refuse := func(c Code, f string, args ...any) error {
 		return &CodedError{Code: c, Err: fmt.Errorf("adapter: invocation: "+f, args...)}
 	}
+	if inv.AssetID != a.AssetID {
+		return refuse(RefusedInvocationMismatch, "asset_id %s is not asset %s", inv.AssetID, a.AssetID)
+	}
 	if a.Suspension != nil {
 		return refuse(RefusedAssetSuspended, "asset %s is suspended (%s)", a.AssetID, a.Suspension.Reason)
-	}
-	if inv.CredentialRef != "" {
-		if err := a.CredentialAllowed(p); err != nil {
-			return refuse(RefusedCredentialUnavailable, "%v", err)
-		}
-	}
-	if inv.AssetID != a.AssetID {
-		return refuse(RefusedLimits, "asset_id %s is not asset %s", inv.AssetID, a.AssetID)
 	}
 	found := false
 	for _, ep := range a.Endpoints {
 		found = found || ep.ID == inv.EndpointID
 	}
 	if !found {
-		return refuse(RefusedLimits, "endpoint %q is not an endpoint of the asset", inv.EndpointID)
+		return refuse(RefusedInvocationMismatch, "endpoint %q is not an endpoint of the asset", inv.EndpointID)
 	}
 	if inv.ProfileID != p.ProfileID {
-		return refuse(RefusedLimits, "profile_id %s is not profile %s", inv.ProfileID, p.ProfileID)
+		return refuse(RefusedInvocationMismatch, "profile_id %s is not profile %s", inv.ProfileID, p.ProfileID)
 	}
 	if err := a.CheckProfile(p); err != nil {
-		return refuse(RefusedLimits, "%v", err)
+		return refuse(RefusedInvocationMismatch, "%v", err)
+	}
+	// The profile ties the loaded register to this asset's family: an
+	// operation the profile does not name is not invocable here (A1 change 2).
+	named := false
+	for _, c := range p.Capabilities {
+		named = named || (c.Mechanism == asset.MechAdapterOperation && slices.Contains(c.Operations, inv.OperationID))
+	}
+	if !named {
+		return refuse(RefusedNotInvocable, "operation %s is not named by an adapter-operation capability of profile %s", inv.OperationID, p.ProfileID)
+	}
+	b := a.Effective().IdentityBinding
+	if len(b.Attributes) == 0 {
+		return refuse(RefusedInvocationMismatch, "the asset's %s binding compares nothing, so no session runs on it (AP-27)", b.Method)
+	}
+	if inv.CredentialRef != "" {
+		if err := a.CredentialAllowed(p); err != nil {
+			return refuse(RefusedCredentialUnavailable, "%v", err)
+		}
 	}
 	want := map[string]string{}
-	for _, name := range a.IdentityBinding.Attributes {
+	for _, name := range b.Attributes {
 		v, ok := a.Declared(name)
 		if !ok {
-			return refuse(RefusedLimits, "binding attribute %q has no declared value", name)
+			return refuse(RefusedInvocationMismatch, "binding attribute %q has no declared value", name)
 		}
 		want[name] = v
 	}
@@ -244,11 +261,11 @@ func (inv Invocation) CheckAgainst(a asset.Asset, p asset.CapabilityProfile) err
 		got[e.Name] = e.Value
 	}
 	if len(got) != len(want) {
-		return refuse(RefusedLimits, "expected_identity has %d attributes, the binding %d", len(got), len(want))
+		return refuse(RefusedInvocationMismatch, "expected_identity has %d attributes, the binding %d", len(got), len(want))
 	}
 	for name, v := range want {
 		if got[name] != v {
-			return refuse(RefusedLimits, "expected_identity %s is not the declared value", name)
+			return refuse(RefusedInvocationMismatch, "expected_identity %s is not the declared value", name)
 		}
 	}
 	l := p.SessionLimits
@@ -257,6 +274,9 @@ func (inv Invocation) CheckAgainst(a asset.Asset, p asset.CapabilityProfile) err
 		return refuse(RefusedLimits, "profile %s has no session_limits (D1-18)", p.ProfileID)
 	case l.MinIntervalMS < MinMinIntervalMS || l.MaxConcurrentSessions > MaxConcurrentSessions:
 		return refuse(RefusedLimits, "profile %s session_limits exceed the C2 ceilings", p.ProfileID)
+	case inv.CredentialRef != "" && l.PasswordAttempts != 1:
+		// C2 0.1 implements exactly one attempt (A3 change 11).
+		return refuse(RefusedLimits, "profile %s allows %d password attempts; C2 0.1 makes exactly one", p.ProfileID, l.PasswordAttempts)
 	case inv.Limits.MinIntervalMS < l.MinIntervalMS:
 		return refuse(RefusedLimits, "limits.min_interval_ms %d is below the profile's %d", inv.Limits.MinIntervalMS, l.MinIntervalMS)
 	}
@@ -281,6 +301,12 @@ func (inv Invocation) ValidateWith(reg OperationLookup) error {
 	if level != "0" && inv.CredentialRef == "" {
 		return &CodedError{Code: RefusedCredentialUnavailable,
 			Err: fmt.Errorf("operation %s needs access level %s and the invocation names no credential", inv.OperationID, level)}
+	}
+	// A password the operation does not need is not put on the wire (C7-A2-5;
+	// A1 C2 review change 1).
+	if level == "0" && inv.CredentialRef != "" {
+		return &CodedError{Code: RefusedLimits,
+			Err: fmt.Errorf("operation %s needs access level 0, so the invocation names no credential", inv.OperationID)}
 	}
 	return nil
 }

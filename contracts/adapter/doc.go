@@ -34,34 +34,73 @@
 //     detection and the probe grammar ignore them, as they ignore XON, XOFF
 //     and NUL; no span of an observation, warning or record may include
 //     them. That the prompt follows ETX is assumed: no capture exists (A6
-//     H-12, H-13).
+//     H-13).
 //
 // # Rules the types enforce
 //
+// Result.Validate checks these against the transcript bytes, not against the
+// session facts, which must agree with the bytes (dialogue.go; A3 and A6 C2
+// reviews). Result.CheckLines checks every sent line against the register
+// package and the invocation, and is the oracle for "no unauthorized write".
+//
 //   - A refusal before connecting has an empty transcript: nothing was sent.
-//   - No line is sent before a prompt. If the device prints nothing on
-//     connect, one bare line end may wake it, once, before any prompt. A
-//     session that ended without QUI can leave the relay elevated or inside
-//     "Password: ?" until TIDLE expires (S22 p. 7.16, p. 7.33), so the wake is
-//     allowed only after the failed-auth floor (C7). A first prompt of "=>" or
-//     "=>>" ends the session with nothing sent (refused.session_elevated).
-//   - A refusal before authentication has no auth phase: no credential left
-//     the node. This covers the language probe and the FID check (AP-27).
-//   - A credential is sent only after a password prompt, appears in the
-//     transcript only as the redaction marker, and an echo scan is recorded
-//     whenever one was sent (C-A2-3; mandatory until a capture shows the
-//     SEL-751 does not echo).
-//   - A rejected password is answered by a second "Password: ?" (S22 p.
-//     7.33). After it nothing more is sent, not even QUI, which would be the
-//     second attempt (C-19).
+//   - Every line follows a prompt, and a prompt counts only at the start of a
+//     line: first in the received bytes, or after CR, LF, STX or ETX. Probe
+//     lines and ACC follow "=", operate lines "=>", and the close-phase QUI
+//     any level prompt. The Phase 2 transport acts on a prompt only after a
+//     short quiet interval with no byte received.
+//   - One exception: after failed.timeout or failed.response_too_large, QUI
+//     may be sent with no prompt before it, because a session at Level 1
+//     must end with QUI (D18, V-S13) and the step ended without one. It is
+//     never the first send after the password.
+//   - If the device prints nothing on connect, one bare line end may wake
+//     it: first, once, and only into silence. A session that ended without
+//     QUI can leave the relay elevated or inside "Password: ?" until TIDLE
+//     expires (S22 p. 7.16, p. 7.33), so the wake is allowed only after the
+//     failed-auth floor (C7). A first prompt of "=>" or "=>>" ends the
+//     session with nothing more sent (refused.session_elevated), and a first
+//     "Password: ?" with nothing sent at all (refused.session_pending_password).
+//   - The auth phase is ACC once, after "=", after an accepted language probe
+//     and after a matching identity item read in the probe phase (AP-27).
+//   - The credential slot: the password prompt received after ACC, then one
+//     segment that is exactly the redaction marker and one line end
+//     (HR-3, C-17). password_prompt says whether the prompt was received.
+//   - Nothing is sent after the password until a level prompt confirms it:
+//     "=>", or "=>>" for failed.unexpected_access_level. A rejected password
+//     is answered by a second "Password: ?" (S22 p. 7.33), and after it, or
+//     after no answer, nothing more is sent, not even QUI, which would be the
+//     second attempt (C-19, D1-20).
+//   - The password is in the transcript only as the redaction marker. An
+//     echo of it is redacted wherever it is received after the password,
+//     and an echo scan is recorded whenever one was sent (C-A2-3; mandatory
+//     until a capture shows the SEL-751 does not echo).
+//   - access_level is the highest level the received prompts showed.
 //   - The credential is suspended (C7) only for codes where the password was
 //     sent: Code.SuspendsCredential. The asset is suspended (C1) by
 //     Code.Suspends.
-//   - A successful session ends with QUI in the close phase (V-S13, D18).
-//   - A session-control or unknown operation can never be invoked (C-A2-1).
+//   - A session that reached Level 1 ends with QUI in the close phase (V-S13,
+//     D18), and the close phase sends nothing else. The exceptions are a
+//     closed connection, a level that already dropped, a port that is not
+//     English (D16), and a session found elevated.
+//   - A session-control or unknown operation can never be invoked (C-A2-1),
+//     and a level 0 operation never carries a credential (C7-A2-5).
 //   - Records and observations point into received bytes only, never into a
 //     redaction.
+//   - error.detail is the collector's own words: at most 256 bytes of
+//     printable ASCII, never device text.
 //   - An unknown error code reads as failed.unknown, a failure.
+//
+// # For the consumers of a result
+//
+//   - Records: RecordFields names the fields of each kind. A record was
+//     received at Transcript.ReceivedAt(record.Span).
+//   - Clock: C2 0.1 carries times only. The producer takes C4 received
+//     resolution_ns and clock.sync from the node's clock status at ended_at
+//     (A4 C2 review change 4).
+//   - Audit: the C8 device.* record for the invocation carries
+//     transcript.sha256, so a stored transcript can be checked against the
+//     audit chain (A3 change 10). The sha256 here detects corruption; the
+//     chain detects tampering.
 //
 // # What it leaves out
 //

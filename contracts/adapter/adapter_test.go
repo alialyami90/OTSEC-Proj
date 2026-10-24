@@ -18,40 +18,59 @@ import (
 // testdata/results/invalid must be listed, so a new example cannot pass by
 // failing for an unrelated reason.
 var resultWant = map[string]string{
-	"segments-gap":                         "no gap or overlap",
-	"segments-short":                       "spans must cover the bytes exactly",
-	"bytes-beyond-segments":                "spans must cover the bytes exactly",
-	"sha256-mismatch":                      "sha256 does not match",
-	"phase-backwards":                      "phases only move forward",
-	"credential-not-redacted":              "not the redaction marker",
-	"credential-without-prompt":            "without a password prompt",
-	"credential-without-echo-scan":         "echo_scan must be performed",
-	"credential-without-redaction":         "exactly one credential redaction",
-	"credential-redaction-labelled-echo":   "an echo redaction lies in a received",
-	"ok-without-quit":                      "ended with QUI",
-	"ok-with-error-code":                   "status ok carries no error",
-	"status-disagrees-with-code":           `implies status "refused", not "failed"`,
-	"unknown-code-at-0.1":                  "is not in the 0.1 taxonomy",
-	"span-in-sent-bytes":                   "covers sent bytes",
-	"span-on-echo-redaction":               "overlaps a redaction",
-	"ok-with-unparsed-record":              "use partial.parse_errors",
-	"identity-mismatch-reported-ok":        "ends the invocation with an identity_mismatch code",
-	"warning-without-value":                "either the observed value or missing",
-	"simulator-reported-as-device":         "target must be",
-	"other-major":                          "not readable as otsec.adapter/0.1",
-	"span-includes-stx":                    "includes an STX or ETX framing byte",
-	"auth-rejected-then-quit":              "QUI was not (C-19)",
-	"before-connect-code-but-connected":    "decided before connecting",
-	"identity-mismatch-code-with-match":    "needs identity.result mismatch",
-	"prompt-absent-without-quit":           "no prompt, no credential, then QUI",
-	"probe-rejected-wrong-code":            "a rejected probe ends with refused.language_probe_rejected",
-	"partial-without-unparsed-record":      "at least one record with parse_ok false",
-	"language-not-english-then-quit":       "QUI is not sent",
-	"probe-before-prompt":                  `sent before the "=" prompt`,
-	"probe-accepted-but-reply-off-grammar": "does not match the probe grammar",
-	"no-register-version":                  "register_version is required",
-	"session-elevated-then-quit":           "nothing but the wake is sent",
-	"wake-after-prompt":                    "sent once, first, before any prompt",
+	"segments-gap":                          "no gap or overlap",
+	"segments-short":                        "spans must cover the bytes exactly",
+	"bytes-beyond-segments":                 "spans must cover the bytes exactly",
+	"sha256-mismatch":                       "sha256 does not match",
+	"phase-backwards":                       "phases only move forward",
+	"credential-not-redacted":               "not the redaction marker",
+	"credential-without-prompt":             "without a password prompt",
+	"credential-without-echo-scan":          "echo_scan must be performed",
+	"credential-without-redaction":          "exactly one credential redaction",
+	"credential-redaction-labelled-echo":    "an echo redaction lies in a received",
+	"ok-without-quit":                       "ended with QUI",
+	"ok-with-error-code":                    "status ok carries no error",
+	"status-disagrees-with-code":            `implies status "refused", not "failed"`,
+	"unknown-code-at-0.1":                   "is not in the 0.1 taxonomy",
+	"span-in-sent-bytes":                    "covers sent bytes",
+	"span-on-echo-redaction":                "overlaps a redaction",
+	"ok-with-unparsed-record":               "use partial.parse_errors",
+	"identity-mismatch-reported-ok":         "ends the invocation with an identity_mismatch code",
+	"warning-without-value":                 "either the observed value or missing",
+	"simulator-reported-as-device":          "target must be",
+	"other-major":                           "not readable as otsec.adapter/0.1",
+	"span-includes-stx":                     "includes an STX or ETX framing byte",
+	"read-rows-exceeded-with-parsed-record": "parses no record (D1-12)",
+	"read-rows-exceeded-without-detail":     "needs a detail giving the row count",
+	"ser-row-field-renamed":                 "a sel.ser.row carries the fields",
+	"no-operation-id":                       "operation_id \"\" is not an operation ID",
+	"wake-into-password-prompt":             "only when nothing was received",
+	"quit-after-unconfirmed-password":       "no level prompt confirmed (C-19, D1-20)",
+	"credential-and-quit-in-one-segment":    "exactly the redaction marker and one line end",
+	"credential-without-password-prompt":    "without a received password prompt",
+	"auth-line-not-acc":                     "the auth phase sends ACC once",
+	"acc-without-language-probe":            "ACC sent without an accepted language probe",
+	"operate-line-without-prompt":           `"SER" sent before the "=>" prompt`,
+	"setting-read-as-prompt":                `"SER" sent before the "=>" prompt`,
+	"close-line-not-quit":                   "the close phase sends QUI only",
+	"timeout-at-level1-without-quit":        "so the session ends with QUI (D18, V-S13)",
+	"elevated-with-level0-prompt":           "not an elevated one",
+	"access-level-without-prompt":           "the highest prompt received shows",
+	"identity-only-after-password":          "must precede it (AP-27)",
+	"detail-with-device-text":               "error.detail must be at most",
+	"unknown-field-in-own-minor":            "is not a field name",
+	"auth-rejected-then-quit":               "QUI was not (C-19)",
+	"before-connect-code-but-connected":     "decided before connecting",
+	"identity-mismatch-code-with-match":     "needs identity.result mismatch",
+	"prompt-absent-without-quit":            "no prompt, no credential, then QUI",
+	"probe-rejected-wrong-code":             "a rejected probe ends with refused.language_probe_rejected",
+	"partial-without-unparsed-record":       "at least one record with parse_ok false",
+	"language-not-english-then-quit":        "QUI is not sent",
+	"probe-before-prompt":                   `sent before the "=" prompt`,
+	"probe-accepted-but-reply-off-grammar":  "does not match the probe grammar",
+	"no-register-version":                   "register_version is required",
+	"session-elevated-then-quit":            "nothing but the wake is sent",
+	"wake-after-prompt":                     "sent once, first, and only when nothing was received",
 }
 
 var invocationWant = map[string]string{
@@ -202,7 +221,7 @@ func TestCodeTable(t *testing.T) {
 // The QUI probe reply grammar (ADR-0005). The accepted forms follow S22
 // Figure 1.4 (header lines without milliseconds, then "=") and Table 7.16
 // (time with milliseconds). The echo and the "Level 0" line are not
-// documented (H-12); the grammar tolerates them. Every text here is
+// documented (H-13); the grammar tolerates them. Every text here is
 // constructed, not captured.
 // The credential is suspended only where the password was sent (C7 design
 // section 7, C7-A2 changes 2 and 3).
@@ -403,6 +422,12 @@ func TestValidateWith(t *testing.T) {
 	if err := i.ValidateWith(reg); err != nil {
 		t.Errorf("Level 0 operation with no credential refused: %v", err)
 	}
+	// A password a Level 0 operation does not need is not sent (C7-A2-5).
+	i = inv
+	i.OperationID = "sel.id"
+	if got := codeOf(i.ValidateWith(reg)); got != RefusedLimits {
+		t.Errorf("Level 0 operation with a credential: code %q, want %q", got, RefusedLimits)
+	}
 	i = inv
 	i.Limits.ConnectRetries = 3
 	if got := codeOf(i.ValidateWith(reg)); got != RefusedLimits {
@@ -449,24 +474,39 @@ func TestCheckAgainst(t *testing.T) {
 		{"suspended asset", func(_ *Invocation, a *asset.Asset, _ *asset.CapabilityProfile) {
 			a.Suspension = &asset.Suspension{Reason: "identity-mismatch"}
 		}, RefusedAssetSuspended},
-		{"credential on an address-only binding", func(_ *Invocation, a *asset.Asset, _ *asset.CapabilityProfile) {
+		{"address-only binding", func(_ *Invocation, a *asset.Asset, _ *asset.CapabilityProfile) {
 			a.IdentityBinding = asset.IdentityBinding{Method: asset.AddressOnly}
+		}, RefusedInvocationMismatch},
+		{"credential on a binding 0.1 reads as address-only", func(_ *Invocation, a *asset.Asset, _ *asset.CapabilityProfile) {
+			a.IdentityBinding.Method = "tpm-attested" // compares attributes, but C1 sends no credential on it (R-1)
 		}, RefusedCredentialUnavailable},
+		{"operation the profile does not name", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
+			i.OperationID = "sel.unknown_read"
+		}, RefusedNotInvocable},
+		{"profile with no password attempt", func(_ *Invocation, _ *asset.Asset, p *asset.CapabilityProfile) {
+			l := *p.SessionLimits
+			l.PasswordAttempts = 0
+			p.SessionLimits = &l
+		}, RefusedLimits},
+		{"other asset, also suspended", func(i *Invocation, a *asset.Asset, _ *asset.CapabilityProfile) {
+			i.AssetID = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b14"
+			a.Suspension = &asset.Suspension{Reason: "identity-mismatch"}
+		}, RefusedInvocationMismatch},
 		{"other asset", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.AssetID = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b14"
-		}, RefusedLimits},
+		}, RefusedInvocationMismatch},
 		{"endpoint not on the asset", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.EndpointID = "port2-telnet"
-		}, RefusedLimits},
+		}, RefusedInvocationMismatch},
 		{"other profile", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.ProfileID = "sel-rtac-syslog"
-		}, RefusedLimits},
+		}, RefusedInvocationMismatch},
 		{"expected FID not the declared one", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.Expected = []Expected{{"firmware_id", "SEL-751-R500-V1-Z103101-D20260910"}, i.Expected[1]}
-		}, RefusedLimits},
+		}, RefusedInvocationMismatch},
 		{"expected identity missing an attribute", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.Expected = i.Expected[:1]
-		}, RefusedLimits},
+		}, RefusedInvocationMismatch},
 		{"min interval below the profile's", func(i *Invocation, _ *asset.Asset, _ *asset.CapabilityProfile) {
 			i.Limits.MinIntervalMS = 59_999
 		}, RefusedLimits},
@@ -492,8 +532,8 @@ func TestCheckAgainst(t *testing.T) {
 	i, a2 := inv, a
 	i.OperationID, i.CredentialRef = "sel.id", ""
 	a2.IdentityBinding = asset.IdentityBinding{Method: asset.AddressOnly, Strength: asset.Spoofable}
-	if got := codeOf(i.CheckAgainst(a2, p)); got != RefusedLimits {
-		t.Errorf("Level 0 read on an address-only binding: code %q, want %q", got, RefusedLimits)
+	if got := codeOf(i.CheckAgainst(a2, p)); got != RefusedInvocationMismatch {
+		t.Errorf("Level 0 read on an address-only binding: code %q, want %q", got, RefusedInvocationMismatch)
 	}
 }
 
@@ -525,7 +565,7 @@ func TestDecodeInvocationRejectsTrailingData(t *testing.T) {
 // Results read every 0.x minor: unknown fields are ignored.
 func TestResultIgnoresUnknownFields(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join("testdata", "results", "valid", "ok.json"))
-	b = []byte(strings.Replace(string(b), `"schema"`, `"added_in_0_2": {"x": 1}, "schema"`, 1))
+	b = []byte(strings.Replace(string(b), `"schema": "otsec.adapter/0.1"`, `"added_in_0_2": {"x": 1}, "schema": "otsec.adapter/0.2"`, 1))
 	if _, err := DecodeResult(b); err != nil {
 		t.Fatalf("unknown field rejected: %v", err)
 	}

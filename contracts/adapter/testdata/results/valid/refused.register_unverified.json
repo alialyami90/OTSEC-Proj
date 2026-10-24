@@ -1,6 +1,7 @@
 {
   "schema": "otsec.adapter/0.1",
   "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
   "adapter": {
     "id": "sel-751-ascii",
     "version": "0.1.0-example"
