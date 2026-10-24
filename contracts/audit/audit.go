@@ -192,6 +192,10 @@ type Record struct {
 	// SHA-256 of the session transcript exactly as stored, redactions
 	// included. Required on device.session.close and on no other action
 	// (A1 D1-25), so a stored transcript can be checked against the chain.
+	// It is bare hex, unlike the "sha256:"-prefixed *_digest fields, so that
+	// it compares byte for byte with the C2 field it copies; the algorithm
+	// is in its name. An empty transcript still has a digest (e3b0c442...,
+	// the SHA-256 of no bytes), so the field is never omitted on a close.
 	TranscriptSHA256 string `json:"transcript_sha256,omitempty"`
 	CorrelationID    string `json:"correlation_id,omitempty"` // C7 request ID, or the C2 invocation ID for invocationActions
 	CollectorSeq     uint64 `json:"collector_seq,omitempty"`  // the collector's number for an event it reported (C7-A5-2)
