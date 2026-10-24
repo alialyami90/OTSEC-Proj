@@ -114,6 +114,7 @@ class TLSMaterial:
         self.server_cert, self.server_key = os.path.join(d, "server.pem"), os.path.join(d, "server.key")
         self.client_cert, self.client_key = os.path.join(d, "client.pem"), os.path.join(d, "client.key")
         self.other_cert, self.other_key = os.path.join(d, "other.pem"), os.path.join(d, "other.key")
+        self.impostor_cert, self.impostor_key = os.path.join(d, "impostor.pem"), os.path.join(d, "impostor.key")
 
     @staticmethod
     def openssl():
@@ -147,4 +148,83 @@ class TLSMaterial:
         # A self-signed client certificate no CA here signed.
         run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
             "-keyout", self.other_key, "-out", self.other_cert, "-days", "2", "-subj", "/CN=a6-stranger")
+        # Self-signed, with the real client's name: only a chain check stops it.
+        run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+            "-keyout", self.impostor_key, "-out", self.impostor_cert, "-days", "2", "-subj", "/CN=a6-slice-node")
         return self
+
+
+RSYSLOG_CONF = """\
+# Upstream collector for the slice's Linux leg (A6). RELP over TLS with client
+# certificates. The ruleset queue is Direct and omfile syncs, so imrelp
+# answers 200 OK only after the message is written and fsynced: the durable
+# acknowledgement C6 requires of a required target (V-S6).
+# tls.authmode is "name": with librelp 1.11.0, "certvalid" accepted a
+# self-signed client certificate no configured CA had signed (A6 test,
+# 2026-10-24). "name" checks the chain and the peer name.
+global(workDirectory="{dir}")
+module(load="imrelp")
+input(type="imrelp" port="{port}" address="127.0.0.1" ruleset="slice"
+      tls="on" tls.cacert="{ca}" tls.mycert="{cert}" tls.myprivkey="{key}"
+      tls.authmode="name" tls.permittedPeer=["a6-slice-node"])
+template(name="raw" type="string" string="%rawmsg%\\n")
+ruleset(name="slice" queue.type="Direct") {{
+  action(type="omfile" file="{out}" template="raw" asyncWriting="off"
+         flushOnTXEnd="on" sync="on" ioBufferSize="4k")
+}}
+"""
+
+
+def rsyslogd():
+    return shutil.which("rsyslogd") or (os.path.exists("/usr/sbin/rsyslogd") and "/usr/sbin/rsyslogd")
+
+
+def free_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+class Rsyslog:
+    """rsyslogd in the foreground with RSYSLOG_CONF. imrelp cannot pick its
+    own port, so the harness picks a free one and waits until it accepts."""
+
+    def __init__(self, d, tls):
+        self.dir, self.out = d, os.path.join(d, "rsyslog-out.log")
+        self.port = free_port()
+        self.conf = os.path.join(d, "rsyslog.conf")
+        with open(self.conf, "w") as f:
+            f.write(RSYSLOG_CONF.format(dir=d, port=self.port, ca=tls.ca, cert=tls.server_cert,
+                                        key=tls.server_key, out=self.out))
+        self.p = subprocess.Popen([rsyslogd(), "-n", "-f", self.conf, "-i", os.path.join(d, "rsyslog.pid")],
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        import socket
+
+        def accepting():
+            try:
+                socket.create_connection(("127.0.0.1", self.port), timeout=0.2).close()
+                return True
+            except OSError:
+                return False
+
+        if not wait_for(accepting, 10):
+            self.stop()
+            raise RuntimeError("rsyslogd did not open its RELP port: " + self.p.stdout.read().decode(errors="replace"))
+
+    def lines(self):
+        if not os.path.exists(self.out):
+            return []
+        with open(self.out, "rb") as f:
+            return [l for l in f.read().split(b"\n") if l]
+
+    def stop(self):
+        if self.p.poll() is None:
+            self.p.terminate()
+            try:
+                self.p.wait(10)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+                self.p.wait(10)

@@ -146,12 +146,15 @@ def test_tls_mutual(tmp_path, tls):
         p.stop()
 
 
-@pytest.mark.parametrize("who", ["no client certificate", "a certificate the CA did not sign"])
+@pytest.mark.parametrize("who", ["no client certificate", "a certificate the CA did not sign",
+                                 "a self-signed one with the client's name"])
 def test_tls_refuses_unknown_client(tmp_path, tls, who):
     log = str(tmp_path / "recv.jsonl")
     p = harness.start_receiver(log, tls=tls)
     try:
-        cert = (None, None) if who.startswith("no") else (tls.other_cert, tls.other_key)
+        cert = {"no client certificate": (None, None),
+                "a certificate the CA did not sign": (tls.other_cert, tls.other_key),
+                "a self-signed one with the client's name": (tls.impostor_cert, tls.impostor_key)}[who]
         try:
             c = Client(p.port, tls=tls, cert=cert[0], key=cert[1])
             c.send("open", b"relp_version=0\ncommands=syslog")

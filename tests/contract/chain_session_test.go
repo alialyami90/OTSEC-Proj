@@ -291,9 +291,9 @@ func chainEvents(t *testing.T, r *chainRun) [][]byte {
 		rec := r.res.Records[i]
 		row := d[rec.Span.Offset : rec.Span.Offset+rec.Span.Length]
 		rs := sha256.Sum256(row)
-		date := strings.Index(string(row), rec.Fields[1].Value)
-		tm := strings.Index(string(row), rec.Fields[2].Value) + len(rec.Fields[2].Value)
-		native := string(row[date:tm])
+		// C4: the printed DATE and TIME joined by one space (D1-25); the
+		// row's own three spaces stay in native.bytes.
+		native := rec.Fields[1].Value + " " + rec.Fields[2].Value
 		dt := rec.Fields[1].Value
 		wall := fmt.Sprintf("%s-%s-%sT%s", dt[6:10], dt[0:2], dt[3:5], rec.Fields[2].Value)
 		e := map[string]any{
@@ -349,7 +349,7 @@ func chainC4(t *testing.T) {
 		if e.Collection.NativePosition != want.Row || e.Normalized.Subject != want.Element || e.Normalized.Value != want.State {
 			t.Errorf("event %d: row %s %s %s, want %+v", i, e.Collection.NativePosition, e.Normalized.Subject, e.Normalized.Value, want)
 		}
-		if !strings.HasPrefix(e.DeviceTime.Native, want.Date) || !strings.HasSuffix(e.DeviceTime.Native, want.Time) {
+		if e.DeviceTime.Native != want.Date+" "+want.Time {
 			t.Errorf("event %d: native time %q, want %s … %s", i, e.DeviceTime.Native, want.Date, want.Time)
 		}
 		if !strings.HasSuffix(e.DeviceTime.WallClock, want.Time) || e.DeviceTime.ResolutionNS != 1000000 || e.DeviceTime.Offset != "unknown" {
