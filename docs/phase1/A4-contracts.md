@@ -58,13 +58,30 @@ Owner: A4. Brief: P1-A4 in [../agent-handoffs.md](../agent-handoffs.md). Package
 | Message | One canonical RFC 5424 rendering, or an RFC 3164-compatible one. Every event field goes in one SD element, `otsec@32473`. Device bytes appear only as escaped `dtext` or as `dtext_b64`, never verbatim in MSG. | A3 AP-20, and E-A4-02 and E-A4-04: device text cannot forge a header, a frame or an SD element. |
 | Header time | Node receive time, cut to 6 fraction digits (RFC 5424 TIME-SECFRAC). `rcv` keeps full precision. | The header cannot carry nanoseconds; no precision is lost from the event. |
 | Size | Never split, never cut. In order: replace device text with `dtext_omitted="1"`, then drop the MSG summary, then fail with `too-large`. The forwarder emits `forward.text-omitted` or `forward.too-large`, and advances past a too-large event only after that health event is accepted. | Acceptance test: "split or truncated only as the profile says, never silently". |
-| Framing | Octet counting by default on TCP and TLS. LF framing only on plain `tcp`, for collectors that cannot count octets. One datagram per message on UDP. | ADR-0004 names RFC 6587 octet counting. LF framing is an addition, offered best-effort and insecure only. A1, please confirm or remove it. |
+| Framing | Octet counting by default on TCP and TLS. LF framing only on plain `tcp`, for collectors that cannot count octets. One datagram per message on UDP. | ADR-0004 names RFC 6587 octet counting. LF framing is an addition, offered best-effort and insecure only, guarded by `Frame`; A3 and A6 accept it. |
 | Inbound (TB5) | `ParseRELPResponse` is the whole grammar a node accepts back: `rsp` and `serverclose`, bounded lengths, a transaction number that must be outstanding. | A3 TB5: the node parses nothing else from upstream. |
 | Versions (D1-13) | Every message carries `v` (the C6 identifier) and `ev` (the C4 identifier of the event). | A receiver can tell an unreadable version from a malformed event. |
 | Audit (C8, D1-15) | A target with `audit: true` must be required `relp-tls` in RFC 5424 with `max_message_octets` at least 17,408 (a 16 KiB sealed record plus header). Any other audit target is refused at load with code `audit`. Sealed bytes go unchanged in MSG and are never cut or split. TODO(C8): the audit rendering lands with C8. | C8 forbids re-encoding sealed bytes, and only a RELP acknowledgement shows that a record or checkpoint left the node. See [C8-A4](reviews/C8-A4.md). |
 | PEN | 32473 is the RFC 5612 documentation number and must be replaced before production. | ADR-0004 amendment. |
 
 Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), `TestAuditOnlyOnRequiredRELPTLS` (D1-15), `TestOversize` (each size step and the failure), `TestHeaderTimestampAtMostSixDigits`, `TestHostileContent` (CR, LF, NUL, a BOM, U+2028, C1 controls, `]`, `"`, backslashes and invalid UTF-8 in device text), `TestGoldenRenderings`, `TestRenderReadBack` and `TestParseRELPResponse`. The examples are described in [contracts/syslog/testdata/NOTES.md](../../contracts/syslog/testdata/NOTES.md).
+
+## Changes from C6 reviews
+
+| Review | Change | Done |
+| --- | --- | --- |
+| A3 1 (blocking), A1 1 | Mode A cursor rule: the cursor advances to N only when every transaction up to N has `200 OK`. A 500, serverclose, timeout or closed connection ends the session, and everything after the cursor is sent again. A second response for one TXNR is a violation. The open's OK advances nothing and must offer `commands=syslog`. | `Window` in `relp.go`, `doc.go`, `TestWindow` |
+| A3 2 (blocking), A1 2 | `tls.client_credential_ref` (mutual TLS) is required on required and audit targets. | `Validate`, invalid `required-without-client-credential`, `TestMutualTLSOnRequiredAndAudit` |
+| A6 1 (required) | A required target records `durable_ack`, the passed commissioning check that its collector acknowledges after a durable write (E-A4-03 trials 1 and 2). It is refused on best-effort targets. | `DurableAck`, `doc.go`, invalid `required-without-durable-ack`. A6 adds the V-S15 case against a real collector. |
+| A3 3 | TLS 1.2 minimum, mandatory host name and chain verification, no fallback. The trust anchor is a platform-only CA set, or `spki_sha256` pins the collector's key. | `TLSConfig` doc, `MinTLSVersion`, `spki_sha256` field, invalid `malformed-spki-pin` |
+| A3 4 | TLS references are marked `TODO(A3 node key ref)`, not C7 `CredentialRef`. | `target.go`, schema |
+| A3 5 | Insecure targets get an admin-acknowledged scope and leave out device text by default. | **Open, for A1** (A3 lists it as A1's call). The renderings would change, so I have not done it yet. |
+| A3 6, A6 3 | `printable` rejects Unicode format characters (Cf: bidi controls, zero-width characters, BOM) and noncharacters, so they travel as `_b64`. | `render.go`, `TestPrintableRejectsFormatAndNoncharacters`, five hostile cases |
+| A3 7 | Target changes are admin-only and audited as C8 `policy.apply`. Removing or downgrading the last audit target or a required target raises an alarm. | `doc.go` |
+| A3 8 | `DefaultRELPResponseTimeout` (30 s). When it expires, the session closes and unacknowledged transactions are sent again. | `relp.go` |
+| A1 3 | `MaxRELPFrameLen`: a buffer this long is never `ErrIncomplete`, so the caller's buffer is bounded. | `relp.go`, `TestRELPFrameBound` |
+| A6 2 | C4 health detail keys match `^[a-z][a-z0-9_.-]{0,63}$` (no `=`), so `hd="key=value"` splits back only one way. | C4 `validate.go`, schema `propertyNames`, `TestHealthDetailKeys` |
+| A3 9, A6 4 | LF framing stays on best-effort plain `tcp` only. A3 and A6 both accept it; A1 accepted C6 without objecting. | no change |
 
 ## Proposals for A1
 

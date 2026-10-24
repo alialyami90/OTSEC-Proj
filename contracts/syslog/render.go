@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"otsec.local/otsec/contracts/event"
@@ -200,19 +201,28 @@ func params(e *event.Event, withText bool) []Param {
 
 // printable reports whether s can travel as an escaped PARAM-VALUE without
 // changing meaning anywhere on the path: valid UTF-8 with no C0 or C1
-// control character, no DEL, no line or paragraph separator and no BOM. A
-// value that fails travels as base64, so LF, NUL and invalid UTF-8 never
-// reach the wire (E-A4-02).
+// control character, no DEL, no line or paragraph separator, no format
+// character (Unicode Cf: the BOM, bidirectional controls, zero-width
+// characters) and no noncharacter. A value that fails travels as base64, so
+// LF, NUL and invalid UTF-8 never reach the wire (E-A4-02), and device text
+// cannot reorder or hide what an analyst sees (C6-A3-6, C6-A6-3).
 func printable(s string) bool {
 	if !utf8.ValidString(s) {
 		return false
 	}
 	for _, r := range s {
-		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029 || r == 0xfeff {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029 ||
+			unicode.Is(unicode.Cf, r) || noncharacter(r) {
 			return false
 		}
 	}
 	return true
+}
+
+// noncharacter reports the Unicode noncharacters: U+FDD0 to U+FDEF and the
+// last two code points of every plane.
+func noncharacter(r rune) bool {
+	return (r >= 0xfdd0 && r <= 0xfdef) || r&0xfffe == 0xfffe
 }
 
 // escape escapes a PARAM-VALUE as RFC 5424 section 6.3.3 requires.

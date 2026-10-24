@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
+	"time"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/version"
@@ -39,6 +41,26 @@ type Target struct {
 	// sealed record may (A1 D1-15): an audit consumer is always required,
 	// and audit is pruned only after a RELP acknowledgement.
 	Audit bool `json:"audit,omitempty"`
+	// DurableAck records the commissioning check that a required target's
+	// collector acknowledges only after the message is durably written
+	// (C6-A6-1). Required when class is required.
+	DurableAck *DurableAck `json:"durable_ack,omitempty"`
+}
+
+// DurableAck is the result of the commissioning check of a required
+// target: a numbered burst is sent, the collector is killed after it
+// acknowledges and restarted, and every acknowledged message is found
+// stored. The reference configuration is the one E-A4-03 trial 2 passed
+// (rsyslog imrelp with Direct queues and confirmMessages on). A collector
+// with in-memory queues lost 1,471 of 1,500 acknowledged messages in trial
+// 1, so without this check a required target could let C5 prune records
+// that exist nowhere else (V-S9). The check runs against the real
+// collector, because the result depends on its configuration (A6 V-S15).
+type DurableAck struct {
+	// VerifiedUTC is when the check passed, RFC 3339 UTC with Z.
+	VerifiedUTC string `json:"verified_utc"`
+	// EvidenceRef names the stored record of the check.
+	EvidenceRef string `json:"evidence_ref"`
 }
 
 // Transport is closed.
@@ -86,17 +108,36 @@ const (
 	ModeB Mode = "B" // unacknowledged: replay window on reconnect
 )
 
-// TLSConfig names the server to verify and the client credential.
+// TLSConfig names the server to verify and the node's client key.
+//
+// Every TLS target verifies the collector (TB5, SC-16): TLS 1.2 or later
+// (MinTLSVersion), the certificate chain against TrustAnchorRef, and the
+// host name against ServerName. A failure closes the connection; nothing
+// falls back to plaintext and no verification step is ever skipped.
+// TrustAnchorRef names a CA set used only for this platform's collectors;
+// when a broader set is unavoidable, SPKIPins pins the collector's key and
+// anything else is refused, so no other certificate for ServerName can act
+// as the collector and acknowledge events into pruning (AP-9).
 type TLSConfig struct {
 	// ServerName is verified against the collector's certificate.
 	ServerName string `json:"server_name"`
 	// TrustAnchorRef names the CA set that verifies the collector.
-	// TODO(C7): C7 CredentialRef.
+	// TODO(A3 node key ref): not a C7 CredentialRef, which is a device
+	// credential held by the collector service (C6-A3-4).
 	TrustAnchorRef string `json:"trust_anchor_ref"`
-	// ClientCredentialRef is set when the collector verifies the node.
-	// TODO(C7): C7 CredentialRef.
+	// SPKIPins are base64 SHA-256 hashes of the collector's
+	// SubjectPublicKeyInfo. When set, the collector's key must match one.
+	SPKIPins []string `json:"spki_sha256,omitempty"`
+	// ClientCredentialRef names the node's TLS client key, so the collector
+	// can refuse a stream that is not from an enrolled node. Required on
+	// required and audit targets (C6-A3-2); recommended on every tls target.
+	// TODO(A3 node key ref): a non-exportable key in the node service's
+	// store, not a C7 CredentialRef.
 	ClientCredentialRef string `json:"client_credential_ref,omitempty"`
 }
+
+// MinTLSVersion is the lowest TLS version a target may negotiate.
+const MinTLSVersion = "1.2"
 
 // Size limits. RFC 5425 receivers must accept 2048 octets; RFC 5426 sets
 // 480 (IPv4) and 1180 (IPv6) as the floors when the path is unknown; RFC
@@ -179,6 +220,8 @@ func Codes(err error) []Code {
 var (
 	self        = version.ID{Name: "syslog", Major: 0, Minor: 1}
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	refPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+	pinPattern  = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
 	hostPattern = regexp.MustCompile(`^[A-Za-z0-9.:\[\]-]{1,253}$`)
 )
 
@@ -278,6 +321,27 @@ func (t *Target) Validate() error {
 	case !usesTLS && t.TLS != nil && known:
 		fail(CodeTLS, "tls", "%q does not use TLS", t.Transport)
 	}
+	if usesTLS && t.TLS != nil {
+		for i, p := range t.TLS.SPKIPins {
+			if !pinPattern.MatchString(p) {
+				fail(CodeTLS, fmt.Sprintf("tls.spki_sha256[%d]", i), "%q is not a base64 SHA-256", p)
+			}
+		}
+		if (t.Class == ClassRequired || t.Audit) && t.TLS.ClientCredentialRef == "" {
+			fail(CodeTLS, "tls.client_credential_ref", "required and audit targets authenticate the node with mutual TLS, so no one else can write to the collector (C6-A3-2)")
+		}
+	}
+	if t.Class == ClassRequired {
+		d := t.DurableAck
+		switch {
+		case d == nil:
+			fail(CodeDelivery, "durable_ack", "a required target needs a passed durable-acknowledgement check, or C5 may prune what the collector lost (C6-A6-1)")
+		case !utcZ(d.VerifiedUTC) || !refPattern.MatchString(d.EvidenceRef):
+			fail(CodeDelivery, "durable_ack", "verified_utc must be RFC 3339 UTC with Z and evidence_ref a reference")
+		}
+	} else if t.DurableAck != nil {
+		fail(CodeDelivery, "durable_ack", "only a required target records a durable-acknowledgement check")
+	}
 	if known {
 		if t.Mode() == ModeA {
 			if t.RELPWindow < 1 || t.RELPWindow > 1024 {
@@ -296,4 +360,9 @@ func (t *Target) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func utcZ(s string) bool {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	return err == nil && t.Location() == time.UTC && strings.HasSuffix(s, "Z")
 }

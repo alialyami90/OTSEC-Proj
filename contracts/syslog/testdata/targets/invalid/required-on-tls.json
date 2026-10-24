@@ -11,7 +11,12 @@
   "facility": 16,
   "tls": {
     "server_name": "siem.example.net",
-    "trust_anchor_ref": "site-a-ca"
+    "trust_anchor_ref": "site-a-ca",
+    "client_credential_ref": "site-a-node1-forwarder"
   },
-  "replay_seconds": 3600
+  "replay_seconds": 3600,
+  "durable_ack": {
+    "verified_utc": "2026-10-24T09:00:00Z",
+    "evidence_ref": "commissioning/siem-a/durable-ack"
+  }
 }

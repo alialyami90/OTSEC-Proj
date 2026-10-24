@@ -12,7 +12,14 @@
 //     confidentiality or integrity and are labelled insecure wherever the
 //     target is shown (Target.Insecure).
 //   - Delivery modes. Mode A (RELP, with or without TLS): the cursor for a
-//     target advances only on a RELP "200 OK" response for that transaction.
+//     target advances to transaction N only when every transaction sent up
+//     to N has a RELP "200 OK" (Window, C6-A3-1). An OK for a later
+//     transaction never covers an earlier one still in flight; a second
+//     response for one transaction is a violation; the open transaction's
+//     OK advances nothing and must offer commands=syslog. A 500, a
+//     serverclose, a closed connection or no response within the response
+//     timeout (DefaultRELPResponseTimeout) ends the session, and every
+//     transaction after the cursor is sent again. Nothing is skipped.
 //     Mode B (every other transport): nothing the receiver says advances it;
 //     on every reconnect the forwarder re-sends the events committed in the
 //     last replay_seconds (a window by time, ADR-0004 item 6), and the
@@ -21,6 +28,28 @@
 //     replay (C5 ComputeBoundary, A1 D1-5). Delivery is at-least-once in
 //     both modes; receivers remove duplicates by the eid parameter, which is
 //     the C4 event ID.
+//   - What "required" promises. A RELP 200 OK says the collector accepted a
+//     message, not that it stored it: with in-memory queues, rsyslog lost
+//     1,471 of 1,500 acknowledged messages when killed (E-A4-03 trial 1),
+//     and none with Direct queues and confirmMessages on (trial 2). Pruning
+//     follows required acknowledgements, so a target may be required only
+//     after a commissioning check against the real collector shows it
+//     acknowledges after a durable write: a numbered burst, the collector
+//     killed after it acknowledges, restarted, and every acknowledged
+//     message found. The result is recorded in Target.DurableAck (C6-A6-1,
+//     A6 V-S15).
+//   - Authentication (TB5, SC-16). Every TLS target verifies the collector:
+//     TLS 1.2 or later, the chain against a CA set used only for platform
+//     collectors or an SPKI pin, and the host name. No fallback to
+//     plaintext, no skipped verification. Required and audit targets also
+//     authenticate the node with mutual TLS (client_credential_ref), so no
+//     one else who can reach the collector can write events or audit into
+//     it (C6-A3-2, C6-A3-3).
+//   - Target changes are security changes (C6-A3-7). Only an admin adds,
+//     changes or removes a target; each change is a C8 policy.apply record
+//     naming the target and a hash of its configuration. Removing the last
+//     audit target or a required target, or downgrading either, raises an
+//     alarm: it changes what C5 may prune and where checkpoints go.
 //   - The message. Render produces the one canonical rendering of a C4 event
 //     in RFC 5424 (default) or an RFC 3164-compatible form for collectors
 //     that cannot parse RFC 5424. HEADER TIMESTAMP is the node's receive

@@ -1,6 +1,6 @@
 # C6 examples
 
-None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, and `site-a-ca` is an illustrative trust anchor name (TODO(C7)).
+None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, `site-a-ca`, `site-a-node1-forwarder` and `commissioning/siem-a/durable-ack` are illustrative references (TODO(A3 node key ref)); no durable-acknowledgement check has been run against any collector.
 
 ## Targets
 
@@ -8,7 +8,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
-| `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window. |
+| `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check. |
 | `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure. |
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
 | `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure. |
@@ -33,6 +33,9 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `invalid/audit-over-udp.json` | audit | no | Audit over UDP: no acknowledgement that a record or checkpoint arrived (D1-15, A6 negative test). |
 | `invalid/audit-over-tls.json` | audit | no | RFC 5425 TLS is authenticated but still unacknowledged. |
 | `invalid/audit-target-too-small.json` | audit | no | Required relp-tls, but 2048 octets cannot hold a 16 KiB sealed record. |
+| `invalid/required-without-client-credential.json` | tls | no | A required target authenticates the node with mutual TLS (C6-A3-2). |
+| `invalid/required-without-durable-ack.json` | delivery | no | A required target records the commissioning check that its collector acknowledges after a durable write (C6-A6-1). |
+| `invalid/malformed-spki-pin.json` | tls | yes | An SPKI pin is a base64 SHA-256. |
 
 ## Rendered messages
 

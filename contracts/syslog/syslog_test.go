@@ -71,25 +71,28 @@ func TestValidTargets(t *testing.T) {
 }
 
 var invalidTargets = map[string]Code{
-	"required-on-tls":        CodeRequiredClass,
-	"required-on-tcp":        CodeRequiredClass,
-	"required-on-udp":        CodeRequiredClass,
-	"required-on-relp":       CodeRequiredClass,
-	"tls-lf-framing":         CodeFraming,
-	"udp-octet-counting":     CodeFraming,
-	"size-below-floor":       CodeSize,
-	"rfc3164-over-1024":      CodeSize,
-	"relp-tls-without-tls":   CodeTLS,
-	"tcp-with-tls":           CodeTLS,
-	"mode-b-without-replay":  CodeDelivery,
-	"relp-with-replay":       CodeDelivery,
-	"misspelt-class":         CodeUnknownField,
-	"case-variant-class":     CodeUnknownField,
-	"other-major":            CodeSchema,
-	"unknown-transport":      CodeEnum,
-	"audit-over-udp":         CodeAudit,
-	"audit-over-tls":         CodeAudit,
-	"audit-target-too-small": CodeAudit,
+	"required-on-tls":                    CodeRequiredClass,
+	"required-on-tcp":                    CodeRequiredClass,
+	"required-on-udp":                    CodeRequiredClass,
+	"required-on-relp":                   CodeRequiredClass,
+	"tls-lf-framing":                     CodeFraming,
+	"udp-octet-counting":                 CodeFraming,
+	"size-below-floor":                   CodeSize,
+	"rfc3164-over-1024":                  CodeSize,
+	"relp-tls-without-tls":               CodeTLS,
+	"tcp-with-tls":                       CodeTLS,
+	"mode-b-without-replay":              CodeDelivery,
+	"relp-with-replay":                   CodeDelivery,
+	"misspelt-class":                     CodeUnknownField,
+	"case-variant-class":                 CodeUnknownField,
+	"other-major":                        CodeSchema,
+	"unknown-transport":                  CodeEnum,
+	"audit-over-udp":                     CodeAudit,
+	"audit-over-tls":                     CodeAudit,
+	"audit-target-too-small":             CodeAudit,
+	"required-without-client-credential": CodeTLS,
+	"required-without-durable-ack":       CodeDelivery,
+	"malformed-spki-pin":                 CodeTLS,
 }
 
 func TestInvalidTargets(t *testing.T) {
@@ -106,8 +109,12 @@ func TestInvalidTargets(t *testing.T) {
 		}
 		b, _ := os.ReadFile(f)
 		_, err := ParseTarget(b)
-		if got := Codes(err); !slices.Contains(got, want) {
-			t.Errorf("%s: codes %v, want %s (%v)", name, got, want, err)
+		// Each file breaks one rule, so it fails with that code alone. An
+		// unknown transport also cannot be required.
+		got := Codes(err)
+		only := slices.Equal(got, []Code{want}) || (name == "unknown-transport" && slices.Equal(got, []Code{CodeEnum, CodeRequiredClass}))
+		if !only {
+			t.Errorf("%s: codes %v, want only %s (%v)", name, got, want, err)
 		}
 	}
 }
@@ -326,6 +333,14 @@ func TestHostileContent(t *testing.T) {
 		"c1 control":           "a\u0085b",
 		"backslashes":          `\\\"\]`,
 		"looks like a summary": "] ser 51P1P Asserted",
+		// Format characters and noncharacters travel as base64 (C6-A3-6,
+		// C6-A6-3): they cannot forge structure, but they can reorder or
+		// hide what an analyst reads.
+		"right-to-left override": "TRIP\u202eDENEPO",
+		"isolate":                "x\u2066y\u2069",
+		"zero width space":       "a\u200bb",
+		"left-to-right mark":     "a\u200eb",
+		"noncharacter":           "a\ufffeb",
 	}
 	for _, target := range []string{"tcp-lf-insecure", "udp-rfc3164", "relp-tls-required"} {
 		tg := loadTarget(t, target)
@@ -522,5 +537,141 @@ func TestParseRELPResponse(t *testing.T) {
 	}
 	if _, _, err := ParseRELPResponse([]byte("2 rsp 6 200 OK\n"), nil); !slices.Contains(Codes(err), CodeRELPViolation) {
 		t.Error("rsp accepted with no outstanding transactions")
+	}
+}
+
+// Every format character and noncharacter fails printable, so it never
+// travels as escaped text.
+func TestPrintableRejectsFormatAndNoncharacters(t *testing.T) {
+	for _, r := range []rune{0x200b, 0x200e, 0x200f, 0x202a, 0x202e, 0x2066, 0x2069, 0xfeff, 0xfffe, 0xffff, 0xfdd0, 0x1fffe, 0x00ad} {
+		if printable("a" + string(r) + "b") {
+			t.Errorf("U+%04X is printable", r)
+		}
+	}
+	for _, ok := range []string{"51P1P Asserted", "Überstrom", "電流", "a b"} {
+		if !printable(ok) {
+			t.Errorf("%q is not printable", ok)
+		}
+	}
+}
+
+// C6-A3-2: required and audit targets authenticate the node.
+func TestMutualTLSOnRequiredAndAudit(t *testing.T) {
+	for _, name := range []string{"relp-tls-required", "relp-tls-audit"} {
+		tg := loadTarget(t, name)
+		tg.TLS.ClientCredentialRef = ""
+		if !slices.Contains(Codes(tg.Validate()), CodeTLS) {
+			t.Errorf("%s without a client key validated", name)
+		}
+	}
+	tg := loadTarget(t, "tls-best-effort")
+	if tg.TLS.ClientCredentialRef != "" || tg.Validate() != nil {
+		t.Error("a best-effort tls target should validate without a client key")
+	}
+	tg.TLS.SPKIPins = []string{"47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}
+	if err := tg.Validate(); err != nil {
+		t.Errorf("a well-formed pin: %v", err)
+	}
+	tg = loadTarget(t, "tls-best-effort")
+	tg.DurableAck = &DurableAck{VerifiedUTC: "2026-10-24T09:00:00Z", EvidenceRef: "x"}
+	if !slices.Contains(Codes(tg.Validate()), CodeDelivery) {
+		t.Error("durable_ack on a best-effort target validated")
+	}
+}
+
+// The mode A cursor rule (C6-A3-1, C6-A1-1).
+func TestWindow(t *testing.T) {
+	ok := func(n uint64) RELPResponse { return RELPResponse{TXNR: n, OK: true} }
+	open := RELPResponse{TXNR: 1, OK: true, Data: []byte("relp_version=0\nrelp_software=x\ncommands=syslog")}
+
+	w := NewWindow(8, 1)
+	if err := w.Send(2); !errors.Is(err, ErrBadOpen) {
+		t.Fatalf("send before open answered: %v", err)
+	}
+	if adv, err := w.Answer(open); adv != 0 || err != nil {
+		t.Fatalf("open: %d %v", adv, err)
+	}
+	for n := uint64(2); n <= 4; n++ {
+		if err := w.Send(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An OK for 4 while 2 and 3 are in flight advances nothing.
+	if adv, err := w.Answer(ok(4)); adv != 0 || err != nil {
+		t.Fatalf("ok 4 first: %d %v", adv, err)
+	}
+	// A second response for 4 is a violation, not a second acknowledgement.
+	if _, _, err := ParseRELPResponse([]byte("4 rsp 6 200 OK\n"), w.Outstanding); !slices.Contains(Codes(err), CodeRELPViolation) {
+		t.Fatalf("repeated response for 4: %v", err)
+	}
+	if adv, _ := w.Answer(ok(2)); adv != 2 {
+		t.Fatalf("ok 2: advance %d, want 2", adv)
+	}
+	if adv, _ := w.Answer(ok(3)); adv != 4 {
+		t.Fatalf("ok 3: advance %d, want 4 (3 and the earlier 4)", adv)
+	}
+
+	// A 500 for the earliest outstanding transaction ends the session and
+	// advances nothing, even after a later OK.
+	w = NewWindow(8, 1)
+	w.Answer(open)
+	w.Send(2)
+	w.Send(3)
+	if adv, _ := w.Answer(ok(3)); adv != 0 {
+		t.Fatal("ok 3 before 2 advanced")
+	}
+	if adv, err := w.Answer(RELPResponse{TXNR: 2}); adv != 0 || !errors.Is(err, ErrRefused) {
+		t.Fatalf("500 for 2: %d %v", adv, err)
+	}
+	if err := w.Send(4); !errors.Is(err, ErrRefused) {
+		t.Fatalf("send after refusal: %v", err)
+	}
+
+	// serverclose ends the session.
+	w = NewWindow(8, 1)
+	w.Answer(open)
+	w.Send(2)
+	if _, err := w.Answer(RELPResponse{Close: true}); !errors.Is(err, ErrSessionClosed) {
+		t.Fatalf("serverclose: %v", err)
+	}
+
+	// The open must offer syslog.
+	for _, data := range []string{"relp_version=0", "commands=syslogx", "commands=", ""} {
+		w = NewWindow(8, 1)
+		if _, err := w.Answer(RELPResponse{TXNR: 1, OK: true, Data: []byte(data)}); !errors.Is(err, ErrBadOpen) {
+			t.Errorf("open offers %q: %v", data, err)
+		}
+	}
+	w = NewWindow(8, 1)
+	if _, err := w.Answer(RELPResponse{TXNR: 1, OK: true, Data: []byte("commands=foo,syslog")}); err != nil {
+		t.Errorf("syslog in a list: %v", err)
+	}
+
+	// The window bounds frames in flight.
+	w = NewWindow(2, 1)
+	w.Answer(open)
+	w.Send(2)
+	w.Send(3)
+	if err := w.Send(4); !errors.Is(err, ErrWindowFull) {
+		t.Fatalf("third frame in a window of 2: %v", err)
+	}
+}
+
+// C6-A1-3: a buffer of MaxRELPFrameLen octets is never incomplete, so a
+// caller that buffers no more than that per frame is bounded.
+func TestRELPFrameBound(t *testing.T) {
+	all := func(uint64) bool { return true }
+	longest := "999999999 rsp 4096 200 OK\n" + strings.Repeat("x", 4096-7) + "\n"
+	if len(longest) != MaxRELPFrameLen-len("serverclose")+len("rsp") {
+		t.Fatalf("longest rsp is %d octets", len(longest))
+	}
+	if _, used, err := ParseRELPResponse([]byte(longest), all); err != nil || used != len(longest) {
+		t.Fatalf("longest rsp: used %d, %v", used, err)
+	}
+	for _, prefix := range []string{"999999999 rsp 4096 ", "1 ", "1 rsp 5 ", ""} {
+		buf := []byte(prefix + strings.Repeat("y", MaxRELPFrameLen))[:MaxRELPFrameLen]
+		if _, _, err := ParseRELPResponse(buf, all); errors.Is(err, ErrIncomplete) {
+			t.Errorf("%q padded to %d octets is incomplete", prefix, MaxRELPFrameLen)
+		}
 	}
 }

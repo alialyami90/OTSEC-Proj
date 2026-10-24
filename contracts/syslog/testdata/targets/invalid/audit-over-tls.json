@@ -11,7 +11,8 @@
   "facility": 16,
   "tls": {
     "server_name": "siem.example.net",
-    "trust_anchor_ref": "site-a-ca"
+    "trust_anchor_ref": "site-a-ca",
+    "client_credential_ref": "site-a-node1-forwarder"
   },
   "replay_seconds": 3600,
   "audit": true
