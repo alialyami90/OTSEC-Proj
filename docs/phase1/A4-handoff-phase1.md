@@ -69,7 +69,7 @@ Owner: A4. Date: 2026-10-24. C4 merged in #29. C6 is PR #42, branch `claude/proj
 **Limitations**
 
 - No forwarder, no Syslog receiver and no parser. Those are Phase 2.
-- Audit rendering (`RenderAudit`) is the next C6 change.
+- `RenderAudit` and `ParseAudit` were added after the handoff, together with D1-23 (`evidence_class`, `evc`, #59). See the last two tables in `A4-contracts.md`.
 - The SEL-751 SER record has no sequence number:
   - a full wrap between reads is undetectable;
   - so is a new record identical to an old one ahead of the first distinct new record (D1-17).

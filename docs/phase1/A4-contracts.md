@@ -95,6 +95,12 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 | [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. The enum is open to later minors: a 0.1 event takes only the two values, and a later minor's new class is kept and read as simulated (A6 D1-23 review change 1). C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
 | C2-A4 changes 4 and 5 | For an adapter poll, `received.utc` is C2 `Transcript.ReceivedAt(record span)`. The resolution and clock state come from the node's clock status at the invocation's `ended_at`. | C4 `Received` doc, `doc.go` |
 
+## RenderAudit (from the C8-A4 review)
+
+| Source | Change | Where |
+| --- | --- | --- |
+| [C8-A4](reviews/C8-A4.md) "Forwarding audit records", D1-15 | `RenderAudit(sealed, target)` puts a sealed C8 record unchanged into the RFC 5424 MSG part. The `otsec@32473` element carries `v`, `ac`, `node`, `seq` and `hash` (MSGID `AUDIT`). Severity is 4 for a denied, failed or warning outcome, and 5 otherwise. It refuses a target without `audit` (`audit`) and bytes that are not a valid C8 record (`audit-invalid`). `ParseAudit` refuses a message whose parameters, header, severity or hash disagree with the sealed bytes. A record at `audit.MaxRecordBytes` with the longest node ID fits in `MinAuditOctets` (16,723 of 17,408 octets), so `too-large` is a broken contract, never a big record. | `audit.go`, two audit goldens, `TestAuditRoundTripVerifiesChain` (chain verified over the bytes read back), `TestRenderAuditRefuses`, `TestParseAuditRefusesDisagreement`, `TestAuditFitsLargestRecord` |
+
 ## Proposals for A1
 
 1. **Line endings of fixtures.** No `.gitattributes` exists, so a Windows checkout with `core.autocrlf=true` can rewrite LF to CRLF in `tests/fixtures/`, which changes every byte-exact fixture and its SHA-256. C4 works around it with a `-text` copy in `contracts/event/testdata/`. Proposed root `.gitattributes`: `tests/fixtures/** -text` and `**/testdata/*.txt -text`.

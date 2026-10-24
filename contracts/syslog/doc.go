@@ -119,16 +119,23 @@
 //     upgrade order was not followed.
 //   - Audit records (C8, from the C8-A4 review). An audit record is never
 //     rendered from fields: C8 forbids re-encoding sealed bytes, and the
-//     chain is verified over exactly those bytes. Its sealed bytes go
-//     unchanged into the RFC 5424 MSG part (MSG-ANY, no BOM), after an SD
-//     element that carries the node, seq and hash. It is never truncated,
-//     split or summarised. Audit goes only to a target with audit set,
-//     which must be required relp-tls in RFC 5424 with room for a whole
-//     sealed record (A1 D1-15): only a RELP acknowledgement shows that a
-//     record or checkpoint left the node, and audit is pruned only after
-//     one. Target.Validate refuses any other audit target. The rendering of
-//     an audit record (RenderAudit) is the next C6 change, now that C8 has
-//     merged.
+//     chain is verified over exactly those bytes. RenderAudit puts the
+//     sealed bytes unchanged into the RFC 5424 MSG part (MSG-ANY, no BOM),
+//     after the otsec@32473 element with v, ac (the C8 identifier), node,
+//     seq and hash. MSGID is AUDIT, TIMESTAMP the record's time.utc and
+//     HOSTNAME its node; severity is 4 for a denied, failed or warning
+//     outcome and 5 otherwise. The parameters only index the record: a
+//     receiver reads it with ParseAudit, which checks that they, the header
+//     and the hash agree with the sealed bytes, then runs audit.VerifyChain
+//     over the bytes it received. A record is never truncated, split or
+//     summarised. Audit goes only to a target with audit set, which must be
+//     required relp-tls in RFC 5424 with room for a whole sealed record (A1
+//     D1-15): only a RELP acknowledgement shows that a record or checkpoint
+//     left the node, and audit is pruned only after one. Target.Validate
+//     refuses any other audit target, and MinAuditOctets leaves room for the
+//     largest record C8 allows, so RenderAudit's too-large error means a
+//     broken contract, not a big record; the forwarder then holds the audit
+//     cursor and alarms, and never skips the record.
 //   - The inbound grammar (TB5). The only bytes a node accepts from an
 //     upstream collector are TLS records and, in mode A, RELP responses:
 //     TXNR SP COMMAND SP DATALEN [SP DATA] LF, COMMAND rsp or serverclose,
