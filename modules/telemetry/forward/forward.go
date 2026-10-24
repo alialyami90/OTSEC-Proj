@@ -69,6 +69,13 @@ type Forwarder struct {
 	consumer store.ConsumerID
 	maxTXNR  uint64 // syslog.MaxTXNR; lowered by tests
 
+	// What this process has already reported, so a session that ends and
+	// reconnects does not raise the same health event again (A6 #89).
+	// Used only by the goroutine running Run.
+	tooLarge map[store.Key]store.Key      // held event -> its forward.too-large
+	omitted  map[store.Key]bool           // events reported as forward.text-omitted
+	skipped  map[store.StreamID]store.Seq // highest seq reported as forward.unreachable
+
 	mu     sync.Mutex
 	status Status
 }
@@ -141,6 +148,7 @@ func New(cfg Config) (*Forwarder, error) {
 		cfg.RetryMax = max(60*time.Second, cfg.RetryMin)
 	}
 	f := &Forwarder{cfg: cfg, consumer: store.ConsumerID(t.Name), maxTXNR: syslog.MaxTXNR,
+		tooLarge: map[store.Key]store.Key{}, omitted: map[store.Key]bool{}, skipped: map[store.StreamID]store.Seq{},
 		status: Status{Streams: map[store.StreamID]StreamStatus{}}}
 	for _, s := range cfg.Streams {
 		f.status.Streams[s.ID] = StreamStatus{}
@@ -235,8 +243,7 @@ type session struct {
 	read    []store.Seq      // the last seq read into the queue
 	saved   []store.Seq      // the cursor persisted for this target
 	hold    []*held
-	omitted map[store.Key]bool // forward.text-omitted raised in this session
-	stopped bool               // TXNRs used up: drain, close, reopen
+	stopped bool // TXNRs used up: drain, close, reopen
 }
 
 func (f *Forwarder) session(ctx context.Context) error {
@@ -250,7 +257,7 @@ func (f *Forwarder) session(ctx context.Context) error {
 	n := len(f.cfg.Streams)
 	s := &session{f: f, ctx: ctx, conn: conn, rbuf: make([]byte, syslog.MaxRELPFrameLen),
 		queue: make([][]store.Stored, n), read: make([]store.Seq, n), saved: make([]store.Seq, n),
-		hold: make([]*held, n), omitted: map[store.Key]bool{}}
+		hold: make([]*held, n)}
 	if err := s.loadCursors(); err != nil {
 		return err
 	}
@@ -389,6 +396,10 @@ func (s *session) peek(i int) (*store.Stored, error) {
 // skipped reports seqs pruned before this target confirmed them: a
 // best-effort target's window passed. Reported, never hidden (C6-A5).
 func (s *session) skipped(stream store.StreamID, first, last store.Seq) error {
+	if last <= s.f.skipped[stream] {
+		return nil // reported by an earlier session
+	}
+	first = max(first, s.f.skipped[stream]+1)
 	_, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardUnreachable, Details: map[string]string{
 		"target": s.f.cfg.Target.Name, "stream": string(stream),
 		"first_skipped": strconv.FormatUint(first, 10), "last_skipped": strconv.FormatUint(last, 10),
@@ -397,6 +408,7 @@ func (s *session) skipped(stream store.StreamID, first, last store.Seq) error {
 	if err != nil {
 		return fmt.Errorf("forward: report skipped %s %d-%d: %w", stream, first, last, err)
 	}
+	s.f.skipped[stream] = last
 	return nil
 }
 
@@ -468,22 +480,26 @@ func (s *session) render(i int, ev *store.Stored) ([]byte, error) {
 			s.stop(i, ev.Key.Seq, nil, fmt.Sprintf("event %s cannot be rendered: %v", ev.Key, err))
 			return nil, nil
 		}
-		key, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: syslog.HealthTooLarge, Related: []event.EventID{ev.Key}, Details: map[string]string{
-			"target": t.Name, "limit": strconv.Itoa(t.MaxMessageOctets),
-		}})
-		if err != nil {
-			return nil, fmt.Errorf("forward: report too-large %s: %w", ev.Key, err)
+		key, ok := s.f.tooLarge[ev.Key]
+		if !ok {
+			key, err = s.f.cfg.Health.Emit(s.ctx, event.Health{Type: syslog.HealthTooLarge, Related: []event.EventID{ev.Key}, Details: map[string]string{
+				"target": t.Name, "limit": strconv.Itoa(t.MaxMessageOctets),
+			}})
+			if err != nil {
+				return nil, fmt.Errorf("forward: report too-large %s: %w", ev.Key, err)
+			}
+			s.f.tooLarge[ev.Key] = key
 		}
 		s.stop(i, ev.Key.Seq, &key, fmt.Sprintf("event %s does not fit %d octets; it is passed once %s is confirmed", ev.Key, t.MaxMessageOctets, key))
 		return nil, nil
 	}
-	if (out.TextOmitted || out.SummaryDropped) && !own && !s.omitted[ev.Key] {
-		s.omitted[ev.Key] = true
+	if (out.TextOmitted || out.SummaryDropped) && !own && !s.f.omitted[ev.Key] {
 		if _, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardTextOmitted, Related: []event.EventID{ev.Key}, Details: map[string]string{
 			"target": t.Name, "text_omitted": strconv.FormatBool(out.TextOmitted), "summary_dropped": strconv.FormatBool(out.SummaryDropped),
 		}}); err != nil {
 			return nil, fmt.Errorf("forward: report text-omitted %s: %w", ev.Key, err)
 		}
+		s.f.omitted[ev.Key] = true
 	}
 	return msg, nil
 }
@@ -518,6 +534,7 @@ func (s *session) release() error {
 			return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
 		}
 		s.saved[i], s.hold[i] = h.seq, nil
+		s.f.confirmed(st.ID, h.seq)
 		s.queue[i] = s.queue[i][1:]
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor, x.Blocked = h.seq, "" })
 	}
@@ -534,6 +551,21 @@ func (s *session) inFlight(i int) bool {
 		}
 	}
 	return false
+}
+
+// confirmed forgets what was reported about events of stream up to seq,
+// which this target has now passed, so the sets stay small.
+func (f *Forwarder) confirmed(stream store.StreamID, seq store.Seq) {
+	for k := range f.omitted {
+		if k.Stream == stream && k.Seq <= seq {
+			delete(f.omitted, k)
+		}
+	}
+	for k := range f.tooLarge {
+		if k.Stream == stream && k.Seq <= seq {
+			delete(f.tooLarge, k)
+		}
+	}
 }
 
 func (s *session) index(id store.StreamID) int {
@@ -588,6 +620,7 @@ func (s *session) receive(wait time.Duration) error {
 			return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
 		}
 		s.saved[i] = seq
+		s.f.confirmed(st.ID, seq)
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = seq })
 	}
 	s.f.update(func(x *Status) { x.Confirmed += uint64(k); x.LastConfirmed = time.Now() })

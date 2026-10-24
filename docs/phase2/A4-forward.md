@@ -34,7 +34,8 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 
 ## Known limits
 
-- **Repeats across sessions.** A session that ends before a hold is released raises `forward.too-large`, `forward.text-omitted` or `forward.unreachable` again in the next session. The result is a duplicate alarm, never a lost one.
+- **Repeats after a restart.** `forward.too-large`, `forward.text-omitted` and `forward.unreachable` are raised once per process for the event or range they name, however many sessions delivery takes (A6). A node restart before the target passes the event raises it once more: a duplicate alarm, never a lost one.
+- **A new best-effort target starts at the first retained event**, not at the first event in its replay window as C6 says (A6 nit). The forwarder has no C5 `CommitIndex` to find that event. Only the lab-only plain `relp` target is best-effort in mode A, so this waits until a best-effort RELP target is needed.
 - **A hold without a release rule** stops its stream until someone acts. That covers an audit record `RenderAudit` refuses, a record that does not decode or render, a `forward.*` event that is itself too large, and a too-large event on the health stream. `Status.Streams[...].Blocked` says why.
 - **Mode B** (RFC 5425, TCP, UDP) is not built. The Phase 2 slice uses `relp-tls` only.
 
@@ -46,6 +47,8 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestReceiverClosesMidBatch` | **P2-A4 acceptance.** The receiver drops the connection at frame 1, 5, 37 or 99, and again 40 frames later. Every event is acknowledged. Each new connection starts no later than the event after the highest one already acknowledged, and runs without a gap. Duplicates are at most one window per close. |
 | `TestSessionEndsAndResends` | A 500, a serverclose, silence past the response timeout, and an answer given twice (a C6 violation) each end the session, and everything is delivered after reconnecting. A 500 names the refused event in `Status.LastErr`, so a collector that refuses the same event every session can be found (A2). |
 | `TestOpenNeedsRELPVersion0` | An open answered without `relp_version=0` is refused (A2). |
+| `TestSessionChecksOpenAnswer` | An open answered with a 500, or without `commands=syslog`, ends the session at the open, and no syslog frame reaches the collector (A6). |
+| `TestTooLargeWaitsForConfirmation`, `TestTextOmittedOncePerProcess` | A collector that refuses every `forward.too-large` keeps the held stream at cursor 0 over four sessions, never receives the event after it, and the event is reported once. `forward.text-omitted` is raised once per event across sessions (A6). Both fail if the confirmation check or the once-per-process sets are removed. |
 | `TestCursorOnlyOnAck` | A collector that acknowledges 5 and then goes silent leaves the cursor at 5 across three sessions. No save past 5 is ever made. |
 | `TestResumesFromSavedCursor`, `TestSkippedRangeReported` | Resume at cursor+1. A pruned range is reported as `forward.unreachable` (11-20) and forwarded. |
 | `TestTextOmitted`, `TestTooLargeHeldThenPassed`, `TestUnrenderableHolds` | The C6 size rules, and holds that never skip. |

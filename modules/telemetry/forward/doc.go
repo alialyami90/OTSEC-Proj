@@ -21,8 +21,12 @@
 //     confirmed (a best-effort target's replay window passed), the skipped
 //     range is reported as forward.unreachable before anything after it is
 //     sent (C6-A5).
+//   - Reported once. Each of these health events is raised once per
+//     process for the event or range it is about, however many sessions it
+//     takes to deliver (A6 #89). A restart may raise it once more: a
+//     duplicate alarm, never a lost one.
 //   - Size. A message whose device text or summary was dropped to fit is
-//     sent and reported once per session as forward.text-omitted. An event
+//     sent and reported as forward.text-omitted. An event
 //     that does not fit at all holds its stream: the forwarder raises
 //     forward.too-large naming it, and moves the cursor past it only after
 //     every earlier event of the stream and the forward.too-large event

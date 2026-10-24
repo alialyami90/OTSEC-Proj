@@ -1,6 +1,7 @@
 package forward
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -390,5 +391,104 @@ func TestOpenNeedsRELPVersion0(t *testing.T) {
 			t.Errorf("offers %q: %v", offers, err)
 		}
 		srv.Close()
+	}
+}
+
+// A too-large event is passed only after its forward.too-large event is
+// confirmed: a collector that refuses every forward.too-large keeps the
+// stream held, and however many sessions that takes, the event is
+// reported once (A6 #89).
+func TestTooLargeWaitsForConfirmation(t *testing.T) {
+	other := store.StreamID("platform/other")
+	r := newRig(t, func(_ int, m relptest.Message) relptest.Action {
+		if strings.Contains(string(m.Data), `htype="forward.too-large"`) {
+			return relptest.Refuse
+		}
+		return relptest.Ack
+	}, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	r.cfg.Streams = append(r.cfg.Streams, Stream{ID: other, Outbox: r.m, Cursors: r.m})
+	r.m.commit(t, other, healthEvent(event.HealthSourceSilent, map[string]string{"note": strings.Repeat("x", 1200)}))
+	r.m.commit(t, other, healthEvent(event.HealthSourceSilent, map[string]string{"note": "small"}))
+	r.run(func() bool { return r.srv.Conns() >= 4 }, nil)
+	if c := r.m.cursor(other); c != 0 {
+		t.Errorf("held stream's cursor %d before its forward.too-large was confirmed", c)
+	}
+	for _, m := range r.srv.Acked() {
+		if strings.Contains(string(m.Data), "note=small") {
+			t.Error("the event after the held one was sent")
+		}
+	}
+	if n := r.healthCount(syslog.HealthTooLarge); n != 1 {
+		t.Errorf("%d forward.too-large events over %d sessions, want 1", n, r.srv.Conns())
+	}
+}
+
+// forward.text-omitted is raised once per event, not once per session.
+func TestTextOmittedOncePerProcess(t *testing.T) {
+	r := newRig(t, func(n int, _ relptest.Message) relptest.Action {
+		if n <= 3 {
+			return relptest.Close // the first frame of three sessions
+		}
+		return relptest.Ack
+	}, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	r.fill(3)
+	r.run(r.delivered, nil)
+	if n := r.healthCount(event.HealthForwardTextOmitted); n != 3 {
+		t.Errorf("%d forward.text-omitted events for 3 events over %d sessions", n, r.srv.Conns())
+	}
+}
+
+func (r *rig) healthCount(typ string) int {
+	r.m.mu.Lock()
+	defer r.m.mu.Unlock()
+	n := 0
+	for _, ev := range r.m.events[hlStream] {
+		e, err := event.Decode(ev.Event)
+		if err != nil {
+			r.t.Fatal(err)
+		}
+		if e.Health.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
+// The open's answer is checked before anything is sent: a 500, or offers
+// without commands=syslog, end the session at the open, and no syslog frame
+// reaches the collector (A6 #89).
+func TestSessionChecksOpenAnswer(t *testing.T) {
+	for _, body := range []string{
+		"500 not today",
+		"200 OK\nrelp_version=0\nrelp_software=x",
+		"200 OK\nrelp_version=0\ncommands=open,close",
+	} {
+		m := newStore()
+		e := row8(t)
+		for range 3 {
+			m.commit(t, serStream, e)
+		}
+		cli, srv := net.Pipe()
+		got := make(chan []byte)
+		go func() { b, _ := io.ReadAll(srv); got <- b }()
+		go func() { srv.Write([]byte("1 rsp " + strconv.Itoa(len(body)) + " " + body + "\n")) }()
+		fw, err := New(Config{
+			Target:       newTarget(t, 2514, nil),
+			Streams:      []Stream{{ID: serStream, Outbox: m, Cursors: m}, {ID: hlStream, Outbox: m, Cursors: m}},
+			HealthStream: hlStream, Health: sink{t: t, m: m},
+			Dial:            func(context.Context) (net.Conn, error) { return cli, nil },
+			ResponseTimeout: time.Second, Poll: 10 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = fw.session(t.Context())
+		if err == nil || !strings.HasPrefix(err.Error(), "forward: open:") {
+			t.Errorf("%q: session ended with %v, want an open error", body, err)
+		}
+		srv.Close()
+		if b := <-got; bytes.Contains(b, []byte(" syslog ")) {
+			t.Errorf("%q: a syslog frame was sent: %q", body, b)
+		}
 	}
 }
