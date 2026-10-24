@@ -4,6 +4,8 @@
 //	otsec assets -config <file>   list the configured assets
 //	otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
 //	otsec health -config <file>   show node status, database modes and alarms
+//	otsec install -config <file> [-collector-exe <path>]   Windows, elevated
+//	otsec uninstall                                         Windows, elevated
 //
 // assets, events and health are read-only: they open the store read-only
 // beside a running node (store.OpenReadOnly) and never write to it, to the
@@ -33,6 +35,7 @@ import (
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node"
 	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/winsvc"
 )
 
 func main() {
@@ -44,6 +47,8 @@ const usage = `usage:
   otsec assets -config <file>
   otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
   otsec health -config <file>
+  otsec install -config <file> [-collector-exe <path>]
+  otsec uninstall
 `
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -58,8 +63,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	after := fs.Uint64("after", 0, "events: read events with seq above this")
 	limit := fs.Int("limit", 50, "events: at most this many events")
 	asJSON := fs.Bool("json", false, "events: print the stored C4 events as JSON lines")
+	collectorExe := fs.String("collector-exe", "", "install: the collector binary; empty installs the node service only")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
+	}
+	if args[0] == "uninstall" && *configPath == "" && fs.NArg() == 0 {
+		return report(stderr, winsvc.Uninstall())
 	}
 	if *configPath == "" || fs.NArg() != 0 {
 		fmt.Fprint(stderr, usage)
@@ -73,6 +82,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "node":
 		err = runNode(ctx, cfg, stderr)
+	case "install":
+		exe, xerr := os.Executable()
+		if xerr != nil {
+			return report(stderr, xerr)
+		}
+		err = winsvc.Install(winsvc.InstallOptions{NodeExe: exe, CollectorExe: *collectorExe, Config: *configPath})
 	case "assets":
 		err = assets(cfg, stdout)
 	case "events":
@@ -83,6 +98,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	return report(stderr, err)
+}
+
+func report(stderr io.Writer, err error) int {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -90,9 +109,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runNode runs the node in the foreground until SIGINT or SIGTERM. Under
-// the Windows SCM, platform/winsvc runs the same loop.
+// runNode runs the node: under the Windows SCM when the SCM started the
+// process, otherwise in the foreground until SIGINT or SIGTERM.
 func runNode(ctx context.Context, cfg *node.Config, stderr io.Writer) error {
+	if ok, err := winsvc.IsService(); err != nil {
+		return err
+	} else if ok {
+		return winsvc.Run(func(ctx context.Context, oslog func(string)) error { return node.Run(ctx, cfg, oslog) })
+	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return node.Run(ctx, cfg, func(s string) { fmt.Fprintln(stderr, s) })
