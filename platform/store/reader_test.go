@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	c5 "otsec.local/otsec/contracts/store"
@@ -88,7 +89,13 @@ func TestOpenReadOnly(t *testing.T) {
 // Windows a volume name (A6, native Windows run of #92: "invalid uri
 // authority: C:").
 func TestOpenReadOnlyPath(t *testing.T) {
-	parent := filepath.Join(t.TempDir(), "OT SEC #1 ?x")
+	// Windows refuses '?' in a file name, so there the name has the space
+	// and '#' only.
+	name := "OT SEC #1 ?x"
+	if runtime.GOOS == "windows" {
+		name = "OT SEC #1"
+	}
+	parent := filepath.Join(t.TempDir(), name)
 	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
