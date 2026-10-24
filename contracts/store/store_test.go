@@ -779,6 +779,9 @@ func TestLogRefusesClassNotOfItsStream(t *testing.T) {
 	if len(f.events["node/audit"])+len(f.events["sel751-feeder1/ser"]) != 0 {
 		t.Fatal("a refused record was committed")
 	}
+	if _, err := NewLog(f, f.node, map[StreamID]StreamClass{"a1": ClassAudit, "a2": ClassAudit}, DefaultGroup, nil); !isCode(err, CodeInvalid) {
+		t.Fatalf("log with two audit streams: %v", err)
+	}
 	if _, err := NewLog(f, f.node, nil, DefaultGroup, nil); !isCode(err, CodeInvalid) {
 		t.Fatalf("log with no streams: %v", err)
 	}

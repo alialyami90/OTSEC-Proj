@@ -206,6 +206,7 @@ func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt Grou
 		return nil, errf(CodeInvalid, nil, "log has no streams")
 	}
 	l := &Log{c: c, opt: opt, node: node, classes: map[StreamID]StreamClass{}, pending: map[StreamID]*group{}, tail: map[StreamID]chan struct{}{}, last: map[StreamID]Seq{}}
+	audit := 0
 	for s, class := range classes {
 		if !s.Valid() {
 			return nil, errf(CodeInvalid, nil, "stream %q is not a valid stream token", s)
@@ -214,6 +215,14 @@ func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt Grou
 			return nil, err
 		}
 		l.classes[s] = class
+		if class == ClassAudit {
+			audit++
+		}
+	}
+	if audit > 1 {
+		// The C8 chain is one per node, so "the Log's audit stream" must be
+		// unambiguous (A6 re-check of C5).
+		return nil, errf(CodeInvalid, nil, "log has %d audit streams, at most one allowed", audit)
 	}
 	for s, q := range last {
 		l.last[s] = q
