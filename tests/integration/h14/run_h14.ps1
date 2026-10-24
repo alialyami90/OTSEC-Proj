@@ -18,8 +18,9 @@
 #      flush_writer.py on a 64 MB NTFS VHDX inside an ETW
 #      Microsoft-Windows-Kernel-File trace. Dump it with tracerpt and run
 #      flush_analyse.py.
-#   2. Recovery (E-03, E-04, R-A5-5): run recovery_rounds.py on a 16 MB NTFS
-#      VHDX. Writers are killed with TerminateProcess.
+#   2. Recovery (E-03, E-04, R-A5-5, reserve-first order): run each
+#      recovery_rounds.py scenario on its own fresh 16 MB NTFS VHDX. Writers
+#      are killed with TerminateProcess.
 # Results go under -Out. Every JSON report is also printed to the console.
 #
 # Imports and runs no A5 or product code. Evidence class: simulated.
@@ -153,7 +154,6 @@ function Add-H14Volume([string]$name, [int]$mb) {
 $trace = $null
 try {
 	$flushDir = Add-H14Volume "h14flush" 64
-	$fullDir = Add-H14Volume "h14full" 16
 
 	# --- 1. flush trace ----------------------------------------------------
 	foreach ($mode in "FULL", "NORMAL", "OFF") {
@@ -180,13 +180,23 @@ try {
 	}
 
 	# --- 2. recovery rounds --------------------------------------------------
+	# One scenario per run, each on its own fresh 16 MB volume, so nothing one
+	# scenario leaves behind (F-013: WinError 32) can affect the next.
 	# ROUND/ERROR/RESULT lines, one JSON object each (recovery_rounds.py header).
-	$code = Invoke-AsAccount @("-I", (Join-Path $bin "recovery_rounds.py"), "--dir", (Join-Path $fullDir "e04")) `
-		(Join-Path $Out "recovery-output.txt") (Join-Path $Out "recovery.err.txt") 1800
-	Get-Content (Join-Path $Out "recovery-output.txt") | Write-Host
-	Write-Host "--- recovery_rounds.py stderr ---"
-	Get-Content (Join-Path $Out "recovery.err.txt") | Write-Host
-	if ($code -ne 0) { throw "recovery_rounds.py exited $code" }
+	$i = 0
+	foreach ($scenario in "incremental-cursor", "incremental-half", "none-half", "open-at-full", "no-reserve") {
+		$i++
+		$dir = Add-H14Volume "h14r$i" 16
+		$stdout = Join-Path $Out "recovery-$scenario.txt"
+		$stderr = Join-Path $Out "recovery-$scenario.err.txt"
+		$code = Invoke-AsAccount @("-I", (Join-Path $bin "recovery_rounds.py"), "--dir", (Join-Path $dir "e04"), "--scenario", $scenario) `
+			$stdout $stderr 1800
+		Write-Host "--- recovery_rounds.py $scenario (exit $code) ---"
+		Get-Content $stdout | Write-Host
+		Write-Host "--- recovery_rounds.py $scenario stderr ---"
+		Get-Content $stderr | Write-Host
+		if ($code -ne 0) { throw "recovery_rounds.py $scenario exited $code" }
+	}
 } finally {
 	if ($trace) { logman stop $trace -ets | Out-Null }
 	$os.RunAs = $script:runAs
