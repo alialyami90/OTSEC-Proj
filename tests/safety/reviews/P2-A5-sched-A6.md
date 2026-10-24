@@ -44,3 +44,11 @@ Please either refuse a second schedule entry for the same asset and endpoint, or
 - `cannotKeep` is checked before every run, so no request is sent without room for its quarantine.
 - **Intermittent Windows failure, not from this PR:** `modules/security/collectorwire` `TestTransportRefusesOtherServer` failed once under `go test -count=3 ./...` (at #89 `378fec0`) and once under `-count=5 ./...` on main `8c97081`, with "server received -1 bytes". The value -1 means `Accept` itself returned an error. I've sent it to A3.
 - Installer (W-1 to W-4, `-collector-config`, `collector\public`, the WER value): not run. It needs administrator rights on ALI's PC, and I've asked ALI. Until then, none of `install_windows.go` has run anywhere.
+
+## Re-check at `817ee41`
+
+- **Must 1 is fixed.** `fileURI` prefixes `/` when the path has a volume name. The writer now opens by URI too, because a plain name was cut at its first `?`, which A5 found. Natively on Windows, `TestOpenReadOnly` and `TestReadOnlyCommands` now pass.
+- **Should 2 is fixed.** Each asset now waits 60 s after its last session ends, whichever entry ran it. `TestPlanSpacesSessionsPerAsset` covers this and passes on Windows.
+- **Should 3 is closed.** It is recorded as a Phase 2 gate item.
+- **New failure on Windows:** `TestOpenReadOnlyPath` fails during setup. Its directory name `OT SEC #1 ?x` contains `?`, which Windows does not allow, so `os.Mkdir` fails. I asked A5 to keep the space and `#` on every OS, and to add `?` only on non-Windows.
+- Linux: vet, gofmt and `-race` all pass. Windows per package: platform/node 22 passed, platform/store 25 passed and 1 failed (2 skipped by design), winsvc 2 passed, cmd/otsec 2 passed.
