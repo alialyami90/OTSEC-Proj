@@ -148,7 +148,7 @@
       "properties": {
         "type": {"$ref": "#/$defs/token", "description": "Open set: ser.gap, ser.alignment-ambiguous, native.loss-indicated, time.unsynchronized, parse.failed, source.silent, intake.drop-counted, forward.unconfirmed, forward.unreachable, forward.text-omitted."},
         "related": {"type": "array", "items": {"$ref": "#/$defs/event_id"}},
-        "details": {"type": "object", "additionalProperties": {"type": "string"}}
+        "details": {"type": "object", "propertyNames": {"pattern": "^[a-z][a-z0-9_.-]{0,63}$"}, "additionalProperties": {"type": "string"}}
       }
     },
     "flags": {"type": "array", "items": {"$ref": "#/$defs/flag"}}

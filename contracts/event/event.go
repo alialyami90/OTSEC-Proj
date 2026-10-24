@@ -93,6 +93,10 @@ const (
 
 var tokenPattern = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,63}$`)
 
+// detailKeyPattern is a health detail key: lowercase, with '_' allowed and
+// never '=', so C6 can render a detail as key=value unambiguously.
+var detailKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
+
 // Source identifies the subject of the event and who delivered it.
 type Source struct {
 	// Asset is the subject. Nil when the subject could not be resolved; the
@@ -386,7 +390,7 @@ type Mapping struct {
 type Health struct {
 	Type    string            `json:"type"` // open set, see the Health* constants
 	Related []EventID         `json:"related,omitempty"`
-	Details map[string]string `json:"details,omitempty"`
+	Details map[string]string `json:"details,omitempty"` // keys match detailKeyPattern (no "=")
 }
 
 // Platform event types. Open: later minors may add types.
@@ -395,6 +399,7 @@ const (
 	HealthAlignmentAmbiguous  = "ser.alignment-ambiguous" // overlap ambiguous: possible duplicates flagged
 	HealthNativeLossIndicated = "native.loss-indicated"   // the device says it lost records (overflow, autoremoval)
 	HealthTimeUnsynchronized  = "time.unsynchronized"     // a source's clock is reported unsynchronized
+	HealthTimeNodeStepped     = "time.node-stepped"       // the node's own clock was stepped; received.utc jumps (D1-16, pairs with C8 clock.change)
 	HealthParseFailed         = "parse.failed"            // a record kept as bytes only
 	HealthSourceSilent        = "source.silent"           // a sender that normally talks has gone quiet
 	HealthDropCounted         = "intake.drop-counted"     // datagrams dropped and counted (storage full, rate limit)

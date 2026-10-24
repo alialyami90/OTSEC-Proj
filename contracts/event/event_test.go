@@ -138,13 +138,14 @@ func TestDecode(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	// health.details keys are free text, not field names.
+	// health.details keys are map keys, not field names: one that equals a
+	// field name of Health is not a duplicate or a case variant.
 	g, err := os.ReadFile("testdata/valid/health-ser-gap.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Decode(insert(g, `"details": {`, ` "Previous Read": "x",`)); err != nil {
-		t.Errorf("free-text details key: %v", err)
+	if _, err := Decode(insert(g, `"details": {`, ` "related": "x", "type": "y",`)); err != nil {
+		t.Errorf("details key named like a field: %v", err)
 	}
 	_ = doc
 }
@@ -395,5 +396,17 @@ func TestDeviceTimeLeapSecondAndInvalidTime(t *testing.T) {
 	e.DeviceTime.WallClock = "2007-03-02T13:54:09.602"
 	if !slices.Contains(Codes(e.Validate()), CodeForbidden) {
 		t.Fatal("invalid-time with a wall_clock validated")
+	}
+}
+
+// C6-A6-2: a health detail key never contains '=', so C6's hd="key=value"
+// splits back one way only.
+func TestHealthDetailKeys(t *testing.T) {
+	for key, ok := range map[string]bool{"skipped_from": true, "reason": true, "a=b": false, "Reason": false, "": false, "a b": false} {
+		e := load(t, "testdata/valid/health-ser-gap.json")
+		e.Health.Details = map[string]string{key: "c"}
+		if got := !slices.Contains(Codes(e.Validate()), CodeEnum); got != ok {
+			t.Errorf("detail key %q: accepted %v, want %v", key, got, ok)
+		}
 	}
 }

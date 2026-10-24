@@ -81,6 +81,12 @@ type AlignResult struct {
 // carries no sequence number (C-06). Polling often enough that the buffer
 // cannot wrap between reads is the producer's job.
 //
+// Also undetectable (A1 D1-17): when keys repeat, a new record identical to
+// an old one and placed before the first distinct new record is matched to
+// the old one and not stored. Nothing in the two reads tells them apart.
+// SEL-751 rows carry millisecond times, so this needs identical text in the
+// same millisecond; A6's randomized model (V-S4) measures the residual.
+//
 // Identical records within one read stay separate records: alignment works
 // on positions, never on a per-record key.
 //

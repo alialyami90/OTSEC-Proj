@@ -1,0 +1,17 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "siem-b",
+  "host": "siem.example.net",
+  "port": 6514,
+  "transport": "tls",
+  "format": "rfc5424",
+  "framing": "non-transparent",
+  "class": "best-effort",
+  "max_message_octets": 2048,
+  "facility": 16,
+  "tls": {
+    "server_name": "siem.example.net",
+    "trust_anchor_ref": "site-a-ca"
+  },
+  "replay_seconds": 3600
+}

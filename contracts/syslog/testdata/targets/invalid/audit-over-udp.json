@@ -1,0 +1,20 @@
+{
+  "schema": "otsec.syslog/0.1",
+  "name": "audit-udp",
+  "host": "192.0.2.50",
+  "port": 514,
+  "transport": "udp",
+  "format": "rfc5424",
+  "framing": "datagram",
+  "class": "best-effort",
+  "max_message_octets": 65507,
+  "facility": 16,
+  "replay_seconds": 60,
+  "audit": true,
+  "acknowledgement": {
+    "by": "admin-example",
+    "at": "2026-10-24T09:00:00Z",
+    "reason": "Lab collector on the isolated test segment; no TLS listener.",
+    "scope": "lab-only"
+  }
+}
