@@ -19,6 +19,8 @@ The store's volume must hold all of the following, with margin for the WAL bound
 
 The audit quota must hold the audit records of the longest expected outage of its required consumer, because only a required consumer makes audit prunable (`docs/phase1/A5-store-semantics.md` sections 1a and 5).
 
+The platform quota needs headroom too. A forwarder passes an event that is too large for a target only after it has committed the `forward.too-large` health event. With no room in the platform quota, that stream stalls instead (`docs/phase1/reviews/C6-A5.md`, note 5).
+
 ## Windows host rules (Phase 2)
 
 These come from C5's lock conditions (A3) and C7's W-1 to W-4 (`docs/phase1/reviews/C7-A5.md`, `docs/phase1/A3-credential-design.md` section 2):
