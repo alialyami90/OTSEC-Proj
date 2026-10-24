@@ -112,10 +112,12 @@ type Source struct {
 	// absent on platform events. In 0.1 it is device-observed or simulated
 	// (C1 values). The enum is open to later minors: a reader keeps an event
 	// with a class it does not know and reads it through Simulated. It is
-	// set from configuration, never
-	// from what the far end says: for adapter-poll from C2 Result.target,
-	// and for received Syslog from the C1 endpoint, where an endpoint fed
-	// by a simulator or a replay is simulated.
+	// set from configuration, never from what the far end says: for
+	// adapter-poll from C2 Result.target, and for received Syslog from the
+	// target of the C1 endpoint the message arrived on (D1-24), where an
+	// endpoint fed by a simulator or a replay is simulated. A relayed
+	// message takes the relay's endpoint, not the subject's: the far end
+	// the node heard is the relay (C1-D1-24-A4).
 	EvidenceClass asset.EvidenceClass `json:"evidence_class,omitempty"`
 }
 
