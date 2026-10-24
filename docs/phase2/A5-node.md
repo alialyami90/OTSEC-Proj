@@ -1,0 +1,70 @@
+# A5: the node (P2-A5)
+
+Owner: A5. Reviewers: A6 and A3. This note is the handoff for the node side of the Phase 2 slice: what each package does, what has been tested and where, and what is still open. The configuration format is described in [`platform/node/README.md`](../../platform/node/README.md).
+
+Evidence class of everything here: `simulated`. No real device was ever involved. Every endpoint is loopback (D2-10) and `simulated` (D2-4).
+
+## Packages
+
+| Package | What it does | PR |
+| --- | --- | --- |
+| `platform/store` | SQLite C5: group commit, `synchronous=FULL`, `auto_vacuum=INCREMENTAL`, reserves, quotas, recovery. Also `CreateDir`, the Windows directory DACL check, and `OpenReadOnly` for the CLI. | #77 (merged), #84, scheduler PR |
+| `platform/node` | The `otsec.nodeconfig/0.1` loader and layout. `Start`, `Tick` and `Status`, the alarm sink outside the store. `Scheduler`. `Run`. | #84, scheduler PR |
+| `platform/node/nodeconfigtest` | The only way tests write a node configuration (D2-6). | #84 |
+| `platform/winsvc` | The node under the SCM, and the installer (W-1 to W-4). | service PR |
+| `cmd/otsec` | `otsec node`, plus the read-only `assets`, `events` and `health`, and `install` and `uninstall`. | CLI PR |
+
+## The run, end to end
+
+1. `Start` runs C5 startup over each database, the audit database first, and writes `audit.chain.start` (new node only), `store.mode_change` and `service.start`.
+2. `Scheduler.Run` waits 60 s, then runs the schedule one entry at a time. It never holds more than one device session (AP-13), and it never repeats a late run to catch up.
+3. Each run:
+   - checks that its outcome could be kept;
+   - writes `collector.request` (info) and sends only with the receipt (D1-11);
+   - records the decision and the reported session records with their `collector_seq`;
+   - commits a checked outcome through A4's `normalize`, or quarantines an outcome that failed a check.
+
+   The README section "The scheduler" gives each step.
+4. `Tick` (every 60 s) resumes blocked databases, turns queued store alarms into health events, and rewrites the status file.
+5. On stop, `service.stop` is recorded, every database is closed, and only then does the SCM see the service as stopped.
+
+## Quarantine (A3 #82; A6's two challenges)
+
+- **Where it is kept.** On `quarantine/<asset_id>`, in the evidence database, class `adapter-evidence`. No target consumes it, so nothing forwards it, and C5 never prunes a stream with no consumer.
+- **What is stored.** One batch of two records: the frame exactly as received, then the reason, each as its own capture. The reason never goes to status, the OS log or the CLI.
+- **Unauthorized line.** The alarm is `collection-unauthorized-line`, and collection from the asset stops. The stop is durable: `NewScheduler` reads the quarantine stream at startup.
+- **Room.** No run is sent unless `adapter-evidence` has `QuarantineRoom` (8 MiB + 32 KiB) left. A quarantine the store still refuses raises `collection-quarantine-not-stored`, stops every credentialed run on the node, and is audited if audit is available.
+
+## Tests and where they ran
+
+Linux container, Go 1.26. Commits are listed in each PR.
+
+| Claim | Test |
+| --- | --- |
+| C5 conformance, D1-11, kill at every commit point, startup with reserve present, absent and release failed | `platform/store` (#77) |
+| `device-observed` refused (D2-4); not-loopback refused (D2-10); strict decoding | `TestDeviceObservedRefused`, `TestNotLoopbackRefused`, `TestStrictDecoding`, `TestChecks`, `FuzzParseConfig` |
+| An alarm reaches status when its database cannot store it | `TestFailedAuditDatabaseIsObservable` |
+| The request reaches the collector only after its audit record is committed | `TestRunCommitsThroughTheClient`: the collector side reads the store while the request is in flight. A mutation that sends first fails it |
+| Audit full: no request is sent | `TestAuditFullSendsNothing` |
+| Refusal and missing decision audited correctly; status does not quote the reply | `TestRefusalAndNoDecision` |
+| Unauthorized line: frame kept byte for byte, not forwarded, not normalized, alarm without the line, halt survives a restart | `TestUnauthorizedLineQuarantinedAndHaltedDurably`. Mutating the halt scan fails it |
+| No room: nothing is sent, and one alarm is raised | `TestNoQuarantineRoomSendsNothing`. Mutating the room check fails it |
+| Quarantine refused: the node stops | `TestQuarantineNotStoredStopsTheNode` |
+| Tick and runs share the runtime | `TestTickAlongsideRuns` under `-race` |
+| The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |
+
+**Windows run owed (D2-8)**, for A6's list:
+- `./platform/...` and `./cmd/...`;
+- the installer and service, with A3's T-13 (W-1 to W-4);
+- `TestDirDACLChecked`.
+
+None of the Windows-only code has run.
+
+## Open
+
+- **Clearing a halt.** A halted asset stays stopped. Clearing it needs an audited admin operation, owned by A1 and A3.
+- **Reading by role.** No read API with roles exists. Until one does, the CLI leaves the audit stream and quarantines out, and shows only quarantine counts.
+- **W-3 "and every other program".** The installer blocks outbound Telnet for `otsec-node` only. Blocking it for every other program on the host is a site decision.
+- **Node-side `CheckLines`.** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector.
+- **SER row order.** The C2 example `ok.json` prints SER rows newest first, and A4's normalizer refuses that order. The scheduler test rebuilds the read in Figure 10.16 order. A2, A4 and A6 must confirm what the simulator prints, or the slice stores no SER events. This was raised to A1.
+- **Forwarding.** The forwarder is A4's, and runs against `Runtime.Store` and `Runtime.Log`. `node.Run` does not start it yet.
