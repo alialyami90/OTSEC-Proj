@@ -1,0 +1,5 @@
+# Byte-exact evidence: device-derived fixtures and contract golden examples
+# must reach every checkout unchanged, so Git never converts their line
+# endings (A4 proposal, docs/phase1/A4-contracts.md; EP-1).
+tests/fixtures/** -text
+contracts/**/testdata/** -text

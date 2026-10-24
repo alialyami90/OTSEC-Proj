@@ -1,0 +1,3 @@
+# Evidence copies must stay byte-exact on every checkout, including Windows
+# (core.autocrlf would otherwise turn LF into CRLF and break the SHA-256).
+*.txt -text
