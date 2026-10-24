@@ -44,6 +44,16 @@ type Config struct {
 	Targets       []json.RawMessage `json:"targets"`
 	Schedule      []Collection      `json:"schedule"`
 	CollectorPipe string            `json:"collector_pipe"`
+	// CollectorPeer is the identity the collector must hold (collectorwire
+	// Endpoint.Peer). On Windows it may be empty, which means the
+	// otsec-collector service SID; on Linux it is the collector's uid.
+	CollectorPeer string `json:"collector_peer,omitempty"`
+	// PolicyVersion and RegisterVersion are named in every run request.
+	// The collector refuses a request whose versions are not its own
+	// (policy_version, register_version), so the node never runs against a
+	// register it was not commissioned with.
+	PolicyVersion   uint64 `json:"policy_version"`
+	RegisterVersion uint64 `json:"register_version"`
 
 	assets  []asset.Asset
 	targets []*syslog.Target
@@ -72,14 +82,24 @@ type Listener struct {
 
 // Collection is one scheduled adapter run.
 type Collection struct {
+	// ID is the schedule principal the runs are made on behalf of (C7
+	// PrincipalSchedule). It names the schedule in every audit record.
+	ID      string `json:"id"`
 	AssetID string `json:"asset_id"`
 	// Endpoint is the asset's endpoint ID the collector connects to.
 	Endpoint string `json:"endpoint"`
 	// Operation is the C3 register operation ID, for example
 	// "sel.ser.read_all". The collector checks it against the signed
 	// register; the node only names it.
-	Operation    string `json:"operation"`
-	EverySeconds int    `json:"every_seconds"`
+	Operation string `json:"operation"`
+	// Params are the operation's parameters; the collector checks them
+	// against the register's grammar.
+	Params map[string]string `json:"params,omitempty"`
+	// CredentialRef is the C7 credential reference for an operation above
+	// access level 0, absent for a level 0 operation (C7-A2-5). It is a
+	// handle only; no secret is in the configuration.
+	CredentialRef string `json:"credential_ref,omitempty"`
+	EverySeconds  int    `json:"every_seconds"`
 }
 
 var (
@@ -150,6 +170,12 @@ func (c *Config) check() error {
 	if err := checkPipe(c.CollectorPipe); err != nil {
 		errs = append(errs, err)
 	}
+	if runtime.GOOS != "windows" && c.CollectorPeer == "" {
+		fail("collector_peer is required on %s: the collector's uid", runtime.GOOS)
+	}
+	if c.PolicyVersion == 0 || c.RegisterVersion == 0 {
+		fail("policy_version and register_version must be at least 1")
+	}
 
 	ids := map[string]bool{}
 	for i, l := range c.Listeners {
@@ -215,8 +241,18 @@ func (c *Config) check() error {
 		c.targets = append(c.targets, t)
 	}
 
+	schedules := map[string]bool{}
 	for i, s := range c.Schedule {
 		p := fmt.Sprintf("schedule[%d]", i)
+		if schedules[s.ID] {
+			fail("%s.id %q used twice", p, s.ID)
+		}
+		schedules[s.ID] = true
+		// The request is checked as C7 checks it, so a schedule the
+		// collector would refuse for its syntax does not load.
+		if err := c.runRequest(i, "req-config-check").Validate(); err != nil {
+			fail("%s: %v", p, err)
+		}
 		a, ok := byID[s.AssetID]
 		switch {
 		case !ok:

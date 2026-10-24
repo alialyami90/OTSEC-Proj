@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -40,6 +41,7 @@ func TestLoadSample(t *testing.T) {
 	}
 	want := map[c5.StreamID]c5.StreamClass{
 		SERStream(relayID):        c5.ClassAdapterEvidence,
+		QuarantineStream(relayID): c5.ClassAdapterEvidence,
 		HealthStream:              c5.ClassPlatform,
 		ListenerStream("lab-udp"): c5.ClassSyslogDatagram,
 		AuditStream:               c5.ClassAudit,
@@ -57,12 +59,13 @@ func TestLoadSample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One required consumer per stream, audit included (the target audits).
+	// One required consumer per stream, audit included (the target audits),
+	// and none for the quarantine stream, which nothing forwards.
 	if len(cs) != 4 {
 		t.Fatalf("consumers %v", cs)
 	}
 	for _, x := range cs {
-		if x.ID != "central" || x.Delivery != c5.Required {
+		if x.ID != "central" || x.Delivery != c5.Required || x.Stream == QuarantineStream(relayID) {
 			t.Fatalf("consumer %+v", x)
 		}
 	}
@@ -174,6 +177,15 @@ func TestChecks(t *testing.T) {
 		"duplicate target":   func(c *nodeconfigtest.Config) { c.Targets = append(c.Targets, c.Targets[0]) },
 		"invalid target":     func(c *nodeconfigtest.Config) { delete(c.Targets[0], "durable_ack") },
 		"invalid asset":      func(c *nodeconfigtest.Config) { delete(c.Assets[0], "identity_binding") },
+		"no schedule id":     func(c *nodeconfigtest.Config) { c.Schedule[0].ID = "" },
+		"duplicate schedule": func(c *nodeconfigtest.Config) { c.Schedule = append(c.Schedule, c.Schedule[0]) },
+		"bad credential ref": func(c *nodeconfigtest.Config) { c.Schedule[0].CredentialRef = "password123" },
+		"bad param":          func(c *nodeconfigtest.Config) { c.Schedule[0].Params = map[string]string{"n": "1\r\nQUI"} },
+		"no policy version":  func(c *nodeconfigtest.Config) { c.PolicyVersion = 0 },
+		"no register":        func(c *nodeconfigtest.Config) { c.RegisterVersion = 0 },
+	}
+	if runtime.GOOS != "windows" {
+		cases["no collector peer"] = func(c *nodeconfigtest.Config) { c.CollectorPeer = "" }
 	}
 	for name, mutate := range cases {
 		c := sample(t)

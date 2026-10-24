@@ -341,16 +341,30 @@ func (r *Runtime) health(ctx context.Context, typ string, details map[string]str
 	if d == nil || d.log == nil || !d.report.Mode.AcceptsEvents() {
 		return
 	}
-	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: r.cfg.NodeID, Stream: HealthStream},
-		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
-		Received: r.received(), Health: &event.Health{Type: typ, Details: details}}
-	b, err := json.Marshal(e)
+	rec, err := r.healthRecord(HealthStream, typ, details)
 	if err == nil {
-		_, err = d.log.Append(ctx, c5.Record{Stream: HealthStream, Class: c5.ClassPlatform, Event: b})
+		_, err = d.log.Append(ctx, rec)
 	}
 	if err != nil {
 		r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: HealthStream, Detail: "health event " + typ + ": " + err.Error()})
 	}
+}
+
+// healthRecord builds a pending C4 platform health event as a C5 record on
+// stream, whose class it takes from the layout.
+func (r *Runtime) healthRecord(stream c5.StreamID, typ string, details map[string]string) (c5.Record, error) {
+	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(stream)},
+		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
+		Received: r.received(), Health: &event.Health{Type: typ, Details: details}}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return c5.Record{}, err
+	}
+	class, ok := r.layout.StreamClasses()[stream]
+	if !ok {
+		return c5.Record{}, fmt.Errorf("stream %s is not in the layout", stream)
+	}
+	return c5.Record{Stream: stream, Class: class, Event: b}, nil
 }
 
 // audit commits a node-written C8 record. A failure goes to status: the
