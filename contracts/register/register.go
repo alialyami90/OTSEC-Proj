@@ -53,6 +53,11 @@ const (
 	PhaseClose   Phase = "close"
 )
 
+// ProbeAccessLevel is the only access level a probe operation may need: the
+// level a session has before authentication (SEL ASCII Level 0, the only
+// families in 0.x; C3-A2 note 5).
+const ProbeAccessLevel = "0"
+
 // Package is one register for one device family.
 type Package struct {
 	Contract string `json:"contract"`
@@ -437,6 +442,9 @@ func (p *Package) Validate() error {
 		}
 		if seen[PhaseProbe] && len(o.Params) != 0 {
 			return fmt.Errorf("register: operation %s runs in probe and has parameters", o.ID)
+		}
+		if seen[PhaseProbe] && o.AccessLevel != ProbeAccessLevel {
+			return fmt.Errorf("register: operation %s runs in probe at access level %q, want %q", o.ID, o.AccessLevel, ProbeAccessLevel)
 		}
 		if err := checkCommon(o.ID, o.AccessLevel, o.Citations, o.Evidence, o.SideEffects, sources, true); err != nil {
 			return err

@@ -297,8 +297,12 @@ func TestRejects(t *testing.T) {
 			o["line"] = o["line"].(string) + " {n}"
 			o["params"] = []any{map[string]any{"name": "n", "kind": "regex", "values": []any{"1"}}}
 		},
-		"operation in auth phase":     func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"auth"} },
-		"operation in close phase":    func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"close"} },
+		"operation in auth phase":  func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"auth"} },
+		"operation in close phase": func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"close"} },
+		"probe operation above level 0": func(m map[string]any) {
+			o := entry(m, "operations", 1)
+			o["phases"] = []any{"probe", "operate"}
+		},
 		"operation repeated phase":    func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"operate", "operate"} },
 		"warning with max and equals": func(m map[string]any) { list(m, "warnings")[0].(map[string]any)["equals"] = "1" },
 		"warning with no threshold":   func(m map[string]any) { delete(list(m, "warnings")[0].(map[string]any), "max") },

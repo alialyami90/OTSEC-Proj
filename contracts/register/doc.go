@@ -17,7 +17,7 @@
 //     transport phase that may send them, and are never invocable (C-A2-1).
 //     An operation runs in the operate phase unless it also lists probe
 //     (sel.id, sent before ACC for the firmware check, C3-1); a probe
-//     operation is literal.
+//     operation is literal and needs access level 0 (C3-A2 note 5).
 //   - Deny rules are regular expressions over outgoing lines. They document
 //     known dangerous lines and act as a second barrier: a package whose
 //     approved line matches a deny rule is invalid.
