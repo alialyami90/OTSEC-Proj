@@ -71,9 +71,10 @@
       "properties": {"offset": {"type": "integer", "minimum": 0}, "length": {"type": "integer", "minimum": 1}}
     },
     "endpoint": {
-      "type": "object", "required": ["id", "transport", "downstream_security"],
+      "type": "object", "required": ["id", "transport", "downstream_security", "target"],
       "properties": {
         "id": {"$ref": "#/$defs/token"},
+        "target": {"enum": ["device-observed", "simulated"], "description": "D1-24: set by an admin, never from the far end; never defaulted."},
         "transport": {"$ref": "#/$defs/transport"},
         "host": {"type": "string"},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},

@@ -96,6 +96,14 @@ type Endpoint struct {
 	Port               int                `json:"port,omitempty"`
 	SerialDevice       string             `json:"serial_device,omitempty"`
 	DownstreamSecurity DownstreamSecurity `json:"downstream_security"`
+	// Target says whether a device or a simulator is behind the endpoint:
+	// device-observed or simulated (D1-24). An admin sets it when the
+	// endpoint is configured; it is never taken from what the far end
+	// reports. C2 copies it into Result.target, and C4 into the evidence
+	// class of every event received on the endpoint (D1-23). It is required
+	// in every minor, and a value outside the two is refused, never read as
+	// either.
+	Target EvidenceClass `json:"target"`
 }
 
 // DownstreamSecurity is A3 §4.5's label for the link from the node to the
@@ -640,12 +648,28 @@ func (a Asset) Validate() error {
 	}
 
 	eps := map[string]bool{}
+	targets := map[EvidenceClass]bool{}
 	for i, ep := range a.Endpoints {
 		v.endpoint(i, ep)
 		if eps[ep.ID] {
 			v.fail("endpoints[%d]: duplicate id %q", i, ep.ID)
 		}
 		eps[ep.ID] = true
+		targets[ep.Target] = true
+	}
+	// An observation from a session or a received message came through an
+	// endpoint, so the asset has one with the same target (D1-24).
+	for _, at := range a.Attributes {
+		for j, ob := range at.Observations {
+			q := fmt.Sprintf("attribute %s observations[%d]", at.Name, j)
+			switch {
+			case ob.Source.Method == SimulatorRun && !targets[Simulated]:
+				v.fail("%s: a simulator observation needs an endpoint whose target is simulated", q)
+			case ob.EvidenceClass == DeviceObserved && (ob.Source.Method == AdapterSession || ob.Source.Method == SyslogReceived) &&
+				!targets[DeviceObserved]:
+				v.fail("%s: a device-observed value from %s needs an endpoint whose target is device-observed", q, ob.Source.Method)
+			}
+		}
 	}
 
 	v.binding(a, attrs)
@@ -816,6 +840,11 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 		if !optional && (ep.Port < 1 || ep.Port > 65535) {
 			v.fail("%s.port %d is out of range", p, ep.Port)
 		}
+	}
+	if ep.Target != DeviceObserved && ep.Target != Simulated {
+		// Checked in every minor: a missing or unknown target is never
+		// defaulted (D1-24).
+		v.fail("%s.target %q is not %s or %s (D1-24)", p, ep.Target, DeviceObserved, Simulated)
 	}
 	ds := ep.DownstreamSecurity
 	v.enum(p+".downstream_security.level", string(ds.Level), SecurityLevels)
