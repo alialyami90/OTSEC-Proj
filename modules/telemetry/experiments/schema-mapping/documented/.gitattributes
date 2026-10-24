@@ -1,0 +1,4 @@
+# Byte-exact documented example: the tests read it in binary and split on
+# LF, so Git must never convert its line endings (found on a Windows
+# checkout with core.autocrlf=true).
+* -text
