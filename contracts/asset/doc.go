@@ -54,6 +54,18 @@
 // Level 1, so it can only be compared after the password has been sent. It
 // can detect a substitution, but cannot protect the credential.
 //
+// The record says which is which: IdentityBinding.PreCredential lists the
+// attributes compared before any credential is sent ("firmware_id" for the
+// SEL-751), and a device-reported binding without one is invalid, so ACC is
+// never sent ungated. The family's profile lists what it reports before
+// authentication, and Asset.CheckProfile holds the binding to that list.
+//
+// Decoding is strict about spelling (strictjson.Forward, D1-10): a key that
+// differs from a field name only in case, or a key given twice, rejects the
+// record, so a reviewer and the node always read the same binding. Values
+// added by a later minor are read down to the least trusted 0.1 value
+// (Asset.Effective).
+//
 // What a mismatch does: the collector sends nothing more except the close
 // sequence that is safe at that point, the invocation ends with an
 // identity_mismatch error (C2), the asset is suspended with reason

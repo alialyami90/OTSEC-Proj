@@ -49,5 +49,7 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/pre-credential-not-in-attributes.json` | A pre-credential attribute that is not a binding attribute. |
 | `invalid/address-only-with-pre-credential.json` | An address-only binding with a pre-credential attribute. |
 | `invalid/profile-pre-credential-operator-only.json` | A profile claiming the family reports `ip_address` before authentication. |
+| `invalid/case-variant-key.json` | An `IDENTITY_BINDING` key after the real binding, which plain `encoding/json` would let replace it (A6 change 3). |
+| `invalid/duplicate-key.json` | `identity_binding` given twice. |
 | `invalid/profile-adapter-without-allowlist.json` | A profile that sends adapter operations with no firmware allowlist (AP-27). |
 | `invalid/profile-claim-without-citation.json` | A capability claim with no citation. |

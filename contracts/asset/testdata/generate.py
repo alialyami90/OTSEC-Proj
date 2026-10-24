@@ -278,6 +278,14 @@ def main():
         write(f"invalid/{name}.json", mutate(base(), fn))
     for name, fn in INVALID_PROFILES.items():
         write(f"invalid/{name}.json", mutate(PROFILE_751, fn))
+    # Keys json.dump cannot produce (A6 C1 review change 3). A6's probe: a
+    # case variant after the real binding, which encoding/json alone would
+    # let replace it.
+    base = json.dumps(relay(), indent=2, ensure_ascii=False)
+    tail = ',\n  %s: {"method": "address-only", "strength": "spoofable", "attributes": []}\n}\n'
+    for name, key in (("case-variant-key", '"IDENTITY_BINDING"'), ("duplicate-key", '"identity_binding"')):
+        with open(os.path.join(HERE, f"invalid/{name}.json"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(base[:-2] + tail % key)
 
 
 if __name__ == "__main__":

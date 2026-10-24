@@ -42,6 +42,8 @@ var invalidWant = map[string]string{
 	"pre-credential-not-in-attributes":            `"firmware_id" is not in attributes`,
 	"address-only-with-pre-credential":            "pre_credential is empty",
 	"profile-pre-credential-operator-only":        `"ip_address" is not an attribute a device reports`,
+	"case-variant-key":                            `IDENTITY_BINDING`,
+	"duplicate-key":                               `duplicate key "identity_binding"`,
 }
 
 func decodeAny(b []byte) error {

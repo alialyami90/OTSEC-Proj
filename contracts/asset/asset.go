@@ -1,7 +1,6 @@
 package asset
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,11 +10,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/version"
 )
 
 // Contract is this package's identifier. Readers accept every 0.x minor
-// (contracts/version) and ignore fields they do not know: C1 is not strict.
+// (contracts/version) and ignore fields they do not know, but reject case
+// variants and duplicate keys (strictjson.Forward, D1-10).
 const Contract = "otsec.asset/0.1"
 
 var self = version.ID{Name: "asset", Major: 0, Minor: 1}
@@ -455,13 +456,14 @@ func ValidTime(s string) bool {
 // --- decoding and validation ---------------------------------------------------
 
 // Decode parses and validates an asset record, and returns it as a 0.1
-// reader must read it (Effective). Unknown fields are ignored.
-//
-// TODO(D1-10): decode with contracts/internal/strictjson once #27 merges, so
-// that case-variant and duplicate keys are rejected (A6 C1 review change 3).
+// reader must read it (Effective). Decoding is strict except for forward
+// compatibility (D1-10): a key that differs from a field name only in case,
+// a duplicate key, or data after the record is rejected, so a reviewer and
+// the node always read the same binding (A6 C1 review change 3). An unknown
+// field from a later minor is ignored.
 func Decode(b []byte) (Asset, error) {
 	var a Asset
-	if err := json.Unmarshal(b, &a); err != nil {
+	if err := strictjson.Forward(b, &a); err != nil {
 		return Asset{}, fmt.Errorf("asset: %w", err)
 	}
 	if err := a.Validate(); err != nil {

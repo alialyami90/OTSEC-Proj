@@ -1,10 +1,10 @@
 package asset
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 
+	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/version"
 )
 
@@ -109,7 +109,7 @@ func ValidOperationID(s string) bool { return operationIDPattern.MatchString(s) 
 // DecodeProfile parses and validates a capability profile.
 func DecodeProfile(b []byte) (CapabilityProfile, error) {
 	var p CapabilityProfile
-	if err := json.Unmarshal(b, &p); err != nil {
+	if err := strictjson.Forward(b, &p); err != nil {
 		return CapabilityProfile{}, fmt.Errorf("asset: profile: %w", err)
 	}
 	return p, p.Validate()
