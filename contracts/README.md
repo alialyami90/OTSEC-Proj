@@ -8,18 +8,20 @@ Phase 1 approves the contracts C1 to C8 listed in [docs/architecture.md](../docs
 
 One Go package per contract, in the root module `otsec.local/otsec`:
 
-| ID | Package | Identifier | Owner |
-| --- | --- | --- | --- |
-| C1 | `contracts/asset` | `otsec.asset/0.1` | A2 |
-| C2 | `contracts/adapter` | `otsec.adapter/0.1` | A2 |
-| C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) |
-| C4 | `contracts/event` | `otsec.event/0.1` | A4 |
-| C5 | `contracts/store` | `otsec.store/0.1` | A5 |
-| C6 | `contracts/syslog` | `otsec.syslog/0.1` | A4 |
-| C7 | `contracts/authz` | `otsec.authz/0.1` | A3 |
-| C8 | `contracts/audit` | `otsec.audit/0.1` | A3 |
-| — | `contracts/version` | identifier parsing and the compatibility rule | A1 |
-| — | `contracts/node` | node ID and stream token, shared by C1 and C4 (D1-1) | A1 (maintained by A4) |
+| ID | Package | Identifier | Owner | Status (2026-10-24) |
+| --- | --- | --- | --- | --- |
+| C1 | `contracts/asset` | `otsec.asset/0.1` | A2 | Merged (#32). D1-24 `Endpoint.target` pending (A2). |
+| C2 | `contracts/adapter` | `otsec.adapter/0.1` | A2 | Merged (#51). |
+| C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) | Merged (#27, #32); SEL-751 content rev 2. |
+| C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
+| C5 | `contracts/store` | `otsec.store/0.1` | A5 | Merged (#33). |
+| C6 | `contracts/syslog` | `otsec.syslog/0.1` | A4 | Merged (#42, #59: `evc`). |
+| C7 | `contracts/authz` | `otsec.authz/0.1` | A3 | Merged (#38). D1-20 amendment wording pending (A3). |
+| C8 | `contracts/audit` | `otsec.audit/0.1` | A3 | Merged (#38). |
+| — | `contracts/version` | identifier parsing and the compatibility rule | A1 | Merged (#26). |
+| — | `contracts/node` | node ID and stream token, shared by C1 and C4 (D1-1) | A1 (maintained by A4) | Merged (#29). |
+
+Every status is `desk` evidence: code and tests on a CI runner. No contract has been exercised against a device.
 
 Each package contains:
 
