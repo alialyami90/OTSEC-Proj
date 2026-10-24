@@ -277,6 +277,12 @@ func TestParseSettings(t *testing.T) {
 		"twice on line": "LANG := ENGLISH  LANG := SPANISH\r\n",
 		"value with :=": "LANG := EN:=GLISH\r\n",
 		"glued pairs":   "LANG := ENGLISH MAXACC := 1\r\n",
+		// A6 on #85: text before or after the pairs is not a setting.
+		"trailing words":    "LANG := ENGLISH  trailing words\r\n",
+		"lower-case prefix": "xLANG := ENGLISH\r\n",
+		"hyphenated name":   "EN-LANG := ENGLISH\r\n",
+		"digit prefix":      "1LANG := ENGLISH\r\n",
+		"value split":       "TID := FEEDER  1\r\n",
 	} {
 		if _, err := parseSettings(message{text: []byte(text)}); err == nil {
 			t.Errorf("%s: parsed", name)

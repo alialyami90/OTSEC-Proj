@@ -114,6 +114,9 @@ func FuzzParseSER(f *testing.F) {
 
 func FuzzParseSettings(f *testing.F) {
 	f.Add([]byte("Port 1\r\n\r\nMAXACC  := 2\r\nLANG    := ENGLISH  FTPACC  := 1\r\n"))
+	for _, l := range []string{"LANG := ENGLISH  trailing words", "xLANG := ENGLISH", "EN-LANG := ENGLISH", "TID := FEEDER  1"} {
+		f.Add([]byte(l + "\r\n"))
+	}
 	f.Fuzz(func(t *testing.T, text []byte) {
 		if !framedText(text) {
 			return
@@ -123,11 +126,26 @@ func FuzzParseSettings(f *testing.F) {
 		if err != nil {
 			return
 		}
+		covered := make([]bool, len(m.text))
 		for name, s := range set {
 			b := inside(t, m, s.span)
 			noFraming(t, b)
 			if s.name != name || !bytes.HasPrefix(b, []byte(name)) || !bytes.HasSuffix(b, []byte(s.value)) || s.value == "" {
 				t.Fatalf("setting %q = %q, span bytes %q", name, s.value, b)
+			}
+			for i := s.span.Offset - m.off; i < s.span.Offset-m.off+s.span.Length; i++ {
+				covered[i] = true
+			}
+		}
+		// A line that holds a ":=" is settings and spaces only (A6 on #85).
+		for _, l := range m.lines() {
+			if !bytes.Contains(l.b, []byte(":=")) {
+				continue
+			}
+			for i, c := range l.b {
+				if at := l.off - m.off + int64(i); !covered[at] && c != ' ' {
+					t.Fatalf("line %q: byte %d (%q) is in no setting", l.b, i, c)
+				}
 			}
 		}
 	})
