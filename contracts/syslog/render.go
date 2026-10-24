@@ -49,7 +49,7 @@ type Param struct {
 // name when the value is not printable UTF-8 (see printable); the value is
 // then standard base64 of the bytes. Repeated names keep the event's order.
 //
-//	v        C6 identifier, otsec.syslog/0.1
+//	v        C6 identifier of the rendering, for example otsec.syslog/0.2
 //	ev       C4 identifier of the event, for example otsec.event/0.1
 //	eid      C4 event ID, canonical text; receivers remove duplicates by it
 //	origin   device or platform

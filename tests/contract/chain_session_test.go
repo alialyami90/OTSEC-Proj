@@ -489,7 +489,7 @@ const chainTarget = `{
   "max_message_octets": 8192, "facility": 13,
   "tls": {"server_name": "collector.a6.example", "trust_anchor_ref": "a6-ca", "client_credential_ref": "a6-node-forwarder"},
   "relp_window": 64,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-chain/kill-test"}
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-chain/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}
 }`
 
 func chainC6(t *testing.T) {

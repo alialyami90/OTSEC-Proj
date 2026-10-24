@@ -103,3 +103,14 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The forwarder checks the receiver's name in the same way, so neither side relies on the CA alone.
 - A4 writes both rules into C6 as a minor revision, reviewed by A3 and A6.
 - The slice harness configures rsyslog this way.
+
+## D2-10: A third lock: collection endpoints and listeners are loopback only
+
+**Reason (A6, review of #84):** both D2-4 locks read the same `target` label, which an administrator sets. An endpoint with a real relay's address labelled `simulated` passes both. In Phase 2 the only device is the simulator on the same host (D2-3), so a lock that ignores the label costs little and stops a typo from pointing a credentialed session at real equipment.
+
+**Rules:**
+- The node's loader refuses a configuration in which a collection endpoint's host, or a Syslog listener's bind address, is not a loopback IP literal (127.0.0.0/8 or `::1`) (A5).
+- The collector refuses a run whose endpoint host is not a loopback IP literal (A3).
+- Host names are refused, `localhost` included, so the check never depends on name resolution.
+- Forwarding targets are not covered, because the upstream collector is not a device.
+- Each lock gets its own negative test (A6). Lifting either lock follows D2-4: the owner authorizes a named lab device, and the authorization is recorded in a decision.

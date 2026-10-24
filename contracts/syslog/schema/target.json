@@ -33,11 +33,14 @@
     "durable_ack": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verified_utc", "evidence_ref"],
-      "description": "The passed commissioning check that the collector acknowledges only after a durable write. Required exactly on required targets (Go rule).",
+      "required": ["verified_utc", "evidence_ref", "peer_check", "permitted_peer", "ack_after"],
+      "description": "The passed commissioning check that the collector acknowledges only after a durable write, and how the collector was configured when it passed (since 0.2, A1 D2-9). Required exactly on required targets (Go rule).",
       "properties": {
         "verified_utc": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"},
-        "evidence_ref": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"}
+        "evidence_ref": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"},
+        "peer_check": {"enum": ["name"], "description": "The collector checks the node's client certificate by name against a permitted-peer list (imrelp tls.authmode=\"name\" with tls.permittedPeer), never by CA alone."},
+        "permitted_peer": {"type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]{0,252})$", "description": "The node certificate name the collector permits, exactly; no wildcard."},
+        "ack_after": {"enum": ["durable-write"], "description": "The collector acknowledges only after a synchronous durable write (rsyslog: ruleset queue.type=\"Direct\" and omfile sync=\"on\")."}
       }
     },
     "acknowledgement": {
