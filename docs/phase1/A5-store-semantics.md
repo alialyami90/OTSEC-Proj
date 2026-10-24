@@ -161,7 +161,7 @@ Alarm codes form a closed list in `class.go`:
 - commit failed;
 - one alarm per startup step.
 
-They become C4 platform events on the node's `platform/health` stream. The mapping to C4 `Health.Type` values is agreed with A4 (`TODO(C4)`; see the C4 review).
+They become C4 platform events on the node's `platform/health` stream. `AlarmCode.HealthType` gives the C4 `Health.Type`, as proposed in the C4 review: `syslog-dropped` is C4's `intake.drop-counted`, `required-consumer-stalled` is `forward.unreachable`, and every other alarm is `store.<code>` without its `store-` prefix (for example `store.quota-reached`, `store.audit-full`). A mode change is `store.mode-changed`. C4's type set is open, so these need no C4 change.
 
 ## 7. What A6 can make fail
 
@@ -183,7 +183,7 @@ The owner's tests (`contracts/store/*_test.go`) cover each one against an in-mem
 
 - **C8 (`TODO(C8)`).** `AuditChain` and `ChainLink` mirror the parts of C8 the store uses (section 1a). C8 merges before C5 in the merge order.
 - **Captures and redaction (C5-A3-6).** A capture is raw device output and may contain the echo of what the transport sent. HR-3 redaction happens before the capture is built (C2, C6), never in the store.
-- **C4 (`TODO(C4)`).** `NodeID`, `StreamID`, `Seq` and `Key` mirror C4's draft (PR #29) and become aliases once it merges. Two C4 changes are requested in [reviews/C4-A5.md](reviews/C4-A5.md):
+- **C4.** C4 has merged. `NodeID` and `StreamID` are aliases of `contracts/node`'s `ID` and `Stream` (D1-1), and `Key` is C4's `EventID`. Two C4 changes are requested in [reviews/C4-A5.md](reviews/C4-A5.md):
   - a pre-commit event form, because the seq exists only after commit;
   - the format of `evidence.ref`.
 

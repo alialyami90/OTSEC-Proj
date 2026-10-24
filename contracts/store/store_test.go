@@ -838,3 +838,19 @@ func TestStartupHonoursContextInCompaction(t *testing.T) {
 		t.Fatal("startup still running 5 s after its context ended")
 	}
 }
+
+func TestAlarmHealthTypes(t *testing.T) {
+	for a, want := range map[AlarmCode]string{
+		AlarmSyslogDropped:     "intake.drop-counted",
+		AlarmRequiredStalled:   "forward.unreachable",
+		AlarmAuditFull:         "store.audit-full",
+		AlarmQuotaReached:      "store.quota-reached",
+		AlarmDrainOnly:         "store.drain-only",
+		AlarmReserveMissing:    "store.reserve-missing",
+		AlarmCollectionStopped: "store.collection-stopped",
+	} {
+		if got := a.HealthType(); got != want {
+			t.Errorf("%s: %s, want %s", a, got, want)
+		}
+	}
+}

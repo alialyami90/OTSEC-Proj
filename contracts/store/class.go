@@ -2,7 +2,10 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"otsec.local/otsec/contracts/event"
 )
 
 // StreamClass groups streams by how they may behave when storage is full.
@@ -91,7 +94,8 @@ func (q Quota) Validate() error {
 }
 
 // AlarmCode is the closed list of alarms the store raises. They become C4
-// platform events (TODO(C4): event kind mapping) and appear in node status.
+// platform events on the node's platform/health stream, with the Health.Type
+// HealthType gives, and appear in node status.
 type AlarmCode string
 
 const (
@@ -115,6 +119,24 @@ const (
 	AlarmCompactFailed         AlarmCode = "store-compact-failed"
 	AlarmDrainOnly             AlarmCode = "store-drain-only"
 )
+
+// HealthModeChanged is the C4 Health.Type of a ModeChange.
+const HealthModeChanged = "store.mode-changed"
+
+// HealthType is the C4 Health.Type the alarm is reported as (C4 review by
+// A5, item 5). Two alarms use C4's existing types; every other is
+// "store.<code>" without its "store-" prefix.
+func (a AlarmCode) HealthType() string {
+	switch a {
+	case AlarmSyslogDropped:
+		return event.HealthDropCounted
+	case AlarmRequiredStalled:
+		return event.HealthForwardUnreachable
+	case AlarmAuditFull:
+		return "store.audit-full"
+	}
+	return "store." + strings.TrimPrefix(string(a), "store-")
+}
 
 // Alarm is one storage alarm. Fields that do not apply to a code are zero.
 type Alarm struct {
