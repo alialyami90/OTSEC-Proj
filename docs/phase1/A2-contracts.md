@@ -1,7 +1,7 @@
 # A2 Phase 1 notes: C1 and C2
 
 - Task: P1-A2 (`docs/agent-handoffs.md`). Author: A2. Started 2026-10-24.
-- Contracts: C1 `otsec.asset/0.1` in `contracts/asset/`; C2 `otsec.adapter/0.1` in `contracts/adapter/` (next PR).
+- Contracts: C1 `otsec.asset/0.1` in `contracts/asset/`; C2 `otsec.adapter/0.1` in `contracts/adapter/`.
 - No device was contacted. Every device value in the examples is from the SEL-751 instruction manual (S22, date code 20260910) or invented and marked as such.
 
 ## C1 decisions
@@ -32,6 +32,15 @@
 | A profile for a family that takes a password carries `secret_policy`: lengths, an allowed set matched against the whole secret, and exactly one of `mnemonic_len` and `whole_word`. SEL-751: `[!-~]+`, 1 to 12, mnemonic 3. Tests check that it equals `authz.SecretPolicies["sel-751"]` and that `MaxSecretLen` agrees. | A1 D1-19 (S22 Table 7.54, Appendix N). |
 | Acknowledgement `by`, and the `ref` of an operator-entry observation, use C7's principal ID syntax. C1 keeps a copy of the pattern, and a test compares it with `authz.Principal.Validate`. | C7 merged (#38). C1 does not import `authz`, because `authz` needs to import C1 for `CredentialAllowed` and the profile. |
 
+## C2 decisions
+
+| Decision | Basis |
+| --- | --- |
+| The SEL-751 frames every message `<STX>` … `<CRLF><ETX>`. The transcript keeps both bytes; prompt detection and the probe grammar ignore them like XON, XOFF and NUL; no observation, warning or record span may include them. The examples are framed, and the prompt is placed directly after `ETX`. | S22 p. 7.28; my C6 review, finding 1. The prompt's position after `ETX` is an assumption, shared with A6's simulator, until H-12 or H-13 has a capture. |
+| `RegisterLookup` implements `OperationLookup` over the C3 matcher. Operations are invocable at their register access level; session-control lines, deny rules and unknown IDs are refused alike. | C3 merged; C-A2-1. Tests use A2's `sel-751.json` content, not a stand-in. |
+| `Invocation.CheckAgainst(asset, profile)` refuses an invocation that is not the one the collector would build: a suspended asset (`refused.asset_suspended`), a credential where `CredentialAllowed` fails (`refused.credential_unavailable`), and any other asset, endpoint or profile, an expected identity other than the binding's declared values, a profile without `session_limits` or beyond the C2 ceilings, or a `min_interval_ms` below the profile's (`refused.limits`). An address-only binding compares nothing, so no C2 session runs on it. | D1-18, A6 C1 re-check R-1, AP-27. |
+| `principal_ref` is checked with `authz.Principal.Validate`; `credential_ref` is a C7 `cred_` ID, checked with a copy of C7's pattern that a test compares with `authz.CredentialRef.Validate`. C2 does not resolve the reference or check its binding: the collector does (`CredentialRef.Binds`). | C7 merged. `authz` does not export the pattern. |
+
 ## B-05: what the identity binding proves
 
 The text is in `contracts/asset/doc.go`. In short:
@@ -48,5 +57,4 @@ The text is in `contracts/asset/doc.go`. In short:
 
 ## Open items for reviewers
 
-- A3: `Acknowledgement.By` and operator refs are TODO(C7) principal IDs.
 - A6: `testdata/generate.py` writes the examples. They are built from my own transcription, so A6's independent tests should not reuse them as ground truth (risk 3).
