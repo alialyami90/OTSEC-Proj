@@ -23,6 +23,15 @@ Every asset endpoint and every listener has a `target`. The loader refuses `devi
 
 Lifting this lock needs the owner's authorization of a named lab device, recorded in a decision.
 
+## D2-10: loopback only
+
+Both D2-4 locks read the same administrator-set label, so a third lock ignores it. The loader refuses, with `ErrNotLoopback`:
+
+- an asset endpoint other than inbound Syslog whose `host` is not a loopback IP literal (127.0.0.0/8 or `::1`);
+- a listener whose `address` is not on a loopback IP literal.
+
+Host names are refused, `localhost` included, so the check never depends on name resolution. A zone (`::1%lo`) and the IPv4-mapped form (`::ffff:127.0.0.1`) are refused too. Forwarding targets are not covered: the upstream collector is not a device. The collector makes its own loopback check (A3). Lifting the lock follows D2-4.
+
 ## Fields
 
 | Field | Meaning | Checked |
@@ -32,8 +41,8 @@ Lifting this lock needs the owner's authorization of a named lab device, recorde
 | `store.dir` | Store directory | absolute path. The store also checks the directory itself: mode 0700 on Linux, and the installer's DACL on Windows |
 | `store.quotas` | Bytes per C5 class, keyed by class name (`adapter-evidence`, `syslog-stream`, `syslog-datagram`, `platform`, `audit`) | each positive. Every class the layout needs must have one |
 | `store.warn_fraction` | Fraction of a quota that raises `store-quota-warning` | in (0, 1) |
-| `listeners[]` | Syslog listeners: `id`, `transport` (`syslog-udp`, `syslog-tcp` or `syslog-tls`), `address` (`ip:port`) and `target` | unique ids; `simulated` only (D2-4). Phase 2 starts no listener |
-| `assets[]` | C1 asset records | `asset.Decode`; every endpoint `simulated`; `asset.CheckSenders` across all assets |
+| `listeners[]` | Syslog listeners: `id`, `transport` (`syslog-udp`, `syslog-tcp` or `syslog-tls`), `address` (`ip:port`) and `target` | unique ids; `simulated` only (D2-4); a loopback address (D2-10). Phase 2 starts no listener |
+| `assets[]` | C1 asset records | `asset.Decode`; every endpoint `simulated`; every collection endpoint on a loopback IP literal (D2-10); `asset.CheckSenders` across all assets |
 | `targets[]` | C6 forwarding targets | `syslog.ParseTarget`; unique names |
 | `schedule[]` | `asset_id`, `endpoint`, `operation` (a C3 operation ID such as `sel.ser.read_all`) and `every_seconds` | see below |
 | `collector_pipe` | Where the collector listens | `\\.\pipe\<name>` on Windows; an absolute socket path on Linux |
@@ -77,7 +86,7 @@ Health events share the evidence database. This is so a capture carried by a hea
   },
   "listeners": [],
   "assets": [{"schema": "otsec.asset/0.1", "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", "node_id": "site-a-node1", "...": "..."}],
-  "targets": [{"schema": "otsec.syslog/0.1", "name": "central", "transport": "relp-tls", "class": "required", "audit": true, "...": "..."}],
+  "targets": [{"schema": "otsec.syslog/0.2", "name": "central", "transport": "relp-tls", "class": "required", "audit": true, "...": "..."}],
   "schedule": [{"asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", "endpoint": "port1-telnet", "operation": "sel.ser.read_all", "every_seconds": 300}],
   "collector_pipe": "/run/otsec/collector.sock"
 }

@@ -91,6 +91,46 @@ func TestDeviceObservedRefused(t *testing.T) {
 	}
 }
 
+// D2-10: a collection endpoint or a listener off loopback refuses the whole
+// file, whatever its target label says. Forwarding targets are exempt.
+func TestNotLoopbackRefused(t *testing.T) {
+	host := func(h string) *nodeconfigtest.Config {
+		c := sample(t)
+		c.Assets[0]["endpoints"].([]any)[0].(map[string]any)["host"] = h
+		return c
+	}
+	for _, h := range []string{"10.0.0.5", "192.0.2.10", "::ffff:127.0.0.1", "::1%lo", "0.0.0.0"} {
+		if _, err := ParseConfig(host(h).Bytes()); !errors.Is(err, ErrNotLoopback) {
+			t.Errorf("endpoint host %s: %v", h, err)
+		}
+	}
+	// C1 refuses a host name before the loopback check sees it.
+	for _, h := range []string{"localhost", "relay1.example"} {
+		if _, err := ParseConfig(host(h).Bytes()); err == nil {
+			t.Errorf("endpoint host %s loaded", h)
+		}
+	}
+	for _, h := range []string{"127.0.0.1", "127.8.9.10", "::1"} {
+		if _, err := ParseConfig(host(h).Bytes()); err != nil {
+			t.Errorf("endpoint host %s refused: %v", h, err)
+		}
+	}
+	for addr, ok := range map[string]bool{"10.0.0.5:5514": false, "0.0.0.0:5514": false, "[::ffff:127.0.0.1]:5514": false, "127.0.0.1:5514": true, "[::1]:5514": true} {
+		c := sample(t)
+		c.Listeners[0].Address = addr
+		_, err := ParseConfig(c.Bytes())
+		if ok && err != nil || !ok && !errors.Is(err, ErrNotLoopback) {
+			t.Errorf("listener %s: %v", addr, err)
+		}
+	}
+	upstream := sample(t)
+	upstream.Targets[0]["host"] = "192.0.2.20"
+	upstream.Targets[0]["tls"].(map[string]any)["server_name"] = "collector.example"
+	if _, err := ParseConfig(upstream.Bytes()); err != nil {
+		t.Errorf("forwarding target off loopback refused: %v", err)
+	}
+}
+
 func TestStrictDecoding(t *testing.T) {
 	good := sample(t).Bytes()
 	cases := map[string][]byte{

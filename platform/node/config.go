@@ -161,8 +161,10 @@ func (c *Config) check() error {
 		if !l.Transport.Inbound() {
 			fail("%s.transport %q is not a Syslog transport", p, l.Transport)
 		}
-		if _, err := netip.ParseAddrPort(l.Address); err != nil {
+		if ap, err := netip.ParseAddrPort(l.Address); err != nil {
 			fail("%s.address %q is not ip:port", p, l.Address)
+		} else if !loopback(ap.Addr().String()) {
+			fail("%s.address %q: %w", p, l.Address, ErrNotLoopback)
 		}
 		if err := checkTarget(p, l.Target); err != nil {
 			errs = append(errs, err)
@@ -181,8 +183,14 @@ func (c *Config) check() error {
 			fail("assets[%d]: asset %s listed twice", i, a.AssetID)
 		}
 		for j, ep := range a.Endpoints {
-			if err := checkTarget(fmt.Sprintf("assets[%d].endpoints[%d]", i, j), ep.Target); err != nil {
+			p := fmt.Sprintf("assets[%d].endpoints[%d]", i, j)
+			if err := checkTarget(p, ep.Target); err != nil {
 				errs = append(errs, err)
+			}
+			// An inbound Syslog endpoint names the device as a sender; every
+			// other endpoint is one a collector connects to (D2-10).
+			if !ep.Transport.Inbound() && !loopback(ep.Host) {
+				fail("%s.host %q: %w", p, ep.Host, ErrNotLoopback)
 			}
 		}
 		byID[a.AssetID] = a
@@ -242,6 +250,20 @@ func (c *Config) check() error {
 
 // ErrDeviceObserved marks a refusal under D2-4.
 var ErrDeviceObserved = errors.New("device-observed endpoints and listeners are refused in Phase 2 (D2-4); lifting this needs the owner's authorization of a named lab device")
+
+// ErrNotLoopback marks a refusal under D2-10.
+var ErrNotLoopback = errors.New("collection endpoints and listeners must be loopback IP literals in Phase 2 (D2-10); host names, localhost included, are refused, and lifting this needs the owner's authorization of a named lab device")
+
+// loopback reports whether host is a loopback IP literal: an IPv4 address
+// in 127.0.0.0/8 or ::1, with no zone and no IPv4-mapped form. A host name
+// is never resolved, so the check does not depend on name resolution.
+func loopback(host string) bool {
+	a, err := netip.ParseAddr(host)
+	if err != nil || a.Zone() != "" {
+		return false
+	}
+	return (a.Is4() && a.IsLoopback()) || a == netip.IPv6Loopback()
+}
 
 // checkTarget enforces D2-4: in Phase 2 everything behind an endpoint or a
 // listener is a simulator. Any other value is refused too, never defaulted

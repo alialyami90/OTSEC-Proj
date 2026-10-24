@@ -68,10 +68,14 @@ func New(node, storeDir string) *Config {
 }
 
 // AddSEL751 adds a simulated SEL-751 reached over Telnet at host:port (A6's
-// recording simulator) and schedules sel.ser.read_all on it every
+// recording simulator); an empty host is 127.0.0.1, and the loader refuses
+// any host that is not a loopback IP literal (D2-10) and schedules sel.ser.read_all on it every
 // everySeconds. The record is a C1 asset with operator-declared attributes
 // only: nothing in it claims a device observation.
 func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config {
+	if host == "" {
+		host = "127.0.0.1"
+	}
 	declared := func(name, value string) map[string]any {
 		return map[string]any{
 			"name": name, "value": value, "confidence": "single-source",
@@ -112,16 +116,19 @@ func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config
 	return c
 }
 
-// AddRELPTarget adds a required relp-tls C6 target. durableAckRef is the
-// evidence reference of the target's durable-acknowledgement check (V-S6);
-// tests that have not run one must not use a required target.
+// AddRELPTarget adds a required relp-tls C6 0.2 target. durableAckRef is
+// the evidence reference of the target's durable-acknowledgement check
+// (V-S6); tests that have not run one must not use a required target. The
+// collector's permitted peer is the node ID, its test certificate name,
+// checked by name and acknowledged after a durable write (D2-9).
 func (c *Config) AddRELPTarget(name, host string, port int, trustAnchor, clientCredential, durableAckRef string, audit bool) *Config {
 	t := map[string]any{
-		"schema": "otsec.syslog/0.1", "name": name, "host": host, "port": port,
+		"schema": "otsec.syslog/0.2", "name": name, "host": host, "port": port,
 		"transport": "relp-tls", "format": "rfc5424", "framing": "relp", "class": "required",
 		"max_message_octets": 2048, "facility": 16, "relp_window": 128,
-		"tls":         map[string]any{"server_name": host, "trust_anchor_ref": trustAnchor, "client_credential_ref": clientCredential},
-		"durable_ack": map[string]any{"verified_utc": "2026-10-24T09:00:00Z", "evidence_ref": durableAckRef},
+		"tls": map[string]any{"server_name": host, "trust_anchor_ref": trustAnchor, "client_credential_ref": clientCredential},
+		"durable_ack": map[string]any{"verified_utc": "2026-10-24T09:00:00Z", "evidence_ref": durableAckRef,
+			"peer_check": "name", "permitted_peer": c.NodeID, "ack_after": "durable-write"},
 	}
 	if audit {
 		// A sealed C8 record must fit whole (C6, audit.MaxRecordBytes).
