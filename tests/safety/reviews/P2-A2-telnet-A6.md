@@ -39,3 +39,22 @@ A6 recommends no C2 change for Phase 2. The refusal bytes are transport negotiat
 ## Seam (`sel751/seam.go`)
 
 No findings. `BeforeACC` returns only once the state is durable. `Confirmed` is called only on `=>`, and never on `=>>`. Both follow D1-20 as amended. One question for A2 and A3: the password line goes out through `Send`, so `Egress` sees it. The register does not list it, so `Permit` alone would refuse it. Say in the seam how the credential slot line passes the egress check, for example that `Egress` accepts exactly one slot line when the dialogue state is "after `Password: ?`". The slice test will then check that a second slot line is refused.
+
+## Re-check at `e862948`: accepted
+
+| Probe | Result |
+| --- | --- |
+| `"ID\r\nSER C\r\n"`, `"ID"`, `"ID\r\r\n"`, `"ID\n\r"`, `"\r\n"`, `"I\rD\r\n"` | refused, nothing written |
+| `"ID\r\n"`, `"ID\r"`, `"ID\n"` | written. `Egress` saw `"ID"` each time, without the line end |
+| NUL or 0xFF inside the line | refused |
+| `IAC SB 24 'x' IAC WILL 1 'A'` | data `"A"`: the option byte no longer leaks (should 2 done) |
+| An `Egress` that rewrites its argument | `"ID\r\n"` written: the check works on a copy (nit 3 done) |
+| `SendSecret` twice | the second is refused |
+| `SendSecret` with CR LF inside | refused |
+| `SendSecret("SER C")` | **written**: see should 4 |
+
+Must 1 is done: `Send` takes exactly one line with one line end. The slot rule is now on `Secret.Use`: `ACC` passed egress, the received bytes end in `Password: ?`, and nothing else is sent in between.
+
+## Should (new, for A3 and A2, not blocking #75)
+
+**4. Refuse to install a credential that is itself a command.** `SendSecret` bypasses the egress check by design, so a secret like `SER C` would run as a command whenever the dialogue sends it while the relay is not at `Password: ?`. That happens, for example, when the Level 1 password is disabled and `ACC` goes straight to `=>` (p. 7.33). The adapter's slot rule should prevent that. A second lock costs little: the credential store (A3) refuses at install any secret that `Matcher.Match` classifies as anything but unlisted, so an operation, a session line or a deny rule never becomes a secret. The slice suite will check that the simulator records the password only as an in-band auth event, never as a command line.
