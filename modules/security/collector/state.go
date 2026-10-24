@@ -59,6 +59,10 @@ type stateDoc struct {
 	Assets       map[string]assetState  `json:"assets"`
 	Families     map[string]familyFloor `json:"families,omitempty"`
 	Installs     []string               `json:"installs,omitempty"` // RFC 3339 UTC times of recent installs, oldest first
+	// CredGeneration is the highest credential store generation this
+	// collector has written or opened; an older store is a restored copy
+	// and is refused (A6 on #90).
+	CredGeneration uint64 `json:"cred_generation,omitempty"`
 }
 
 // familyFloor is authz.FamilyFloor as stored.
@@ -327,6 +331,29 @@ func (s *State) SetFamilyFloor(family string, f authz.FamilyFloor) error {
 		next.Families[k] = v
 	}
 	next.Families[family] = familyFloor{Revision: f.Revision, PayloadSHA256: hex.EncodeToString(f.PayloadSHA256[:])}
+	return s.write(next)
+}
+
+// CredGeneration returns the highest credential store generation recorded.
+func (s *State) CredGeneration() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.doc.CredGeneration
+}
+
+// RaiseCredGeneration records g durably when it is higher than the recorded
+// generation, and does nothing otherwise: the record only moves forward.
+func (s *State) RaiseCredGeneration(g uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	if g <= s.doc.CredGeneration {
+		return nil
+	}
+	next := s.doc
+	next.CredGeneration = g
 	return s.write(next)
 }
 

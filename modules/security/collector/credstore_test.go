@@ -90,22 +90,40 @@ func telnetUse(assetID string) authz.Use {
 type credFixture struct {
 	path  string
 	store *CredStore
+	gens  *State // where the store's generation is recorded
 	clock *clock
 	pkg   *register.Package
 }
 
 func newCredStore(t *testing.T) *credFixture {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "credentials.json")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials.json")
 	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
-	if err := InitCredStore(path, testNode, c.now); err != nil {
+	if err := InitState(filepath.Join(dir, "state.json")); err != nil {
 		t.Fatal(err)
 	}
-	s, err := OpenCredStore(path, CredStoreConfig{NodeID: testNode, Now: c.now})
+	gens, err := OpenState(filepath.Join(dir, "state.json"), c.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &credFixture{path: path, store: s, clock: c, pkg: loadRegister(t)}
+	if err := InitCredStore(path, testNode, c.now); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenCredStore(path, CredStoreConfig{NodeID: testNode, Now: c.now, Generations: gens})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &credFixture{path: path, store: s, gens: gens, clock: c, pkg: loadRegister(t)}
+}
+
+// memGens is a GenerationLog for tests that open a store without a fixture.
+type memGens struct{ g uint64 }
+
+func (m *memGens) CredGeneration() uint64 { return m.g }
+func (m *memGens) RaiseCredGeneration(g uint64) error {
+	m.g = max(m.g, g)
+	return nil
 }
 
 // sealFor seals secret to the fixture's collector, pinning the fingerprint
@@ -162,7 +180,7 @@ func TestCredStoreInitAndOpen(t *testing.T) {
 		t.Fatal("invalid node id accepted")
 	}
 	// A reopened store has the same install key.
-	again, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode})
+	again, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: f.gens})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,15 +244,15 @@ func TestOpenCredStoreFailsClosed(t *testing.T) {
 			if err := os.WriteFile(p, b, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := OpenCredStore(p, CredStoreConfig{NodeID: testNode}); !errors.Is(err, ErrStateUnavailable) {
+			if _, err := OpenCredStore(p, CredStoreConfig{NodeID: testNode, Generations: &memGens{}}); !errors.Is(err, ErrStateUnavailable) {
 				t.Fatalf("opened: %v", err)
 			}
 		})
 	}
-	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: "site-a-node2"}); !errors.Is(err, ErrStateUnavailable) {
+	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: "site-a-node2", Generations: f.gens}); !errors.Is(err, ErrStateUnavailable) {
 		t.Fatal("store opened for another node")
 	}
-	if _, err := OpenCredStore(filepath.Join(t.TempDir(), "missing.json"), CredStoreConfig{NodeID: testNode}); !errors.Is(err, ErrStateUnavailable) {
+	if _, err := OpenCredStore(filepath.Join(t.TempDir(), "missing.json"), CredStoreConfig{NodeID: testNode, Generations: f.gens}); !errors.Is(err, ErrStateUnavailable) {
 		t.Fatal("missing store opened")
 	}
 }
@@ -281,7 +299,7 @@ func TestInstallAndAcquire(t *testing.T) {
 		t.Fatalf("Use after Close: %v", err)
 	}
 	// The store survives a restart.
-	again, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode})
+	again, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: f.gens})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +628,7 @@ func TestStoredCiphertextBoundToReference(t *testing.T) {
 	if err := os.WriteFile(f.path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode})
+	s, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: f.gens})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,12 +682,63 @@ func TestBrokenCredStoreFailsClosed(t *testing.T) {
 		t.Fatalf("broken store still revokes: %v", err)
 	}
 	// The file still holds the last good state.
-	s, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode})
+	s, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: f.gens})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.Status("cred_bbbbbbb1") != nil || len(s.Status(ref.ID)) != 1 {
 		t.Fatal("the failed write reached the file")
+	}
+}
+
+// A6 on #90: removal is logical, so a restored older copy of the store
+// would bring a revoked secret back. The generation recorded in the State
+// refuses it, after a restart too.
+func TestRestoredStoreRefused(t *testing.T) {
+	f := newCredStore(t)
+	ref := telnetRef("cred_slice0001", assetA, 1)
+	f.install(t, ref, canary)
+	backup, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.Revoke(authz.CredentialRevokeBody{RefID: ref.ID, Reason: authz.RevokeOperator}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.path, backup, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: f.gens}); !errors.Is(err, ErrStateUnavailable) {
+		t.Fatalf("restored copy opened: %v", err)
+	}
+	gens, err := OpenState(f.gens.path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: gens}); !errors.Is(err, ErrStateUnavailable) {
+		t.Fatalf("restored copy opened after a restart: %v", err)
+	}
+	// Without a record the store does not open at all.
+	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode}); !errors.Is(err, ErrStateUnavailable) {
+		t.Fatalf("opened without a generation record: %v", err)
+	}
+}
+
+// A store ahead of its record, as after a crash between the two writes,
+// opens and the record catches up; every write moves both forward.
+func TestStoreAheadOfRecord(t *testing.T) {
+	f := newCredStore(t)
+	g := f.gens.CredGeneration()
+	f.install(t, telnetRef("cred_slice0001", assetA, 1), canary)
+	if f.gens.CredGeneration() != g+1 || f.store.doc.Generation != g+1 {
+		t.Fatalf("after a write: record %d, store %d, want %d", f.gens.CredGeneration(), f.store.doc.Generation, g+1)
+	}
+	behind := &memGens{g: g}
+	if _, err := OpenCredStore(f.path, CredStoreConfig{NodeID: testNode, Generations: behind}); err != nil {
+		t.Fatal(err)
+	}
+	if behind.g != g+1 {
+		t.Fatalf("record not raised: %d", behind.g)
 	}
 }
 
@@ -687,7 +756,7 @@ func FuzzOpenCredStore(f *testing.F) {
 		if err := os.WriteFile(p, b, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		s, err := OpenCredStore(p, CredStoreConfig{NodeID: testNode})
+		s, err := OpenCredStore(p, CredStoreConfig{NodeID: testNode, Generations: &memGens{}})
 		if err != nil {
 			if !errors.Is(err, ErrStateUnavailable) {
 				t.Fatalf("error not ErrStateUnavailable: %v", err)

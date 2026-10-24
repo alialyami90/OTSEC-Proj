@@ -138,14 +138,7 @@ type pipeOption func(*PipelineConfig, *pipeFixture)
 func newPipeline(t *testing.T, opts ...pipeOption) *pipeFixture {
 	t.Helper()
 	f := &pipeFixture{credFixture: newCredStore(t), runner: &fakeRunner{result: readFixture(t, "result-ok.json")}}
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	if err := InitState(statePath); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	if f.state, err = OpenState(statePath, f.clock.now); err != nil {
-		t.Fatal(err)
-	}
+	f.state = f.gens
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	f.release = priv
 	f.registers = NewRegisters(f.state, []authz.TrustAnchor{{KeyID: "release-2026", PublicKey: pub, Status: authz.KeyActive}})
@@ -163,6 +156,7 @@ func newPipeline(t *testing.T, opts ...pipeOption) *pipeFixture {
 	for _, o := range opts {
 		o(&cfg, f)
 	}
+	var err error
 	if f.pipe, err = NewPipeline(cfg); err != nil {
 		t.Fatal(err)
 	}
