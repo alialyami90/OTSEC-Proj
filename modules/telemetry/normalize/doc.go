@@ -65,7 +65,8 @@
 // committed in the same transaction as the events. When a read changes the
 // state but adds no events (an empty read after rows, which is the one gap
 // at a clear, D1-7), Output.StateChanged is true and the state still has to
-// be kept; C5 has no record to carry it then, which is an open point with A5.
+// be kept: the node commits the health records first, then saves the state
+// on its own (A5), so a crash in between repeats the gap and never loses it.
 //
 // # What it leaves out
 //
