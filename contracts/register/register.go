@@ -1,14 +1,12 @@
 package register
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"otsec.local/otsec/contracts/internal/strictjson"
 )
 
 // ContractID is the identifier every register package carries.
@@ -271,106 +269,16 @@ const SigningDomain = "otsec.register/0.1 package\n"
 // keys at any depth, anything after the package and any validation failure
 // are errors.
 func Decode(data []byte) (*Package, error) {
-	if err := checkStrictJSON(data); err != nil {
-		return nil, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
+	// Strict reading: exact key spelling, no duplicate or case-variant keys,
+	// no unknown fields, nothing after the package (A3 C3-A3-2, A6 review).
 	var p Package
-	if err := dec.Decode(&p); err != nil {
+	if err := strictjson.Decode(data, &p); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("register: data after the package")
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	return &p, nil
-}
-
-// checkStrictJSON rejects duplicate object keys at any depth and anything
-// after the first value. encoding/json silently keeps the last of duplicate
-// keys, so a package could otherwise show one line to a reviewer and another
-// to the collector (A3 review C3-A3-2).
-func checkStrictJSON(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	if err := strictValue(dec); err != nil {
-		return fmt.Errorf("register: %w", err)
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return fmt.Errorf("register: data after the package")
-	}
-	return nil
-}
-
-// jsonKeys holds every JSON field name used by Package and the types it
-// contains, spelled exactly as in their tags.
-var jsonKeys = func() map[string]bool {
-	keys := map[string]bool{}
-	var walk func(t reflect.Type)
-	seen := map[reflect.Type]bool{}
-	walk = func(t reflect.Type) {
-		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
-			t = t.Elem()
-		}
-		if t.Kind() != reflect.Struct || seen[t] {
-			return
-		}
-		seen[t] = true
-		for i := 0; i < t.NumField(); i++ {
-			f := t.Field(i)
-			if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name != "" && name != "-" {
-				keys[name] = true
-			}
-			walk(f.Type)
-		}
-	}
-	walk(reflect.TypeOf(Package{}))
-	return keys
-}()
-
-func strictValue(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	switch tok {
-	case json.Delim('{'):
-		seen := map[string]bool{}
-		for dec.More() {
-			k, err := dec.Token()
-			if err != nil {
-				return err
-			}
-			key := k.(string)
-			// encoding/json matches field names without regard to case, so
-			// "Line" would fill Line. Only the exact tag spellings are allowed
-			// (A6 review of C3).
-			if !jsonKeys[key] {
-				return fmt.Errorf("key %q is not a field name of this contract", key)
-			}
-			if seen[strings.ToLower(key)] {
-				return fmt.Errorf("duplicate key %q", key)
-			}
-			seen[strings.ToLower(key)] = true
-			if err := strictValue(dec); err != nil {
-				return err
-			}
-		}
-		_, err = dec.Token() // '}'
-		return err
-	case json.Delim('['):
-		for dec.More() {
-			if err := strictValue(dec); err != nil {
-				return err
-			}
-		}
-		_, err = dec.Token() // ']'
-		return err
-	}
-	return nil
 }
 
 var (
