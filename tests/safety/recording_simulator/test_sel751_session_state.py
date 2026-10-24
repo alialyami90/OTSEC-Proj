@@ -4,7 +4,7 @@ QUIT (p. 7.16). For C7-A6 change 2 (T-10, T-11) and A2's C7 review.
 
 Whether a new connection inherits that state is not documented, so the profile
 models it as a switch (RelayState). These tests show what each setting does to a
-collector; they say nothing about which one a real relay follows (H-12).
+collector; they say nothing about which one a real relay follows (H-15).
 Results are `simulated`.
 
 Run from the repository root:
@@ -31,7 +31,7 @@ REGISTER = check.load_register(os.path.join(HERE, "sel751-collector-register.jso
 LOGIN = [(b"ACC\r\n", b"Password: ?"), (PASSWORD + b"\r\n", b"=>")]
 
 
-async def drive(connections, relay, pause=0.0):
+async def drive(connections, relay, pause=0.0, **profile):
     """connections: one list of (bytes, marker) steps per connection, run one
     after another against one relay. Returns events, each connection's
     greeting, everything received, and the check report."""
@@ -39,7 +39,7 @@ async def drive(connections, relay, pause=0.0):
         log = os.path.join(tmp, "rec.jsonl")
         rec = sim.Recorder(log)
         cfg = sim.Config(telnet=True, responder_factory=profile_sel751.factory(
-            password=PASSWORD, relay=relay))
+            password=PASSWORD, relay=relay, **profile))
         server = await sim.start_tcp(rec, "127.0.0.1", 0, cfg)
         port = server.sockets[0].getsockname()[1]
         greetings, received = [], bytearray()
@@ -64,8 +64,8 @@ async def drive(connections, relay, pause=0.0):
     return events, greetings, bytes(received), check.check(events, REGISTER)
 
 
-def run(connections, relay=None, pause=0.0):
-    return asyncio.run(drive(connections, relay, pause))
+def run(connections, relay=None, pause=0.0, **profile):
+    return asyncio.run(drive(connections, relay, pause, **profile))
 
 
 def effects(events, session=None):
@@ -147,6 +147,26 @@ class InheritedState(unittest.TestCase):
         events, greetings, out, report = run([LOGIN, [], []], relay=relay)
         self.assertEqual(greetings[1:], [b"=>", b"=>"])
         self.assertGreater(relay.until, time.monotonic())
+
+
+class Framing(unittest.TestCase):
+    """p. 7.28: every message is sent as STX, lines, CRLF, ETX (A2's C6 review)."""
+
+    def test_messages_framed_prompts_not(self):
+        events, greetings, out, report = run([LOGIN + [(b"ID\r\n", b"=>"), (b"QUI\r\n", b"\r\n=")]],
+                                             stx_etx=True)
+        self.assertEqual(greetings[0], b"=")
+        self.assertIn(b"\r\nPassword: ?", out)
+        self.assertNotIn(b"\x02Password", out)
+        self.assertIn(b"Level 1\r\n\x03=>", out)
+        self.assertIn(b'\x02"FID=', out)
+        self.assertEqual(out.count(b"\x02"), out.count(b"\x03"))
+        self.assertTrue(report["pass"], report["violations"])
+
+    def test_off_by_default(self):
+        events, greetings, out, report = run([LOGIN + [(b"QUI\r\n", b"\r\n=")]])
+        self.assertNotIn(b"\x02", out)
+        self.assertNotIn(b"\x03", out)
 
 
 if __name__ == "__main__":
