@@ -12,7 +12,7 @@ import (
 	"otsec.local/otsec/contracts/authz"
 )
 
-const asset = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"
+const testAsset = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"
 
 type clock struct{ t time.Time }
 
@@ -92,63 +92,63 @@ func TestSeqIsDurableAndNeverReused(t *testing.T) {
 	}
 }
 
-// T-9 at the state layer: an unconfirmed authentication refuses the asset
+// T-9 at the state layer: an unconfirmed authentication refuses the testAsset
 // until the floor has passed; TIDLE shortens the floor; a clock stepped back
 // does not reopen it.
 func TestFailedAuthFloor(t *testing.T) {
 	_, s, c := newState(t)
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatalf("fresh asset: %v", err)
 	}
-	if err := s.BeginAuth(asset); err != nil {
+	if err := s.BeginAuth(testAsset); err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range []time.Duration{0, time.Minute, 30 * time.Minute, 31*time.Minute - time.Nanosecond} {
 		c.t = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC).Add(d)
-		if err := s.CheckFloor(asset); !isRateLimited(err) {
+		if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 			t.Fatalf("%s after ACC with TIDLE unknown: %v, want rate_limited", d, err)
 		}
 	}
 	c.t = time.Date(2026, 10, 24, 12, 31, 0, 0, time.UTC)
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatalf("31 minutes after ACC: %v", err)
 	}
 	c.t = time.Date(2026, 10, 24, 11, 0, 0, 0, time.UTC) // stepped back
-	if err := s.CheckFloor(asset); !isRateLimited(err) {
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("clock stepped back: %v, want rate_limited", err)
 	}
-	if err := s.SetTIDLE(asset, 5*time.Minute); err != nil {
+	if err := s.SetTIDLE(testAsset, 5*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	c.t = time.Date(2026, 10, 24, 12, 6, 0, 0, time.UTC)
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatalf("TIDLE 5 min, 6 min after ACC: %v", err)
 	}
 	c.t = time.Date(2026, 10, 24, 12, 5, 59, 0, time.UTC)
-	if err := s.CheckFloor(asset); !isRateLimited(err) {
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("TIDLE 5 min, 5:59 after ACC: %v", err)
 	}
 	// Other assets are unaffected; a confirmed login clears the floor.
-	if err := s.CheckFloor("other-asset"); err != nil {
+	if err := s.CheckFloor("other-testAsset"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmAuth(asset); err != nil {
+	if err := s.ConfirmAuth(testAsset); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatalf("after confirm: %v", err)
 	}
 }
 
 func TestTIDLEOutOfRangeIsUnknown(t *testing.T) {
 	_, s, c := newState(t)
-	s.BeginAuth(asset)
+	s.BeginAuth(testAsset)
 	for _, d := range []time.Duration{0, 30 * time.Second, 31 * time.Minute, -time.Minute} {
-		if err := s.SetTIDLE(asset, d); err != nil {
+		if err := s.SetTIDLE(testAsset, d); err != nil {
 			t.Fatal(err)
 		}
 		c.t = time.Date(2026, 10, 24, 12, 30, 0, 0, time.UTC)
-		if err := s.CheckFloor(asset); !isRateLimited(err) {
+		if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 			t.Fatalf("TIDLE %s: %v, want the 31-minute floor", d, err)
 		}
 	}
@@ -156,7 +156,7 @@ func TestTIDLEOutOfRangeIsUnknown(t *testing.T) {
 
 // T-9b at the state layer: the collector process is killed after ACC was
 // recorded and before any confirmation. A new process reading the same file
-// refuses the asset. The kill is real (the helper process exits without
+// refuses the testAsset. The kill is real (the helper process exits without
 // returning), so nothing but the file carries the state across.
 func TestFloorSurvivesKill(t *testing.T) {
 	if os.Getenv("OTSEC_STATE_HELPER") != "" {
@@ -164,7 +164,7 @@ func TestFloorSurvivesKill(t *testing.T) {
 		if err != nil {
 			os.Exit(3)
 		}
-		if err := s.BeginAuth(asset); err != nil {
+		if err := s.BeginAuth(testAsset); err != nil {
 			os.Exit(4)
 		}
 		p, _ := os.FindProcess(os.Getpid())
@@ -183,7 +183,7 @@ func TestFloorSurvivesKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckFloor(asset); !isRateLimited(err) {
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("after a kill between ACC and confirmation: %v, want rate_limited", err)
 	}
 }
@@ -195,13 +195,13 @@ func TestFailedWriteBreaksState(t *testing.T) {
 	if err := os.Mkdir(path+".tmp", 0o700); err != nil { // the temporary file cannot be created
 		t.Fatal(err)
 	}
-	if err := s.BeginAuth(asset); !errors.Is(err, ErrStateUnavailable) {
+	if err := s.BeginAuth(testAsset); !errors.Is(err, ErrStateUnavailable) {
 		t.Fatalf("BeginAuth: %v", err)
 	}
 	if _, err := s.NextSeq(); !errors.Is(err, ErrStateUnavailable) {
 		t.Fatalf("NextSeq after a failed write: %v", err)
 	}
-	if err := s.CheckFloor("other-asset"); !errors.Is(err, ErrStateUnavailable) {
+	if err := s.CheckFloor("other-testAsset"); !errors.Is(err, ErrStateUnavailable) {
 		t.Fatalf("CheckFloor after a failed write: %v", err)
 	}
 	if s.LastSeq() != 0 {
@@ -211,30 +211,30 @@ func TestFailedWriteBreaksState(t *testing.T) {
 
 func TestFloorGate(t *testing.T) {
 	_, s, _ := newState(t)
-	g := NewFloorGate(s, asset)
+	g := NewFloorGate(s, testAsset)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := g.BeforeACC(ctx); err == nil {
 		t.Fatal("BeforeACC with a cancelled context")
 	}
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatal("a refused BeforeACC set the floor")
 	}
 	if err := g.BeforeACC(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckFloor(asset); !isRateLimited(err) {
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("after BeforeACC: %v", err)
 	}
 	g.Confirmed(context.Background())
-	if err := s.CheckFloor(asset); err != nil {
+	if err := s.CheckFloor(testAsset); err != nil {
 		t.Fatalf("after Confirmed: %v", err)
 	}
 }
 
 func TestFloorGateAlarmsOnFailedClear(t *testing.T) {
 	path, s, c := newState(t)
-	g := NewFloorGate(s, asset)
+	g := NewFloorGate(s, testAsset)
 	var alarmed error
 	g.Alarm = func(err error) { alarmed = err }
 	if err := g.BeforeACC(context.Background()); err != nil {
@@ -245,13 +245,13 @@ func TestFloorGateAlarmsOnFailedClear(t *testing.T) {
 	if !errors.Is(alarmed, ErrStateUnavailable) {
 		t.Fatalf("alarm %v", alarmed)
 	}
-	// The floor stays set on disk: a restart still refuses the asset.
+	// The floor stays set on disk: a restart still refuses the testAsset.
 	os.Remove(path + ".tmp")
 	s2, err := OpenState(path, c.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s2.CheckFloor(asset); !isRateLimited(err) {
+	if err := s2.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("after a failed clear and a restart: %v", err)
 	}
 }

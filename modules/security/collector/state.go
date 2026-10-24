@@ -73,21 +73,29 @@ func InitState(path string) error {
 	if err != nil {
 		return err
 	}
+	if err := createExclusive(path, b); err != nil {
+		return fmt.Errorf("collector: create state: %w", err)
+	}
+	return nil
+}
+
+// createExclusive writes b to a new file at path, mode 0600, and flushes the
+// file and its directory. It refuses an existing file, and removes what it
+// created when a step fails.
+func createExclusive(path string, b []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("collector: create state: %w", err)
+		return err
 	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
+	_, err = f.Write(b)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		os.Remove(path)
-		return fmt.Errorf("collector: create state: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(path)
-		return fmt.Errorf("collector: create state: %w", err)
-	}
-	if err := f.Close(); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))
