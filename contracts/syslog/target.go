@@ -45,6 +45,41 @@ type Target struct {
 	// collector acknowledges only after the message is durably written
 	// (C6-A6-1). Required when class is required.
 	DurableAck *DurableAck `json:"durable_ack,omitempty"`
+	// Acknowledgement is an admin's acceptance of an insecure target (tcp,
+	// udp, plain relp), required on those and refused on the others (A1
+	// D1-22). It covers the target as configured, device_text included.
+	// Setting or changing it is a C8 audit record.
+	Acknowledgement *Acknowledgement `json:"acknowledgement,omitempty"`
+	// DeviceText says whether messages carry the record's device bytes.
+	// Absent means on for relp-tls and tls, off for insecure transports,
+	// so a SER row never crosses an unencrypted link unless an admin chose
+	// it (D1-22). Text left out this way is marked dtext_omitted="config"
+	// and reported once, in the target's state and audit record.
+	DeviceText *bool `json:"device_text,omitempty"`
+}
+
+// Acknowledgement has the shape of C1's insecure-endpoint acknowledgement.
+// TODO(C1): use asset.Acknowledgement once contracts/asset merges.
+type Acknowledgement struct {
+	By     string   `json:"by"` // TODO(C7): human principal ID.
+	At     string   `json:"at"` // RFC 3339 UTC with Z
+	Reason string   `json:"reason"`
+	Scope  AckScope `json:"scope"`
+}
+
+// AckScope is where an insecure target is accepted. 0.1 has one value, as
+// in C1 (ADR-0005); a production scope needs an owner decision and a later
+// minor.
+type AckScope string
+
+const LabOnly AckScope = "lab-only"
+
+// SendsDeviceText reports whether messages to t carry device bytes.
+func (t *Target) SendsDeviceText() bool {
+	if t.DeviceText != nil {
+		return *t.DeviceText
+	}
+	return !t.Insecure()
 }
 
 // DurableAck is the result of the commissioning check of a required
@@ -178,20 +213,21 @@ func (t *Target) Insecure() bool {
 type Code string
 
 const (
-	CodeSchema        Code = "schema"         // identifier missing, malformed, or another contract or major
-	CodeUnknownField  Code = "unknown-field"  // targets are strict: unknown, duplicate or case-variant key
-	CodeEnum          Code = "enum"           // value outside a closed enum
-	CodeRequiredClass Code = "required-class" // required on a transport other than relp-tls
-	CodeFraming       Code = "framing"        // framing not allowed for the transport
-	CodeSize          Code = "size"           // size limit outside the allowed range
-	CodeTLS           Code = "tls"            // TLS settings missing or present where they do not apply
-	CodeDelivery      Code = "delivery"       // RELP window or replay window missing or out of range
-	CodeField         Code = "field"          // name, host, port or facility invalid
-	CodeTooLarge      Code = "too-large"      // fixed fields alone exceed the size limit (Render)
-	CodeFrameUnsafe   Code = "frame-unsafe"   // LF or NUL in a message for non-transparent framing (Frame)
-	CodeRELPViolation Code = "relp-violation" // inbound bytes outside the TB5 grammar (ParseRELPResponse)
-	CodeEventInvalid  Code = "event-invalid"  // the C4 event failed its own validation (Render)
-	CodeAudit         Code = "audit"          // audit on a target that is not required relp-tls RFC 5424 with room for a record (D1-15)
+	CodeSchema        Code = "schema"          // identifier missing, malformed, or another contract or major
+	CodeUnknownField  Code = "unknown-field"   // targets are strict: unknown, duplicate or case-variant key
+	CodeEnum          Code = "enum"            // value outside a closed enum
+	CodeRequiredClass Code = "required-class"  // required on a transport other than relp-tls
+	CodeFraming       Code = "framing"         // framing not allowed for the transport
+	CodeSize          Code = "size"            // size limit outside the allowed range
+	CodeTLS           Code = "tls"             // TLS settings missing or present where they do not apply
+	CodeDelivery      Code = "delivery"        // RELP window or replay window missing or out of range
+	CodeField         Code = "field"           // name, host, port or facility invalid
+	CodeTooLarge      Code = "too-large"       // fixed fields alone exceed the size limit (Render)
+	CodeFrameUnsafe   Code = "frame-unsafe"    // LF or NUL in a message for non-transparent framing (Frame)
+	CodeRELPViolation Code = "relp-violation"  // inbound bytes outside the TB5 grammar (ParseRELPResponse)
+	CodeEventInvalid  Code = "event-invalid"   // the C4 event failed its own validation (Render)
+	CodeAudit         Code = "audit"           // audit on a target that is not required relp-tls RFC 5424 with room for a record (D1-15)
+	CodeAck           Code = "acknowledgement" // an insecure target without a complete acknowledgement, or a secure one with one (D1-22)
 )
 
 // Error is one validation failure.
@@ -329,6 +365,17 @@ func (t *Target) Validate() error {
 		}
 		if (t.Class == ClassRequired || t.Audit) && t.TLS.ClientCredentialRef == "" {
 			fail(CodeTLS, "tls.client_credential_ref", "required and audit targets authenticate the node with mutual TLS, so no one else can write to the collector (C6-A3-2)")
+		}
+	}
+	if known {
+		a := t.Acknowledgement
+		switch {
+		case !t.Insecure() && a != nil:
+			fail(CodeAck, "acknowledgement", "%q is not insecure; nothing to acknowledge", t.Transport)
+		case t.Insecure() && (a == nil || a.By == "" || !utcZ(a.At) || strings.TrimSpace(a.Reason) == ""):
+			fail(CodeAck, "acknowledgement", "%q sends in clear text and needs an acknowledgement with by, at, reason and scope (D1-22)", t.Transport)
+		case t.Insecure() && a.Scope != LabOnly:
+			fail(CodeAck, "acknowledgement.scope", "%q: 0.1 accepts an insecure target for lab-only", a.Scope)
 		}
 	}
 	if t.Class == ClassRequired {

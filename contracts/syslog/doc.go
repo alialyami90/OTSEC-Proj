@@ -45,6 +45,13 @@
 //     authenticate the node with mutual TLS (client_credential_ref), so no
 //     one else who can reach the collector can write events or audit into
 //     it (C6-A3-2, C6-A3-3).
+//   - Insecure targets (A1 D1-22). A tcp, udp or plain relp target carries
+//     an admin's acknowledgement (by, at, reason, scope; C1's shape), and in
+//     0.1 the only scope is lab-only. By default it sends no device text:
+//     the record's bytes are replaced by dtext_omitted="config", reported
+//     once in the target's state and audit record rather than as a
+//     forward.text-omitted per message. An admin may turn device_text on;
+//     the acknowledgement covers the target as configured.
 //   - Target changes are security changes (C6-A3-7). Only an admin adds,
 //     changes or removes a target; each change is a C8 policy.apply record
 //     naming the target and a hash of its configuration. Removing the last
@@ -64,7 +71,7 @@
 //   - Size. A message never exceeds the target's limit and is never split or
 //     cut. When it would exceed the limit, Render applies two steps in order
 //     and stops at the first that fits: (1) the device text is replaced by
-//     dtext_omitted="1" (rsha256 and rlen still identify the record, which
+//     dtext_omitted="size" (rsha256 and rlen still identify the record, which
 //     stays in the store), then (2) the MSG summary is dropped. Each step is
 //     reported in Outcome, and the forwarder emits a C4 forward.text-omitted
 //     health event naming the event. If the message still does not fit,

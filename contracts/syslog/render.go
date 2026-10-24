@@ -26,9 +26,15 @@ const AppName = "otsec"
 // Health types C6 adds to C4's open set. forward.text-omitted is C4's own.
 const HealthTooLarge = "forward.too-large"
 
+// dtext_omitted values.
+const (
+	OmitSize   = "size"   // left out to fit the size limit
+	OmitConfig = "config" // the target sends no device text (D1-22)
+)
+
 // Outcome reports what Render had to leave out to fit the size limit.
 type Outcome struct {
-	TextOmitted    bool // device text replaced by dtext_omitted="1"
+	TextOmitted    bool // device text replaced by dtext_omitted="size"
 	SummaryDropped bool // MSG summary left out
 }
 
@@ -89,8 +95,13 @@ type Param struct {
 //	flag     an event flag (repeated)
 //	dtext    the record's native bytes, when printable UTF-8
 //	dtext_b64      the record's native bytes otherwise
-//	dtext_omitted  "1" when the bytes were left out to fit the size limit
-func params(e *event.Event, withText bool) []Param {
+//	dtext_omitted  why the bytes were left out: "size" (to fit the limit;
+//	               the forwarder emits forward.text-omitted) or "config"
+//	               (the target sends no device text, D1-22; reported once
+//	               in the target's state, not per message)
+//
+// omit is "" to include the device text, or the dtext_omitted value.
+func params(e *event.Event, omit string) []Param {
 	var ps []Param
 	add := func(name, value string) {
 		if printable(value) {
@@ -188,8 +199,8 @@ func params(e *event.Event, withText bool) []Param {
 	}
 	if n := e.Native; n != nil && n.Bytes != nil {
 		switch {
-		case !withText:
-			ps = append(ps, Param{"dtext_omitted", "1"})
+		case omit != "":
+			ps = append(ps, Param{"dtext_omitted", omit})
 		case printable(string(n.Bytes)):
 			ps = append(ps, Param{"dtext", string(n.Bytes)})
 		default:
@@ -324,9 +335,12 @@ func Render(e *event.Event, t *Target) ([]byte, Outcome, error) {
 	if err := e.Validate(); err != nil {
 		return nil, out, &Error{Code: CodeEventInvalid, Field: "event", Detail: err.Error()}
 	}
-	withText, msg := true, summary(e)
+	omit, msg := "", summary(e)
+	if !t.SendsDeviceText() {
+		omit = OmitConfig
+	}
 	for {
-		b, err := assemble(e, t, params(e, withText), msg)
+		b, err := assemble(e, t, params(e, omit), msg)
 		if err != nil {
 			return nil, out, err
 		}
@@ -334,8 +348,8 @@ func Render(e *event.Event, t *Target) ([]byte, Outcome, error) {
 			return b, out, nil
 		}
 		switch {
-		case withText && e.Native != nil && e.Native.Bytes != nil:
-			withText, out.TextOmitted = false, true
+		case omit == "" && e.Native != nil && e.Native.Bytes != nil:
+			omit, out.TextOmitted = OmitSize, true
 		case msg != "":
 			msg, out.SummaryDropped = "", true
 		default:

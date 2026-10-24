@@ -13,5 +13,11 @@
   "durable_ack": {
     "verified_utc": "2026-10-24T09:00:00Z",
     "evidence_ref": "commissioning/siem-a/durable-ack"
+  },
+  "acknowledgement": {
+    "by": "admin-example",
+    "at": "2026-10-24T09:00:00Z",
+    "reason": "Lab collector on the isolated test segment; no TLS listener.",
+    "scope": "lab-only"
   }
 }

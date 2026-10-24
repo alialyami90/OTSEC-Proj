@@ -1,6 +1,6 @@
 # C6 examples
 
-None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, `site-a-ca`, `site-a-node1-forwarder` and `commissioning/siem-a/durable-ack` are illustrative references (TODO(A3 node key ref)); no durable-acknowledgement check has been run against any collector.
+None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, `admin-example`, `site-a-ca`, `site-a-node1-forwarder` and `commissioning/siem-a/durable-ack` are illustrative references (TODO(A3 node key ref)); no durable-acknowledgement check has been run against any collector.
 
 ## Targets
 
@@ -9,10 +9,10 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
 | `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check. |
-| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure. |
+| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure; acknowledged lab-only, no device text. |
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
-| `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure. |
-| `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure. |
+| `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure: acknowledged lab-only, no device text (D1-22). |
+| `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure: acknowledged lab-only, no device text. |
 | `valid/relp-tls-audit.json` | | | Also carries the C8 audit stream: required relp-tls, RFC 5424, 17408 octets (D1-15). |
 | `invalid/required-on-tls.json` | required-class | no | RFC 5425 cannot confirm delivery. |
 | `invalid/required-on-tcp.json` | required-class | no | Neither can plain TCP. |
@@ -36,6 +36,9 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `invalid/required-without-client-credential.json` | tls | no | A required target authenticates the node with mutual TLS (C6-A3-2). |
 | `invalid/required-without-durable-ack.json` | delivery | no | A required target records the commissioning check that its collector acknowledges after a durable write (C6-A6-1). |
 | `invalid/malformed-spki-pin.json` | tls | yes | An SPKI pin is a base64 SHA-256. |
+| `invalid/insecure-without-acknowledgement.json` | acknowledgement | no | Plain TCP without an admin's acknowledgement (D1-22). |
+| `invalid/acknowledgement-production-scope.json` | acknowledgement | yes | `same-segment`: 0.1 accepts an insecure target for lab-only. |
+| `invalid/acknowledgement-on-tls.json` | acknowledgement | no | An acknowledgement on a TLS target, where there is nothing to accept. |
 
 ## Rendered messages
 
@@ -44,7 +47,7 @@ Each file in `rendered/` is `Render` output for one C4 golden example (`contract
 | File | Event | Target |
 | --- | --- | --- |
 | `sel751-row8.rfc5424.txt` | SEL-751 Figure 10.16 row 8 | `tls-best-effort` |
-| `sel751-row8.rfc3164.txt` | the same row, 1021 of 1024 octets | `udp-rfc3164` |
+| `sel751-row8.rfc3164.txt` | the same row, without its device text (`dtext_omitted="config"`, D1-22) | `udp-rfc3164` |
 | `rtac-syslog.rfc5424.txt` | the RTAC Syslog example. The RTAC's own message, `<190>` included, sits escaped in `dtext`. | `relp-tls-required` |
 | `health-ser-gap.rfc5424.txt` | a `ser.gap` platform event, severity 4 | `relp-tls-required` |
 | `constructed-invalid-date.rfc5424.txt` | the constructed `02/30/2007` row: `dt` without `dwall` | `tls-best-effort` |

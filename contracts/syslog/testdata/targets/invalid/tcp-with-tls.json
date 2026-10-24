@@ -13,5 +13,11 @@
   "tls": {
     "server_name": "siem.example.net",
     "trust_anchor_ref": "site-a-ca"
+  },
+  "acknowledgement": {
+    "by": "admin-example",
+    "at": "2026-10-24T09:00:00Z",
+    "reason": "Lab collector on the isolated test segment; no TLS listener.",
+    "scope": "lab-only"
   }
 }

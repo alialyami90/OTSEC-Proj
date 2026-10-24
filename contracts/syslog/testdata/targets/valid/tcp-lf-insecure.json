@@ -9,5 +9,11 @@
   "class": "best-effort",
   "max_message_octets": 2048,
   "facility": 16,
-  "replay_seconds": 600
+  "replay_seconds": 600,
+  "acknowledgement": {
+    "by": "admin-example",
+    "at": "2026-10-24T09:00:00Z",
+    "reason": "Lab collector on the isolated test segment; no TLS listener.",
+    "scope": "lab-only"
+  }
 }
