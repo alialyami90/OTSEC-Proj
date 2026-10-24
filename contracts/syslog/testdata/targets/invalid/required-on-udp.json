@@ -9,7 +9,6 @@
   "class": "required",
   "max_message_octets": 1024,
   "facility": 16,
-  "replay_seconds": 60,
   "durable_ack": {
     "verified_utc": "2026-10-24T09:00:00Z",
     "evidence_ref": "commissioning/siem-a/durable-ack"

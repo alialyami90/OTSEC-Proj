@@ -33,10 +33,13 @@ type Target struct {
 	TLS      *TLSConfig `json:"tls,omitempty"`
 	// RELPWindow bounds frames in flight in mode A.
 	RELPWindow int `json:"relp_window,omitempty"`
-	// ReplaySeconds is the mode B replay window (ADR-0004 items 5 and 6): on
-	// every reconnect the forwarder re-sends the events committed in the last
-	// ReplaySeconds seconds. The C5 consumer for this target has the same
-	// window, so those events are never pruned before the replay.
+	// ReplaySeconds is the replay window of a best-effort target (ADR-0004
+	// items 5 and 6), required on every best-effort target and absent on a
+	// required one. It is the C5 consumer's ReplayWindow, so nothing in it
+	// is pruned before a replay (D1-5). In mode B, every reconnect resumes at
+	// the lower of cursor+1 and the first event committed in the window; in
+	// mode A (plain RELP), the OK cursor is the resume point and the window
+	// only bounds pruning (C6-A5-1).
 	ReplaySeconds int `json:"replay_seconds,omitempty"`
 	// Audit is set when the target also carries the node's C8 audit stream.
 	// Only a required relp-tls target in RFC 5424 with room for a whole
@@ -397,16 +400,17 @@ func (t *Target) Validate() error {
 			if t.RELPWindow < 1 || t.RELPWindow > 1024 {
 				fail(CodeDelivery, "relp_window", "mode A needs a window of 1 to 1024 frames")
 			}
-			if t.ReplaySeconds != 0 {
-				fail(CodeDelivery, "replay_seconds", "mode A advances on acknowledgements, not a replay window")
-			}
-		} else {
-			if t.ReplaySeconds < 1 || t.ReplaySeconds > MaxReplaySeconds {
-				fail(CodeDelivery, "replay_seconds", "mode B needs a replay window of 1 to %d seconds", MaxReplaySeconds)
-			}
-			if t.RELPWindow != 0 {
-				fail(CodeDelivery, "relp_window", "only RELP targets have a RELP window")
-			}
+		} else if t.RELPWindow != 0 {
+			fail(CodeDelivery, "relp_window", "only RELP targets have a RELP window")
+		}
+		// The replay window is the C5 consumer window of every best-effort
+		// target, mode A included (C6-A5-1): pruning for it follows age
+		// alone, and a required target's pruning follows acknowledgements.
+		switch {
+		case t.Class == ClassRequired && t.ReplaySeconds != 0:
+			fail(CodeDelivery, "replay_seconds", "a required target is pruned on acknowledgements, not a replay window")
+		case t.Class != ClassRequired && (t.ReplaySeconds < 1 || t.ReplaySeconds > MaxReplaySeconds):
+			fail(CodeDelivery, "replay_seconds", "a best-effort target needs a replay window of 1 to %d seconds", MaxReplaySeconds)
 		}
 	}
 	return errors.Join(errs...)

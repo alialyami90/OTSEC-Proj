@@ -9,7 +9,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
 | `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check. |
-| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure; acknowledged lab-only, no device content. |
+| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure, so it has a one-hour replay window as its C5 window (C6-A5-1); acknowledged lab-only, no device content. |
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
 | `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure: acknowledged lab-only, no device content (D1-22). |
 | `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure: acknowledged lab-only, no device content. |
@@ -25,7 +25,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `invalid/relp-tls-without-tls.json` | tls | no | A TLS transport names the server and trust anchor. |
 | `invalid/tcp-with-tls.json` | tls | no | TLS settings on a transport without TLS. |
 | `invalid/mode-b-without-replay.json` | delivery | no | A mode B target needs a replay window. |
-| `invalid/relp-with-replay.json` | delivery | no | A mode A target advances on acknowledgements, not a window. |
+| `invalid/required-with-replay.json` | delivery | no | A required target is pruned on acknowledgements, not a replay window. |
 | `invalid/misspelt-class.json` | unknown-field | yes | `clas`: targets are strict, so a typo cannot fall back to a default. |
 | `invalid/case-variant-class.json` | unknown-field | yes | `CLASS` beside `class`: strictjson rejects case variants. |
 | `invalid/other-major.json` | schema | yes | `otsec.syslog/1.0`. |

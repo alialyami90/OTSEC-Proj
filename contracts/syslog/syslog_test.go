@@ -82,7 +82,7 @@ var invalidTargets = map[string]Code{
 	"relp-tls-without-tls":               CodeTLS,
 	"tcp-with-tls":                       CodeTLS,
 	"mode-b-without-replay":              CodeDelivery,
-	"relp-with-replay":                   CodeDelivery,
+	"required-with-replay":               CodeDelivery,
 	"misspelt-class":                     CodeUnknownField,
 	"case-variant-class":                 CodeUnknownField,
 	"other-major":                        CodeSchema,

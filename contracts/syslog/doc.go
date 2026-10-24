@@ -21,13 +21,30 @@
 //     timeout (DefaultRELPResponseTimeout) ends the session, and every
 //     transaction after the cursor is sent again. Nothing is skipped.
 //     Mode B (every other transport): nothing the receiver says advances it;
-//     on every reconnect the forwarder re-sends the events committed in the
-//     last replay_seconds (a window by time, ADR-0004 item 6), and the
-//     platform reports the target as unconfirmed. The C5 consumer of a mode B
-//     target has the same window, so nothing in it is pruned before the
-//     replay (C5 ComputeBoundary, A1 D1-5). Delivery is at-least-once in
-//     both modes; receivers remove duplicates by the eid parameter, which is
-//     the C4 event ID.
+//     every reconnect resumes at the lower of cursor+1 and the first event
+//     committed in the last replay_seconds (a window by time, ADR-0004 item
+//     6), and the platform reports the target as unconfirmed. Every
+//     best-effort target, plain RELP included, has replay_seconds, and its
+//     C5 consumer has the same window, so nothing in it is pruned before a
+//     replay (C5 ComputeBoundary, A1 D1-5, C6-A5-1). When the resume point
+//     has already been pruned, Outbox.Read returns the first retained event
+//     and the forwarder reports the skipped range as forward.unreachable
+//     (C6-A5). Delivery is at-least-once in both modes; receivers remove
+//     duplicates by the eid parameter, which is the C4 event ID.
+//   - Targets and C5 consumers (C6-A5-2). A target is one C5 consumer per
+//     event stream it forwards, plus the audit stream when audit is set:
+//     ConsumerID is the target name, Delivery its class and ReplayWindow its
+//     replay_seconds. Renaming a target makes a new consumer with a new
+//     cursor. A new required target starts at the first retained event, so
+//     it receives everything still held; a new best-effort target starts at
+//     the first event in its window. Removing a required target raises an
+//     alarm that states how many retained events become prunable.
+//   - Known limits. A too-large event holds its target's cursor until the
+//     forward.too-large health event is accepted, so a target that never
+//     accepts it stalls, visibly, until the store's quota alarms. A node
+//     with no audit target keeps every audit record until an export or the
+//     C5 audit-store-full alarm; collection then stops (audit before act,
+//     D1-11) while Syslog intake continues.
 //   - What "required" promises. A RELP 200 OK says the collector accepted a
 //     message, not that it stored it: with in-memory queues, rsyslog lost
 //     1,471 of 1,500 acknowledged messages when killed (E-A4-03 trial 1),

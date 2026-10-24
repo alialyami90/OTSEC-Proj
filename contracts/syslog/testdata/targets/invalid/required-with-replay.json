@@ -1,6 +1,6 @@
 {
   "schema": "otsec.syslog/0.1",
-  "name": "siem-a",
+  "name": "required-replay",
   "host": "siem.example.net",
   "port": 2514,
   "transport": "relp-tls",

@@ -15,5 +15,6 @@
     "at": "2026-10-24T09:00:00Z",
     "reason": "Lab collector on the isolated test segment; no TLS listener.",
     "scope": "lab-only"
-  }
+  },
+  "replay_seconds": 3600
 }
