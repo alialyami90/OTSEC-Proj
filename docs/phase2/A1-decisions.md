@@ -123,5 +123,12 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 
 **Ruling:**
 - **Phase 2:** A3's durable install budget (10 installs per hour per node, refused with `rate_limited`, and no shared count in any reply) is accepted as an interim control. It is acceptable because every Phase 2 credential is a lab-only test value (D2-5), no secret of another scope exists, and D2-4 and D2-10 keep every endpoint on the simulator.
-- **Before any `device-observed` endpoint** (that is, before D2-4 or D2-10 is lifted), installs must be authenticated independently of the node. An administrator signs the install request with a key whose public half is pinned in the collector, and the signature binds the reference, the scope and a single-use nonce. The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. A3 designs this, and it is a C7 0.2 candidate.
+- **Before any `device-observed` endpoint** (that is, before D2-4 or D2-10 is lifted), installs must be authenticated independently of the node. An administrator signs the request with a key whose public half is pinned in the collector, out of band. The signature binds:
+  - the reference and the scope;
+  - the sealed secret itself, so that a node cannot swap its own guess under a genuine signature;
+  - the node ID and the install key ID;
+  - an expiry;
+  - a single-use nonce, which the collector spends durably before it makes any decision.
+
+  The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. Revoke and clear-suspension carry the same requirement (A3 review of #91). A revoke stops collection, and a clear lifts a safety floor, so neither may be originated by the node. A3's design, [A3-signed-credential-requests.md](A3-signed-credential-requests.md), is the C7 0.2 candidate.
 - This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
