@@ -9,6 +9,7 @@
   "kind": "ser",
   "source": {
     "origin_auth": "session",
+    "evidence_class": "simulated",
     "sender": {
       "address": "192.0.2.40"
     }

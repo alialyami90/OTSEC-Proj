@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/node"
 )
 
@@ -106,7 +107,21 @@ type Source struct {
 	// copied into Asset when the sender relays for others (A3 AP-22).
 	Sender     *Sender    `json:"sender,omitempty"`
 	OriginAuth OriginAuth `json:"origin_auth"`
+	// EvidenceClass says whether the far end was a real device or a
+	// simulator (A1 D1-23, principle 10). Required on device events and
+	// absent on platform events. Only two C1 values are allowed:
+	// device-observed and simulated. It is set from configuration, never
+	// from what the far end says: for adapter-poll from C2 Result.target,
+	// and for received Syslog from the C1 endpoint, where an endpoint fed
+	// by a simulator or a replay is simulated.
+	EvidenceClass asset.EvidenceClass `json:"evidence_class,omitempty"`
 }
+
+// Simulated reports whether a reader must treat the event as coming from a
+// simulator. Any value other than device-observed counts as simulated,
+// because that is the weaker claim (D1-23). This includes an empty value,
+// and a value that only a later minor defines.
+func (s Source) Simulated() bool { return s.EvidenceClass != asset.DeviceObserved }
 
 // AssetRef refers to a C1 asset.
 //
@@ -221,6 +236,11 @@ const (
 )
 
 // Received is when and how the node received or committed the record.
+//
+// For an adapter-poll event, UTC is C2 Transcript.ReceivedAt(record span):
+// the at of the receive segment that holds the record's last byte. The
+// resolution and clock state are the node's clock status at the
+// invocation's ended_at (C2 review, C2-A4 changes 4 and 5).
 type Received struct {
 	UTC          string `json:"utc"`           // RFC 3339, UTC, Z suffix
 	ResolutionNS int64  `json:"resolution_ns"` // the step of the node clock's reading

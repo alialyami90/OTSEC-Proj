@@ -431,8 +431,9 @@ func TestOversize(t *testing.T) {
 			if v, _ := m.Get("dtext_omitted"); v != OmitSize {
 				t.Errorf("%s at %d: no dtext_omitted=size", name, limit)
 			}
-			// Identity, time and the record's hash survive every step.
-			for _, p := range []string{"eid", "rcv", "rsha256", "rlen", "origin", "auth"} {
+			// Identity, time, the record's hash and the evidence class survive
+			// every step (D1-23).
+			for _, p := range []string{"eid", "rcv", "rsha256", "rlen", "origin", "auth", "evc"} {
 				if _, ok := m.Get(p); !ok {
 					t.Errorf("%s at %d: %s cut", name, limit, p)
 				}

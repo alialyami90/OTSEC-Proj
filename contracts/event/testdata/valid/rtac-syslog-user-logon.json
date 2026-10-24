@@ -18,7 +18,8 @@
     "sender": {
       "address": "192.0.2.40"
     },
-    "origin_auth": "none"
+    "origin_auth": "none",
+    "evidence_class": "simulated"
   },
   "collection": {
     "method": "syslog-receive",

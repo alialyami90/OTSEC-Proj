@@ -1,6 +1,6 @@
 # C4 golden examples
 
-Generated from the documented-example fixtures named below, then frozen. None of them is device output. Values that no document supplies are illustrative and say so here: node ID, stream, receive times, the invocation ID, the asset IDs and the RTAC sender address `192.0.2.40` (RFC 5737 documentation range). The asset IDs and the RTAC address are the ones in A2's C1 examples (PR #32), so the two contracts' examples describe the same assets. The operation ID `sel.ser.read_all` is the SER operation in C3's register (PR #27).
+Generated from the documented-example fixtures named below, then frozen. None of them is device output, so every device event carries `source.evidence_class` `simulated` (D1-23): C1 classes test fixtures as simulated. Values that no document supplies are illustrative and say so here: node ID, stream, receive times, the invocation ID, the asset IDs and the RTAC sender address `192.0.2.40` (RFC 5737 documentation range). The asset IDs and the RTAC address are the ones in A2's C1 examples (PR #32), so the two contracts' examples describe the same assets. The operation ID `sel.ser.read_all` is the SER operation in C3's register (PR #27).
 
 `sel751-fig10-16.txt` is a byte-exact copy of A2's transcription `tests/fixtures/ied/sel/751/documented-example/ser-report-fig10-16.txt` (SEL-751 IM 20260910, Figure 10.16, `documented-example`). `TestFixtureCopyIsA2Transcription` keeps them identical; the copy is marked `-text` so a Windows checkout cannot change its bytes.
 
@@ -17,7 +17,7 @@ Generated from the documented-example fixtures named below, then frozen. None of
 
 ## Invalid
 
-Each file is `sel751-fig10-16-row8.json` with one change (the platform case starts from `health-ser-gap.json`). `Schema` says whether `schema/event.json` alone also rejects it; the rest need `event.Validate`.
+Each file is `sel751-fig10-16-row8.json` with one change (the two platform cases start from `health-ser-gap.json`). `Schema` says whether `schema/event.json` alone also rejects it; the rest need `event.Validate`.
 
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
@@ -47,3 +47,6 @@ Each file is `sel751-fig10-16-row8.json` with one change (the platform case star
 | `wall-clock-missing.json` | missing | no | No wall clock without the `invalid-time` flag. |
 | `leap-second-with-utc.json` | offset | no | A leap-second record that states UTC. C4 does not convert second 60. |
 | `evidence-ref-mismatch.json` | evidence | no | The capture name is not `sha256:` + the evidence SHA-256 (C5 names captures by content). |
+| `evidence-class-missing.json` | missing | no | A device event that does not say whether its device was real or a simulator (D1-23). |
+| `evidence-class-not-observed.json` | enum | yes | `documented` is a C1 class, but an event's far end is `device-observed` or `simulated`, nothing else. |
+| `platform-event-with-evidence-class.json` | forbidden | no | A platform event has no far end to classify. |

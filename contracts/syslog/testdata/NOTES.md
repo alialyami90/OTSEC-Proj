@@ -42,7 +42,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 
 ## Rendered messages
 
-Each file in `rendered/` is `Render` output for one C4 golden example (`contracts/event/testdata/valid/`) on one valid target. They were generated once with `go test ./contracts/syslog -run Golden -update` and then frozen. A4 checked them by hand against the parameter table in `render.go`: the PRI (facility 16, severity 5 for device events and 4 for health), the header, the order of the parameters, escaping, and the summary. `TestRenderReadBack` also reads every example back on every target, so they are not only self-consistent. The files are marked `-text` so a Windows checkout cannot change their bytes.
+Each file in `rendered/` is `Render` output for one C4 golden example (`contracts/event/testdata/valid/`) on one valid target. They were generated once with `go test ./contracts/syslog -run Golden -update` and then frozen. A4 checked them by hand against the parameter table in `render.go`: the PRI (facility 16, severity 5 for device events and 4 for health), the header, the order of the parameters, escaping, and the summary. `TestRenderReadBack` also reads every example back on every target, so they are not only self-consistent. The files are marked `-text` so a Windows checkout cannot change their bytes. They were regenerated once for D1-23, and the only change was `evc="simulated"` after `auth` on the four device events.
 
 | File | Event | Target |
 | --- | --- | --- |

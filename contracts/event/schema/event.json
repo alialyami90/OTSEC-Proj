@@ -37,7 +37,8 @@
             "asset_id": {"type": "string"}
           }
         },
-        "origin_auth": {"enum": ["none", "tls-server-only", "tls-mutual", "session", "platform"]}
+        "origin_auth": {"enum": ["none", "tls-server-only", "tls-mutual", "session", "platform"]},
+        "evidence_class": {"enum": ["device-observed", "simulated"], "description": "Required on device events, absent on platform events (Go rule, D1-23)."}
       }
     },
     "collection": {
