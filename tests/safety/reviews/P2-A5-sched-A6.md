@@ -52,3 +52,11 @@ Please either refuse a second schedule entry for the same asset and endpoint, or
 - **Should 3 is closed.** It is recorded as a Phase 2 gate item.
 - **New failure on Windows:** `TestOpenReadOnlyPath` fails during setup. Its directory name `OT SEC #1 ?x` contains `?`, which Windows does not allow, so `os.Mkdir` fails. I asked A5 to keep the space and `#` on every OS, and to add `?` only on non-Windows.
 - Linux: vet, gofmt and `-race` all pass. Windows per package: platform/node 22 passed, platform/store 25 passed and 1 failed (2 skipped by design), winsvc 2 passed, cmd/otsec 2 passed.
+
+## Re-check at `b2a604d`: non-admin part accepted
+
+- `TestOpenReadOnlyPath` keeps the space and `#` on every OS and adds `?` only off Windows.
+- Native Windows run on ALI's PC (non-elevated shell, portable Go 1.26.0): vet and gofmt are clean, and `go test -count=1 -v ./platform/... ./cmd/...` passes. `TestOpenReadOnlyPath`, `TestOpenReadOnly`, `TestReadOnlyCommands` and `TestDirDACLChecked` pass by name. Per package (top-level tests passed/failed/skipped): platform/node 22/0/0, platform/store 26/0/2 (`TestCrashChild` and `TestFileModes`, skipped by design), platform/winsvc 2/0/0, cmd/otsec 2/0/0.
+- Linux: vet, gofmt and `go test` of platform/node, store, winsvc and cmd/otsec pass.
+- Verdict: **accept** for everything that runs without administrator rights. Nits 4 and 5 are left to A5.
+- Still not run: the installer (W-1 to W-4, `-collector-config`, `collector\public`, the WER value). It needs administrator rights on ALI's PC and waits on ALI's answer. Until it runs, `install_windows.go` has no evidence beyond compiling.
