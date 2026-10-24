@@ -55,6 +55,9 @@ var gtSER = []struct{ Row, Date, Time, Element, State string }{
 	{"1", "02/28/2007", "13:54:10.511", "TRIP", "Deasserted"},
 }
 
+// gtSERColumns is the column heading Figure 10.16 prints above the rows.
+var gtSERColumns = []string{"#", "DATE", "TIME", "ELEMENT", "STATE"}
+
 // gtSERHeader is what the report says about the device that produced it.
 var gtSERHeader = struct{ Model, FID, CID, TimeSource string }{
 	"SEL-751", "SEL-751-R100-V0-Z001001-D20070410", "5052", "Internal",
@@ -115,11 +118,21 @@ func TestGroundTruthIDNegativeFigure(t *testing.T) {
 func TestGroundTruthSER(t *testing.T) {
 	lines := readLines(t, "ser-fig-10-16.txt")
 	var rows [][]string
+	headings := 0
 	for _, l := range lines {
 		f := strings.Fields(l)
 		if len(f) == 5 && f[0] != "#" && strings.Count(f[1], "/") == 2 {
 			rows = append(rows, f)
 		}
+		if len(f) > 0 && f[0] == "#" {
+			headings++
+			if strings.Join(f, " ") != strings.Join(gtSERColumns, " ") {
+				t.Errorf("column heading %q, ground truth %q", f, gtSERColumns)
+			}
+		}
+	}
+	if headings != 1 {
+		t.Errorf("transcription has %d column headings, want 1", headings)
 	}
 	if len(rows) != len(gtSER) {
 		t.Fatalf("transcription has %d SER rows, ground truth %d", len(rows), len(gtSER))
