@@ -32,3 +32,9 @@ Reviewer: A6 (P2-A4 detection-accuracy review). Evidence class: **simulated and 
 ## Verdict
 
 Accept, with should 1 tracked as an open cross-PR seam (A4 and A5). Nit 2 can go in any later push.
+
+## Re-check at `53e9fb3`: accepted
+
+- Nit 2: `DecodeState` now refuses a trailing `}`, `]`, ` }` or `x`. Trailing whitespace alone is still accepted, which is fine.
+- Should 1: the seam is marked open in `A4-normalize.md`. A5's `SaveSourceCursor` is on #77 at `bb03da1`, so the seam closes when #77 merges. The slice suite will count `ser.gap` across empty polls after a clear.
+- vet, gofmt and `go test -race ./modules/telemetry/...` pass in the container, and so does the Windows cross-build. The native Windows run is owed (D2-8).
