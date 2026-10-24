@@ -184,6 +184,9 @@ class Session:
             rows = ["%-4d 10/24/2026 %02d:%02d:%02d.000   IN101             %s"
                     % (i, t // 3600, t // 60 % 60, t % 60, ("Asserted", "Deasserted")[i % 2])
                     for i, t in zip(range(1, n_rows + 1), secs)]
+        # The report prints the oldest row first: the highest number at the
+        # top and row 1 last (S22 Figure 10.16, the response to SER 8).
+        rows.reverse()
         text = framed(b"SER\r\n", "\r\n"
                 "SEL-751          Date: 10/24/2026  Time: 09:15:04.112\r\n"
                 "FEEDER 1         Time Source: Internal\r\n\r\n"
@@ -196,9 +199,9 @@ class Session:
         header = self.span("SEL-751          Date", start)
         header["length"] = self.data.index(b"#    DATE", start) - header["offset"]
         records = []
-        for i, r in enumerate(rows):
+        for r in rows:
             sp = self.span(r, start)
-            if bad_row and i == 2:
+            if bad_row and r.startswith("3 "):
                 records.append({"kind": "sel.ser.row", "span": sp, "context_span": header, "parse_ok": False})
                 continue
             f = r.split()
