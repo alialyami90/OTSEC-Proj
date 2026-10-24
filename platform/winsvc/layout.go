@@ -12,7 +12,8 @@
 //   - when the collector binary is given, copies the collector's
 //     configuration into OTSEC\collector, owned by Administrators and
 //     readable by the collector service only, writes the collector's
-//     first-start marker if neither collector store exists, and installs
+//     first-start marker if neither collector store exists, excludes the
+//     collector from Windows Error Reporting dumps (A3 T-5), and installs
 //     otsec-collector with "run -data %ProgramData%\OTSEC" (A3);
 //   - installs otsec-node (and otsec-collector when its binary is given) as
 //     virtual service accounts NT SERVICE\<name>, with an unrestricted
@@ -87,9 +88,13 @@ func sddl(grants ...grant) string {
 //	OTSEC\collector             collector reads (collector.json, A3)
 //	OTSEC\collector\credentials collector full control (A3 credential design)
 //	OTSEC\collector\state       collector full control (A3: failed-auth floor, collector_seq)
+//	OTSEC\collector\public      collector full control, node reads (install-key.json, A3)
 //
 // SYSTEM and Administrators have full control everywhere; nobody else,
-// Users and Everyone included, has any access.
+// Users and Everyone included, has any access. The node has no entry on
+// OTSEC\collector, so it cannot list it or read collector.json; it reaches
+// collector\public by its full path, which needs only the traverse right
+// SeChangeNotifyPrivilege gives, the one privilege it keeps (W-2).
 func Dirs(programData string) []Dir {
 	node := collectorwire.ServiceSID(NodeService)
 	coll := collectorwire.ServiceSID(CollectorService)
@@ -101,7 +106,15 @@ func Dirs(programData string) []Dir {
 		{filepath.Join(root, "collector"), sddl(grant{coll, accessTraverse, true})},
 		{filepath.Join(root, "collector", "credentials"), sddl(grant{coll, accessFull, true})},
 		{filepath.Join(root, "collector", "state"), sddl(grant{coll, accessFull, true})},
+		{PublicDir(programData), sddl(grant{coll, accessFull, true}, grant{node, accessTraverse, true})},
 	}
+}
+
+// PublicDir is where the collector writes what the node may read: its
+// install-key.json, the public half of its sealing key (A3). Nothing in it
+// is secret.
+func PublicDir(programData string) string {
+	return filepath.Join(programData, "OTSEC", "collector", "public")
 }
 
 // DataDir is the -data argument of the collector service (A3).
@@ -147,6 +160,17 @@ func ConfigPath(programData string) string {
 
 // RequiredPrivileges is the only privilege either service keeps (W-2).
 var RequiredPrivileges = []string{"SeChangeNotifyPrivilege"}
+
+// CollectorImage is the collector binary's file name. The Windows Error
+// Reporting exclusion is keyed by it, so the installer refuses a collector
+// binary with another name.
+const CollectorImage = "otsec-collector.exe"
+
+// WERExclusionKey is the HKLM key under which the installer sets
+// CollectorImage = 1 (REG_DWORD), so Windows Error Reporting writes no dump
+// of the collector's memory, which holds credentials. The collector refuses
+// to start without it (A3 T-5).
+const WERExclusionKey = `SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications`
 
 // FirewallRule is the name of the W-3 rule the installer adds.
 const FirewallRule = "otsec-node: no outbound Telnet (W-3)"

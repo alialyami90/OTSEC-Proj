@@ -59,6 +59,7 @@ Linux container, Go 1.26. Commits are listed in each PR.
 - the installer and service, with A3's T-13 (W-1 to W-4);
 - `TestDirDACLChecked`, which also covers a junction and SDDL in the account (A3 #84 notes 1 and 4);
 - `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service.
+- for A3's collector: `collector\public` (collector writes, node reads `install-key.json` by full path), the `otsec-collector` event log source, and the WER exclusion `otsec-collector.exe = 1` (T-5), which the collector refuses to start without.
 
 None of the Windows-only code has run.
 

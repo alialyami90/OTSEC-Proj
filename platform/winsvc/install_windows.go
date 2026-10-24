@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 
@@ -48,6 +49,9 @@ func Install(opt InstallOptions) error {
 	if (opt.CollectorExe == "") != (opt.CollectorConfig == "") {
 		return errors.New("winsvc: the collector binary and the collector configuration are given together or not at all")
 	}
+	if opt.CollectorExe != "" && !strings.EqualFold(filepath.Base(opt.CollectorExe), CollectorImage) {
+		return fmt.Errorf("winsvc: the collector binary must be named %s, which its Windows Error Reporting exclusion names (A3 T-5)", CollectorImage)
+	}
 	for _, exe := range []string{opt.NodeExe, opt.CollectorExe} {
 		if exe != "" && !under(exe, pf) {
 			return fmt.Errorf("winsvc: %s is not under %s (W-4)", exe, pf)
@@ -76,12 +80,21 @@ func Install(opt InstallOptions) error {
 		if err := provision(pd); err != nil {
 			return err
 		}
+		if err := excludeFromWER(); err != nil {
+			return err
+		}
 		if err := createService(m, CollectorService, opt.CollectorExe, "OTSEC collector", "run", "-data", DataDir(pd)); err != nil {
 			return err
 		}
 	}
-	if err := eventlog.InstallAsEventCreate(NodeService, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
-		return fmt.Errorf("winsvc: event log source: %w", err)
+	sources := []string{NodeService}
+	if opt.CollectorExe != "" {
+		sources = append(sources, CollectorService)
+	}
+	for _, src := range sources {
+		if err := eventlog.InstallAsEventCreate(src, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
+			return fmt.Errorf("winsvc: event log source %s: %w", src, err)
+		}
 	}
 	return firewall("add", "rule", "name="+FirewallRule, "dir=out", "action=block", "service="+NodeService,
 		"protocol=TCP", "remoteport=23", "enable=yes")
@@ -107,6 +120,13 @@ func Uninstall() error {
 		s.Close()
 	}
 	eventlog.Remove(NodeService)
+	eventlog.Remove(CollectorService)
+	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, WERExclusionKey, registry.SET_VALUE); err == nil {
+		if err := k.DeleteValue(CollectorImage); err != nil && !errors.Is(err, registry.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("winsvc: remove the WER exclusion: %w", err))
+		}
+		k.Close()
+	}
 	errs = append(errs, firewall("delete", "rule", "name="+FirewallRule))
 	return errors.Join(errs...)
 }
@@ -344,6 +364,24 @@ func provision(pd string) error {
 		return fmt.Errorf("winsvc: provision marker: %w", err)
 	}
 	return f.Close()
+}
+
+// excludeFromWER sets CollectorImage = 1 under WERExclusionKey and reads it
+// back (A3 T-5).
+func excludeFromWER() error {
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, WERExclusionKey, registry.SET_VALUE|registry.QUERY_VALUE)
+	if err != nil {
+		return fmt.Errorf("winsvc: open %s: %w", WERExclusionKey, err)
+	}
+	defer k.Close()
+	if err := k.SetDWordValue(CollectorImage, 1); err != nil {
+		return fmt.Errorf("winsvc: WER exclusion (A3 T-5): %w", err)
+	}
+	v, typ, err := k.GetIntegerValue(CollectorImage)
+	if err != nil || typ != registry.DWORD || v != 1 {
+		return fmt.Errorf("winsvc: WER exclusion reads back %d (type %d): %v", v, typ, err)
+	}
+	return nil
 }
 
 // serviceRequiredPrivilegesInfo is SERVICE_REQUIRED_PRIVILEGES_INFO.

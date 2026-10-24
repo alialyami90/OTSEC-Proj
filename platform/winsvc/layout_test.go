@@ -23,6 +23,7 @@ func TestDirs(t *testing.T) {
 		`OTSEC/collector`:             "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + coll + ")",
 		`OTSEC/collector/credentials`: "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + coll + ")",
 		`OTSEC/collector/state`:       "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + coll + ")",
+		`OTSEC/collector/public`:      "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + coll + ")(A;OICI;0x1200a9;;;" + node + ")",
 	}
 	if len(dirs) != len(want) {
 		t.Fatalf("%d directories", len(dirs))
@@ -37,7 +38,9 @@ func TestDirs(t *testing.T) {
 				t.Errorf("%s grants %s", rel, bad)
 			}
 		}
-		if strings.Contains(d.SDDL, coll) && strings.Contains(d.SDDL, node) && rel != "OTSEC" {
+		// Only the root and collector/public name both services; in
+		// collector/public the node reads and never writes.
+		if strings.Contains(d.SDDL, coll) && strings.Contains(d.SDDL, node) && rel != "OTSEC" && rel != "OTSEC/collector/public" {
 			t.Errorf("%s grants both services", rel)
 		}
 	}
