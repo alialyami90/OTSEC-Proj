@@ -158,9 +158,44 @@
           "offset": 127,
           "length": 33
         }
+      },
+      {
+        "name": "serial_number",
+        "expected": "SIM0000000000001",
+        "observed": "SIM0000000000001",
+        "span": {
+          "offset": 713,
+          "length": 16
+        }
       }
     ]
   },
+  "observations": [
+    {
+      "name": "firmware_id",
+      "value": "SEL-751-R501-V0-Z104101-D20260910",
+      "span": {
+        "offset": 127,
+        "length": 33
+      }
+    },
+    {
+      "name": "sel.cid",
+      "value": "E754",
+      "span": {
+        "offset": 224,
+        "length": 4
+      }
+    },
+    {
+      "name": "serial_number",
+      "value": "SIM0000000000001",
+      "span": {
+        "offset": 713,
+        "length": 16
+      }
+    }
+  ],
   "warnings": [
     {
       "code": "warn.maxacc_above_1",
@@ -170,6 +205,76 @@
         "offset": 485,
         "length": 103
       }
+    }
+  ],
+  "records": [
+    {
+      "kind": "sel.ser.row",
+      "span": {
+        "offset": 845,
+        "length": 57
+      },
+      "context_span": {
+        "offset": 604,
+        "length": 185
+      },
+      "parse_ok": true,
+      "fields": [
+        {
+          "name": "#",
+          "value": "2"
+        },
+        {
+          "name": "DATE",
+          "value": "10/24/2026"
+        },
+        {
+          "name": "TIME",
+          "value": "09:10:01.004"
+        },
+        {
+          "name": "ELEMENT",
+          "value": "IN101"
+        },
+        {
+          "name": "STATE",
+          "value": "Asserted"
+        }
+      ]
+    },
+    {
+      "kind": "sel.ser.row",
+      "span": {
+        "offset": 904,
+        "length": 59
+      },
+      "context_span": {
+        "offset": 604,
+        "length": 185
+      },
+      "parse_ok": true,
+      "fields": [
+        {
+          "name": "#",
+          "value": "1"
+        },
+        {
+          "name": "DATE",
+          "value": "10/24/2026"
+        },
+        {
+          "name": "TIME",
+          "value": "09:10:01.251"
+        },
+        {
+          "name": "ELEMENT",
+          "value": "IN101"
+        },
+        {
+          "name": "STATE",
+          "value": "Deasserted"
+        }
+      ]
     }
   ]
 }
