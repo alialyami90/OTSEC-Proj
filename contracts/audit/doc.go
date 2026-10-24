@@ -27,7 +27,14 @@
 //     invocation ID. The digest is known only when the session ends, so it
 //     is not on device.session.open, which audit before act requires first.
 //     It was added inside 0.1 by D1-25; no 0.1 reader was deployed without
-//     it.
+//     it. An open with no matching close means the collector stopped during
+//     the session (a crash or a lost node), so no close, and no digest, could
+//     be written. That session's outcome is unknown and its transcript, if
+//     any was stored, cannot be checked against the chain. A reader reports
+//     it as such and never treats it as succeeded. Events that carry its
+//     invocation ID are kept, but they are not shown as reconciled with the
+//     chain. The C7 failed-auth floor stays in force for the asset, because
+//     the collector cleared nothing (D1-20).
 //   - What must be recorded: every collector request, accepted or refused,
 //     with the C7 refusal code; every C2 refusal and posture warning; every
 //     credential use, install, suspension, clearing and revocation; every
