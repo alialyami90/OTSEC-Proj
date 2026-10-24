@@ -1,0 +1,64 @@
+{
+  "schema": "otsec.event/0.1",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "sel751-feeder1/ser",
+    "seq": 1
+  },
+  "origin": "device",
+  "kind": "ser",
+  "source": {
+    "asset": {
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+      "binding": {
+        "method": "adapter-target",
+        "confidence": "configured"
+      }
+    },
+    "origin_auth": "session"
+  },
+  "collection": {
+    "method": "adapter-poll",
+    "invocation_id": "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71",
+    "operation_id": "sel.ser.read_all",
+    "parser": {
+      "name": "sel-ascii-ser",
+      "version": "0.1"
+    },
+    "native_position": "8",
+    "alignment": "first-read",
+    "parse_status": "ok"
+  },
+  "received": {
+    "utc": "2026-10-24T12:00:05.123456Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "device_time": {
+    "native": "02/28/2007 13:54:09.602",
+    "native_encoding": "text",
+    "format": "sel-ascii-ser-row",
+    "wall_clock": "2007-02-28T13:54:09.602",
+    "offset": "unknown",
+    "offset_basis": "none",
+    "resolution_ns": 1000000,
+    "quality": {
+      "time_source": "Internal",
+      "sync": "unknown",
+      "accuracy_relative_ns": 1000000,
+      "scope": "report"
+    },
+    "flags": [
+      "date-format-assumed:MDY"
+    ]
+  },
+  "normalized": {
+    "subject": "51P1P",
+    "subject_type": "ser-element",
+    "value": "Asserted",
+    "category": "unmapped"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schema": "otsec.event/0.1",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "platform/health",
+    "seq": 1
+  },
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {
+    "asset": {
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+      "binding": {
+        "method": "adapter-target",
+        "confidence": "configured"
+      }
+    },
+    "origin_auth": "platform"
+  },
+  "received": {
+    "utc": "2026-10-24T12:05:05.200000Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "health": {
+    "type": "ser.gap",
+    "related": [
+      {
+        "node_id": "site-a-node1",
+        "stream": "sel751-feeder1/ser",
+        "seq": 9
+      }
+    ],
+    "details": {
+      "stream": "sel751-feeder1/ser",
+      "previous_read_records": "8",
+      "new_read_records": "3",
+      "reason": "no overlap between consecutive reads"
+    }
+  },
+  "native": {
+    "bytes": "OCAgICAgMDIvMjgvMjAwNyAgIDEzOjU0OjA5LjYwMiAgIDUxUDFQICAgICAgICAgICAgICAgICAgICBBc3NlcnRlZA==",
+    "record_sha256": "17a3967c69ba758a4fb272c18c57b1391c59e381e4536237d759ec058acecbfd",
+    "record_length": 67,
+    "evidence": {
+      "sha256": "006c5eba0418a185507dd7def360a2dc618f9334439141220ba737c5c081a8bf",
+      "length": 879,
+      "ref": "sha256:006c5eba0418a185507dd7def360a2dc618f9334439141220ba737c5c081a8bf"
+    },
+    "span": {
+      "offset": 324,
+      "length": 67
+    },
+    "context_span": {
+      "offset": 18,
+      "length": 236
+    },
+    "alignment_key": "sha256:1caaf49fb21226069b72cc6efeff83e0b95f1331da18ac854b3f9d7ff6b69ed7",
+    "fields": [
+      {
+        "name": "#",
+        "value": "8"
+      },
+      {
+        "name": "DATE",
+        "value": "02/28/2007"
+      },
+      {
+        "name": "TIME",
+        "value": "13:54:09.602"
+      },
+      {
+        "name": "ELEMENT",
+        "value": "51P1P"
+      },
+      {
+        "name": "STATE",
+        "value": "Asserted"
+      }
+    ]
+  }
+}
