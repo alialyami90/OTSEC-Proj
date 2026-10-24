@@ -31,8 +31,9 @@
 //     and the forwarder reports the skipped range as forward.unreachable
 //     (C6-A5). Delivery is at-least-once in both modes; receivers remove
 //     duplicates by the eid parameter, which is the C4 event ID.
-//   - Targets and C5 consumers (C6-A5-2). A target is one C5 consumer per
-//     event stream it forwards, plus the audit stream when audit is set:
+//   - Targets and C5 consumers (C6-A5-2, Consumers). A target is one C5
+//     consumer per event stream it forwards, plus the audit stream when
+//     audit is set:
 //     ConsumerID is the target name, Delivery its class and ReplayWindow its
 //     replay_seconds. Renaming a target makes a new consumer with a new
 //     cursor. A new required target starts at the first retained event, so

@@ -14,8 +14,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/store"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/rendered from Render")
@@ -753,5 +755,43 @@ func TestInsecureTargetsAcknowledgedAndContentOff(t *testing.T) {
 				t.Errorf("%s with %+v validated", name, a)
 			}
 		}
+	}
+}
+
+// C6-A5-2: every valid target maps to C5 consumers that store accepts, one
+// per event stream plus audit when set, named after the target.
+func TestConsumers(t *testing.T) {
+	events := []store.StreamID{"sel751-feeder1/ser", "syslog/udp"}
+	files, _ := filepath.Glob("testdata/targets/valid/*.json")
+	for _, f := range files {
+		tg := loadTarget(t, strings.TrimSuffix(filepath.Base(f), ".json"))
+		cs, err := Consumers(tg, events, "audit")
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		want := len(events)
+		if tg.Audit {
+			want++
+		}
+		if len(cs) != want {
+			t.Errorf("%s: %d consumers, want %d", f, len(cs), want)
+		}
+		for _, c := range cs {
+			if err := c.Validate(); err != nil {
+				t.Errorf("%s: %v", f, err)
+			}
+			if string(c.ID) != tg.Name || (c.Delivery == store.Required) != (tg.Class == ClassRequired) ||
+				c.ReplayWindow != time.Duration(tg.ReplaySeconds)*time.Second {
+				t.Errorf("%s: consumer %+v", f, c)
+			}
+		}
+	}
+	tg := loadTarget(t, "relp-tls-audit")
+	if _, err := Consumers(tg, events, ""); !slices.Contains(Codes(err), CodeAudit) {
+		t.Errorf("audit target on a node without an audit stream: %v", err)
+	}
+	tg.ReplaySeconds = 60
+	if _, err := Consumers(tg, events, "audit"); err == nil {
+		t.Error("an invalid target produced consumers")
 	}
 }
