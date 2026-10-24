@@ -265,8 +265,7 @@ func loadSEL751Package(t *testing.T) *register.Package {
 
 func TestSecretPolicy(t *testing.T) {
 	pkg := loadSEL751Package(t)
-	table754ish := regexp.MustCompile(`^[A-Za-z0-9!#$%&()*+,\-./:;<=>?@\[\]^_{|}~]+$`) // stand-in; the real set comes from the register (S22 Table 7.54)
-	p := SecretPolicy{MaxLen: 12, Allowed: table754ish, MnemonicLen: 3}
+	p := SecretPolicies["sel-751"]
 	for _, s := range []string{"Otter#2026", "Wq7!mZ2p", "xyz-9"} {
 		if err := ValidateSecret([]byte(s), p, pkg); err != nil {
 			t.Fatalf("%q: %v", s, err)
@@ -289,8 +288,16 @@ func TestSecretPolicy(t *testing.T) {
 	if err := ValidateSecret([]byte("Otter#2026"), p, nil); err == nil {
 		t.Fatal("missing register package accepted")
 	}
-	// Whole-word mode: only the full command word is refused.
-	whole := SecretPolicy{MaxLen: 12, Allowed: table754ish}
+	// The allowed set is matched against the whole secret, not a substring.
+	if err := ValidateSecret([]byte("Wq7!mZ2 p"), p, pkg); !errors.Is(err, ErrSecretRejected) {
+		t.Fatalf("space inside an otherwise allowed secret: %v", err)
+	}
+	// A policy must choose its mnemonic rule; zero is not whole-word mode.
+	if err := ValidateSecret([]byte("Otter#2026"), SecretPolicy{MaxLen: 12}, pkg); !errors.Is(err, ErrSecretRejected) {
+		t.Fatalf("policy with no mnemonic rule: %v", err)
+	}
+	// Whole-word mode, chosen explicitly: only the full command word is refused.
+	whole := SecretPolicy{MaxLen: 12, WholeWord: true}
 	if err := ValidateSecret([]byte("accent12"), whole, pkg); err != nil {
 		t.Fatalf("whole-word mode: %v", err)
 	}

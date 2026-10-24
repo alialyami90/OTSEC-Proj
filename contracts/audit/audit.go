@@ -351,12 +351,15 @@ var forbiddenKeys = regexp.MustCompile(`(?i)^(secret|password|passwd|pwd|passphr
 // ErrRecordRejected wraps every reason ParseRecord rejects a record.
 var ErrRecordRejected = errors.New("audit: record rejected")
 
-// ParseRecord parses and validates one stored record. Stored records are
-// evidence that a later minor may extend, so C8 readers accept later minors:
-// ParseRecord decodes with strictjson.Forward (A1 D1-10), which rejects
-// duplicate keys, a key that differs only in case from a field name, and
-// trailing data, and ignores only unknown fields spelled unlike any field
-// name. The chain covers those fields, so they cannot be altered unseen.
+// ParseRecord parses and validates one stored record. A record stamped with
+// this reader's minor or an earlier one is decoded strictly
+// (strictjson.Decode), so it cannot carry a field this contract does not
+// define (C8-A6-2). Stored records are evidence that a later minor may
+// extend, so a record stamped with a later minor is decoded with
+// strictjson.Forward (A1 D1-10), which rejects duplicate keys, a key that
+// differs only in case from a field name, and trailing data, and ignores
+// only unknown fields spelled unlike any field name. The chain covers those
+// fields, so they cannot be altered unseen.
 // Before decoding, it also rejects oversize records, invalid UTF-8, a raw CR,
 // LF or NUL byte (Seal never writes one), and any field
 // named like a secret or raw device output, at any depth. Writers go
@@ -382,6 +385,13 @@ func ParseRecord(b []byte) (*Record, error) {
 	var r Record
 	if err := strictjson.Forward(b, &r); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
+	}
+	reader, _ := version.Parse(ContractID)
+	if got, err := version.Parse(r.Contract); err == nil && got.Major == reader.Major && got.Minor <= reader.Minor {
+		r = Record{}
+		if err := strictjson.Decode(b, &r); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
+		}
 	}
 	if err := r.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)

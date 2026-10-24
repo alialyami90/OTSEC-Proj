@@ -30,7 +30,9 @@ func broken(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrChainBroken, fmt.Sprintf(format, a...))
 }
 
-// VerifyChain checks a contiguous run of stored records from one node.
+// VerifyChain checks a contiguous run of stored records from node, the node
+// the verifier expects. The node is never taken from the records themselves,
+// so a whole chain from another node does not verify (C8-A6-1).
 //
 //   - from is the checkpoint just before the first record, or nil when the
 //     run starts at the node's genesis record (seq 1).
@@ -39,24 +41,28 @@ func broken(format string, a ...any) error {
 //     and the record there must hash to head.Hash; this is what catches an
 //     altered or truncated tail.
 //
-// Each record must parse (ParseRecord), belong to the same node, have seq one
-// more than its predecessor, and carry prev_hash equal to the predecessor's
-// hash.
-func VerifyChain(stored [][]byte, from, head *Checkpoint) error {
-	var node string
+// Each record must parse (ParseRecord), belong to node, have seq one more
+// than its predecessor, and carry prev_hash equal to the predecessor's hash.
+// A checkpoint must name node.
+func VerifyChain(node string, stored [][]byte, from, head *Checkpoint) error {
+	if !nodeIDPattern.MatchString(node) {
+		return broken("expected node %q is not a valid node ID", node)
+	}
+	for _, c := range []*Checkpoint{from, head} {
+		if c != nil && c.NodeID != node {
+			return broken("checkpoint is for node %q, not %s", c.NodeID, node)
+		}
+	}
 	var seq uint64
 	prev := GenesisPrevHash
 	if from != nil {
-		node, seq, prev = from.NodeID, from.Seq, from.Hash
+		seq, prev = from.Seq, from.Hash
 	}
 	reachedHead := head == nil
 	for i, b := range stored {
 		r, err := ParseRecord(b)
 		if err != nil {
 			return broken("record %d: %v", i, err)
-		}
-		if node == "" {
-			node = r.NodeID
 		}
 		if r.NodeID != node {
 			return broken("record %d is from node %s, not %s", i, r.NodeID, node)

@@ -74,16 +74,16 @@ func sliceRecords() []Record {
 
 func TestChainVerifies(t *testing.T) {
 	recs := chain(t, sliceRecords())
-	if err := VerifyChain(recs, nil, nil); err != nil {
+	if err := VerifyChain("site-a-node-1", recs, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	head := &Checkpoint{NodeID: "site-a-node-1", Seq: uint64(len(recs)), Hash: Hash(recs[len(recs)-1])}
-	if err := VerifyChain(recs, nil, head); err != nil {
+	if err := VerifyChain("site-a-node-1", recs, nil, head); err != nil {
 		t.Fatal(err)
 	}
 	// Verifying a later run from a checkpoint.
 	from := &Checkpoint{NodeID: "site-a-node-1", Seq: 4, Hash: Hash(recs[3])}
-	if err := VerifyChain(recs[4:], from, head); err != nil {
+	if err := VerifyChain("site-a-node-1", recs[4:], from, head); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -119,13 +119,13 @@ func TestChainDetectsTampering(t *testing.T) {
 		"whitespace added (bytes, not meaning)":  {altered(2, `{"contract"`, `{ "contract"`), nil},
 	}
 	for name, c := range cases {
-		if err := VerifyChain(c.recs, nil, c.head); !errors.Is(err, ErrChainBroken) {
+		if err := VerifyChain("site-a-node-1", c.recs, nil, c.head); !errors.Is(err, ErrChainBroken) {
 			t.Fatalf("%s: got %v", name, err)
 		}
 	}
 	// Without a trusted head, altering the newest record is not detectable:
 	// that is the residual window between checkpoints (AP-17).
-	if err := VerifyChain(altered(n-1, `not_invocable`, `busy`), nil, nil); err != nil {
+	if err := VerifyChain("site-a-node-1", altered(n-1, `not_invocable`, `busy`), nil, nil); err != nil {
 		t.Fatalf("expected the documented residual: %v", err)
 	}
 }
@@ -242,9 +242,14 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 			t.Fatalf("%s: got %v", name, err)
 		}
 	}
-	// An unknown, harmless field from a later minor is kept.
-	if _, err := ParseRecord([]byte(strings.Replace(string(ok), `"outcome"`, `"new_field_in_0_2":1,"outcome"`, 1))); err != nil {
-		t.Fatalf("unknown field: %v", err)
+	// An unknown, harmless field from a later minor is kept; the same field
+	// on a 0.1 record is refused (C8-A6-2).
+	later := strings.Replace(string(ok), `"otsec.audit/0.1"`, `"otsec.audit/0.2"`, 1)
+	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_2":1,"outcome"`, 1))); err != nil {
+		t.Fatalf("unknown field in a later minor: %v", err)
+	}
+	if _, err := ParseRecord([]byte(strings.Replace(string(ok), `"outcome"`, `"api_token":"x","outcome"`, 1))); !errors.Is(err, ErrRecordRejected) {
+		t.Fatalf("unknown field in a 0.1 record: %v", err)
 	}
 }
 
@@ -274,7 +279,7 @@ func TestGoldenRecords(t *testing.T) {
 	for _, l := range bytes.Split(bytes.TrimRight(chainFile, "\n"), []byte("\n")) {
 		lines = append(lines, l)
 	}
-	if err := VerifyChain(lines, nil, nil); err != nil {
+	if err := VerifyChain("site-a-node-1", lines, nil, nil); err != nil {
 		t.Fatalf("golden chain: %v", err)
 	}
 }
@@ -310,7 +315,7 @@ func TestSealBuildsAVerifiableChain(t *testing.T) {
 		}
 		stored, prev = append(stored, b), Hash(b)
 	}
-	if err := VerifyChain(stored, nil, nil); err != nil {
+	if err := VerifyChain("site-a-node-1", stored, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	base := `"contract":"otsec.audit/0.1","node_id":"site-a-node-1","time":{"utc":"2026-10-24T11:00:00Z","resolution_ns":1000000000,"clock":{"sync":"synchronized","source":"ntp"}},"actor":{"type":"system","id":"collector"},"action":"service.start","outcome":"info"`
@@ -401,5 +406,21 @@ func TestSchemaPatterns(t *testing.T) {
 		if c.schema != c.code {
 			t.Errorf("schema pattern %q, code %q", c.schema, c.code)
 		}
+	}
+}
+
+// TestVerifyChainBindsNode: the verifier names the node; it is never taken
+// from the records (C8-A6-1).
+func TestVerifyChainBindsNode(t *testing.T) {
+	recs := chain(t, sliceRecords())
+	if err := VerifyChain("site-b-node-1", recs, nil, nil); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("chain of another node: %v", err)
+	}
+	noNode := &Checkpoint{Seq: 2, Hash: Hash(recs[1])}
+	if err := VerifyChain("site-a-node-1", recs[2:], noNode, nil); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("checkpoint without a node: %v", err)
+	}
+	if err := VerifyChain("", recs, nil, nil); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("no expected node: %v", err)
 	}
 }

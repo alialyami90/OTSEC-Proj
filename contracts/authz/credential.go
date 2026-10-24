@@ -196,7 +196,9 @@ func (r SuspendReason) ClearableInPlace() bool { return r != SuspendIdentityMism
 // could land on that pending prompt and its first line would be the second
 // attempt. The floor is therefore longer than TIDLE: tidle plus one minute
 // when SHO P 1 last read it, and 31 minutes (the largest TIDLE, 30, plus one)
-// when it is unknown or out of range.
+// when it is unknown or out of range. TODO(D1-18): take the maximum from the
+// C1 capability profile (session_limits) once #32 merges; a TIDLE read from
+// the device only ever shortens the floor, never below TIDLE plus one minute.
 func FailureFloor(tidle time.Duration) time.Duration {
 	if tidle <= 0 || tidle > 30*time.Minute {
 		return 31 * time.Minute
@@ -204,13 +206,17 @@ func FailureFloor(tidle time.Duration) time.Duration {
 	return tidle + time.Minute
 }
 
-// InsideFailureFloor reports whether a request for an asset whose last
-// failed authentication was at lastFailure must be refused with
-// rate_limited. The collector reads lastFailure from its durable state,
-// which it flushes before it replies to the run that failed (C7-A5-3), so
-// the floor survives a restart. A failure time after now counts as inside
-// the floor: a clock stepped backwards must not reopen it. Zero means no
-// failure is recorded.
+// InsideFailureFloor reports whether a request for an asset must be refused
+// with rate_limited. lastFailure is the time of the last unconfirmed
+// authentication on that asset. The collector writes it to its durable state
+// before the credential slot sends the password, and clears it only when the
+// relay's Level 1 prompt confirms the login (C7-A2-1, re-check). A wrong
+// password, a timeout, a closed connection or a collector crash between the
+// password and that prompt therefore all start the floor: in each case the
+// relay may still sit at Password: ? until TIDLE expires. Because the state
+// is durable (C7-A5-3), the floor survives a restart. A time after now
+// counts as inside the floor: a clock stepped backwards must not reopen it.
+// Zero means no unconfirmed authentication is recorded.
 func InsideFailureFloor(lastFailure, now time.Time, floor time.Duration) bool {
 	if lastFailure.IsZero() {
 		return false
@@ -323,16 +329,29 @@ func SealAAD(ref CredentialRef) []byte {
 }
 
 // SecretPolicy is the write-time rule for a decrypted secret, applied inside
-// the collector before anything is stored. The family's register entry
-// supplies MaxLen, Allowed and MnemonicLen; the rest applies to every family.
+// the collector before anything is stored. Each family has one; the
+// collector takes it from SecretPolicies, never from a request.
+// TODO(D1-18): take it from the C1 capability profile once #32 merges.
 type SecretPolicy struct {
 	MinLen  int
 	MaxLen  int            // at most MaxSecretLen
-	Allowed *regexp.Regexp // whole-secret pattern, e.g. the SEL-751 Table 7.54 set; nil means printable ASCII
+	Allowed *regexp.Regexp // the allowed characters; matched against the whole secret; nil means printable ASCII
 	// MnemonicLen is how many leading characters of a command word the
 	// device reads: 3 for SEL, which accepts QUIT as QUI and CLOSE as CLO.
-	// 0 means the device reads whole words.
+	// It must be set unless WholeWord is.
 	MnemonicLen int
+	// WholeWord says the device reads only whole command words, so only a
+	// secret whose first word is a command word is refused. It must be
+	// chosen explicitly (C7-A6, re-check note 1).
+	WholeWord bool
+}
+
+// SecretPolicies holds the secret policy of each register family.
+var SecretPolicies = map[string]SecretPolicy{
+	// SEL-751: 1 to 12 characters from ! to ~, no space (S22 Table 7.54,
+	// A2's C7 review item 7); SEL reads the first three characters of a
+	// command word.
+	"sel-751": {MinLen: 1, MaxLen: 12, Allowed: regexp.MustCompile(`[!-~]+`), MnemonicLen: 3},
 }
 
 // ErrSecretRejected is returned for a secret that fails write-time validation.
@@ -346,7 +365,7 @@ var ErrSecretRejected = errors.New("authz: secret rejected at write time")
 // case, the register matches it as a line (allowed or denied), or when its
 // upper-case form, without leading spaces, starts with the mnemonic of any
 // operation, session line or deny rule: the first MnemonicLen characters of
-// the command word, or the whole word when MnemonicLen is 0. The
+// the command word, or the whole word when WholeWord is set. The
 // prompt-gated slot is the main barrier; this check keeps a secret that the
 // slot sends at the wrong moment from reading as a command.
 func ValidateSecret(secret []byte, p SecretPolicy, pkg *register.Package) error {
@@ -366,8 +385,11 @@ func ValidateSecret(secret []byte, p SecretPolicy, pkg *register.Package) error 
 			return fmt.Errorf("%w: byte outside printable ASCII", ErrSecretRejected)
 		}
 	}
-	if p.Allowed != nil && !p.Allowed.Match(secret) {
+	if p.Allowed != nil && !regexp.MustCompile(`^(?:`+p.Allowed.String()+`)$`).Match(secret) {
 		return fmt.Errorf("%w: character outside the family's allowed set", ErrSecretRejected)
+	}
+	if (p.MnemonicLen > 0) == p.WholeWord {
+		return fmt.Errorf("%w: the policy must set exactly one of MnemonicLen and WholeWord", ErrSecretRejected)
 	}
 	if pkg == nil {
 		return fmt.Errorf("%w: no verified register package", ErrSecretRejected)
