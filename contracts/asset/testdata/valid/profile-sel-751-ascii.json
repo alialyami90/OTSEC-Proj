@@ -9,6 +9,11 @@
   "firmware": {
     "allowlist": "sel-751"
   },
+  "pre_credential": [
+    "firmware_id",
+    "part_number",
+    "sel.cid"
+  ],
   "capabilities": [
     {
       "capability": "identification",

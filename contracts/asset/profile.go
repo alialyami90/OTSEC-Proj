@@ -18,14 +18,19 @@ const ProfileKind = "capability-profile"
 // in the signed register package with the operations they reference
 // (C-A2-2), so a profile cannot widen what the collector may send.
 type CapabilityProfile struct {
-	Schema        string       `json:"schema"`
-	Kind          string       `json:"kind"`
-	ProfileID     string       `json:"profile_id"`
-	Version       string       `json:"version"`
-	Vendor        string       `json:"vendor"`
-	ProductFamily string       `json:"product_family"`
-	DeviceClass   string       `json:"device_class"`
-	Firmware      Firmware     `json:"firmware"`
+	Schema        string   `json:"schema"`
+	Kind          string   `json:"kind"`
+	ProfileID     string   `json:"profile_id"`
+	Version       string   `json:"version"`
+	Vendor        string   `json:"vendor"`
+	ProductFamily string   `json:"product_family"`
+	DeviceClass   string   `json:"device_class"`
+	Firmware      Firmware `json:"firmware"`
+	// PreCredential lists the attributes the family reports before
+	// authentication, which an asset's binding may compare before a
+	// credential is sent. Its evidence is the identification capability's
+	// citation. Empty for a family that reports nothing unauthenticated.
+	PreCredential []string     `json:"pre_credential,omitempty"`
 	Capabilities  []Capability `json:"capabilities"`
 }
 
@@ -130,6 +135,11 @@ func (p CapabilityProfile) Validate() error {
 	if p.Firmware.Allowlist != "none" && !tokenPattern.MatchString(p.Firmware.Allowlist) {
 		v.fail("firmware.allowlist must name an allowlist or be \"none\"")
 	}
+	for i, name := range p.PreCredential {
+		if !ValidAttributeName(name) || contains(OperatorOnlyAttributes, name) {
+			v.fail("pre_credential[%d]: %q is not an attribute a device reports", i, name)
+		}
+	}
 	usesAdapter := false
 	seen := map[CapabilityName]bool{}
 	for i, c := range p.Capabilities {
@@ -165,6 +175,21 @@ func (p CapabilityProfile) Validate() error {
 		v.fail("a profile that sends adapter operations needs a firmware allowlist (AP-27)")
 	}
 	return v.err()
+}
+
+// CheckProfile checks the asset against its capability profile: the profile
+// is the one the asset names, and every pre-credential attribute of the
+// binding is one the family reports before authentication.
+func (a Asset) CheckProfile(p CapabilityProfile) error {
+	if a.Profile == nil || a.Profile.ID != p.ProfileID || a.Profile.Version != p.Version {
+		return fmt.Errorf("asset: profile %s %s is not the one the asset names", p.ProfileID, p.Version)
+	}
+	for _, name := range a.IdentityBinding.PreCredential {
+		if !contains(p.PreCredential, name) {
+			return fmt.Errorf("asset: pre_credential attribute %q is not reported before authentication by profile %s", name, p.ProfileID)
+		}
+	}
+	return nil
 }
 
 func parseSchema(s string) (version.ID, error) {

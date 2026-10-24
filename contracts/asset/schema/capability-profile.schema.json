@@ -17,6 +17,7 @@
       "type": "object", "required": ["allowlist"],
       "properties": {"allowlist": {"type": "string", "description": "A firmware allowlist in the register package (TODO(C3)), or \"none\"."}}
     },
+    "pre_credential": {"type": "array", "items": {"type": "string"}, "description": "Attributes the family reports before authentication."},
     "capabilities": {
       "type": "array",
       "items": {

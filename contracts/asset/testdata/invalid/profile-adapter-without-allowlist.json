@@ -9,6 +9,11 @@
   "firmware": {
     "allowlist": "none"
   },
+  "pre_credential": [
+    "firmware_id",
+    "part_number",
+    "sel.cid"
+  ],
   "capabilities": [
     {
       "capability": "identification",

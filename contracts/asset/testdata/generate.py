@@ -15,10 +15,16 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 T0 = "2026-10-24T09:00:00Z"   # commissioning (invented)
-T1 = "2026-10-24T09:15:02.481Z"  # simulator session (invented)
+T1 = "2026-10-24T09:15:00.5Z"  # simulator session: the ID reply in the C2 example (invented)
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"  # C2 invocation ID (invented)
 FID = "SEL-751-R501-V0-Z104101-D20260910"     # S22 Table A.1 p. A.2
 FID_OTHER = "SEL-751-R500-V1-Z103101-D20260910"  # S22 Table A.1 p. A.2
+# Spans point into the C2 example transcript of invocation INV
+# (contracts/adapter/testdata/results/valid/ok.json, an invented simulator
+# session shaped after S22 Figure 7.38): the FID value and the CID value in
+# the ID reply. C2's tests check that each span selects its value.
+FID_AT = 124
+CID_AT = 221
 
 
 def obs(value, cls, method, ref, at, span=None):
@@ -46,11 +52,11 @@ def relay():
             {"name": "firmware_id", "value": FID, "confidence": "corroborated",
              "observations": [
                  obs(FID, "operator-declared", "operator-entry", "operator:commissioning-sheet-07", T0),
-                 obs(FID, "simulated", "simulator-session", INV, T1, (42, 33)),
+                 obs(FID, "simulated", "simulator-session", INV, T1, (FID_AT, 33)),
              ]},
             declared("serial_number", "SIM0000000000001"),
             {"name": "sel.cid", "value": "E754", "confidence": "single-source",
-             "observations": [obs("E754", "simulated", "simulator-session", INV, T1, (98, 4))]},
+             "observations": [obs("E754", "simulated", "simulator-session", INV, T1, (CID_AT, 4))]},
             declared("ip_address", "192.0.2.21"),
         ],
         "endpoints": [{
@@ -61,7 +67,8 @@ def relay():
                                     "reason": "Simulated slice only, lab-only credentials (ADR-0005)",
                                     "scope": "lab-only"}}}],
         "identity_binding": {"method": "device-reported", "strength": "spoofable",
-                             "attributes": ["firmware_id", "serial_number"]},
+                             "attributes": ["firmware_id", "serial_number"],
+                             "pre_credential": ["firmware_id"]},
         "profile": {"id": "sel-751-ascii", "version": "0.1"},
     }
 
@@ -117,10 +124,32 @@ def mismatch():
         "name": "firmware_id", "value": FID, "confidence": "conflicting",
         "observations": [
             obs(FID, "operator-declared", "operator-entry", "operator:commissioning-sheet-07", T0),
-            obs(FID_OTHER, "simulated", "simulator-session", INV, T1, (42, 33)),
+            obs(FID_OTHER, "simulated", "simulator-session", INV, T1, (FID_AT, 33)),
         ]}
     a["suspension"] = {"reason": "identity-mismatch", "since": T1, "ref": INV}
     return a
+
+
+def later(fn):
+    a = relay()
+    a["schema"] = "otsec.asset/0.2"
+    fn(a)
+    return a
+
+
+LATER = {
+    # Each carries a value 0.1 does not know where trust is at stake; the test
+    # checks what a 0.1 reader reads (A6 C1 review change 2).
+    "later-minor-unknown-binding-method": lambda a: a["identity_binding"].update(
+        method="tpm-attested", strength="cryptographic"),
+    "later-minor-unknown-source-method": lambda a: attr(a, "firmware_id")["observations"][1].update(
+        evidence_class="device-observed", source={"method": "simulator-replay", "ref": INV, "observed_at": T1,
+                                                   "span": {"offset": FID_AT, "length": 33}}),
+    "later-minor-unknown-confidence": lambda a: attr(a, "firmware_id").update(confidence="verified"),
+    "later-minor-unknown-evidence-class": lambda a: attr(a, "sel.cid")["observations"][0].update(
+        evidence_class="hardware-verified", source={"method": "adapter-session", "ref": INV, "observed_at": T1,
+                                                     "span": {"offset": CID_AT, "length": 4}}),
+}
 
 
 def later_minor():
@@ -136,6 +165,7 @@ PROFILE_751 = {
     "profile_id": "sel-751-ascii", "version": "0.1",
     "vendor": "sel", "product_family": "sel-751", "device_class": "protective-relay",
     "firmware": {"allowlist": "sel-751"},
+    "pre_credential": ["firmware_id", "part_number", "sel.cid"],
     "capabilities": [
         {"capability": "identification", "mechanism": "adapter-operation", "operations": ["sel.id"],
          "status": "simulated", "citation": "S22 Table 7.43, Figure 7.38; simulator only (C-10)"},
@@ -178,7 +208,7 @@ INVALID = {
     "observation-without-evidence-class": (relay, lambda a: attr(a, "vendor")["observations"][0].pop("evidence_class")),
     "attribute-without-observations": (relay, lambda a: attr(a, "vendor").update(observations=[])),
     "corroborated-by-one-class": (relay, lambda a: attr(a, "firmware_id").update(observations=[
-        obs(FID, "device-observed", "adapter-session", INV, T1, (42, 33)),
+        obs(FID, "device-observed", "adapter-session", INV, T1, (FID_AT, 33)),
         obs(FID, "device-observed", "syslog-received", "syslog:192.0.2.21", T1, (0, 33))])),
     "conflicting-value-not-declared": (mismatch, lambda a: attr(a, "firmware_id").update(value=FID_OTHER)),
     "telnet-labelled-encrypted": (relay, lambda a: a["endpoints"][0]["downstream_security"].update(
@@ -209,11 +239,20 @@ INVALID = {
         "downstream_security": {"level": "encrypted-authenticated"}})),
     "acknowledgement-without-scope": (relay, lambda a: a["endpoints"][0]["downstream_security"]["acknowledgement"].pop("scope")),
     "asset-id-from-device-content": (relay, lambda a: a.update(asset_id="sel-751-" + FID.lower())),
+    "binding-without-pre-credential": (relay, lambda a: a["identity_binding"].update(
+        attributes=["serial_number"], pre_credential=[])),
+    "device-reported-on-ip-address": (relay, lambda a: a["identity_binding"].update(
+        attributes=["ip_address"], pre_credential=["ip_address"])),
+    "pre-credential-not-in-attributes": (relay, lambda a: a["identity_binding"].update(
+        attributes=["serial_number"], pre_credential=["firmware_id"])),
+    "address-only-with-pre-credential": (rtac, lambda a: a["identity_binding"].update(
+        pre_credential=["ip_address"])),
 }
 
 INVALID_PROFILES = {
     "profile-adapter-without-allowlist": lambda p: p["firmware"].update(allowlist="none"),
     "profile-claim-without-citation": lambda p: p["capabilities"][0].pop("citation"),
+    "profile-pre-credential-operator-only": lambda p: p.update(pre_credential=["firmware_id", "ip_address"]),
 }
 
 
@@ -231,6 +270,8 @@ def main():
     write("valid/site-node.json", node())
     write("valid/sel-rtac-syslog.json", rtac())
     write("valid/later-minor.json", later_minor())
+    for name, fn in LATER.items():
+        write(f"valid/{name}.json", later(fn))
     write("valid/profile-sel-751-ascii.json", PROFILE_751)
     write("valid/profile-sel-rtac-syslog.json", PROFILE_RTAC)
     for name, (base, fn) in INVALID.items():

@@ -37,6 +37,11 @@ var invalidWant = map[string]string{
 	"acknowledgement-without-scope":               "acknowledgement.scope is required",
 	"profile-adapter-without-allowlist":           "needs a firmware allowlist",
 	"profile-claim-without-citation":              "needs a citation",
+	"binding-without-pre-credential":              "needs a pre_credential attribute",
+	"device-reported-on-ip-address":               `cannot compare "ip_address"`,
+	"pre-credential-not-in-attributes":            `"firmware_id" is not in attributes`,
+	"address-only-with-pre-credential":            "pre_credential is empty",
+	"profile-pre-credential-operator-only":        `"ip_address" is not an attribute a device reports`,
 }
 
 func decodeAny(b []byte) error {
@@ -240,5 +245,82 @@ func TestInboundPortIsOptional(t *testing.T) {
 	a.Endpoints[0].Port = 0
 	if err := a.Validate(); err == nil {
 		t.Fatal("Telnet endpoint without a port accepted")
+	}
+}
+
+// A later minor's values are read down wherever they carry trust (A6 C1
+// review change 2).
+func TestLaterMinorReadsDown(t *testing.T) {
+	fid := func(a Asset) Attribute { at, _ := a.Attribute(AttrFirmwareID); return at }
+	a := load(t, "later-minor-unknown-binding-method.json")
+	if a.IdentityBinding.Strength != Spoofable {
+		t.Errorf("unknown binding method read as %q, want spoofable", a.IdentityBinding.Strength)
+	}
+	a = load(t, "later-minor-unknown-source-method.json")
+	if c := fid(a).Observations[1].EvidenceClass; c != FallbackEvidenceClass {
+		t.Errorf("device-observed value from an unknown method read as %q", c)
+	}
+	a = load(t, "later-minor-unknown-confidence.json")
+	if c := fid(a).Confidence; c != Corroborated {
+		t.Errorf("unknown confidence recomputed as %q, want corroborated", c)
+	}
+	a = load(t, "later-minor-unknown-evidence-class.json")
+	if at, _ := a.Attribute("sel.cid"); at.Observations[0].EvidenceClass != FallbackEvidenceClass {
+		t.Errorf("unknown evidence class read as %q", at.Observations[0].EvidenceClass)
+	}
+	if a := load(t, "later-minor.json"); a.DeviceClass() != FallbackDeviceClass {
+		t.Errorf("unknown device class read as %q", a.DeviceClass())
+	}
+	// A valid 0.1 record reads unchanged.
+	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "sel-751-simulated.json"))
+	var raw Asset
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := json.Marshal(load(t, "sel-751-simulated.json"))
+	want, _ := json.Marshal(raw)
+	if string(got) != string(want) {
+		t.Error("Decode changed a valid 0.1 record")
+	}
+}
+
+// Two device claims of one class are single-source, never corroborated.
+func TestSingleSourceAcrossMethods(t *testing.T) {
+	a := load(t, "sel-751-simulated.json")
+	a.Attributes = append([]Attribute(nil), a.Attributes...)
+	for i, at := range a.Attributes {
+		if at.Name == "sel.cid" {
+			at.Observations = append(at.Observations, Observation{Value: "E754", EvidenceClass: Simulated,
+				Source: Source{Method: SimulatorRun, Ref: "other-run", ObservedAt: "2026-10-24T09:20:00Z",
+					Span: &Span{Offset: 221, Length: 4}}})
+			a.Attributes[i] = at
+		}
+	}
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "keep only the latest") {
+		t.Fatalf("two observations of one class and method: %v", err)
+	}
+	if got := DeriveConfidence("E754", []Observation{{Value: "E754", EvidenceClass: DeviceObserved},
+		{Value: "E754", EvidenceClass: DeviceObserved}}); got != SingleSource {
+		t.Errorf("two device claims derive %q", got)
+	}
+}
+
+func TestCheckProfile(t *testing.T) {
+	a := load(t, "sel-751-simulated.json")
+	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "profile-sel-751-ascii.json"))
+	p, err := DecodeProfile(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CheckProfile(p); err != nil {
+		t.Fatalf("golden asset against its profile: %v", err)
+	}
+	a.IdentityBinding.PreCredential = []string{"serial_number"} // printed only after authentication
+	if err := a.CheckProfile(p); err == nil {
+		t.Fatal("serial_number accepted as a pre-credential attribute of the SEL-751")
+	}
+	p.ProfileID = "other"
+	if err := a.CheckProfile(p); err == nil {
+		t.Fatal("a profile the asset does not name accepted")
 	}
 }

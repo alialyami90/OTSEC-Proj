@@ -100,8 +100,11 @@
       "properties": {
         "method": {"$ref": "#/$defs/bindingMethod"},
         "strength": {"$ref": "#/$defs/bindingStrength"},
-        "attributes": {"type": "array", "items": {"$ref": "#/$defs/attributeName"}}
-      }
+        "attributes": {"type": "array", "items": {"$ref": "#/$defs/attributeName"}},
+        "pre_credential": {"type": "array", "items": {"$ref": "#/$defs/attributeName"}, "description": "Subset of attributes compared before any credential is sent. Non-empty for device-reported, empty for address-only."}
+      },
+      "if": {"properties": {"method": {"const": "device-reported"}}},
+      "then": {"required": ["pre_credential"], "properties": {"pre_credential": {"minItems": 1}}}
     },
     "postureLabel": {
       "type": "object", "required": ["label", "since"],

@@ -1,16 +1,20 @@
 # C1 golden examples
 
-Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device.
+Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device. Transcript spans (FID at offset 124, CID at 221) point into the invented C2 example transcript of the same invocation, `contracts/adapter/testdata/results/valid/ok.json`, which arrives with C2; C2's tests check each span selects its value.
 
 ## Valid
 
 | File | What it shows |
 | --- | --- |
-| `valid/sel-751-simulated.json` | SEL-751 in the simulated slice: Telnet labelled plaintext with an acknowledgement, FID corroborated by the operator record and a simulator session, binding `device-reported` and `spoofable`. |
+| `valid/sel-751-simulated.json` | SEL-751 in the simulated slice: Telnet labelled plaintext with an acknowledgement, FID corroborated by the operator record and a simulator session, binding `device-reported` and `spoofable`, with the FID compared before the password and the serial after. |
 | `valid/sel-751-identity-mismatch.json` | The simulator reported a different FID: the attribute is `conflicting`, keeps the declared value, and the asset is suspended for `identity-mismatch`. |
 | `valid/site-node.json` | The site platform node as a `server` asset carrying A5's posture labels: OS out of support with its standing condition and migration date, and storage durability unverified. |
 | `valid/sel-rtac-syslog.json` | An RTAC heard only through Syslog over UDP: plaintext, acknowledged, bound by address only. |
 | `valid/later-minor.json` | A 0.3 record with a device class and a field 0.1 does not know: a 0.1 reader accepts it and reads the class as `unknown`. |
+| `valid/later-minor-unknown-binding-method.json` | A 0.2 binding method `tpm-attested` claiming `cryptographic`: a 0.1 reader reads `spoofable`. |
+| `valid/later-minor-unknown-source-method.json` | A 0.2 source method `simulator-replay` labelled `device-observed`: a 0.1 reader reads `inferred`, never a device observation. |
+| `valid/later-minor-unknown-confidence.json` | A 0.2 confidence `verified`: a 0.1 reader recomputes it (`corroborated`). |
+| `valid/later-minor-unknown-evidence-class.json` | A 0.2 evidence class `hardware-verified`: a 0.1 reader reads `inferred`. |
 | `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. |
 | `valid/profile-sel-rtac-syslog.json` | RTAC profile: Syslog push only, no adapter operations, so no firmware allowlist. |
 
@@ -40,5 +44,10 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/syslog-tls-authenticated-without-pinned-key.json` | The same for a Syslog-over-TLS endpoint on an address-only asset (C1-A3-2). |
 | `invalid/acknowledgement-without-scope.json` | A plaintext acknowledgement with no scope (C1-A3-3). |
 | `invalid/asset-id-from-device-content.json` | An asset ID derived from the FID instead of an assigned UUID. |
+| `invalid/binding-without-pre-credential.json` | A `device-reported` binding on `serial_number` alone, with nothing compared before the password (A6 change 1). |
+| `invalid/device-reported-on-ip-address.json` | A `device-reported` binding on `ip_address`, which the device does not report. |
+| `invalid/pre-credential-not-in-attributes.json` | A pre-credential attribute that is not a binding attribute. |
+| `invalid/address-only-with-pre-credential.json` | An address-only binding with a pre-credential attribute. |
+| `invalid/profile-pre-credential-operator-only.json` | A profile claiming the family reports `ip_address` before authentication. |
 | `invalid/profile-adapter-without-allowlist.json` | A profile that sends adapter operations with no firmware allowlist (AP-27). |
 | `invalid/profile-claim-without-citation.json` | A capability claim with no citation. |

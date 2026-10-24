@@ -133,6 +133,15 @@ type IdentityBinding struct {
 	// Attributes are compared on every session. Each must exist on the asset
 	// with an operator-declared observation, which is the expected value.
 	Attributes []string `json:"attributes"`
+	// PreCredential is the subset of Attributes compared before any
+	// credential leaves the node: what the device reports without
+	// authentication (for the SEL-751, the ID response, S22 Figure 7.38). A
+	// device-reported binding needs at least one, so that ACC is never sent
+	// ungated (AP-27, V-S19). The other attributes are compared after
+	// authentication, where they detect a substitution but cannot protect
+	// the credential. Which attributes a family can report before
+	// authentication is profile content (CapabilityProfile.PreCredential).
+	PreCredential []string `json:"pre_credential,omitempty"`
 }
 
 // ProfileRef names the capability profile the collector uses for this asset.
@@ -173,12 +182,15 @@ type PostureLabel struct {
 // Every enum below is closed: a 0.1 reader rejects a value it does not know
 // in a 0.1 message. A message stamped with a later 0.x minor may carry values
 // added since; a 0.1 reader accepts the message and reads such a value as the
-// enum's fallback (Effective), never as anything more trusted.
+// enum's fallback, never as anything more trusted. Decode applies the
+// fallbacks (Asset.Effective), so a 0.1 consumer never sees a later value.
 
 // Confidence is derived from the observations by fixed rules, so it can be
 // checked rather than asserted:
 //
-//   - single-source: exactly one observation, equal to Value.
+//   - single-source: every observation equal to Value, all from one evidence
+//     class. Usually one observation; two device claims (an adapter session
+//     and Syslog) are one class and stay single-source.
 //   - corroborated: two or more observations, all equal to Value, from at
 //     least two different evidence classes. Two device claims (ID and the SER
 //     header) are one class and do not corroborate each other.
@@ -339,6 +351,10 @@ const (
 	FallbackSecurityLevel = PlaintextUnauthenticated
 	FallbackStrength      = Spoofable
 	FallbackDeviceClass   = ClassUnknown
+	// FallbackEvidenceClass is how a 0.1 reader reads an evidence class it
+	// does not know, and a device-observed value from a source method it
+	// does not know: never as a device observation.
+	FallbackEvidenceClass = Inferred
 )
 
 // StrengthOf is the strength a binding method implies.
@@ -390,6 +406,12 @@ var AttributeNames = []string{AttrDeviceClass, AttrVendor, AttrProductFamily, At
 // nothing better is known (ADR-0006 item 5).
 var RequiredAttributes = []string{AttrDeviceClass, AttrVendor}
 
+// OperatorOnlyAttributes are never reported by a device about itself. A
+// device-reported binding cannot compare them: the device does not print
+// them, so the comparison would check nothing (A6 C1 review change 1).
+var OperatorOnlyAttributes = []string{AttrDeviceClass, AttrVendor, AttrProductFamily, AttrDeviceName,
+	AttrIPAddress, AttrLocation}
+
 // --- formats -----------------------------------------------------------------
 
 var (
@@ -432,13 +454,97 @@ func ValidTime(s string) bool {
 
 // --- decoding and validation ---------------------------------------------------
 
-// Decode parses and validates an asset record. Unknown fields are ignored.
+// Decode parses and validates an asset record, and returns it as a 0.1
+// reader must read it (Effective). Unknown fields are ignored.
+//
+// TODO(D1-10): decode with contracts/internal/strictjson once #27 merges, so
+// that case-variant and duplicate keys are rejected (A6 C1 review change 3).
 func Decode(b []byte) (Asset, error) {
 	var a Asset
 	if err := json.Unmarshal(b, &a); err != nil {
 		return Asset{}, fmt.Errorf("asset: %w", err)
 	}
-	return a, a.Validate()
+	if err := a.Validate(); err != nil {
+		return Asset{}, err
+	}
+	return a.Effective(), nil
+}
+
+// Effective is the record as a 0.1 reader reads it. Values a later minor
+// added are read down to the least trusted 0.1 value, wherever they carry
+// trust (A6 C1 review change 2):
+//
+//   - binding strength is always StrengthOf(method): spoofable unless the
+//     method is pinned-key;
+//   - an evidence class 0.1 does not know reads as FallbackEvidenceClass;
+//   - a device-observed value from a source method 0.1 does not know reads
+//     as FallbackEvidenceClass, so it is never shown as a device observation;
+//     a simulator-session value always reads as simulated;
+//   - a confidence 0.1 does not know is recomputed from the observations;
+//   - a downstream security level 0.1 does not know reads as
+//     FallbackSecurityLevel.
+//
+// For a valid 0.1 record, Effective returns the record unchanged. Device
+// class is not rewritten; read it with DeviceClass.
+func (a Asset) Effective() Asset {
+	out := a
+	out.Attributes = make([]Attribute, len(a.Attributes))
+	for i, at := range a.Attributes {
+		at.Observations = append([]Observation(nil), at.Observations...)
+		for j := range at.Observations {
+			at.Observations[j].EvidenceClass = effectiveClass(at.Observations[j])
+		}
+		if !contains(Confidences, at.Confidence) {
+			at.Confidence = DeriveConfidence(at.Value, at.Observations)
+		}
+		out.Attributes[i] = at
+	}
+	out.Endpoints = append([]Endpoint(nil), a.Endpoints...)
+	for i := range out.Endpoints {
+		if !contains(SecurityLevels, out.Endpoints[i].DownstreamSecurity.Level) {
+			out.Endpoints[i].DownstreamSecurity.Level = FallbackSecurityLevel
+		}
+	}
+	out.IdentityBinding.Strength = StrengthOf(a.IdentityBinding.Method)
+	return out
+}
+
+func effectiveClass(ob Observation) EvidenceClass {
+	switch {
+	case ob.Source.Method == SimulatorRun:
+		return Simulated
+	case !contains(EvidenceClasses, ob.EvidenceClass):
+		return FallbackEvidenceClass
+	case ob.EvidenceClass == DeviceObserved && !contains(SourceMethods, ob.Source.Method):
+		return FallbackEvidenceClass
+	}
+	return ob.EvidenceClass
+}
+
+// DeriveConfidence computes the confidence the rules give a value and its
+// observations.
+func DeriveConfidence(value string, obs []Observation) Confidence {
+	classes := map[EvidenceClass]bool{}
+	for _, ob := range obs {
+		if ob.Value != value {
+			return Conflicting
+		}
+		classes[ob.EvidenceClass] = true
+	}
+	if len(classes) >= 2 {
+		return Corroborated
+	}
+	return SingleSource
+}
+
+// DeviceClass is the asset's device class as a 0.1 reader reads it: a class
+// from a later minor reads as FallbackDeviceClass.
+func (a Asset) DeviceClass() string {
+	at, _ := a.Attribute(AttrDeviceClass)
+	if !contains(DeviceClasses, at.Value) {
+		return FallbackDeviceClass
+	}
+	return at.Value
 }
 
 // Validate checks every rule of the contract that can be checked from the
@@ -581,8 +687,8 @@ func (v *validator) attribute(i int, at Attribute) {
 	}
 	switch at.Confidence {
 	case SingleSource:
-		if len(at.Observations) != 1 || at.Observations[0].Value != at.Value {
-			v.fail("%s: single-source needs exactly one observation equal to value", p)
+		if !allEqual || at.Observations[0].Value != at.Value || len(classes) != 1 {
+			v.fail("%s: single-source needs observations equal to value, all from one evidence class", p)
 		}
 	case Corroborated:
 		if len(at.Observations) < 2 || !allEqual || at.Observations[0].Value != at.Value || len(classes) < 2 {
@@ -731,6 +837,29 @@ func (v *validator) binding(a Asset, attrs map[string]Attribute) {
 	}
 	if b.Method == DeviceReported && len(b.Attributes) == 0 {
 		v.fail("identity_binding: device-reported needs at least one attribute")
+	}
+	if b.Method == DeviceReported && len(b.PreCredential) == 0 {
+		v.fail("identity_binding: device-reported needs a pre_credential attribute, compared before any credential is sent (AP-27)")
+	}
+	if b.Method == AddressOnly && len(b.PreCredential) != 0 {
+		v.fail("identity_binding: address-only compares nothing the device reports, so pre_credential is empty")
+	}
+	pre := map[string]bool{}
+	for _, name := range b.PreCredential {
+		if pre[name] {
+			v.fail("identity_binding: pre_credential lists %q twice", name)
+		}
+		pre[name] = true
+		if !contains(b.Attributes, name) {
+			v.fail("identity_binding: pre_credential attribute %q is not in attributes", name)
+		}
+	}
+	if b.Method == DeviceReported {
+		for _, name := range b.Attributes {
+			if contains(OperatorOnlyAttributes, name) {
+				v.fail("identity_binding: device-reported cannot compare %q, which the device does not report", name)
+			}
+		}
 	}
 	for _, name := range b.Attributes {
 		at, ok := attrs[name]

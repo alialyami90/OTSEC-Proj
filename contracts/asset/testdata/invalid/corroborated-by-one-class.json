@@ -62,9 +62,9 @@
           "source": {
             "method": "adapter-session",
             "ref": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
-            "observed_at": "2026-10-24T09:15:02.481Z",
+            "observed_at": "2026-10-24T09:15:00.5Z",
             "span": {
-              "offset": 42,
+              "offset": 124,
               "length": 33
             }
           }
@@ -75,7 +75,7 @@
           "source": {
             "method": "syslog-received",
             "ref": "syslog:192.0.2.21",
-            "observed_at": "2026-10-24T09:15:02.481Z",
+            "observed_at": "2026-10-24T09:15:00.5Z",
             "span": {
               "offset": 0,
               "length": 33
@@ -111,9 +111,9 @@
           "source": {
             "method": "simulator-session",
             "ref": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
-            "observed_at": "2026-10-24T09:15:02.481Z",
+            "observed_at": "2026-10-24T09:15:00.5Z",
             "span": {
-              "offset": 98,
+              "offset": 221,
               "length": 4
             }
           }
@@ -160,6 +160,9 @@
     "attributes": [
       "firmware_id",
       "serial_number"
+    ],
+    "pre_credential": [
+      "firmware_id"
     ]
   },
   "profile": {
