@@ -47,6 +47,7 @@ var resultWant = map[string]string{
 	"wake-into-password-prompt":             "only when nothing was received",
 	"quit-after-unconfirmed-password":       "no level prompt confirmed (C-19, D1-20)",
 	"quit-after-unanswered-acc":             `"QUI" sent before a prompt`,
+	"quit-after-rejected-probe":             "the QUI probe is the last line sent (D16)",
 	"credential-and-quit-in-one-segment":    "exactly the redaction marker and one line end",
 	"credential-without-password-prompt":    "without a received password prompt",
 	"auth-line-not-acc":                     "the auth phase sends ACC once",

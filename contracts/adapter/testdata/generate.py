@@ -460,6 +460,12 @@ def invalid_results(good):
 
     # Session rules checked against the bytes (A3 and A6 C2 reviews).
     s = Session()
+    s.connect()
+    s.probe(reply=framed(b"QUI\r\n", b"Comando no valido\r\n", b"="))
+    s.quit()  # D16: nothing more after a rejected probe
+    out["quit-after-rejected-probe"] = s.result("refused", "refused.language_probe_rejected")
+
+    s = Session()
     s.facts.update(connected=True, wake_sent=True, access_level="0")
     s.rx("probe", b"\r\nPassword: ? ")
     s.tx("probe", b"\r\n")  # the wake into a password prompt is a password attempt

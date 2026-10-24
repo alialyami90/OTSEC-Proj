@@ -101,8 +101,10 @@ func (c *check) dialogue(r Result, code Code) {
 	ss, tail := sends(t)
 	at := func(x send) string { return fmt.Sprintf("transcript.segments[%d]", x.seg) }
 
-	level := -1 // the highest level a prompt showed
-	first := "" // the first prompt received
+	level := -1    // the highest level a prompt showed
+	sinceACC := -1 // the highest level a prompt showed after the last ACC
+	first := ""    // the first prompt received
+	acc := -1      // the send that was ACC
 	see := func(rx []byte) string {
 		p := promptOf(rx)
 		if l, ok := promptLevels[p]; ok {
@@ -110,11 +112,14 @@ func (c *check) dialogue(r Result, code Code) {
 				first = p
 			}
 			level = max(level, l)
+			if acc >= 0 {
+				sinceACC = max(sinceACC, l)
+			}
 		}
 		return p
 	}
 
-	wakes, acc, cred := 0, -1, -1
+	wakes, cred := 0, -1
 	passwordPrompt := false
 	probed := false
 	for k, x := range ss {
@@ -157,7 +162,7 @@ func (c *check) dialogue(r Result, code Code) {
 			if acc >= 0 || !isLine(x.b, "ACC") {
 				c.fail("%s: the auth phase sends ACC once, then only the credential", at(x))
 			}
-			acc = k
+			acc, sinceACC = k, -1
 		case PhaseClose:
 			if !isLine(x.b, "QUI") {
 				c.fail("%s: the close phase sends QUI only", at(x))
@@ -175,9 +180,9 @@ func (c *check) dialogue(r Result, code Code) {
 				c.fail("%s: sent after a password that no level prompt confirmed (C-19, D1-20)", at(x))
 			}
 		case x.phase == PhaseClose && p == "" && (code == FailedTimeout || code == FailedResponseTooLarge) &&
-			level >= 1 && (cred < 0 || k > cred+1):
+			acc >= 0 && sinceACC >= 1 && (cred < 0 || k > cred+1):
 			// The one line not sent after a prompt: a step ended without
-			// one, and QUI drops a level already confirmed by a prompt back
+			// one, and QUI drops a level a prompt confirmed after ACC back
 			// to 0 (D18, V-S13). It is never the first send after the
 			// password, and never follows an unanswered ACC, where a late
 			// "Password: ?" would take it as a wrong password (A3 change 12);
@@ -228,6 +233,11 @@ func (c *check) dialogue(r Result, code Code) {
 		if s.AccessLevel != want {
 			c.fail("session: access_level %q, but the highest prompt received shows %q", s.AccessLevel, want)
 		}
+	}
+	// D16: after a rejected probe nothing more is sent, not even QUI; the
+	// port's commands are not known (A6 change 13).
+	if code == RefusedLanguageProbe && (len(ss) == 0 || !(ss[len(ss)-1].phase == PhaseProbe && isLine(ss[len(ss)-1].b, "QUI"))) {
+		c.fail("%s: the QUI probe is the last line sent (D16)", code)
 	}
 	if code == RefusedSessionPendingPassword && (len(ss) != 0 || last != promptPassword) {
 		c.fail("%s: the device printed only %q, and nothing was sent", code, promptPassword)
