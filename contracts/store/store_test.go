@@ -26,9 +26,9 @@ func TestIdentifier(t *testing.T) {
 func goodLayout() Layout {
 	q := func(c StreamClass) Quota { return Quota{Class: c, Bytes: 1 << 30, WarnFraction: 0.8} }
 	return Layout{Databases: []Database{
-		{ID: "evidence", Writer: "ied", Streams: []StreamID{"relay1/ser"}, Classes: []StreamClass{ClassAdapterEvidence}, Quotas: []Quota{q(ClassAdapterEvidence)}},
-		{ID: "syslog", Writer: "telemetry", Streams: []StreamID{"udp514/2488"}, Classes: []StreamClass{ClassSyslogDatagram, ClassSyslogStream}, Quotas: []Quota{q(ClassSyslogDatagram), q(ClassSyslogStream)}},
-		{ID: "audit", Writer: "security", Streams: []StreamID{"audit"}, Classes: []StreamClass{ClassAudit}, Quotas: []Quota{q(ClassAudit)}},
+		{ID: "evidence", Writer: "ied", Streams: []StreamSpec{{"relay1/ser", ClassAdapterEvidence}}, Classes: []StreamClass{ClassAdapterEvidence}, Quotas: []Quota{q(ClassAdapterEvidence)}},
+		{ID: "syslog", Writer: "telemetry", Streams: []StreamSpec{{"udp514/2488", ClassSyslogDatagram}}, Classes: []StreamClass{ClassSyslogDatagram, ClassSyslogStream}, Quotas: []Quota{q(ClassSyslogDatagram), q(ClassSyslogStream)}},
+		{ID: "audit", Writer: "security", Streams: []StreamSpec{{"audit", ClassAudit}}, Classes: []StreamClass{ClassAudit}, Quotas: []Quota{q(ClassAudit)}},
 	}}
 }
 
@@ -39,7 +39,9 @@ func TestLayout(t *testing.T) {
 	for name, mutate := range map[string]func(*Layout){
 		"no writer":          func(l *Layout) { l.Databases[0].Writer = "" },
 		"duplicate database": func(l *Layout) { l.Databases[1].ID = "evidence" },
-		"stream in two":      func(l *Layout) { l.Databases[1].Streams = append(l.Databases[1].Streams, "relay1/ser") },
+		"stream in two": func(l *Layout) {
+			l.Databases[1].Streams = append(l.Databases[1].Streams, StreamSpec{"relay1/ser", ClassSyslogStream})
+		},
 		"audit mixed": func(l *Layout) {
 			l.Databases[2].Classes = append(l.Databases[2].Classes, ClassPlatform)
 			l.Databases[2].Quotas = append(l.Databases[2].Quotas, Quota{ClassPlatform, 1, 0.5})
@@ -48,8 +50,13 @@ func TestLayout(t *testing.T) {
 		"quota for absent":    func(l *Layout) { l.Databases[0].Quotas = append(l.Databases[0].Quotas, Quota{ClassAudit, 1, 0.5}) },
 		"bad warn fraction":   func(l *Layout) { l.Databases[0].Quotas[0].WarnFraction = 1 },
 		"unknown class":       func(l *Layout) { l.Databases[0].Classes[0] = "video" },
-		"two audit streams":   func(l *Layout) { l.Databases[2].Streams = append(l.Databases[2].Streams, "audit2") },
-		"no audit stream":     func(l *Layout) { l.Databases = l.Databases[:2] },
+		"two audit streams": func(l *Layout) {
+			l.Databases[2].Streams = append(l.Databases[2].Streams, StreamSpec{"audit2", ClassAudit})
+		},
+		"no audit stream": func(l *Layout) { l.Databases = l.Databases[:2] },
+		"stream class not held": func(l *Layout) {
+			l.Databases[0].Streams = append(l.Databases[0].Streams, StreamSpec{"relay2/ser", ClassAudit})
+		},
 	} {
 		l := goodLayout()
 		mutate(&l)
@@ -89,6 +96,12 @@ func TestGroupOptionsRequireGrouping(t *testing.T) {
 	}
 }
 
+// testStreams are the streams the tests' Logs write.
+var testStreams = map[StreamID]StreamClass{
+	"s": ClassAdapterEvidence, "t": ClassAdapterEvidence, "ok": ClassAdapterEvidence,
+	"full": ClassSyslogStream, "audit": ClassAudit,
+}
+
 func rec(stream StreamID, s string) Record {
 	return Record{Stream: stream, Class: ClassAdapterEvidence, Event: []byte(s)}
 }
@@ -110,7 +123,7 @@ func (g gatedCommitter) CommitBatch(ctx context.Context, s StreamID, recs []Reco
 func TestNoReceiptBeforeCommitReturns(t *testing.T) {
 	f := newFake()
 	g := gatedCommitter{f, make(chan struct{}, 1), make(chan struct{})}
-	l, err := NewLog(g, f.node, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
+	l, err := NewLog(g, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +153,7 @@ func TestNoReceiptBeforeCommitReturns(t *testing.T) {
 
 func TestGroupCommit(t *testing.T) {
 	f := newFake()
-	l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 10, MaxWait: time.Second}, nil)
+	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 10, MaxWait: time.Second}, nil)
 	var wg sync.WaitGroup
 	keys := make(chan Key, 10)
 	for i := 0; i < 10; i++ {
@@ -171,7 +184,7 @@ func TestGroupCommit(t *testing.T) {
 
 	// MaxWait commits a group that never fills.
 	f2 := newFake()
-	l2, _ := NewLog(f2, f2.node, GroupOptions{MaxEvents: 100, MaxWait: 10 * time.Millisecond}, nil)
+	l2, _ := NewLog(f2, f2.node, testStreams, GroupOptions{MaxEvents: 100, MaxWait: 10 * time.Millisecond}, nil)
 	if _, err := l2.Append(context.Background(), rec("s", "y")); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +227,7 @@ func (o *orderCommitter) CommitBatch(ctx context.Context, s StreamID, recs []Rec
 func TestGroupsOfAStreamCommitInOrder(t *testing.T) {
 	f := newFake()
 	o := &orderCommitter{fake: f, first: make(chan struct{}), t: t}
-	l, _ := NewLog(o, f.node, GroupOptions{MaxEvents: 2, MaxWait: 5 * time.Millisecond}, nil)
+	l, _ := NewLog(o, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: 5 * time.Millisecond}, nil)
 	done := make(chan struct{})
 	go func() { l.Append(context.Background(), rec("s", "1")); done <- struct{}{} }()
 	time.Sleep(20 * time.Millisecond) // group 1 is flushed and blocked in its commit
@@ -244,7 +257,7 @@ func TestCommitFailuresStopTheLog(t *testing.T) {
 	} {
 		f := newFake()
 		tc.setup(f)
-		l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, tc.last)
+		l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, tc.last)
 		r, err := l.Append(context.Background(), rec("s", "a"))
 		if r != nil || !isCode(err, tc.want) {
 			t.Errorf("%s: Append = %v, %v; want no receipt and %s", name, r, err, tc.want)
@@ -259,7 +272,7 @@ func TestCommitFailuresStopTheLog(t *testing.T) {
 
 func TestAppendCancelledGivesNoReceipt(t *testing.T) {
 	f := newFake()
-	l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
+	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if r, err := l.Append(ctx, rec("s", "a")); r != nil || !errors.Is(err, context.Canceled) {
@@ -429,11 +442,11 @@ func TestStartupFailsClosedBeforeOpen(t *testing.T) {
 		alarm AlarmCode
 	}{
 		{"Lock", StepLock, AlarmLockFailed},
-		{"StoreExists", StepInspect, AlarmOpenBlocked},
-		{"ReserveExists:recovery", StepInspect, AlarmOpenBlocked},
-		{"ReserveExists:last-resort", StepInspect, AlarmOpenBlocked},
+		{"StoreExists", StepInspect, AlarmInspectFailed},
+		{"ReserveExists:recovery", StepInspect, AlarmInspectFailed},
+		{"ReserveExists:last-resort", StepInspect, AlarmInspectFailed},
 		{"ReleaseReserve:recovery", StepReleaseReserve, AlarmReserveReleaseFailed},
-		{"FreeBytes", StepHeadroom, AlarmOpenBlocked},
+		{"FreeBytes", StepHeadroom, AlarmInspectFailed},
 	} {
 		f := existing()
 		f.fail[step.call] = errInjected
@@ -604,7 +617,7 @@ func capture(b string) *Capture {
 
 func TestAppendBatch(t *testing.T) {
 	f := newFake()
-	l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
+	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
 	// One record waits in a group; the batch must commit after it.
 	first := make(chan Receipt)
 	go func() { r, _ := l.Append(context.Background(), rec("s", "single")); first <- r }()
@@ -652,7 +665,7 @@ func TestAppendBatch(t *testing.T) {
 
 func TestNewLogRejectsBadNodeID(t *testing.T) {
 	for _, n := range []NodeID{"", "Site-A", "site_a", "-a"} {
-		if _, err := NewLog(newFake(), n, DefaultGroup, nil); !isCode(err, CodeInvalid) {
+		if _, err := NewLog(newFake(), n, testStreams, DefaultGroup, nil); !isCode(err, CodeInvalid) {
 			t.Errorf("node %q: %v", n, err)
 		}
 	}
@@ -744,5 +757,84 @@ func TestResumeLeavesOtherModesAlone(t *testing.T) {
 		if r := Resume(context.Background(), f, policy(), Report{Mode: m}); r.Mode != m || len(f.calls) != 0 {
 			t.Errorf("%s: %s %v", m, r.Mode, f.calls)
 		}
+	}
+}
+
+// A6 review of C5, change 1: class belongs to the stream.
+func TestLogRefusesClassNotOfItsStream(t *testing.T) {
+	f := auditFake()
+	l, _ := NewLog(f, f.node, map[StreamID]StreamClass{"sel751-feeder1/ser": ClassAdapterEvidence, "node/audit": ClassAudit}, DefaultGroup, nil)
+	ctx := context.Background()
+	ran := false
+	err := AuditBeforeAct(ctx, l, Record{Stream: "sel751-feeder1/ser", Class: ClassAudit, Event: []byte("op")}, func(Receipt) error { ran = true; return nil })
+	if ran || !isCode(err, CodeInvalid) {
+		t.Fatalf("audit record on an evidence stream: ran %v err %v", ran, err)
+	}
+	if _, err := l.Append(ctx, Record{Stream: "node/audit", Class: ClassAdapterEvidence, Event: []byte("e")}); !isCode(err, CodeInvalid) {
+		t.Fatalf("evidence record on the audit stream: %v", err)
+	}
+	if _, err := l.Append(ctx, Record{Stream: "other", Class: ClassAdapterEvidence, Event: []byte("e")}); !isCode(err, CodeInvalid) {
+		t.Fatalf("stream the log does not write: %v", err)
+	}
+	if len(f.events["node/audit"])+len(f.events["sel751-feeder1/ser"]) != 0 {
+		t.Fatal("a refused record was committed")
+	}
+	if _, err := NewLog(f, f.node, nil, DefaultGroup, nil); !isCode(err, CodeInvalid) {
+		t.Fatalf("log with no streams: %v", err)
+	}
+}
+
+// A6 review of C5, change 3: when the recovery reserve does not free enough,
+// the same run releases the last-resort reserve instead of waiting.
+func TestStartupReleasesLastResortWhenRecoveryIsNotEnough(t *testing.T) {
+	f := existing()
+	f.cursors["s"] = map[ConsumerID]Seq{"central": 200}
+	p := policy()
+	p.RecoveryReserveBytes = p.OpenHeadroomBytes
+	f.reserveBytes = map[Reserve]int64{ReserveRecovery: 64 << 10} // smaller on disk than the policy says
+	r := RunStartup(context.Background(), f, p)
+	if indexOf(f.calls, "ReleaseReserve:last-resort") < 0 || indexOf(f.calls, "ReleaseReserve:last-resort") > indexOf(f.calls, "Open") {
+		t.Fatalf("last-resort not released before open: %v", f.calls)
+	}
+	if r.Mode == ModeBlocked || r.Mode == ModeFailed {
+		t.Fatalf("mode %s alarms %v", r.Mode, r.Alarms)
+	}
+	p.RecoveryReserveBytes = p.OpenHeadroomBytes - 1
+	if err := p.Validate(); !isCode(err, CodeInvalid) {
+		t.Fatalf("recovery reserve below headroom accepted: %v", err)
+	}
+}
+
+// A6 review of C5, change 4: at quota with nothing prunable, startup says so.
+func TestStartupAtQuotaWithNothingPrunable(t *testing.T) {
+	f := existing()
+	f.limit = 200 * f.eventSize // full
+	r := RunStartup(context.Background(), f, policy())
+	if !hasAlarm(r, AlarmQuotaReached) || !hasAlarm(r, AlarmRequiredStalled) {
+		t.Fatalf("mode %s alarms %v", r.Mode, r.Alarms)
+	}
+	for _, a := range r.Alarms {
+		if a.Code == AlarmRequiredStalled && a.Stream != "s" {
+			t.Fatalf("stalled alarm without its stream: %+v", a)
+		}
+	}
+}
+
+// A6 review of C5, change 5: a CompactStep that never finishes cannot hold
+// startup past its context.
+func TestStartupHonoursContextInCompaction(t *testing.T) {
+	f := existing()
+	f.freePages = 1 << 62 // always "more"
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan Report)
+	go func() { done <- RunStartup(ctx, f, policy()) }()
+	select {
+	case r := <-done:
+		if r.Mode != ModeDrainOnly || !hasAlarm(r, AlarmCompactFailed) {
+			t.Fatalf("mode %s alarms %v", r.Mode, r.Alarms)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup still running 5 s after its context ended")
 	}
 }

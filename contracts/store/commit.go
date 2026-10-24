@@ -166,9 +166,10 @@ func (o GroupOptions) Validate() error {
 // restarts and startup recovery runs, because after a failed flush the state
 // of the file is unknown and retrying could acknowledge lost data.
 type Log struct {
-	c    Committer
-	opt  GroupOptions
-	node NodeID
+	c       Committer
+	opt     GroupOptions
+	node    NodeID
+	classes map[StreamID]StreamClass
 
 	mu      sync.Mutex
 	pending map[StreamID]*group
@@ -188,17 +189,32 @@ type group struct {
 	err    error
 }
 
-// NewLog returns a Log over c for node. last holds each stream's last
-// committed seq as read at startup (absent: unknown, and the first commit
-// sets it); it lets the Log reject a Commit that leaves a gap or overlaps.
-func NewLog(c Committer, node NodeID, opt GroupOptions, last map[StreamID]Seq) (*Log, error) {
+// NewLog returns a Log over c for node. classes maps each stream the Log may
+// write to its class (Layout.StreamClasses, or the part of it for c's
+// database); the Log refuses a record for any other stream, or whose class
+// differs from its stream's. last holds each stream's last committed seq as
+// read at startup (absent: unknown, and the first commit sets it); it lets
+// the Log reject a Commit that leaves a gap or overlaps.
+func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt GroupOptions, last map[StreamID]Seq) (*Log, error) {
 	if err := opt.Validate(); err != nil {
 		return nil, err
 	}
 	if !node.Valid() {
 		return nil, errf(CodeInvalid, nil, "node ID %q is not a lowercase DNS label", node)
 	}
-	l := &Log{c: c, opt: opt, node: node, pending: map[StreamID]*group{}, tail: map[StreamID]chan struct{}{}, last: map[StreamID]Seq{}}
+	if len(classes) == 0 {
+		return nil, errf(CodeInvalid, nil, "log has no streams")
+	}
+	l := &Log{c: c, opt: opt, node: node, classes: map[StreamID]StreamClass{}, pending: map[StreamID]*group{}, tail: map[StreamID]chan struct{}{}, last: map[StreamID]Seq{}}
+	for s, class := range classes {
+		if !s.Valid() {
+			return nil, errf(CodeInvalid, nil, "stream %q is not a valid stream token", s)
+		}
+		if _, err := ActionFor(class); err != nil {
+			return nil, err
+		}
+		l.classes[s] = class
+	}
 	for s, q := range last {
 		l.last[s] = q
 	}
@@ -210,7 +226,7 @@ func NewLog(c Committer, node NodeID, opt GroupOptions, last map[StreamID]Seq) (
 // ctx.Err() and no Receipt; the record may still commit, so the source must
 // not be acknowledged and will re-send (at-least-once).
 func (l *Log) Append(ctx context.Context, rec Record) (Receipt, error) {
-	if err := rec.Validate(); err != nil {
+	if err := l.check(rec); err != nil {
 		return nil, err
 	}
 	l.mu.Lock()
@@ -257,7 +273,7 @@ func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error)
 		return nil, errf(CodeInvalid, nil, "batch of %d records, want 1 to %d", len(recs), MaxBatch)
 	}
 	for _, r := range recs {
-		if err := r.Validate(); err != nil {
+		if err := l.check(r); err != nil {
 			return nil, err
 		}
 		if r.Stream != recs[0].Stream {
@@ -356,6 +372,29 @@ func (l *Log) commitGroup(g *group) {
 	}
 	g.at = c.At
 	l.last[g.stream] = c.FirstSeq + Seq(c.Count) - 1
+}
+
+// check validates rec and refuses a stream the Log does not write, or a class
+// that is not the stream's.
+func (l *Log) check(rec Record) error {
+	if err := rec.Validate(); err != nil {
+		return err
+	}
+	c, ok := l.classes[rec.Stream]
+	if !ok {
+		return errf(CodeInvalid, nil, "this log does not write stream %s", rec.Stream)
+	}
+	if rec.Class != c {
+		return errf(CodeInvalid, nil, "record of class %s for stream %s, which is %s", rec.Class, rec.Stream, c)
+	}
+	return nil
+}
+
+// ClassOf returns the class of stream in this Log, and false if the Log does
+// not write it.
+func (l *Log) ClassOf(stream StreamID) (StreamClass, bool) {
+	c, ok := l.classes[stream]
+	return c, ok
 }
 
 // refused reports whether a CommitBatch error is a refusal that wrote

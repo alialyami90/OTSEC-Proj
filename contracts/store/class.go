@@ -106,7 +106,8 @@ const (
 	AlarmReserveReleaseFailed  AlarmCode = "reserve-release-failed"
 	AlarmReserveMissing        AlarmCode = "reserve-missing"
 	AlarmReserveRecreateFailed AlarmCode = "reserve-recreate-failed"
-	AlarmOpenBlocked           AlarmCode = "store-open-blocked"
+	AlarmOpenBlocked           AlarmCode = "store-open-blocked"   // blocked: not enough free space to open; recoverable
+	AlarmInspectFailed         AlarmCode = "store-inspect-failed" // the store, its reserves or free space could not be read; failed
 	AlarmOpenFailed            AlarmCode = "store-open-failed"
 	AlarmSettingsInvalid       AlarmCode = "store-settings-invalid"
 	AlarmIntegrityFailed       AlarmCode = "store-integrity-failed"

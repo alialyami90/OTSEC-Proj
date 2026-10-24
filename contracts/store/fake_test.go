@@ -30,6 +30,8 @@ type fake struct {
 	anchors   map[StreamID]ChainLink
 	quotaFull map[StreamID]bool
 
+	reserveBytes map[Reserve]int64 // bytes a release frees, if not the default
+
 	storeExists bool
 	reserves    map[Reserve]bool
 	free        int64
@@ -157,6 +159,9 @@ func (f *fake) ReleaseReserve(_ context.Context, r Reserve) error {
 }
 
 func (f *fake) reserveSize(r Reserve) int64 {
+	if b, ok := f.reserveBytes[r]; ok {
+		return b
+	}
 	if r == ReserveRecovery {
 		return 512 << 10
 	}

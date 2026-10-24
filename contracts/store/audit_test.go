@@ -74,7 +74,7 @@ func readAll(t *testing.T, f *fake, stream StreamID) []Stored {
 // read back byte for byte as sealed.
 func TestAuditSealedInCommit(t *testing.T) {
 	f := auditFake()
-	l, err := NewLog(f, f.node, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
+	l, err := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestAuditSealedInCommit(t *testing.T) {
 // and the Log keeps running.
 func TestAuditBadPendingRefusesBatch(t *testing.T) {
 	f := auditFake()
-	l, _ := NewLog(f, f.node, DefaultGroup, nil)
+	l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 	recs := auditRecords(3)
 	recs[1].Event = []byte("a|b")
 	if _, err := l.AppendBatch(context.Background(), recs); !isCode(err, CodeInvalid) {
@@ -122,7 +122,7 @@ func TestAuditBadPendingRefusesBatch(t *testing.T) {
 // verifies from, and so does the resumed prune.
 func TestAuditPruneKeepsAnchor(t *testing.T) {
 	f := auditFake()
-	l, _ := NewLog(f, f.node, DefaultGroup, nil)
+	l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 	ctx := context.Background()
 	if _, err := l.AppendBatch(ctx, auditRecords(10)); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestAuditBeforeAct(t *testing.T) {
 	cases := map[string]func() (*Log, context.Context){
 		"log stopped": func() (*Log, context.Context) {
 			f := auditFake()
-			l, _ := NewLog(f, f.node, DefaultGroup, nil)
+			l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 			f.fail["CommitBatch"] = errInjected
 			l.AppendBatch(ctx, auditRecords(1))
 			delete(f.fail, "CommitBatch")
@@ -193,13 +193,13 @@ func TestAuditBeforeAct(t *testing.T) {
 		"quota reached": func() (*Log, context.Context) {
 			f := auditFake()
 			f.quotaFull["audit"] = true
-			l, _ := NewLog(f, f.node, DefaultGroup, nil)
+			l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 			return l, ctx
 		},
 		"audit store not open": func() (*Log, context.Context) { return nil, ctx },
 		"cancelled": func() (*Log, context.Context) {
 			f := auditFake()
-			l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
+			l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
 			c, cancel := context.WithCancel(ctx)
 			cancel()
 			return l, c
@@ -215,7 +215,7 @@ func TestAuditBeforeAct(t *testing.T) {
 	}
 
 	f := auditFake()
-	l, _ := NewLog(f, f.node, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
+	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
 	var got Receipt
 	if err := AuditBeforeAct(ctx, l, rec, func(r Receipt) error { got = r; return nil }); err != nil || got == nil || got.Key().Seq != 1 {
 		t.Fatalf("err %v receipt %v", err, got)
@@ -229,7 +229,7 @@ func TestAuditBeforeAct(t *testing.T) {
 func TestQuotaRefusalDoesNotStopTheLog(t *testing.T) {
 	f := newFake()
 	f.quotaFull["full"] = true
-	l, _ := NewLog(f, f.node, DefaultGroup, nil)
+	l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 	ctx := context.Background()
 	if _, err := l.AppendBatch(ctx, []Record{{Stream: "full", Class: ClassSyslogStream, Event: []byte("e")}}); !isCode(err, CodeQuotaReached) {
 		t.Fatalf("err %v", err)

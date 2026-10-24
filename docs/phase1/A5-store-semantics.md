@@ -1,6 +1,6 @@
 # C5 `otsec.store/0.1`: store, outbox and delivery semantics
 
-Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24; revised for A4's review ([reviews/C5-A4.md](reviews/C5-A4.md)), A3's review (`reviews/C5-A3.md`, PR #37) and A1's decisions D1-3 to D1-5 and D1-11.
+Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24; revised for A4's review ([reviews/C5-A4.md](reviews/C5-A4.md)), A3's review (`reviews/C5-A3.md`, PR #37), A6's review (`reviews/C5-A6.md`, PR #40) and A1's decisions D1-3 to D1-5 and D1-11.
 
 C5 fixes how a site node keeps, acknowledges, recovers and prunes events. It is an in-process contract, so it consists of Go interfaces plus two pieces of contract-owned logic: the group-commit coordinator `Log` and the startup sequence `RunStartup`. Those two are in the contract because they are what make an early acknowledgement or an out-of-order startup impossible. Phase 2 writes the SQLite implementation behind the interfaces. The implementation does not reorder the steps.
 
@@ -10,6 +10,7 @@ Evidence classes: every number below is `simulated` (Linux container, Windows Se
 
 - `Layout` lists the node's databases. Each has exactly one writer module, the streams it holds, the stream classes it holds, and one quota per class. `Layout.Validate` rejects a stream in two databases, a database with no writer, a class with no quota, and audit mixed with any other class.
 - Other modules never open another module's database file. They read through the `Outbox` and `CursorStore` the owning module hands out. On Windows the files' ACL names only the node's service SID (ADR-0007 item 4, A3 AP-1).
+- **A stream's class is fixed in the `Layout`** (`Database.Streams` lists each stream with its class). `NewLog` takes `Layout.StreamClasses()`, and the Log refuses, with `invalid`, a record for a stream it does not write or whose class differs from its stream's. So an audit record cannot be committed to an evidence stream, and evidence cannot enter the audit chain (A6 change 1, `TestLogRefusesClassNotOfItsStream`). In 0.1 the layout is read at startup, so enrolling an asset that adds a stream takes effect at the next restart.
 - Audit has its own database, with **exactly one audit stream per node**, because the C8 hash chain is one per node (`Layout.Validate`, C5-A3-1). An evidence flood cannot fill the audit quota (ADR-0004 item 9). A full audit store fails privileged operations closed and also stops collection that uses a device credential (section 6, D1-11). Passive intake, such as received Syslog, continues.
 
 ### 1a. Audit records (C5-A3-1, C5-A3-2)
@@ -64,13 +65,15 @@ Native evidence: a `Record` may point at a `Capture` (a whole SER report, a data
 | # | Step | On failure |
 | --- | --- | --- |
 | 1 | `Lock`: exclusive use of the store's files for the life of the node. The lock fails if another process holds it. | `failed`. The store is not opened. Alarm `store-lock-failed`. |
-| 2 | Inspect without opening: does the store exist, and which reserves exist. | `failed`. Alarm `store-open-blocked`. |
+| 2 | Inspect without opening: does the store exist, and which reserves exist. | `failed`. Alarm `store-inspect-failed`, which is distinct from the recoverable `store-open-blocked` (A6 change 6). |
 | 3 | Release the recovery reserve. `ReleaseReserve` returns success only once the file is gone. **A failed release stops startup.** | `failed`. Alarm `reserve-release-failed`. The store is not opened. |
 | 3' | If the store exists and the recovery reserve does not, release the last-resort reserve instead (section 5). | As step 3: a failed release of either reserve stops startup (D1-4; `TestReleaseOfLastResortFailingStopsStartup`). |
-| 4 | Check the free space against `OpenHeadroomBytes`. | `blocked`. The store is not opened. Alarm `store-open-blocked`. The lock is kept. |
+| 4 | Check the free space against `OpenHeadroomBytes`. If releasing the recovery reserve did not free enough and the last-resort reserve exists, release it too in the same run and check again (A6 change 3). | `blocked`. The store is not opened. Alarm `store-open-blocked`. The lock is kept. A failure to read free space is `failed` with `store-inspect-failed`. |
 | 5 | `Open`, then `CheckSettings` (WAL, `FULL`, bounded WAL, created with `auto_vacuum=INCREMENTAL`; a store without it is refused, never altered), then `QuickCheck`. | `failed`, and the store is closed. Alarms `store-open-failed`, `store-settings-invalid` and `store-integrity-failed`. Nothing is pruned or repaired automatically, so evidence is preserved. |
-| 6 | While usage is above `PruneTarget` *(proposed 0.8)*, run one prune step per stream per pass. The boundary is recomputed before every step. | `drain-only`. Alarm `store-prune-failed`. |
+| 6 | While usage is above `PruneTarget` *(proposed 0.8)*, run one prune step per stream per pass. The boundary is recomputed before every step. Usage counts live pages only, `(page_count − freelist_count) × page_size`: freed pages stay in the file until step 7, and counting them would prune every confirmed event (A6 change 2). If usage is still at the limit afterwards, startup raises `store-quota-reached` and one `required-consumer-stalled` per required consumer that holds a stream back (A6 change 4). | `drain-only`. Alarm `store-prune-failed`. |
 | 7 | `CompactStep` *(proposed 32 pages)* returns free pages to the filesystem with a checkpoint between steps. | `drain-only`. Alarm `store-compact-failed`. |
+
+Steps 6 and 7 check the context before every step, so a store whose `CompactStep` never reports done cannot hold startup past its deadline; startup ends in `drain-only` with the alarm instead (A6 change 5, `TestStartupHonoursContextInCompaction`). The node runs startup with a deadline, *(proposed)* 5 minutes. `StartupPolicy.Validate` requires both reserves to be at least `OpenHeadroomBytes`.
 | 8 | Re-create any released or missing reserve, the last-resort reserve first. `CreateReserve` is all or nothing. | `drain-only`. Alarm `reserve-recreate-failed`. |
 
 The node collects (`collecting`) only if every step passed and both reserves are back in place. Otherwise it ends in one of the states of section 4a.
@@ -79,10 +82,10 @@ The node collects (`collecting`) only if every step passed and both reserves are
 
 | | `blocked` | `drain-only` |
 | --- | --- | --- |
-| Entered when | Step 4 finds free space below `OpenHeadroomBytes`. | The store opened, but step 6, 7 or 8 failed, or startup needed the last-resort reserve and could not put both reserves back. |
+| Entered when | Step 4 finds free space below `OpenHeadroomBytes` after every reserve on disk has been released. | The store opened, but step 6, 7 or 8 failed, or startup needed the last-resort reserve and could not put both reserves back. |
 | Store | Not opened. The lock from step 1 is held. | Open. Forwarding reads the outbox and saves cursors; pruning and compaction run. |
 | New events | None. | None. |
-| Exit | `Resume` re-runs steps 2 to 8 when free space changes, *(proposed)* checked every 60 s. It opens the store only once free space reaches the headroom, then goes to `collecting` or `drain-only` like a fresh startup. Free space comes from outside the store, from an operator or a removed file; an open attempt is never the way out. | `Resume` re-runs steps 6 to 8 on the open store after forwarding saves a cursor, *(proposed)* at most every 60 s. It goes to `collecting` only when pruning and compaction succeed and both reserves exist again. |
+| Exit | `Resume` re-runs steps 2 to 8 when free space changes, *(proposed)* checked every 60 s. It opens the store only once free space reaches the headroom, then goes to `collecting` or `drain-only` like a fresh startup. Since both reserves are already released by then, free space can only come from outside the store, from an operator or a removed file; an open attempt is never the way out. | `Resume` re-runs steps 6 to 8 on the open store after forwarding saves a cursor, *(proposed)* at most every 60 s. It goes to `collecting` only when pruning and compaction succeed and both reserves exist again. |
 | Tests | `TestStartupBlockedWithoutHeadroom`, `TestResumeFromBlocked` | `TestStartupDegradesToDrainOnly`, `TestResumeFromDrainOnly` |
 
 Common to both, and to `failed`:
@@ -143,7 +146,7 @@ Sizing rule for deployment: the sum of the class quotas, plus both reserves, plu
 | `audit` | `fail-closed`. Privileged operations and credential-bearing collection are refused (`audit-store-full`; see "audit before act" below). |
 | `platform` | `refuse-new`. The alarm stays in node status. |
 
-**Audit before act (C5-A3-3, A1 D1-11).** A privileged operation, and every collector request that uses a device credential, runs only after its audit record holds a `Receipt`. `AuditBeforeAct(ctx, log, rec, act)` is the contract's form of the rule. If there is no receipt, for any reason, `act` does not run, and the caller gets `audit-unavailable`. The reasons covered are a stopped Log, a full audit quota, an audit database that is not open, and a cancelled append (`TestAuditBeforeAct`).
+**Audit before act (C5-A3-3, A1 D1-11).** A privileged operation, and every collector request that uses a device credential, runs only after its audit record holds a `Receipt`. `AuditBeforeAct(ctx, log, rec, act)` is the contract's form of the rule. It refuses a record whose stream is not the Log's audit stream, and runs `act` only on a receipt for that stream. If there is no receipt, for any reason, `act` does not run, and the caller gets `audit-unavailable`. The reasons covered are a stopped Log, a full audit quota, an audit database that is not open, and a cancelled append (`TestAuditBeforeAct`).
 
 - The refusal is reported through node status, because the audit store may be what failed.
 - So a full or failed audit store **stops collection that uses a credential**, while passive intake (received Syslog, evidence already received) continues. SER rows stay in the relay's buffer, and a wrap shows up as `ser.gap` (D1-4).
@@ -174,7 +177,7 @@ The Log's failure points are:
 - a wrong stream, count or node;
 - a seq gap.
 
-The owner's tests (`contracts/store/*_test.go`) cover each one against an in-memory fake. The table-driven tests also check that a failure before step 5 never calls `Open`, and that the reserve is never re-created before the store has been opened. A6's independent tests may import the package but not `fake_test.go`.
+The owner's tests (`contracts/store/*_test.go`) cover each one against an in-memory fake. A6 reviewed with its own fakes (C5-A6). Two properties are the implementation's and the fake cannot prove them, so they are Phase 2 conformance tests against the SQLite store: `Usage` falls as step 6 prunes, before compaction (A6 change 2); and a `CompactStep` reports done once the free-page count it started with is returned. The table-driven tests also check that a failure before step 5 never calls `Open`, and that the reserve is never re-created before the store has been opened. A6's independent tests may import the package but not `fake_test.go`.
 
 ## 8. Not covered, and dependencies
 

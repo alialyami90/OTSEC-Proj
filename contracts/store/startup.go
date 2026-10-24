@@ -80,8 +80,12 @@ type RecoveryStore interface {
 	CheckSettings(ctx context.Context) error
 	// QuickCheck runs a structural check of the database.
 	QuickCheck(ctx context.Context) error
-	// Usage is the space the database uses and its limit (the sum of its
-	// class quotas).
+	// Usage is the space the database's live pages take, (page_count -
+	// freelist_count) * page_size, and its limit (the sum of its class
+	// quotas). Free pages do not count: a delete leaves them in the file
+	// until compaction, and counting them would make step 6 prune every
+	// confirmed event instead of stopping at the target (A6 review of C5,
+	// change 2).
 	Usage(ctx context.Context) (used, limit int64, err error)
 	// CompactStep returns up to pages free pages to the filesystem and
 	// checkpoints, in one step; more is false when no free pages are left.
@@ -125,6 +129,8 @@ func (p StartupPolicy) Validate() error {
 		return errf(CodeInvalid, nil, "open headroom %d below %d", p.OpenHeadroomBytes, MinOpenHeadroom)
 	case p.LastResortReserveBytes < p.OpenHeadroomBytes:
 		return errf(CodeInvalid, nil, "last-resort reserve %d below open headroom %d", p.LastResortReserveBytes, p.OpenHeadroomBytes)
+	case p.RecoveryReserveBytes < p.OpenHeadroomBytes:
+		return errf(CodeInvalid, nil, "recovery reserve %d below open headroom %d", p.RecoveryReserveBytes, p.OpenHeadroomBytes)
 	case p.RecoveryReserveBytes <= 0:
 		return errf(CodeInvalid, nil, "recovery reserve must be positive")
 	case p.PruneStepEvents < 1 || p.PruneStepEvents > 1000:
@@ -155,12 +161,6 @@ func (p StartupPolicy) Validate() error {
 		}
 	}
 	return nil
-}
-
-// StreamSpec names a stream startup recovery prunes, with its class.
-type StreamSpec struct {
-	ID    StreamID
-	Class StreamClass
 }
 
 // Mode is how the node may run after startup.
@@ -294,17 +294,17 @@ func (s *startup) run(ctx context.Context) {
 func (s *startup) fromInspect(ctx context.Context) {
 	exists, err := s.env.StoreExists(ctx)
 	if err != nil {
-		s.fail(StepInspect, AlarmOpenBlocked, err)
+		s.fail(StepInspect, AlarmInspectFailed, err)
 		return
 	}
 	hasRecovery, err := s.env.ReserveExists(ctx, ReserveRecovery)
 	if err != nil {
-		s.fail(StepInspect, AlarmOpenBlocked, err)
+		s.fail(StepInspect, AlarmInspectFailed, err)
 		return
 	}
 	hasLast, err := s.env.ReserveExists(ctx, ReserveLastResort)
 	if err != nil {
-		s.fail(StepInspect, AlarmOpenBlocked, err)
+		s.fail(StepInspect, AlarmInspectFailed, err)
 		return
 	}
 	s.ok(StepInspect, fmt.Sprintf("store=%t recovery=%t last-resort=%t", exists, hasRecovery, hasLast))
@@ -335,8 +335,23 @@ func (s *startup) fromInspect(ctx context.Context) {
 
 	free, err := s.env.FreeBytes(ctx)
 	if err != nil {
-		s.fail(StepHeadroom, AlarmOpenBlocked, err)
+		s.fail(StepHeadroom, AlarmInspectFailed, err)
 		return
+	}
+	if free < s.p.OpenHeadroomBytes && exists && hasRecovery && hasLast {
+		// Releasing the recovery reserve did not free enough, for example
+		// because something outside the store used the volume. The
+		// last-resort reserve exists for exactly this; waiting for Resume
+		// would only delay the same step (A6 review of C5, change 3).
+		if err := s.env.ReleaseReserve(ctx, ReserveLastResort); err != nil {
+			s.fail(StepReleaseLastResort, AlarmReserveReleaseFailed, err)
+			return
+		}
+		s.ok(StepReleaseLastResort, fmt.Sprintf("%d bytes free after the recovery reserve, %d needed", free, s.p.OpenHeadroomBytes))
+		if free, err = s.env.FreeBytes(ctx); err != nil {
+			s.fail(StepHeadroom, AlarmInspectFailed, err)
+			return
+		}
 	}
 	if free < s.p.OpenHeadroomBytes {
 		err := fmt.Errorf("%d bytes free, %d needed to open the store", free, s.p.OpenHeadroomBytes)
@@ -373,6 +388,7 @@ func (s *startup) recover(ctx context.Context, st RecoveryStore) {
 		s.degrade(StepPrune, AlarmPruneFailed, err)
 	} else {
 		s.ok(StepPrune, fmt.Sprintf("%d events pruned", n))
+		s.checkQuota(ctx, st)
 		if err := s.compact(ctx, st); err != nil {
 			s.degrade(StepCompact, AlarmCompactFailed, err)
 		} else {
@@ -479,6 +495,9 @@ func ModeChangeOf(prev, next Report, at time.Time) (ModeChange, bool) {
 func (s *startup) prune(ctx context.Context, st RecoveryStore) (int, error) {
 	total := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
 		used, limit, err := st.Usage(ctx)
 		if err != nil {
 			return total, err
@@ -508,8 +527,43 @@ func (s *startup) prune(ctx context.Context, st RecoveryStore) (int, error) {
 	}
 }
 
+// checkQuota raises the alarms of a store that pruning could not bring below
+// its limit: it starts, but the first commit will be refused (A6 review of
+// C5, change 4). Every required consumer whose persisted cursor holds a
+// stream back is named as stalled.
+func (s *startup) checkQuota(ctx context.Context, st RecoveryStore) {
+	used, limit, err := st.Usage(ctx)
+	if err != nil || used < limit {
+		return
+	}
+	s.alarm(AlarmQuotaReached, StepPrune, fmt.Sprintf("%d of %d bytes used after pruning; new events will be refused", used, limit))
+	for _, stream := range s.p.Streams {
+		last, err := st.LastCommitted(ctx, stream.ID)
+		if err != nil {
+			continue
+		}
+		cursors, err := st.LoadCursors(ctx, stream.ID)
+		if err != nil {
+			continue
+		}
+		at := map[ConsumerID]Seq{}
+		for _, c := range cursors {
+			at[c.Consumer] = c.Through
+		}
+		for _, c := range s.p.Consumers {
+			if c.Stream == stream.ID && c.Delivery == Required && at[c.ID] < last {
+				s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmRequiredStalled, At: s.now, Stream: stream.ID, Step: StepPrune,
+					Detail: fmt.Sprintf("consumer %s confirmed through %d of %d", c.ID, at[c.ID], last)})
+			}
+		}
+	}
+}
+
 func (s *startup) compact(ctx context.Context, st RecoveryStore) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		more, err := st.CompactStep(ctx, s.p.CompactStepPages)
 		if err != nil || !more {
 			return err

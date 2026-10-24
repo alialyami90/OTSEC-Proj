@@ -1,6 +1,6 @@
 # Node posture labels
 
-Owner: A5. A2 carries these into C1 (`otsec.asset`), because a platform node is also an asset. Reviewers: A6 (V-S20, C-24), A3 (HR-9). Status: draft, 2026-10-24. A3 confirmed section 3 against HR-9 (C5-A3 review). Brief: P1-A5.
+Owner: A5. A2 carries these into C1 (`otsec.asset`), because a platform node is also an asset. Reviewers: A6 (V-S20, C-24), A3 (HR-9). Status: draft, 2026-10-24. A3 confirmed section 3 against HR-9 (C5-A3 review). A6 checked the lifecycle table against Microsoft's page and zoneinfo, 10 of 10 (C5-A6). Brief: P1-A5.
 
 A node reports two posture labels about itself:
 
@@ -27,7 +27,7 @@ Rules:
 - **The H-11 record is shipped, not configured.** It is a signed list of tested pairs (system model and drive model, with drive firmware recorded) in the release package, like the command register (C-A2-2). An operator cannot mark hardware as verified.
 - **Flush latency never sets this label.** A drive that acknowledges flushes from a volatile cache looks fast exactly when commits are not durable (A6, F-011 note).
 - **A changed drive model changes the label.** For example, a replaced SSD makes the label `unverified` until that model has an H-11 record.
-- **Firmware is recorded but not part of the match.** *(proposed)* This is so that a routine firmware update does not flip every node to `unverified`. A6 may ask for firmware to be part of the key if H-11 shows firmware-dependent results.
+- **Firmware is recorded but not part of the match.** This is so that a routine firmware update does not flip every node to `unverified`; a firmware change is still visible. A6 accepted this (C5-A6). It may ask for firmware to be part of the key if H-11 shows firmware-dependent results. C-24 stays open until H-11 runs per hardware model.
 
 ## 2. OS support (V-S20)
 

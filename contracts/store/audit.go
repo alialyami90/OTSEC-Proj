@@ -78,9 +78,15 @@ func AuditBeforeAct(ctx context.Context, l *Log, rec Record, act func(Receipt) e
 	if l == nil {
 		return errf(CodeAuditUnavailable, nil, "audit store not open; operation refused")
 	}
+	if c, ok := l.ClassOf(rec.Stream); !ok || c != ClassAudit {
+		return errf(CodeInvalid, nil, "stream %s is not this log's audit stream; operation refused", rec.Stream)
+	}
 	r, err := l.Append(ctx, rec)
 	if err != nil {
 		return errf(CodeAuditUnavailable, err, "no audit receipt; operation refused")
+	}
+	if r.Key().Stream != rec.Stream {
+		return errf(CodeAuditUnavailable, nil, "receipt for stream %s, not %s; operation refused", r.Key().Stream, rec.Stream)
 	}
 	return act(r)
 }

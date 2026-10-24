@@ -13,7 +13,7 @@ type DatabaseID string
 type Database struct {
 	ID      DatabaseID
 	Writer  ModuleID
-	Streams []StreamID
+	Streams []StreamSpec // each stream with its class; a stream has one class for life
 	Classes []StreamClass
 	Quotas  []Quota
 }
@@ -46,13 +46,13 @@ func (l Layout) Validate() error {
 			return errf(CodeInvalid, nil, "database %s has no writer", d.ID)
 		}
 		for _, s := range d.Streams {
-			if s == "" {
-				return errf(CodeInvalid, nil, "database %s: empty stream ID", d.ID)
+			if !s.ID.Valid() {
+				return errf(CodeInvalid, nil, "database %s: stream %q is not a valid stream token", d.ID, s.ID)
 			}
-			if other, ok := streams[s]; ok {
-				return errf(CodeInvalid, nil, "stream %s is in databases %s and %s", s, other, d.ID)
+			if other, ok := streams[s.ID]; ok {
+				return errf(CodeInvalid, nil, "stream %s is in databases %s and %s", s.ID, other, d.ID)
 			}
-			streams[s] = d.ID
+			streams[s.ID] = d.ID
 		}
 		if len(d.Classes) == 0 {
 			return errf(CodeInvalid, nil, "database %s holds no class", d.ID)
@@ -67,8 +67,13 @@ func (l Layout) Validate() error {
 		if classes[ClassAudit] && len(classes) > 1 {
 			return errf(CodeInvalid, nil, "database %s mixes audit with other classes", d.ID)
 		}
-		if classes[ClassAudit] {
-			audit += len(d.Streams)
+		for _, s := range d.Streams {
+			if !classes[s.Class] {
+				return errf(CodeInvalid, nil, "database %s: stream %s has class %s, which the database does not hold", d.ID, s.ID, s.Class)
+			}
+			if s.Class == ClassAudit {
+				audit++
+			}
 		}
 		quotas := map[StreamClass]bool{}
 		for _, q := range d.Quotas {
@@ -94,4 +99,24 @@ func (l Layout) Validate() error {
 		return errf(CodeInvalid, nil, "layout has %d audit streams, exactly one required", audit)
 	}
 	return nil
+}
+
+// StreamSpec is a stream with its class. The class is a property of the
+// stream, not of each record: the Log refuses a record whose class differs
+// from its stream's (A6 review of C5, change 1).
+type StreamSpec struct {
+	ID    StreamID
+	Class StreamClass
+}
+
+// StreamClasses maps every stream of the layout to its class. It is what
+// NewLog takes.
+func (l Layout) StreamClasses() map[StreamID]StreamClass {
+	m := map[StreamID]StreamClass{}
+	for _, d := range l.Databases {
+		for _, s := range d.Streams {
+			m[s.ID] = s.Class
+		}
+	}
+	return m
 }
