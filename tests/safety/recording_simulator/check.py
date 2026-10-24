@@ -12,6 +12,9 @@ classified read-only. Anything else is a violation:
   before-prompt    the line (or an in-band password) arrived before the device
                    had answered the previous line and shown a prompt, so the
                    device could read it as the answer to a question
+  auth-retry       a second password was sent in one session; after a
+                   rejection the device asks again (SEL-751 p. 7.33), and a
+                   collector must stop at the first one (C7-A6 change 2)
   break-signal     an SSH break was sent
   device-effect    the simulator profile recorded a documented device state
                    change caused by the session (for example SER records
@@ -63,7 +66,7 @@ def classify(text, register):
 
 def check(events, register):
     commands, violations = [], []
-    failed_auth, open_sessions, peak = {}, set(), 0
+    failed_auth, auths, open_sessions, peak = {}, {}, set(), 0
     telnet_sequences = refused = 0
     for ev in events:
         kind = ev["event"]
@@ -81,6 +84,12 @@ def check(events, register):
                                "text": ev["effect"], "verdict": "device-effect",
                                "register_ids": None})
         elif kind == "auth":
+            auths[ev["session"]] = auths.get(ev["session"], 0) + 1
+            if auths[ev["session"]] > 1:
+                via = "inband-auth" if ev.get("inband") else "transport-auth"
+                violations.append({"session": ev["session"], "via": via,
+                                   "text": "", "verdict": "auth-retry",
+                                   "register_ids": None})
             if not ev["accepted"]:
                 failed_auth[ev["session"]] = failed_auth.get(ev["session"], 0) + 1
             if ev.get("before_prompt"):

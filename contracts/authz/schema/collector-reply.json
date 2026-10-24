@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.authz/0.1/collector-reply",
+  "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
+  "type": "object",
+  "required": [
+    "contract",
+    "request_id",
+    "status",
+    "collector_seq"
+  ],
+  "properties": {
+    "contract": {
+      "const": "otsec.authz/0.1"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "refused"
+      ]
+    },
+    "collector_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "C7-A5-2: the collector's persisted, contiguous number for this decision. The matching C8 record carries it, so an omitted record shows as a gap."
+    },
+    "invocation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "refusal": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "malformed",
+            "oversize",
+            "unknown_field",
+            "contract_mismatch",
+            "invalid",
+            "principal_not_permitted",
+            "unknown_operation",
+            "not_invocable",
+            "bad_params",
+            "asset_not_enrolled",
+            "credential_mismatch",
+            "credential_unusable",
+            "register_unverified",
+            "register_version",
+            "policy_version",
+            "busy",
+            "rate_limited",
+            "secret_rejected",
+            "collector_state_unavailable",
+            "refused_unknown"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {
+          "const": "accepted"
+        }
+      },
+      "not": {
+        "required": [
+          "refusal"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "status": {
+          "const": "refused"
+        }
+      },
+      "required": [
+        "refusal"
+      ]
+    }
+  ]
+}
