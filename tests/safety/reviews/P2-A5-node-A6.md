@@ -34,3 +34,7 @@ Fix: merge main, write a 0.2 target in `nodeconfigtest` with the three fields (`
 ## Re-check at `58560aa`: accepted
 
 Main is merged in, the helper writes C6 0.2 targets, and the platform and contract tests pass with the race detector, as does the Windows cross-build. A1 took should 2 as D2-10. The loader's `loopback` accepts only a 127.0.0.0/8 or `::1` IP literal with no zone, so a name, `localhost`, `127.1` and `::ffff:127.0.0.1` are refused, on listeners and on every endpoint that isn't inbound Syslog.
+
+## Re-check at `55e2e30`
+
+One commit since `58560aa`, test-only: `platform/node/runtime_test.go` now creates the store directory with `store.CreateDir(dir, "")` instead of `os.Mkdir(dir, 0o700)`. On Windows that is the call that sets the protected DACL the store's startup check expects, so the test now builds the directory the same way the installer path does. No product code changed. Merged with main at `04c9525`: `go vet ./...`, `gofmt -l .` (empty) and `go test -race -count=1 ./platform/... ./tests/contract/` pass in the Linux container, and `GOOS=windows go vet ./platform/...` and `go test -c ./platform/node` pass. Still accepted. The native Windows run of `./platform/...` at `55e2e30` is running on ALI's PC and is the evidence for this change.
