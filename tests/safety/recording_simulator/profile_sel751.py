@@ -22,6 +22,7 @@ Documented (p. = manual page):
   Level 1 clear/reset commands: HIS C|R|CA|RA (p. 7.60), LDP C (p. 7.65),
     MET c R (p. 7.68, asks "Reset Metering Quantities (Y,N)?"), SUM C|R
     (p. 7.81), TAR R (p. 7.82), COM C (p. 7.49), COM PTP C|R, FGS/GOOSE S n C
+  messages are framed <STX> lines <CRLF> <ETX> (switch stx_etx)  p. 7.28
   Telnet: two concurrent sessions on PORT 1 (p. 7.13); without QUIT the
     relay stays at the elevated level until TIDLE expires (p. 7.16)
   SHO P n (Level 1) shows the settings of port n; Port 1 is Ethernet and
@@ -141,8 +142,13 @@ class RelayState:
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
-                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None):
+                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False):
         self.password = password          # None models "Level 1 password disabled"
+        # p. 7.28: "The relay transmits all messages in the following format:
+        # <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
+        # Documented but untested, so a switch (off by default, as the
+        # profile was built). ASSUMED: the prompt follows ETX, outside it.
+        self.stx_etx = stx_etx
         self.relay = relay
         self.level, self.awaiting, self.attempts = relay.take() if relay else (0, None, 0)
         self.inherited = self.level > 0 or self.awaiting is not None
@@ -233,7 +239,24 @@ class SEL751DocResponder:
         if self.vulnerable and not self.exposed:
             self.exposed = True
             reply.effects = list(reply.effects) + [self._exposure()]
+        if self.stx_etx:
+            reply.out = self._frame(reply.out)
         return reply
+
+    def _frame(self, out):
+        """Wrap the message part of a reply in STX ... CRLF ETX (p. 7.28),
+        leaving the trailing prompt outside. A reply that is only a prompt
+        carries no message and is not framed."""
+        for prompt in (PROMPTS[self.level], b"Password: ?"):
+            if out.endswith(CRLF + prompt):
+                body = out[:-len(CRLF + prompt)]
+                break
+        else:
+            body, prompt = out, b""
+        lines = body[len(CRLF):] if body.startswith(CRLF) else body
+        if not lines:
+            return out
+        return b"\x02" + lines + CRLF + b"\x03" + prompt
 
     def _exposure(self):
         return f"traffic reached firmware with a documented diagnostic-restart defect: {self.vulnerable}"
