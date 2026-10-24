@@ -135,7 +135,7 @@
       }
     },
     "envelope": {
-      "description": "Signed package. Verification rules are C7's.",
+      "description": "Signed package. The signature is over the bytes of \"otsec.register/0.1 package\\n\" followed by payload (SigningDomain, A3 C3-A3-1). Verification rules are C7's.",
       "type": "object", "additionalProperties": false, "required": ["contract", "algorithm", "key_id", "payload", "signature"],
       "properties": {
         "contract": {"const": "otsec.register/0.1"},

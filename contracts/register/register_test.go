@@ -317,8 +317,28 @@ func TestRejects(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, err := Decode(append(mutate(t, func(map[string]any) {}), []byte(`{}`)...)); err == nil {
-		t.Errorf("trailing data: accepted")
+	good := mutate(t, func(map[string]any) {})
+	if _, err := Decode(good); err != nil {
+		t.Fatalf("re-encoded golden rejected: %v", err)
+	}
+	for _, tail := range []string{`{}`, `]`, `}`, ` x`, `0`} {
+		if _, err := Decode(append(append([]byte{}, good...), tail...)); err == nil {
+			t.Errorf("trailing %q: accepted", tail)
+		}
+	}
+	// Duplicate keys at the top level and nested (A3 C3-A3-2).
+	for _, dup := range []struct{ old, new string }{
+		{`"revision":1`, `"revision":1,"revision":2`},
+		{`"line":"SER"`, `"line":"SER","line":"TRI"`},
+		{`"class":"documented-untested"`, `"class":"documented-untested","class":"hardware-verified"`},
+	} {
+		bad := strings.Replace(string(good), dup.old, dup.new, 1)
+		if bad == string(good) {
+			t.Fatalf("test setup: %s not found", dup.old)
+		}
+		if _, err := Decode([]byte(bad)); err == nil {
+			t.Errorf("duplicate key %s: accepted", dup.new)
+		}
 	}
 }
 

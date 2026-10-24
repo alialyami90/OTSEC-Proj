@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -203,25 +204,87 @@ type Envelope struct {
 	Algorithm string `json:"algorithm"` // "ed25519"
 	KeyID     string `json:"key_id"`
 	Payload   []byte `json:"payload"`   // the package's exact JSON bytes
-	Signature []byte `json:"signature"` // over Payload
+	Signature []byte `json:"signature"` // over SigningDomain followed by Payload
 }
 
-// Decode parses and validates a package strictly: unknown fields, trailing
-// data and any validation failure are errors.
+// SigningDomain is prefixed to the payload before signing and verifying, so a
+// register signature can never be valid for any other kind of signed message
+// (A3 review C3-A3-1). C7 builds the signing input from it
+// (authz.RegisterSigningInput).
+const SigningDomain = "otsec.register/0.1 package\n"
+
+// Decode parses and validates a package strictly: unknown fields, duplicate
+// keys at any depth, anything after the package and any validation failure
+// are errors.
 func Decode(data []byte) (*Package, error) {
+	if err := checkStrictJSON(data); err != nil {
+		return nil, err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var p Package
 	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
-	if dec.More() {
-		return nil, fmt.Errorf("register: trailing data after package")
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("register: data after the package")
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// checkStrictJSON rejects duplicate object keys at any depth and anything
+// after the first value. encoding/json silently keeps the last of duplicate
+// keys, so a package could otherwise show one line to a reviewer and another
+// to the collector (A3 review C3-A3-2).
+func checkStrictJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := strictValue(dec); err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("register: data after the package")
+	}
+	return nil
+}
+
+func strictValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch tok {
+	case json.Delim('{'):
+		seen := map[string]bool{}
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key := k.(string)
+			if seen[key] {
+				return fmt.Errorf("duplicate key %q", key)
+			}
+			seen[key] = true
+			if err := strictValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // '}'
+		return err
+	case json.Delim('['):
+		for dec.More() {
+			if err := strictValue(dec); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // ']'
+		return err
+	}
+	return nil
 }
 
 var (
