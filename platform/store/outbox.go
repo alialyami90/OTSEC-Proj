@@ -341,3 +341,29 @@ func (d *DB) clearQuotaAlarms(ctx context.Context) {
 		}
 	}
 }
+
+// SaveSourceCursor commits a stream's device-side position on its own, at
+// synchronous=FULL. It is not part of C5. It is for a read that changes the
+// position but yields no record of the stream to carry it, such as an
+// empty SER read after a clear (D1-7). The caller commits the read's
+// health records first and calls this after their receipts, so a crash in
+// between repeats the health event rather than losing it.
+func (d *DB) SaveSourceCursor(ctx context.Context, stream c5.StreamID, cursor []byte) error {
+	if cursor == nil {
+		return invalid("no source cursor")
+	}
+	if err := d.lock(); err != nil {
+		return err
+	}
+	defer d.mu.Unlock()
+	if _, err := d.classOf(stream); err != nil {
+		return err
+	}
+	if d.sync != c5.SyncFull {
+		return errors.New("store: settings not checked; CheckSettings must pass before a source cursor is saved")
+	}
+	return d.tx(ctx, "source", func() error {
+		_, err := d.conn.ExecContext(ctx, `UPDATE streams SET source_cursor = ? WHERE stream = ?`, cursor, string(stream))
+		return err
+	})
+}

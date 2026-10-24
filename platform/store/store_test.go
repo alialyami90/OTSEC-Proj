@@ -510,3 +510,29 @@ func TestFileModes(t *testing.T) {
 		t.Fatal("lock taken on a directory others can read")
 	}
 }
+
+func TestSaveSourceCursor(t *testing.T) {
+	dir := storeDir(t)
+	opt := Options{Dir: dir, Node: testNode, Database: evidenceDB}
+	db, r := testStore(t, opt, policy(evidenceDB), c5.ModeCollecting)
+	r1 := rec("relay1/ser", c5.ClassAdapterEvidence, 0)
+	r1.SourceCursor = []byte("state 1")
+	if _, err := testLog(t, db).Append(bg, r1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSourceCursor(bg, "relay1/ser", []byte("state 2")); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	r.Unlock()
+	db, _ = testStore(t, opt, policy(evidenceDB), c5.ModeCollecting)
+	if got, _ := db.SourceCursor(bg, "relay1/ser"); string(got) != "state 2" {
+		t.Fatalf("after restart: %q", got)
+	}
+	if n, _ := db.LastCommitted(bg, "relay1/ser"); n != 1 {
+		t.Fatalf("a source cursor changed the seq: %d", n)
+	}
+	if err := db.SaveSourceCursor(bg, "nope", []byte("x")); !isCode(err, c5.CodeInvalid) {
+		t.Fatalf("unknown stream: %v", err)
+	}
+}
