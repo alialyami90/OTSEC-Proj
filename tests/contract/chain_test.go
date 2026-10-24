@@ -16,7 +16,7 @@ var chain = []struct {
 	link, contract, checks string
 }{
 	{"C3 lookup", "C3",
-		"`ID` and `SER` resolve to read-only operations allowed for SEL-751 firmware R301; `ACC` and `QUI` do not resolve as operations"},
+		"`ID` and `SER` resolve to operations; `ACC` and `QUI` do not; Figure 7.38's FID (R301, a denied branch) is refused, and the positive path needs an allowed FID (C3-A6 review, question 3)"},
 	{"C7 IPC request", "C7",
 		"a strict collector request naming the operation, the asset and a CredentialRef validates; one with an unknown field or a raw secret is rejected"},
 	{"C2 invocation", "C2",
