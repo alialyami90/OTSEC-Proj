@@ -237,6 +237,26 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-015 — 2026-10-24 — A6's Appendix A count was wrong (79 rows, not 84); two FIDs in the C3 package are in no revision table
+
+- **What happened:** A1 relayed that A2 counts 82 rows in Tables A.1 to A.5 of the SEL-751 IM (20260910): 79 with a FID, which come to 78 unique FIDs, plus 3 marked "not released". A6 had reported 84. A6 re-ran its parser (`tests/safety/firmware_review/check_allowlist.py`) and listed each record with its line in the manual text.
+- **Result: A2's count is right.** The parser started at the first "Firmware Revision History" in the text, which is the list of tables, and ran to the end of the manual. That range also took in 5 FIDs that are not table rows:
+  - Figure 7.38 (an `ID` response);
+  - the `CEV` example;
+  - the Figure 10.16 SER header;
+  - the FID format explanation at the start of Appendix A;
+  - a second `ID` example after Appendix A.
+
+  Inside Tables A.1 to A.5, A6 also finds 79 FID rows and 78 unique FIDs (R200-V4 appears twice).
+- **Effect on earlier results: none.** None of the 5 extra records matched any of A6's 7 fix phrases. The fix now limits the parser to Tables A.1 to A.5. A re-run against A2's allowlist gives the same result as before, apart from `rows_parsed` (79): [rerun](../tests/safety/firmware_review/results/A2-allowlist-85d8091-rerun-2026-10-24.txt). The parser self-test passes (3 tests).
+- **Found on the way, for A2:**
+  - The C3 package (PR #27) lists 80 known FIDs: the 78 table FIDs plus two that appear in no revision table.
+    - `SEL-751-R100-V0-Z001001-D20070410` appears only in Figure 10.16's header.
+    - `SEL-751-R100-V0-Z001001-D20110601` appears only in the format explanation. For that date, Table A.5 lists `R101-V0`.
+  - Both cite "Appendix A, firmware revision history", which does not list them.
+  - Branch R100 is `deny`, so neither FID can enable collection. A2 corrects the citations and decides whether to keep the entries. A6 sent A2 the row list (`/mnt/project-files/phase1/A6-appendixA-rows-2026-10-24.txt`).
+- **Evidence class:** `desk`.
+
 ### F-014 — 2026-10-24 — H-14 third run: on NTFS, releasing the reserve before the first open kept a full store openable in every round; with no reserve the store reads but cannot be pruned
 
 - **Tested:** A6's rewritten part 2 harness (PR #26, merged at `6aaf845`). It runs one scenario per fresh 16 MB NTFS volume, so nothing one scenario leaves behind reaches the next (the WinError 32 in F-013). A1 dispatched it as workflow `a6-windows-h14`, run 40090170881 (job 120861057162). A6 transcribed the result from the job log: [run-40090170881-2026-10-24.txt](../tests/integration/h14/results/run-40090170881-2026-10-24.txt). The artifact could not be fetched from this environment; its digest is in the transcription.
@@ -348,7 +368,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
 - **Result:** the gate logic can fail closed (cases a to d pass). But an `ID`-probe-only gate reaches a pre-fix unit before deciding, and the record shows the exposure (C-23). The gate needs the FID before connecting; `ID` confirms it. Even then, a unit replaced or downgraded since the inventory is reached once before the mismatch stops it; that residual is recorded, not hidden.
 - **Evidence class:** `desk`, `simulated`.
 - **Disproves:** that reading `ID` first is enough to protect a pre-fix unit.
-- **A2 allowlist check (2585fd9):** A6 split Appendix A into 84 FID rows and searched them with its own phrases for the seven restart and lock-up fixes. A6 found exactly the rows A2 lists for every fix (7 of 7 agree; [result](../tests/safety/firmware_review/results/A2-allowlist-2585fd9-2026-10-23.txt)). Every allowed branch (R400, R401, R402, R500, R501) depends on inherited, not listed, fixes for F1 (Ethernet traffic) and F2 (Telnet traffic), and R402, R500 and R501 also for F5 (communications access). A2 marks this as inference. On documented evidence alone the allowlist is empty, so collection from any SEL-751 waits on either SEL's confirmation or an explicit owner decision to accept the inference.
+- **A2 allowlist check (2585fd9):** A6 split Appendix A into 84 FID rows (corrected 2026-10-24: 79 rows in Tables A.1 to A.5; the 84 included 5 FIDs from example outputs, F-015) and searched them with its own phrases for the seven restart and lock-up fixes. A6 found exactly the rows A2 lists for every fix (7 of 7 agree; [result](../tests/safety/firmware_review/results/A2-allowlist-2585fd9-2026-10-23.txt)). Every allowed branch (R400, R401, R402, R500, R501) depends on inherited, not listed, fixes for F1 (Ethernet traffic) and F2 (Telnet traffic), and R402, R500 and R501 also for F5 (communications access). A2 marks this as inference. On documented evidence alone the allowlist is empty, so collection from any SEL-751 waits on either SEL's confirmation or an explicit owner decision to accept the inference.
 - **Owner decision (A1, 2026-10-23, ADR-0005):** the inheritance is accepted as an owner risk. Allowlist entries must carry the evidence class "inferred (owner-accepted)"; `check_allowlist.py` now fails any allowed branch that relies on an unlisted Ethernet, Telnet, or communications-access fix without that class ([self-test](../tests/safety/firmware_review/test_check_allowlist.py), 3 cases). A2's list at `954fd86` said only "inferred" and failed; at `85d8091` every allowed branch carries the class and the check passes ([result](../tests/safety/firmware_review/results/A2-allowlist-85d8091-2026-10-23.txt)). **F-009 stays open as a residual risk**: an owner-accepted inference is not evidence, and a restart on a listed firmware would show it was wrong.
 
 ### F-008 — 2026-10-23 — Owner answers: Windows site computer, central isolation, any Syslog collector

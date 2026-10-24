@@ -354,7 +354,7 @@ The owner accepted Phase 0 and authorized Phase 1 on 2026-10-24 at 11:16Z ("Cont
     - asset ID, device class and vendor/product family (ADR-0006);
     - each attribute with value, evidence source, evidence class and confidence;
     - `downstream_security` (plaintext labelled insecure);
-    - FID and serial from `ID`, as the identity binding for a transport without cryptographic identity (B-05: state what is and is not proven by it, and what a mismatch does);
+    - the FID from `ID`, plus the serial number read after authentication, as the identity binding for a transport without cryptographic identity (B-05: state what is and is not proven by it, and what a mismatch does). *Amended 2026-10-24 on A2's finding:* the SEL-751 `ID` response (Figure 7.38) carries no serial number. The serial appears only at Level 1 (SER header, `STA`). Only the FID can be checked before the password is sent; the serial can only detect a substitution after the password has been sent;
     - the site platform node itself as an asset of class "server", carrying A5's posture labels.
   - **C2 `otsec.adapter/0.1`:**
     - **Invocation:** asset ID, operation ID from C3, validated parameters, `CredentialRef` from C7, and limits (timeout, retries, rate).
