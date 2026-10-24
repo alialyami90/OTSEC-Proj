@@ -199,3 +199,25 @@ func TestEchoRedactedAfterAuthPhase(t *testing.T) {
 		t.Errorf("close-phase echo redaction refused: %v", err)
 	}
 }
+
+// The result's target is the C1 endpoint's target (D1-24).
+func TestResultCheckAgainst(t *testing.T) {
+	a, _ := c1Example(t)
+	inv := validInvocation(t)
+	r := loadResult(t, "ok")
+	if err := r.CheckAgainst(inv, a); err != nil {
+		t.Fatalf("ok example refused: %v", err)
+	}
+	for n, f := range map[string]func(*Result, *Invocation){
+		"device claimed on a simulated endpoint": func(r *Result, _ *Invocation) { r.Target = "device-observed" },
+		"other invocation":                       func(r *Result, _ *Invocation) { r.InvocationID = "00000000-0000-4000-8000-000000000000" },
+		"other operation":                        func(r *Result, _ *Invocation) { r.OperationID = "sel.id" },
+		"endpoint not on the asset":              func(_ *Result, i *Invocation) { i.EndpointID = "port2-telnet" },
+	} {
+		r2, i2 := r, inv
+		f(&r2, &i2)
+		if err := r2.CheckAgainst(i2, a); err == nil {
+			t.Errorf("%s: accepted", n)
+		}
+	}
+}

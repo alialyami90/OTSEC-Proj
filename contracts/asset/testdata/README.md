@@ -1,6 +1,6 @@
 # C1 golden examples
 
-Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device. Transcript spans (FID at offset 124, CID at 221) point into the invented C2 example transcript of the same invocation, `contracts/adapter/testdata/results/valid/ok.json`, which arrives with C2; C2's tests check each span selects its value.
+Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device. Transcript spans (FID at offset 127, CID at 224) point into the invented C2 example transcript of the same invocation, `contracts/adapter/testdata/results/valid/ok.json`; C2's tests check each span selects its value. Every endpoint has `target` `simulated` (D1-24): no example describes a real device behind an endpoint.
 
 ## Valid
 
@@ -51,6 +51,11 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/device-reported-on-ip-address.json` | A `device-reported` binding on `ip_address`, which the device does not report. |
 | `invalid/pre-credential-not-in-attributes.json` | A pre-credential attribute that is not a binding attribute. |
 | `invalid/address-only-with-pre-credential.json` | An address-only binding with a pre-credential attribute. |
+| `invalid/endpoint-without-target.json` | An endpoint that does not say whether a device or a simulator is behind it (D1-24). |
+| `invalid/endpoint-target-documented.json` | An endpoint target of `documented`: only `device-observed` and `simulated` describe a far end. |
+| `invalid/later-minor-endpoint-target-unknown.json` | A 0.3 record with an endpoint target 0.1 does not know. It is refused, not read as either value (D1-24). |
+| `invalid/device-value-without-device-endpoint.json` | A `device-observed` value from an adapter session on an asset whose only endpoint is a simulator. |
+| `invalid/simulator-value-without-simulated-endpoint.json` | The relay example with its endpoint relabelled `device-observed`, while its values come from a simulator session. |
 | `invalid/profile-pre-credential-operator-only.json` | A profile claiming the family reports `ip_address` before authentication. |
 | `invalid/case-variant-key.json` | An `IDENTITY_BINDING` key after the real binding, which plain `encoding/json` would let replace it (A6 change 3). |
 | `invalid/duplicate-key.json` | `identity_binding` given twice. |

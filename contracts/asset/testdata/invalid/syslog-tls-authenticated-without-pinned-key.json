@@ -74,6 +74,7 @@
       "transport": "syslog-udp",
       "host": "192.0.2.40",
       "port": 514,
+      "target": "simulated",
       "downstream_security": {
         "level": "plaintext-unauthenticated",
         "acknowledgement": {
@@ -89,6 +90,7 @@
       "transport": "syslog-tls",
       "host": "192.0.2.40",
       "port": 6514,
+      "target": "simulated",
       "downstream_security": {
         "level": "encrypted-authenticated"
       }

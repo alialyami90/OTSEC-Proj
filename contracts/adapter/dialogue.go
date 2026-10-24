@@ -185,8 +185,11 @@ func (c *check) dialogue(r Result, code Code) {
 			// one, and QUI drops a level a prompt confirmed after ACC back
 			// to 0 (D18, V-S13). It is never the first send after the
 			// password, and never follows an unanswered ACC, where a late
-			// "Password: ?" would take it as a wrong password (A3 change 12);
-			// there nothing is sent and the C7 floor covers the next session.
+			// "Password: ?" would take it as a wrong password (A3 change 12).
+			// There nothing is sent, and the C7 failed-auth floor holds the
+			// next session back: it starts when ACC is sent and clears only
+			// when "=>" is received (D1-20 as amended, A6 C2 change 14), so
+			// the next wake comes no sooner than TIDLE plus one minute.
 		case x.phase == PhaseProbe || x.phase == PhaseAuth:
 			if p != promptLevel0 {
 				c.fail("%s: %q sent before the %q prompt", at(x), bytes.TrimRight(x.b, "\r\n"), promptLevel0)
