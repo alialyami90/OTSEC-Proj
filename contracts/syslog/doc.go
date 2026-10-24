@@ -64,7 +64,9 @@
 //   - The message. Render produces the one canonical rendering of a C4 event
 //     in RFC 5424 (default) or an RFC 3164-compatible form for collectors
 //     that cannot parse RFC 5424. HEADER TIMESTAMP is the node's receive
-//     time, never the device time. Every event field travels in one SD
+//     time, never the device time; in the RFC 3164 form it is UTC with no
+//     zone, no year and whole seconds, so the rcv parameter is the
+//     authoritative receive time in both forms (C6-A2-3). Every event field travels in one SD
 //     element, otsec@32473, as escaped SD-PARAM values. Device bytes appear
 //     only in dtext (printable UTF-8, escaped) or dtext_b64 (anything else),
 //     never verbatim in MSG, so device content cannot forge a message, a

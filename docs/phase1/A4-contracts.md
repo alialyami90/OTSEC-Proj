@@ -82,6 +82,8 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 | A1 3 | `MaxRELPFrameLen`: a buffer this long is never `ErrIncomplete`, so the caller's buffer is bounded. | `relp.go`, `TestRELPFrameBound` |
 | A6 2 | C4 health detail keys match `^[a-z][a-z0-9_.-]{0,63}$` (no `=`), so `hd="key=value"` splits back only one way. | C4 `validate.go`, schema `propertyNames`, `TestHealthDetailKeys` |
 | A3 9, A6 4 | LF framing stays on best-effort plain `tcp` only. A3 and A6 both accept it; A1 accepted C6 without objecting. | no change |
+| A2 ([C6-A2](reviews/C6-A2.md) on #32) 3 and 4 | `rcv` is the authoritative receive time; the RFC 3164 header has no zone, year or fraction. The RTAC golden's `SystemTags. User_Logged_On` space is marked unverified on the wire. | `doc.go`, `contracts/event/testdata/NOTES.md` |
+| A2 1, 2 and 5 (for the Phase 2 producers) | The SEL-751 record bytes exclude STX, ETX and CR LF (S22 p. 7.28), or the row goes as `dtext_b64` and `rsha256` changes. The date order comes from `DATE_F` read by `SHO G` in the same session; `date-format-assumed` only when it was not read. RTAC forwarding should use RFC 5424 at 2,048 octets or more, since a 1,024-byte RTAC message always loses `dtext` on a 3164 target. | Recorded here for the SEL-751 and RTAC parsers; no contract change |
 
 ## Proposals for A1
 
