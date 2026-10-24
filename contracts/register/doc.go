@@ -15,13 +15,21 @@
 //   - Only read-only operations are invocable (C2 names them by ID).
 //     Session-control lines (ACC, QUI) live in a separate list, carry the
 //     transport phase that may send them, and are never invocable (C-A2-1).
+//     An operation runs in the operate phase unless it also lists probe
+//     (sel.id, sent before ACC for the firmware check, C3-1); a probe
+//     operation is literal.
 //   - Deny rules are regular expressions over outgoing lines. They document
 //     known dangerous lines and act as a second barrier: a package whose
 //     approved line matches a deny rule is invalid.
 //   - Anything not listed is denied.
 //   - Lines are produced only by Matcher.Render, which refuses a rendered
 //     line that does not classify as its own operation, and every line the
-//     transport sends must pass Matcher.Match at egress.
+//     transport sends must pass Matcher.Permit for its phase at egress.
+//   - Device settings the collector checks are in the package: preconditions
+//     refuse collection when they do not hold (LANG := ENGLISH), branch
+//     conditions refuse a firmware branch (EHTTP := N), and warnings are
+//     reported by ID without refusing (MAXACC, FTPACC, HTTPACC above 1,
+//     C3-2).
 //   - The firmware allowlist for the family ships in the same package, so it
 //     is covered by the same signature and anti-rollback floor (C-A2-2).
 //

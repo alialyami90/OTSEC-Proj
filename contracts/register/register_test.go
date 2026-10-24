@@ -293,10 +293,20 @@ func TestRejects(t *testing.T) {
 			list(m, "preconditions")[0].(map[string]any)["read_by"] = "sel.session.qui"
 		},
 		"unknown param kind": func(m map[string]any) {
-			o := entry(m, "operations", 0)
+			o := entry(m, "operations", 1)
 			o["line"] = o["line"].(string) + " {n}"
 			o["params"] = []any{map[string]any{"name": "n", "kind": "regex", "values": []any{"1"}}}
 		},
+		"operation in auth phase":     func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"auth"} },
+		"operation in close phase":    func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"close"} },
+		"operation repeated phase":    func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"operate", "operate"} },
+		"warning with max and equals": func(m map[string]any) { list(m, "warnings")[0].(map[string]any)["equals"] = "1" },
+		"warning with no threshold":   func(m map[string]any) { delete(list(m, "warnings")[0].(map[string]any), "max") },
+		"warning read by session line": func(m map[string]any) {
+			list(m, "warnings")[0].(map[string]any)["read_by"] = "sel.session.qui"
+		},
+		"warning reuses an entry ID": func(m map[string]any) { list(m, "warnings")[0].(map[string]any)["id"] = "sel.id" },
+		"warning without reason":     func(m map[string]any) { list(m, "warnings")[0].(map[string]any)["reason"] = "" },
 		"firmware branch without rule": func(m map[string]any) {
 			fw := m["firmware"].(map[string]any)
 			fw["branches"] = fw["branches"].([]any)[1:]
@@ -418,7 +428,7 @@ func TestKeySpelling(t *testing.T) {
 func TestRenderRefusesDenied(t *testing.T) {
 	data := mutate(t, func(m map[string]any) {
 		op := map[string]any{}
-		for k, v := range entry(m, "operations", 0) {
+		for k, v := range entry(m, "operations", 1) {
 			op[k] = v
 		}
 		op["id"] = "sel.test.sho_port"
@@ -454,5 +464,71 @@ func TestRenderRefusesDenied(t *testing.T) {
 		if _, err := m.Render(id, nil); err == nil {
 			t.Errorf("Render(%s) accepted", id)
 		}
+	}
+}
+
+// TestProbeOperationLiteral checks that an operation sent before
+// authentication cannot take parameters (C3-A2 change 1).
+func TestProbeOperationLiteral(t *testing.T) {
+	data := mutate(t, func(m map[string]any) {
+		o := entry(m, "operations", 0)
+		o["line"] = "ID {n}"
+		o["params"] = []any{map[string]any{"name": "n", "kind": "uint", "min": 1, "max": 2}}
+	})
+	if _, err := Decode(data); err == nil || !strings.Contains(err.Error(), "runs in probe and has parameters") {
+		t.Errorf("probe operation with a parameter: %v", err)
+	}
+}
+
+// TestPermit checks the egress rule per phase: ID in probe and operate, the
+// other operations in operate only, session lines in their listed phases,
+// and nothing else anywhere (C3-A2 change 1, A3 8.3).
+func TestPermit(t *testing.T) {
+	m, err := NewMatcher(load(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow := map[Phase][]string{
+		PhaseProbe:   {"ID", "QUI"},
+		PhaseAuth:    {"ACC"},
+		PhaseOperate: {"ID", "SER", "SHO G", "SHO P 1"},
+		PhaseClose:   {"QUI"},
+	}
+	all := []string{"ID", "SER", "SHO G", "SHO P 1", "ACC", "QUI", "SER C", "2AC", "TRI", ""}
+	for _, ph := range []Phase{PhaseProbe, PhaseAuth, PhaseOperate, PhaseClose, "other"} {
+		for _, l := range all {
+			want := false
+			for _, a := range allow[ph] {
+				want = want || a == l
+			}
+			if _, _, err := m.Permit(ph, l); (err == nil) != want {
+				t.Errorf("Permit(%s, %q): err %v, want allowed %v", ph, l, err, want)
+			}
+		}
+	}
+}
+
+// TestWarnings checks the posture warnings carried from ADR-0005 and how a
+// reading raises them (C3-A2 change 2).
+func TestWarnings(t *testing.T) {
+	p := load(t)
+	got := map[string]PostureWarning{}
+	for _, w := range p.Warnings {
+		got[w.Setting] = w
+	}
+	for _, s := range []string{"MAXACC", "FTPACC", "HTTPACC"} {
+		w, ok := got[s]
+		if !ok || w.Max == nil || *w.Max != 1 || w.ReadBy != "sel.settings.show_port1" {
+			t.Fatalf("%s warning: %+v", s, w)
+		}
+		for v, want := range map[string]bool{"1": false, "2": true, "C": true, "": true, "-1": true, "1 ": true} {
+			if w.Raised(v) != want {
+				t.Errorf("%s Raised(%q) = %v", s, v, !want)
+			}
+		}
+	}
+	eq := PostureWarning{Equals: "N"}
+	if eq.Raised("N") || !eq.Raised("Y") || !eq.Raised("n") {
+		t.Errorf("equals warning raised wrongly")
 	}
 }

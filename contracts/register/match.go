@@ -92,6 +92,31 @@ func (m *Matcher) Match(line string) (Verdict, string) {
 	return VerdictUnlisted, ""
 }
 
+// Permit is the egress check: it allows a line only if it classifies as an
+// operation or session line that may be sent in phase ph. It returns the
+// deciding verdict and entry ID either way, and an error when the line must
+// not be sent.
+func (m *Matcher) Permit(ph Phase, line string) (Verdict, string, error) {
+	v, id := m.Match(line)
+	switch v {
+	case VerdictOperation:
+		if m.p.operation(id).InPhase(ph) {
+			return v, id, nil
+		}
+	case VerdictSessionControl:
+		for _, s := range m.p.SessionControl {
+			if s.ID == id {
+				for _, p := range s.Phases {
+					if p == ph {
+						return v, id, nil
+					}
+				}
+			}
+		}
+	}
+	return v, id, fmt.Errorf("register: %q (%s %s) may not be sent in phase %s", line, v, id, ph)
+}
+
 // Render produces the exact line for an invocable operation with the given
 // parameters. It refuses any line that does not classify, through Match, as
 // that same operation, so a parameter value can never produce a line a deny

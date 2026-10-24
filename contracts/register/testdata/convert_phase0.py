@@ -81,8 +81,13 @@ for c in reg["commands"]:
         session.append({**common, "classification": "session-control", "line": c["pattern"],
                         "phases": phases[c["id"]], "access_level": c["access_level"]})
     elif c["classification"] == "read-only":
-        operations.append({**common, "classification": "read-only", "line": c["pattern"],
-                           "access_level": c["access_level"]})
+        o = {**common, "classification": "read-only", "line": c["pattern"],
+             "access_level": c["access_level"]}
+        if c["id"] == "sel.id":
+            # ADR-0005 (c), A3 8.3: ID is sent in probe, before ACC, for the
+            # firmware check, and is also an adapter read (C3-A2 change 1).
+            o["phases"] = ["probe", "operate"]
+        operations.append(o)
     else:
         d = {**common, "classification": "state-changing", "pattern": c["pattern"]}
         if c.get("access_level"):
@@ -139,6 +144,10 @@ pkg = {
     "preconditions": [{
         "id": "pre.lang_english", "setting": "LANG", "equals": "ENGLISH", "read_by": "sel.settings.show_port1",
         "reason": "ADR-0005 (A1 401ebd7, from A6 F-006): command names differ on a Spanish port and 'SER D' clears the SER; refuse to collect unless SHO P 1 parses as English port settings with LANG := ENGLISH."}],
+    "warnings": [{
+        "id": "warn.%s_above_1" % name.lower(), "setting": name, "max": 1, "read_by": "sel.settings.show_port1",
+        "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): %s above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)." % name}
+        for name in ("MAXACC", "FTPACC", "HTTPACC")],
     "operations": operations,
     "session_control": session,
     "denied": denied,

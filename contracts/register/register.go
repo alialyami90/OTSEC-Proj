@@ -41,13 +41,16 @@ const (
 	EvidenceUnknown    EvidenceClass = "unknown"
 )
 
-// Phase is a transport phase that may send a session-control line (A3 8.3).
+// Phase is a transport phase (A3 8.3). Session lines name the phases that may
+// send them (probe, auth, close). Operations run in operate unless they list
+// phases; an operation may also run in probe, before authentication (C3-1).
 type Phase string
 
 const (
-	PhaseProbe Phase = "probe"
-	PhaseAuth  Phase = "auth"
-	PhaseClose Phase = "close"
+	PhaseProbe   Phase = "probe"
+	PhaseAuth    Phase = "auth"
+	PhaseOperate Phase = "operate"
+	PhaseClose   Phase = "close"
 )
 
 // Package is one register for one device family.
@@ -64,12 +67,16 @@ type Package struct {
 	// Preconditions must all be confirmed in the current session before any
 	// operation other than the ones they are read by (e.g. LANG := ENGLISH,
 	// read with SHO P 1).
-	Preconditions  []SettingCheck `json:"preconditions"`
-	Operations     []Operation    `json:"operations"`
-	SessionControl []SessionLine  `json:"session_control"`
-	Denied         []DenyRule     `json:"denied"`
-	Firmware       Firmware       `json:"firmware"`
-	Notes          []string       `json:"notes,omitempty"`
+	Preconditions []SettingCheck `json:"preconditions"`
+	// Warnings are posture checks that do not refuse: the collector reads
+	// them and reports each by ID, then collects (ADR-0005 MAXACC ruling,
+	// C3-2).
+	Warnings       []PostureWarning `json:"warnings,omitempty"`
+	Operations     []Operation      `json:"operations"`
+	SessionControl []SessionLine    `json:"session_control"`
+	Denied         []DenyRule       `json:"denied"`
+	Firmware       Firmware         `json:"firmware"`
+	Notes          []string         `json:"notes,omitempty"`
 }
 
 // Source is a document the entries cite.
@@ -97,8 +104,12 @@ type Operation struct {
 	Classification Classification `json:"classification"`
 	// Line is the template: tokens of [A-Z0-9] separated by single spaces,
 	// where a token may instead be "{name}" for a declared parameter.
-	Line        string     `json:"line"`
-	Params      []Param    `json:"params,omitempty"`
+	Line   string  `json:"line"`
+	Params []Param `json:"params,omitempty"`
+	// Phases lists where the transport may send the line: operate, probe or
+	// both. Empty means operate only. A probe line is sent before
+	// authentication, so it must be literal (no parameters).
+	Phases      []Phase    `json:"phases,omitempty"`
 	AccessLevel string     `json:"access_level"`
 	Citations   []Citation `json:"citations"`
 	Evidence    Evidence   `json:"evidence"`
@@ -159,6 +170,42 @@ type SettingCheck struct {
 	Equals  string `json:"equals"`  // e.g. "ENGLISH"
 	ReadBy  string `json:"read_by"` // an Operation ID
 	Reason  string `json:"reason"`
+}
+
+// PostureWarning is a device setting the collector reads and warns about
+// without refusing. Exactly one of Max and Equals is set: the warning is
+// raised when the value is above Max, or differs from Equals.
+type PostureWarning struct {
+	ID      string  `json:"id"`      // the warning code C2 reports
+	Setting string  `json:"setting"` // e.g. "MAXACC"
+	Max     *uint64 `json:"max,omitempty"`
+	Equals  string  `json:"equals,omitempty"`
+	ReadBy  string  `json:"read_by"` // an Operation ID
+	Reason  string  `json:"reason"`
+}
+
+// Raised reports whether a value read from the device raises the warning. A
+// value that is not a decimal number, against a Max, raises it: a reading
+// the collector cannot interpret is reported, not passed.
+func (w *PostureWarning) Raised(value string) bool {
+	if w.Max == nil {
+		return value != w.Equals
+	}
+	v, err := strconv.ParseUint(value, 10, 64)
+	return err != nil || v > *w.Max
+}
+
+// InPhase reports whether the transport may send the operation's line in ph.
+func (o *Operation) InPhase(ph Phase) bool {
+	if len(o.Phases) == 0 {
+		return ph == PhaseOperate
+	}
+	for _, p := range o.Phases {
+		if p == ph {
+			return true
+		}
+	}
+	return false
 }
 
 // Firmware is the family's firmware allowlist. Matching is exact: a firmware
@@ -381,6 +428,16 @@ func (p *Package) Validate() error {
 		if err := o.validateTemplate(); err != nil {
 			return err
 		}
+		seen := map[Phase]bool{}
+		for _, ph := range o.Phases {
+			if (ph != PhaseProbe && ph != PhaseOperate) || seen[ph] {
+				return fmt.Errorf("register: operation %s has unknown or repeated phase %q", o.ID, ph)
+			}
+			seen[ph] = true
+		}
+		if seen[PhaseProbe] && len(o.Params) != 0 {
+			return fmt.Errorf("register: operation %s runs in probe and has parameters", o.ID)
+		}
 		if err := checkCommon(o.ID, o.AccessLevel, o.Citations, o.Evidence, o.SideEffects, sources, true); err != nil {
 			return err
 		}
@@ -434,6 +491,17 @@ func (p *Package) Validate() error {
 	for _, c := range p.Preconditions {
 		if err := p.checkSetting(c, ids); err != nil {
 			return err
+		}
+	}
+	for _, w := range p.Warnings {
+		if err := claim(w.ID); err != nil {
+			return err
+		}
+		if !settingRe.MatchString(w.Setting) || (w.Max == nil) == (w.Equals == "") || w.Reason == "" {
+			return fmt.Errorf("register: warning %s is incomplete or sets both max and equals", w.ID)
+		}
+		if p.operation(w.ReadBy) == nil {
+			return fmt.Errorf("register: warning %s is read by %q, which is not an operation", w.ID, w.ReadBy)
 		}
 	}
 	if err := p.validateFirmware(sources, ids); err != nil {

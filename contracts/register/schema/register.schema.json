@@ -14,6 +14,7 @@
     "owner": {"type": "string", "minLength": 1},
     "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
     "preconditions": {"type": "array", "items": {"$ref": "#/$defs/settingCheck"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/postureWarning"}},
     "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/operation"}},
     "session_control": {"type": "array", "items": {"$ref": "#/$defs/sessionLine"}},
     "denied": {"type": "array", "items": {"$ref": "#/$defs/denyRule"}},
@@ -62,6 +63,7 @@
         "classification": {"const": "read-only"},
         "line": {"$ref": "#/$defs/templateLine"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
+        "phases": {"type": "array", "uniqueItems": true, "items": {"enum": ["probe", "operate"]}},
         "access_level": {"type": "string", "minLength": 1},
         "citations": {"$ref": "#/$defs/citations"},
         "evidence": {"$ref": "#/$defs/evidence"},
@@ -96,6 +98,18 @@
         "evidence": {"$ref": "#/$defs/evidence"},
         "side_effects": {"type": "string", "minLength": 1},
         "notes": {"type": "string"}
+      }
+    },
+    "postureWarning": {
+      "type": "object", "additionalProperties": false, "required": ["id", "setting", "read_by", "reason"],
+      "oneOf": [{"required": ["max"]}, {"required": ["equals"]}],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "setting": {"type": "string", "pattern": "^[A-Z0-9_]+$"},
+        "max": {"type": "integer", "minimum": 0},
+        "equals": {"type": "string", "minLength": 1},
+        "read_by": {"$ref": "#/$defs/id"},
+        "reason": {"type": "string", "minLength": 1}
       }
     },
     "settingCheck": {

@@ -224,6 +224,29 @@
    "reason": "ADR-0005 (A1 401ebd7, from A6 F-006): command names differ on a Spanish port and 'SER D' clears the SER; refuse to collect unless SHO P 1 parses as English port settings with LANG := ENGLISH."
   }
  ],
+ "warnings": [
+  {
+   "id": "warn.maxacc_above_1",
+   "setting": "MAXACC",
+   "max": 1,
+   "read_by": "sel.settings.show_port1",
+   "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): MAXACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+  },
+  {
+   "id": "warn.ftpacc_above_1",
+   "setting": "FTPACC",
+   "max": 1,
+   "read_by": "sel.settings.show_port1",
+   "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): FTPACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+  },
+  {
+   "id": "warn.httpacc_above_1",
+   "setting": "HTTPACC",
+   "max": 1,
+   "read_by": "sel.settings.show_port1",
+   "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): HTTPACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+  }
+ ],
  "operations": [
   {
    "id": "sel.id",
@@ -244,7 +267,11 @@
    "notes": "Fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL, display package lines, and on IEC 61850 models iedName/type/configVersion. Per-line checksum = 4-hex sum of characters of '\"KEY=value\",' (verified on all 10 lines of Figure 7.38).",
    "classification": "read-only",
    "line": "ID",
-   "access_level": "0"
+   "access_level": "0",
+   "phases": [
+    "probe",
+    "operate"
+   ]
   },
   {
    "id": "sel.ser.read_all",
