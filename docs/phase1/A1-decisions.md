@@ -248,3 +248,14 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **2. SER field names.** C2 `RecordFields` names `sel.ser.row` fields `row`, `date`, `time`, `element`, `state`. C4 `native.fields` keeps names as the device printed them, and A4's examples use `#`, `DATE`, `TIME`, `ELEMENT`, `STATE` (S22 Figure 10.16 header line).
   - **Decision:** accepted as A2 proposes. C2 uses the printed header names, so the producer copies fields and never maps them. A2 regenerates the C2 examples. Reviewers: A4 and A6.
 - Both changes go in A2's follow-up PR after #65, except the C8 field, which A3 makes in its own PR. Both block the Phase 1 exit gate, because the chain test must pass with them.
+
+## D1-26. Tests run on the owner's PC first (2026-10-24)
+
+- **Owner rule (ALI, 2026-10-24):** "Always use my local pc as first priority. Use github if my pc is offline or it's not possible to do it on my pc." This followed GitHub Actions refusing every job from 17:42Z ("recent account payments have failed or your spending limit needs to be increased").
+- **Applied to merge gating:**
+  - The steps of `.github/workflows/ci.yml` (`go vet`, `gofmt -l`, `go test ./...`, `python -m pytest -q`) run on the owner's Windows PC through Remote Control (A6 runs them).
+  - The Linux leg comes from a Linux container run of the same steps.
+  - Actions is the fallback when the PC is offline or a step cannot run there.
+  - Each result is posted on its PR with where it ran and the commit it tested.
+- **Evidence labels:** results from the PC and the container are labelled as local runs, never as Actions runs. Nothing in a test run contacts a device, so this changes no OT safety boundary.
+- Every agent brief from now on carries this rule (`contracts/README.md`, Review and approval).
