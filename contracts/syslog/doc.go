@@ -45,13 +45,17 @@
 //     authenticate the node with mutual TLS (client_credential_ref), so no
 //     one else who can reach the collector can write events or audit into
 //     it (C6-A3-2, C6-A3-3).
-//   - Insecure targets (A1 D1-22). A tcp, udp or plain relp target carries
-//     an admin's acknowledgement (by, at, reason, scope; C1's shape), and in
-//     0.1 the only scope is lab-only. By default it sends no device text:
-//     the record's bytes are replaced by dtext_omitted="config", reported
-//     once in the target's state and audit record rather than as a
-//     forward.text-omitted per message. An admin may turn device_text on;
-//     the acknowledgement covers the target as configured.
+//   - Insecure targets (A1 D1-22 and its amendment). A tcp, udp or plain
+//     relp target carries an admin's acknowledgement (by, a C7 human
+//     principal; at; reason; scope; C1's shape), and in 0.1 the only scope
+//     is lab-only. By default it sends no device content: no device bytes,
+//     no normalized subject, subject type, value, category or mapping, and
+//     a summary of the kind alone. The message carries
+//     content_omitted="config", and the omission is reported once in the
+//     target's state and audit record, not as a forward.text-omitted per
+//     message. Kind, asset, times, severity and record hash are still sent.
+//     An admin may turn device_content on; the acknowledgement covers the
+//     target as configured.
 //   - Target changes are security changes (C6-A3-7). Only an admin adds,
 //     changes or removes a target; each change is a C8 policy.apply record
 //     naming the target and a hash of its configuration. Removing the last
@@ -103,7 +107,8 @@
 //     sealed record (A1 D1-15): only a RELP acknowledgement shows that a
 //     record or checkpoint left the node, and audit is pruned only after
 //     one. Target.Validate refuses any other audit target. The rendering of
-//     an audit record is TODO(C8) and lands with C8.
+//     an audit record (RenderAudit) is the next C6 change, now that C8 has
+//     merged.
 //   - The inbound grammar (TB5). The only bytes a node accepts from an
 //     upstream collector are TLS records and, in mode A, RELP responses:
 //     TXNR SP COMMAND SP DATALEN [SP DATA] LF, COMMAND rsp or serverclose,

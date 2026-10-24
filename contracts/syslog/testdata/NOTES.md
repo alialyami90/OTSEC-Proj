@@ -9,10 +9,10 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
 | `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check. |
-| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure; acknowledged lab-only, no device text. |
+| `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure; acknowledged lab-only, no device content. |
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
-| `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure: acknowledged lab-only, no device text (D1-22). |
-| `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure: acknowledged lab-only, no device text. |
+| `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure: acknowledged lab-only, no device content (D1-22). |
+| `valid/udp-rfc3164.json` | | | RFC 5426 with the RFC 3164 form, 1024 octets. Insecure: acknowledged lab-only, no device content. |
 | `valid/relp-tls-audit.json` | | | Also carries the C8 audit stream: required relp-tls, RFC 5424, 17408 octets (D1-15). |
 | `invalid/required-on-tls.json` | required-class | no | RFC 5425 cannot confirm delivery. |
 | `invalid/required-on-tcp.json` | required-class | no | Neither can plain TCP. |
@@ -47,7 +47,7 @@ Each file in `rendered/` is `Render` output for one C4 golden example (`contract
 | File | Event | Target |
 | --- | --- | --- |
 | `sel751-row8.rfc5424.txt` | SEL-751 Figure 10.16 row 8 | `tls-best-effort` |
-| `sel751-row8.rfc3164.txt` | the same row, without its device text (`dtext_omitted="config"`, D1-22) | `udp-rfc3164` |
+| `sel751-row8.rfc3164.txt` | the same row, without device content (`content_omitted="config"`: no `dtext`, `subj`, `val`, `cat` or summary; D1-22) | `udp-rfc3164` |
 | `rtac-syslog.rfc5424.txt` | the RTAC Syslog example. The RTAC's own message, `<190>` included, sits escaped in `dtext`. | `relp-tls-required` |
 | `health-ser-gap.rfc5424.txt` | a `ser.gap` platform event, severity 4 | `relp-tls-required` |
 | `constructed-invalid-date.rfc5424.txt` | the constructed `02/30/2007` row: `dt` without `dwall` | `tls-best-effort` |

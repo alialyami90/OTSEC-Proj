@@ -278,9 +278,9 @@ func TestRenderReadBack(t *testing.T) {
 				if ok {
 					t.Errorf("%s: device text without native bytes", ef)
 				}
-			case !tg.SendsDeviceText():
-				if v, _ := m.Get("dtext_omitted"); ok || v != OmitConfig || out.TextOmitted {
-					t.Errorf("%s on %s: device text off by configuration not marked (%q, %+v)", ef, tf, v, out)
+			case !tg.SendsDeviceContent():
+				if v, _ := m.Get("content_omitted"); ok || v != OmitConfig || out.TextOmitted {
+					t.Errorf("%s on %s: device content off by configuration not marked (%q, %+v)", ef, tf, v, out)
 				}
 			case out.TextOmitted:
 				if v, _ := m.Get("dtext_omitted"); ok || v != OmitSize {
@@ -352,7 +352,7 @@ func TestHostileContent(t *testing.T) {
 	on := true
 	for _, target := range []string{"tcp-lf-insecure", "udp-rfc3164", "relp-tls-required"} {
 		tg := loadTarget(t, target)
-		tg.DeviceText = &on // escaping is what is under test
+		tg.DeviceContent = &on // escaping is what is under test
 		for name, s := range cases {
 			e := withBytes(t, []byte(s), s)
 			msg, out, err := Render(e, tg)
@@ -406,7 +406,7 @@ func TestOversize(t *testing.T) {
 	on := true
 	for _, name := range []string{"tls-best-effort", "udp-rfc3164"} {
 		tg := loadTarget(t, name)
-		tg.DeviceText = &on // the size steps apply to text the target sends
+		tg.DeviceContent = &on // the size steps apply to text the target sends
 		for _, limit := range []int{tg.MaxMessageOctets, 1024, 900, 700} {
 			tg.MaxMessageOctets = limit
 			msg, out, err := Render(e, tg)
@@ -443,7 +443,7 @@ func TestOversize(t *testing.T) {
 	// A summary is dropped only after the text.
 	tg := loadTarget(t, "tls-best-effort")
 	full, _, _ := Render(e, tg)
-	noText, _ := assemble(e, tg, params(e, OmitSize), summary(e))
+	noText, _ := assemble(e, tg, params(e, OmitSize, true), summary(e, true))
 	tg.MaxMessageOctets = len(noText) - 1
 	msg, out, err := Render(e, tg)
 	if err != nil || !out.TextOmitted || !out.SummaryDropped || len(msg) > tg.MaxMessageOctets || len(full) <= len(msg) {
@@ -687,16 +687,18 @@ func TestRELPFrameBound(t *testing.T) {
 	}
 }
 
-// A1 D1-22: an insecure target carries an acknowledgement and, unless an
-// admin turned it on, no device text; a secure target sends device text
-// unless turned off.
-func TestInsecureTargetsAcknowledgedAndTextOff(t *testing.T) {
+// A1 D1-22 and its amendment: an insecure target carries an
+// acknowledgement and, unless an admin turned it on, no device content; a
+// secure target sends device content unless turned off.
+func TestInsecureTargetsAcknowledgedAndContentOff(t *testing.T) {
 	e := loadEvent(t, "sel751-fig10-16-row8")
 	off, on := false, true
+	content := []string{"dtext", "dtext_b64", "subj", "subj_b64", "stype", "val", "val_b64", "cat", "map"}
+	kept := []string{"eid", "kind", "asset", "rcv", "dt", "dwall", "rsha256", "rlen"}
 	for _, c := range []struct {
 		target  string
 		setting *bool
-		text    bool
+		content bool
 	}{
 		{"tcp-lf-insecure", nil, false},
 		{"udp-rfc3164", nil, false},
@@ -707,22 +709,38 @@ func TestInsecureTargetsAcknowledgedAndTextOff(t *testing.T) {
 		{"tls-best-effort", &off, false},
 	} {
 		tg := loadTarget(t, c.target)
-		tg.DeviceText = c.setting
+		tg.DeviceContent = c.setting
 		msg, out, err := Render(e, tg)
 		if err != nil {
 			t.Fatalf("%s: %v", c.target, err)
 		}
 		m, _ := ParseMessage(msg)
-		_, has := m.DeviceText()
-		omitted, _ := m.Get("dtext_omitted")
-		if has != c.text || (!c.text && omitted != OmitConfig) || out.TextOmitted {
-			t.Errorf("%s device_text %v: text %v, dtext_omitted %q, outcome %+v", c.target, c.setting, has, omitted, out)
+		marker, marked := m.Get("content_omitted")
+		if out.TextOmitted || marked == c.content || (marked && marker != OmitConfig) {
+			t.Errorf("%s device_content %v: content_omitted %q (%v), outcome %+v", c.target, c.setting, marker, marked, out)
+		}
+		for _, p := range content {
+			if _, has := m.Get(p); has && !c.content {
+				t.Errorf("%s device_content %v: %s sent", c.target, c.setting, p)
+			}
+		}
+		if _, has := m.DeviceText(); has != c.content {
+			t.Errorf("%s device_content %v: device text %v", c.target, c.setting, has)
+		}
+		if want := "ser"; !c.content && m.Summary != want {
+			t.Errorf("%s device_content %v: summary %q, want %q", c.target, c.setting, m.Summary, want)
+		}
+		for _, p := range kept {
+			if _, has := m.Get(p); !has {
+				t.Errorf("%s device_content %v: %s missing", c.target, c.setting, p)
+			}
 		}
 	}
 	for _, name := range []string{"tcp-lf-insecure", "udp-rfc3164", "relp-plain-best-effort"} {
 		tg := loadTarget(t, name)
 		for _, broken := range []func(a *Acknowledgement){
 			func(a *Acknowledgement) { a.By = "" },
+			func(a *Acknowledgement) { a.By = "not a principal" },
 			func(a *Acknowledgement) { a.At = "2026-10-24T09:00:00+03:00" },
 			func(a *Acknowledgement) { a.Reason = " " },
 			func(a *Acknowledgement) { a.Scope = "same-segment" },

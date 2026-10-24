@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"otsec.local/otsec/contracts/audit"
+	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/version"
 )
@@ -47,21 +49,25 @@ type Target struct {
 	DurableAck *DurableAck `json:"durable_ack,omitempty"`
 	// Acknowledgement is an admin's acceptance of an insecure target (tcp,
 	// udp, plain relp), required on those and refused on the others (A1
-	// D1-22). It covers the target as configured, device_text included.
+	// D1-22). It covers the target as configured, device_content included.
 	// Setting or changing it is a C8 audit record.
 	Acknowledgement *Acknowledgement `json:"acknowledgement,omitempty"`
-	// DeviceText says whether messages carry the record's device bytes.
-	// Absent means on for relp-tls and tls, off for insecure transports,
-	// so a SER row never crosses an unencrypted link unless an admin chose
-	// it (D1-22). Text left out this way is marked dtext_omitted="config"
-	// and reported once, in the target's state and audit record.
-	DeviceText *bool `json:"device_text,omitempty"`
+	// DeviceContent says whether messages carry what is derived from the
+	// device record: its bytes (dtext), the normalized subject, subject
+	// type, value, category and mapping, and the MSG summary. Absent means
+	// on for relp-tls and tls, off for insecure transports, so which
+	// element operated never crosses an unencrypted link unless an admin
+	// chose it (D1-22 and its amendment). With it off, the event's kind,
+	// asset, times, severity and record hash are still sent; the message
+	// carries content_omitted="config", and the omission is reported once,
+	// in the target's state and audit record.
+	DeviceContent *bool `json:"device_content,omitempty"`
 }
 
 // Acknowledgement has the shape of C1's insecure-endpoint acknowledgement.
 // TODO(C1): use asset.Acknowledgement once contracts/asset merges.
 type Acknowledgement struct {
-	By     string   `json:"by"` // TODO(C7): human principal ID.
+	By     string   `json:"by"` // a C7 human principal ID
 	At     string   `json:"at"` // RFC 3339 UTC with Z
 	Reason string   `json:"reason"`
 	Scope  AckScope `json:"scope"`
@@ -74,10 +80,10 @@ type AckScope string
 
 const LabOnly AckScope = "lab-only"
 
-// SendsDeviceText reports whether messages to t carry device bytes.
-func (t *Target) SendsDeviceText() bool {
-	if t.DeviceText != nil {
-		return *t.DeviceText
+// SendsDeviceContent reports whether messages to t carry device content.
+func (t *Target) SendsDeviceContent() bool {
+	if t.DeviceContent != nil {
+		return *t.DeviceContent
 	}
 	return !t.Insecure()
 }
@@ -186,13 +192,10 @@ const (
 	DefaultFacility  = 16 // local0
 	MaxReplaySeconds = 7 * 24 * 3600
 
-	// AuditRecordBytes is the largest sealed C8 record. TODO(C8): use
-	// audit.MaxRecordBytes once contracts/audit merges.
-	AuditRecordBytes = 16 << 10
 	// MinAuditOctets is the smallest max_message_octets of an audit target:
 	// a whole sealed record plus room for the header and the SD element
 	// that carries node, seq and hash.
-	MinAuditOctets = AuditRecordBytes + 1024
+	MinAuditOctets = audit.MaxRecordBytes + 1024
 )
 
 // Mode returns the delivery mode of the target's transport.
@@ -372,7 +375,7 @@ func (t *Target) Validate() error {
 		switch {
 		case !t.Insecure() && a != nil:
 			fail(CodeAck, "acknowledgement", "%q is not insecure; nothing to acknowledge", t.Transport)
-		case t.Insecure() && (a == nil || a.By == "" || !utcZ(a.At) || strings.TrimSpace(a.Reason) == ""):
+		case t.Insecure() && (a == nil || (authz.Principal{Type: authz.PrincipalHuman, ID: a.By}).Validate() != nil || !utcZ(a.At) || strings.TrimSpace(a.Reason) == ""):
 			fail(CodeAck, "acknowledgement", "%q sends in clear text and needs an acknowledgement with by, at, reason and scope (D1-22)", t.Transport)
 		case t.Insecure() && a.Scope != LabOnly:
 			fail(CodeAck, "acknowledgement.scope", "%q: 0.1 accepts an insecure target for lab-only", a.Scope)

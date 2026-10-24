@@ -26,10 +26,10 @@ const AppName = "otsec"
 // Health types C6 adds to C4's open set. forward.text-omitted is C4's own.
 const HealthTooLarge = "forward.too-large"
 
-// dtext_omitted values.
+// Omission markers.
 const (
-	OmitSize   = "size"   // left out to fit the size limit
-	OmitConfig = "config" // the target sends no device text (D1-22)
+	OmitSize   = "size"   // dtext_omitted: left out to fit the size limit
+	OmitConfig = "config" // content_omitted: the target sends no device content (D1-22)
 )
 
 // Outcome reports what Render had to leave out to fit the size limit.
@@ -95,13 +95,17 @@ type Param struct {
 //	flag     an event flag (repeated)
 //	dtext    the record's native bytes, when printable UTF-8
 //	dtext_b64      the record's native bytes otherwise
-//	dtext_omitted  why the bytes were left out: "size" (to fit the limit;
-//	               the forwarder emits forward.text-omitted) or "config"
-//	               (the target sends no device text, D1-22; reported once
-//	               in the target's state, not per message)
+//	dtext_omitted  "size": the bytes were left out to fit the limit; the
+//	               forwarder emits forward.text-omitted
+//	content_omitted  "config": the target sends no device content (D1-22):
+//	               no dtext, subj, stype, val, cat, map or summary; reported
+//	               once in the target's state, not per message
 //
-// omit is "" to include the device text, or the dtext_omitted value.
-func params(e *event.Event, omit string) []Param {
+// omit is "" to include the device text, or OmitSize. content is false when
+// the target sends no device content: dtext and the normalized subject,
+// value, category and mapping are left out, and content_omitted="config"
+// says so.
+func params(e *event.Event, omit string, content bool) []Param {
 	var ps []Param
 	add := func(name, value string) {
 		if printable(value) {
@@ -166,7 +170,7 @@ func params(e *event.Event, omit string) []Param {
 			add("dflag", f)
 		}
 	}
-	if n := e.Normalized; n != nil {
+	if n := e.Normalized; n != nil && content {
 		add("subj", n.Subject)
 		add("stype", n.SubjectType)
 		add("val", n.Value)
@@ -197,7 +201,11 @@ func params(e *event.Event, omit string) []Param {
 	for _, f := range e.Flags {
 		add("flag", f)
 	}
-	if n := e.Native; n != nil && n.Bytes != nil {
+	hasContent := (e.Native != nil && e.Native.Bytes != nil) || e.Normalized != nil
+	if !content && hasContent {
+		ps = append(ps, Param{"content_omitted", OmitConfig})
+	}
+	if n := e.Native; n != nil && n.Bytes != nil && content {
 		switch {
 		case omit != "":
 			ps = append(ps, Param{"dtext_omitted", omit})
@@ -257,12 +265,13 @@ func sd(ps []Param) string {
 var summaryToken = regexp.MustCompile(`^[A-Za-z0-9 ._:/+()',-]{1,64}$`)
 
 // summary is MSG: a short line for people, never needed to read the event.
-func summary(e *event.Event) string {
+// Without device content it is the kind alone.
+func summary(e *event.Event, content bool) string {
 	s := string(e.Kind)
 	if h := e.Health; h != nil && summaryToken.MatchString(h.Type) {
 		return s + " " + h.Type
 	}
-	if n := e.Normalized; n != nil && summaryToken.MatchString(n.Subject) && summaryToken.MatchString(n.Value) {
+	if n := e.Normalized; n != nil && content && summaryToken.MatchString(n.Subject) && summaryToken.MatchString(n.Value) {
 		s += " " + n.Subject + " " + n.Value
 	}
 	return s
@@ -335,12 +344,10 @@ func Render(e *event.Event, t *Target) ([]byte, Outcome, error) {
 	if err := e.Validate(); err != nil {
 		return nil, out, &Error{Code: CodeEventInvalid, Field: "event", Detail: err.Error()}
 	}
-	omit, msg := "", summary(e)
-	if !t.SendsDeviceText() {
-		omit = OmitConfig
-	}
+	content := t.SendsDeviceContent()
+	omit, msg := "", summary(e, content)
 	for {
-		b, err := assemble(e, t, params(e, omit), msg)
+		b, err := assemble(e, t, params(e, omit, content), msg)
 		if err != nil {
 			return nil, out, err
 		}
@@ -348,7 +355,7 @@ func Render(e *event.Event, t *Target) ([]byte, Outcome, error) {
 			return b, out, nil
 		}
 		switch {
-		case omit == "" && e.Native != nil && e.Native.Bytes != nil:
+		case content && omit == "" && e.Native != nil && e.Native.Bytes != nil:
 			omit, out.TextOmitted = OmitSize, true
 		case msg != "":
 			msg, out.SummaryDropped = "", true

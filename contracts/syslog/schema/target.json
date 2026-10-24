@@ -46,13 +46,13 @@
       "required": ["by", "at", "reason", "scope"],
       "description": "An admin's acceptance of an insecure target (tcp, udp, relp), with C1's shape. Required exactly on those transports (A1 D1-22, Go rule).",
       "properties": {
-        "by": {"type": "string", "minLength": 1},
+        "by": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$", "description": "A C7 human principal ID."},
         "at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"},
         "reason": {"type": "string", "minLength": 1},
         "scope": {"enum": ["lab-only"]}
       }
     },
-    "device_text": {"type": "boolean", "description": "Whether messages carry device bytes. Absent: on for relp-tls and tls, off for insecure transports (D1-22)."},
+    "device_content": {"type": "boolean", "description": "Whether messages carry what is derived from the device record (dtext, subj, stype, val, cat, map, summary). Absent: on for relp-tls and tls, off for insecure transports (D1-22 and its amendment)."},
     "audit": {"type": "boolean", "description": "The target also carries the C8 audit stream. Only a required relp-tls RFC 5424 target with max_message_octets of at least 17408 (A1 D1-15, Go rule)."}
   }
 }
