@@ -22,6 +22,11 @@
 //     then only to drain (StartupEnv, RunStartup).
 //   - Storage-full behaviour per stream class and the alarms the store
 //     raises (StreamClass, FullAction, Quota, Alarm).
+//   - Audit records: one audit stream per node, sealed into the C8 hash
+//     chain inside the commit and never re-encoded, a chain anchor kept
+//     across pruning, and audit before act, so that a privileged operation
+//     or credential-bearing collection runs only after its audit record
+//     holds a Receipt (AuditChain, SealAudit, ChainLink, AuditBeforeAct).
 //
 // It deliberately leaves out the SQLite implementation (Phase 2), the
 // site-to-central protocol, how events are encoded (C4) and how they are

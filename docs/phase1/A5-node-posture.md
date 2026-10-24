@@ -1,6 +1,6 @@
 # Node posture labels
 
-Owner: A5. A2 carries these into C1 (`otsec.asset`), because a platform node is also an asset. Reviewers: A6 (V-S20, C-24), A3 (HR-9). Status: draft, 2026-10-24. Brief: P1-A5.
+Owner: A5. A2 carries these into C1 (`otsec.asset`), because a platform node is also an asset. Reviewers: A6 (V-S20, C-24), A3 (HR-9). Status: draft, 2026-10-24. A3 confirmed section 3 against HR-9 (C5-A3 review). Brief: P1-A5.
 
 A node reports two posture labels about itself:
 
@@ -61,6 +61,8 @@ Rules:
 The product pages already give the last instant as 06:59:59 PT on the day after the nominal date. That instant is converted with the offset in force on that date: PST (UTC−8) gives 14:59:59Z, and PDT (UTC−7) gives 13:59:59Z. US daylight time starts on 2028-03-12, so the 26H1 instant is in PDT.
 
 The two summary-page rows keep the nominal date as their source. Their UTC instant is derived with the same rule and is marked `derived`. A6's V-S20 fixture marks them the same way.
+
+**The table is shipped, not configured.** It is a signed file in the release package, like the H-11 record, so an operator cannot mark an edition as supported by editing configuration (A3, C5-A3-7). The label also depends on the node clock. A clock stepped backwards would hide an expired edition, but clock changes are audited (C8 `clock.change`), so the step is visible.
 
 **Evaluation.** The label is evaluated at startup, every 24 hours *(proposed)*, and on a system clock change. A node therefore changes label when the instant passes, without a reinstall. Inside 180 days *(proposed)* of the end instant, the label stays `OS supported` and node status adds "support ends <date>".
 

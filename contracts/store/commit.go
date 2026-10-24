@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"time"
 )
@@ -41,6 +42,10 @@ type Record struct {
 	// its full ID and passes C4's Validate before any reader sees it. Native
 	// bytes and native time verbatim plus the normalized form commit
 	// together and are pruned together (ADR-0004 item 2, EP-6).
+	//
+	// For class audit, Event is instead a pending C8 record (C8's
+	// ValidatePending accepts it). The store seals it with SealAudit in the
+	// commit transaction and keeps the sealed bytes exactly (C5-A3-1).
 	Event []byte
 	// Capture is the native capture the record came from, if any. Records
 	// of one read share one Capture; the store writes it once.
@@ -95,8 +100,15 @@ type Commit struct {
 type Committer interface {
 	// CommitBatch writes every record in one transaction, in order, assigns
 	// consecutive seqs starting at the stream's next seq, and returns only
-	// after the transaction has committed at the reported Sync. If it returns
-	// an error, durability of the batch is unknown.
+	// after the transaction has committed at the reported Sync. For class
+	// audit it seals the records with SealAudit inside the transaction.
+	//
+	// It may refuse a batch, having written nothing, with an *Error whose
+	// Code is CodeQuotaReached (the class is at quota and its action refuses)
+	// or CodeInvalid (for example a pending audit record SealAudit rejects).
+	// The Log fails that batch's appends with the error and keeps running.
+	// Any other error means the durability of the batch is unknown, and the
+	// Log stops.
 	CommitBatch(ctx context.Context, stream StreamID, recs []Record) (Commit, error)
 }
 
@@ -317,6 +329,10 @@ func (l *Log) commitGroup(g *group) {
 	l.mu.Unlock()
 
 	c, err := l.c.CommitBatch(context.Background(), g.stream, g.recs)
+	if refused(err) {
+		g.err = err // nothing was written; the Log keeps running
+		return
+	}
 	switch {
 	case err != nil:
 		err = errf(CodeCommitFailed, err, "stream %s, %d records", g.stream, len(g.recs))
@@ -340,6 +356,12 @@ func (l *Log) commitGroup(g *group) {
 	}
 	g.at = c.At
 	l.last[g.stream] = c.FirstSeq + Seq(c.Count) - 1
+}
+
+// refused reports whether a CommitBatch error is a refusal that wrote
+// nothing.
+func refused(err error) bool {
+	return errors.Is(err, &Error{Code: CodeQuotaReached}) || errors.Is(err, &Error{Code: CodeInvalid})
 }
 
 // Stopped reports the error that stopped the Log, or nil.

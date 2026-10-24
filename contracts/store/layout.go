@@ -33,6 +33,7 @@ type Layout struct {
 func (l Layout) Validate() error {
 	dbs := map[DatabaseID]bool{}
 	streams := map[StreamID]DatabaseID{}
+	audit := 0
 	for _, d := range l.Databases {
 		if d.ID == "" {
 			return errf(CodeInvalid, nil, "database with no ID")
@@ -66,6 +67,9 @@ func (l Layout) Validate() error {
 		if classes[ClassAudit] && len(classes) > 1 {
 			return errf(CodeInvalid, nil, "database %s mixes audit with other classes", d.ID)
 		}
+		if classes[ClassAudit] {
+			audit += len(d.Streams)
+		}
 		quotas := map[StreamClass]bool{}
 		for _, q := range d.Quotas {
 			if err := q.Validate(); err != nil {
@@ -84,6 +88,10 @@ func (l Layout) Validate() error {
 				return errf(CodeInvalid, nil, "database %s: no quota for %s", d.ID, c)
 			}
 		}
+	}
+	if audit != 1 {
+		// The C8 chain is one per node (C5-A3-1).
+		return errf(CodeInvalid, nil, "layout has %d audit streams, exactly one required", audit)
 	}
 	return nil
 }

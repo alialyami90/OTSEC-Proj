@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -23,6 +25,11 @@ type fake struct {
 	next     map[StreamID]Seq
 	cursors  map[StreamID]map[ConsumerID]Seq // persisted only
 	captures map[string]Capture
+
+	chain     AuditChain // seals records of class audit when set
+	heads     map[StreamID]ChainLink
+	anchors   map[StreamID]ChainLink
+	quotaFull map[StreamID]bool
 
 	storeExists bool
 	reserves    map[Reserve]bool
@@ -50,6 +57,9 @@ func newFake() *fake {
 		next:      map[StreamID]Seq{},
 		cursors:   map[StreamID]map[ConsumerID]Seq{},
 		captures:  map[string]Capture{},
+		heads:     map[StreamID]ChainLink{},
+		anchors:   map[StreamID]ChainLink{},
+		quotaFull: map[StreamID]bool{},
 		reserves:  map[Reserve]bool{},
 		free:      1 << 20,
 		limit:     1 << 30,
@@ -84,6 +94,24 @@ func (f *fake) CommitBatch(_ context.Context, stream StreamID, recs []Record) (C
 	defer f.mu.Unlock()
 	if err := f.call("CommitBatch"); err != nil {
 		return Commit{}, err
+	}
+	if f.quotaFull[stream] {
+		return Commit{}, &Error{Code: CodeQuotaReached, Detail: string(stream)}
+	}
+	if f.chain != nil && len(recs) > 0 && recs[0].Class == ClassAudit {
+		head, ok := f.heads[stream]
+		if !ok {
+			head = ChainLink{Hash: f.chain.Genesis()}
+		}
+		sealed, next, err := SealAudit(f.chain, head, recs)
+		if err != nil {
+			return Commit{}, err
+		}
+		recs = slices.Clone(recs)
+		for i := range recs {
+			recs[i].Event = sealed[i]
+		}
+		f.heads[stream] = next
 	}
 	first := f.next[stream] + 1
 	for _, r := range recs {
@@ -263,6 +291,11 @@ func (f *fake) PruneStep(_ context.Context, b Boundary, max int) (int, error) {
 	for n < len(ev) && n < max && ev[n].Key.Seq <= b.Through() {
 		n++
 	}
+	for _, e := range ev[:n] {
+		if e.Class == ClassAudit {
+			f.anchors[b.Stream()] = ChainLink{Seq: e.Key.Seq, Hash: sha256.Sum256(e.Event)}
+		}
+	}
 	f.events[b.Stream()] = ev[n:]
 	f.free += int64(n) * f.eventSize // pages handed back by compaction, modelled here
 	return n, nil
@@ -284,6 +317,16 @@ func (f *fake) ReadCapture(_ context.Context, ref string) (Capture, error) {
 		return Capture{}, &Error{Code: CodeInvalid, Detail: "no capture " + ref}
 	}
 	return c, nil
+}
+
+func (f *fake) ChainAnchor(_ context.Context, stream StreamID) (ChainLink, error) {
+	if f.chain == nil {
+		return ChainLink{}, &Error{Code: CodeInvalid, Detail: "no audit stream"}
+	}
+	if a, ok := f.anchors[stream]; ok {
+		return a, nil
+	}
+	return ChainLink{Hash: f.chain.Genesis()}, nil
 }
 
 // retained lists the seqs still stored for stream.

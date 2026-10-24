@@ -27,6 +27,12 @@ type Outbox interface {
 	// ReadCapture returns the capture an EvidenceRef names. It is held at
 	// least as long as any record that refers to it.
 	ReadCapture(ctx context.Context, ref string) (Capture, error)
+	// ChainAnchor returns the link of the last record pruned from the audit
+	// stream, or ChainLink{0, genesis} if none was. The prune step that
+	// removes audit records writes it in the same transaction, so the
+	// retained chain always verifies from it (C5-A3-2). It is read-only.
+	// It fails with CodeInvalid for a stream that is not the audit stream.
+	ChainAnchor(ctx context.Context, stream StreamID) (ChainLink, error)
 }
 
 // CommitIndex answers position questions about committed events.
@@ -146,20 +152,27 @@ func (boundary) sealedBoundary()    {}
 //   - the boundary is the lowest of these, and never above the last
 //     committed seq.
 //
-// A stream with no consumers fails with CodeNoConsumers: nothing confirms its
-// events, and the site is the system of record.
-func ComputeBoundary(ctx context.Context, cs CursorStore, idx CommitIndex, consumers []Consumer, stream StreamID, now time.Time) (Boundary, error) {
+// For class audit only required consumers count: a replay window never
+// makes an audit record prunable, because that would delete it with no
+// confirmed delivery (C5-A3-2, AP-17).
+//
+// A stream with no consumers that count fails with CodeNoConsumers: nothing
+// confirms its events, and the site is the system of record.
+func ComputeBoundary(ctx context.Context, cs CursorStore, idx CommitIndex, consumers []Consumer, stream StreamID, class StreamClass, now time.Time) (Boundary, error) {
+	if _, err := ActionFor(class); err != nil {
+		return nil, err
+	}
 	var mine []Consumer
 	for _, c := range consumers {
 		if err := c.Validate(); err != nil {
 			return nil, err
 		}
-		if c.Stream == stream {
+		if c.Stream == stream && (class != ClassAudit || c.Delivery == Required) {
 			mine = append(mine, c)
 		}
 	}
 	if len(mine) == 0 {
-		return nil, errf(CodeNoConsumers, nil, "stream %s", stream)
+		return nil, errf(CodeNoConsumers, nil, "stream %s (%s)", stream, class)
 	}
 	persisted, err := cs.LoadCursors(ctx, stream)
 	if err != nil {
@@ -198,7 +211,9 @@ type Pruner interface {
 	// deletes each event's native bytes and normalized form together, and
 	// returns how many it deleted (0 when nothing at or below the boundary
 	// is left). A capture no retained record refers to any more is deleted
-	// in the same transaction. Small steps matter: a single large delete can need more WAL
+	// in the same transaction. For the audit stream, the same transaction
+	// also writes the ChainLink of the last record it deletes as the
+	// stream's chain anchor. Small steps matter: a single large delete can need more WAL
 	// space than a full disk has (E-A5-3).
 	PruneStep(ctx context.Context, b Boundary, max int) (int, error)
 }

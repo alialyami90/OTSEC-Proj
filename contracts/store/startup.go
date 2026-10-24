@@ -91,7 +91,7 @@ type RecoveryStore interface {
 
 // StartupPolicy holds the numbers startup works with.
 type StartupPolicy struct {
-	Streams   []StreamID
+	Streams   []StreamSpec
 	Consumers []Consumer
 	// RecoveryReserveBytes: at least twice the WAL bound.
 	RecoveryReserveBytes int64
@@ -134,12 +134,33 @@ func (p StartupPolicy) Validate() error {
 	case !(p.PruneTarget > 0 && p.PruneTarget < 1):
 		return errf(CodeInvalid, nil, "prune target %v not in (0,1)", p.PruneTarget)
 	}
+	audit := 0
+	for _, s := range p.Streams {
+		if !s.ID.Valid() {
+			return errf(CodeInvalid, nil, "startup policy stream %q is not a valid stream token", s.ID)
+		}
+		if _, err := ActionFor(s.Class); err != nil {
+			return err
+		}
+		if s.Class == ClassAudit {
+			audit++
+		}
+	}
+	if audit > 1 {
+		return errf(CodeInvalid, nil, "startup policy names %d audit streams, at most one allowed", audit)
+	}
 	for _, c := range p.Consumers {
 		if err := c.Validate(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// StreamSpec names a stream startup recovery prunes, with its class.
+type StreamSpec struct {
+	ID    StreamID
+	Class StreamClass
 }
 
 // Mode is how the node may run after startup.
@@ -467,7 +488,7 @@ func (s *startup) prune(ctx context.Context, st RecoveryStore) (int, error) {
 		}
 		pass := 0
 		for _, stream := range s.p.Streams {
-			b, err := ComputeBoundary(ctx, st, st, s.p.Consumers, stream, s.now)
+			b, err := ComputeBoundary(ctx, st, st, s.p.Consumers, stream.ID, stream.Class, s.now)
 			if errors.Is(err, &Error{Code: CodeNoConsumers}) {
 				continue // nothing confirms this stream; none of it is prunable
 			}

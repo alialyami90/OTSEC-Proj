@@ -28,6 +28,13 @@ const (
 	// CodeNoConsumers: a stream has no consumer, so nothing confirms its
 	// events and none may be pruned (the site is the system of record).
 	CodeNoConsumers Code = "no-consumers"
+	// CodeQuotaReached: the record's class is at its quota and its storage-
+	// full action refuses it (refuse-new, fail-closed). Nothing was written,
+	// so the Log keeps running.
+	CodeQuotaReached Code = "quota-reached"
+	// CodeAuditUnavailable: a privileged operation or credential-bearing
+	// collection was refused because its audit record holds no Receipt.
+	CodeAuditUnavailable Code = "audit-unavailable"
 	// CodeStartupFailed: a startup step failed and startup stopped.
 	CodeStartupFailed Code = "startup-failed"
 )

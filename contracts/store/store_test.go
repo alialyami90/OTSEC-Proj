@@ -48,6 +48,8 @@ func TestLayout(t *testing.T) {
 		"quota for absent":    func(l *Layout) { l.Databases[0].Quotas = append(l.Databases[0].Quotas, Quota{ClassAudit, 1, 0.5}) },
 		"bad warn fraction":   func(l *Layout) { l.Databases[0].Quotas[0].WarnFraction = 1 },
 		"unknown class":       func(l *Layout) { l.Databases[0].Classes[0] = "video" },
+		"two audit streams":   func(l *Layout) { l.Databases[2].Streams = append(l.Databases[2].Streams, "audit2") },
+		"no audit stream":     func(l *Layout) { l.Databases = l.Databases[:2] },
 	} {
 		l := goodLayout()
 		mutate(&l)
@@ -308,27 +310,27 @@ func TestComputeBoundary(t *testing.T) {
 	req := Consumer{ID: "central", Stream: "s", Delivery: Required}
 	be := Consumer{ID: "rfc5425", Stream: "s", Delivery: BestEffort, ReplayWindow: time.Hour}
 
-	b, err := ComputeBoundary(ctx, f, f, []Consumer{req}, "s", f.now)
+	b, err := ComputeBoundary(ctx, f, f, []Consumer{req}, "s", ClassAdapterEvidence, f.now)
 	if err != nil || b.Through() != 0 {
 		t.Fatalf("required consumer with no cursor: %v %v, want 0", b, err)
 	}
 	f.SaveCursor(ctx, Cursor{"central", "s", 8})
-	b, _ = ComputeBoundary(ctx, f, f, []Consumer{req, be}, "s", f.now)
+	b, _ = ComputeBoundary(ctx, f, f, []Consumer{req, be}, "s", ClassAdapterEvidence, f.now)
 	if b.Through() != 4 {
 		t.Fatalf("required at 8, best-effort window ends at 4: got %d", b.Through())
 	}
 	// A best-effort cursor means "sent", not "delivered": it never makes
 	// events inside the replay window prunable (A4 review of C5, change 1).
 	f.SaveCursor(ctx, Cursor{"rfc5425", "s", 10})
-	b, _ = ComputeBoundary(ctx, f, f, []Consumer{req, be}, "s", f.now)
+	b, _ = ComputeBoundary(ctx, f, f, []Consumer{req, be}, "s", ClassAdapterEvidence, f.now)
 	if b.Through() != 4 {
 		t.Fatalf("best-effort cursor 10 inside its window moved the boundary to %d, want 4", b.Through())
 	}
-	if _, err := ComputeBoundary(ctx, f, f, nil, "s", f.now); !isCode(err, CodeNoConsumers) {
+	if _, err := ComputeBoundary(ctx, f, f, nil, "s", ClassAdapterEvidence, f.now); !isCode(err, CodeNoConsumers) {
 		t.Fatalf("no consumers: %v", err)
 	}
 	for _, c := range []Consumer{{ID: "x", Stream: "s", Delivery: Required, ReplayWindow: time.Hour}, {ID: "x", Stream: "s", Delivery: BestEffort}, {ID: "x", Stream: "s", Delivery: "sometimes"}} {
-		if _, err := ComputeBoundary(ctx, f, f, []Consumer{c}, "s", f.now); !isCode(err, CodeInvalid) {
+		if _, err := ComputeBoundary(ctx, f, f, []Consumer{c}, "s", ClassAdapterEvidence, f.now); !isCode(err, CodeInvalid) {
 			t.Errorf("consumer %+v accepted", c)
 		}
 	}
@@ -343,7 +345,7 @@ func TestBoundaryIgnoresUnpersistedCursor(t *testing.T) {
 	f.SaveCursor(ctx, Cursor{"central", "s", 3})
 	inMemory := Cursor{"central", "s", 9} // sent and confirmed, not yet saved
 	_ = inMemory
-	b, _ := ComputeBoundary(ctx, f, f, []Consumer{{ID: "central", Stream: "s", Delivery: Required}}, "s", f.now)
+	b, _ := ComputeBoundary(ctx, f, f, []Consumer{{ID: "central", Stream: "s", Delivery: Required}}, "s", ClassAdapterEvidence, f.now)
 	if b.Through() != 3 {
 		t.Fatalf("boundary %d, want the persisted 3", b.Through())
 	}
@@ -357,7 +359,7 @@ func TestBoundaryIgnoresUnpersistedCursor(t *testing.T) {
 
 func policy() StartupPolicy {
 	return StartupPolicy{
-		Streams:                []StreamID{"s"},
+		Streams:                []StreamSpec{{"s", ClassAdapterEvidence}},
 		Consumers:              []Consumer{{ID: "central", Stream: "s", Delivery: Required}},
 		RecoveryReserveBytes:   512 << 10,
 		LastResortReserveBytes: 128 << 10,
