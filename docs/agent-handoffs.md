@@ -302,3 +302,188 @@ Checked against SEL-751 IM Table 7.67 (SHOW command, all forms Access Level 1) a
 ### Phase 0 branches merged — 2026-10-23 (18:5xZ)
 With the owner's approval, PRs #1–#6 were merged to `main` (heads: A3 09783c7, A2 85d8091, A5 830a0f4, A4 27a8182, A6 3b666e9, A1 f500e94). Trial merge had no conflicts. On merged `main`: 67 tests pass, 5 skipped; the 5 environment-gated tests pass with the SEL-751 manual text, A2 allowlist and A2 register (5 passed, 141 subtests). Further work goes on branches cut from `main`. SEL-2730M IM (20260408) supplied and added to `manuals-SEL/` (grep: Syslog, SNMP, RADIUS, HTTPS); A2 to classify. The repository default branch is still `claude/project-thread-03n4bh` (same commit as the old `main`); changing it is a repository setting the owner makes.
 - **A6 F-010 / C-24 (PR #10):** no A6 test assumes co-hosting or 3355-2-only features. C-24 accepted: H-11 per hardware and drive model; node reports models and labels "storage durability unverified" without an H-11 result (ADR-0007). A3 PR #9: AS-7 and AP-24 widened to any out-of-band controller (ADR-0007 item 8). A2 PR #8: SEL-2730M classified.
+
+## Phase 1 task briefs (issued 2026-10-24)
+
+The owner accepted Phase 0 and authorized Phase 1 on 2026-10-24 at 11:16Z ("Continue phase 1"; see `docs/phase-0-exit.md`, "Owner sign-off"). Phase 1 approves contracts C1 to C8 and nothing else. Phase 2 code waits for the Phase 1 exit gate below.
+
+### Common rules for every Phase 1 brief
+
+- **Still no contact with operational equipment.** The Phase 0 rules on equipment, networks, credentials and fabricated evidence apply unchanged. Hardware checks (H-01 to H-14) are prepared, not run, unless the owner authorizes a lab device or site machine through A1.
+- **Write only to owned paths.** Each contract owner writes its own package under `contracts/<pkg>/` (layout and rules in [contracts/README.md](../contracts/README.md)), plus `docs/phase1/<agent>-<topic>.md`. Reviewers write `docs/phase1/reviews/<contract>-<reviewer>.md`. `docs/architecture.md`, `docs/requirements.md`, `docs/agent-handoffs.md`, `docs/decisions/`, `contracts/README.md` and `contracts/version/` stay A1's. Proposals for them go in your findings file.
+- **Contracts only.** A contract package holds types, validation, JSON Schemas, golden examples and tests. It does no I/O and has no device, storage or network logic. Standard library only.
+- **One definition per concept.** The owning contract defines a concept and the others import it:
+  - C1: asset ID and device identity;
+  - C3: operation ID;
+  - C4: event ID `(node_id, stream, seq)`, node ID and the timestamp model;
+  - C7: principal, role and `CredentialRef`.
+  Until the owner's package is merged, use the name and shape agreed in its draft PR and leave a `TODO(C<n>)` where you will import it.
+- **Merge order** (later PRs rebase onto earlier ones; nobody waits to start): C4, C1, C3, C7, C2, C8, C5, C6.
+- **Branch and CI.** Branch from `main` (`agent/<area>-phase1`, or your session's assigned branch). Open a PR against `main`. CI (`.github/workflows/ci.yml`) must be green on Linux and Windows.
+- **Finish with a handoff** in the template above, listing every reviewer's outcome.
+
+### Task P1-A1: Contract conventions, C3 format, integration and the Phase 1 gate
+- Objective and rationale: give every owner one set of conventions and one tree to build against. Own the C3 format. Integrate contracts in order and decide the Phase 1 exit gate.
+- Owner agent: A1.
+- Required inputs and dependencies: `docs/phase-0-exit.md` ("Carried into Phase 1"), A2's register JSON, A6's register checker, `A3-review-A2.md`.
+- Files or modules the agent may modify: `go.mod`, `contracts/README.md`, `contracts/version/`, `contracts/register/` (format only), `.github/workflows/ci.yml`, `CLAUDE.md` "Repository state", A1-owned docs.
+- Expected interfaces: the `otsec.<name>/<major>.<minor>` identifier and compatibility rule (done, `contracts/version`). C3 register format `otsec.register/0.1`. It must cover:
+  - exact lines;
+  - parameters with validation patterns;
+  - access level;
+  - classification `read-only`, `state-changing` or `session-control` (C-A2-1: `session-control` entries are never invocable as operations);
+  - citation;
+  - per-family firmware allowlist inside the same package (C-A2-2);
+  - a detached signature envelope with release key ID and anti-rollback floor, whose verification rules A3 defines in C7.
+- Deliverable: skeleton, conventions and CI on `main`; C3 format package with schema and tests; integration of each contract PR; Phase 1 exit report in `docs/phase-1-exit.md`.
+- Acceptance tests:
+  - `go test ./...` is green on Linux and Windows.
+  - A2's current register JSON converts to `otsec.register/0.1` with no information lost.
+  - A6's deny corpus still passes against it.
+  - `ACC` and `QUI` cannot be named as an invocable operation.
+- Explicit exclusions: no register content changes (A2), no signing implementation (Phase 2).
+- Uncertainty or safety risks: a register format that can express an unrestricted line would defeat risk 1. The schema must make free-form lines unrepresentable.
+
+### Task P1-A2: C1 asset identity and capability profile; C2 adapter envelope; C3 content
+- Objective and rationale: fix how a device is identified and how the collector is asked to do one approved thing and reports what happened. Closes B-02 and B-05 and tests Q5.
+- Owner agent: A2.
+- Required inputs and dependencies: A2 §9 draft interface, §15 manual results, the firmware allowlist, `A3-review-A2.md` C-A2-1 to C-A2-3, A3 §4.5 and §8.3, A4 EP-1 to EP-9, ADR-0005 rulings, and the C3 format from P1-A1.
+- Files or modules the agent may modify: `contracts/asset/`, `contracts/adapter/`, register content (`docs/phase0/A2-command-register-draft.json` moving into the C3 package once the format lands), `docs/device-capabilities.md`, `docs/phase1/A2-*.md`, `tests/fixtures/ied/`.
+- Expected interfaces:
+  - **C1 `otsec.asset/0.1`:**
+    - asset ID, device class and vendor/product family (ADR-0006);
+    - each attribute with value, evidence source, evidence class and confidence;
+    - `downstream_security` (plaintext labelled insecure);
+    - FID and serial from `ID`, as the identity binding for a transport without cryptographic identity (B-05: state what is and is not proven by it, and what a mismatch does);
+    - the site platform node itself as an asset of class "server", carrying A5's posture labels.
+  - **C2 `otsec.adapter/0.1`:**
+    - **Invocation:** asset ID, operation ID from C3, validated parameters, `CredentialRef` from C7, and limits (timeout, retries, rate).
+    - **Result:** the raw transcript as bytes, with byte spans for every send and receive, redaction markers (echo redaction mandatory until a capture shows no echo, C-A2-3), parsed records, and the closed error taxonomy with a failure fallback.
+    - **Posture and refusals:** posture warnings and refusal reasons, including the FID gate, `LANG`, MAXACC, FTPACC and HTTPACC warnings, no password prompt (AP-23), and a failed password with no `QUI` (C-19).
+    - **Language probe:** the reply grammar for the language probe.
+- Deliverable:
+  - **Packages:** the two contract packages with schemas, golden examples built from `documented-example` figures, and tests.
+  - **Register:** the register, re-expressed in the C3 format with citations read from the manual. Closes B-02.
+  - **Q5 test:** a paper exercise in `docs/phase1/A2-q5-rtac.md`, expressing RTAC collection against C1 and C2 and counting every special case the envelope cannot carry.
+- Acceptance tests:
+  - every C2 error code has a negative example;
+  - a result whose transcript spans do not cover the bytes exactly is rejected;
+  - an invocation naming a `session-control` or unknown operation is rejected;
+  - an asset attribute with no evidence class is rejected;
+  - the RTAC exercise needs no change to the envelope's shape, or the changes are listed and reviewed.
+- Explicit exclusions: no Telnet driver, no parser implementation beyond the contract's record types, no new device families in the register.
+- Uncertainty or safety risks:
+  - FID and serial can be spoofed by anything on the station LAN. C1 must say so rather than imply authentication.
+  - Manual figures are not byte-level ground truth (C-20).
+
+### Task P1-A3: C7 authorization and credentials; C8 audit; security review of every contract
+- Objective and rationale: fix who may ask for what, how device credentials are held on a Windows site node, and what is recorded. Closes B-04 and checks that no contract opens a path into OT (Q7).
+- Owner agent: A3.
+- Required inputs and dependencies: A3 §4.1, §4.2, §4.4, §4.6, the threat model (TB1 to TB11, AP-1 to AP-27, HR-1 to HR-10), ADR-0007 items 4 and 9, C-A2-2, A4's timestamp model (C4).
+- Files or modules the agent may modify: `contracts/authz/`, `contracts/audit/`, `docs/threat-model.md`, `docs/phase1/A3-*.md`.
+- Expected interfaces:
+  - **C7 `otsec.authz/0.1`:**
+    - **Roles and operations:** a role and operation matrix that separates monitoring, engineering, administration and security.
+    - **`CredentialRef`:** an opaque handle. The main process never holds a secret.
+    - **Collector IPC:** strict and allowlisted. The main process may ask the collector only to run a C3 operation ID against an enrolled asset. It can never send raw lines, change the register or read a secret.
+    - **Credential storage on Windows:** a key scoped to the collector's service SID, no machine-scope DPAPI, plus rotation and revocation.
+    - **Register package verification:** release key, anti-rollback floor, and failing closed when anything is missing, unsigned or unparseable (C-A2-2).
+  - **C8 `otsec.audit/0.1`:**
+    - records every collector request, refusal, posture warning, credential use and session;
+    - shares the C4 timestamp model;
+    - is append-only, with integrity chaining.
+- Deliverable:
+  - the two packages with schemas and tests;
+  - `docs/phase1/A3-credential-design.md`, which closes B-04 after A6's review;
+  - a security review record for each of C1, C2, C3, C4, C5 and C6 in `docs/phase1/reviews/`.
+- Acceptance tests:
+  - an IPC request with an unknown field, a raw command line or a `session-control` operation is rejected;
+  - every C2 refusal maps to an audit record;
+  - an audit chain with one record removed or altered fails verification;
+  - an unsigned or rolled-back register package is rejected.
+- Explicit exclusions: no engineering-access contracts (Phase 4), no central enrollment protocol (deferred).
+- Uncertainty or safety risks: Telnet credentials cross the station LAN in cleartext (owner-accepted for the simulated slice only). C7 must keep that label visible and must not allow the same credential on a non-slice device.
+
+### Task P1-A4: C4 event and timestamp schema; C6 Syslog forwarding profile
+- Objective and rationale: fix the event every module produces and how it leaves the node, preserving native evidence. Closes B-03 together with C5.
+- Owner agent: A4.
+- Required inputs and dependencies: `A4-event-schema-draft.md` (§2 to §5), EP-1 to EP-9, A2 §7 and §15.4 (SEL-751 SER), ADR-0004 (required vs best-effort), owner answers (any standards-compliant collector; all transports offered).
+- Files or modules the agent may modify: `contracts/event/`, `contracts/syslog/`, `docs/phase1/A4-*.md`, `tests/fixtures/network/`.
+- Expected interfaces:
+  - **C4 `otsec.event/0.1`:**
+    - event ID `(node_id, stream, seq)` and node ID format;
+    - native bytes verbatim, with native time verbatim;
+    - resolution kept separate from accuracy, offset allowed to be "unknown", and time quality scoped;
+    - asset reference (C1);
+    - snapshot alignment for SEL ring buffers, with gaps reported as health events;
+    - platform event types.
+  - **C6 `otsec.syslog/0.1`:**
+    - message format and size rules;
+    - modes A and B;
+    - transports: RELP over TLS, which is the only one allowed as `required`; RFC 5425, RFC 6587 TCP, RFC 5426 UDP and plain RELP as `best-effort`; plain TCP and UDP labelled insecure;
+    - the TB5 ack-only grammar.
+- Deliverable: the two packages with schemas, golden examples (SEL-751 SER rows from `documented-example` figures, mapped field by field) and tests.
+- Acceptance tests:
+  - every native SER example round-trips to C4 and back to identical native bytes;
+  - an event whose rendered time claims more precision than its resolution is rejected;
+  - a `required` target with any transport other than RELP over TLS is rejected;
+  - a rendered message over the size limit is split or truncated only as the profile says, never silently.
+- Explicit exclusions: no forwarder implementation, no IDS event types (Phase 4).
+- Uncertainty or safety risks: semantic mapping is per device (Q3). C4 must not imply meaning it cannot carry.
+
+### Task P1-A5: C5 local store, outbox and delivery semantics; node posture labels
+- Objective and rationale: fix how events are kept, acknowledged, recovered and pruned on a Windows site node. This is where the Windows evidence (F-012, F-013) lands. Closes B-03 together with C6.
+- Owner agent: A5.
+- Required inputs and dependencies:
+  - A5 §5 and §13;
+  - ADR-0004 (item 8 and its F-013 note) and ADR-0007;
+  - W-1 results;
+  - A6 E-02 to E-04 and F-011 to F-013;
+  - R-A5-5;
+  - the event ID from C4.
+- Files or modules the agent may modify: `contracts/store/`, `docs/phase1/A5-*.md`.
+- Expected interfaces: C5 `otsec.store/0.1`, as Go interfaces with documented semantics, covering:
+  - **Store shape:** per-module data ownership, with one writer per database.
+  - **Commit before acknowledgement:** with **group commit required**. An acknowledgement is released only after its batch's commit returns at `synchronous=FULL` (W-1: 92/s one at a time vs 676/s in batches of 100).
+  - **Outbox and cursors:** at-least-once delivery with consumer cursors, and the prune boundary taken from persisted cursors on every run (R-A5-5).
+  - **Startup recovery order:**
+    - the reserve is released before the store is first opened, and **a failed release is an error that stops startup, not a silent continue**;
+    - **no other process opens the store before recovery completes**;
+    - **what startup does when there is no reserve to release** (F-013's condition; propose and justify).
+  - **Storage-full alarms.**
+  - **Node posture labels:** "storage durability unverified" until H-11 passes for that hardware model (C-24), "OS out of support" or "OS support unknown" (V-S20), and the standing condition and migration date for an unsupported OS. Defined in `docs/phase1/A5-node-posture.md` and carried into C1 by A2.
+- Deliverable: the package with interface tests against an in-memory fake, and `docs/phase1/A5-store-semantics.md`.
+- Acceptance tests:
+  - the interface makes it impossible to release an acknowledgement before its commit returns;
+  - a prune call cannot take a boundary that is not a persisted cursor;
+  - the startup sequence is expressed so that A6 can test each step's failure, including reserve release failing and reserve absent.
+- Explicit exclusions: no SQLite implementation (Phase 2); no site-to-central protocol.
+- Uncertainty or safety risks: F-013's failure mode is shown only on a Windows Server VM with Python's SQLite. The product driver and LTSC are untested (H-14 rest, A6).
+
+### Task P1-A6: Independent contract tests, the integration chain, H-14 part 2 and hardware procedures
+- Objective and rationale: prove the contracts fit together before any implementation exists, and close what can be closed without hardware.
+- Owner agent: A6.
+- Required inputs and dependencies: every contract PR as it opens, `docs/verification.md`, the recording simulator, A6's own SEL-751 transcription, and the H-14 harness.
+- Files or modules the agent may modify: `tests/contract/` (new), `tests/integration/`, `tests/security/`, `tests/safety/`, `docs/verification.md`, `.github/workflows/a6-*.yml`.
+- Expected interfaces: none of its own. A6 consumes every contract.
+- Deliverable:
+  - **Independent contract tests:** under `tests/contract/` for each contract, with positive and negative cases built from A6's own transcription, not the owner's fixtures.
+  - **Chain test:** `tests/contract/chain_test.go`, which builds one SEL-751 `ID` plus `SER` collection end to end out of contract types only and checks the whole path with no gaps and nothing lost. The path is: C3 lookup, C7 IPC request, C2 invocation, C2 result with transcript, C1 identity check, C4 events, C5 commit and acknowledgement, C6 rendering, and C8 audit records. Run it on Linux and Windows in CI.
+  - **H-14 part 2:** fix the harness setup (WinError 32), then run the reserve-first order, `INCREMENTAL` and R-A5-5 on NTFS as a non-admin account. A1 dispatches it. Record the result as F-014.
+  - **Hardware procedures:** step-by-step, read-only procedures with stop conditions for H-01 to H-13 and the hardware half of H-14, ready for when the owner authorizes a lab relay or site machine.
+  - **Thresholds:** confirm, or ask the owning agents to confirm, every V-S threshold marked *(proposed)*.
+  - **Reviews:** review each contract per the table in `docs/architecture.md`.
+- Acceptance tests:
+  - the chain test fails if any contract changes a shared concept's shape;
+  - each contract has at least one negative test that its owner did not write;
+  - the H-14 part 2 report says whether the reserve-first order keeps a full store openable on NTFS.
+- Explicit exclusions: no product implementation, no hardware runs without the owner's authorization.
+- Uncertainty or safety risks: tests derived from the same manuals as the contracts share their errors (risk 3). Mark which tests have independent ground truth.
+
+### Phase 1 exit gate (A1 decides)
+
+- C1 to C8 merged at 0.x, each with every listed reviewer's record.
+- The chain test passes in CI on Linux and Windows.
+- B-02, B-03, B-04 and B-05 are closed, or carried with the owner's explicit agreement.
+- A3's security review is recorded for every contract, with no open safety or security objection.
+- `docs/phase-1-exit.md` gives the integration path for Phase 2: the order of components, who builds which, and the first end-to-end test.

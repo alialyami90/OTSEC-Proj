@@ -1,0 +1,39 @@
+# Project CI (A1). Runs the root Go module's vet and tests on Linux and on
+# windows/amd64, the site node's primary build (ADR-0007), and the Python
+# verification tests (ADR-0003: Python for verification tooling only).
+# Tests that need the SEL manual text are environment-gated and skip here.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  go:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^platform/experiments/'))"
+      - run: go vet ./...
+      - run: go test ./...
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
+      - run: python -m pytest -q
