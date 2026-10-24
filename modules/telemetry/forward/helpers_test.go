@@ -381,4 +381,3 @@ func (m *memStore) keys(stream store.StreamID) []string {
 	}
 	return out
 }
-
