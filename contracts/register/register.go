@@ -191,7 +191,8 @@ type PostureWarning struct {
 
 // Raised reports whether a value read from the device raises the warning. A
 // value that is not a decimal number, against a Max, raises it: a reading
-// the collector cannot interpret is reported, not passed.
+// the collector cannot interpret is reported, not passed. A setting missing
+// from the reading is passed as "" and so always raises it (C3-A3 note).
 func (w *PostureWarning) Raised(value string) bool {
 	if w.Max == nil {
 		return value != w.Equals
