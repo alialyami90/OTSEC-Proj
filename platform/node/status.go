@@ -171,3 +171,26 @@ func (s *Status) Write(node string) error {
 	}
 	return os.Rename(tmp.Name(), s.path)
 }
+
+// StatusFileName is the status file's name in the store directory, where
+// only the node's account, SYSTEM and Administrators can read it.
+const StatusFileName = "status.json"
+
+// StatusPath is where the node writes its status file.
+func StatusPath(c *Config) string { return filepath.Join(c.Store.Dir, StatusFileName) }
+
+// ReadStatus reads a status file the node wrote.
+func ReadStatus(path string) (StatusFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return StatusFile{}, err
+	}
+	var f StatusFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return StatusFile{}, fmt.Errorf("status file %s: %w", path, err)
+	}
+	if f.Schema != StatusSchema {
+		return StatusFile{}, fmt.Errorf("status file %s is %q, want %q", path, f.Schema, StatusSchema)
+	}
+	return f, nil
+}
