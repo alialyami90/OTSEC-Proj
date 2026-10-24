@@ -152,6 +152,10 @@ type ProfileRef struct {
 }
 
 // Suspension stops collection from the asset until an operator clears it.
+// It stops what the platform starts (adapter sessions), never what the device
+// sends: Syslog received from a suspended asset is still received and stored,
+// because dropping it would discard native evidence (EP-1). A listen-only
+// asset (an RTAC) has no sessions, so only reason "operator" applies to it.
 type Suspension struct {
 	Reason SuspensionReason `json:"reason"`
 	Since  string           `json:"since"` // RFC 3339 UTC. TODO(C4).

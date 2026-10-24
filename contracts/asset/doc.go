@@ -19,7 +19,8 @@
 //   - The identity binding: which attributes the collector compares, and how
 //     strong that comparison is. See "What the identity binding proves" below.
 //   - A suspension that stops collection from the asset until an operator
-//     clears it, with a reason from a closed list.
+//     clears it, with a reason from a closed list. It stops adapter
+//     sessions, never the reception of what the device sends (EP-1).
 //   - The site platform node as an asset of class "server", carrying A5's
 //     posture labels.
 //   - Capability profiles (profile.go): per family, which capabilities exist,
