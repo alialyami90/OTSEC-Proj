@@ -43,6 +43,13 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		if r.Stream != stream || r.Class != class {
 			return c5.Commit{}, invalid("record %d is %s/%s in a batch of %s/%s", i, r.Stream, r.Class, stream, class)
 		}
+		// The Log validates records too; the store does not rely on it. A
+		// capture whose bytes do not match its digest would be kept, and
+		// the digest would then hide every later correct capture (A6
+		// review of #77).
+		if err := r.Validate(); err != nil {
+			return c5.Commit{}, err
+		}
 	}
 
 	var (
@@ -249,8 +256,8 @@ func mustParse(s string) version.ID {
 
 // assignSeq writes id into a pending C4 event (C5 Record.Event): b must pass
 // C4's ValidatePending with id's node and stream and seq 0. Only the value
-// of the top-level "id" member is replaced; every other byte stays as the
-// producer wrote it. The result must pass C4's Decode, which reads strictly
+// of the top-level "id" member is replaced, and every other member's value
+// keeps the producer's bytes (replaceMember). The result must pass C4's Decode, which reads strictly
 // and validates the full event.
 func assignSeq(b []byte, id event.EventID) ([]byte, error) {
 	e, _ := event.Decode(b) // Decode validates as stored; seq 0 fails that, so check pending below
@@ -288,8 +295,10 @@ func assignSeq(b []byte, id event.EventID) ([]byte, error) {
 }
 
 // replaceMember returns the JSON object b with the value of its top-level
-// member key replaced by value. Other members keep their bytes and order.
-// b must hold exactly one object, with key once.
+// member key replaced by value. Every other member's value keeps its bytes,
+// and the members keep their order. Whitespace between members is dropped
+// and member names are re-encoded, which changes no name C4 accepts. b must
+// hold exactly one object, with key once.
 func replaceMember(b []byte, key string, value []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {

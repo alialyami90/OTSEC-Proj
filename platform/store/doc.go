@@ -18,8 +18,8 @@
 //     file, so a second connection would add SQLITE_BUSY handling and no
 //     throughput. Readers wait for at most one transaction.
 //   - The store writes the assigned seq into each C4 event's id in the
-//     commit transaction. Every other byte of the producer's JSON is kept as
-//     it was. Audit records are sealed with contracts/store.SealAudit.
+//     commit transaction. Every other member's value keeps the producer's
+//     bytes. Audit records are sealed with contracts/store.SealAudit.
 //   - Per-class quotas are counted in bytes of stored payload (event bytes,
 //     source cursors and captures), not pages, so that a class at quota is
 //     refused before the database as a whole is full. Usage, which startup

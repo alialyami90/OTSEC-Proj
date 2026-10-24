@@ -536,3 +536,23 @@ func TestSaveSourceCursor(t *testing.T) {
 		t.Fatalf("unknown stream: %v", err)
 	}
 }
+
+// CommitBatch checks capture digests itself, so a capture with the wrong
+// bytes cannot be stored and then hide the correct one (A6 review of #77).
+func TestCommitBatchRefusesBadCapture(t *testing.T) {
+	db := open1(t, storeDir(t), evidenceDB, nil)
+	good := capture("report")
+	bad := c5.Capture{SHA256: good.SHA256, Bytes: []byte("not the report")}
+	r := rec("relay1/ser", c5.ClassAdapterEvidence, 0)
+	r.Capture = &bad
+	if _, err := db.CommitBatch(bg, "relay1/ser", []c5.Record{r}); !isCode(err, c5.CodeInvalid) {
+		t.Fatalf("bad capture: %v", err)
+	}
+	r.Capture = &good
+	if _, err := db.CommitBatch(bg, "relay1/ser", []c5.Record{r}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := db.ReadCapture(bg, c5.EvidenceRef(good.SHA256)); err != nil || string(got.Bytes) != "report" {
+		t.Fatalf("stored capture: %q %v", got.Bytes, err)
+	}
+}

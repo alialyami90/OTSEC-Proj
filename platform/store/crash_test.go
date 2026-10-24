@@ -27,18 +27,34 @@ import (
 
 const crashExit = 9
 
-var crashPoints = []string{
-	"commit:begin", "commit:commit", "commit:done",
-	"cursor:begin", "cursor:commit", "cursor:done",
-	"prune:begin", "prune:commit", "prune:done",
-}
+// crashPoints are the points of every transaction of a running store, each
+// reached many times. startPoints are those of the first open, each reached
+// once: creating the database and registering its streams.
+var (
+	crashPoints = []string{
+		"commit:begin", "commit:commit", "commit:done",
+		"cursor:begin", "cursor:commit", "cursor:done",
+		"prune:begin", "prune:commit", "prune:done",
+	}
+	startPoints = []string{
+		"create:begin", "create:commit", "create:done", "create:rename",
+		"streams:begin", "streams:commit", "streams:done",
+	}
+)
 
 func TestKillAtEveryCommitPoint(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts child processes")
 	}
-	for _, point := range crashPoints {
-		for _, nth := range []int{1, 4} {
+	runs := map[string][]int{}
+	for _, p := range crashPoints {
+		runs[p] = []int{1, 4}
+	}
+	for _, p := range startPoints {
+		runs[p] = []int{1}
+	}
+	for _, point := range append(crashPoints, startPoints...) {
+		for _, nth := range runs[point] {
 			t.Run(fmt.Sprintf("%s#%d", point, nth), func(t *testing.T) {
 				dir := storeDir(t)
 				cmd := exec.Command(os.Args[0], "-test.run=^TestCrashChild$", "-test.v")
@@ -128,15 +144,14 @@ func TestCrashChild(t *testing.T) {
 	point := os.Getenv("OTSEC_CRASH_POINT")
 	nth, _ := strconv.Atoi(os.Getenv("OTSEC_CRASH_NTH"))
 	seen := 0
-	opt := Options{Dir: dir, Node: testNode, Database: evidenceDB}
-	db, _ := testStore(t, opt, policy(evidenceDB), c5.ModeCollecting)
-	db.opt.hook = func(p string) {
+	opt := Options{Dir: dir, Node: testNode, Database: evidenceDB, hook: func(p string) {
 		if p == point {
 			if seen++; seen == nth {
 				os.Exit(crashExit)
 			}
 		}
-	}
+	}}
+	db, _ := testStore(t, opt, policy(evidenceDB), c5.ModeCollecting)
 	l := testLog(t, db)
 	central := c5.Consumer{ID: "central", Stream: "relay1/ser", Delivery: c5.Required}
 	n := 0

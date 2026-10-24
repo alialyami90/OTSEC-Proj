@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync"
 
@@ -100,15 +101,68 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		return nil, err
 	}
 	if !existed {
-		// SQLite gives the -wal and -shm files the database file's mode, so
-		// creating it 0600 keeps all three owner-only on Linux (A3 C5
-		// review, section 4). An empty file is a new database.
-		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return nil, fmt.Errorf("create %s: %w", path, err)
+		if err := create(ctx, path, opt); err != nil {
+			return nil, err
 		}
-		f.Close()
 	}
+	d, err := connect(ctx, path, opt)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.load(ctx); err != nil {
+		d.Close()
+		return nil, err
+	}
+	return d, nil
+}
+
+// create builds a new database at path+".new" and renames it into place
+// once its schema has committed, so a crash during creation never leaves a
+// file at path that is not a complete store (A6 review of #77). Leftovers of
+// an earlier interrupted creation were never a store and are removed.
+func create(ctx context.Context, path string, opt Options) error {
+	tmp := path + ".new"
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if err := os.Remove(tmp + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove interrupted creation %s: %w", tmp+suffix, err)
+		}
+	}
+	// SQLite gives the -wal and -shm files the database file's mode, so
+	// creating it 0600 keeps all three owner-only on Linux (A3 C5 review,
+	// section 4). An empty file is a new database.
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
+	f.Close()
+	d, err := connect(ctx, tmp, opt)
+	if err != nil {
+		return err
+	}
+	// auto_vacuum must be set before the first table (E-A5-3 case 3), and
+	// journal_mode=WAL is persistent. Both are set only here, on a new file.
+	for _, q := range []string{"PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
+		if _, err := d.conn.ExecContext(ctx, q); err != nil {
+			d.Close()
+			return fmt.Errorf("create %s: %s: %w", tmp, q, err)
+		}
+	}
+	if err := d.create(ctx); err != nil {
+		d.Close()
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("create %s: close: %w", tmp, err)
+	}
+	d.point("create:rename")
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	return syncDir(opt.Dir)
+}
+
+// connect opens path on one connection with the per-connection settings.
+func connect(ctx context.Context, path string, opt Options) (*DB, error) {
 	sdb, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -124,33 +178,11 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 	d := &DB{opt: opt, path: path, db: sdb, conn: conn,
 		streams: map[c5.StreamID]c5.StreamClass{}, quotas: map[c5.StreamClass]c5.Quota{},
 		full: map[c5.StreamClass]bool{}, warned: map[c5.StreamClass]bool{}}
-	fail := func(err error) (*DB, error) {
-		conn.Close()
-		sdb.Close()
-		return nil, err
-	}
-	if !existed {
-		// auto_vacuum must be set before the first table (E-A5-3 case 3),
-		// and journal_mode=WAL is persistent. Both are set only here, on a
-		// new file.
-		for _, q := range []string{"PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
-			if _, err := conn.ExecContext(ctx, q); err != nil {
-				return fail(fmt.Errorf("create %s: %s: %w", path, q, err))
-			}
-		}
-	}
 	for _, q := range connPragmas {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
-			return fail(fmt.Errorf("open %s: %s: %w", path, q, err))
+			d.Close()
+			return nil, fmt.Errorf("open %s: %s: %w", path, q, err)
 		}
-	}
-	if !existed {
-		if err := d.create(ctx); err != nil {
-			return fail(err)
-		}
-	}
-	if err := d.load(ctx); err != nil {
-		return fail(err)
 	}
 	return d, nil
 }
