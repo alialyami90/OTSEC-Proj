@@ -15,7 +15,23 @@
   ],
   "propertyNames": {
     "not": {
-      "pattern": "^(?i:secret|password|passwd|pwd|passphrase|credential_value|private_key|raw_output|transcript)$"
+      "anyOf": [
+        {
+          "pattern": "^(?i:secret|password|passwd|pwd|passphrase|credential_value|private_key|raw_output)$"
+        },
+        {
+          "allOf": [
+            {
+              "pattern": "^(?i:transcript.*)$"
+            },
+            {
+              "not": {
+                "const": "transcript_sha256"
+              }
+            }
+          ]
+        }
+      ]
     }
   },
   "properties": {
@@ -234,6 +250,11 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
+    "transcript_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "D1-25: C2 transcript.sha256, the SHA-256 of the session transcript exactly as stored. Required on device.session.close and on no other action."
+    },
     "correlation_id": {
       "type": "string"
     },
@@ -313,6 +334,30 @@
               "downstream_security"
             ]
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "device.session.close"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "transcript_sha256"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "transcript_sha256"
+          ]
         }
       }
     }
