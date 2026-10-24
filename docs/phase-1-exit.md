@@ -1,6 +1,6 @@
 # Phase 1 exit report
 
-Owner: A1. Date: 2026-10-24. Status: **gate passed with conditions, pending owner sign-off.**
+Owner: A1. Date: 2026-10-24. Status: **gate passed with conditions; the owner started Phase 2 on 2026-10-24.**
 
 This report closes Phase 1 (contracts and minimal architecture). It follows the milestone format in `CLAUDE.md` §9. Phase 1 wrote contracts, not product code, and nothing was run against a device. Every result here is either `desk` (code and tests on a CI runner, the owner's PC or A1's container) or `simulated` (synthetic transcripts and A6's recording simulator). No result is `hardware-verified` (B-01).
 
@@ -189,4 +189,5 @@ Order:
 
 ## Owner sign-off
 
-*(pending)*
+- 2026-10-24 19:15Z: the owner chose "Start Phase 2 now". Phase 2 runs under the D1-24 interlock, against the simulator only.
+- Still open: owner decision 1, plaintext Syslog outside the lab.
