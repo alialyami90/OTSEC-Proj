@@ -57,13 +57,19 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **Content:** the corrected package is A2's `contracts/register/testdata/sel-751.json`, after #27 merges. `sel-751-phase0.json` stays as the lossless Phase 0 conversion record.
 - **FID count:** A6 confirmed 78 unique FIDs and withdrew the count of 84.
 
-## D1-7. A cleared SER buffer may raise ser.gap twice (2026-10-24)
+## D1-7. A read after an empty read is not a gap (2026-10-24)
 
-- **Question (A6, C4-A6 Q4):** C4 reports an empty previous read as a gap, so clearing a relay's SER buffer raises `ser.gap` twice.
-- **Decision:** accepted as specified, following A6's recommendation. Reporting a gap twice is safe, while missing one is not, and the second event carries its own evidence. C4's doc.go says a buffer clear can produce two `ser.gap` events, and consumers must not treat the second as a new loss without reading its evidence.
-- **Action:** A4 adds the sentence to C4. A6's V-S4 case expects either one or two gap events, never zero.
+- **Question (A6, C4-A6 Q4):** C4 reports a read that follows an empty read as a gap, so clearing a relay's SER buffer raises `ser.gap` twice. The first gap, the clear itself, is real. The second is not, because nothing can have been dropped from an empty read.
+- **Decision:** A6's recommendation is accepted. When the previous read is empty but not nil, `Align` returns `ok` and adds every record. C4's doc.go states the case that cannot be detected: if the buffer wraps completely between two reads, records are lost without trace, and that is true after any read, not only after an empty one.
+- **Action:** A4 changes `Align` and adds the case to `align_test.go`. A6's V-S4 case expects exactly one gap per clear.
 
 ## D1-8. An authentication line is sent in auth only (2026-10-24)
 
 - **Question (A6, C3 re-check at 6a776bc):** the format allowed a session line such as `ACC` to be listed for probe as well.
 - **Decision:** `Validate` refuses a session line that lists auth together with any other phase. The format cannot tell which line elevates a session, so a package that puts `ACC` in probe alone is caught by A2's and A3's content review and by C7's signature, not by `Validate`.
+
+## D1-9. C4 decoding is strict (2026-10-24)
+
+- **Question (A6, C4-A6 optional 6):** `encoding/json` matches keys to fields without regard to case, lets a duplicate key overwrite the first, and ignores unknown fields. A6 showed that the result of decoding an event depended on key order.
+- **Decision:** C4 gets a strict `Decode`, the same rules as C3. Stored events are evidence, so every reader must read them the same way. Checking only at the C7 IPC boundary would leave stored and forwarded copies unchecked.
+- **Action:** A4 adds `Decode` in #29. A shared helper may move into a leaf package later, but only once a third contract needs it.
