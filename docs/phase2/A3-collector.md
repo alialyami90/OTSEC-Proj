@@ -1,6 +1,6 @@
 # A3: the collector and its IPC (P2-A3)
 
-Owner: A3. Reviewers: A6, A2. Status: PR 1 (IPC) in review; later sections are added as their PRs land.
+Owner: A3. Reviewers: A6, A2. Status: PR 1 (IPC) merged in #79; its follow-up (strict names, quarantine) in review. Later sections are added as their PRs land.
 
 This note records how the collector side of C7 is built. C7 (`contracts/authz`) defines the messages; this is the implementation around them. The design it follows is [../phase1/A3-credential-design.md](../phase1/A3-credential-design.md) (W-1 to W-4, T-1 to T-12).
 
@@ -34,9 +34,9 @@ A length over the reader's limit is refused before any of the body is read.
 
 ## What the server guarantees
 
-- **Strict decoding before any decision.** A request is decoded with `authz.DecodeRequest` before the handler sees it. A field C7 does not define, at any depth, is refused with `unknown_field`. A duplicate key, trailing data or invalid UTF-8 is refused with `malformed`. An oversize frame is refused with `oversize`, and so is a run asked for by anyone but a schedule. All of these refusals go through `Handler.Refuse`, never `Handler.Handle`, so they cannot reach the run pipeline or the device. Tests: `TestFieldOutsideC7RefusedBeforeHandler`, `TestMalformedRequestsRefused`.
+- **Strict decoding before any decision.** A request is decoded with `authz.DecodeRequest` before the handler sees it. A field C7 does not define, at any depth, is refused with `unknown_field`. A duplicate key, trailing data or invalid UTF-8 is refused with `malformed`. An oversize frame is refused with `oversize` without its body being read. The server then drains at most 64 KiB, for at most 5 s, so the client can read the refusal. A run asked for by anyone but a schedule is refused with `principal_not_permitted`. All of these refusals go through `Handler.Refuse`, never `Handler.Handle`, so they cannot reach the run pipeline or the device. Tests: `TestFieldOutsideC7RefusedBeforeHandler`, `TestMalformedRequestsRefused`.
 - **Every decision is numbered.** Each reply, including a refusal of an undecodable request, carries the handler's next `collector_seq`. A connection that ends before a whole request arrives is not a decision and takes no number (`TestIncompleteRequestTakesNoNumber`).
-- **The reply comes before the run, and the run starts only after the reply is delivered.** If the reply cannot be written, the work is not started. A node that has no reply cannot record the run, so the run must not happen.
+- **The reply comes before the run, and the run starts only after the reply has been written.** "Written" means the whole frame was accepted by the socket or pipe; it does not prove the node read it. If the reply cannot be written, the work is not started. A node that has no reply cannot record the run, so the run must not happen.
 - **Handler bugs fail closed.** The server drops the connection without a reply in two cases: an accepted reply without work, and work with anything other than an accepted run that carries an invocation ID. It also drops the outcome if its invocation ID differs from the reply's (`TestHandlerContractBreachDropsConnection`, `TestOutcomeForAnotherInvocationDropped`).
 - **Logs** carry the request ID, status, refusal code and collector_seq only. They never carry a request body, a secret or a device line.
 
@@ -65,7 +65,34 @@ For an accepted run, the client checks the outcome:
 
 `Result.CheckLines`, the "no unauthorized line" oracle (C2 EP-4), runs in the collector before the outcome is sent (PR 3). It also runs on the node whenever the node sets `Client.Register` to return its own verified copy of the register package. If the node sets the hook but holds no package at the run's version, the outcome is `ErrOutcomeUnknown`. Test: `TestCheckLinesOnTheNode`.
 
-A failure, or a connection that ends before the outcome, is `ErrOutcomeUnknown`. It comes with the accepted reply, so the node still audits the decision and records the run as outcome unknown, never as succeeded. It must not treat the run as "nothing happened" either: ACC may have been sent. A retry is safe because the failed-auth floor is written before ACC (D1-20), so a retry is refused with `rate_limited` until the floor has passed.
+A connection that ends before the outcome arrives is `ErrOutcomeUnknown`. It comes with the accepted reply, so the node still audits the decision and records the run as outcome unknown, never as succeeded. It must not treat the run as "nothing happened" either: ACC may have been sent. A retry is safe because the failed-auth floor is written before ACC (D1-20), so a retry is refused with `rate_limited` until the floor has passed.
+
+### An outcome that fails a check is quarantined, never dropped
+
+If an outcome frame arrived but failed any check above, `Do` returns `ErrOutcomeUnknown` together with `ErrOutcomeQuarantined`, and the `Response` carries a `Quarantine` instead of an `Outcome`. Evidence is never silently discarded (brief section 1.4, EP-1; A6 and A1 on #79). The `Quarantine` holds:
+
+- `Raw`: the frame exactly as received;
+- `ResultJSON`: the C2 result, when the envelope decoded;
+- `Audit`: every record that passes `audit.ValidatePending` on its own, kept even when the failed check was about the records as a set (order, correlation, pairing or digest);
+- `Reason`: the check that failed.
+
+A `CheckLines` failure on the node also returns `ErrUnauthorizedLine` and sets `UnauthorizedLine`. By the node's own register, the session put a line on the wire that this run was not allowed to send. This is the safety case.
+
+What the node does with a quarantine is A5's to implement. A3's requirement is:
+
+- Store `Raw` as quarantined evidence. It is never normalized, never forwarded as events, and never treated as a result.
+- Write the session records it holds, so the transcript digest reaches the chain.
+- Record the run as outcome unknown.
+- On `UnauthorizedLine`, raise a safety alarm.
+
+`Reason` can quote the refused line, so it belongs with the evidence, not in an operational log.
+
+**Residual.** A quarantine keeps whatever the collector sent. If the collector were faulty enough to put a secret in a frame, for example in a record field that `ValidatePending` refuses, the quarantined bytes would hold it. Keeping evidence takes priority here, so the collector's own tests carry the burden: T-5 scans every byte the collector writes for the test secret (PR 2 and PR 4).
+
+Tests:
+- `TestCheckLinesOnTheNode`: a forbidden line leaves the frame, the transcript and the four session records reachable.
+- `TestBadOutcomeIsOutcomeUnknown`: every case keeps the frame.
+- `TestLostOutcomeKeepsReply`: when no frame arrives, there is no quarantine.
 
 Tests: `TestReplyBreakingC7Refused` (9 cases), `TestBadOutcomeIsOutcomeUnknown` (13 cases), `TestLostOutcomeKeepsReply`, `TestInvalidRequestNotSent`.
 
@@ -88,7 +115,8 @@ Each end checks the other's operating-system identity before it sends a byte. `E
 
 - It uses a Unix socket with `SO_PEERCRED` uid checks on both ends.
 - The socket's directory must not be writable by group or others.
-- A stale socket file is replaced. A socket that still answers is refused, so two collectors never serve one path. A path that is not a socket is refused.
+- The socket is bound under a private name, set to mode 0660, then hard-linked into place, so it never appears at its address with the umask's mode. The link fails if the address appeared in the meantime.
+- A stale socket file is replaced. A socket that still answers is refused, so two collectors never serve one path. A path that is not a socket is refused. `Close` removes the socket.
 
 Other operating systems return `ErrUnsupported`.
 
@@ -105,4 +133,4 @@ Transport tests (`collectorwire/transport_test.go`) run on both Linux and Window
 
 - **PC run of the Windows transport.** One risk to check there: a service's process token may not grant another service `TOKEN_QUERY`. If it does not, `Dial` fails closed, and the collector must grant the node's SID `TOKEN_QUERY` on its own token at startup. A5's service accounts (`platform/winsvc`) decide which case applies.
 - **Credential secrets that the register recognises (from A6's #75 re-check).** The credential store will refuse at install any secret that the register `Matcher` classifies as anything other than unlisted: an operation, a session line or a deny rule. That covers values such as `SER C` and `ACC`, because `telnet.SendSecret` deliberately bypasses the egress check. This lands with the credential store (PR 2).
-- **C7 0.2 candidate.** C7 has no `DecodeReply`, so `collectorwire.DecodeReply` applies the D1-10 strictness rules itself. A contract-level decoder would let other readers share it.
+- **C7 0.2 candidate.** C7 has no `DecodeReply`. `collectorwire.DecodeStrict` is therefore a copy of the contracts' internal strict decoder: a struct key must be exactly a field name, so `STATUS` and `ſtatus` are refused (A6's review of #79). A contract-level `DecodeReply` would let the copy go. Until then the two must be kept in step.

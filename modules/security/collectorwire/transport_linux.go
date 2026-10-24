@@ -48,22 +48,45 @@ func Listen(ep Endpoint) (net.Listener, error) {
 			return nil, fmt.Errorf("collectorwire: remove stale socket: %w", err)
 		}
 	}
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: ep.Address, Net: "unix"})
+	// Bind under a private name, set the mode, then link it into place, so
+	// the socket never appears at its address with the umask's mode (A6
+	// review of #79). The peer check is the gate; the mode keeps others from
+	// even connecting when the node runs in the collector's group.
+	tmp := fmt.Sprintf("%s.%d.tmp", ep.Address, os.Getpid())
+	os.Remove(tmp)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: tmp, Net: "unix"})
 	if err != nil {
 		return nil, err
 	}
-	// The peer check is the gate; the mode keeps others from even
-	// connecting when the node runs in the collector's group.
-	if err := os.Chmod(ep.Address, 0o660); err != nil {
+	ln.SetUnlinkOnClose(false)
+	if err := os.Chmod(tmp, 0o660); err != nil {
+		ln.Close()
+		os.Remove(tmp)
+		return nil, err
+	}
+	// A hard link, not a rename: it fails if the address appeared in the
+	// meantime, so two collectors starting together cannot replace each
+	// other's socket.
+	err = os.Link(tmp, ep.Address)
+	os.Remove(tmp)
+	if err != nil {
 		ln.Close()
 		return nil, err
 	}
-	return &unixListener{UnixListener: ln, peer: uid}, nil
+	return &unixListener{UnixListener: ln, peer: uid, path: ep.Address}, nil
 }
 
 type unixListener struct {
 	*net.UnixListener
 	peer uint32
+	path string
+}
+
+// Close stops listening and removes the socket file.
+func (l *unixListener) Close() error {
+	err := l.UnixListener.Close()
+	os.Remove(l.path)
+	return err
 }
 
 func (l *unixListener) Accept() (net.Conn, error) {
