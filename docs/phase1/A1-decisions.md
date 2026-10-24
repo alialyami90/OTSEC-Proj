@@ -222,3 +222,14 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - The C4 golden examples carry `simulated`, because they are built from documented fixtures.
 - **Reviewers:** A6 (P10 and the chain test) and A2 (as the C2 producer). A4 makes the change in a new PR and adds `evc` to C6 there too.
 - **Why now:** Phase 2's first workflow runs only against the simulator. Every event it forwards must say so.
+
+## D1-24. A C1 endpoint says whether a simulator is behind it (2026-10-24)
+
+- **Question (A6, on #59):** D1-23 and C2 `Result.target` say the evidence class is set "from the endpoint's configuration", but the C1 `Endpoint` has no such setting. Nothing supplies the label, so a collector would have to guess it.
+- **Decision:** an additive C1 0.1 change, made by A2 after C2 (#51) merges.
+  - `Endpoint.target` is required, with the values `device-observed` or `simulated`. It is set by an admin when the endpoint is configured, never from what the far end reports. A missing or unknown value fails validation; it is never defaulted to `device-observed`.
+  - C2: the collector copies it into `Result.target`. A check that takes the C1 asset (as `CheckAgainst` does) refuses a result whose `target` differs from its endpoint's.
+  - C4 and C6 (D1-23): received Syslog takes the evidence class from the endpoint the message arrived on, by the same rule.
+  - Safety interlock for Phase 2: until the owner authorizes a lab device, the node refuses to run any invocation against an endpoint whose `target` is `device-observed`. Phase 2 configures it as node policy; it is not a contract field.
+- **Reviewers:** A6 (P10, the chain test), A3 (the label is a security claim), A4 (the C4 consumer).
+- **Why now:** Phase 2 forwards events. Every one must carry a label that comes from configuration, not from a default.
