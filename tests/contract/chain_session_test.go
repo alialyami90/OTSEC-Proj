@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -357,6 +358,14 @@ func chainC4(t *testing.T) {
 		if !e.Source.Simulated() {
 			t.Errorf("event %d does not say it is simulated", i)
 		}
+		// D1-25: native.fields are named as the device prints its columns.
+		var names []string
+		for _, f := range e.Native.Fields {
+			names = append(names, f.Name)
+		}
+		if !slices.Equal(names, gtSERColumns) {
+			t.Errorf("event %d: native.fields %q, Figure 10.16 heading %q", i, names, gtSERColumns)
+		}
 	}
 }
 
@@ -585,11 +594,35 @@ func chainC8(t *testing.T) {
 		// C8 time is C4's Received type.
 		var _ event.Received = rec.Time
 	}
+	// D1-25: the session close carries the digest of the stored
+	// transcript. A6 hashes the transcript bytes itself, not the C2 field.
+	stx := sha256.Sum256(r.res.Transcript.Data)
+	closes := 0
+	for i, rec := range recs {
+		if rec.Action != audit.ActionDeviceSessionClose {
+			if rec.TranscriptSHA256 != "" {
+				t.Errorf("record %d (%s) carries transcript_sha256", i, rec.Action)
+			}
+			continue
+		}
+		closes++
+		if rec.TranscriptSHA256 != hex.EncodeToString(stx[:]) {
+			t.Errorf("session close transcript_sha256 %s, A6 hash of the stored transcript %x", rec.TranscriptSHA256, stx)
+		}
+		// The chain covers the digest: a changed digest breaks it.
+		forged := append([][]byte(nil), stored...)
+		forged[i] = []byte(strings.Replace(string(stored[i]), rec.TranscriptSHA256, strings.Repeat("0", 64), 1))
+		if audit.VerifyChain(chainNode, forged, nil, head) == nil {
+			t.Error("a session close with a replaced transcript_sha256 still verifies")
+		}
+	}
+	if closes != 1 {
+		t.Errorf("%d session-close records, want 1", closes)
+	}
 	if inInvocation != 4 {
 		t.Errorf("%d records correlate with invocation %s, want 4 (open, credential, op, close)", inInvocation, chainInvocation)
 	}
 	if err := audit.VerifyCollectorSeq(recs, 0, 5); err != nil {
 		t.Errorf("collector seq: %v", err)
 	}
-	_ = r
 }
