@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.asset/0.1#capability-profile",
+  "title": "otsec.asset/0.1 capability profile (C1)",
+  "description": "Structural schema only. Cross-field rules (operations only with mechanism adapter-operation, mechanism none only with status unsupported or unknown, a citation for every status but unknown, a firmware allowlist for any profile that sends adapter operations) are enforced by CapabilityProfile.Validate in contracts/asset.",
+  "type": "object",
+  "required": ["schema", "kind", "profile_id", "version", "vendor", "product_family", "device_class", "firmware", "capabilities"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^otsec\\.asset/0\\.(0|[1-9][0-9]{0,3})$"},
+    "kind": {"const": "capability-profile"},
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "version": {"type": "string", "minLength": 1},
+    "vendor": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "product_family": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+    "device_class": {"$ref": "#/$defs/deviceClass"},
+    "firmware": {
+      "type": "object", "required": ["allowlist"],
+      "properties": {"allowlist": {"type": "string", "description": "A firmware allowlist in the register package (TODO(C3)), or \"none\"."}}
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["capability", "mechanism", "status"],
+        "properties": {
+          "capability": {"$ref": "#/$defs/capabilityName"},
+          "mechanism": {"$ref": "#/$defs/mechanism"},
+          "operations": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$"}},
+          "status": {"$ref": "#/$defs/capabilityStatus"},
+          "citation": {"type": "string"},
+          "notes": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "capabilityName": {"enum": ["identification", "event-retrieval", "event-push", "configuration-retrieval", "health", "time-quality"]},
+    "mechanism": {"enum": ["adapter-operation", "syslog-receive", "passive", "operator-entry", "none"]},
+    "deviceClass": {"enum": ["protective-relay", "ied-other", "rtu", "automation-controller", "communications-processor", "ethernet-switch", "router", "security-gateway", "firewall", "time-server", "server", "engineering-workstation", "hmi", "historian", "meter", "port-server", "unknown"]},
+    "capabilityStatus": {"enum": ["hardware-verified", "documented-untested", "simulated", "inferred-owner-accepted", "unsupported", "unknown"]}
+  }
+}

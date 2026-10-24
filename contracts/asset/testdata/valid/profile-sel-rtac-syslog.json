@@ -1,0 +1,26 @@
+{
+  "schema": "otsec.asset/0.1",
+  "kind": "capability-profile",
+  "profile_id": "sel-rtac-syslog",
+  "version": "0.1",
+  "vendor": "sel",
+  "product_family": "sel-rtac",
+  "device_class": "automation-controller",
+  "firmware": {
+    "allowlist": "none"
+  },
+  "capabilities": [
+    {
+      "capability": "event-push",
+      "mechanism": "syslog-receive",
+      "status": "documented-untested",
+      "citation": "A2-sel-portfolio.md section 3 (RTAC Syslog, RFC 3164, facility 23)"
+    },
+    {
+      "capability": "identification",
+      "mechanism": "operator-entry",
+      "status": "documented-untested",
+      "citation": "No device-side identification without a credential; operator records only"
+    }
+  ]
+}
