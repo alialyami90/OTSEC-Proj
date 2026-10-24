@@ -2,12 +2,16 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/authz"
@@ -25,8 +29,11 @@ const StateFormat = "otsec.collector-state/0.1"
 var ErrStateUnavailable = errors.New("collector: durable state unavailable")
 
 // State is the collector's durable state (A3 credential design, section 3;
-// D1-20 as amended): the collector_seq counter, and per asset the time of the
-// last unconfirmed authentication and the TIDLE last read from it.
+// D1-20 as amended): the collector_seq counter; per asset the time of the
+// last unconfirmed authentication, the TIDLE last read from it and the time
+// of the last run that connected to it; per register family the
+// anti-rollback floor (C3-A3-4); and the times of recent credential installs
+// (the install budget).
 //
 // Every change is written to disk, flushed and renamed into place before the
 // method returns, so a caller that has a nil error knows the change survives
@@ -47,9 +54,17 @@ type State struct {
 }
 
 type stateDoc struct {
-	Format       string                `json:"format"`
-	CollectorSeq uint64                `json:"collector_seq"` // the last number handed out; 0 before the first
-	Assets       map[string]assetState `json:"assets"`
+	Format       string                 `json:"format"`
+	CollectorSeq uint64                 `json:"collector_seq"` // the last number handed out; 0 before the first
+	Assets       map[string]assetState  `json:"assets"`
+	Families     map[string]familyFloor `json:"families,omitempty"`
+	Installs     []string               `json:"installs,omitempty"` // RFC 3339 UTC times of recent installs, oldest first
+}
+
+// familyFloor is authz.FamilyFloor as stored.
+type familyFloor struct {
+	Revision      uint64 `json:"revision"`
+	PayloadSHA256 string `json:"payload_sha256"` // lowercase hex
 }
 
 type assetState struct {
@@ -58,6 +73,9 @@ type assetState struct {
 	UnconfirmedAuthUTC string `json:"unconfirmed_auth_utc,omitempty"`
 	// TIDLESeconds is the port TIDLE last read from the asset; 0 is unknown.
 	TIDLESeconds int `json:"tidle_seconds,omitempty"`
+	// LastRunUTC is when the last accepted run to the asset began, for the
+	// profile's minimum interval.
+	LastRunUTC string `json:"last_run_utc,omitempty"`
 }
 
 // MaxStateBytes bounds the state file. One asset entry is about 100 bytes,
@@ -118,17 +136,37 @@ func OpenState(path string, now func() time.Time) (*State, error) {
 	if doc.Format != StateFormat || doc.Assets == nil {
 		return nil, fmt.Errorf("%w: %s: format %q", ErrStateUnavailable, path, doc.Format)
 	}
+	if err := checkStateDoc(doc); err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrStateUnavailable, path, err)
+	}
+	return &State{path: path, now: now, doc: doc}, nil
+}
+
+func checkStateDoc(doc stateDoc) error {
 	for id, a := range doc.Assets {
-		if a.UnconfirmedAuthUTC != "" {
-			if _, err := time.Parse(time.RFC3339Nano, a.UnconfirmedAuthUTC); err != nil {
-				return nil, fmt.Errorf("%w: %s: asset %s: %v", ErrStateUnavailable, path, id, err)
+		for _, ts := range []string{a.UnconfirmedAuthUTC, a.LastRunUTC} {
+			if ts == "" {
+				continue
+			}
+			if _, err := time.Parse(time.RFC3339Nano, ts); err != nil {
+				return fmt.Errorf("asset %s: %v", id, err)
 			}
 		}
 		if a.TIDLESeconds < 0 {
-			return nil, fmt.Errorf("%w: %s: asset %s: negative TIDLE", ErrStateUnavailable, path, id)
+			return fmt.Errorf("asset %s: negative TIDLE", id)
 		}
 	}
-	return &State{path: path, now: now, doc: doc}, nil
+	for fam, f := range doc.Families {
+		if b, err := hex.DecodeString(f.PayloadSHA256); err != nil || len(b) != sha256.Size || f.PayloadSHA256 != strings.ToLower(f.PayloadSHA256) {
+			return fmt.Errorf("family %s: payload_sha256 is not a lowercase SHA-256", fam)
+		}
+	}
+	for _, ts := range doc.Installs {
+		if _, err := time.Parse(time.RFC3339Nano, ts); err != nil {
+			return fmt.Errorf("installs: %v", err)
+		}
+	}
+	return nil
 }
 
 // NextSeq hands out the next collector_seq number, written durably first. A
@@ -204,6 +242,94 @@ func (s *State) SetTIDLE(asset string, tidle time.Duration) error {
 	})
 }
 
+// CheckInterval refuses with rate_limited a run that starts sooner than min
+// after the last accepted run to asset (the profile's min_interval_ms, C2
+// Limits). A last run later than the clock counts as too recent.
+func (s *State) CheckInterval(asset string, min time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	last := s.doc.Assets[asset].LastRunUTC
+	if last == "" {
+		return nil
+	}
+	t, _ := time.Parse(time.RFC3339Nano, last) // checked on open and on write
+	if now := s.now(); t.After(now) || now.Sub(t) < min {
+		return &authz.Refusal{Code: authz.RefuseRateLimited, Detail: fmt.Sprintf("minimum interval of %s since the run at %s", min, last)}
+	}
+	return nil
+}
+
+// BeginRun records, durably, that a run to asset starts now.
+func (s *State) BeginRun(asset string) error {
+	return s.update(asset, func(a *assetState) {
+		a.LastRunUTC = s.now().UTC().Format(time.RFC3339Nano)
+	})
+}
+
+// TakeInstall spends one install from the budget: at most limit installs in
+// any window. It refuses with rate_limited when the budget is spent, and
+// records the install durably otherwise. An install time later than the
+// clock stays in the window. The budget keeps a node service that has been
+// compromised from using installs to test guesses of stored secrets
+// (docs/phase2/A3-collector.md, reuse rule).
+func (s *State) TakeInstall(limit int, window time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	now := s.now()
+	var kept []string
+	for _, ts := range s.doc.Installs {
+		t, _ := time.Parse(time.RFC3339Nano, ts) // checked on open and on write
+		if t.After(now) || now.Sub(t) < window {
+			kept = append(kept, ts)
+		}
+	}
+	if len(kept) >= limit {
+		return &authz.Refusal{Code: authz.RefuseRateLimited, Detail: fmt.Sprintf("install budget of %d per %s is spent", limit, window)}
+	}
+	next := s.doc
+	next.Installs = append(kept, now.UTC().Format(time.RFC3339Nano))
+	return s.write(next)
+}
+
+// FamilyFloors returns the persisted anti-rollback floor of every register
+// family, for authz.VerifyRegisterPackage.
+func (s *State) FamilyFloors() map[string]authz.FamilyFloor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]authz.FamilyFloor, len(s.doc.Families))
+	for fam, f := range s.doc.Families {
+		var ff authz.FamilyFloor
+		ff.Revision = f.Revision
+		hex.Decode(ff.PayloadSHA256[:], []byte(f.PayloadSHA256)) // checked on open and on write
+		out[fam] = ff
+	}
+	return out
+}
+
+// SetFamilyFloor persists a family's floor. The collector calls it after a
+// package verifies and before it activates the package, and does not
+// activate it if this fails (C7).
+func (s *State) SetFamilyFloor(family string, f authz.FamilyFloor) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	next := s.doc
+	next.Families = make(map[string]familyFloor, len(s.doc.Families)+1)
+	for k, v := range s.doc.Families {
+		next.Families[k] = v
+	}
+	next.Families[family] = familyFloor{Revision: f.Revision, PayloadSHA256: hex.EncodeToString(f.PayloadSHA256[:])}
+	return s.write(next)
+}
+
 func (s *State) update(asset string, f func(*assetState)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,7 +354,11 @@ func (s *State) update(asset string, f func(*assetState)) error {
 // write replaces the file with next and, only on success, adopts it. Any
 // failure breaks the state.
 func (s *State) write(next stateDoc) error {
-	b, err := marshalState(next)
+	err := checkStateDoc(next)
+	var b []byte
+	if err == nil {
+		b, err = marshalState(next)
+	}
 	if err == nil && len(b) > MaxStateBytes {
 		err = fmt.Errorf("state would be %d bytes, limit %d", len(b), MaxStateBytes)
 	}
@@ -303,6 +433,8 @@ type FloorGate struct {
 	// safe side (the floor stays set), but the state is now broken and the
 	// operator needs to know. Nil drops it.
 	Alarm func(error)
+
+	confirmed atomic.Bool
 }
 
 // NewFloorGate returns the gate for one run on asset.
@@ -320,7 +452,12 @@ func (g *FloorGate) BeforeACC(ctx context.Context) error {
 
 // Confirmed clears the floor after "=>" followed ACC.
 func (g *FloorGate) Confirmed(ctx context.Context) {
+	g.confirmed.Store(true)
 	if err := g.state.ConfirmAuth(g.asset); err != nil && g.Alarm != nil {
 		g.Alarm(err)
 	}
 }
+
+// LoginConfirmed reports whether Confirmed was called in this run: the
+// session reached Level 1, so the relay keeps that level until QUI or TIDLE.
+func (g *FloorGate) LoginConfirmed() bool { return g.confirmed.Load() }

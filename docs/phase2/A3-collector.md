@@ -1,6 +1,6 @@
 # A3: the collector and its IPC (P2-A3)
 
-Owner: A3. Reviewers: A6, A2. Status: PR 1 (IPC) merged in #79; its follow-up (strict names, quarantine) in #82. PR 2 adds the durable collector state and the credential store. Later sections are added as their PRs land.
+Owner: A3. Reviewers: A6, A2. Status: PR 1 (IPC) merged in #79; its follow-up (strict names, quarantine) in #82. PR 2 adds the durable collector state and the credential store; PR 3 adds the run pipeline. Later sections are added as their PRs land.
 
 This note records how the collector side of C7 is built. C7 (`contracts/authz`) defines the messages; this is the implementation around them. The design it follows is [../phase1/A3-credential-design.md](../phase1/A3-credential-design.md) (W-1 to W-4, T-1 to T-12).
 
@@ -9,7 +9,7 @@ This note records how the collector side of C7 is built. C7 (`contracts/authz`) 
 | Package | What it holds | Who imports it |
 | --- | --- | --- |
 | `modules/security/collectorwire` | Framing, strict decoding, the run outcome, the two transports and their peer checks, `ServiceSID`. No credential code, no device transport. | `collector`, `collectorclient` |
-| `modules/security/collector` | The IPC server, the durable collector state, the credential store; later the run pipeline. Hosts the SEL-751 adapter. | `cmd/otsec-collector` only |
+| `modules/security/collector` | The IPC server, the durable collector state, the credential store, verified register packages and the run pipeline. Hosts the SEL-751 adapter. | `cmd/otsec-collector` only |
 | `modules/security/seal` | Sealing a secret to a collector's install key (`Seal`, which refuses without a pinned fingerprint) and opening it (`Open`). No store, no transport. | `collector`; the admin's sealing client |
 | `modules/security/collectorclient` | The node's side: send one request, check the reply and the outcome. | `cmd/otsec`, `platform/node` |
 
@@ -221,11 +221,75 @@ Tests (`credstore_test.go`, `seal_test.go`):
 
 Fuzz targets: `FuzzOpenCredStore` and `seal.FuzzOpen`.
 
+## Run pipeline (PR 3)
+
+`collector.Pipeline` is the server's `Handler`. Each decision is numbered first, so every reply has a `collector_seq`, including a refusal whose own state write then fails. If the number itself cannot be written durably, the reply is `collector_state_unavailable` with no number. The policy version is checked next, for every kind of request (`policy_version`).
+
+### Run checks, in order
+
+Nothing before the accepted reply opens a connection.
+
+1. **The principal is a schedule.** A person, whatever their role, never causes device I/O directly; `authz.DecodeRequest` already refuses it, and the pipeline refuses it again (`principal_not_permitted`). That is how a monitor principal is kept from causing a run.
+2. **The asset is enrolled on this node** (`asset_not_enrolled`). Enrolled assets and their profiles come from the collector's own configuration; `NewPipeline` refuses an asset that fails C1 validation, is on another node, does not match its profile, or appears twice.
+3. **D2-4.** No endpoint of the asset is labelled `device-observed`, and the run's endpoint is labelled `simulated`.
+4. **D2-10.** Every outbound endpoint (Telnet, SSH) of the asset has as its host an IPv4 literal in 127.0.0.0/8 or the literal `::1`. Host names, `localhost` included, zones and IPv4-mapped forms are refused, and nothing is resolved. A5's node loader applies the same rule with the same result.
+   Both locks refuse with `asset_not_enrolled` and name the decision in the detail, because C7 0.1 has no closer code. C7 0.1 runs name no endpoint, so an asset with more than one outbound endpoint is refused with `invalid` rather than guessed at.
+5. **The register.** The family's package is active, which means its signature verified in this collector (`Registers.Activate`, below), and the run names its revision (`register_unverified`, `register_version`).
+6. **The operation** (`RunBody.ValidateAgainst`): known, read-only, in the operate phase, with parameters that render, and a credential exactly when its level is above 0.
+7. **The invocation.** The collector builds the C2 invocation itself. It takes the endpoint, profile, expected identity (the binding attributes' declared values) and limits from its configuration, and the minimum interval from the profile. It then runs C2's `ValidateWith` and `CheckAgainst`, so an asset that is suspended, a binding that compares nothing, or a credential C1 does not allow is refused before any secret is decrypted. C2 codes map to C7 codes, with the C2 code kept in the detail.
+8. **The failed-auth floor, then the profile's minimum interval** (`rate_limited`). Both are durable. The floor applies to every run, level 0 included, because a session landing on a pending `Password: ?` would send its first line as a password.
+9. **One session per device** (`busy`).
+10. **The credential.** `CredStore.Acquire` decrypts the secret only here, after every other check.
+11. **The run's start is recorded durably** (for the interval). Only then is the reply sent.
+
+### After the reply
+
+The accepted run's work calls the `Runner`, with a deadline of the invocation's deadline plus 10 s. The SEL-751 runner wraps A2's `sel751.Run` and follows when it lands. The `RunPlan` carries:
+
+- the invocation, asset, profile, endpoint and register;
+- the credential and `SecretHandle`;
+- the asset's `FloorGate`;
+- a dialer that connects only to the endpoint's own host and port over TCP and checks D2-10 again;
+- the reply's number and `NextSeq` for the events the run reports.
+
+When the runner returns, the pipeline:
+
+- records the `TIDLE` the session read;
+- suspends the credential for the fault the session found;
+- **sets the floor again when the login was confirmed (`=>`) and the report does not say QUI was sent.** The relay may keep Level 1 until `TIDLE` expires, so no new session may land on it. A zero report counts as "QUI not sent";
+- runs `Validate`, `CheckLines` and `CheckAgainst` on the result. A `CheckLines` failure is a `SAFETY` alarm. The outcome is still sent, because the node quarantines it and evidence is never dropped;
+- wipes the secret and frees the device, whatever happened, including when the runner panics. A panic is an alarm, and the node receives an outcome with no result, which it records as outcome unknown.
+
+### Credential requests
+
+Install, revoke and clear are refused unless a person asked (`principal_not_permitted`). An install first spends one from the **install budget**: 10 per hour per node by default, durable in the state file, and refused with `rate_limited`. The budget is spent before any check, so a request a later check refuses still counts. This bounds guessing through the reuse rule (see Open items).
+
+### Register packages
+
+`Registers.Activate` takes a signed envelope and runs `authz.VerifyRegisterPackage` against the collector's own trust anchors and the per-family floors in the state file. It persists the new floor before activating the package. On any failure, the previous package stays active. The trust anchors are fixed at start, so a change to them restarts the collector, which then verifies every package again.
+
+Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.1, its profile, the C3 register signed in the test, and result-ok.json):
+
+- an accepted level 1 run: the secret reaches the runner, no alarm, then the handle is wiped, the device freed and the floor cleared;
+- a level 0 run carries no secret;
+- a person or service principal cannot run;
+- 20 refusals, each before the runner, each numbered, none leaving the device busy;
+- the locks without C1 validation;
+- T-9: after a failed authentication the next request is `rate_limited`, and after the floor the suspended credential is `credential_unusable`;
+- an exit without QUI sets a floor of `TIDLE` plus one minute;
+- a zero report is cautious;
+- a runner panic;
+- the SAFETY alarm when the result's lines are not the operation's;
+- credential requests and the install budget;
+- the dialer reaches only its endpoint;
+- register activation: unknown key, wrong key, tampered payload, revoked key, and rollback after a restart are all refused.
+
 ## Open items
 
 - **PC run of the Windows transport.** One risk to check there: a service's process token may not grant another service `TOKEN_QUERY`. If it does not, `Dial` fails closed, and the collector must grant the node's SID `TOKEN_QUERY` on its own token at startup. A5's service accounts (`platform/winsvc`) decide which case applies.
-- **The install path is a guessing oracle for a compromised node service (A3 finding, for A1 and A6).** The node service holds the install key's public half, so it can seal any guess. It installs the guess under a new reference whose plaintext scope differs from the target's. The reply is `secret_rejected` for the reuse rule exactly when the guess equals a stored secret, and nothing is destroyed. SEL default passwords are well known, so a short list could confirm that a site still uses one. The secret still cannot leave through the collector, but the node service could carry it to another host on the station LAN. Every attempt is a collector-numbered decision, so a node that hides them leaves `collector_seq` gaps. In Phase 2 every device credential is lab-only Telnet, so no target of another scope exists yet. Proposed fix for PR 3: a durable install budget in the collector state, for example 10 installs per hour per node, refused with `rate_limited`. The shared count must then not go into the reply either, because it would be the same oracle within one scope.
+- **The install path is a guessing oracle for a compromised node service (A3 finding, for A1 and A6).** The node service holds the install key's public half, so it can seal any guess. It installs the guess under a new reference whose plaintext scope differs from the target's. The reply is `secret_rejected` for the reuse rule exactly when the guess equals a stored secret, and nothing is destroyed. SEL default passwords are well known, so a short list could confirm that a site still uses one. The secret still cannot leave through the collector, but the node service could carry it to another host on the station LAN. Every attempt is a collector-numbered decision, so a node that hides them leaves `collector_seq` gaps. In Phase 2 every device credential is lab-only Telnet, so no target of another scope exists yet. PR 3 adds a durable install budget (10 per hour per node by default, `rate_limited`). It bounds the rate, but it does not remove the oracle: a few known default passwords fit in one hour. The shared count must not go into the reply either, because it would be the same oracle within one scope. A1 and A6 may want a stronger rule, for example refusing the cross-scope case without saying why, which loses the admin's explanation.
 - **The shared-secret count has no field in the C7 reply.** `InstallResult.SharedWith` exists, but `CollectorReply` cannot carry it. Given the oracle above, it belongs in a collector-reported C8 install record, not in the reply. That is a C7 or C8 0.2 candidate.
 - **The sealing parameters** (HKDF salt and info) are fixed by `modules/security/seal`, not by C7. They are a C7 0.2 candidate, so that a browser client using WebCrypto can be checked against the contract.
 - **A revoked secret can remain on disk.** Revocation removes the ciphertext from the store file, but the blocks of an earlier file may survive on the disk until they are reused. Recovering them needs the store key, so only the collector's account, SYSTEM or an administrator could read them, and design section 10 already lists those as able to read every secret.
+- **C7 0.2 candidates from the pipeline:** `endpoint_id` in `RunBody`, so an asset with two outbound endpoints can be collected; and refusal codes for the Phase 2 locks and for a suspended asset, which use `asset_not_enrolled` today.
 - **C7 0.2 candidate.** C7 has no `DecodeReply`. `collectorwire.DecodeStrict` is therefore a copy of the contracts' internal strict decoder: a struct key must be exactly a field name, so `STATUS` and `ſtatus` are refused (A6's review of #79). A contract-level `DecodeReply` would let the copy go. Until then the two must be kept in step.
