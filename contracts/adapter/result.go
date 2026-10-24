@@ -28,8 +28,9 @@ type Result struct {
 	// with refused.register_unverified.
 	RegisterVersion uint64 `json:"register_version"`
 	// Target says whether the far end was a device or a simulator. It is
-	// set from the endpoint's configuration, never from what the far end
-	// says, and fixes the C1 evidence class of every observation below.
+	// copied from the C1 endpoint's target (D1-24, CheckAgainst), never
+	// taken from what the far end says, and fixes the C1 evidence class of
+	// every observation below.
 	Target    asset.EvidenceClass `json:"target"` // device-observed or simulated
 	Status    Status              `json:"status"`
 	Error     *Error              `json:"error,omitempty"`
@@ -314,6 +315,27 @@ func DecodeResult(b []byte) (Result, error) {
 		}
 	}
 	return r, r.Validate()
+}
+
+// CheckAgainst checks the result against the invocation it answers and the
+// C1 asset it ran on: the same invocation and operation, an endpoint of that
+// asset, and a target equal to the endpoint's (D1-24). The collector copies
+// the endpoint's target into the result; a result that claims another far end
+// is refused, so a simulator session can never be reported as a device read.
+func (r Result) CheckAgainst(inv Invocation, a asset.Asset) error {
+	if r.InvocationID != inv.InvocationID || r.OperationID != inv.OperationID || inv.AssetID != a.AssetID {
+		return fmt.Errorf("adapter: result: not the result of invocation %s on asset %s", inv.InvocationID, a.AssetID)
+	}
+	for _, ep := range a.Endpoints {
+		if ep.ID != inv.EndpointID {
+			continue
+		}
+		if r.Target != ep.Target {
+			return fmt.Errorf("adapter: result: target %q, but endpoint %s is %q (D1-24)", r.Target, ep.ID, ep.Target)
+		}
+		return nil
+	}
+	return fmt.Errorf("adapter: result: endpoint %q is not an endpoint of asset %s", inv.EndpointID, a.AssetID)
 }
 
 // Validate checks every rule that can be checked from the result alone.

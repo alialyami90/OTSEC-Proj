@@ -184,9 +184,10 @@ func (c Code) Suspends() asset.SuspensionReason { return codes[c.Effective()].su
 // password, a wrong level after a password, and an identity mismatch after
 // authentication (C1-A3-5).
 //
-// A timeout or a closed connection after the password, before any level
-// prompt, suspends nothing. The relay may still be in "Password: ?" or may
-// have counted a failure (H-15, H-04). The C7 failed-auth floor covers it: the
-// floor starts when the password is sent and clears only when "=>" is
-// confirmed (D1-20), so the next session waits it out (A6 C2 review change 8).
+// A timeout or a closed connection after ACC or the password, before any
+// level prompt, suspends nothing. The relay may still be in "Password: ?" or
+// may have counted a failure (H-15, H-04). The C7 failed-auth floor covers it:
+// the floor starts when ACC is sent and clears only when "=>" is received
+// (D1-20 as amended), so the next session waits it out (A6 C2 review changes 8
+// and 14).
 func (c Code) SuspendsCredential() asset.SuspensionReason { return codes[c.Effective()].credential }

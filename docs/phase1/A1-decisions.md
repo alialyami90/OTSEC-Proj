@@ -234,3 +234,17 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - Safety interlock for Phase 2: until the owner authorizes a lab device, the node refuses to run any invocation against an endpoint whose `target` is `device-observed`. Phase 2 configures it as node policy; it is not a contract field.
 - **Reviewers:** A6 (P10, the chain test), A3 (the label is a security claim), A4 (the C4 consumer).
 - **Why now:** Phase 2 forwards events. Every one must carry a label that comes from configuration, not from a default.
+- **Amendment (2026-10-24, A4 on #65): received Syslog from an unknown sender.** An `asset-unresolved` event has no C1 endpoint. Labelling it `device-observed` claims what nobody configured, and labelling it `simulated` lets a SIEM filter on `evc` hide the traffic analysts most need to see.
+  - **Decision:** accepted as A4 proposes. Each node Syslog listener carries its own admin-set `target` (`device-observed` or `simulated`), defined with the listener configuration (R4.1). An unresolved event takes the listener's target.
+  - **A resolved event** is `device-observed` only when both its endpoint and the listener say `device-observed`. Otherwise it is `simulated`, the weaker claim. So a lab listener can never forward anything as `device-observed`.
+  - **Owner:** A4 writes the rule into C4 `doc.go`, and A5 carries the listener field into the Phase 2 node configuration. Reviewers: A6 and A2.
+
+## D1-25. Two C2 faults found by the chain test (2026-10-24)
+
+- **Source:** A6's chain work (#66, `docs/phase1/A6-chain.md`), with A2's diagnosis.
+- **1. The transcript digest is not in the audit chain.** C2 `doc.go` says the C8 `device.*` record carries `transcript.sha256`. C8 0.1 has no such field, and its forbidden-key check rejects a key named `transcript`. Today C8 carries only `correlation_id` (the invocation ID) and `bytes_sent_digest` (sent bytes only), so a stored transcript cannot be checked against the audit chain. That defeats A3 change 10 and EP-style evidence preservation.
+  - **Decision:** C8 gains a `transcript_sha256` field, additive in 0.1. It goes on the record written when a device session ends (audit before act covers the start; the digest is known only at the end). It is the SHA-256 of the C2 transcript exactly as stored. The forbidden-key rule is narrowed so that this digest is allowed and transcript content still is not.
+  - **Owner:** A3 (C8). A2 corrects C2 `doc.go` to cite the new field. Reviewers: A2 and A6. The chain test then checks the digest end to end.
+- **2. SER field names.** C2 `RecordFields` names `sel.ser.row` fields `row`, `date`, `time`, `element`, `state`. C4 `native.fields` keeps names as the device printed them, and A4's examples use `#`, `DATE`, `TIME`, `ELEMENT`, `STATE` (S22 Figure 10.16 header line).
+  - **Decision:** accepted as A2 proposes. C2 uses the printed header names, so the producer copies fields and never maps them. A2 regenerates the C2 examples. Reviewers: A4 and A6.
+- Both changes go in A2's follow-up PR after #65, except the C8 field, which A3 makes in its own PR. Both block the Phase 1 exit gate, because the chain test must pass with them.
