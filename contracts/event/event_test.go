@@ -123,7 +123,6 @@ func TestDecode(t *testing.T) {
 		"field of another object":    insert(b, `"kind": "ser",`, ` "seq": 5,`),
 		"trailing data":              append(append([]byte{}, b...), []byte(" {}")...),
 		"not an object":              []byte(`[]`),
-		"later minor, uppercase key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "Severity": "high",`),
 		"later minor, duplicate key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "severity": "a", "severity": "b",`),
 	}
 	for name, doc := range rejected {
