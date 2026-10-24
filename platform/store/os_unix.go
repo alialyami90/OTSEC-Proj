@@ -5,6 +5,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync"
 	"syscall"
@@ -29,17 +30,43 @@ func lockFile(path string) (func(), error) {
 	return func() { once.Do(func() { f.Close() }) }, nil
 }
 
-// checkDir refuses a store directory that group or others can use.
+// checkDir refuses a store directory that group or others can use, and a
+// symbolic link, so the checked mode is the one on the directory the files
+// are written to (A3 #84 note 4).
 func checkDir(dir string) error {
-	st, err := os.Stat(dir)
+	st, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("store directory: %w", err)
+	}
+	if st.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("store directory %s is a symbolic link; it must be the directory itself", dir)
 	}
 	if !st.IsDir() {
 		return fmt.Errorf("store directory %s is not a directory", dir)
 	}
 	if perm := st.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf("store directory %s has mode %04o; group and others must have no access (0700)", dir, perm)
+	}
+	return nil
+}
+
+// checkFile refuses a database file (the database, its -wal or its -shm)
+// that is not a plain file or that group or others can use (A3 #84 note
+// 3). A file that does not exist passes: SQLite creates it with the
+// database file's mode.
+func checkFile(path string) error {
+	st, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("store file: %w", err)
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("store file %s is not a plain file", path)
+	}
+	if perm := st.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("store file %s has mode %04o; group and others must have no access (0600)", path, perm)
 	}
 	return nil
 }

@@ -9,9 +9,11 @@
 //     user who pre-created a folder would own it and could rewrite its DACL;
 //   - copies the node configuration into OTSEC\config and loads it, so a
 //     configuration the node would refuse is refused at install;
-//   - when the collector binary is given, writes the collector's first-start
-//     marker if neither collector store exists, and installs otsec-collector
-//     with "run -data %ProgramData%\OTSEC" (A3);
+//   - when the collector binary is given, copies the collector's
+//     configuration into OTSEC\collector, owned by Administrators and
+//     readable by the collector service only, writes the collector's
+//     first-start marker if neither collector store exists, and installs
+//     otsec-collector with "run -data %ProgramData%\OTSEC" (A3);
 //   - installs otsec-node (and otsec-collector when its binary is given) as
 //     virtual service accounts NT SERVICE\<name>, with an unrestricted
 //     service SID, so the store and pipe DACLs and the peer checks can name
@@ -122,6 +124,18 @@ func CollectorStores(programData string) []string {
 		filepath.Join(programData, "OTSEC", "collector", "credentials", "credentials.json"),
 	}
 }
+
+// CollectorConfigPath is where the installer puts the collector's
+// configuration (A3). It inherits the collector directory's DACL: SYSTEM
+// and Administrators full control, the collector service read, and nothing
+// for the node service.
+func CollectorConfigPath(programData string) string {
+	return filepath.Join(programData, "OTSEC", "collector", "collector.json")
+}
+
+// MaxCollectorConfigBytes bounds the collector configuration the installer
+// copies.
+const MaxCollectorConfigBytes = 4 << 20
 
 // StoreDir is the store directory the node configuration must name.
 func StoreDir(programData string) string { return filepath.Join(programData, "OTSEC", "store") }

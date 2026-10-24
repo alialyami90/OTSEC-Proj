@@ -51,12 +51,14 @@ Linux container, Go 1.26. Commits are listed in each PR.
 | No room: nothing is sent, and one alarm is raised | `TestNoQuarantineRoomSendsNothing`. Mutating the room check fails it |
 | Quarantine refused: the node stops | `TestQuarantineNotStoredStopsTheNode` |
 | Tick and runs share the runtime | `TestTickAlongsideRuns` under `-race` |
+| A store directory that is a link, and a database file that is a link or that others can read, are refused (A3 #84 notes 3 and 4) | `TestFileModes`. Mutating the file check fails it |
 | The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |
 
 **Windows run owed (D2-8)**, for A6's list:
 - `./platform/...` and `./cmd/...`;
 - the installer and service, with A3's T-13 (W-1 to W-4);
-- `TestDirDACLChecked`.
+- `TestDirDACLChecked`, which also covers a junction and SDDL in the account (A3 #84 notes 1 and 4);
+- `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service.
 
 None of the Windows-only code has run.
 

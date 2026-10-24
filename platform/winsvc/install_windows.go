@@ -3,6 +3,7 @@
 package winsvc
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 
+	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/node"
 )
 
@@ -28,6 +30,10 @@ type InstallOptions struct {
 	// Config is the node configuration to install. It is copied to
 	// ConfigPath and must name StoreDir as store.dir.
 	Config string
+	// CollectorConfig is A3's collector configuration, copied to
+	// CollectorConfigPath. It is required with CollectorExe and refused
+	// without it.
+	CollectorConfig string
 }
 
 // Install creates the directory tree, installs the configuration and the
@@ -38,6 +44,9 @@ func Install(opt InstallOptions) error {
 	pd, pf := os.Getenv("ProgramData"), os.Getenv("ProgramFiles")
 	if pd == "" || pf == "" {
 		return errors.New("winsvc: ProgramData or ProgramFiles is not set")
+	}
+	if (opt.CollectorExe == "") != (opt.CollectorConfig == "") {
+		return errors.New("winsvc: the collector binary and the collector configuration are given together or not at all")
 	}
 	for _, exe := range []string{opt.NodeExe, opt.CollectorExe} {
 		if exe != "" && !under(exe, pf) {
@@ -61,6 +70,9 @@ func Install(opt InstallOptions) error {
 		return err
 	}
 	if opt.CollectorExe != "" {
+		if err := installCollectorConfig(opt.CollectorConfig, pd); err != nil {
+			return err
+		}
 		if err := provision(pd); err != nil {
 			return err
 		}
@@ -219,6 +231,99 @@ func installConfig(src, pd string) error {
 	}
 	_, err = node.LoadConfig(dst)
 	return err
+}
+
+// installCollectorConfig copies the collector's configuration into the
+// collector directory, sets its owner to Administrators, and reads its
+// descriptor back. The file inherits the directory's DACL, so the collector
+// service may read it and the node service has no entry. It is not parsed
+// here: the format is A3's, and the collector refuses a file it cannot
+// read.
+func installCollectorConfig(src, pd string) error {
+	st, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() || st.Size() > MaxCollectorConfigBytes {
+		return fmt.Errorf("winsvc: %s is not a file of at most %d bytes", src, MaxCollectorConfigBytes)
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if !json.Valid(b) {
+		return fmt.Errorf("winsvc: %s is not JSON", src)
+	}
+	dst := CollectorConfigPath(pd)
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("winsvc: %s exists; uninstall and remove it first", dst)
+	}
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		os.Remove(dst)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return err
+	}
+	if err := windows.SetNamedSecurityInfo(dst, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, admins, nil, nil, nil); err != nil {
+		os.Remove(dst)
+		return fmt.Errorf("winsvc: owner of %s: %w", dst, err)
+	}
+	if err := checkCollectorConfig(dst); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	return nil
+}
+
+// checkCollectorConfig refuses the installed collector configuration
+// unless it is owned by Administrators and its DACL grants SYSTEM and
+// Administrators, the collector service read access, and nobody else.
+func checkCollectorConfig(path string) error {
+	got, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("winsvc: read the DACL of %s: %w", path, err)
+	}
+	fail := func(why string) error {
+		return fmt.Errorf("winsvc: %s has %s; the installer stops (A3). Found %s", path, why, got.String())
+	}
+	owner, _, err := got.Owner()
+	if err != nil || owner == nil || !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+		return fail("another owner")
+	}
+	as, err := aces(got)
+	if err != nil {
+		return fail(err.Error())
+	}
+	coll := collectorwire.ServiceSID(CollectorService)
+	seen := map[string]bool{}
+	for _, a := range as {
+		switch a.sid {
+		case "S-1-5-18", "S-1-5-32-544":
+		case coll:
+			if a.mask != 0x1200a9 {
+				return fail(fmt.Sprintf("access %#x for the collector, want read (0x1200a9)", a.mask))
+			}
+		default:
+			return fail("an entry for " + a.sid)
+		}
+		seen[a.sid] = true
+	}
+	if !seen[coll] {
+		return fail("no entry for the collector")
+	}
+	return nil
 }
 
 // provision writes the collector's first-start marker when neither of its

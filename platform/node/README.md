@@ -38,7 +38,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | --- | --- | --- |
 | `schema` | `"otsec.nodeconfig/0.1"` | exact match |
 | `node_id` | This node | lowercase DNS label (`contracts/node`) |
-| `store.dir` | Store directory | absolute path. The store also checks the directory itself: mode 0700 on Linux, and the installer's DACL on Windows |
+| `store.dir` | Store directory | absolute path. The store also checks the directory itself: mode 0700 on Linux, and the installer's DACL on Windows. A link or a junction there is refused, and so is a database file that is a link or whose own mode or DACL is wider |
 | `store.quotas` | Bytes per C5 class, keyed by class name (`adapter-evidence`, `syslog-stream`, `syslog-datagram`, `platform`, `audit`) | each positive. Every class the layout needs must have one |
 | `store.warn_fraction` | Fraction of a quota that raises `store-quota-warning` | in (0, 1) |
 | `listeners[]` | Syslog listeners: `id`, `transport` (`syslog-udp`, `syslog-tcp` or `syslog-tls`), `address` (`ip:port`) and `target` | unique ids; `simulated` only (D2-4); a loopback address (D2-10). Phase 2 starts no listener |

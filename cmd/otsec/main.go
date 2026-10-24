@@ -4,8 +4,8 @@
 //	otsec assets -config <file>   list the configured assets
 //	otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
 //	otsec health -config <file>   show node status, database modes and alarms
-//	otsec install -config <file> [-collector-exe <path>]   Windows, elevated
-//	otsec uninstall                                         Windows, elevated
+//	otsec install -config <file> [-collector-exe <path> -collector-config <file>]   Windows, elevated
+//	otsec uninstall                                                                 Windows, elevated
 //
 // assets, events and health are read-only: they open the store read-only
 // beside a running node (store.OpenReadOnly) and never write to it, to the
@@ -47,7 +47,7 @@ const usage = `usage:
   otsec assets -config <file>
   otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
   otsec health -config <file>
-  otsec install -config <file> [-collector-exe <path>]
+  otsec install -config <file> [-collector-exe <path> -collector-config <file>]
   otsec uninstall
 `
 
@@ -64,6 +64,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	limit := fs.Int("limit", 50, "events: at most this many events")
 	asJSON := fs.Bool("json", false, "events: print the stored C4 events as JSON lines")
 	collectorExe := fs.String("collector-exe", "", "install: the collector binary; empty installs the node service only")
+	collectorConfig := fs.String("collector-config", "", "install: the collector's configuration, required with -collector-exe")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -87,7 +88,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if xerr != nil {
 			return report(stderr, xerr)
 		}
-		err = winsvc.Install(winsvc.InstallOptions{NodeExe: exe, CollectorExe: *collectorExe, Config: *configPath})
+		err = winsvc.Install(winsvc.InstallOptions{NodeExe: exe, CollectorExe: *collectorExe, Config: *configPath, CollectorConfig: *collectorConfig})
 	case "assets":
 		err = assets(cfg, stdout)
 	case "events":

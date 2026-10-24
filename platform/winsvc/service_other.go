@@ -13,7 +13,7 @@ var ErrUnsupported = errors.New("winsvc: Windows only")
 
 // InstallOptions are the installer's inputs (Windows only).
 type InstallOptions struct {
-	NodeExe, CollectorExe, Config string
+	NodeExe, CollectorExe, Config, CollectorConfig string
 }
 
 func IsService() (bool, error)                                      { return false, nil }

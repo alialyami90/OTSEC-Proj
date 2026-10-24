@@ -98,6 +98,9 @@ var connPragmas = []string{
 }
 
 func open(ctx context.Context, path string, opt Options) (*DB, error) {
+	if err := checkFiles(path); err != nil {
+		return nil, err
+	}
 	existed, err := exists(path)
 	if err != nil {
 		return nil, err
@@ -116,6 +119,18 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// checkFiles applies checkFile to the database and its -wal and -shm, so a
+// file whose own mode or DACL was widened after the directory was checked
+// is refused before SQLite opens it.
+func checkFiles(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := checkFile(path + suffix); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // create builds a new database at path+".new" and renames it into place

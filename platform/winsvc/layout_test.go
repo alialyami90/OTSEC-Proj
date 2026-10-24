@@ -1,6 +1,7 @@
 package winsvc
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,4 +44,23 @@ func TestDirs(t *testing.T) {
 	if node == coll || !strings.HasPrefix(node, "S-1-5-80-") {
 		t.Fatalf("service SIDs %s %s", node, coll)
 	}
+}
+
+// The collector configuration sits in OTSEC\collector, so it inherits a
+// DACL that names the collector service and not the node service (A3).
+func TestCollectorConfigPath(t *testing.T) {
+	node := collectorwire.ServiceSID(NodeService)
+	coll := collectorwire.ServiceSID(CollectorService)
+	pd := `C:\ProgramData`
+	parent := filepath.Dir(CollectorConfigPath(pd))
+	for _, d := range Dirs(pd) {
+		if d.Path != parent {
+			continue
+		}
+		if !strings.Contains(d.SDDL, "(A;OICI;0x1200a9;;;"+coll+")") || strings.Contains(d.SDDL, node) {
+			t.Fatalf("collector directory %s", d.SDDL)
+		}
+		return
+	}
+	t.Fatalf("no directory %s", parent)
 }
