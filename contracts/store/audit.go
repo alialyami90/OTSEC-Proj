@@ -1,9 +1,6 @@
 package store
 
-import (
-	"context"
-	"crypto/sha256"
-)
+import "context"
 
 // Audit records (class audit) are C8 records, not C4 events. A node has one
 // audit stream, and its records form one hash chain: each record carries its
@@ -12,26 +9,30 @@ import (
 // predecessor, so the store seals records inside the commit transaction and
 // never re-encodes them afterwards (A3 review of C5, C5-A3-1).
 
-// ChainLink is one position of the audit chain: a seq and the SHA-256 of the
-// exact bytes stored at it. Seq 0 with the chain's genesis hash is the
-// position before the first record.
-// TODO(C8): becomes audit.Checkpoint.
+// ChainLink is one position of the audit chain: a seq and the chain hash of
+// the exact bytes stored at it, as C8's Hash gives it (lowercase hex
+// SHA-256). Seq 0 with the chain's genesis hash is the position before the
+// first record. TODO(C8): with the node ID added it is an audit.Checkpoint,
+// which is what audit.VerifyChain takes as from and head.
 type ChainLink struct {
 	Seq  Seq
-	Hash [32]byte
+	Hash string
 }
 
-// AuditChain is the part of C8 the store calls.
-// TODO(C8): an adapter over audit.ValidatePending, audit.Seal and
-// audit.GenesisPrevHash once C8 merges.
+// AuditChain is the part of C8 (PR #38) the store calls. TODO(C8): once C8
+// merges, an adapter over audit.ValidatePending, audit.Seal, audit.Hash and
+// audit.GenesisPrevHash. C8's Seal requires seq 1 to be the
+// audit.chain.start record.
 type AuditChain interface {
 	// ValidatePending checks a pending record, which has no seq and no
-	// previous hash yet.
+	// prev_hash yet.
 	ValidatePending(pending []byte) error
 	// Seal returns the record's final bytes with seq and prevHash in them.
-	Seal(pending []byte, seq Seq, prevHash [32]byte) ([]byte, error)
-	// Genesis is the previous hash of a node's first record.
-	Genesis() [32]byte
+	Seal(pending []byte, seq Seq, prevHash string) ([]byte, error)
+	// Hash is the chain hash of stored bytes.
+	Hash(stored []byte) string
+	// Genesis is the prev_hash of a node's first record.
+	Genesis() string
 }
 
 // SealAudit seals a batch of pending audit records after head, the link of
@@ -58,7 +59,7 @@ func SealAudit(chain AuditChain, head ChainLink, recs []Record) ([][]byte, Chain
 			return nil, head, errf(CodeInvalid, err, "sealing audit record %d", i)
 		}
 		sealed[i] = b
-		head = ChainLink{Seq: head.Seq + 1, Hash: sha256.Sum256(b)}
+		head = ChainLink{Seq: head.Seq + 1, Hash: chain.Hash(b)}
 	}
 	return sealed, head, nil
 }

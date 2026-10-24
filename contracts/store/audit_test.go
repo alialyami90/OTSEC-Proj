@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,21 +23,26 @@ func (testChain) ValidatePending(p []byte) error {
 	return nil
 }
 
-func (testChain) Seal(p []byte, seq Seq, prev [32]byte) ([]byte, error) {
-	return fmt.Appendf(nil, "%d|%x|%s", seq, prev, p), nil
+func (testChain) Seal(p []byte, seq Seq, prev string) ([]byte, error) {
+	return fmt.Appendf(nil, "%d|%s|%s", seq, prev, p), nil
 }
 
-func (testChain) Genesis() [32]byte { return sha256.Sum256([]byte("genesis")) }
+func (testChain) Hash(stored []byte) string {
+	sum := sha256.Sum256(stored)
+	return hex.EncodeToString(sum[:])
+}
+
+func (testChain) Genesis() string { return strings.Repeat("0", 64) }
 
 // verifyChain checks that retained records follow from anchor link by link.
 func verifyChain(retained []Stored, anchor ChainLink) error {
 	at := anchor
 	for _, r := range retained {
-		want := fmt.Sprintf("%d|%x|", at.Seq+1, at.Hash)
+		want := fmt.Sprintf("%d|%s|", at.Seq+1, at.Hash)
 		if r.Key.Seq != at.Seq+1 || !bytes.HasPrefix(r.Event, []byte(want)) {
 			return fmt.Errorf("seq %d: %q does not follow %d", r.Key.Seq, r.Event, at.Seq)
 		}
-		at = ChainLink{Seq: r.Key.Seq, Hash: sha256.Sum256(r.Event)}
+		at = ChainLink{Seq: r.Key.Seq, Hash: testChain{}.Hash(r.Event)}
 	}
 	return nil
 }
@@ -85,7 +92,7 @@ func TestAuditSealedInCommit(t *testing.T) {
 	if err := verifyChain(got, ChainLink{Hash: testChain{}.Genesis()}); err != nil {
 		t.Fatal(err)
 	}
-	if f.heads["audit"] != (ChainLink{Seq: 4, Hash: sha256.Sum256(got[3].Event)}) {
+	if f.heads["audit"] != (ChainLink{Seq: 4, Hash: testChain{}.Hash(got[3].Event)}) {
 		t.Fatalf("head %+v", f.heads["audit"])
 	}
 }

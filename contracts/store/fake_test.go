@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -293,7 +292,7 @@ func (f *fake) PruneStep(_ context.Context, b Boundary, max int) (int, error) {
 	}
 	for _, e := range ev[:n] {
 		if e.Class == ClassAudit {
-			f.anchors[b.Stream()] = ChainLink{Seq: e.Key.Seq, Hash: sha256.Sum256(e.Event)}
+			f.anchors[b.Stream()] = ChainLink{Seq: e.Key.Seq, Hash: f.chain.Hash(e.Event)}
 		}
 	}
 	f.events[b.Stream()] = ev[n:]

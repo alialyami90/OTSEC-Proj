@@ -19,7 +19,7 @@ Evidence classes: every number below is `simulated` (Linux container, Windows Se
 - **A bad pending record** refuses its whole batch with `invalid`, and nothing is written (`TestAuditBadPendingRefusesBatch`).
 - **Pruning keeps a chain anchor.** The prune step that deletes audit records also writes the `ChainLink` of the last record it deleted, in the same transaction. `Outbox.ChainAnchor` exposes it read-only, so the retained chain always verifies from it, even after a prune that was interrupted and resumed (`TestAuditPruneKeepsAnchor`).
 - **Only required consumers make audit prunable.** A best-effort replay window would delete audit records with no confirmed delivery (AP-17), so `ComputeBoundary` ignores best-effort consumers for class audit. A node whose audit stream has no required consumer keeps audit until its quota is reached, and then fails closed (`TestAuditBoundaryIgnoresBestEffort`).
-- `AuditChain` and `ChainLink` mirror C8 (`TODO(C8)`). They become adapters over `audit.ValidatePending`, `audit.Seal`, `audit.GenesisPrevHash` and `audit.Checkpoint` when C8 merges, and the tests then verify with `audit.VerifyChain`.
+- `AuditChain` and `ChainLink` mirror C8 as it stands in PR #38 (`TODO(C8)`): `Seal(pending, seq, prevHash)` with `prevHash` as lowercase hex, `Hash` over the exact sealed bytes, and `GenesisPrevHash` for seq 1, which must be the `audit.chain.start` record. When C8 merges they become an adapter over those functions, a `ChainLink` plus the node ID is an `audit.Checkpoint`, and the tests verify with `audit.VerifyChain`.
 
 ## 2. Commit before acknowledgement, with group commit
 
