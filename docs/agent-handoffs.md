@@ -487,3 +487,37 @@ The owner accepted Phase 0 and authorized Phase 1 on 2026-10-24 at 11:16Z ("Cont
 - B-02, B-03, B-04 and B-05 are closed, or carried with the owner's explicit agreement.
 - A3's security review is recorded for every contract, with no open safety or security objection.
 - `docs/phase-1-exit.md` gives the integration path for Phase 2: the order of components, who builds which, and the first end-to-end test.
+
+## Phase 1 handoffs (2026-10-24)
+
+Each agent's full handoff is linked below; these entries are the summary A1 accepted. Every item is `desk` or `simulated`; nothing ran against a device.
+
+### Handoff P1-A2 — A2 — 2026-10-24
+Full text: `docs/phase1/A2-contracts.md`, `docs/phase1/A2-q5-rtac.md`.
+**Completed:** C1 `otsec.asset/0.1` (#32, endpoint `target` #65), C2 `otsec.adapter/0.1` (#51, D1-25 follow-up), C3 SEL-751 register content rev 2 (#32), Q5 RTAC paper exercise (passes, D1-21).
+**Reviewers and outcome:** C1 accepted by A3, A4, A6; C2 accepted by A1, A3, A4, A6 after two rounds (dialogue rules checked against the bytes).
+**Open:** C3 content change naming `SHO G` as the read for `DATE_F`; capture-dependent assumptions H-12, H-13, H-15.
+
+### Handoff P1-A3 — A3 — 2026-10-24
+Full text: `docs/phase1/A3-credential-design.md` and the A3 review records in `docs/phase1/reviews/`.
+**Completed:** C7 `otsec.authz/0.1` and C8 `otsec.audit/0.1` (#38; D1-20 amendment wording and `transcript_sha256`, #64); security review of C1 to C6; credential design closing B-04 as a design.
+**Reviewers and outcome:** C7 accepted by A2, A5, A6; C8 accepted by A4, A6.
+**Open:** Windows credential mechanisms T-1 to T-5 on the site image (H-14); pinned-key enrollment before any SSH family.
+
+### Handoff P1-A4 — A4 — 2026-10-24
+Full text: `docs/phase1/A4-handoff-phase1.md`, `docs/phase1/A4-contracts.md`.
+**Completed:** C4 `otsec.event/0.1` (#29, #42, `evidence_class` #59, D1-24 amendment rule #63) and C6 `otsec.syslog/0.1` (#42, `evc` #59, `RenderAudit`/`ParseAudit` #63).
+**Reviewers and outcome:** C4 accepted by A2, A3, A5, A6; C6 accepted by A1, A2, A3, A5, A6.
+**Open:** render `evc` through `Source.Simulated()` (A1 note on #59); PEN 32473 replacement before production.
+
+### Handoff P1-A5 — A5 — 2026-10-24
+Full text: `docs/phase1/A5-handoff-phase1.md`, `docs/phase1/A5-store-semantics.md`, `docs/phase1/A5-node-posture.md`.
+**Completed:** C5 `otsec.store/0.1` (#33): ownership, group commit, outbox and cursors, audit sealing, startup recovery order, storage-full actions; node posture labels.
+**Reviewers and outcome:** accepted by A3, A4, A6.
+**Open:** `OpenHeadroomBytes` untested against F-013; listener `target` and the `device-observed` interlock go into the Phase 2 node configuration (D1-24 and its amendment).
+
+### Handoff P1-A6 — A6 — 2026-10-24
+Full text: `tests/contract/README.md`, `docs/phase1/A6-chain.md`, and the A6 review records in `docs/phase1/reviews/`.
+**Completed:** independent contract tests for C1 to C8; C2 probes as contract tests; the chain test across all nine links on Linux and Windows (run 40115458123; final run in `docs/phase-1-exit.md`); H-14 third run (F-014); hardware procedures prepared, not run.
+**Findings that changed contracts:** C2 dialogue rules (round 1), C1 endpoint `target` (D1-24), the floor starting at `ACC` (D1-20 amendment), the C2 faults in D1-25.
+**Open:** H-14 remaining cases; every H-item awaits the owner's authorization of a lab device.
