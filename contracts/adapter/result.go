@@ -256,14 +256,16 @@ type Record struct {
 }
 
 // RecordFields names the fields of each record kind 0.1 defines, in order.
-// Values are verbatim device text. For sel.ser.row (S22 Figure 10.16): row
-// is the relay's row number, and row 1 is the newest; date is in the
-// relay's DATE_F order (S22 p. 7.31) and time is as printed; element and
-// state are the Relay Word bit and its printed state. A parsed record of
-// one of these kinds carries exactly these fields. Kinds not listed are a
+// Names are the column headings as the device prints them, so C4
+// native.fields copies them unchanged (D1-25), and values are verbatim
+// device text. For sel.ser.row (S22 Figure 10.16): # is the relay's row
+// number, and row 1 is the newest; DATE is in the relay's DATE_F order
+// (S22 p. 7.31) and TIME is as printed; ELEMENT and STATE are the Relay
+// Word bit and its printed state. A parsed record of one of these kinds
+// carries exactly these fields, case included. Kinds not listed are a
 // later minor's.
 var RecordFields = map[string][]string{
-	"sel.ser.row": {"row", "date", "time", "element", "state"},
+	"sel.ser.row": {"#", "DATE", "TIME", "ELEMENT", "STATE"},
 }
 
 // Field is one native field, verbatim.
@@ -322,6 +324,10 @@ func DecodeResult(b []byte) (Result, error) {
 // asset, and a target equal to the endpoint's (D1-24). The collector copies
 // the endpoint's target into the result; a result that claims another far end
 // is refused, so a simulator session can never be reported as a device read.
+// Both the collector, before it replies, and the main process, before
+// anything reaches C1 or C4, run it with Validate and CheckLines: the main
+// process labels the evidence, so it does not rely on the collector's check
+// (A3 D1-24 review T-2).
 func (r Result) CheckAgainst(inv Invocation, a asset.Asset) error {
 	if r.InvocationID != inv.InvocationID || r.OperationID != inv.OperationID || inv.AssetID != a.AssetID {
 		return fmt.Errorf("adapter: result: not the result of invocation %s on asset %s", inv.InvocationID, a.AssetID)
