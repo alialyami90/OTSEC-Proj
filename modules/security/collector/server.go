@@ -74,6 +74,12 @@ var ErrServerClosed = errors.New("collector: server closed")
 // avoids that on both transports.
 const lingerTimeout = 5 * time.Second
 
+// lingerMaxBytes bounds what linger drains. A client that sent an oversize
+// frame may still be writing its body; draining it lets the client read the
+// refusal instead of meeting a reset, and the bound stops a client from
+// holding the connection by writing forever.
+const lingerMaxBytes = 64 << 10
+
 // Serve accepts connections until Close. A peer that fails the transport's
 // identity check is logged and skipped.
 func (s *Server) Serve(ln net.Listener) error {
@@ -193,7 +199,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 		err = collectorwire.WriteFrame(c, out, collectorwire.MaxReplyBytes)
 	}
 	if err != nil {
-		s.log().Warn("collector: reply not delivered", "request_id", reply.RequestID, "collector_seq", reply.CollectorSeq, "err", err)
+		s.log().Warn("collector: reply not written", "request_id", reply.RequestID, "collector_seq", reply.CollectorSeq, "err", err)
 		// The run was accepted and numbered but the node did not get the
 		// reply; it must not start, since the node cannot record it.
 		return
@@ -224,16 +230,18 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 	}
 	c.SetDeadline(time.Now().Add(ot))
 	if err := collectorwire.WriteFrame(c, ob, collectorwire.MaxOutcomeBytes); err != nil {
-		s.log().Warn("collector: outcome not delivered", "request_id", reply.RequestID, "invocation_id", reply.InvocationID, "err", err)
+		s.log().Warn("collector: outcome not written", "request_id", reply.RequestID, "invocation_id", reply.InvocationID, "err", err)
 		return
 	}
 	linger(c)
 }
 
-// linger waits for the client to close after the server's last frame.
+// linger waits for the client to close after the server's last frame,
+// discarding at most lingerMaxBytes of anything it still sends, for at most
+// lingerTimeout.
 func linger(c net.Conn) {
 	c.SetReadDeadline(time.Now().Add(lingerTimeout))
-	io.Copy(io.Discard, io.LimitReader(c, 1))
+	io.Copy(io.Discard, io.LimitReader(c, lingerMaxBytes))
 }
 
 func refusalCode(r authz.CollectorReply) string {

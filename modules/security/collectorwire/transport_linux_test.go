@@ -59,3 +59,21 @@ func TestListenRefusesNonSocket(t *testing.T) {
 		t.Fatal("replaced a regular file")
 	}
 }
+
+// The socket appears at its address already with mode 0660, and Close
+// removes it.
+func TestListenSocketModeAndCleanup(t *testing.T) {
+	addr := testAddress(t)
+	ln, err := Listen(Endpoint{Address: addr, Peer: strconv.Itoa(os.Getuid())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(addr)
+	if err != nil || fi.Mode().Perm() != 0o660 {
+		t.Fatalf("socket mode %v, %v", fi.Mode(), err)
+	}
+	ln.Close()
+	if _, err := os.Lstat(addr); !os.IsNotExist(err) {
+		t.Fatalf("socket left after Close: %v", err)
+	}
+}
