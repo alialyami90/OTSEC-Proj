@@ -2,7 +2,7 @@
 
 Owner: A1. Date: 2026-10-24. Status: **gate passed with conditions, pending owner sign-off.**
 
-This report closes Phase 1 (contracts and minimal architecture). It follows the milestone format in `CLAUDE.md` §9. Phase 1 wrote contracts, not product code, and nothing was run against a device. Every result here is either `desk` (code and tests on a CI runner) or `simulated` (synthetic transcripts and A6's recording simulator). No result is `hardware-verified` (B-01).
+This report closes Phase 1 (contracts and minimal architecture). It follows the milestone format in `CLAUDE.md` §9. Phase 1 wrote contracts, not product code, and nothing was run against a device. Every result here is either `desk` (code and tests on a CI runner, the owner's PC or A1's container) or `simulated` (synthetic transcripts and A6's recording simulator). No result is `hardware-verified` (B-01).
 
 ## Milestone
 
@@ -28,7 +28,7 @@ This report closes Phase 1 (contracts and minimal architecture). It follows the 
 | — | `contracts/version`, `contracts/node`, `contracts/internal/strictjson` | | A1 | #26, #29, #27 | A6 (via contract tests) |
 
 - Review records are in `docs/phase1/reviews/<contract>-<reviewer>.md`.
-- Decisions D1-1 to D1-25 are in `docs/phase1/A1-decisions.md`.
+- Decisions D1-1 to D1-26 are in `docs/phase1/A1-decisions.md`.
 - Contract status is in `contracts/README.md`.
 
 Supporting design, all merged:
@@ -77,23 +77,24 @@ The probes are committed as contract tests.
 - The chain test found two C2 faults, which were fixed under D1-25:
   - the transcript digest was not in the audit chain;
   - SER field names differed from C4's.
-- Final run from `main`, with the end-to-end transcript-digest check and `CheckAgainst`: *(run ID)*.
+- Final run from `main`, with the end-to-end transcript-digest check and `CheckAgainst`: *(Windows result on the owner's PC, commit; Linux result in A1's container, commit)*.
 
 ### A1 integration checks
 
 - Before each merge, A1 ran `go vet`, `gofmt` and `go test ./...` on the merge with `main`.
 - For C3 and C6, A1 also probed the code directly, for example with 13 hostile RELP responses against `ParseRELPResponse`.
 
-### CI
+### Where tests ran
 
-CI runs Go on Linux and Windows, plus pytest, on every PR.
+- CI (`.github/workflows/ci.yml`) runs Go on Linux and Windows, plus pytest, on every PR.
+- From 17:42Z on 2026-10-24, GitHub stopped starting jobs in this repository (an account billing hold). From then on, under D1-26, the same steps ran on the owner's Windows PC (A6) and in A1's Linux container. Those results are posted on each PR with the commit and the place they ran, and are labelled local, not CI.
 
 ## Exit-gate items
 
 | Gate item (P1 briefs) | State |
 | --- | --- |
 | C1 to C8 merged at 0.x, each with every listed reviewer's record | Met. Reviewer table above. |
-| Chain test passes in CI on Linux and Windows | Met (run IDs above). |
+| Chain test passes on Linux and Windows | Met. CI runs before 17:42Z, then local runs under D1-26 (above). |
 | B-02, B-03, B-04, B-05 closed, or carried with the owner's agreement | **B-02** is closed for the SEL-751 slice from documented evidence; H-09 confirms levels on hardware. **B-03** is closed as a contract. **B-04** is closed as a design. **B-05** is closed for the slice as a stated limit: the binding is device-reported and spoofable, the FID is checked before the credential, and `CredentialAllowed` gates it. |
 | A3's security review recorded for every contract, with no open safety or security objection | Met. A3 reviewed C1 to C6. C7 and C8 are A3's own and were reviewed by A6 for security. No objection is open. |
 | Integration path for Phase 2 | Below. |
@@ -130,7 +131,7 @@ CI runs Go on Linux and Windows, plus pytest, on every PR.
 
 ## Architectural decisions
 
-D1-1 to D1-25 are in `docs/phase1/A1-decisions.md`. These shape Phase 2 most:
+D1-1 to D1-26 are in `docs/phase1/A1-decisions.md`. These shape Phase 2 most:
 
 - **D1-10:** one strict decoder for every contract.
 - **D1-11:** audit comes before the act. A full audit store stops credentialed collection, and Syslog continues.
@@ -141,6 +142,7 @@ D1-1 to D1-25 are in `docs/phase1/A1-decisions.md`. These shape Phase 2 most:
 - **D1-22:** insecure forwarding needs an acknowledgement and sends no device content by default.
 - **D1-23, D1-24:** every device event says whether its source was a real device or a simulator. The label comes from configuration (the endpoint and listener `target`), never from a default and never from the far end.
 - **D1-25:** the C8 session-close record carries the C2 transcript digest, so stored evidence can be checked against the audit chain.
+- **D1-26:** tests run on the owner's PC first, and GitHub Actions is the fallback. Each result names where it ran and the commit.
 
 ## Open risks
 
