@@ -209,3 +209,5 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - The two insecure golden renderings change accordingly.
 - **Why:** without this, a SER row crosses the WAN in clear text by default, and the platform would open a weaker path than the one C1 already refuses for downstream links without an acknowledgement.
 - **Action:** A4 applies it in #42. A3 and A6 check the change when they re-check C6.
+
+- **Amendment (2026-10-24, A4 on #42).** Leaving out only the raw record does not close the concern: the normalized `subject`, `value` and `summary` still say which element picked up, and when. On a target with device content off, those three fields are left out as well. The setting is named `device_content` rather than `device_text`, because it covers everything derived from the device record. What remains is the event type, asset, times, severity and record hash, which is enough for an analyst to look the event up on the node. The `dtext_omitted="config"` marker and the once-only report apply to all of it.
