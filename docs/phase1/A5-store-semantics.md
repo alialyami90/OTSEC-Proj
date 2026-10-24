@@ -133,6 +133,8 @@ The owner's tests (`contracts/store/*_test.go`) cover each one against an in-mem
 - **C4 (`TODO(C4)`).** `NodeID`, `StreamID`, `Seq` and `Key` mirror C4's draft (PR #29) and become aliases once it merges. Two C4 changes are requested in [reviews/C4-A5.md](reviews/C4-A5.md):
   - a pre-commit event form, because the seq exists only after commit;
   - the format of `evidence.ref`.
+
+  A4 made both changes (PR #29 at `de3476e`). A producer's event passes `ValidatePending`, which requires seq 0. The store writes the assigned seq into `id` in the commit transaction, so a stored event always passes `Validate`. `evidence.ref` must be `"sha256:" + evidence.sha256`.
 - **Phase 2:**
   - the SQLite implementation and the OS lock mechanism;
   - measuring `OpenHeadroomBytes` against F-013 on NTFS;

@@ -35,10 +35,12 @@ func EvidenceRef(sha string) string { return "sha256:" + sha }
 type Record struct {
 	Stream StreamID
 	Class  StreamClass
-	// Event is the C4-encoded event without its key: native bytes and
-	// native time verbatim plus the normalized form, committed together in
-	// one transaction and pruned together (ADR-0004 item 2, EP-6).
-	// TODO(C4): the encoding and how the key is joined back in on read.
+	// Event is the C4-encoded event as the producer built it: it passes
+	// C4's ValidatePending, so id.seq is 0. In the commit transaction the
+	// store writes the assigned seq into id, so every stored event carries
+	// its full ID and passes C4's Validate before any reader sees it. Native
+	// bytes and native time verbatim plus the normalized form commit
+	// together and are pruned together (ADR-0004 item 2, EP-6).
 	Event []byte
 	// Capture is the native capture the record came from, if any. Records
 	// of one read share one Capture; the store writes it once.
