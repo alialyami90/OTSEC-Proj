@@ -349,22 +349,22 @@ func TestParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	for v, ok := range map[string]bool{"1": true, "1024": true, "0": false, "1025": false, "01": false, "-1": false, "1 C": false, "": false} {
-		_, err := o.Render(map[string]string{"n": v})
+		_, err := o.render(map[string]string{"n": v})
 		if (err == nil) != ok {
 			t.Errorf("Render(n=%q) err=%v, want ok=%v", v, err, ok)
 		}
 	}
-	if _, err := o.Render(map[string]string{"n": "5", "m": "1"}); err == nil {
+	if _, err := o.render(map[string]string{"n": "5", "m": "1"}); err == nil {
 		t.Errorf("extra parameter accepted")
 	}
 	e := Operation{ID: "x.sho", Line: "SHO {set}", Params: []Param{{Name: "set", Kind: ParamEnum, Values: []string{"G", "P"}}}}
 	if err := e.validateTemplate(); err != nil {
 		t.Fatal(err)
 	}
-	if l, err := e.Render(map[string]string{"set": "G"}); err != nil || l != "SHO G" {
+	if l, err := e.render(map[string]string{"set": "G"}); err != nil || l != "SHO G" {
 		t.Errorf("Render enum = %q %v", l, err)
 	}
-	if _, err := e.Render(map[string]string{"set": "g"}); err == nil {
+	if _, err := e.render(map[string]string{"set": "g"}); err == nil {
 		t.Errorf("lower-case enum value accepted")
 	}
 	bad := []Operation{
@@ -389,6 +389,70 @@ func TestNotText(t *testing.T) {
 	for _, l := range []string{"SER\x00", "\xa5\xe0", "ID\n"} {
 		if v, _ := m.Match(l); v != VerdictNotText {
 			t.Errorf("Match(%q) = %s, want not-text", l, v)
+		}
+	}
+}
+
+// TestKeySpelling: encoding/json fills fields without regard to case, so a
+// key spelled differently from its tag, alone or beside the real one, must be
+// rejected (A6 review of C3).
+func TestKeySpelling(t *testing.T) {
+	good := string(mutate(t, func(map[string]any) {}))
+	for _, c := range []struct{ old, new string }{
+		{`"line":"ID"`, `"Line":"ID"`},
+		{`"line":"ID"`, `"line":"ID","Line":"EVE"`},
+		{`"revision":1`, `"REVISION":1`},
+	} {
+		bad := strings.Replace(good, c.old, c.new, 1)
+		if bad == good {
+			t.Fatalf("test setup: %s not found", c.old)
+		}
+		if _, err := Decode([]byte(bad)); err == nil {
+			t.Errorf("%s: accepted", c.new)
+		}
+	}
+}
+
+// TestRenderRefusesDenied: a parameter value inside its range that renders a
+// denied line is refused, although Validate samples only the range ends.
+func TestRenderRefusesDenied(t *testing.T) {
+	data := mutate(t, func(m map[string]any) {
+		op := map[string]any{}
+		for k, v := range entry(m, "operations", 0) {
+			op[k] = v
+		}
+		op["id"] = "sel.test.sho_port"
+		op["line"] = "SHO P {port}"
+		op["params"] = []any{map[string]any{"name": "port", "kind": "uint", "min": 1, "max": 4}}
+		m["operations"] = append(list(m, "operations"), op)
+		deny := map[string]any{}
+		for k, v := range entry(m, "denied", 0) {
+			deny[k] = v
+		}
+		deny["id"] = "sel.test.port3"
+		deny["pattern"] = "SHO P 3"
+		m["denied"] = append(list(m, "denied"), deny)
+	})
+	p, err := Decode(data)
+	if err != nil {
+		t.Fatalf("test package rejected: %v", err)
+	}
+	m, err := NewMatcher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, err := m.Render("sel.test.sho_port", map[string]string{"port": "2"}); err != nil || l != "SHO P 2" {
+		t.Errorf("Render(port=2) = %q, %v", l, err)
+	}
+	if _, err := m.Render("sel.test.sho_port", map[string]string{"port": "3"}); err == nil {
+		t.Errorf("Render(port=3) produced a denied line")
+	}
+	if l, err := m.Render("sel.ser.read_all", nil); err != nil || l != "SER" {
+		t.Errorf("Render(sel.ser.read_all) = %q, %v", l, err)
+	}
+	for _, id := range []string{"sel.session.acc", "sel.ser.clear", "nope"} {
+		if _, err := m.Render(id, nil); err == nil {
+			t.Errorf("Render(%s) accepted", id)
 		}
 	}
 }

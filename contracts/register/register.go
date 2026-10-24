@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -251,6 +252,32 @@ func checkStrictJSON(data []byte) error {
 	return nil
 }
 
+// jsonKeys holds every JSON field name used by Package and the types it
+// contains, spelled exactly as in their tags.
+var jsonKeys = func() map[string]bool {
+	keys := map[string]bool{}
+	var walk func(t reflect.Type)
+	seen := map[reflect.Type]bool{}
+	walk = func(t reflect.Type) {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct || seen[t] {
+			return
+		}
+		seen[t] = true
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name != "" && name != "-" {
+				keys[name] = true
+			}
+			walk(f.Type)
+		}
+	}
+	walk(reflect.TypeOf(Package{}))
+	return keys
+}()
+
 func strictValue(dec *json.Decoder) error {
 	tok, err := dec.Token()
 	if err != nil {
@@ -265,10 +292,16 @@ func strictValue(dec *json.Decoder) error {
 				return err
 			}
 			key := k.(string)
-			if seen[key] {
+			// encoding/json matches field names without regard to case, so
+			// "Line" would fill Line. Only the exact tag spellings are allowed
+			// (A6 review of C3).
+			if !jsonKeys[key] {
+				return fmt.Errorf("key %q is not a field name of this contract", key)
+			}
+			if seen[strings.ToLower(key)] {
 				return fmt.Errorf("duplicate key %q", key)
 			}
-			seen[key] = true
+			seen[strings.ToLower(key)] = true
 			if err := strictValue(dec); err != nil {
 				return err
 			}
@@ -573,9 +606,10 @@ func (o *Operation) validateTemplate() error {
 	return nil
 }
 
-// Render produces the exact line for an operation, or an error if any
-// parameter is missing, extra or out of range.
-func (o *Operation) Render(args map[string]string) (string, error) {
+// render produces the line for an operation from its template, or an error
+// if any parameter is missing, extra or out of range. It does not apply the
+// deny rules; Matcher.Render does.
+func (o *Operation) render(args map[string]string) (string, error) {
 	out := []string{}
 	seen := 0
 	for _, tok := range strings.Split(o.Line, " ") {

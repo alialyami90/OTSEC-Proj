@@ -1,6 +1,7 @@
 package register
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -82,13 +83,33 @@ func (m *Matcher) Match(line string) (Verdict, string) {
 	if lineRe.MatchString(line) {
 		for i := range m.p.Operations {
 			if args, ok := m.p.Operations[i].parse(line); ok {
-				if r, err := m.p.Operations[i].Render(args); err == nil && r == line {
+				if r, err := m.p.Operations[i].render(args); err == nil && r == line {
 					return VerdictOperation, m.p.Operations[i].ID
 				}
 			}
 		}
 	}
 	return VerdictUnlisted, ""
+}
+
+// Render produces the exact line for an invocable operation with the given
+// parameters. It refuses any line that does not classify, through Match, as
+// that same operation, so a parameter value can never produce a line a deny
+// rule matches (A6 review of C3). Rendering is not the last check: every line
+// the transport sends, whoever produced it, must pass Match at egress.
+func (m *Matcher) Render(id string, args map[string]string) (string, error) {
+	o, ok := m.Operation(id)
+	if !ok {
+		return "", fmt.Errorf("register: %q is not an invocable operation", id)
+	}
+	line, err := o.render(args)
+	if err != nil {
+		return "", err
+	}
+	if v, got := m.Match(line); v != VerdictOperation || got != id {
+		return "", fmt.Errorf("register: %s renders %q, which classifies as %s %s", id, line, v, got)
+	}
+	return line, nil
 }
 
 // Operation returns the invocable operation with this ID. Session-control

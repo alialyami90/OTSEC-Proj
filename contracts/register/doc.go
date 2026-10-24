@@ -19,6 +19,9 @@
 //     known dangerous lines and act as a second barrier: a package whose
 //     approved line matches a deny rule is invalid.
 //   - Anything not listed is denied.
+//   - Lines are produced only by Matcher.Render, which refuses a rendered
+//     line that does not classify as its own operation, and every line the
+//     transport sends must pass Matcher.Match at egress.
 //   - The firmware allowlist for the family ships in the same package, so it
 //     is covered by the same signature and anti-rollback floor (C-A2-2).
 //
