@@ -11,6 +11,11 @@
 //   - a map object may hold any keys, each once;
 //   - nothing may follow the first value.
 //
+// Decode rejects unknown fields, for strict contracts (C3, C7 IPC). Forward
+// is for contracts whose readers accept later minors (contracts/README.md):
+// it ignores a key that is not a field name, but still rejects a key that
+// differs from a field name only in case, and duplicate keys.
+//
 // Used by every contract that decodes a document crossing a process, network
 // or storage boundary (A1 decisions D1-9, D1-10).
 package strictjson
@@ -26,31 +31,45 @@ import (
 )
 
 // Decode checks data against v's type and then decodes it into v, which must
-// be a non-nil pointer.
-func Decode(data []byte, v any) error {
+// be a non-nil pointer. Unknown fields are errors.
+func Decode(data []byte, v any) error { return decode(data, v, false) }
+
+// Forward is Decode for a contract that accepts later minors: unknown fields
+// spelled differently from every field name are ignored.
+func Forward(data []byte, v any) error { return decode(data, v, true) }
+
+func decode(data []byte, v any, forward bool) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.New("strictjson: target must be a non-nil pointer")
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
-	if err := check(dec, rv.Type().Elem(), ""); err != nil {
+	c := checker{forward: forward}
+	if err := c.check(dec, rv.Type().Elem(), ""); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return errors.New("strictjson: data after the first value")
 	}
 	dec = json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
+	if !forward {
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("strictjson: %w", err)
 	}
 	return nil
 }
 
-var unmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
+var (
+	unmarshaler = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
+	anyType     = reflect.TypeOf((*any)(nil)).Elem()
+)
 
-func check(dec *json.Decoder, t reflect.Type, path string) error {
+type checker struct{ forward bool }
+
+func (c checker) check(dec *json.Decoder, t reflect.Type, path string) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -68,7 +87,7 @@ func check(dec *json.Decoder, t reflect.Type, path string) error {
 		case t.Kind() == reflect.Map:
 			elem = t.Elem()
 		default:
-			elem = reflect.TypeOf((*any)(nil)).Elem()
+			elem = anyType
 		}
 		seen := map[string]bool{}
 		for dec.More() {
@@ -81,7 +100,10 @@ func check(dec *json.Decoder, t reflect.Type, path string) error {
 			if fields != nil {
 				var ok bool
 				if ft, ok = fields[key]; !ok {
-					return fmt.Errorf("strictjson: %s: key %q is not a field name", where(path), key)
+					if !c.forward || caseVariant(fields, key) {
+						return fmt.Errorf("strictjson: %s: key %q is not a field name", where(path), key)
+					}
+					ft = anyType
 				}
 				if seen[strings.ToLower(key)] {
 					return fmt.Errorf("strictjson: %s: duplicate key %q", where(path), key)
@@ -93,19 +115,19 @@ func check(dec *json.Decoder, t reflect.Type, path string) error {
 				}
 				seen[key] = true
 			}
-			if err := check(dec, ft, path+"."+key); err != nil {
+			if err := c.check(dec, ft, path+"."+key); err != nil {
 				return err
 			}
 		}
 		_, err = dec.Token() // '}'
 		return err
 	case json.Delim('['):
-		elem := reflect.TypeOf((*any)(nil)).Elem()
+		elem := anyType
 		if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
 			elem = t.Elem()
 		}
 		for i := 0; dec.More(); i++ {
-			if err := check(dec, elem, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := c.check(dec, elem, fmt.Sprintf("%s[%d]", path, i)); err != nil {
 				return err
 			}
 		}
@@ -143,6 +165,17 @@ func structFields(t reflect.Type) map[string]reflect.Type {
 		out[name] = f.Type
 	}
 	return out
+}
+
+// caseVariant reports whether key matches a field name when case is ignored,
+// which encoding/json would decode into that field.
+func caseVariant(fields map[string]reflect.Type, key string) bool {
+	for name := range fields {
+		if strings.EqualFold(name, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func where(path string) string {

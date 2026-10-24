@@ -81,6 +81,10 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - `contracts/internal/strictjson`, owned by A1, is the one strict decoder.
   - It walks the document against the target's Go type. A struct object may hold only its fields' exact JSON names, each once, with no case variants. A map may hold any keys, each once. Nothing may follow the value.
   - Every contract that decodes a document crossing a process, network or storage boundary uses it: C1, C2, C3, C4, C6, C7 and C8. C3 already does, at #27.
+  - There are two entry points:
+    - **`Decode`** rejects unknown fields. It is for strict contracts: C3, C7 IPC requests, and C2 invocations.
+    - **`Forward`** is for contracts whose readers accept later minors: C1, C4 and C2 results. It ignores an unknown key only when the key does not case-fold to a field name (`strings.EqualFold`, which also covers the Kelvin sign and long s that `encoding/json` folds). Duplicate keys are always rejected.
+    - A2 and A4 both pointed out that rejecting every unknown field would make each new field a major version change. `Forward` is their option (a).
   - D1-9 is satisfied through this package.
 - **Action:**
   - A4 (C4) and A2 (C1) switch their `Decode` functions to `strictjson.Decode` once #27 merges.
