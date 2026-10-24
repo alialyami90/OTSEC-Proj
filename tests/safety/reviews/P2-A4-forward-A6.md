@@ -68,3 +68,13 @@ One commit since `8baa19d`, from A2's review: a refusal now names the refused ev
 - Should 3 is closed at this commit. With `s.win.Answer(r)` skipped in `open()`, 11 tests now fail. The `commands=syslog` rule itself is checked by `Window.Answer`, which C6's own tests cover.
 - Shoulds 1 and 2 and nit 4 are unchanged.
 - Native Windows run on ALI's PC at `e102d5d`: `go test -count=1 ./modules/telemetry/forward/... ./contracts/syslog ./tests/contract/` passes. The three `TestRsyslog*` tests skip, because there is no rsyslogd on Windows. `-race` is not available there (no C compiler for cgo).
+
+## Re-check at `65c2845`: accepted, no open should
+
+A4 moved what has been reported (the too-large key per held event, the omitted keys, and the highest skipped seq per stream) onto the `Forwarder`, and forgets each entry once the target confirms past it. `TestTooLargeWaitsForConfirmation` is the test from should 2.
+
+- Should 1 closed. My probe (a collector that drops the session whenever a `forward.too-large` arrives) now gives 88 sessions in 2 s with **1** `forward.too-large` committed, where `8baa19d` gave 83.
+- Should 2 closed. The new test is the one I proposed. A4 reports that the release mutant fails it.
+- Nit 4 is recorded as a known limit in `docs/phase2/A4-forward.md`.
+- My store-backed probes against the receiver oracle pass again at this commit. vet, gofmt and `go test -race` for the telemetry, syslog and contract packages pass in the Linux container.
+- Native Windows run on ALI's PC at `65c2845`: vet and gofmt are clean, and `go test -count=1 ./modules/telemetry/forward/... ./contracts/syslog ./tests/contract/` passes (forward 19 tests, with the 3 `TestRsyslog*` skipped because there is no rsyslogd on Windows).
