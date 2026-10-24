@@ -12,46 +12,42 @@ import (
 	"unicode/utf8"
 
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/internal/strictjson"
+	"otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/contracts/version"
 )
 
 // ContractID is the identifier every audit record carries.
 const ContractID = "otsec.audit/0.1"
 
-// MaxRecordBytes bounds one stored record.
+// MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
+// a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
+// what writers produce but never raise this bound.
 const MaxRecordBytes = 16 << 10
 
 var (
-	// TODO(C4): import the node ID pattern from contracts/event.
-	nodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-	// TODO(C1): import the asset ID pattern from contracts/asset.
-	assetIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+	nodeIDPattern = regexp.MustCompile(node.IDPattern) // D1-1
+	// TODO(C1): use asset.ValidAssetID once contracts/asset merges; this is
+	// C1's rule, a lowercase UUID (C8-A4-2).
+	assetIDPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	digestPattern   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	hashPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	idPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
 	codePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
-	clockWordRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	clockWordRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)     // an open clock source word
 	operationIDPat  = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`) // TODO(C3): exported pattern
 )
 
-// Time is the platform timestamp of a record, in the shape A4's C4 draft uses
-// for an event's receive time: a UTC value, its resolution, and the node
-// clock's state. TODO(C4): import the C4 type once contracts/event merges.
-type Time struct {
-	UTC          string `json:"utc"`           // RFC 3339, UTC, Z suffix, no more digits than the resolution supports
-	ResolutionNS int64  `json:"resolution_ns"` // > 0
-	Clock        Clock  `json:"clock"`
-}
+// Time is the platform timestamp of a record: C4's event.Received, so audit
+// records and events share one clock vocabulary (C8-A4-3). It is always the
+// node's clock; a record never carries a device time.
+type Time = event.Received
 
-// Clock is the node clock's state when the record was written.
-type Clock struct {
-	Sync   string `json:"sync"`   // e.g. "synchronized", "unsynchronized", "unknown"
-	Source string `json:"source"` // e.g. "ntp", "irig", "none"
-	Scope  string `json:"scope"`  // "node" for audit records
-}
+// Clock is the node clock's state when the record was written (C4).
+type Clock = event.Clock
 
-func (t Time) validate() error {
+func validateTime(t Time) error {
 	parsed, err := time.Parse(time.RFC3339Nano, t.UTC)
 	if err != nil || parsed.Location() != time.UTC || !strings.HasSuffix(t.UTC, "Z") {
 		return fmt.Errorf("audit: time %q is not RFC 3339 UTC with Z", t.UTC)
@@ -70,10 +66,13 @@ func (t Time) validate() error {
 	if granularity < t.ResolutionNS {
 		return fmt.Errorf("audit: time %q claims more precision than resolution %d ns", t.UTC, t.ResolutionNS)
 	}
-	for _, w := range []string{t.Clock.Sync, t.Clock.Source, t.Clock.Scope} {
-		if !clockWordRegexp.MatchString(w) {
-			return fmt.Errorf("audit: clock field %q is not valid", w)
-		}
+	switch t.Clock.Sync {
+	case event.SyncSynchronized, event.SyncUnsynchronized, event.SyncUnknown:
+	default:
+		return fmt.Errorf("audit: clock sync %q is not valid", t.Clock.Sync)
+	}
+	if t.Clock.Source != "" && !clockWordRegexp.MatchString(t.Clock.Source) {
+		return fmt.Errorf("audit: clock source %q is not valid", t.Clock.Source)
 	}
 	return nil
 }
@@ -113,7 +112,7 @@ const (
 	ActionRoleRevoke           Action = "role.revoke"                 //
 	ActionPolicyApply          Action = "policy.apply"                //
 	ActionAuditChainStart      Action = "audit.chain.start"           // first record on a node
-	ActionAuditCheckpoint      Action = "audit.checkpoint"            // a checkpoint left the node
+	ActionAuditCheckpoint      Action = "audit.checkpoint"            // a confirming receiver acknowledged (seq, hash)
 	ActionAuditExport          Action = "audit.export"                //
 	ActionClockChange          Action = "clock.change"                //
 	ActionStorageAlarm         Action = "storage.alarm"               //
@@ -189,8 +188,33 @@ type Record struct {
 	PolicyVersion    uint64  `json:"policy_version,omitempty"`
 	ParamsDigest     string  `json:"params_digest,omitempty"`     // sha256 of the canonical parameters
 	BytesSentDigest  string  `json:"bytes_sent_digest,omitempty"` // sha256 of the redacted bytes sent
-	CorrelationID    string  `json:"correlation_id,omitempty"`    // C7 request ID or C2 invocation ID
+	CorrelationID    string  `json:"correlation_id,omitempty"`    // C7 request ID, or the C2 invocation ID for invocationActions
+	CollectorSeq     uint64  `json:"collector_seq,omitempty"`     // the collector's number for an event it reported (C7-A5-2)
 	Detail           string  `json:"detail,omitempty"`            // free text; never a secret or raw device output
+}
+
+// collectorActions are the actions only the collector performs. The node
+// writes their records from what the collector reports.
+var collectorActions = map[Action]bool{
+	ActionDeviceSessionOpen: true, ActionDeviceSessionClose: true, ActionCredentialUse: true,
+	ActionDeviceOp: true, ActionDeviceRefused: true, ActionDevicePostureWarning: true,
+	ActionCredentialSuspend: true, ActionRegisterVerify: true, ActionRegisterActivate: true,
+}
+
+// CollectorReported reports whether a record states an event the collector
+// reported, and so must carry its collector_seq (C7-A5-2): every action only
+// the collector performs, the collector's decision on a request
+// (collector.request allowed or denied), and the collector's result of a
+// credential install, revocation or clearing. The node's own record that it
+// sent a request (collector.request info) carries none.
+func CollectorReported(r *Record) bool {
+	switch r.Action {
+	case ActionCollectorRequest:
+		return r.Outcome == OutcomeAllowed || r.Outcome == OutcomeDenied
+	case ActionCredentialInstall, ActionCredentialRevoke, ActionCredentialClearSusp:
+		return r.Outcome != OutcomeInfo
+	}
+	return collectorActions[r.Action]
 }
 
 // GenesisPrevHash is prev_hash of a node's first record.
@@ -199,6 +223,15 @@ const GenesisPrevHash = "0000000000000000000000000000000000000000000000000000000
 // deviceActions need a target with an asset, and keep the plaintext label
 // visible on every record.
 var deviceActions = map[Action]bool{
+	ActionDeviceSessionOpen: true, ActionDeviceSessionClose: true, ActionCredentialUse: true,
+	ActionDeviceOp: true, ActionDeviceRefused: true, ActionDevicePostureWarning: true,
+}
+
+// invocationActions happen inside one C2 invocation. Their correlation_id is
+// that invocation's ID, which C4 events carry as collection.invocation_id, so
+// a reader can list the events a privileged read produced without matching
+// time windows (C8-A4-4).
+var invocationActions = map[Action]bool{
 	ActionDeviceSessionOpen: true, ActionDeviceSessionClose: true, ActionCredentialUse: true,
 	ActionDeviceOp: true, ActionDeviceRefused: true, ActionDevicePostureWarning: true,
 }
@@ -222,7 +255,7 @@ func (r *Record) Validate() error {
 	if (r.Seq == 1) != (r.PrevHash == GenesisPrevHash) || (r.Seq == 1) != (r.Action == ActionAuditChainStart) {
 		return errors.New("audit: seq 1, the genesis prev_hash and audit.chain.start go together")
 	}
-	if err := r.Time.validate(); err != nil {
+	if err := validateTime(r.Time); err != nil {
 		return err
 	}
 	if err := (authz.Principal{Type: r.Actor.Type, ID: r.Actor.ID}).Validate(); err != nil {
@@ -248,17 +281,27 @@ func (r *Record) Validate() error {
 	}
 	if r.Action == ActionCollectorRequest {
 		switch r.Outcome {
+		case OutcomeInfo: // written by the node before it sends the request (D1-11)
 		case OutcomeAllowed:
 		case OutcomeDenied:
 			if authz.RefusalCode(r.ReasonCode).Normalize() == authz.RefuseUnknown && r.ReasonCode != string(authz.RefuseUnknown) {
 				return fmt.Errorf("audit: %q is not a C7 refusal code", r.ReasonCode)
 			}
 		default:
-			return errors.New("audit: collector.request is allowed or denied")
+			return errors.New("audit: collector.request is info (sent), allowed or denied")
 		}
 		if r.CorrelationID == "" {
 			return errors.New("audit: collector.request needs the request ID as correlation_id")
 		}
+	}
+	if invocationActions[r.Action] && r.CorrelationID == "" {
+		return fmt.Errorf("audit: %s needs the C2 invocation ID as correlation_id", r.Action)
+	}
+	if need := CollectorReported(r); need != (r.CollectorSeq != 0) {
+		if need {
+			return fmt.Errorf("audit: %s %s is reported by the collector and needs collector_seq", r.Action, r.Outcome)
+		}
+		return fmt.Errorf("audit: %s %s is not a collector event and has no collector_seq", r.Action, r.Outcome)
 	}
 	if r.Action == ActionDevicePostureWarning && r.Outcome != OutcomeWarning {
 		return errors.New("audit: device.posture_warning has outcome warning")
@@ -314,8 +357,9 @@ var ErrRecordRejected = errors.New("audit: record rejected")
 // duplicate keys, a key that differs only in case from a field name, and
 // trailing data, and ignores only unknown fields spelled unlike any field
 // name. The chain covers those fields, so they cannot be altered unseen.
-// Before decoding, it also rejects oversize records, invalid UTF-8, and any
-// field named like a secret or raw device output, at any depth. Writers go
+// Before decoding, it also rejects oversize records, invalid UTF-8, a raw CR,
+// LF or NUL byte (Seal never writes one), and any field
+// named like a secret or raw device output, at any depth. Writers go
 // through Seal, which is fully strict (strictjson.Decode).
 func ParseRecord(b []byte) (*Record, error) {
 	if len(b) > MaxRecordBytes {
@@ -323,6 +367,9 @@ func ParseRecord(b []byte) (*Record, error) {
 	}
 	if !utf8.Valid(b) {
 		return nil, fmt.Errorf("%w: not UTF-8", ErrRecordRejected)
+	}
+	if bytes.ContainsAny(b, "\r\n\x00") {
+		return nil, fmt.Errorf("%w: raw CR, LF or NUL byte", ErrRecordRejected)
 	}
 	if err := walkKeys(b, func(k string) error {
 		if forbiddenKeys.MatchString(k) {

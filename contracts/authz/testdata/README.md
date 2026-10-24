@@ -1,10 +1,11 @@
 # C7 golden examples
 
-Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`, and `TestGoldenRequests` checks that `DecodeRequest` refuses each one with that code. None is device-derived.
+Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`, and `TestGoldenRequests` checks that `DecodeRequest` refuses each one with that code. Files under `requests/against-register/` decode, but fail a check against the verified SEL-751 register with the code their name gives (`TestCheckAccessLevel`). None is device-derived. Asset IDs are C1 lowercase UUIDs, the same one C1 and C4 use in their examples.
 
 | File | What it shows |
 | --- | --- |
 | `requests/valid/run-ser-read-all.json` | A schedule asks for `sel.ser.read_all` on one enrolled asset: no line, no limits, no secret. |
+| `requests/valid/run-id-without-credential.json` | A run of `sel.id`, a level 0 operation sent before `ACC`: it carries no `credential_ref` (C7-A2-5). `TestRunAgainstRegister` refuses a level 0 run that carries one, and a level 1 run that does not. |
 | `requests/valid/credential-install.json` | An admin installs version 2 of a lab-only Telnet credential, as ciphertext sealed to the collector. |
 | `requests/valid/credential-revoke.json` | An admin revokes a credential after rotation. |
 | `requests/valid/credential-clear-suspension.json` | An admin clears a suspension on the exact version they reviewed. |
@@ -28,3 +29,4 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/invalid/unknown_field__limits-from-main-process.json` | The main process tries to set limits; they come from the register and profile. |
 | `requests/invalid/unknown_field__raw-line-in-run.json` | A raw `line` inside the run body. |
 | `requests/invalid/unknown_field__secret-in-credential-ref.json` | A `secret` field inside a credential reference. |
+| `requests/against-register/credential_mismatch__level-2ac.json` | A credential installed for access level `2AC`. It decodes, but no auth-phase session line in the SEL-751 register reaches it and no read-only operation needs it (C7-A6-1). |

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/register"
 )
@@ -175,19 +176,22 @@ func TestRunAgainstRegister(t *testing.T) {
 	cases := []struct {
 		op     string
 		params map[string]string
+		ref    string
 		want   RefusalCode
 	}{
-		{"sel.ser.read_all", map[string]string{}, ""},
-		{"sel.id", map[string]string{}, ""},
-		{"sel.settings.show_port1", map[string]string{}, ""},
-		{"sel.session.acc", map[string]string{}, RefuseUnknownOperation}, // session-control is never an operation (C-A2-1)
-		{"sel.session.qui", map[string]string{}, RefuseUnknownOperation},
-		{"sel.ser.clear", map[string]string{}, RefuseUnknownOperation}, // deny rules are never operations
-		{"sel.tri", map[string]string{}, RefuseUnknownOperation},
-		{"sel.ser.read_all", map[string]string{"row": "1"}, RefuseBadParams},
+		{"sel.ser.read_all", map[string]string{}, "cred_abcdefgh", ""},
+		{"sel.id", map[string]string{}, "", ""}, // level 0: sent before ACC, no credential (C7-A2-5)
+		{"sel.settings.show_port1", map[string]string{}, "cred_abcdefgh", ""},
+		{"sel.id", map[string]string{}, "cred_abcdefgh", RefuseCredentialMismatch}, // a password must not be resolved for level 0
+		{"sel.ser.read_all", map[string]string{}, "", RefuseCredentialMismatch},
+		{"sel.session.acc", map[string]string{}, "cred_abcdefgh", RefuseUnknownOperation}, // session-control is never an operation (C-A2-1)
+		{"sel.session.qui", map[string]string{}, "cred_abcdefgh", RefuseUnknownOperation},
+		{"sel.ser.clear", map[string]string{}, "cred_abcdefgh", RefuseUnknownOperation}, // deny rules are never operations
+		{"sel.tri", map[string]string{}, "cred_abcdefgh", RefuseUnknownOperation},
+		{"sel.ser.read_all", map[string]string{"row": "1"}, "cred_abcdefgh", RefuseBadParams},
 	}
 	for _, c := range cases {
-		b := RunBody{AssetID: "a1", OperationID: c.op, Params: c.params, CredentialRef: "cred_abcdefgh", RegisterVersion: 1}
+		b := RunBody{AssetID: "a1", OperationID: c.op, Params: c.params, CredentialRef: c.ref, RegisterVersion: 1}
 		err := b.ValidateAgainst(m)
 		var ref *Refusal
 		if c.want == "" {
@@ -216,7 +220,7 @@ func TestRunAgainstRegister(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := RunBody{AssetID: "a1", OperationID: "sel.id", Params: map[string]string{}, CredentialRef: "cred_abcdefgh", RegisterVersion: 1}
+	b := RunBody{AssetID: "a1", OperationID: "sel.id", Params: map[string]string{}, RegisterVersion: 1}
 	var ref *Refusal
 	if err := b.ValidateAgainst(probeOnly); !errors.As(err, &ref) || ref.Code != RefuseNotInvocable {
 		t.Fatalf("probe-only operation: %v", err)
@@ -229,7 +233,8 @@ func TestRunAgainstRegister(t *testing.T) {
 
 func TestReplyFailsClosed(t *testing.T) {
 	for _, raw := range []string{
-		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","invocation_id":"inv-1"}`,
+		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","invocation_id":"inv-1","collector_seq":7}`,
+		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","invocation_id":"inv-2"}`, // no collector_seq: unaccountable (C7-A5-2)
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"ACCEPTED"}`,
 		`{"contract":"otsec.authz/0.2","request_id":"r1","status":"maybe"}`,
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","refusal":{"code":"busy"}}`,
@@ -238,7 +243,7 @@ func TestReplyFailsClosed(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &r); err != nil {
 			t.Fatal(err)
 		}
-		want := strings.Contains(raw, `"accepted","invocation_id"`)
+		want := strings.Contains(raw, `"collector_seq":7`)
 		if r.Accepted() != want {
 			t.Fatalf("%s: Accepted() = %v", raw, r.Accepted())
 		}
@@ -248,17 +253,32 @@ func TestReplyFailsClosed(t *testing.T) {
 	}
 }
 
-func TestSecretPolicy(t *testing.T) {
-	isLine := func(s string) bool {
-		return regexp.MustCompile(`(?i)^\s*(SER|ACC|QUI|ID|SHO|TRI|2AC)\b.*`).MatchString(s)
-	}
-	table754ish := regexp.MustCompile(`^[A-Za-z0-9!#$%&()*+,\-./:;<=>?@\[\]^_{|}~]+$`) // stand-in; the real set comes from the register (S22 Table 7.54)
-	p := SecretPolicy{MaxLen: 12, Allowed: table754ish}
-	if err := ValidateSecret([]byte("Otter#2026"), p, isLine); err != nil {
+func loadSEL751Package(t *testing.T) *register.Package {
+	t.Helper()
+	data, _ := loadSEL751(t)
+	pkg, err := register.Decode(data)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"", "ThirteenChars", "has space", "tab\there", "line\r\n", "SER C", "TRI", "\xa5\xe0"} {
-		err := ValidateSecret([]byte(s), p, isLine)
+	return pkg
+}
+
+func TestSecretPolicy(t *testing.T) {
+	pkg := loadSEL751Package(t)
+	table754ish := regexp.MustCompile(`^[A-Za-z0-9!#$%&()*+,\-./:;<=>?@\[\]^_{|}~]+$`) // stand-in; the real set comes from the register (S22 Table 7.54)
+	p := SecretPolicy{MaxLen: 12, Allowed: table754ish, MnemonicLen: 3}
+	for _, s := range []string{"Otter#2026", "Wq7!mZ2p", "xyz-9"} {
+		if err := ValidateSecret([]byte(s), p, pkg); err != nil {
+			t.Fatalf("%q: %v", s, err)
+		}
+	}
+	rejected := []string{"", "ThirteenChars", "has space", "tab\there", "line\r\n", "SER C", "TRI", "\xa5\xe0"}
+	// A6's C7 probe (C7-A6-3): lower-case and longer forms of approved lines,
+	// and command words the deny rules only match with an argument or a space.
+	rejected = append(rejected, "OPEN", "open1234", "Trip1", "tri", "set", "pas", "2ac", "QUI", "qui", "quiet123",
+		"acc", "accent12", "ser", "serial99", "id", "idle4now", "show1234", "close!", "his", "Dat3")
+	for _, s := range rejected {
+		err := ValidateSecret([]byte(s), p, pkg)
 		if !errors.Is(err, ErrSecretRejected) {
 			t.Fatalf("%q: got %v", s, err)
 		}
@@ -267,12 +287,68 @@ func TestSecretPolicy(t *testing.T) {
 		}
 	}
 	if err := ValidateSecret([]byte("Otter#2026"), p, nil); err == nil {
-		t.Fatal("missing register check accepted")
+		t.Fatal("missing register package accepted")
+	}
+	// Whole-word mode: only the full command word is refused.
+	whole := SecretPolicy{MaxLen: 12, Allowed: table754ish}
+	if err := ValidateSecret([]byte("accent12"), whole, pkg); err != nil {
+		t.Fatalf("whole-word mode: %v", err)
+	}
+	if err := ValidateSecret([]byte("acc"), whole, pkg); !errors.Is(err, ErrSecretRejected) {
+		t.Fatalf("whole-word mode, acc: %v", err)
+	}
+}
+
+func TestMnemonicsFromRegister(t *testing.T) {
+	got := map[string]bool{}
+	for _, m := range mnemonics(loadSEL751Package(t)) {
+		got[m] = true
+	}
+	for _, want := range []string{"ID", "SER", "SHO", "ACC", "QUI", "2AC", "CAL", "TRI", "OPE", "CLO", "SET", "PAS", "R_S", "DAT", "TIM", "HSR", "PARTNO", "GOO", "FGS"} {
+		if !got[want] {
+			t.Errorf("mnemonic %s missing", want)
+		}
+	}
+}
+
+func TestCheckAccessLevel(t *testing.T) {
+	pkg := loadSEL751Package(t)
+	if err := CheckAccessLevel(pkg, "1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, level := range []string{"0", "2", "2AC", "ACC", ""} {
+		var ref *Refusal
+		if err := CheckAccessLevel(pkg, level); !errors.As(err, &ref) || ref.Code != RefuseCredentialMismatch {
+			t.Errorf("level %q: got %v", level, err)
+		}
+	}
+	var ref *Refusal
+	if err := CheckAccessLevel(nil, "1"); !errors.As(err, &ref) || ref.Code != RefuseRegisterUnverified {
+		t.Errorf("nil package: %v", err)
+	}
+	// Golden examples that decode but fail against the SEL-751 register.
+	files, _ := filepath.Glob("testdata/requests/against-register/*.json")
+	if len(files) == 0 {
+		t.Fatal("no against-register examples")
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req, err := DecodeRequest(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		want := RefusalCode(strings.SplitN(filepath.Base(f), "__", 2)[0])
+		if err := CheckAccessLevel(pkg, req.CredentialInstall.Ref.AccessLevel); !errors.As(err, &ref) || ref.Code != want {
+			t.Errorf("%s: got %v, want %s", f, err, want)
+		}
 	}
 }
 
 func TestSealAADBindsReference(t *testing.T) {
-	ref := CredentialRef{ID: "cred_abcdefgh", AssetID: "a1", NodeID: "n1", Transport: TransportTelnet, AccessLevel: "ACC", Version: 1}
+	ref := CredentialRef{ID: "cred_abcdefgh", AssetID: "a1", NodeID: "n1", EndpointID: "port1-telnet", Transport: TransportTelnet, AccessLevel: "1", Version: 1}
 	base := string(SealAAD(ref))
 	for _, change := range []func(*CredentialRef){
 		func(r *CredentialRef) { r.ID = "cred_abcdefgi" },
@@ -280,7 +356,8 @@ func TestSealAADBindsReference(t *testing.T) {
 		func(r *CredentialRef) { r.AssetID = "a2" },
 		func(r *CredentialRef) { r.NodeID = "n2" },
 		func(r *CredentialRef) { r.Transport = TransportSSH },
-		func(r *CredentialRef) { r.AccessLevel = "2AC" },
+		func(r *CredentialRef) { r.EndpointID = "port2-telnet" },
+		func(r *CredentialRef) { r.AccessLevel = "2" },
 	} {
 		r := ref
 		change(&r)
@@ -461,6 +538,130 @@ func TestSchemasAreStrictJSON(t *testing.T) {
 		}
 		if strings.Contains(p, "collector-request") && !strings.Contains(string(data), `"unevaluatedProperties": false`) && !strings.Contains(string(data), `"additionalProperties": false`) {
 			t.Fatalf("%s: collector requests must be strict", p)
+		}
+	}
+}
+
+func TestFailedAuthFloor(t *testing.T) {
+	for _, c := range []struct {
+		tidle, want time.Duration
+	}{
+		{0, 31 * time.Minute}, // TIDLE unknown
+		{-time.Minute, 31 * time.Minute},
+		{31 * time.Minute, 31 * time.Minute}, // out of range
+		{15 * time.Minute, 16 * time.Minute},
+		{30 * time.Minute, 31 * time.Minute},
+	} {
+		if got := FailureFloor(c.tidle); got != c.want {
+			t.Errorf("FailureFloor(%v) = %v, want %v", c.tidle, got, c.want)
+		}
+	}
+
+	now := time.Date(2026, 10, 24, 15, 0, 0, 0, time.UTC)
+	floor := FailureFloor(15 * time.Minute)
+	for _, c := range []struct {
+		last time.Time
+		want bool
+	}{
+		{time.Time{}, false},
+		{now.Add(-floor), false},
+		{now.Add(-floor + time.Second), true},
+		{now.Add(-15 * time.Minute), true}, // inside TIDLE plus one minute
+		{now, true},
+		{now.Add(time.Hour), true}, // stamped in the future: a clock stepped back must not reopen the floor
+	} {
+		if got := InsideFailureFloor(c.last, now, floor); got != c.want {
+			t.Errorf("last failure %v: got %v, want %v", c.last, got, c.want)
+		}
+	}
+}
+
+func installedRef(t *testing.T) CredentialRef {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/requests/valid/credential-install.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := DecodeRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req.CredentialInstall.Ref
+}
+
+func TestCredentialRefFields(t *testing.T) {
+	ref := installedRef(t)
+	if err := ref.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*CredentialRef){
+		"level 0":             func(r *CredentialRef) { r.AccessLevel = register.ProbeAccessLevel }, // C7-A2-5
+		"serial transport":    func(r *CredentialRef) { r.Transport = TransportSerial },             // out of 0.1
+		"no endpoint":         func(r *CredentialRef) { r.EndpointID = "" },
+		"upper-case endpoint": func(r *CredentialRef) { r.EndpointID = "Port1" },
+		"upper-case node":     func(r *CredentialRef) { r.NodeID = "Site-A-Node-1" }, // C7-A5-1
+		"64-character node":   func(r *CredentialRef) { r.NodeID = strings.Repeat("a", 64) },
+		"node ends in hyphen": func(r *CredentialRef) { r.NodeID = "site-a-" },
+		"node with a dot":     func(r *CredentialRef) { r.NodeID = "site-a.node-1" },
+	} {
+		r := ref
+		change(&r)
+		if r.Validate() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	r := ref
+	r.NodeID = strings.Repeat("a", 63)
+	if err := r.Validate(); err != nil {
+		t.Errorf("63-character node: %v", err)
+	}
+}
+
+func TestBinds(t *testing.T) {
+	ref := installedRef(t)
+	use := Use{NodeID: ref.NodeID, AssetID: ref.AssetID, EndpointID: ref.EndpointID, Transport: ref.Transport, AckScope: PlaintextLabOnly, AccessLevel: "1"}
+	if err := ref.Binds(use); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*Use){
+		"other node":            func(u *Use) { u.NodeID = "site-a-node-2" },
+		"other asset":           func(u *Use) { u.AssetID = "c41f8a2d-6b0e-4e97-8d13-5a2c9f7b0e64" },
+		"other endpoint":        func(u *Use) { u.EndpointID = "port2-telnet" }, // same asset, another port (C7-A2-6)
+		"other transport":       func(u *Use) { u.Transport = TransportSerial },
+		"higher level":          func(u *Use) { u.AccessLevel = "2" }, // a Level 1 credential never reaches 2AC (C7-A2-4)
+		"level 0":               func(u *Use) { u.AccessLevel = register.ProbeAccessLevel },
+		"no acknowledgement":    func(u *Use) { u.AckScope = "" }, // plaintext needs the endpoint's acknowledgement (C1-A3-3)
+		"other acknowledgement": func(u *Use) { u.AckScope = "production" },
+	} {
+		u := use
+		change(&u)
+		var ref2 *Refusal
+		if err := ref.Binds(u); !errors.As(err, &ref2) || ref2.Code != RefuseCredentialMismatch {
+			t.Errorf("%s: got %v, want %s", name, err, RefuseCredentialMismatch)
+		}
+	}
+}
+
+// TestSchemaPatterns keeps the credential reference schema's shared
+// identifier patterns equal to the ones the code enforces (C7-A5-1).
+func TestSchemaPatterns(t *testing.T) {
+	b, err := os.ReadFile("schema/credential-ref.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties map[string]struct{ Pattern string }
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+	for field, re := range map[string]*regexp.Regexp{
+		"node_id":     nodeIDPattern,
+		"asset_id":    assetIDPattern,
+		"endpoint_id": endpointIDPattern,
+	} {
+		if got := s.Properties[field].Pattern; got != re.String() {
+			t.Errorf("%s: schema pattern %q, code %q", field, got, re.String())
 		}
 	}
 }

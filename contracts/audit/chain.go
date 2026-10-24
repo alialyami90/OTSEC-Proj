@@ -83,3 +83,34 @@ func VerifyChain(stored [][]byte, from, head *Checkpoint) error {
 	}
 	return nil
 }
+
+// VerifyCollectorSeq checks that the records of one node account for every
+// event the collector reported between two of its numbers: each collector
+// sequence number in after+1 .. through appears on exactly one record, and no
+// record carries a number outside that range. through is the newest number
+// the collector has given (its latest reply), and after the last number
+// already verified (0 at the start). The node writes the records of
+// collector events, so a node that leaves one out leaves a gap here
+// (C7-A5-2). A node that withholds every record after a point is detected
+// only once the collector next reports a higher number.
+func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
+	seen := map[uint64]bool{}
+	for _, r := range recs {
+		if r.CollectorSeq == 0 {
+			continue
+		}
+		if r.CollectorSeq <= after || r.CollectorSeq > through {
+			return broken("collector_seq %d is outside %d..%d", r.CollectorSeq, after+1, through)
+		}
+		if seen[r.CollectorSeq] {
+			return broken("collector_seq %d appears on two records", r.CollectorSeq)
+		}
+		seen[r.CollectorSeq] = true
+	}
+	for n := after + 1; n <= through; n++ {
+		if !seen[n] {
+			return broken("no record for collector_seq %d: a collector event was not recorded", n)
+		}
+	}
+	return nil
+}

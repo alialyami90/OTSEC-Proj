@@ -6,7 +6,8 @@
   "required": [
     "contract",
     "request_id",
-    "status"
+    "status",
+    "collector_seq"
   ],
   "properties": {
     "contract": {
@@ -20,6 +21,11 @@
         "accepted",
         "refused"
       ]
+    },
+    "collector_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "C7-A5-2: the collector's persisted, contiguous number for this decision. The matching C8 record carries it, so an omitted record shows as a gap."
     },
     "invocation_id": {
       "type": "string",
@@ -51,6 +57,7 @@
             "busy",
             "rate_limited",
             "secret_rejected",
+            "collector_state_unavailable",
             "refused_unknown"
           ]
         },

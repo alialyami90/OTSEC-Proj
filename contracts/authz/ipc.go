@@ -59,8 +59,8 @@ type RunBody struct {
 	AssetID         string            `json:"asset_id"`
 	OperationID     string            `json:"operation_id"`
 	Params          map[string]string `json:"params"`
-	CredentialRef   string            `json:"credential_ref"`
-	RegisterVersion uint64            `json:"register_version"` // must equal the collector's active, verified package version
+	CredentialRef   string            `json:"credential_ref,omitempty"` // absent for a level 0 operation, required otherwise (C7-A2-5)
+	RegisterVersion uint64            `json:"register_version"`         // must equal the collector's active, verified package version
 }
 
 // CredentialInstallBody installs or replaces one credential version.
@@ -97,15 +97,16 @@ const (
 	RefuseNotInvocable       RefusalCode = "not_invocable"     // session-control or state-changing
 	RefuseBadParams          RefusalCode = "bad_params"        // parameter missing, extra, or failing its register pattern
 	RefuseAssetNotEnrolled   RefusalCode = "asset_not_enrolled"
-	RefuseCredentialMismatch RefusalCode = "credential_mismatch" // ref is for another asset, node or transport
-	RefuseCredentialUnusable RefusalCode = "credential_unusable" // missing, suspended or revoked
-	RefuseRegisterUnverified RefusalCode = "register_unverified" // no verified register package is active
-	RefuseRegisterVersion    RefusalCode = "register_version"    // request names another register version
-	RefusePolicyVersion      RefusalCode = "policy_version"      // request names another policy version
-	RefuseBusy               RefusalCode = "busy"                // a session to this asset is already open (D9)
-	RefuseRateLimited        RefusalCode = "rate_limited"        // minimum interval or failed-auth floor not elapsed
-	RefuseSecretRejected     RefusalCode = "secret_rejected"     // write-time validation failed
-	RefuseUnknown            RefusalCode = "refused_unknown"     // fallback for unknown codes
+	RefuseCredentialMismatch RefusalCode = "credential_mismatch"         // ref is for another asset, node or transport
+	RefuseCredentialUnusable RefusalCode = "credential_unusable"         // missing, suspended or revoked
+	RefuseRegisterUnverified RefusalCode = "register_unverified"         // no verified register package is active
+	RefuseRegisterVersion    RefusalCode = "register_version"            // request names another register version
+	RefusePolicyVersion      RefusalCode = "policy_version"              // request names another policy version
+	RefuseBusy               RefusalCode = "busy"                        // a session to this asset is already open (D9)
+	RefuseRateLimited        RefusalCode = "rate_limited"                // minimum interval or failed-auth floor not elapsed
+	RefuseSecretRejected     RefusalCode = "secret_rejected"             // write-time validation failed
+	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
+	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
 // RefusalCodes lists every refusal code.
@@ -114,7 +115,7 @@ var RefusalCodes = []RefusalCode{
 	RefusePrincipal, RefuseUnknownOperation, RefuseNotInvocable, RefuseBadParams,
 	RefuseAssetNotEnrolled, RefuseCredentialMismatch, RefuseCredentialUnusable,
 	RefuseRegisterUnverified, RefuseRegisterVersion, RefusePolicyVersion, RefuseBusy,
-	RefuseRateLimited, RefuseSecretRejected, RefuseUnknown,
+	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseUnknown,
 }
 
 // Normalize maps an unknown code to RefuseUnknown.
@@ -162,12 +163,16 @@ type CollectorReply struct {
 	Status       ReplyStatus `json:"status"`
 	InvocationID string      `json:"invocation_id,omitempty"` // set for an accepted run
 	Refusal      *Refusal    `json:"refusal,omitempty"`       // set when refused
+	// CollectorSeq numbers this decision among every event the collector
+	// reports (C7-A5-2). See the package documentation, "Collector sequence".
+	CollectorSeq uint64 `json:"collector_seq"`
 }
 
 // Accepted reports whether the reply accepts the request. Anything malformed
-// or unknown counts as not accepted.
+// or unknown counts as not accepted, and so does a reply with no collector
+// sequence number, because its decision could not be accounted for in audit.
 func (r CollectorReply) Accepted() bool {
-	return r.Contract == ContractID && r.Status == ReplyAccepted && r.Refusal == nil
+	return r.Contract == ContractID && r.Status == ReplyAccepted && r.Refusal == nil && r.CollectorSeq != 0
 }
 
 // DecodeRequest decodes and validates one request strictly. Every error is a
@@ -268,7 +273,7 @@ func (b *RunBody) validate() error {
 	if !operationIDPattern.MatchString(b.OperationID) {
 		return refuse(RefuseInvalid, "operation_id")
 	}
-	if !credentialRefIDPattern.MatchString(b.CredentialRef) {
+	if b.CredentialRef != "" && !credentialRefIDPattern.MatchString(b.CredentialRef) {
 		return refuse(RefuseInvalid, "credential_ref")
 	}
 	if b.RegisterVersion == 0 {
@@ -303,8 +308,9 @@ func (b *RunBody) validate() error {
 // verified register (C3): the operation exists among the invocable
 // operations (session-control lines and deny rules are never returned, C-A2-1),
 // is read-only, runs in the operate phase (a probe-only operation belongs to
-// the transport, before authentication, and a schedule cannot ask for it), and
-// the parameters render through Matcher.Render, which also applies the deny
+// the transport, before authentication, and a schedule cannot ask for it),
+// carries a credential_ref exactly when its access level is above 0 (C7-A2-5),
+// and the parameters render through Matcher.Render, which also applies the deny
 // rules. The transport still checks every line with Matcher.Permit at egress.
 // A nil matcher means no verified register package is active for the family.
 func (b *RunBody) ValidateAgainst(m *register.Matcher) error {
@@ -320,6 +326,11 @@ func (b *RunBody) ValidateAgainst(m *register.Matcher) error {
 	}
 	if !op.InPhase(register.PhaseOperate) {
 		return refuse(RefuseNotInvocable, "%s does not run in the operate phase", b.OperationID)
+	}
+	// A level 0 operation (sel.id) is sent before ACC, so no password is
+	// needed and none may be resolved; any other operation needs one.
+	if (op.AccessLevel == register.ProbeAccessLevel) != (b.CredentialRef == "") {
+		return refuse(RefuseCredentialMismatch, "%s at level %q: credential_ref must be present exactly when the level is above 0", b.OperationID, op.AccessLevel)
 	}
 	if _, err := m.Render(b.OperationID, b.Params); err != nil {
 		return refuse(RefuseBadParams, "%s", b.OperationID)

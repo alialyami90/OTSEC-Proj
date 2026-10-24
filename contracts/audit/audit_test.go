@@ -10,14 +10,15 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/event"
 )
 
 func baseTime() Time {
-	return Time{UTC: "2026-10-24T11:40:00.123456Z", ResolutionNS: 1000, Clock: Clock{Sync: "synchronized", Source: "ntp", Scope: "node"}}
+	return Time{UTC: "2026-10-24T11:40:00.123456Z", ResolutionNS: 1000, Clock: Clock{Sync: event.SyncSynchronized, Source: "ntp"}}
 }
 
 func telnetTarget() *Target {
-	return &Target{AssetID: "site-a.relay.feeder-3", Transport: authz.TransportTelnet, DownstreamSecurity: authz.DownstreamPlaintext,
+	return &Target{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", Transport: authz.TransportTelnet, DownstreamSecurity: authz.DownstreamPlaintext,
 		CredentialRef: "cred_7f3k2m9q4x", CredentialVersion: 2, Family: "sel-751"}
 }
 
@@ -48,18 +49,27 @@ func chain(t *testing.T, recs []Record) [][]byte {
 func sliceRecords() []Record {
 	collector := Actor{Type: authz.PrincipalSchedule, ID: "sch-ser-751-feeder-3", Role: authz.RoleCollector}
 	system := Actor{Type: authz.PrincipalSystem, ID: "collector"}
-	return []Record{
+	recs := []Record{
 		{Actor: system, Action: ActionAuditChainStart, Outcome: OutcomeInfo},
 		{Actor: system, Action: ActionRegisterVerify, Outcome: OutcomeSucceeded, Target: &Target{Family: "sel-751"}, RegisterRevision: 6},
 		{Actor: collector, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-20261024-0001", OperationID: "sel.ser.read_all", PolicyVersion: 3},
-		{Actor: collector, Action: ActionDeviceSessionOpen, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "inv-0001"},
-		{Actor: collector, Action: ActionCredentialUse, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "inv-0001"},
-		{Actor: collector, Action: ActionDevicePostureWarning, Outcome: OutcomeWarning, ReasonCode: "maxacc_above_1", Target: telnetTarget(), CorrelationID: "inv-0001"},
+		{Actor: collector, Action: ActionDeviceSessionOpen, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
+		{Actor: collector, Action: ActionCredentialUse, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
+		{Actor: collector, Action: ActionDevicePostureWarning, Outcome: OutcomeWarning, ReasonCode: "maxacc_above_1", Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
 		{Actor: collector, Action: ActionDeviceOp, Outcome: OutcomeSucceeded, Target: telnetTarget(), OperationID: "sel.ser.read_all", RegisterRevision: 6,
-			BytesSentDigest: "sha256:" + strings.Repeat("ab", 32), CorrelationID: "inv-0001"},
-		{Actor: collector, Action: ActionDeviceSessionClose, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "inv-0001"},
+			BytesSentDigest: "sha256:" + strings.Repeat("ab", 32), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
+		{Actor: collector, Action: ActionDeviceSessionClose, Outcome: OutcomeSucceeded, Target: telnetTarget(), CorrelationID: "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71"},
 		{Actor: collector, Action: ActionCollectorRequest, Outcome: OutcomeDenied, ReasonCode: string(authz.RefuseNotInvocable), CorrelationID: "req-20261024-0002"},
 	}
+	// The collector numbers every event it reports (C7-A5-2).
+	var n uint64
+	for i := range recs {
+		if CollectorReported(&recs[i]) {
+			n++
+			recs[i].CollectorSeq = n
+		}
+	}
+	return recs
 }
 
 func TestChainVerifies(t *testing.T) {
@@ -124,14 +134,14 @@ func TestEveryC7RefusalMapsToAnAuditRecord(t *testing.T) {
 	for _, code := range authz.RefusalCodes {
 		r := Record{Contract: ContractID, NodeID: "n1", Seq: 2, PrevHash: strings.Repeat("0", 63) + "1", Time: baseTime(),
 			Actor:  Actor{Type: authz.PrincipalSchedule, ID: "sch-1", Role: authz.RoleCollector},
-			Action: ActionCollectorRequest, Outcome: OutcomeDenied, ReasonCode: string(code), CorrelationID: "req-1"}
+			Action: ActionCollectorRequest, Outcome: OutcomeDenied, ReasonCode: string(code), CorrelationID: "req-1", CollectorSeq: 3}
 		if err := r.Validate(); err != nil {
 			t.Fatalf("%s: %v", code, err)
 		}
 	}
 	r := Record{Contract: ContractID, NodeID: "n1", Seq: 2, PrevHash: strings.Repeat("0", 63) + "1", Time: baseTime(),
 		Actor: Actor{Type: authz.PrincipalSchedule, ID: "sch-1"}, Action: ActionCollectorRequest, Outcome: OutcomeDenied,
-		ReasonCode: "made_up", CorrelationID: "req-1"}
+		ReasonCode: "made_up", CorrelationID: "req-1", CollectorSeq: 3}
 	if err := r.Validate(); err == nil {
 		t.Fatal("a code outside C7 accepted for collector.request")
 	}
@@ -144,7 +154,7 @@ func TestDeviceRefusalRecords(t *testing.T) {
 	for _, code := range []string{"fid_not_allowlisted", "lang_not_english", "password_prompt_absent", "auth_failed", "identity_mismatch", "unexpected_access_level"} {
 		r := Record{Contract: ContractID, NodeID: "n1", Seq: 2, PrevHash: strings.Repeat("0", 63) + "1", Time: baseTime(),
 			Actor: Actor{Type: authz.PrincipalSchedule, ID: "sch-1"}, Action: ActionDeviceRefused, Outcome: OutcomeDenied,
-			ReasonCode: code, Target: telnetTarget(), CorrelationID: "inv-1"}
+			ReasonCode: code, Target: telnetTarget(), CorrelationID: "inv-1", CollectorSeq: 3}
 		if err := r.Validate(); err != nil {
 			t.Fatalf("%s: %v", code, err)
 		}
@@ -178,6 +188,14 @@ func TestRecordRules(t *testing.T) {
 		"local time":                             mut(func(r *Record) { r.Time.UTC = "2026-10-24T14:40:00.123456+03:00" }),
 		"digest not sha256":                      mut(func(r *Record) { r.BytesSentDigest = "md5:abc" }),
 		"detail too long":                        mut(func(r *Record) { r.Detail = strings.Repeat("x", 513) }),
+		"collector event without collector_seq":  mut(func(r *Record) { r.CollectorSeq = 0 }),
+		"device action without invocation ID":    mut(func(r *Record) { r.CorrelationID = "" }),
+		"clock sync outside the C4 enum":         mut(func(r *Record) { r.Time.Clock.Sync = "ok" }),
+		"upper-case node":                        mut(func(r *Record) { r.NodeID = "Site-A" }),
+		"asset ID that is not a C1 UUID":         mut(func(r *Record) { r.Target.AssetID = "site-a.relay.feeder-3" }),
+		"node record with collector_seq": mut(func(r *Record) {
+			r.Action, r.Outcome, r.Target, r.CorrelationID = ActionCollectorRequest, OutcomeInfo, nil, "req-1"
+		}),
 	}
 	for name, r := range bad {
 		if err := r.Validate(); err == nil {
@@ -204,6 +222,11 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 		"raw device output": strings.Replace(string(ok), `"outcome"`, `"raw_output":"PSVTAgo=","outcome"`, 1),
 		"duplicate outcome": strings.Replace(string(ok), `"outcome":"succeeded"`, `"outcome":"succeeded","outcome":"failed"`, 1),
 		"trailing data":     string(ok) + `{}`,
+		// Sealed bytes never hold a raw CR, LF or NUL, so a forwarder can
+		// frame them without escaping (C8-A4-6).
+		"raw LF":  strings.Replace(string(ok), `,"outcome"`, ",\n\"outcome\"", 1),
+		"raw CR":  strings.Replace(string(ok), `,"outcome"`, ",\r\"outcome\"", 1),
+		"raw NUL": strings.Replace(string(ok), `,"outcome"`, ",\x00\"outcome\"", 1),
 		// encoding/json fills a field from a key that differs only in case,
 		// so these would show a reviewer one outcome and a reader another.
 		"case-folded duplicate": strings.Replace(string(ok), `"outcome":"succeeded"`, `"outcome":"succeeded","Outcome":"failed"`, 1),
@@ -290,7 +313,7 @@ func TestSealBuildsAVerifiableChain(t *testing.T) {
 	if err := VerifyChain(stored, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	base := `"contract":"otsec.audit/0.1","node_id":"site-a-node-1","time":{"utc":"2026-10-24T11:00:00Z","resolution_ns":1000000000,"clock":{"sync":"synchronized","source":"ntp","scope":"node"}},"actor":{"type":"system","id":"collector"},"action":"service.start","outcome":"info"`
+	base := `"contract":"otsec.audit/0.1","node_id":"site-a-node-1","time":{"utc":"2026-10-24T11:00:00Z","resolution_ns":1000000000,"clock":{"sync":"synchronized","source":"ntp"}},"actor":{"type":"system","id":"collector"},"action":"service.start","outcome":"info"`
 	if _, err := ValidatePending([]byte("{" + base + "}")); err != nil {
 		t.Fatalf("valid pending record rejected: %v", err)
 	}
@@ -311,5 +334,72 @@ func TestSealBuildsAVerifiableChain(t *testing.T) {
 	start := `{` + strings.Replace(base, `"service.start"`, `"audit.chain.start"`, 1) + `}`
 	if _, err := Seal([]byte(start), 5, strings.Repeat("ab", 32)); err == nil {
 		t.Error("audit.chain.start sealed at seq 5")
+	}
+}
+
+func TestVerifyCollectorSeq(t *testing.T) {
+	var recs []*Record
+	for _, b := range chain(t, sliceRecords()) {
+		r, err := ParseRecord(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recs = append(recs, r)
+	}
+	var last uint64
+	for _, r := range recs {
+		last = max(last, r.CollectorSeq)
+	}
+	if err := VerifyCollectorSeq(recs, 0, last); err != nil {
+		t.Fatal(err)
+	}
+	// The node leaves out the credential.use record.
+	var without []*Record
+	for _, r := range recs {
+		if r.Action != ActionCredentialUse {
+			without = append(without, r)
+		}
+	}
+	if err := VerifyCollectorSeq(without, 0, last); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("suppressed credential.use: got %v", err)
+	}
+	// The collector's latest reply is ahead of the records: the tail is missing.
+	if err := VerifyCollectorSeq(recs, 0, last+1); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("missing tail: got %v", err)
+	}
+	// One collector event recorded twice.
+	dup := append(append([]*Record{}, recs...), recs[len(recs)-1])
+	if err := VerifyCollectorSeq(dup, 0, last); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("duplicate: got %v", err)
+	}
+}
+
+// TestSchemaPatterns keeps the schema's shared identifier patterns equal to
+// the ones the code enforces (C8-A4-1, C8-A4-2).
+func TestSchemaPatterns(t *testing.T) {
+	b, err := os.ReadFile("schema/record.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties struct {
+			NodeID struct{ Pattern string } `json:"node_id"`
+			Target struct {
+				Properties struct {
+					AssetID struct{ Pattern string } `json:"asset_id"`
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ schema, code string }{
+		{s.Properties.NodeID.Pattern, nodeIDPattern.String()},
+		{s.Properties.Target.Properties.AssetID.Pattern, assetIDPattern.String()},
+	} {
+		if c.schema != c.code {
+			t.Errorf("schema pattern %q, code %q", c.schema, c.code)
+		}
 	}
 }

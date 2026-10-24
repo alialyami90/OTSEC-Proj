@@ -60,13 +60,12 @@
         "asset_id",
         "operation_id",
         "params",
-        "credential_ref",
         "register_version"
       ],
       "properties": {
         "asset_id": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "description": "TODO(C1): C1 asset ID"
         },
         "operation_id": {
@@ -89,7 +88,8 @@
         },
         "credential_ref": {
           "type": "string",
-          "pattern": "^cred_[a-z0-9]{8,40}$"
+          "pattern": "^cred_[a-z0-9]{8,40}$",
+          "description": "Absent for a level 0 operation (sel.id), required for any other; the collector checks this against the register (C7-A2-5)."
         },
         "register_version": {
           "type": "integer",

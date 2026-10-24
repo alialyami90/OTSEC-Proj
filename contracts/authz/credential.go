@@ -5,23 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"regexp/syntax"
 	"strconv"
+	"strings"
 	"time"
+
+	"otsec.local/otsec/contracts/node"
+	"otsec.local/otsec/contracts/register"
 )
 
 // Provisional identifier patterns for concepts owned by other contracts.
 var (
-	// TODO(C1): import the asset ID type and pattern from contracts/asset.
-	assetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	// TODO(C4): import the node ID type and pattern from contracts/event.
-	nodeIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	// TODO(C1): use asset.ValidAssetID once contracts/asset merges; this is
+	// C1's rule, a lowercase UUID (C8-A4-2), the same copy C4 holds.
+	assetIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	nodeIDPattern  = regexp.MustCompile(node.IDPattern) // D1-1, C7-A5-1
 	// TODO(C3): use an exported ID pattern from contracts/register; this copies
 	// its entry ID rule.
 	operationIDPattern = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`)
 
 	credentialRefIDPattern = regexp.MustCompile(`^cred_[a-z0-9]{8,40}$`)
-	accessLevelPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$`)
-	keyIDPattern           = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	// TODO(C1): use C1's endpoint ID rule once contracts/asset merges; this
+	// copies its token pattern for Endpoint.ID.
+	endpointIDPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	accessLevelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$`)
+	keyIDPattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 )
 
 // Transport is the downstream transport a credential is used on.
@@ -71,9 +79,10 @@ type CredentialRef struct {
 	ID                 string             `json:"id"`
 	AssetID            string             `json:"asset_id"`
 	NodeID             string             `json:"node_id"`
+	EndpointID         string             `json:"endpoint_id"` // the C1 endpoint of AssetID this credential is sent over (C7-A2-6)
 	Transport          Transport          `json:"transport"`
 	Purpose            Purpose            `json:"purpose"`
-	AccessLevel        string             `json:"access_level"` // device-native level name, e.g. "ACC"; must not exceed the family ceiling in the register
+	AccessLevel        string             `json:"access_level"` // the register's access level token the credential reaches, e.g. "1" for SEL Level 1 (C7-A2-4); never "0"
 	DownstreamSecurity DownstreamSecurity `json:"downstream_security"`
 	PlaintextScope     PlaintextScope     `json:"plaintext_scope,omitempty"` // required when the transport is plaintext
 	Version            uint32             `json:"version"`                   // 1 on install, +1 on every replacement
@@ -94,16 +103,24 @@ func (c CredentialRef) Validate() error {
 	if !nodeIDPattern.MatchString(c.NodeID) {
 		return fmt.Errorf("authz: node id %q is not valid", c.NodeID)
 	}
+	if !endpointIDPattern.MatchString(c.EndpointID) {
+		return fmt.Errorf("authz: endpoint id %q is not valid", c.EndpointID)
+	}
 	switch c.Transport {
-	case TransportTelnet, TransportSerial, TransportSSH:
+	case TransportTelnet, TransportSSH:
+	case TransportSerial:
+		// A serial port keeps its session state and nothing closes it, so
+		// serial credentials wait for a lab capture of the port's behaviour
+		// (C7-A2, note on serial transport).
+		return fmt.Errorf("authz: transport %s is not allowed in %s", c.Transport, ContractID)
 	default:
 		return fmt.Errorf("authz: unknown transport %q", c.Transport)
 	}
 	if c.Purpose != PurposeCollectReadOnly {
 		return fmt.Errorf("authz: purpose %q is not allowed in %s", c.Purpose, ContractID)
 	}
-	if !accessLevelPattern.MatchString(c.AccessLevel) {
-		return fmt.Errorf("authz: access level %q is not valid", c.AccessLevel)
+	if !accessLevelPattern.MatchString(c.AccessLevel) || c.AccessLevel == register.ProbeAccessLevel {
+		return fmt.Errorf("authz: access level %q is not valid; a level 0 operation needs no credential", c.AccessLevel)
 	}
 	switch c.DownstreamSecurity {
 	case DownstreamEncryptedAuthenticated, DownstreamEncryptedWeak, DownstreamPlaintext:
@@ -148,14 +165,17 @@ const (
 // suspension reasons, limited to the ones where the password was sent or may
 // have been: language-not-english and firmware-not-allowlisted are found in
 // the probe phase, before ACC, so they suspend the asset (C1) but not the
-// credential. The per-asset failed-auth floor is a refusal (rate_limited),
-// not a suspension.
+// credential. A first prompt that is already elevated (D18) is not one of
+// them either: no password was sent and the state clears on its own, so C2
+// refuses the session (refused.session_elevated) without suspending the
+// credential (C7-A2-2). The per-asset failed-auth floor is a refusal
+// (rate_limited), not a suspension.
 type SuspendReason string
 
 const (
 	SuspendAuthFailed           SuspendReason = "auth-failed"             // wrong password: one attempt, disconnect, no QUI (C-19)
 	SuspendPasswordPromptAbsent SuspendReason = "password-prompt-absent"  // ACC reached a prompt without asking for a password (D26, AP-23)
-	SuspendUnexpectedLevel      SuspendReason = "unexpected-access-level" // first prompt already elevated (D18)
+	SuspendUnexpectedLevel      SuspendReason = "unexpected-access-level" // ACC and the password reached a prompt other than the credential's level (C7-A2-2)
 	SuspendIdentityMismatch     SuspendReason = "identity-mismatch"       // serial number differed after login: the password went to another device (C1-A3-5)
 	SuspendOperator             SuspendReason = "operator"                // an admin suspended it
 )
@@ -167,6 +187,69 @@ const (
 // re-commissioned after the suspension. Otherwise the admin replaces the
 // credential, which is a new version (C1-A3-5).
 func (r SuspendReason) ClearableInPlace() bool { return r != SuspendIdentityMismatch }
+
+// FailureFloor is the shortest time between two failed authentications to
+// one asset (C7-A2-1). After a wrong password a SEL relay asks for the
+// password again, up to three times, and pulses SALARM on the third failure
+// (S22 p. 7.33). A Telnet session closed without QUI stays at its prompt
+// until the port's TIDLE expires (S22 p. 7.16), so a new session inside TIDLE
+// could land on that pending prompt and its first line would be the second
+// attempt. The floor is therefore longer than TIDLE: tidle plus one minute
+// when SHO P 1 last read it, and 31 minutes (the largest TIDLE, 30, plus one)
+// when it is unknown or out of range.
+func FailureFloor(tidle time.Duration) time.Duration {
+	if tidle <= 0 || tidle > 30*time.Minute {
+		return 31 * time.Minute
+	}
+	return tidle + time.Minute
+}
+
+// InsideFailureFloor reports whether a request for an asset whose last
+// failed authentication was at lastFailure must be refused with
+// rate_limited. The collector reads lastFailure from its durable state,
+// which it flushes before it replies to the run that failed (C7-A5-3), so
+// the floor survives a restart. A failure time after now counts as inside
+// the floor: a clock stepped backwards must not reopen it. Zero means no
+// failure is recorded.
+func InsideFailureFloor(lastFailure, now time.Time, floor time.Duration) bool {
+	if lastFailure.IsZero() {
+		return false
+	}
+	return lastFailure.After(now) || now.Sub(lastFailure) < floor
+}
+
+// Use is what the collector is about to do with a credential: the node it
+// runs on, the asset and C1 endpoint it connects to, the endpoint's
+// transport and acknowledgement scope, and the access level the register
+// operation needs.
+type Use struct {
+	NodeID      string
+	AssetID     string
+	EndpointID  string
+	Transport   Transport
+	AckScope    PlaintextScope // the C1 endpoint acknowledgement's scope; empty when it has none
+	AccessLevel string         // the register operation's access level token
+}
+
+// Binds checks bound use (C7-A2-4): the credential may be sent only for the
+// node, asset, endpoint, transport and access level it was installed for,
+// and a plaintext credential only where the endpoint's acknowledgement has
+// the same scope (C1-A3-3). Anything else is credential_mismatch.
+func (c *CredentialRef) Binds(u Use) error {
+	switch {
+	case u.NodeID != c.NodeID:
+		return refuse(RefuseCredentialMismatch, "credential is for node %s", c.NodeID)
+	case u.AssetID != c.AssetID || u.EndpointID != c.EndpointID:
+		return refuse(RefuseCredentialMismatch, "credential is for another asset or endpoint")
+	case u.Transport != c.Transport:
+		return refuse(RefuseCredentialMismatch, "credential is for transport %s", c.Transport)
+	case u.AccessLevel != c.AccessLevel:
+		return refuse(RefuseCredentialMismatch, "operation needs level %q, credential reaches %q", u.AccessLevel, c.AccessLevel)
+	case u.AckScope != c.PlaintextScope:
+		return refuse(RefuseCredentialMismatch, "endpoint acknowledgement scope %q differs from the credential's %q", u.AckScope, c.PlaintextScope)
+	}
+	return nil
+}
 
 // RevokeReason says why a credential was revoked.
 type RevokeReason string
@@ -234,17 +317,22 @@ func SealAAD(ref CredentialRef) []byte {
 		"version=" + strconv.FormatUint(uint64(ref.Version), 10) + "\n" +
 		"asset=" + ref.AssetID + "\n" +
 		"node=" + ref.NodeID + "\n" +
+		"endpoint=" + ref.EndpointID + "\n" +
 		"transport=" + string(ref.Transport) + "\n" +
 		"access_level=" + ref.AccessLevel + "\n")
 }
 
 // SecretPolicy is the write-time rule for a decrypted secret, applied inside
 // the collector before anything is stored. The family's register entry
-// supplies MaxLen and Allowed; the rest applies to every family.
+// supplies MaxLen, Allowed and MnemonicLen; the rest applies to every family.
 type SecretPolicy struct {
 	MinLen  int
 	MaxLen  int            // at most MaxSecretLen
 	Allowed *regexp.Regexp // whole-secret pattern, e.g. the SEL-751 Table 7.54 set; nil means printable ASCII
+	// MnemonicLen is how many leading characters of a command word the
+	// device reads: 3 for SEL, which accepts QUIT as QUI and CLOSE as CLO.
+	// 0 means the device reads whole words.
+	MnemonicLen int
 }
 
 // ErrSecretRejected is returned for a secret that fails write-time validation.
@@ -253,10 +341,15 @@ var ErrSecretRejected = errors.New("authz: secret rejected at write time")
 
 // ValidateSecret applies the write-time rules (A3 findings 4.2): printable
 // ASCII only, no CR or LF, within the length bounds and the family's allowed
-// set, and not equal to anything the register would accept or deny as a line,
-// so the credential slot can never carry a command. isRegisterLine reports
-// whether a line matches any register entry, allowed or denied.
-func ValidateSecret(secret []byte, p SecretPolicy, isRegisterLine func(line string) bool) error {
+// set, and nothing the device could read as a command (C7-A6-3). pkg is the
+// family's verified register package. The secret is rejected when, in any
+// case, the register matches it as a line (allowed or denied), or when its
+// upper-case form, without leading spaces, starts with the mnemonic of any
+// operation, session line or deny rule: the first MnemonicLen characters of
+// the command word, or the whole word when MnemonicLen is 0. The
+// prompt-gated slot is the main barrier; this check keeps a secret that the
+// slot sends at the wrong moment from reading as a command.
+func ValidateSecret(secret []byte, p SecretPolicy, pkg *register.Package) error {
 	max := p.MaxLen
 	if max <= 0 || max > MaxSecretLen {
 		max = MaxSecretLen
@@ -276,13 +369,141 @@ func ValidateSecret(secret []byte, p SecretPolicy, isRegisterLine func(line stri
 	if p.Allowed != nil && !p.Allowed.Match(secret) {
 		return fmt.Errorf("%w: character outside the family's allowed set", ErrSecretRejected)
 	}
-	if isRegisterLine == nil {
-		return fmt.Errorf("%w: no register check supplied", ErrSecretRejected)
+	if pkg == nil {
+		return fmt.Errorf("%w: no verified register package", ErrSecretRejected)
 	}
-	if isRegisterLine(string(secret)) {
-		return fmt.Errorf("%w: secret matches a register line", ErrSecretRejected)
+	m, err := register.NewMatcher(pkg)
+	if err != nil {
+		return fmt.Errorf("%w: register: %v", ErrSecretRejected, err)
+	}
+	upper := strings.ToUpper(string(secret))
+	for _, line := range []string{string(secret), upper} {
+		if v, _ := m.Match(line); v != register.VerdictUnlisted {
+			return fmt.Errorf("%w: secret matches a register line", ErrSecretRejected)
+		}
+	}
+	lead := strings.TrimLeft(upper, " ")
+	word := lead
+	if i := strings.IndexByte(word, ' '); i >= 0 {
+		word = word[:i]
+	}
+	for _, mn := range mnemonics(pkg) {
+		if p.MnemonicLen > 0 {
+			if len(mn) > p.MnemonicLen {
+				mn = mn[:p.MnemonicLen]
+			}
+			if strings.HasPrefix(lead, mn) {
+				return fmt.Errorf("%w: secret starts with a command mnemonic", ErrSecretRejected)
+			}
+		} else if word == mn {
+			return fmt.Errorf("%w: secret is a command word", ErrSecretRejected)
+		}
 	}
 	return nil
+}
+
+// mnemonics lists the upper-case command words of a register package: the
+// first word of every operation and session line, and the leading literal of
+// every deny rule. A deny rule with no leading literal (such as the rule for
+// bytes outside ASCII) adds none; Match still applies it.
+func mnemonics(pkg *register.Package) []string {
+	var out []string
+	first := func(line string) {
+		if f := strings.Fields(line); len(f) > 0 {
+			out = append(out, strings.ToUpper(f[0]))
+		}
+	}
+	for _, o := range pkg.Operations {
+		first(o.Line)
+	}
+	for _, s := range pkg.SessionControl {
+		first(s.Line)
+	}
+	for _, d := range pkg.Denied {
+		re, err := syntax.Parse(d.Pattern, syntax.Perl)
+		if err != nil {
+			continue // NewMatcher has already compiled every pattern
+		}
+		out = append(out, literalPrefixes(re)...)
+	}
+	return out
+}
+
+// literalPrefixes returns the literal each alternative of re starts with,
+// after leading optional whitespace, or nil when one alternative does not
+// start with a literal.
+func literalPrefixes(re *syntax.Regexp) []string {
+	switch re.Op {
+	case syntax.OpLiteral:
+		return []string{strings.ToUpper(string(re.Rune))}
+	case syntax.OpCapture:
+		return literalPrefixes(re.Sub[0])
+	case syntax.OpAlternate:
+		var out []string
+		for _, sub := range re.Sub {
+			p := literalPrefixes(sub)
+			if p == nil {
+				return nil
+			}
+			out = append(out, p...)
+		}
+		return out
+	case syntax.OpConcat:
+		for _, sub := range re.Sub {
+			if sub.Op == syntax.OpStar && sub.Sub[0].Op == syntax.OpCharClass && whitespaceOnly(sub.Sub[0]) {
+				continue
+			}
+			return literalPrefixes(sub)
+		}
+	}
+	return nil
+}
+
+func whitespaceOnly(cc *syntax.Regexp) bool {
+	for i := 0; i+1 < len(cc.Rune); i += 2 {
+		for r := cc.Rune[i]; r <= cc.Rune[i+1]; r++ {
+			if !strings.ContainsRune(" \t\n\v\f\r", r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// CheckAccessLevel checks a credential's access level against the family's
+// verified register package (C7-A6-1). The level must be one that an
+// auth-phase session line reaches from level 0 (for SEL-751, "ACC" with
+// access_level "0 -> 1"), and that a read-only operation in the operate
+// phase needs. For SEL-751 0.1 only "1" passes, so a Level 2 credential
+// cannot be installed. The collector applies it at install and at every run.
+// It cannot tell what the password opens: a Level 2 password installed as
+// level 1 is caught only if the relay rejects it at ACC (H-12).
+func CheckAccessLevel(pkg *register.Package, level string) error {
+	if pkg == nil {
+		return refuse(RefuseRegisterUnverified, "no verified register package")
+	}
+	reached := false
+	for _, s := range pkg.SessionControl {
+		from, to, ok := strings.Cut(s.AccessLevel, "->")
+		if !ok || strings.TrimSpace(from) != register.ProbeAccessLevel || strings.TrimSpace(to) != level {
+			continue
+		}
+		for _, ph := range s.Phases {
+			if ph == register.PhaseAuth {
+				reached = true
+			}
+		}
+	}
+	if !reached {
+		return refuse(RefuseCredentialMismatch, "no auth-phase session line reaches access level %q", level)
+	}
+	for i := range pkg.Operations {
+		o := &pkg.Operations[i]
+		if o.AccessLevel == level && o.Classification == register.ReadOnly && o.InPhase(register.PhaseOperate) {
+			return nil
+		}
+	}
+	return refuse(RefuseCredentialMismatch, "no read-only operation needs access level %q", level)
 }
 
 func validUTC(s string) error {

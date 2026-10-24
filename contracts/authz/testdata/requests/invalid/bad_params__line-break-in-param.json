@@ -8,7 +8,7 @@
   },
   "policy_version": 3,
   "run": {
-    "asset_id": "site-a.relay.feeder-3",
+    "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
     "operation_id": "sel.ser.read_all",
     "params": {
       "row": "1\r\nSER C"
