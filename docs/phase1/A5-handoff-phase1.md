@@ -1,6 +1,6 @@
 # A5 handoff: P1-A5 (C5 `otsec.store/0.1` and node posture labels)
 
-Owner: A5. Date: 2026-10-24. PR #33, branch `claude/project-thread-xni3ff` C4 and C8 have merged, and the PR is ready for A1 to merge. A1 holds `docs/agent-handoffs.md`, so this file is the handoff for A1 to copy in.
+Owner: A5. Date: 2026-10-24. PR #33, branch `claude/project-thread-xni3ff`. C4 and C8 have merged, and the PR is ready for A1 to merge. A1 holds `docs/agent-handoffs.md`, so this file is the handoff for A1 to copy in.
 
 **Completed**
 
