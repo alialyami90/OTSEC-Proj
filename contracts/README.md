@@ -19,6 +19,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | C7 | `contracts/authz` | `otsec.authz/0.1` | A3 |
 | C8 | `contracts/audit` | `otsec.audit/0.1` | A3 |
 | — | `contracts/version` | identifier parsing and the compatibility rule | A1 |
+| — | `contracts/node` | node ID and stream token, shared by C1 and C4 (D1-1) | A1 (maintained by A4) |
 
 Each package contains:
 
