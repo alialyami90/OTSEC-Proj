@@ -1,6 +1,10 @@
 package store
 
-import "context"
+import (
+	"context"
+
+	"otsec.local/otsec/contracts/audit"
+)
 
 // Audit records (class audit) are C8 records, not C4 events. A node has one
 // audit stream, and its records form one hash chain: each record carries its
@@ -9,57 +13,47 @@ import "context"
 // predecessor, so the store seals records inside the commit transaction and
 // never re-encodes them afterwards (A3 review of C5, C5-A3-1).
 
-// ChainLink is one position of the audit chain: a seq and the chain hash of
-// the exact bytes stored at it, as C8's Hash gives it (lowercase hex
-// SHA-256). Seq 0 with the chain's genesis hash is the position before the
-// first record. TODO(C8): with the node ID added it is an audit.Checkpoint,
-// which is what audit.VerifyChain takes as from and head.
-type ChainLink struct {
-	Seq  Seq
-	Hash string
+// ChainLink is one position of the audit chain: the node, a seq and the
+// chain hash (audit.Hash) of the exact bytes stored at it. It is C8's
+// Checkpoint, so a ChainAnchor can be passed to audit.VerifyChain as from.
+type ChainLink = audit.Checkpoint
+
+// GenesisLink is the position before a node's first audit record.
+func GenesisLink(n NodeID) ChainLink {
+	return ChainLink{NodeID: string(n), Seq: 0, Hash: audit.GenesisPrevHash}
 }
 
-// AuditChain is the part of C8 (PR #38) the store calls. TODO(C8): once C8
-// merges, an adapter over audit.ValidatePending, audit.Seal, audit.Hash and
-// audit.GenesisPrevHash. C8's Seal requires seq 1 to be the
-// audit.chain.start record.
-type AuditChain interface {
-	// ValidatePending checks a pending record, which has no seq and no
-	// prev_hash yet.
-	ValidatePending(pending []byte) error
-	// Seal returns the record's final bytes with seq and prevHash in them.
-	Seal(pending []byte, seq Seq, prevHash string) ([]byte, error)
-	// Hash is the chain hash of stored bytes.
-	Hash(stored []byte) string
-	// Genesis is the prev_hash of a node's first record.
-	Genesis() string
-}
-
-// SealAudit seals a batch of pending audit records after head, the link of
-// the last stored record (ChainLink{0, chain.Genesis()} on a new node). A
-// Committer calls it inside the CommitBatch transaction for class audit,
-// stores sealed[i] exactly as the Event of record i, and stores the returned
-// head in the same transaction. Outbox.Read returns those bytes unchanged.
+// SealAudit seals a batch of pending C8 records after head, the link of the
+// last stored record (GenesisLink on a new node). A Committer calls it inside
+// the CommitBatch transaction for class audit, stores sealed[i] exactly as
+// the Event of record i, and stores the returned head in the same
+// transaction. Outbox.Read returns those bytes unchanged.
 //
-// Every record is validated before any is sealed. On error nothing may be
-// written, and the Committer returns the error, which has CodeInvalid.
-func SealAudit(chain AuditChain, head ChainLink, recs []Record) ([][]byte, ChainLink, error) {
+// Every record is checked with audit.ValidatePending, and must name head's
+// node, before any is sealed; audit.Seal then requires seq 1 to be the
+// audit.chain.start record. On error nothing may be written, and the
+// Committer returns the error, which has CodeInvalid.
+func SealAudit(head ChainLink, recs []Record) ([][]byte, ChainLink, error) {
 	for i, r := range recs {
 		if r.Class != ClassAudit {
 			return nil, head, errf(CodeInvalid, nil, "record %d of an audit batch has class %s", i, r.Class)
 		}
-		if err := chain.ValidatePending(r.Event); err != nil {
+		p, err := audit.ValidatePending(r.Event)
+		if err != nil {
 			return nil, head, errf(CodeInvalid, err, "audit record %d is not a valid pending record", i)
+		}
+		if p.NodeID != head.NodeID {
+			return nil, head, errf(CodeInvalid, nil, "audit record %d is for node %s, the chain is %s", i, p.NodeID, head.NodeID)
 		}
 	}
 	sealed := make([][]byte, len(recs))
 	for i, r := range recs {
-		b, err := chain.Seal(r.Event, head.Seq+1, head.Hash)
+		b, err := audit.Seal(r.Event, head.Seq+1, head.Hash)
 		if err != nil {
 			return nil, head, errf(CodeInvalid, err, "sealing audit record %d", i)
 		}
 		sealed[i] = b
-		head = ChainLink{Seq: head.Seq + 1, Hash: chain.Hash(b)}
+		head = ChainLink{NodeID: head.NodeID, Seq: head.Seq + 1, Hash: audit.Hash(b)}
 	}
 	return sealed, head, nil
 }

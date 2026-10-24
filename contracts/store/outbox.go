@@ -28,7 +28,7 @@ type Outbox interface {
 	// least as long as any record that refers to it.
 	ReadCapture(ctx context.Context, ref string) (Capture, error)
 	// ChainAnchor returns the link of the last record pruned from the audit
-	// stream, or ChainLink{0, genesis} if none was. The prune step that
+	// stream, or GenesisLink if none was. The prune step that
 	// removes audit records writes it in the same transaction, so the
 	// retained chain always verifies from it (C5-A3-2). It is read-only.
 	// It fails with CodeInvalid for a stream that is not the audit stream.

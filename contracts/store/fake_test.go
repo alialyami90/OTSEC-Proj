@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"otsec.local/otsec/contracts/audit"
 	"sync"
 	"time"
 )
@@ -25,7 +27,7 @@ type fake struct {
 	cursors  map[StreamID]map[ConsumerID]Seq // persisted only
 	captures map[string]Capture
 
-	chain     AuditChain // seals records of class audit when set
+	sealAudit bool // seals records of class audit with C8 when set
 	heads     map[StreamID]ChainLink
 	anchors   map[StreamID]ChainLink
 	quotaFull map[StreamID]bool
@@ -99,12 +101,12 @@ func (f *fake) CommitBatch(_ context.Context, stream StreamID, recs []Record) (C
 	if f.quotaFull[stream] {
 		return Commit{}, &Error{Code: CodeQuotaReached, Detail: string(stream)}
 	}
-	if f.chain != nil && len(recs) > 0 && recs[0].Class == ClassAudit {
+	if f.sealAudit && len(recs) > 0 && recs[0].Class == ClassAudit {
 		head, ok := f.heads[stream]
 		if !ok {
-			head = ChainLink{Hash: f.chain.Genesis()}
+			head = GenesisLink(f.node)
 		}
-		sealed, next, err := SealAudit(f.chain, head, recs)
+		sealed, next, err := SealAudit(head, recs)
 		if err != nil {
 			return Commit{}, err
 		}
@@ -297,7 +299,7 @@ func (f *fake) PruneStep(_ context.Context, b Boundary, max int) (int, error) {
 	}
 	for _, e := range ev[:n] {
 		if e.Class == ClassAudit {
-			f.anchors[b.Stream()] = ChainLink{Seq: e.Key.Seq, Hash: f.chain.Hash(e.Event)}
+			f.anchors[b.Stream()] = ChainLink{NodeID: string(f.node), Seq: e.Key.Seq, Hash: audit.Hash(e.Event)}
 		}
 	}
 	f.events[b.Stream()] = ev[n:]
@@ -324,13 +326,13 @@ func (f *fake) ReadCapture(_ context.Context, ref string) (Capture, error) {
 }
 
 func (f *fake) ChainAnchor(_ context.Context, stream StreamID) (ChainLink, error) {
-	if f.chain == nil {
+	if !f.sealAudit {
 		return ChainLink{}, &Error{Code: CodeInvalid, Detail: "no audit stream"}
 	}
 	if a, ok := f.anchors[stream]; ok {
 		return a, nil
 	}
-	return ChainLink{Hash: f.chain.Genesis()}, nil
+	return GenesisLink(f.node), nil
 }
 
 // retained lists the seqs still stored for stream.

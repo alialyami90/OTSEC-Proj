@@ -89,7 +89,14 @@ This follows the A3 proposal, which A1 accepted for this brief (HR-9; handoff lo
 - Other nodes may still receive the asset's Syslog. Only collection is exclusive.
 - Why: two nodes polling one relay double its session load (V-S13), and would produce two event streams for the same SER rows.
 
-## 5. Shape proposed for C1 (A2 decides)
+## 5. Upgrade order: readers before writers (A1 D1-13)
+
+- Central nodes, and every receiver of a contract that a site node writes (C4 events, C8 audit), are upgraded before the nodes that write it.
+- A site node never emits a minor version that its central node has not declared it supports. A 0.1 reader refuses an enum value from a later minor. That is safe, but the events would then fail at the older central node.
+- In 0.x the operator follows this order by hand, using the release notes. An enrollment-time version exchange that enforces it belongs to Phase 4 (distributed operation).
+- A node reports the contract versions it writes in node status, so the operator can see which writers are ahead of a reader. *(proposed)*
+
+## 6. Shape proposed for C1 (A2 decides)
 
 ```json
 "posture": {

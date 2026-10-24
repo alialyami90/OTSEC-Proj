@@ -1,63 +1,49 @@
 package store
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"otsec.local/otsec/contracts/audit"
 )
 
-// testChain stands in for C8 until it merges: a sealed record is
-// "<seq>|<prev hash hex>|<pending>". TODO(C8): use audit.Seal and
-// audit.VerifyChain.
-type testChain struct{}
-
-func (testChain) ValidatePending(p []byte) error {
-	if len(p) == 0 || bytes.ContainsRune(p, '|') {
-		return fmt.Errorf("pending record %q", p)
-	}
-	return nil
+// pendingAudit builds a pending C8 record for the fake's node.
+func pendingAudit(action, extra string) []byte {
+	return fmt.Appendf(nil, `{"contract":"otsec.audit/0.1","node_id":"site-a-node1",`+
+		`"time":{"utc":"2026-10-24T12:00:00.000001Z","resolution_ns":1000,"clock":{"sync":"synchronized","source":"ntp"}},`+
+		`"actor":{"type":"system","id":"node"},"action":%q,"outcome":"info"%s}`, action, extra)
 }
 
-func (testChain) Seal(p []byte, seq Seq, prev string) ([]byte, error) {
-	return fmt.Appendf(nil, "%d|%s|%s", seq, prev, p), nil
-}
-
-func (testChain) Hash(stored []byte) string {
-	sum := sha256.Sum256(stored)
-	return hex.EncodeToString(sum[:])
-}
-
-func (testChain) Genesis() string { return strings.Repeat("0", 64) }
-
-// verifyChain checks that retained records follow from anchor link by link.
+// verifyChain checks the retained records with C8's own verifier, from anchor.
 func verifyChain(retained []Stored, anchor ChainLink) error {
-	at := anchor
-	for _, r := range retained {
-		want := fmt.Sprintf("%d|%s|", at.Seq+1, at.Hash)
-		if r.Key.Seq != at.Seq+1 || !bytes.HasPrefix(r.Event, []byte(want)) {
-			return fmt.Errorf("seq %d: %q does not follow %d", r.Key.Seq, r.Event, at.Seq)
-		}
-		at = ChainLink{Seq: r.Key.Seq, Hash: testChain{}.Hash(r.Event)}
+	stored := make([][]byte, len(retained))
+	for i, r := range retained {
+		stored[i] = r.Event
 	}
-	return nil
+	return audit.VerifyChain(anchor.NodeID, stored, &anchor, nil)
 }
 
+// auditRecords returns n pending store.mode_change records.
 func auditRecords(n int) []Record {
 	recs := make([]Record, n)
 	for i := range recs {
-		recs[i] = Record{Stream: "audit", Class: ClassAudit, Event: fmt.Appendf(nil, "op-%d", i)}
+		recs[i] = Record{Stream: "audit", Class: ClassAudit,
+			Event: pendingAudit("store.mode_change", fmt.Sprintf(`,"reason_code":"collecting","detail":"op-%d"`, i))}
 	}
 	return recs
 }
 
+// auditFake returns a fake whose audit chain already holds its
+// audit.chain.start record at seq 1, sealed as a Committer would.
 func auditFake() *fake {
 	f := newFake()
-	f.chain = testChain{}
+	f.sealAudit = true
+	if _, err := f.CommitBatch(context.Background(), "audit", []Record{{Stream: "audit", Class: ClassAudit, Event: pendingAudit("audit.chain.start", "")}}); err != nil {
+		panic(err)
+	}
 	return f
 }
 
@@ -86,13 +72,13 @@ func TestAuditSealedInCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readAll(t, f, "audit")
-	if len(got) != 4 {
+	if len(got) != 5 {
 		t.Fatalf("%d records", len(got))
 	}
-	if err := verifyChain(got, ChainLink{Hash: testChain{}.Genesis()}); err != nil {
+	if err := verifyChain(got, GenesisLink(f.node)); err != nil {
 		t.Fatal(err)
 	}
-	if f.heads["audit"] != (ChainLink{Seq: 4, Hash: testChain{}.Hash(got[3].Event)}) {
+	if f.heads["audit"] != (ChainLink{NodeID: string(f.node), Seq: 5, Hash: audit.Hash(got[4].Event)}) {
 		t.Fatalf("head %+v", f.heads["audit"])
 	}
 }
@@ -103,17 +89,17 @@ func TestAuditBadPendingRefusesBatch(t *testing.T) {
 	f := auditFake()
 	l, _ := NewLog(f, f.node, testStreams, DefaultGroup, nil)
 	recs := auditRecords(3)
-	recs[1].Event = []byte("a|b")
+	recs[1].Event = pendingAudit("store.mode_change", `,"reason_code":"collecting","password":"x"`)
 	if _, err := l.AppendBatch(context.Background(), recs); !isCode(err, CodeInvalid) {
 		t.Fatalf("err %v", err)
 	}
-	if len(f.events["audit"]) != 0 || l.Stopped() != nil {
+	if len(f.events["audit"]) != 1 || l.Stopped() != nil {
 		t.Fatalf("%d written, stopped %v", len(f.events["audit"]), l.Stopped())
 	}
 	if _, err := l.AppendBatch(context.Background(), auditRecords(2)); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyChain(readAll(t, f, "audit"), ChainLink{Hash: testChain{}.Genesis()}); err != nil {
+	if err := verifyChain(readAll(t, f, "audit"), GenesisLink(f.node)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -158,7 +144,7 @@ func TestAuditPruneKeepsAnchor(t *testing.T) {
 
 // C5-A3-2(b): best-effort windows never make audit prunable.
 func TestAuditBoundaryIgnoresBestEffort(t *testing.T) {
-	f := auditFake()
+	f := newFake()
 	f.seed("audit", 10, f.now.Add(-48*time.Hour))
 	ctx := context.Background()
 	siem := Consumer{ID: "siem", Stream: "audit", Delivery: BestEffort, ReplayWindow: time.Hour}
@@ -217,7 +203,7 @@ func TestAuditBeforeAct(t *testing.T) {
 	f := auditFake()
 	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
 	var got Receipt
-	if err := AuditBeforeAct(ctx, l, rec, func(r Receipt) error { got = r; return nil }); err != nil || got == nil || got.Key().Seq != 1 {
+	if err := AuditBeforeAct(ctx, l, rec, func(r Receipt) error { got = r; return nil }); err != nil || got == nil || got.Key().Seq != 2 {
 		t.Fatalf("err %v receipt %v", err, got)
 	}
 	if err := AuditBeforeAct(ctx, l, Record{Stream: "s", Class: ClassPlatform, Event: []byte("e")}, func(Receipt) error { return nil }); !isCode(err, CodeInvalid) {
@@ -236,5 +222,23 @@ func TestQuotaRefusalDoesNotStopTheLog(t *testing.T) {
 	}
 	if _, err := l.AppendBatch(ctx, []Record{{Stream: "ok", Class: ClassAdapterEvidence, Event: []byte("e")}}); err != nil || l.Stopped() != nil {
 		t.Fatalf("err %v stopped %v", err, l.Stopped())
+	}
+}
+
+// SealAudit refuses a record for another node and a second chain start,
+// before anything is sealed.
+func TestSealAuditRefusesWrongNodeAndRestart(t *testing.T) {
+	head := GenesisLink("site-a-node1")
+	start := Record{Stream: "audit", Class: ClassAudit, Event: pendingAudit("audit.chain.start", "")}
+	_, head, err := SealAudit(head, []Record{start})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := Record{Stream: "audit", Class: ClassAudit, Event: []byte(strings.Replace(string(auditRecords(1)[0].Event), "site-a-node1", "site-b-node1", 1))}
+	if _, h, err := SealAudit(head, []Record{other}); !isCode(err, CodeInvalid) || h != head {
+		t.Fatalf("other node: %v", err)
+	}
+	if _, h, err := SealAudit(head, []Record{start}); !isCode(err, CodeInvalid) || h != head {
+		t.Fatalf("second chain start: %v", err)
 	}
 }

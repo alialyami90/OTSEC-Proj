@@ -20,7 +20,7 @@ Evidence classes: every number below is `simulated` (Linux container, Windows Se
 - **A bad pending record** refuses its whole batch with `invalid`, and nothing is written (`TestAuditBadPendingRefusesBatch`).
 - **Pruning keeps a chain anchor.** The prune step that deletes audit records also writes the `ChainLink` of the last record it deleted, in the same transaction. `Outbox.ChainAnchor` exposes it read-only, so the retained chain always verifies from it, even after a prune that was interrupted and resumed (`TestAuditPruneKeepsAnchor`).
 - **Only required consumers make audit prunable.** A best-effort replay window would delete audit records with no confirmed delivery (AP-17), so `ComputeBoundary` ignores best-effort consumers for class audit. A node whose audit stream has no required consumer keeps audit until its quota is reached, and then fails closed (`TestAuditBoundaryIgnoresBestEffort`).
-- `AuditChain` and `ChainLink` mirror C8 as it stands in PR #38 (`TODO(C8)`): `Seal(pending, seq, prevHash)` with `prevHash` as lowercase hex, `Hash` over the exact sealed bytes, and `GenesisPrevHash` for seq 1, which must be the `audit.chain.start` record. When C8 merges they become an adapter over those functions, a `ChainLink` plus the node ID is an `audit.Checkpoint`, and the tests verify with `audit.VerifyChain`.
+- C8 has merged, and `SealAudit` calls `audit.ValidatePending`, `audit.Seal` and `audit.Hash` directly. It also refuses a record for a node other than the chain's. `ChainLink` is `audit.Checkpoint`, so `ChainAnchor` passes straight to `audit.VerifyChain` as `from`, and the tests verify with it. Seq 1 must be the `audit.chain.start` record (`GenesisLink`, `TestSealAuditRefusesWrongNodeAndRestart`).
 
 ## 2. Commit before acknowledgement, with group commit
 
@@ -181,7 +181,7 @@ The owner's tests (`contracts/store/*_test.go`) cover each one against an in-mem
 
 ## 8. Not covered, and dependencies
 
-- **C8 (`TODO(C8)`).** `AuditChain` and `ChainLink` mirror the parts of C8 the store uses (section 1a). C8 merges before C5 in the merge order.
+- **C8.** C8 has merged (#38). C5 uses `contracts/audit` for sealing, hashing and checkpoints (section 1a).
 - **Captures and redaction (C5-A3-6).** A capture is raw device output and may contain the echo of what the transport sent. HR-3 redaction happens before the capture is built (C2, C6), never in the store.
 - **C4.** C4 has merged. `NodeID` and `StreamID` are aliases of `contracts/node`'s `ID` and `Stream` (D1-1), and `Key` is C4's `EventID`. Two C4 changes are requested in [reviews/C4-A5.md](reviews/C4-A5.md):
   - a pre-commit event form, because the seq exists only after commit;

@@ -471,8 +471,9 @@ func Resume(ctx context.Context, env StartupEnv, p StartupPolicy, prev Report) R
 func (m Mode) AcceptsEvents() bool { return m == ModeCollecting }
 
 // ModeChange is a change of the store's mode. The node emits it as a C4
-// platform health event (HealthModeChanged) and as an audit record.
-// TODO(C8): the audit record shape.
+// platform health event (HealthModeChanged) and as a C8 audit record with
+// action store.mode_change, the new mode as reason_code and the alarms in
+// detail.
 type ModeChange struct {
 	From, To Mode
 	At       time.Time
