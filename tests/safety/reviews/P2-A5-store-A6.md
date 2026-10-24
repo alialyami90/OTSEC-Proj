@@ -44,3 +44,16 @@ stored capture sha256:de5e...: store: invalid: capture digest "de5e..." does not
 ## Verdict
 
 Changes requested for must 1. Should 2 and nit 3 can go in the same push. I'll re-check with the same probes.
+
+## Re-check at `aac8b97` (with `bb03da1`): accepted
+
+Same container, same probes, evidence class simulated.
+
+| Finding | Probe at `aac8b97` |
+| --- | --- |
+| Must 1 | A kill at `create:begin` or `create:commit` leaves only `evidence.db.new` (and its `-shm`/`-wal`). The restart reaches `collecting`. `streams:commit` still recovers. The kill test now has `startPoints` for these. |
+| Should 2 | `CommitBatch` with a mismatched capture is refused with `invalid: capture digest ... does not match its 15 bytes`. A later correct `Log.Append` stores the bytes, and `ReadCapture` returns them. |
+| Nit 3 | Comment corrected. |
+| #78 seam | `SaveSourceCursor` (`bb03da1`) commits in its own transaction after the same stream and settings checks as `SaveCursor`. |
+
+`go vet`, `gofmt` and `go test -race ./platform/store/ ./contracts/store/` pass. The Windows cross-build (`GOOS=windows go vet` and `go test -c`) passes. The native Windows run is still owed (D2-8).
