@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -80,23 +81,48 @@ func TestNormalizeC2Read(t *testing.T) {
 	}
 }
 
-// The C2 examples print row 1 first, but Figure 10.16 prints the oldest row
-// first and row 1 last. Read in their order, the newest row would be stored
-// first, so the read is kept as bytes and not aligned (reported to A2).
-func TestC2ExampleRowOrderIsNotAligned(t *testing.T) {
+// A read whose rows print row 1 (the newest) first, against Figure 10.16,
+// would store the newest row first. It is kept as bytes and not aligned.
+func TestNewestFirstReadIsNotAligned(t *testing.T) {
+	inv, a := c2Fixtures(t)
+	res := withRows(t, []testRow{
+		{serLine(1, "10/24/2026", "09:10:01.251", "IN101", "Deasserted"), true},
+		{serLine(2, "10/24/2026", "09:10:01.004", "IN101", "Asserted"), true},
+	})
+	out, err := Normalize(res, inv, a, testInput(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Events) != 0 || len(out.Health) != 1 || out.Health[0].Health.Type != event.HealthParseFailed || out.StateChanged || out.State != nil {
+		t.Fatalf("%d events, health %+v", len(out.Events), out.Health)
+	}
+	if d := out.Health[0].Health.Details; d["aligned"] != "false" || !strings.Contains(d["reason"], "row number") {
+		t.Errorf("details %v", d)
+	}
+}
+
+// The C2 SER examples normalize when their rows follow Figure 10.16, and
+// are kept as bytes when they print row 1 first (A2 is reordering them;
+// this test holds before and after that change).
+func TestC2SERExamples(t *testing.T) {
 	inv, a := c2Fixtures(t)
 	for _, name := range []string{"ok.json", "ok-with-echo.json", "partial.parse_errors.json"} {
 		res := c2Result(t, name)
+		inOrder := true
+		for i, rec := range res.Records {
+			if rec.ParseOK && rec.Fields[0].Value != strconv.Itoa(len(res.Records)-i) {
+				inOrder = false
+			}
+		}
 		out, err := Normalize(res, inv, a, testInput(nil))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if len(out.Events) != 0 || len(out.Health) != 1 || out.Health[0].Health.Type != event.HealthParseFailed || out.StateChanged || out.State != nil {
-			t.Errorf("%s: %d events, health %+v", name, len(out.Events), out.Health)
-			continue
+		if inOrder && len(out.Events) != len(res.Records) {
+			t.Errorf("%s: %d events for %d rows", name, len(out.Events), len(res.Records))
 		}
-		if d := out.Health[0].Health.Details; d["aligned"] != "false" || !strings.Contains(d["reason"], "row number") {
-			t.Errorf("%s: details %v", name, d)
+		if !inOrder && (len(out.Events) != 0 || out.Health[0].Health.Details["aligned"] != "false") {
+			t.Errorf("%s: newest-first read aligned: %+v", name, out)
 		}
 	}
 }
