@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -167,12 +167,13 @@ func modeChange(i int) c5.Record {
 
 func isCode(err error, code c5.Code) bool { return errors.Is(err, &c5.Error{Code: code}) }
 
-// storeDir is a new store directory that only its owner can use, as Lock
-// requires on Linux.
+// storeDir is a new store directory as CreateDir makes it: mode 0700 on
+// Linux, a protected DACL for this account, SYSTEM and Administrators on
+// Windows.
 func storeDir(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o700); err != nil {
+	dir := filepath.Join(t.TempDir(), "store")
+	if err := CreateDir(dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	return dir
