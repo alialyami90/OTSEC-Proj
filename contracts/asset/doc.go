@@ -11,8 +11,11 @@
 //     evidence class. Device class, vendor and product family (ADR-0006) are
 //     attributes like any other, so their provenance is visible too.
 //   - Endpoints, each with its transport and its downstream_security label
-//     (A3 §4.5). A plaintext endpoint needs a recorded per-device
-//     acknowledgement and is labelled insecure wherever it appears.
+//     (A3 §4.5). Telnet, serial and Syslog without TLS are always
+//     plaintext-unauthenticated. Only a pinned-key binding makes a link
+//     encrypted-authenticated. Anything less needs a recorded per-device
+//     acknowledgement with its scope, and is labelled insecure wherever it
+//     appears.
 //   - The identity binding: which attributes the collector compares, and how
 //     strong that comparison is. See "What the identity binding proves" below.
 //   - A suspension that stops collection from the asset until an operator
@@ -41,7 +44,10 @@
 // and serial number, because both are plain text the relay prints to anyone
 // at Level 0 or Level 1. The binding is therefore labelled "spoofable", and a
 // match never authenticates the device. The Level 1 password is still sent in
-// clear text to whatever answers (owner-accepted risk, ADR-0005).
+// clear text to whatever answers (owner-accepted risk, ADR-0005). Anyone
+// who can read station LAN traffic also reads the Level 1 password; the
+// binding gives no protection against that. This is why plaintext links are
+// accepted for the lab only (Acknowledgement.Scope).
 //
 // The serial number is not in the SEL-751 ID response (S22 Figure 7.38). It
 // appears in the SER report header (Figure 10.16) and the STA report, both
@@ -53,7 +59,11 @@
 // identity_mismatch error (C2), the asset is suspended with reason
 // "identity-mismatch", and collection stays stopped until an operator
 // re-commissions the asset. A mismatch is never resolved automatically, and
-// the observed value never replaces the declared one.
+// the observed value never replaces the declared one. A mismatch found after
+// authentication (the serial number in the SER header) means the password
+// went to a device that is not the bound one: C7 then treats the credential
+// as exposed, and only rotation or re-commissioning clears it (C1-A3-5). No
+// event is created for the asset from that session.
 //
 // # What it leaves out
 //

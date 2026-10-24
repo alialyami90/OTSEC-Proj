@@ -79,7 +79,8 @@
         "acknowledgement": {
           "by": "admin:lab-admin",
           "at": "2026-10-24T09:00:00Z",
-          "reason": "RTAC Syslog is RFC 3164 over UDP only (A2 portfolio section 3)"
+          "reason": "RTAC Syslog is RFC 3164 over UDP only (A2 portfolio section 3)",
+          "scope": "lab-only"
         }
       }
     }

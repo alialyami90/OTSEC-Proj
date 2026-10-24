@@ -134,7 +134,8 @@
         "acknowledgement": {
           "by": "admin:lab-admin",
           "at": "2026-10-24T09:00:00Z",
-          "reason": "Simulated slice only, lab-only credentials (ADR-0005)"
+          "reason": "Simulated slice only, lab-only credentials (ADR-0005)",
+          "scope": "lab-only"
         }
       }
     }

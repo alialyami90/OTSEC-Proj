@@ -58,7 +58,8 @@ def relay():
             "downstream_security": {
                 "level": "plaintext-unauthenticated",
                 "acknowledgement": {"by": "admin:lab-admin", "at": T0,
-                                    "reason": "Simulated slice only, lab-only credentials (ADR-0005)"}}}],
+                                    "reason": "Simulated slice only, lab-only credentials (ADR-0005)",
+                                    "scope": "lab-only"}}}],
         "identity_binding": {"method": "device-reported", "strength": "spoofable",
                              "attributes": ["firmware_id", "serial_number"]},
         "profile": {"id": "sel-751-ascii", "version": "0.1"},
@@ -103,7 +104,8 @@ def rtac():
             "downstream_security": {
                 "level": "plaintext-unauthenticated",
                 "acknowledgement": {"by": "admin:lab-admin", "at": T0,
-                                    "reason": "RTAC Syslog is RFC 3164 over UDP only (A2 portfolio section 3)"}}}],
+                                    "reason": "RTAC Syslog is RFC 3164 over UDP only (A2 portfolio section 3)",
+                                    "scope": "lab-only"}}}],
         "identity_binding": {"method": "address-only", "strength": "spoofable", "attributes": []},
         "profile": {"id": "sel-rtac-syslog", "version": "0.1"},
     }
@@ -196,6 +198,16 @@ INVALID = {
     "session-observation-without-span": (relay, lambda a: attr(a, "sel.cid")["observations"][0]["source"].pop("span")),
     "missing-vendor": (relay, lambda a: a.update(attributes=[x for x in a["attributes"] if x["name"] != "vendor"])),
     "other-major": (relay, lambda a: a.update(schema="otsec.asset/1.0")),
+    "serial-labelled-encrypted": (relay, lambda a: a["endpoints"].append({
+        "id": "port3-serial", "transport": "serial", "serial_device": "COM3",
+        "downstream_security": {"level": "encrypted-authenticated"}})),
+    "ssh-authenticated-without-pinned-key": (relay, lambda a: a["endpoints"].append({
+        "id": "gateway-ssh", "transport": "ssh", "host": "192.0.2.22", "port": 22,
+        "downstream_security": {"level": "encrypted-authenticated"}})),
+    "syslog-tls-authenticated-without-pinned-key": (rtac, lambda a: a["endpoints"].append({
+        "id": "syslog-tls-in", "transport": "syslog-tls", "host": "192.0.2.40", "port": 6514,
+        "downstream_security": {"level": "encrypted-authenticated"}})),
+    "acknowledgement-without-scope": (relay, lambda a: a["endpoints"][0]["downstream_security"]["acknowledgement"].pop("scope")),
     "asset-id-from-device-content": (relay, lambda a: a.update(asset_id="sel-751-" + FID.lower())),
 }
 

@@ -53,6 +53,7 @@ func TestSchemaEnumsMatchGo(t *testing.T) {
 	a := schemaDefs(t, "asset.schema.json")
 	p := schemaDefs(t, "capability-profile.schema.json")
 	for name, want := range map[string][]string{
+		"ackScope":         sorted(AckScopes),
 		"confidence":       sorted(Confidences),
 		"evidenceClass":    sorted(EvidenceClasses),
 		"sourceMethod":     sorted(SourceMethods),

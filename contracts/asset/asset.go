@@ -92,10 +92,20 @@ type DownstreamSecurity struct {
 // Acknowledgement records an administrator's per-device acceptance of an
 // insecure downstream link (A3 §4.5, ADR-0005).
 type Acknowledgement struct {
-	By     string `json:"by"` // TODO(C7): principal ID.
+	By     string `json:"by"` // TODO(C7): human principal ID.
 	At     string `json:"at"` // RFC 3339 UTC. TODO(C4).
 	Reason string `json:"reason"`
+	// Scope is where the acceptance holds. The collector refuses to run when
+	// the credential's C7 plaintext_scope differs from it (C1-A3-3).
+	Scope AckScope `json:"scope"`
 }
+
+// AckScope is where an insecure downstream link is accepted. 0.1 has one
+// value: the owner accepted Telnet for the simulated and lab slice only
+// (ADR-0005). A production scope needs an owner decision and a later minor.
+type AckScope string
+
+const LabOnly AckScope = "lab-only"
 
 // IdentityBinding says which attributes tie this asset record to the device
 // that answers, and how strong that tie is. See the package documentation.
@@ -298,6 +308,7 @@ var (
 	SecurityLevels    = []SecurityLevel{EncryptedAuthenticated, EncryptedWeak, PlaintextUnauthenticated}
 	BindingMethods    = []BindingMethod{DeviceReported, AddressOnly, PinnedKey}
 	BindingStrengths  = []BindingStrength{Spoofable, Cryptographic}
+	AckScopes         = []AckScope{LabOnly}
 	SuspensionReasons = []SuspensionReason{SuspendIdentityMismatch, SuspendAuthFailed, SuspendPasswordPromptAbsent,
 		SuspendLanguageNotEnglish, SuspendFirmwareNotAllowed, SuspendUnexpectedLevel, SuspendOperator}
 	PostureCodes  = []PostureCode{StorageDurabilityUnverified, OSOutOfSupport, OSSupportUnknown}
@@ -623,15 +634,25 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 	}
 	ds := ep.DownstreamSecurity
 	v.enum(p+".downstream_security.level", string(ds.Level), SecurityLevels)
-	if (ep.Transport == Telnet || ep.Transport == SyslogUDP || ep.Transport == SyslogTCP) && ds.Level != PlaintextUnauthenticated {
+	if AlwaysPlaintext(ep.Transport) && ds.Level != PlaintextUnauthenticated {
 		v.fail("%s: %s is plaintext-unauthenticated, whatever the record says", p, ep.Transport)
 	}
 	if ds.Level != "" && ds.Level != EncryptedAuthenticated {
 		ack := ds.Acknowledgement
 		if ack == nil || ack.By == "" || strings.TrimSpace(ack.Reason) == "" || !ValidTime(ack.At) {
-			v.fail("%s: %s needs an acknowledgement with by, at and reason (A3 §4.5)", p, ds.Level)
+			v.fail("%s: %s needs an acknowledgement with by, at, reason and scope (A3 §4.5)", p, ds.Level)
+		} else {
+			v.enum(p+".downstream_security.acknowledgement.scope", string(ack.Scope), AckScopes)
 		}
 	}
+}
+
+// AlwaysPlaintext reports whether a transport is plaintext-unauthenticated
+// whatever a record says: Telnet, serial (anything on the line or on a
+// networked serial server sees the password) and Syslog without TLS
+// (A3 §4.5, C1-A3-1).
+func AlwaysPlaintext(t Transport) bool {
+	return t == Telnet || t == Serial || t == SyslogUDP || t == SyslogTCP
 }
 
 func (v *validator) binding(a Asset, attrs map[string]Attribute) {
@@ -644,6 +665,12 @@ func (v *validator) binding(a Asset, attrs map[string]Attribute) {
 	for _, ep := range a.Endpoints {
 		if b.Method == PinnedKey && ep.DownstreamSecurity.Level == PlaintextUnauthenticated {
 			v.fail("identity_binding: a plaintext endpoint (%s) cannot carry a pinned key", ep.ID)
+		}
+		// Encryption without a key pinned at commissioning does not
+		// authenticate the device (AP-12, V-S14, C1-A3-2): such a link is
+		// encrypted-weak, with its acknowledgement.
+		if ep.DownstreamSecurity.Level == EncryptedAuthenticated && b.Method != PinnedKey {
+			v.fail("endpoints: %s is labelled encrypted-authenticated but the binding is %q; only pinned-key authenticates the device", ep.ID, b.Method)
 		}
 	}
 	if b.Method == DeviceReported && len(b.Attributes) == 0 {
@@ -763,6 +790,8 @@ func enumContains(allowed any, val string) bool {
 		return contains(xs, SuspensionReason(val))
 	case []PostureCode:
 		return contains(xs, PostureCode(val))
+	case []AckScope:
+		return contains(xs, AckScope(val))
 	case []CapabilityName:
 		return contains(xs, CapabilityName(val))
 	case []Mechanism:

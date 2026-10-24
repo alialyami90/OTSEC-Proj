@@ -35,6 +35,10 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/session-observation-without-span.json` | A session observation with no transcript span (A4 EP-2). |
 | `invalid/missing-vendor.json` | The required `vendor` attribute is missing. |
 | `invalid/other-major.json` | A 1.0 record is not readable as 0.x. |
+| `invalid/serial-labelled-encrypted.json` | A serial endpoint labelled `encrypted-authenticated`: serial is always plaintext (C1-A3-1). |
+| `invalid/ssh-authenticated-without-pinned-key.json` | SSH labelled `encrypted-authenticated` on a `device-reported` asset: without a pinned key the device is not authenticated (C1-A3-2). |
+| `invalid/syslog-tls-authenticated-without-pinned-key.json` | The same for a Syslog-over-TLS endpoint on an address-only asset (C1-A3-2). |
+| `invalid/acknowledgement-without-scope.json` | A plaintext acknowledgement with no scope (C1-A3-3). |
 | `invalid/asset-id-from-device-content.json` | An asset ID derived from the FID instead of an assigned UUID. |
 | `invalid/profile-adapter-without-allowlist.json` | A profile that sends adapter operations with no firmware allowlist (AP-27). |
 | `invalid/profile-claim-without-citation.json` | A capability claim with no citation. |
