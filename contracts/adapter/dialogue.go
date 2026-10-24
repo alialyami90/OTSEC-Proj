@@ -175,10 +175,13 @@ func (c *check) dialogue(r Result, code Code) {
 				c.fail("%s: sent after a password that no level prompt confirmed (C-19, D1-20)", at(x))
 			}
 		case x.phase == PhaseClose && p == "" && (code == FailedTimeout || code == FailedResponseTooLarge) &&
-			(cred < 0 || k > cred+1):
+			level >= 1 && (cred < 0 || k > cred+1):
 			// The one line not sent after a prompt: a step ended without
-			// one, and QUI drops a level already confirmed back to 0 (D18,
-			// V-S13). It is never the first send after the password.
+			// one, and QUI drops a level already confirmed by a prompt back
+			// to 0 (D18, V-S13). It is never the first send after the
+			// password, and never follows an unanswered ACC, where a late
+			// "Password: ?" would take it as a wrong password (A3 change 12);
+			// there nothing is sent and the C7 floor covers the next session.
 		case x.phase == PhaseProbe || x.phase == PhaseAuth:
 			if p != promptLevel0 {
 				c.fail("%s: %q sent before the %q prompt", at(x), bytes.TrimRight(x.b, "\r\n"), promptLevel0)

@@ -475,6 +475,13 @@ def invalid_results(good):
     out["quit-after-unconfirmed-password"] = s.result("failed", "failed.timeout", fid_item(sp))
 
     s = Session()
+    s.connect(); s.probe(); sp = s.ident()
+    s.tx("auth", b"ACC\r\n")
+    s.rx("auth", b"ACC\r\n")  # then nothing until the step timeout; a late "Password: ?" would take QUI
+    s.quit()
+    out["quit-after-unanswered-acc"] = s.result("failed", "failed.timeout", fid_item(sp))
+
+    s = Session()
     s.connect(); s.probe(); sp = s.ident(); s.acc()
     off = s.tx("auth", RED + b"\r\nQUI\r\n")
     s.redactions.append({"offset": off, "length": len(RED), "reason": "credential", "component": "transport"})

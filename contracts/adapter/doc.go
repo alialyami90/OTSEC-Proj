@@ -51,8 +51,9 @@
 //     short quiet interval with no byte received.
 //   - One exception: after failed.timeout or failed.response_too_large, QUI
 //     may be sent with no prompt before it, because a session at Level 1
-//     must end with QUI (D18, V-S13) and the step ended without one. It is
-//     never the first send after the password.
+//     must end with QUI (D18, V-S13) and the step ended without one. It
+//     needs Level 1 confirmed by a prompt first, so it is never the first
+//     send after the password and never follows an unanswered ACC.
 //   - If the device prints nothing on connect, one bare line end may wake
 //     it: first, once, and only into silence. A session that ended without
 //     QUI can leave the relay elevated or inside "Password: ?" until TIDLE
