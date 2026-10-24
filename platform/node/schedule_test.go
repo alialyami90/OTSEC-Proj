@@ -592,3 +592,25 @@ func TestRunWaitsBeforeTheFirstRun(t *testing.T) {
 		t.Fatalf("%d requests in the first 200 ms after start", f.n())
 	}
 }
+
+// Tick and the scheduler share the runtime (run under -race).
+func TestTickAlongsideRuns(t *testing.T) {
+	c, dir := schedConfig(t, nil)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	var seq uint64
+	s := newScheduler(t, r, wireCollector(t, func(*authz.CollectorRequest) {}, &seq))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 20; i++ {
+			r.Tick(bg)
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		if rep := s.RunOnce(bg, 0); rep.Outcome != "ok" {
+			t.Fatalf("run %d: %+v", i, rep)
+		}
+	}
+	<-done
+}
