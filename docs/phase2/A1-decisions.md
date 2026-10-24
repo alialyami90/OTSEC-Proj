@@ -93,6 +93,8 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The PR records the Windows run as owed. A6 keeps the list of owed runs and runs them once Go is available on the PC.
 - The Phase 2 gate still requires the slice suite to pass on Windows (P2 exit gate). D2-8 delays the Windows evidence. It does not waive it.
 
+**Ended 2026-10-24, 22:49Z.** With the owner's approval (decision card, 22:22Z), A6 put portable Go 1.26.0 inside OTSEC on the owner's PC. The owed Windows Go runs then passed at main 04c9525, #84 and #89. From now on D2-7 applies in full: every PR is tested on Windows on the PC before it merges. The PC has no C compiler, so `go test -race` runs on Linux only.
+
 ## D2-9: RELP/TLS peer check is by name, not by CA alone
 
 **Evidence:** A6, `desk`/`simulated`, rsyslogd 8.2312.0 with librelp 1.11.0. With `tls.authmode="certvalid"`, imrelp accepted a self-signed client certificate that the CA never signed. With `tls.authmode="name"` and `tls.permittedPeer` set to the node's name, imrelp refused that certificate, a missing certificate, and a stranger's certificate.
