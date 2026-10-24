@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"otsec.local/otsec/contracts/asset"
 )
 
 // serFixture is a byte-exact copy of A2's documented-example transcription
@@ -153,32 +155,35 @@ func TestDecode(t *testing.T) {
 // Each invalid example and the code it must produce. testdata/NOTES.md says
 // what each shows.
 var invalid = map[string]Code{
-	"precision-overclaim":             CodePrecision,
-	"received-precision-overclaim":    CodePrecision,
-	"utc-with-unknown-offset":         CodeOffset,
-	"utc-inconsistent":                CodeOffset,
-	"known-offset-without-basis":      CodeOffset,
-	"bytes-tampered":                  CodeEvidence,
-	"span-outside-evidence":           CodeEvidence,
-	"seq-zero":                        CodeID,
-	"node-id-uppercase":               CodeID,
-	"stream-with-colon":               CodeID,
-	"category-without-mapping":        CodeUnjustifiedMeaning,
-	"failed-parse-with-normalized":    CodeForbidden,
-	"missing-native":                  CodeMissing,
-	"received-without-z":              CodeTimeFormat,
-	"other-major":                     CodeSchema,
-	"device-event-platform-auth":      CodeEnum,
-	"content-field-configured":        CodeEnum,
-	"no-asset-no-flag":                CodeMissing,
-	"platform-event-with-native":      CodeForbidden,
-	"closed-enum-unknown":             CodeEnum,
-	"adapter-poll-without-invocation": CodeMissing,
-	"context-span-outside-evidence":   CodeEvidence,
-	"evidence-ref-mismatch":           CodeEvidence,
-	"origin-auth-mismatch":            CodeEnum,
-	"wall-clock-missing":              CodeMissing,
-	"leap-second-with-utc":            CodeOffset,
+	"precision-overclaim":                CodePrecision,
+	"received-precision-overclaim":       CodePrecision,
+	"utc-with-unknown-offset":            CodeOffset,
+	"utc-inconsistent":                   CodeOffset,
+	"known-offset-without-basis":         CodeOffset,
+	"bytes-tampered":                     CodeEvidence,
+	"span-outside-evidence":              CodeEvidence,
+	"seq-zero":                           CodeID,
+	"node-id-uppercase":                  CodeID,
+	"stream-with-colon":                  CodeID,
+	"category-without-mapping":           CodeUnjustifiedMeaning,
+	"failed-parse-with-normalized":       CodeForbidden,
+	"missing-native":                     CodeMissing,
+	"received-without-z":                 CodeTimeFormat,
+	"other-major":                        CodeSchema,
+	"device-event-platform-auth":         CodeEnum,
+	"content-field-configured":           CodeEnum,
+	"no-asset-no-flag":                   CodeMissing,
+	"platform-event-with-native":         CodeForbidden,
+	"closed-enum-unknown":                CodeEnum,
+	"adapter-poll-without-invocation":    CodeMissing,
+	"context-span-outside-evidence":      CodeEvidence,
+	"evidence-ref-mismatch":              CodeEvidence,
+	"origin-auth-mismatch":               CodeEnum,
+	"wall-clock-missing":                 CodeMissing,
+	"leap-second-with-utc":               CodeOffset,
+	"evidence-class-missing":             CodeMissing,
+	"evidence-class-not-observed":        CodeEnum,
+	"platform-event-with-evidence-class": CodeForbidden,
 }
 
 func TestInvalidExamples(t *testing.T) {
@@ -408,5 +413,41 @@ func TestHealthDetailKeys(t *testing.T) {
 		if got := !slices.Contains(Codes(e.Validate()), CodeEnum); got != ok {
 			t.Errorf("detail key %q: accepted %v, want %v", key, got, ok)
 		}
+	}
+}
+
+// D1-23: only device-observed is a claim that the far end was a device.
+func TestSimulated(t *testing.T) {
+	for _, c := range []struct {
+		class asset.EvidenceClass
+		want  bool
+	}{
+		{asset.DeviceObserved, false},
+		{asset.Simulated, true},
+		{"", true},
+		{"a-class-from-0.7", true},
+	} {
+		if got := (Source{EvidenceClass: c.class}).Simulated(); got != c.want {
+			t.Errorf("Simulated() with %q = %v, want %v", c.class, got, c.want)
+		}
+	}
+	e := load(t, "testdata/valid/sel751-fig10-16-row1.json")
+	e.Source.EvidenceClass = asset.DeviceObserved
+	if err := e.Validate(); err != nil {
+		t.Fatalf("device-observed refused: %v", err)
+	}
+	// The enum is open to later minors (A6 D1-23 review change 1): a 0.2
+	// class is kept and read as simulated; a 0.1 event takes only the two.
+	e.Source.EvidenceClass = "lab-replay"
+	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
+		t.Error("0.1 event with an unknown class validated")
+	}
+	e.Schema = "otsec.event/0.2"
+	if err := e.Validate(); err != nil || !e.Source.Simulated() {
+		t.Errorf("0.2 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
+	}
+	e.Source.EvidenceClass = "Not A Token"
+	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
+		t.Error("0.2 event with a malformed class validated")
 	}
 }

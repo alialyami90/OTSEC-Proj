@@ -15,7 +15,8 @@
         "confidence": "configured"
       }
     },
-    "origin_auth": "none"
+    "origin_auth": "none",
+    "evidence_class": "simulated"
   },
   "collection": {
     "method": "adapter-poll",

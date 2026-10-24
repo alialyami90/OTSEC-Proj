@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/version"
 )
 
@@ -165,6 +166,18 @@ func checkDeviceEvent(c *checker, e *Event) {
 	if s.Sender != nil && strings.TrimSpace(s.Sender.Address) == "" {
 		c.fail(CodeMissing, "source.sender.address", "empty")
 	}
+	// evidence_class is open to later minors (D1-23): a class this reader
+	// does not know is kept and read as simulated through Source.Simulated.
+	// An event of this minor or earlier takes only the two values.
+	switch s.EvidenceClass {
+	case asset.DeviceObserved, asset.Simulated:
+	case "":
+		c.fail(CodeMissing, "source.evidence_class", "a device event says whether its device was real or a simulator (D1-23)")
+	default:
+		if got, err := version.Parse(e.Schema); err != nil || got.Minor <= self.Minor || !tokenPattern.MatchString(string(s.EvidenceClass)) {
+			c.fail(CodeEnum, "source.evidence_class", "%q is not %s or %s", s.EvidenceClass, asset.DeviceObserved, asset.Simulated)
+		}
+	}
 	if e.Health != nil {
 		c.fail(CodeForbidden, "health", "only platform events carry health")
 	}
@@ -198,6 +211,9 @@ func checkPlatformEvent(c *checker, e *Event) {
 	}
 	if e.Source.Asset != nil {
 		checkAsset(c, e.Source.Asset)
+	}
+	if e.Source.EvidenceClass != "" {
+		c.fail(CodeForbidden, "source.evidence_class", "platform events have no far end to classify (D1-23)")
 	}
 	if e.Native != nil || e.DeviceTime != nil || e.Collection != nil {
 		c.fail(CodeForbidden, "native/device_time/collection", "platform events carry no device record")

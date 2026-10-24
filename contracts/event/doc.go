@@ -23,13 +23,20 @@
 //     the time as printed, and coarser internal timing is an accuracy. The
 //     offset from UTC may be "unknown", and then no UTC time is stated. Time
 //     quality is scoped (record, report, device or stream). A rendered time
-//     may not carry more fractional digits than its resolution supports. The collector's receive time is a
-//     separate field. C8 audit records reuse DeviceTime and Received.
+//     may not carry more fractional digits than its resolution supports. The
+//     collector's receive time is a separate field; for an adapter poll it
+//     is the time the record's last byte arrived (C2 ReceivedAt). C8 audit records reuse DeviceTime and Received.
 //   - Who sent it and what it is about. Source.Asset is the subject (a C1 asset
 //     reference); Source.Sender is who delivered the bytes. A relaying sender
 //     (an RTAC, an SEL-5056) never becomes the subject: the subject is then
 //     bound with confidence "asserted" (A3 AP-22). Source.OriginAuth records
 //     how the sender was authenticated.
+//   - Real or simulated (A1 D1-23). Every device event carries
+//     Source.EvidenceClass: device-observed or simulated. It is set from
+//     configuration, never from what the far end says, so a simulated read
+//     can never pass upstream as a device read (principle 10). Readers use
+//     Source.Simulated, which counts any value other than device-observed
+//     as simulated. C6 forwards it as evc.
 //   - Snapshot alignment for ring-buffer sources such as the SEL ASCII SER
 //     (A6 C-13, R-A4-1, R-A4-2). Align compares consecutive reads by alignment
 //     key; the key is the record without its row number. A gap or an
@@ -67,5 +74,7 @@
 //
 // Readers accept every 0.x minor and ignore unknown fields (not strict).
 // Kind, Health.Type, Flags, DeviceTime.Format and quality time sources are
-// open sets; every other enum is closed.
+// open sets. Source.EvidenceClass is open to later minors only: an event of
+// 0.1 takes device-observed or simulated, and a later minor's new class is
+// read as simulated (D1-23). Every other enum is closed.
 package event

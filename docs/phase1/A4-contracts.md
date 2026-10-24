@@ -88,6 +88,13 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 | A5 2 | The target-to-consumer mapping is stated (one consumer per stream, audit when set; ID = name, Delivery = class, ReplayWindow = replay_seconds). A `Consumers` function with a test against `store.Consumer.Validate` lands as soon as C5 (#33) merges, since C6 cannot import it before. | `doc.go`; function pending #33 |
 | A5 shoulds and notes | Mode B resumes at min(cursor+1, first event in the window); a pruned jump is `forward.unreachable`. Rename means a new cursor; start positions of new targets; the removal alarm states what becomes prunable. The too-large stall and the audit store without a target are stated as known limits. `MinAuditOctets` uses `audit.MaxRecordBytes`. | `doc.go`, `target.go` |
 
+## Change from the C2 review (A1 D1-23)
+
+| Source | Change | Where |
+| --- | --- | --- |
+| [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. The enum is open to later minors: a 0.1 event takes only the two values, and a later minor's new class is kept and read as simulated (A6 D1-23 review change 1). C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
+| C2-A4 changes 4 and 5 | For an adapter poll, `received.utc` is C2 `Transcript.ReceivedAt(record span)`. The resolution and clock state come from the node's clock status at the invocation's `ended_at`. | C4 `Received` doc, `doc.go` |
+
 ## Proposals for A1
 
 1. **Line endings of fixtures.** No `.gitattributes` exists, so a Windows checkout with `core.autocrlf=true` can rewrite LF to CRLF in `tests/fixtures/`, which changes every byte-exact fixture and its SHA-256. C4 works around it with a `-text` copy in `contracts/event/testdata/`. Proposed root `.gitattributes`: `tests/fixtures/** -text` and `**/testdata/*.txt -text`.

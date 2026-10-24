@@ -15,7 +15,8 @@
         "confidence": "configured"
       }
     },
-    "origin_auth": "platform"
+    "origin_auth": "platform",
+    "evidence_class": "simulated"
   },
   "collection": {
     "method": "adapter-poll",

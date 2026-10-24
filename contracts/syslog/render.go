@@ -58,6 +58,8 @@ type Param struct {
 //	abind    binding method/confidence, for example adapter-target/configured
 //	sender   sender address as observed by the node
 //	auth     C4 origin_auth
+//	evc      C4 evidence_class: device-observed or simulated (D1-23); on
+//	         every device event, never omitted to fit the size limit
 //	rcv      received.utc at full precision (HEADER TIMESTAMP is truncated)
 //	rres     received.resolution_ns
 //	rsync    received clock sync state
@@ -133,6 +135,7 @@ func params(e *event.Event, omit string, content bool) []Param {
 		add("sender", s.Address)
 	}
 	add("auth", string(e.Source.OriginAuth))
+	opt("evc", string(e.Source.EvidenceClass))
 	add("rcv", e.Received.UTC)
 	num("rres", e.Received.ResolutionNS)
 	add("rsync", string(e.Received.Clock.Sync))
