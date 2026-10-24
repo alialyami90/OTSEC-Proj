@@ -60,3 +60,11 @@ I disabled one rule at a time in `forward.go` and ran the package's tests (not m
 2. The `inFlight(i)` check in `release` cannot change behaviour today. The `forward.too-large` event is committed after every earlier event of the held stream was sent in the same session, and `Window` confirms only a contiguous prefix. So when it is confirmed, those earlier events are confirmed too. Keep the check: it states the rule.
 3. My probes also showed that a confirmed transaction whose cursor was not saved before shutdown is sent again (7 duplicates on a stop at cursor 10). That is the at-least-once rule working as C6 says. Receivers remove duplicates by `eid`.
 4. Owed on Windows: `go test ./modules/telemetry/forward/... ./contracts/syslog ./tests/contract/` at `8baa19d`. The `TestRsyslog*` tests should skip there.
+
+## Re-check at `e102d5d`
+
+One commit since `8baa19d`, from A2's review: a refusal now names the refused event in `Status().LastErr`, and the open is refused unless the collector offers `relp_version=0` (`TestOpenNeedsRELPVersion0`). My oracle offers `relp_version=0`, and all my store-backed probes pass again at this commit. vet, gofmt and `go test -race` for the telemetry, syslog and contract packages pass.
+
+- Should 3 is closed at this commit. With `s.win.Answer(r)` skipped in `open()`, 11 tests now fail. The `commands=syslog` rule itself is checked by `Window.Answer`, which C6's own tests cover.
+- Shoulds 1 and 2 and nit 4 are unchanged.
+- Native Windows run on ALI's PC at `e102d5d`: `go test -count=1 ./modules/telemetry/forward/... ./contracts/syslog ./tests/contract/` passes. The three `TestRsyslog*` tests skip, because there is no rsyslogd on Windows. `-race` is not available there (no C compiler for cgo).
