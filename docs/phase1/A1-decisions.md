@@ -111,7 +111,7 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **Question (A6, C4 re-check R-1):** `Align`'s gap path allocates (n+1)(m+1) `int32`. A SEL-751 read of at most 1,024 rows costs 4 MB. But a fault or an attacker on the Telnet path can send far more: 50,000 rows comes to about 10 GB and takes down the node.
 - **Decision:** the bound is enforced in both places.
   - **C4 ceiling:** `event.MaxAlignRows = 2048`, which costs at most about 16 MB. `Align` itself refuses a longer read with an error and allocates nothing. The contract function protects itself and does not rely on its callers.
-  - **C2 per-family limit:** each capability profile states its own `max_read_rows`, at or below the C4 ceiling. For SEL-751 that is 1,024, taken from the manual.
+  - **Per-family limit:** each capability profile (C1 `profile.go`, used by C2) states its own `max_read_rows`, at or below the C4 ceiling. For SEL-751 that is 1,024, taken from the manual. *Corrected 2026-10-24: profiles live in C1, not C2 (D1-18).*
   - **Over-limit reads:** a read over the limit is a failed parse. Its bytes are kept, a `parse.failed` health event is raised, and no records are aligned or stored from it.
   - **Raising the ceiling:** a minor version may raise it when a family's evidence calls for it.
 - **Action:**
@@ -154,3 +154,22 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **Note (A4, A6):** D1-14 closes the case A6 raised. One case remains that cannot be detected from the reads alone: when keys repeat, a new record identical to an old one, and placed before the first distinct new record, cannot be told apart from the old one.
 - **Decision:** C4's doc.go states the limitation. V-S4 reports the residual measured by A6's randomized model, and it is listed as an open risk in the Phase 1 exit document.
 - **Evidence:** SEL-751 SER rows carry millisecond timestamps, so identical rows need identical text in the same millisecond. Only a device run will show how often that happens.
+
+## D1-18. Family session limits live on the C1 capability profile (2026-10-24)
+
+- **Question (A2, C7-A2):** C7 says the collector takes session limits from the register or the profile, and neither has a field for them yet.
+- **Decision:** add `session_limits` to the C1 capability profile, next to `max_read_rows` (D1-12). Each value stays at or below the C2 ceilings. C3 stays a list of lines and the conditions for sending them; per-family timing and counts are profile facts with citations.
+- **Fields for 0.1:**
+  - concurrent sessions;
+  - the minimum interval between collections;
+  - password attempts per session;
+  - the failed-auth floor;
+  - the idle timeout the platform assumes (`TIDLE`).
+- **A2's SEL-751 finding (S22 p. 7.33, p. 7.16):**
+  - The relay re-prompts `Password: ?` up to three times.
+  - A Telnet session closed without `QUI` stays elevated until `TIDLE` expires, which is 1 to 30 minutes.
+  - So the failed-auth floor must be longer than the largest `TIDLE`. A first prompt that is already elevated gets no password and does not suspend the credential (`refused.session_elevated`).
+- **Action:**
+  - A2 adds the fields to #32.
+  - A3 reads C7's limits from the profile.
+  - A6 models re-prompting and persisted elevation in the recording simulator.
