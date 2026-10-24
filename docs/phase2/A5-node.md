@@ -65,9 +65,9 @@ None of the Windows-only code has run.
 
 ## Open
 
-- **Clearing a halt.** A halted asset stays stopped. Clearing it needs an audited admin operation, owned by A1 and A3.
+- **Clearing a halt.** A halted asset stays stopped, so it fails closed. The audited clear operation is out of Phase 2 scope (A1); it is a Phase 3 item for A3 and A5, in `docs/phase-2-exit.md`.
 - **Reading by role.** No read API with roles exists. Until one does, the CLI leaves the audit stream and quarantines out, and shows only quarantine counts.
 - **W-3 "and every other program".** The installer blocks outbound Telnet for `otsec-node` only. Blocking it for every other program on the host is a site decision.
 - **Node-side `CheckLines`.** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector.
-- **SER row order.** The C2 example `ok.json` prints SER rows newest first, and A4's normalizer refuses that order. The scheduler test rebuilds the read in Figure 10.16 order. A2, A4 and A6 must confirm what the simulator prints, or the slice stores no SER events. This was raised to A1.
+- **SER row order.** A2's #85 puts the C2 example `ok.json` rows oldest first, as Figure 10.16 and A6's simulator do. Until #85 merges, the scheduler test rebuilds the read in that order; after it merges, the test uses `ok.json` as it is.
 - **Forwarding.** The forwarder is A4's, and runs against `Runtime.Store` and `Runtime.Log`. `node.Run` does not start it yet.
