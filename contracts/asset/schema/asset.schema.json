@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.asset/0.1",
+  "title": "otsec.asset/0.1 asset record (C1)",
+  "description": "Structural schema only. Not strict: readers ignore unknown fields and accept every 0.x minor, reading an enum value added in a later minor as that enum's fallback. Cross-field rules (confidence derived from observations, at most one observation per evidence class and method, simulated values only from simulator sessions, session observations carrying a transcript span, Telnet, serial and plain Syslog always plaintext-unauthenticated, encrypted-authenticated only with a pinned-key binding, an acknowledgement with scope for every level below encrypted-authenticated, binding strength implied by method, binding attributes having an operator-declared value, platform_node only on class server, os-out-of-support needing a condition) are enforced by Asset.Validate in contracts/asset. The enum lists here are checked against the Go lists by schema_test.go.",
+  "type": "object",
+  "required": ["schema", "asset_id", "node_id", "attributes", "identity_binding"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^otsec\\.asset/0\\.(0|[1-9][0-9]{0,3})$"},
+    "asset_id": {"$ref": "#/$defs/uuid"},
+    "node_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "description": "The node that runs adapter sessions to this asset. contracts/node IDPattern (a lowercase DNS label), shared with otsec.event."},
+    "attributes": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/attribute"}},
+    "endpoints": {"type": "array", "items": {"$ref": "#/$defs/endpoint"}},
+    "identity_binding": {"$ref": "#/$defs/identityBinding"},
+    "profile": {
+      "type": "object", "required": ["id", "version"],
+      "properties": {"id": {"$ref": "#/$defs/token"}, "version": {"type": "string", "minLength": 1}}
+    },
+    "suspension": {
+      "type": "object", "required": ["reason", "since", "ref"],
+      "properties": {
+        "reason": {"$ref": "#/$defs/suspensionReason"},
+        "since": {"$ref": "#/$defs/time"},
+        "ref": {"type": "string", "minLength": 1}
+      }
+    },
+    "platform_node": {
+      "type": "object", "required": ["posture"],
+      "properties": {"posture": {"type": "array", "items": {"$ref": "#/$defs/postureLabel"}}}
+    }
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "token": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "time": {"type": "string", "format": "date-time", "pattern": "Z$", "description": "RFC 3339 UTC. TODO(C4): timestamp model."},
+    "value": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000-\\u001f\\u007f]+$"},
+    "attributeName": {
+      "type": "string",
+      "anyOf": [
+        {"enum": ["device_class", "vendor", "product_family", "model", "part_number", "serial_number", "firmware_id", "firmware_version", "device_name", "hostname", "ip_address", "mac_address", "location", "os_name", "os_version", "hardware_model", "drive_model"]},
+        {"pattern": "^[a-z][a-z0-9]{1,15}\\.[a-z][a-z0-9_]{0,63}$"}
+      ]
+    },
+    "attribute": {
+      "type": "object", "required": ["name", "value", "confidence", "observations"],
+      "properties": {
+        "name": {"$ref": "#/$defs/attributeName"},
+        "value": {"$ref": "#/$defs/value"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "observations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/observation"}}
+      }
+    },
+    "observation": {
+      "type": "object", "required": ["value", "evidence_class", "source"],
+      "properties": {
+        "value": {"$ref": "#/$defs/value"},
+        "evidence_class": {"$ref": "#/$defs/evidenceClass"},
+        "source": {
+          "type": "object", "required": ["method", "ref", "observed_at"],
+          "properties": {
+            "method": {"$ref": "#/$defs/sourceMethod"},
+            "ref": {"type": "string", "minLength": 1},
+            "span": {"$ref": "#/$defs/span"},
+            "observed_at": {"$ref": "#/$defs/time"}
+          }
+        }
+      }
+    },
+    "span": {
+      "type": "object", "required": ["offset", "length"],
+      "properties": {"offset": {"type": "integer", "minimum": 0}, "length": {"type": "integer", "minimum": 1}}
+    },
+    "endpoint": {
+      "type": "object", "required": ["id", "transport", "downstream_security"],
+      "properties": {
+        "id": {"$ref": "#/$defs/token"},
+        "transport": {"$ref": "#/$defs/transport"},
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "serial_device": {"type": "string"},
+        "downstream_security": {
+          "type": "object", "required": ["level"],
+          "properties": {
+            "level": {"$ref": "#/$defs/securityLevel"},
+            "acknowledgement": {
+              "type": "object", "required": ["by", "at", "reason", "scope"],
+              "properties": {
+                "by": {"type": "string", "minLength": 1, "description": "TODO(C7): human principal ID."},
+                "at": {"$ref": "#/$defs/time"},
+                "reason": {"type": "string", "minLength": 1},
+                "scope": {"$ref": "#/$defs/ackScope"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "identityBinding": {
+      "type": "object", "required": ["method", "strength", "attributes"],
+      "properties": {
+        "method": {"$ref": "#/$defs/bindingMethod"},
+        "strength": {"$ref": "#/$defs/bindingStrength"},
+        "attributes": {"type": "array", "items": {"$ref": "#/$defs/attributeName"}},
+        "pre_credential": {"type": "array", "items": {"$ref": "#/$defs/attributeName"}, "description": "Subset of attributes compared before any credential is sent. Non-empty for device-reported, empty for address-only."}
+      },
+      "if": {"properties": {"method": {"const": "device-reported"}}},
+      "then": {"required": ["pre_credential"], "properties": {"pre_credential": {"minItems": 1}}}
+    },
+    "postureLabel": {
+      "type": "object", "required": ["label", "since"],
+      "properties": {
+        "label": {"$ref": "#/$defs/postureCode"},
+        "since": {"$ref": "#/$defs/time"},
+        "condition": {"type": "string"},
+        "migration_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      }
+    },
+    "ackScope": {"enum": ["lab-only"]},
+    "confidence": {"enum": ["single-source", "corroborated", "conflicting"]},
+    "evidenceClass": {"enum": ["device-observed", "simulated", "operator-declared", "documented", "inferred"]},
+    "sourceMethod": {"enum": ["adapter-session", "syslog-received", "passive-network", "operator-entry", "document", "derived", "simulator-session"]},
+    "transport": {"enum": ["telnet", "ssh", "serial", "syslog-udp", "syslog-tcp", "syslog-tls"]},
+    "securityLevel": {"enum": ["encrypted-authenticated", "encrypted-weak", "plaintext-unauthenticated"]},
+    "bindingMethod": {"enum": ["device-reported", "address-only", "pinned-key"]},
+    "bindingStrength": {"enum": ["spoofable", "cryptographic"]},
+    "suspensionReason": {"enum": ["identity-mismatch", "auth-failed", "password-prompt-absent", "language-not-english", "firmware-not-allowlisted", "unexpected-access-level", "operator"]},
+    "postureCode": {"enum": ["storage-durability-unverified", "os-out-of-support", "os-support-unknown"]},
+    "deviceClass": {"enum": ["protective-relay", "ied-other", "rtu", "automation-controller", "communications-processor", "ethernet-switch", "router", "security-gateway", "firewall", "time-server", "server", "engineering-workstation", "hmi", "historian", "meter", "port-server", "unknown"]}
+  }
+}

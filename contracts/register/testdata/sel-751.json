@@ -1,0 +1,2029 @@
+{
+  "contract": "otsec.register/0.1",
+  "family": "sel-751",
+  "revision": 2,
+  "issued": "2026-10-24",
+  "owner": "A2",
+  "sources": [
+    {
+      "id": "S1",
+      "title": "SEL-300G Relay Instruction Manual, Quick-Start section (mirror: bcsswitchgear.com `SEL_300G_QuickStart-CD_20060731.pdf`)",
+      "date_code": "20060731"
+    },
+    {
+      "id": "S2",
+      "title": "SEL-751A Feeder Protection Relay Instruction Manual, PM751A-01-NB (mirror: nepsi.com `SEL-751A-Instructions.pdf`)",
+      "date_code": "20130329"
+    },
+    {
+      "id": "S3",
+      "title": "SEL-751 Feeder Protection Relay Instruction Manual (official: selinc.com/api/download/10737, unreadable from here; mirror: ManualsLib manual 1617093)"
+    },
+    {
+      "id": "S4",
+      "title": "SEL-751 Data Sheet (selinc.com/api/download/10734)"
+    },
+    {
+      "id": "S5",
+      "title": "SEL-451-6 Data Sheet (selinc.com/api/download/124252)",
+      "date_code": "20260217"
+    },
+    {
+      "id": "S6",
+      "title": "SEL-421 Instruction Manual, Table 4.3 Relay Access Levels (ManualsLib 1645670, p. 138)"
+    },
+    {
+      "id": "S7",
+      "title": "SEL-2701 Ethernet Processor Instruction Manual, Tables 5.3 and 5.4 (ManualsLib 1584531, p. 72)"
+    },
+    {
+      "id": "S8",
+      "title": "SEL-3620 Ethernet Security Gateway product page (selinc.com/products/3620)"
+    },
+    {
+      "id": "S9",
+      "title": "SEL white paper LWP0018-01, \"Leveraging Security – Using the SEL RTAC's Built-In Security Features\" (selinc.com/api/download/112760)",
+      "date_code": "20160111"
+    },
+    {
+      "id": "S10",
+      "title": "selprotopy 0.1.3 (PyPI sdist, MIT, Joe Stanley): `protocol/commands.py`, `protocol/parser/common.py`, `client/base.py`"
+    },
+    {
+      "id": "S11",
+      "title": "go-iec61850 v1.0.2 (pkg.go.dev/github.com/otfabric/go-iec61850)"
+    },
+    {
+      "id": "S12",
+      "title": "Triangle MicroWorks, 61850 Test Suite Pro \"Log Services\" page"
+    },
+    {
+      "id": "S13",
+      "title": "Digital Substation, \"Magical case study #2: a report-control-block audit in IEDs\""
+    },
+    {
+      "id": "S14",
+      "title": "Siemens, \"Cybersecurity for energy automation\" tutorial page"
+    },
+    {
+      "id": "S15",
+      "title": "SEL-751A ordering guide WI-7074 (selinc.com/api/download/3278)",
+      "date_code": "20180913"
+    },
+    {
+      "id": "S16",
+      "title": "SEL-751 Data Sheet, supplied by the owner (`/mnt/project-files/phase0/datasheets-SEL/751_DS_20260910.pdf`)",
+      "date_code": "20260910"
+    },
+    {
+      "id": "S17",
+      "title": "SEL-311L Data Sheet, supplied by the owner (`311L_DS_20221103.pdf`)",
+      "date_code": "20221103"
+    },
+    {
+      "id": "S18",
+      "title": "SEL-400G Data Sheet, supplied by the owner (`400G_DS_20260331.pdf`)",
+      "date_code": "20260331"
+    },
+    {
+      "id": "S19",
+      "title": "SEL-451 Data Sheet, supplied by the owner (`451_DS_20250731.pdf`)",
+      "date_code": "20250731"
+    },
+    {
+      "id": "S20",
+      "title": "SEL-411L Data Sheet, supplied by the owner (`411L_DS_20250731.pdf`)",
+      "date_code": "20250731"
+    },
+    {
+      "id": "S21",
+      "title": "SEL-787-2/-3/-4 Data Sheet, supplied by the owner (`787-2-3-4_DS_20250501.pdf`)",
+      "date_code": "20250501"
+    },
+    {
+      "id": "S22",
+      "title": "SEL-751 Feeder Protection Relay Instruction Manual, supplied by the owner (`OTSEC\\Manuals\\SEL\\751_IM_20260910.pdf`)",
+      "date_code": "20260910"
+    },
+    {
+      "id": "S23",
+      "title": "ACSELERATOR RTAC SEL-5033 Software Instruction Manual",
+      "date_code": "20260925"
+    },
+    {
+      "id": "S24",
+      "title": "Programming Reference for ACSELERATOR RTAC SEL-5033 Software",
+      "date_code": "20260925"
+    },
+    {
+      "id": "S25",
+      "title": "SEL-3355-2 Automation Controller Instruction Manual (PM3355-04)",
+      "date_code": "20260521"
+    },
+    {
+      "id": "S26",
+      "title": "SEL-2488 Satellite-Synchronized Network Clock Instruction Manual (PM2488-01)",
+      "date_code": "20260918"
+    },
+    {
+      "id": "S27",
+      "title": "SEL-2731 Ethernet Switch Manual",
+      "date_code": "20251223"
+    },
+    {
+      "id": "S28",
+      "title": "SEL-2741 Ethernet Switch Manual",
+      "date_code": "20260724"
+    },
+    {
+      "id": "S29",
+      "title": "Rapid Spanning Tree Protocol for the SEL Managed Ethernet Switch, User's Guide",
+      "date_code": "20260424"
+    },
+    {
+      "id": "S30",
+      "title": "Software-Defined Networking for the SEL Managed Ethernet Switch, User's Guide",
+      "date_code": "20260601"
+    },
+    {
+      "id": "S31",
+      "title": "SEL-5056 Network Management System Instruction Manual",
+      "date_code": "20261015"
+    },
+    {
+      "id": "S32",
+      "title": "SEL-400 Series Relays Instruction Manual (bundled with SEL-451, SEL-411L, SEL-400G manuals)",
+      "date_code": "20260730"
+    },
+    {
+      "id": "S33",
+      "title": "SEL-311L-0, -6 Instruction Manual",
+      "date_code": "20260129"
+    },
+    {
+      "id": "S34",
+      "title": "SEL-787-4 Instruction Manual",
+      "date_code": "20251212"
+    },
+    {
+      "id": "S35",
+      "title": "SEL Application Guide AG95-04, *Compressed ASCII Commands*",
+      "date_code": "20030425"
+    },
+    {
+      "id": "S36",
+      "title": "SEL-3530 RTAC Instruction Manual (bundled RTAC content)",
+      "date_code": "20241217"
+    },
+    {
+      "id": "S37",
+      "title": "SEL-3555-2 RTAC Instruction Manual",
+      "date_code": "20250730"
+    },
+    {
+      "id": "S38",
+      "title": "SEL-3505/3505-3 RTAC Instruction Manual",
+      "date_code": "20241217"
+    },
+    {
+      "id": "S39",
+      "title": "SEL-3350-1 Automation Controller Instruction Manual",
+      "date_code": "20260928"
+    },
+    {
+      "id": "S40",
+      "title": "SEL-3610 Port Server, SEL-3620 Ethernet Security Gateway, SEL-3622 Security Gateway Instruction Manual",
+      "date_code": "20241010"
+    },
+    {
+      "id": "S41",
+      "title": "SEL-735 Power Quality and Revenue Meter Instruction Manual",
+      "date_code": "20250711"
+    },
+    {
+      "id": "S42",
+      "title": "SEL-2401, SEL-2404, SEL-2407 Satellite-Synchronized Clock Instruction Manuals",
+      "date_code": "20250918"
+    },
+    {
+      "id": "S43",
+      "title": "SEL-2730M Managed Ethernet Switch Instruction Manual (PM2730M-01), supplied 2026-10-23 at about 18:56",
+      "date_code": "20260408"
+    }
+  ],
+  "preconditions": [
+    {
+      "id": "pre.lang_english",
+      "setting": "LANG",
+      "equals": "ENGLISH",
+      "read_by": "sel.settings.show_port1",
+      "reason": "ADR-0005 (A1 401ebd7, from A6 F-006): command names differ on a Spanish port and 'SER D' clears the SER; refuse to collect unless SHO P 1 parses as English port settings with LANG := ENGLISH."
+    }
+  ],
+  "warnings": [
+    {
+      "id": "warn.maxacc_above_1",
+      "setting": "MAXACC",
+      "max": 1,
+      "read_by": "sel.settings.show_port1",
+      "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): MAXACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+    },
+    {
+      "id": "warn.ftpacc_above_1",
+      "setting": "FTPACC",
+      "max": 1,
+      "read_by": "sel.settings.show_port1",
+      "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): FTPACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+    },
+    {
+      "id": "warn.httpacc_above_1",
+      "setting": "HTTPACC",
+      "max": 1,
+      "read_by": "sel.settings.show_port1",
+      "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): HTTPACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
+    }
+  ],
+  "operations": [
+    {
+      "id": "sel.id",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.43 and Figure 7.38 p.7.64"
+        },
+        {
+          "source": "S22",
+          "ref": "Figure 3.20 p.3.14: negative fixture, 6 of 12 checksums wrong (C-20); not a positive example"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Occupies the session for the response.",
+      "notes": "Fields FID, BFID, CID, DEVID, DEVCODE, PARTNO, CONFIG, SPECIAL, display package lines, and on IEC 61850 models iedName/type/configVersion. Per-line checksum = 4-hex sum of characters of '\"KEY=value\",' (verified on all 10 lines of Figure 7.38).",
+      "classification": "read-only",
+      "line": "ID",
+      "access_level": "0",
+      "phases": [
+        "probe",
+        "operate"
+      ]
+    },
+    {
+      "id": "sel.ser.read_all",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.63 p.7.75 ('Displays a chronological progression of all available SER rows (as many as 1024 rows). Row 1 is the most recently triggered row')"
+        },
+        {
+          "source": "S22",
+          "ref": "Figure 10.16 p.10.40"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Returns up to the full ring buffer (1,024 rows on SEL-751, S4), so every read repeats rows already collected.",
+      "notes": "On SEL-751 bare SER returns all rows (unlike A4's report for SEL-400 series). Row/date range forms exist (Table 7.63) but stay denied until needed.",
+      "classification": "read-only",
+      "line": "SER",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.settings.show_global",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO G s Shows global settings', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH, DATE_F)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. Needed to state UTC offset and DST rule for SER local times. Output is sensitive configuration evidence. No password-bearing setting appears in any S22 settings sheet (A2 searched every ':=' line for pass/pwd/key/secret/community/auth: none); passwords are set only with PAS (Table 7.52) and are not settings. S22 prints no example SHO G output.",
+      "classification": "read-only",
+      "line": "SHO G",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.settings.show_port1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO P n s Shows serial port settings. n specifies the port', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Port 1 is Ethernet per S22 Table 7.1 p.7.1"
+        },
+        {
+          "source": "S22",
+          "ref": "Port 1 settings sheet (ETELNET, MAXACC, LANG, TPORT, TCBAN, TIDLE, FASTOP, EFTPSERV, FTPACC, FTPUSER, HTTPACC)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains addresses and FTPUSER; store as sensitive evidence.",
+      "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. The port number is always explicit (bare SHO P shows the active port). Lets the collector record MAXACC, FASTOP, LANG, FTPACC and HTTPACC before collecting; per A1, MAXACC above 1 is recorded and warned, not refused (owner decision pending). Output includes IP addresses and FTPUSER (a user name, not a password); no password-bearing setting exists in the Port 1 sheet. A1 asked for Table 2.5 as the Port 1 citation, but S22 Table 2.5 covers the Port 4 communications card; Table 7.1 is the correct citation.",
+      "classification": "read-only",
+      "line": "SHO P 1",
+      "access_level": "1"
+    }
+  ],
+  "session_control": [
+    {
+      "id": "sel.session.acc",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.17 p.7.32"
+        },
+        {
+          "source": "S22",
+          "ref": "password behaviour p.7.33"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Changes session access level 0 to 1. Three wrong passwords pulse SALARM for 1 s (S22 p.7.33); factory default OUT101 := HALARM OR SALARM (S22 Table 4.83) closes the alarm contact, and SER4 := SALARM (S22 Table 4.122) records it in the SER. One attempt per session; no further ACC after a failure. Sent only by the transport auth phase. If the Level 1 password is disabled, ACC goes straight to '=>' with no prompt (S22 p.7.33); the adapter sends the password only after seeing 'Password: ?', otherwise the password would be executed as a command and logged (D26, raised by A6).",
+      "notes": "Changes session access level only. One attempt per invocation (risk D2).",
+      "classification": "session-control",
+      "line": "ACC",
+      "phases": [
+        "auth"
+      ],
+      "access_level": "0 -> 1"
+    },
+    {
+      "id": "sel.session.qui",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.59 p.7.73 (Access Level 0)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Returns to Level 0. Without QUIT a Telnet session stays at its elevated level until TIDLE expires (S22 p.7.15-7.16 Telnet Server note).",
+      "notes": "Sent twice per session. (1) Once at Level 0 before ACC as the language probe: if rejected, close without elevating and raise the LANG alarm (A1, ADR-0005 4687c17). (2) At the end of every session, followed by a TCP close. No Spanish command starts with QUI. Probe behaviour on a Spanish-mode relay is simulated, not proven.",
+      "classification": "session-control",
+      "line": "QUI",
+      "phases": [
+        "probe",
+        "close"
+      ],
+      "access_level": "any -> 0"
+    }
+  ],
+  "denied": [
+    {
+      "id": "sel.access.elevate",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.17 (2AC Level 1, CAL Level 2)"
+        },
+        {
+          "source": "S7",
+          "ref": "Table 5.4 (PAC, AAC, OAC on SEL-400)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "2AC: SALARM pulses after successful Level 2 access or if access is denied (S22 p.7.33).",
+      "notes": "Access elevation. Collector holds no Level B/P/A/O/2 password; a failed attempt still counts toward the ALARM pulse (D2).",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*(2AC|BAC|PAC|AAC|OAC|CAL)\\b.*"
+    },
+    {
+      "id": "sel.ser.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.63 p.7.75 'SER C or R  Clears/resets the SER records'  Access Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Level 1. Covers C and R.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*SER\\w*\\s+C\\b.*"
+    },
+    {
+      "id": "sel.ser.d",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.64 p.7.76 (English: lists chattering elements, Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.6 (Spanish 'SER D o R' clears SER data)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Read-only in English but CLEARS the SER when LANG := SPANISH. Kept denied.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*SER\\w*\\s+D\\b.*"
+    },
+    {
+      "id": "sel.ser.other_args",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.63 p.7.75 (SER argument forms) and Table 7.64 (SER D)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Every SER argument form is refused until approved as its own operation. The documented range forms (SER n, SER n m, SER date, SER date date) are read-only but not approved; SER C and SER R clear the SER and have their own deny rules.",
+      "classification": "unknown",
+      "pattern": "(?i)\\s*SER\\w*\\s+.+"
+    },
+    {
+      "id": "sel.his.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.37 p.7.60 (HIS C/R), Table 7.38 (HIS HIF C/R/CA/RA), Table 7.39"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary (Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*HIS\\w*\\s+(\\S+\\s+)?(C|R|CA|RA)\\b.*"
+    },
+    {
+      "id": "sel.tri",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.77 p.7.86 (TRI), Table 7.78 (TRI HIF)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Level 1 command that creates an event report and consumes limited event storage (D1).",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*TRI\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.met.reset",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.50 p.7.67 (MET RD/RE/RM/RP)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*MET\\w*\\s+R(D|E|M|P)\\b.*"
+    },
+    {
+      "id": "sel.pro.reset",
+      "citations": [
+        {
+          "source": "S1",
+          "ref": "Table 4 (SEL-300G only)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*PRO\\w*\\s+R\\b.*"
+    },
+    {
+      "id": "sel.tar.reset",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.72 p.7.82 (TAR R resets latched targets)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*TAR\\w*\\s+R\\b.*"
+    },
+    {
+      "id": "sel.sta.args",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.68 p.7.80 (STA C/R clears self-test status and restarts the relay, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*STA\\w*\\s+\\S.*"
+    },
+    {
+      "id": "sel.breaker.ope",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary (OPE, Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "no dedicated table in Section 7 index"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*OPE\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.breaker.clo",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary (CLO, Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "no dedicated table in Section 7 index"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*CLO\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.output.pul",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.58 p.7.73 (PUL OUTnnn, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*PUL\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.control.con",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.24 p.7.49 (CONTROL, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*CON\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.settings.set",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.65 p.7.76 (SET, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*SET\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.settings.pas",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.52 p.7.69 (PAS 1/2 Level 2, PAS C Level C)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*PAS\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.settings.copy",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.25 p.7.50 (COPY, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*COP\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.settings.group",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.35 p.7.59 (GROUP n changes active group, Level 2"
+        },
+        {
+          "source": "S22",
+          "ref": "bare GROUP displays, Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*GRO\\w*\\s+\\S.*"
+    },
+    {
+      "id": "sel.defaults.r_s",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.62 p.7.75 (R_S restore factory defaults, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*R_S.*"
+    },
+    {
+      "id": "sel.firmware.l_d",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.46 p.7.65 (L_D load firmware, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*L_D.*"
+    },
+    {
+      "id": "sel.file",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.29 p.7.53 (FILE DIR/READ/SHOW Level 1, FILE WRITE Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "Table 7.85 (Ymodem files)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*FIL\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.ldp.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.47 p.7.65 (LDP C clears load profile, Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*LDP\\w*\\s+C\\b.*"
+    },
+    {
+      "id": "sel.clock.set",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.27 p.7.50 (DATE), Table 7.76 p.7.85 (TIME)"
+        },
+        {
+          "source": "S22",
+          "ref": "setting forms Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Would corrupt SER time stamps.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*(DAT|TIM)\\w*\\s+\\S.*"
+    },
+    {
+      "id": "sel.irig",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.45 p.7.64 (IRI forces clock synchronization, Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*IRI\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.loopback",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.49 p.7.66 (LOO, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*LOO\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.analog_test",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.20 p.7.37 (ANALOG, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*ANA\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.port.transparent",
+      "citations": [
+        {
+          "source": "S7",
+          "ref": "Table 5.3 (Level 1 'establish transparent connections', SEL-400 series)"
+        },
+        {
+          "source": "S7",
+          "ref": "command name is recollection"
+        }
+      ],
+      "evidence": {
+        "class": "unknown"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*POR\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.binary.any_non_ascii",
+      "citations": [
+        {
+          "source": "S10",
+          "ref": "commands.py (Fast Operate 0xA5E0, 0xA5E3"
+        },
+        {
+          "source": "S10",
+          "ref": "0xA5B5"
+        },
+        {
+          "source": "S10",
+          "ref": "0xA5B9)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested",
+        "note": "secondary source"
+      },
+      "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
+      "notes": "Adapter transport must send only 0x20-0x7E plus CR LF.",
+      "classification": "state-changing",
+      "pattern": "(?s).*[\\x80-\\xff].*"
+    },
+    {
+      "id": "sel.sum.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.70 p.7.81 (SUM C/R resets event summary buffer, Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Clears event summaries.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*SUM\\w*\\s+(C|R)\\b.*",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.com.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.23 p.7.48 (COM C), Table 7.21 p.7.42 (COM PTP C/R)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Clears communications records or PTP statistics.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*COM\\w*\\s+(PTP\\s+)?(C|R)\\b.*",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.goose.clear",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.32 p.7.55 (GOOSE S n C), Table 7.30 p.7.53 (FGS S n C)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 1"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Clears GOOSE statistics.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*(GOO|FGS)\\w*\\s+S\\s+\\S+\\s+C\\b.*",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.ping",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary (PING x.x.x.x t, Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "no dedicated table in Section 7 index"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Makes the relay emit ICMP traffic; not a read.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*PIN\\w*(\\s.*)?",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.breaker.data",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary (BRE R/W, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Changes breaker wear data.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*BRE\\w*\\s+(R|W)\\b.*",
+      "access_level": "2"
+    },
+    {
+      "id": "sel.thermal",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.75 p.7.85 (THE P/R, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Changes thermal capacity state.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*THE\\w*\\s+(P|R)\\b.*",
+      "access_level": "2"
+    },
+    {
+      "id": "sel.disconnect",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.18 p.7.33 (89CLOSE), Table 7.19 p.7.35 (89OPEN)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 2"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Operates disconnects.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*89(C|O)\\w*(\\s.*)?",
+      "access_level": "2"
+    },
+    {
+      "id": "sel.misc.level2",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.41 p.7.63 (HSR C), Table 7.44 p.7.64 (INI HIF), Table 7.74 p.7.83 (TEST DB)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary (AFT, PARTNO)"
+        },
+        {
+          "source": "S22",
+          "ref": "Level 2"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Tests, resets or changes device data.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*(AFT|HSR\\s+C|INI\\w*|PARTNO|TEST\\s+DB\\s+\\S+)\\b.*",
+      "access_level": "2"
+    },
+    {
+      "id": "sel.cse.candidate",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table C.2 (CSE, Level 1)"
+        },
+        {
+          "source": "S32",
+          "ref": "Table 14.50 p.14.27 and Figure 9.17 p.9.30 (SEL-400 series)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Denied until a family profile and checksum-correct source exist.",
+      "notes": "Read-only by documentation, but DENIED: deferred by A1 to the SEL-400 family's Phase 4 expansion. SEL-751 field list not documented; the S32 example has wrong data-line checksums (D25).",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*CSE\\w*(\\s.*)?",
+      "access_level": "1"
+    },
+    {
+      "id": "sel.cas.candidate",
+      "citations": [
+        {
+          "source": "S35",
+          "ref": "AG95-04 (CAS configuration message, any access level)"
+        },
+        {
+          "source": "S22",
+          "ref": "Appendix A firmware history (CAS response corrupted after a settings change, fixed R300-V3/R202-V1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output is firmware-dependent and was corrupted on some firmware.",
+      "notes": "Read-only by documentation but DENIED: deferred with CSE to Phase 4 (A1). Would let a collector learn the relay's own CSE layout.",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*CAS\\w*(\\s.*)?",
+      "access_level": "any (S35)"
+    }
+  ],
+  "firmware": {
+    "known": [
+      {
+        "fid": "SEL-751-R501-V0-Z104101-D20260910",
+        "branch": "R501",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.1 sheet 1 p. A.2"
+        }
+      },
+      {
+        "fid": "SEL-751-R500-V1-Z103101-D20260910",
+        "branch": "R500",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.1 sheet 1 p. A.2"
+        }
+      },
+      {
+        "fid": "SEL-751-R500-V0-Z103101-D20260327",
+        "branch": "R500",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.1 sheet 1 p. A.2"
+        }
+      },
+      {
+        "fid": "SEL-751-R402-V4-Z102100-D20260910",
+        "branch": "R402",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 1 p. A.4"
+        }
+      },
+      {
+        "fid": "SEL-751-R402-V3-Z102100-D20260327",
+        "branch": "R402",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 1 p. A.4"
+        }
+      },
+      {
+        "fid": "SEL-751-R402-V2-Z102100-D20250731",
+        "branch": "R402",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 2 p. A.5"
+        }
+      },
+      {
+        "fid": "SEL-751-R402-V1-Z102100-D20250701",
+        "branch": "R402",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 2 p. A.5"
+        }
+      },
+      {
+        "fid": "SEL-751-R402-V0-Z102100-D20241231",
+        "branch": "R402",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 2 p. A.5"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V7-Z101100-D20260910",
+        "branch": "R401",
+        "version": 7,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 3 p. A.6"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V6-Z101100-D20260327",
+        "branch": "R401",
+        "version": 6,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 3 p. A.6"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V5-Z101100-D20250731",
+        "branch": "R401",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 4 p. A.7"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V4-Z101100-D20250701",
+        "branch": "R401",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 4 p. A.7"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V3-Z101100-D20241231",
+        "branch": "R401",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 4 p. A.7"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V2-Z101100-D20241031",
+        "branch": "R401",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 5 p. A.8"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V1-Z101100-D20240930",
+        "branch": "R401",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 5 p. A.8"
+        }
+      },
+      {
+        "fid": "SEL-751-R401-V0-Z101100-D20240308",
+        "branch": "R401",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 5 p. A.8"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V9-Z100100-D20260910",
+        "branch": "R400",
+        "version": 9,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 8 p. A.11"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V8-Z100100-D20260327",
+        "branch": "R400",
+        "version": 8,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 8 p. A.11"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V7-Z100100-D20250731",
+        "branch": "R400",
+        "version": 7,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 8 p. A.11"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V6-Z100100-D20250701",
+        "branch": "R400",
+        "version": 6,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 8 p. A.11"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V5-Z100100-D20241231",
+        "branch": "R400",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 9 p. A.12"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V4-Z100100-D20241031",
+        "branch": "R400",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 9 p. A.12"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V3-Z100100-D20240930",
+        "branch": "R400",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 9 p. A.12"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V2-Z100100-D20240308",
+        "branch": "R400",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 9 p. A.12"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V1-Z100100-D20230607",
+        "branch": "R400",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 11 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R400-V0-Z100100-D20230315",
+        "branch": "R400",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.2 sheet 11 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V9-Z010005-D20260831",
+        "branch": "R302",
+        "version": 9,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 1 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V8-Z010005-D20250731",
+        "branch": "R302",
+        "version": 8,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 1 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V7-Z010005-D20250214",
+        "branch": "R302",
+        "version": 7,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 1 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V6-Z010005-D20241231",
+        "branch": "R302",
+        "version": 6,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 1 p. A.14"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V5-Z010005-D20240930",
+        "branch": "R302",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 2 p. A.15"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V4-Z010005-D20240329",
+        "branch": "R302",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 2 p. A.15"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V3-Z010005-D20240122",
+        "branch": "R302",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 2 p. A.15"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V2-Z010005-D20230428",
+        "branch": "R302",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 3 p. A.16"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V1-Z010005-D20230315",
+        "branch": "R302",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 3 p. A.16"
+        }
+      },
+      {
+        "fid": "SEL-751-R302-V0-Z010005-D20220826",
+        "branch": "R302",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 3 p. A.16"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V5-Z009005-D20230428",
+        "branch": "R301",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 3 p. A.16"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V4-Z009005-D20220826",
+        "branch": "R301",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 4 p. A.17"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V3-Z009005-D20220719",
+        "branch": "R301",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 4 p. A.17"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V2-Z009005-D20220607",
+        "branch": "R301",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 4 p. A.17"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V1-Z009005-D20220308",
+        "branch": "R301",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 4 p. A.17"
+        }
+      },
+      {
+        "fid": "SEL-751-R301-V0-Z009005-D20220107",
+        "branch": "R301",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 4 p. A.17"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V9-Z008004-D20230428",
+        "branch": "R300",
+        "version": 9,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V8-Z008004-D20220826",
+        "branch": "R300",
+        "version": 8,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V7-Z008004-D20220607",
+        "branch": "R300",
+        "version": 7,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V6-Z008004-D20220225",
+        "branch": "R300",
+        "version": 6,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V5-Z008004-D20220225",
+        "branch": "R300",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V4-Z008004-D20211116",
+        "branch": "R300",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 5 p. A.18"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V3-Z008004-D20210104",
+        "branch": "R300",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 6 p. A.19"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V2-Z008004-D20200921",
+        "branch": "R300",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 6 p. A.19"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V1-Z008004-D20200603",
+        "branch": "R300",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 6 p. A.19"
+        }
+      },
+      {
+        "fid": "SEL-751-R300-V0-Z008004-D20200331",
+        "branch": "R300",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.3 sheet 6 p. A.19"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V5-Z007003-D20220826",
+        "branch": "R202",
+        "version": 5,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 1 p. A.21"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V4-Z007003-D20220607",
+        "branch": "R202",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 1 p. A.21"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V3-Z007003-D20220225",
+        "branch": "R202",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 1 p. A.21"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V2-Z007003-D20211116",
+        "branch": "R202",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 2 p. A.22"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V1-Z007003-D20210104",
+        "branch": "R202",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 2 p. A.22"
+        }
+      },
+      {
+        "fid": "SEL-751-R202-V0-Z007003-D20200331",
+        "branch": "R202",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 2 p. A.22"
+        }
+      },
+      {
+        "fid": "SEL-751-R201-V1-Z007003-D20180921",
+        "branch": "R201",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 3 p. A.23"
+        }
+      },
+      {
+        "fid": "SEL-751-R201-V0-Z007003-D20180420",
+        "branch": "R201",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 3 p. A.23"
+        }
+      },
+      {
+        "fid": "SEL-751-R200-V4-Z007003-D20170922",
+        "branch": "R200",
+        "version": 4,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheets 3 and 4 pp. A.23-A.24: 2 rows with one FID (manual date codes 20171206 and 20170922); the FID cannot tell them apart"
+        }
+      },
+      {
+        "fid": "SEL-751-R200-V3-Z007003-D20170814",
+        "branch": "R200",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 4 p. A.24"
+        }
+      },
+      {
+        "fid": "SEL-751-R200-V2-Z007003-D20170315",
+        "branch": "R200",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.4 sheet 4 p. A.24"
+        }
+      },
+      {
+        "fid": "SEL-751-R113-V2-Z006002-D20220225",
+        "branch": "R113",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 1 p. A.25"
+        }
+      },
+      {
+        "fid": "SEL-751-R113-V1-Z006002-D20180921",
+        "branch": "R113",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 1 p. A.25"
+        }
+      },
+      {
+        "fid": "SEL-751-R113-V0-Z006002-D20180420",
+        "branch": "R113",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 1 p. A.25"
+        }
+      },
+      {
+        "fid": "SEL-751-R112-V3-Z006002-D20170922",
+        "branch": "R112",
+        "version": 3,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 2 p. A.26"
+        }
+      },
+      {
+        "fid": "SEL-751-R112-V2-Z006002-D20170814",
+        "branch": "R112",
+        "version": 2,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 2 p. A.26"
+        }
+      },
+      {
+        "fid": "SEL-751-R112-V1-Z006002-D20160930",
+        "branch": "R112",
+        "version": 1,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 2 p. A.26"
+        }
+      },
+      {
+        "fid": "SEL-751-R112-V0-Z006002-D20151112",
+        "branch": "R112",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 2 p. A.26"
+        }
+      },
+      {
+        "fid": "SEL-751-R110-V0-Z005001-D20150410",
+        "branch": "R110",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 4 p. A.28"
+        }
+      },
+      {
+        "fid": "SEL-751-R109-V0-Z004001-D20140402",
+        "branch": "R109",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 4 p. A.28"
+        }
+      },
+      {
+        "fid": "SEL-751-R108-V0-Z003001-D20131218",
+        "branch": "R108",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 4 p. A.28"
+        }
+      },
+      {
+        "fid": "SEL-751-R106-V0-Z003001-D20131101",
+        "branch": "R106",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 4 p. A.28"
+        }
+      },
+      {
+        "fid": "SEL-751-R105-V0-Z002001-D20130206",
+        "branch": "R105",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 5 p. A.29"
+        }
+      },
+      {
+        "fid": "SEL-751-R103-V0-Z001001-D20111116",
+        "branch": "R103",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 6 p. A.30"
+        }
+      },
+      {
+        "fid": "SEL-751-R102-V0-Z001001-D20110720",
+        "branch": "R102",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 6 p. A.30"
+        }
+      },
+      {
+        "fid": "SEL-751-R101-V0-Z001001-D20110601",
+        "branch": "R101",
+        "version": 0,
+        "citation": {
+          "source": "S22",
+          "ref": "Table A.5 sheet 6 p. A.30"
+        }
+      }
+    ],
+    "branches": [
+      {
+        "branch": "R501",
+        "status": "allow",
+        "min_version": 0,
+        "basis": "Released after every fix; F8 listed. F1-F7 by inheritance (inferred).",
+        "evidence": {
+          "class": "inferred",
+          "note": "owner-accepted"
+        }
+      },
+      {
+        "branch": "R500",
+        "status": "allow",
+        "min_version": 0,
+        "basis": "F7 listed at V0; F1-F6 by inheritance (inferred). V1 adds F8 (recommended, not required).",
+        "evidence": {
+          "class": "inferred",
+          "note": "owner-accepted"
+        }
+      },
+      {
+        "branch": "R402",
+        "status": "allow-with-condition",
+        "min_version": 2,
+        "basis": "F6 listed at V2; F1-F5 by inheritance (inferred). F7 (web server DoS) is not listed on R402.",
+        "evidence": {
+          "class": "inferred",
+          "note": "owner-accepted"
+        },
+        "conditions": [
+          {
+            "id": "fw.r402.ehttp_off",
+            "setting": "EHTTP",
+            "equals": "N",
+            "read_by": "sel.settings.show_port1",
+            "reason": "F7: require EHTTP := N, verified with SHO P 1, until SEL confirms R402 was not affected"
+          }
+        ]
+      },
+      {
+        "branch": "R401",
+        "status": "allow-with-condition",
+        "min_version": 5,
+        "basis": "F4 at V0, F5 at V1, F6 at V5; F1-F3 by inheritance (inferred). F7 not listed.",
+        "evidence": {
+          "class": "inferred",
+          "note": "owner-accepted"
+        },
+        "conditions": [
+          {
+            "id": "fw.r401.ehttp_off",
+            "setting": "EHTTP",
+            "equals": "N",
+            "read_by": "sel.settings.show_port1",
+            "reason": "F7: require EHTTP := N"
+          }
+        ]
+      },
+      {
+        "branch": "R400",
+        "status": "allow-with-condition",
+        "min_version": 7,
+        "basis": "F4 at V2, F5 at V3, F6 at V7; F1-F3 by inheritance (inferred). F7 not listed.",
+        "evidence": {
+          "class": "inferred",
+          "note": "owner-accepted"
+        },
+        "conditions": [
+          {
+            "id": "fw.r400.ehttp_off",
+            "setting": "EHTTP",
+            "equals": "N",
+            "read_by": "sel.settings.show_port1",
+            "reason": "F7: require EHTTP := N"
+          }
+        ]
+      },
+      {
+        "branch": "R302",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F3 at V0, F4 at V3. F5 (communications-port access, collector traffic) and F6 not listed; latest V9 D20260831. Open item: Ask SEL whether R302 had the F5 and F6 defects",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R301",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "No restart fixes listed; F3, F4 and F5 not listed; latest V5 D20230428.",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R300",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F2 at V3; F3, F4 and F5 not listed; latest V9 D20230428.",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R202",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F2 at V1; F3, F4 and F5 not listed; latest V5 D20220826.",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R201",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F2 never listed (Telnet restart).",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R200",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 at V3; F2 never listed.",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R101",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R102",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R103",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R105",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R106",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R108",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R109",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R110",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R112",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      },
+      {
+        "branch": "R113",
+        "status": "deny",
+        "min_version": 0,
+        "basis": "F1 on R112-V2 only; F2 never listed. R100 series predates ETELNET/EPORT (R112-V0). (Phase 0 range R100-R113)",
+        "evidence": {
+          "class": "documented-untested",
+          "note": "fix not listed on branch"
+        }
+      }
+    ],
+    "not_covered": [
+      "Any SEL-751 FID released after date code 20260910",
+      "SEL-751A (a different product with its own manual and FIDs)",
+      "Special or custom firmware whose FID is not in Appendix A",
+      "Bootloader (SLBT/BOOTLDR) versions: not assessed"
+    ]
+  },
+  "notes": [
+    "Revision 2 by A2 (content owner), 2026-10-24, from A1's Phase 0 conversion: C3 review changes 3 and 4 and the sel.ser.other_args citation (docs/phase1/reviews/C3-A2.md). Allowlist decisions are unchanged.",
+    "Converted by A1 on 2026-10-24 from the Phase 0 draft (register status: draft; A1 approved SHO G and SHO P 1 on 2026-10-23 (docs/agent-handoffs.md, commit 4481653 on claude/project-thread-hperik); A6 re-review pending; allowlist status: Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently. UPDATE 2026-10-23 18:48Z: the owner accepted the inheritance inference as an owner risk (ADR-0005). The allowed entries are classed 'inferred (owner-accepted)', never 'documented'.).",
+    "Matching (Phase 0): Each pattern is a Python re.fullmatch against one received line. Allowed entries are exact canonical forms the adapter may send. Denied entries document known dangerous lines and are case-insensitive and abbreviation-tolerant on purpose. Any line matching no entry is a violation (deny by default).",
+    "Not representable as lines (Phase 0): The password line sent after ACC prompts 'Password:'. It must be logged by the simulator as an auth event, never as a command line, and never stored in clear. | Binary SEL Fast messages (0xA5 prefix, S10). Covered by sel.binary.any_non_ascii below only if the log decodes bytes as latin-1; the checker's CONTROL class misses 0x80-0xFF.",
+    "Language (Phase 0): ENGLISH ONLY. Valid only for LANG := ENGLISH on the port. With LANG := SPANISH, command names differ and 'SER D' clears the SER ('SER D o R  Borrar los datos SER', S22 Command Summary); 'SHO' becomes 'MOS' and 'QUIT' becomes 'SAL'. Ruling (A1, ADR-0005 401ebd7, from A6 F-006): the adapter reads LANG with 'SHO P 1' before any SER command and refuses to collect, failing closed with an alarm, unless the output parses as English port settings with LANG := ENGLISH. An 'Invalid Command' or any unparseable response counts as not English. Accepted by A1 (ADR-0005 4687c17): send 'QUI' once at Level 0 before 'ACC'. In English it is valid at Level 0 (S22 Table 7.59). If a Spanish-mode relay rejects it, the adapter learns that before elevating and closes without 'ACC'. This also covers the D18 problem that 'QUI' might not de-elevate a Spanish-mode session. Whether a Spanish-mode relay accepts English names is not documented (unknown). FTPACC or HTTPACC above 1 gets the same warning as MAXACC.",
+    "Firmware rule (Phase 0): A1 (ADR-0005 6d82243): collect only from allowlisted FIDs that carry every communications-restart fix. Appendix A records each fix only on the branches where SEL shipped it, and never says whether other branches had the defect. Each branch's first release (V0) has no 'Includes' clause, so inheritance across branches is not documented. Treating a fix as inherited by a branch whose V0 is dated after the fix is an INFERENCE, marked as such. It needs SEL confirmation before it counts as documented.",
+    "Firmware match (Phase 0): Match the full FID string: SEL-751-R<branch>-V<n>-Z<...>-D<date>, with V >= min_version on an allowed branch and the Z and D fields equal to an Appendix A row. Any FID not in Appendix A (later releases, special builds, SEL-751A) is unknown and fails closed.",
+    "Firmware fixes (Phase 0): {\"F1\": {\"collector_traffic\": true, \"date\": \"20170814\", \"listed_on\": [\"R112-V2 (D20170814)\", \"R200-V3 (D20170814)\"], \"what\": \"certain Ethernet traffic could cause diagnostic restarts\"}, \"F2\": {\"collector_traffic\": true, \"date\": \"20210104\", \"listed_on\": [\"R300-V3 (D20210104)\", \"R202-V1 (D20210104)\"], \"what\": \"rare issue where Telnet traffic could cause a diagnostic restart\"}, \"F3\": {\"collector_traffic\": false, \"date\": \"20220826\", \"listed_on\": [\"R302-V0 (D20220826)\"], \"what\": \"deliberately crafted Ethernet traffic could cause a diagnostic restart\"}, \"F4\": {\"collector_traffic\": false, \"date\": \"20240122\", \"listed_on\": [\"R302-V3 (D20240122)\", \"R400-V2 (D20240308)\", \"R401-V0 (D20240308)\"], \"what\": \"BPDU packet of invalid size could cause a diagnostic restart\"}, \"F5\": {\"collector_traffic\": true, \"date\": \"20240930\", \"listed_on\": [\"R400-V3 (D20240930)\", \"R401-V1 (D20240930)\"], \"what\": \"accessing the relay via communications ports (among other operations) could cause a diagnostic restart\"}, \"F6\": {\"collector_traffic\": false, \"date\": \"20250731\", \"listed_on\": [\"R400-V7 (D20250731)\", \"R401-V5 (D20250731)\", \"R402-V2 (D20250731)\"], \"what\": \"Ethernet port could lock up in switched mode under heavy network traffic\"}, \"F7\": {\"collector_traffic\": false, \"date\": \"20260327\", \"listed_on\": [\"R500-V0 (D20260327)\"], \"what\": \"denial-of-service condition in the web server could trigger diagnostic restarts\"}, \"F8\": {\"collector_traffic\": false, \"date\": \"20260910\", \"listed_on\": [\"R400-V9\", \"R401-V7\", \"R402-V4\", \"R500-V1\", \"R501-V0 (all D20260910)\"], \"what\": \"maliciously crafted CID file could cause the relay to disable (needs a file write, which the collector never does)\"}}",
+    "Known firmware IDs: 78 unique FIDs from 79 rows of S22 Tables A.1 to A.5 (A2 extraction, reconciled with A6's independent count, 2026-10-24). R200-V4-Z007003-D20170922 is the FID of two rows. Three rows (R200-V1, R200-V0, R111) say the version was not released and have no FID."
+  ]
+}

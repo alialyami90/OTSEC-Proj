@@ -1,0 +1,41 @@
+{
+  "schema": "otsec.asset/0.1",
+  "kind": "capability-profile",
+  "profile_id": "sel-rtac-syslog",
+  "version": "0.1",
+  "vendor": "sel",
+  "product_family": "sel-rtac",
+  "device_class": "automation-controller",
+  "firmware": {
+    "allowlist": "none"
+  },
+  "capabilities": [
+    {
+      "capability": "event-push",
+      "mechanism": "syslog-receive",
+      "status": "documented-untested",
+      "citation": "S23 pp. 635-637 (RFC 3164 over UDP, facility 23, 1,024 bytes); fixture tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt",
+      "notes": "Only tags the project logs, at or above the destination's threshold, are sent; User_Logged_On and User_Logged_Off are logged by default (S23 p. 633). Firmware before R150-V8, R151-V6, R152-V2 and R153-V0 (by branch) may send an incorrect time stamp (S23 Table A.1), so the event time from older firmware is not trusted (docs/phase1/A2-q5-rtac.md)."
+    },
+    {
+      "capability": "identification",
+      "mechanism": "operator-entry",
+      "status": "documented-untested",
+      "citation": "No device shell for monitoring (A2-sel-portfolio.md section 2); Syslog carries only the operator-set hostname (S23 p. 636), and no firmware ID"
+    },
+    {
+      "capability": "health",
+      "mechanism": "none",
+      "status": "unknown",
+      "notes": "Silence is not a health signal: the RTAC sends only what the project logs (C4 source.silent)"
+    }
+  ],
+  "session_limits": {
+    "max_concurrent_sessions": 1,
+    "min_interval_ms": 60000,
+    "password_attempts": 1,
+    "idle_timeout_ms": 1800000,
+    "failed_auth_floor_ms": 1860000,
+    "citation": "S22 Table 7.63 (SER holds up to 1,024 rows); Table 7.5 note a (Port 1: two Telnet sessions, the platform takes one); p. 7.33 (a wrong password re-prompts, the third pulses SALARM, so one attempt); p. 7.16 and Table 4.104 sheet 2 (state stays until TIDLE, 1 to 30 min, expires: the platform assumes 30 and waits 31). min_interval_ms is a platform choice, not a device fact (Phase 0 register proposal)."
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "schema": "otsec.asset/0.1",
+  "asset_id": "9a0c6e42-1f7b-4d38-a5c9-3e8b2d1f6a07",
+  "node_id": "site-a-node1",
+  "attributes": [
+    {
+      "name": "device_class",
+      "value": "server",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "server",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor",
+      "value": "sel",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "sel",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "product_family",
+      "value": "sel-3355-2",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "sel-3355-2",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "os_name",
+      "value": "Windows 10 Pro",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "Windows 10 Pro",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "hostname",
+      "value": "site-a-node1",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "site-a-node1",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z"
+          }
+        }
+      ]
+    }
+  ],
+  "identity_binding": {
+    "method": "address-only",
+    "strength": "spoofable",
+    "attributes": []
+  },
+  "platform_node": {
+    "posture": [
+      {
+        "label": "os-out-of-support",
+        "since": "2026-10-24T09:00:00Z",
+        "condition": "Owner-accepted risk 2026-10-23 (ADR-0007 item 9): Windows 10 Pro allowed, installer warns",
+        "migration_date": "2027-06-30"
+      },
+      {
+        "label": "storage-durability-unverified",
+        "since": "2026-10-24T09:00:00Z"
+      }
+    ]
+  }
+}
