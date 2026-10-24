@@ -477,6 +477,12 @@ func (p *Package) Validate() error {
 			if ph != PhaseProbe && ph != PhaseAuth && ph != PhaseClose {
 				return fmt.Errorf("register: session line %s has unknown phase %q", s.ID, ph)
 			}
+			// An authentication line (ACC) elevates the session, so it may
+			// not also be sent in probe or close (A6 C3 re-check). Which
+			// line elevates is content, checked in A2's and A3's review.
+			if ph == PhaseAuth && len(s.Phases) != 1 {
+				return fmt.Errorf("register: session line %s is sent in auth and another phase", s.ID)
+			}
 		}
 		if err := checkCommon(s.ID, s.AccessLevel, s.Citations, s.Evidence, s.SideEffects, sources, true); err != nil {
 			return err

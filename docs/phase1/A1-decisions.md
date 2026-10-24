@@ -56,3 +56,14 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
 - **C3-A2 note 5:** a probe operation must be literal and need access level 0 (`ProbeAccessLevel`).
 - **Content:** the corrected package is A2's `contracts/register/testdata/sel-751.json`, after #27 merges. `sel-751-phase0.json` stays as the lossless Phase 0 conversion record.
 - **FID count:** A6 confirmed 78 unique FIDs and withdrew the count of 84.
+
+## D1-7. A cleared SER buffer may raise ser.gap twice (2026-10-24)
+
+- **Question (A6, C4-A6 Q4):** C4 reports an empty previous read as a gap, so clearing a relay's SER buffer raises `ser.gap` twice.
+- **Decision:** accepted as specified, following A6's recommendation. Reporting a gap twice is safe, while missing one is not, and the second event carries its own evidence. C4's doc.go says a buffer clear can produce two `ser.gap` events, and consumers must not treat the second as a new loss without reading its evidence.
+- **Action:** A4 adds the sentence to C4. A6's V-S4 case expects either one or two gap events, never zero.
+
+## D1-8. An authentication line is sent in auth only (2026-10-24)
+
+- **Question (A6, C3 re-check at 6a776bc):** the format allowed a session line such as `ACC` to be listed for probe as well.
+- **Decision:** `Validate` refuses a session line that lists auth together with any other phase. The format cannot tell which line elevates a session, so a package that puts `ACC` in probe alone is caught by A2's and A3's content review and by C7's signature, not by `Validate`.

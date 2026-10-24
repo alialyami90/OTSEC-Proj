@@ -303,6 +303,13 @@ func TestRejects(t *testing.T) {
 			o := entry(m, "operations", 1)
 			o["phases"] = []any{"probe", "operate"}
 		},
+		"auth line also in probe": func(m map[string]any) {
+			for _, e := range list(m, "session_control") {
+				if e.(map[string]any)["line"] == "ACC" {
+					e.(map[string]any)["phases"] = []any{"auth", "probe"}
+				}
+			}
+		},
 		"operation repeated phase":    func(m map[string]any) { entry(m, "operations", 0)["phases"] = []any{"operate", "operate"} },
 		"warning with max and equals": func(m map[string]any) { list(m, "warnings")[0].(map[string]any)["equals"] = "1" },
 		"warning with no threshold":   func(m map[string]any) { delete(list(m, "warnings")[0].(map[string]any), "max") },
