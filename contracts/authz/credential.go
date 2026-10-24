@@ -499,7 +499,7 @@ func whitespaceOnly(cc *syntax.Regexp) bool {
 // phase needs. For SEL-751 0.1 only "1" passes, so a Level 2 credential
 // cannot be installed. The collector applies it at install and at every run.
 // It cannot tell what the password opens: a Level 2 password installed as
-// level 1 is caught only if the relay rejects it at ACC (H-12).
+// level 1 is caught only if the relay rejects it at ACC (H-15).
 func CheckAccessLevel(pkg *register.Package, level string) error {
 	if pkg == nil {
 		return refuse(RefuseRegisterUnverified, "no verified register package")

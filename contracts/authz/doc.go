@@ -44,7 +44,7 @@
 //     needs it. For SEL-751 0.1 that is "1" only. The collector checks it at
 //     install and at every run. It cannot tell what a password opens: a
 //     Level 2 password installed for level 1 is caught only if the relay
-//     rejects it at ACC (H-12).
+//     rejects it at ACC (H-15).
 //   - A secret is checked against the verified register at install
 //     (ValidateSecret, C7-A6-3): it may not match any register line in any
 //     case, nor start with a command mnemonic (three characters for SEL).
