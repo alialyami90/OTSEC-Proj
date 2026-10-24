@@ -14,7 +14,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every target.
-const Identifier = "otsec.syslog/0.1"
+const Identifier = "otsec.syslog/0.2"
 
 // Target is one upstream collector.
 type Target struct {
@@ -100,12 +100,51 @@ func (t *Target) SendsDeviceContent() bool {
 // 1, so without this check a required target could let C5 prune records
 // that exist nowhere else (V-S9). The check runs against the real
 // collector, because the result depends on its configuration (A6 V-S6).
+//
+// Since 0.2 (A1 D2-9) it also records how the collector was configured when
+// the check passed, because a 200 OK and a node-only stream depend on that
+// configuration, not on the protocol. A6 found, with rsyslogd 8.2312.0 and
+// librelp 1.11.0, that imrelp with tls.authmode="certvalid" accepted a
+// self-signed client certificate the CA never signed, and that without a
+// Direct queue and a synchronous write the 200 OK can arrive before the
+// write. Both fields are required on every required target, whatever minor
+// it declares: a target that never recorded them has not shown that only
+// this node can write to the collector, or that an acknowledgement means
+// stored, so it cannot hold back pruning.
 type DurableAck struct {
 	// VerifiedUTC is when the check passed, RFC 3339 UTC with Z.
 	VerifiedUTC string `json:"verified_utc"`
 	// EvidenceRef names the stored record of the check.
 	EvidenceRef string `json:"evidence_ref"`
+	// PeerCheck is how the collector authenticates the node's client
+	// certificate. Only PeerCheckName is accepted: the certificate must
+	// chain to the collector's CA and carry a name on its permitted-peer
+	// list (imrelp tls.authmode="name" with tls.permittedPeer). A check by
+	// CA alone (authmode certvalid) is refused.
+	PeerCheck PeerCheck `json:"peer_check"`
+	// PermittedPeer is the node certificate name the collector permits,
+	// exactly; no wildcard, which would permit more than this node.
+	PermittedPeer string `json:"permitted_peer"`
+	// AckAfter says when the collector acknowledges. Only AckAfterDurableWrite
+	// is accepted: the receiving ruleset writes synchronously before it
+	// answers (rsyslog: queue.type="Direct" on the ruleset and omfile
+	// sync="on").
+	AckAfter AckAfter `json:"ack_after"`
 }
+
+// PeerCheck is how a collector authenticates the node. Closed.
+type PeerCheck string
+
+// PeerCheckName: CA chain plus the name on the collector's permitted-peer
+// list (D2-9). The only value accepted.
+const PeerCheckName PeerCheck = "name"
+
+// AckAfter is when a collector acknowledges a message. Closed.
+type AckAfter string
+
+// AckAfterDurableWrite: after a synchronous durable write (D2-9). The only
+// value accepted.
+const AckAfterDurableWrite AckAfter = "durable-write"
 
 // Transport is closed.
 type Transport string
@@ -261,11 +300,12 @@ func Codes(err error) []Code {
 }
 
 var (
-	self        = version.ID{Name: "syslog", Major: 0, Minor: 1}
+	self        = version.ID{Name: "syslog", Major: 0, Minor: 2}
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	refPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 	pinPattern  = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
 	hostPattern = regexp.MustCompile(`^[A-Za-z0-9.:\[\]-]{1,253}$`)
+	peerPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,252})$`)
 )
 
 // ParseTarget decodes a target strictly with contracts/internal/strictjson
@@ -392,6 +432,12 @@ func (t *Target) Validate() error {
 			fail(CodeDelivery, "durable_ack", "a required target needs a passed durable-acknowledgement check, or C5 may prune what the collector lost (C6-A6-1)")
 		case !utcZ(d.VerifiedUTC) || !refPattern.MatchString(d.EvidenceRef):
 			fail(CodeDelivery, "durable_ack", "verified_utc must be RFC 3339 UTC with Z and evidence_ref a reference")
+		case d.PeerCheck != PeerCheckName:
+			fail(CodeDelivery, "durable_ack.peer_check", "%q: the collector must check the node's certificate by name against a permitted-peer list, not by CA alone (D2-9)", d.PeerCheck)
+		case !peerPattern.MatchString(d.PermittedPeer):
+			fail(CodeDelivery, "durable_ack.permitted_peer", "%q is not one exact certificate name (no wildcard)", d.PermittedPeer)
+		case d.AckAfter != AckAfterDurableWrite:
+			fail(CodeDelivery, "durable_ack.ack_after", "%q: the collector must acknowledge only after a synchronous durable write (D2-9)", d.AckAfter)
 		}
 	} else if t.DurableAck != nil {
 		fail(CodeDelivery, "durable_ack", "only a required target records a durable-acknowledgement check")

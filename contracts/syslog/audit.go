@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"otsec.local/otsec/contracts/audit"
+	"otsec.local/otsec/contracts/version"
 )
 
 // AuditMsgID is the RFC 5424 MSGID of an audit message.
@@ -16,7 +17,7 @@ const AuditMsgID = "AUDIT"
 // record and is never its source: a receiver takes every fact from the
 // sealed bytes in MSG, and checks that the parameters agree with them.
 //
-//	v     C6 identifier, otsec.syslog/0.1
+//	v     C6 identifier of the rendering, for example otsec.syslog/0.2
 //	ac    C8 identifier of the record, for example otsec.audit/0.1
 //	node  the record's node_id
 //	seq   the record's seq
@@ -135,8 +136,8 @@ func ParseAudit(b []byte) (*AuditMessage, error) {
 	a.Node, _ = m.Get("node")
 	a.Hash, _ = m.Get("hash")
 	seq, _ := m.Get("seq")
-	if v != Identifier {
-		return bad("v %q is not %s", v, Identifier)
+	if got, err := version.Parse(v); err != nil || !self.Accepts(got) {
+		return bad("v %q is not an otsec.syslog/0.x identifier", v)
 	}
 	a.Seq, err = strconv.ParseUint(seq, 10, 64)
 	if err != nil || strconv.FormatUint(a.Seq, 10) != seq {
