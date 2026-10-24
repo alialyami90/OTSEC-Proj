@@ -94,6 +94,8 @@ Acceptance tests: `TestRequiredOnlyOnRELPTLS` (every transport and class pair), 
 | --- | --- | --- |
 | [C2-A4](reviews/C2-A4.md), D1-23 | Every device event carries `source.evidence_class`, `device-observed` or `simulated`. It is set from C2 `Result.target` or the C1 endpoint, never from the far end. A platform event carries none. `Source.Simulated` counts any other value as simulated. The enum is open to later minors: a 0.1 event takes only the two values, and a later minor's new class is kept and read as simulated (A6 D1-23 review change 1). C6 renders it as `evc` after `auth`, and no size step removes it. The C4 golden examples carry `simulated`. | C4 `event.go`, `validate.go`, schema, three invalid examples, `TestSimulated`; C6 `render.go`, the regenerated goldens, `TestOversize` |
 | C2-A4 changes 4 and 5 | For an adapter poll, `received.utc` is C2 `Transcript.ReceivedAt(record span)`. The resolution and clock state come from the node's clock status at the invocation's `ended_at`. | C4 `Received` doc, `doc.go` |
+| D1-24 and its amendment ([C1-D1-24-A4](reviews/C1-D1-24-A4.md)) | Received Syslog: `device-observed` only when both the arrival endpoint and the node listener are; a relayed message uses the relay's endpoint; an unknown sender takes the listener's target. | C4 `doc.go`, `Source.EvidenceClass` doc |
+| A6 chain notes, D1-25 | `device_time.native` for a format with separate date and time fields is the two printed values joined by one space (for `sel-ascii-ser-row`, C2 `DATE` and `TIME`). The row's own spacing stays in the native bytes. The goldens already follow this. | `DeviceTime.Native` doc |
 
 ## RenderAudit (from the C8-A4 review)
 
