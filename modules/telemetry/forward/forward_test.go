@@ -1,6 +1,9 @@
 package forward
 
 import (
+	"context"
+	"io"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -176,6 +179,10 @@ func TestSessionEndsAndResends(t *testing.T) {
 			if f.Status().LastErr == nil {
 				t.Error("no session error recorded")
 			}
+			// A refusal names the event it refused (A2 #89).
+			if act == relptest.Refuse && !strings.Contains(f.Status().LastErr.Error(), "refused site-a-node1:sel751-feeder1/ser:10 ") {
+				t.Errorf("refusal error %v does not name the event", f.Status().LastErr)
+			}
 		})
 	}
 }
@@ -349,5 +356,39 @@ func TestNewRefuses(t *testing.T) {
 		if _, err := New(c); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// The open is refused unless the collector offers relp_version=0, the one
+// version this forwarder speaks (A2 #89).
+func TestOpenNeedsRELPVersion0(t *testing.T) {
+	for offers, ok := range map[string]bool{
+		"relp_version=0\ncommands=syslog": true,
+		"relp_version=1\ncommands=syslog": false,
+		"commands=syslog":                 false,
+	} {
+		m := newStore()
+		cli, srv := net.Pipe()
+		go io.Copy(io.Discard, srv)
+		go func() {
+			body := "200 OK\n" + offers
+			srv.Write([]byte("1 rsp " + strconv.Itoa(len(body)) + " " + body + "\n"))
+		}()
+		fw, err := New(Config{
+			Target:       newTarget(t, 2514, nil),
+			Streams:      []Stream{{ID: serStream, Outbox: m, Cursors: m}, {ID: hlStream, Outbox: m, Cursors: m}},
+			HealthStream: hlStream, Health: sink{t: t, m: m},
+			Dial:            func(context.Context) (net.Conn, error) { return cli, nil },
+			ResponseTimeout: time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &session{f: fw, ctx: t.Context(), conn: cli, rbuf: make([]byte, syslog.MaxRELPFrameLen)}
+		err = s.open()
+		if (err == nil) != ok {
+			t.Errorf("offers %q: %v", offers, err)
+		}
+		srv.Close()
 	}
 }

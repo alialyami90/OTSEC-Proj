@@ -7,7 +7,7 @@
 
 `New(Config)` takes one C6 target (mode A: `relp-tls`, or lab-only plain `relp`), the C5 streams it carries, a dial function and a health sink. `Run` keeps one RELP session open. Each session does the following:
 
-1. It loads the target's cursors, sends `open`, and requires `commands=syslog`.
+1. It loads the target's cursors, sends `open`, and requires the collector to offer `relp_version=0` and `commands=syslog`.
 2. It reads each stream after its cursor, renders each record with C6 `Render` (or `RenderAudit` for the audit stream), and keeps up to `relp_window` transactions in flight.
 3. It saves a stream's cursor with C5 `SaveCursor` only when C6 `Window` says every transaction up to it has a 200 OK.
 
@@ -44,7 +44,8 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | --- | --- |
 | `TestForwardsEveryEventOnce` | 100 events plus health: one connection, each eid once, oldest first, C6 0.2 rendering with `evc`. |
 | `TestReceiverClosesMidBatch` | **P2-A4 acceptance.** The receiver drops the connection at frame 1, 5, 37 or 99, and again 40 frames later. Every event is acknowledged. Each new connection starts no later than the event after the highest one already acknowledged, and runs without a gap. Duplicates are at most one window per close. |
-| `TestSessionEndsAndResends` | A 500, a serverclose, silence past the response timeout, and an answer given twice (a C6 violation) each end the session, and everything is delivered after reconnecting. |
+| `TestSessionEndsAndResends` | A 500, a serverclose, silence past the response timeout, and an answer given twice (a C6 violation) each end the session, and everything is delivered after reconnecting. A 500 names the refused event in `Status.LastErr`, so a collector that refuses the same event every session can be found (A2). |
+| `TestOpenNeedsRELPVersion0` | An open answered without `relp_version=0` is refused (A2). |
 | `TestCursorOnlyOnAck` | A collector that acknowledges 5 and then goes silent leaves the cursor at 5 across three sessions. No save past 5 is ever made. |
 | `TestResumesFromSavedCursor`, `TestSkippedRangeReported` | Resume at cursor+1. A pruned range is reported as `forward.unreachable` (11-20) and forwarded. |
 | `TestTextOmitted`, `TestTooLargeHeldThenPassed`, `TestUnrenderableHolds` | The C6 size rules, and holds that never skip. |

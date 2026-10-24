@@ -1,11 +1,13 @@
 package forward
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -206,7 +208,7 @@ func (f *Forwarder) Run(ctx context.Context) error {
 type inflight struct {
 	txnr   uint64
 	stream int
-	seq    store.Seq
+	key    store.Key
 	sentAt time.Time
 }
 
@@ -316,6 +318,11 @@ func (s *session) open() error {
 	if _, err := s.win.Answer(r); err != nil {
 		return fmt.Errorf("forward: open: %w", err)
 	}
+	// RELP version 0 is the only one this forwarder speaks, and librelp
+	// offers it; a collector that offers another is refused (A2 #89).
+	if !slices.ContainsFunc(bytes.Split(r.Data, []byte("\n")), func(l []byte) bool { return string(l) == "relp_version=0" }) {
+		return fmt.Errorf("forward: open: collector does not offer relp_version=0")
+	}
 	return nil
 }
 
@@ -421,7 +428,7 @@ func (s *session) sendNext(i int) (bool, error) {
 	if err := s.write(frame); err != nil {
 		return false, fmt.Errorf("forward: send: %w", err)
 	}
-	s.flight = append(s.flight, inflight{txnr: s.txnr, stream: i, seq: ev.Key.Seq, sentAt: time.Now()})
+	s.flight = append(s.flight, inflight{txnr: s.txnr, stream: i, key: ev.Key, sentAt: time.Now()})
 	s.queue[i] = s.queue[i][1:]
 	return true, nil
 }
@@ -553,6 +560,16 @@ func (s *session) receive(wait time.Duration) error {
 		return err
 	}
 	through, err := s.win.Answer(r)
+	if errors.Is(err, syslog.ErrRefused) {
+		// Name the event, so a collector that refuses the same one on
+		// every session (a receive limit below the target's, say) can be
+		// found from Status without reading logs (A2 #89).
+		for _, x := range s.flight {
+			if x.txnr == r.TXNR {
+				return fmt.Errorf("forward: collector refused %s (transaction %d): %w", x.key, x.txnr, err)
+			}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("forward: %w", err)
 	}
@@ -562,7 +579,7 @@ func (s *session) receive(wait time.Duration) error {
 	upto := map[int]store.Seq{}
 	k := 0
 	for ; k < len(s.flight) && s.flight[k].txnr <= through; k++ {
-		upto[s.flight[k].stream] = s.flight[k].seq
+		upto[s.flight[k].stream] = s.flight[k].key.Seq
 	}
 	s.flight = s.flight[k:]
 	for i, seq := range upto {
