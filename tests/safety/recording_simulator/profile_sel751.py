@@ -33,6 +33,14 @@ Documented (p. = manual page):
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
+Not stated in the manual, modelled as a switch (A2's C7 review): whether a new
+Telnet connection inherits the state a session left behind when it closed
+without QUIT, before TIDLE expires (p. 7.16 says only that the relay stays
+elevated). RelayState(inherit=None) gives every connection a fresh Level 0
+(the default); inherit="level" starts the next connection at the level left
+behind; inherit="prompt" also carries a pending "Password: ?" and the failed
+attempt count, so the next connection's first line is read as a password.
+
 ASSUMED (not stated in the manual): the QUIT reply (see quit_reply);
 commands are case-insensitive; no
 character echo; an unmodelled but valid command gets a placeholder; the
@@ -108,14 +116,37 @@ def _settings(name):
         return {n.strip(): v.strip() for n, v in pairs}
 
 
+class RelayState:
+    """State one relay keeps between Telnet connections, shared by every
+    responder a factory creates. inherit: None, "level" or "prompt" (see the
+    module docstring); tidle: seconds the left-behind state lasts (TIDLE)."""
+
+    def __init__(self, inherit=None, tidle=900.0):
+        assert inherit in (None, "level", "prompt")
+        self.inherit, self.tidle = inherit, tidle
+        self.level, self.awaiting, self.attempts, self.until = 0, None, 0, 0.0
+
+    def take(self):
+        if self.inherit is None or time.monotonic() >= self.until:
+            return 0, None, 0
+        if self.inherit == "level":
+            return self.level, None, 0
+        return self.level, self.awaiting, self.attempts
+
+    def leave(self, level, awaiting, attempts):
+        self.level, self.awaiting, self.attempts = level, awaiting, attempts
+        self.until = time.monotonic() + self.tidle if (level > 0 or awaiting) else 0.0
+
+
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
-                 fid=None, fid_checksum_ok=True, vulnerable=None):
+                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None):
         self.password = password          # None models "Level 1 password disabled"
-        self.level = 0
-        self.awaiting = None              # level being authenticated for, or None
-        self.attempts = 0
+        self.relay = relay
+        self.level, self.awaiting, self.attempts = relay.take() if relay else (0, None, 0)
+        self.inherited = self.level > 0 or self.awaiting is not None
+        self.elevated_here = False        # this session raised the level
         self.ser = _load("ser-fig-10-16.txt") if ser == "example" else None
         self.id = _load("id-fig-7-38.txt")
         if fid is not None:
@@ -169,9 +200,6 @@ class SEL751DocResponder:
         return (self.rid.ljust(42) + b"Date: " + stamp + CRLF +
                 self.tid.ljust(42) + b"Time Source: Internal" + CRLF)
 
-    def greeting(self):
-        return PROMPTS[0]
-
     def _password_reply(self, line):
         from sim import Reply
         target = self.awaiting
@@ -179,6 +207,7 @@ class SEL751DocResponder:
         effects = []
         if ok:
             self.awaiting, self.attempts, self.level = None, 0, 1
+            self.elevated_here = True
             out = CRLF + self._header() + CRLF + b"Level 1" + self._prompt()
         else:
             self.attempts += 1
@@ -193,7 +222,14 @@ class SEL751DocResponder:
         return Reply(out, secret=True, accepted=ok, effects=effects)
 
     def handle(self, line):
+        inherited, self.inherited = self.inherited, False
+        start_level, prompt_inherited = self.level, inherited and self.awaiting is not None
         reply = self._handle(line)
+        if inherited:
+            what = ("its first line was read as a password at a 'Password: ?' prompt"
+                    if prompt_inherited else f"it started at Access Level {start_level}")
+            reply.effects = [f"connection inherited the state an earlier session left without QUIT: "
+                             f"{what} (switch inherit; p. 7.16 does not say)"] + list(reply.effects)
         if self.vulnerable and not self.exposed:
             self.exposed = True
             reply.effects = list(reply.effects) + [self._exposure()]
@@ -277,13 +313,19 @@ class SEL751DocResponder:
                          effects=["SER records cleared: Spanish 'SER D o R' (Command Summary)"])
         return None
 
+    def greeting(self):
+        return PROMPTS[self.level]
+
     def on_close(self):
         effects = []
         if self.vulnerable and not self.exposed:
             effects.append(self._exposure())
-        if self.level > 0:
+        if self.level > 0 and (self.elevated_here or self.relay is None):
             effects.append(f"session closed at Access Level {self.level} without QUIT; relay stays "
                            "elevated until TIDLE expires (p. 7.16)")
+        if self.relay is not None and not self.inherited:
+            # A connection that inherited a state and sent nothing leaves it as it was.
+            self.relay.leave(self.level, self.awaiting, self.attempts)
         return effects
 
 
