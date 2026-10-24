@@ -1,0 +1,98 @@
+{
+  "schema": "otsec.event/0.1",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "sel751-feeder1/ser",
+    "seq": 5
+  },
+  "origin": "device",
+  "kind": "ser",
+  "source": {
+    "asset": {
+      "id": "sel751-feeder1",
+      "binding": {
+        "method": "adapter-target",
+        "confidence": "configured"
+      }
+    },
+    "origin_auth": "session"
+  },
+  "collection": {
+    "method": "adapter-poll",
+    "parser": {
+      "name": "sel-ascii-ser",
+      "version": "0.1"
+    },
+    "native_position": "4",
+    "alignment": "first-read",
+    "parse_status": "ok"
+  },
+  "received": {
+    "utc": "2026-10-24T12:00:05.123456Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "device_time": {
+    "native": "02/28/2007 13:54:10.219",
+    "native_encoding": "text",
+    "format": "sel-ascii-ser-row",
+    "wall_clock": "2007-02-28T13:54:10.219",
+    "offset": "unknown",
+    "offset_basis": "none",
+    "resolution_ns": 1000000,
+    "quality": {
+      "time_source": "Internal",
+      "sync": "unknown",
+      "accuracy_relative_ns": 1000000,
+      "scope": "report"
+    },
+    "flags": [
+      "date-format-assumed:MDY"
+    ]
+  },
+  "native": {
+    "bytes": "NCAgICAgMDIvMjgvMjAwNyAgIDEzOjU0OjEwLjIxOSAgIDUxUDFQICAgICAgICAgICAgICAgICAgICBEZWFzc2VydGVk",
+    "record_sha256": "bd53c57a756b256e510ed60c0468aa7c8f40d4ce5e5952a21c081ddb75bf0ba5",
+    "record_length": 69,
+    "evidence": {
+      "sha256": "006c5eba0418a185507dd7def360a2dc618f9334439141220ba737c5c081a8bf",
+      "length": 879
+    },
+    "span": {
+      "offset": 596,
+      "length": 69
+    },
+    "alignment_key": "sha256:3b643e0992481975b9184a50be96ab047b9fe6e658efdaaed2aa25b08d0f09d3",
+    "fields": [
+      {
+        "name": "#",
+        "value": "4"
+      },
+      {
+        "name": "DATE",
+        "value": "02/28/2007"
+      },
+      {
+        "name": "TIME",
+        "value": "13:54:10.219"
+      },
+      {
+        "name": "ELEMENT",
+        "value": "51P1P"
+      },
+      {
+        "name": "STATE",
+        "value": "Deasserted"
+      }
+    ]
+  },
+  "normalized": {
+    "subject": "51P1P",
+    "subject_type": "ser-element",
+    "value": "Deasserted",
+    "category": "unmapped"
+  }
+}

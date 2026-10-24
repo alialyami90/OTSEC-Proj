@@ -1,0 +1,44 @@
+{
+  "schema": "otsec.event/0.1",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "platform/health",
+    "seq": 1
+  },
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {
+    "asset": {
+      "id": "sel751-feeder1",
+      "binding": {
+        "method": "adapter-target",
+        "confidence": "configured"
+      }
+    },
+    "origin_auth": "platform"
+  },
+  "received": {
+    "utc": "2026-10-24T12:05:05.200000Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "health": {
+    "type": "ser.gap",
+    "related": [
+      {
+        "node_id": "site-a-node1",
+        "stream": "sel751-feeder1/ser",
+        "seq": 9
+      }
+    ],
+    "details": {
+      "stream": "sel751-feeder1/ser",
+      "previous_read_records": "8",
+      "new_read_records": "3",
+      "reason": "no overlap between consecutive reads"
+    }
+  }
+}
