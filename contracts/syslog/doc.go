@@ -57,8 +57,8 @@
 //     message found. The result is recorded in Target.DurableAck (C6-A6-1,
 //     A6 V-S6). Since 0.2 (A1 D2-9) it also records the collector settings
 //     the check ran with, and Validate accepts only these: the collector
-//     authenticates the node by name against a permitted-peer list, never by
-//     CA alone (imrelp tls.authmode="name" with tls.permittedPeer; A6 found
+//     authenticates the node by name against a permitted-peer list that
+//     holds only this node's name, never by CA alone (imrelp tls.authmode="name" with tls.permittedPeer; A6 found
 //     that authmode certvalid accepted a self-signed client certificate the
 //     CA never signed), and it acknowledges only after a synchronous write
 //     (a Direct ruleset queue and omfile sync="on"). The rule applies to

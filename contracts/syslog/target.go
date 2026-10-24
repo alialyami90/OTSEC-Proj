@@ -107,10 +107,16 @@ func (t *Target) SendsDeviceContent() bool {
 // librelp 1.11.0, that imrelp with tls.authmode="certvalid" accepted a
 // self-signed client certificate the CA never signed, and that without a
 // Direct queue and a synchronous write the 200 OK can arrive before the
-// write. Both fields are required on every required target, whatever minor
-// it declares: a target that never recorded them has not shown that only
-// this node can write to the collector, or that an acknowledgement means
-// stored, so it cannot hold back pruning.
+// write. The three fields are required on every required target, whatever
+// minor it declares: a target that never recorded them has not shown that
+// the collector refuses writers other than this node, or that an
+// acknowledgement means stored, so it cannot hold back pruning.
+//
+// The fields are what the commissioning record attests; Validate checks
+// their form, not the collector. The record itself must show the refusals
+// A6 lists in V-S6 (docs/verification.md): no client certificate, a
+// CA-signed certificate for another name, and a self-signed certificate
+// with the permitted name.
 type DurableAck struct {
 	// VerifiedUTC is when the check passed, RFC 3339 UTC with Z.
 	VerifiedUTC string `json:"verified_utc"`
@@ -122,8 +128,13 @@ type DurableAck struct {
 	// list (imrelp tls.authmode="name" with tls.permittedPeer). A check by
 	// CA alone (authmode certvalid) is refused.
 	PeerCheck PeerCheck `json:"peer_check"`
-	// PermittedPeer is the node certificate name the collector permits,
-	// exactly; no wildcard, which would permit more than this node.
+	// PermittedPeer is the whole permitted-peer list of the collector
+	// listener this target writes to, which must be exactly one name: this
+	// node's client certificate name, with no wildcard. A collector shared
+	// by several nodes gives each node its own listener. A listener whose
+	// list holds several names lets each of those nodes write as the
+	// others, so it does not pass (A3 #81 S-1). The forwarder checks this
+	// name against the node's own certificate.
 	PermittedPeer string `json:"permitted_peer"`
 	// AckAfter says when the collector acknowledges. Only AckAfterDurableWrite
 	// is accepted: the receiving ruleset writes synchronously before it
