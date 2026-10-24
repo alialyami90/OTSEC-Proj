@@ -37,7 +37,7 @@ Evidence class of everything here: `simulated`. No real device was ever involved
 
 ## Tests and where they ran
 
-Linux container, Go 1.26. Commits are listed in each PR.
+Linux container, Go 1.26, and, for #92 at `b2a604d`, A6's native Windows run on the owner's PC (Windows 11, non-elevated, Go 1.26.0): `./platform/...` and `./cmd/...` pass, `TestDirDACLChecked`, `TestOpenReadOnlyPath` and `TestReadOnlyCommands` included. Commits are listed in each PR.
 
 | Claim | Test |
 | --- | --- |
@@ -49,6 +49,7 @@ Linux container, Go 1.26. Commits are listed in each PR.
 | Refusal and missing decision audited correctly; status does not quote the reply | `TestRefusalAndNoDecision` |
 | Unauthorized line: frame kept byte for byte, not forwarded, not normalized, alarm without the line, halt survives a restart | `TestUnauthorizedLineQuarantinedAndHaltedDurably`. Mutating the halt scan fails it |
 | No room: nothing is sent, and one alarm is raised | `TestNoQuarantineRoomSendsNothing`. Mutating the room check fails it |
+| A result the normalizer refuses is quarantined and ends with one health event (A6 #92 nit 4) | `TestNormalizerRefusalEndsWithOneHealthEvent` |
 | Quarantine refused: the node stops | `TestQuarantineNotStoredStopsTheNode` |
 | An asset gets 60 s between sessions, whatever the schedule says (A6 #92) | `TestPlanSpacesSessionsPerAsset`. Removing the per-asset quiet time fails it |
 | The store opens the file it checked: a directory with a space, `#` or `?` in its name, and on Windows a volume name (A6 #92) | `TestOpenReadOnlyPath`. Opening by plain name, which the driver cuts at `?`, fails it |
@@ -56,16 +57,14 @@ Linux container, Go 1.26. Commits are listed in each PR.
 | A store directory that is a link, and a database file that is a link or that others can read, are refused (A3 #84 notes 3 and 4) | `TestFileModes`. Mutating the file check fails it |
 | The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |
 
-**Windows run owed (D2-8)**, for A6's list:
-- `./platform/...` and `./cmd/...`;
-- the installer and service, with A3's T-13 (W-1 to W-4);
-- `TestDirDACLChecked`, which also covers a junction and SDDL in the account (A3 #84 notes 1 and 4);
-- `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service.
+**Not evidenced: the installer.** It needs an elevated shell on the owner's PC and has not run anywhere; `platform/winsvc/install_windows.go` has no evidence beyond compiling. For A6's list:
+- the installer and the services, with A3's T-13 (W-1 to W-4);
+- `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service;
 - the installer refuses a junction planted at any `OTSEC` path (A3 #92 note 1);
 - A3's collector creating and reopening its stores as `NT SERVICE\otsec-collector` (user-scope DPAPI), also after a reboot: whether the virtual account's profile is loaded under the SCM is inferred, not shown (A3 #92 note 2);
 - for A3's collector: `collector\public` (collector writes, node reads `install-key.json` by full path), the `otsec-collector` event log source, and the WER exclusion `otsec-collector.exe = 1` (T-5), which the collector refuses to start without.
 
-None of the Windows-only code has run.
+Until that run, the installer and the services under the SCM are not evidenced.
 
 ## Open
 
