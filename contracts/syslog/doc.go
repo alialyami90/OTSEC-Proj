@@ -37,7 +37,7 @@
 //     acknowledges after a durable write: a numbered burst, the collector
 //     killed after it acknowledges, restarted, and every acknowledged
 //     message found. The result is recorded in Target.DurableAck (C6-A6-1,
-//     A6 V-S15).
+//     A6 V-S6).
 //   - Authentication (TB5, SC-16). Every TLS target verifies the collector:
 //     TLS 1.2 or later, the chain against a CA set used only for platform
 //     collectors or an SPKI pin, and the host name. No fallback to

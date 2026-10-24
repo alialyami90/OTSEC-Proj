@@ -55,7 +55,7 @@ type Target struct {
 // with in-memory queues lost 1,471 of 1,500 acknowledged messages in trial
 // 1, so without this check a required target could let C5 prune records
 // that exist nowhere else (V-S9). The check runs against the real
-// collector, because the result depends on its configuration (A6 V-S15).
+// collector, because the result depends on its configuration (A6 V-S6).
 type DurableAck struct {
 	// VerifiedUTC is when the check passed, RFC 3339 UTC with Z.
 	VerifiedUTC string `json:"verified_utc"`
