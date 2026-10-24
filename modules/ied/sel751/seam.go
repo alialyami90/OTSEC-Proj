@@ -41,8 +41,13 @@ type FloorGate interface {
 // bytes until the collector closes the handle after Run returns, then zeroes
 // them; the adapter never holds a copy.
 type Secret interface {
-	// Use calls f once with the secret. The adapter writes the secret and a
-	// line end inside f. A second Use fails.
+	// Use calls f once with the secret. Inside f the adapter writes it with
+	// telnet.Conn.SendSecret: the secret, CR LF, in one Write, once per
+	// session. That line does not pass the C3 egress check, since no
+	// register line can match a password; the credential slot is its check
+	// instead: ACC was sent and passed egress, the next received bytes end
+	// in "Password: ?", and nothing else is sent in between (HR-3, C-17).
+	// A second Use fails.
 	Use(f func(secret []byte) error) error
 	// EchoSpans returns the ranges of rx that equal the secret, as
 	// half-open [start, end) byte offsets, so the adapter can replace each

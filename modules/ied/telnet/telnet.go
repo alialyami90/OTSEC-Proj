@@ -13,26 +13,34 @@
 //     per option and verb (RFC 854: a request to enter a mode already
 //     refused is not answered again). WONT and DONT need no answer, because
 //     no option is ever on. Subnegotiation is discarded up to
-//     MaxSubnegotiation bytes. More than Config.MaxCommands commands in one
-//     session fails with ErrNegotiation, so a peer cannot hold the
-//     session in negotiation.
-//   - Writes: Send writes one caller line in one Write. The line is checked
-//     first by Config.Egress on the exact bytes, then by the transport's own
-//     rule: printable ASCII, CR and LF only (ADR-0005, A2 D5). Because 0xFF
-//     can never pass, data needs no IAC escaping, and the bytes the egress
-//     check saw are the bytes on the socket.
+//     MaxSubnegotiation bytes. An IAC followed by anything but IAC or SE
+//     inside a subnegotiation ends it, and the command is handled as if
+//     outside, so no option byte reaches the data stream. More than
+//     Config.MaxCommands commands in one session fails with ErrNegotiation,
+//     so a peer cannot hold the session in negotiation.
+//   - Writes: Send writes exactly one line in one Write: printable ASCII
+//     followed by one line end (CR LF, CR or LF), and no other CR or LF
+//     (ADR-0005, A2 D5). Config.Egress sees the line without its line end,
+//     as the C3 egress check (Matcher.Permit) expects. The line is copied
+//     before the check, so the bytes checked are the bytes written. Because
+//     0xFF can never pass, data needs no IAC escaping.
+//   - SendSecret writes the credential once per session: printable ASCII,
+//     then CR LF, in one Write. Config.Egress does not see it, since no
+//     register line can match a password; the adapter calls it only from its
+//     credential slot (HR-3, C-17), and the transport refuses a second call.
 //   - The refusals are the only other bytes it writes: three bytes each,
 //     IAC WONT x or IAC DONT x, written from inside Read.
 //
 // What it leaves out: options, subnegotiation, urgent data (the Synch
 // signal's data mark is discarded like any other command), and concurrency.
-// A Conn is used by one goroutine.
+// A Conn is used by one goroutine. Any write error ends the session.
 //
 // The refusals are not in the C2 transcript, which holds the NVT data
-// stream. Stats counts them.
+// stream. Stats counts them, and A6's simulator records them on the far side.
 package telnet
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -59,7 +67,7 @@ var (
 	// ErrNegotiation: more commands than Config.MaxCommands, or an
 	// oversized subnegotiation.
 	ErrNegotiation = errors.New("telnet: negotiation over the limit")
-	// ErrEgress: Send refused the line; nothing was written.
+	// ErrEgress: Send or SendSecret refused the bytes; nothing was written.
 	ErrEgress = errors.New("telnet: line refused at egress")
 )
 
@@ -69,8 +77,8 @@ type Config struct {
 	MaxReceived int64
 	// MaxCommands is the most Telnet commands accepted in the session.
 	MaxCommands int
-	// Egress is the caller's check on every line Send writes. It sees the
-	// exact bytes the socket will get. It is required.
+	// Egress is the caller's check on every line Send writes, given without
+	// its line end. It is required.
 	Egress func(line []byte) error
 }
 
@@ -85,15 +93,16 @@ type Conn struct {
 	nc  net.Conn
 	cfg Config
 
-	state    parseState
-	verb     byte
-	sbLen    int
-	received int64
-	stats    Stats
-	refused  map[[2]byte]bool // verb and option already answered
-	err      error            // sticky: the session is over
-	pending  []byte           // data decoded but not yet returned
-	readBuf  []byte
+	state      parseState
+	verb       byte
+	sbLen      int
+	received   int64
+	stats      Stats
+	refused    map[[2]byte]bool // verb and option already answered
+	err        error            // sticky: the session is over
+	pending    []byte           // data decoded but not yet returned
+	readBuf    []byte
+	secretSent bool
 }
 
 type parseState int
@@ -165,16 +174,9 @@ func (c *Conn) decode(b []byte) error {
 				}
 				continue
 			}
-			if err := c.command(); err != nil {
+			if err := c.command(x); err != nil {
 				return err
 			}
-			switch x {
-			case cmdWILL, cmdWONT, cmdDO, cmdDONT:
-				c.verb, c.state = x, stOption
-			case cmdSB:
-				c.sbLen, c.state = 0, stSB
-			}
-			// Any other command (NOP, DM, GA, ...) is discarded.
 		case stOption:
 			c.state = stData
 			if err := c.answer(c.verb, x); err != nil {
@@ -198,8 +200,12 @@ func (c *Conn) decode(b []byte) error {
 					return ErrNegotiation
 				}
 			default:
-				// RFC 854 allows no other command inside SB; end it here.
+				// RFC 854 allows no other command inside SB: end it there,
+				// and handle the command as if outside.
 				c.state = stData
+				if err := c.command(x); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -215,9 +221,18 @@ func (c *Conn) data(x byte) error {
 	return nil
 }
 
-func (c *Conn) command() error {
+// command counts the command byte x that followed IAC and moves to the
+// state it starts. Any command other than an option verb or SB (NOP, DM,
+// GA, ...) is discarded.
+func (c *Conn) command(x byte) error {
 	if c.stats.Commands++; c.stats.Commands > c.cfg.MaxCommands {
 		return ErrNegotiation
+	}
+	switch x {
+	case cmdWILL, cmdWONT, cmdDO, cmdDONT:
+		c.verb, c.state = x, stOption
+	case cmdSB:
+		c.sbLen, c.state = 0, stSB
 	}
 	return nil
 }
@@ -245,28 +260,78 @@ func (c *Conn) answer(verb, opt byte) error {
 	return nil
 }
 
-// Send writes line, exactly, in one Write: after the caller's egress check
-// and the transport's own byte rule. On a refusal nothing is written.
+// Send writes one line, exactly, in one Write. line is printable ASCII
+// followed by one line end (CR LF, CR or LF), with no other CR or LF.
+// Config.Egress checks it without the line end. On a refusal nothing is
+// written.
 func (c *Conn) Send(line []byte) error {
 	if c.err != nil {
 		return c.err
 	}
-	if len(line) == 0 {
-		return fmt.Errorf("%w: empty line", ErrEgress)
+	b := append([]byte(nil), line...) // what is checked is what is written
+	text, ok := cutLineEnd(b)
+	if !ok {
+		return fmt.Errorf("%w: not one line with one line end", ErrEgress)
 	}
-	if err := c.cfg.Egress(line); err != nil {
+	if err := printable(text); err != nil {
+		return err
+	}
+	if err := c.cfg.Egress(append([]byte(nil), text...)); err != nil {
 		return fmt.Errorf("%w: %v", ErrEgress, err)
 	}
-	for i, x := range line {
-		if (x < 0x20 || x > 0x7e) && x != '\r' && x != '\n' {
-			return fmt.Errorf("%w: byte 0x%02x at %d is not printable ASCII, CR or LF", ErrEgress, x, i)
-		}
+	return c.write(b)
+}
+
+// SendSecret writes secret and CR LF in one Write, once per session. The
+// secret is printable ASCII. The buffer that held the line is zeroed after
+// the Write; the caller's copy is the caller's to clear.
+func (c *Conn) SendSecret(secret []byte) error {
+	if c.err != nil {
+		return c.err
 	}
-	n, err := c.nc.Write(line)
-	if err == nil && n != len(line) {
-		err = fmt.Errorf("telnet: short write, %d of %d bytes", n, len(line))
+	if c.secretSent {
+		return fmt.Errorf("%w: the credential was already sent in this session", ErrEgress)
+	}
+	if len(secret) == 0 || printable(secret) != nil {
+		return fmt.Errorf("%w: the credential is empty or not printable ASCII", ErrEgress)
+	}
+	c.secretSent = true
+	b := make([]byte, 0, len(secret)+2)
+	b = append(append(b, secret...), '\r', '\n')
+	defer clear(b)
+	return c.write(b)
+}
+
+func (c *Conn) write(b []byte) error {
+	n, err := c.nc.Write(b)
+	if err == nil && n != len(b) {
+		err = fmt.Errorf("telnet: short write, %d of %d bytes", n, len(b))
+	}
+	if err != nil {
+		c.err = err
 	}
 	return err
+}
+
+// cutLineEnd returns b without its line end, when b is non-empty text
+// followed by exactly one CR LF, CR or LF.
+func cutLineEnd(b []byte) ([]byte, bool) {
+	for _, eol := range []string{"\r\n", "\r", "\n"} {
+		if text, ok := bytes.CutSuffix(b, []byte(eol)); ok {
+			return text, len(text) > 0 && !bytes.ContainsAny(text, "\r\n")
+		}
+	}
+	return nil, false
+}
+
+// printable refuses any byte outside printable ASCII.
+func printable(b []byte) error {
+	for i, x := range b {
+		if x < 0x20 || x > 0x7e {
+			return fmt.Errorf("%w: byte 0x%02x at %d is not printable ASCII", ErrEgress, x, i)
+		}
+	}
+	return nil
 }
 
 // SetDeadline sets the read and write deadline of the socket.

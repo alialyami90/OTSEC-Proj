@@ -129,6 +129,20 @@ func TestSubnegotiationDiscarded(t *testing.T) {
 	}
 }
 
+// An option verb inside a subnegotiation ends it; its option byte never
+// becomes data, and the option is refused like any other (A6 #75 review).
+func TestCommandInsideSubnegotiation(t *testing.T) {
+	in := append([]byte{cmdIAC, cmdSB, 24, 1, cmdIAC, cmdWILL, 1}, "=>"...)
+	c, f := session(t, Config{}, in)
+	got, _ := readAll(c)
+	if string(got) != "=>" {
+		t.Errorf("data %q", got)
+	}
+	if !bytes.Equal(f.wrote.Bytes(), []byte{cmdIAC, cmdDONT, 1}) {
+		t.Errorf("wrote %x", f.wrote.Bytes())
+	}
+}
+
 func TestSubnegotiationBounded(t *testing.T) {
 	in := append([]byte{cmdIAC, cmdSB, 24}, bytes.Repeat([]byte{'x'}, MaxSubnegotiation+1)...)
 	c, _ := session(t, Config{}, in)
@@ -160,34 +174,65 @@ func TestReceivedBounded(t *testing.T) {
 }
 
 func TestSendChecksTheExactBytes(t *testing.T) {
-	var seen [][]byte
+	var seen []string
 	egress := func(b []byte) error {
-		seen = append(seen, append([]byte(nil), b...))
-		if string(b) == "SER D\r\n" {
+		seen = append(seen, string(b))
+		if string(b) == "SER D" {
 			return errors.New("denied")
 		}
+		b[0] = 'X' // a check that changes its argument changes nothing written
 		return nil
 	}
 	c, f := session(t, Config{Egress: egress})
-	if err := c.Send([]byte("SER\r\n")); err != nil {
-		t.Fatal(err)
+	for _, line := range []string{"SER\r\n", "ID\r", "QUI\n"} {
+		if err := c.Send([]byte(line)); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
 	}
 	for name, line := range map[string]string{
-		"egress refusal": "SER D\r\n",
-		"control byte":   "SER\x07\r\n",
-		"IAC":            "SER\xff\xf4\r\n",
-		"high bit":       "SER\xe9\r\n",
-		"empty":          "",
+		"egress refusal":     "SER D\r\n",
+		"control byte":       "SER\x07\r\n",
+		"IAC":                "SER\xff\xf4\r\n",
+		"high bit":           "SER\xe9\r\n",
+		"empty":              "",
+		"line end only":      "\r\n",
+		"no line end":        "SER",
+		"two lines":          "SER\r\nSER D\r\n",
+		"CR inside":          "SER\rD\r\n",
+		"LF inside":          "SER\nD\n",
+		"two line ends":      "SER\r\n\r\n",
+		"LF CR":              "SER\n\r",
+		"NUL after CR":       "SER\r\x00",
+		"two lines, no last": "QUI\r\nSER D",
 	} {
 		if err := c.Send([]byte(line)); !errors.Is(err, ErrEgress) {
 			t.Errorf("%s: error %v, want ErrEgress", name, err)
 		}
 	}
-	if f.wrote.String() != "SER\r\n" || f.writes != 1 {
-		t.Errorf("wrote %q in %d writes; only the permitted line may reach the socket", f.wrote.String(), f.writes)
+	if f.wrote.String() != "SER\r\nID\rQUI\n" || f.writes != 3 {
+		t.Errorf("wrote %q in %d writes; only the permitted lines may reach the socket", f.wrote.String(), f.writes)
 	}
-	if string(seen[0]) != "SER\r\n" {
-		t.Errorf("egress saw %q", seen[0])
+	if len(seen) != 4 || seen[0] != "SER" || seen[1] != "ID" || seen[2] != "QUI" || seen[3] != "SER D" {
+		t.Errorf("egress saw %q", seen)
+	}
+}
+
+func TestSendSecretOnce(t *testing.T) {
+	var seen int
+	c, f := session(t, Config{Egress: func([]byte) error { seen++; return nil }})
+	for name, s := range map[string]string{"empty": "", "CR": "pa\rss", "LF": "pa\nss", "IAC": "pa\xffss", "NUL": "pa\x00ss"} {
+		if err := c.SendSecret([]byte(s)); !errors.Is(err, ErrEgress) {
+			t.Errorf("%s: error %v", name, err)
+		}
+	}
+	if err := c.SendSecret([]byte("Otter#2026")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendSecret([]byte("Otter#2026")); !errors.Is(err, ErrEgress) {
+		t.Errorf("second credential: %v", err)
+	}
+	if f.wrote.String() != "Otter#2026\r\n" || f.writes != 1 || seen != 0 {
+		t.Errorf("wrote %q in %d writes, egress called %d times", f.wrote.String(), f.writes, seen)
 	}
 }
 

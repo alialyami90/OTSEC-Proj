@@ -41,3 +41,38 @@ func FuzzRead(f *testing.F) {
 		}
 	})
 }
+
+// FuzzSend checks that whatever Send accepts is written unchanged, is one
+// line of printable ASCII with one line end, and was passed to Egress
+// without that line end.
+func FuzzSend(f *testing.F) {
+	f.Add([]byte("SER\r\n"))
+	f.Add([]byte("SER\r\nSER D\r\n"))
+	f.Add([]byte("QUI\r"))
+	f.Fuzz(func(t *testing.T, line []byte) {
+		var seen []byte
+		c, fc := session(t, Config{Egress: func(b []byte) error { seen = append([]byte(nil), b...); return nil }})
+		if err := c.Send(line); err != nil {
+			if fc.wrote.Len() != 0 {
+				t.Fatalf("refused %q but wrote %q", line, fc.wrote.Bytes())
+			}
+			return
+		}
+		w := fc.wrote.Bytes()
+		if !bytes.Equal(w, line) || fc.writes != 1 {
+			t.Fatalf("sent %q, wrote %q in %d writes", line, w, fc.writes)
+		}
+		text := bytes.TrimRight(w, "\r\n")
+		if !bytes.Equal(text, seen) || len(text) == 0 || len(w)-len(text) > 2 {
+			t.Fatalf("wrote %q, egress saw %q", w, seen)
+		}
+		for _, x := range text {
+			if x < 0x20 || x > 0x7e {
+				t.Fatalf("wrote %q", w)
+			}
+		}
+		if end := string(w[len(text):]); end != "\r\n" && end != "\r" && end != "\n" {
+			t.Fatalf("line end %q", end)
+		}
+	})
+}
