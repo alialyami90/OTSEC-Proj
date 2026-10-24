@@ -62,15 +62,22 @@
 //
 // The record says which is which: IdentityBinding.PreCredential lists the
 // attributes compared before any credential is sent ("firmware_id" for the
-// SEL-751), and a device-reported binding without one is invalid, so ACC is
-// never sent ungated. The family's profile lists what it reports before
-// authentication, and Asset.CheckProfile holds the binding to that list.
+// SEL-751), and a device-reported binding without one is invalid. The
+// family's profile lists what it reports before authentication, and
+// Asset.CheckProfile holds the binding to that list. Asset.CredentialAllowed
+// is the rule the collector applies before any credential is used: only a
+// pinned-key binding, or a device-reported binding whose pre_credential
+// passes CheckProfile, gets one. An address-only binding, or a binding method
+// from a later minor, never does, so ACC is never sent ungated (A6 R-1).
 //
-// Decoding is strict about spelling (strictjson.Forward, D1-10): a key that
-// differs from a field name only in case, or a key given twice, rejects the
-// record, so a reviewer and the node always read the same binding. Values
-// added by a later minor are read down to the least trusted 0.1 value
-// (Asset.Effective).
+// Decoding is strict (D1-10, A6 S-1). A record of this minor or an earlier
+// one is read with strictjson.Decode, so an unknown field is an error. A
+// record of a later minor is read with strictjson.Forward, which ignores the
+// fields it adds. Either way a key that differs from a field name only in
+// case, or a key given twice, rejects the record, so a reviewer and the node
+// always read the same binding. Values added by a later minor are read down
+// to the least trusted 0.1 value (Asset.Effective); an unknown binding method
+// reads as address-only.
 //
 // What a mismatch does: the collector sends nothing more except the close
 // sequence that is safe at that point, the invocation ends with an

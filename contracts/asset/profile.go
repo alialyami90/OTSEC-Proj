@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 
-	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/version"
 )
 
@@ -40,7 +39,33 @@ type CapabilityProfile struct {
 	// SessionLimits are required when the profile sends adapter operations,
 	// and absent otherwise (D1-18).
 	SessionLimits *SessionLimits `json:"session_limits,omitempty"`
+	// SecretPolicy is required when the family takes a password
+	// (session_limits.password_attempts 1), and absent otherwise (D1-19).
+	SecretPolicy *SecretPolicy `json:"secret_policy,omitempty"`
 }
+
+// SecretPolicy is the family's write-time rule for a password (D1-19). C7's
+// ValidateSecret applies it inside the collector, together with the checks
+// that hold for every family; the collector never builds a policy itself,
+// and a missing or zero policy is invalid, never "accept anything".
+type SecretPolicy struct {
+	MinLen int `json:"min_len"`
+	// MaxLen is at most MaxSecretLen.
+	MaxLen int `json:"max_len"`
+	// Allowed is an RE2 expression for the allowed characters, matched
+	// against the whole secret (C7 anchors it).
+	Allowed string `json:"allowed"`
+	// MnemonicLen is how many leading characters of a command word the
+	// device reads (3 for SEL, which reads QUIT as QUI). Exactly one of
+	// MnemonicLen and WholeWord is set; zero is not a mode.
+	MnemonicLen int    `json:"mnemonic_len,omitempty"`
+	WholeWord   bool   `json:"whole_word,omitempty"`
+	Citation    string `json:"citation"`
+}
+
+// MaxSecretLen is C7's authz.MaxSecretLen, copied so that C7 can import this
+// package; a test checks the two agree.
+const MaxSecretLen = 64
 
 // MaxReadRowsCeiling is C4's event.MaxAlignRows, the most rows Align accepts
 // (D1-12). It is a copy, so that C1 and C4 need not import each other (D1-1);
@@ -152,7 +177,7 @@ func ValidOperationID(s string) bool { return operationIDPattern.MatchString(s) 
 // DecodeProfile parses and validates a capability profile.
 func DecodeProfile(b []byte) (CapabilityProfile, error) {
 	var p CapabilityProfile
-	if err := strictjson.Forward(b, &p); err != nil {
+	if err := decodeStrict(b, &p, func() string { return p.Schema }); err != nil {
 		return CapabilityProfile{}, fmt.Errorf("asset: profile: %w", err)
 	}
 	return p, p.Validate()
@@ -229,6 +254,15 @@ func (p CapabilityProfile) Validate() error {
 	case !readsByAdapter && p.MaxReadRows != 0:
 		v.fail("max_read_rows is only for event retrieval by adapter operation")
 	}
+	takesPassword := p.SessionLimits != nil && p.SessionLimits.PasswordAttempts == 1
+	switch sp := p.SecretPolicy; {
+	case takesPassword && sp == nil:
+		v.fail("a family that takes a password needs secret_policy (D1-19)")
+	case !takesPassword && sp != nil:
+		v.fail("secret_policy is only for a family that takes a password")
+	case sp != nil:
+		sp.validate(v)
+	}
 	switch l := p.SessionLimits; {
 	case usesAdapter && l == nil:
 		v.fail("a profile that sends adapter operations needs session_limits (D1-18)")
@@ -238,6 +272,23 @@ func (p CapabilityProfile) Validate() error {
 		l.validate(v)
 	}
 	return v.err()
+}
+
+func (sp *SecretPolicy) validate(v *validator) {
+	if sp.MinLen < 1 || sp.MaxLen < sp.MinLen || sp.MaxLen > MaxSecretLen {
+		v.fail("secret_policy: lengths must satisfy 1 <= min_len <= max_len <= %d", MaxSecretLen)
+	}
+	if sp.Allowed == "" {
+		v.fail("secret_policy.allowed is required")
+	} else if _, err := regexp.Compile(sp.Allowed); err != nil {
+		v.fail("secret_policy.allowed: %v", err)
+	}
+	if (sp.MnemonicLen > 0) == sp.WholeWord || sp.MnemonicLen < 0 {
+		v.fail("secret_policy: set exactly one of mnemonic_len and whole_word")
+	}
+	if sp.Citation == "" {
+		v.fail("secret_policy needs a citation")
+	}
 }
 
 func (l *SessionLimits) validate(v *validator) {

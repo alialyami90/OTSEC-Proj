@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -62,7 +63,7 @@ type Observation struct {
 type Source struct {
 	Method SourceMethod `json:"method"`
 	// Ref points at the evidence: the C2 invocation ID for adapter-session,
-	// the operator principal for operator-entry (TODO(C7)), a document
+	// the operator's C7 principal ID for operator-entry, a document
 	// citation for document, the attribute names used for derived.
 	Ref string `json:"ref"`
 	// Span is the byte span in the invocation's transcript that holds the
@@ -108,7 +109,7 @@ type DownstreamSecurity struct {
 // Acknowledgement records an administrator's per-device acceptance of an
 // insecure downstream link (A3 §4.5, ADR-0005).
 type Acknowledgement struct {
-	By     string `json:"by"` // TODO(C7): human principal ID.
+	By     string `json:"by"` // the admin's C7 principal ID
 	At     string `json:"at"` // RFC 3339 UTC. TODO(C4).
 	Reason string `json:"reason"`
 	// Scope is where the acceptance holds. The collector refuses to run when
@@ -355,6 +356,10 @@ var (
 const (
 	FallbackSecurityLevel = PlaintextUnauthenticated
 	FallbackStrength      = Spoofable
+	// FallbackBindingMethod is how a 0.1 reader reads a binding method it
+	// does not know: as comparing nothing, so no credential is sent on it
+	// (CredentialAllowed).
+	FallbackBindingMethod = AddressOnly
 	FallbackDeviceClass   = ClassUnknown
 	// FallbackEvidenceClass is how a 0.1 reader reads an evidence class it
 	// does not know, and a device-observed value from a source method it
@@ -420,11 +425,14 @@ var OperatorOnlyAttributes = []string{AttrDeviceClass, AttrVendor, AttrProductFa
 // --- formats -----------------------------------------------------------------
 
 var (
-	uuidPattern       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	attrNamePattern   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	vendorAttrPattern = regexp.MustCompile(`^[a-z][a-z0-9]{1,15}\.[a-z][a-z0-9_]{0,63}$`)
-	tokenPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-	datePattern       = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	uuidPattern     = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	attrNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	// principalIDPattern is C7's principal ID syntax, copied so that C7 can
+	// import this package; a test compares the two.
+	principalIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$`)
+	vendorAttrPattern  = regexp.MustCompile(`^[a-z][a-z0-9]{1,15}\.[a-z][a-z0-9_]{0,63}$`)
+	tokenPattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	datePattern        = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 	// familyPattern is the shape of vendor and product family values. C3
 	// names a register package's family with the same token ("sel-751").
 	familyPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -446,6 +454,9 @@ func ValidAttributeName(s string) bool {
 	return attrNamePattern.MatchString(s) && contains(AttributeNames, s)
 }
 
+// ValidPrincipalID reports whether s has C7's principal ID syntax.
+func ValidPrincipalID(s string) bool { return principalIDPattern.MatchString(s) }
+
 // ValidTime reports whether s is a platform time: RFC 3339, UTC, Z suffix.
 // TODO(C4): replace with C4's timestamp model.
 func ValidTime(s string) bool {
@@ -458,6 +469,22 @@ func ValidTime(s string) bool {
 
 // --- decoding and validation ---------------------------------------------------
 
+// decodeStrict reads a record the way C4 reads events (A6 C1 re-check S-1):
+// a record stamped with this minor or an earlier one is read with
+// strictjson.Decode, so an unknown field (a typo in a hand-written 0.1
+// record) is an error; a record from a later minor is read with
+// strictjson.Forward, which ignores the fields that minor adds but still
+// rejects duplicate keys and case variants (D1-10).
+func decodeStrict(b []byte, v any, schema func() string) error {
+	if err := strictjson.Forward(b, v); err != nil {
+		return err
+	}
+	if id, err := version.Parse(schema()); err == nil && id.Name == self.Name && id.Minor <= self.Minor {
+		return strictjson.Decode(b, v)
+	}
+	return nil
+}
+
 // Decode parses and validates an asset record, and returns it as a 0.1
 // reader must read it (Effective). Decoding is strict except for forward
 // compatibility (D1-10): a key that differs from a field name only in case,
@@ -466,7 +493,7 @@ func ValidTime(s string) bool {
 // field from a later minor is ignored.
 func Decode(b []byte) (Asset, error) {
 	var a Asset
-	if err := strictjson.Forward(b, &a); err != nil {
+	if err := decodeStrict(b, &a, func() string { return a.Schema }); err != nil {
 		return Asset{}, fmt.Errorf("asset: %w", err)
 	}
 	if err := a.Validate(); err != nil {
@@ -510,8 +537,37 @@ func (a Asset) Effective() Asset {
 			out.Endpoints[i].DownstreamSecurity.Level = FallbackSecurityLevel
 		}
 	}
-	out.IdentityBinding.Strength = StrengthOf(a.IdentityBinding.Method)
+	out.IdentityBinding.Attributes = slices.Clone(a.IdentityBinding.Attributes)
+	out.IdentityBinding.PreCredential = slices.Clone(a.IdentityBinding.PreCredential)
+	if !contains(BindingMethods, a.IdentityBinding.Method) {
+		out.IdentityBinding.Method = FallbackBindingMethod
+		out.IdentityBinding.PreCredential = nil
+	}
+	out.IdentityBinding.Strength = StrengthOf(out.IdentityBinding.Method)
 	return out
+}
+
+// CredentialAllowed reports whether the collector may send a credential to
+// the asset at all (A6 C1 re-check R-1; AP-27, V-S19). It reads the effective
+// binding. Allowed are a pinned-key binding, and a device-reported binding
+// whose pre_credential is non-empty and is reported before authentication
+// by p, the asset's capability profile (CheckProfile), so the device's
+// claims are compared before the password leaves the node. Anything else,
+// address-only and any method from a later minor included, is refused before
+// connecting. C7 calls it for every run that carries a credential.
+func (a Asset) CredentialAllowed(p CapabilityProfile) error {
+	b := a.Effective().IdentityBinding
+	switch b.Method {
+	case PinnedKey:
+		return nil
+	case DeviceReported:
+		if len(b.PreCredential) == 0 {
+			return errors.New("asset: device-reported binding compares nothing before the credential is sent")
+		}
+		return a.CheckProfile(p)
+	default:
+		return fmt.Errorf("asset: no credential is sent to an asset bound %q: nothing is compared before the password leaves the node", b.Method)
+	}
 }
 
 func effectiveClass(ob Observation) EvidenceClass {
@@ -664,6 +720,8 @@ func (v *validator) attribute(i int, at Attribute) {
 		v.value(q+".value", at.Name, ob.Value)
 		if ob.Source.Ref == "" {
 			v.fail("%s.source.ref is required", q)
+		} else if ob.Source.Method == OperatorEntry && !ValidPrincipalID(ob.Source.Ref) {
+			v.fail("%s.source.ref %q is not a C7 principal ID", q, ob.Source.Ref)
 		}
 		if !ValidTime(ob.Source.ObservedAt) {
 			v.fail("%s.source.observed_at %q is not an RFC 3339 UTC time", q, ob.Source.ObservedAt)
@@ -766,7 +824,7 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 	}
 	if ds.Level != "" && ds.Level != EncryptedAuthenticated {
 		ack := ds.Acknowledgement
-		if ack == nil || ack.By == "" || strings.TrimSpace(ack.Reason) == "" || !ValidTime(ack.At) {
+		if ack == nil || !ValidPrincipalID(ack.By) || strings.TrimSpace(ack.Reason) == "" || !ValidTime(ack.At) {
 			v.fail("%s: %s needs an acknowledgement with by, at, reason and scope (A3 §4.5)", p, ds.Level)
 		} else {
 			v.enum(p+".downstream_security.acknowledgement.scope", string(ack.Scope), AckScopes)

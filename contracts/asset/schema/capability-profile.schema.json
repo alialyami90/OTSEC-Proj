@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "otsec.asset/0.1#capability-profile",
   "title": "otsec.asset/0.1 capability profile (C1)",
-  "description": "Structural schema only. Cross-field rules (operations only with mechanism adapter-operation, mechanism none only with status unsupported or unknown, a citation for every status but unknown, a firmware allowlist for any profile that sends adapter operations, max_read_rows exactly when event retrieval uses an adapter operation, session_limits exactly when the profile sends adapter operations, a failed-auth floor longer than the idle timeout) are enforced by CapabilityProfile.Validate in contracts/asset.",
+  "description": "Structural schema only. Cross-field rules (operations only with mechanism adapter-operation, mechanism none only with status unsupported or unknown, a citation for every status but unknown, a firmware allowlist for any profile that sends adapter operations, max_read_rows exactly when event retrieval uses an adapter operation, session_limits exactly when the profile sends adapter operations, a failed-auth floor longer than the idle timeout, secret_policy exactly when the family takes a password) are enforced by CapabilityProfile.Validate in contracts/asset.",
   "type": "object",
   "required": ["schema", "kind", "profile_id", "version", "vendor", "product_family", "device_class", "firmware", "capabilities"],
   "properties": {
@@ -43,6 +43,19 @@
         "password_attempts": {"enum": [0, 1]},
         "idle_timeout_ms": {"type": "integer", "minimum": 0},
         "failed_auth_floor_ms": {"type": "integer", "minimum": 0},
+        "citation": {"type": "string", "minLength": 1}
+      }
+    },
+    "secret_policy": {
+      "type": "object",
+      "required": ["min_len", "max_len", "allowed", "citation"],
+      "description": "The family's write-time password rule (D1-19). Exactly one of mnemonic_len and whole_word.",
+      "properties": {
+        "min_len": {"type": "integer", "minimum": 1},
+        "max_len": {"type": "integer", "minimum": 1, "maximum": 64},
+        "allowed": {"type": "string", "minLength": 1, "description": "RE2, matched against the whole secret."},
+        "mnemonic_len": {"type": "integer", "minimum": 1},
+        "whole_word": {"type": "boolean"},
         "citation": {"type": "string", "minLength": 1}
       }
     }

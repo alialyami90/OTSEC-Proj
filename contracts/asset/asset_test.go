@@ -44,6 +44,11 @@ var invalidWant = map[string]string{
 	"profile-pre-credential-operator-only":        `"ip_address" is not an attribute a device reports`,
 	"case-variant-key":                            `IDENTITY_BINDING`,
 	"duplicate-key":                               `duplicate key "identity_binding"`,
+	"unknown-field-in-own-minor":                  `key "zz_new" is not a field name`,
+	"profile-without-secret-policy":               "needs secret_policy",
+	"profile-secret-policy-zero-mnemonic":         "exactly one of mnemonic_len and whole_word",
+	"profile-secret-policy-both-modes":            "exactly one of mnemonic_len and whole_word",
+	"profile-syslog-with-secret-policy":           "secret_policy is only for",
 	"profile-without-session-limits":              "needs session_limits",
 	"profile-floor-within-idle-timeout":           "must be longer than idle_timeout_ms",
 	"profile-two-password-attempts":               "password_attempts must be 0 or 1",
@@ -290,6 +295,72 @@ func TestLaterMinorReadsDown(t *testing.T) {
 	want, _ := json.Marshal(raw)
 	if string(got) != string(want) {
 		t.Error("Decode changed a valid 0.1 record")
+	}
+}
+
+// A credential goes only to an asset whose binding compares the device's
+// claims before the password is sent (A6 C1 re-check R-1, AP-27).
+func TestCredentialAllowed(t *testing.T) {
+	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "profile-sel-751-ascii.json"))
+	p, err := DecodeProfile(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := load(t, "sel-751-simulated.json").CredentialAllowed(p); err != nil {
+		t.Errorf("device-reported FID binding refused: %v", err)
+	}
+	if err := (Asset{IdentityBinding: IdentityBinding{Method: PinnedKey}}).CredentialAllowed(p); err != nil {
+		t.Errorf("pinned-key binding refused: %v", err)
+	}
+	later := load(t, "later-minor-binding-without-pre-credential.json")
+	if later.IdentityBinding.Method != AddressOnly {
+		t.Errorf("unknown binding method read as %q, want address-only", later.IdentityBinding.Method)
+	}
+	for _, name := range []string{"sel-751-address-only.json", "later-minor-binding-without-pre-credential.json",
+		"later-minor-unknown-binding-method.json", "sel-rtac-syslog.json"} {
+		if err := load(t, name).CredentialAllowed(p); err == nil {
+			t.Errorf("%s: credential allowed", name)
+		}
+	}
+	// Bypassing Decode does not help: CredentialAllowed reads the effective
+	// binding itself.
+	raw := load(t, "sel-751-simulated.json")
+	raw.IdentityBinding = IdentityBinding{Method: "tpm-attested", Strength: Cryptographic, PreCredential: []string{"firmware_id"}}
+	if err := raw.CredentialAllowed(p); err == nil {
+		t.Error("unknown method with a pre_credential allowed")
+	}
+	// A pre_credential the profile does not report before authentication.
+	serial := load(t, "sel-751-simulated.json")
+	serial.IdentityBinding.PreCredential = []string{AttrSerialNumber}
+	if err := serial.CredentialAllowed(p); err == nil {
+		t.Error("serial_number as pre_credential allowed against sel-751-ascii")
+	}
+}
+
+// A 0.1 record is read strictly; only a later minor may add fields (S-1).
+func TestOwnMinorIsStrict(t *testing.T) {
+	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "sel-751-simulated.json"))
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["zz_new"] = 1
+	for schema, ok := range map[string]bool{"otsec.asset/0.1": false, "otsec.asset/0.0": false, "otsec.asset/0.2": true} {
+		m["schema"] = schema
+		b, _ := json.Marshal(m)
+		if _, err := Decode(b); (err == nil) != ok {
+			t.Errorf("%s with an unknown field: err %v", schema, err)
+		}
+	}
+	pb, _ := os.ReadFile(filepath.Join("testdata", "valid", "profile-sel-751-ascii.json"))
+	var pm map[string]any
+	if err := json.Unmarshal(pb, &pm); err != nil {
+		t.Fatal(err)
+	}
+	pm["zz_new"] = 1
+	pb, _ = json.Marshal(pm)
+	if _, err := DecodeProfile(pb); err == nil {
+		t.Error("0.1 profile with an unknown field accepted")
 	}
 }
 

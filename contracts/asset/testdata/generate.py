@@ -118,6 +118,14 @@ def rtac():
     }
 
 
+def address_only_relay():
+    # A6 C1 re-check R-1: a valid record whose binding compares nothing, so
+    # CredentialAllowed refuses it.
+    a = relay()
+    a["identity_binding"] = {"method": "address-only", "strength": "spoofable", "attributes": []}
+    return a
+
+
 def mismatch():
     a = relay()
     a["attributes"][3] = {
@@ -145,6 +153,10 @@ LATER = {
     "later-minor-unknown-source-method": lambda a: attr(a, "firmware_id")["observations"][1].update(
         evidence_class="device-observed", source={"method": "simulator-replay", "ref": INV, "observed_at": T1,
                                                    "span": {"offset": FID_AT, "length": 33}}),
+    # A6 C1 re-check R-1: an unknown method with nothing compared before the
+    # password reads as address-only, and gets no credential.
+    "later-minor-binding-without-pre-credential": lambda a: a.update(identity_binding={
+        "method": "tpm-attested", "strength": "cryptographic", "attributes": ["firmware_id"]}),
     "later-minor-unknown-confidence": lambda a: attr(a, "firmware_id").update(confidence="verified"),
     "later-minor-unknown-evidence-class": lambda a: attr(a, "sel.cid")["observations"][0].update(
         evidence_class="hardware-verified", source={"method": "adapter-session", "ref": INV, "observed_at": T1,
@@ -191,6 +203,12 @@ PROFILE_751 = {
                      "the platform assumes 30 and waits 31). min_interval_ms is a platform choice, not a device fact "
                      "(Phase 0 register proposal)."),
     },
+    "secret_policy": {
+        "min_len": 1, "max_len": 12, "allowed": "[!-~]+", "mnemonic_len": 3,
+        "citation": ("S22 Table 7.54 p. 7.70 and Appendix N p. N.2 (passwords: printable ASCII except space, "
+                     "at most 12 characters); S22 Command Summary (commands are read by their first three "
+                     "characters, so QUIT is QUI)"),
+    },
 }
 
 PROFILE_RTAC = {
@@ -226,6 +244,7 @@ def attr(a, name):
 
 
 INVALID = {
+    "unknown-field-in-own-minor": (relay, lambda a: a.update(zz_new=1)),
     "observation-without-evidence-class": (relay, lambda a: attr(a, "vendor")["observations"][0].pop("evidence_class")),
     "attribute-without-observations": (relay, lambda a: attr(a, "vendor").update(observations=[])),
     "corroborated-by-one-class": (relay, lambda a: attr(a, "firmware_id").update(observations=[
@@ -279,12 +298,16 @@ INVALID_PROFILES = {
     "profile-two-password-attempts": lambda p: p["session_limits"].update(password_attempts=2),
     "profile-without-max-read-rows": lambda p: p.pop("max_read_rows"),
     "profile-read-rows-over-ceiling": lambda p: p.update(max_read_rows=4096),
+    "profile-without-secret-policy": lambda p: p.pop("secret_policy"),
+    "profile-secret-policy-zero-mnemonic": lambda p: p["secret_policy"].pop("mnemonic_len"),
+    "profile-secret-policy-both-modes": lambda p: p["secret_policy"].update(whole_word=True),
 }
 
 # A family the platform only listens to has no sessions and reads nothing.
 INVALID_RTAC_PROFILES = {
     "profile-syslog-with-session-limits": lambda p: p.update(session_limits=PROFILE_751["session_limits"]),
     "profile-syslog-with-max-read-rows": lambda p: p.update(max_read_rows=1024),
+    "profile-syslog-with-secret-policy": lambda p: p.update(secret_policy=PROFILE_751["secret_policy"]),
 }
 
 
@@ -301,6 +324,7 @@ def main():
     write("valid/sel-751-identity-mismatch.json", mismatch())
     write("valid/site-node.json", node())
     write("valid/sel-rtac-syslog.json", rtac())
+    write("valid/sel-751-address-only.json", address_only_relay())
     write("valid/later-minor.json", later_minor())
     for name, fn in LATER.items():
         write(f"valid/{name}.json", later(fn))

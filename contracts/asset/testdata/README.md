@@ -10,12 +10,14 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `valid/sel-751-identity-mismatch.json` | The simulator reported a different FID: the attribute is `conflicting`, keeps the declared value, and the asset is suspended for `identity-mismatch`. |
 | `valid/site-node.json` | The site platform node as a `server` asset carrying A5's posture labels: OS out of support with its standing condition and migration date, and storage durability unverified. |
 | `valid/sel-rtac-syslog.json` | An RTAC heard only through Syslog over UDP: plaintext, acknowledged, bound by address only. |
+| `valid/sel-751-address-only.json` | A valid SEL-751 record whose binding is `address-only`: nothing is compared before a password would be sent, so `CredentialAllowed` refuses it (A6 C1 re-check R-1). |
 | `valid/later-minor.json` | A 0.3 record with a device class and a field 0.1 does not know: a 0.1 reader accepts it and reads the class as `unknown`. |
 | `valid/later-minor-unknown-binding-method.json` | A 0.2 binding method `tpm-attested` claiming `cryptographic`: a 0.1 reader reads `spoofable`. |
+| `valid/later-minor-binding-without-pre-credential.json` | A 0.2 binding method 0.1 does not know, with no `pre_credential`. It reads as `address-only` and gets no credential (R-1). |
 | `valid/later-minor-unknown-source-method.json` | A 0.2 source method `simulator-replay` labelled `device-observed`: a 0.1 reader reads `inferred`, never a device observation. |
 | `valid/later-minor-unknown-confidence.json` | A 0.2 confidence `verified`: a 0.1 reader recomputes it (`corroborated`). |
 | `valid/later-minor-unknown-evidence-class.json` | A 0.2 evidence class `hardware-verified`: a 0.1 reader reads `inferred`. |
-| `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. `max_read_rows` 1,024 and the session limits of D1-18, cited to S22. |
+| `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. `max_read_rows` 1,024, the session limits of D1-18 and the secret policy of D1-19, cited to S22. |
 | `valid/profile-sel-rtac-syslog.json` | RTAC profile: Syslog push only, no adapter operations, so no firmware allowlist, no session limits and no `max_read_rows`. |
 
 ## Invalid
@@ -23,6 +25,7 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | File | What it shows |
 | --- | --- |
 | `invalid/observation-without-evidence-class.json` | An observation with no evidence class is rejected. |
+| `invalid/unknown-field-in-own-minor.json` | A 0.1 record with a field 0.1 does not define: read strictly, because only a later minor may add fields (A6 C1 re-check S-1). |
 | `invalid/attribute-without-observations.json` | An attribute with no observations, and so no evidence class, is rejected. |
 | `invalid/corroborated-by-one-class.json` | Two device claims (session and Syslog) do not corroborate each other: one evidence class. |
 | `invalid/conflicting-value-not-declared.json` | A conflicting attribute must keep the operator-declared value, never the device's claim. |
@@ -60,3 +63,7 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/profile-read-rows-over-ceiling.json` | `max_read_rows` 4,096, above C4's ceiling of 2,048. |
 | `invalid/profile-syslog-with-session-limits.json` | A listen-only profile with session limits. |
 | `invalid/profile-syslog-with-max-read-rows.json` | A listen-only profile with `max_read_rows`. |
+| `invalid/profile-syslog-with-secret-policy.json` | A listen-only profile with a secret policy. |
+| `invalid/profile-without-secret-policy.json` | A family that takes a password, with no `secret_policy` (D1-19). |
+| `invalid/profile-secret-policy-zero-mnemonic.json` | A secret policy with neither `mnemonic_len` nor `whole_word`: zero is not a mode (D1-19). |
+| `invalid/profile-secret-policy-both-modes.json` | A secret policy with both `mnemonic_len` and `whole_word`. |

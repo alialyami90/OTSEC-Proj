@@ -55,5 +55,12 @@
       "notes": "Out of slice 1 (A2 section 8)"
     }
   ],
-  "max_read_rows": 1024
+  "max_read_rows": 1024,
+  "secret_policy": {
+    "min_len": 1,
+    "max_len": 12,
+    "allowed": "[!-~]+",
+    "mnemonic_len": 3,
+    "citation": "S22 Table 7.54 p. 7.70 and Appendix N p. N.2 (passwords: printable ASCII except space, at most 12 characters); S22 Command Summary (commands are read by their first three characters, so QUIT is QUI)"
+  }
 }
