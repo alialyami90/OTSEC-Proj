@@ -104,6 +104,8 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - A4 writes both rules into C6 as a minor revision, reviewed by A3 and A6.
 - The slice harness configures rsyslog this way.
 
+**Amendment (2026-10-24, A6, `desk`/`simulated`, librelp 1.11.0):** name mode accepted a CA-signed client certificate whose subject CN was the permitted peer while its SAN named another node. The peer check therefore holds only if the CA never puts a node's name in a certificate held by anything other than that node. Commissioning rule: the node CA issues a certificate carrying a node's name, as CN or as a SAN entry, only to that node, and issues no certificate whose CN differs from its SAN dNSName. A4 adds this rule to C6's commissioning text in the next C6 revision. A6's receiver is stricter than librelp (SAN first, CN only when there is no SAN), so tests against it do not depend on this rule.
+
 ## D2-10: A third lock: collection endpoints and listeners are loopback only
 
 **Reason (A6, review of #84):** both D2-4 locks read the same `target` label, which an administrator sets. An endpoint with a real relay's address labelled `simulated` passes both. In Phase 2 the only device is the simulator on the same host (D2-3), so a lock that ignores the label costs little and stops a typo from pointing a credentialed session at real equipment.
