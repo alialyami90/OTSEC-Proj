@@ -83,3 +83,38 @@ func TestOpenReadOnly(t *testing.T) {
 		t.Errorf("opening a missing database created it: %v", err)
 	}
 }
+
+// The writer's and the reader's file URIs survive a path with a space, '#' and '?', and on
+// Windows a volume name (A6, native Windows run of #92: "invalid uri
+// authority: C:").
+func TestOpenReadOnlyPath(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "OT SEC #1 ?x")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, "store")
+	if err := CreateDir(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	db, _ := testStore(t, Options{Dir: dir, Node: testNode, Database: evidenceDB}, policy(evidenceDB), c5.ModeCollecting)
+	if _, err := testLog(t, db).AppendBatch(bg, recs("relay1/ser", c5.ClassAdapterEvidence, 0, 2)); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenReadOnly(bg, dir, testNode, evidenceDB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if got, err := r.Read(bg, "relay1/ser", 0, 100); err != nil || len(got) != 2 {
+		t.Fatalf("read %d events: %v", len(got), err)
+	}
+	// The writer opened the file it checked, not a name cut at '?'.
+	ents, _ := os.ReadDir(parent)
+	if len(ents) != 1 || ents[0].Name() != "store" {
+		var names []string
+		for _, e := range ents {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("files beside the store directory: %q", names)
+	}
+}

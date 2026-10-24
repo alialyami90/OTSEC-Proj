@@ -134,27 +134,19 @@ func newRequestID() string {
 // Run runs the schedule until ctx ends. The first run of each entry waits
 // MinIntervalSeconds after start, so a node that restarts in a loop never
 // polls a device faster than the minimum interval. A run that falls behind
-// is not repeated to catch up: the next run is one interval after the last
-// one started, or now if that has passed.
+// is not repeated to catch up. However the schedule is written, a device
+// gets at least MinIntervalSeconds between the end of one session and the
+// start of the next (plan).
 func (s *Scheduler) Run(ctx context.Context) error {
 	sched := s.rt.cfg.Schedule
 	if len(sched) == 0 {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	next := make([]time.Time, len(sched))
-	start := s.now()
-	for i := range next {
-		next[i] = start.Add(MinIntervalSeconds * time.Second)
-	}
+	p := newPlan(sched, s.now())
 	for {
-		i := 0
-		for j := range next {
-			if next[j].Before(next[i]) {
-				i = j
-			}
-		}
-		if d := next[i].Sub(s.now()); d > 0 {
+		i, at := p.due()
+		if d := at.Sub(s.now()); d > 0 {
 			t := time.NewTimer(d)
 			select {
 			case <-ctx.Done():
@@ -165,11 +157,51 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		}
 		began := s.now()
 		s.RunOnce(ctx, i)
-		next[i] = began.Add(time.Duration(sched[i].EverySeconds) * time.Second)
-		if now := s.now(); next[i].Before(now) {
-			next[i] = now
+		p.done(i, began, s.now())
+	}
+}
+
+// plan is the scheduler's timetable. Each entry is due one interval after
+// its last run began. An asset is also kept quiet for MinIntervalSeconds
+// after its last session ended, whichever entry ran it, so two entries for
+// one asset, or a run longer than its interval, never poll a device faster
+// than the minimum (A6 review of #92).
+type plan struct {
+	sched   []Collection
+	next    []time.Time
+	lastEnd map[string]time.Time
+}
+
+func newPlan(sched []Collection, start time.Time) *plan {
+	p := &plan{sched: sched, next: make([]time.Time, len(sched)), lastEnd: map[string]time.Time{}}
+	for i := range p.next {
+		p.next[i] = start.Add(MinIntervalSeconds * time.Second)
+	}
+	return p
+}
+
+// due returns the entry to run next and the earliest time it may start.
+// Ties go to the entry listed first.
+func (p *plan) due() (int, time.Time) {
+	best, bestAt := -1, time.Time{}
+	for j, c := range p.sched {
+		at := p.next[j]
+		if end, ok := p.lastEnd[c.AssetID]; ok {
+			if quiet := end.Add(MinIntervalSeconds * time.Second); quiet.After(at) {
+				at = quiet
+			}
+		}
+		if best < 0 || at.Before(bestAt) {
+			best, bestAt = j, at
 		}
 	}
+	return best, bestAt
+}
+
+// done records that entry i ran from began to ended.
+func (p *plan) done(i int, began, ended time.Time) {
+	p.lastEnd[p.sched[i].AssetID] = ended
+	p.next[i] = began.Add(time.Duration(p.sched[i].EverySeconds) * time.Second)
 }
 
 // Report is what one run did.

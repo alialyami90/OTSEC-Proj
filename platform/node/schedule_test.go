@@ -614,3 +614,49 @@ func TestTickAlongsideRuns(t *testing.T) {
 	}
 	<-done
 }
+
+// Two entries for one asset, and a run longer than its interval, still
+// leave the device MinIntervalSeconds between sessions; another asset is
+// not held back by it (A6 review of #92).
+func TestPlanSpacesSessionsPerAsset(t *testing.T) {
+	const a, b = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", "7f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f"
+	sched := []Collection{
+		{ID: "x1", AssetID: a, EverySeconds: 60},
+		{ID: "x2", AssetID: a, EverySeconds: 60},
+		{ID: "y", AssetID: b, EverySeconds: 60},
+	}
+	t0 := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	p := newPlan(sched, t0)
+	min := MinIntervalSeconds * time.Second
+
+	i, at := p.due()
+	if i != 0 || !at.Equal(t0.Add(min)) {
+		t.Fatalf("first: entry %d at %v", i, at)
+	}
+	// x1 runs for 90 s, longer than its interval.
+	p.done(0, at, at.Add(90*time.Second))
+	end := at.Add(90 * time.Second)
+
+	// y, on another asset, is due at once; x2 waits for asset a's quiet time.
+	if i, at := p.due(); i != 2 || !at.Equal(t0.Add(min)) {
+		t.Fatalf("second: entry %d at %v", i, at)
+	}
+	p.done(2, end, end.Add(time.Second))
+	i, at = p.due()
+	if p.sched[i].AssetID != a || at.Before(end.Add(min)) {
+		t.Fatalf("asset a polled %v after its last session ended (entry %d)", at.Sub(end), i)
+	}
+	// Whichever entry of asset a runs, the other waits a full minimum after it.
+	p.done(i, at, at.Add(5*time.Second))
+	end = at.Add(5 * time.Second)
+	for k := 0; k < 3; k++ {
+		j, next := p.due()
+		if p.sched[j].AssetID == a && next.Before(end.Add(min)) {
+			t.Fatalf("entry %d of asset a due %v after the session ended", j, next.Sub(end))
+		}
+		p.done(j, next, next.Add(time.Second))
+		if p.sched[j].AssetID == a {
+			end = next.Add(time.Second)
+		}
+	}
+}

@@ -180,7 +180,7 @@ func create(ctx context.Context, path string, opt Options) error {
 
 // connect opens path on one connection with the per-connection settings.
 func connect(ctx context.Context, path string, opt Options) (*DB, error) {
-	sdb, err := sql.Open("sqlite", path)
+	sdb, err := sql.Open("sqlite", fileURI(path, ""))
 	if err != nil {
 		return nil, err
 	}

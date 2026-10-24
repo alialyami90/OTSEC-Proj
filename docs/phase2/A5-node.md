@@ -50,6 +50,8 @@ Linux container, Go 1.26. Commits are listed in each PR.
 | Unauthorized line: frame kept byte for byte, not forwarded, not normalized, alarm without the line, halt survives a restart | `TestUnauthorizedLineQuarantinedAndHaltedDurably`. Mutating the halt scan fails it |
 | No room: nothing is sent, and one alarm is raised | `TestNoQuarantineRoomSendsNothing`. Mutating the room check fails it |
 | Quarantine refused: the node stops | `TestQuarantineNotStoredStopsTheNode` |
+| An asset gets 60 s between sessions, whatever the schedule says (A6 #92) | `TestPlanSpacesSessionsPerAsset`. Removing the per-asset quiet time fails it |
+| The store opens the file it checked: a directory with a space, `#` or `?` in its name, and on Windows a volume name (A6 #92) | `TestOpenReadOnlyPath`. Opening by plain name, which the driver cuts at `?`, fails it |
 | Tick and runs share the runtime | `TestTickAlongsideRuns` under `-race` |
 | A store directory that is a link, and a database file that is a link or that others can read, are refused (A3 #84 notes 3 and 4) | `TestFileModes`. Mutating the file check fails it |
 | The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |
@@ -70,7 +72,7 @@ None of the Windows-only code has run.
 - **Clearing a halt.** A halted asset stays stopped, so it fails closed. The audited clear operation is out of Phase 2 scope (A1); it is a Phase 3 item for A3 and A5, in `docs/phase-2-exit.md`.
 - **Reading by role.** No read API with roles exists. Until one does, the CLI leaves the audit stream and quarantines out, and shows only quarantine counts.
 - **W-3 "and every other program".** The installer blocks outbound Telnet for `otsec-node` only. Blocking it for every other program on the host is a site decision.
-- **Node-side `CheckLines`.** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector.
+- **Node-side `CheckLines` (a gate item, A6 #92).** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector, and in the built node the unauthorized-line quarantine and halt cannot fire yet; only the tests, which set `Register`, reach them.
 - **SER row order.** A2's #85 puts the C2 example `ok.json` rows oldest first, as Figure 10.16 and A6's simulator do. Until #85 merges, the scheduler test rebuilds the read in that order; after it merges, the test uses `ok.json` as it is.
 - **A `collector_seq` that goes backwards** (A3 #92). A reinstall after both collector stores are lost restarts the collector's numbering at 1. Today the node writes each reply's `collector_seq` as given and checks only that the records within one reply rise (`collectorclient`). It does not compare across runs, so a restart shows only when `audit.VerifyCollectorSeq` finds duplicates. Follow-up: keep the highest `collector_seq` durably, and on a lower one raise an alarm and record the restart, rather than accepting it silently or reading it as a gap.
 - **A partial install** (for example, a refused collector configuration after the node service exists) leaves the node service and `node.json`. A rerun needs `otsec uninstall` and removing `OTSEC\config\node.json` by hand (A3 #92 note 3).
