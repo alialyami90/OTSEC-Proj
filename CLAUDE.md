@@ -4,7 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-The repository contains no product code yet. Phase 0 is complete (exit gate passed with conditions, 2026-10-23); the runtime language is Go (ADR-0003) with Python for verification tooling only. Record the build, lint, test, and single-test commands here when the first module skeleton lands. The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
+The repository contains no product code yet. Phase 0 is complete (exit gate passed with conditions, 2026-10-23; owner accepted 2026-10-24). Phase 1 (contracts) is in progress. The runtime language is Go (ADR-0003) with Python for verification tooling only.
+
+Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
+
+- Build and vet: `go vet ./...`
+- Format check: `gofmt -l .` (must print nothing)
+- Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
+- Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
+- Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
+- CI: `.github/workflows/ci.yml` runs all of the above on every pull request (Go on Linux and Windows). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
 Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
 

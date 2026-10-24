@@ -1,6 +1,6 @@
 # Phase 0 exit report
 
-Owner: A1. Date: 2026-10-23. Status: **ready for owner sign-off** (revised 2026-10-23 20:40Z to add A6's Windows runs, F-012 and F-013). Items marked *open at close* are listed in "Carried into Phase 1".
+Owner: A1. Date: 2026-10-23. Status: **closed.** Owner accepted on 2026-10-24 by authorizing Phase 1 (see "Owner sign-off"). Revised 2026-10-23 20:40Z to add A6's Windows runs, F-012 and F-013. Items marked *open at close* are listed in "Carried into Phase 1".
 
 This report closes Phase 0 (Establish evidence and challenge assumptions). It follows the milestone format in `CLAUDE.md` §9. It records what was delivered, where it is on `main`, what was independently checked, and what was decided. Nothing in Phase 0 was tested on hardware. No result is better than `documented-untested` or `simulated`, because no lab device or capture exists (owner, 2026-10-23).
 
@@ -175,5 +175,5 @@ Also unverified: whether the firmware a relay reports is honest, and the IEC 623
 
 Phase 0 is closed when the owner signs below.
 
-- Owner: ____________________  Date: __________
-- Decision: ☐ Phase 0 accepted as complete  ☐ Accepted with the open items above  ☐ Not accepted (reason): ____________
+- Owner: ALI. Date: 2026-10-24, 11:16Z.
+- Decision: **accepted with the open items above.** The owner wrote "Continue phase 1" in the project chat. The owner did not write the requested "Phase 0 accepted". A1 records the instruction to start Phase 1 as acceptance of this report, with its open items carried into Phase 1 as listed. If the owner meant something narrower, this line is corrected and Phase 1 pauses.
