@@ -58,7 +58,11 @@ const (
 	// Required: events are pruned only after this consumer confirmed them.
 	// Only a consumer whose acknowledgement cannot be forged may be
 	// required: for Syslog that is a C6 target with transport relp-tls
-	// (plain RELP acknowledgements can be forged).
+	// (plain RELP acknowledgements can be forged) whose commissioning check
+	// showed that its collector acknowledges only after a durable write (C6
+	// Target.DurableAck, A6 V-S6). Pruning trusts the acknowledgement only
+	// because of that check: E-A4-03 lost 1,471 of 1,500 acknowledged
+	// messages with rsyslog's default queues.
 	Required Delivery = "required"
 	// BestEffort: the consumer cannot confirm delivery (for example plain
 	// RFC 5425). Events older than its replay window are prunable for it.
