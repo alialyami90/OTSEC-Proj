@@ -11,7 +11,10 @@
   "facility": 16,
   "durable_ack": {
     "verified_utc": "2026-10-24T09:00:00Z",
-    "evidence_ref": "commissioning/siem-a/durable-ack"
+    "evidence_ref": "commissioning/siem-a/durable-ack",
+    "peer_check": "name",
+    "permitted_peer": "site-a-node1",
+    "ack_after": "durable-write"
   },
   "acknowledgement": {
     "by": "admin-example",

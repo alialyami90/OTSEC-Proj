@@ -69,7 +69,7 @@ const d123Target = `{
   "max_message_octets": 2048, "facility": 13,
   "tls": {"server_name": "collector.a6.example", "trust_anchor_ref": "a6-ca", "client_credential_ref": "a6-node-forwarder"},
   "relp_window": 64,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6/kill-test"}
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}
 }`
 
 var evcParam = regexp.MustCompile(`(?:^|[ \[])evc="([^"]*)"`)

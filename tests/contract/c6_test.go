@@ -26,7 +26,7 @@ const c6Audit = `{
   "tls": {"server_name": "collector.a6.example", "trust_anchor_ref": "a6-ca", "client_credential_ref": "a6-node-forwarder"},
   "relp_window": 64,
   "audit": true,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test"}
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}
 }`
 
 const c6UDPAck = `"acknowledgement": {"by": "admin:a6", "at": "2026-10-24T10:00:00Z", "reason": "A6 negative test", "scope": "lab-only"}`
@@ -48,12 +48,12 @@ func TestC6AuditTargets(t *testing.T) {
 		{"audit over UDP, required", udp},
 		{"audit over UDP, best-effort", strings.Replace(strings.Replace(udp, `"class": "required"`, `"class": "best-effort", "replay_seconds": 60`, 1),
 			`,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test"}`, "", 1)},
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}`, "", 1)},
 		{"audit on a best-effort relp-tls target", strings.Replace(strings.Replace(c6Audit, `"class": "required"`, `"class": "best-effort", "replay_seconds": 60`, 1),
 			`,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test"}`, "", 1)},
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}`, "", 1)},
 		{"audit without a durable-ack check", strings.Replace(c6Audit, `,
-  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test"}`, "", 1)},
+  "durable_ack": {"verified_utc": "2026-10-24T10:00:00Z", "evidence_ref": "commissioning/a6-audit/kill-test", "peer_check": "name", "permitted_peer": "a6-node", "ack_after": "durable-write"}`, "", 1)},
 		{"audit without mutual TLS", strings.Replace(c6Audit, `, "client_credential_ref": "a6-node-forwarder"`, "", 1)},
 	} {
 		if c.target == c6Audit {
