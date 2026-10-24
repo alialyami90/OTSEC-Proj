@@ -24,6 +24,9 @@
 | Vendor-specific attributes use a vendor prefix (`sel.cid`). Unprefixed names come from a fixed list. | Profiles can add attributes without a contract change, while the common names stay stable. |
 | The site platform node is an asset of class `server` with `platform_node.posture`. | P1-A5 posture labels. `os-out-of-support` needs its standing condition. TODO(A5): `docs/phase1/A5-node-posture.md` will define when each label applies. |
 | Capability profiles are C1 types (`profile.go`), and ship in the signed register package. | Architecture table: C1 covers the capability profile. Shipping it with the register means a profile cannot widen what the collector may send (C-A2-2). |
+| `node_id` is `node.ID` from `contracts/node`; the schema repeats its pattern and a test compares them. | A1 D1-1, after #29 merged. |
+| A profile that reads events by adapter operation states `max_read_rows`, at most C4's `MaxAlignRows` (2,048). SEL-751: 1,024. C1 keeps a copy of the ceiling, and an external test compares it with C4's. | A1 D1-12. The copy keeps C1 and C4 from importing each other (D1-1). |
+| A profile that sends adapter operations states `session_limits`: concurrent sessions, minimum interval, password attempts (0 or 1), idle timeout and failed-auth floor, with a citation. The floor must be longer than the idle timeout when the family takes a password. A listen-only profile has neither field. SEL-751: 1 session, 60 s, 1 attempt, 30 min, 31 min. | A1 D1-18 and C7-A2 change 1 (S22 p. 7.33, p. 7.16, Table 4.104 sheet 2). The 60 s interval is a platform choice, not a device fact, and the citation says so. C2's ceilings bound these values when the invocation is built. |
 
 ## B-05: what the identity binding proves
 

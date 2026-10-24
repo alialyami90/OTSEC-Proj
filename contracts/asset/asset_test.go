@@ -44,6 +44,13 @@ var invalidWant = map[string]string{
 	"profile-pre-credential-operator-only":        `"ip_address" is not an attribute a device reports`,
 	"case-variant-key":                            `IDENTITY_BINDING`,
 	"duplicate-key":                               `duplicate key "identity_binding"`,
+	"profile-without-session-limits":              "needs session_limits",
+	"profile-floor-within-idle-timeout":           "must be longer than idle_timeout_ms",
+	"profile-two-password-attempts":               "password_attempts must be 0 or 1",
+	"profile-without-max-read-rows":               "needs max_read_rows",
+	"profile-read-rows-over-ceiling":              "outside 0..2048",
+	"profile-syslog-with-session-limits":          "session_limits are only for",
+	"profile-syslog-with-max-read-rows":           "max_read_rows is only for",
 }
 
 func decodeAny(b []byte) error {

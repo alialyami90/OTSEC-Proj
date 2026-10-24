@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"otsec.local/otsec/contracts/node"
 )
 
 func schemaDefs(t *testing.T, file string) map[string]any {
@@ -87,5 +89,25 @@ func TestSchemaEnumsMatchGo(t *testing.T) {
 	sort.Strings(got)
 	if want := sorted(AttributeNames); !reflect.DeepEqual(got, want) {
 		t.Errorf("attribute names in schema = %v, Go has %v", got, want)
+	}
+}
+
+// The schema repeats contracts/node's pattern, because JSON Schema cannot
+// import Go (D1-1).
+func TestSchemaNodeIDPattern(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("schema", "asset.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties map[string]struct {
+			Pattern string `json:"pattern"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Properties["node_id"].Pattern; got != node.IDPattern {
+		t.Errorf("schema node_id pattern %q, want node.IDPattern %q", got, node.IDPattern)
 	}
 }

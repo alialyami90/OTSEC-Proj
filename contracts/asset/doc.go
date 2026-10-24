@@ -23,7 +23,12 @@
 //   - The site platform node as an asset of class "server", carrying A5's
 //     posture labels.
 //   - Capability profiles (profile.go): per family, which capabilities exist,
-//     by which mechanism, with which evidence class.
+//     by which mechanism, with which evidence class, and for a family the
+//     platform sends commands to, the most rows one read may hold (D1-12)
+//     and its session limits (D1-18): concurrent sessions, the interval
+//     between collections, password attempts, the idle timeout the device
+//     may keep session state for, and the failed-auth floor, which must be
+//     longer than that timeout.
 //
 // # What the identity binding proves (B-05, C-07)
 //
@@ -86,10 +91,9 @@
 //
 // # What it leaves out
 //
-//   - Timestamp model: C4. The node ID format is C4's, copied here because
-//     C4 imports this package (no import cycle; C1-A4-1). Principal and credential reference:
-//     C7. Operation ID and the firmware allowlist: C3. Each is marked
-//     TODO(C<n>) until that package is merged.
+//   - Timestamp model: C4. The node ID is contracts/node's (D1-1). Principal
+//     and credential reference: C7. Operation ID and the firmware allowlist:
+//     C3. Each is marked TODO(C<n>) until that package is merged.
 //   - Asset discovery, storage, and the UI.
 //   - Configuration baselines (Phase 4).
 //

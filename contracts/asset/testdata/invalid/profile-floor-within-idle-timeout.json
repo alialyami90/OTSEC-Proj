@@ -1,0 +1,67 @@
+{
+  "schema": "otsec.asset/0.1",
+  "kind": "capability-profile",
+  "profile_id": "sel-751-ascii",
+  "version": "0.1",
+  "vendor": "sel",
+  "product_family": "sel-751",
+  "device_class": "protective-relay",
+  "firmware": {
+    "allowlist": "sel-751"
+  },
+  "pre_credential": [
+    "firmware_id",
+    "part_number",
+    "sel.cid"
+  ],
+  "capabilities": [
+    {
+      "capability": "identification",
+      "mechanism": "adapter-operation",
+      "operations": [
+        "sel.id"
+      ],
+      "status": "simulated",
+      "citation": "S22 Table 7.43, Figure 7.38; simulator only (C-10)"
+    },
+    {
+      "capability": "event-retrieval",
+      "mechanism": "adapter-operation",
+      "operations": [
+        "sel.ser.read_all"
+      ],
+      "status": "simulated",
+      "citation": "S22 Table 7.63, Figure 10.16; simulator only (C-10)"
+    },
+    {
+      "capability": "time-quality",
+      "mechanism": "adapter-operation",
+      "operations": [
+        "sel.settings.show_global"
+      ],
+      "status": "documented-untested",
+      "citation": "S22 Table 4.90 (UTC_OFF, DST), Table 7.16 (Time Source)"
+    },
+    {
+      "capability": "event-push",
+      "mechanism": "none",
+      "status": "unsupported",
+      "citation": "S22 Table 7.5: no Syslog on Port 1"
+    },
+    {
+      "capability": "configuration-retrieval",
+      "mechanism": "none",
+      "status": "unknown",
+      "notes": "Out of slice 1 (A2 section 8)"
+    }
+  ],
+  "max_read_rows": 1024,
+  "session_limits": {
+    "max_concurrent_sessions": 1,
+    "min_interval_ms": 60000,
+    "password_attempts": 1,
+    "idle_timeout_ms": 1800000,
+    "failed_auth_floor_ms": 900000,
+    "citation": "S22 Table 7.63 (SER holds up to 1,024 rows); Table 7.5 note a (Port 1: two Telnet sessions, the platform takes one); p. 7.33 (a wrong password re-prompts, the third pulses SALARM, so one attempt); p. 7.16 and Table 4.104 sheet 2 (state stays until TIDLE, 1 to 30 min, expires: the platform assumes 30 and waits 31). min_interval_ms is a platform choice, not a device fact (Phase 0 register proposal)."
+  }
+}

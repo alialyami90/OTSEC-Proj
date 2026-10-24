@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
+	"otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/contracts/version"
 )
 
@@ -29,9 +30,8 @@ type Asset struct {
 	// per asset, because some devices allow very few sessions (D9). Other
 	// nodes may still receive the asset's Syslog; their events reference the
 	// same asset ID. Failover of the collecting node under N-1 redundancy is
-	// open (A5, A1). The format is C4's NodeID, kept as a copy here because
-	// C4 imports this package (C1-A4-1); A6's tests check the two agree.
-	NodeID          string          `json:"node_id"`
+	// open (A5, A1). The format is contracts/node's, shared with C4 (D1-1).
+	NodeID          node.ID         `json:"node_id"`
 	Attributes      []Attribute     `json:"attributes"`
 	Endpoints       []Endpoint      `json:"endpoints,omitempty"`
 	IdentityBinding IdentityBinding `json:"identity_binding"`
@@ -417,7 +417,6 @@ var OperatorOnlyAttributes = []string{AttrDeviceClass, AttrVendor, AttrProductFa
 
 var (
 	uuidPattern       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	nodeIDPattern     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`) // same as C4 NodeID; see Asset.NodeID
 	attrNamePattern   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	vendorAttrPattern = regexp.MustCompile(`^[a-z][a-z0-9]{1,15}\.[a-z][a-z0-9_]{0,63}$`)
 	tokenPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -562,7 +561,7 @@ func (a Asset) Validate() error {
 	if !ValidAssetID(a.AssetID) {
 		v.fail("asset_id %q is not a lowercase UUID", a.AssetID)
 	}
-	if !nodeIDPattern.MatchString(a.NodeID) {
+	if !a.NodeID.Valid() {
 		v.fail("node_id %q is not a node ID", a.NodeID)
 	}
 
@@ -781,7 +780,7 @@ func (t Transport) Inbound() bool { return t == SyslogUDP || t == SyslogTCP || t
 // Validate cannot check this, because it sees one asset at a time.
 func CheckSenders(assets []Asset) error {
 	type key struct {
-		node string
+		node node.ID
 		t    Transport
 		host string
 	}

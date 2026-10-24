@@ -32,6 +32,49 @@ type CapabilityProfile struct {
 	// citation. Empty for a family that reports nothing unauthenticated.
 	PreCredential []string     `json:"pre_credential,omitempty"`
 	Capabilities  []Capability `json:"capabilities"`
+	// MaxReadRows bounds one read of the family's native record buffer
+	// (D1-12): a read with more rows is a failed parse, and nothing from it
+	// is aligned or stored. At most MaxReadRowsCeiling. Required when event
+	// retrieval uses an adapter operation; zero otherwise.
+	MaxReadRows int `json:"max_read_rows,omitempty"`
+	// SessionLimits are required when the profile sends adapter operations,
+	// and absent otherwise (D1-18).
+	SessionLimits *SessionLimits `json:"session_limits,omitempty"`
+}
+
+// MaxReadRowsCeiling is C4's event.MaxAlignRows, the most rows Align accepts
+// (D1-12). It is a copy, so that C1 and C4 need not import each other (D1-1);
+// a test checks the two agree.
+const MaxReadRowsCeiling = 2048
+
+// SessionLimits are a family's timing and counts for adapter sessions
+// (D1-18). C7 and the collector read them from here, and C2's ceilings bound
+// them when an invocation is built (TODO(C2)). Each value is a device fact or
+// a platform choice made from one; Citation says which.
+type SessionLimits struct {
+	// MaxConcurrentSessions is how many sessions the platform may hold to one
+	// asset at once. It is below what the device allows, so that an engineer
+	// can still connect.
+	MaxConcurrentSessions int `json:"max_concurrent_sessions"`
+	// MinIntervalMS is the minimum time between two collections from one
+	// asset.
+	MinIntervalMS int64 `json:"min_interval_ms"`
+	// PasswordAttempts per session: 0 for a family that takes no password,
+	// otherwise 1 (C7: one attempt per session, never a retry).
+	PasswordAttempts int `json:"password_attempts"`
+	// IdleTimeoutMS is the longest the device may keep a session's state
+	// after the connection closes: an access level, or a pending password
+	// prompt (for the SEL-751, the largest TIDLE). The platform assumes this
+	// value, not the setting's default.
+	IdleTimeoutMS int64 `json:"idle_timeout_ms"`
+	// FailedAuthFloorMS is how long runs to an asset are refused after a
+	// session that sent a password and did not confirm the expected level.
+	// When the family takes a password it is longer than IdleTimeoutMS, so a
+	// new session never lands at a prompt the failed one left open, where its
+	// first line would be another password attempt (C7-A2 change 1).
+	FailedAuthFloorMS int64 `json:"failed_auth_floor_ms"`
+	// Citation is the evidence for the values.
+	Citation string `json:"citation"`
 }
 
 // Firmware says which firmware the profile may be used with.
@@ -174,7 +217,48 @@ func (p CapabilityProfile) Validate() error {
 	if usesAdapter && p.Firmware.Allowlist == "none" {
 		v.fail("a profile that sends adapter operations needs a firmware allowlist (AP-27)")
 	}
+	readsByAdapter := false
+	for _, c := range p.Capabilities {
+		readsByAdapter = readsByAdapter || (c.Capability == CapEventRetrieval && c.Mechanism == MechAdapterOperation)
+	}
+	switch {
+	case p.MaxReadRows < 0 || p.MaxReadRows > MaxReadRowsCeiling:
+		v.fail("max_read_rows %d is outside 0..%d", p.MaxReadRows, MaxReadRowsCeiling)
+	case readsByAdapter && p.MaxReadRows == 0:
+		v.fail("event retrieval by adapter operation needs max_read_rows (D1-12)")
+	case !readsByAdapter && p.MaxReadRows != 0:
+		v.fail("max_read_rows is only for event retrieval by adapter operation")
+	}
+	switch l := p.SessionLimits; {
+	case usesAdapter && l == nil:
+		v.fail("a profile that sends adapter operations needs session_limits (D1-18)")
+	case !usesAdapter && l != nil:
+		v.fail("session_limits are only for a profile that sends adapter operations")
+	case l != nil:
+		l.validate(v)
+	}
 	return v.err()
+}
+
+func (l *SessionLimits) validate(v *validator) {
+	if l.MaxConcurrentSessions < 1 {
+		v.fail("session_limits.max_concurrent_sessions must be at least 1")
+	}
+	if l.MinIntervalMS < 1 {
+		v.fail("session_limits.min_interval_ms must be positive")
+	}
+	if l.PasswordAttempts != 0 && l.PasswordAttempts != 1 {
+		v.fail("session_limits.password_attempts must be 0 or 1 (C7)")
+	}
+	if l.IdleTimeoutMS < 0 || l.FailedAuthFloorMS < 0 {
+		v.fail("session_limits: times cannot be negative")
+	}
+	if l.PasswordAttempts == 1 && l.FailedAuthFloorMS <= l.IdleTimeoutMS {
+		v.fail("session_limits.failed_auth_floor_ms %d must be longer than idle_timeout_ms %d", l.FailedAuthFloorMS, l.IdleTimeoutMS)
+	}
+	if l.Citation == "" {
+		v.fail("session_limits needs a citation")
+	}
 }
 
 // CheckProfile checks the asset against its capability profile: the profile

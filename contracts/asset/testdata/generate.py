@@ -178,6 +178,19 @@ PROFILE_751 = {
         {"capability": "configuration-retrieval", "mechanism": "none", "status": "unknown",
          "notes": "Out of slice 1 (A2 section 8)"},
     ],
+    "max_read_rows": 1024,
+    "session_limits": {
+        "max_concurrent_sessions": 1,
+        "min_interval_ms": 60000,
+        "password_attempts": 1,
+        "idle_timeout_ms": 1800000,
+        "failed_auth_floor_ms": 1860000,
+        "citation": ("S22 Table 7.63 (SER holds up to 1,024 rows); Table 7.5 note a (Port 1: two Telnet sessions, "
+                     "the platform takes one); p. 7.33 (a wrong password re-prompts, the third pulses SALARM, so one "
+                     "attempt); p. 7.16 and Table 4.104 sheet 2 (state stays until TIDLE, 1 to 30 min, expires: "
+                     "the platform assumes 30 and waits 31). min_interval_ms is a platform choice, not a device fact "
+                     "(Phase 0 register proposal)."),
+    },
 }
 
 PROFILE_RTAC = {
@@ -253,6 +266,17 @@ INVALID_PROFILES = {
     "profile-adapter-without-allowlist": lambda p: p["firmware"].update(allowlist="none"),
     "profile-claim-without-citation": lambda p: p["capabilities"][0].pop("citation"),
     "profile-pre-credential-operator-only": lambda p: p.update(pre_credential=["firmware_id", "ip_address"]),
+    "profile-without-session-limits": lambda p: p.pop("session_limits"),
+    "profile-floor-within-idle-timeout": lambda p: p["session_limits"].update(failed_auth_floor_ms=900000),
+    "profile-two-password-attempts": lambda p: p["session_limits"].update(password_attempts=2),
+    "profile-without-max-read-rows": lambda p: p.pop("max_read_rows"),
+    "profile-read-rows-over-ceiling": lambda p: p.update(max_read_rows=4096),
+}
+
+# A family the platform only listens to has no sessions and reads nothing.
+INVALID_RTAC_PROFILES = {
+    "profile-syslog-with-session-limits": lambda p: p.update(session_limits=PROFILE_751["session_limits"]),
+    "profile-syslog-with-max-read-rows": lambda p: p.update(max_read_rows=1024),
 }
 
 
@@ -278,6 +302,8 @@ def main():
         write(f"invalid/{name}.json", mutate(base(), fn))
     for name, fn in INVALID_PROFILES.items():
         write(f"invalid/{name}.json", mutate(PROFILE_751, fn))
+    for name, fn in INVALID_RTAC_PROFILES.items():
+        write(f"invalid/{name}.json", mutate(PROFILE_RTAC, fn))
     # Keys json.dump cannot produce (A6 C1 review change 3). A6's probe: a
     # case variant after the real binding, which encoding/json alone would
     # let replace it.

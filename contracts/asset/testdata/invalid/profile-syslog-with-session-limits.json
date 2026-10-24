@@ -1,0 +1,34 @@
+{
+  "schema": "otsec.asset/0.1",
+  "kind": "capability-profile",
+  "profile_id": "sel-rtac-syslog",
+  "version": "0.1",
+  "vendor": "sel",
+  "product_family": "sel-rtac",
+  "device_class": "automation-controller",
+  "firmware": {
+    "allowlist": "none"
+  },
+  "capabilities": [
+    {
+      "capability": "event-push",
+      "mechanism": "syslog-receive",
+      "status": "documented-untested",
+      "citation": "A2-sel-portfolio.md section 3 (RTAC Syslog, RFC 3164, facility 23)"
+    },
+    {
+      "capability": "identification",
+      "mechanism": "operator-entry",
+      "status": "documented-untested",
+      "citation": "No device-side identification without a credential; operator records only"
+    }
+  ],
+  "session_limits": {
+    "max_concurrent_sessions": 1,
+    "min_interval_ms": 60000,
+    "password_attempts": 1,
+    "idle_timeout_ms": 1800000,
+    "failed_auth_floor_ms": 1860000,
+    "citation": "S22 Table 7.63 (SER holds up to 1,024 rows); Table 7.5 note a (Port 1: two Telnet sessions, the platform takes one); p. 7.33 (a wrong password re-prompts, the third pulses SALARM, so one attempt); p. 7.16 and Table 4.104 sheet 2 (state stays until TIDLE, 1 to 30 min, expires: the platform assumes 30 and waits 31). min_interval_ms is a platform choice, not a device fact (Phase 0 register proposal)."
+  }
+}

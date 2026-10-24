@@ -8,7 +8,7 @@
   "properties": {
     "schema": {"type": "string", "pattern": "^otsec\\.asset/0\\.(0|[1-9][0-9]{0,3})$"},
     "asset_id": {"$ref": "#/$defs/uuid"},
-    "node_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "description": "The node that runs adapter sessions to this asset. Same format as the otsec.event NodeID (a lowercase DNS label)."},
+    "node_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "description": "The node that runs adapter sessions to this asset. contracts/node IDPattern (a lowercase DNS label), shared with otsec.event."},
     "attributes": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/attribute"}},
     "endpoints": {"type": "array", "items": {"$ref": "#/$defs/endpoint"}},
     "identity_binding": {"$ref": "#/$defs/identityBinding"},

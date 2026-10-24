@@ -15,8 +15,8 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `valid/later-minor-unknown-source-method.json` | A 0.2 source method `simulator-replay` labelled `device-observed`: a 0.1 reader reads `inferred`, never a device observation. |
 | `valid/later-minor-unknown-confidence.json` | A 0.2 confidence `verified`: a 0.1 reader recomputes it (`corroborated`). |
 | `valid/later-minor-unknown-evidence-class.json` | A 0.2 evidence class `hardware-verified`: a 0.1 reader reads `inferred`. |
-| `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. |
-| `valid/profile-sel-rtac-syslog.json` | RTAC profile: Syslog push only, no adapter operations, so no firmware allowlist. |
+| `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. `max_read_rows` 1,024 and the session limits of D1-18, cited to S22. |
+| `valid/profile-sel-rtac-syslog.json` | RTAC profile: Syslog push only, no adapter operations, so no firmware allowlist, no session limits and no `max_read_rows`. |
 
 ## Invalid
 
@@ -53,3 +53,10 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/duplicate-key.json` | `identity_binding` given twice. |
 | `invalid/profile-adapter-without-allowlist.json` | A profile that sends adapter operations with no firmware allowlist (AP-27). |
 | `invalid/profile-claim-without-citation.json` | A capability claim with no citation. |
+| `invalid/profile-without-session-limits.json` | A profile that sends adapter operations with no `session_limits` (D1-18). |
+| `invalid/profile-floor-within-idle-timeout.json` | A failed-auth floor of 15 min against an idle timeout of 30 min: a new session could land at the prompt the failed one left (C7-A2 change 1). |
+| `invalid/profile-two-password-attempts.json` | Two password attempts per session; C7 allows one. |
+| `invalid/profile-without-max-read-rows.json` | SER retrieval by adapter operation with no `max_read_rows` (D1-12). |
+| `invalid/profile-read-rows-over-ceiling.json` | `max_read_rows` 4,096, above C4's ceiling of 2,048. |
+| `invalid/profile-syslog-with-session-limits.json` | A listen-only profile with session limits. |
+| `invalid/profile-syslog-with-max-read-rows.json` | A listen-only profile with `max_read_rows`. |
