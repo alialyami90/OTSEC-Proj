@@ -521,7 +521,8 @@ func chainC6(t *testing.T) {
 
 // chainAuditRecords are the pending C8 records of the session, in order:
 // four before the read (chain start, the C7 request, session open,
-// credential use) and two after it (the operation and session close).
+// credential use) and two after it (the operation and session close, which
+// carries the transcript digest, D1-25).
 func chainAuditRecords(r *chainRun) [][]byte {
 	sent := sha256.Sum256(sentBytes(r.res.Transcript))
 	common := func(i int, action, outcome, extra string) []byte {
@@ -537,7 +538,8 @@ func chainAuditRecords(r *chainRun) [][]byte {
 		common(0, "device.session.open", "succeeded", target+inv+`,"collector_seq":2`),
 		common(1, "credential.use", "succeeded", target+inv+`,"collector_seq":3`),
 		common(2, "device.op", "succeeded", target+inv+fmt.Sprintf(`,"bytes_sent_digest":"sha256:%s","collector_seq":4`, hex.EncodeToString(sent[:]))),
-		common(3, "device.session.close", "succeeded", target+inv+`,"collector_seq":5`),
+		// The close carries the stored transcript's digest (D1-25).
+		common(3, "device.session.close", "succeeded", target+inv+fmt.Sprintf(`,"transcript_sha256":%q,"collector_seq":5`, r.res.Transcript.SHA256)),
 	}
 }
 

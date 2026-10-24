@@ -188,9 +188,18 @@ type Record struct {
 	PolicyVersion    uint64  `json:"policy_version,omitempty"`
 	ParamsDigest     string  `json:"params_digest,omitempty"`     // sha256 of the canonical parameters
 	BytesSentDigest  string  `json:"bytes_sent_digest,omitempty"` // sha256 of the redacted bytes sent
-	CorrelationID    string  `json:"correlation_id,omitempty"`    // C7 request ID, or the C2 invocation ID for invocationActions
-	CollectorSeq     uint64  `json:"collector_seq,omitempty"`     // the collector's number for an event it reported (C7-A5-2)
-	Detail           string  `json:"detail,omitempty"`            // free text; never a secret or raw device output
+	// TranscriptSHA256 is C2 Result.transcript.sha256: lowercase hex of the
+	// SHA-256 of the session transcript exactly as stored, redactions
+	// included. Required on device.session.close and on no other action
+	// (A1 D1-25), so a stored transcript can be checked against the chain.
+	// It is bare hex, unlike the "sha256:"-prefixed *_digest fields, so that
+	// it compares byte for byte with the C2 field it copies; the algorithm
+	// is in its name. An empty transcript still has a digest (e3b0c442...,
+	// the SHA-256 of no bytes), so the field is never omitted on a close.
+	TranscriptSHA256 string `json:"transcript_sha256,omitempty"`
+	CorrelationID    string `json:"correlation_id,omitempty"` // C7 request ID, or the C2 invocation ID for invocationActions
+	CollectorSeq     uint64 `json:"collector_seq,omitempty"`  // the collector's number for an event it reported (C7-A5-2)
+	Detail           string `json:"detail,omitempty"`         // free text; never a secret or raw device output
 }
 
 // collectorActions are the actions only the collector performs. The node
@@ -339,14 +348,28 @@ func (r *Record) Validate() error {
 	if r.CorrelationID != "" && !idPattern.MatchString(r.CorrelationID) {
 		return errors.New("audit: correlation id")
 	}
+	// The digest is known only when the session ends; audit before act
+	// covers its start with device.session.open (D1-25).
+	switch {
+	case r.Action == ActionDeviceSessionClose && !hashPattern.MatchString(r.TranscriptSHA256):
+		return errors.New("audit: device.session.close needs transcript_sha256, 64 lowercase hex digits")
+	case r.Action != ActionDeviceSessionClose && r.TranscriptSHA256 != "":
+		return fmt.Errorf("audit: transcript_sha256 belongs on device.session.close, not %s", r.Action)
+	}
 	if len(r.Detail) > 512 {
 		return errors.New("audit: detail over 512 bytes")
 	}
 	return nil
 }
 
-// forbiddenKeys may not appear as a field name anywhere in a record.
-var forbiddenKeys = regexp.MustCompile(`(?i)^(secret|password|passwd|pwd|passphrase|credential_value|private_key|raw_output|transcript)$`)
+// forbiddenKeys may not appear as a field name anywhere in a record: names of
+// secrets and raw device output, and any name that starts with "transcript",
+// in any case. The one exception is transcript_sha256, spelled exactly so,
+// which is a digest and not content (D1-25).
+var forbiddenKeys = regexp.MustCompile(`(?i)^(secret|password|passwd|pwd|passphrase|credential_value|private_key|raw_output|transcript.*)$`)
+
+// transcriptDigestKey is the one transcript-named field a record may carry.
+const transcriptDigestKey = "transcript_sha256"
 
 // ErrRecordRejected wraps every reason ParseRecord rejects a record.
 var ErrRecordRejected = errors.New("audit: record rejected")
@@ -375,7 +398,7 @@ func ParseRecord(b []byte) (*Record, error) {
 		return nil, fmt.Errorf("%w: raw CR, LF or NUL byte", ErrRecordRejected)
 	}
 	if err := walkKeys(b, func(k string) error {
-		if forbiddenKeys.MatchString(k) {
+		if k != transcriptDigestKey && forbiddenKeys.MatchString(k) {
 			return fmt.Errorf("field %q may not appear in an audit record", k)
 		}
 		return nil
