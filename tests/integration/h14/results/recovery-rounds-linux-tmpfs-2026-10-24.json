@@ -1,0 +1,1113 @@
+{
+  "experiment": "H-14 part 2: reserve-first startup recovery over repeated exhaustion (E-03, E-04, R-A5-5)",
+  "classification": "simulated",
+  "identity": {
+    "pid": 545,
+    "user": "0",
+    "is_admin": true
+  },
+  "platform": "linux",
+  "python": "3.13.17",
+  "sqlite": "3.45.1",
+  "batch": 10,
+  "lag": 2000,
+  "scenarios": [
+    {
+      "scenario": "incremental-cursor",
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "cursor",
+      "recovery_killed_in_round": 2,
+      "probe_at_full": false,
+      "reserve_used": true,
+      "order": "reserve-first",
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8240,
+          "seq": [
+            1,
+            8240
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8240,
+              8240
+            ],
+            "integrity_after_release": "ok",
+            "cut": 6240,
+            "pruned": 6240
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=8240",
+            "read_write": "ok count=2000 max=8240",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 6241,
+          "max": 8240,
+          "count": 2000,
+          "cursor": 6240,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6240,
+          "above_cursor_intact": true,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 6160,
+          "seq": [
+            8241,
+            14400
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "killed_recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8160,
+              14400
+            ],
+            "integrity_after_release": "ok",
+            "cut": 12400,
+            "pruned": 6160
+          },
+          "killed_recovery_stderr": null,
+          "recovery": {
+            "reserve_release": "absent",
+            "read_after_release": [
+              2000,
+              14400
+            ],
+            "integrity_after_release": "ok",
+            "cut": 12400,
+            "pruned": 0
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=14400",
+            "read_write": "ok count=2000 max=14400",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 12401,
+          "max": 14400,
+          "count": 2000,
+          "cursor": 12400,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "restart_pruned": 0,
+          "r_a5_5_holds": true,
+          "pass": true
+        },
+        {
+          "round": 3,
+          "written": 6160,
+          "seq": [
+            14401,
+            20560
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8160,
+              20560
+            ],
+            "integrity_after_release": "ok",
+            "cut": 18560,
+            "pruned": 6160
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=20560",
+            "read_write": "ok count=2000 max=20560",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 18561,
+          "max": 20560,
+          "count": 2000,
+          "cursor": 18560,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "r_a5_5_holds": true,
+      "opened_after_release_every_round": true,
+      "expected": "pass true, r_a5_5_holds true"
+    },
+    {
+      "scenario": "incremental-half",
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "half",
+      "recovery_killed_in_round": 2,
+      "probe_at_full": false,
+      "reserve_used": true,
+      "order": "reserve-first",
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8240,
+          "seq": [
+            1,
+            8240
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8240,
+              8240
+            ],
+            "integrity_after_release": "ok",
+            "cut": 4120,
+            "pruned": 4120
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 1953792,
+              "db": 1716224,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=4120 max=8240",
+            "read_write": "ok count=4120 max=8240",
+            "sizes_after": {
+              "fs_free": 1953792,
+              "db": 1716224,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 4121,
+          "max": 8240,
+          "count": 4120,
+          "cursor": 6240,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 1953792,
+          "pruned": 4120,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 4110,
+          "seq": [
+            8241,
+            12350
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "killed_recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8230,
+              12350
+            ],
+            "integrity_after_release": "ok",
+            "cut": 8235,
+            "pruned": 4115
+          },
+          "killed_recovery_stderr": null,
+          "recovery": {
+            "reserve_release": "absent",
+            "read_after_release": [
+              4115,
+              12350
+            ],
+            "integrity_after_release": "ok",
+            "cut": 10292,
+            "pruned": 2057
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2797568,
+              "db": 872448,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2058 max=12350",
+            "read_write": "ok count=2058 max=12350",
+            "sizes_after": {
+              "fs_free": 2797568,
+              "db": 872448,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 10293,
+          "max": 12350,
+          "count": 2058,
+          "cursor": 10350,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2797568,
+          "pruned": 6172,
+          "restart_pruned": 2057,
+          "r_a5_5_holds": false,
+          "pass": true
+        },
+        {
+          "round": 3,
+          "written": 6160,
+          "seq": [
+            12351,
+            18510
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8218,
+              18510
+            ],
+            "integrity_after_release": "ok",
+            "cut": 14401,
+            "pruned": 4109
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 1957888,
+              "db": 1712128,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=4109 max=18510",
+            "read_write": "ok count=4109 max=18510",
+            "sizes_after": {
+              "fs_free": 1957888,
+              "db": 1712128,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 14402,
+          "max": 18510,
+          "count": 4109,
+          "cursor": 16510,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 1957888,
+          "pruned": 4109,
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "r_a5_5_holds": false,
+      "opened_after_release_every_round": true,
+      "expected": "pass true, r_a5_5_holds false (double prune)"
+    },
+    {
+      "scenario": "none-half",
+      "auto_vacuum": "NONE",
+      "prune": "half",
+      "recovery_killed_in_round": null,
+      "probe_at_full": false,
+      "reserve_used": true,
+      "order": "reserve-first",
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8190,
+          "seq": [
+            1,
+            8190
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3366912,
+            "wal": 270336,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8190,
+              8190
+            ],
+            "integrity_after_release": "ok",
+            "cut": 4095,
+            "pruned": 4095
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=4095 max=8190",
+            "read_write": "ok count=4095 max=8190",
+            "sizes_after": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 4096,
+          "max": 8190,
+          "count": 4095,
+          "cursor": 6190,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 4095,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 100,
+          "seq": [
+            8191,
+            8290
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": false,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3383296,
+            "wal": 253952,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              4195,
+              8290
+            ],
+            "integrity_after_release": "ok",
+            "cut": 6192,
+            "pruned": 2097
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2098 max=8290",
+            "read_write": "ok count=2098 max=8290",
+            "sizes_after": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 6193,
+          "max": 8290,
+          "count": 2098,
+          "cursor": 6290,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 2097,
+          "pass": false
+        },
+        {
+          "round": 3,
+          "written": 100,
+          "seq": [
+            8291,
+            8390
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": false,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3383296,
+            "wal": 253952,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              2198,
+              8390
+            ],
+            "integrity_after_release": "ok",
+            "cut": 7291,
+            "pruned": 1099
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=1099 max=8390",
+            "read_write": "ok count=1099 max=8390",
+            "sizes_after": {
+              "fs_free": 286720,
+              "db": 3383296,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 7292,
+          "max": 8390,
+          "count": 1099,
+          "cursor": 6390,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 286720,
+          "pruned": 1099,
+          "pass": false
+        }
+      ],
+      "pass": false,
+      "r_a5_5_holds": null,
+      "opened_after_release_every_round": true,
+      "expected": "pass false (capacity not regained)"
+    },
+    {
+      "scenario": "open-at-full",
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "cursor",
+      "recovery_killed_in_round": null,
+      "probe_at_full": true,
+      "reserve_used": true,
+      "order": "reserve-first",
+      "rounds": [
+        {
+          "round": 1,
+          "written": 8240,
+          "seq": [
+            1,
+            8240
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "probe_at_full": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            },
+            "read_only": "ok count=8240 max=8240",
+            "read_write": "ok count=8240 max=8240",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            }
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8240,
+              8240
+            ],
+            "integrity_after_release": "ok",
+            "cut": 6240,
+            "pruned": 6240
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=8240",
+            "read_write": "ok count=2000 max=8240",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 6241,
+          "max": 8240,
+          "count": 2000,
+          "cursor": 6240,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6240,
+          "above_cursor_intact": true,
+          "pass": true
+        },
+        {
+          "round": 2,
+          "written": 6160,
+          "seq": [
+            8241,
+            14400
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "probe_at_full": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            },
+            "read_only": "ok count=8160 max=14400",
+            "read_write": "ok count=8160 max=14400",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            }
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8160,
+              14400
+            ],
+            "integrity_after_release": "ok",
+            "cut": 12400,
+            "pruned": 6160
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=14400",
+            "read_write": "ok count=2000 max=14400",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 12401,
+          "max": 14400,
+          "count": 2000,
+          "cursor": 12400,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "pass": true
+        },
+        {
+          "round": 3,
+          "written": 6160,
+          "seq": [
+            14401,
+            20560
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3362816,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": 524288
+          },
+          "probe_at_full": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            },
+            "read_only": "ok count=8160 max=20560",
+            "read_write": "ok count=8160 max=20560",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3362816,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": 524288
+            }
+          },
+          "recovery": {
+            "reserve_release": "ok",
+            "read_after_release": [
+              8160,
+              20560
+            ],
+            "integrity_after_release": "ok",
+            "cut": 18560,
+            "pruned": 6160
+          },
+          "recovery_done": true,
+          "recovery_stopped": false,
+          "recovery_exit": 0,
+          "reserve": "ok",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            },
+            "read_only": "ok count=2000 max=20560",
+            "read_write": "ok count=2000 max=20560",
+            "sizes_after": {
+              "fs_free": 2822144,
+              "db": 847872,
+              "wal": null,
+              "shm": null,
+              "reserve": 524288
+            }
+          },
+          "integrity": "ok",
+          "min": 18561,
+          "max": 20560,
+          "count": 2000,
+          "cursor": 18560,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 2822144,
+          "pruned": 6160,
+          "above_cursor_intact": true,
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "r_a5_5_holds": null,
+      "opened_after_release_every_round": true,
+      "expected": "unknown: whether the release clears a failed open is the question"
+    },
+    {
+      "scenario": "no-reserve",
+      "auto_vacuum": "INCREMENTAL",
+      "prune": "cursor",
+      "recovery_killed_in_round": null,
+      "probe_at_full": false,
+      "reserve_used": false,
+      "order": "reserve-first",
+      "rounds": [
+        {
+          "round": 1,
+          "written": 9450,
+          "seq": [
+            1,
+            9450
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3887104,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": null
+          },
+          "recovery": {
+            "reserve_release": "absent",
+            "read_after_release": [
+              9450,
+              9450
+            ],
+            "integrity_after_release": "ok",
+            "cut": 7450,
+            "pruned": 0,
+            "prune_error": "OperationalError: database or disk is full"
+          },
+          "recovery_done": false,
+          "recovery_stopped": true,
+          "recovery_exit": 5,
+          "reserve": "not used",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            },
+            "read_only": "ok count=9450 max=9450",
+            "read_write": "ok count=9450 max=9450",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            }
+          },
+          "integrity": "ok",
+          "min": 1,
+          "max": 9450,
+          "count": 9450,
+          "cursor": 7450,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 0,
+          "pruned": 0,
+          "above_cursor_intact": false,
+          "pass": false
+        },
+        {
+          "round": 2,
+          "written": 0,
+          "seq": [
+            null,
+            null
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3887104,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": null
+          },
+          "recovery": {
+            "reserve_release": "absent",
+            "read_after_release": [
+              9450,
+              9450
+            ],
+            "integrity_after_release": "ok",
+            "cut": 7450,
+            "pruned": 0,
+            "prune_error": "OperationalError: database or disk is full"
+          },
+          "recovery_done": false,
+          "recovery_stopped": true,
+          "recovery_exit": 5,
+          "reserve": "not used",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            },
+            "read_only": "ok count=9450 max=9450",
+            "read_write": "ok count=9450 max=9450",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            }
+          },
+          "integrity": "ok",
+          "min": 1,
+          "max": 9450,
+          "count": 9450,
+          "cursor": 7450,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 0,
+          "pruned": 0,
+          "above_cursor_intact": false,
+          "pass": false
+        },
+        {
+          "round": 3,
+          "written": 0,
+          "seq": [
+            null,
+            null
+          ],
+          "writer": "FULL OperationalError database or disk is full",
+          "writer_stderr": null,
+          "capacity_regained": true,
+          "sizes_at_full": {
+            "fs_free": 0,
+            "db": 3887104,
+            "wal": 274432,
+            "shm": 32768,
+            "reserve": null
+          },
+          "recovery": {
+            "reserve_release": "absent",
+            "read_after_release": [
+              9450,
+              9450
+            ],
+            "integrity_after_release": "ok",
+            "cut": 7450,
+            "pruned": 0,
+            "prune_error": "OperationalError: database or disk is full"
+          },
+          "recovery_done": false,
+          "recovery_stopped": true,
+          "recovery_exit": 5,
+          "reserve": "not used",
+          "recovery_error": null,
+          "opened_after_release": true,
+          "probe_after_recovery": {
+            "sizes_before": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            },
+            "read_only": "ok count=9450 max=9450",
+            "read_write": "ok count=9450 max=9450",
+            "sizes_after": {
+              "fs_free": 0,
+              "db": 3887104,
+              "wal": 274432,
+              "shm": 32768,
+              "reserve": null
+            }
+          },
+          "integrity": "ok",
+          "min": 1,
+          "max": 9450,
+          "count": 9450,
+          "cursor": 7450,
+          "contiguous": true,
+          "acked_present": true,
+          "fs_free": 0,
+          "pruned": 0,
+          "above_cursor_intact": false,
+          "pass": false
+        }
+      ],
+      "pass": false,
+      "r_a5_5_holds": null,
+      "opened_after_release_every_round": true,
+      "expected": "unknown: F-013's condition with nothing to release"
+    }
+  ]
+}
