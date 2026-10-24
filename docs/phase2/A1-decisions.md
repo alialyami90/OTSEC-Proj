@@ -81,3 +81,36 @@ Each lock has its own negative test (A6). Lifting either lock needs the owner's 
 - Every result names where it ran and the commit it tested.
 - A PR merges when its reviewers accept it and its tests pass on Linux and Windows.
 - Integration happens in small steps. Each step is merged once the end-to-end tests that apply to it pass, so no component waits for the others to finish.
+
+## D2-8: Merging while Windows cannot run
+
+GitHub Actions is blocked because the repository is private, and Go is not yet on the owner's PC. Until either changes:
+
+- A PR merges when:
+  - its reviewers accept it;
+  - all checks pass on Linux in a container;
+  - `GOOS=windows CGO_ENABLED=0 go vet` and `go test -c` succeed for every package it changes.
+- The PR records the Windows run as owed. A6 keeps the list of owed runs and runs them once Go is available on the PC.
+- The Phase 2 gate still requires the slice suite to pass on Windows (P2 exit gate). D2-8 delays the Windows evidence. It does not waive it.
+
+## D2-9: RELP/TLS peer check is by name, not by CA alone
+
+**Evidence:** A6, `desk`/`simulated`, rsyslogd 8.2312.0 with librelp 1.11.0. With `tls.authmode="certvalid"`, imrelp accepted a self-signed client certificate that the CA never signed. With `tls.authmode="name"` and `tls.permittedPeer` set to the node's name, imrelp refused that certificate, a missing certificate, and a stranger's certificate.
+
+**Rules:**
+- C6 commissioning requires the receiver to use name mode with `permittedPeer`, never `certvalid`.
+- A durable acknowledgement needs `queue.type="Direct"` and `omfile sync="on"` in the receiving ruleset. Without them, `200 OK` can arrive before the write.
+- The forwarder checks the receiver's name in the same way, so neither side relies on the CA alone.
+- A4 writes both rules into C6 as a minor revision, reviewed by A3 and A6.
+- The slice harness configures rsyslog this way.
+
+## D2-10: A third lock: collection endpoints and listeners are loopback only
+
+**Reason (A6, review of #84):** both D2-4 locks read the same `target` label, which an administrator sets. An endpoint with a real relay's address labelled `simulated` passes both. In Phase 2 the only device is the simulator on the same host (D2-3), so a lock that ignores the label costs little and stops a typo from pointing a credentialed session at real equipment.
+
+**Rules:**
+- The node's loader refuses a configuration in which a collection endpoint's host, or a Syslog listener's bind address, is not a loopback IP literal (127.0.0.0/8 or `::1`) (A5).
+- The collector refuses a run whose endpoint host is not a loopback IP literal (A3).
+- Host names are refused, `localhost` included, so the check never depends on name resolution.
+- Forwarding targets are not covered, because the upstream collector is not a device.
+- Each lock gets its own negative test (A6). Lifting either lock follows D2-4: the owner authorizes a named lab device, and the authorization is recorded in a decision.

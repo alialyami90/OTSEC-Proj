@@ -145,7 +145,7 @@ func TestParseAuditRefusesDisagreement(t *testing.T) {
 		"param order":       strings.Replace(s, `node="site-a-node-1" seq="4"`, `seq="4" node="site-a-node-1"`, 1),
 		"other contract id": strings.Replace(s, `ac="otsec.audit/0.1"`, `ac="otsec.audit/0.2"`, 1),
 		"no MSG":            s[:strings.Index(s, "] ")+1],
-		"escaped bracket":   strings.Replace(s, `v="otsec.syslog/0.1"`, `v="otsec.syslog/0.1\]"`, 1),
+		"escaped bracket":   strings.Replace(s, `v="`+Identifier+`"`, `v="`+Identifier+`\]"`, 1),
 	} {
 		if m == s {
 			t.Fatalf("%s: the change did not apply", name)
@@ -181,4 +181,21 @@ func TestAuditFitsLargestRecord(t *testing.T) {
 		t.Fatalf("read back: %v", err)
 	}
 	t.Logf("%d octets of %d", len(msg), MinAuditOctets)
+}
+
+// A receiver reads every 0.x minor (D1-13): an audit message rendered by a
+// 0.1 node still parses, and one from another major does not.
+func TestParseAuditReadsOlderMinor(t *testing.T) {
+	chain := loadChain(t)
+	msg, err := RenderAudit(chain[0], loadTarget(t, "relp-tls-audit"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(msg)
+	if _, err := ParseAudit([]byte(strings.Replace(s, `v="`+Identifier+`"`, `v="otsec.syslog/0.1"`, 1))); err != nil {
+		t.Errorf("0.1 message: %v", err)
+	}
+	if _, err := ParseAudit([]byte(strings.Replace(s, `v="`+Identifier+`"`, `v="otsec.syslog/1.0"`, 1))); err == nil {
+		t.Error("a 1.0 message was accepted")
+	}
 }

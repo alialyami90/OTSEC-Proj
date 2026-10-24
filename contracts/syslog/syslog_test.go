@@ -94,6 +94,11 @@ var invalidTargets = map[string]Code{
 	"audit-target-too-small":             CodeAudit,
 	"required-without-client-credential": CodeTLS,
 	"required-without-durable-ack":       CodeDelivery,
+	"required-peer-check-certvalid":      CodeDelivery,
+	"required-without-ack-after":         CodeDelivery,
+	"required-ack-before-write":          CodeDelivery,
+	"required-wildcard-peer":             CodeDelivery,
+	"required-0.1-without-peer-check":    CodeDelivery,
 	"malformed-spki-pin":                 CodeTLS,
 	"insecure-without-acknowledgement":   CodeAck,
 	"acknowledgement-production-scope":   CodeAck,
@@ -794,5 +799,38 @@ func TestConsumers(t *testing.T) {
 	tg.ReplaySeconds = 60
 	if _, err := Consumers(tg, events, "audit"); err == nil {
 		t.Error("an invalid target produced consumers")
+	}
+}
+
+// D2-9: a required target is accepted only when its commissioning check
+// records that the collector authenticates the node by name and
+// acknowledges after a synchronous write. Each field is checked on its own,
+// starting from the valid required target.
+func TestDurableAckRecordsCollectorSettings(t *testing.T) {
+	if err := loadTarget(t, "relp-tls-required").Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*DurableAck){
+		"authmode certvalid":     func(d *DurableAck) { d.PeerCheck = "certvalid" },
+		"no peer check":          func(d *DurableAck) { d.PeerCheck = "" },
+		"no permitted peer":      func(d *DurableAck) { d.PermittedPeer = "" },
+		"wildcard peer":          func(d *DurableAck) { d.PermittedPeer = "*.example.net" },
+		"peer with a space":      func(d *DurableAck) { d.PermittedPeer = "site a" },
+		"missing ack_after":      func(d *DurableAck) { d.AckAfter = "" },
+		"ack on receipt":         func(d *DurableAck) { d.AckAfter = "receipt" },
+		"ack_after in uppercase": func(d *DurableAck) { d.AckAfter = "DURABLE-WRITE" },
+	} {
+		tg := loadTarget(t, "relp-tls-required")
+		mutate(tg.DurableAck)
+		if got := Codes(tg.Validate()); !slices.Equal(got, []Code{CodeDelivery}) {
+			t.Errorf("%s: codes %v", name, got)
+		}
+	}
+	// Declaring an older minor does not skip the rule.
+	tg := loadTarget(t, "relp-tls-required")
+	tg.Schema = "otsec.syslog/0.1"
+	tg.DurableAck.PeerCheck, tg.DurableAck.PermittedPeer, tg.DurableAck.AckAfter = "", "", ""
+	if !slices.Contains(Codes(tg.Validate()), CodeDelivery) {
+		t.Error("a 0.1 required target without the D2-9 fields was accepted")
 	}
 }

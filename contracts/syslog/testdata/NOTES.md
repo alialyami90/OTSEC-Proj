@@ -1,6 +1,6 @@
 # C6 examples
 
-None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, `admin-example`, `site-a-ca`, `site-a-node1-forwarder` and `commissioning/siem-a/durable-ack` are illustrative references (TODO(A3 node key ref)); no durable-acknowledgement check has been run against any collector.
+None of these is device output. Host names use `example.net` (RFC 2606), addresses come from the RFC 5737 documentation range, `admin-example`, `site-a-ca`, `site-a-node1-forwarder` and `commissioning/siem-a/durable-ack` are illustrative references (TODO(A3 node key ref)); no durable-acknowledgement check has been run against any collector, and the permitted peer `site-a-node1` is illustrative.
 
 ## Targets
 
@@ -8,7 +8,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 
 | File | Code | Schema | What it shows |
 | --- | --- | --- | --- |
-| `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check. |
+| `valid/relp-tls-required.json` | | | The only transport that may be `required`: mode A, with a RELP window, the node's client key (mutual TLS) and a passed durable-acknowledgement check that records the collector's name check (`peer_check: name`, `permitted_peer`) and its synchronous write (`ack_after: durable-write`), D2-9. Stamped `otsec.syslog/0.2`. |
 | `valid/relp-plain-best-effort.json` | | | Plain RELP: mode A acknowledgements, but best-effort and insecure, so it has a one-hour replay window as its C5 window (C6-A5-1); acknowledged lab-only, no device content. |
 | `valid/tls-best-effort.json` | | | RFC 5425: mode B, with a one-hour replay window. |
 | `valid/tcp-lf-insecure.json` | | | RFC 6587 with LF framing, for collectors that cannot count octets. Insecure: acknowledged lab-only, no device content (D1-22). |
@@ -35,6 +35,11 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 | `invalid/audit-target-too-small.json` | audit | no | Required relp-tls, but 2048 octets cannot hold a 16 KiB sealed record. |
 | `invalid/required-without-client-credential.json` | tls | no | A required target authenticates the node with mutual TLS (C6-A3-2). |
 | `invalid/required-without-durable-ack.json` | delivery | no | A required target records the commissioning check that its collector acknowledges after a durable write (C6-A6-1). |
+| `invalid/required-peer-check-certvalid.json` | delivery | yes | The collector checked the node's certificate by CA alone (`certvalid`), which accepted a self-signed certificate the CA never signed (D2-9). |
+| `invalid/required-without-ack-after.json` | delivery | yes | The check does not say the collector acknowledges after a synchronous write (D2-9). |
+| `invalid/required-ack-before-write.json` | delivery | yes | `ack_after` other than `durable-write`: a 200 OK could arrive before the write (D2-9). |
+| `invalid/required-wildcard-peer.json` | delivery | yes | A wildcard permitted peer admits more than this node. |
+| `invalid/required-0.1-without-peer-check.json` | delivery | yes | A target stamped `otsec.syslog/0.1` without the 0.2 fields is still refused as required: it never showed the name check or the synchronous write. |
 | `invalid/malformed-spki-pin.json` | tls | yes | An SPKI pin is a base64 SHA-256. |
 | `invalid/insecure-without-acknowledgement.json` | acknowledgement | no | Plain TCP without an admin's acknowledgement (D1-22). |
 | `invalid/acknowledgement-production-scope.json` | acknowledgement | yes | `same-segment`: 0.1 accepts an insecure target for lab-only. |
