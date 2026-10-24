@@ -105,3 +105,27 @@ Owner: A1. One entry per decision made while the contracts are reviewed. Each en
   - A5 adds this to C5's storage-full rules.
   - A3 records it in C7 and C8.
   - A6 adds a V-S9 case: with the audit store full, no `ACC` is sent and Syslog is still received.
+
+## D1-12. Align has a hard input bound (2026-10-24)
+
+- **Question (A6, C4 re-check R-1):** `Align`'s gap path allocates (n+1)(m+1) `int32`. A SEL-751 read of at most 1,024 rows costs 4 MB. But a fault or an attacker on the Telnet path can send far more: 50,000 rows comes to about 10 GB and takes down the node.
+- **Decision:** the bound is enforced in both places.
+  - **C4 ceiling:** `event.MaxAlignRows = 2048`, which costs at most about 16 MB. `Align` itself refuses a longer read with an error and allocates nothing. The contract function protects itself and does not rely on its callers.
+  - **C2 per-family limit:** each capability profile states its own `max_read_rows`, at or below the C4 ceiling. For SEL-751 that is 1,024, taken from the manual.
+  - **Over-limit reads:** a read over the limit is a failed parse. Its bytes are kept, a `parse.failed` health event is raised, and no records are aligned or stored from it.
+  - **Raising the ceiling:** a minor version may raise it when a family's evidence calls for it.
+- **Action:**
+  - A4 adds the ceiling and a test, before #29 merges.
+  - A2 adds `max_read_rows` to C2 profiles.
+  - A6 re-runs the oversize probe.
+
+## D1-13. Readers upgrade before writers (2026-10-24)
+
+- **Question (A6):** a 0.1 reader rejects a later-minor enum value. That is safe, but a newer site node's events then fail at an older central node.
+- **Decision:** central nodes and every receiver of a contract (C4 events, C8 audit) upgrade before the nodes that write it. A site node never emits a minor version its central node has not declared support for. In 0.x the operator follows this order by hand. An enrollment-time version exchange that enforces it belongs to Phase 4, distributed operation.
+- **Action:** A5 records the order in deploy notes and in `A5-node-posture.md`. C6 (A4) states that the Syslog payload carries the C4 identifier, so a receiver can tell a version it cannot read apart from a malformed event.
+
+## D1-14. A gap must never lose a new record (2026-10-24)
+
+- **Question (A6, C4 re-check S-1, rated "should"):** a gap with repeated keys can lose a new record.
+- **Decision:** S-1 is required before #29 merges. Silently losing a native record breaks EP-1, and `Align` sits on the path of every SER read. S-2 (second 60 checked against local time, not UTC) and S-3 (`invalid-time` with a `wall_clock` present validates) are small, so A4 fixes them in the same change.
