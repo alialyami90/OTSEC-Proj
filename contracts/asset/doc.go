@@ -65,9 +65,17 @@
 // as exposed, and only rotation or re-commissioning clears it (C1-A3-5). No
 // event is created for the asset from that session.
 //
+// After a mismatch, the operator re-commissions. If the device is the same
+// unit (same serial number; for example an unrecorded firmware upgrade), the
+// asset keeps its ID and gets new declared values. If it is a different unit
+// (a replaced relay), it gets a new asset ID and the old record is retired
+// with its history, so events never mix two physical devices under one ID
+// (C1-A4-3).
+//
 // # What it leaves out
 //
-//   - Node ID and timestamp model: C4. Principal and credential reference:
+//   - Timestamp model: C4. The node ID format is C4's, copied here because
+//     C4 imports this package (no import cycle; C1-A4-1). Principal and credential reference:
 //     C7. Operation ID and the firmware allowlist: C3. Each is marked
 //     TODO(C<n>) until that package is merged.
 //   - Asset discovery, storage, and the UI.

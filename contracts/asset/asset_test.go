@@ -211,3 +211,34 @@ func TestTimes(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckSenders(t *testing.T) {
+	r := load(t, "sel-rtac-syslog.json")
+	if err := CheckSenders([]Asset{r, load(t, "sel-751-simulated.json")}); err != nil {
+		t.Fatalf("distinct senders rejected: %v", err)
+	}
+	other := r
+	other.AssetID = "5d0b7c3e-2a41-4f86-9c1d-8e7f6a5b4c32"
+	other.Endpoints = []Endpoint{r.Endpoints[0]}
+	other.Endpoints[0].Host = "::ffff:192.0.2.40" // the same IPv4 sender, written mapped
+	if err := CheckSenders([]Asset{r, other}); err == nil {
+		t.Fatal("one sender on two assets of one node accepted")
+	}
+	other.NodeID = "site-a-node2"
+	if err := CheckSenders([]Asset{r, other}); err != nil {
+		t.Fatalf("same sender heard by two nodes rejected: %v", err)
+	}
+}
+
+func TestInboundPortIsOptional(t *testing.T) {
+	r := load(t, "sel-rtac-syslog.json")
+	r.Endpoints[0].Port = 0
+	if err := r.Validate(); err != nil {
+		t.Fatalf("Syslog endpoint without a listening port rejected: %v", err)
+	}
+	a := load(t, "sel-751-simulated.json")
+	a.Endpoints[0].Port = 0
+	if err := a.Validate(); err == nil {
+		t.Fatal("Telnet endpoint without a port accepted")
+	}
+}

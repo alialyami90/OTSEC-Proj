@@ -15,6 +15,7 @@
 | Evidence class `simulated` goes only with method `simulator-session`, and the reverse. | A simulator run can never be shown as a device observation (C-10). |
 | `downstream_security` is per endpoint. Telnet and plain Syslog are always `plaintext-unauthenticated`. Anything below `encrypted-authenticated` needs an acknowledgement (by, at, reason). | A3 §4.5 and ADR-0005. An RTAC has a plaintext Syslog endpoint next to an SSH one, so a single per-asset value would be wrong; `WeakestDownstreamSecurity` gives the asset-level label. |
 | Serial is always `plaintext-unauthenticated`, like Telnet. `encrypted-authenticated` requires a `pinned-key` binding; SSH or TLS without one is `encrypted-weak`. Every acknowledgement carries a `scope`, and 0.1 has only `lab-only`. | A3 review C1-A3-1 to C1-A3-3. The collector refuses a run whose credential `plaintext_scope` (C7) differs from the endpoint's acknowledgement scope. A production scope needs an owner decision. |
+| C1 keeps its own copy of the node ID pattern (identical to C4's). Syslog endpoints name the expected sender address; the port, when set, is the node's listening port. `CheckSenders` rejects one sender on two assets of one node. `node_id` is the node that runs adapter sessions; other nodes may receive the asset's Syslog. A replaced unit gets a new asset ID; the same unit keeps its ID. | A4 review C1-A4-1 to C1-A4-4. C4 imports C1, so C1 cannot import C4. Collector failover under N-1 redundancy is open for A5 and A1. |
 | Unknown values from a later minor are read as the enum's least trusted value (`plaintext-unauthenticated`, `spoofable`, `unknown`). | contracts/README.md compatibility rule, with a fallback that is never more trusted. |
 | Vendor and product family are lowercase tokens (`sel`, `sel-751`). | C3 names a register package's family with the same token (`family` in PR #27). Display names belong in the UI. |
 | Vendor-specific attributes use a vendor prefix (`sel.cid`). Unprefixed names come from a fixed list. | Profiles can add attributes without a contract change, while the common names stay stable. |
@@ -37,6 +38,5 @@ The text is in `contracts/asset/doc.go`. In short:
 
 ## Open items for reviewers
 
-- A4: C1 has `node_id` as a TODO(C4), already using the DNS-label pattern from the C4 draft (PR #29). I will switch to C4's `NodeID` when it merges.
 - A3: `Acknowledgement.By` and operator refs are TODO(C7) principal IDs.
 - A6: `testdata/generate.py` writes the examples. They are built from my own transcription, so A6's independent tests should not reuse them as ground truth (risk 3).

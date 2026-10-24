@@ -22,9 +22,15 @@ var self = version.ID{Name: "asset", Major: 0, Minor: 1}
 
 // Asset is one device the platform knows about.
 type Asset struct {
-	Schema          string          `json:"schema"`
-	AssetID         string          `json:"asset_id"`
-	NodeID          string          `json:"node_id"` // TODO(C4): node ID format is A4's; this is the shape agreed in A4's draft.
+	Schema  string `json:"schema"`
+	AssetID string `json:"asset_id"`
+	// NodeID is the node that runs adapter sessions to this asset: one node
+	// per asset, because some devices allow very few sessions (D9). Other
+	// nodes may still receive the asset's Syslog; their events reference the
+	// same asset ID. Failover of the collecting node under N-1 redundancy is
+	// open (A5, A1). The format is C4's NodeID, kept as a copy here because
+	// C4 imports this package (C1-A4-1); A6's tests check the two agree.
+	NodeID          string          `json:"node_id"`
 	Attributes      []Attribute     `json:"attributes"`
 	Endpoints       []Endpoint      `json:"endpoints,omitempty"`
 	IdentityBinding IdentityBinding `json:"identity_binding"`
@@ -72,6 +78,15 @@ type Span struct {
 }
 
 // Endpoint is one way to reach or hear from the asset.
+//
+// For telnet and ssh, Host and Port are where the node connects. For the
+// Syslog transports the device is the sender (C1-A4-2): Host is the source
+// address the node expects its messages from, as the node's listener sees it
+// (after any NAT); Port is optional and, when set, is the node's listening
+// port, never the device's ephemeral source port. Within one node a
+// (transport, host) pair belongs to at most one asset (CheckSenders). A
+// message relayed by another Syslog host arrives from the relay's address,
+// so an address-only binding names the direct sender only.
 type Endpoint struct {
 	ID                 string             `json:"id"`
 	Transport          Transport          `json:"transport"`
@@ -379,7 +394,7 @@ var RequiredAttributes = []string{AttrDeviceClass, AttrVendor}
 
 var (
 	uuidPattern       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	nodeIDPattern     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`) // TODO(C4): contracts/event NodeID
+	nodeIDPattern     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`) // same as C4 NodeID; see Asset.NodeID
 	attrNamePattern   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	vendorAttrPattern = regexp.MustCompile(`^[a-z][a-z0-9]{1,15}\.[a-z][a-z0-9_]{0,63}$`)
 	tokenPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -628,7 +643,8 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 		if _, err := netip.ParseAddr(ep.Host); err != nil {
 			v.fail("%s.host %q is not an IP address", p, ep.Host)
 		}
-		if ep.Port < 1 || ep.Port > 65535 {
+		optional := ep.Transport.Inbound() && ep.Port == 0
+		if !optional && (ep.Port < 1 || ep.Port > 65535) {
 			v.fail("%s.port %d is out of range", p, ep.Port)
 		}
 	}
@@ -645,6 +661,46 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 			v.enum(p+".downstream_security.acknowledgement.scope", string(ack.Scope), AckScopes)
 		}
 	}
+}
+
+// Inbound reports whether the device sends to the node on this transport,
+// rather than the node connecting to the device.
+func (t Transport) Inbound() bool { return t == SyslogUDP || t == SyslogTCP || t == SyslogTLS }
+
+// CheckSenders checks a node's asset registry: an inbound (transport, host)
+// pair may belong to at most one asset per node, so a received message is
+// attributed to one asset or to none, never to the wrong one (C1-A4-2).
+// Validate cannot check this, because it sees one asset at a time.
+func CheckSenders(assets []Asset) error {
+	type key struct {
+		node string
+		t    Transport
+		host string
+	}
+	owner := map[key]string{}
+	var errs []error
+	for _, a := range assets {
+		for _, ep := range a.Endpoints {
+			if !ep.Transport.Inbound() {
+				continue
+			}
+			addr, err := netip.ParseAddr(ep.Host)
+			host := ep.Host
+			if err == nil {
+				host = addr.Unmap().String()
+			}
+			k := key{a.NodeID, ep.Transport, host}
+			if prev, ok := owner[k]; ok && prev != a.AssetID {
+				errs = append(errs, fmt.Errorf("node %s: %s sender %s belongs to both %s and %s", k.node, k.t, k.host, prev, a.AssetID))
+				continue
+			}
+			owner[k] = a.AssetID
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("asset: %w", errors.Join(errs...))
+	}
+	return nil
 }
 
 // AlwaysPlaintext reports whether a transport is plaintext-unauthenticated
