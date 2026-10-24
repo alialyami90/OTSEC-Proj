@@ -13,6 +13,7 @@ import (
 	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
+	"otsec.local/otsec/platform/store"
 )
 
 var bg = context.Background()
@@ -21,7 +22,9 @@ func runtimeConfig(t *testing.T) (*Config, string) {
 	t.Helper()
 	dir := t.TempDir()
 	storeDir := filepath.Join(dir, "store")
-	if err := os.Mkdir(storeDir, 0o700); err != nil {
+	// CreateDir, so the Windows DACL check passes as it does for the
+	// installer's directory.
+	if err := store.CreateDir(storeDir, ""); err != nil {
 		t.Fatal(err)
 	}
 	c, err := ParseConfig(nodeconfigtest.New("site-a-node1", storeDir).
