@@ -18,7 +18,7 @@ This report closes Phase 1 (contracts and minimal architecture). It follows the 
 | ID | Contract | Package | Owner | PRs | Reviewers, all accepted |
 | --- | --- | --- | --- | --- | --- |
 | C1 | `otsec.asset/0.1`: asset identity, identity binding, capability profile, endpoint `target` | `contracts/asset` | A2 | #32, #65 | A3, A4, A6 |
-| C2 | `otsec.adapter/0.1`: invocation, result, transcript, session dialogue rules | `contracts/adapter` | A2 | #51, #65, D1-25 PR | A1, A3, A4, A6 |
+| C2 | `otsec.adapter/0.1`: invocation, result, transcript, session dialogue rules | `contracts/adapter` | A2 | #51, #65, #68 | A1, A3, A4, A6 |
 | C3 | `otsec.register/0.1`: signed command register format; SEL-751 content rev 2 | `contracts/register` | A1 (format), A2 (content) | #27, #32 | A2, A3, A6 |
 | C4 | `otsec.event/0.1`: event, native evidence, time, alignment, `evidence_class` | `contracts/event` | A4 | #29, #42, #59, #63 | A2, A3, A5, A6 |
 | C5 | `otsec.store/0.1`: store, outbox, cursors, startup recovery | `contracts/store` | A5 | #33 | A3, A4, A6 |
@@ -77,7 +77,8 @@ The probes are committed as contract tests.
 - The chain test found two C2 faults, which were fixed under D1-25:
   - the transcript digest was not in the audit chain;
   - SER field names differed from C4's.
-- Final run from `main`, with the end-to-end transcript-digest check and `CheckAgainst`: *(Windows result on the owner's PC, commit; Linux result in A1's container, commit)*.
+- A6 added the end-to-end transcript-digest check, the printed SER headings check and the D1-25 contract tests in #71. `CheckAgainst` has been in the chain since #66.
+- Final run from `main` at `b4f9bc6`, after #71: [40120896240](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40120896240), on Linux and Windows. All nine links also pass in A1's container on the same commit.
 
 ### A1 integration checks
 
@@ -87,14 +88,15 @@ The probes are committed as contract tests.
 ### Where tests ran
 
 - CI (`.github/workflows/ci.yml`) runs Go on Linux and Windows, plus pytest, on every PR.
-- From 17:42Z on 2026-10-24, GitHub stopped starting jobs in this repository (an account billing hold). From then on, under D1-26, the same steps ran on the owner's Windows PC (A6) and in A1's Linux container. Those results are posted on each PR with the commit and the place they ran, and are labelled local, not CI.
+- From 17:42Z on 2026-10-24, GitHub stopped starting jobs in this repository (an account billing hold). From then on, under D1-26, the same steps ran on the owner's Windows PC (A6) and in A1's Linux container. Those results are posted on each PR with the commit and the place they ran, and are labelled local, not CI. Go was not yet on the owner's PC, so that leg covered pytest only.
+- At 18:25Z the owner made the repository public, and Actions ran again. #64, #68, #69 and #71 merged on green CI, Linux and Windows. Later tests go back to the owner's PC first (D1-26).
 
 ## Exit-gate items
 
 | Gate item (P1 briefs) | State |
 | --- | --- |
 | C1 to C8 merged at 0.x, each with every listed reviewer's record | Met. Reviewer table above. |
-| Chain test passes on Linux and Windows | Met. CI runs before 17:42Z, then local runs under D1-26 (above). |
+| Chain test passes on Linux and Windows | Met. Final run 40120896240 from `main` (above). |
 | B-02, B-03, B-04, B-05 closed, or carried with the owner's agreement | **B-02** is closed for the SEL-751 slice from documented evidence; H-09 confirms levels on hardware. **B-03** is closed as a contract. **B-04** is closed as a design. **B-05** is closed for the slice as a stated limit: the binding is device-reported and spoofable, the FID is checked before the credential, and `CredentialAllowed` gates it. |
 | A3's security review recorded for every contract, with no open safety or security objection | Met. A3 reviewed C1 to C6. C7 and C8 are A3's own and were reviewed by A6 for security. No objection is open. |
 | Integration path for Phase 2 | Below. |
