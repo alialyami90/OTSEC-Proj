@@ -244,6 +244,9 @@ type Report struct {
 	Code adapter.Code
 	// Refusal is the collector's refusal code for a refused run.
 	Refusal string
+	// Detail is the error detail of an outcome that passed its checks:
+	// the collector's own words, never device text (C2).
+	Detail string
 }
 
 // RunOnce runs schedule entry i once. Calls must not overlap: the node
@@ -363,6 +366,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	// The outcome code's suspension is recorded before anything else is
 	// decided, whatever becomes of the outcome (A1).
 	rep.Code = outcomeCode(resp)
+	if resp.Outcome != nil && resp.Outcome.Result.Error != nil {
+		rep.Detail = resp.Outcome.Result.Error.Detail
+	}
 	s.suspend(ctx, col.AssetID, inv, rep.Code)
 
 	switch {
@@ -602,20 +608,40 @@ func (s *Scheduler) Halted(assetID string) string { return s.stopped(assetID) }
 
 // cannotKeep reports why a run's outcome could not be kept, if it could
 // not: the evidence database does not accept events, or the adapter
-// evidence class has less than QuarantineRoom left.
+// evidence class has less than QuarantineRoom left once confirmed events
+// are pruned (Prune). It raises AlarmQuarantineRoomLow once when the class
+// holds WarnFraction of what runs may use, so the warning comes before
+// runs stop whatever the quota (A6, V-S9).
 func (s *Scheduler) cannotKeep(ctx context.Context) (code, detail string) {
 	if m := s.rt.Mode(EvidenceDB); !m.AcceptsEvents() {
 		return AlarmEvidenceNotStored, "evidence database is " + string(m) + "; runs are not sent"
 	}
-	db := s.rt.Store(HealthStream)
-	used, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	quota := s.rt.cfg.Store.Quotas[string(c5.ClassAdapterEvidence)]
+	used, err := s.evidenceBytes(ctx)
+	if err == nil && used+QuarantineRoom > quota {
+		s.rt.Prune(ctx)
+		used, err = s.evidenceBytes(ctx)
+	}
 	if err != nil {
 		return AlarmEvidenceNotStored, "adapter-evidence usage unreadable: " + err.Error()
 	}
-	if quota := s.rt.cfg.Store.Quotas[string(c5.ClassAdapterEvidence)]; used+QuarantineRoom > quota {
-		return AlarmNoQuarantineRoom, fmt.Sprintf("adapter-evidence holds %d of %d bytes, less than %d left for a quarantine; runs are not sent", used, quota, QuarantineRoom)
+	if room := quota - QuarantineRoom; float64(used) >= s.rt.cfg.Store.WarnFraction*float64(room) {
+		s.raiseOnceKey("quarantine room low", "", AlarmQuarantineRoomLow, fmt.Sprintf("adapter-evidence holds %d bytes; runs stop at %d (the quota %d less %d for a quarantine) while its events are not confirmed upstream", used, room, quota, QuarantineRoom))
+	} else {
+		s.clearQuietKey("quarantine room low")
+	}
+	if used+QuarantineRoom > quota {
+		return AlarmNoQuarantineRoom, fmt.Sprintf("adapter-evidence holds %d of %d bytes, less than %d left for a quarantine, after confirmed events were pruned; runs are not sent until more are confirmed upstream", used, quota, QuarantineRoom)
 	}
 	return "", ""
+}
+
+func (s *Scheduler) evidenceBytes(ctx context.Context) (int64, error) {
+	db := s.rt.Store(HealthStream)
+	if db == nil {
+		return 0, errors.New("evidence database not open")
+	}
+	return db.ClassBytes(ctx, c5.ClassAdapterEvidence)
 }
 
 // raiseOnce raises a skip alarm once per condition, not once per run.

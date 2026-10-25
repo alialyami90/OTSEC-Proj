@@ -1,0 +1,229 @@
+package node
+
+import (
+	"strings"
+	"testing"
+
+	"otsec.local/otsec/contracts/authz"
+	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
+	"otsec.local/otsec/platform/store"
+)
+
+// pruneNode is a node with a required target and an adapter-evidence
+// quota of QuarantineRoom and room; 1024 is less than one run's SER events.
+func pruneNode(t *testing.T, room int64, mods ...func(*nodeconfigtest.Config)) (*Runtime, *Status, *Config, *Scheduler) {
+	t.Helper()
+	nc, _, dir := forwardConfig(t, 9, func(nc *nodeconfigtest.Config) { // the forwarder is never run
+		nc.Store.Quotas["adapter-evidence"] = QuarantineRoom + room
+		for _, m := range mods {
+			m(nc)
+		}
+	})
+	if err := nc.WriteInstallKey(testInstallKey); err != nil {
+		t.Fatal(err)
+	}
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	r, st, _ := start(t, c, dir)
+	t.Cleanup(func() { r.Close() })
+	var seq uint64
+	return r, st, c, newScheduler(t, r, wireCollector(t, func(*authz.CollectorRequest) {}, &seq))
+}
+
+// confirm persists the required target's cursor on the SER stream through
+// seq, as the forwarder does after the target confirms.
+func confirm(t *testing.T, r *Runtime, c *Config, seq c5.Seq) {
+	t.Helper()
+	confirmStream(t, r, c, SERStream(relayID), seq)
+}
+
+func confirmStream(t *testing.T, r *Runtime, c *Config, stream c5.StreamID, seq c5.Seq) {
+	t.Helper()
+	cs, err := c.Consumers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cn := range cs {
+		if cn.Stream == stream && cn.Delivery == c5.Required {
+			if err := r.Store(stream).SaveCursor(bg, c5.Cursor{Consumer: cn.ID, Stream: stream, Through: seq}); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("no required consumer of %s", stream)
+}
+
+// A6, V-S9: runs stop at the quota while the SER events are not confirmed,
+// and start again once they are, without a restart or an operator: the
+// node prunes the confirmed events, and nothing past the cursor.
+func TestRunsResumeOnceConfirmed(t *testing.T) {
+	r, st, c, s := pruneNode(t, 1024)
+	stream := SERStream(relayID)
+	if rep := s.RunOnce(bg, 0); rep.Outcome != "ok" || rep.Events == 0 {
+		t.Fatalf("first run: %+v", rep)
+	}
+	last, _ := r.Store(stream).LastCommitted(bg, stream)
+	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmNoQuarantineRoom || rep.Sent {
+		t.Fatalf("unconfirmed: %+v", rep)
+	}
+	if got, _ := r.Store(stream).FirstRetained(bg, stream); got != 1 {
+		t.Fatalf("unconfirmed events pruned: first retained %d", got)
+	}
+	// Half confirmed: only that half may go, and it is not enough.
+	confirm(t, r, c, last/2)
+	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmNoQuarantineRoom {
+		t.Fatalf("half confirmed: %+v", rep)
+	}
+	if got, _ := r.Store(stream).FirstRetained(bg, stream); got != last/2+1 {
+		t.Fatalf("half confirmed: first retained %d, want %d", got, last/2+1)
+	}
+	confirm(t, r, c, last)
+	if rep := s.RunOnce(bg, 0); !rep.Sent || rep.Alarm == AlarmNoQuarantineRoom {
+		t.Fatalf("all confirmed: %+v", rep)
+	}
+	if n := countAlarms(st, AlarmNoQuarantineRoom); n != 1 {
+		t.Fatalf("%d no-quarantine-room alarms, want 1", n)
+	}
+	// Below the warning band again, the warning is re-armed.
+	s.mu.Lock()
+	armed := !s.quiet["quarantine room low"]
+	s.mu.Unlock()
+	if !armed || countAlarms(st, AlarmQuarantineRoomLow) != 1 {
+		t.Fatalf("after the prune: warning re-armed %v, %d raised", armed, countAlarms(st, AlarmQuarantineRoomLow))
+	}
+}
+
+// Tick prunes a class above its runtime target too, so the room is there
+// before the next run asks for it.
+func TestTickPrunesConfirmed(t *testing.T) {
+	r, _, c, s := pruneNode(t, 1024)
+	stream := SERStream(relayID)
+	s.RunOnce(bg, 0)
+	last, _ := r.Store(stream).LastCommitted(bg, stream)
+	r.Tick(bg)
+	if got, _ := r.Store(stream).FirstRetained(bg, stream); got != 1 {
+		t.Fatalf("Tick pruned unconfirmed events: first retained %d", got)
+	}
+	confirm(t, r, c, last)
+	// One event per step, so the prune takes several passes.
+	r.find(EvidenceDB).policy.PruneStepEvents = 1
+	r.Tick(bg)
+	used, err := r.Store(stream).ClassBytes(bg, c5.ClassAdapterEvidence)
+	if err != nil || used+QuarantineRoom > c.Store.Quotas["adapter-evidence"] {
+		t.Fatalf("after Tick: adapter-evidence %d bytes, %v", used, err)
+	}
+}
+
+// The warning comes before runs stop, whatever the quota: at WarnFraction
+// of the quota less QuarantineRoom, raised once (A6, V-S9 point 3). Here
+// the room holds one run's evidence and a tenth, so the first run lands in
+// the warning band while runs still go.
+func TestQuarantineRoomLowWarnsFirst(t *testing.T) {
+	r, _, _, s := pruneNode(t, 1<<20)
+	s.RunOnce(bg, 0)
+	one, err := r.Store(HealthStream).ClassBytes(bg, c5.ClassAdapterEvidence)
+	if err != nil || one == 0 {
+		t.Fatalf("one run's evidence: %d, %v", one, err)
+	}
+	_, st, _, s := pruneNode(t, one+one/10)
+	if rep := s.RunOnce(bg, 0); rep.Alarm != "" || countAlarms(st, AlarmQuarantineRoomLow) != 0 {
+		t.Fatalf("first run: %+v, warned before any evidence", rep)
+	}
+	if rep := s.RunOnce(bg, 0); !rep.Sent || countAlarms(st, AlarmQuarantineRoomLow) != 1 || countAlarms(st, AlarmNoQuarantineRoom) != 0 {
+		t.Fatalf("second run: %+v; the warning must come while runs still go", rep)
+	}
+	s.RunOnce(bg, 0)
+	if n := countAlarms(st, AlarmQuarantineRoomLow); n != 1 {
+		t.Fatalf("%d quarantine-room-low alarms, want 1", n)
+	}
+}
+
+// A drain-only database is pruned too: there, pruning confirmed events is
+// how it frees room (A6 on #135).
+func TestPruneDrainOnly(t *testing.T) {
+	r, _, c, s := pruneNode(t, 1024)
+	stream := SERStream(relayID)
+	s.RunOnce(bg, 0)
+	last, _ := r.Store(stream).LastCommitted(bg, stream)
+	confirm(t, r, c, last)
+	d := r.find(EvidenceDB)
+	r.state.Lock()
+	mode := d.report.Mode
+	d.report.Mode = c5.ModeDrainOnly
+	r.state.Unlock()
+	r.Prune(bg)
+	r.state.Lock()
+	d.report.Mode = mode
+	r.state.Unlock()
+	if got, _ := r.Store(stream).FirstRetained(bg, stream); got == 1 {
+		t.Fatalf("drain-only database not pruned: first retained %d", got)
+	}
+}
+
+// A class over its target is pruned when an earlier class is under its own:
+// here platform is over and adapter-evidence, sorted first, is not.
+func TestPruneSecondClass(t *testing.T) {
+	const quota = 64 << 10
+	r, _, c, _ := pruneNode(t, 1<<30, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["platform"] = quota })
+	db := r.Store(HealthStream)
+	for i := 0; ; i++ {
+		used, err := db.ClassBytes(bg, c5.ClassPlatform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if float64(used) > 0.8*quota {
+			break
+		}
+		if i > 1000 {
+			t.Fatalf("platform holds %d bytes after %d events", used, i)
+		}
+		r.health(bg, HealthCollectionRun, map[string]string{"n": "filler"})
+	}
+	last, _ := db.LastCommitted(bg, HealthStream)
+	confirmStream(t, r, c, HealthStream, last)
+	r.Prune(bg)
+	used, _ := db.ClassBytes(bg, c5.ClassPlatform)
+	if first, _ := db.FirstRetained(bg, HealthStream); first == 1 || float64(used) > 0.8*quota {
+		t.Fatalf("platform over target not pruned: first retained %d, %d bytes", first, used)
+	}
+}
+
+// A prune that fails raises store-prune-failed once for the condition, not
+// at every Tick.
+func TestPruneFailureRaisedOnce(t *testing.T) {
+	r, st, _, _ := pruneNode(t, 1024)
+	d := r.find(EvidenceDB)
+	r.state.RLock()
+	db := d.db
+	r.state.RUnlock()
+	db.Close() // every read now fails
+	raised := func() (n int) {
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == string(c5.AlarmPruneFailed) && a.Database == EvidenceDB && strings.Contains(a.Detail, "runtime prune") {
+				n++
+			}
+		}
+		return n
+	}
+	setDB := func(v *store.DB) {
+		r.state.Lock()
+		d.db = v
+		r.state.Unlock()
+	}
+	r.Prune(bg)
+	r.Prune(bg)
+	if n := raised(); n != 1 {
+		t.Fatalf("%d runtime prune-failed alarms, want 1", n)
+	}
+	// A prune that succeeds (here, with no handle open, one that has
+	// nothing to do) re-arms the alarm for the next failure.
+	setDB(nil)
+	r.Prune(bg)
+	setDB(db)
+	r.Prune(bg)
+	if n := raised(); n != 2 {
+		t.Fatalf("%d runtime prune-failed alarms after fail, succeed, fail, want 2", n)
+	}
+}

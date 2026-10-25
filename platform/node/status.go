@@ -163,6 +163,9 @@ const (
 	// the evidence of a failed run could not be kept.
 	AlarmQuarantineNotStored = "collection-quarantine-not-stored"
 	AlarmNoQuarantineRoom    = "collection-no-quarantine-room"
+	// AlarmQuarantineRoomLow: adapter-evidence holds WarnFraction of what
+	// runs may use; runs stop at the quota less QuarantineRoom.
+	AlarmQuarantineRoomLow = "collection-quarantine-room-low"
 )
 
 // Raise records a collection alarm for asset. detail goes to the OS log, so
