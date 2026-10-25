@@ -75,9 +75,19 @@ func TestCheckSDFor(t *testing.T) {
 // On disk: a directory and file laid out as the installer lays out
 // OTSEC\config\admin pass the For checks, and fail the plain ones, which
 // admit no reader. Making Administrators the owner needs an elevated
-// process; GitHub Actions has one.
+// process; GitHub Actions has one. Without one it skips before changing
+// any DACL: the file's DACL leaves this account no right to delete it, so
+// a later skip left it behind and failed TempDir's cleanup (A6, on ALI's
+// PC at c486e42).
 func TestProtectedForOnDisk(t *testing.T) {
-	u, err := windows.GetCurrentProcessToken().GetTokenUser()
+	tok := windows.GetCurrentProcessToken()
+	if !tok.IsElevated() {
+		if os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("OTSEC_REQUIRE_ELEVATED") == "1" {
+			t.Fatal("needs an elevated process")
+		}
+		t.Skip("needs an elevated process, to make Administrators the owner")
+	}
+	u, err := tok.GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +95,22 @@ func TestProtectedForOnDisk(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// Registered after TempDir's, so it runs first: give this account full
+	// access again, whatever step the test stopped at, so the cleanup can
+	// remove the files.
+	t.Cleanup(func() {
+		sd, err := windows.SecurityDescriptorFromString("D:(A;OICI;FA;;;" + u.User.Sid.String() + ")")
+		if err != nil {
+			return
+		}
+		dacl, _, err := sd.DACL()
+		if err != nil {
+			return
+		}
+		for _, p := range []string{filepath.Join(dir, "hard.json"), filepath.Join(dir, "clear.json"), dir} {
+			windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+		}
+	})
 	file := filepath.Join(dir, "clear.json")
 	if err := os.WriteFile(file, []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
