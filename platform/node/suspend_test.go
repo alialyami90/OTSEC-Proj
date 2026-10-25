@@ -733,7 +733,7 @@ func TestUnauditedSuspensionSurvivesRestart(t *testing.T) {
 	r.state.Unlock()
 	s.suspend(bg, relayID, "inv-test", "failed.auth_rejected")
 	f, err := readSuspensions(filepath.Join(c.Store.Dir, SuspensionsFileName))
-	if err != nil || len(f.Unaudited) != 1 || f.Unaudited[0] != (pendingSuspension{relayID, "inv-test", "failed.auth_rejected"}) {
+	if err != nil || len(f.Unaudited) != 1 || f.Unaudited[0] != (pendingSuspension{relayID, "inv-test", "failed.auth_rejected", false}) {
 		t.Fatalf("checkpoint %+v: %v", f, err)
 	}
 	r.state.Lock()
@@ -769,7 +769,7 @@ func TestCommittedSuspensionNotWrittenTwice(t *testing.T) {
 	}
 	s.mu.Lock()
 	s.susp[relayID] = sp
-	s.unaudited = append(s.unaudited, unaudited{relayID, sp, "failed.auth_rejected"})
+	s.unaudited = append(s.unaudited, unaudited{relayID, sp, "failed.auth_rejected", false})
 	s.mu.Unlock()
 	s.settle(bg)
 	if sus, _ := suspensionRecords(t, r); len(sus) != 1 {

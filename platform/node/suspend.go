@@ -101,6 +101,9 @@ type pendingSuspension struct {
 	AssetID string `json:"asset_id"`
 	Ref     string `json:"ref"`
 	Code    string `json:"code"`
+	// Adopted marks a suspension taken from the collector's refusal
+	// (adopt.go), which its record says.
+	Adopted bool `json:"adopted,omitempty"`
 }
 
 type clearSuspension struct {
@@ -153,7 +156,7 @@ func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 		if !ok || sp.Ref != u.Ref {
 			return fmt.Errorf("the checkpoint lists suspension %s of %s as unaudited but does not hold it", u.Ref, u.AssetID)
 		}
-		pending = append(pending, unaudited{u.AssetID, sp, u.Code})
+		pending = append(pending, unaudited{u.AssetID, sp, u.Code, u.Adopted})
 	}
 	cc := f.CollectorClears
 	if cc == nil {
@@ -290,6 +293,12 @@ func outcomeCode(resp collectorclient.Response) adapter.Code {
 // audit stream and in the checkpoint, before the scheduler decides
 // anything else.
 func (s *Scheduler) suspend(ctx context.Context, assetID, ref string, code adapter.Code) {
+	s.hold(ctx, assetID, ref, code, false)
+}
+
+// hold is suspend for a run's outcome, or, with adopted, for a suspension
+// the collector's refusal named (adopt.go).
+func (s *Scheduler) hold(ctx context.Context, assetID, ref string, code adapter.Code, adopted bool) {
 	reason := code.Suspends()
 	if reason == "" || ref == "" {
 		return
@@ -297,10 +306,14 @@ func (s *Scheduler) suspend(ctx context.Context, assetID, ref string, code adapt
 	sp := asset.Suspension{Reason: reason, Since: s.now().UTC().Format(time.RFC3339), Ref: ref}
 	s.mu.Lock()
 	s.susp[assetID] = sp
-	s.unaudited = append(s.unaudited, unaudited{assetID, sp, string(code.Effective())})
+	s.unaudited = append(s.unaudited, unaudited{assetID, sp, string(code.Effective()), adopted})
 	s.fileStale = true
 	s.mu.Unlock()
-	s.rt.opt.Status.Raise(assetID, AlarmAssetSuspended, fmt.Sprintf("outcome code %s suspends the asset (%s); its runs are not sent until an administrator clears suspension %s", code.Effective(), reason, ref))
+	why := fmt.Sprintf("outcome code %s suspends the asset (%s)", code.Effective(), reason)
+	if adopted {
+		why = fmt.Sprintf("the collector holds the asset suspended by %s (%s, outcome code %s), which the node had not recorded; adopted from the collector's refusal", ref, reason, code.Effective())
+	}
+	s.rt.opt.Status.Raise(assetID, AlarmAssetSuspended, why+"; its runs are not sent until an administrator clears suspension "+ref)
 	s.settle(ctx)
 }
 
@@ -310,6 +323,15 @@ type unaudited struct {
 	assetID string
 	sp      asset.Suspension
 	code    string // the C2 code that set it
+	adopted bool   // taken from the collector's refusal (adopt.go)
+}
+
+// detail is the asset.suspend record's detail.
+func (u unaudited) detail() string {
+	if u.adopted {
+		return adoptedDetail + "; outcome code " + u.code
+	}
+	return "outcome code " + u.code
 }
 
 // settle writes what suspend and checkClear could not, and keeps the
@@ -352,7 +374,7 @@ func (s *Scheduler) settleLocked(ctx context.Context) {
 		if auditErr != nil {
 			break
 		}
-		if auditErr = s.commitSuspensionRecord(ctx, audit.ActionAssetSuspend, u.assetID, u.sp, u.code, "outcome code "+u.code); auditErr == nil {
+		if auditErr = s.commitSuspensionRecord(ctx, audit.ActionAssetSuspend, u.assetID, u.sp, u.code, u.detail()); auditErr == nil {
 			done++
 		}
 	}
@@ -687,7 +709,7 @@ func readSuspensions(path string) (suspensionsFile, error) {
 func writeSuspensions(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string) error {
 	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc}
 	for _, u := range pending {
-		f.Unaudited = append(f.Unaudited, pendingSuspension{AssetID: u.assetID, Ref: u.sp.Ref, Code: u.code})
+		f.Unaudited = append(f.Unaudited, pendingSuspension{AssetID: u.assetID, Ref: u.sp.Ref, Code: u.code, Adopted: u.adopted})
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
