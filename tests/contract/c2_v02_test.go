@@ -86,10 +86,10 @@ func TestC2v02Probes(t *testing.T) {
 				{adapter.Received, adapter.PhaseOperate, "SER\r\n\r\nPassword: ? "},
 			}...)), "sent before"},
 		{"status refused for a failed code", statusRefused, "implies status"},
-		{"a code from a later minor in a 0.2 result", newerCode, "not in the otsec.adapter/0.2 taxonomy"},
+		{"a code from a later minor in a 0.2 result", newerCode, "not in the " + adapter.Contract + " taxonomy"},
 		{"access_level 0 while the bytes show Level 1", levelZero, "access_level"},
 		{"quit_sent claimed with no QUI in the bytes", quitClaimed, "quit_sent"},
-		{"the 0.2 code in a 0.1 result (Code.Since)", codeAt01, "0.1"},
+		{"the 0.2 code in a 0.1 result (Code.Since)", codeAt01, "new in 0.2"},
 		{"the 0.2 probe QUI exemption claimed by a 0.1 result", probeRejectedAtL1("otsec.adapter/0.1"), "QUI"},
 	} {
 		err := tc.r.Validate()
