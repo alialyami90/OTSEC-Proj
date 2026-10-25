@@ -5,11 +5,8 @@ import (
 	"bytes"
 	"context"
 	"net"
-	"strings"
 	"testing"
 	"time"
-
-	"otsec.local/otsec/contracts/adapter"
 )
 
 // FuzzRun drives the whole dialogue against a far end that answers each
@@ -56,9 +53,6 @@ func FuzzRun(f *testing.F) {
 			hooks: &hooks{quiet: time.Millisecond, wakeWait: 5 * time.Millisecond},
 			Dial:  func(context.Context, string, string) (net.Conn, error) { return near, nil }}
 		got := Run(context.Background(), inv, cfg)
-		if gap := c2Gap(got); gap != "" {
-			t.Skip(gap)
-		}
 		x := in
 		x.inv = inv
 		check(t, x, got)
@@ -69,24 +63,4 @@ func FuzzRun(f *testing.F) {
 			}
 		}
 	})
-}
-
-// c2Gap names the C2 0.1 gaps Run meets, where no result exists that both
-// follows the safety rules and passes Validate. Run follows the safety rule
-// and the collector quarantines the result (#82). Each is raised with A1.
-func c2Gap(r adapter.Result) string {
-	if r.Error == nil {
-		return ""
-	}
-	switch {
-	case strings.Contains(r.Error.Detail, "unexpected password prompt"):
-		// QUI would be a password attempt (C-19); closing without it breaks
-		// the D18 rule for a session that reached Level 1.
-		return "C2 gap 1: Password: ? at Level 1"
-	case r.Error.Code == adapter.RefusedLanguageProbe && r.Session.AccessLevel != "0":
-		// D16 sends nothing after a rejected probe; D18 wants QUI once a
-		// level prompt above 0 was seen.
-		return "C2 gap 2: the probe reply shows a level above 0"
-	}
-	return ""
 }

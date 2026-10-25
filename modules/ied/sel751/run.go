@@ -469,9 +469,14 @@ func (s *session) expect(want string) adapter.Code {
 	switch {
 	case p == promptLevel0 && s.level >= 1:
 		return adapter.FailedAccessLevelDropped
+	case p == promptPassword && s.level >= 1 && s.phase == adapter.PhaseOperate:
+		// Anything sent now would be a password attempt (C-19), so nothing
+		// more is sent, not even QUI (C2 0.2, D2-14).
+		return adapter.FailedUnexpectedPasswordPrompt
 	case p == promptPassword:
-		// Anything sent now would be a password attempt (C-19).
-		s.detail = "an unexpected password prompt; nothing more sent"
+		// Before ACC (the reply to ID): no code names this state, and QUI
+		// would still be a password attempt, so nothing more is sent.
+		s.detail = "an unexpected password prompt before ACC; nothing more sent"
 		return adapter.FailedInternal
 	default:
 		return adapter.FailedUnexpectedLevel
@@ -490,10 +495,12 @@ func (s *session) identifyID() adapter.Code {
 		rep, err = parseID(msg)
 	}
 	if err == nil {
-		if c, ok := rep.field("CID"); ok {
+		// An empty value has no span to point at (C2 spans are never
+		// empty), so it is not read: an empty FID is no FID.
+		if c, ok := rep.field("CID"); ok && c.value != "" {
 			s.cid = &found{c.value, c.span}
 		}
-		if f, ok := rep.field("FID"); ok {
+		if f, ok := rep.field("FID"); ok && f.value != "" {
 			s.fid = &found{f.value, f.span}
 			s.items = append(s.items, adapter.IdentityItem{Name: attrFID, Expected: exp, Observed: f.value, Span: f.span})
 			if f.value == exp {

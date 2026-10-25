@@ -217,9 +217,11 @@ func farEnd(c net.Conn, steps []step, hangUp bool) <-chan error {
 }
 
 // normal clears what a replay cannot reproduce: times, the build version,
-// and a detail the golden does not state.
+// the schema (Run stamps this package's minor, a golden the minor it was
+// written for), and a detail the golden does not state.
 func normal(r adapter.Result, keepDetail bool) adapter.Result {
 	r.StartedAt, r.EndedAt = "", ""
+	r.Schema = ""
 	r.Adapter.Version = ""
 	r.Transcript.Segments = append([]adapter.Segment(nil), r.Transcript.Segments...)
 	for i := range r.Transcript.Segments {
@@ -309,6 +311,9 @@ var replays = []replay{
 		}
 	}},
 	{golden: "failed.internal", setup: func(_ *inputs, cfg *Config) { cfg.Floor.(*floor).fail = true }},
+	// C2 0.2 (D2-14): the two device states FuzzRun found.
+	{golden: "failed.unexpected_password_prompt"},
+	{golden: "probe-rejected-at-level1"},
 }
 
 // floorCalls is what each replay must do with the failed-auth floor: the
@@ -322,6 +327,9 @@ var floorCalls = map[string]string{
 	"failed.access_level_dropped": "before,confirmed", "failed.device_error": "before,confirmed",
 	"failed.timeout": "before,confirmed", "failed.transport_closed": "before,confirmed",
 	"failed.response_too_large": "before,confirmed", "failed.egress_violation": "before,confirmed",
+	"failed.unexpected_password_prompt": "before,confirmed",
+	// Nothing after a rejected probe, so the floor is never touched (D16).
+	"probe-rejected-at-level1": "",
 	// The floor stays set: no "=>" confirmed the attempt.
 	"failed.auth_rejected": "before", "failed.unexpected_access_level": "before", "failed.internal": "before",
 }
@@ -401,7 +409,7 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.2 result read by a 0.1 reader; no 0.1 adapter writes it",
+	"failed.unknown":                     "a 0.3 result read by a 0.2 reader; no 0.2 adapter writes it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",
