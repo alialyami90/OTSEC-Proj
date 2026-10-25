@@ -366,9 +366,6 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	// The outcome code's suspension is recorded before anything else is
 	// decided, whatever becomes of the outcome (A1).
 	rep.Code = outcomeCode(resp)
-	if resp.Outcome != nil && resp.Outcome.Result.Error != nil {
-		rep.Detail = resp.Outcome.Result.Error.Detail
-	}
 	s.suspend(ctx, col.AssetID, inv, rep.Code)
 
 	switch {
@@ -423,13 +420,16 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 	out, err := normalize.Normalize(o.Result, inv, a, normalize.Input{Node: s.rt.cfg.NodeID, Stream: event.Stream(stream),
 		HealthStream: event.Stream(HealthStream), ClockResolutionNS: rx.ResolutionNS, Clock: rx.Clock, Prev: prev})
 	if err != nil {
-		// A refused result is kept as quarantine, never as events, and
-		// its detail is not kept: it did not pass every check (A1 on #135).
+		// A refused result is kept as quarantine, never as events.
 		rep.Outcome = "quarantined"
-		rep.Detail = ""
 		s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, err.Error(), false)
 		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
 		return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the normalizer refused the result; kept as quarantine")
+	}
+	// The detail is kept only once the result has passed every check,
+	// the collector's and the normalizer's (A1 and A3 on #136).
+	if o.Result.Error != nil {
+		rep.Detail = o.Result.Error.Detail
 	}
 	ser, hl, err := out.Records(event.Stream(stream), event.Stream(HealthStream))
 	if err != nil {
