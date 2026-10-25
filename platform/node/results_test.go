@@ -187,3 +187,16 @@ func TestResultCode(t *testing.T) {
 		}
 	}
 }
+
+// A partial result counts as a failure (A3 and A6 on #126): C2 gives every
+// partial result a partial.* code, so none reads as ok.
+func TestPartialIsAFailure(t *testing.T) {
+	c, dir := schedConfig(t, nil)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	s := newScheduler(t, r, &fakeCollector{})
+	s.recordResult(relayID, Report{Sent: true, Code: adapter.PartialParseErrors})
+	if a := st.Snapshot("x").Assets[relayID]; a.Code != string(adapter.PartialParseErrors) || a.Failures != 1 {
+		t.Fatalf("after a partial run: %+v", a)
+	}
+}
