@@ -290,3 +290,15 @@ The only way out was a collector reinstall. That fails closed, but the cause was
 - **Versioning.** A request stamped before 0.3 gets the 0.2 reply, because replies decode strictly: a run gets `asset_not_enrolled`, and a clear keeps `suspension_mismatch`, in both cases without the field. The seal labels are unchanged. The admin-signed requests (D2-11, D2-15) move to the 0.4 candidate.
 
 **Evidence: simulated.** A6 ran it end to end on the real binaries with the node killed mid-run: the node adopted the suspension, and one administrator file cleared both sides.
+
+## D2-20: The failed-auth floor holds from ACC until QUI (amends D1-20)
+
+**Context (A6 on D2-16, A3 #131):** D1-20 cleared the floor on `=>`. A6 killed the collector after `=>` and before QUI. Nothing was left in the state, but the relay may hold Level 1 until `TIDLE` after the last line. On main the next session landed on the open level 61 s later, and only the adapter's `refused.session_elevated` stopped it.
+
+**Ruling (A3 owns the collector, A1 approved, A6 reviewed):**
+- **`=>` no longer clears the floor.** It stamps the floor again and marks the level open (`level_open`). Only a session that sent QUI clears it (`EndAuth`). An exit without QUI sets the floor again from that moment, as before.
+- **A process that dies with the level open leaves the floor behind.** The next process counts the floor from when it opened the state, because the level lasted no later than the death. A state with an open level and no floor time is unavailable, which fails closed.
+- **Rollback.** A collector built before this change refuses a state file that holds `level_open`, which fails closed. The first release that carries this tells operators so (A6), from `docs/phase2/A3-collector.md`.
+- `docs/phase1/A3-credential-design.md` and D1-20 describe the floor as cleared on `=>`; this ruling supersedes that sentence. The start of the floor at `ACC` is unchanged.
+
+**Evidence: simulated.** A6 killed 10 of 10 mutants and ran the kill after `=>` on the PR's binaries: the next two runs were refused `rate_limited`, and no second session reached the device. Whether a real relay holds Level 1 after a dropped connection is for H-13.
