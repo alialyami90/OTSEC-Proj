@@ -5,13 +5,17 @@
 package nodeconfigtest
 
 import (
+	"crypto/ecdh"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
+
+	"otsec.local/otsec/modules/security/seal"
 )
 
 // Config is a node configuration under construction. Its fields are the
@@ -93,15 +97,35 @@ func New(node, storeDir string) *Config {
 	}
 }
 
+// InstallKey is the test install key named name: an X25519 key whose
+// private half is the SHA-256 of name, with its derived key ID and
+// fingerprint (seal.KeyID, seal.Fingerprint), so one name always gives the
+// same key and different names give different keys.
+func InstallKey(name string) (keyID, publicKey, fingerprint string) {
+	sum := sha256.Sum256([]byte(name))
+	priv, err := ecdh.X25519().NewPrivateKey(sum[:])
+	if err != nil {
+		panic(err) // any 32 bytes are an X25519 private key
+	}
+	pub := priv.PublicKey().Bytes()
+	return seal.KeyID(pub), base64.StdEncoding.EncodeToString(pub), seal.Fingerprint(pub)
+}
+
+// InstallKeyID is the key ID of InstallKey(name).
+func InstallKeyID(name string) string {
+	id, _, _ := InstallKey(name)
+	return id
+}
+
 // WriteInstallKey writes install-key.json in CollectorPublicDir as the
-// collector does (A3 #106), naming key ID keyID. The public key and
-// fingerprint are fixed test values: the node reads only the key ID.
-func (c *Config) WriteInstallKey(keyID string) error {
+// collector does (A3 #106), for the test install key named name.
+func (c *Config) WriteInstallKey(name string) error {
 	if err := os.MkdirAll(c.CollectorPublicDir, 0o700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": keyID,
-		"public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "fingerprint": "sha256:" + strings.Repeat("0", 64)})
+	id, pub, fp := InstallKey(name)
+	b, err := json.Marshal(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": id,
+		"public_key": pub, "fingerprint": fp})
 	if err != nil {
 		return err
 	}

@@ -33,10 +33,27 @@ func (n *numbering) collector() *fakeCollector {
 	}}
 }
 
-func writeAck(t *testing.T, nc *nodeconfigtest.Config, key string) {
+// withField returns the JSON object b with field set to v.
+func withField(t *testing.T, b []byte, field, v string) []byte {
+	t.Helper()
+	m := map[string]string{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	m[field] = v
+	out, _ := json.Marshal(m)
+	return out
+}
+
+// kid is the key ID of the test install key named name.
+func kid(name string) string { return nodeconfigtest.InstallKeyID(name) }
+
+// writeAck writes seq-reset-ack.json naming the test install key named
+// name, as an administrator who confirmed its fingerprint would.
+func writeAck(t *testing.T, nc *nodeconfigtest.Config, name string) {
 	t.Helper()
 	nc.UnlockTLS()
-	b, _ := json.Marshal(map[string]string{"schema": SeqResetAckSchema, "install_key_id": key})
+	b, _ := json.Marshal(map[string]string{"schema": SeqResetAckSchema, "install_key_id": kid(name)})
 	if err := os.WriteFile(filepath.Join(nc.AdminDir, SeqResetAckFileName), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +99,7 @@ func TestInstallKeyBeforeFirstRequest(t *testing.T) {
 		switch {
 		case rec.Action == audit.ActionCollectorInstallKey:
 			keys++
-			if rec.InstallKeyID != testInstallKey || firstRequest >= 0 {
+			if rec.InstallKeyID != kid(testInstallKey) || firstRequest >= 0 {
 				t.Fatalf("collector.install_key %+v at %d, first request at %d", rec, i, firstRequest)
 			}
 		case rec.Action == audit.ActionCollectorRequest && firstRequest < 0:
@@ -94,7 +111,7 @@ func TestInstallKeyBeforeFirstRequest(t *testing.T) {
 	}
 	verifySeq(t, r, 2)
 	s.settle(bg) // applies the last run's records
-	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.TrustedKey != testInstallKey || cs.High != 2 {
+	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.TrustedKey != kid(testInstallKey) || cs.High != 2 {
 		t.Fatalf("status collector %+v", cs)
 	}
 }
@@ -123,8 +140,17 @@ func TestUnreadableInstallKeyHolds(t *testing.T) {
 		"no key id": func() {
 			os.WriteFile(path, []byte(`{"schema":"`+InstallKeySchema+`","key_id":"","public_key":"p","fingerprint":"f"}`), 0o600)
 		},
-		"a dir":      func() { os.Remove(path); os.Mkdir(path, 0o700) },
-		"empty file": func() { os.WriteFile(path, nil, 0o600) },
+		"a dir": func() { os.Remove(path); os.Mkdir(path, 0o700) },
+		// The key ID and the fingerprint must both be the public key's
+		// (A3 on #109), so an acknowledged key ID is the key whose
+		// fingerprint the administrator confirmed.
+		"key id of another key": func() { os.WriteFile(path, withField(t, good, "key_id", kid("ik_test_other")), 0o600) },
+		"fingerprint of another key": func() {
+			_, _, fp := nodeconfigtest.InstallKey("ik_test_other")
+			os.WriteFile(path, withField(t, good, "fingerprint", fp), 0o600)
+		},
+		"public key not 32 bytes": func() { os.WriteFile(path, withField(t, good, "public_key", "AAAA"), 0o600) },
+		"empty file":              func() { os.WriteFile(path, nil, 0o600) },
 	} {
 		damage()
 		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmInstallKeyUnreadable || col.n() != 0 {
@@ -158,10 +184,10 @@ func TestReinstallHoldsUntilAcknowledged(t *testing.T) {
 		t.Fatalf("after the reinstall: run %+v, %d requests", rep, col.n())
 	}
 	resets := actionsOf(t, r, audit.ActionCollectorSeqReset)
-	if len(resets) != 1 || resets[0].InstallKeyID != "ik_test_second" || resets[0].PreviousHigh == nil || *resets[0].PreviousHigh != 2 || resets[0].FirstSeen != 0 {
+	if len(resets) != 1 || resets[0].InstallKeyID != kid("ik_test_second") || resets[0].PreviousHigh == nil || *resets[0].PreviousHigh != 2 || resets[0].FirstSeen != 0 {
 		t.Fatalf("collector.seq_reset records %+v", resets)
 	}
-	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.TrustedKey != testInstallKey || cs.OpenResetKey != "ik_test_second" {
+	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.TrustedKey != kid(testInstallKey) || cs.OpenResetKey != kid("ik_test_second") {
 		t.Fatalf("status collector %+v", cs)
 	}
 	r.Close()
@@ -194,7 +220,7 @@ func TestReinstallHoldsUntilAcknowledged(t *testing.T) {
 	if rep := s.RunOnce(bg, 0); !rep.Sent || col.n() != 3 {
 		t.Fatalf("acknowledged: run %+v, %d requests", rep, col.n())
 	}
-	if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 1 || acks[0].InstallKeyID != "ik_test_second" {
+	if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 1 || acks[0].InstallKeyID != kid("ik_test_second") {
 		t.Fatalf("acks %+v", acks)
 	}
 	// The acknowledgement file left in place changes nothing later.
@@ -224,7 +250,7 @@ func TestCommittedResetNotWrittenTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	high := uint64(1)
-	rec, err := s.collectorRecord(audit.ActionCollectorSeqReset, "ik_test_second", &high, 0, "test")
+	rec, err := s.collectorRecord(audit.ActionCollectorSeqReset, kid("ik_test_second"), &high, 0, "test")
 	if err == nil {
 		err = s.commitAudit(bg, rec)
 	}
@@ -237,7 +263,7 @@ func TestCommittedResetNotWrittenTwice(t *testing.T) {
 	if resets := actionsOf(t, r, audit.ActionCollectorSeqReset); len(resets) != 1 {
 		t.Fatalf("%d collector.seq_reset records", len(resets))
 	}
-	rec, err = s.collectorRecord(audit.ActionCollectorSeqResetAck, "ik_test_second", nil, 0, "test")
+	rec, err = s.collectorRecord(audit.ActionCollectorSeqResetAck, kid("ik_test_second"), nil, 0, "test")
 	if err == nil {
 		err = s.commitAudit(bg, rec)
 	}
@@ -254,6 +280,173 @@ func TestCommittedResetNotWrittenTwice(t *testing.T) {
 	}
 	if why := s.Halted("any-other-asset"); why != "" {
 		t.Fatalf("node held: %q", why)
+	}
+}
+
+// A key the node trusted or recorded a reset for before is never a new
+// reset (A3, A6 and A1 on #109): a reinstall makes a new key, so it is
+// held as restored, no reset is written, and no acknowledgement lifts it. An
+// acknowledgement of the open reset is refused while the collector is on
+// another key. The chain verifies throughout.
+func TestReusedKeyIsNotAReset(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	n := &numbering{next: 1}
+	col := n.collector()
+	s := newScheduler(t, r, col)
+	key := func(k string) {
+		t.Helper()
+		if err := nc.WriteInstallKey(k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(what, alarm string, sent int) {
+		t.Helper()
+		if rep := s.RunOnce(bg, 0); rep.Alarm != alarm || col.n() != sent {
+			t.Fatalf("%s: run %+v, %d requests; want alarm %q, %d requests", what, rep, col.n(), alarm, sent)
+		}
+	}
+	s.RunOnce(bg, 0) // first key trusted, collector_seq 1
+	key("ik_test_second")
+	n.next = 1
+	run("reinstall", AlarmCollectorReset, 1)
+	writeAck(t, nc, "ik_test_second")
+	if rep := s.RunOnce(bg, 0); !rep.Sent || col.n() != 2 {
+		t.Fatalf("acknowledged: run %+v", rep)
+	}
+
+	key(testInstallKey) // the first key, trusted before
+	run("back to the first key", AlarmCollectorRestored, 2)
+	writeAck(t, nc, testInstallKey)
+	run("ack of the first key", AlarmCollectorRestored, 2)
+
+	key("ik_test_third")
+	n.next = 1
+	run("a new key", AlarmCollectorReset, 2)
+	key("ik_test_second") // the trusted key: no new reset, the open one holds
+	run("back to the trusted key", AlarmCollectorReset, 2)
+	key(testInstallKey)
+	run("back to the first key with a reset open", AlarmCollectorRestored, 2)
+	writeAck(t, nc, "ik_test_third")
+	run("ack while the collector is on another key", AlarmCollectorRestored, 2)
+
+	if resets := actionsOf(t, r, audit.ActionCollectorSeqReset); len(resets) != 2 {
+		t.Fatalf("%d collector.seq_reset records, want 2", len(resets))
+	}
+	if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 1 {
+		t.Fatalf("%d collector.seq_reset_ack records, want 1", len(acks))
+	}
+	// One for the file naming the first key once the third key's reset is
+	// open, one for the third key's file while the collector is elsewhere.
+	if n := countAlarms(st, AlarmResetAckRefused); n != 2 {
+		t.Fatalf("%d ack-refused alarms, want 2", n)
+	}
+	key("ik_test_third")
+	if rep := s.RunOnce(bg, 0); !rep.Sent || col.n() != 3 {
+		t.Fatalf("acknowledged on the third key: run %+v", rep)
+	}
+	verifySeq(t, r, 1)
+}
+
+// A6's probe on #109: K1, a reinstall to K2 acknowledged, a reinstall to
+// K3 acknowledged, then an earlier key comes back, an earlier reset's key
+// (K2) or the first install key (K1), and an acknowledgement names it.
+// Either way it is a restore: held, no reset written for it, nothing sent
+// after the acknowledgement, and the chain verifies.
+func TestEarlierEpochKeyIsRestore(t *testing.T) {
+	for _, back := range []string{"ik_test_second", testInstallKey} {
+		t.Run(back, func(t *testing.T) {
+			c, dir, nc := suspendConfig(t)
+			r, _, _ := start(t, c, dir)
+			defer r.Close()
+			n := &numbering{next: 1}
+			col := n.collector()
+			s := newScheduler(t, r, col)
+			s.RunOnce(bg, 0)
+			for _, k := range []string{"ik_test_second", "ik_test_third"} {
+				if err := nc.WriteInstallKey(k); err != nil {
+					t.Fatal(err)
+				}
+				n.next = 1
+				s.RunOnce(bg, 0)
+				writeAck(t, nc, k)
+				if rep := s.RunOnce(bg, 0); !rep.Sent {
+					t.Fatalf("reinstall to %s not resumed after its ack: %+v", k, rep)
+				}
+			}
+			sent := col.n()
+			if err := nc.WriteInstallKey(back); err != nil {
+				t.Fatal(err)
+			}
+			if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorRestored || col.n() != sent {
+				t.Fatalf("earlier key back: run %+v, %d requests", rep, col.n())
+			}
+			writeAck(t, nc, back)
+			for range 2 {
+				if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorRestored || col.n() != sent {
+					t.Fatalf("after an ack naming %s: run %+v, %d requests", back, rep, col.n())
+				}
+			}
+			if resets := actionsOf(t, r, audit.ActionCollectorSeqReset); len(resets) != 2 {
+				t.Fatalf("%d collector.seq_reset records, want 2", len(resets))
+			}
+			if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 2 {
+				t.Fatalf("%d collector.seq_reset_ack records, want 2", len(acks))
+			}
+			verifySeq(t, r, 1)
+		})
+	}
+}
+
+// The backstop writes no reset for an earlier key either: a key that went
+// back to the first install key while the request was out leaves the
+// reply's records under the trusted key, where they read as a restore.
+// A reset record repeating a used key, which the node never writes, is a
+// record the state cannot be rebuilt past, so it holds every run.
+func TestEarlierKeyAtTheBackstop(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	n := &numbering{next: 1}
+	col := n.collector()
+	s := newScheduler(t, r, col)
+	s.RunOnce(bg, 0)
+	if err := nc.WriteInstallKey("ik_test_second"); err != nil {
+		t.Fatal(err)
+	}
+	n.next = 1
+	s.RunOnce(bg, 0)
+	writeAck(t, nc, "ik_test_second")
+	s.RunOnce(bg, 0)
+	s.RunOnce(bg, 0) // 1, 2 under the second key
+	n.next = 1
+	n.before = func() {
+		if err := nc.WriteInstallKey(testInstallKey); err != nil {
+			t.Error(err)
+		}
+		n.before = nil
+	}
+	s.RunOnce(bg, 0)
+	if resets := actionsOf(t, r, audit.ActionCollectorSeqReset); len(resets) != 1 {
+		t.Fatalf("%d collector.seq_reset records, want 1", len(resets))
+	}
+	sent := col.n()
+	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorRestored || col.n() != sent {
+		t.Fatalf("after the reply: run %+v, %d requests", rep, col.n())
+	}
+
+	high := uint64(2)
+	rec, err := s.collectorRecord(audit.ActionCollectorSeqReset, kid(testInstallKey), &high, 0, "test")
+	if err == nil {
+		err = s.commitAudit(bg, rec)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.settle(bg)
+	if why := s.Halted("any-other-asset"); why != AlarmSuspensionsUnknown {
+		t.Fatalf("a reset repeating a used key: node %q", why)
 	}
 }
 
@@ -320,7 +513,7 @@ func TestReplyBelowHighWithNewKeyIsReset(t *testing.T) {
 		switch {
 		case rec.Action == audit.ActionCollectorSeqReset:
 			resetAt = i
-			if rec.FirstSeen != 1 || *rec.PreviousHigh != 2 || rec.InstallKeyID != "ik_test_second" {
+			if rec.FirstSeen != 1 || *rec.PreviousHigh != 2 || rec.InstallKeyID != kid("ik_test_second") {
 				t.Fatalf("reset %+v", rec)
 			}
 		case rec.CollectorSeq == 1 && resetAt >= 0 && requestAt < 0:

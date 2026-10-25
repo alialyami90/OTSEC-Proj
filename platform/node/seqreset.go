@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/security/seal"
 	"otsec.local/otsec/platform/store"
 )
 
@@ -48,8 +50,11 @@ const (
 	// until an administrator acknowledges the new key.
 	AlarmCollectorReset = "collector-reset"
 	// AlarmCollectorRestored: the collector's numbering went back while its
-	// install key stayed the same. Nothing is sent; this is never
-	// acknowledged.
+	// install key stayed the same, or its install key is one the node
+	// trusted or recorded a reset for before. A reinstall makes a new key,
+	// so either is a restore of old stores or another process (W-1).
+	// Nothing is sent, no reset is written, and it is never acknowledged
+	// (D2-15; A3, A6 and A1 on #109).
 	AlarmCollectorRestored = "collector-restored"
 	// AlarmResetAckRefused: seq-reset-ack.json names no open reset's key.
 	AlarmResetAckRefused = "collector-reset-ack-refused"
@@ -92,6 +97,19 @@ type collectorState struct {
 	// Restored is set when a collector_seq at or below High was recorded
 	// with no reset before it. Only a reset clears it.
 	Restored *restored `json:"restored,omitempty"`
+	// UsedKeys is every key the node has trusted or written a reset for.
+	// A reinstall makes a new key, so a key seen before is a restore or
+	// another process, never a reset (C8 0.2 breaks the chain on a reset
+	// repeating an earlier one's key; A1 on #109).
+	UsedKeys []string `json:"used_keys,omitempty"`
+}
+
+func (cs *collectorState) used(key string) bool { return slices.Contains(cs.UsedKeys, key) }
+
+func (cs *collectorState) use(key string) {
+	if !cs.used(key) {
+		cs.UsedKeys = append(slices.Clone(cs.UsedKeys), key)
+	}
 }
 
 type restored struct {
@@ -110,11 +128,16 @@ func applyCollector(cs *collectorState, rec *audit.Record) error {
 			return fmt.Errorf("collector.install_key %s changes the trusted key without an acknowledged reset", rec.InstallKeyID)
 		}
 		cs.TrustedKey = rec.InstallKeyID
+		cs.use(rec.InstallKeyID)
 	case audit.ActionCollectorSeqReset:
 		if rec.InstallKeyID == cs.TrustedKey {
 			return fmt.Errorf("collector.seq_reset keeps the trusted install key %s", rec.InstallKeyID)
 		}
+		if cs.used(rec.InstallKeyID) {
+			return fmt.Errorf("collector.seq_reset repeats install key %s, which was trusted or reset before", rec.InstallKeyID)
+		}
 		cs.OpenResetKey, cs.High, cs.Restored = rec.InstallKeyID, 0, nil
+		cs.use(rec.InstallKeyID)
 	case audit.ActionCollectorSeqResetAck:
 		if cs.OpenResetKey == "" || cs.OpenResetKey != rec.InstallKeyID {
 			return fmt.Errorf("collector.seq_reset_ack names install key %s, which no open reset has", rec.InstallKeyID)
@@ -155,6 +178,16 @@ func (s *Scheduler) readInstallKey() (string, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&k); err != nil || dec.More() || k.Schema != InstallKeySchema || k.KeyID == "" || k.PublicKey == "" || k.Fingerprint == "" {
 		return "", fmt.Errorf("%s is not a %s object with key_id, public_key and fingerprint", path, InstallKeySchema)
+	}
+	// The key ID an administrator acknowledges must be the key whose
+	// fingerprint they confirmed (T-12; A3 on #109): the ID is derived
+	// from the key, and so is the fingerprint.
+	pub, err := seal.InstallKey{KeyID: k.KeyID, PublicKey: k.PublicKey}.PublicKeyBytes()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	if seal.NormalizeFingerprint(k.Fingerprint) != seal.Fingerprint(pub) {
+		return "", fmt.Errorf("%s: the fingerprint is not the public key's", path)
 	}
 	return k.KeyID, nil
 }
@@ -221,6 +254,8 @@ func (s *Scheduler) collectorHoldReason(ctx context.Context) (string, string) {
 		// The first start, or the first 0.2 start: the key is in the chain
 		// before the first request (A6 on #105).
 		rec, err = s.collectorRecord(audit.ActionCollectorInstallKey, key, nil, 0, "install key trusted at the node's first start")
+	case key != cs.TrustedKey && key != cs.OpenResetKey && cs.used(key):
+		return AlarmCollectorRestored, fmt.Sprintf("the collector's install key %s is an earlier key: the node trusted it or recorded a reset to it before (trusted key %s). A reinstall makes a new key, so old stores were restored or another process answered. Nothing is sent, and this is not acknowledged; reinstall the collector", key, keyOrNone(cs.TrustedKey))
 	case key != cs.TrustedKey && key != cs.OpenResetKey:
 		high := cs.High
 		rec, err = s.collectorRecord(audit.ActionCollectorSeqReset, key, &high, 0, "install key changed before a request: the collector was reinstalled")
@@ -269,7 +304,7 @@ func (s *Scheduler) resetFirst(seq uint64) []c5.Record {
 		return nil
 	}
 	key, err := s.readInstallKey()
-	if err != nil || key == cs.TrustedKey || key == cs.OpenResetKey {
+	if err != nil || key == cs.TrustedKey || key == cs.OpenResetKey || cs.used(key) {
 		return nil
 	}
 	high := cs.High
@@ -336,6 +371,12 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 	}
 	if ack.InstallKeyID != open {
 		s.raiseOnceKey(key, "", AlarmResetAckRefused, fmt.Sprintf("%s names install key %s; the open reset is on %s; nothing acknowledged", SeqResetAckFileName, ack.InstallKeyID, open))
+		return
+	}
+	// The collector must still be on the reset's key: one that went back
+	// to an earlier key since is held as restored, not acknowledged.
+	if now, err := s.readInstallKey(); err != nil || now != open {
+		s.raiseOnceKey("key "+key, "", AlarmResetAckRefused, fmt.Sprintf("%s names install key %s, but the collector's install key is no longer it (%s); nothing acknowledged", SeqResetAckFileName, open, keyOrNone(now)))
 		return
 	}
 	rec, err := s.collectorRecord(audit.ActionCollectorSeqResetAck, open, nil, 0, "acknowledged by "+SeqResetAckFileName)
