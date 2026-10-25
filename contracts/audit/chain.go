@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+
+	"otsec.local/otsec/contracts/asset"
 )
 
 // Hash returns the chain hash of one stored record: lowercase hex SHA-256 of
@@ -120,12 +122,41 @@ func VerifyChain(node string, stored [][]byte, from, head *Checkpoint) error {
 // node's own previous_high: a verifier that holds a higher number for the
 // old epoch from outside the node (forwarded upstream) should compare it.
 func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
+	_, err := VerifyCollectorSeqFrom(recs, after, through, SeqStart{})
+	return err
+}
+
+// SeqStart is the reset state at the start of a verification window that
+// does not begin at the chain's first record (0.2): a node that prunes up to
+// a checkpoint verifies the tail from what the checkpoint holds, because the
+// window no longer shows the collector.install_key or the reset that set it.
+type SeqStart struct {
+	// TrustedKey is the install key trusted at the start: the key of
+	// collector.install_key or of the last acknowledged reset. "" means the
+	// window shows it, or there is none yet.
+	TrustedKey string `json:"trusted_key,omitempty"`
+	// OpenResetKey is the install key of a collector.seq_reset not yet
+	// acknowledged at the start, or "". The window's after is then a number
+	// of the new epoch.
+	OpenResetKey string `json:"open_reset_key,omitempty"`
+}
+
+// VerifyCollectorSeqFrom is VerifyCollectorSeq for a window that starts in
+// the state start, and returns the state at its end, for the next
+// checkpoint. Keys of resets before the window are not known to it, so the
+// rule that no reset repeats an earlier key holds only within the window
+// and against start.
+func VerifyCollectorSeqFrom(recs []*Record, after, through uint64, start SeqStart) (SeqStart, error) {
 	seen := map[uint64]bool{}
 	lo := after
 	var open *Record          // the latest reset, until acknowledged
 	var awaitFirst *Record    // a reset whose first_seen is not yet recorded
 	keys := map[string]bool{} // install keys of earlier resets
-	trusted := ""             // the install key the node trusts, when the window shows it
+	trusted := start.TrustedKey
+	if start.OpenResetKey != "" {
+		open = &Record{Action: ActionCollectorSeqReset, InstallKeyID: start.OpenResetKey}
+		keys[start.OpenResetKey] = true
+	}
 	cover := func(hi uint64) error {
 		for n := range seen {
 			if n > hi {
@@ -143,16 +174,16 @@ func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
 		switch r.Action {
 		case ActionCollectorSeqReset:
 			if *r.PreviousHigh < lo {
-				return broken("collector.seq_reset previous_high %d is below %d", *r.PreviousHigh, lo)
+				return SeqStart{}, broken("collector.seq_reset previous_high %d is below %d", *r.PreviousHigh, lo)
 			}
 			if awaitFirst != nil {
-				return broken("collector.seq_reset follows a reset whose first_seen %d was never recorded", awaitFirst.FirstSeen)
+				return SeqStart{}, broken("collector.seq_reset follows a reset whose first_seen %d was never recorded", awaitFirst.FirstSeen)
 			}
 			if err := cover(*r.PreviousHigh); err != nil {
-				return err
+				return SeqStart{}, err
 			}
 			if keys[r.InstallKeyID] || r.InstallKeyID == trusted {
-				return broken("collector.seq_reset keeps install key %s: not a reinstall", r.InstallKeyID)
+				return SeqStart{}, broken("collector.seq_reset keeps install key %s: not a reinstall", r.InstallKeyID)
 			}
 			keys[r.InstallKeyID] = true
 			seen, lo, open, awaitFirst = map[uint64]bool{}, 0, r, nil
@@ -162,13 +193,13 @@ func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
 			continue
 		case ActionCollectorSeqResetAck:
 			if open == nil || open.InstallKeyID != r.InstallKeyID {
-				return broken("collector.seq_reset_ack names install key %s, which no open reset has", r.InstallKeyID)
+				return SeqStart{}, broken("collector.seq_reset_ack names install key %s, which no open reset has", r.InstallKeyID)
 			}
 			open, trusted = nil, r.InstallKeyID
 			continue
 		case ActionCollectorInstallKey:
 			if open != nil || (trusted != "" && trusted != r.InstallKeyID) {
-				return broken("collector.install_key %s changes the trusted key without an acknowledged reset", r.InstallKeyID)
+				return SeqStart{}, broken("collector.install_key %s changes the trusted key without an acknowledged reset", r.InstallKeyID)
 			}
 			trusted = r.InstallKeyID
 			continue
@@ -178,52 +209,85 @@ func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
 		}
 		if awaitFirst != nil {
 			if r.CollectorSeq != awaitFirst.FirstSeen {
-				return broken("the first collector_seq after a reset is %d, not its first_seen %d", r.CollectorSeq, awaitFirst.FirstSeen)
+				return SeqStart{}, broken("the first collector_seq after a reset is %d, not its first_seen %d", r.CollectorSeq, awaitFirst.FirstSeen)
 			}
 			awaitFirst = nil
 		}
 		if r.CollectorSeq <= lo {
-			return broken("collector_seq %d is outside %d..%d", r.CollectorSeq, lo+1, through)
+			return SeqStart{}, broken("collector_seq %d is outside %d..%d", r.CollectorSeq, lo+1, through)
 		}
 		if seen[r.CollectorSeq] {
-			return broken("collector_seq %d appears on two records", r.CollectorSeq)
+			return SeqStart{}, broken("collector_seq %d appears on two records", r.CollectorSeq)
 		}
 		seen[r.CollectorSeq] = true
 	}
-	return cover(through)
+	if err := cover(through); err != nil {
+		return SeqStart{}, err
+	}
+	end := SeqStart{TrustedKey: trusted}
+	if open != nil {
+		end.OpenResetKey = open.InstallKeyID
+	}
+	return end, nil
+}
+
+// OpenSuspension is one asset suspension the node holds (0.2), keyed by the
+// asset, the C1 reason and the ref (the correlation_id of the asset.suspend
+// that opened it). Code is the C2 code that set it, "" for reason operator;
+// it is carried, not compared.
+type OpenSuspension struct {
+	AssetID string                 `json:"asset_id"`
+	Reason  asset.SuspensionReason `json:"reason"`
+	Ref     string                 `json:"ref"`
+	Code    string                 `json:"code,omitempty"`
 }
 
 // VerifySuspensions checks the node's asset suspensions in chain order (0.2):
 // asset.suspend opens a suspension, keyed by asset, C1 reason and ref
 // (correlation_id), that is not already open, and asset.suspension_clear must
-// name one that is open and no later clear has closed. It returns the
-// suspensions still open at the end, from which a node can rebuild its state.
-func VerifySuspensions(recs []*Record) ([]*Record, error) {
+// name one that is open and no later clear has closed. from is the open set
+// at the start of recs: nil for a chain from its first record, or the
+// node's checkpoint when recs is the tail after it, so that a clear of a
+// suspension opened before the checkpoint verifies. It returns the
+// suspensions still open at the end, in the order they were opened, from
+// which a node can rebuild its state.
+func VerifySuspensions(from []OpenSuspension, recs []*Record) ([]OpenSuspension, error) {
 	type key struct{ asset, reason, ref string }
-	open := map[key]*Record{}
+	keyOf := func(o OpenSuspension) key { return key{o.AssetID, string(o.Reason), o.Ref} }
+	open := map[key]OpenSuspension{}
 	var order []key
+	for _, o := range from {
+		k := keyOf(o)
+		if _, ok := open[k]; ok {
+			return nil, broken("the starting set holds asset %s (%s) by %s twice", k.asset, k.reason, k.ref)
+		}
+		open[k] = o
+		order = append(order, k)
+	}
 	for _, r := range recs {
 		if r.Action != ActionAssetSuspend && r.Action != ActionAssetSuspensionClear {
 			continue
 		}
-		k := key{r.Target.AssetID, string(r.Suspension.Reason), r.CorrelationID}
+		o := OpenSuspension{AssetID: r.Target.AssetID, Reason: r.Suspension.Reason, Ref: r.CorrelationID, Code: r.Suspension.Code}
+		k := keyOf(o)
+		_, isOpen := open[k]
 		if r.Action == ActionAssetSuspend {
-			if open[k] != nil {
+			if isOpen {
 				return nil, broken("asset %s is already suspended (%s) by %s", k.asset, k.reason, k.ref)
 			}
-			open[k] = r
+			open[k] = o
 			order = append(order, k)
 			continue
 		}
-		if open[k] == nil {
+		if !isOpen {
 			return nil, broken("asset.suspension_clear names %s (%s) by %s, which is not open", k.asset, k.reason, k.ref)
 		}
 		delete(open, k)
 	}
-	var out []*Record
+	out := []OpenSuspension{}
 	for _, k := range order {
-		if r := open[k]; r != nil {
-			out = append(out, r)
+		if o, ok := open[k]; ok {
+			out = append(out, o)
 			delete(open, k) // a key reopened later appears once
 		}
 	}

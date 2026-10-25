@@ -187,7 +187,7 @@ func TestVerifyCollectorSeqAcrossReset(t *testing.T) {
 
 func TestVerifySuspensions(t *testing.T) {
 	const inv1, inv2 = "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71", "1a2b3c4d-8b2d-4e7f-9a15-6c4d2b8e0a71"
-	open, err := VerifySuspensions(parsed(t,
+	open, err := VerifySuspensions(nil, parsed(t,
 		suspend(asset.SuspendAuthFailed, "failed.auth_rejected", inv1),
 		suspend(asset.SuspendUnexpectedLevel, "failed.unexpected_access_level", inv2),
 		clearSusp(asset.SuspendAuthFailed, inv1),
@@ -196,7 +196,8 @@ func TestVerifySuspensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(open) != 1 || open[0].CorrelationID != inv2 {
+	want := OpenSuspension{AssetID: suspendedAsset, Reason: asset.SuspendUnexpectedLevel, Ref: inv2, Code: "failed.unexpected_access_level"}
+	if len(open) != 1 || open[0] != want {
 		t.Fatalf("open after the clear: %+v", open)
 	}
 	for name, recs := range map[string][]Record{
@@ -208,7 +209,73 @@ func TestVerifySuspensions(t *testing.T) {
 		"the same suspension twice": {suspend(asset.SuspendAuthFailed, "failed.auth_rejected", inv1),
 			suspend(asset.SuspendAuthFailed, "failed.auth_rejected", inv1)},
 	} {
-		if _, err := VerifySuspensions(parsed(t, recs...)); !errors.Is(err, ErrChainBroken) {
+		if _, err := VerifySuspensions(nil, parsed(t, recs...)); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}
+
+// A node that prunes to a checkpoint verifies the tail from the checkpoint's
+// open set: a clear of a suspension opened before it verifies, and the open
+// set at the end is the next checkpoint (A5 on #105).
+func TestVerifySuspensionsFromCheckpoint(t *testing.T) {
+	const inv1, inv2 = "0f3e6c1a-8b2d-4e7f-9a15-6c4d2b8e0a71", "1a2b3c4d-8b2d-4e7f-9a15-6c4d2b8e0a71"
+	checkpoint := []OpenSuspension{{AssetID: suspendedAsset, Reason: asset.SuspendAuthFailed, Ref: inv1, Code: "failed.auth_rejected"}}
+	tail := parsed(t, clearSusp(asset.SuspendAuthFailed, inv1), suspend(asset.SuspendUnexpectedLevel, "failed.unexpected_access_level", inv2))
+	if _, err := VerifySuspensions(nil, tail); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("tail without its checkpoint: %v", err)
+	}
+	open, err := VerifySuspensions(checkpoint, tail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Ref != inv2 {
+		t.Fatalf("open after the tail: %+v", open)
+	}
+	if _, err := VerifySuspensions(checkpoint, parsed(t, suspend(asset.SuspendAuthFailed, "failed.auth_rejected", inv1))); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("suspend of one the checkpoint holds: %v", err)
+	}
+	if _, err := VerifySuspensions(append(checkpoint, checkpoint[0]), nil); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("a checkpoint holding one suspension twice: %v", err)
+	}
+	if open, err := VerifySuspensions(checkpoint, nil); err != nil || len(open) != 1 || open[0] != checkpoint[0] {
+		t.Fatalf("empty tail: %+v, %v", open, err)
+	}
+}
+
+// A window that starts after the collector.install_key, or inside an open
+// reset, verifies from the state the checkpoint holds, and returns the state
+// at its end (A5 on #105).
+func TestVerifyCollectorSeqFrom(t *testing.T) {
+	const k1, k2, k3 = "x25519-1111111111111111", "x25519-2222222222222222", "x25519-3333333333333333"
+	type tc struct {
+		recs           []Record
+		after, through uint64
+		start, end     SeqStart
+	}
+	ok := map[string]tc{
+		"trusted key from the checkpoint": {[]Record{decided(4), decided(5)}, 3, 5, SeqStart{TrustedKey: k1}, SeqStart{TrustedKey: k1}},
+		"reset in the window":             {[]Record{decided(4), reset(4, 1, k2), decided(1)}, 3, 1, SeqStart{TrustedKey: k1}, SeqStart{TrustedKey: k1, OpenResetKey: k2}},
+		"ack of a reset before the window": {[]Record{decided(3), ack(k2), decided(4)}, 2, 4,
+			SeqStart{TrustedKey: k1, OpenResetKey: k2}, SeqStart{TrustedKey: k2}},
+		"zero start is VerifyCollectorSeq": {[]Record{decided(1), reset(1, 1, k1), decided(1)}, 0, 1, SeqStart{}, SeqStart{OpenResetKey: k1}},
+	}
+	for name, c := range ok {
+		end, err := VerifyCollectorSeqFrom(parsed(t, c.recs...), c.after, c.through, c.start)
+		if err != nil || end != c.end {
+			t.Errorf("%s: end %+v, %v; want %+v", name, end, err, c.end)
+		}
+	}
+	broken := map[string]tc{
+		"reset keeps the checkpoint's trusted key": {recs: []Record{decided(4), reset(4, 1, k1), decided(1)}, after: 3, through: 1, start: SeqStart{TrustedKey: k1}},
+		"reset repeats the open reset's key":       {recs: []Record{decided(3), reset(3, 1, k2), decided(1)}, after: 2, through: 1, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
+		"install_key changes the checkpoint's key": {recs: []Record{installKey(k3), decided(4)}, after: 3, through: 4, start: SeqStart{TrustedKey: k1}},
+		"install_key during an open reset":         {recs: []Record{installKey(k2), decided(3)}, after: 2, through: 3, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
+		"ack on another key than the open reset":   {recs: []Record{decided(3), ack(k3)}, after: 2, through: 3, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
+		"ack with nothing open at the start":       {recs: []Record{decided(4), ack(k1)}, after: 3, through: 4, start: SeqStart{TrustedKey: k1}},
+	}
+	for name, c := range broken {
+		if _, err := VerifyCollectorSeqFrom(parsed(t, c.recs...), c.after, c.through, c.start); !errors.Is(err, ErrChainBroken) {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
