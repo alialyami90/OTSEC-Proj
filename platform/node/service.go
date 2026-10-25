@@ -14,9 +14,10 @@ import (
 // turns queued store alarms into health events and rewrites its status.
 const TickInterval = 60 * time.Second
 
-// Run runs a node until ctx ends: C5 startup of every database, the
-// scheduler through the collector at cfg's pipe, and Tick every
-// TickInterval. oslog receives every alarm line (the Event Log under the
+// Run runs a node until ctx ends: C5 startup of every database, one
+// forwarder per target (NewForwarding, which stops the node on a bad TLS
+// reference), the scheduler through the collector at cfg's pipe, and
+// Tick every TickInterval and Forwarding.Check every CheckInterval. oslog receives every alarm line (the Event Log under the
 // SCM, stderr otherwise). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
 func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
@@ -26,6 +27,10 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 		return err
 	}
 	defer rt.Close()
+	fw, err := NewForwarding(rt)
+	if err != nil {
+		return err
+	}
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
 	if err != nil {
 		return err
@@ -44,8 +49,29 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 			}
 		}
 	}()
+	checked := make(chan struct{})
+	go func() {
+		defer close(checked)
+		t := time.NewTicker(CheckInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				fw.Check(ctx)
+			}
+		}
+	}()
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		fw.Run(ctx)
+	}()
 	err = sched.Run(ctx)
 	<-done
+	<-checked
+	<-forwarded
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}

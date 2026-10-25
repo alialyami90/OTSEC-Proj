@@ -27,6 +27,7 @@ type Config struct {
 	CollectorPeer   string           `json:"collector_peer,omitempty"`
 	PolicyVersion   uint64           `json:"policy_version"`
 	RegisterVersion uint64           `json:"register_version"`
+	TLSDir          string           `json:"tls_dir,omitempty"`
 }
 
 type Store struct {
@@ -57,7 +58,8 @@ type Collection struct {
 const TestCredentialRef = "cred_7f3k2m9q4x"
 
 // New returns a configuration for node with its store in storeDir, 64 MiB
-// per class, and no assets, listeners or targets. The collector peer is
+// per class, its TLS files in "tls" beside storeDir (WritePKI writes them),
+// and no assets, listeners or targets. The collector peer is
 // this process's uid on Linux (empty, the service SID, on Windows), and the
 // policy and register versions are those of the C7 and C3 test data (3 and
 // 2).
@@ -82,6 +84,7 @@ func New(node, storeDir string) *Config {
 		CollectorPeer:   peer,
 		PolicyVersion:   3,
 		RegisterVersion: 2,
+		TLSDir:          filepath.Join(filepath.Dir(storeDir), "tls"),
 	}
 }
 

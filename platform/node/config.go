@@ -54,6 +54,10 @@ type Config struct {
 	// register it was not commissioned with.
 	PolicyVersion   uint64 `json:"policy_version"`
 	RegisterVersion uint64 `json:"register_version"`
+	// TLSDir holds the files the targets' TLS references name (a Phase 2
+	// interim, lab only; see "TLS references" in the README). Required when
+	// a target names a reference.
+	TLSDir string `json:"tls_dir,omitempty"`
 
 	assets  []asset.Asset
 	targets []*syslog.Target
@@ -104,6 +108,7 @@ type Collection struct {
 
 var (
 	tokenPattern     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	tlsRefPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	operationPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
 )
 
@@ -239,6 +244,24 @@ func (c *Config) check() error {
 		}
 		names[t.Name] = true
 		c.targets = append(c.targets, t)
+		if t.TLS == nil {
+			continue
+		}
+		// A reference names a file in tls_dir, so it may not hold a path.
+		for field, ref := range map[string]string{"trust_anchor_ref": t.TLS.TrustAnchorRef, "client_credential_ref": t.TLS.ClientCredentialRef} {
+			if ref == "" {
+				continue
+			}
+			if !tlsRefPattern.MatchString(ref) {
+				fail("targets[%d].tls.%s %q is not a reference (%s)", i, field, ref, tlsRefPattern)
+			}
+			if c.TLSDir == "" {
+				fail("targets[%d].tls.%s is set, so tls_dir is required", i, field)
+			}
+		}
+	}
+	if c.TLSDir != "" && !filepath.IsAbs(c.TLSDir) {
+		fail("tls_dir %q is not an absolute path", c.TLSDir)
 	}
 
 	schedules := map[string]bool{}

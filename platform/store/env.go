@@ -218,3 +218,18 @@ func exists(p string) (bool, error) {
 	}
 	return false, err
 }
+
+// CheckPrivateFile refuses a file the node keeps private, such as its TLS
+// client key, unless it exists, is a plain file and not a link, and only
+// this account, SYSTEM and Administrators can reach it: mode 0600 or
+// tighter on Linux, the store directory's owner and ACE rule on Windows.
+func CheckPrivateFile(path string) error {
+	ok, err := exists(path)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s does not exist", path)
+	}
+	return checkFile(path)
+}

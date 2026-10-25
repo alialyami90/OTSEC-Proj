@@ -23,9 +23,10 @@ type Status struct {
 	oslog func(string)
 	now   func() time.Time
 
-	mu     sync.Mutex
-	modes  map[c5.DatabaseID]c5.Mode
-	alarms []StatusAlarm
+	mu      sync.Mutex
+	modes   map[c5.DatabaseID]c5.Mode
+	alarms  []StatusAlarm
+	targets map[string]TargetStatus
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -34,6 +35,7 @@ type Status struct {
 type StatusAlarm struct {
 	Database c5.DatabaseID `json:"database,omitempty"`
 	Asset    string        `json:"asset_id,omitempty"`
+	Target   string        `json:"target,omitempty"`
 	Code     string        `json:"code"`
 	At       time.Time     `json:"at"`
 	Class    string        `json:"class,omitempty"`
@@ -51,6 +53,29 @@ type StatusFile struct {
 	Alarms  []StatusAlarm             `json:"alarms"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
+	// Targets is each forwarding target's state, from its forwarder.
+	Targets map[string]TargetStatus `json:"targets,omitempty"`
+}
+
+// TargetStatus is one forwarding target as node status shows it.
+type TargetStatus struct {
+	Class string `json:"class"`
+	// LastConfirmed is when the target last confirmed a transaction in
+	// this process; zero if never.
+	LastConfirmed time.Time `json:"last_confirmed,omitempty"`
+	Confirmed     uint64    `json:"confirmed"`
+	// LastErr is why the last session ended. It is the forwarder's error
+	// text, which never holds event content.
+	LastErr string                       `json:"last_error,omitempty"`
+	Streams map[string]TargetStreamState `json:"streams"`
+}
+
+// TargetStreamState is one stream of a target: the saved cursor, the
+// stream's last committed seq, and why the stream is held, if it is.
+type TargetStreamState struct {
+	Cursor  uint64 `json:"cursor"`
+	Last    uint64 `json:"last"`
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // StatusSchema identifies the status file format.
@@ -108,6 +133,24 @@ func (s *Status) Raise(asset, code, detail string) {
 	s.add(StatusAlarm{Asset: asset, Code: code, At: s.now().UTC(), Detail: detail})
 }
 
+// RaiseTarget records a forwarding alarm for target.
+func (s *Status) RaiseTarget(target, code, detail string) {
+	if s.oslog != nil {
+		s.oslog(fmt.Sprintf("otsec forward %s: %s %s", target, code, detail))
+	}
+	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
+}
+
+// SetTarget records target's state.
+func (s *Status) SetTarget(name string, ts TargetStatus) {
+	s.mu.Lock()
+	if s.targets == nil {
+		s.targets = map[string]TargetStatus{}
+	}
+	s.targets[name] = ts
+	s.mu.Unlock()
+}
+
 func (s *Status) add(sa StatusAlarm) {
 	s.mu.Lock()
 	s.alarms = append(s.alarms, sa)
@@ -140,6 +183,12 @@ func (s *Status) Snapshot(node string) StatusFile {
 		}
 	}
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
+	if len(s.targets) > 0 {
+		f.Targets = map[string]TargetStatus{}
+		for n, ts := range s.targets {
+			f.Targets[n] = ts
+		}
+	}
 	return f
 }
 

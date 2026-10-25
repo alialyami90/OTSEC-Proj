@@ -370,9 +370,14 @@ func (r *Runtime) health(ctx context.Context, typ string, details map[string]str
 // healthRecord builds a pending C4 platform health event as a C5 record on
 // stream, whose class it takes from the layout.
 func (r *Runtime) healthRecord(stream c5.StreamID, typ string, details map[string]string) (c5.Record, error) {
+	return r.healthEventRecord(stream, event.Health{Type: typ, Details: details})
+}
+
+// healthEventRecord is healthRecord for a whole C4 health payload.
+func (r *Runtime) healthEventRecord(stream c5.StreamID, h event.Health) (c5.Record, error) {
 	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(stream)},
 		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
-		Received: r.received(), Health: &event.Health{Type: typ, Details: details}}
+		Received: r.received(), Health: &h}
 	b, err := json.Marshal(e)
 	if err != nil {
 		return c5.Record{}, err
