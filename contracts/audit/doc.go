@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.1: the audit record every module
+// Package audit is contract C8, otsec.audit/0.2: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -56,6 +56,32 @@
 //     that is not open), the operation is refused and the refusal goes to node
 //     status. Credentialed collection therefore stops; passive Syslog intake
 //     continues.
+//
+// # Node state (0.2)
+//
+// Five node-written actions, all outcome info with actor type node
+// (docs/phase2/A3-c8-seq-reset.md, A1 D2-15):
+//
+//   - collector.install_key: the collector install key the node trusts,
+//     written at its first start, so a reset can be checked against it.
+//   - collector.seq_reset: the collector's numbering restarted, which only a
+//     reinstall with a new install key does. It carries previous_high, the
+//     new install_key_id, and first_seen when a reply showed it (absent when
+//     the node found the new key before sending). The node holds collection
+//     from it until collector.seq_reset_ack.
+//   - collector.seq_reset_ack: an admin acknowledged the reset on the key
+//     they confirmed (T-12); that key becomes the trusted one. The Phase 2
+//     acknowledgement is an admin-written file, so the record cannot name
+//     the admin; an admin-signed C7 0.2 request will replace it before any
+//     device-observed endpoint.
+//   - asset.suspend and asset.suspension_clear: the node's C1 asset
+//     suspensions, with the reason, the C2 code that set it, and the ref
+//     (the invocation ID, or the operator) as correlation_id. A node can
+//     rebuild its suspensions from them (VerifySuspensions).
+//
+// VerifyCollectorSeq reads each reset as an epoch boundary, and
+// VerifySuspensions checks that each clear names an open suspension. A record
+// stamped 0.1 cannot carry any of these actions or their fields.
 //
 // # What it leaves out
 //

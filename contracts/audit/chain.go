@@ -99,24 +99,133 @@ func VerifyChain(node string, stored [][]byte, from, head *Checkpoint) error {
 // collector events, so a node that leaves one out leaves a gap here
 // (C7-A5-2). A node that withholds every record after a point is detected
 // only once the collector next reports a higher number.
+//
+// From 0.2, a collector.seq_reset record (in chain order) closes an epoch: the
+// numbers before it must be exactly after+1 .. its previous_high (which may
+// be none, when the window starts just before the reset), and the numbers
+// after it start again at 1. When the reset carries first_seen, the first
+// collector number after it is that number, and numbers the new collector
+// gave before it are a gap, not excused. The install key the node trusts
+// (collector.install_key, then each acknowledged reset) must change at a
+// reset, and no reset repeats an earlier one's key. A collector.seq_reset_ack
+// names the key of the open reset, and a collector.install_key may not
+// change a trusted key without a reset. A restart with no reset record
+// breaks the chain, as in 0.1.
+//
+// This stops a node that leaves records out from hiding them behind a fake
+// reset: without a reinstall, the collector's real numbers keep rising past
+// previous_high, and the new epoch cannot hold 1..n. It does not stop a node
+// that forges records, because collector_seq is node-written; that was
+// already so in 0.1. A real reset can hide the old epoch's tail behind the
+// node's own previous_high: a verifier that holds a higher number for the
+// old epoch from outside the node (forwarded upstream) should compare it.
 func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
 	seen := map[uint64]bool{}
+	lo := after
+	var open *Record          // the latest reset, until acknowledged
+	var awaitFirst *Record    // a reset whose first_seen is not yet recorded
+	keys := map[string]bool{} // install keys of earlier resets
+	trusted := ""             // the install key the node trusts, when the window shows it
+	cover := func(hi uint64) error {
+		for n := range seen {
+			if n > hi {
+				return broken("collector_seq %d is outside %d..%d", n, lo+1, hi)
+			}
+		}
+		for n := lo + 1; n <= hi; n++ {
+			if !seen[n] {
+				return broken("no record for collector_seq %d: a collector event was not recorded", n)
+			}
+		}
+		return nil
+	}
 	for _, r := range recs {
+		switch r.Action {
+		case ActionCollectorSeqReset:
+			if *r.PreviousHigh < lo {
+				return broken("collector.seq_reset previous_high %d is below %d", *r.PreviousHigh, lo)
+			}
+			if awaitFirst != nil {
+				return broken("collector.seq_reset follows a reset whose first_seen %d was never recorded", awaitFirst.FirstSeen)
+			}
+			if err := cover(*r.PreviousHigh); err != nil {
+				return err
+			}
+			if keys[r.InstallKeyID] || r.InstallKeyID == trusted {
+				return broken("collector.seq_reset keeps install key %s: not a reinstall", r.InstallKeyID)
+			}
+			keys[r.InstallKeyID] = true
+			seen, lo, open, awaitFirst = map[uint64]bool{}, 0, r, nil
+			if r.FirstSeen != 0 {
+				awaitFirst = r
+			}
+			continue
+		case ActionCollectorSeqResetAck:
+			if open == nil || open.InstallKeyID != r.InstallKeyID {
+				return broken("collector.seq_reset_ack names install key %s, which no open reset has", r.InstallKeyID)
+			}
+			open, trusted = nil, r.InstallKeyID
+			continue
+		case ActionCollectorInstallKey:
+			if open != nil || (trusted != "" && trusted != r.InstallKeyID) {
+				return broken("collector.install_key %s changes the trusted key without an acknowledged reset", r.InstallKeyID)
+			}
+			trusted = r.InstallKeyID
+			continue
+		}
 		if r.CollectorSeq == 0 {
 			continue
 		}
-		if r.CollectorSeq <= after || r.CollectorSeq > through {
-			return broken("collector_seq %d is outside %d..%d", r.CollectorSeq, after+1, through)
+		if awaitFirst != nil {
+			if r.CollectorSeq != awaitFirst.FirstSeen {
+				return broken("the first collector_seq after a reset is %d, not its first_seen %d", r.CollectorSeq, awaitFirst.FirstSeen)
+			}
+			awaitFirst = nil
+		}
+		if r.CollectorSeq <= lo {
+			return broken("collector_seq %d is outside %d..%d", r.CollectorSeq, lo+1, through)
 		}
 		if seen[r.CollectorSeq] {
 			return broken("collector_seq %d appears on two records", r.CollectorSeq)
 		}
 		seen[r.CollectorSeq] = true
 	}
-	for n := after + 1; n <= through; n++ {
-		if !seen[n] {
-			return broken("no record for collector_seq %d: a collector event was not recorded", n)
+	return cover(through)
+}
+
+// VerifySuspensions checks the node's asset suspensions in chain order (0.2):
+// asset.suspend opens a suspension, keyed by asset, C1 reason and ref
+// (correlation_id), that is not already open, and asset.suspension_clear must
+// name one that is open and no later clear has closed. It returns the
+// suspensions still open at the end, from which a node can rebuild its state.
+func VerifySuspensions(recs []*Record) ([]*Record, error) {
+	type key struct{ asset, reason, ref string }
+	open := map[key]*Record{}
+	var order []key
+	for _, r := range recs {
+		if r.Action != ActionAssetSuspend && r.Action != ActionAssetSuspensionClear {
+			continue
+		}
+		k := key{r.Target.AssetID, string(r.Suspension.Reason), r.CorrelationID}
+		if r.Action == ActionAssetSuspend {
+			if open[k] != nil {
+				return nil, broken("asset %s is already suspended (%s) by %s", k.asset, k.reason, k.ref)
+			}
+			open[k] = r
+			order = append(order, k)
+			continue
+		}
+		if open[k] == nil {
+			return nil, broken("asset.suspension_clear names %s (%s) by %s, which is not open", k.asset, k.reason, k.ref)
+		}
+		delete(open, k)
+	}
+	var out []*Record
+	for _, k := range order {
+		if r := open[k]; r != nil {
+			out = append(out, r)
+			delete(open, k) // a key reopened later appears once
 		}
 	}
-	return nil
+	return out, nil
 }
