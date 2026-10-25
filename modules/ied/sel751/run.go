@@ -165,6 +165,10 @@ type session struct {
 	mismatch         string // the attribute that differed
 	detail           string
 	tidleReported    bool // Config.TIDLE was called (at most once per run)
+	// after names what the awaited reply answers, for a failed step's
+	// detail: "connecting", "the wake", a register line, or "the password".
+	// Never device text (C2 error.detail).
+	after string
 }
 
 func (s *session) run() adapter.Code {
@@ -387,6 +391,7 @@ func (s *session) dialogue() adapter.Code {
 		}
 		s.rec.add(adapter.Sent, adapter.PhaseProbe, []byte("\r\n"), s.now())
 		s.facts.WakeSent = true
+		s.after = "the wake"
 		p, err = s.await(time.Time{}, false)
 	}
 	if err != nil {
@@ -570,6 +575,7 @@ func (s *session) authenticate() adapter.Code {
 		return adapter.FailedInternal
 	}
 	s.rec.credential(s.now())
+	s.after = "the password"
 	s.credSent = true
 	s.facts.CredentialSent = true
 	s.facts.EchoScan = adapter.EchoScanPerformed
@@ -821,6 +827,7 @@ func (s *session) send(ph adapter.Phase, line string) adapter.Code {
 	}
 	s.rec.add(adapter.Sent, ph, []byte(line+"\r\n"), s.now())
 	s.last = ""
+	s.after = line
 	if line == "QUI" && ph == adapter.PhaseProbe {
 		s.facts.LanguageProbe = adapter.ProbeRejected // until the reply is accepted
 	}
@@ -836,15 +843,29 @@ func (s *session) sendFailed(err error) adapter.Code {
 	return adapter.FailedTransportClosed
 }
 
+// stepFailed is the code for a step that ended without a prompt. Its detail
+// names the step, so a late device and a hung SER read differ in health
+// (A6, V-S12); a detail set for the step already is kept.
 func (s *session) stepFailed(err error) adapter.Code {
-	switch {
-	case errors.Is(err, errTimeout), errors.Is(err, errDeadline):
-		return adapter.FailedTimeout
-	case errors.Is(err, errTooLarge):
-		return adapter.FailedResponseTooLarge
+	after := s.after
+	if after == "" {
+		after = "connecting"
 	}
-	s.dead = true
-	return adapter.FailedTransportClosed
+	code, what := adapter.FailedTransportClosed, "the connection closed with no prompt after %s"
+	switch {
+	case errors.Is(err, errTimeout):
+		code, what = adapter.FailedTimeout, "no prompt within the step timeout after %s"
+	case errors.Is(err, errDeadline):
+		code, what = adapter.FailedTimeout, "the invocation deadline passed with no prompt after %s"
+	case errors.Is(err, errTooLarge):
+		code, what = adapter.FailedResponseTooLarge, "max_response_bytes reached with no prompt after %s"
+	default:
+		s.dead = true
+	}
+	if d := fmt.Sprintf(what, after); s.detail == "" && len(d) <= adapter.MaxDetailLen {
+		s.detail = d
+	}
+	return code
 }
 
 // await reads until the bytes received since the last send end in a prompt
