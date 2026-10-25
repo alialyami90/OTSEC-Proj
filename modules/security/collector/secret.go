@@ -49,9 +49,19 @@ func (h *SecretHandle) Use(f func(secret []byte) error) error {
 	return f(c)
 }
 
+// minPartialEcho is the shortest leading part of the secret that EchoSpans
+// redacts at the end of rx. Three bytes cannot cover a prompt: a prompt
+// counts only after CR, LF, STX or ETX, and a secret is printable, so a
+// match this long always ends before the prompt does.
+const minPartialEcho = 3
+
 // EchoSpans returns the non-overlapping ranges of rx that equal the secret,
-// as half-open [start, end) offsets, so the adapter can redact each one. It
-// returns nil once the handle is closed.
+// as half-open [start, end) offsets, so the adapter can redact each one.
+// rx may also end inside an echo, when the reply was cut by the response
+// budget, a timeout or a close: a trailing run of at least minPartialEcho
+// bytes that equals the start of the secret is returned too, so the cut
+// echo is redacted as well (A3 on #99). It returns nil once the handle is
+// closed.
 func (h *SecretHandle) EchoSpans(rx []byte) [][2]int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -59,13 +69,20 @@ func (h *SecretHandle) EchoSpans(rx []byte) [][2]int {
 		return nil
 	}
 	var spans [][2]int
-	for off := 0; off <= len(rx)-len(h.b); {
+	off := 0
+	for off <= len(rx)-len(h.b) {
 		i := bytes.Index(rx[off:], h.b)
 		if i < 0 {
 			break
 		}
 		spans = append(spans, [2]int{off + i, off + i + len(h.b)})
 		off += i + len(h.b)
+	}
+	for n := min(len(h.b)-1, len(rx)-off); n >= minPartialEcho; n-- {
+		if bytes.Equal(rx[len(rx)-n:], h.b[:n]) {
+			spans = append(spans, [2]int{len(rx) - n, len(rx)})
+			break
+		}
 	}
 	return spans
 }

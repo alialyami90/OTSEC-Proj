@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -310,6 +311,37 @@ func TestInstallAndAcquire(t *testing.T) {
 	defer h2.Close()
 	if !bytes.Equal(secretOf(t, h2), canary) {
 		t.Fatal("reopened store gave another secret")
+	}
+}
+
+// A reply cut inside an echo still has the cut part redacted, and the
+// prompts a short partial match could touch are never covered (A3 on #99).
+func TestEchoSpansPartial(t *testing.T) {
+	h := &SecretHandle{b: []byte("Abc123xyz")}
+	cases := []struct {
+		rx   string
+		want [][2]int
+	}{
+		{"\r\nAbc12", [][2]int{{2, 7}}},
+		{"Abc123xyz\r\nAbc", [][2]int{{0, 9}, {11, 14}}},
+		{"Abc123xyz", [][2]int{{0, 9}}},
+		{"\r\nAb", nil},                    // under three bytes: not redacted
+		{"xyzAbc123xy", [][2]int{{3, 11}}}, // the longest leading part
+		{"Abc123xyzAbc123xyz", [][2]int{{0, 9}, {9, 18}}},
+		{"Abc1", [][2]int{{0, 4}}},
+		{"\r\n=>", nil},
+	}
+	for _, c := range cases {
+		got := h.EchoSpans([]byte(c.rx))
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%q: spans %v, want %v", c.rx, got, c.want)
+		}
+	}
+	// A secret that starts like a prompt still leaves a prompt alone: the
+	// prompt's leading CR or LF is not in the secret.
+	h = &SecretHandle{b: []byte("=>x9")}
+	if got := h.EchoSpans([]byte("SER\r\n=>")); got != nil {
+		t.Errorf("prompt redacted: %v", got)
 	}
 }
 

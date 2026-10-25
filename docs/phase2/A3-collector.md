@@ -203,7 +203,7 @@ The reuse tag is HMAC-SHA-256 of the secret under its own key derived from the s
 It returns a `SecretHandle`, the seam's `sel751.Secret`:
 
 - `Use` calls its function once with a copy of the secret and wipes the copy afterwards. A second `Use` is `ErrSecretUsed`, so the slot opens at most once per session.
-- `EchoSpans` gives the non-overlapping half-open ranges of received bytes that equal the secret.
+- `EchoSpans` gives the non-overlapping half-open ranges of received bytes that equal the secret. It also returns a trailing run of at least 3 bytes that equals the start of the secret, so an echo cut off by the response budget, a timeout or a close is still redacted. A match that long cannot cover a prompt, because a prompt counts only after CR, LF, STX or ETX, and a secret is printable (A3 on #99).
 - `Close` wipes the secret. After it, `Use` fails and `EchoSpans` finds nothing.
 
 Tests (`credstore_test.go`, `seal_test.go`):
