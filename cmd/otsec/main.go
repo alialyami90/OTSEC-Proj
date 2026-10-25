@@ -346,7 +346,7 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		sort.Strings(streams)
 		for _, s := range streams {
 			ss := ts.Streams[s]
-			line := fmt.Sprintf("  %s: cursor %d of %d", safe(s), ss.Cursor, ss.Last)
+			line := fmt.Sprintf("  %s: confirmed %d of %d, cursor %d", safe(s), ss.Confirmed, ss.Last, ss.Cursor)
 			if ss.Blocked != "" {
 				line += ", HELD: " + safe(ss.Blocked)
 			}

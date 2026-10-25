@@ -152,13 +152,16 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 	waiting := false
 	for _, id := range tg.streams {
 		ss := st.Streams[id]
-		state := TargetStreamState{Cursor: uint64(ss.Cursor), Blocked: ss.Blocked}
+		state := TargetStreamState{Cursor: uint64(ss.Cursor), Confirmed: uint64(ss.Confirmed), Blocked: ss.Blocked}
 		if db := fw.rt.Store(id); db != nil {
 			if last, err := db.LastCommitted(ctx, id); err == nil {
 				state.Last = uint64(last)
-				// A held stream is reported as forward-held; its events
-				// do not count as waiting on the target (A4 #98).
-				waiting = waiting || (last > ss.Cursor && ss.Blocked == "")
+				// What is waiting is what the target has not confirmed:
+				// the cursor stays behind while a report about the stream
+				// is owed (A4 #103). A held stream is reported as
+				// forward-held; its events do not count as waiting (A4
+				// #98).
+				waiting = waiting || (last > ss.Confirmed && ss.Blocked == "")
 			}
 		}
 		ts.Streams[string(id)] = state

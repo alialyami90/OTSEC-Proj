@@ -455,7 +455,7 @@ func TestNoSessionOpenIsUnreachable(t *testing.T) {
 		fs := forward.Status{Open: open, Streams: map[c5.StreamID]forward.StreamStatus{}}
 		for _, id := range tg.streams {
 			last, _ := r.Store(id).LastCommitted(bg, id)
-			fs.Streams[id] = forward.StreamStatus{Cursor: last}
+			fs.Streams[id] = forward.StreamStatus{Cursor: last, Confirmed: last}
 		}
 		return fs
 	}
@@ -540,5 +540,56 @@ func TestBestEffortTargetForwards(t *testing.T) {
 	ts := st.Snapshot("site-a-node1").Targets["central"]
 	if ts.Class != "best-effort" || ts.Streams[string(HealthStream)].Cursor < uint64(want) {
 		t.Fatalf("target status %+v; receiver errors %v", ts, srv.Errors())
+	}
+}
+
+// A stream the target confirmed through its last seq is not waiting, even
+// with its cursor held back for an owed report: no forward-unreachable
+// after UnreachableAfter (A6 and A4 on #102, A4 #103).
+func TestOwedReportIsNotWaiting(t *testing.T) {
+	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	fs := forward.Status{Open: now, Unreported: 2, Streams: map[c5.StreamID]forward.StreamStatus{}}
+	var withEvents int
+	for _, id := range tg.streams {
+		last, _ := r.Store(id).LastCommitted(bg, id)
+		if last > 0 {
+			withEvents++
+		}
+		fs.Streams[id] = forward.StreamStatus{Cursor: 0, Confirmed: last}
+	}
+	if withEvents == 0 {
+		t.Fatal("no stream has events")
+	}
+	fw.check(bg, tg, fs)
+	mu.Lock()
+	now = now.Add(UnreachableAfter + time.Minute)
+	fs.Open = now
+	mu.Unlock()
+	fw.check(bg, tg, fs)
+	for _, a := range st.Snapshot("site-a-node1").Alarms {
+		if a.Code == AlarmForwardUnreachable {
+			t.Fatalf("forward-unreachable with every stream confirmed: %+v", a)
+		}
+	}
+	for id, ss := range st.Snapshot("site-a-node1").Targets["central"].Streams {
+		if ss.Cursor != 0 || ss.Confirmed != ss.Last {
+			t.Fatalf("stream %s status %+v", id, ss)
+		}
 	}
 }

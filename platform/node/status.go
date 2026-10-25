@@ -77,12 +77,15 @@ type TargetStatus struct {
 	Streams    map[string]TargetStreamState `json:"streams"`
 }
 
-// TargetStreamState is one stream of a target: the saved cursor, the
-// stream's last committed seq, and why the stream is held, if it is.
+// TargetStreamState is one stream of a target: the saved cursor, the last
+// position the target confirmed (ahead of the cursor while a report about
+// the stream is owed, A4 #103), the stream's last committed seq, and why
+// the stream is held, if it is.
 type TargetStreamState struct {
-	Cursor  uint64 `json:"cursor"`
-	Last    uint64 `json:"last"`
-	Blocked string `json:"blocked,omitempty"`
+	Cursor    uint64 `json:"cursor"`
+	Confirmed uint64 `json:"confirmed"`
+	Last      uint64 `json:"last"`
+	Blocked   string `json:"blocked,omitempty"`
 }
 
 // StatusSchema identifies the status file format.

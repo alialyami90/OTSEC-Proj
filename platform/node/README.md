@@ -125,7 +125,7 @@ This is an interim. A3's node key register (credential design, section 9: a non-
 
 Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`targets`, shown by `otsec health`) and raises two alarms, each once per condition:
 
-- `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s, or has had no session open for 60 s even with nothing waiting (`Status.Open`). A held stream's events do not count as waiting. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
+- `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s, or has had no session open for 60 s even with nothing waiting (`Status.Open`). Waiting means past what the target confirmed (`StreamStatus.Confirmed`, A4 #103), not past the cursor, which stays behind while a report about the stream is owed. A held stream's events do not count as waiting. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
 - `forward-held`: a stream is held, with the forwarder's reason.
 
 ## Example
