@@ -14,7 +14,7 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/seal"
-	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 // The node finds a collector reset, a reinstall that lost the collector's
@@ -155,7 +155,7 @@ func applyCollector(cs *collectorState, rec *audit.Record) error {
 
 // readInstallKey reads the collector's install key ID. The file is public
 // and written by the collector; the node checks only that it is a regular
-// file, not a link or device, and small (store.ReadPublicFile). Its integrity comes from the directory's
+// file, not a link or device, and small (protect.ReadPublicFile). Its integrity comes from the directory's
 // DACL (winsvc.Dirs: only the collector, SYSTEM and Administrators can
 // write it) and, for an acknowledgement, from the administrator's
 // fingerprint check (T-12).
@@ -164,7 +164,7 @@ func (s *Scheduler) readInstallKey() (string, error) {
 		return "", errors.New("collector_public_dir is not configured")
 	}
 	path := filepath.Join(s.rt.cfg.CollectorPublicDir, InstallKeyFileName)
-	b, err := store.ReadPublicFile(path, maxInstallKeyBytes)
+	b, err := protect.ReadPublicFile(path, maxInstallKeyBytes)
 	if err != nil {
 		return "", err
 	}
@@ -328,12 +328,12 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 	}
 	// As checkClear: only from a directory the node cannot write (A3 on
 	// #107).
-	if err := store.CheckProtectedDir(s.rt.cfg.AdminDir); err != nil {
+	if err := protect.CheckDir(s.rt.cfg.AdminDir); err != nil {
 		s.raiseOnceKey(AlarmResetAckRefused+" dir "+err.Error(), "", AlarmResetAckRefused, "admin_dir refused, so "+SeqResetAckFileName+" is not read: "+err.Error())
 		return
 	}
 	path := filepath.Join(s.rt.cfg.AdminDir, SeqResetAckFileName)
-	b, err := store.ReadProtectedFile(path, MaxClearSuspensionBytes)
+	b, err := protect.ReadFile(path, MaxClearSuspensionBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
