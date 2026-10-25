@@ -173,11 +173,27 @@ func checkSD(what, path string, sd *windows.SECURITY_DESCRIPTOR, protected, read
 	return nil
 }
 
-func readProtected(path string, max int64) ([]byte, error) { return readChecked(path, max, true) }
+func readProtected(path string, max int64) ([]byte, error) {
+	return readSDChecked(path, max, func(sd *windows.SECURITY_DESCRIPTOR) error {
+		return checkSD("file", path, sd, false, true)
+	})
+}
 
-func readPublic(path string, max int64) ([]byte, error) { return readChecked(path, max, false) }
+func readProtectedFor(path string, max int64, readers []string) ([]byte, error) {
+	sids, err := readerSIDs(readers)
+	if err != nil {
+		return nil, err
+	}
+	return readSDChecked(path, max, func(sd *windows.SECURITY_DESCRIPTOR) error {
+		return checkSDFor("file", path, sd, false, sids)
+	})
+}
 
-func readChecked(path string, max int64, protected bool) ([]byte, error) {
+func readPublic(path string, max int64) ([]byte, error) { return readSDChecked(path, max, nil) }
+
+// readSDChecked opens path and applies check to its security descriptor;
+// a nil check is a public file, whose DACL is not read.
+func readSDChecked(path string, max int64, check func(*windows.SECURITY_DESCRIPTOR) error) ([]byte, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
@@ -185,7 +201,7 @@ func readChecked(path string, max int64, protected bool) ([]byte, error) {
 	// A public file is shared for write and delete too, so that its
 	// writer can rename a new one over it while the node reads (A3 #106).
 	share := uint32(windows.FILE_SHARE_READ)
-	if !protected {
+	if check == nil {
 		share |= windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 	}
 	// FILE_FLAG_OPEN_REPARSE_POINT opens a link or junction itself, so the
@@ -207,12 +223,17 @@ func readChecked(path string, max int64, protected bool) ([]byte, error) {
 	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
 		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
 	}
-	if protected {
+	if check != nil {
+		if info.NumberOfLinks > 1 {
+			// Defence in depth (A6 on #108): a hard link would carry
+			// another path's file, and its DACL, into the checked directory.
+			return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, info.NumberOfLinks)
+		}
 		sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 		if err != nil {
 			return nil, fmt.Errorf("%s: read DACL: %w", path, err)
 		}
-		if err := checkSD("file", path, sd, false, true); err != nil {
+		if err := check(sd); err != nil {
 			return nil, err
 		}
 	}
@@ -223,6 +244,22 @@ func readChecked(path string, max int64, protected bool) ([]byte, error) {
 }
 
 func checkProtectedDir(dir string) error {
+	return checkDirSD(dir, func(sd *windows.SECURITY_DESCRIPTOR) error {
+		return checkSD("directory", dir, sd, true, true)
+	})
+}
+
+func checkProtectedDirFor(dir string, readers []string) error {
+	sids, err := readerSIDs(readers)
+	if err != nil {
+		return err
+	}
+	return checkDirSD(dir, func(sd *windows.SECURITY_DESCRIPTOR) error {
+		return checkSDFor("directory", dir, sd, true, sids)
+	})
+}
+
+func checkDirSD(dir string, check func(*windows.SECURITY_DESCRIPTOR) error) error {
 	p, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
 		return err
@@ -245,7 +282,114 @@ func checkProtectedDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("%s: read DACL: %w", dir, err)
 	}
-	return checkSD("directory", dir, sd, true, true)
+	return check(sd)
+}
+
+// readRights is the most an entry for this account or a reader may grant
+// in checkSDFor: FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, which is read
+// and traverse (A3).
+const readRights = 0x1200a9
+
+// readerSIDs parses the readers of ReadProtectedFileFor. CREATOR OWNER and
+// OWNER RIGHTS are refused: they name whoever owns or creates the object,
+// not a service. They are compared as SIDs, so no spelling gets past
+// (A3 and A6 on #108).
+func readerSIDs(readers []string) ([]*windows.SID, error) {
+	var owners []*windows.SID
+	for _, w := range []windows.WELL_KNOWN_SID_TYPE{windows.WinCreatorOwnerSid, windows.WinCreatorOwnerRightsSid} {
+		sid, err := windows.CreateWellKnownSid(w)
+		if err != nil {
+			return nil, err
+		}
+		owners = append(owners, sid)
+	}
+	var sids []*windows.SID
+	for _, r := range readers {
+		sid, err := windows.StringToSid(r)
+		if err != nil {
+			return nil, fmt.Errorf("reader %q is not a SID: %w", r, err)
+		}
+		if !strings.EqualFold(sid.String(), r) {
+			// StringToSid saturates a subauthority above 32 bits, so the
+			// SID checked would not be the one named.
+			return nil, fmt.Errorf("reader %q is not a SID as written (it reads as %s)", r, sid)
+		}
+		for _, o := range owners {
+			if windows.EqualSid(sid, o) {
+				return nil, fmt.Errorf("reader %s names an owner, not a service", r)
+			}
+		}
+		sids = append(sids, sid)
+	}
+	return sids, nil
+}
+
+// checkSDFor is ReadProtectedFileFor's rule (A3): owner SYSTEM or
+// Administrators; every allow entry SYSTEM or Administrators, or this
+// account or a reader within readRights; nothing else. dir also requires a
+// protected DACL. A deny entry only narrows access and is passed.
+func checkSDFor(what, path string, sd *windows.SECURITY_DESCRIPTOR, dir bool, readers []*windows.SID) error {
+	allowed, err := allowedSIDs()
+	if err != nil {
+		return err
+	}
+	self, system, admins := allowed[0], allowed[1], allowed[2]
+	control, _, err := sd.Control()
+	if err != nil {
+		return err
+	}
+	if dir && control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("%s %s inherits its DACL; it must be protected", what, path)
+	}
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return err
+	}
+	if owner == nil || !windows.EqualSid(owner, system) && !windows.EqualSid(owner, admins) {
+		return fmt.Errorf("%s %s is owned by %s; the owner must be SYSTEM or Administrators", what, path, owner)
+	}
+	reader := func(sid *windows.SID) bool {
+		if windows.EqualSid(sid, self) {
+			return true
+		}
+		for _, r := range readers {
+			if windows.EqualSid(sid, r) {
+				return true
+			}
+		}
+		return false
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	if dacl == nil {
+		return fmt.Errorf("%s %s has a null DACL, which grants everyone", what, path)
+	}
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			return fmt.Errorf("%s %s: ACE %d: %w", what, path, i, err)
+		}
+		switch ace.Header.AceType {
+		case windows.ACCESS_DENIED_ACE_TYPE:
+			continue
+		case windows.ACCESS_ALLOWED_ACE_TYPE:
+		default:
+			return fmt.Errorf("%s %s: ACE %d has type %d; only plain allow and deny entries are accepted", what, path, i, ace.Header.AceType)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		switch {
+		case windows.EqualSid(sid, system), windows.EqualSid(sid, admins):
+		case reader(sid):
+			if ace.Mask&^readRights != 0 {
+				return fmt.Errorf("%s %s grants %s access %#x; a reader may only read and traverse (%#x)", what, path, sid, ace.Mask, readRights)
+			}
+		default:
+			return fmt.Errorf("%s %s grants access to %s; only SYSTEM, Administrators, this account and the named readers may have access", what, path, sid)
+		}
+	}
+	return nil
 }
 
 // allowedSIDs are the process's own account, SYSTEM and Administrators.
