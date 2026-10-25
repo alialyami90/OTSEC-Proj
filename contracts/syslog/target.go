@@ -135,6 +135,12 @@ type DurableAck struct {
 	// list holds several names lets each of those nodes write as the
 	// others, so it does not pass (A3 #81 S-1). The forwarder checks this
 	// name against the node's own certificate.
+	//
+	// The name check is only as strong as the CA's issuing. A6 found that
+	// librelp 1.11.0 name mode matches the subject CN even when the
+	// certificate's SANs name another node (#76). Commissioning must
+	// therefore show that the trust anchor issues no certificate carrying
+	// this name, as CN or SAN, to anyone but this node.
 	PermittedPeer string `json:"permitted_peer"`
 	// AckAfter says when the collector acknowledges. Only AckAfterDurableWrite
 	// is accepted: the receiving ruleset writes synchronously before it
