@@ -47,6 +47,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `schedule[]` | `id` (the C7 schedule principal the runs are made for), `asset_id`, `endpoint`, `operation` (a C3 operation ID such as `sel.ser.read_all`), `params` (optional), `credential_ref` (a C7 handle, absent for a level 0 operation) and `every_seconds` | see below |
 | `collector_pipe` | Where the collector listens | `\\.\pipe\<name>` on Windows; an absolute socket path on Linux |
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
+| `tls_dir` | The directory holding the files the targets' TLS references name (D2-12, lab only) | absolute; required when a target names a reference. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
 
 A `schedule[]` entry is checked as follows:
@@ -90,6 +91,42 @@ Each run:
 On an unauthorized line, the alarm is `collection-unauthorized-line` and collection from the asset stops. The stop is durable: at startup `NewScheduler` finds the quarantine on the stream and keeps the asset stopped. Phase 2 has no way to clear the stop, so a halted asset fails closed. Clearing it needs an audited admin operation, which is out of Phase 2 scope (A1): it is a Phase 3 item for A3 and A5, recorded as a limitation in `docs/phase-2-exit.md`.
 
 If a quarantine cannot be stored, the alarm is `collection-quarantine-not-stored`, and every credentialed run on the node stops.
+
+## TLS references (D2-12, lab only)
+
+A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the node's client credential (`tls.client_credential_ref`). In Phase 2 each reference names files in `tls_dir`:
+
+| File | Holds |
+| --- | --- |
+| `<trust_anchor_ref>.pem` | The CA set that verifies the collector: certificates only |
+| `<client_credential_ref>.crt` | The node's client certificate chain |
+| `<client_credential_ref>.key` | Its private key |
+
+A reference matches `[a-z0-9][a-z0-9_-]{0,63}` and is not a Windows device name (`con`, `nul`, `com1` and the like), so it cannot name a path or a device. The node may read these files and must not be able to change them (D2-12):
+
+- **`tls_dir`** passes `store.CheckProtectedDir`: a plain directory, not a link or junction, opened without following one. On Linux its mode is 0500. On Windows it has a protected DACL whose allow entries name only the node's account, SYSTEM and Administrators, an owner other than the node's account, and no write right in the node's entries.
+- **Each file** is read with `store.ReadProtectedFile`, which checks the opened handle, not the path: a regular file on disk (no link, reparse point or device), at most 1 MiB, mode 0400 on Linux, and on Windows the same owner and allow-entry rule as `tls_dir`.
+- **No error or log quotes file content.** A parse failure names the file only.
+
+What these checks prove differs by platform (A3 #98):
+
+- **Windows:** the node has no write right only while it runs as its service account (`NT SERVICE\otsec-node`), which is not in Administrators. The check reads the node's own entries; a node run by a member of Administrators passes it through the Administrators entry and could rewrite the files.
+- **Linux:** "no write for the node" is not enforced. The node must own a 0400 file to read it, so it could change the mode back. The Linux checks refuse links, devices and loose modes, and are the test platform; the deployed node is the Windows service.
+
+The installer creates `OTSEC\config\tls` (owner Administrators, node read only) and refuses a configuration whose `tls_dir` is anything else. An administrator copies the files in, so they inherit that DACL; a moved file keeps its own, and the node refuses it if that grants anything more. The client key is unencrypted at rest. That is part of the D2-12 gate limitation, and A3's node key register (credential design section 9) must replace this before any `device-observed` deployment.
+
+Every reference is resolved and checked through A4's `forward.ClientTLS` before the node starts. A missing or bad file, or a client certificate whose name is not the target's `durable_ack.permitted_peer`, stops the node. Nothing falls back to another reference.
+
+This is an interim. A3's node key register (credential design, section 9: a non-exportable key in the `NT SERVICE\otsec-node` certificate store, made from a certificate request the node generates) replaces it, and must land before any `device-observed` deployment.
+
+## Forwarding
+
+`NewForwarding` builds one A4 forwarder per target over the target's C5 consumers. Each stream's `Outbox` and `CursorStore` is a live view that looks the open database up on every call, because `Tick` can replace a database's handle when it resumes one. The audit stream comes from the audit database, with `Audit` set. The health sink commits each `forward.*` event on `platform/health` and returns its key after the commit.
+
+Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`targets`, shown by `otsec health`) and raises two alarms, each once per condition:
+
+- `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
+- `forward-held`: a stream is held, with the forwarder's reason.
 
 ## Example
 
