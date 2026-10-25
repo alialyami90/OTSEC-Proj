@@ -316,7 +316,7 @@ Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.
 The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2's `sel751.Run` with the plan's asset, profile, register, endpoint and dialer. It follows these rules from the reviews of #97 and #99:
 
 - **Never pass a nil `*SecretHandle` as `sel751.Config.Secret`** (A2 on #97). A nil pointer stored in the interface is not a nil interface, so `Run` would refuse every Level 0 run as `failed.internal`. `cfg.Secret` and `cfg.Floor` are set only when `plan.Secret != nil`. `TestSEL751RunnerLevel0` fails without this.
-- **A wake answered by `Password: ?` counts as an unconfirmed attempt** (A3 on #99). The bare line end probably landed as a blank password, and a Level 0 run has no floor gate to record it. When a result is `failed.internal` with `wake_sent` true and its last received bytes end in the password prompt, the runner sets the floor through `FloorGate.Unconfirmed`, even after the run's context has ended. `TestSEL751RunnerWakeHitsPasswordPrompt` fails without this.
+- **A session that ends at `Password: ?` counts as an unconfirmed attempt** (A3 on #99, A6 on #112). The wake line end, or `ID` when the relay greeted with its prompt and no wake was sent, may have landed as a password, and a Level 0 run has no floor gate to record it. When the bytes received since the last line sent end at the password prompt, under sel751's prompt rule (NUL, XON and XOFF ignored, trailing spaces trimmed, the prompt first or after CR, LF, STX or ETX), the runner sets the floor through `FloorGate.Unconfirmed`, whatever the result's code and even after the run's context has ended. On the `ACC` path the gate has already set it. The rule is a copy, because sel751's `promptOf` is unexported. `TestSEL751RunnerPasswordPromptSetsFloor` and `TestEndsAtPasswordPrompt` cover it.
 - **`RunReport.TIDLE` stays 0 until `sel751` reports the TIDLE it parsed** (A2 on #97). Until then, the floor after an exit without QUI is the 31-minute fallback, which is the safe side.
 - `RunReport.QUISent` is the result's `quit_sent`. When no login was confirmed it is true, because the pipeline reads it only after a confirmed login.
 
@@ -330,21 +330,23 @@ The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2
 | `device.refused` | a C2 refusal | denied, with the code's name, for example `identity_mismatch` |
 | `device.op` | the operation completed (`ok`, `partial`), or failed after the operate phase sent something | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes. A Level 0 read sends its line in the probe phase, so it has no digest. |
 | `device.session.close` | after an open | succeeded; failed with `qui_not_sent` after a confirmed login without QUI (C7-A6-2); always with the transcript digest (D1-25) |
-| `credential.suspend` | the pipeline suspended the credential after the run | succeeded, with the C7 reason using `_`, for example `auth_failed` |
+| `credential.suspend` | the pipeline suspended the credential after the run; not when the store refused the write, nor when the credential was already suspended or revoked | succeeded, with the C7 reason using `_`, for example `auth_failed` |
 
 An asset suspension has no collector action in C8. The node writes `asset.suspend` from the outcome code (D2-15).
 
 Tests (`runner_sel751_test.go`) drive the whole pipeline with the runner hosted, against a far end on a loopback TCP port that replays a C2 golden's transcript. That covers the D2-10 dialer, the credential store, the floor and the suspensions. Every transcript is invented, so this is simulated evidence only.
-- **Eight goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `refused.password_prompt_absent` and `failed.transport_closed`. For each one, the test checks:
+- **Eight goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. For each one, the test checks:
   - the result code;
   - the transcript digest, which is the golden's;
   - the exact record sequence, under the node's own outcome checks;
+  - each record's actor and target (asset, transport, downstream label, family, credential and version), `device.op`'s `operation_id` and its digest recomputed from the operate-phase lines, and each posture warning's `detail` (A6 on #112);
   - no alarm;
   - the floor;
   - the asset and credential suspensions;
   - that the secret is nowhere in the outcome.
-- **A Level 0 ID read** with no secret: no credential record, and no floor.
-- **A wake answered by the password prompt** sets the floor.
+- **A Level 0 ID read** with no secret: no credential record, no digest, and no floor.
+- **A line answered by the password prompt** sets the floor: the wake (the C2 golden `failed.internal-wake-password-prompt`), and `ID` after a relay that greeted with its prompt, so no wake was sent.
+- **`credential.suspend` only for a suspension that happened:** none when the store's write fails or the credential was revoked during the run.
 - **An echo of the secret cut short.** The relay echoes the first five bytes of the secret and hangs up. Those bytes are redacted in the stored transcript, which pins the reply order behind `EchoSpans`' partial rule (A6 on #106).
 - Removing the nil-secret guard, the `Unconfirmed` call or the pipeline's record hand-off each fails a test.
 

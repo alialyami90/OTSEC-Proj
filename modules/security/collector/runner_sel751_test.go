@@ -3,6 +3,8 @@ package collector
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -221,6 +223,60 @@ func resultCode(r adapter.Result) adapter.Code {
 	return r.Error.Code
 }
 
+// checkFields pins what T-1 to T-12 and the slice suite reconcile
+// against, beyond action, outcome and reason (A6 on #112): the actor, the
+// target, device.op's operation_id and its bytes_sent_digest recomputed
+// here from the transcript's operate-phase lines (none when there are
+// none, as on a Level 0 read), and each posture warning's detail, which is
+// the register's setting name.
+func checkFields(t *testing.T, recs []*audit.Record, res adapter.Result, op string, level1 bool) {
+	t.Helper()
+	var sent []byte
+	operated := false
+	for _, sg := range res.Transcript.Segments {
+		if sg.Dir == adapter.Sent && sg.Phase == adapter.PhaseOperate {
+			operated = true
+			sent = append(sent, res.Transcript.Data[sg.Offset:sg.Offset+sg.Length]...)
+		}
+	}
+	warnings := 0
+	for _, r := range recs {
+		if r.Actor.ID != schedule.ID {
+			t.Errorf("%s: actor %+v", r.Action, r.Actor)
+		}
+		tg := r.Target
+		if tg == nil || tg.AssetID != testAsset || tg.Family != "sel-751" || tg.Transport != authz.TransportTelnet || tg.DownstreamSecurity != authz.DownstreamPlaintext {
+			t.Errorf("%s: target %+v", r.Action, tg)
+			continue
+		}
+		if level1 != (tg.CredentialRef == pipeCred && tg.CredentialVersion == 1) || (!level1 && (tg.CredentialRef != "" || tg.CredentialVersion != 0)) {
+			t.Errorf("%s: credential %s version %d on a level 1 run %v", r.Action, tg.CredentialRef, tg.CredentialVersion, level1)
+		}
+		switch r.Action {
+		case audit.ActionDeviceOp:
+			if r.OperationID != op {
+				t.Errorf("device.op names %q, want %q", r.OperationID, op)
+			}
+			want := ""
+			if operated {
+				sum := sha256.Sum256(sent)
+				want = "sha256:" + hex.EncodeToString(sum[:])
+			}
+			if r.BytesSentDigest != want {
+				t.Errorf("device.op digest %q, want %q", r.BytesSentDigest, want)
+			}
+		case audit.ActionDevicePostureWarning:
+			if warnings >= len(res.Warnings) || r.Detail != res.Warnings[warnings].Setting || r.Detail == "" {
+				t.Errorf("posture warning %d: detail %q, result warnings %+v", warnings, r.Detail, res.Warnings)
+			}
+			warnings++
+		}
+	}
+	if warnings != len(res.Warnings) {
+		t.Errorf("%d posture warning records for %d warnings", warnings, len(res.Warnings))
+	}
+}
+
 func TestSEL751RunnerGoldens(t *testing.T) {
 	cases := []struct {
 		golden string
@@ -247,6 +303,8 @@ func TestSEL751RunnerGoldens(t *testing.T) {
 			want: "device.session.open/succeeded device.refused/denied/password_prompt_absent device.session.close/succeeded"},
 		{golden: "failed.transport_closed", hangUp: true, floorSet: true,
 			want: "device.session.open/succeeded credential.use/succeeded device.posture_warning/warning/maxacc_above_1 device.op/failed/transport_closed device.session.close/failed/qui_not_sent"},
+		// A partial result is an operation that ran (A6 on #112).
+		{golden: "partial.parse_errors", want: "device.session.open/succeeded credential.use/succeeded device.posture_warning/warning/maxacc_above_1 device.op/succeeded device.session.close/succeeded"},
 	}
 	for _, c := range cases {
 		t.Run(c.golden, func(t *testing.T) {
@@ -260,6 +318,7 @@ func TestSEL751RunnerGoldens(t *testing.T) {
 			if got := shape(recs); got != c.want {
 				t.Errorf("records\n got %s\nwant %s", got, c.want)
 			}
+			checkFields(t, recs, res, "sel.ser.read_all", true)
 			if a := f.alarmList(); len(a) != 0 {
 				t.Errorf("alarms: %v", a)
 			}
@@ -291,35 +350,93 @@ func TestSEL751RunnerLevel0(t *testing.T) {
 	if got, want := shape(recs), "device.session.open/succeeded device.op/succeeded device.session.close/succeeded"; got != want {
 		t.Errorf("records\n got %s\nwant %s", got, want)
 	}
-	for _, r := range recs {
-		if r.Target.CredentialRef != "" {
-			t.Errorf("%s names a credential on a Level 0 run", r.Action)
-		}
-	}
+	// sel.id is sent in the probe phase, so device.op has no digest.
+	checkFields(t, recs, res, "sel.id", false)
 	if err := f.state.CheckFloor(testAsset); err != nil {
 		t.Errorf("floor after a clean Level 0 run: %v", err)
 	}
 }
 
-// A wake answered by "Password: ?" may have been taken as a blank password,
-// and a Level 0 run has no floor gate to record it: the runner sets the
-// floor itself (A3 on #99).
-func TestSEL751RunnerWakeHitsPasswordPrompt(t *testing.T) {
-	f, l := hostedFixture(t)
-	turns := []turn{{}, {expect: []byte("\r\n"), reply: []byte("\r\nPassword: ? ")}}
-	_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.id", ""), turns, false)
-	if resultCode(res) != adapter.FailedInternal || !res.Session.WakeSent {
-		t.Fatalf("result %s: %+v", resultCode(res), res.Session)
+// A line answered by "Password: ?" may have landed as a password, and a
+// Level 0 run has no floor gate to record it: the runner sets the floor
+// itself (A3 on #99), keyed on the end state, not on the wake (A6 on #112).
+func TestSEL751RunnerPasswordPromptSetsFloor(t *testing.T) {
+	ok := replayTurns(goldenResult(t, "ok"))
+	for _, c := range []struct {
+		name  string
+		turns []turn
+		wake  bool
+		check func(t *testing.T, res adapter.Result)
+	}{
+		{name: "wake answered by the prompt", wake: true,
+			turns: replayTurns(goldenResult(t, "failed.internal-wake-password-prompt")),
+			check: func(t *testing.T, res adapter.Result) {
+				if want := goldenResult(t, "failed.internal-wake-password-prompt"); res.Transcript.SHA256 != want.Transcript.SHA256 {
+					t.Errorf("transcript %s, want the golden's %s", res.Transcript.SHA256, want.Transcript.SHA256)
+				}
+			}},
+		// The relay greets with its prompt, so no wake is sent, and ID is
+		// answered by the password prompt.
+		{name: "ID answered by the prompt, no wake",
+			turns: []turn{{reply: []byte("\r\n=")}, {expect: ok[2].expect, reply: ok[2].reply}, {expect: []byte("ID\r\n"), reply: []byte("ID\r\nPassword: ? ")}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f, l := hostedFixture(t)
+			_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.id", ""), c.turns, false)
+			if resultCode(res) != adapter.FailedInternal || res.Session.WakeSent != c.wake || res.Session.CredentialSent {
+				t.Fatalf("result %s: %+v", resultCode(res), res.Session)
+			}
+			if c.check != nil {
+				c.check(t, res)
+			}
+			if got, want := shape(recs), "device.session.open/succeeded device.session.close/succeeded"; got != want {
+				t.Errorf("records\n got %s\nwant %s", got, want)
+			}
+			if err := f.state.CheckFloor(testAsset); err == nil {
+				t.Fatal("no floor after a line answered by the password prompt")
+			}
+		})
 	}
-	if got, want := shape(recs), "device.session.open/succeeded device.session.close/succeeded"; got != want {
-		t.Errorf("records\n got %s\nwant %s", got, want)
+}
+
+// endsAtPasswordPrompt follows sel751's prompt rule.
+func TestEndsAtPasswordPrompt(t *testing.T) {
+	tr := func(parts ...string) adapter.Transcript {
+		var t adapter.Transcript
+		for i, p := range parts {
+			dir := adapter.Received
+			if i%2 == 1 {
+				dir = adapter.Sent
+			}
+			if strings.HasPrefix(p, "rx:") {
+				dir, p = adapter.Received, p[3:]
+			}
+			t.Segments = append(t.Segments, adapter.Segment{Dir: dir, Offset: int64(len(t.Data)), Length: int64(len(p))})
+			t.Data = append(t.Data, p...)
+		}
+		return t
 	}
-	if err := f.state.CheckFloor(testAsset); err == nil {
-		t.Fatal("no floor after a wake answered by the password prompt")
-	}
-	// Any other failed.internal leaves the floor alone.
-	if wakeHitPassword(adapter.Result{Error: &adapter.Error{Code: adapter.FailedInternal}, Session: adapter.SessionFacts{WakeSent: true}}) {
-		t.Error("a failed.internal with no password prompt counted")
+	for _, c := range []struct {
+		name string
+		t    adapter.Transcript
+		want bool
+	}{
+		{"prompt", tr("\r\n=", "ID\r\n", "ID\r\nPassword: ? "), true},
+		{"first in the reply", tr("Password: ?"), true},
+		{"NUL inside", tr("\r\nPass\x00word: ?\x00 "), true},
+		{"XON and XOFF", tr("\r\nPassword: ?\x11 \x13"), true},
+		{"split across reads", tr("\r\nPassw", "rx:ord: ? "), true},
+		{"after STX", tr("\x02Password: ?"), true},
+		{"inside a setting", tr("\r\nDEVID=Password: ?"), false},
+		{"Level 1 after the prompt", tr("Password: ? ", "Canary-7f3K\r\n", "\r\n=>"), false},
+		{"a line sent after it", tr("Password: ? ", "QUI\r\n"), false},
+		{"Level 0 prompt", tr("\r\n="), false},
+		{"empty", adapter.Transcript{}, false},
+		{"segment outside the data", adapter.Transcript{Data: []byte("Password: ?"), Segments: []adapter.Segment{{Dir: adapter.Received, Offset: 0, Length: 99}}}, false},
+	} {
+		if got := endsAtPasswordPrompt(c.t); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

@@ -421,9 +421,12 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 		credSuspend = authz.SuspendReason(code.SuspendsCredential())
 	}
 	if credSuspend != "" && plan.Credential != nil {
-		if _, _, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
+		if _, changed, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: suspend %s: %w", plan.Credential.ID, err))
-		} else {
+		} else if changed {
+			// Only a suspension that happened is recorded: not one the
+			// store refused, nor a credential already suspended or
+			// revoked (A6 on #112).
 			plan.Audit.Add(audit.ActionCredentialSuspend, audit.OutcomeSucceeded, suspendReason(credSuspend), nil)
 		}
 	}

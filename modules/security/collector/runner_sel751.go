@@ -40,9 +40,10 @@ func (r *SEL751Runner) Run(ctx context.Context, plan RunPlan) RunReport {
 	}
 	res := sel751.Run(ctx, plan.Invocation, cfg)
 
-	if wakeHitPassword(res) {
-		// The bare line end probably landed as a blank password, and a
-		// Level 0 run has no gate to record it (A3 on #99).
+	if endsAtPasswordPrompt(res.Transcript) {
+		// A line the adapter sent, the wake line end or ID, may have
+		// landed as a password, and a Level 0 run has no gate to record
+		// it (A3 on #99, A6 on #112).
 		plan.Floor.Unconfirmed()
 	}
 	confirmed := plan.Floor.LoginConfirmed()
@@ -66,26 +67,40 @@ func (r *SEL751Runner) Run(ctx context.Context, plan RunPlan) RunReport {
 	return report
 }
 
-// wakeHitPassword reports a session whose wake was answered by the
-// password prompt: sel751 ends it as failed.internal with wake_sent, and
-// the last bytes received are the prompt. It also fires when ID, after the
-// wake, is answered by the prompt (A2 on #112); that is failed.internal
-// too, and setting the floor there is the safe side.
-func wakeHitPassword(res adapter.Result) bool {
-	if res.Error == nil || res.Error.Code != adapter.FailedInternal || !res.Session.WakeSent {
-		return false
+// endsAtPasswordPrompt reports a session whose last received bytes, since
+// the last line sent, end at the password prompt: whatever the adapter sent
+// before them may have been taken as a password attempt (S22 p. 7.33,
+// three failures pulse SALARM), so the floor is set whatever the result's
+// code. On the path through ACC the gate has already set it, and setting it
+// again only moves it later.
+//
+// The prompt rule is sel751's promptOf for the password prompt (itself
+// C2's rule; both are unexported): NUL, XON and XOFF are ignored, trailing
+// spaces are trimmed, and the prompt counts only first in the bytes or
+// right after CR, LF, STX or ETX.
+func endsAtPasswordPrompt(t adapter.Transcript) bool {
+	start := len(t.Segments)
+	for start > 0 && t.Segments[start-1].Dir == adapter.Received {
+		start--
 	}
-	t := res.Transcript
-	for i := len(t.Segments) - 1; i >= 0; i-- {
-		sg := t.Segments[i]
-		if sg.Dir != adapter.Received {
-			continue
-		}
-		if sg.Offset < 0 || sg.Offset+sg.Length > int64(len(t.Data)) {
+	var rx []byte
+	for _, sg := range t.Segments[start:] {
+		if sg.Offset < 0 || sg.Length < 0 || sg.Offset+sg.Length > int64(len(t.Data)) {
 			return false
 		}
-		rx := bytes.TrimRight(t.Data[sg.Offset:sg.Offset+sg.Length], " \x00\x11\x13")
-		return bytes.HasSuffix(rx, passwordPrompt)
+		rx = append(rx, t.Data[sg.Offset:sg.Offset+sg.Length]...)
 	}
-	return false
+	clean := bytes.Map(func(r rune) rune {
+		switch r {
+		case 0x00, 0x11, 0x13:
+			return -1
+		}
+		return r
+	}, rx)
+	clean = bytes.TrimRight(clean, " ")
+	if !bytes.HasSuffix(clean, passwordPrompt) {
+		return false
+	}
+	before := clean[:len(clean)-len(passwordPrompt)]
+	return len(before) == 0 || bytes.IndexByte([]byte("\r\n\x02\x03"), before[len(before)-1]) >= 0
 }
