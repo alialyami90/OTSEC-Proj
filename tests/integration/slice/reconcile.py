@@ -186,3 +186,90 @@ def seq_of(eid):
     """The C5 seq at the end of a C4 event ID (node:stream:seq)."""
     tail = eid.rsplit(":", 1)[-1]
     return int(tail) if tail.isdigit() else -1
+
+
+def row_key(row):
+    """A row's content without its number: SEL-751 renumbers every row when
+    a new one arrives (row 1 is the newest, Table 7.63), so across reads of a
+    buffer that grows only the date, time, element and state identify it.
+    Unique in the simulator's grown buffer, where every row has its own time;
+    a real buffer can repeat it (C-13), which is why the product aligns
+    snapshots instead."""
+    return tuple(row.split()[1:])
+
+
+def reconcile_grown(messages, rows, invocation=None):
+    """reconcile for the simulator's grown buffer (ser="grow"), read many
+    times with interruptions between and during the reads. rows are the
+    buffer's rows as last printed, oldest first. Every row must arrive under
+    exactly one event ID; one event ID may arrive more than once (a resend
+    after a break), always with the same bytes. The row number in dtext is
+    the one printed at the read that first saw the row, so it is checked
+    against that read's own text only (pos equals it) and not against the
+    last print. Returns (problems, stats) as reconcile does."""
+    problems = []
+    by_eid = {}
+    order = []
+    duplicates = 0
+    for k, raw in enumerate(messages):
+        try:
+            m = parse_rfc5424(raw)
+        except ValueError as exc:
+            problems.append(f"message {k}: {exc}")
+            continue
+        ps = m["sd"].get(SDID)
+        if ps is None:
+            problems.append(f"message {k}: no {SDID} element")
+            continue
+        if first(ps, "kind") != "ser":
+            continue
+        eid = first(ps, "eid")
+        if eid is None:
+            problems.append(f"message {k}: no eid")
+            continue
+        if eid in by_eid:
+            duplicates += 1
+            if by_eid[eid] != raw:
+                problems.append(f"eid {eid}: delivered twice with different bytes")
+            continue
+        by_eid[eid] = raw
+        order.append((eid, ps))
+    want = {row_key(row): i for i, row in enumerate(rows)}
+    seen = {}
+    for eid, ps in order:
+        dtext = first(ps, "dtext")
+        if dtext is None:
+            problems.append(f"eid {eid}: no dtext")
+            continue
+        row = dtext.encode("utf-8")
+        key = row_key(row)
+        if key not in want:
+            problems.append(f"eid {eid}: dtext {dtext!r} is not a row the device printed")
+            continue
+        if key in seen:
+            problems.append(f"row {want[key]}: two events ({seen[key]} and {eid})")
+            continue
+        seen[key] = eid
+        checks = {
+            "evc": "simulated",
+            "pos": row.split()[0].decode(),
+            "dt": row_time_text(row),
+            "rsha256": hashlib.sha256(row).hexdigest(),
+            "rlen": str(len(row)),
+            "parse": "ok",
+        }
+        if invocation is not None:
+            checks["inv"] = invocation
+        for name, v in checks.items():
+            got = first(ps, name)
+            if got != v:
+                problems.append(f"eid {eid} (row {want[key]}): {name}={got!r}, want {v!r}")
+    for key, i in want.items():
+        if key not in seen:
+            problems.append(f"row {i} ({b' '.join(key).decode()}): never arrived")
+    numbered = sorted(((seq_of(eid), key) for key, eid in seen.items()), key=lambda x: x[0])
+    got_order = [want[key] for _, key in numbered]
+    if got_order != sorted(got_order):
+        problems.append("event order is not the device's print order")
+    return problems, {"messages": len(messages), "unique": len(by_eid), "duplicates": duplicates,
+                      "rows": len(rows), "matched": len(seen)}

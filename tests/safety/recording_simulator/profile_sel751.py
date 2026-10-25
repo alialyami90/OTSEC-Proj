@@ -34,6 +34,18 @@ Documented (p. = manual page):
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
+SYNTHESIZED, not documented (ser="grow", for V-S4 and V-S6): each SER read
+adds rows after Figure 10.16's newest, in the figure's layout, and renumbers
+every row so row 1 is the newest (Table 7.63, p. 7.75). The added rows
+(elements from the figure, one second apart, after its last time) are test
+data, not a documentation example, and support only `simulated` claims about
+the platform's handling of a buffer that changes between reads.
+
+SYNTHESIZED fault cases, not documented (V-S12): ser="hang" sends the
+figure's header and its first four rows, then nothing more for that SER (no
+prompt; later lines are answered as usual); ser="malformed" sends the figure
+with row 5's TIME damaged ("13:5X:10.003"), so that one row does not parse.
+
 Not stated in the manual, modelled as a switch (A2's C7 review): whether a new
 Telnet connection inherits the state a session left behind when it closed
 without QUIT, before TIDLE expires (p. 7.16 says only that the relay stays
@@ -52,6 +64,7 @@ commands that have a different Spanish name are rejected with the English
 error text.
 """
 
+import datetime
 import os
 import re
 import time
@@ -139,10 +152,73 @@ class RelayState:
         self.until = time.monotonic() + self.tidle if (level > 0 or awaiting) else 0.0
 
 
+SER_ROW = re.compile(rb"^(\d+)\s+(\d\d/\d\d/\d{4})\s+(\d\d:\d\d:\d\d\.\d{3})\s+(\S+)\s+(\S+)$")
+GROW_ELEMENTS = (b"51P1P", b"51AP", b"51P1T", b"TRIP")
+
+
+def ser_row(num, date, time, element, state):
+    """One SER row in Figure 10.16's column layout."""
+    return b"%-6d%s   %s   %-25s%s" % (num, date, time, element, state)
+
+
+def grown_rows(added):
+    """The rows of a grown SER buffer, oldest first as printed: Figure
+    10.16's eight, then `added` synthesized rows, numbered so the newest is
+    row 1. Each row is (date, time, element, state)."""
+    rows = []
+    for line in _load("ser-fig-10-16.txt").split(CRLF):
+        m = SER_ROW.match(line)
+        if m:
+            rows.append(m.groups()[1:])
+    base = datetime.datetime(2007, 2, 28, 13, 54, 11)
+    for k in range(added):
+        t = base + datetime.timedelta(seconds=k)
+        rows.append((t.strftime("%m/%d/%Y").encode(), t.strftime("%H:%M:%S").encode() + b".000",
+                     GROW_ELEMENTS[k % 4], b"Asserted" if (k // 4) % 2 == 0 else b"Deasserted"))
+    return rows
+
+
+def grown_ser(added):
+    """The SER reply after `added` synthesized rows: the figure's header,
+    then every row renumbered (SYNTHESIZED, see the module documentation)."""
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line)
+    rows = grown_rows(added)
+    body = [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)]
+    return CRLF.join(head + body)
+
+
+class SerGrowth:
+    """The count of synthesized rows, kept in a file so that it survives a
+    simulator restart (the device's buffer does). Each SER read adds `step`."""
+
+    def __init__(self, path, step):
+        self.path, self.step = path, step
+
+    def read(self):
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                n = int(f.read().strip() or 0)
+        except FileNotFoundError:
+            n = 0
+        n += self.step
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str(n))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.path)
+        return n
+
+
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
-                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False):
+                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None):
         self.password = password          # None models "Level 1 password disabled"
         # p. 7.28: "The relay transmits all messages in the following format:
         # <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
@@ -153,7 +229,11 @@ class SEL751DocResponder:
         self.level, self.awaiting, self.attempts = relay.take() if relay else (0, None, 0)
         self.inherited = self.level > 0 or self.awaiting is not None
         self.elevated_here = False        # this session raised the level
-        self.ser = _load("ser-fig-10-16.txt") if ser == "example" else None
+        self.ser = _load("ser-fig-10-16.txt") if ser in ("example", "grow", "hang", "malformed") else None
+        self.hang = ser == "hang"
+        if ser == "malformed":
+            self.ser = self.ser.replace(b"5     02/28/2007   13:54:10.003", b"5     02/28/2007   13:5X:10.003")
+        self.growth = growth if ser == "grow" else None
         self.id = _load("id-fig-7-38.txt")
         if fid is not None:
             self.id = _replace_id_field(self.id, b"FID=" + fid, fid_checksum_ok)
@@ -239,7 +319,7 @@ class SEL751DocResponder:
         if self.vulnerable and not self.exposed:
             self.exposed = True
             reply.effects = list(reply.effects) + [self._exposure()]
-        if self.stx_etx:
+        if self.stx_etx and not getattr(reply, "unframed", False):
             reply.out = self._frame(reply.out)
         return reply
 
@@ -308,6 +388,15 @@ class SEL751DocResponder:
         if text == "SHO P 1":
             return Reply(self._show_port1() + self._prompt())
         if text == "SER":
+            if self.ser is not None and self.growth is not None:
+                self.ser = grown_ser(self.growth.read())
+            if self.hang:
+                lines = self.ser.split(CRLF)
+                cut = next(i for i, l in enumerate(lines) if SER_ROW.match(l)) + 4
+                # Cut inside the message: STX sent, ETX and the prompt never.
+                reply = Reply((b"\x02" if self.stx_etx else CRLF) + CRLF.join(lines[:cut]) + CRLF)
+                reply.unframed = True
+                return reply
             body = self.ser if self.ser is not None else b"No Data Available"
             return Reply(CRLF + body + self._prompt())
         return Reply(CRLF + UNMODELLED + self._prompt())
