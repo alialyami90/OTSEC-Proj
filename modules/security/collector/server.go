@@ -185,11 +185,13 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 		}
 	}
 
-	// The server's own invariants on what the handler returned: an accepted
-	// reply comes with work exactly when it accepts a run. A handler that
-	// breaks this is a bug; the connection is dropped without a reply, so
-	// the node sees a failed request, never a run it cannot account for.
-	if reply.Accepted() != (work != nil) || (work != nil && (kind != authz.KindRun || reply.InvocationID == "")) {
+	// The server's own invariants on what the handler returned: work comes
+	// exactly with an accepted run, which also carries an invocation ID; an
+	// accepted credential request has neither. A handler that breaks this
+	// is a bug; the connection is dropped without a reply, so the node sees
+	// a failed request, never a run it cannot account for.
+	acceptedRun := reply.Accepted() && kind == authz.KindRun
+	if acceptedRun != (work != nil) || (acceptedRun && reply.InvocationID == "") || (!acceptedRun && reply.InvocationID != "") {
 		s.log().Error("collector: handler broke the reply contract; dropping connection",
 			"request_id", reply.RequestID, "status", reply.Status, "has_work", work != nil)
 		return

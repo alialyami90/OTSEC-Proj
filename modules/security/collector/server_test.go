@@ -259,6 +259,38 @@ func TestHandlerContractBreachDropsConnection(t *testing.T) {
 	}
 }
 
+// An accepted credential request has no work and no invocation ID, and gets
+// its reply; with work or an invocation ID it is a breach.
+func TestAcceptedCredentialRequest(t *testing.T) {
+	revoke, _ := json.Marshal(authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialRevoke, RequestID: "req-2",
+		OnBehalfOf: authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site-a"}, PolicyVersion: 1,
+		CredentialRevoke: &authz.CredentialRevokeBody{RefID: "cred_slice0001", Reason: authz.RevokeOperator}})
+	accept := func(inv string, w Work) func(*authz.CollectorRequest, uint64) (authz.CollectorReply, Work) {
+		return func(req *authz.CollectorRequest, seq uint64) (authz.CollectorReply, Work) {
+			return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: inv, CollectorSeq: seq}, w
+		}
+	}
+	ln, _ := startServer(t, &fakeHandler{decide: accept("", nil)})
+	r, c := exchange(t, ln, frame(string(revoke)))
+	c.Close()
+	if !r.Accepted() || r.InvocationID != "" {
+		t.Fatalf("reply %+v", r)
+	}
+	noop := Work(func(context.Context) collectorwire.RunOutcome { return collectorwire.RunOutcome{} })
+	for name, d := range map[string]func(*authz.CollectorRequest, uint64) (authz.CollectorReply, Work){
+		"with work":          accept("inv-1", noop),
+		"with an invocation": accept("inv-1", nil),
+	} {
+		ln, _ := startServer(t, &fakeHandler{decide: d})
+		c := ln.dial(t)
+		c.Write(frame(string(revoke)))
+		if _, err := collectorwire.ReadFrame(c, collectorwire.MaxReplyBytes); err == nil {
+			t.Errorf("%s: got a reply", name)
+		}
+		c.Close()
+	}
+}
+
 func TestOutcomeForAnotherInvocationDropped(t *testing.T) {
 	h := &fakeHandler{decide: acceptRun(func(ctx context.Context) collectorwire.RunOutcome {
 		return collectorwire.RunOutcome{InvocationID: "inv-2", Result: json.RawMessage(`{}`)}
