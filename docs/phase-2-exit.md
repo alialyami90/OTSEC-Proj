@@ -23,7 +23,7 @@ Two binaries (D2-1): `otsec` (the node) and `otsec-collector` (the privileged co
 | Telnet client that refuses every option; SEL-751 parsers for `ID`, `SER`, `SHO P 1`; the C2 session dialogue `sel751.Run`; register revision 3 | A2 | #75, #85, #99, #111, #114, #122, #133, #137 | A6, A3 |
 | Collector: C7 IPC over a named pipe or Unix socket, credential store and sealing, durable state (`collector_seq`, the failed-auth floor), run pipeline, binary and Windows service with T-5 hardening, asset suspensions, the hosted SEL-751 adapter | A3 | #79, #82, #90, #97, #106, #112, #117, #121, #124, #125, #131 | A6, A2, A5 |
 | SER normalizer with read alignment (C2 result to C4 events); C6 forwarder over RELP/TLS with durable acknowledgement | A4 | #78, #81, #89, #94, #103 | A6, A2, A3, A5 |
-| SQLite C5 store; node configuration and runtime; collection scheduler; read-only CLI (`otsec health`); both services under the SCM and the installer; forwarder wiring; suspension handling and adoption; shared admin folder; runtime pruning | A5 | #77, #84, #92, #98, #102, #107, #108, #109, #116, #119, #120, #126, #127, #129, #135, #136 | A6, A3, A4 |
+| SQLite C5 store; node configuration and runtime; collection scheduler; read-only CLI (`otsec health`); both services under the SCM and the installer; forwarder wiring; suspension handling and adoption; shared admin folder; runtime pruning; store open waits for WAL recovery after a crash (`busy_timeout` first) | A5 | #77, #84, #92, #98, #102, #107, #108, #109, #116, #119, #120, #126, #127, #129, #135, #136, #138 | A6, A3, A4 |
 | Slice harness, RELP receiver oracle, rsyslog leg, reconciliation, end-to-end suites, installer and safety checks | A6 | #76, #104, #118, #128, #132 | A1, and the owners of what each test covers |
 
 Contract changes in Phase 2, each approved by A1 and reviewed by the affected owners:
@@ -182,7 +182,7 @@ The Phase 4 order is the brief's recommendation. The owner may reorder it, for e
 3. **A3's §9 node key store** (A3 with A5). Replaces the D2-12 file resolver.
 4. **An audited quarantine export and a way to clear a halted asset** (A5 with A3).
 5. **V-S8 end to end**: every stored event's raw hash checked against the recording (A6).
-6. **A bounded retry of a transient open failure** (A5, C5 amendment; A6 contract tests, A3 review; brief in `docs/phase2/A5-p3-failed-open-retry.md`): `Resume` from `ModeFailed` only for `store-open-failed` with a busy or locked cause, at most once per tick, with the suspension rebuild before any run and a `store.mode_change` on recovery. Integrity, format and settings failures stay terminal.
+6. **A bounded retry of a transient open failure** (A5, C5 amendment; A6 contract tests, A3 review; brief in `docs/phase2/A5-p3-failed-open-retry.md`): `Resume` from `ModeFailed` only for `store-open-failed` with a busy or locked cause, at most once per tick, with the suspension rebuild before any run and a `store.mode_change` on recovery. Every other failure stays terminal: integrity, format, stream class, settings, the store lock, and any other open error.
 7. **Then Phase 4's first expansion**, in the order the brief recommends, starting with configuration and baseline monitoring, re-ranked by measured risk.
 
 A lab relay, if the owner authorizes one, would let A6 run the H checks and move items from `simulated` to `hardware-verified`.
