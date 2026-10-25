@@ -41,7 +41,9 @@ type Runtime struct {
 	dbs    []*database
 
 	mu      sync.Mutex
-	pending []queued // store alarms raised during a commit, for Tick
+	pending []queued        // store alarms raised during a commit, for Tick
+	raised  map[string]bool // conditions whose alarm is raised (prune.go)
+	pruneMu sync.Mutex      // serializes Prune
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
@@ -230,7 +232,8 @@ type queued struct {
 
 // Tick is called periodically by the service (proposed: every 60 s). It
 // resumes blocked and drain-only databases (C5 Resume), records every mode
-// change, and turns queued store alarms into health events.
+// change, turns queued store alarms into health events, and prunes
+// confirmed events of a class above its runtime target (Prune).
 func (r *Runtime) Tick(ctx context.Context) {
 	for _, d := range r.dbs {
 		r.state.Lock()
@@ -265,6 +268,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 		}
 		r.health(ctx, x.a.Code.HealthType(), details)
 	}
+	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
 }
 

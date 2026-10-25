@@ -19,8 +19,14 @@ type AssetResult struct {
 	// outcome code, the collection alarm it raised.
 	Code string `json:"code"`
 	// Refusal is the collector's refusal code when it refused the run.
-	Refusal string    `json:"refusal,omitempty"`
-	At      time.Time `json:"at"`
+	Refusal string `json:"refusal,omitempty"`
+	// Detail is the outcome's C2 error detail, which tells apart runs
+	// that end with the same code, such as a late device and a read that
+	// hung, both failed.timeout (A6, V-S12). It is kept only from an
+	// outcome that passed its checks, and only as C2 bounds it: printable
+	// ASCII, at most adapter.MaxDetailLen bytes, never device text.
+	Detail string    `json:"detail,omitempty"`
+	At     time.Time `json:"at"`
 	// Failures counts the runs in a row that did not end "ok".
 	Failures int `json:"consecutive_failures"`
 }
@@ -47,12 +53,25 @@ func (rep Report) resultCode() string {
 	return string(adapter.StatusOK)
 }
 
+// c2Detail is d if it is a detail C2 allows, else empty.
+func c2Detail(d string) string {
+	if len(d) > adapter.MaxDetailLen {
+		return ""
+	}
+	for i := 0; i < len(d); i++ {
+		if d[i] < 0x20 || d[i] > 0x7e {
+			return ""
+		}
+	}
+	return d
+}
+
 // recordResult updates the asset's last result after a sent run.
 func (s *Scheduler) recordResult(assetID string, rep Report) {
 	code := rep.resultCode()
 	s.mu.Lock()
 	r := s.results[assetID]
-	r.Code, r.Refusal, r.At = code, rep.Refusal, s.now().UTC()
+	r.Code, r.Refusal, r.Detail, r.At = code, rep.Refusal, c2Detail(rep.Detail), s.now().UTC()
 	if code == string(adapter.StatusOK) {
 		r.Failures = 0
 	} else {

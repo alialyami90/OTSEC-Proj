@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,5 +199,47 @@ func TestPartialIsAFailure(t *testing.T) {
 	s.recordResult(relayID, Report{Sent: true, Code: adapter.PartialParseErrors})
 	if a := st.Snapshot("x").Assets[relayID]; a.Code != string(adapter.PartialParseErrors) || a.Failures != 1 {
 		t.Fatalf("after a partial run: %+v", a)
+	}
+}
+
+// The last result keeps the C2 detail of an outcome that passed its
+// checks, which tells apart runs that end with the same code (A6, V-S12),
+// and never one from a quarantined outcome or one C2 does not allow.
+func TestResultDetail(t *testing.T) {
+	for _, c := range []struct {
+		quarantine   bool
+		detail, want string
+	}{
+		{false, "second password prompt", "second password prompt"},
+		{true, "second password prompt", ""},
+		{false, "bell\x07", ""}, // not as C2 bounds it, so not kept
+	} {
+		cfg, dir := schedConfig(t, nil)
+		r, st, _ := start(t, cfg, dir)
+		col := suspendingCollector(t, c.quarantine)
+		base := col.answer
+		col.answer = func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+			resp, err := base(req)
+			if resp.Outcome != nil {
+				resp.Outcome.Result.Error = &adapter.Error{Code: adapter.FailedAuthRejected, Detail: c.detail}
+			}
+			return resp, err
+		}
+		newScheduler(t, r, col).RunOnce(bg, 0)
+		if a := st.Snapshot("x").Assets[relayID]; a.Code != string(adapter.FailedAuthRejected) || a.Detail != c.want {
+			t.Fatalf("%+v: %+v", c, a)
+		}
+		r.Close()
+	}
+	for d, want := range map[string]string{
+		"read timed out after 3 of 8 rows":          "read timed out after 3 of 8 rows",
+		"bell\x07":                                  "",
+		strings.Repeat("x", adapter.MaxDetailLen+1): "",
+		strings.Repeat("x", adapter.MaxDetailLen):   strings.Repeat("x", adapter.MaxDetailLen),
+		"caf\xc3\xa9":                               "",
+	} {
+		if got := c2Detail(d); got != want {
+			t.Errorf("c2Detail(%q) = %q", d, got)
+		}
 	}
 }

@@ -232,14 +232,14 @@ func TestHealthShowsAssetResults(t *testing.T) {
 	at := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
 	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
 	st.SetAssetResults(map[string]node.AssetResult{
-		relayID:   {Code: "failed.identity_unreadable", At: at, Failures: 4},
+		relayID:   {Code: "failed.identity_unreadable", Detail: "no FID line", At: at, Failures: 4},
 		"relay-b": {Code: node.AlarmCollectorRefused, Refusal: "rate_limited", At: at, Failures: 1},
 		"relay-c": {Code: "ok", At: at},
 	})
 	st.Write("site-a-node1")
 	out, errs, code := otsec(t, "health", "-config", path)
 	for _, want := range []string{
-		"FAILING asset " + relayID + ": last run failed.identity_unreadable at 2026-10-25T06:00:00Z; 4 failed in a row since the node started",
+		"FAILING asset " + relayID + ": last run failed.identity_unreadable (no FID line) at 2026-10-25T06:00:00Z; 4 failed in a row since the node started",
 		"FAILING asset relay-b: last run " + node.AlarmCollectorRefused + " at 2026-10-25T06:00:00Z (collector refused: rate_limited); 1 failed in a row since the node started",
 		"\nasset relay-c: last run ok at 2026-10-25T06:00:00Z\n",
 	} {

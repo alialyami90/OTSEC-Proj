@@ -345,7 +345,11 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	sort.Strings(assets)
 	for _, a := range assets {
 		r := st.Assets[a]
-		line := fmt.Sprintf("asset %s: last run %s at %s", safe(a), safe(r.Code), r.At.Format(time.RFC3339))
+		line := fmt.Sprintf("asset %s: last run %s", safe(a), safe(r.Code))
+		if r.Detail != "" {
+			line += " (" + safe(r.Detail) + ")"
+		}
+		line += " at " + r.At.Format(time.RFC3339)
 		if r.Refusal != "" {
 			line += " (collector refused: " + safe(r.Refusal) + ")"
 		}
