@@ -43,18 +43,20 @@ A6's status table, "Phase 2 slice status" in `docs/verification.md`, is the reco
 
 ### End to end on the real binaries (`tests/integration/slice/`, Linux)
 
-The four processes are the simulator, `otsec-collector`, `otsec node` and the RELP receiver over mutual TLS. Each suite also runs `check.py` over the simulator's recording.
+The four processes are the simulator, `otsec-collector`, `otsec node` and the RELP receiver over mutual TLS. Five of the eight suites (`test_slice_e2e`, identity, interruptions, buffer and floor) also run `check.py` over the simulator's recording. The failures, time and store-full suites do not yet, so their fault cases have no recording check; A6 is adding it in a separate PR.
 
 | Check | Result at `709f4bc` |
 | --- | --- |
 | **V-S6** recovery from interruption | **Pass.** 100 seeded interruptions (receiver and node SIGKILLed, half mid-burst; simulator and collector killed between sessions) against a buffer that grows and renumbers every row. All 240 rows reached the receiver under exactly one event ID each, and every resent ID carried the same bytes. At most 5 events were resent after any of the 53 upstream breaks, against the RELP window of 128. |
-| **V-S7** no write to the device | **Pass.** Every line every simulator received, across all recordings, is a read-only register line, with no non-printable and no before-prompt line. The register passes A6's deny corpus. |
+| **V-S7** no write to the device | **Pass** for the parts run. Every line the simulators received in the five suites that run `check.py` is a read-only register line, with no non-printable and no before-prompt line. The register passes A6's deny corpus. Not run: the 24-hour soak (b), the byte-for-byte transcript comparison (c) and the Telnet capture decode (d). |
 | **V-S9** store full | **Pass.** The warning comes before runs stop. No session opens while the store is full, including after a SIGKILL and restart. Once the receiver is back, confirmed events are pruned and runs resume in 113 s with no operator, and all 308 rows arrive once. The same test fails on main before #135. On `main` before #138 the test failed intermittently: after the SIGKILL, the node's first open met `otsec health`'s read-only open during WAL recovery and failed with `SQLITE_BUSY_RECOVERY`, so runs never resumed. With #138 (`busy_timeout` set before any statement that reads the file), the test passed 5 of 5 in CI at `709f4bc` (run 40232121836, attempts 1 to 5) and 3 of 3 on A6's Linux machine. Five passes show the race is rare or absent under this load, not that it is gone; a retry of a busy or locked open is Phase 3 task 6. |
-| **V-S12** failures are observable | **Pass.** Unreachable, auth failure, timeout, hang mid-SER, malformed row, upstream down and store full each show in `otsec health` as a code or alarm that names it, and none reads `ok`. A late device and a hung SER now differ by their detail (#136, #137). Upstream down took 77 s, inside D2-21. |
+| **V-S12** failures are observable | **Pass**, `simulated (in part)`. Unreachable, auth failure, timeout, hang mid-SER, malformed row, upstream down and store full each show in `otsec health` as a code or alarm that names it, and none reads `ok`. A late device and a hung SER now differ by their detail (#136, #137). Upstream down took 77 s, inside D2-21. |
 | **V-S4** duplicates and gaps | **Pass**, with D2-21's reading of the ambiguous overlap. |
 | **V-S3** time | **Pass.** No offset is invented, and native time text is kept through a fall-back hour. SEL-751 documents no unsynchronized flag, so that case has nothing to test. |
 | **V-S13** session safety | **Pass.** One session per device, at most one password per session, `QUI` last. A collector killed with Level 1 open leaves the floor behind, and the next runs are refused (D2-20). |
-| **V-S1, V-S2, V-S5, V-S10, V-S11, V-S16, V-S17, V-S19** | Pass at the level A6's table states, mostly end to end on one documented example. Each row names what is still owed. |
+| **V-S1, V-S2, V-S11** | Pass at the level A6's table states, end to end on the real binaries against one documented example each. Owed: V-S1's field-by-field comparison with GT-HAND (A6); V-S2's second and third examples. |
+| **V-S5, V-S10** | Pass in unit tests only. The node builds only valid requests, so hostile parameters reach the collector only in unit tests. |
+| **V-S16, V-S17, V-S19** | Pass against the simulator profile and the C2 goldens, not end to end. Owed: V-S16's `FTPACC`, `HTTPACC` and setting-absent goldens (A6); V-S19 (d), the checksum rule, is not met (see "Unverified assumptions"). |
 | **V-S8, V-S15** | Pass in part. The end-to-end hash check (V-S8) and the hostile framing cases end to end (V-S15) are not run. |
 | **V-S14** | Not applicable to Telnet beyond detection, which passes. |
 | **V-S18, V-S20** | Not run. There is no central role yet, and no OS-support check. |
@@ -69,7 +71,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 
 ### Where tests ran
 
-- **CI.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest, and the `integration` job, which runs the slice suites on Linux with `OTSEC_SLICE_REQUIRED=1`, so a skip fails the job. GitHub Actions has been the main test path since D2-13. Every PR in this report merged with every CI job green on its head. #132 split the three long end-to-end files into an `integration-long` job, one runner per file, so each stays inside its 20-minute limit. The python job leaves the slice directory to the integration jobs. CI now has seven jobs, and the merge rule is that all of them are green. All seven passed on `main` at `709f4bc` ([run 40232121836](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40232121836)), the first main commit with #138's fix.
+- **CI.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest, and the `integration` job, which runs the slice suites on Linux with `OTSEC_SLICE_REQUIRED=1`, so a skip fails the job. GitHub Actions has been the main test path since D2-13. Every PR merged since D2-13 merged with every CI job green on its head, checked by A1 at each merge; the PRs before D2-13 were tested on the owner's PC under the rule then in force. #132 split the three long end-to-end files into an `integration-long` job, one runner per file, so each stays inside its 20-minute limit. The python job leaves the slice directory to the integration jobs. CI now has seven jobs, and the merge rule is that all of them are green. All seven passed on `main` at `709f4bc` ([run 40232121836](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40232121836)), the first main commit with #138's fix.
 - **The owner's PC (Windows 11).** This is the second Windows run (D2-13). The elevated pass at `c486e42` used `OTSEC_REQUIRE_ELEVATED=1`, so nothing could skip:
   - `platform/node` passed 65 of 65, including the 27 tests that need elevation;
   - `platform/store/protect` passed;
@@ -86,7 +88,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 | The slice suite passes on the owner's PC (Windows) and on Linux, rsyslog included, from one commit on `main` | **Met on Linux, with a condition on Windows.** The Linux suites, rsyslog included, pass at `709f4bc`. The end-to-end suites cannot run on Windows as interactive processes, for three reasons: the collector requires the installer's WER exclusion, the harness uses a Unix socket and the Unix user ID, and the admin folder admits only the service SIDs (A6). The Windows evidence is the Go units and the elevated installer run at `c486e42`. **Condition:** the slice run against the installed services on the owner's PC, proposed as the first Phase 3 task (D2-21). |
 | Every component is merged, with its reviewers' records | Met. Table above. The review records are on each PR and in `tests/safety/reviews/`. |
 | No safety or security objection is open | Met. A3 and A6 accepted every PR listed. The open high risk under D2-11 is tracked below. It is not an objection to the simulated slice, because D2-4 and D2-10 keep every endpoint on the simulator. |
-| V-S6, V-S7 and V-S9 pass | Met, `simulated`. See the end-to-end summary above. |
+| V-S6, V-S7 and V-S9 pass | Met, `simulated`, for the parts run. Not run: V-S6's link cut in the middle of a SER read and its non-RELP transports; V-S7 (b), (c) and (d); V-S9's disk-level case. All are listed under "Failed or incomplete". |
 | This report records what is `simulated` and what needs a lab relay | Met. See "Unverified assumptions" and A6's table. |
 
 **Conditions carried into Phase 3:**
@@ -112,10 +114,17 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 - **Not run:**
   - V-S8 end to end: each stored event's raw hash against the recording, including after a forced parser failure;
   - V-S15's hostile framing cases end to end;
-  - V-S7's 24-hour soak and its byte-for-byte transcript comparison;
+  - V-S7's 24-hour soak (b), its byte-for-byte transcript comparison (c) and the Telnet capture decode (d);
+  - V-S6: a device link cut in the middle of a SER read. Only cuts between sessions are run, and the hang case stalls the link without cutting it;
+  - V-S6: the detect-and-report condition for the transports other than RELP, which are not built;
+  - V-S9: file-system exhaustion. The test's limit is the quota, not the disk. F-013, a store with no reserve that could not open, remains a recorded risk;
+  - V-S1: the field-by-field comparison with GT-HAND (A6);
+  - V-S16: the `FTPACC`, `HTTPACC` and setting-absent goldens (A6), and V-S16 end to end;
+  - the recording check (`check.py`) in the failures, time and store-full suites (A6, in progress);
   - V-S18 (central) and V-S20 (OS support).
 - **V-S2 end to end** covers one documented SER example. The criterion asks for three, from two sections.
 - **A database that fails at open stays failed until the node restarts.** C5 says `ModeFailed` needs a restart. Main's store-full run at `9c50395` showed the cost: after a crash, the node's open met `otsec health`'s open during WAL recovery and failed with `SQLITE_BUSY_RECOVERY`, so every run stopped until the next restart. #138 removes that cause by setting `busy_timeout` before any statement that reads the file. A bounded retry of a transient open failure is proposed for Phase 3 (A5), and health shows the failed database meanwhile.
+- **F-015.** Two FIDs in the C3 package are in no revision table (A6, 2026-10-24).
 - **The floor's full 31 minutes** were not run end to end, because that is too long for CI. The tests show the refusals inside the floor.
 - **Hardware.** H-01 to H-15 are written and were not run, as the owner directed.
 
