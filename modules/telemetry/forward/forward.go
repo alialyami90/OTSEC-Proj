@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"slices"
 	"strconv"
@@ -25,6 +26,10 @@ type Stream struct {
 	Audit   bool // the audit stream: sealed C8 bytes, rendered with RenderAudit
 	Outbox  store.Outbox
 	Cursors store.CursorStore
+	// Index finds where a new best-effort target starts: the first event
+	// committed in its replay window (C6). Required for an event stream of
+	// a best-effort target; unused otherwise.
+	Index store.CommitIndex
 }
 
 // HealthSink commits a platform health event the forwarder raises
@@ -68,6 +73,7 @@ type Forwarder struct {
 	cfg      Config
 	consumer store.ConsumerID
 	maxTXNR  uint64 // syslog.MaxTXNR; lowered by tests
+	maxOwed  int    // MaxOwed; lowered by tests
 
 	// What this process has already reported, so a session that ends and
 	// reconnects does not raise the same health event again (A6 #89).
@@ -75,6 +81,15 @@ type Forwarder struct {
 	tooLarge map[store.Key]store.Key      // held event -> its forward.too-large
 	omitted  map[store.Key]bool           // events reported as forward.text-omitted
 	skipped  map[store.StreamID]store.Seq // highest seq reported as forward.unreachable
+	// Health events the sink refused, oldest first, committed later
+	// (retryOwed). Past MaxOwed only their number per type is kept, and
+	// lostHold the lowest seq each stream must not pass for them.
+	owed     []owed
+	lost     map[string]int
+	lostHold map[store.StreamID]store.Seq
+	// The replay window start of each best-effort stream that has no
+	// cursor yet, worked out once per process (A6 #94).
+	start map[store.StreamID]store.Seq
 
 	mu     sync.Mutex
 	status Status
@@ -85,13 +100,27 @@ type Status struct {
 	Streams map[store.StreamID]StreamStatus
 	// LastConfirmed is when a transaction was last confirmed, zero if never
 	// in this process. The node raises forward.unreachable for a required
-	// target from it.
+	// target from it and from Open.
 	LastConfirmed time.Time
 	// Confirmed counts confirmed transactions in this process.
 	Confirmed uint64
 	// LastErr is why the last session ended, nil while none has failed.
 	LastErr error
+	// Open is when the collector answered the current session's open, zero
+	// while no session is open. A required target with Open zero is down
+	// even when nothing is waiting to be sent.
+	Open time.Time
+	// Unreported counts forward.* health events the HealthSink refused and
+	// the forwarder still holds to commit; ReportErr is the sink's last
+	// refusal. Both clear once every one is committed.
+	Unreported int
+	ReportErr  error
 }
+
+// MaxOwed is how many refused health events the forwarder keeps whole.
+// Beyond it, it keeps only their number per type and, once the sink accepts
+// again, commits one event per type stating how many went unreported.
+const MaxOwed = 1024
 
 // StreamStatus is one stream of the target.
 type StreamStatus struct {
@@ -125,8 +154,11 @@ func New(cfg Config) (*Forwarder, error) {
 		seen[s.ID] = true
 		if s.Audit {
 			audits++
-		} else if s.ID == cfg.HealthStream {
-			health = true
+		} else {
+			health = health || s.ID == cfg.HealthStream
+			if t.Class == syslog.ClassBestEffort && s.Index == nil {
+				return nil, fmt.Errorf("%w: stream %q of best-effort target %s needs a commit index", ErrConfig, s.ID, t.Name)
+			}
 		}
 	}
 	if audits > 1 || (audits == 1) != t.Audit {
@@ -147,8 +179,9 @@ func New(cfg Config) (*Forwarder, error) {
 	if cfg.RetryMax < cfg.RetryMin {
 		cfg.RetryMax = max(60*time.Second, cfg.RetryMin)
 	}
-	f := &Forwarder{cfg: cfg, consumer: store.ConsumerID(t.Name), maxTXNR: syslog.MaxTXNR,
+	f := &Forwarder{cfg: cfg, consumer: store.ConsumerID(t.Name), maxTXNR: syslog.MaxTXNR, maxOwed: MaxOwed,
 		tooLarge: map[store.Key]store.Key{}, omitted: map[store.Key]bool{}, skipped: map[store.StreamID]store.Seq{},
+		lost: map[string]int{}, lostHold: map[store.StreamID]store.Seq{}, start: map[store.StreamID]store.Seq{},
 		status: Status{Streams: map[store.StreamID]StreamStatus{}}}
 	for _, s := range cfg.Streams {
 		f.status.Streams[s.ID] = StreamStatus{}
@@ -190,6 +223,7 @@ func (f *Forwarder) Run(ctx context.Context) error {
 	wait := f.cfg.RetryMin
 	for {
 		before := f.Status().Confirmed
+		f.retryOwed(ctx)
 		err := f.session(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -226,6 +260,7 @@ type inflight struct {
 type held struct {
 	seq     store.Seq
 	release *store.Key
+	retry   bool // too-large whose report was refused: render it again
 }
 
 // session is one RELP session: open, send, confirm, save cursors.
@@ -242,11 +277,67 @@ type session struct {
 	queue   [][]store.Stored // read from the outbox, not sent yet
 	read    []store.Seq      // the last seq read into the queue
 	saved   []store.Seq      // the cursor persisted for this target
+	conf    []store.Seq      // confirmed by this target; saved lags it while a report is owed
+	known   []bool           // the start is a cursor or a window start, so a jump past it is a loss
 	hold    []*held
 	stopped bool // TXNRs used up: drain, close, reopen
 }
 
+// prepare works out, once per process, where each event stream of a
+// best-effort target without a cursor starts: after the last event
+// committed before its replay window, or before the first retained event
+// when none was (what was pruned before the target existed is not its
+// loss). It saves that start as the cursor before the collector is even
+// dialled, so a target that confirms nothing for a while, or cannot reach
+// its collector, does not move its start forward and pass events over
+// unreported (A6 #94). Events up to the start are outside the window, so
+// saving it gives up nothing the target was owed.
+func (f *Forwarder) prepare(ctx context.Context) error {
+	t := f.cfg.Target
+	if t.Class != syslog.ClassBestEffort {
+		return nil
+	}
+	for _, st := range f.cfg.Streams {
+		if _, ok := f.start[st.ID]; ok || st.Audit {
+			continue
+		}
+		cs, err := st.Cursors.LoadCursors(ctx, st.ID)
+		if err != nil {
+			return fmt.Errorf("forward: load cursors of %s: %w", st.ID, err)
+		}
+		if i := slices.IndexFunc(cs, func(c store.Cursor) bool { return c.Consumer == f.consumer && c.Stream == st.ID }); i >= 0 {
+			f.start[st.ID] = cs[i].Through
+			continue
+		}
+		after, err := st.Index.LastCommittedBy(ctx, st.ID, time.Now().Add(-time.Duration(t.ReplaySeconds)*time.Second))
+		if err == nil && after == 0 {
+			var first store.Seq
+			if first, err = st.Index.FirstRetained(ctx, st.ID); err == nil {
+				if first > 0 {
+					after = first - 1
+				} else {
+					after, err = st.Index.LastCommitted(ctx, st.ID)
+				}
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("forward: find the replay window of %s: %w", st.ID, err)
+		}
+		if after > 0 {
+			if err := st.Cursors.SaveCursor(ctx, store.Cursor{Consumer: f.consumer, Stream: st.ID, Through: after}); err != nil {
+				return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
+			}
+			f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = after })
+		}
+		f.start[st.ID] = after
+	}
+	return nil
+}
+
 func (f *Forwarder) session(ctx context.Context) error {
+	if err := f.prepare(ctx); err != nil {
+		return err
+	}
 	conn, err := f.cfg.Dial(ctx)
 	if err != nil {
 		return fmt.Errorf("forward: dial %s: %w", f.cfg.Target.Name, err)
@@ -257,15 +348,21 @@ func (f *Forwarder) session(ctx context.Context) error {
 	n := len(f.cfg.Streams)
 	s := &session{f: f, ctx: ctx, conn: conn, rbuf: make([]byte, syslog.MaxRELPFrameLen),
 		queue: make([][]store.Stored, n), read: make([]store.Seq, n), saved: make([]store.Seq, n),
-		hold: make([]*held, n)}
+		conf: make([]store.Seq, n), known: make([]bool, n), hold: make([]*held, n)}
 	if err := s.loadCursors(); err != nil {
 		return err
 	}
 	if err := s.open(); err != nil {
 		return err
 	}
+	f.update(func(x *Status) { x.Open = time.Now() })
+	defer f.update(func(x *Status) { x.Open = time.Time{} })
 	for {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f.retryOwed(ctx)
+		if err := s.catchUp(); err != nil {
 			return err
 		}
 		if err := s.release(); err != nil {
@@ -296,10 +393,23 @@ func (s *session) loadCursors() error {
 		if err != nil {
 			return fmt.Errorf("forward: load cursors of %s: %w", st.ID, err)
 		}
+		found := false
 		for _, c := range cs {
 			if c.Consumer == s.f.consumer && c.Stream == st.ID {
-				s.saved[i], s.read[i] = c.Through, c.Through
+				s.saved[i], s.read[i], found = c.Through, c.Through, true
 			}
+		}
+		s.conf[i], s.known[i] = s.saved[i], found
+		// A new required target starts at the first retained event, so it
+		// receives everything still held. A new best-effort target starts
+		// at the first event in its replay window (C6-A5-2); the audit
+		// stream has no window and starts at the first retained record.
+		if !found && s.f.cfg.Target.Class == syslog.ClassBestEffort && !st.Audit {
+			after, ok := s.f.start[st.ID]
+			if !ok {
+				return fmt.Errorf("forward: no window start for %s", st.ID)
+			}
+			s.read[i], s.conf[i], s.known[i] = after, after, true
 		}
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = s.saved[i] })
 	}
@@ -376,9 +486,10 @@ func (s *session) peek(i int) (*store.Stored, error) {
 			if ev.Key.Stream != st.ID || seq <= s.read[i] {
 				return nil, fmt.Errorf("forward: outbox of %s returned %s after %d", st.ID, ev.Key, s.read[i])
 			}
-			// A first read with no cursor starts at the first retained
-			// event: a new target receives what is still held (C6-A5-2).
-			if seq > s.read[i]+1 && s.read[i] > 0 {
+			// A new required target reads from 0 and takes the first
+			// retained event as its start, so nothing is reported. Past
+			// a cursor or a best-effort window start, a jump is a loss.
+			if seq > s.read[i]+1 && (s.read[i] > 0 || s.known[i]) {
 				if err := s.skipped(st.ID, s.read[i]+1, seq-1); err != nil {
 					return nil, err
 				}
@@ -400,13 +511,13 @@ func (s *session) skipped(stream store.StreamID, first, last store.Seq) error {
 		return nil // reported by an earlier session
 	}
 	first = max(first, s.f.skipped[stream]+1)
-	_, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardUnreachable, Details: map[string]string{
+	err := s.f.report(s.ctx, event.Health{Type: event.HealthForwardUnreachable, Details: map[string]string{
 		"target": s.f.cfg.Target.Name, "stream": string(stream),
 		"first_skipped": strconv.FormatUint(first, 10), "last_skipped": strconv.FormatUint(last, 10),
 		"reason": "pruned before this target confirmed them",
-	}})
+	}}, stream, first)
 	if err != nil {
-		return fmt.Errorf("forward: report skipped %s %d-%d: %w", stream, first, last, err)
+		return err
 	}
 	s.f.skipped[stream] = last
 	return nil
@@ -486,7 +597,17 @@ func (s *session) render(i int, ev *store.Stored) ([]byte, error) {
 				"target": t.Name, "limit": strconv.Itoa(t.MaxMessageOctets),
 			}})
 			if err != nil {
-				return nil, fmt.Errorf("forward: report too-large %s: %w", ev.Key, err)
+				if s.ctx.Err() != nil {
+					return nil, s.ctx.Err()
+				}
+				// The release needs this event's key, so the stream waits;
+				// the other streams go on draining, which is what lets the
+				// health stream accept it again. Retried at the next loop.
+				s.hold[i] = &held{seq: ev.Key.Seq, retry: true}
+				s.f.setStream(st.ID, func(x *StreamStatus) {
+					x.Blocked = fmt.Sprintf("event %s does not fit %d octets, and forward.too-large about it was refused: %v", ev.Key, t.MaxMessageOctets, err)
+				})
+				return nil, nil
 			}
 			s.f.tooLarge[ev.Key] = key
 		}
@@ -494,10 +615,10 @@ func (s *session) render(i int, ev *store.Stored) ([]byte, error) {
 		return nil, nil
 	}
 	if (out.TextOmitted || out.SummaryDropped) && !own && !s.f.omitted[ev.Key] {
-		if _, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardTextOmitted, Related: []event.EventID{ev.Key}, Details: map[string]string{
+		if err := s.f.report(s.ctx, event.Health{Type: event.HealthForwardTextOmitted, Related: []event.EventID{ev.Key}, Details: map[string]string{
 			"target": t.Name, "text_omitted": strconv.FormatBool(out.TextOmitted), "summary_dropped": strconv.FormatBool(out.SummaryDropped),
-		}}); err != nil {
-			return nil, fmt.Errorf("forward: report text-omitted %s: %w", ev.Key, err)
+		}}, ev.Key.Stream, ev.Key.Seq); err != nil {
+			return nil, err
 		}
 		s.f.omitted[ev.Key] = true
 	}
@@ -520,23 +641,56 @@ func (s *session) stop(i int, seq store.Seq, release *store.Key, why string) {
 // release moves a stream held at a too-large event past it, once every
 // earlier event of the stream and the forward.too-large event about it are
 // confirmed by this target (C6 size rule).
+// save persists stream i's cursor at seq, or as far towards it as owed
+// reports allow (Forwarder.limit).
+func (s *session) save(i int, seq store.Seq) error {
+	st := s.f.cfg.Streams[i]
+	seq = s.f.limit(st.ID, seq)
+	if seq <= s.saved[i] {
+		return nil
+	}
+	if err := st.Cursors.SaveCursor(s.ctx, store.Cursor{Consumer: s.f.consumer, Stream: st.ID, Through: seq}); err != nil {
+		return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
+	}
+	s.saved[i] = seq
+	s.f.confirmed(st.ID, seq)
+	s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = seq })
+	return nil
+}
+
+// catchUp saves the cursors that owed reports held back, once they are
+// committed.
+func (s *session) catchUp() error {
+	for i := range s.conf {
+		if s.conf[i] > s.saved[i] {
+			if err := s.save(i, s.conf[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *session) release() error {
 	for i, h := range s.hold {
+		if h != nil && h.retry {
+			s.hold[i] = nil // the next fill renders it and reports again
+			continue
+		}
 		if h == nil || h.release == nil || s.inFlight(i) {
 			continue
 		}
 		j := s.index(h.release.Stream)
-		if j < 0 || s.saved[j] < h.release.Seq {
+		if j < 0 || s.conf[j] < h.release.Seq {
 			continue
 		}
 		st := s.f.cfg.Streams[i]
-		if err := st.Cursors.SaveCursor(s.ctx, store.Cursor{Consumer: s.f.consumer, Stream: st.ID, Through: h.seq}); err != nil {
-			return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
+		s.conf[i], s.hold[i] = h.seq, nil
+		if err := s.save(i, h.seq); err != nil {
+			return err
 		}
-		s.saved[i], s.hold[i] = h.seq, nil
-		s.f.confirmed(st.ID, h.seq)
 		s.queue[i] = s.queue[i][1:]
-		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor, x.Blocked = h.seq, "" })
+		s.f.setStream(st.ID, func(x *StreamStatus) { x.Blocked = "" })
 	}
 	return nil
 }
@@ -551,6 +705,97 @@ func (s *session) inFlight(i int) bool {
 		}
 	}
 	return false
+}
+
+// owed is a health event the sink refused. While it is owed, the cursor of
+// stream stays below seq, the event or the first seq of the range it is
+// about, so a restart sends that event again or finds that gap again and
+// the report is raised again: a duplicate, never a lost one (A6 #94).
+type owed struct {
+	h      event.Health
+	stream store.StreamID // "" when no cursor waits for it
+	seq    store.Seq
+}
+
+// report commits a health event the forwarder raises about seq of stream:
+// an event it still sends, or the first seq of a range it passed. A sink
+// that refuses it (the health stream at quota, its database not open)
+// does not stop forwarding: draining is what frees the store, and a
+// forwarder stalled on its own report would never drain it. The event is
+// kept and committed later, after the ones refused before it; Status
+// counts it meanwhile, and the stream's cursor is not saved past seq until
+// it is committed. The exception is the health stream of a required
+// target: its cursor is what frees the health stream that refused the
+// report, so holding it could keep that stream full for good. Only a
+// cancelled ctx is returned.
+func (f *Forwarder) report(ctx context.Context, h event.Health, stream store.StreamID, seq store.Seq) error {
+	f.retryOwed(ctx)
+	if len(f.owed) == 0 && len(f.lost) == 0 {
+		_, err := f.cfg.Health.Emit(ctx, h)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		f.update(func(s *Status) { s.ReportErr = err })
+	}
+	if f.cfg.Target.Class == syslog.ClassRequired && stream == f.cfg.HealthStream {
+		stream = ""
+	}
+	if len(f.owed) < f.maxOwed {
+		f.owed = append(f.owed, owed{h: h, stream: stream, seq: seq})
+	} else {
+		f.lost[h.Type]++
+		if stream != "" && (f.lostHold[stream] == 0 || seq < f.lostHold[stream]) {
+			f.lostHold[stream] = seq
+		}
+	}
+	f.update(func(s *Status) { s.Unreported++ })
+	return ctx.Err()
+}
+
+// retryOwed commits the refused health events in order, stopping at the
+// first the sink still refuses, then one summary per type for those past
+// maxOwed.
+func (f *Forwarder) retryOwed(ctx context.Context) {
+	for len(f.owed) > 0 {
+		if _, err := f.cfg.Health.Emit(ctx, f.owed[0].h); err != nil {
+			f.update(func(s *Status) { s.ReportErr = err })
+			return
+		}
+		f.owed = f.owed[1:]
+		f.update(func(s *Status) { s.Unreported-- })
+	}
+	for _, typ := range slices.Sorted(maps.Keys(f.lost)) {
+		n := f.lost[typ]
+		if _, err := f.cfg.Health.Emit(ctx, event.Health{Type: typ, Details: map[string]string{
+			"target": f.cfg.Target.Name, "unreported": strconv.Itoa(n),
+			"reason": "the health stream refused them while the forwarder held " + strconv.Itoa(f.maxOwed) + " others",
+		}}); err != nil {
+			f.update(func(s *Status) { s.ReportErr = err })
+			return
+		}
+		delete(f.lost, typ)
+		f.update(func(s *Status) { s.Unreported -= n })
+	}
+	clear(f.lostHold)
+	f.update(func(s *Status) { s.ReportErr = nil })
+}
+
+// limit is the highest cursor stream may be saved at, up to seq, while
+// reports about it are owed.
+func (f *Forwarder) limit(stream store.StreamID, seq store.Seq) store.Seq {
+	hold := f.lostHold[stream]
+	for _, o := range f.owed {
+		if o.stream == stream && (hold == 0 || o.seq < hold) {
+			hold = o.seq
+		}
+	}
+	if hold > 0 && seq >= hold {
+		return hold - 1
+	}
+	return seq
 }
 
 // confirmed forgets what was reported about events of stream up to seq,
@@ -615,13 +860,10 @@ func (s *session) receive(wait time.Duration) error {
 	}
 	s.flight = s.flight[k:]
 	for i, seq := range upto {
-		st := s.f.cfg.Streams[i]
-		if err := st.Cursors.SaveCursor(s.ctx, store.Cursor{Consumer: s.f.consumer, Stream: st.ID, Through: seq}); err != nil {
-			return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
+		s.conf[i] = seq
+		if err := s.save(i, seq); err != nil {
+			return err
 		}
-		s.saved[i] = seq
-		s.f.confirmed(st.ID, seq)
-		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = seq })
 	}
 	s.f.update(func(x *Status) { x.Confirmed += uint64(k); x.LastConfirmed = time.Now() })
 	return nil

@@ -425,3 +425,48 @@ func TestHealthSinkRefusesOutsideCollecting(t *testing.T) {
 		t.Fatalf("health stream went from %d to %d", before, after)
 	}
 }
+
+// A best-effort target is built with each stream's commit index and
+// forwards what was committed inside its replay window (A4 #94: a
+// best-effort target needs Stream.Index).
+func TestBestEffortTargetForwards(t *testing.T) {
+	nc, p, dir := forwardConfig(t, 1, func(nc *nodeconfigtest.Config) {
+		tg := nc.Targets[0]
+		delete(tg, "durable_ack")
+		delete(tg, "audit")
+		tg["class"], tg["replay_seconds"], tg["max_message_octets"] = "best-effort", 3600, 2048
+	})
+	srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	nc.Targets[0]["port"] = srv.Addr().Port
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.health(bg, "test.forwarded", map[string]string{"n": "a"})
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); fw.Run(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+	want, _ := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		fw.Check(bg)
+		if ss := st.Snapshot("site-a-node1").Targets["central"].Streams[string(HealthStream)]; ss.Cursor >= uint64(want) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ts := st.Snapshot("site-a-node1").Targets["central"]
+	if ts.Class != "best-effort" || ts.Streams[string(HealthStream)].Cursor < uint64(want) {
+		t.Fatalf("target status %+v; receiver errors %v", ts, srv.Errors())
+	}
+}

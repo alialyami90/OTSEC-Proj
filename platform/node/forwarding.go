@@ -77,8 +77,10 @@ func NewForwarding(rt *Runtime) (*Forwarding, error) {
 			if string(c.ID) != t.Name {
 				continue
 			}
+			// Index is used only by a best-effort target, to start a new
+			// cursor at its replay window (A4 #94).
 			cfg.Streams = append(cfg.Streams, forward.Stream{ID: c.Stream, Audit: c.Stream == AuditStream,
-				Outbox: liveStore{rt, c.Stream}, Cursors: liveStore{rt, c.Stream}})
+				Outbox: liveStore{rt, c.Stream}, Cursors: liveStore{rt, c.Stream}, Index: liveStore{rt, c.Stream}})
 			tg.streams = append(tg.streams, c.Stream)
 		}
 		sort.Slice(tg.streams, func(i, j int) bool { return tg.streams[i] < tg.streams[j] })
@@ -213,6 +215,7 @@ type liveStore struct {
 var (
 	_ c5.Outbox      = liveStore{}
 	_ c5.CursorStore = liveStore{}
+	_ c5.CommitIndex = liveStore{}
 )
 
 func (l liveStore) db() (*store.DB, error) {
