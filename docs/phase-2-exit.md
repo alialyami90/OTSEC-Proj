@@ -43,7 +43,7 @@ A6's status table, "Phase 2 slice status" in `docs/verification.md`, is the reco
 
 ### End to end on the real binaries (`tests/integration/slice/`, Linux)
 
-The four processes are the simulator, `otsec-collector`, `otsec node` and the RELP receiver over mutual TLS. Five of the eight suites (`test_slice_e2e`, identity, interruptions, buffer and floor) also run `check.py` over the simulator's recording. The failures, time and store-full suites do not yet, so their fault cases have no recording check; A6 is adding it in a separate PR.
+The four processes are the simulator, `otsec-collector`, `otsec node` and the RELP receiver over mutual TLS. Five of the eight suites (`test_slice_e2e`, identity, interruptions, buffer and floor) also run `check.py` over the simulator's recording. The failures, time and store-full suites do not yet, so their fault cases have no recording check at `709f4bc`; A6's #142 adds it.
 
 | Check | Result at `709f4bc` |
 | --- | --- |
@@ -120,7 +120,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
   - V-S9: file-system exhaustion. The test's limit is the quota, not the disk. F-013, a store with no reserve that could not open, remains a recorded risk;
   - V-S1: the field-by-field comparison with GT-HAND (A6);
   - V-S16: the `FTPACC`, `HTTPACC` and setting-absent goldens (A6), and V-S16 end to end;
-  - the recording check (`check.py`) in the failures, time and store-full suites (A6, in progress);
+  - the recording check (`check.py`) in the failures, time and store-full suites at `709f4bc` (A6's #142 adds it);
   - V-S18 (central) and V-S20 (OS support).
 - **V-S2 end to end** covers one documented SER example. The criterion asks for three, from two sections.
 - **A database that fails at open stays failed until the node restarts.** C5 says `ModeFailed` needs a restart. Main's store-full run at `9c50395` showed the cost: after a crash, the node's open met `otsec health`'s open during WAL recovery and failed with `SQLITE_BUSY_RECOVERY`, so every run stopped until the next restart. #138 removes that cause by setting `busy_timeout` before any statement that reads the file. A bounded retry of a transient open failure is proposed for Phase 3 (A5), and health shows the failed database meanwhile.
