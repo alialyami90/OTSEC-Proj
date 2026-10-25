@@ -303,7 +303,7 @@ The only way out was a collector reinstall. That fails closed, but the cause was
 - **Versioning.** A 0.3 reader rejects `language_probe: "unanswered"`, because the enum is closed. A node or collector rolled back on its own would quarantine such a run. The first release that carries this says so, beside D2-20's rollback note.
 - **Open for V-S12 (A6 with A5):** health shows `failed.timeout` for both a late device and a hung `SER`. The result's detail tells them apart, but health does not show it.
 
-**Evidence: simulated.** A6 ran the late-device case on the PR's binaries: `failed.timeout`, no suspension, no `asset-suspended` alarm. 6 of 8 mutants were killed, one survivor was equivalent, and the other was killed by the added test (A1 re-ran it). Whether a real relay's QUI reply matches the grammar remains H-12.
+**Evidence: simulated.** A6 ran the late-device case on the PR's binaries: `failed.timeout`, no suspension, no `asset-suspended` alarm. 6 of 8 mutants were killed, one survivor was equivalent, and the other was killed by the added test (A1 re-ran it). Whether a real relay's QUI reply matches the grammar remains H-13, and what a Spanish port replies remains H-12.
 
 ## D2-20: The failed-auth floor holds from ACC until QUI (amends D1-20)
 
@@ -311,8 +311,8 @@ The only way out was a collector reinstall. That fails closed, but the cause was
 
 **Ruling (A3 owns the collector, A1 approved, A6 reviewed):**
 - **`=>` no longer clears the floor.** It stamps the floor again and marks the level open (`level_open`). Only a session that sent QUI clears it (`EndAuth`). An exit without QUI sets the floor again from that moment, as before.
-- **A process that dies with the level open leaves the floor behind.** The next process counts the floor from when it opened the state, because the level lasted no later than the death. A state with an open level and no floor time is unavailable, which fails closed.
+- **A process that dies with the level open leaves the floor behind.** The next process counts the floor from when it opened the state, because the relay's idle timer last restarted no later than the death, which was before the next process opened the state (A3). A state with an open level and no floor time is unavailable, which fails closed.
 - **Rollback.** A collector built before this change refuses a state file that holds `level_open`, which fails closed. The first release that carries this tells operators so (A6), from `docs/phase2/A3-collector.md`.
 - `docs/phase1/A3-credential-design.md` and D1-20 describe the floor as cleared on `=>`; this ruling supersedes that sentence. The start of the floor at `ACC` is unchanged.
 
-**Evidence: simulated.** A6 killed 10 of 10 mutants and ran the kill after `=>` on the PR's binaries: the next two runs were refused `rate_limited`, and no second session reached the device. Whether a real relay holds Level 1 after a dropped connection is for H-13.
+**Evidence: simulated.** A6 killed 10 of 10 mutants and ran the kill after `=>` on the PR's binaries: the next two runs were refused `rate_limited`, and no second session reached the device. Whether a real relay holds Level 1 after a dropped connection is for H-15 (b) (A6).
