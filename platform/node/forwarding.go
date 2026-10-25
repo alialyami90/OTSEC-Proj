@@ -172,7 +172,11 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 			fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardHeld, fmt.Sprintf("stream %s held: %s", id, ss.Blocked))
 		}
 	}
-	fw.rt.opt.Status.SetTarget(tg.t.Name, ts)
+	if fw.rt.opt.Status.SetTarget(tg.t.Name, ts) {
+		// Written on a change, so health's counts are at most one check
+		// behind, not one tick (A6 on #118).
+		fw.rt.opt.Status.Write(string(fw.rt.cfg.NodeID))
+	}
 
 	// A required target is down when it has events waiting and has
 	// confirmed nothing for UnreachableAfter, or when no session has been

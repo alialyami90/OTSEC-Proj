@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
@@ -221,5 +222,29 @@ func TestHealthShowsCollectorStillSuspended(t *testing.T) {
 	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1, the collector has not accepted the clear yet; runs stay held, and " + node.ClearSuspensionFileName + " stays in place until this line is gone"
 	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
+// health shows each asset's last run and, when it failed, how many in a
+// row (D2-17).
+func TestHealthShowsAssetResults(t *testing.T) {
+	path, cfg := ranNode(t)
+	at := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetAssetResults(map[string]node.AssetResult{
+		relayID:   {Code: "failed.identity_unreadable", At: at, Failures: 4},
+		"relay-b": {Code: node.AlarmCollectorRefused, Refusal: "rate_limited", At: at, Failures: 1},
+		"relay-c": {Code: "ok", At: at},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	for _, want := range []string{
+		"FAILING asset " + relayID + ": last run failed.identity_unreadable at 2026-10-25T06:00:00Z; 4 failed in a row since the node started",
+		"FAILING asset relay-b: last run " + node.AlarmCollectorRefused + " at 2026-10-25T06:00:00Z (collector refused: rate_limited); 1 failed in a row since the node started",
+		"\nasset relay-c: last run ok at 2026-10-25T06:00:00Z\n",
+	} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Fatalf("health: %d %s\nwant %q in\n%s", code, errs, want, out)
+		}
 	}
 }

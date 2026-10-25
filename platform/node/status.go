@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ type Status struct {
 	suspensions map[string]asset.Suspension
 	collClears  map[string]string
 	collector   *CollectorStatus
+	assets      map[string]AssetResult
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -73,6 +75,9 @@ type StatusFile struct {
 	// them (seqreset.go): the trusted key and, after a reinstall, the new
 	// one beside it, for the administrator's fingerprint check.
 	Collector *CollectorStatus `json:"collector,omitempty"`
+	// Assets is each scheduled asset's last run that reached the collector
+	// in this process (results.go).
+	Assets map[string]AssetResult `json:"assets,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -200,14 +205,23 @@ func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Unlock()
 }
 
-// SetTarget records target's state.
-func (s *Status) SetTarget(name string, ts TargetStatus) {
+// SetAssetResults records each asset's last sent run.
+func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
+	s.assets = m
+	s.mu.Unlock()
+}
+
+// SetTarget records target's state and reports whether it changed.
+func (s *Status) SetTarget(name string, ts TargetStatus) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.targets == nil {
 		s.targets = map[string]TargetStatus{}
 	}
+	prev, ok := s.targets[name]
 	s.targets[name] = ts
-	s.mu.Unlock()
+	return !ok || !reflect.DeepEqual(prev, ts)
 }
 
 func (s *Status) add(sa StatusAlarm) {
@@ -251,6 +265,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if s.collector != nil {
 		c := *s.collector
 		f.Collector = &c
+	}
+	if len(s.assets) > 0 {
+		f.Assets = maps.Clone(s.assets)
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
