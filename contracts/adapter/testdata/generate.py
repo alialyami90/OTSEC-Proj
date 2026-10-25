@@ -460,6 +460,15 @@ def results():
     out["failed.internal"] = s.result(
         "failed", "failed.internal", {"result": "match", "items": [item("firmware_id", FID, FID, sp)]})
 
+    # The wake was answered by the password prompt: the floor should make
+    # this impossible, since a session that ended without QUI is left alone
+    # until it expires. Nothing more is sent. The wake may have landed as a
+    # blank password, so the collector sets the floor for this asset (A3 on
+    # #99 and #112).
+    s = Session()
+    s.connect(prompt=b"\r\nPassword: ? ")
+    out["failed.internal-wake-password-prompt"] = s.result("failed", "failed.internal")
+
     s = Session()
     s.connect()
     out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_3", schema="otsec.adapter/0.3")
