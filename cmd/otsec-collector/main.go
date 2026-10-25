@@ -21,11 +21,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
+	"otsec.local/otsec/platform/store"
 )
 
 func main() {
@@ -114,6 +116,7 @@ func start(data string, log *slog.Logger) (*running, error) {
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
 		State: state, Creds: creds, Registers: regs, Runner: hostedRunner(),
 		InstallLimit: cfg.InstallLimit, Alarm: alarm,
+		ReadClearFile: clearFileReader(l.admin, []string{cfg.Endpoint.Peer, collectorwire.ServiceSID(collectorwire.CollectorService)}),
 	})
 	if err != nil {
 		return nil, err
@@ -123,6 +126,22 @@ func start(data string, log *slog.Logger) (*running, error) {
 		return nil, err
 	}
 	return serveOn(ln, pipe, log), nil
+}
+
+// clearFileReader reads clear-suspension.json in the administrators'
+// folder for an asset.clear_suspension request, checking the folder and
+// then the file every time: owned by SYSTEM or Administrators, a protected
+// DACL, and nothing more than read for the node or the collector, so
+// neither service could have written what it reads (store.CheckProtectedDirFor,
+// ReadProtectedFileFor). On Linux, a development platform only, the check
+// is the mode. readers are the node's identity and the collector's own.
+func clearFileReader(dir string, readers []string) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		if err := store.CheckProtectedDirFor(dir, readers); err != nil {
+			return nil, err
+		}
+		return store.ReadProtectedFileFor(filepath.Join(dir, collector.ClearSuspensionFileName), collector.MaxClearSuspensionBytes, readers)
+	}
 }
 
 func serveOn(ln net.Listener, h collector.Handler, log *slog.Logger) *running {

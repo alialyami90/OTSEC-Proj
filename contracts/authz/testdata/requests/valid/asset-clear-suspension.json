@@ -1,0 +1,14 @@
+{
+  "contract": "otsec.authz/0.2",
+  "kind": "asset.clear_suspension",
+  "request_id": "req-20261025-0001",
+  "on_behalf_of": {
+    "type": "node",
+    "id": "site-a-node-1"
+  },
+  "policy_version": 3,
+  "asset_clear_suspension": {
+    "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+    "ref": "5d0c9a41-7e2b-4f68-a913-2c6e8b0f4d57"
+  }
+}

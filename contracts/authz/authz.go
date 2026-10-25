@@ -4,10 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+
+	"otsec.local/otsec/contracts/version"
 )
 
-// ContractID is the identifier every C7 message carries.
-const ContractID = "otsec.authz/0.1"
+// ContractID is the identifier every C7 message this package writes
+// carries. 0.2 added the asset.clear_suspension request and the
+// suspension_mismatch refusal (D2-15, A1).
+const ContractID = "otsec.authz/0.2"
+
+// AcceptsContract reports whether a reader of this package can read a
+// message stamped id: any minor of its major (contracts/README.md). What a
+// request may ask for under an older minor is checked by Validate.
+func AcceptsContract(id string) bool {
+	got, err := version.Parse(id)
+	return err == nil && contractVersion.Accepts(got)
+}
+
+var contractVersion, _ = version.Parse(ContractID)
 
 // PrincipalType says what kind of actor a principal is.
 type PrincipalType string
