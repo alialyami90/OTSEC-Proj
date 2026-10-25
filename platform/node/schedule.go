@@ -328,6 +328,10 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 			s.rt.opt.Status.Raise(col.AssetID, AlarmAuditUnavailable, "collector.request denied record: "+err.Error())
 		}
 		s.health(ctx, HealthCollectionRefused, col, rep.RequestID, "", map[string]string{"refusal": code})
+		if s.adopt(ctx, col.AssetID, resp.Reply) {
+			rep.Alarm = AlarmAssetSuspended
+			return rep
+		}
 		return s.alarm(ctx, rep, col.AssetID, AlarmCollectorRefused, "collector refused the run: "+code)
 	}
 
