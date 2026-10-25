@@ -145,10 +145,12 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The node configuration gains `tls_dir`. On Windows this is `OTSEC\config\tls`.
 - `<ref>.pem` holds a trust anchor. `<ref>.crt` and `<ref>.key` hold a client credential.
 - References match `^[a-z0-9_-]+$`, so a reference cannot name another path.
-- Each file must be a regular file. Symbolic links and reparse points are refused.
-- The key file is refused unless only the node's account can read it: mode 0600 on Linux, or the store's owner and ACE rule on Windows (A3's #84 notes apply).
+- `tls_dir` itself must pass the store's directory rule, which also refuses junctions.
+- Each file must be a regular file. Symbolic links, reparse points and Windows device names (such as `con.pem`) are refused. The checks run on the opened handle, not on the path, and each file has a size limit.
+- Every file must pass the same owner and ACE rule, not only the key: mode 0600 on Linux, or the store's owner and ACE rule on Windows (A3's #84 notes apply). The node itself has no write access to any of them. A trust anchor the node could write would let an attacker sit in the middle of the required audit path (A3 review of #95).
+- No file content appears in any log or error.
 - `forward.ClientTLS` resolves and checks everything before the node starts. A missing or bad reference stops the node; it never falls back to another reference.
-- The certificates and keys are test material only (D2-5). No key used here is used anywhere else.
+- The certificates and keys are test material only (D2-5). No key used here is used anywhere else. The key is stored unencrypted, which is part of the gate limitation below.
 
 A3's §9 design remains the target. Until it lands, the file resolver is a gate limitation, and a `device-observed` deployment (lifting D2-4 or D2-10) needs §9 first. A3 reviews this resolver.
 
