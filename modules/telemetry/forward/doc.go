@@ -25,6 +25,13 @@
 //     process for the event or range it is about, however many sessions it
 //     takes to deliver (A6 #89). A restart may raise it once more: a
 //     duplicate alarm, never a lost one.
+//   - A refused report does not stop draining. When the HealthSink refuses
+//     forward.text-omitted or forward.unreachable (the health stream at
+//     quota), the event it is about is still sent and the report is kept
+//     and committed later, in order; Status.Unreported counts them. A
+//     forwarder stalled on its own report would never drain the store that
+//     refused it. A too-large event whose report is refused holds only its
+//     own stream and is reported again on the next loop.
 //   - Size. A message whose device text or summary was dropped to fit is
 //     sent and reported as forward.text-omitted. An event
 //     that does not fit at all holds its stream: the forwarder raises

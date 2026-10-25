@@ -1,14 +1,18 @@
 package forward
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/syslog"
 	"otsec.local/otsec/modules/telemetry/forward/relptest"
 )
 
@@ -117,4 +121,114 @@ func TestStatusOpen(t *testing.T) {
 	if f.Status().Confirmed != 0 {
 		t.Errorf("confirmed %d with nothing committed", f.Status().Confirmed)
 	}
+}
+
+// refusing is a HealthSink that refuses while refuse is set, as a health
+// stream at quota does.
+type refusing struct {
+	sink
+	refuse atomic.Bool
+}
+
+func (r *refusing) Emit(ctx context.Context, h event.Health) (store.Key, error) {
+	if r.refuse.Load() {
+		return store.Key{}, errors.New("quota reached")
+	}
+	return r.sink.Emit(ctx, h)
+}
+
+// A health stream that refuses the forwarder's reports does not stop it:
+// the events are still sent, the reports are counted and committed once the
+// sink accepts again (A4 review of #98: a full store must still drain).
+func TestRefusedReportDoesNotStall(t *testing.T) {
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	r.fill(5)
+	var f *Forwarder
+	refused := false
+	r.run(func() bool {
+		if f == nil {
+			return false
+		}
+		st := f.Status()
+		if !refused && r.m.cursor(serStream) == 5 && st.Unreported == 5 {
+			refused = true
+			if st.ReportErr == nil {
+				t.Error("no ReportErr while refused")
+			}
+			hs.refuse.Store(false)
+		}
+		return refused && st.Unreported == 0 && r.m.cursor(hlStream) == 5
+	}, func(x *Forwarder) { f = x })
+	if f.Status().ReportErr != nil {
+		t.Errorf("ReportErr %v after every report committed", f.Status().ReportErr)
+	}
+	var named []string
+	for _, m := range r.srv.Acked() {
+		if s := string(m.Data); strings.Contains(s, `htype="forward.text-omitted"`) {
+			named = append(named, s[strings.Index(s, "sel751-feeder1/ser:"):][:20])
+		}
+	}
+	if len(named) != 5 {
+		t.Errorf("text-omitted forwarded for %v", named)
+	}
+}
+
+// Past maxOwed the refused reports are counted per type and summed up in
+// one event once the sink accepts.
+func TestRefusedReportsSummarised(t *testing.T) {
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	r.fill(5)
+	var f *Forwarder
+	refused := false
+	r.run(func() bool {
+		if f == nil {
+			return false
+		}
+		if !refused && r.m.cursor(serStream) == 5 && f.Status().Unreported == 5 {
+			refused = true
+			hs.refuse.Store(false)
+		}
+		return refused && f.Status().Unreported == 0 && r.m.cursor(hlStream) == 3
+	}, func(x *Forwarder) { f = x; f.maxOwed = 2 })
+	var summary bool
+	for _, m := range r.srv.Acked() {
+		s := string(m.Data)
+		summary = summary || strings.Contains(s, `htype="forward.text-omitted"`) && strings.Contains(s, `unreported=3`)
+	}
+	if !summary {
+		t.Error("no summary for the 3 reports past maxOwed")
+	}
+}
+
+// A too-large event whose report is refused holds only its own stream; the
+// others drain, and it is released once the report is committed and
+// confirmed.
+func TestTooLargeReportRefused(t *testing.T) {
+	other := store.StreamID("platform/other")
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	r.cfg.Streams = append(r.cfg.Streams, Stream{ID: other, Outbox: r.m, Cursors: r.m})
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	r.m.commit(t, other, healthEvent(event.HealthSourceSilent, map[string]string{"note": strings.Repeat("x", 1200)}))
+	r.m.commit(t, other, healthEvent(event.HealthSourceSilent, map[string]string{"note": "small"}))
+	r.m.commit(t, hlStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "ok"}))
+	var f *Forwarder
+	refused := false
+	r.run(func() bool {
+		if f == nil {
+			return false
+		}
+		if !refused && r.m.cursor(hlStream) == 1 && strings.Contains(f.Status().Streams[other].Blocked, "was refused") {
+			refused = true
+			hs.refuse.Store(false)
+		}
+		return refused && r.m.cursor(other) == 2
+	}, func(x *Forwarder) { f = x })
 }

@@ -45,6 +45,9 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestForwardsEveryEventOnce` | 100 events plus health: one connection, each eid once, oldest first, C6 0.2 rendering with `evc`. |
 | `TestReceiverClosesMidBatch` | **P2-A4 acceptance.** The receiver drops the connection at frame 1, 5, 37 or 99, and again 40 frames later. Every event is acknowledged. Each new connection starts no later than the event after the highest one already acknowledged, and runs without a gap. Duplicates are at most one window per close. |
 | `TestSessionEndsAndResends` | A 500, a serverclose, silence past the response timeout, and an answer given twice (a C6 violation) each end the session, and everything is delivered after reconnecting. A 500 names the refused event in `Status.LastErr`, so a collector that refuses the same event every session can be found (A2). |
+| `TestRefusedReportDoesNotStall` | A HealthSink that refuses (a health stream at quota) does not stop forwarding: the events are sent, `Status.Unreported` counts the reports, and they are committed once the sink accepts. |
+| `TestRefusedReportsSummarised` | Past the owed limit, refused reports are counted per type and committed as one summary event. |
+| `TestTooLargeReportRefused` | A too-large event whose report is refused holds only its own stream; the others drain, and it is released once the report is committed and confirmed. |
 | `TestStatusOpen` | `Status.Open` is set while an idle session is open and cleared when the collector goes away. |
 | `TestOpenNeedsRELPVersion0` | An open answered without `relp_version=0` is refused (A2). |
 | `TestSessionChecksOpenAnswer` | An open answered with a 500, or without `commands=syslog`, ends the session at the open, and no syslog frame reaches the collector (A6). |

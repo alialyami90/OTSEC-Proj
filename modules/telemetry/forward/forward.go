@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"slices"
 	"strconv"
@@ -72,6 +73,7 @@ type Forwarder struct {
 	cfg      Config
 	consumer store.ConsumerID
 	maxTXNR  uint64 // syslog.MaxTXNR; lowered by tests
+	maxOwed  int    // MaxOwed; lowered by tests
 
 	// What this process has already reported, so a session that ends and
 	// reconnects does not raise the same health event again (A6 #89).
@@ -79,6 +81,10 @@ type Forwarder struct {
 	tooLarge map[store.Key]store.Key      // held event -> its forward.too-large
 	omitted  map[store.Key]bool           // events reported as forward.text-omitted
 	skipped  map[store.StreamID]store.Seq // highest seq reported as forward.unreachable
+	// Health events the sink refused, oldest first, committed later
+	// (retryOwed). Past MaxOwed only their number per type is kept.
+	owed []event.Health
+	lost map[string]int
 
 	mu     sync.Mutex
 	status Status
@@ -99,7 +105,17 @@ type Status struct {
 	// while no session is open. A required target with Open zero is down
 	// even when nothing is waiting to be sent.
 	Open time.Time
+	// Unreported counts forward.* health events the HealthSink refused and
+	// the forwarder still holds to commit; ReportErr is the sink's last
+	// refusal. Both clear once every one is committed.
+	Unreported int
+	ReportErr  error
 }
+
+// MaxOwed is how many refused health events the forwarder keeps whole.
+// Beyond it, it keeps only their number per type and, once the sink accepts
+// again, commits one event per type stating how many went unreported.
+const MaxOwed = 1024
 
 // StreamStatus is one stream of the target.
 type StreamStatus struct {
@@ -158,8 +174,9 @@ func New(cfg Config) (*Forwarder, error) {
 	if cfg.RetryMax < cfg.RetryMin {
 		cfg.RetryMax = max(60*time.Second, cfg.RetryMin)
 	}
-	f := &Forwarder{cfg: cfg, consumer: store.ConsumerID(t.Name), maxTXNR: syslog.MaxTXNR,
+	f := &Forwarder{cfg: cfg, consumer: store.ConsumerID(t.Name), maxTXNR: syslog.MaxTXNR, maxOwed: MaxOwed,
 		tooLarge: map[store.Key]store.Key{}, omitted: map[store.Key]bool{}, skipped: map[store.StreamID]store.Seq{},
+		lost:   map[string]int{},
 		status: Status{Streams: map[store.StreamID]StreamStatus{}}}
 	for _, s := range cfg.Streams {
 		f.status.Streams[s.ID] = StreamStatus{}
@@ -201,6 +218,7 @@ func (f *Forwarder) Run(ctx context.Context) error {
 	wait := f.cfg.RetryMin
 	for {
 		before := f.Status().Confirmed
+		f.retryOwed(ctx)
 		err := f.session(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -237,6 +255,7 @@ type inflight struct {
 type held struct {
 	seq     store.Seq
 	release *store.Key
+	retry   bool // too-large whose report was refused: render it again
 }
 
 // session is one RELP session: open, send, confirm, save cursors.
@@ -281,6 +300,7 @@ func (f *Forwarder) session(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		f.retryOwed(ctx)
 		if err := s.release(); err != nil {
 			return err
 		}
@@ -428,13 +448,13 @@ func (s *session) skipped(stream store.StreamID, first, last store.Seq) error {
 		return nil // reported by an earlier session
 	}
 	first = max(first, s.f.skipped[stream]+1)
-	_, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardUnreachable, Details: map[string]string{
+	err := s.f.report(s.ctx, event.Health{Type: event.HealthForwardUnreachable, Details: map[string]string{
 		"target": s.f.cfg.Target.Name, "stream": string(stream),
 		"first_skipped": strconv.FormatUint(first, 10), "last_skipped": strconv.FormatUint(last, 10),
 		"reason": "pruned before this target confirmed them",
 	}})
 	if err != nil {
-		return fmt.Errorf("forward: report skipped %s %d-%d: %w", stream, first, last, err)
+		return err
 	}
 	s.f.skipped[stream] = last
 	return nil
@@ -514,7 +534,17 @@ func (s *session) render(i int, ev *store.Stored) ([]byte, error) {
 				"target": t.Name, "limit": strconv.Itoa(t.MaxMessageOctets),
 			}})
 			if err != nil {
-				return nil, fmt.Errorf("forward: report too-large %s: %w", ev.Key, err)
+				if s.ctx.Err() != nil {
+					return nil, s.ctx.Err()
+				}
+				// The release needs this event's key, so the stream waits;
+				// the other streams go on draining, which is what lets the
+				// health stream accept it again. Retried at the next loop.
+				s.hold[i] = &held{seq: ev.Key.Seq, retry: true}
+				s.f.setStream(st.ID, func(x *StreamStatus) {
+					x.Blocked = fmt.Sprintf("event %s does not fit %d octets, and forward.too-large about it was refused: %v", ev.Key, t.MaxMessageOctets, err)
+				})
+				return nil, nil
 			}
 			s.f.tooLarge[ev.Key] = key
 		}
@@ -522,10 +552,10 @@ func (s *session) render(i int, ev *store.Stored) ([]byte, error) {
 		return nil, nil
 	}
 	if (out.TextOmitted || out.SummaryDropped) && !own && !s.f.omitted[ev.Key] {
-		if _, err := s.f.cfg.Health.Emit(s.ctx, event.Health{Type: event.HealthForwardTextOmitted, Related: []event.EventID{ev.Key}, Details: map[string]string{
+		if err := s.f.report(s.ctx, event.Health{Type: event.HealthForwardTextOmitted, Related: []event.EventID{ev.Key}, Details: map[string]string{
 			"target": t.Name, "text_omitted": strconv.FormatBool(out.TextOmitted), "summary_dropped": strconv.FormatBool(out.SummaryDropped),
 		}}); err != nil {
-			return nil, fmt.Errorf("forward: report text-omitted %s: %w", ev.Key, err)
+			return nil, err
 		}
 		s.f.omitted[ev.Key] = true
 	}
@@ -550,6 +580,10 @@ func (s *session) stop(i int, seq store.Seq, release *store.Key, why string) {
 // confirmed by this target (C6 size rule).
 func (s *session) release() error {
 	for i, h := range s.hold {
+		if h != nil && h.retry {
+			s.hold[i] = nil // the next fill renders it and reports again
+			continue
+		}
 		if h == nil || h.release == nil || s.inFlight(i) {
 			continue
 		}
@@ -583,6 +617,60 @@ func (s *session) inFlight(i int) bool {
 
 // confirmed forgets what was reported about events of stream up to seq,
 // which this target has now passed, so the sets stay small.
+// report commits a health event the forwarder raises about an event it
+// still sends. A sink that refuses it (the health stream at quota, its
+// database not open) does not stop forwarding: draining is what frees the
+// store, and a forwarder stalled on its own report would never drain it.
+// The event is kept and committed later, after the ones refused before it;
+// Status counts it meanwhile. Only a cancelled ctx is returned.
+func (f *Forwarder) report(ctx context.Context, h event.Health) error {
+	f.retryOwed(ctx)
+	if len(f.owed) == 0 {
+		_, err := f.cfg.Health.Emit(ctx, h)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		f.update(func(s *Status) { s.ReportErr = err })
+	}
+	if len(f.owed) < f.maxOwed {
+		f.owed = append(f.owed, h)
+	} else {
+		f.lost[h.Type]++
+	}
+	f.update(func(s *Status) { s.Unreported++ })
+	return ctx.Err()
+}
+
+// retryOwed commits the refused health events in order, stopping at the
+// first the sink still refuses, then one summary per type for those past
+// MaxOwed.
+func (f *Forwarder) retryOwed(ctx context.Context) {
+	for len(f.owed) > 0 {
+		if _, err := f.cfg.Health.Emit(ctx, f.owed[0]); err != nil {
+			f.update(func(s *Status) { s.ReportErr = err })
+			return
+		}
+		f.owed = f.owed[1:]
+		f.update(func(s *Status) { s.Unreported-- })
+	}
+	for _, typ := range slices.Sorted(maps.Keys(f.lost)) {
+		n := f.lost[typ]
+		if _, err := f.cfg.Health.Emit(ctx, event.Health{Type: typ, Details: map[string]string{
+			"target": f.cfg.Target.Name, "unreported": strconv.Itoa(n),
+			"reason": "the health stream refused them while the forwarder held " + strconv.Itoa(f.maxOwed) + " others",
+		}}); err != nil {
+			f.update(func(s *Status) { s.ReportErr = err })
+			return
+		}
+		delete(f.lost, typ)
+		f.update(func(s *Status) { s.Unreported -= n })
+	}
+	f.update(func(s *Status) { s.ReportErr = nil })
+}
+
 func (f *Forwarder) confirmed(stream store.StreamID, seq store.Seq) {
 	for k := range f.omitted {
 		if k.Stream == stream && k.Seq <= seq {
