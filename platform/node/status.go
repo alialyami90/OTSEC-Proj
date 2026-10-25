@@ -62,12 +62,19 @@ type TargetStatus struct {
 	Class string `json:"class"`
 	// LastConfirmed is when the target last confirmed a transaction in
 	// this process; zero if never.
-	LastConfirmed time.Time `json:"last_confirmed,omitempty"`
+	LastConfirmed time.Time `json:"last_confirmed,omitzero"`
 	Confirmed     uint64    `json:"confirmed"`
 	// LastErr is why the last session ended. It is the forwarder's error
 	// text, which never holds event content.
-	LastErr string                       `json:"last_error,omitempty"`
-	Streams map[string]TargetStreamState `json:"streams"`
+	LastErr string `json:"last_error,omitempty"`
+	// Open is when the current session opened; zero while none is open.
+	Open time.Time `json:"open,omitzero"`
+	// Unreported counts forward.* health events the node's health stream
+	// refused and the forwarder still holds to commit; ReportErr is the
+	// last refusal (A4 #94).
+	Unreported int                          `json:"unreported,omitempty"`
+	ReportErr  string                       `json:"report_error,omitempty"`
+	Streams    map[string]TargetStreamState `json:"streams"`
 }
 
 // TargetStreamState is one stream of a target: the saved cursor, the
