@@ -193,7 +193,7 @@ func TestD210CollectorLoopbackRuns(t *testing.T) {
 func TestD210CollectorRefusesNonLoopback(t *testing.T) {
 	ip := hostIP(t)
 	l := listen(t, ip)
-	any := listen(t, "0.0.0.0") // reached by "0.0.0.0" and "::" if they were dialled
+	unspec := listen(t, "0.0.0.0") // reached by "0.0.0.0" and "::" if they were dialled
 	for _, host := range []string{
 		ip,                 // this host's own address: a real connection if the lock fails
 		"0.0.0.0",          // unspecified: Linux dials it as the local host
@@ -207,13 +207,23 @@ func TestD210CollectorRefusesNonLoopback(t *testing.T) {
 			r := &dialRunner{}
 			port := l.port()
 			if host == "0.0.0.0" || host == "::" {
-				port = any.port()
+				port = unspec.port()
 			}
 			pipe, rev, err := lockPipeline(t, host, port, r)
 			if err != nil {
-				// Refused while loading, which is before any dial too.
-				t.Logf("refused at NewPipeline: %v", err)
+				// C1 refuses a name or a zoned literal while loading, which is
+				// before any dial too. Any other load error means the rig, not
+				// lock 2, stopped the case.
+				if (host == "localhost" || host == "127.0.0.1%lo") &&
+					strings.Contains(err.Error(), strconv.Quote(host)) && strings.Contains(err.Error(), "not an IP address") {
+					t.Logf("refused at NewPipeline: %v", err)
+				} else {
+					t.Errorf("NewPipeline refused for another reason: %v", err)
+				}
 				return
+			}
+			if host == "localhost" || host == "127.0.0.1%lo" {
+				t.Fatalf("NewPipeline loaded an asset whose host is %q", host)
 			}
 			reply, work := pipe.Handle(context.Background(), lockRun(lockAsset, rev))
 			if work != nil {
@@ -233,7 +243,7 @@ func TestD210CollectorRefusesNonLoopback(t *testing.T) {
 		})
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := l.n.Load() + any.n.Load(); n != 0 {
+	if n := l.n.Load() + unspec.n.Load(); n != 0 {
 		t.Errorf("listeners saw %d connections, want 0", n)
 	}
 }
