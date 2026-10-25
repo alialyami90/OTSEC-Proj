@@ -11,7 +11,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | ID | Package | Identifier | Owner | Status (2026-10-24) |
 | --- | --- | --- | --- | --- |
 | C1 | `contracts/asset` | `otsec.asset/0.1` | A2 | Merged (#32). D1-24 `Endpoint.target` pending (A2). |
-| C2 | `contracts/adapter` | `otsec.adapter/0.1` | A2 | Merged (#51). |
+| C2 | `contracts/adapter` | `otsec.adapter/0.2` | A2 | Merged (#51). 0.2: `failed.unexpected_password_prompt` and the probe QUI exemption (D2-14). |
 | C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) | Merged (#27, #32); SEL-751 content rev 2. |
 | C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
 | C5 | `contracts/store` | `otsec.store/0.1` | A5 | Merged (#33). |

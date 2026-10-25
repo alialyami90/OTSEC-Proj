@@ -15,9 +15,9 @@ import (
 
 // Contract is this package's identifier. Invocations are strict (unknown
 // fields rejected); results are not.
-const Contract = "otsec.adapter/0.1"
+const Contract = "otsec.adapter/0.2"
 
-var self = version.ID{Name: "adapter", Major: 0, Minor: 1}
+var self = version.ID{Name: "adapter", Major: 0, Minor: 2}
 
 // Invocation asks the collector to run one register operation against one
 // endpoint of one asset.

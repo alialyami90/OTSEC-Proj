@@ -164,3 +164,27 @@ A3's §9 design remains the target. Until it lands, the file resolver is a gate 
 - A red job on main is fixed before anything else merges, unless the PR being merged is the fix.
 - The owner's PC is never registered as a self-hosted runner (A3). In a public repository, a pull request from anyone could otherwise run code on it.
 - The Phase 2 gate still needs the slice suite on Windows and on Linux with rsyslog, from one main commit. GitHub's `windows-latest` and `integration` jobs provide that.
+
+## D2-14: C2 0.2 closes two gaps in the QUI rule
+
+**Context (A2, #99):** A2's `FuzzRun` found two sessions where no result could both follow the safety rule and pass `Validate`. The adapter followed the safety rule. The collector would then quarantine the result (#82) rather than use it. Neither state has been seen on a device. The manual does not describe either reply.
+
+1. **A reply at Level 1 ends in `Password: ?`.** Anything sent now is a password attempt, so QUI would be a second attempt (C-19). D18 wanted QUI because Level 1 was reached.
+2. **A rejected probe reply prints `=>` or `=>>`.** D16 sends nothing after a rejected probe, not even QUI. D18 wanted QUI because a prompt above 0 was seen.
+
+**Ruling:** both are closed in C2 `otsec.adapter/0.2`. A1 applied the change, and A2 (C2 owner), A3, A4 and A6 review it.
+
+- **Gap 1 gets a new code, `failed.unexpected_password_prompt`.**
+  - It is `failed`, not `refused`, because the session was already under way when the device state appeared. It is a distinct code, not `failed.unexpected_access_level`, so that this credential-relevant state is not hidden behind a code that means something else.
+  - It is exempt from the QUI rule. QUI is refused for it.
+  - The bytes must back it: Level 1 was reached, an operate-phase line was the last sent, and the last prompt received is `Password: ?`.
+  - The asset is suspended with `unexpected-access-level`. Repeating the invocation would send ACC and the password again into the same state, which is the code table's rule for suspension. The credential is not suspended, because the relay accepted the password and nothing was sent at the prompt.
+  - The session ends without QUI, so the C7 failed-auth floor applies to the next session (A3's PR 3 sets it again after an exit without QUI).
+- **Gap 2 adds `refused.language_probe_rejected` to the codes exempt from the QUI rule.** D16 already requires the QUI probe to be the last line sent, so the bytes are still bound. No new code is needed.
+- **Versioning.**
+  - `Contract` becomes `otsec.adapter/0.2`, and writers stamp 0.2.
+  - Every code records the minor that added it. A result of an earlier minor that carries a newer code is refused, so a 0.1 result can never carry the new code.
+  - Results of 0.1 still validate unchanged.
+  - The `failed.unknown` example moves to 0.3, because 0.2 now knows every code it defines.
+
+Both states are simulated (fuzz-found). A capture that shows either one (H-13, H-15) is evidence for or against the ruling.

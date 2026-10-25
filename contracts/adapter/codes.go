@@ -74,6 +74,12 @@ const (
 	FailedIdentityMismatchLate Code = "failed.identity_mismatch"           // identity differs in Level 1 output (SER header serial)
 	FailedAccessLevelDropped   Code = "failed.access_level_dropped"        // prompt fell back to "=" mid-session (TIDLE)
 	FailedDeviceError          Code = "failed.device_error"                // "Invalid Command", "Invalid Access Level" or similar
+	// FailedUnexpectedPasswordPrompt (0.2): a reply at Level 1 ended in
+	// "Password: ?". Anything sent now is a password attempt, so nothing more
+	// is sent, not even QUI (C-19, D2-14). Repeating the invocation would
+	// send ACC and the password again into the same state, so the asset is
+	// suspended; the password was accepted, so the credential is not.
+	FailedUnexpectedPasswordPrompt Code = "failed.unexpected_password_prompt"
 
 	// Any time after connecting.
 	FailedTimeout          Code = "failed.timeout"            // a step or the deadline expired
@@ -92,6 +98,9 @@ const (
 
 type codeInfo struct {
 	stage Stage
+	// since is the minor that added the code. A result of an earlier minor
+	// cannot carry it.
+	since int
 	// suspends is the C1 suspension reason the code sets on the asset, if any.
 	suspends asset.SuspensionReason
 	// credential is the C7 suspension reason the code sets on the credential,
@@ -101,42 +110,43 @@ type codeInfo struct {
 }
 
 var codes = map[Code]codeInfo{
-	RefusedNotInvocable:           {StageBeforeConnect, "", ""},
-	RefusedInvalidParams:          {StageBeforeConnect, "", ""},
-	RefusedLimits:                 {StageBeforeConnect, "", ""},
-	RefusedRegisterUnverified:     {StageBeforeConnect, "", ""},
-	RefusedFirmwareUndeclared:     {StageBeforeConnect, "", ""},
-	RefusedFirmwareNotAllowed:     {StageBeforeConnect, "", ""},
-	RefusedAssetSuspended:         {StageBeforeConnect, "", ""},
-	RefusedCredentialUnavailable:  {StageBeforeConnect, "", ""},
-	RefusedPlaintextNotAcked:      {StageBeforeConnect, "", ""},
-	RefusedSessionBusy:            {StageBeforeConnect, "", ""},
-	RefusedRateLimited:            {StageBeforeConnect, "", ""},
-	FailedConnect:                 {StageBeforeConnect, "", ""},
-	RefusedSessionElevated:        {StageBeforeAuth, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
-	RefusedSessionPendingPassword: {StageBeforeAuth, "", ""}, // as elevated: TIDLE clears it
-	RefusedInvocationMismatch:     {StageBeforeConnect, "", ""},
-	RefusedLanguageProbe:          {StageBeforeAuth, asset.SuspendLanguageNotEnglish, ""},
-	RefusedIdentityMismatch:       {StageBeforeAuth, asset.SuspendIdentityMismatch, ""},
-	RefusedPasswordPromptAbsent:   {StageAuth, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
-	FailedAuthRejected:            {StageAuth, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
-	FailedUnexpectedLevel:         {StageAuth, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
-	RefusedLanguageNotEnglish:     {StageAfterAuth, asset.SuspendLanguageNotEnglish, ""},
-	RefusedFirmwareCondition:      {StageAfterAuth, asset.SuspendFirmwareNotAllowed, ""},
-	FailedIdentityMismatchLate:    {StageAfterAuth, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
-	FailedAccessLevelDropped:      {StageAfterAuth, "", ""},
-	FailedDeviceError:             {StageAfterAuth, "", ""},
-	FailedTimeout:                 {StageAny, "", ""},
-	FailedTransportClosed:         {StageAny, "", ""},
-	FailedResponseTooLarge:        {StageAny, "", ""},
-	FailedEgressViolation:         {StageAny, "", ""},
-	FailedInternal:                {StageAny, "", ""},
-	FailedUnknown:                 {StageAny, "", ""},
-	PartialParseErrors:            {StageAfterAuth, "", ""},
-	PartialReadRowsExceeded:       {StageAfterAuth, "", ""},
+	RefusedNotInvocable:            {StageBeforeConnect, 1, "", ""},
+	RefusedInvalidParams:           {StageBeforeConnect, 1, "", ""},
+	RefusedLimits:                  {StageBeforeConnect, 1, "", ""},
+	RefusedRegisterUnverified:      {StageBeforeConnect, 1, "", ""},
+	RefusedFirmwareUndeclared:      {StageBeforeConnect, 1, "", ""},
+	RefusedFirmwareNotAllowed:      {StageBeforeConnect, 1, "", ""},
+	RefusedAssetSuspended:          {StageBeforeConnect, 1, "", ""},
+	RefusedCredentialUnavailable:   {StageBeforeConnect, 1, "", ""},
+	RefusedPlaintextNotAcked:       {StageBeforeConnect, 1, "", ""},
+	RefusedSessionBusy:             {StageBeforeConnect, 1, "", ""},
+	RefusedRateLimited:             {StageBeforeConnect, 1, "", ""},
+	FailedConnect:                  {StageBeforeConnect, 1, "", ""},
+	RefusedSessionElevated:         {StageBeforeAuth, 1, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
+	RefusedSessionPendingPassword:  {StageBeforeAuth, 1, "", ""}, // as elevated: TIDLE clears it
+	RefusedInvocationMismatch:      {StageBeforeConnect, 1, "", ""},
+	RefusedLanguageProbe:           {StageBeforeAuth, 1, asset.SuspendLanguageNotEnglish, ""},
+	RefusedIdentityMismatch:        {StageBeforeAuth, 1, asset.SuspendIdentityMismatch, ""},
+	RefusedPasswordPromptAbsent:    {StageAuth, 1, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
+	FailedAuthRejected:             {StageAuth, 1, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
+	FailedUnexpectedLevel:          {StageAuth, 1, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
+	RefusedLanguageNotEnglish:      {StageAfterAuth, 1, asset.SuspendLanguageNotEnglish, ""},
+	RefusedFirmwareCondition:       {StageAfterAuth, 1, asset.SuspendFirmwareNotAllowed, ""},
+	FailedIdentityMismatchLate:     {StageAfterAuth, 1, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
+	FailedAccessLevelDropped:       {StageAfterAuth, 1, "", ""},
+	FailedDeviceError:              {StageAfterAuth, 1, "", ""},
+	FailedUnexpectedPasswordPrompt: {StageAfterAuth, 2, asset.SuspendUnexpectedLevel, ""},
+	FailedTimeout:                  {StageAny, 1, "", ""},
+	FailedTransportClosed:          {StageAny, 1, "", ""},
+	FailedResponseTooLarge:         {StageAny, 1, "", ""},
+	FailedEgressViolation:          {StageAny, 1, "", ""},
+	FailedInternal:                 {StageAny, 1, "", ""},
+	FailedUnknown:                  {StageAny, 1, "", ""},
+	PartialParseErrors:             {StageAfterAuth, 1, "", ""},
+	PartialReadRowsExceeded:        {StageAfterAuth, 1, "", ""},
 }
 
-// Codes lists every code in the 0.1 taxonomy.
+// Codes lists every code in the taxonomy of this package's minor.
 func Codes() []Code {
 	out := make([]Code, 0, len(codes))
 	for c := range codes {
@@ -145,7 +155,7 @@ func Codes() []Code {
 	return out
 }
 
-// Known reports whether c is in the 0.1 taxonomy.
+// Known reports whether c is in the taxonomy of this package's minor.
 func (c Code) Known() bool { _, ok := codes[c]; return ok }
 
 // Effective is the code a reader acts on: c itself, or FailedUnknown.
@@ -166,6 +176,9 @@ func (c Code) Status() Status {
 	}
 	return StatusFailed
 }
+
+// Since is the minor that added the code: 1 for the 0.1 codes.
+func (c Code) Since() int { return codes[c.Effective()].since }
 
 // Stage is how far a session may have got for this code.
 func (c Code) Stage() Stage { return codes[c.Effective()].stage }
