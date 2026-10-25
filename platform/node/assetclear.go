@@ -136,6 +136,9 @@ func (s *Scheduler) clearAtCollector(ctx context.Context, assetID string) bool {
 		} else {
 			s.rt.opt.Status.Raise(assetID, AlarmAuditUnavailable, "collector.request denied record: "+err.Error())
 		}
+		if s.adopt(ctx, assetID, reply) {
+			return false
+		}
 		return still("refused "+code, "it refused the clear ("+code+"); it is sent again before the asset's next run")
 	}
 	rec, err := s.requestRecord(req, audit.OutcomeAllowed, "", reply.CollectorSeq)
