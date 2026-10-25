@@ -242,6 +242,12 @@ func (c *check) dialogue(r Result, code Code) {
 	if code == RefusedLanguageProbe && (len(ss) == 0 || !(ss[len(ss)-1].phase == PhaseProbe && isLine(ss[len(ss)-1].b, "QUI"))) {
 		c.fail("%s: the QUI probe is the last line sent (D16)", code)
 	}
+	// The bytes back the code: the ID reply is what could not be read, so
+	// ID was the last line sent, in the probe phase, after an accepted probe.
+	if code == FailedIdentityUnreadable && (len(ss) == 0 || !(ss[len(ss)-1].phase == PhaseProbe && isLine(ss[len(ss)-1].b, "ID")) ||
+		s.LanguageProbe != ProbeAccepted) {
+		c.fail("%s: ID is the last line sent, in the probe phase, after an accepted probe", code)
+	}
 	if code == RefusedSessionPendingPassword && (len(ss) != 0 || last != promptPassword) {
 		c.fail("%s: the device printed only %q, and nothing was sent", code, promptPassword)
 	}

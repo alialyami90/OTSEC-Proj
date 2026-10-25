@@ -1,0 +1,79 @@
+{
+  "schema": "otsec.adapter/0.3",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 3,
+  "target": "simulated",
+  "status": "failed",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.6Z",
+  "transcript": {
+    "data": "DQoNCj1RVUkNClFVSQ0KAkNvbWFuZG8gbm8gdmFsaWRvDQoDPUlEDQpJRA0KIkZJRD1TRUwtNzUxLVI1MDEtVjAtWjEwNDEwMS1EMjAyNjA5MTAiLCIwMDAwIg0KIkJGSUQ9Qk9PVExEUi1SNTAwLVYwLVowMDAwMDAtRDIwMDkwOTI1IiwiMDAwMCINCiJDSUQ9RTc1NCIsIjAwMDAiDQoiREVWSUQ9RkVFREVSIDEiLCIwMDAwIg0KIkRFVkNPREU9OTEiLCIwMDAwIg0KIlBBUlROTz03NTE1MDFBMUE1QTBYOEMwODAiLCIwMDAwIg0KPQ==",
+    "sha256": "95db21936a0e5ed9d15e712b690fbf9507282edf497e0ecb14d53946142c1945",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 5,
+        "length": 5,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 10,
+        "length": 27,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 37,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 41,
+        "length": 203,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.5Z"
+      }
+    ],
+    "redactions": []
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "rejected",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "0",
+    "quit_sent": false
+  },
+  "identity": {
+    "result": "not-checked"
+  },
+  "error": {
+    "code": "failed.identity_unreadable"
+  }
+}
