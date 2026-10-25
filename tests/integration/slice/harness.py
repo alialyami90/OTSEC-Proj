@@ -232,6 +232,15 @@ def rsyslogd():
     return _rsyslogd_copy
 
 
+def imrelp():
+    """True when rsyslog's imrelp module is installed. GitHub's runners ship
+    rsyslogd without it (rsyslog-relp is a separate package), so finding
+    rsyslogd alone does not mean the RELP leg can run."""
+    import glob
+    return any(glob.glob(p) for p in ("/usr/lib/*/rsyslog/imrelp.so", "/usr/lib/rsyslog/imrelp.so",
+                                      "/usr/lib64/rsyslog/imrelp.so"))
+
+
 def free_port():
     import socket
     s = socket.socket()
