@@ -1,6 +1,7 @@
 """Builds sel-751.json, A2's SEL-751 register content, from A1's Phase 0
 conversion (sel-751-phase0.json, which stays pinned) and the SEL-751
-instruction manual text.
+instruction manual text. sel-751-rev2.json is revision 2 as signed, pinned
+so the rollback floor can be tested against it.
 
 Run from this directory with
 `python3 -I build_sel751.py <S22 text, e.g. $OTSEC_SEL751_TEXT>`. The output
@@ -17,6 +18,12 @@ citation (docs/phase1/reviews/C3-A2.md):
 - sel.ser.other_args cites S22 Table 7.63 and 7.64 instead of a pseudo-source,
   and is classed unknown with documented-untested evidence.
 - sel.id's Figure 3.20 citation is marked as a negative fixture (C-20).
+
+Revision 3 (rev3 below) makes every documented command word a deny-rule
+mnemonic, so authz.ValidateSecret refuses a password the relay could read as
+a command, and denies the Spanish forms that change state (A1's brief
+approval on #99's follow-up). Every word is checked against the text of its
+S22 page before anything is written.
 """
 
 import json
@@ -74,7 +81,171 @@ def known(rs):
     return out
 
 
+# Revision 3. Every documented command word of S22: the Relay Command Summary
+# (pp. 1 to 9 at the end of the manual, English and Spanish columns) and
+# Table C.2 (Compressed ASCII). Each entry is the word as printed and the
+# summary page where it first appears; check_words finds each one on that
+# page of the text before anything is written. The relay reads the first
+# three letters of a command (Command Summary p. 1), so that is the mnemonic.
+ENGLISH = [
+    ("ACC", 1), ("ID", 1), ("QUIT", 1), ("2AC", 1), ("BRE", 1), ("CEV", 1), ("COM", 1),
+    ("COU", 2), ("DATE", 2), ("ETH", 2), ("EVE", 2), ("FIL", 2),
+    ("FGS", 3), ("GOOSE", 3), ("GROUP", 3), ("HELP", 3),
+    ("HIS", 4), ("HSG", 4), ("HSR", 4), ("IRIG", 4), ("LDP", 4), ("LOG", 4), ("MAC", 4), ("MET", 4),
+    ("PING", 5), ("PRP", 5), ("RSTP", 5), ("SER", 5),
+    ("SHO", 6), ("STA", 6), ("SUM", 6), ("TAR", 6),
+    ("TIME", 7), ("TRI", 7), ("89C", 7), ("89O", 7), ("AFT", 7), ("ANA", 7), ("CAL", 7), ("CLO", 7), ("CON", 7),
+    ("COPY", 8), ("INI", 8), ("L_D", 8), ("LOO", 8), ("OPE", 8), ("PARTNO", 8), ("PAS", 8), ("PUL", 8),
+    ("R_S", 8), ("SET", 8),
+    ("TEST", 9), ("THE", 9), ("VEC", 9),
+]
+# Spanish words that differ from the English ones, with the English word.
+SPANISH = [
+    ("SAL", "QUIT", 1), ("INT", "BRE", 1), ("FEC", "DATE", 2), ("GRUPO", "GROUP", 3), ("AYUDA", "HELP", 3),
+    ("MED", "MET", 4), ("MOS", "SHO", 6), ("EST", "STA", 6), ("BAN", "TAR", 6), ("HORA", "TIME", 7),
+    ("89A", "89O", 7), ("CER", "CLO", 7), ("ABR", "OPE", 8), ("AJU", "SET", 8),
+]
+COMPRESSED = ["BNAME", "CASCII", "CBRE", "CEVENT", "CHISTORY", "CLDP", "CMETER", "CSE", "CSTATUS", "CSUMMARY",
+              "DNAME", "ID", "SNS"]
+# Words with an approved line; sel.unapproved.command leaves them out.
+APPROVED = {"ACC", "ID", "QUI", "SHO", "SER"}
+
+
+def summary_pages(text_path):
+    """The Relay Command Summary page by page, and the text of Table C.2."""
+    with open(text_path, encoding="utf-8", errors="replace") as f:
+        lines = f.read().split("\n")
+    start = max(i for i, l in enumerate(lines) if l.strip() == "SEL-751 Relay Command Summary")
+    pages, page = {1: []}, 1
+    head = re.compile(r"SEL-751 Relay Command Summary (\d)\s*$|^\s*(\d) SEL-751 Relay Command Summary")
+    for l in lines[start:]:
+        m = head.search(l)
+        if m:
+            page = int(m.group(1) or m.group(2))
+            pages.setdefault(page, [])
+        pages[page].append(l)
+    c2 = next(i for i, l in enumerate(lines) if "Table C.2   Compressed ASCII Commands" in l)
+    end = next(i for i in range(c2, len(lines)) if "Interleaved ASCII" in lines[i])
+    return {k: "\n".join(v) for k, v in pages.items()}, "\n".join(lines[c2:end])
+
+
+def check_words(text_path):
+    pages, c2 = summary_pages(text_path)
+    if sorted(pages) != list(range(1, 10)):
+        sys.exit("command summary pages %s, want 1 to 9" % sorted(pages))
+    on = lambda w, t: re.search(r"(?<![\w])%s(?![\w])" % re.escape(w), t)
+    for w, pg in ENGLISH:
+        if not on(w, pages[pg]):
+            sys.exit("%s is not on command summary p. %d" % (w, pg))
+    for w, _, pg in SPANISH:
+        if not on(w, pages[pg]):
+            sys.exit("%s is not on command summary p. %d" % (w, pg))
+    for w in COMPRESSED:
+        if not on(w, c2):
+            sys.exit("%s is not in Table C.2" % w)
+
+
+def interleave(words):
+    """Orders words so that no two neighbours share a first character. Go's
+    regexp parser factors a common prefix out of neighbouring alternatives,
+    so (CEV|COU) parses as C(?:EV|OU), and authz.ValidateSecret would then
+    derive the mnemonic C and refuse every secret that starts with C. Do not
+    sort the alternation of sel.unapproved.command."""
+    groups = {}
+    for w in sorted(words):
+        groups.setdefault(w[0], []).append(w)
+    out = []
+    while groups:
+        for k in sorted(groups, key=lambda k: (-len(groups[k]), k)):
+            if not out or out[-1][0] != k:
+                out.append(groups[k].pop(0))
+                if not groups[k]:
+                    del groups[k]
+                break
+        else:
+            sys.exit("cannot order %s without neighbours sharing a first character" % sorted(words))
+    return out
+
+
+SUMMARY = "Command Summary p.%d (Spanish column: %s)"
+
+
+def rev3(p):
+    p["revision"] = 3
+    p["issued"] = "2026-10-25"
+    rules = {d["id"]: d for d in p["denied"]}
+
+    def extend(id, pattern, ref, notes=None):
+        d = rules[id]
+        d["pattern"] = pattern
+        d["citations"].append({"source": "S22", "ref": ref})
+        if notes:
+            d["notes"] = (d.get("notes", "") + " " + notes).strip()
+
+    def add_after(after, rule):
+        i = next(i for i, d in enumerate(p["denied"]) if d["id"] == after)
+        p["denied"].insert(i + 1, rule)
+
+    def spanish(id, pattern, ref, side_effects, level=None):
+        r = {"id": id, "classification": "state-changing", "pattern": pattern,
+             "citations": [{"source": "S22", "ref": ref}], "evidence": {"class": "documented-untested"},
+             "side_effects": side_effects,
+             "notes": "Spanish form, in its own rule: in one alternation with the English word, Go's regexp "
+                      "parser would factor out the shared first letters and authz.ValidateSecret would derive "
+                      "a shorter mnemonic."}
+        if level:
+            r["access_level"] = level
+        return r
+
+    extend("sel.disconnect", r"(?i)\s*89(C|O|A)\w*(\s.*)?", SUMMARY % (7, "89A m and 89A n m open disconnects, Level 2"))
+    extend("sel.breaker.ope", r"(?i)\s*(OPE|ABR)\w*(\s.*)?", SUMMARY % (8, "ABR opens the breaker"))
+    add_after("sel.breaker.clo", spanish("sel.breaker.clo.es", r"(?i)\s*CER\w*(\s.*)?",
+                                         SUMMARY % (7, "CER closes the breaker, Level 2"),
+                                         "Closes the breaker.", "2"))
+    extend("sel.settings.set", r"(?i)\s*(SET|AJU)\w*(\s.*)?", SUMMARY % (8, "AJU changes settings; p.9 AJU ... TERSO"))
+    add_after("sel.settings.group", spanish("sel.settings.group.es", r"(?i)\s*GRU\w*\s+\S.*",
+                                            SUMMARY % (8, "GRUPO n changes the active group, Level 2"),
+                                            "Changes the active settings group.", "2"))
+    extend("sel.clock.set", r"(?i)\s*(DAT|TIM|FEC|HOR)\w*\s+\S.*",
+           SUMMARY % (2, "FEC sets the date") + "; " + SUMMARY % (7, "HORA sets the time"))
+    add_after("sel.met.reset", spanish("sel.met.reset.es", r"(?i)\s*MED\w*\s+R(D|E|M|P)\b.*",
+                                       SUMMARY % (5, "MED RD, MED RE, MED RM and MED RP reset meter data, Level 1"),
+                                       "Resets demand, energy, max/min or peak meter data.", "1"))
+    extend("sel.tar.reset", r"(?i)\s*(TAR|BAN)\w*\s+R\b.*", SUMMARY % (7, "BAN R resets latched targets"))
+    extend("sel.sta.args", r"(?i)\s*(STA|EST)\w*\s+\S.*", SUMMARY % (9, "EST C o R clears the self-test status"))
+    extend("sel.breaker.data", r"(?i)\s*(BRE|INT)\w*\s+(R|W)\b.*", SUMMARY % (7, "INT R resets and INT W presets breaker wear data"))
+    extend("sel.his.clear", r"(?i)\s*HIS\w*\s+(\S+\s+)?(C|R|CA|RA|D|DT|RT)\b.*",
+           SUMMARY % (4, "HIS D o R and HIS HIF D o R clear history; HIS HIF DT o RT clears all HIF history"))
+    extend("sel.ser.clear", r"(?i)\s*SER\w*\s+(C|R)\b.*",
+           SUMMARY % (6, "SER D o R clears the SER; SER D also has sel.ser.d"),
+           "Revision 3: the pattern now matches R as its notes always said; revision 2 left SER R to "
+           "sel.ser.other_args (unknown).")
+    extend("sel.ldp.clear", r"(?i)\s*LDP\w*\s+(C|D)\b.*", SUMMARY % (4, "LDP D clears the load profile"))
+
+    words = {w[:3] for w, _ in ENGLISH} | {w[:3] for w, _, _ in SPANISH} | {w[:3] for w in COMPRESSED}
+    order = interleave(sorted(words - APPROVED))
+    p["denied"].append({
+        "id": "sel.unapproved.command",
+        "classification": "unknown",
+        "pattern": r"(?i)\s*(" + "|".join(order) + r")\w*(\s.*)?",
+        "citations": [{"source": "S22", "ref": "Command Summary pp.1-9 (every command word, English and Spanish columns)"},
+                      {"source": "S22", "ref": "Table C.2 p.C.2 (Compressed ASCII commands)"}],
+        "evidence": {"class": "documented-untested"},
+        "side_effects": "Documented as displays, session control or commands with their own deny rules; none is "
+                        "approved. Never sent.",
+        "notes": "Every documented command word with no approved line, whole and with any arguments, so that "
+                 "each is a command mnemonic for authz.ValidateSecret (C7-A6-3). Earlier rules decide first, so "
+                 "a state-changing form still reports its own rule. The alternation is ordered so that no two "
+                 "neighbours share a first character (build_sel751.py interleave): do not sort it.",
+    })
+
+    p["notes"].insert(0, "Revision 3 by A2 (content owner), 2026-10-25: every documented command word of S22 "
+                         "(Command Summary pp.1-9, English and Spanish, and Table C.2) is a deny-rule mnemonic, and "
+                         "the Spanish state-changing forms are denied. Allowlist decisions are unchanged.")
+
+
 def main():
+    check_words(sys.argv[1])
     rs = rows(sys.argv[1])
     with open(os.path.join(HERE, "sel-751-phase0.json"), encoding="utf-8") as f:
         p = json.load(f)
@@ -113,6 +284,7 @@ def main():
                       "reconciled with A6's independent count, 2026-10-24). R200-V4-Z007003-D20170922 is the FID of "
                       "two rows. Three rows (R200-V1, R200-V0, R111) say the version was not released and have no FID."
                       % (len(k), len(rs)))
+    rev3(p)
 
     with open(os.path.join(HERE, "sel-751.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(p, f, indent=2, ensure_ascii=False)
