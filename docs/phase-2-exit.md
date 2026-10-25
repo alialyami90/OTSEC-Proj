@@ -48,7 +48,7 @@ The four processes are the simulator, `otsec-collector`, `otsec node` and the RE
 | Check | Result at `709f4bc` |
 | --- | --- |
 | **V-S6** recovery from interruption | **Pass.** 100 seeded interruptions (receiver and node SIGKILLed, half mid-burst; simulator and collector killed between sessions) against a buffer that grows and renumbers every row. All 240 rows reached the receiver under exactly one event ID each, and every resent ID carried the same bytes. At most 5 events were resent after any of the 53 upstream breaks, against the RELP window of 128. |
-| **V-S7** no write to the device | **Pass** for the parts run. Every line the simulators received in the five suites that run `check.py` is a read-only register line, with no non-printable and no before-prompt line. The register passes A6's deny corpus. Not run: the 24-hour soak (b), the byte-for-byte transcript comparison (c) and the Telnet capture decode (d). |
+| **V-S7** no write to the device | **Pass** for the parts run. Every line the simulators received in the five suites that run `check.py` is a read-only register line, with no non-printable and no before-prompt line. The register passes A6's deny corpus. Not run: the 24-hour soak (part of (b)), the byte-for-byte transcript comparison (c) and the Telnet capture decode (d). |
 | **V-S9** store full | **Pass.** The warning comes before runs stop. No session opens while the store is full, including after a SIGKILL and restart. Once the receiver is back, confirmed events are pruned and runs resume in 113 s with no operator, and all 308 rows arrive once. The same test fails on main before #135. On `main` before #138 the test failed intermittently: after the SIGKILL, the node's first open met `otsec health`'s read-only open during WAL recovery and failed with `SQLITE_BUSY_RECOVERY`, so runs never resumed. With #138 (`busy_timeout` set before any statement that reads the file), the test passed 5 of 5 in CI at `709f4bc` (run 40232121836, attempts 1 to 5) and 3 of 3 on A6's Linux machine. Five passes show the race is rare or absent under this load, not that it is gone; a retry of a busy or locked open is Phase 3 task 6. |
 | **V-S12** failures are observable | **Pass**, `simulated (in part)`. Unreachable, auth failure, timeout, hang mid-SER, malformed row, upstream down and store full each show in `otsec health` as a code or alarm that names it, and none reads `ok`. A late device and a hung SER now differ by their detail (#136, #137). Upstream down took 77 s, inside D2-21. |
 | **V-S4** duplicates and gaps | **Pass**, with D2-21's reading of the ambiguous overlap. |
@@ -88,7 +88,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 | The slice suite passes on the owner's PC (Windows) and on Linux, rsyslog included, from one commit on `main` | **Met on Linux, with a condition on Windows.** The Linux suites, rsyslog included, pass at `709f4bc`. The end-to-end suites cannot run on Windows as interactive processes, for three reasons: the collector requires the installer's WER exclusion, the harness uses a Unix socket and the Unix user ID, and the admin folder admits only the service SIDs (A6). The Windows evidence is the Go units and the elevated installer run at `c486e42`. **Condition:** the slice run against the installed services on the owner's PC, proposed as the first Phase 3 task (D2-21). |
 | Every component is merged, with its reviewers' records | Met. Table above. The review records are on each PR and in `tests/safety/reviews/`. |
 | No safety or security objection is open | Met. A3 and A6 accepted every PR listed. The open high risk under D2-11 is tracked below. It is not an objection to the simulated slice, because D2-4 and D2-10 keep every endpoint on the simulator. |
-| V-S6, V-S7 and V-S9 pass | Met, `simulated`, for the parts run. Not run: V-S6's link cut in the middle of a SER read and its non-RELP transports; V-S7 (b), (c) and (d); V-S9's disk-level case. All are listed under "Failed or incomplete". |
+| V-S6, V-S7 and V-S9 pass | Met, `simulated`, for the parts run. Not run: V-S6's link cut in the middle of a SER read and its non-RELP transports; V-S7's 24-hour soak (part of (b)), (c) and (d); V-S9's disk-level case. All are listed under "Failed or incomplete". |
 | This report records what is `simulated` and what needs a lab relay | Met. See "Unverified assumptions" and A6's table. |
 
 **Conditions carried into Phase 3:**
@@ -114,7 +114,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 - **Not run:**
   - V-S8 end to end: each stored event's raw hash against the recording, including after a forced parser failure;
   - V-S15's hostile framing cases end to end;
-  - V-S7's 24-hour soak (b), its byte-for-byte transcript comparison (c) and the Telnet capture decode (d);
+  - V-S7's 24-hour soak (part of (b)), its byte-for-byte transcript comparison (c) and the Telnet capture decode (d);
   - V-S6: a device link cut in the middle of a SER read. Only cuts between sessions are run, and the hang case stalls the link without cutting it;
   - V-S6: the detect-and-report condition for the transports other than RELP, which are not built;
   - V-S9: file-system exhaustion. The test's limit is the quota, not the disk. F-013, a store with no reserve that could not open, remains a recorded risk;
