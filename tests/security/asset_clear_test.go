@@ -135,6 +135,11 @@ func stillSuspended(t *testing.T, r rig, runner *dialRunner) {
 	}
 	if reply.Accepted() || len(runner.dials) != 0 {
 		t.Errorf("a run to the suspended asset was accepted (%+v) or dialled %v", reply.Refusal, runner.dials)
+	} else if reply.Refusal == nil || reply.Refusal.Code != authz.RefuseAssetNotEnrolled || !strings.Contains(reply.Refusal.Detail, "is suspended") {
+		// C7 has no suspended code; the collector refuses asset_not_enrolled
+		// and names the suspension. Any other refusal is the rig, not the
+		// suspension.
+		t.Errorf("the run was refused for another reason: %+v", reply.Refusal)
 	}
 }
 
@@ -171,7 +176,15 @@ func TestAssetClearControl(t *testing.T) {
 	if err := r.state.CheckSuspended(lockAsset); err != nil {
 		t.Fatalf("not cleared in memory: %v", err)
 	}
-	_ = runner
+	// The run the denials keep refused now reaches the runner (A3 on #118).
+	reply, work := r.pipe.Handle(context.Background(), lockRun(lockAsset, r.rev))
+	if !reply.Accepted() || work == nil {
+		t.Fatalf("a run after the clear was refused: %+v", reply.Refusal)
+	}
+	work.Run(context.Background())
+	if len(runner.dials) != 1 {
+		t.Fatalf("the runner dialled %v after the clear, want one dial", runner.dials)
+	}
 }
 
 // A planted file with no request lifts nothing: the asset stays suspended
