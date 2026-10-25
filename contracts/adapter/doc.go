@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.1: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.2: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -82,14 +82,25 @@
 //   - A session that reached Level 1 ends with QUI in the close phase (V-S13,
 //     D18), and the close phase sends nothing else. The exceptions are a
 //     closed connection, a level that already dropped, a port that is not
-//     English (D16), and a session found elevated.
+//     English (D16), a session found elevated, and, from 0.2 (D2-14), a
+//     rejected probe whose reply showed a level prompt (D16) and a
+//     "Password: ?" at Level 1 (failed.unexpected_password_prompt), where
+//     QUI would be a password attempt (C-19).
 //   - A session-control or unknown operation can never be invoked (C-A2-1),
 //     and a level 0 operation never carries a credential (C7-A2-5).
 //   - Records and observations point into received bytes only, never into a
 //     redaction.
 //   - error.detail is the collector's own words: at most 256 bytes of
 //     printable ASCII, never device text.
-//   - An unknown error code reads as failed.unknown, a failure.
+//   - An unknown error code reads as failed.unknown, a failure. A code
+//     carries the minor that added it (Code.Since), and a result of an
+//     earlier minor cannot carry it.
+//
+// # Versions
+//
+//   - 0.1 (#51): the first contract.
+//   - 0.2 (D2-14): failed.unexpected_password_prompt, and the QUI exemption
+//     for refused.language_probe_rejected. Results of 0.1 read unchanged.
 //
 // # For the consumers of a result
 //

@@ -23,6 +23,7 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 SCHEMA = "otsec.adapter/0.1"
+SCHEMA_0_2 = "otsec.adapter/0.2"  # results that need a 0.2 rule or code (D2-14)
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 FID = "SEL-751-R501-V0-Z104101-D20260910"       # S22 Table A.1 p. A.2
@@ -345,6 +346,29 @@ def results():
     out["failed.auth_rejected"] = s.result(
         "failed", "failed.auth_rejected", {"result": "match", "items": [item("firmware_id", FID, FID, sp)]})
 
+    # 0.2 (D2-14): a reply at Level 1 ends in "Password: ?". Anything sent now
+    # would be a password attempt, so nothing is, not even QUI (C-19). Not
+    # seen on a device; A2's FuzzRun found the state.
+    # SHO P 1 comes first, as in every Level 1 read (D16), and its posture
+    # warning is reported whatever the outcome (A2 on #100).
+    s = Session()
+    items, _ = to_level1(s)
+    s.sho_p1()
+    s.tx("operate", b"SER\r\n")
+    s.rx("operate", b"SER\r\n\r\nPassword: ? ")
+    out["failed.unexpected_password_prompt"] = s.result(
+        "failed", "failed.unexpected_password_prompt", {"result": "match", "items": items},
+        warnings=[maxacc_warning(s)], schema=SCHEMA_0_2)
+
+    # 0.2 (D2-14): the probe reply prints a level prompt. D16 sends nothing
+    # after a rejected probe, so this session reached Level 1 and ends
+    # without QUI. Invented reply; A2's FuzzRun found the state.
+    s = Session()
+    s.connect()
+    s.probe(reply=framed(b"QUI\r\n", b"Comando no valido\r\n", b"=>"))
+    s.facts["access_level"] = "1"
+    out["probe-rejected-at-level1"] = s.result("refused", "refused.language_probe_rejected", schema=SCHEMA_0_2)
+
     s = Session()
     s.connect()
     s.probe()
@@ -438,7 +462,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_2", schema="otsec.adapter/0.2")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_3", schema="otsec.adapter/0.3")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -625,6 +649,34 @@ def invalid_results(good):
     mut("ok-with-error-code", ok_with_error)
     mut("status-disagrees-with-code", lambda r: r.update(status="failed", error={"code": "refused.session_busy"}))
     mut("unknown-code-at-0.1", lambda r: r.update(status="failed", error={"code": "failed.something_new"}))
+
+    # The probe QUI exemption is 0.2 (D2-14): a 0.1 result validates as it did (A6 on #100).
+    r = copy.deepcopy(good["probe-rejected-at-level1"])
+    r["schema"] = SCHEMA
+    out["probe-rejected-at-level1-at-0.1"] = r
+
+    # failed.unexpected_password_prompt (0.2, D2-14): its own minor, no QUI,
+    # and the bytes must show Level 1 and the prompt.
+    r = copy.deepcopy(good["failed.unexpected_password_prompt"])
+    r["schema"] = SCHEMA
+    out["unexpected-password-prompt-at-0.1"] = r
+
+    s = Session()
+    items, _ = to_level1(s)
+    s.tx("operate", b"SER\r\n")
+    s.rx("operate", b"SER\r\n\r\nPassword: ? ")
+    s.quit()
+    out["unexpected-password-prompt-then-quit"] = s.result(
+        "failed", "failed.unexpected_password_prompt", {"result": "match", "items": items}, schema=SCHEMA_0_2)
+
+    s = Session()
+    s.connect()
+    s.probe()
+    sp = s.ident()
+    s.acc()
+    s.password(outcome="rejected")
+    out["unexpected-password-prompt-for-rejected-password"] = s.result(
+        "failed", "failed.unexpected_password_prompt", fid_item(sp), schema=SCHEMA_0_2)
     mut("span-in-sent-bytes", lambda r: r["observations"][0].update(span={"offset": 0, "length": 2}))
 
     def span_stx(r):

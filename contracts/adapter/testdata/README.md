@@ -21,7 +21,9 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.timeout.json`: The SER reply stops part-way; the step timeout expires; QUI, then close.
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
-- `results/valid/failed.unknown.json`: A 0.2 result with a code 0.1 does not know: read as `failed.unknown`.
+- `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
+- `results/valid/failed.unknown.json`: A 0.3 result with a code 0.2 does not know: read as `failed.unknown`.
+- `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
 - `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3). Otherwise as `ok`: records, the serial check and the observations.
 - `results/valid/ok-with-echo.json`: As `ok`, but the relay echoes the password; the echo is redacted too (C-A2-3).
 - `results/valid/ok.json`: Full session: wake (the device printed nothing on connect), `=`, QUI probe accepted, `ID` FID check, `ACC`, password (redacted), `SHO P 1` with `MAXACC := 2` (warning), `SER` with two rows, QUI. Identity match on FID and serial.
@@ -84,6 +86,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/no-operation-id.json`: A result that does not name its operation.
 - `results/invalid/wake-into-password-prompt.json`: The wake line end sent after `Password: ?` was received; it would be a password attempt (A3 change 7).
 - `results/invalid/quit-after-unconfirmed-password.json`: The password got no reply, then QUI was sent: into `Password: ?` that is a second attempt (C-19, D1-20; A3 P2, A6 P2).
+- `results/invalid/probe-rejected-at-level1-at-0.1.json`: `probe-rejected-at-level1` stamped 0.1. The QUI exemption is 0.2, so a 0.1 result is refused as it was (A6 on #100).
 - `results/invalid/quit-after-rejected-probe.json`: QUI sent in the close phase after a rejected language probe (D16; A6 change 13).
 - `results/invalid/quit-after-unanswered-acc.json`: ACC got only its echo, then the step timed out and QUI was sent: a relay that prints `Password: ?` late would take it as a wrong password (A3 change 12).
 - `results/invalid/credential-and-quit-in-one-segment.json`: `[REDACTED]` and `QUI` in one sent segment (A3 P3).
@@ -102,7 +105,10 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/span-includes-stx.json`: The SER header span is widened back over the STX that opens the relay's message (S22 p. 7.28). A record is the text between the framing bytes, never the bytes themselves.
 - `results/invalid/span-on-echo-redaction.json`: An observation span points at the echo redaction.
 - `results/invalid/status-disagrees-with-code.json`: Status failed with a `refused.` code.
-- `results/invalid/unknown-code-at-0.1.json`: A 0.1 result with a code 0.1 does not define.
+- `results/invalid/unexpected-password-prompt-at-0.1.json`: `failed.unexpected_password_prompt` in a 0.1 result: the code is new in 0.2.
+- `results/invalid/unexpected-password-prompt-for-rejected-password.json`: `failed.unexpected_password_prompt` for a rejected password, which never reached Level 1 (that is `failed.auth_rejected`).
+- `results/invalid/unexpected-password-prompt-then-quit.json`: QUI sent after `Password: ?` at Level 1: a password attempt (C-19).
+- `results/invalid/unknown-code-at-0.1.json`: A 0.1 result with a code 0.2 does not define.
 - `results/invalid/warning-without-value.json`: A warning with neither an observed value nor `missing`.
 - `results/invalid/wake-after-prompt.json`: A second bare line end after the `=` prompt: a pending password prompt would take it as an attempt.
 

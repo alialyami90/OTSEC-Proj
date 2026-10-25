@@ -250,14 +250,25 @@ func (c *check) dialogue(r Result, code Code) {
 	}
 	// A session that reached Level 1 ends with QUI (D18, V-S13), except where
 	// the bytes make it impossible or unsafe: the connection closed, the level
-	// already dropped, the port is not English (D16), or the session was
-	// found elevated and left to TIDLE.
+	// already dropped, the port is not English (D16), the session was found
+	// elevated and left to TIDLE, a probe reply showed a level prompt but was
+	// rejected (D16: nothing after a rejected probe), or the relay asked for
+	// a password at Level 1, where QUI would be a password attempt (C-19).
+	// The last two are C2 0.2 (D2-14), so a 0.1 result validates as it did.
 	if level >= 1 && !quit {
-		switch code {
-		case FailedTransportClosed, FailedAccessLevelDropped, RefusedLanguageNotEnglish, RefusedSessionElevated:
+		switch {
+		case code == FailedTransportClosed, code == FailedAccessLevelDropped, code == RefusedLanguageNotEnglish,
+			code == RefusedSessionElevated, code == FailedUnexpectedPasswordPrompt:
+		case code == RefusedLanguageProbe && c.minor >= 2:
 		default:
 			c.fail("session: Level %d was reached, so the session ends with QUI (D18, V-S13)", level)
 		}
+	}
+	// The bytes back the code: Level 1 was reached, an operate-phase line
+	// was the last sent, and the last thing received is "Password: ?".
+	if code == FailedUnexpectedPasswordPrompt &&
+		(level < 1 || last != promptPassword || len(ss) == 0 || ss[len(ss)-1].phase != PhaseOperate) {
+		c.fail("%s: Level 1 was reached, an operate line was the last sent, and the last prompt received is %q", code, promptPassword)
 	}
 	if code == FailedAccessLevelDropped && last != promptLevel0 && !quit {
 		c.fail("%s: the last prompt received is %q, not %q", code, last, promptLevel0)
