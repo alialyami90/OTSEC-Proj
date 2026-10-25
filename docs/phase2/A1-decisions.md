@@ -255,7 +255,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 **Ruling:** C2 becomes `otsec.adapter/0.3` with `failed.identity_unreadable`. A2 owns C2, A1 approves the change, and A3 (the suspension path) and A6 (safety) review it.
 - **When it applies.** The ID reply has no STX and ETX frame, prints a key twice, has no FID line, or has an empty FID. A FID visible in unframed text is neither accepted nor called a mismatch: the adapter does not read unframed text.
 - **What it does.**
-  - It is decided before auth. ACC is never sent and no credential is used.
+  - It is decided before auth. ACC is never sent and no credential is used. C2 binds it to the bytes: `ID` is the last line sent, in the probe phase, after an accepted probe.
   - Identity is `not-checked`, and the reply bytes stay in the transcript.
   - It suspends neither the asset nor the credential. A repeat sends only the Level 0 wake, `QUI` and `ID`, which are read-only register lines, at the schedule's rate.
   - The floor and QUI behaviour are unchanged.
