@@ -58,6 +58,11 @@ type Config struct {
 	// interim, lab only; see "TLS references" in the README). Required when
 	// a target names a reference.
 	TLSDir string `json:"tls_dir,omitempty"`
+	// AdminDir is where an administrator leaves the Phase 2 interim admin
+	// files, such as clear-suspension.json (see "Suspensions" in the
+	// README). The node only reads it. Empty means no such file is read,
+	// so a suspension cannot be cleared.
+	AdminDir string `json:"admin_dir,omitempty"`
 
 	assets  []asset.Asset
 	targets []*syslog.Target
@@ -262,6 +267,9 @@ func (c *Config) check() error {
 	}
 	if c.TLSDir != "" && !filepath.IsAbs(c.TLSDir) {
 		fail("tls_dir %q is not an absolute path", c.TLSDir)
+	}
+	if c.AdminDir != "" && !filepath.IsAbs(c.AdminDir) {
+		fail("admin_dir %q is not an absolute path", c.AdminDir)
 	}
 
 	schedules := map[string]bool{}

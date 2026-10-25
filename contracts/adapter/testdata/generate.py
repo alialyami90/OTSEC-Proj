@@ -451,24 +451,35 @@ def results():
     s.quit()  # the adapter's next line was refused by the egress check and never sent
     out["failed.egress_violation"] = s.result("failed", "failed.egress_violation", {"result": "match", "items": items})
 
+    # The failed-auth floor could not be recorded before ACC (sel751
+    # FloorGate.BeforeACC): ACC is not sent, and at Level 0 no QUI is needed.
     s = Session()
     s.connect()
     s.probe()
-    out["failed.internal"] = s.result("failed", "failed.internal")
+    sp = s.ident()
+    out["failed.internal"] = s.result(
+        "failed", "failed.internal", {"result": "match", "items": [item("firmware_id", FID, FID, sp)]})
 
     s = Session()
     s.connect()
     out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_3", schema="otsec.adapter/0.3")
 
     # A setting missing from SHO P 1 raises its warning (A3).
+    # As ok in every other respect: records, the serial check and the
+    # observations.
     s = Session()
-    items, _ = to_level1(s)
+    items, fid_span = to_level1(s)
     s.sho_p1(drop_maxacc=True)
     p1 = s.message_span()  # the whole SHO P 1 message, inside STX and ETX
-    s.ser()
+    recs = s.ser()
+    ser_span = s.span(SERIAL, s.ser_start)
+    items.append(item("serial_number", SERIAL, SERIAL, ser_span))
     s.quit()
-    out["ok-missing-setting"] = s.result("ok", None, {"result": "match", "items": items}, warnings=[
-        {"code": "warn.maxacc_above_1", "setting": "MAXACC", "missing": True, "span": p1}])
+    obs = [{"name": "firmware_id", "value": FID, "span": fid_span},
+           {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
+           {"name": "serial_number", "value": SERIAL, "span": ser_span}]
+    out["ok-missing-setting"] = s.result("ok", None, {"result": "match", "items": items}, obs, [
+        {"code": "warn.maxacc_above_1", "setting": "MAXACC", "missing": True, "span": p1}], recs)
     return out
 
 

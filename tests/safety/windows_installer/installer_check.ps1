@@ -133,10 +133,11 @@ try {
     Result 'I-1' ($r.Code -eq 0) "install exit $($r.Code)"
     if ($r.Code -ne 0) { throw 'install failed; going to cleanup' }
 
-    # Directory descriptors, against TestDirs.
+    # Directory descriptors, against TestDirs (8 since D2-12 added config\tls).
     $want = [ordered]@{
         ''                       = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;$nodeSid)(A;;0x1200a9;;;$collSid)"
         'config'                 = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;$nodeSid)"
+        'config\tls'             = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;$nodeSid)"
         'store'                  = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;$nodeSid)"
         'collector'              = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;$collSid)"
         'collector\credentials'  = "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;$collSid)"

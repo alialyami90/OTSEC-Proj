@@ -3,12 +3,14 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
 )
 
@@ -27,6 +29,8 @@ type Status struct {
 	modes   map[c5.DatabaseID]c5.Mode
 	alarms  []StatusAlarm
 	targets map[string]TargetStatus
+	// suspensions are the scheduler's current asset suspensions.
+	suspensions map[string]asset.Suspension
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -55,6 +59,9 @@ type StatusFile struct {
 	Collecting bool `json:"collecting"`
 	// Targets is each forwarding target's state, from its forwarder.
 	Targets map[string]TargetStatus `json:"targets,omitempty"`
+	// Suspensions are the assets the node will not collect from until an
+	// administrator clears them (suspend.go).
+	Suspensions map[string]asset.Suspension `json:"suspensions,omitempty"`
 }
 
 // TargetStatus is one forwarding target as node status shows it.
@@ -62,20 +69,30 @@ type TargetStatus struct {
 	Class string `json:"class"`
 	// LastConfirmed is when the target last confirmed a transaction in
 	// this process; zero if never.
-	LastConfirmed time.Time `json:"last_confirmed,omitempty"`
+	LastConfirmed time.Time `json:"last_confirmed,omitzero"`
 	Confirmed     uint64    `json:"confirmed"`
 	// LastErr is why the last session ended. It is the forwarder's error
 	// text, which never holds event content.
-	LastErr string                       `json:"last_error,omitempty"`
-	Streams map[string]TargetStreamState `json:"streams"`
+	LastErr string `json:"last_error,omitempty"`
+	// Open is when the current session opened; zero while none is open.
+	Open time.Time `json:"open,omitzero"`
+	// Unreported counts forward.* health events the node's health stream
+	// refused and the forwarder still holds to commit; ReportErr is the
+	// last refusal (A4 #94).
+	Unreported int                          `json:"unreported,omitempty"`
+	ReportErr  string                       `json:"report_error,omitempty"`
+	Streams    map[string]TargetStreamState `json:"streams"`
 }
 
-// TargetStreamState is one stream of a target: the saved cursor, the
-// stream's last committed seq, and why the stream is held, if it is.
+// TargetStreamState is one stream of a target: the saved cursor, the last
+// position the target confirmed (ahead of the cursor while a report about
+// the stream is owed, A4 #103), the stream's last committed seq, and why
+// the stream is held, if it is.
 type TargetStreamState struct {
-	Cursor  uint64 `json:"cursor"`
-	Last    uint64 `json:"last"`
-	Blocked string `json:"blocked,omitempty"`
+	Cursor    uint64 `json:"cursor"`
+	Confirmed uint64 `json:"confirmed"`
+	Last      uint64 `json:"last"`
+	Blocked   string `json:"blocked,omitempty"`
 }
 
 // StatusSchema identifies the status file format.
@@ -117,7 +134,7 @@ const (
 	AlarmResultRefused      = "collection-result-refused"
 	AlarmEvidenceNotStored  = "collection-evidence-not-stored"
 	AlarmCollectionDisabled = "collection-disabled"
-	// AlarmQuarantineNotStored stops every credentialed run on the node:
+	// AlarmQuarantineNotStored stops every run on the node, level 0 included:
 	// the evidence of a failed run could not be kept.
 	AlarmQuarantineNotStored = "collection-quarantine-not-stored"
 	AlarmNoQuarantineRoom    = "collection-no-quarantine-room"
@@ -139,6 +156,13 @@ func (s *Status) RaiseTarget(target, code, detail string) {
 		s.oslog(fmt.Sprintf("otsec forward %s: %s %s", target, code, detail))
 	}
 	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
+}
+
+// SetSuspensions records the node's current asset suspensions.
+func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
+	s.mu.Lock()
+	s.suspensions = m
+	s.mu.Unlock()
 }
 
 // SetTarget records target's state.
@@ -183,6 +207,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 		}
 	}
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
+	if len(s.suspensions) > 0 {
+		f.Suspensions = maps.Clone(s.suspensions)
+	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
 		for n, ts := range s.targets {

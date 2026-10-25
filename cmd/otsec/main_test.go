@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorclient"
 	"otsec.local/otsec/platform/node"
@@ -158,5 +159,49 @@ func TestUsage(t *testing.T) {
 	}
 	if _, errs, code := otsec(t, "assets", "-config", filepath.Join(t.TempDir(), "missing.json")); code != 1 || errs == "" {
 		t.Errorf("missing config: %d %s", code, errs)
+	}
+}
+
+// health shows each forwarding target: confirmations, whether a session is
+// open, the last session error, refused forward health events, each
+// stream's confirmed position, cursor and hold, and the target's alarms.
+func TestHealthShowsTargets(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetTarget("central", node.TargetStatus{Class: "required", Confirmed: 3, LastErr: "dial refused",
+		Unreported: 2, ReportErr: "mode drain-only",
+		Streams: map[string]node.TargetStreamState{"platform/health": {Cursor: 3, Confirmed: 4, Last: 6, Blocked: "too large"}}})
+	st.RaiseTarget("central", node.AlarmForwardUnreachable, "no session open for 1m0s")
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"target central (required): 3 confirmed, last never in this process",
+		"  no session open",
+		"  last session ended: dial refused",
+		"  forward health events not yet recorded: 2 (last refusal: mode drain-only)",
+		"  platform/health: confirmed 4 of 6, cursor 3, HELD: too large",
+		node.AlarmForwardUnreachable,
+		"target central",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// health lists each suspended asset with its reason and the ref an
+// administrator's clear must name.
+func TestHealthShowsSuspensions(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetSuspensions(map[string]asset.Suspension{relayID: {Reason: asset.SuspendAuthFailed, Since: "2026-10-25T06:00:00Z", Ref: "inv-run-1"}})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "SUSPENDED " + relayID + ": auth-failed since 2026-10-25T06:00:00Z; cleared only by an administrator naming ref inv-run-1"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
 	}
 }

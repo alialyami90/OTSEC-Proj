@@ -6,9 +6,9 @@
 // and the failed-auth floor check.
 //
 // This file is the seam agreed with A3 for Phase 2. The adapter's one entry
-// point, Run(ctx, Invocation, Config) adapter.Result, follows in a later
-// change; it never returns a Go error, every outcome is a C2 Result, and
-// the collector runs Validate, CheckLines and CheckAgainst on it.
+// point is Run(ctx, Invocation, Config) adapter.Result (run.go); it never
+// returns a Go error, every outcome is a C2 Result, and the collector runs
+// Validate, CheckLines and CheckAgainst on it.
 package sel751
 
 import (
@@ -72,4 +72,6 @@ type Config struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// Now is the clock for transcript times; nil means time.Now.
 	Now func() time.Time
+
+	hooks *hooks // tests only
 }

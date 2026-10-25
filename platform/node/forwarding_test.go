@@ -1,7 +1,9 @@
 package node
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -359,9 +361,9 @@ func TestHeldStreamIsNotUnreachable(t *testing.T) {
 		t.Fatal(err)
 	}
 	tg := fw.targets[0]
-	// Every stream with events is held, and the rest are confirmed through
-	// their last seq.
-	fs := forward.Status{Streams: map[c5.StreamID]forward.StreamStatus{}}
+	// A session is open, every stream with events is held, and the rest
+	// are confirmed through their last seq.
+	fs := forward.Status{Open: now, Streams: map[c5.StreamID]forward.StreamStatus{}}
 	for _, id := range tg.streams {
 		last, _ := r.Store(id).LastCommitted(bg, id)
 		if last > 0 {
@@ -426,6 +428,76 @@ func TestHealthSinkRefusesOutsideCollecting(t *testing.T) {
 	}
 }
 
+// A required target with no session open for UnreachableAfter is
+// unreachable even with nothing waiting; an open, idle session is not
+// (A4 #94: Status.Open).
+func TestNoSessionOpenIsUnreachable(t *testing.T) {
+	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	// Every stream confirmed through its last seq: nothing is waiting.
+	caughtUp := func(open time.Time) forward.Status {
+		fs := forward.Status{Open: open, Streams: map[c5.StreamID]forward.StreamStatus{}}
+		for _, id := range tg.streams {
+			last, _ := r.Store(id).LastCommitted(bg, id)
+			fs.Streams[id] = forward.StreamStatus{Cursor: last, Confirmed: last}
+		}
+		return fs
+	}
+	alarms := func() int {
+		n := 0
+		for _, a := range st.Snapshot("site-a-node1").Alarms {
+			if a.Code == AlarmForwardUnreachable && a.Target == "central" {
+				n++
+			}
+		}
+		return n
+	}
+	fw.check(bg, tg, caughtUp(clock()))
+	advance(time.Hour)
+	fw.check(bg, tg, caughtUp(clock().Add(-time.Hour)))
+	if alarms() != 0 {
+		t.Fatal("an open, idle session raised forward-unreachable")
+	}
+	// The session closes; the alarm waits UnreachableAfter from when a
+	// session was last seen open.
+	advance(UnreachableAfter - time.Second)
+	fw.check(bg, tg, caughtUp(time.Time{}))
+	if alarms() != 0 {
+		t.Fatal("raised before UnreachableAfter")
+	}
+	advance(2 * time.Second)
+	fw.check(bg, tg, caughtUp(time.Time{}))
+	fw.check(bg, tg, caughtUp(time.Time{}))
+	if alarms() != 1 {
+		t.Fatalf("%d forward-unreachable alarms for one closed period", alarms())
+	}
+	ts := st.Snapshot("site-a-node1").Targets["central"]
+	if !ts.Open.IsZero() {
+		t.Fatalf("status shows a session open: %+v", ts)
+	}
+	// The status file leaves out a zero time rather than writing year 1
+	// (A6 #94: omitzero).
+	if b, _ := json.Marshal(ts); bytes.Contains(b, []byte(`"open"`)) || bytes.Contains(b, []byte(`"last_confirmed"`)) {
+		t.Fatalf("zero times written: %s", b)
+	}
+}
+
 // A best-effort target is built with each stream's commit index and
 // forwards what was committed inside its replay window (A4 #94: a
 // best-effort target needs Stream.Index).
@@ -468,5 +540,56 @@ func TestBestEffortTargetForwards(t *testing.T) {
 	ts := st.Snapshot("site-a-node1").Targets["central"]
 	if ts.Class != "best-effort" || ts.Streams[string(HealthStream)].Cursor < uint64(want) {
 		t.Fatalf("target status %+v; receiver errors %v", ts, srv.Errors())
+	}
+}
+
+// A stream the target confirmed through its last seq is not waiting, even
+// with its cursor held back for an owed report: no forward-unreachable
+// after UnreachableAfter (A6 and A4 on #102, A4 #103).
+func TestOwedReportIsNotWaiting(t *testing.T) {
+	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	fs := forward.Status{Open: now, Unreported: 2, Streams: map[c5.StreamID]forward.StreamStatus{}}
+	var withEvents int
+	for _, id := range tg.streams {
+		last, _ := r.Store(id).LastCommitted(bg, id)
+		if last > 0 {
+			withEvents++
+		}
+		fs.Streams[id] = forward.StreamStatus{Cursor: 0, Confirmed: last}
+	}
+	if withEvents == 0 {
+		t.Fatal("no stream has events")
+	}
+	fw.check(bg, tg, fs)
+	mu.Lock()
+	now = now.Add(UnreachableAfter + time.Minute)
+	fs.Open = now
+	mu.Unlock()
+	fw.check(bg, tg, fs)
+	for _, a := range st.Snapshot("site-a-node1").Alarms {
+		if a.Code == AlarmForwardUnreachable {
+			t.Fatalf("forward-unreachable with every stream confirmed: %+v", a)
+		}
+	}
+	for id, ss := range st.Snapshot("site-a-node1").Targets["central"].Streams {
+		if ss.Cursor != 0 || ss.Confirmed != ss.Last {
+			t.Fatalf("stream %s status %+v", id, ss)
+		}
 	}
 }

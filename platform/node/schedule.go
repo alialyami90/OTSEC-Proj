@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"otsec.local/otsec/contracts/adapter"
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
@@ -63,8 +64,14 @@ type Scheduler struct {
 
 	mu     sync.Mutex
 	halted map[string]string // asset ID: why its collection is stopped
-	node   string            // non-empty: every credentialed run is stopped
+	node   string            // non-empty: every run on the node is stopped, level 0 included
 	quiet  map[string]bool   // alarm codes already raised for the current condition
+
+	susp      map[string]asset.Suspension // asset ID: its suspension (suspend.go)
+	through   uint64                      // audit seq the suspensions were loaded through
+	unaudited []unaudited                 // suspensions not yet in the audit stream
+	fileStale bool                        // the checkpoint does not hold susp
+	settleMu  sync.Mutex                  // serializes settle, so records apply once in order
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -72,7 +79,17 @@ type Scheduler struct {
 // stays stopped across restarts, until an audited operator action clears
 // it (not in Phase 2).
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
-	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{}}
+	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
+		susp: map[string]asset.Suspension{}}
+	if err := s.loadSuspensions(ctx); err != nil {
+		// Unknown suspensions: any asset may hold one (A1).
+		s.node = AlarmSuspensionsUnknown
+		rt.opt.Status.Raise("", AlarmSuspensionsUnknown, "suspensions could not be read or rebuilt; every run on this node is stopped: "+err.Error())
+	} else {
+		// Writes a suspension the checkpoint lists as unaudited, or holds
+		// the node until it can.
+		s.settle(ctx)
+	}
 	for _, col := range rt.cfg.Schedule {
 		if _, done := s.halted[col.AssetID]; done {
 			continue
@@ -220,11 +237,18 @@ type Report struct {
 	Alarm string
 }
 
-// RunOnce runs schedule entry i once.
+// RunOnce runs schedule entry i once. Calls must not overlap: the node
+// runs its schedule from one goroutine (Run), and a run's suspension
+// decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	col := s.rt.cfg.Schedule[i]
+	s.settle(ctx)
+	s.checkClear(ctx)
 	if why := s.stopped(col.AssetID); why != "" {
 		return Report{Alarm: AlarmCollectionDisabled}
+	}
+	if s.suspended(col.AssetID) {
+		return Report{Alarm: AlarmAssetSuspended}
 	}
 	if code, detail := s.cannotKeep(ctx); code != "" {
 		s.raiseOnce(col.AssetID, code, detail)
@@ -292,6 +316,9 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 		s.appendAudit(ctx, col.AssetID, recs)
 	}
 	inv := resp.Reply.InvocationID
+	// The outcome code's suspension is recorded before anything else is
+	// decided, whatever becomes of the outcome (A1).
+	s.suspend(ctx, col.AssetID, inv, outcomeCode(resp))
 
 	switch {
 	case resp.Quarantine != nil:
@@ -402,7 +429,7 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 // quarantine stream, in one batch: the bytes exactly as received, then the
 // reason, each as the capture of its own event. The reason can quote a
 // device line, so it is kept here and never in status or a log. If the
-// batch cannot be committed, every credentialed run on the node stops,
+// batch cannot be committed, every run on the node stops, level 0 included,
 // because evidence of a failed run would otherwise be lost.
 func (s *Scheduler) quarantine(ctx context.Context, rep Report, col Collection, invocationID string, raw []byte, reason string, unauthorized bool) {
 	if len(reason) > maxReasonBytes {
@@ -430,7 +457,7 @@ func (s *Scheduler) quarantine(ctx context.Context, rep Report, col Collection, 
 		s.mu.Lock()
 		s.node = AlarmQuarantineNotStored
 		s.mu.Unlock()
-		s.rt.opt.Status.Raise(col.AssetID, AlarmQuarantineNotStored, "quarantine not stored; every credentialed run on this node is stopped: "+err.Error())
+		s.rt.opt.Status.Raise(col.AssetID, AlarmQuarantineNotStored, "quarantine not stored; every run on this node is stopped: "+err.Error())
 		s.rt.audit(ctx, audit.ActionPolicyApply, audit.OutcomeFailed, "quarantine_not_stored", "quarantine of asset "+col.AssetID+" not stored; collection stopped on this node")
 	}
 }
@@ -538,8 +565,12 @@ func (s *Scheduler) cannotKeep(ctx context.Context) (code, detail string) {
 
 // raiseOnce raises a skip alarm once per condition, not once per run.
 func (s *Scheduler) raiseOnce(assetID, code, detail string) {
+	s.raiseOnceKey(assetID+" "+code, assetID, code, detail)
+}
+
+// raiseOnceKey is raiseOnce for a condition named by k.
+func (s *Scheduler) raiseOnceKey(k, assetID, code, detail string) {
 	s.mu.Lock()
-	k := assetID + " " + code
 	seen := s.quiet[k]
 	s.quiet[k] = true
 	s.mu.Unlock()
@@ -547,6 +578,12 @@ func (s *Scheduler) raiseOnce(assetID, code, detail string) {
 		s.rt.opt.Status.Raise(assetID, code, detail)
 		s.rt.opt.Status.Write(string(s.rt.cfg.NodeID))
 	}
+}
+
+func (s *Scheduler) clearQuietKey(k string) {
+	s.mu.Lock()
+	delete(s.quiet, k)
+	s.mu.Unlock()
 }
 
 func (s *Scheduler) clearQuiet(assetID string) {
