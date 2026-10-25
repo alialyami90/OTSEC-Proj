@@ -60,7 +60,10 @@ func ClientTLS(t *syslog.Target, roots *x509.CertPool, client *tls.Certificate) 
 		}
 		// The collector refuses these at the handshake too; checking at
 		// load gives the admin the reason instead of a TLS alert (A3 #89).
-		if len(leaf.ExtKeyUsage) > 0 && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth) && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageAny) {
+		// An EKU extension with only OIDs Go does not know leaves
+		// ExtKeyUsage empty; it still restricts the key (A3 #94).
+		hasEKU := len(leaf.ExtKeyUsage) > 0 || len(leaf.UnknownExtKeyUsage) > 0
+		if hasEKU && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth) && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageAny) {
 			return nil, fmt.Errorf("%w: target %s: the node's client certificate is not for client authentication", ErrConfig, t.Name)
 		}
 		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {

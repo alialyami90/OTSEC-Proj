@@ -2,6 +2,7 @@ package forward
 
 import (
 	"crypto/x509"
+	"encoding/asn1"
 	"errors"
 	"testing"
 	"time"
@@ -82,6 +83,15 @@ func TestClientTLSChecksLeaf(t *testing.T) {
 		if err != nil && !errors.Is(err, ErrConfig) {
 			t.Errorf("%s: %v is not ErrConfig", name, err)
 		}
+	}
+	// An EKU extension listing only OIDs Go does not know is still an EKU
+	// extension without clientAuth (A3 #94).
+	unknown := p.issueAt(t, string(node), nil, nil, now.Add(-time.Hour), now.Add(time.Hour), asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1})
+	if leaf, _ := x509.ParseCertificate(unknown.Certificate[0]); len(leaf.ExtKeyUsage) != 0 || len(leaf.UnknownExtKeyUsage) != 1 {
+		t.Fatalf("test certificate: known %v, unknown %v", leaf.ExtKeyUsage, leaf.UnknownExtKeyUsage)
+	}
+	if _, err := ClientTLS(tg, p.roots, &unknown); !errors.Is(err, ErrConfig) {
+		t.Errorf("unknown EKU only: %v", err)
 	}
 }
 

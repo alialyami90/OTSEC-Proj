@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -77,13 +78,13 @@ func (p *pki) issue(t testing.TB, cn string, dns []string, usage x509.ExtKeyUsag
 	return p.issueAt(t, cn, dns, []x509.ExtKeyUsage{usage}, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 }
 
-func (p *pki) issueAt(t testing.TB, cn string, dns []string, usage []x509.ExtKeyUsage, from, until time.Time) tls.Certificate {
+func (p *pki) issueAt(t testing.TB, cn string, dns []string, usage []x509.ExtKeyUsage, from, until time.Time, unknown ...asn1.ObjectIdentifier) tls.Certificate {
 	t.Helper()
 	k := key(t)
 	serial.Add(serial, big.NewInt(1))
 	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: cn}, DNSNames: dns,
 		NotBefore: from, NotAfter: until,
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usage}
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usage, UnknownExtKeyUsage: unknown}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.caCert, &k.PublicKey, p.caKey)
 	if err != nil {
 		t.Fatal(err)
