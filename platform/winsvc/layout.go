@@ -163,7 +163,7 @@ func TLSDir(programData string) string { return filepath.Join(programData, "OTSE
 // one: OTSEC\config, where an administrator leaves the Phase 2 interim
 // files such as clear-suspension.json. The node reads it and cannot write
 // it, and files an administrator creates there are owned by
-// Administrators, as node.Scheduler requires (store.ReadProtectedFile).
+// Administrators, as node.Scheduler requires (protect.ReadFile).
 func AdminDir(programData string) string { return filepath.Join(programData, "OTSEC", "config") }
 
 // StoreDir is the store directory the node configuration must name.

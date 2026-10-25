@@ -82,7 +82,7 @@ Linux container, Go 1.26, and, for #92 at `b2a604d`, A6's native Windows run on 
 
 Until that run, the installer and the services under the SCM are not evidenced.
 
-**Linux does not evidence the admin-file boundary (A3).** On Linux the protected-file and directory checks (`ReadProtectedFile`, `CheckProtectedDir` and their `For` variants) look at the mode only. The owner of a directory can make it writable, plant a 0400 or 0440 file and restore the mode, so on Linux they do not establish that the node or the collector could not have written the file. They guard against mistakes only, and Linux is a development platform. The boundary that admin files such as `clear-suspension.json` come from an administrator is evidenced only on Windows: `TestCheckSDFor`, and `TestProtectedForOnDisk` and the node's protected-directory tests run elevated there. A6's denial tests for this boundary count only the Windows run.
+**Linux does not evidence the admin-file boundary (A3).** On Linux the protected-file and directory checks (`protect.ReadFile`, `protect.CheckDir` and their `For` variants) look at the mode only. The owner of a directory can make it writable, plant a 0400 or 0440 file and restore the mode, so on Linux they do not establish that the node or the collector could not have written the file. They guard against mistakes only, and Linux is a development platform. The boundary that admin files such as `clear-suspension.json` come from an administrator is evidenced only on Windows: `TestCheckSDFor`, and `TestProtectedForOnDisk` and the node's protected-directory tests run elevated there. A6's denial tests for this boundary count only the Windows run.
 
 ## Open
 

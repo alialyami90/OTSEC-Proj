@@ -19,7 +19,7 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/collectorclient"
-	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 // The node keeps its own copy of the C1 suspensions its runs' outcome codes
@@ -529,12 +529,12 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	// itself is no administrator's. On Linux the file check reads only the
 	// mode, so a node-writable directory would let the node plant a 0400
 	// file; on Windows another account could write one into it.
-	if err := store.CheckProtectedDir(s.rt.cfg.AdminDir); err != nil {
+	if err := protect.CheckDir(s.rt.cfg.AdminDir); err != nil {
 		s.refuseClear("dir "+err.Error(), "", "admin_dir refused, so "+ClearSuspensionFileName+" is not read: "+err.Error())
 		return
 	}
 	path := filepath.Join(s.rt.cfg.AdminDir, ClearSuspensionFileName)
-	b, err := store.ReadProtectedFile(path, MaxClearSuspensionBytes)
+	b, err := protect.ReadFile(path, MaxClearSuspensionBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
