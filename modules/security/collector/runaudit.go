@@ -164,11 +164,16 @@ func (a *RunAudit) ReportSession(res adapter.Result, confirmed bool) {
 	if res.Status == adapter.StatusRefused {
 		a.Add(audit.ActionDeviceRefused, audit.OutcomeDenied, codeReason(code), nil)
 	}
-	// The operation: done (ok, partial), or failed once the operate phase
-	// had sent something. A refusal stops before the operation, even after
-	// a check read in the operate phase, and device.refused records it.
+	// The operation: done (ok, partial), or failed. A failure before the
+	// operate phase is recorded too, so every failed run names its code (an
+	// unreadable ID reply or a probe timeout would otherwise leave only the
+	// open and the close), except a failed login, which credential.use
+	// already names. A refusal stops before the operation, even after a
+	// check read in the operate phase, and device.refused records it.
 	sent, operated := operateBytes(res.Transcript)
-	if res.Status == adapter.StatusOK || res.Status == adapter.StatusPartial || (res.Status == adapter.StatusFailed && operated) {
+	loginNamed := res.Session.CredentialSent && !confirmed && code != ""
+	failed := res.Status == adapter.StatusFailed && (operated || !loginNamed)
+	if res.Status == adapter.StatusOK || res.Status == adapter.StatusPartial || failed {
 		outcome, reason := audit.OutcomeSucceeded, ""
 		if res.Status == adapter.StatusFailed {
 			outcome, reason = audit.OutcomeFailed, codeReason(code)

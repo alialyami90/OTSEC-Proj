@@ -389,7 +389,7 @@ func TestSEL751RunnerPasswordPromptSetsFloor(t *testing.T) {
 			if c.check != nil {
 				c.check(t, res)
 			}
-			if got, want := shape(recs), "device.session.open/succeeded device.session.close/succeeded"; got != want {
+			if got, want := shape(recs), "device.session.open/succeeded device.op/failed/internal device.session.close/succeeded"; got != want {
 				t.Errorf("records\n got %s\nwant %s", got, want)
 			}
 			if err := f.state.CheckFloor(testAsset); err == nil {

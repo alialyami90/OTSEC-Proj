@@ -348,7 +348,7 @@ The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2
 | `credential.use` | the credential was sent | succeeded when the login was confirmed (`=>`); otherwise failed, with the C2 code's name, for example `auth_rejected` |
 | `device.posture_warning` | each C2 warning | warning, with the C3 warning ID without `warn.`, for example `maxacc_above_1` |
 | `device.refused` | a C2 refusal | denied, with the code's name, for example `identity_mismatch` |
-| `device.op` | the operation completed (`ok`, `partial`), or failed after the operate phase sent something | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes. A Level 0 read sends its line in the probe phase, so it has no digest. |
+| `device.op` | the operation completed (`ok`, `partial`), or the run failed. A failure before the operate phase is recorded too, so every failed run names its code (for example `identity_unreadable` or `internal`), except a failed login, which `credential.use` already names | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes, and is absent when none were sent. A Level 0 read sends its line in the probe phase, so it has no digest. |
 | `device.session.close` | after an open | succeeded; failed with `qui_not_sent` after a confirmed login without QUI (C7-A6-2); always with the transcript digest (D1-25) |
 | `credential.suspend` | the pipeline suspended the credential after the run; not when the store refused the write, nor when the credential was already suspended or revoked | succeeded, with the C7 reason using `_`, for example `auth_failed` |
 
