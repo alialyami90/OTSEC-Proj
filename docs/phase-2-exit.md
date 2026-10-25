@@ -45,7 +45,7 @@ A6's status table, "Phase 2 slice status" in `docs/verification.md`, is the reco
 
 The four processes are the simulator, `otsec-collector`, `otsec node` and the RELP receiver over mutual TLS. Each suite also runs `check.py` over the simulator's recording.
 
-| Check | Result at `MAIN-COMMIT` |
+| Check | Result at `709f4bc` |
 | --- | --- |
 | **V-S6** recovery from interruption | **Pass.** 100 seeded interruptions (receiver and node SIGKILLed, half mid-burst; simulator and collector killed between sessions) against a buffer that grows and renumbers every row. All 240 rows reached the receiver under exactly one event ID each, and every resent ID carried the same bytes. At most 5 events were resent after any of the 53 upstream breaks, against the RELP window of 128. |
 | **V-S7** no write to the device | **Pass.** Every line every simulator received, across all recordings, is a read-only register line, with no non-printable and no before-prompt line. The register passes A6's deny corpus. |
@@ -69,7 +69,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 
 ### Where tests ran
 
-- **CI.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest, and the `integration` job, which runs the slice suites on Linux with `OTSEC_SLICE_REQUIRED=1`, so a skip fails the job. GitHub Actions has been the main test path since D2-13. Every PR in this report merged with every CI job green on its head. #132 split the three long end-to-end files into an `integration-long` job, one runner per file, so each stays inside its 20-minute limit. The python job leaves the slice directory to the integration jobs. CI now has seven jobs, and the merge rule is that all of them are green.
+- **CI.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest, and the `integration` job, which runs the slice suites on Linux with `OTSEC_SLICE_REQUIRED=1`, so a skip fails the job. GitHub Actions has been the main test path since D2-13. Every PR in this report merged with every CI job green on its head. #132 split the three long end-to-end files into an `integration-long` job, one runner per file, so each stays inside its 20-minute limit. The python job leaves the slice directory to the integration jobs. CI now has seven jobs, and the merge rule is that all of them are green. All seven passed on `main` at `709f4bc` ([run 40232121836](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40232121836)), the first main commit with #138's fix.
 - **The owner's PC (Windows 11).** This is the second Windows run (D2-13). The elevated pass at `c486e42` used `OTSEC_REQUIRE_ELEVATED=1`, so nothing could skip:
   - `platform/node` passed 65 of 65, including the 27 tests that need elevation;
   - `platform/store/protect` passed;
@@ -83,7 +83,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 
 | Gate item (`docs/agent-handoffs.md`, "Phase 2 exit gate") | State |
 | --- | --- |
-| The slice suite passes on the owner's PC (Windows) and on Linux, rsyslog included, from one commit on `main` | **Met on Linux, with a condition on Windows.** The Linux suites, rsyslog included, pass at `MAIN-COMMIT`. The end-to-end suites cannot run on Windows as interactive processes, for three reasons: the collector requires the installer's WER exclusion, the harness uses a Unix socket and the Unix user ID, and the admin folder admits only the service SIDs (A6). The Windows evidence is the Go units and the elevated installer run at `c486e42`. **Condition:** the slice run against the installed services on the owner's PC, proposed as the first Phase 3 task (D2-21). |
+| The slice suite passes on the owner's PC (Windows) and on Linux, rsyslog included, from one commit on `main` | **Met on Linux, with a condition on Windows.** The Linux suites, rsyslog included, pass at `709f4bc`. The end-to-end suites cannot run on Windows as interactive processes, for three reasons: the collector requires the installer's WER exclusion, the harness uses a Unix socket and the Unix user ID, and the admin folder admits only the service SIDs (A6). The Windows evidence is the Go units and the elevated installer run at `c486e42`. **Condition:** the slice run against the installed services on the owner's PC, proposed as the first Phase 3 task (D2-21). |
 | Every component is merged, with its reviewers' records | Met. Table above. The review records are on each PR and in `tests/safety/reviews/`. |
 | No safety or security objection is open | Met. A3 and A6 accepted every PR listed. The open high risk under D2-11 is tracked below. It is not an objection to the simulated slice, because D2-4 and D2-10 keep every endpoint on the simulator. |
 | V-S6, V-S7 and V-S9 pass | Met, `simulated`. See the end-to-end summary above. |
