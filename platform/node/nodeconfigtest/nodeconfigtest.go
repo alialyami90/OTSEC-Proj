@@ -10,19 +10,24 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 )
 
 // Config is a node configuration under construction. Its fields are the
 // file's sections; tests may change any of them before Bytes or Write.
 type Config struct {
-	Schema        string           `json:"schema"`
-	NodeID        string           `json:"node_id"`
-	Store         Store            `json:"store"`
-	Listeners     []Listener       `json:"listeners"`
-	Assets        []map[string]any `json:"assets"`
-	Targets       []map[string]any `json:"targets"`
-	Schedule      []Collection     `json:"schedule"`
-	CollectorPipe string           `json:"collector_pipe"`
+	Schema          string           `json:"schema"`
+	NodeID          string           `json:"node_id"`
+	Store           Store            `json:"store"`
+	Listeners       []Listener       `json:"listeners"`
+	Assets          []map[string]any `json:"assets"`
+	Targets         []map[string]any `json:"targets"`
+	Schedule        []Collection     `json:"schedule"`
+	CollectorPipe   string           `json:"collector_pipe"`
+	CollectorPeer   string           `json:"collector_peer,omitempty"`
+	PolicyVersion   uint64           `json:"policy_version"`
+	RegisterVersion uint64           `json:"register_version"`
+	TLSDir          string           `json:"tls_dir,omitempty"`
 }
 
 type Store struct {
@@ -39,18 +44,30 @@ type Listener struct {
 }
 
 type Collection struct {
-	AssetID      string `json:"asset_id"`
-	Endpoint     string `json:"endpoint"`
-	Operation    string `json:"operation"`
-	EverySeconds int    `json:"every_seconds"`
+	ID            string            `json:"id"`
+	AssetID       string            `json:"asset_id"`
+	Endpoint      string            `json:"endpoint"`
+	Operation     string            `json:"operation"`
+	Params        map[string]string `json:"params,omitempty"`
+	CredentialRef string            `json:"credential_ref,omitempty"`
+	EverySeconds  int               `json:"every_seconds"`
 }
 
+// TestCredentialRef is the credential reference AddSEL751 schedules with: a
+// handle from the C7 test data, never bound to a real secret.
+const TestCredentialRef = "cred_7f3k2m9q4x"
+
 // New returns a configuration for node with its store in storeDir, 64 MiB
-// per class, and no assets, listeners or targets.
+// per class, its TLS files in "tls" beside storeDir (WritePKI writes them),
+// and no assets, listeners or targets. The collector peer is
+// this process's uid on Linux (empty, the service SID, on Windows), and the
+// policy and register versions are those of the C7 and C3 test data (3 and
+// 2).
 func New(node, storeDir string) *Config {
 	pipe := filepath.Join(storeDir, "collector.sock")
+	peer := strconv.Itoa(os.Getuid())
 	if runtime.GOOS == "windows" {
-		pipe = `\\.\pipe\otsec-collector-test`
+		pipe, peer = `\\.\pipe\otsec-collector-test`, ""
 	}
 	q := int64(64 << 20)
 	return &Config{
@@ -59,11 +76,15 @@ func New(node, storeDir string) *Config {
 		Store: Store{Dir: storeDir, WarnFraction: 0.8, Quotas: map[string]int64{
 			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "platform": q, "audit": q,
 		}},
-		Listeners:     []Listener{},
-		Assets:        []map[string]any{},
-		Targets:       []map[string]any{},
-		Schedule:      []Collection{},
-		CollectorPipe: pipe,
+		Listeners:       []Listener{},
+		Assets:          []map[string]any{},
+		Targets:         []map[string]any{},
+		Schedule:        []Collection{},
+		CollectorPipe:   pipe,
+		CollectorPeer:   peer,
+		PolicyVersion:   3,
+		RegisterVersion: 2,
+		TLSDir:          filepath.Join(filepath.Dir(storeDir), "tls"),
 	}
 }
 
@@ -112,7 +133,8 @@ func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config
 		},
 		"profile": map[string]any{"id": "sel-751-ascii", "version": "0.1"},
 	})
-	c.Schedule = append(c.Schedule, Collection{AssetID: assetID, Endpoint: "port1-telnet", Operation: "sel.ser.read_all", EverySeconds: everySeconds})
+	c.Schedule = append(c.Schedule, Collection{ID: "sch-ser-" + assetID[:8], AssetID: assetID, Endpoint: "port1-telnet",
+		Operation: "sel.ser.read_all", CredentialRef: TestCredentialRef, EverySeconds: everySeconds})
 	return c
 }
 

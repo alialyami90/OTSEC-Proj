@@ -154,7 +154,7 @@ func TestFailedAuditDatabaseIsObservable(t *testing.T) {
 	snap := st.Snapshot("x")
 	found := false
 	for _, a := range snap.Alarms {
-		if a.Database == AuditDB && a.Code == c5.AlarmReserveReleaseFailed {
+		if a.Database == AuditDB && a.Code == string(c5.AlarmReserveReleaseFailed) {
 			found = true
 		}
 	}

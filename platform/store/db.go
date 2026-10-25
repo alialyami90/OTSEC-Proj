@@ -33,6 +33,8 @@ type DB struct {
 	full    map[c5.StreamClass]bool // quota-reached alarm raised and not cleared
 	warned  map[c5.StreamClass]bool
 	closed  bool
+	// readOnly is set by OpenReadOnly: every transaction is refused.
+	readOnly bool
 }
 
 var (
@@ -96,6 +98,9 @@ var connPragmas = []string{
 }
 
 func open(ctx context.Context, path string, opt Options) (*DB, error) {
+	if err := checkFiles(path); err != nil {
+		return nil, err
+	}
 	existed, err := exists(path)
 	if err != nil {
 		return nil, err
@@ -114,6 +119,18 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// checkFiles applies checkFile to the database and its -wal and -shm, so a
+// file whose own mode or DACL was widened after the directory was checked
+// is refused before SQLite opens it.
+func checkFiles(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := checkFile(path + suffix); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // create builds a new database at path+".new" and renames it into place
@@ -163,7 +180,7 @@ func create(ctx context.Context, path string, opt Options) error {
 
 // connect opens path on one connection with the per-connection settings.
 func connect(ctx context.Context, path string, opt Options) (*DB, error) {
-	sdb, err := sql.Open("sqlite", path)
+	sdb, err := sql.Open("sqlite", fileURI(path, ""))
 	if err != nil {
 		return nil, err
 	}
@@ -252,6 +269,9 @@ func (d *DB) load(ctx context.Context) error {
 // caller holds d.mu, or is open. hook points: <name>:begin before BEGIN,
 // <name>:commit just before COMMIT, <name>:done after it returned.
 func (d *DB) tx(ctx context.Context, name string, f func() error) error {
+	if d.readOnly {
+		return errReadOnly
+	}
 	d.point(name + ":begin")
 	if _, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("%s: begin: %w", name, err)
@@ -405,6 +425,9 @@ func (d *DB) CompactStep(ctx context.Context, n int) (more bool, err error) {
 		return false, err
 	}
 	defer d.mu.Unlock()
+	if d.readOnly {
+		return false, errReadOnly
+	}
 	_, before, _, err := d.pages(ctx)
 	if err != nil {
 		return false, err
@@ -436,7 +459,9 @@ func (d *DB) Close() error {
 		return nil
 	}
 	d.closed = true
-	d.conn.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
+	if !d.readOnly {
+		d.conn.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
+	}
 	return errors.Join(d.conn.Close(), d.db.Close())
 }
 
