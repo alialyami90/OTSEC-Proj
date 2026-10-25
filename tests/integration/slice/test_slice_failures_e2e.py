@@ -172,8 +172,9 @@ def test_within_60s_of_the_failing_run(cases, name):
         # The node raises forward-unreachable when events wait and nothing
         # has been confirmed for 60 s. On a node with one run a minute the
         # first event to wait can come up to 60 s after the kill, so the
-        # alarm can take up to two minutes (77 s seen in CI). Recorded
-        # against V-S12's proposed 60 s in docs/verification.md.
+        # alarm can take up to two minutes (77 s seen in CI). D2-21 sets
+        # V-S12's bound for this case at 2 minutes from the first event
+        # the node cannot deliver.
         limit = 120.0 + 5.0
     assert r["seen"] - start <= limit, (name, r["seen"] - start, r["signs"])
 
