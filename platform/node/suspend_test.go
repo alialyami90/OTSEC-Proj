@@ -440,6 +440,30 @@ func TestBadClearFileChangesNothing(t *testing.T) {
 	}
 }
 
+// strangerSID is a service SID that is not in AdminReaders.
+const strangerSID = "S-1-5-80-1111111111-2222222222-3333333333-4000000000-555555555"
+
+// writeShared writes name in admin_dir and locks the directory as the
+// installer lays out OTSEC\config\admin, with reader as the other
+// service's read entry (nodeconfigtest.ShareTLS). Like lockTLS, a
+// non-elevated Windows run skips, except under GitHub Actions or with
+// OTSEC_REQUIRE_ELEVATED=1.
+func writeShared(t *testing.T, nc *nodeconfigtest.Config, name string, body []byte, reader string) {
+	t.Helper()
+	nc.UnlockTLS()
+	if err := os.WriteFile(filepath.Join(nc.AdminDir, name), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := nc.ShareTLS(reader); errors.Is(err, nodeconfigtest.ErrNeedsElevation) {
+		if os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("OTSEC_REQUIRE_ELEVATED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip(err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // admin_dir as the installer lays it out, shared with the collector (A3
 // #117): a directory and file the collector may also read are accepted,
 // and on Windows a read entry for a service not in AdminReaders is
@@ -452,24 +476,10 @@ func TestAdminDirSharedWithCollector(t *testing.T) {
 	s := newScheduler(t, r, col)
 	s.RunOnce(bg, 0)
 	ref := s.Suspensions()[relayID].Ref
-	share := func(reader string) {
-		t.Helper()
-		nc.UnlockTLS()
-		b, _ := json.Marshal(map[string]string{"schema": ClearSuspensionSchema, "asset_id": relayID, "ref": ref})
-		if err := os.WriteFile(filepath.Join(nc.AdminDir, ClearSuspensionFileName), b, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := nc.ShareTLS(reader); errors.Is(err, nodeconfigtest.ErrNeedsElevation) {
-			if os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("OTSEC_REQUIRE_ELEVATED") == "1" {
-				t.Fatal(err)
-			}
-			t.Skip(err)
-		} else if err != nil {
-			t.Fatal(err)
-		}
-	}
+	b, _ := json.Marshal(map[string]string{"schema": ClearSuspensionSchema, "asset_id": relayID, "ref": ref})
+	share := func(reader string) { t.Helper(); writeShared(t, nc, ClearSuspensionFileName, b, reader) }
 	if runtime.GOOS == "windows" {
-		share("S-1-5-80-1111111111-2222222222-3333333333-4000000000-555555555")
+		share(strangerSID)
 		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmAssetSuspended {
 			t.Fatalf("a reader not in AdminReaders: run %+v", rep)
 		}
