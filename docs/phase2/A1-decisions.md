@@ -151,3 +151,13 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The certificates and keys are test material only (D2-5). No key used here is used anywhere else.
 
 A3's §9 design remains the target. Until it lands, the file resolver is a gate limitation, and a `device-observed` deployment (lifting D2-4 or D2-10) needs §9 first. A3 reviews this resolver.
+
+## D2-13: GitHub Actions is the main test path again
+
+**Owner (2026-10-25, 05:10Z):** "Its public now. Double check nothing private or secret is in my repo. If making my repo has nothing to worry about. Make github my main testing again." A3 audited every ref, PR and issue of the now-public repository and found it clean (A3 report `A3-public-repo-audit-2026-10-25.md` in the project files).
+
+**Rules (this replaces the order in D1-26 and D2-7):**
+- A PR merges when its reviewers accept it and every job in `.github/workflows/ci.yml` is green on its head: `go` on Linux and Windows, `python`, and `integration`.
+- The owner's PC is the backup. It is used when GitHub cannot run a job, such as a test that needs administrator rights on a real Windows installation (A6's installer check), or when Actions is unavailable. Each PC result names the commit and is posted on the PR.
+- A red job on main is fixed before anything else merges, unless the PR being merged is the fix.
+- The Phase 2 gate still needs the slice suite on Windows and on Linux with rsyslog, from one main commit. GitHub's `windows-latest` and `integration` jobs provide that.
