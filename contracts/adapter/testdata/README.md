@@ -86,6 +86,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/no-operation-id.json`: A result that does not name its operation.
 - `results/invalid/wake-into-password-prompt.json`: The wake line end sent after `Password: ?` was received; it would be a password attempt (A3 change 7).
 - `results/invalid/quit-after-unconfirmed-password.json`: The password got no reply, then QUI was sent: into `Password: ?` that is a second attempt (C-19, D1-20; A3 P2, A6 P2).
+- `results/invalid/probe-rejected-at-level1-at-0.1.json`: `probe-rejected-at-level1` stamped 0.1. The QUI exemption is 0.2, so a 0.1 result is refused as it was (A6 on #100).
 - `results/invalid/quit-after-rejected-probe.json`: QUI sent in the close phase after a rejected language probe (D16; A6 change 13).
 - `results/invalid/quit-after-unanswered-acc.json`: ACC got only its echo, then the step timed out and QUI was sent: a relay that prints `Password: ?` late would take it as a wrong password (A3 change 12).
 - `results/invalid/credential-and-quit-in-one-segment.json`: `[REDACTED]` and `QUI` in one sent segment (A3 P3).

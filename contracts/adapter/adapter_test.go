@@ -32,6 +32,7 @@ var resultWant = map[string]string{
 	"ok-with-error-code":                               "status ok carries no error",
 	"status-disagrees-with-code":                       `implies status "refused", not "failed"`,
 	"unknown-code-at-0.1":                              "is not in the otsec.adapter/0.2 taxonomy",
+	"probe-rejected-at-level1-at-0.1":                  "so the session ends with QUI",
 	"unexpected-password-prompt-at-0.1":                "is new in 0.2, so a 0.1 result cannot carry it",
 	"unexpected-password-prompt-then-quit":             "is a password attempt",
 	"unexpected-password-prompt-for-rejected-password": "Level 1 was reached, an operate line was the last sent",

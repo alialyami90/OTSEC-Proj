@@ -635,6 +635,11 @@ def invalid_results(good):
     mut("status-disagrees-with-code", lambda r: r.update(status="failed", error={"code": "refused.session_busy"}))
     mut("unknown-code-at-0.1", lambda r: r.update(status="failed", error={"code": "failed.something_new"}))
 
+    # The probe QUI exemption is 0.2 (D2-14): a 0.1 result validates as it did (A6 on #100).
+    r = copy.deepcopy(good["probe-rejected-at-level1"])
+    r["schema"] = SCHEMA
+    out["probe-rejected-at-level1-at-0.1"] = r
+
     # failed.unexpected_password_prompt (0.2, D2-14): its own minor, no QUI,
     # and the bytes must show Level 1 and the prompt.
     r = copy.deepcopy(good["failed.unexpected_password_prompt"])

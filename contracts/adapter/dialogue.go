@@ -254,11 +254,12 @@ func (c *check) dialogue(r Result, code Code) {
 	// elevated and left to TIDLE, a probe reply showed a level prompt but was
 	// rejected (D16: nothing after a rejected probe), or the relay asked for
 	// a password at Level 1, where QUI would be a password attempt (C-19).
-	// The last two are C2 0.2 (D2-14).
+	// The last two are C2 0.2 (D2-14), so a 0.1 result validates as it did.
 	if level >= 1 && !quit {
-		switch code {
-		case FailedTransportClosed, FailedAccessLevelDropped, RefusedLanguageNotEnglish, RefusedSessionElevated,
-			RefusedLanguageProbe, FailedUnexpectedPasswordPrompt:
+		switch {
+		case code == FailedTransportClosed, code == FailedAccessLevelDropped, code == RefusedLanguageNotEnglish,
+			code == RefusedSessionElevated, code == FailedUnexpectedPasswordPrompt:
+		case code == RefusedLanguageProbe && c.minor >= 2:
 		default:
 			c.fail("session: Level %d was reached, so the session ends with QUI (D18, V-S13)", level)
 		}
