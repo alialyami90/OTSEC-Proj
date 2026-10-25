@@ -316,3 +316,14 @@ The only way out was a collector reinstall. That fails closed, but the cause was
 - `docs/phase1/A3-credential-design.md` and D1-20 describe the floor as cleared on `=>`; this ruling supersedes that sentence. The start of the floor at `ACC` is unchanged.
 
 **Evidence: simulated.** A6 killed 10 of 10 mutants and ran the kill after `=>` on the PR's binaries: the next two runs were refused `rate_limited`, and no second session reached the device. Whether a real relay holds Level 1 after a dropped connection is for H-15 (b) (A6).
+
+## D2-21: Phase 2 gate rulings
+
+**Context (A6's gate report, 2026-10-25):** three points needed a ruling before the exit report.
+
+**Rulings:**
+- **V-S12, upstream down.** The criterion changes; the node's rule does not. The node must raise its alarm within the 60 s rule plus one 60 s tick (about 2 minutes) of the first event it cannot deliver, not within 60 s of the outage. A6 measured 77 s from the receiver's kill in CI; the test bounds it at 125 s. While the upstream is down and nothing is waiting, nothing is lost, because every event is stored before it is forwarded. Alarming sooner would mean probing the upstream with nothing to send: new traffic for no delivery gain.
+- **V-S4, an overlap that matches at more than one offset.** "Never resolved by choosing one" means never resolved silently. C1 alignment keeps the smallest overlap, raises `ser.alignment-ambiguous` and flags each row it may repeat `possible-duplicate`. A row may then be forwarded twice, with the flag, but no row is dropped. That meets the criterion.
+- **Gate item 1, the slice on Windows.** The end-to-end suites cannot run on the owner's PC as interactive processes. The collector requires the installer's WER exclusion, the harness speaks a Unix socket with the Unix user ID, and the admin folder admits only the service SIDs. Running them that way would not test the shipped configuration anyway. The gate item is met on Linux and carried on Windows as a condition. The Windows evidence is the Go units and the elevated installer run at `c486e42`. The slice against the installed services on the owner's PC (A5 and A6) is proposed as the first Phase 3 task.
+
+**Evidence: simulated** (A6, `docs/verification.md`, "Phase 2 slice status").
