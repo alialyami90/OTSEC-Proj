@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,7 +101,7 @@ func newCredStore(t *testing.T) *credFixture {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.json")
 	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
-	if err := InitState(filepath.Join(dir, "state.json")); err != nil {
+	if err := InitState(filepath.Join(dir, "state.json"), c.t.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	gens, err := OpenState(filepath.Join(dir, "state.json"), c.now)
@@ -310,6 +311,59 @@ func TestInstallAndAcquire(t *testing.T) {
 	defer h2.Close()
 	if !bytes.Equal(secretOf(t, h2), canary) {
 		t.Fatal("reopened store gave another secret")
+	}
+}
+
+// The reply to the password line, cut inside an echo, still has the cut part
+// redacted. Later replies, and a reply that ends in a prompt, get whole
+// matches only (A3 on #99, A6 on #106).
+func TestEchoSpansPartial(t *testing.T) {
+	sent := func(secret string) *SecretHandle {
+		h := &SecretHandle{b: []byte(secret)}
+		if err := h.Use(func([]byte) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	cases := []struct {
+		secret, rx string
+		want       [][2]int
+	}{
+		{"Abc123xyz", "\r\nAbc12", [][2]int{{2, 7}}},
+		{"Abc123xyz", "Abc123xyz\r\nAbc", [][2]int{{0, 9}, {11, 14}}},
+		{"Abc123xyz", "Abc123xyz", [][2]int{{0, 9}}},
+		{"Abc123xyz", "\r\nAb", nil},                    // under three bytes: not redacted
+		{"Abc123xyz", "xyzAbc123xy", [][2]int{{3, 11}}}, // the longest leading part
+		{"Abc123xyz", "Abc123xyzAbc123xyz", [][2]int{{0, 9}, {9, 18}}},
+		{"Abc123xyz", "Abc1", [][2]int{{0, 4}}},
+		{"Abc123xyz", "\r\n=>", nil},
+		// A6's probes: a reply that ends in a prompt is never cut.
+		{"=>>Lv2", "\r\n=>>", nil},
+		{": ? x", "\r\nPassword: ? ", nil},
+		{"=>x9", "SER\r\n=>", nil},
+		{"ab=cd", "\r\nab=", nil}, // what the prompt rule leaves: a cut ending in a prompt byte
+	}
+	for _, c := range cases {
+		got := sent(c.secret).EchoSpans([]byte(c.rx))
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%q in %q: spans %v, want %v", c.secret, c.rx, got, c.want)
+		}
+	}
+	// Only the first reply after Use: a later reply's cut tail is device
+	// data, and redacting it would show the secret's first bytes.
+	h := sent("000Secret")
+	if got := h.EchoSpans([]byte("\r\n=>")); got != nil {
+		t.Fatalf("first reply: %v", got)
+	}
+	if got := h.EchoSpans([]byte("SER 12:00:00.000")); got != nil {
+		t.Errorf("a later reply's tail was redacted: %v", got)
+	}
+	if got := h.EchoSpans([]byte("x000Secret")); fmt.Sprint(got) != "[[1 10]]" {
+		t.Errorf("a later reply's whole echo: %v", got)
+	}
+	// Before Use nothing was sent, so nothing can be cut.
+	if got := (&SecretHandle{b: []byte("000Secret")}).EchoSpans([]byte("12:00:00.000")); got != nil {
+		t.Errorf("before Use: %v", got)
 	}
 }
 
