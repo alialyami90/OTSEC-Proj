@@ -303,7 +303,7 @@ var (
 // duplicate keys are rejected, unknown exact-case fields are ignored.
 //
 // A result of this package's own minor or earlier is decoded with
-// strictjson.Decode as well, so a writer bug in 0.1 is caught (A6 C2 review
+// strictjson.Decode as well, so a writer bug is caught (A6 C2 review
 // change 9; the same rule as C1 and C4).
 func DecodeResult(b []byte) (Result, error) {
 	var r Result
@@ -350,7 +350,7 @@ func (r Result) Validate() error {
 	if err != nil || !self.Accepts(id) {
 		return fmt.Errorf("adapter: result: schema %q is not readable as %s", r.Schema, Contract)
 	}
-	c := &check{later: id.Minor > self.Minor}
+	c := &check{minor: id.Minor, later: id.Minor > self.Minor}
 	if !uuidPattern.MatchString(r.InvocationID) {
 		c.fail("invocation_id %q is not a lowercase UUID", r.InvocationID)
 	}
@@ -446,7 +446,7 @@ func (r Result) Validate() error {
 func (c *check) status(r Result) Code {
 	if !contains(Statuses, r.Status) {
 		if !c.later {
-			c.fail("status %q is not one of the 0.1 values", r.Status)
+			c.fail("status %q is not one of the %s values", r.Status, Contract)
 		}
 	}
 	if r.Status == StatusOK {
@@ -467,9 +467,12 @@ func (c *check) status(r Result) Code {
 	code := r.Error.Code
 	if !code.Known() {
 		if !c.later {
-			c.fail("error code %q is not in the 0.1 taxonomy", code)
+			c.fail("error code %q is not in the %s taxonomy", code, Contract)
 		}
 		code = FailedUnknown
+	}
+	if code.Since() > c.minor {
+		c.fail("error code %q is new in 0.%d, so a 0.%d result cannot carry it", code, code.Since(), c.minor)
 	}
 	if code.Status() != r.Status && code != FailedUnknown {
 		c.fail("error code %q implies status %q, not %q", code, code.Status(), r.Status)
@@ -665,14 +668,19 @@ func (c *check) session(r Result, code Code) {
 		if !s.CredentialSent && s.AccessLevel != "1" {
 			c.fail("error %s happens after authentication", code)
 		}
-		// QUI drops Level 1 to Level 0 (D18). Two exceptions: the level has
-		// already dropped, or the port turned out not to be English, where
-		// QUI is not a known command and nothing more may be sent (D16).
+		// QUI drops Level 1 to Level 0 (D18). Three exceptions: the level has
+		// already dropped; the port turned out not to be English, where QUI
+		// is not a known command and nothing more may be sent (D16); or the
+		// relay asked for a password, where QUI would be an attempt (C-19).
 		switch code {
 		case FailedAccessLevelDropped:
 		case RefusedLanguageNotEnglish:
 			if s.QuitSent {
 				c.fail("%s: the port is not English, so QUI is not sent; close the connection (D16)", code)
+			}
+		case FailedUnexpectedPasswordPrompt:
+			if s.QuitSent {
+				c.fail("%s: QUI into \"Password: ?\" is a password attempt; close the connection (C-19)", code)
 			}
 		default:
 			if !s.QuitSent {
@@ -794,7 +802,8 @@ func segmentAt(t Transcript, off, n int64) (Segment, bool) {
 }
 
 type check struct {
-	later bool
+	minor int  // the result's minor
+	later bool // a minor after this package's
 	errs  []error
 }
 
