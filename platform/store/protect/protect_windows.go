@@ -15,7 +15,10 @@ import (
 // (platform/store's checkDir and checkFile): the owner and every allow
 // entry name this account, SYSTEM or Administrators. protected also
 // requires the DACL to be protected. what names the object in errors.
-// Windows only: on Linux the store checks modes itself.
+// It admits this account as owner and writer, so it is the store's rule
+// and never for a file this account must not be able to change: use
+// ReadFile or ReadFileFor for that (A6 on #116). Windows only: on Linux
+// the store checks modes itself.
 func CheckOwnACL(what, path string, protected bool) error {
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
