@@ -18,6 +18,7 @@ import (
 	"otsec.local/otsec/modules/security/collectorclient"
 	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/node"
+	"otsec.local/otsec/platform/winsvc"
 )
 
 // The collector reads the node's administrator file, so the name, the
@@ -27,6 +28,12 @@ func TestClearFileIsTheNodes(t *testing.T) {
 		collector.ClearSuspensionSchema != node.ClearSuspensionSchema ||
 		collector.MaxClearSuspensionBytes != node.MaxClearSuspensionBytes {
 		t.Fatal("the collector's clear-suspension.json differs from the node's")
+	}
+	// The data directory is %ProgramData%\OTSEC, and the folder is the one
+	// the installer creates and the node is configured with.
+	pd := filepath.Join(t.TempDir(), "ProgramData")
+	if got, want := newLayout(filepath.Join(pd, "OTSEC")).admin, winsvc.AdminDir(pd); got != want {
+		t.Fatalf("the collector reads %s, the installer creates %s", got, want)
 	}
 }
 
