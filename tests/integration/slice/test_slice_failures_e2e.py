@@ -28,10 +28,9 @@ A late device leaves the QUI language probe unanswered (C2 0.4, D2-19):
 failed.timeout, and nothing suspended. Until C2 0.4 it was a rejected probe
 that suspended the asset as language-not-english.
 
-The late device and the SER that hangs share failed.timeout. They are told
-apart only by the detail: the late device's names the unanswered probe, and
-the hung SER's is empty, since the adapter gives a step timeout no detail
-(open with A2, V-S12).
+The late device and the SER that hangs share failed.timeout and are told
+apart by the detail health prints (#135): the late device's names the
+unanswered probe (#133), the hung SER's names the step (#137).
 
 Evidence class: simulated. The device-side faults are the simulator's, not
 a relay's failure signatures (H-04, H-05).
@@ -82,8 +81,8 @@ def _signs(health, since):
 EXPECT = {
     "unreachable": "run:failed.connect",
     "auth": "run:failed.auth_rejected",
-    "timeout": "run:failed.timeout",
-    "hang": "run:failed.timeout",
+    "timeout": "run:failed.timeout (no prompt after the QUI language probe; nothing more sent)",
+    "hang": "run:failed.timeout (no prompt within the step timeout after SER)",
     "malformed": "run:partial.parse_errors",
     "upstream": "alarm:forward-unreachable",
     "store": "alarm:collection-no-quarantine-room",

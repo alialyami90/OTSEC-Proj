@@ -36,7 +36,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
-      - run: python -m pytest -q
+      # The slice directory runs in the integration and integration-long jobs
+      # in required mode; here it would build the binaries and overrun.
+      - run: python -m pytest -q --ignore=tests/integration/slice
   # The Phase 2 slice suite (D2-3, P2-A1): A6's harness with rsyslog as the
   # upstream RELP/TLS collector (imrelp, name mode, Direct queue, sync on;
   # D2-9). Required mode turns every check that cannot run into a failure,
