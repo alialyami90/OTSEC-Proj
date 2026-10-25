@@ -84,9 +84,13 @@
                 "password-prompt-absent",
                 "language-not-english",
                 "firmware-not-allowlisted",
-                "unexpected-access-level",
-                "operator"
+                "unexpected-access-level"
               ]
+            },
+            "code": {
+              "type": "string",
+              "description": "The C2 outcome code that set the suspension; the reader checks it is known and suspends with reason. Absent for a suspension recorded before the collector kept codes, which the node does not adopt.",
+              "pattern": "^(refused|failed)\\.[a-z][a-z0-9_]{0,63}$"
             },
             "ref": {
               "type": "string",

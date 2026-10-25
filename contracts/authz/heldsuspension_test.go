@@ -15,7 +15,7 @@ const heldRef = "6f1c2e8a-0000-4000-8000-0000000000a1"
 // asset_suspended and the suspension it names (0.3, A6 on #120): the node
 // adopts a suspension only the collector holds, so it must be checkable.
 func TestHeldSuspension(t *testing.T) {
-	held := &HeldSuspension{Reason: asset.SuspendIdentityMismatch, Ref: heldRef}
+	held := &HeldSuspension{Reason: asset.SuspendIdentityMismatch, Ref: heldRef, Code: "refused.identity_mismatch"}
 	reply := func(code RefusalCode, h *HeldSuspension) CollectorReply {
 		return CollectorReply{Contract: ContractID, RequestID: "r1", Status: ReplyRefused, CollectorSeq: 7,
 			Refusal: &Refusal{Code: code, Detail: "d", Suspension: h}}
@@ -33,7 +33,12 @@ func TestHeldSuspension(t *testing.T) {
 		{"accepted", CollectorReply{Contract: ContractID, RequestID: "r1", Status: ReplyAccepted, CollectorSeq: 7}, nil, ""},
 		{"asset_suspended naming none", reply(RefuseAssetSuspended, nil), nil, "names no suspension"},
 		{"a suspension on another code", reply(RefuseAssetNotEnrolled, held), nil, "a suspension on refusal asset_not_enrolled"},
-		{"an unknown reason", reply(RefuseAssetSuspended, &HeldSuspension{Reason: "tired", Ref: heldRef}), nil, "not a C1 suspension reason"},
+		{"no code, from a state before codes were kept", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: heldRef}),
+			&HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: heldRef}, ""},
+		{"an unknown reason", reply(RefuseAssetSuspended, &HeldSuspension{Reason: "tired", Ref: heldRef}), nil, "not a reason an outcome code sets"},
+		{"an operator suspension, which only the node sets", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendOperator, Ref: heldRef}), nil, "not a reason an outcome code sets"},
+		{"an ok code", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: heldRef, Code: "ok.done"}), nil, "not a C2 refusal or failure code"},
+		{"a code with a space", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: heldRef, Code: "failed.auth rejected"}), nil, "not a C2 refusal or failure code"},
 		{"an upper-case ref", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: strings.ToUpper(heldRef)}), nil, "not an invocation ID"},
 		{"an empty ref", reply(RefuseAssetSuspended, &HeldSuspension{Reason: asset.SuspendAuthFailed}), nil, "not an invocation ID"},
 	} {
@@ -123,7 +128,12 @@ func TestReplySchemaRefusals(t *testing.T) {
 			t.Errorf("schema reason %q: %v", r, err)
 		}
 	}
-	if err := (HeldSuspension{Reason: "tired", Ref: heldRef}).Validate(); err == nil {
-		t.Error("an unknown reason validated")
+	for _, r := range []asset.SuspensionReason{"tired", asset.SuspendOperator} {
+		if slices.Contains(reasons, r) {
+			t.Errorf("the schema accepts %q", r)
+		}
+		if err := (HeldSuspension{Reason: r, Ref: heldRef}).Validate(); err == nil {
+			t.Errorf("reason %q validated", r)
+		}
 	}
 }

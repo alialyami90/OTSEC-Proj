@@ -120,8 +120,8 @@
 //     suspension, and credential.clear_suspension never touches an asset's.
 //   - Held suspensions (0.3, A6 on #120). A run refused because the
 //     collector holds the asset suspended is refused with asset_suspended,
-//     and the refusal's suspension names the C1 reason and the invocation
-//     that set it. A clear refused with suspension_mismatch names the
+//     and the refusal's suspension names the C1 reason, the invocation that
+//     set it and its C2 outcome code. A clear refused with suspension_mismatch names the
 //     suspension the collector holds, if it holds one. The node adopts a
 //     named suspension it does not hold: it records its own asset.suspend
 //     with that reason and ref, so the administrator's clear works as for
@@ -130,8 +130,12 @@
 //     collector. Adopting only adds a restriction the collector already
 //     enforces, so a collector that names a false suspension stops nothing
 //     it could not already refuse. CollectorReply.HeldSuspension checks
-//     the named suspension; one that fails it is not adopted, and the node
-//     alarms.
+//     the named suspension's shape, and the node checks its code is a known
+//     C2 code whose Suspends is the reason (C2 imports this package). One
+//     that fails either check, or has no code because the collector
+//     recorded it before it kept codes, is not adopted, and the node
+//     alarms. The collector never holds an operator suspension, so that
+//     reason is not accepted.
 //   - Audit before act (A1 D1-11). The main process sends a request only after
 //     its C8 collector.request record holds a C5 receipt. With a full or
 //     failed audit store, no request is sent, so collection that uses a

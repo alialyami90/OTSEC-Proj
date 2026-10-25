@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 )
@@ -87,7 +88,7 @@ func TestOpenStateFailsClosed(t *testing.T) {
 // makes the state unavailable (A6 nit on #106).
 func TestOpenStateChecksSuspension(t *testing.T) {
 	path, s, _ := newState(t)
-	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, "inv-1"); err != nil {
+	if err := s.SuspendAsset(testAsset, adapter.FailedUnexpectedLevel, "inv-1"); err != nil {
 		t.Fatal(err)
 	}
 	good, err := os.ReadFile(path)
@@ -98,9 +99,14 @@ func TestOpenStateChecksSuspension(t *testing.T) {
 		t.Fatalf("a valid suspension: %v", err)
 	}
 	for name, edit := range map[string]func(a map[string]any){
-		"no invocation":  func(a map[string]any) { delete(a, "suspended_by") },
-		"no reason":      func(a map[string]any) { delete(a, "suspended") },
-		"unknown reason": func(a map[string]any) { a["suspended"] = "made-up" },
+		"no invocation":                 func(a map[string]any) { delete(a, "suspended_by") },
+		"no reason":                     func(a map[string]any) { delete(a, "suspended") },
+		"unknown reason":                func(a map[string]any) { a["suspended"] = "made-up" },
+		"code that sets another reason": func(a map[string]any) { a["suspended_code"] = string(adapter.FailedAuthRejected) },
+		"code with no suspension": func(a map[string]any) {
+			delete(a, "suspended")
+			delete(a, "suspended_by")
+		},
 	} {
 		var doc map[string]any
 		if err := json.Unmarshal(good, &doc); err != nil {
@@ -115,6 +121,26 @@ func TestOpenStateChecksSuspension(t *testing.T) {
 		if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
 			t.Errorf("%s: %v, want ErrStateUnavailable", name, err)
 		}
+	}
+	// A state written before codes were kept opens, and names the held
+	// suspension without a code, which the node does not adopt (A1 on #125).
+	var doc map[string]any
+	if err := json.Unmarshal(good, &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc["assets"].(map[string]any)[testAsset].(map[string]any), "suspended_code")
+	b, _ := json.Marshal(doc)
+	p := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := OpenState(p, nil)
+	if err != nil {
+		t.Fatalf("a state without codes: %v", err)
+	}
+	if err := old.CheckSuspended(testAsset); codeOf(err) != authz.RefuseAssetSuspended ||
+		*err.(*authz.Refusal).Suspension != (authz.HeldSuspension{Reason: asset.SuspendUnexpectedLevel, Ref: "inv-1"}) {
+		t.Fatalf("a state without codes: %v", err)
 	}
 }
 
@@ -407,24 +433,24 @@ func TestAssetSuspension(t *testing.T) {
 	if err := s.CheckSuspended(testAsset); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SuspendAsset(testAsset, "made-up", "inv-1"); err == nil {
+	if err := s.SuspendAsset(testAsset, adapter.Code("refused.made_up"), "inv-1"); err == nil {
 		t.Fatal("an unknown reason was recorded")
 	}
-	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, ""); err == nil {
+	if err := s.SuspendAsset(testAsset, adapter.FailedUnexpectedLevel, ""); err == nil {
 		t.Fatal("a suspension without its invocation was recorded")
 	}
-	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, "inv-1"); err != nil {
+	if err := s.SuspendAsset(testAsset, adapter.FailedUnexpectedLevel, "inv-1"); err != nil {
 		t.Fatal(err)
 	}
 	// A later reason does not replace the first, except identity-mismatch.
-	if err := s.SuspendAsset(testAsset, asset.SuspendLanguageNotEnglish, "inv-2"); err != nil {
+	if err := s.SuspendAsset(testAsset, adapter.RefusedLanguageNotEnglish, "inv-2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CheckSuspended(testAsset); codeOf(err) != authz.RefuseAssetSuspended || !strings.Contains(err.Error(), "unexpected-access-level") ||
-		*err.(*authz.Refusal).Suspension != (authz.HeldSuspension{Reason: asset.SuspendUnexpectedLevel, Ref: "inv-1"}) {
+		*err.(*authz.Refusal).Suspension != (authz.HeldSuspension{Reason: asset.SuspendUnexpectedLevel, Ref: "inv-1", Code: string(adapter.FailedUnexpectedLevel)}) {
 		t.Fatalf("suspended asset: %v", err)
 	}
-	if err := s.SuspendAsset(testAsset, asset.SuspendIdentityMismatch, "inv-3"); err != nil {
+	if err := s.SuspendAsset(testAsset, adapter.RefusedIdentityMismatch, "inv-3"); err != nil {
 		t.Fatal(err)
 	}
 	// Durable.
@@ -432,7 +458,8 @@ func TestAssetSuspension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := again.CheckSuspended(testAsset); !strings.Contains(fmt.Sprint(err), "identity-mismatch") || !strings.Contains(err.Error(), "inv-3") {
+	if err := again.CheckSuspended(testAsset); !strings.Contains(fmt.Sprint(err), "identity-mismatch") || !strings.Contains(err.Error(), "inv-3") ||
+		err.(*authz.Refusal).Suspension.Code != string(adapter.RefusedIdentityMismatch) {
 		t.Fatalf("after reopening: %v", err)
 	}
 	if err := again.CheckSuspended("another-asset"); err != nil {

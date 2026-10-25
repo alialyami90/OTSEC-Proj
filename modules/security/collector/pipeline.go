@@ -474,7 +474,7 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 	// checks below: suspending is the cautious direction.
 	code := outcomeCode(report.Outcome)
 	if r := code.Suspends(); r != "" {
-		if err := p.cfg.State.SuspendAsset(asset, r, plan.Invocation.InvocationID); err != nil {
+		if err := p.cfg.State.SuspendAsset(asset, code, plan.Invocation.InvocationID); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: suspend asset %s (%s): %w", asset, r, err))
 		}
 	}

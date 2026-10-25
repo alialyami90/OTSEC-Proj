@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorwire"
@@ -93,6 +94,10 @@ type assetState struct {
 	// none. Runs to the asset are refused until it is cleared.
 	Suspended   asset.SuspensionReason `json:"suspended,omitempty"`
 	SuspendedBy string                 `json:"suspended_by,omitempty"`
+	// SuspendedCode is the outcome code that set Suspended, which the
+	// node's C8 asset.suspend record needs when it adopts the suspension
+	// (C7 0.3). A state written before codes were kept has none.
+	SuspendedCode adapter.Code `json:"suspended_code,omitempty"`
 }
 
 // MaxStateBytes bounds the state file. One asset entry is about 100 bytes,
@@ -183,6 +188,9 @@ func checkStateDoc(doc stateDoc) error {
 		if (a.Suspended == "") != (a.SuspendedBy == "") || (a.Suspended != "" && !knownSuspension(a.Suspended)) {
 			return fmt.Errorf("asset %s: suspension %q by %q is not a known reason with its invocation", id, a.Suspended, a.SuspendedBy)
 		}
+		if a.SuspendedCode != "" && (a.Suspended == "" || a.SuspendedCode.Suspends() != a.Suspended) {
+			return fmt.Errorf("asset %s: suspension %q was not set by code %q", id, a.Suspended, a.SuspendedCode)
+		}
 	}
 	for fam, f := range doc.Families {
 		if b, err := hex.DecodeString(f.PayloadSHA256); err != nil || len(b) != sha256.Size || f.PayloadSHA256 != strings.ToLower(f.PayloadSHA256) {
@@ -246,18 +254,20 @@ func (s *State) CheckFloor(asset string) error {
 	return nil
 }
 
-// SuspendAsset records, durably, that the outcome of invocation set reason
-// on asset (adapter.Code.Suspends). An existing suspension keeps its reason,
-// except that identity-mismatch replaces any other, as for credentials, and
-// then names the later invocation. Only ClearAssetSuspension lifts it, for
-// a C7 0.2 asset.clear_suspension, or a fresh state, after its floor.
-func (s *State) SuspendAsset(id string, reason asset.SuspensionReason, invocation string) error {
+// SuspendAsset records, durably, that the outcome code of invocation set
+// its reason on asset (adapter.Code.Suspends). An existing suspension keeps
+// its reason, except that identity-mismatch replaces any other, as for
+// credentials, and then names the later invocation and code. Only
+// ClearAssetSuspension lifts it, for a C7 asset.clear_suspension, or a
+// fresh state, after its floor.
+func (s *State) SuspendAsset(id string, code adapter.Code, invocation string) error {
+	reason := code.Suspends()
 	if !knownSuspension(reason) || invocation == "" {
-		return fmt.Errorf("collector: suspend asset %s: reason %q by %q", id, reason, invocation)
+		return fmt.Errorf("collector: suspend asset %s: code %q (reason %q) by %q", id, code, reason, invocation)
 	}
 	return s.update(id, func(a *assetState) {
 		if a.Suspended == "" || reason == asset.SuspendIdentityMismatch {
-			a.Suspended, a.SuspendedBy = reason, invocation
+			a.Suspended, a.SuspendedBy, a.SuspendedCode = reason, invocation, code
 		}
 	})
 }
@@ -275,7 +285,7 @@ func (s *State) CheckSuspended(id string) error {
 	}
 	if a := s.doc.Assets[id]; a.Suspended != "" {
 		return &authz.Refusal{Code: authz.RefuseAssetSuspended, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s", id, a.Suspended, a.SuspendedBy),
-			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy}}
+			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy, Code: string(a.SuspendedCode)}}
 	}
 	return nil
 }
@@ -301,9 +311,9 @@ func (s *State) ClearAssetSuspension(id, ref string) error {
 		return nil
 	case a.SuspendedBy != ref:
 		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s, not %s", id, a.Suspended, a.SuspendedBy, ref),
-			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy}}
+			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy, Code: string(a.SuspendedCode)}}
 	}
-	a.Suspended, a.SuspendedBy = "", ""
+	a.Suspended, a.SuspendedBy, a.SuspendedCode = "", "", ""
 	next := s.doc
 	next.Assets = maps.Clone(s.doc.Assets)
 	if a == (assetState{}) {

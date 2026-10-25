@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 )
@@ -54,7 +55,7 @@ func suspendedPipeline(t *testing.T, file *adminFile) *pipeFixture {
 			c.ReadClearFile = file.read
 		}
 	})
-	if err := f.state.SuspendAsset(testAsset, asset.SuspendAuthFailed, suspendingRun); err != nil {
+	if err := f.state.SuspendAsset(testAsset, adapter.FailedAuthRejected, suspendingRun); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -171,7 +172,7 @@ func TestAssetClear(t *testing.T) {
 	}
 	// A run suspends the asset again: the old clear, file and request
 	// alike, does not lift the new suspension.
-	if err := f.state.SuspendAsset(testAsset, asset.SuspendAuthFailed, laterRun); err != nil {
+	if err := f.state.SuspendAsset(testAsset, adapter.FailedAuthRejected, laterRun); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun)); refusalOf(again) != authz.RefuseSuspensionMismatch {
@@ -201,7 +202,7 @@ func TestAssetClearReinstalled(t *testing.T) {
 // alike, lifts nothing.
 func TestAssetClearAfterLaterSuspension(t *testing.T) {
 	f := suspendedPipeline(t, &adminFile{b: clearFileFor(testAsset, suspendingRun)})
-	if err := f.state.SuspendAsset(testAsset, asset.SuspendIdentityMismatch, laterRun); err != nil {
+	if err := f.state.SuspendAsset(testAsset, adapter.RefusedIdentityMismatch, laterRun); err != nil {
 		t.Fatal(err)
 	}
 	if reply, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun)); refusalOf(reply) != authz.RefuseSuspensionMismatch {
@@ -245,7 +246,7 @@ func TestClearAssetSuspensionState(t *testing.T) {
 	if err := state.ClearAssetSuspension(testAsset, suspendingRun); err != nil {
 		t.Fatalf("clear of an asset not suspended: %v", err)
 	}
-	if err := state.SuspendAsset(testAsset, asset.SuspendPasswordPromptAbsent, suspendingRun); err != nil {
+	if err := state.SuspendAsset(testAsset, adapter.RefusedPasswordPromptAbsent, suspendingRun); err != nil {
 		t.Fatal(err)
 	}
 	if err := state.ClearAssetSuspension(testAsset, laterRun); !errors.As(err, &r) || r.Code != authz.RefuseSuspensionMismatch {
@@ -265,7 +266,7 @@ func TestClearAssetSuspensionState(t *testing.T) {
 // it the normal way (A6 on #120). A clear naming another invocation is
 // told which one is held. A request stamped before 0.3 gets the 0.2 reply.
 func TestHeldSuspensionNamed(t *testing.T) {
-	held := authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: suspendingRun}
+	held := authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: suspendingRun, Code: string(adapter.FailedAuthRejected)}
 	f := suspendedPipeline(t, &adminFile{b: clearFileFor(testAsset, laterRun)})
 	f.installCanary(t)
 	f.clock.t = f.clock.t.Add(time.Hour) // past the fresh-state floor

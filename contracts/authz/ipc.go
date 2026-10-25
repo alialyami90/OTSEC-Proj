@@ -170,24 +170,39 @@ type Refusal struct {
 	Suspension *HeldSuspension `json:"suspension,omitempty"`
 }
 
-// HeldSuspension is an asset suspension the collector holds: its C1 reason
-// and the invocation that set it, a lowercase UUID (since 0.3).
+// HeldSuspension is an asset suspension the collector holds (since 0.3):
+// its C1 reason, the invocation that set it, a lowercase UUID, and the C2
+// outcome code that set it, which the node's C8 asset.suspend record needs
+// (A5 on #125). Code is empty for a suspension recorded before the
+// collector kept codes; the node does not adopt one without a code.
 type HeldSuspension struct {
 	Reason asset.SuspensionReason `json:"reason"`
 	Ref    string                 `json:"ref"`
+	Code   string                 `json:"code,omitempty"`
 }
 
-// Validate checks the reason is a C1 suspension reason and the ref an
-// invocation ID.
+// heldCodePattern is the shape of a C2 code that suspends: a refusal or a
+// failure. TODO(C2): C2 imports this package, so whether the code is known
+// and suspends with Reason (adapter.Code.Suspends) is the reader's check.
+var heldCodePattern = regexp.MustCompile(`^(refused|failed)\.[a-z][a-z0-9_]{0,63}$`)
+
+// Validate checks the reason is a C1 reason an outcome code sets (operator
+// suspensions are the node's, and the collector never holds one), the ref
+// an invocation ID, and the code, when present, shaped as a C2 refusal or
+// failure. The node must also check that the code is a known C2 code whose
+// Suspends is Reason before it adopts the suspension.
 func (h HeldSuspension) Validate() error {
 	switch h.Reason {
 	case asset.SuspendIdentityMismatch, asset.SuspendAuthFailed, asset.SuspendPasswordPromptAbsent,
-		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel, asset.SuspendOperator:
+		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel:
 	default:
-		return fmt.Errorf("authz: held suspension: %q is not a C1 suspension reason", h.Reason)
+		return fmt.Errorf("authz: held suspension: %q is not a reason an outcome code sets", h.Reason)
 	}
 	if !invocationRefPattern.MatchString(h.Ref) {
 		return errors.New("authz: held suspension: ref is not an invocation ID (lowercase UUID)")
+	}
+	if h.Code != "" && !heldCodePattern.MatchString(h.Code) {
+		return fmt.Errorf("authz: held suspension: %q is not a C2 refusal or failure code", h.Code)
 	}
 	return nil
 }

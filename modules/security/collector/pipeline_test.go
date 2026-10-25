@@ -786,7 +786,7 @@ func TestOutcomeCodeSuspends(t *testing.T) {
 	}
 	// The refusal names the suspension, so a node that never recorded it
 	// can adopt it (C7 0.3, A6 on #120).
-	if h, err := reply.HeldSuspension(); err != nil || h == nil || h.Reason != asset.SuspendUnexpectedLevel || h.Ref != f.runner.plans[0].Invocation.InvocationID {
+	if h, err := reply.HeldSuspension(); err != nil || h == nil || h.Reason != asset.SuspendUnexpectedLevel || h.Ref != f.runner.plans[0].Invocation.InvocationID || h.Code != string(adapter.FailedUnexpectedLevel) {
 		t.Fatalf("held suspension %+v, %v", h, err)
 	}
 	if f.runner.count() != 1 {
