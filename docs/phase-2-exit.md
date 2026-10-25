@@ -178,9 +178,9 @@ The owner asked where each requested capability lands. Nothing has been dropped.
 | 1.1 Asset management and monitoring | One asset, identified by FID, with suspension, health and last result. No inventory or discovery. | Phase 4, with each new SEL family. |
 | 1.2 Secure engineering and remote access | Not built. The threat model and the Q1 comparison are in Phase 0. | Phase 4, item 3. |
 | 1.3 Configuration and baseline monitoring | Not built. `SHO P 1` is read for posture only. | Phase 4, item 1. |
-| 1.4 Syslog and SER collection | SER retrieval, normalization, evidence and RELP/TLS forwarding, end to end. Receiving device Syslog is designed (C1 listeners, C4, C6) and not built. | Receiving: proposed for Phase 4 beside item 1, as the vendor-neutral path of ADR-0006. |
+| 1.4 Syslog and SER collection | SER retrieval, normalization, evidence and RELP/TLS forwarding, end to end. Receiving device Syslog is designed (C1 listeners, C4 `origin: syslog`, C5's `syslog-stream` and `syslog-datagram` classes) and not built. | Receiving: proposed for Phase 4 beside item 1, as the vendor-neutral path of ADR-0006. |
 | 1.5 Custom IED command framework | The C2 adapter, the signed C3 register, the read-only egress check and the hosted SEL-751 adapter. | Each new family extends it. |
-| 1.6 Intrusion detection and anomaly detection | Not built. Zeek and Suricata are evaluated in Phase 0. | Phase 4, item 4. |
+| 1.6 Intrusion detection and anomaly detection | Not built. Zeek and Suricata are evaluated in Phase 0 for protocol coverage only: neither stock release decodes IEC 61850 MMS, GOOSE, SV or IEC 60870-5-104, and no detection was run against a capture. | Phase 4, item 4. |
 | 1.7 Modular and additive architecture | Contracts C1 to C8 (Phase 1), two binaries, D2-1's import rule enforced by test. | Done for the slice. |
 | 1.8 Centralized and distributed deployment | Single-site node only, under the SCM. No central role (V-S18). | Phase 4, item 5. |
 
