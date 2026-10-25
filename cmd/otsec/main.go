@@ -312,6 +312,35 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		}
 		closeAll()
 	}
+	names := make([]string, 0, len(st.Targets))
+	for n := range st.Targets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		ts := st.Targets[n]
+		confirmed := "never in this process"
+		if !ts.LastConfirmed.IsZero() {
+			confirmed = ts.LastConfirmed.Format(time.RFC3339)
+		}
+		fmt.Fprintf(w, "target %s (%s): %d confirmed, last %s\n", safe(n), ts.Class, ts.Confirmed, confirmed)
+		if ts.LastErr != "" {
+			fmt.Fprintf(w, "  last session ended: %s\n", safe(ts.LastErr))
+		}
+		streams := make([]string, 0, len(ts.Streams))
+		for s := range ts.Streams {
+			streams = append(streams, s)
+		}
+		sort.Strings(streams)
+		for _, s := range streams {
+			ss := ts.Streams[s]
+			line := fmt.Sprintf("  %s: cursor %d of %d", safe(s), ss.Cursor, ss.Last)
+			if ss.Blocked != "" {
+				line += ", HELD: " + safe(ss.Blocked)
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
 	if len(st.Alarms) == 0 {
 		fmt.Fprintln(w, "alarms: none")
 		return nil
@@ -322,6 +351,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		src := string(a.Database)
 		if a.Asset != "" {
 			src = "asset " + a.Asset
+		}
+		if a.Target != "" {
+			src = "target " + safe(a.Target)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.At.Format(time.RFC3339), src, a.Code, safe(a.Detail))
 	}
