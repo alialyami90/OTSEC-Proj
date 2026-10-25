@@ -112,7 +112,7 @@ func lockPipeline(t *testing.T, host string, port int, runner collector.Runner) 
 	dir := t.TempDir()
 	now := func() time.Time { return time.Date(2026, 10, 25, 7, 0, 0, 0, time.UTC) }
 	statePath := filepath.Join(dir, "state.json")
-	if err := collector.InitState(statePath); err != nil {
+	if err := collector.InitState(statePath, now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	st, err := collector.OpenState(statePath, now)
