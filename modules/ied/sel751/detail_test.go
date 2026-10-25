@@ -46,6 +46,9 @@ func TestStepDetail(t *testing.T) {
 		want   adapter.Code
 		detail string
 	}{
+		// A far end that closes before it prints anything, so no wake is sent.
+		{"closed while connecting", nil, true, nil, adapter.FailedTransportClosed,
+			"the connection closed with no prompt after connecting"},
 		{"no prompt after the wake", silentAfter(t, "ok", []byte("\r\n")), false, nil, adapter.FailedTimeout,
 			"no prompt within the step timeout after the wake"},
 		{"no prompt after the probe", script(golden(t, "failed.timeout-probe-unanswered")), false, nil, adapter.FailedTimeout,
@@ -61,6 +64,10 @@ func TestStepDetail(t *testing.T) {
 			"no prompt within the step timeout after SHO P 1"},
 		{"a SER read that hangs", script(golden(t, "failed.timeout")), false, nil, adapter.FailedTimeout,
 			"no prompt within the step timeout after " + ser},
+		// The deadline ends before the step timeout would (A6 on #137).
+		{"the deadline during a SER read", append(silentAfter(t, "ok", []byte(ser+"\r\n")), step{expect: []byte("QUI\r\n"), reply: []byte("QUI\r\n=")}), false,
+			func(l *adapter.Limits, _ []step) { l.StepTimeoutMS, l.DeadlineMS = 2000, 2000 }, adapter.FailedTimeout,
+			"the invocation deadline passed with no prompt after " + ser},
 		{"a SER read cut off", script(golden(t, "failed.transport_closed")), true, nil, adapter.FailedTransportClosed,
 			"the connection closed with no prompt after " + ser},
 		{"a SER reply past the budget", script(golden(t, "failed.response_too_large")), false, replayLimits(t, "failed.response_too_large"),
