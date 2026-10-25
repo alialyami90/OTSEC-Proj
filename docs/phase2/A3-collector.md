@@ -309,6 +309,12 @@ Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.
 
 `hostedRunner()` returns nil until A2's `sel751.Run` is on main. Until then, every run that passes the checks is refused with `not_invocable`, and only credential requests do work.
 
+The SEL-751 runner will follow these rules, which came from the reviews of #97 and #99:
+
+- **Never pass a nil `*SecretHandle` as `sel751.Config.Secret`** (A2 on #97). A nil pointer stored in the interface is not a nil interface, so `Run` would refuse every Level 0 run as `failed.internal`. `cfg.Secret` and `cfg.Floor` are set only when `plan.Secret != nil`.
+- **A wake answered by `Password: ?` counts as an unconfirmed attempt** (A3 on #99). The bare line end probably landed as a blank password. A Level 0 run has no floor gate, so nothing else records it. When a result is `failed.internal` with `wake_sent` true and its last received bytes end in the password prompt, the runner sets the floor for the asset. A2 is adding a golden for this path.
+- **`RunReport.TIDLE` stays 0 until `sel751` reports the TIDLE it parsed** (A2 on #97, A2's follow-up). Until then, the floor after an exit without QUI is the 31-minute fallback, which is the safe side.
+
 ### Logs
 
 On Windows a service logs to the Event Log under the source `otsec-collector`, which the installer registers. Error level goes to Error, Warn to Warning, and the rest to Information. In the foreground the log goes to standard error. What is logged is the same as the server's: request ID, status, refusal code and collector_seq.
