@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
@@ -785,6 +786,63 @@ func TestOutcomeCodeSuspends(t *testing.T) {
 	}
 	if f.runner.count() != 1 {
 		t.Fatal("the run to the suspended asset reached the runner")
+	}
+}
+
+// A result that fails Result.Validate still suspends what its code
+// suspends: for every C2 golden whose code suspends the asset, three changes
+// that break Validate but keep the code, and the next run to the asset is
+// refused before the runner (A6 on #106).
+func TestOutcomeCodeSuspendsInvalidResult(t *testing.T) {
+	dir := "../../../contracts/adapter/testdata/results/valid"
+	entries, err := os.ReadDir(filepath.FromSlash(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	breaks := map[string]func(m map[string]any){
+		"status":    func(m map[string]any) { m["status"] = "ok" },
+		"quit_sent": func(m map[string]any) { s := m["session"].(map[string]any); s["quit_sent"] = !s["quit_sent"].(bool) },
+		"sha256":    func(m map[string]any) { m["transcript"].(map[string]any)["sha256"] = strings.Repeat("0", 64) },
+	}
+	tested := 0
+	for _, e := range entries {
+		code := adapter.Code(strings.TrimSuffix(e.Name(), ".json"))
+		if code.Suspends() == "" {
+			continue
+		}
+		tested++
+		golden := readFixtureFrom(t, dir+"/"+e.Name())
+		for name, brk := range breaks {
+			var m map[string]any
+			if err := json.Unmarshal(golden, &m); err != nil {
+				t.Fatal(err)
+			}
+			brk(m)
+			bad, _ := json.Marshal(m)
+			if _, err := adapter.DecodeResult(bad); err == nil {
+				t.Fatalf("%s/%s: the changed result still passes Validate", code, name)
+			}
+			f := newPipeline(t)
+			f.installCanary(t)
+			f.runner.result = bad
+			if reply, _ := f.run(t, pipeRun("sel.ser.read_all", pipeCred)); !reply.Accepted() {
+				t.Fatalf("%s/%s first run: %+v", code, name, reply)
+			}
+			f.runner.result = readFixture(t, "result-ok.json")
+			f.clock.t = f.clock.t.Add(time.Hour)
+			reply, _ := f.run(t, pipeRun("sel.id", ""))
+			if refusalOf(reply) != authz.RefuseAssetNotEnrolled || f.runner.count() != 1 {
+				t.Errorf("%s/%s: next run %+v, runner called %d times", code, name, reply, f.runner.count())
+			}
+			if want := code.SuspendsCredential(); want != "" {
+				if st := f.store.Status(pipeCred); st[0].State != authz.CredentialSuspended || st[0].Reason != string(want) {
+					t.Errorf("%s/%s: credential %+v", code, name, st)
+				}
+			}
+		}
+	}
+	if tested < 3 {
+		t.Fatalf("only %d suspending goldens found", tested)
 	}
 }
 

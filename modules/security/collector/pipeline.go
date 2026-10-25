@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -425,15 +426,21 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 	return report.Outcome
 }
 
-// outcomeCode is the error code of the outcome's result, read leniently: ""
-// when the result is ok or does not decode. An unknown code reads as
-// failed.unknown, which suspends nothing.
+// outcomeCode is the error code of the outcome's result, read leniently and
+// without Result.Validate: a result inconsistent with its own bytes (an
+// adapter fault, or a redaction over a prompt) still suspends what its code
+// suspends (A6 on #106). "" when the result is ok or has no error object.
+// An unknown code reads as failed.unknown, which suspends nothing.
 func outcomeCode(o collectorwire.RunOutcome) adapter.Code {
-	res, err := adapter.DecodeResult(o.Result)
-	if err != nil || res.Error == nil {
+	var r struct {
+		Error *struct {
+			Code adapter.Code `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(o.Result, &r) != nil || r.Error == nil {
 		return ""
 	}
-	return res.Error.Code.Effective()
+	return r.Error.Code.Effective()
 }
 
 // runSafely calls the runner, and turns a panic into an alarm and an empty

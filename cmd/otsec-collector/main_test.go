@@ -148,6 +148,29 @@ func TestProvision(t *testing.T) {
 	if created, err := provision(l, testNode, nil); err != nil || created {
 		t.Fatalf("second start: %v %v", created, err)
 	}
+	// A marker left by a crash after the stores were created goes at the
+	// next start, so a later loss of both stores is refused, not a silent
+	// first start (A6 on #106).
+	marker(t, l)
+	if created, err := provision(l, testNode, nil); err != nil || created {
+		t.Fatalf("start with a leftover marker: %v %v", created, err)
+	}
+	if ok, _ := exists(l.provision); ok {
+		t.Fatal("leftover marker kept")
+	}
+	saved := map[string][]byte{}
+	for _, f := range []string{l.state, l.credentials} {
+		saved[f], _ = os.ReadFile(f)
+		os.Remove(f)
+	}
+	if _, err := provision(l, testNode, nil); !errors.Is(err, errLostState) {
+		t.Fatalf("both stores lost after a leftover marker: %v", err)
+	}
+	for f, b := range saved {
+		if err := os.WriteFile(f, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// One store lost: refused, even with a marker, and nothing is created.
 	os.Remove(l.state)
 	marker(t, l)

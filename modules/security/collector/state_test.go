@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -75,6 +76,42 @@ func TestOpenStateFailsClosed(t *testing.T) {
 		"bad install":    write("inst.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"installs":["x"]}`),
 	}
 	for name, p := range cases {
+		if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
+			t.Errorf("%s: %v, want ErrStateUnavailable", name, err)
+		}
+	}
+}
+
+// A stored suspension is checked when the state is opened: a reason without
+// its invocation, an invocation without a reason, or an unknown reason
+// makes the state unavailable (A6 nit on #106).
+func TestOpenStateChecksSuspension(t *testing.T) {
+	path, s, _ := newState(t)
+	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, "inv-1"); err != nil {
+		t.Fatal(err)
+	}
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenState(path, nil); err != nil {
+		t.Fatalf("a valid suspension: %v", err)
+	}
+	for name, edit := range map[string]func(a map[string]any){
+		"no invocation":  func(a map[string]any) { delete(a, "suspended_by") },
+		"no reason":      func(a map[string]any) { delete(a, "suspended") },
+		"unknown reason": func(a map[string]any) { a["suspended"] = "made-up" },
+	} {
+		var doc map[string]any
+		if err := json.Unmarshal(good, &doc); err != nil {
+			t.Fatal(err)
+		}
+		edit(doc["assets"].(map[string]any)[testAsset].(map[string]any))
+		b, _ := json.Marshal(doc)
+		p := filepath.Join(t.TempDir(), "state.json")
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
 			t.Errorf("%s: %v, want ErrStateUnavailable", name, err)
 		}

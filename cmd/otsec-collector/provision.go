@@ -23,6 +23,9 @@ var errLostState = errors.New("collector state or credential store is missing an
 // credential store key is protected for that account (DPAPI user scope).
 // It reports whether it created the stores.
 func provision(l layout, nodeID string, now func() time.Time) (bool, error) {
+	if now == nil {
+		now = time.Now
+	}
 	state, sErr := exists(l.state)
 	creds, cErr := exists(l.credentials)
 	if sErr != nil || cErr != nil {
@@ -30,6 +33,12 @@ func provision(l layout, nodeID string, now func() time.Time) (bool, error) {
 	}
 	switch {
 	case state && creds:
+		// A marker left by a start that crashed after creating the stores
+		// would turn a later loss of both into a silent first start, so it
+		// goes now (A6 on #106).
+		if err := os.Remove(l.provision); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("the stores exist, but a leftover first-start marker could not be removed: %w", err)
+		}
 		return false, nil
 	case state != creds:
 		return false, fmt.Errorf("%w: only one of %s and %s exists", errLostState, l.state, l.credentials)
@@ -41,7 +50,7 @@ func provision(l layout, nodeID string, now func() time.Time) (bool, error) {
 	if !marker {
 		return false, fmt.Errorf("%w: no %s", errLostState, l.provision)
 	}
-	if err := collector.InitState(l.state, time.Now()); err != nil {
+	if err := collector.InitState(l.state, now()); err != nil {
 		return false, err
 	}
 	if err := collector.InitCredStore(l.credentials, nodeID, now); err != nil {
@@ -107,5 +116,23 @@ func publishInstallKey(l layout, s *collector.CredStore) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, l.publicKey)
+	// On Windows the rename fails while a reader holds the file open
+	// without FILE_SHARE_DELETE, and the node reads it before every
+	// request, so a few retries ride out a read in progress (A6 on #106).
+	for try := 0; ; try++ {
+		err = os.Rename(tmp, l.publicKey)
+		if err == nil || try == renameTries-1 {
+			break
+		}
+		time.Sleep(renameWait)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
+
+const (
+	renameTries = 20
+	renameWait  = 50 * time.Millisecond
+)
