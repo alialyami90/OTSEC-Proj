@@ -284,6 +284,8 @@ var replays = []replay{
 	{golden: "refused.session_pending_password"},
 	{golden: "refused.language_probe_rejected"},
 	{golden: "refused.identity_mismatch"},
+	{golden: "failed.identity_unreadable"},
+	{golden: "failed.identity_unreadable-no-fid-line"},
 	{golden: "refused.password_prompt_absent"},
 	{golden: "refused.language_not_english"},
 	{golden: "refused.firmware_condition_not_met", setup: func(f *inputs, _ *Config) { f.declare("firmware_id", fidR402) }},
@@ -430,7 +432,7 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.3 result read by a 0.2 reader; no 0.2 adapter writes it",
+	"failed.unknown":                     "a 0.4 result read by a 0.3 reader; no 0.3 adapter writes it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",

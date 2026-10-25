@@ -355,7 +355,7 @@ The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2
 An asset suspension has no collector action in C8. The node writes `asset.suspend` from the outcome code (D2-15).
 
 Tests (`runner_sel751_test.go`) drive the whole pipeline with the runner hosted, against a far end on a loopback TCP port that replays a C2 golden's transcript. That covers the D2-10 dialer, the credential store, the floor and the suspensions. Every transcript is invented, so this is simulated evidence only.
-- **Eight goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. For each one, the test checks:
+- **Twelve goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `failed.identity_unreadable`, `failed.identity_mismatch`, `failed.device_error`, `failed.unexpected_access_level`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. `TestSEL751RunnerFailureBeforeOperate` also cuts the `ok` transcript before the login, before the login is confirmed, and after it is confirmed but before the operate phase, so `device.op` is pinned on both sides of a confirmed login (A6 on #124). For each one, the test checks:
   - the result code;
   - the transcript digest, which is the golden's;
   - the exact record sequence, under the node's own outcome checks;

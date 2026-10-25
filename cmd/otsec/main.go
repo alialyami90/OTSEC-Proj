@@ -321,6 +321,14 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		sp := st.Suspensions[a]
 		fmt.Fprintf(w, "SUSPENDED %s: %s since %s; cleared only by an administrator naming ref %s\n", safe(a), safe(string(sp.Reason)), safe(sp.Since), safe(sp.Ref))
 	}
+	clearing := make([]string, 0, len(st.CollectorClears))
+	for a := range st.CollectorClears {
+		clearing = append(clearing, a)
+	}
+	sort.Strings(clearing)
+	for _, a := range clearing {
+		fmt.Fprintf(w, "COLLECTOR STILL SUSPENDED %s: the node cleared ref %s, the collector has not accepted the clear yet; runs stay held, and %s stays in place until this line is gone\n", safe(a), safe(st.CollectorClears[a]), node.ClearSuspensionFileName)
+	}
 	if c := st.Collector; c != nil {
 		fmt.Fprintf(w, "collector install key: trusted %s, collector_seq high %d\n", safe(keyOrNone(c.TrustedKey)), c.High)
 		if c.OpenResetKey != "" {

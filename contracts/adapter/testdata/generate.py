@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SCHEMA = "otsec.adapter/0.1"
 SCHEMA_0_2 = "otsec.adapter/0.2"  # results that need a 0.2 rule or code (D2-14)
+SCHEMA_0_3 = "otsec.adapter/0.3"  # results that need a 0.3 code (A6 on #118)
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 FID = "SEL-751-R501-V0-Z104101-D20260910"       # S22 Table A.1 p. A.2
@@ -117,7 +118,10 @@ class Session:
             self.facts["language_probe"] = "rejected"
         self.rx("probe", reply)
 
-    def ident(self, fid=FID):
+    def ident(self, fid=FID, frame=True, fid_line=True):
+        """The ID reply. frame=False leaves out STX and ETX, and
+        fid_line=False the FID line: replies the adapter cannot read
+        (failed.identity_unreadable, A6 on #118)."""
         self.tx("probe", b"ID\r\n")
         lines = [
             '"FID=%s","0000"' % fid,
@@ -126,10 +130,12 @@ class Session:
             '"DEVID=FEEDER 1","0000"',
             '"DEVCODE=91","0000"',
             '"PARTNO=751501A1A5A0X8C080","0000"',
-        ]
-        start = self.rx("probe", framed(b"ID\r\n", "\r\n".join(lines) + "\r\n", b"="))
+        ][0 if fid_line else 1:]
+        text = ("\r\n".join(lines) + "\r\n").encode()
+        reply = framed(b"ID\r\n", text, b"=") if frame else b"ID\r\n" + text + b"="
+        start = self.rx("probe", reply)
         self.id_start = start
-        return self.span(fid, start)
+        return self.span(fid, start) if fid_line else None
 
     def acc(self, prompt=True):
         self.tx("auth", b"ACC\r\n")
@@ -328,6 +334,23 @@ def results():
         "refused", "refused.identity_mismatch", {"result": "mismatch", "items": [item("firmware_id", FID, FID_OTHER, sp)]},
         [{"name": "firmware_id", "value": FID_OTHER, "span": sp}])
 
+    # An ID reply the adapter cannot read compares nothing, so it is not an
+    # identity mismatch and suspends nothing (0.3, A6 on #118). The first is
+    # the documented reply without STX and ETX, as the recording simulator
+    # sends it without --profile-stx-etx; the second is framed but has no
+    # FID line. ACC is not sent.
+    s = Session()
+    s.connect()
+    s.probe()
+    s.ident(frame=False)
+    out["failed.identity_unreadable"] = s.result("failed", "failed.identity_unreadable", schema=SCHEMA_0_3)
+
+    s = Session()
+    s.connect()
+    s.probe()
+    s.ident(fid_line=False)
+    out["failed.identity_unreadable-no-fid-line"] = s.result("failed", "failed.identity_unreadable", schema=SCHEMA_0_3)
+
     s = Session()
     s.connect()
     s.probe()
@@ -471,7 +494,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_3", schema="otsec.adapter/0.3")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_4", schema="otsec.adapter/0.4")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -663,6 +686,37 @@ def invalid_results(good):
     r = copy.deepcopy(good["probe-rejected-at-level1"])
     r["schema"] = SCHEMA
     out["probe-rejected-at-level1-at-0.1"] = r
+
+    # failed.identity_unreadable (0.3): its own minor, identity not-checked,
+    # and ID the last line sent, after an accepted probe.
+    r = copy.deepcopy(good["failed.identity_unreadable"])
+    r["schema"] = SCHEMA_0_2
+    out["identity-unreadable-at-0.2"] = r
+
+    r = copy.deepcopy(good["refused.identity_mismatch"])
+    r["schema"] = SCHEMA_0_3
+    r["error"] = {"code": "failed.identity_unreadable"}
+    r["status"] = "failed"
+    out["identity-unreadable-with-mismatch"] = r
+
+    # The unframed golden claiming the FID it shows as a match: nothing else
+    # is wrong with it (A6 on #122).
+    r = copy.deepcopy(good["failed.identity_unreadable"])
+    data = base64.b64decode(r["transcript"]["data"])
+    i = data.index(FID.encode())
+    r["identity"] = {"result": "match", "items": [item("firmware_id", FID, FID, {"offset": i, "length": len(FID)})]}
+    out["identity-unreadable-with-match"] = r
+
+    s = Session()
+    s.connect()
+    s.probe()
+    out["identity-unreadable-without-id"] = s.result("failed", "failed.identity_unreadable", schema=SCHEMA_0_3)
+
+    s = Session()
+    s.connect()
+    s.probe(reply=framed(b"QUI\r\n", b"Comando no valido\r\n", b"="))
+    s.ident(frame=False)
+    out["identity-unreadable-after-rejected-probe"] = s.result("failed", "failed.identity_unreadable", schema=SCHEMA_0_3)
 
     # failed.unexpected_password_prompt (0.2, D2-14): its own minor, no QUI,
     # and the bytes must show Level 1 and the prompt.

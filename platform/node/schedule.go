@@ -74,6 +74,8 @@ type Scheduler struct {
 	settleMu  sync.Mutex                  // serializes settle, so records apply once in order
 	cs        collectorState              // the collector's keys and numbering (seqreset.go)
 	collHold  string                      // why no request is sent to the collector, from collectorHold
+	collClear map[string]string           // asset ID: ref of a clear the collector has not accepted (assetclear.go)
+	clearFile *clearSuspension            // the clear-suspension.json checkClear last read, nil when none
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -82,7 +84,7 @@ type Scheduler struct {
 // it (not in Phase 2).
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
-		susp: map[string]asset.Suspension{}}
+		susp: map[string]asset.Suspension{}, collClear: map[string]string{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -262,6 +264,9 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	}
 	for _, c := range []string{AlarmInstallKeyUnreadable, AlarmCollectorReset, AlarmCollectorRestored, AlarmAuditUnavailable} {
 		s.clearQuietKey("collector " + c)
+	}
+	if !s.clearAtCollector(ctx, col.AssetID) {
+		return Report{Alarm: AlarmCollectorStillSuspended}
 	}
 	if code, detail := s.cannotKeep(ctx); code != "" {
 		s.raiseOnce(col.AssetID, code, detail)
@@ -505,15 +510,22 @@ func (s *Scheduler) health(ctx context.Context, typ string, col Collection, requ
 	}
 }
 
-// requestRecord is the C8 collector.request record of req: info before it
-// is sent, then allowed or denied with the collector's number.
+// requestRecord is the C8 collector.request record of req, a run or an
+// asset clear: info before it is sent, then allowed or denied with the
+// collector's number.
 func (s *Scheduler) requestRecord(req *authz.CollectorRequest, outcome audit.Outcome, reason string, seq uint64) (c5.Record, error) {
 	rec := audit.Record{Contract: audit.ContractID, NodeID: string(s.rt.cfg.NodeID), Time: s.rt.received(),
 		Actor:  audit.Actor{Type: req.OnBehalfOf.Type, ID: req.OnBehalfOf.ID, Role: authz.RoleCollector},
 		Action: audit.ActionCollectorRequest, Outcome: outcome, ReasonCode: reason,
-		Target:      &audit.Target{AssetID: req.Run.AssetID, CredentialRef: req.Run.CredentialRef},
-		OperationID: req.Run.OperationID, RegisterRevision: req.Run.RegisterVersion, PolicyVersion: req.PolicyVersion,
-		CorrelationID: req.RequestID, CollectorSeq: seq}
+		PolicyVersion: req.PolicyVersion, CorrelationID: req.RequestID, CollectorSeq: seq}
+	switch {
+	case req.Run != nil:
+		rec.Target = &audit.Target{AssetID: req.Run.AssetID, CredentialRef: req.Run.CredentialRef}
+		rec.OperationID, rec.RegisterRevision = req.Run.OperationID, req.Run.RegisterVersion
+	case req.AssetClearSusp != nil:
+		rec.Target = &audit.Target{AssetID: req.AssetClearSusp.AssetID}
+		rec.Detail = "asset.clear_suspension of suspension " + req.AssetClearSusp.Ref
+	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return c5.Record{}, err
