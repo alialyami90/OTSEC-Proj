@@ -12,7 +12,7 @@ import (
 
 // golden decodes a C2 example result (contracts/adapter/testdata). These are
 // A2's own C2 goldens; A6's oracle under tests/ is never read.
-func golden(t *testing.T, name string) adapter.Result {
+func golden(t testing.TB, name string) adapter.Result {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "adapter", "testdata", "results", "valid", name+".json"))
 	if err != nil {

@@ -16,7 +16,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.device_error.json`: `SER` answered `Invalid Command`. QUI, then close.
 - `results/valid/failed.egress_violation.json`: The adapter's next line failed the egress check and was never sent; QUI, then close.
 - `results/valid/failed.identity_mismatch.json`: The SER header serial differs from the declared serial: identity mismatch after authentication (C1-A3-5).
-- `results/valid/failed.internal.json`: A collector fault after the probe.
+- `results/valid/failed.internal.json`: A collector fault after the FID check: the failed-auth floor could not be recorded, so ACC is not sent, and at Level 0 no QUI is needed.
 - `results/valid/failed.response_too_large.json`: The SER reply reaches `max_response_bytes` (shown short); QUI, then close.
 - `results/valid/failed.timeout.json`: The SER reply stops part-way; the step timeout expires; QUI, then close.
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
@@ -24,7 +24,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
 - `results/valid/failed.unknown.json`: A 0.3 result with a code 0.2 does not know: read as `failed.unknown`.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
-- `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3).
+- `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3). Otherwise as `ok`: records, the serial check and the observations.
 - `results/valid/ok-with-echo.json`: As `ok`, but the relay echoes the password; the echo is redacted too (C-A2-3).
 - `results/valid/ok.json`: Full session: wake (the device printed nothing on connect), `=`, QUI probe accepted, `ID` FID check, `ACC`, password (redacted), `SHO P 1` with `MAXACC := 2` (warning), `SER` with two rows, QUI. Identity match on FID and serial.
 - `results/valid/partial.parse_errors.json`: As `ok`, with a third SER row the parser cannot read: `parse_ok` false, bytes kept (EP-1).
