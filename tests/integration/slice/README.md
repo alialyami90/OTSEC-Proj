@@ -24,7 +24,7 @@ RELP collector. Each runs as a separate process (D2-3). Evidence class:
 | `slicerun.py` | The shared runner for the end-to-end files: builds the binaries (or shares another run's), starts the four processes, kills and restarts any of them, replaces the simulator at the same address, writes the administrator's file, reads `otsec health`, the collector's state, and what the receiver got. `slicehelper setup -quota class=bytes` changes a store quota. |
 | `conftest.py` | `need()`: a check that cannot run skips, or fails when `OTSEC_SLICE_REQUIRED=1`. |
 
-The `test_slice_*_e2e.py` files drive the product binaries.
+The `test_slice_*_e2e.py` files drive the product binaries. On GitHub Actions the three long ones (interruptions, buffer, store full) run in `a6-slice-long.yml`, one job per file, and `ci.yml`'s integration job deselects them (`conftest.py`), which keeps it under its 20-minute limit.
 
 ## Requirements
 
