@@ -78,6 +78,14 @@ type Config struct {
 	// TIMEOUT). The collector uses it for the failed-auth floor
 	// (authz.FailureFloor). It is not called for any other value, which
 	// leaves the floor at its longest.
+	//
+	// Assumption (A6 on #114): the session runs over the relay's own
+	// Ethernet Telnet, whose time-out TIDLE is. Through a port server to a
+	// serial port, the session's time-out is that port's T_OUT, which SHO
+	// P 1 does not show and which may be longer or 0. C1 cannot yet say
+	// which path an endpoint takes, so before any device endpoint either C1
+	// declares it and the collector sets TIDLE only for direct Ethernet
+	// Telnet, or the collector leaves TIDLE unset.
 	TIDLE func(time.Duration)
 
 	hooks *hooks // tests only

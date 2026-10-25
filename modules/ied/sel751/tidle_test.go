@@ -108,6 +108,34 @@ func TestTIDLENotFromSpanish(t *testing.T) {
 	}
 }
 
+// TestTIDLEOnlyWithTheLanguagePrecondition pins reportTIDLE's own English
+// gate, which TestTIDLENotFromSpanish cannot reach: a Spanish port is refused
+// before the read is interpreted (A6 on #114). With a register that does
+// not make LANG := ENGLISH a precondition, the run still reads SHO P 1, but
+// its settings are not known to be English, so TIDLE is not reported.
+func TestTIDLEOnlyWithTheLanguagePrecondition(t *testing.T) {
+	f := load(t)
+	reg := *f.reg
+	reg.Preconditions = nil
+	for _, c := range f.reg.Preconditions {
+		if c.Setting != "LANG" {
+			reg.Preconditions = append(reg.Preconditions, c)
+		}
+	}
+	if len(reg.Preconditions) == len(f.reg.Preconditions) {
+		t.Fatal("the register has no LANG precondition")
+	}
+	f.reg = &reg
+	var got []time.Duration
+	res, _ := runSteps(t, f, Config{TIDLE: func(d time.Duration) { got = append(got, d) }}, script(golden(t, "ok")), false)
+	if !bytes.Contains(res.Transcript.Data, []byte("TIDLE   := 15")) {
+		t.Fatalf("SHO P 1 was not read: %s %+v", res.Status, res.Error)
+	}
+	if len(got) != 0 {
+		t.Errorf("TIDLE reported without the language precondition: %v", got)
+	}
+}
+
 // TestTIDLENil: without a callback a run is unchanged (the other tests).
 func TestTIDLENil(t *testing.T) {
 	res, _ := runSteps(t, load(t), Config{}, script(golden(t, "ok")), false)
