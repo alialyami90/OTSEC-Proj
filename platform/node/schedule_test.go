@@ -199,20 +199,37 @@ func wireCollector(t *testing.T, onRequest func(req *authz.CollectorRequest), se
 }
 
 // fakeCollector returns what answer says and counts the requests.
+// fakeCollector answers each request with answer. calls counts the runs
+// and clears the asset clears (assetclear.go). With clear set, clears are
+// answered by it instead.
 type fakeCollector struct {
 	mu     sync.Mutex
 	calls  int
+	clears int
 	answer func(req *authz.CollectorRequest) (collectorclient.Response, error)
+	clear  func(req *authz.CollectorRequest) (collectorclient.Response, error)
 }
 
 func (f *fakeCollector) Do(ctx context.Context, req *authz.CollectorRequest) (collectorclient.Response, error) {
 	f.mu.Lock()
-	f.calls++
+	clear := req.Kind == authz.KindAssetClearSusp
+	if clear {
+		f.clears++
+	} else {
+		f.calls++
+	}
+	answer := f.answer
+	if clear && f.clear != nil {
+		answer = f.clear
+	}
 	f.mu.Unlock()
-	return f.answer(req)
+	return answer(req)
 }
 
 func (f *fakeCollector) n() int { f.mu.Lock(); defer f.mu.Unlock(); return f.calls }
+
+// nClears is the number of asset clears sent.
+func (f *fakeCollector) nClears() int { f.mu.Lock(); defer f.mu.Unlock(); return f.clears }
 
 func accepted(req *authz.CollectorRequest, seq uint64) authz.CollectorReply {
 	return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: okInvocation, CollectorSeq: seq}
