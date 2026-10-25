@@ -3,12 +3,14 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
 )
 
@@ -27,6 +29,8 @@ type Status struct {
 	modes   map[c5.DatabaseID]c5.Mode
 	alarms  []StatusAlarm
 	targets map[string]TargetStatus
+	// suspensions are the scheduler's current asset suspensions.
+	suspensions map[string]asset.Suspension
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -55,6 +59,9 @@ type StatusFile struct {
 	Collecting bool `json:"collecting"`
 	// Targets is each forwarding target's state, from its forwarder.
 	Targets map[string]TargetStatus `json:"targets,omitempty"`
+	// Suspensions are the assets the node will not collect from until an
+	// administrator clears them (suspend.go).
+	Suspensions map[string]asset.Suspension `json:"suspensions,omitempty"`
 }
 
 // TargetStatus is one forwarding target as node status shows it.
@@ -151,6 +158,13 @@ func (s *Status) RaiseTarget(target, code, detail string) {
 	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
 }
 
+// SetSuspensions records the node's current asset suspensions.
+func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
+	s.mu.Lock()
+	s.suspensions = m
+	s.mu.Unlock()
+}
+
 // SetTarget records target's state.
 func (s *Status) SetTarget(name string, ts TargetStatus) {
 	s.mu.Lock()
@@ -193,6 +207,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 		}
 	}
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
+	if len(s.suspensions) > 0 {
+		f.Suspensions = maps.Clone(s.suspensions)
+	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
 		for n, ts := range s.targets {

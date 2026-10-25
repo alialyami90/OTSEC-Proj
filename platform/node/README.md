@@ -47,6 +47,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `schedule[]` | `id` (the C7 schedule principal the runs are made for), `asset_id`, `endpoint`, `operation` (a C3 operation ID such as `sel.ser.read_all`), `params` (optional), `credential_ref` (a C7 handle, absent for a level 0 operation) and `every_seconds` | see below |
 | `collector_pipe` | Where the collector listens | `\\.\pipe\<name>` on Windows; an absolute socket path on Linux |
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
+| `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config` |
 | `tls_dir` | The directory holding the files the targets' TLS references name (D2-12, lab only) | absolute; required when a target names a reference. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
 
@@ -91,6 +92,28 @@ Each run:
 On an unauthorized line, the alarm is `collection-unauthorized-line` and collection from the asset stops. The stop is durable: at startup `NewScheduler` finds the quarantine on the stream and keeps the asset stopped. Phase 2 has no way to clear the stop, so a halted asset fails closed. Clearing it needs an audited admin operation, which is out of Phase 2 scope (A1): it is a Phase 3 item for A3 and A5, recorded as a limitation in `docs/phase-2-exit.md`.
 
 If a quarantine cannot be stored, the alarm is `collection-quarantine-not-stored`, and every credentialed run on the node stops.
+
+## Suspensions (D2-15)
+
+The node keeps its own copy of the C1 suspension each run's outcome code sets (`adapter.Code.Suspends`). A collector reinstalled from fresh state does not hold the old collector's suspensions, so the node's copy is what keeps a suspended asset suspended (A1, D2-15).
+
+- **Recording.** An accepted run whose outcome carries a code that suspends holds the asset at once. This applies even when the outcome failed a check and was quarantined, as long as its result names a code. The suspension is then written to the audit stream as `asset.suspend` (C8 0.2: actor type `node`, the C1 reason and the C2 code in `suspension`, the invocation ID as `correlation_id`) and to the checkpoint `suspensions.json` in the store directory, before the scheduler decides anything else.
+- **Enforced.** A suspended asset's runs are not sent. `otsec health` lists it with its reason and the ref a clear must name.
+- **The stream is the record.** The node's suspensions are what the `asset.suspend` and `asset.suspension_clear` records give, applied in chain order, each checked with C8 0.2's `audit.VerifySuspensions` from the suspensions already open. A clear, including the node's own, takes effect when it is applied from the stream. Before every run the node applies the records written since it last did. So a record whose append reported an error but was committed is found there, and not written twice (C8 0.2 breaks the chain on a duplicate suspend or a second clear).
+- **The checkpoint** carries `through_seq`, the last audit seq applied, and lists as `unaudited` any suspension whose record is not yet in the stream. Every start applies the records after `through_seq`, then writes the unaudited ones, holding the node until it has. A missing or unreadable checkpoint means the whole stream is read.
+- **Fail closed.** All collection on the node is held, and an alarm raised, if the suspensions cannot be rebuilt:
+  - the audit stream was pruned past what the rebuild needs;
+  - a record does not parse, breaks C8 0.2's suspension rules (a clear of a suspension that is not open, a suspension already open), or suspends an asset the node already holds a suspension for (a suspended asset never runs, so the node holds one per asset);
+  - the checkpoint claims more of the stream than it holds.
+
+  A record like this met while the node runs holds it the same way, until a restart rebuilds the suspensions. It is also held while any `asset.suspend` record is not yet in the audit stream, even when the checkpoint holds the suspension, until the audit write succeeds (A1, D2-15 at 0ef6641). The chain is the record. The scheduler retries before every run.
+- **Pruning stops at the checkpoint.** When the audit stream has a required consumer, the node adds one more, `node-suspensions`, whose cursor is the checkpoint's `through_seq`. It moves only after the checkpoint is written, so C5 never prunes an audit record that a rebuild would need. Without a required audit consumer the stream is never pruned, and the node adds nothing, since its cursor alone would make unforwarded records prunable (C5-A3-2).
+- **Clearing.** An administrator writes `clear-suspension.json` in `admin_dir` (`OTSEC\config` when installed): `{"schema": "otsec.clear-suspension/0.1", "asset_id": ..., "ref": ...}`.
+  - The file is read like a TLS file: no link, at most 4 KiB, and not writable by the node.
+  - The node clears one suspension, only on an exact asset and ref match, and writes `asset.suspension_clear` before it schedules the asset again.
+  - A file that does not match, or that names a suspension already cleared, changes nothing and is raised once.
+  - The node never clears on its own.
+- **Interim.** The file is the Phase 2 interim. Before any `device-observed` endpoint, the clear becomes an admin-signed C7 0.2 request (D2-11, D2-15).
 
 ## TLS references (D2-12, lab only)
 

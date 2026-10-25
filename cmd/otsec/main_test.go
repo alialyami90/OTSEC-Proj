@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorclient"
 	"otsec.local/otsec/platform/node"
@@ -188,5 +189,19 @@ func TestHealthShowsTargets(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("health lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// health lists each suspended asset with its reason and the ref an
+// administrator's clear must name.
+func TestHealthShowsSuspensions(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetSuspensions(map[string]asset.Suspension{relayID: {Reason: asset.SuspendAuthFailed, Since: "2026-10-25T06:00:00Z", Ref: "inv-run-1"}})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "SUSPENDED " + relayID + ": auth-failed since 2026-10-25T06:00:00Z; cleared only by an administrator naming ref inv-run-1"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
 	}
 }

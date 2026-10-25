@@ -312,6 +312,15 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		}
 		closeAll()
 	}
+	suspended := make([]string, 0, len(st.Suspensions))
+	for a := range st.Suspensions {
+		suspended = append(suspended, a)
+	}
+	sort.Strings(suspended)
+	for _, a := range suspended {
+		sp := st.Suspensions[a]
+		fmt.Fprintf(w, "SUSPENDED %s: %s since %s; cleared only by an administrator naming ref %s\n", safe(a), safe(string(sp.Reason)), safe(sp.Since), safe(sp.Ref))
+	}
 	names := make([]string, 0, len(st.Targets))
 	for n := range st.Targets {
 		names = append(names, n)

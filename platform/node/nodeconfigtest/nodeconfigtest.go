@@ -28,6 +28,7 @@ type Config struct {
 	PolicyVersion   uint64           `json:"policy_version"`
 	RegisterVersion uint64           `json:"register_version"`
 	TLSDir          string           `json:"tls_dir,omitempty"`
+	AdminDir        string           `json:"admin_dir,omitempty"`
 }
 
 type Store struct {
