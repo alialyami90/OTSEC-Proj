@@ -51,8 +51,11 @@ var ErrStateUnavailable = errors.New("collector: durable state unavailable")
 // not a first start, because creating a fresh one would reopen every floor
 // and restart collector_seq at 1.
 type State struct {
-	path   string
-	now    func() time.Time
+	path string
+	now  func() time.Time
+	// opened is when this process opened the state. A Level 1 a previous
+	// process left open is inside the floor from then (CheckFloor).
+	opened time.Time
 	mu     sync.Mutex
 	doc    stateDoc
 	broken error
@@ -81,9 +84,16 @@ type familyFloor struct {
 }
 
 type assetState struct {
-	// UnconfirmedAuthUTC is when ACC was about to be sent and no "=>" has
-	// confirmed the login since. Empty when none is pending.
+	// UnconfirmedAuthUTC is when ACC was about to be sent, or when "=>"
+	// then confirmed the login, and the session has not since ended with
+	// QUI. Empty when no authentication is pending and no Level 1 is open.
 	UnconfirmedAuthUTC string `json:"unconfirmed_auth_utc,omitempty"`
+	// LevelOpen is set from "=>" until the session sends QUI (D2-16, A6).
+	// A process that dies in between leaves it set: the relay may keep
+	// Level 1 until TIDLE after the last line, which was no later than
+	// the death, so the next process counts the floor from when it opened
+	// the state.
+	LevelOpen bool `json:"level_open,omitempty"`
 	// TIDLESeconds is the port TIDLE last read from the asset; 0 is unknown.
 	TIDLESeconds int `json:"tidle_seconds,omitempty"`
 	// LastRunUTC is when the last accepted run to the asset began, for the
@@ -166,7 +176,7 @@ func OpenState(path string, now func() time.Time) (*State, error) {
 	if err := checkStateDoc(doc); err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrStateUnavailable, path, err)
 	}
-	return &State{path: path, now: now, doc: doc}, nil
+	return &State{path: path, now: now, opened: now(), doc: doc}, nil
 }
 
 func checkStateDoc(doc stateDoc) error {
@@ -184,6 +194,9 @@ func checkStateDoc(doc stateDoc) error {
 		}
 		if a.TIDLESeconds < 0 {
 			return fmt.Errorf("asset %s: negative TIDLE", id)
+		}
+		if a.LevelOpen && a.UnconfirmedAuthUTC == "" {
+			return fmt.Errorf("asset %s: a Level 1 open with no floor", id)
 		}
 		if (a.Suspended == "") != (a.SuspendedBy == "") || (a.Suspended != "" && !knownSuspension(a.Suspended)) {
 			return fmt.Errorf("asset %s: suspension %q by %q is not a known reason with its invocation", id, a.Suspended, a.SuspendedBy)
@@ -242,7 +255,14 @@ func (s *State) CheckFloor(asset string) error {
 	}
 	a := s.doc.Assets[asset]
 	floor := authz.FailureFloor(time.Duration(a.TIDLESeconds) * time.Second)
-	for _, from := range []string{a.UnconfirmedAuthUTC, s.doc.CreatedUTC} {
+	starts := []string{a.UnconfirmedAuthUTC, s.doc.CreatedUTC}
+	if a.LevelOpen {
+		// Left open by a process that died before QUI: Level 1 may last
+		// until TIDLE after its last line, which was before this process
+		// opened the state (A6 on D2-16).
+		starts = append(starts, s.opened.UTC().Format(time.RFC3339Nano))
+	}
+	for _, from := range starts {
 		if from == "" {
 			continue
 		}
@@ -333,18 +353,29 @@ func knownSuspension(r asset.SuspensionReason) bool {
 	return false
 }
 
-// BeginAuth records, durably, that ACC is about to be sent to asset. The
+// BeginAuth records, durably, that ACC is about to be sent to asset, or
+// that a session left Level 1 without QUI: the floor runs from now. The
 // adapter sends ACC only after it returns nil (FloorGate.BeforeACC).
 func (s *State) BeginAuth(asset string) error {
 	return s.update(asset, func(a *assetState) {
-		a.UnconfirmedAuthUTC = s.now().UTC().Format(time.RFC3339Nano)
+		a.UnconfirmedAuthUTC, a.LevelOpen = s.now().UTC().Format(time.RFC3339Nano), false
 	})
 }
 
-// ConfirmAuth clears the pending authentication of asset, durably. It is
-// called only when "=>" follows ACC (FloorGate.Confirmed).
-func (s *State) ConfirmAuth(asset string) error {
-	return s.update(asset, func(a *assetState) { a.UnconfirmedAuthUTC = "" })
+// OpenLevel records, durably, that "=>" confirmed the login to asset
+// (FloorGate.Confirmed). The floor is kept, from now, and the level is
+// marked open, so a process that dies before QUI leaves the floor behind
+// (D2-16, A6). Only EndAuth, once QUI has been sent, clears it.
+func (s *State) OpenLevel(asset string) error {
+	return s.update(asset, func(a *assetState) {
+		a.UnconfirmedAuthUTC, a.LevelOpen = s.now().UTC().Format(time.RFC3339Nano), true
+	})
+}
+
+// EndAuth clears the floor of asset, durably, after a session whose login
+// was confirmed sent QUI before closing.
+func (s *State) EndAuth(asset string) error {
+	return s.update(asset, func(a *assetState) { a.UnconfirmedAuthUTC, a.LevelOpen = "", false })
 }
 
 // SetTIDLE records the TIDLE read from asset. Only a value from 1 to 30
@@ -569,9 +600,9 @@ func readBounded(path string, max int64) ([]byte, error) {
 type FloorGate struct {
 	state *State
 	asset string
-	// Alarm receives a failure to clear the floor. Clearing failed is the
-	// safe side (the floor stays set), but the state is now broken and the
-	// operator needs to know. Nil drops it.
+	// Alarm receives a failure to record the open level. The floor from
+	// BeforeACC then stays set, the safe side, but the state is now broken
+	// and the operator needs to know. Nil drops it.
 	Alarm func(error)
 
 	confirmed atomic.Bool
@@ -590,10 +621,13 @@ func (g *FloorGate) BeforeACC(ctx context.Context) error {
 	return g.state.BeginAuth(g.asset)
 }
 
-// Confirmed clears the floor after "=>" followed ACC.
+// Confirmed records that "=>" followed ACC. It does not clear the floor:
+// the relay holds Level 1 until QUI, so the floor stays until the session
+// has sent QUI (the pipeline then calls EndAuth), even if this process dies
+// first (D2-16, A6).
 func (g *FloorGate) Confirmed(ctx context.Context) {
 	g.confirmed.Store(true)
-	if err := g.state.ConfirmAuth(g.asset); err != nil && g.Alarm != nil {
+	if err := g.state.OpenLevel(g.asset); err != nil && g.Alarm != nil {
 		g.Alarm(err)
 	}
 }
