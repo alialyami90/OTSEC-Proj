@@ -49,7 +49,12 @@ func clearRequestID(ref string) string {
 // collector, m: asset ID to the ref the node cleared. It returns true when
 // the record is the collector's acceptance of an owed clear. A later
 // suspension of the asset leaves the owed clear in place: the collector
-// still holds the earlier one until it accepts it.
+// still holds the earlier one until it accepts it. A later node clear
+// replaces it, which is right while node suspensions come only from run
+// outcomes, since the asset's runs are held while a clear is owed. A
+// node-only suspension (reason operator) would break that: its clear would
+// replace a ref the collector still holds (A3 on #120), so such a path
+// must keep the owed refs per suspension.
 func applyCollectorClear(m map[string]string, rec *audit.Record) bool {
 	switch {
 	case rec.Action == audit.ActionAssetSuspensionClear && rec.Target != nil:
