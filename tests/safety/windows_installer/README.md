@@ -6,7 +6,8 @@ Owner: A6. These scripts run A5's installer (`otsec install`, `platform/winsvc`)
 | --- | --- | --- |
 | `installer_check.ps1` | elevated | Preflight, W-4 refusal, install, checks, a short run of the node service, uninstall, cleanup |
 | `nonadmin_check.ps1` | normal user | While the elevated script waits, checks that a non-admin user is refused each read and write it tries |
-| `node.template.json` | | Node configuration from `nodeconfigtest`: one simulated SEL-751 at 127.0.0.1:2323. `STOREDIR` is replaced with `%ProgramData%\OTSEC\store` |
+| `node.template.json` | | Node configuration from `nodeconfigtest`: one simulated SEL-751 at 127.0.0.1:2323. `STOREDIR` is replaced with `%ProgramData%\OTSEC\store` and `PUBLICDIR` with `%ProgramData%\OTSEC\collector\public`. With no collector running, no install key is there, so the node holds every request (D2-15) |
+| `template_test.go` | | Runs in CI on every pull request: loads the filled template with the node's own config check, and checks that `register_version` is the SEL-751 register's revision on main |
 | `collector.stand-in.json` | | JSON passed to `-collector-config`. It is not A3's format, and no collector runs |
 
 ## Order
