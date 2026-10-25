@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.1/record",
+  "$id": "otsec.audit/0.2/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -156,7 +156,12 @@
         "store.mode_change",
         "node.posture_change",
         "node.migration_date",
-        "asset.collector_assign"
+        "asset.collector_assign",
+        "collector.install_key",
+        "collector.seq_reset",
+        "collector.seq_reset_ack",
+        "asset.suspend",
+        "asset.suspension_clear"
       ]
     },
     "outcome": {
@@ -266,6 +271,47 @@
     "detail": {
       "type": "string",
       "maxLength": 512
+    },
+    "previous_high": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0.2: on collector.seq_reset only, required there. The highest collector_seq the node recorded before the reset."
+    },
+    "first_seen": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "0.2: on collector.seq_reset only. The number on the reply that showed the reset; absent when the node found it by the install key before sending."
+    },
+    "install_key_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+      "description": "0.2: on collector.install_key, collector.seq_reset and collector.seq_reset_ack only, required there."
+    },
+    "suspension": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "identity-mismatch",
+            "auth-failed",
+            "password-prompt-absent",
+            "language-not-english",
+            "firmware-not-allowlisted",
+            "unexpected-access-level",
+            "operator"
+          ],
+          "description": "C1 SuspensionReason"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^(ok|refused|failed|partial)\\.[a-z][a-z0-9_]{0,63}$",
+          "description": "The C2 code that set it; on asset.suspend except for reason operator, never on a clear"
+        }
+      },
+      "description": "0.2: on asset.suspend and asset.suspension_clear only, required there. The ref is correlation_id."
     }
   },
   "allOf": [
@@ -357,6 +403,136 @@
         "not": {
           "required": [
             "transcript_sha256"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "collector.install_key",
+              "collector.seq_reset",
+              "collector.seq_reset_ack",
+              "asset.suspend",
+              "asset.suspension_clear"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "collector.seq_reset"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "previous_high",
+          "install_key_id"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "previous_high"
+              ]
+            },
+            {
+              "required": [
+                "first_seen"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "collector.install_key",
+              "collector.seq_reset",
+              "collector.seq_reset_ack"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "install_key_id"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "install_key_id"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "asset.suspend",
+              "asset.suspension_clear"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "suspension",
+          "target",
+          "correlation_id"
+        ],
+        "properties": {
+          "target": {
+            "required": [
+              "asset_id"
+            ]
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "suspension"
           ]
         }
       }
