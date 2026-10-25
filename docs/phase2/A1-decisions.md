@@ -265,3 +265,25 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 - **Versioning.** Results of 0.1 and 0.2 validate unchanged. A 0.2 result cannot carry the new code. The `failed.unknown` example moves to 0.4.
 
 **Evidence: simulated.** Whether a relay or a port server ever strips the `ID` frame is for H-12 and H-13. If one does, the frame rule changes, and this ruling changes with it.
+
+## D2-18: The collector names the suspension it holds, and the node adopts it (C7 0.3)
+
+**Context (A6 on #120):** Suppose the reply to the run that suspends an asset is lost, or the node stops before it records the outcome. Then the collector holds the suspension and the node holds nothing:
+- every run was refused `asset_not_enrolled`, which names no cause;
+- the administrator's clear file was refused by the node, which held no such suspension;
+- `asset.clear_suspension` comes only from the node.
+
+The only way out was a collector reinstall. That fails closed, but the cause was hidden and the recovery costly.
+
+**Ruling:** C7 becomes `otsec.authz/0.3`. A3 owns C7 and the collector side (#125), A5 the node side (#127), and A1 approved the contract.
+- **The collector names the suspension it holds.** It refuses a run of a suspended asset with the new code `asset_suspended`. The refusal carries `suspension: {reason, ref, code}`: the C1 reason, the invocation that set it, and the C2 code. The same field rides on `suspension_mismatch` when the collector holds a suspension other than the one a clear names. That covers the identity-mismatch case, where the collector's ref is replaced.
+- **The node adopts a suspension only the collector holds.** It records an ordinary C8 0.2 `asset.suspend` with the collector's reason, ref and code, with the detail "adopted from the collector's refusal". The administrator's normal clear file then clears both sides. Adopting only adds a restriction the collector already enforces, so a compromised collector gains nothing.
+- **The node checks before it adopts.** C7 checks only the code's shape, because C2 imports C7. The node adopts only when the code is a known C2 code whose `Suspends()` equals the reason. It adopts nothing, and raises `asset-suspension-not-adopted`, when:
+  - the code is missing, which is what a collector state written before codes were kept gives;
+  - the code and reason disagree;
+  - the node already holds another suspension of the asset;
+  - the ref is the one whose clear the node is sending.
+- **`operator` is never a held suspension.** The collector suspends only from run outcomes. An operator suspension has a principal ID as its ref and no C2 code.
+- **Versioning.** A request stamped before 0.3 gets the 0.2 reply (`asset_not_enrolled`, no field), because replies decode strictly. The seal labels are unchanged. The admin-signed requests (D2-11, D2-15) move to the 0.4 candidate.
+
+**Evidence: simulated.** A6 ran it end to end on the real binaries with the node killed mid-run: the node adopted the suspension, and one administrator file cleared both sides.
