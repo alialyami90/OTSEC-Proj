@@ -124,11 +124,15 @@ func (c *Config) WriteInstallKey(name string) error {
 		return err
 	}
 	id, pub, fp := InstallKey(name)
-	b, err := json.Marshal(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": id,
-		"public_key": pub, "fingerprint": fp})
+	// Indented and ending in a newline, as cmd/otsec-collector's
+	// publishInstallKey writes it (A3 #106), so the node's strict read is
+	// tested against the real writer's shape.
+	b, err := json.MarshalIndent(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": id,
+		"public_key": pub, "fingerprint": fp}, "", "  ")
 	if err != nil {
 		return err
 	}
+	b = append(b, '\n')
 	tmp := filepath.Join(c.CollectorPublicDir, ".install-key.tmp")
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err

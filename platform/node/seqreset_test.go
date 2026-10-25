@@ -134,7 +134,8 @@ func TestUnreadableInstallKeyHolds(t *testing.T) {
 		"schema": func() {
 			os.WriteFile(path, []byte(`{"schema":"x","key_id":"k","public_key":"p","fingerprint":"f"}`), 0o600)
 		},
-		"extra":     func() { os.WriteFile(path, append(slices.Clone(good[:len(good)-1]), `,"x":1}`...), 0o600) },
+		"extra":     func() { os.WriteFile(path, withField(t, good, "x", "1"), 0o600) },
+		"trailing":  func() { os.WriteFile(path, append(slices.Clone(good), `{}`...), 0o600) },
 		"too large": func() { os.WriteFile(path, make([]byte, maxInstallKeyBytes+1), 0o600) },
 		"a link":    func() { os.WriteFile(path+".real", good, 0o600); os.Remove(path); os.Symlink(path+".real", path) },
 		"no key id": func() {
