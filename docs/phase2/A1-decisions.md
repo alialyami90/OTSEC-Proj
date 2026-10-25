@@ -209,7 +209,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
   - Record names, from A3's C8 0.2:
     - The trusted key is `collector.install_key`, written at the node's first start before its first request. Each `collector.seq_reset_ack` makes its key the trusted one.
     - `first_seen` is optional, because a reset found by the key before a request has no reply yet. When it is present, it is checked.
-    - The chain breaks on a reset that keeps the trusted key or an earlier reset's key, and on a key change without an acknowledged reset.
+    - The chain breaks on a reset to any key trusted or reset before (a restore, never a reinstall; A3, #110), and on a key change without an acknowledged reset.
   - `collector_epoch` in C7 0.2 replies remains the stronger fix.
 - **Collection is held after a reset until an admin acknowledges.**
   - Alarm-only collection was allowed only if a reset could not weaken a safety control.
