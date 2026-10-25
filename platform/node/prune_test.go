@@ -1,6 +1,7 @@
 package node
 
 import (
+	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/authz"
@@ -10,10 +11,13 @@ import (
 
 // pruneNode is a node with a required target and an adapter-evidence
 // quota of QuarantineRoom and room; 1024 is less than one run's SER events.
-func pruneNode(t *testing.T, room int64) (*Runtime, *Status, *Config, *Scheduler) {
+func pruneNode(t *testing.T, room int64, mods ...func(*nodeconfigtest.Config)) (*Runtime, *Status, *Config, *Scheduler) {
 	t.Helper()
 	nc, _, dir := forwardConfig(t, 9, func(nc *nodeconfigtest.Config) { // the forwarder is never run
 		nc.Store.Quotas["adapter-evidence"] = QuarantineRoom + room
+		for _, m := range mods {
+			m(nc)
+		}
 	})
 	if err := nc.WriteInstallKey(testInstallKey); err != nil {
 		t.Fatal(err)
@@ -30,11 +34,15 @@ func pruneNode(t *testing.T, room int64) (*Runtime, *Status, *Config, *Scheduler
 // seq, as the forwarder does after the target confirms.
 func confirm(t *testing.T, r *Runtime, c *Config, seq c5.Seq) {
 	t.Helper()
+	confirmStream(t, r, c, SERStream(relayID), seq)
+}
+
+func confirmStream(t *testing.T, r *Runtime, c *Config, stream c5.StreamID, seq c5.Seq) {
+	t.Helper()
 	cs, err := c.Consumers()
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream := SERStream(relayID)
 	for _, cn := range cs {
 		if cn.Stream == stream && cn.Delivery == c5.Required {
 			if err := r.Store(stream).SaveCursor(bg, c5.Cursor{Consumer: cn.ID, Stream: stream, Through: seq}); err != nil {
@@ -43,7 +51,7 @@ func confirm(t *testing.T, r *Runtime, c *Config, seq c5.Seq) {
 			return
 		}
 	}
-	t.Fatal("no required consumer of the SER stream")
+	t.Fatalf("no required consumer of %s", stream)
 }
 
 // A6, V-S9: runs stop at the quota while the SER events are not confirmed,
@@ -128,5 +136,77 @@ func TestQuarantineRoomLowWarnsFirst(t *testing.T) {
 	s.RunOnce(bg, 0)
 	if n := countAlarms(st, AlarmQuarantineRoomLow); n != 1 {
 		t.Fatalf("%d quarantine-room-low alarms, want 1", n)
+	}
+}
+
+// A drain-only database is pruned too: there, pruning confirmed events is
+// how it frees room (A6 on #135).
+func TestPruneDrainOnly(t *testing.T) {
+	r, _, c, s := pruneNode(t, 1024)
+	stream := SERStream(relayID)
+	s.RunOnce(bg, 0)
+	last, _ := r.Store(stream).LastCommitted(bg, stream)
+	confirm(t, r, c, last)
+	d := r.find(EvidenceDB)
+	r.state.Lock()
+	mode := d.report.Mode
+	d.report.Mode = c5.ModeDrainOnly
+	r.state.Unlock()
+	r.Prune(bg)
+	r.state.Lock()
+	d.report.Mode = mode
+	r.state.Unlock()
+	if got, _ := r.Store(stream).FirstRetained(bg, stream); got == 1 {
+		t.Fatalf("drain-only database not pruned: first retained %d", got)
+	}
+}
+
+// A class over its target is pruned when an earlier class is under its own:
+// here platform is over and adapter-evidence, sorted first, is not.
+func TestPruneSecondClass(t *testing.T) {
+	const quota = 64 << 10
+	r, _, c, _ := pruneNode(t, 1<<30, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["platform"] = quota })
+	db := r.Store(HealthStream)
+	for i := 0; ; i++ {
+		used, err := db.ClassBytes(bg, c5.ClassPlatform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if float64(used) > 0.8*quota {
+			break
+		}
+		if i > 1000 {
+			t.Fatalf("platform holds %d bytes after %d events", used, i)
+		}
+		r.health(bg, HealthCollectionRun, map[string]string{"n": "filler"})
+	}
+	last, _ := db.LastCommitted(bg, HealthStream)
+	confirmStream(t, r, c, HealthStream, last)
+	r.Prune(bg)
+	used, _ := db.ClassBytes(bg, c5.ClassPlatform)
+	if first, _ := db.FirstRetained(bg, HealthStream); first == 1 || float64(used) > 0.8*quota {
+		t.Fatalf("platform over target not pruned: first retained %d, %d bytes", first, used)
+	}
+}
+
+// A prune that fails raises store-prune-failed once for the condition, not
+// at every Tick.
+func TestPruneFailureRaisedOnce(t *testing.T) {
+	r, st, _, _ := pruneNode(t, 1024)
+	d := r.find(EvidenceDB)
+	r.state.RLock()
+	db := d.db
+	r.state.RUnlock()
+	db.Close() // every read now fails
+	r.Prune(bg)
+	r.Prune(bg)
+	n := 0
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == string(c5.AlarmPruneFailed) && a.Database == EvidenceDB && strings.Contains(a.Detail, "runtime prune") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d runtime prune-failed alarms, want 1", n)
 	}
 }

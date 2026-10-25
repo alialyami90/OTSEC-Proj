@@ -105,6 +105,7 @@ C5 startup prunes confirmed events only while a database's total usage is above 
 - **Never forced.** A class whose events are not confirmed stays full, and runs stay held until the target confirms.
 - **On failure.** A failed prune raises `store-prune-failed` once for the database, with "runtime prune" in its detail. Collection continues.
 - **Pages.** Freed pages are reused by later commits. Compaction remains a startup step.
+- **Quarantines are kept.** A `quarantine/<asset_id>` stream has no consumers, so it is never pruned: its records are the evidence A3 requires of an outcome that failed a check, and a reason can quote a device line no consumer may receive. Repeated quarantines can therefore fill `adapter-evidence` for good. That is the intended end state (A6 on #135): runs stop with `collection-no-quarantine-room`, after `collection-quarantine-room-low` warned first, until an operator acts. Phase 2 has no operation to export or remove a quarantine, so acting means moving the store aside; an audited one is a Phase 3 item, with clearing a halted asset.
 
 ## Suspensions (D2-15)
 
