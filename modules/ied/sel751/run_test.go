@@ -283,6 +283,8 @@ var replays = []replay{
 	{golden: "refused.session_elevated"},
 	{golden: "refused.session_pending_password"},
 	{golden: "refused.language_probe_rejected"},
+	{golden: "failed.timeout-probe-unanswered", limits: func(l *adapter.Limits, _ []step) { l.StepTimeoutMS = 300 }},
+	{golden: "failed.transport_closed-probe-unanswered", hangUp: true},
 	{golden: "refused.identity_mismatch"},
 	{golden: "failed.identity_unreadable"},
 	{golden: "failed.identity_unreadable-no-fid-line"},
@@ -432,7 +434,7 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.4 result read by a 0.3 reader; no 0.3 adapter writes it",
+	"failed.unknown":                     "a 0.5 result read by a 0.4 reader; no 0.4 adapter writes it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",

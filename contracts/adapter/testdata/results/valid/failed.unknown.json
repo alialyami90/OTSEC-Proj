@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.adapter/0.4",
+  "schema": "otsec.adapter/0.5",
   "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
   "operation_id": "sel.ser.read_all",
   "adapter": {
@@ -46,6 +46,6 @@
     "result": "not-checked"
   },
   "error": {
-    "code": "failed.some_code_from_0_4"
+    "code": "failed.some_code_from_0_5"
   }
 }

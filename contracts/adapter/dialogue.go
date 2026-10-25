@@ -239,7 +239,8 @@ func (c *check) dialogue(r Result, code Code) {
 	}
 	// D16: after a rejected probe nothing more is sent, not even QUI; the
 	// port's commands are not known (A6 change 13).
-	if code == RefusedLanguageProbe && (len(ss) == 0 || !(ss[len(ss)-1].phase == PhaseProbe && isLine(ss[len(ss)-1].b, "QUI"))) {
+	if (code == RefusedLanguageProbe || s.LanguageProbe == ProbeUnanswered) &&
+		(len(ss) == 0 || !(ss[len(ss)-1].phase == PhaseProbe && isLine(ss[len(ss)-1].b, "QUI"))) {
 		c.fail("%s: the QUI probe is the last line sent (D16)", code)
 	}
 	// The bytes back the code: the ID reply is what could not be read, so
@@ -288,8 +289,12 @@ func (c *check) probeOutcome(reply []byte, s SessionFacts) {
 		c.fail("session: language_probe accepted, but the reply does not match the probe grammar")
 	case s.LanguageProbe == ProbeRejected && ok:
 		c.fail("session: language_probe rejected, but the reply matches the probe grammar")
+	case s.LanguageProbe == ProbeUnanswered && promptOf(reply) != "":
+		// A prompt ends a reply, so a reply that ends in one was answered
+		// and the grammar decides it.
+		c.fail("session: language_probe unanswered, but the reply ends in a prompt")
 	case s.LanguageProbe == ProbeNotRun:
-		c.fail("session: a QUI probe was sent, so language_probe is accepted or rejected")
+		c.fail("session: a QUI probe was sent, so language_probe is accepted, rejected or unanswered")
 	}
 }
 

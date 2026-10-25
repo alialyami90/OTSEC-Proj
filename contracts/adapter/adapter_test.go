@@ -31,9 +31,13 @@ var resultWant = map[string]string{
 	"ok-without-quit":                                  "ended with QUI",
 	"ok-with-error-code":                               "status ok carries no error",
 	"status-disagrees-with-code":                       `implies status "refused", not "failed"`,
-	"unknown-code-at-0.1":                              "is not in the otsec.adapter/0.3 taxonomy",
+	"unknown-code-at-0.1":                              "is not in the otsec.adapter/0.4 taxonomy",
 	"probe-rejected-at-level1-at-0.1":                  "so the session ends with QUI",
 	"unexpected-password-prompt-at-0.1":                "is new in 0.2, so a 0.1 result cannot carry it",
+	"probe-unanswered-at-0.3":                          "is new in 0.4, so a 0.3 result cannot carry it",
+	"probe-unanswered-as-language-fault":               "an unanswered probe ends with failed.timeout or failed.transport_closed",
+	"probe-unanswered-after-a-prompt":                  "language_probe unanswered, but the reply ends in a prompt",
+	"probe-unanswered-then-id":                         "the QUI probe is the last line sent (D16)",
 	"identity-unreadable-at-0.2":                       "is new in 0.3, so a 0.2 result cannot carry it",
 	"identity-unreadable-with-mismatch":                "ends the invocation with an identity_mismatch code",
 	"identity-unreadable-with-match":                   "failed.identity_unreadable needs identity.result not-checked",
@@ -47,7 +51,7 @@ var resultWant = map[string]string{
 	"identity-mismatch-reported-ok":                    "ends the invocation with an identity_mismatch code",
 	"warning-without-value":                            "either the observed value or missing",
 	"simulator-reported-as-device":                     "target must be",
-	"other-major":                                      "not readable as otsec.adapter/0.3",
+	"other-major":                                      "not readable as otsec.adapter/0.4",
 	"span-includes-stx":                                "includes an STX or ETX framing byte",
 	"read-rows-exceeded-with-parsed-record":            "parses no record (D1-12)",
 	"read-rows-exceeded-without-detail":                "needs a detail giving the row count",
@@ -93,7 +97,7 @@ var invocationWant = map[string]string{
 	"deadline-below-step":   "deadline_ms 1000 is outside",
 	"no-expected-identity":  "expected_identity is required",
 	"params-with-free-text": "is not a parameter name and value",
-	"other-major":           "not readable as otsec.adapter/0.3",
+	"other-major":           "not readable as otsec.adapter/0.4",
 	"credential-ref-not-c7": "not a C7 credential reference ID",
 	"principal-ref-not-c7":  "not a C7 principal ID",
 }
@@ -587,7 +591,7 @@ func TestDecodeInvocationRejectsTrailingData(t *testing.T) {
 // Results read every 0.x minor: unknown fields are ignored.
 func TestResultIgnoresUnknownFields(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join("testdata", "results", "valid", "ok.json"))
-	b = []byte(strings.Replace(string(b), `"schema": "otsec.adapter/0.1"`, `"added_in_0_4": {"x": 1}, "schema": "otsec.adapter/0.4"`, 1))
+	b = []byte(strings.Replace(string(b), `"schema": "otsec.adapter/0.1"`, `"added_in_0_5": {"x": 1}, "schema": "otsec.adapter/0.5"`, 1))
 	if _, err := DecodeResult(b); err != nil {
 		t.Fatalf("unknown field rejected: %v", err)
 	}
