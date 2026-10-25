@@ -12,7 +12,8 @@ MSG = b'<133>1 2026-10-24T12:00:05.123456Z site-a6 otsec - SER [otsec@32473 eid=
 
 @pytest.fixture
 def rsyslog(tmp_path, tls):
-    need(harness.rsyslogd(), "rsyslogd not installed (the Linux integration leg needs rsyslog with imrelp)")
+    need(harness.rsyslogd() and harness.imrelp(),
+         "rsyslogd with imrelp not installed (the Linux integration leg needs rsyslog and rsyslog-relp)")
     r = harness.Rsyslog(str(tmp_path), tls)
     yield r
     r.stop()

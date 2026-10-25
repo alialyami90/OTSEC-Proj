@@ -205,8 +205,40 @@ ruleset(name="slice" queue.type="Direct") {{
 """
 
 
+_rsyslogd_copy = None
+
+
 def rsyslogd():
-    return shutil.which("rsyslogd") or (os.path.exists("/usr/sbin/rsyslogd") and "/usr/sbin/rsyslogd")
+    """The rsyslogd to run, or a false value when none is installed.
+
+    Ubuntu's AppArmor profile for /usr/sbin/rsyslogd lets it read only its
+    own configuration under /etc, so the installed binary cannot open a test
+    configuration in a temporary directory ("could not open config file:
+    Permission denied" on GitHub's runners). The profile is attached by path,
+    so the harness runs a copy of the same binary from its own directory.
+    The copy loads the same modules (imrelp included) from the compiled-in
+    module directory; only the AppArmor confinement differs."""
+    global _rsyslogd_copy
+    path = shutil.which("rsyslogd") or (os.path.exists("/usr/sbin/rsyslogd") and "/usr/sbin/rsyslogd")
+    if not path or sys.platform != "linux":
+        return path
+    if _rsyslogd_copy is None:
+        import atexit
+        import tempfile
+        d = tempfile.mkdtemp(prefix="a6-rsyslogd-")
+        atexit.register(shutil.rmtree, d, True)
+        _rsyslogd_copy = os.path.join(d, "rsyslogd")
+        shutil.copy2(os.path.realpath(path), _rsyslogd_copy)
+    return _rsyslogd_copy
+
+
+def imrelp():
+    """True when rsyslog's imrelp module is installed. GitHub's runners ship
+    rsyslogd without it (rsyslog-relp is a separate package), so finding
+    rsyslogd alone does not mean the RELP leg can run."""
+    import glob
+    return any(glob.glob(p) for p in ("/usr/lib/*/rsyslog/imrelp.so", "/usr/lib/rsyslog/imrelp.so",
+                                      "/usr/lib64/rsyslog/imrelp.so"))
 
 
 def free_port():

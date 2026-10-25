@@ -1,0 +1,152 @@
+{
+  "schema": "otsec.nodeconfig/0.1",
+  "node_id": "site-a-node1",
+  "store": {
+    "dir": "STOREDIR",
+    "quotas": {
+      "adapter-evidence": 67108864,
+      "audit": 67108864,
+      "platform": 67108864,
+      "syslog-datagram": 67108864,
+      "syslog-stream": 67108864
+    },
+    "warn_fraction": 0.8
+  },
+  "listeners": [],
+  "assets": [
+    {
+      "asset_id": "6f1c2e8a-4b3d-4c5e-9f70-0a1b2c3d4e5f",
+      "attributes": [
+        {
+          "confidence": "single-source",
+          "name": "device_class",
+          "observations": [
+            {
+              "evidence_class": "operator-declared",
+              "source": {
+                "method": "operator-entry",
+                "observed_at": "2026-10-24T09:00:00Z",
+                "ref": "operator:test-fixture"
+              },
+              "value": "protective-relay"
+            }
+          ],
+          "value": "protective-relay"
+        },
+        {
+          "confidence": "single-source",
+          "name": "vendor",
+          "observations": [
+            {
+              "evidence_class": "operator-declared",
+              "source": {
+                "method": "operator-entry",
+                "observed_at": "2026-10-24T09:00:00Z",
+                "ref": "operator:test-fixture"
+              },
+              "value": "sel"
+            }
+          ],
+          "value": "sel"
+        },
+        {
+          "confidence": "single-source",
+          "name": "product_family",
+          "observations": [
+            {
+              "evidence_class": "operator-declared",
+              "source": {
+                "method": "operator-entry",
+                "observed_at": "2026-10-24T09:00:00Z",
+                "ref": "operator:test-fixture"
+              },
+              "value": "sel-751"
+            }
+          ],
+          "value": "sel-751"
+        },
+        {
+          "confidence": "single-source",
+          "name": "firmware_id",
+          "observations": [
+            {
+              "evidence_class": "operator-declared",
+              "source": {
+                "method": "operator-entry",
+                "observed_at": "2026-10-24T09:00:00Z",
+                "ref": "operator:test-fixture"
+              },
+              "value": "SEL-751-R501-V0-Z104101-D20260910"
+            }
+          ],
+          "value": "SEL-751-R501-V0-Z104101-D20260910"
+        },
+        {
+          "confidence": "single-source",
+          "name": "serial_number",
+          "observations": [
+            {
+              "evidence_class": "operator-declared",
+              "source": {
+                "method": "operator-entry",
+                "observed_at": "2026-10-24T09:00:00Z",
+                "ref": "operator:test-fixture"
+              },
+              "value": "SIM0000000000001"
+            }
+          ],
+          "value": "SIM0000000000001"
+        }
+      ],
+      "endpoints": [
+        {
+          "downstream_security": {
+            "acknowledgement": {
+              "at": "2026-10-24T09:00:00Z",
+              "by": "admin:lab-admin",
+              "reason": "Simulated slice only, test credentials (ADR-0005)",
+              "scope": "lab-only"
+            },
+            "level": "plaintext-unauthenticated"
+          },
+          "host": "127.0.0.1",
+          "id": "port1-telnet",
+          "port": 2323,
+          "target": "simulated",
+          "transport": "telnet"
+        }
+      ],
+      "identity_binding": {
+        "attributes": [
+          "firmware_id",
+          "serial_number"
+        ],
+        "method": "device-reported",
+        "pre_credential": [
+          "firmware_id"
+        ],
+        "strength": "spoofable"
+      },
+      "node_id": "site-a-node1",
+      "profile": {
+        "id": "sel-751-ascii",
+        "version": "0.1"
+      },
+      "schema": "otsec.asset/0.1"
+    }
+  ],
+  "targets": [],
+  "schedule": [
+    {
+      "id": "sch-ser-6f1c2e8a",
+      "asset_id": "6f1c2e8a-4b3d-4c5e-9f70-0a1b2c3d4e5f",
+      "endpoint": "port1-telnet",
+      "operation": "sel.ser.read_all",
+      "credential_ref": "cred_7f3k2m9q4x",
+      "every_seconds": 300
+    }
+  ],
+  "collector_pipe": "\\\\.\\pipe\\otsec-collector",
+  "policy_version": 3,
+  "register_version": 2
+}
