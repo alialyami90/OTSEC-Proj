@@ -88,12 +88,17 @@ CREATE TABLE class_bytes (
 
 // connPragmas are set on every open. They are per connection in SQLite, so
 // setting them changes no persistent setting of an existing store.
+// busy_timeout comes first: it needs no read of the file, and every other
+// statement may start the connection's first read, which after a killed
+// writer can meet another connection's WAL recovery (SQLITE_BUSY_RECOVERY,
+// 261). With the handler set, the read waits for the recovery instead of
+// failing the open (A1 and A6, store-full e2e on 9c50395).
 var connPragmas = []string{
+	"PRAGMA busy_timeout=5000",
 	"PRAGMA synchronous=FULL",
 	fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
 	fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
 	"PRAGMA temp_store=MEMORY",
-	"PRAGMA busy_timeout=5000",
 	"PRAGMA foreign_keys=OFF",
 }
 
