@@ -7,6 +7,7 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
+	"otsec.local/otsec/platform/store"
 )
 
 // pruneNode is a node with a required target and an adapter-evidence
@@ -198,15 +199,31 @@ func TestPruneFailureRaisedOnce(t *testing.T) {
 	db := d.db
 	r.state.RUnlock()
 	db.Close() // every read now fails
-	r.Prune(bg)
-	r.Prune(bg)
-	n := 0
-	for _, a := range st.Snapshot("x").Alarms {
-		if a.Code == string(c5.AlarmPruneFailed) && a.Database == EvidenceDB && strings.Contains(a.Detail, "runtime prune") {
-			n++
+	raised := func() (n int) {
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == string(c5.AlarmPruneFailed) && a.Database == EvidenceDB && strings.Contains(a.Detail, "runtime prune") {
+				n++
+			}
 		}
+		return n
 	}
-	if n != 1 {
+	setDB := func(v *store.DB) {
+		r.state.Lock()
+		d.db = v
+		r.state.Unlock()
+	}
+	r.Prune(bg)
+	r.Prune(bg)
+	if n := raised(); n != 1 {
 		t.Fatalf("%d runtime prune-failed alarms, want 1", n)
+	}
+	// A prune that succeeds (here, with no handle open, one that has
+	// nothing to do) re-arms the alarm for the next failure.
+	setDB(nil)
+	r.Prune(bg)
+	setDB(db)
+	r.Prune(bg)
+	if n := raised(); n != 2 {
+		t.Fatalf("%d runtime prune-failed alarms after fail, succeed, fail, want 2", n)
 	}
 }
