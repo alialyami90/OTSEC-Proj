@@ -42,6 +42,10 @@ type Runtime struct {
 
 	mu      sync.Mutex
 	pending []queued // store alarms raised during a commit, for Tick
+
+	// state guards each database's report, store and Log, which Tick
+	// replaces while the scheduler and the forwarder read them.
+	state sync.RWMutex
 }
 
 type database struct {
@@ -179,8 +183,8 @@ func (r *Runtime) find(id c5.DatabaseID) *database {
 // recordStart writes the chain start on a new node, the first mode of
 // every database, and service.start.
 func (r *Runtime) recordStart(ctx context.Context) {
-	if a := r.find(AuditDB); a != nil && a.log != nil && a.report.Mode.AcceptsEvents() {
-		if n, err := a.db.LastCommitted(ctx, AuditStream); err == nil && n == 0 {
+	if db, log, mode := r.view(r.find(AuditDB)); log != nil && mode.AcceptsEvents() {
+		if n, err := db.LastCommitted(ctx, AuditStream); err == nil && n == 0 {
 			r.audit(ctx, audit.ActionAuditChainStart, audit.OutcomeInfo, "", "audit chain started for node "+string(r.cfg.NodeID))
 		}
 	}
@@ -228,7 +232,9 @@ type queued struct {
 // change, and turns queued store alarms into health events.
 func (r *Runtime) Tick(ctx context.Context) {
 	for _, d := range r.dbs {
+		r.state.Lock()
 		if d.report.Mode != c5.ModeBlocked && d.report.Mode != c5.ModeDrainOnly {
+			r.state.Unlock()
 			continue
 		}
 		prev := d.report
@@ -238,7 +244,9 @@ func (r *Runtime) Tick(ctx context.Context) {
 		if err := r.adopt(d); err != nil {
 			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmOpenFailed, At: r.opt.Now(), Detail: err.Error()})
 		}
-		if mc, ok := c5.ModeChangeOf(prev, d.report, r.opt.Now()); ok {
+		now := d.report
+		r.state.Unlock()
+		if mc, ok := c5.ModeChangeOf(prev, now, r.opt.Now()); ok {
 			r.modeChanged(ctx, d, mc)
 		}
 	}
@@ -263,6 +271,8 @@ func (r *Runtime) Tick(ctx context.Context) {
 // accept events (C5 Mode.AcceptsEvents). Each credentialed run still needs
 // its own audit receipt (AuditBeforeAct, D1-11).
 func (r *Runtime) Collecting() bool {
+	r.state.RLock()
+	defer r.state.RUnlock()
 	for _, d := range r.dbs {
 		if !d.report.Mode.AcceptsEvents() {
 			return false
@@ -274,19 +284,25 @@ func (r *Runtime) Collecting() bool {
 // Log returns the Log of the database that holds stream, or nil if that
 // database is not open.
 func (r *Runtime) Log(stream c5.StreamID) *c5.Log {
-	if d := r.dbFor(stream); d != nil {
-		return d.log
-	}
-	return nil
+	_, log, _ := r.view(r.dbFor(stream))
+	return log
 }
 
 // Store returns the open database that holds stream, or nil. Modules get
 // it as C5 interfaces (Outbox, CursorStore, CommitIndex), never as a file.
 func (r *Runtime) Store(stream c5.StreamID) *store.DB {
-	if d := r.dbFor(stream); d != nil {
-		return d.db
+	db, _, _ := r.view(r.dbFor(stream))
+	return db
+}
+
+// view reads a database's store, Log and mode under the state lock.
+func (r *Runtime) view(d *database) (*store.DB, *c5.Log, c5.Mode) {
+	if d == nil {
+		return nil, nil, ""
 	}
-	return nil
+	r.state.RLock()
+	defer r.state.RUnlock()
+	return d.db, d.log, d.report.Mode
 }
 
 func (r *Runtime) dbFor(stream c5.StreamID) *database {
@@ -302,10 +318,8 @@ func (r *Runtime) dbFor(stream c5.StreamID) *database {
 
 // Mode returns database id's mode.
 func (r *Runtime) Mode(id c5.DatabaseID) c5.Mode {
-	if d := r.find(id); d != nil {
-		return d.report.Mode
-	}
-	return ""
+	_, _, m := r.view(r.find(id))
+	return m
 }
 
 // Close records service.stop, closes every database and releases the
@@ -314,6 +328,8 @@ func (r *Runtime) Close() error {
 	if len(r.dbs) > 0 {
 		r.audit(context.Background(), audit.ActionServiceStop, audit.OutcomeInfo, "", "otsec node stopping")
 	}
+	r.state.Lock()
+	defer r.state.Unlock()
 	var errs []error
 	for _, d := range r.dbs {
 		if d.db != nil {
@@ -338,32 +354,47 @@ func (r *Runtime) received() event.Received {
 // status, which already holds the alarm.
 func (r *Runtime) health(ctx context.Context, typ string, details map[string]string) {
 	d := r.dbFor(HealthStream)
-	if d == nil || d.log == nil || !d.report.Mode.AcceptsEvents() {
+	_, log, mode := r.view(d)
+	if log == nil || !mode.AcceptsEvents() {
 		return
 	}
-	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: r.cfg.NodeID, Stream: HealthStream},
-		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
-		Received: r.received(), Health: &event.Health{Type: typ, Details: details}}
-	b, err := json.Marshal(e)
+	rec, err := r.healthRecord(HealthStream, typ, details)
 	if err == nil {
-		_, err = d.log.Append(ctx, c5.Record{Stream: HealthStream, Class: c5.ClassPlatform, Event: b})
+		_, err = log.Append(ctx, rec)
 	}
 	if err != nil {
 		r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: HealthStream, Detail: "health event " + typ + ": " + err.Error()})
 	}
 }
 
+// healthRecord builds a pending C4 platform health event as a C5 record on
+// stream, whose class it takes from the layout.
+func (r *Runtime) healthRecord(stream c5.StreamID, typ string, details map[string]string) (c5.Record, error) {
+	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(stream)},
+		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
+		Received: r.received(), Health: &event.Health{Type: typ, Details: details}}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return c5.Record{}, err
+	}
+	class, ok := r.layout.StreamClasses()[stream]
+	if !ok {
+		return c5.Record{}, fmt.Errorf("stream %s is not in the layout", stream)
+	}
+	return c5.Record{Stream: stream, Class: class, Event: b}, nil
+}
+
 // audit commits a node-written C8 record. A failure goes to status: the
 // audit store may be what failed.
 func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.Outcome, reason, detail string) {
-	d := r.find(AuditDB)
-	if d == nil || d.log == nil || !d.report.Mode.AcceptsEvents() {
+	_, log, mode := r.view(r.find(AuditDB))
+	if log == nil || !mode.AcceptsEvents() {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmAuditFull, At: r.opt.Now(), Detail: fmt.Sprintf("%s not recorded: audit database %s", action, r.Mode(AuditDB))})
 		return
 	}
 	rec, err := r.AuditRecord(action, outcome, reason, detail)
 	if err == nil {
-		_, err = d.log.Append(ctx, rec)
+		_, err = log.Append(ctx, rec)
 	}
 	if err != nil {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})

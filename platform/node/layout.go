@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
@@ -27,6 +28,15 @@ const (
 // SERStream is the stream of an asset's SER records.
 func SERStream(assetID string) c5.StreamID { return c5.StreamID("ser/" + assetID) }
 
+// QuarantineStream is the stream of an asset's quarantined run outcomes:
+// outcomes that failed the collector client's checks (A3, #82). It has no
+// consumer, so no Syslog target forwards it, and a C5 stream with no
+// consumer is never pruned (CodeNoConsumers): the quarantine stays on the
+// node until an operator deals with it, bounded only by the class quota.
+func QuarantineStream(assetID string) c5.StreamID { return c5.StreamID(quarantinePrefix + assetID) }
+
+const quarantinePrefix = "quarantine/"
+
 // ListenerStream is the stream of the messages a listener receives.
 func ListenerStream(listenerID string) c5.StreamID { return c5.StreamID("syslog/" + listenerID) }
 
@@ -43,7 +53,9 @@ func (c *Config) Layout() (c5.Layout, error) {
 			continue
 		}
 		seen[s.AssetID] = true
-		evidence.Streams = append(evidence.Streams, c5.StreamSpec{ID: SERStream(s.AssetID), Class: c5.ClassAdapterEvidence})
+		evidence.Streams = append(evidence.Streams,
+			c5.StreamSpec{ID: SERStream(s.AssetID), Class: c5.ClassAdapterEvidence},
+			c5.StreamSpec{ID: QuarantineStream(s.AssetID), Class: c5.ClassAdapterEvidence})
 	}
 	evidence.Streams = append(evidence.Streams, c5.StreamSpec{ID: HealthStream, Class: c5.ClassPlatform})
 
@@ -86,7 +98,8 @@ func (c *Config) Layout() (c5.Layout, error) {
 
 // Consumers returns every forwarding target's C5 consumers (C6-A5-2): each
 // target consumes every event stream of the node, platform/health included,
-// and the audit stream when its audit flag is set.
+// and the audit stream when its audit flag is set. No target consumes a
+// quarantine stream.
 func (c *Config) Consumers() ([]c5.Consumer, error) {
 	l, err := c.Layout()
 	if err != nil {
@@ -94,7 +107,7 @@ func (c *Config) Consumers() ([]c5.Consumer, error) {
 	}
 	var events []c5.StreamID
 	for s, class := range l.StreamClasses() {
-		if class != c5.ClassAudit {
+		if class != c5.ClassAudit && !strings.HasPrefix(string(s), quarantinePrefix) {
 			events = append(events, s)
 		}
 	}

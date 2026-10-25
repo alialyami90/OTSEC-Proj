@@ -28,10 +28,13 @@ type Status struct {
 	alarms []StatusAlarm
 }
 
-// StatusAlarm is one alarm as node status shows it.
+// StatusAlarm is one alarm as node status shows it: a store alarm, which
+// names its database and has a C5 alarm code, or a collection alarm, which
+// names its asset and has a code below.
 type StatusAlarm struct {
-	Database c5.DatabaseID `json:"database"`
-	Code     c5.AlarmCode  `json:"code"`
+	Database c5.DatabaseID `json:"database,omitempty"`
+	Asset    string        `json:"asset_id,omitempty"`
+	Code     string        `json:"code"`
 	At       time.Time     `json:"at"`
 	Class    string        `json:"class,omitempty"`
 	Stream   string        `json:"stream,omitempty"`
@@ -70,10 +73,42 @@ func (s *Status) Alarm(db c5.DatabaseID, a c5.Alarm) {
 	if a.At.IsZero() {
 		a.At = s.now()
 	}
-	sa := StatusAlarm{Database: db, Code: a.Code, At: a.At.UTC(), Class: string(a.Class), Stream: string(a.Stream), Step: string(a.Step), Detail: a.Detail}
+	sa := StatusAlarm{Database: db, Code: string(a.Code), At: a.At.UTC(), Class: string(a.Class), Stream: string(a.Stream), Step: string(a.Step), Detail: a.Detail}
 	if s.oslog != nil {
 		s.oslog(fmt.Sprintf("otsec store %s: %s %s", db, a.Code, a.Detail))
 	}
+	s.add(sa)
+}
+
+// Collection alarm codes. AlarmUnauthorizedLine is the safety case: by the
+// node's own register, a session sent a line its run was not allowed to
+// send, and collection from that asset stops until the node restarts.
+const (
+	AlarmUnauthorizedLine   = "collection-unauthorized-line"
+	AlarmAuditUnavailable   = "collection-audit-unavailable"
+	AlarmOutcomeUnknown     = "collection-outcome-unknown"
+	AlarmCollectorRefused   = "collection-refused"
+	AlarmNoDecision         = "collection-no-decision"
+	AlarmResultRefused      = "collection-result-refused"
+	AlarmEvidenceNotStored  = "collection-evidence-not-stored"
+	AlarmCollectionDisabled = "collection-disabled"
+	// AlarmQuarantineNotStored stops every credentialed run on the node:
+	// the evidence of a failed run could not be kept.
+	AlarmQuarantineNotStored = "collection-quarantine-not-stored"
+	AlarmNoQuarantineRoom    = "collection-no-quarantine-room"
+)
+
+// Raise records a collection alarm for asset. detail goes to the OS log, so
+// it never holds device text: a quarantine's reason stays with the
+// quarantined evidence.
+func (s *Status) Raise(asset, code, detail string) {
+	if s.oslog != nil {
+		s.oslog(fmt.Sprintf("otsec collection %s: %s %s", asset, code, detail))
+	}
+	s.add(StatusAlarm{Asset: asset, Code: code, At: s.now().UTC(), Detail: detail})
+}
+
+func (s *Status) add(sa StatusAlarm) {
 	s.mu.Lock()
 	s.alarms = append(s.alarms, sa)
 	if len(s.alarms) > MaxStatusAlarms {
@@ -135,4 +170,27 @@ func (s *Status) Write(node string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), s.path)
+}
+
+// StatusFileName is the status file's name in the store directory, where
+// only the node's account, SYSTEM and Administrators can read it.
+const StatusFileName = "status.json"
+
+// StatusPath is where the node writes its status file.
+func StatusPath(c *Config) string { return filepath.Join(c.Store.Dir, StatusFileName) }
+
+// ReadStatus reads a status file the node wrote.
+func ReadStatus(path string) (StatusFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return StatusFile{}, err
+	}
+	var f StatusFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return StatusFile{}, fmt.Errorf("status file %s: %w", path, err)
+	}
+	if f.Schema != StatusSchema {
+		return StatusFile{}, fmt.Errorf("status file %s is %q, want %q", path, f.Schema, StatusSchema)
+	}
+	return f, nil
 }

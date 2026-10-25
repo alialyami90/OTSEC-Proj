@@ -1,0 +1,78 @@
+# A5: the node (P2-A5)
+
+Owner: A5. Reviewers: A6 and A3. This note is the handoff for the node side of the Phase 2 slice: what each package does, what has been tested and where, and what is still open. The configuration format is described in [`platform/node/README.md`](../../platform/node/README.md).
+
+Evidence class of everything here: `simulated`. No real device was ever involved. Every endpoint is loopback (D2-10) and `simulated` (D2-4).
+
+## Packages
+
+| Package | What it does | PR |
+| --- | --- | --- |
+| `platform/store` | SQLite C5: group commit, `synchronous=FULL`, `auto_vacuum=INCREMENTAL`, reserves, quotas, recovery. Also `CreateDir`, the Windows directory DACL check, and `OpenReadOnly` for the CLI. | #77 (merged), #84, scheduler PR |
+| `platform/node` | The `otsec.nodeconfig/0.1` loader and layout. `Start`, `Tick` and `Status`, the alarm sink outside the store. `Scheduler`. `Run`. | #84, scheduler PR |
+| `platform/node/nodeconfigtest` | The only way tests write a node configuration (D2-6). | #84 |
+| `platform/winsvc` | The node under the SCM, and the installer (W-1 to W-4). | service PR |
+| `cmd/otsec` | `otsec node`, plus the read-only `assets`, `events` and `health`, and `install` and `uninstall`. | CLI PR |
+
+## The run, end to end
+
+1. `Start` runs C5 startup over each database, the audit database first, and writes `audit.chain.start` (new node only), `store.mode_change` and `service.start`.
+2. `Scheduler.Run` waits 60 s, then runs the schedule one entry at a time. It never holds more than one device session (AP-13), and it never repeats a late run to catch up.
+3. Each run:
+   - checks that its outcome could be kept;
+   - writes `collector.request` (info) and sends only with the receipt (D1-11);
+   - records the decision and the reported session records with their `collector_seq`;
+   - commits a checked outcome through A4's `normalize`, or quarantines an outcome that failed a check.
+
+   The README section "The scheduler" gives each step.
+4. `Tick` (every 60 s) resumes blocked databases, turns queued store alarms into health events, and rewrites the status file.
+5. On stop, `service.stop` is recorded, every database is closed, and only then does the SCM see the service as stopped.
+
+## Quarantine (A3 #82; A6's two challenges)
+
+- **Where it is kept.** On `quarantine/<asset_id>`, in the evidence database, class `adapter-evidence`. No target consumes it, so nothing forwards it, and C5 never prunes a stream with no consumer.
+- **What is stored.** One batch of two records: the frame exactly as received, then the reason, each as its own capture. The reason never goes to status, the OS log or the CLI.
+- **Unauthorized line.** The alarm is `collection-unauthorized-line`, and collection from the asset stops. The stop is durable: `NewScheduler` reads the quarantine stream at startup.
+- **Room.** No run is sent unless `adapter-evidence` has `QuarantineRoom` (8 MiB + 32 KiB) left. A quarantine the store still refuses raises `collection-quarantine-not-stored`, stops every credentialed run on the node, and is audited if audit is available.
+
+## Tests and where they ran
+
+Linux container, Go 1.26, and, for #92 at `b2a604d`, A6's native Windows run on the owner's PC (Windows 11, non-elevated, Go 1.26.0): `./platform/...` and `./cmd/...` pass, `TestDirDACLChecked`, `TestOpenReadOnlyPath` and `TestReadOnlyCommands` included. Commits are listed in each PR.
+
+| Claim | Test |
+| --- | --- |
+| C5 conformance, D1-11, kill at every commit point, startup with reserve present, absent and release failed | `platform/store` (#77) |
+| `device-observed` refused (D2-4); not-loopback refused (D2-10); strict decoding | `TestDeviceObservedRefused`, `TestNotLoopbackRefused`, `TestStrictDecoding`, `TestChecks`, `FuzzParseConfig` |
+| An alarm reaches status when its database cannot store it | `TestFailedAuditDatabaseIsObservable` |
+| The request reaches the collector only after its audit record is committed | `TestRunCommitsThroughTheClient`: the collector side reads the store while the request is in flight. A mutation that sends first fails it |
+| Audit full: no request is sent | `TestAuditFullSendsNothing` |
+| Refusal and missing decision audited correctly; status does not quote the reply | `TestRefusalAndNoDecision` |
+| Unauthorized line: frame kept byte for byte, not forwarded, not normalized, alarm without the line, halt survives a restart | `TestUnauthorizedLineQuarantinedAndHaltedDurably`. Mutating the halt scan fails it |
+| No room: nothing is sent, and one alarm is raised | `TestNoQuarantineRoomSendsNothing`. Mutating the room check fails it |
+| A result the normalizer refuses is quarantined and ends with one health event (A6 #92 nit 4) | `TestNormalizerRefusalEndsWithOneHealthEvent` |
+| Quarantine refused: the node stops | `TestQuarantineNotStoredStopsTheNode` |
+| An asset gets 60 s between sessions, whatever the schedule says (A6 #92) | `TestPlanSpacesSessionsPerAsset`. Removing the per-asset quiet time fails it |
+| The store opens the file it checked: a directory with a space, `#` or `?` in its name, and on Windows a volume name (A6 #92) | `TestOpenReadOnlyPath`. Opening by plain name, which the driver cuts at `?`, fails it |
+| Tick and runs share the runtime | `TestTickAlongsideRuns` under `-race` |
+| A store directory that is a link, and a database file that is a link or that others can read, are refused (A3 #84 notes 3 and 4) | `TestFileModes`. Mutating the file check fails it |
+| The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |
+
+**Not evidenced: the installer.** It needs an elevated shell on the owner's PC and has not run anywhere; `platform/winsvc/install_windows.go` has no evidence beyond compiling. For A6's list:
+- the installer and the services, with A3's T-13 (W-1 to W-4);
+- `-collector-config`: `collector.json` owned by Administrators, readable by the collector service, with no entry for the node service;
+- the installer refuses a junction planted at any `OTSEC` path (A3 #92 note 1);
+- A3's collector creating and reopening its stores as `NT SERVICE\otsec-collector` (user-scope DPAPI), also after a reboot: whether the virtual account's profile is loaded under the SCM is inferred, not shown (A3 #92 note 2);
+- for A3's collector: `collector\public` (collector writes, node reads `install-key.json` by full path), the `otsec-collector` event log source, and the WER exclusion `otsec-collector.exe = 1` (T-5), which the collector refuses to start without.
+
+Until that run, the installer and the services under the SCM are not evidenced.
+
+## Open
+
+- **Clearing a halt.** A halted asset stays stopped, so it fails closed. The audited clear operation is out of Phase 2 scope (A1); it is a Phase 3 item for A3 and A5, in `docs/phase-2-exit.md`.
+- **Reading by role.** No read API with roles exists. Until one does, the CLI leaves the audit stream and quarantines out, and shows only quarantine counts.
+- **W-3 "and every other program".** The installer blocks outbound Telnet for `otsec-node` only. Blocking it for every other program on the host is a site decision.
+- **Node-side `CheckLines` (a gate item, A6 #92).** `collectorclient.Client.Register` is not set, because the node does not yet hold a verified register package. `CheckLines` therefore runs only in the collector, and in the built node the unauthorized-line quarantine and halt cannot fire yet; only the tests, which set `Register`, reach them.
+- **SER row order.** A2's #85 puts the C2 example `ok.json` rows oldest first, as Figure 10.16 and A6's simulator do. Until #85 merges, the scheduler test rebuilds the read in that order; after it merges, the test uses `ok.json` as it is.
+- **A `collector_seq` that goes backwards** (A3 #92). A reinstall after both collector stores are lost restarts the collector's numbering at 1. Today the node writes each reply's `collector_seq` as given and checks only that the records within one reply rise (`collectorclient`). It does not compare across runs, so a restart shows only when `audit.VerifyCollectorSeq` finds duplicates. Follow-up: keep the highest `collector_seq` durably, and on a lower one raise an alarm and record the restart, rather than accepting it silently or reading it as a gap.
+- **A partial install** (for example, a refused collector configuration after the node service exists) leaves the node service and `node.json`. A rerun needs `otsec uninstall` and removing `OTSEC\config\node.json` by hand (A3 #92 note 3).
+- **Forwarding.** The forwarder is A4's, and runs against `Runtime.Store` and `Runtime.Log`. `node.Run` does not start it yet.

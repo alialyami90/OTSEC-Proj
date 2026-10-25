@@ -3,8 +3,10 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -40,19 +42,62 @@ func lockFile(path string) (func(), error) {
 // allow entry must name one of the three; and the owner must be one of
 // them, because an owner can rewrite the DACL (W-4). Under the SCM the
 // process's account is the node's service SID, so the collector's SID,
-// Users and Everyone are all refused.
+// Users and Everyone are all refused. A reparse point (a symbolic link, a
+// junction or a mount point) is refused, so the checked DACL is the one on
+// the directory the files are written to (A3 #84 note 4).
 func checkDir(dir string) error {
-	st, err := os.Stat(dir)
+	attrs, err := attributes(dir)
 	if err != nil {
 		return fmt.Errorf("store directory: %w", err)
 	}
-	if !st.IsDir() {
+	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("store directory %s is a reparse point; it must be the directory itself", dir)
+	}
+	if attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
 		return fmt.Errorf("store directory %s is not a directory", dir)
 	}
-	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+	return checkACL("store directory", dir, true)
+}
+
+// checkFile refuses a database file (the database, its -wal or its -shm)
+// that is a reparse point or whose DACL or owner fails the directory's
+// rule (A3 #84 note 3). Its DACL is the one it inherited from the store
+// directory, so it is not required to be protected. A file that does not
+// exist passes: SQLite creates it under the directory's DACL.
+func checkFile(path string) error {
+	attrs, err := attributes(path)
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("store file: %w", err)
+	}
+	if attrs&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
+		return fmt.Errorf("store file %s is not a plain file", path)
+	}
+	return checkACL("store file", path, false)
+}
+
+// attributes reads path's attributes without following a reparse point.
+func attributes(path string) (uint32, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, err
+	}
+	attrs, err := windows.GetFileAttributes(p)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
+	}
+	return attrs, nil
+}
+
+// checkACL applies the rule to path's owner and DACL. protected also
+// requires the DACL to be protected.
+func checkACL(what, path string, protected bool) error {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
-		return fmt.Errorf("store directory %s: read DACL: %w", dir, err)
+		return fmt.Errorf("%s %s: read DACL: %w", what, path, err)
 	}
 	allowed, err := allowedSIDs()
 	if err != nil {
@@ -70,27 +115,27 @@ func checkDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	if control&windows.SE_DACL_PROTECTED == 0 {
-		return fmt.Errorf("store directory %s inherits its DACL; it must be protected (A3 condition 1)", dir)
+	if protected && control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("%s %s inherits its DACL; it must be protected (A3 condition 1)", what, path)
 	}
 	owner, _, err := sd.Owner()
 	if err != nil {
 		return err
 	}
 	if !ok(owner) {
-		return fmt.Errorf("store directory %s is owned by %s; the owner must be this account, SYSTEM or Administrators (W-4)", dir, owner)
+		return fmt.Errorf("%s %s is owned by %s; the owner must be this account, SYSTEM or Administrators (W-4)", what, path, owner)
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil {
 		return err
 	}
 	if dacl == nil {
-		return fmt.Errorf("store directory %s has a null DACL, which grants everyone", dir)
+		return fmt.Errorf("%s %s has a null DACL, which grants everyone", what, path)
 	}
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
-			return fmt.Errorf("store directory %s: ACE %d: %w", dir, i, err)
+			return fmt.Errorf("%s %s: ACE %d: %w", what, path, i, err)
 		}
 		switch ace.Header.AceType {
 		case windows.ACCESS_DENIED_ACE_TYPE:
@@ -98,10 +143,10 @@ func checkDir(dir string) error {
 		case windows.ACCESS_ALLOWED_ACE_TYPE:
 			sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 			if !ok(sid) {
-				return fmt.Errorf("store directory %s grants access to %s; only this account, SYSTEM and Administrators may have access", dir, sid)
+				return fmt.Errorf("%s %s grants access to %s; only this account, SYSTEM and Administrators may have access", what, path, sid)
 			}
 		default:
-			return fmt.Errorf("store directory %s: ACE %d has type %d, which this check does not read", dir, i, ace.Header.AceType)
+			return fmt.Errorf("%s %s: ACE %d has type %d, which this check does not read", what, path, i, ace.Header.AceType)
 		}
 	}
 	return nil
@@ -163,7 +208,18 @@ func CreateDir(dir, account string) error {
 		}
 		account = u.User.Sid.String()
 	}
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + account + ")")
+	// account goes into SDDL, so it is parsed as a SID first and written
+	// back in canonical form: a string with SDDL syntax in it cannot add an
+	// entry (A3 #84 note 1). StringToSid also takes SDDL aliases such as
+	// WD (Everyone), so only the S-1- form is accepted (A3 #92 note 4).
+	if !strings.HasPrefix(account, "S-1-") {
+		return fmt.Errorf("store directory account %q is not a SID in S-1- form", account)
+	}
+	sid, err := windows.StringToSid(account)
+	if err != nil {
+		return fmt.Errorf("store directory account %q is not a SID: %w", account, err)
+	}
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + sid.String() + ")")
 	if err != nil {
 		return fmt.Errorf("store directory DACL for %s: %w", account, err)
 	}

@@ -502,6 +502,50 @@ func TestFileModes(t *testing.T) {
 			t.Errorf("%s has mode %v", e.Name(), info.Mode())
 		}
 	}
+	db.Close()
+
+	// A database file widened after the directory was checked is refused
+	// before SQLite opens it, and so is one that is a link (A3 #84 note 3).
+	opt := Options{Dir: dir, Node: testNode, Database: evidenceDB}
+	path := filepath.Join(dir, string(evidenceDB.ID)+".db")
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open(bg, path, opt); err == nil {
+		t.Fatal("opened a database file others can read")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.WriteFile(other, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(path + "-wal")
+	if err := os.Symlink(other, path+"-wal"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open(bg, path, opt); err == nil {
+		t.Fatal("opened a database whose WAL is a link")
+	}
+	os.Remove(path + "-wal")
+	d, err := open(bg, path, opt)
+	if err != nil {
+		t.Fatalf("plain files refused: %v", err)
+	}
+	d.Close()
+
+	// A link to a good directory is refused, so the checked mode is the
+	// mode of the directory written to (A3 #84 note 4).
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	linked, _ := NewEnv(Options{Dir: link, Node: testNode, Database: auditDB})
+	if _, err := linked.Lock(bg); err == nil {
+		t.Fatal("lock taken through a symbolic link")
+	}
+
 	if err := os.Chmod(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
