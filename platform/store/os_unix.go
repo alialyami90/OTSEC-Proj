@@ -144,6 +144,11 @@ func readModeChecked(path string, max int64, mode func(os.FileMode) error) ([]by
 	if err := mode(st.Mode().Perm()); err != nil {
 		return nil, err
 	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Nlink > 1 {
+		// As on Windows (A6 on #108): a hard link would carry a file from
+		// another path into the checked directory.
+		return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, sys.Nlink)
+	}
 	if st.Size() > max {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
 	}

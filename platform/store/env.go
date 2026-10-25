@@ -223,7 +223,7 @@ func exists(p string) (bool, error) {
 // as a TLS trust anchor or its client key (D2-12). It opens the file
 // without following a link or reparse point and checks the opened handle,
 // not the path: it must be a regular file on disk (no device such as
-// CON), of at most max bytes, that only this account, SYSTEM and
+// CON) with one hard link, of at most max bytes, that only this account, SYSTEM and
 // Administrators can reach, and that this account cannot write. On Linux
 // that is mode 0400 (no write bit, nothing for group and others); on
 // Windows the store's owner and ACE rule, with an owner other than this

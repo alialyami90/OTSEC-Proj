@@ -213,6 +213,11 @@ func readSDChecked(path string, max int64, check func(*windows.SECURITY_DESCRIPT
 	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
 		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
 	}
+	if info.NumberOfLinks > 1 {
+		// Defence in depth (A6 on #108): a hard link would carry another
+		// path's file, and its DACL, into the checked directory.
+		return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, info.NumberOfLinks)
+	}
 	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return nil, fmt.Errorf("%s: read DACL: %w", path, err)
@@ -275,8 +280,17 @@ const readRights = 0x1200a9
 
 // readerSIDs parses the readers of ReadProtectedFileFor. CREATOR OWNER and
 // OWNER RIGHTS are refused: they name whoever owns or creates the object,
-// not a service.
+// not a service. They are compared as SIDs, so no spelling gets past
+// (A3 and A6 on #108).
 func readerSIDs(readers []string) ([]*windows.SID, error) {
+	var owners []*windows.SID
+	for _, w := range []windows.WELL_KNOWN_SID_TYPE{windows.WinCreatorOwnerSid, windows.WinCreatorOwnerRightsSid} {
+		sid, err := windows.CreateWellKnownSid(w)
+		if err != nil {
+			return nil, err
+		}
+		owners = append(owners, sid)
+	}
 	var sids []*windows.SID
 	for _, r := range readers {
 		sid, err := windows.StringToSid(r)
@@ -288,18 +302,15 @@ func readerSIDs(readers []string) ([]*windows.SID, error) {
 			// SID checked would not be the one named.
 			return nil, fmt.Errorf("reader %q is not a SID as written (it reads as %s)", r, sid)
 		}
-		if r == creatorOwner || r == ownerRights {
-			return nil, fmt.Errorf("reader %s names an owner, not a service", r)
+		for _, o := range owners {
+			if windows.EqualSid(sid, o) {
+				return nil, fmt.Errorf("reader %s names an owner, not a service", r)
+			}
 		}
 		sids = append(sids, sid)
 	}
 	return sids, nil
 }
-
-const (
-	creatorOwner = "S-1-3-0"
-	ownerRights  = "S-1-3-4"
-)
 
 // checkSDFor is ReadProtectedFileFor's rule (A3): owner SYSTEM or
 // Administrators; every allow entry SYSTEM or Administrators, or this

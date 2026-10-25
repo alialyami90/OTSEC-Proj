@@ -58,6 +58,15 @@ func TestProtectedForModes(t *testing.T) {
 	if _, err := ReadProtectedFileFor(flink, 64, nil); err == nil {
 		t.Fatal("a linked file accepted")
 	}
+	os.Chmod(dir, 0o700)
+	if err := os.Link(file, filepath.Join(dir, "hard.json")); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(dir, 0o550)
+	os.Chmod(file, 0o440)
+	if _, err := ReadProtectedFileFor(file, 64, nil); err == nil {
+		t.Fatal("a file with two hard links read")
+	}
 	if err := CheckProtectedDir(dir); err == nil {
 		t.Fatal("the plain check accepted group access")
 	}

@@ -65,7 +65,7 @@ func TestCheckSDFor(t *testing.T) {
 			t.Errorf("%s: %v, want ok %v", c.name, err, c.ok)
 		}
 	}
-	for _, bad := range []string{"S-1-3-0", "S-1-3-4", "not a SID", "S-1-5-80-1;(A;;FA;;;WD)", "S-1-5-80-4444444444"} {
+	for _, bad := range []string{"S-1-3-0", "S-1-3-4", "not a SID", "S-1-5-80-1;(A;;FA;;;WD)", "S-1-5-80-4444444444", "CO", "OW", "s-1-3-0", "s-1-3-4"} {
 		if _, err := readerSIDs([]string{bad}); err == nil {
 			t.Errorf("reader %q accepted", bad)
 		}
@@ -128,6 +128,13 @@ func TestProtectedForOnDisk(t *testing.T) {
 	}
 	if _, err := ReadProtectedFileFor(file, 64, nil); err == nil {
 		t.Fatal("read with the reader not named")
+	}
+	hard := filepath.Join(dir, "hard.json")
+	if err := os.Link(file, hard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadProtectedFileFor(hard, 64, []string{peer}); err == nil {
+		t.Fatal("a file with two hard links read")
 	}
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(dir, link); err == nil {
