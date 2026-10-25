@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +12,7 @@ import (
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/modules/security/seal"
 	"otsec.local/otsec/platform/store/protect"
 )
@@ -174,9 +174,7 @@ func (s *Scheduler) readInstallKey() (string, error) {
 		PublicKey   string `json:"public_key"`
 		Fingerprint string `json:"fingerprint"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&k); err != nil || dec.More() || k.Schema != InstallKeySchema || k.KeyID == "" || k.PublicKey == "" || k.Fingerprint == "" {
+	if err := collectorwire.DecodeStrict(b, &k); err != nil || k.Schema != InstallKeySchema || k.KeyID == "" || k.PublicKey == "" || k.Fingerprint == "" {
 		return "", fmt.Errorf("%s is not a %s object with key_id, public_key and fingerprint", path, InstallKeySchema)
 	}
 	// The key ID an administrator acknowledges must be the key whose
@@ -328,12 +326,12 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 	}
 	// As checkClear: only from a directory the node cannot write (A3 on
 	// #107).
-	if err := protect.CheckDir(s.rt.cfg.AdminDir); err != nil {
+	if err := protect.CheckDirFor(s.rt.cfg.AdminDir, AdminReaders()); err != nil {
 		s.raiseOnceKey(AlarmResetAckRefused+" dir "+err.Error(), "", AlarmResetAckRefused, "admin_dir refused, so "+SeqResetAckFileName+" is not read: "+err.Error())
 		return
 	}
 	path := filepath.Join(s.rt.cfg.AdminDir, SeqResetAckFileName)
-	b, err := protect.ReadFile(path, MaxClearSuspensionBytes)
+	b, err := protect.ReadFileFor(path, MaxClearSuspensionBytes, AdminReaders())
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
@@ -363,9 +361,7 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 		Schema       string `json:"schema"`
 		InstallKeyID string `json:"install_key_id"`
 	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&ack); err != nil || dec.More() || ack.Schema != SeqResetAckSchema {
+	if err := collectorwire.DecodeStrict(b, &ack); err != nil || ack.Schema != SeqResetAckSchema {
 		s.raiseOnceKey(key, "", AlarmResetAckRefused, fmt.Sprintf("%s is not a %s object with install_key_id", SeqResetAckFileName, SeqResetAckSchema))
 		return
 	}

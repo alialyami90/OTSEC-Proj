@@ -215,7 +215,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
   - Alarm-only collection was allowed only if a reset could not weaken a safety control.
   - The floor holds from PR 4.
   - Asset suspensions do not survive in the collector, and the node keeps none yet. The condition is not met.
-  - The admin acknowledges by confirming the new install key (T-12) and writing `OTSEC\config\seq-reset-ack.json`, which the node can read but not write. The node refuses an acknowledgement that names the key it already trusted. Before acknowledging, the admin also checks the active register revisions: a fresh state loses the collector's family floors, and node-side suspensions do not carry them (A3 on #101).
+  - The admin acknowledges by confirming the new install key (T-12) and writing `OTSEC\config\admin\seq-reset-ack.json`, which the node and the collector can read but not write (#119). The node refuses an acknowledgement that names the key it already trusted. Before acknowledging, the admin also checks the active register revisions: a fresh state loses the collector's family floors, and node-side suspensions do not carry them (A3 on #101).
 - **The node keeps asset suspensions (A5, `platform/node`).**
   - The node records a suspension from `Code.Suspends` on every outcome, even one that fails validation. It audits it as `asset.suspend` (C8 0.2, because collector records do not carry the C2 code reliably) and writes it durably before the next schedule decision.
   - If the `asset.suspend` audit record cannot be written, the node holds all collection on every asset, not only the suspended one, until it can, whatever happens to the file. A hold kept only in memory would be lost on a restart (A5 and A6 on #101).
@@ -227,8 +227,23 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 
     Then the node holds collection on every asset and raises an alarm.
   - Audit pruning never passes the checkpoint's `through_seq`, so the tail the rebuild needs always exists (A6 on #101).
-  - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own. `asset.suspension_clear` is keyed by asset, C1 reason and reference, and the node takes the reason from the suspension it matched.
+  - An admin clears a suspension by writing `OTSEC\config\admin\clear-suspension.json` (#119), which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own. `asset.suspension_clear` is keyed by asset, C1 reason and reference, and the node takes the reason from the suspension it matched. The collector holds its own suspension of the asset. It lifts that suspension only on the node's C7 0.2 `asset.clear_suspension` request, and only when the request names the same asset and reference as the file the collector reads itself (#117).
   - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed. The register revision check stays.
-- **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
+- **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 requests, as D2-11 requires for install, revoke and clear-suspension. C7 0.2 is A3's `asset.clear_suspension`, the collector side of the clear, so the signed requests come in the minor after it (A1 on A3's collector-clear design).
 - **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
 - **Reviews.** A6 reviews the node work for reliability and fault injection. A3 reviews it for the trust boundary on the clear path.
+
+## D2-16: A relay's TIDLE bounds the floor only on a direct Ethernet Telnet path
+
+**Context (A6 on #114, A2):**
+- `sel751` can now report the TIDLE it parsed from `SHO P 1` (`Config.TIDLE`). The collector could use it in place of the 31-minute fallback for the floor after an exit without QUI.
+- TIDLE is the time-out of the relay's own Ethernet Telnet. Through a port server to a serial port, Level 1 lasts as long as that port's `T_OUT`, which can be longer than TIDLE, or 0 (no time-out at all).
+- C1 cannot say which path an endpoint takes.
+
+**Rulings:**
+- **The collector does not wire `Config.TIDLE` in Phase 2.** The floor after an exit without QUI stays the 31-minute fallback. `sel751` may report the value, but it does not shorten a floor. Under D2-10 every endpoint is loopback, so nothing is lost.
+- **C1 gains an endpoint path before any `device-observed` endpoint** (A2's proposal): for example `path: "direct"` or `"port-server"`. A reported TIDLE may set the floor only on `direct`.
+- **A port-server path is refused until it has its own rule.** With `T_OUT` unknown or 0, no floor bounds Level 1 after an exit without QUI, so the fallback is not safe there either. The same holds for the failed-auth floor, because a pending `Password: ?` also times out by TIDLE on the direct path only (A3). The rule needs evidence of the port's `T_OUT` (a hardware or configuration check, H-13).
+- **An endpoint with no path, or an unknown one, is refused like a port server** once the field exists (A2).
+- **A reported TIDLE counts only from an `ok` or `partial` run**, because the serial check comes after `SHO P 1` (A2, A3 on #114).
+- **Gate item:** the C1 path field and the port-server rule are owed before the first `device-observed` endpoint, together with the admin-signed C7 requests (D2-15).

@@ -13,6 +13,11 @@ import (
 // 0500). Tests change the files first, then lock.
 func (c *Config) LockTLS() error { return c.chmodTLS(0o400, 0o500) }
 
+// ShareTLS is LockTLS for a directory another service also reads, as
+// the installer lays out OTSEC\config\admin: group read stands in for the
+// reader, so files 0440 and the directory 0550. reader is for Windows.
+func (c *Config) ShareTLS(reader string) error { return c.chmodTLS(0o440, 0o550) }
+
 // UnlockTLS undoes LockTLS so the files can be changed or removed.
 func (c *Config) UnlockTLS() error { return c.chmodTLS(0o600, 0o700) }
 

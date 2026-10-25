@@ -60,8 +60,8 @@ type Config struct {
 	TLSDir string `json:"tls_dir,omitempty"`
 	// AdminDir is where an administrator leaves the Phase 2 interim admin
 	// files, such as clear-suspension.json (see "Suspensions" in the
-	// README). The node only reads it. Empty means no such file is read,
-	// so a suspension cannot be cleared.
+	// README). The node and the collector only read it (AdminReaders).
+	// Empty means no such file is read, so a suspension cannot be cleared.
 	AdminDir string `json:"admin_dir,omitempty"`
 	// CollectorPublicDir is where the collector publishes its
 	// install-key.json (A3 #106). The node reads the key before every
