@@ -37,9 +37,12 @@ a relay's failure signatures (H-04, H-05).
 """
 
 import calendar
+import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import threading
 import time
 
@@ -47,7 +50,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import CANARY, Slice
+from slicerun import CANARY, CHECK, REGISTER, Slice
 
 FIRST_RUN = 100.0
 # One schedule interval, the 15 s step timeout, and the time to report.
@@ -135,10 +138,27 @@ def _run_case(name, s, out):
         r["run_start"] = _utc(last) if last and _utc(last) >= t0 - 1 else None
         r["runs_reported"] = s.runs_reported()
         r["sim_lines"] = [x.get("text") for x in s.sim_records() if x["event"] == "line"]
+        r["sim_logs"] = list(s.sim_logs)
     except Exception as exc:  # reported by the tests below
         r["error"] = repr(exc)
     finally:
         s.stop()
+
+
+def _check(logs):
+    """check.py over each recording that exists: only read-only register
+    lines, nothing before a prompt, nothing non-printable (V-S7 (b))."""
+    checked = 0
+    for log in logs:
+        if not os.path.exists(log):
+            continue
+        out = subprocess.run([sys.executable, CHECK, "--log", log, "--register", REGISTER],
+                             capture_output=True, text=True)
+        report = json.loads(out.stdout)
+        assert out.returncode == 0 and report["pass"], (log, report)
+        assert report["violations"] == [], (log, report)
+        checked += 1
+    return checked
 
 
 @pytest.fixture(scope="module")
@@ -212,3 +232,11 @@ def test_a_late_device_suspends_nothing(cases):
     # D2-19: an unanswered probe is not a language fault.
     assert "alarm:asset-suspended" not in cases["timeout"]["signs"], cases["timeout"]["signs"]
     assert "SUSPENDED" not in cases["timeout"]["health"], cases["timeout"]["health"]
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_only_read_only_lines_reached_the_device(cases, name):
+    # Under each fault, including a wrong password and a hang mid-SER.
+    r = cases[name]
+    assert "sim_logs" in r, r.get("error")
+    assert _check(r["sim_logs"]) >= 1, r["sim_logs"]

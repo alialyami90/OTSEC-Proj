@@ -25,8 +25,10 @@ Evidence class: simulated. How a real relay prints the fall-back hour is
 H-10.
 """
 
+import json
 import os
 import shutil
+import subprocess
 import threading
 
 import pytest
@@ -34,7 +36,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import Slice
+from slicerun import CHECK, REGISTER, Slice
 
 import sys
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
@@ -61,6 +63,22 @@ def _run(name, s, out):
         s.stop()
 
 
+def _check(logs):
+    """check.py over each recording that exists: only read-only register
+    lines, nothing before a prompt, nothing non-printable (V-S7 (b))."""
+    checked = 0
+    for log in logs:
+        if not os.path.exists(log):
+            continue
+        out = subprocess.run([sys.executable, CHECK, "--log", log, "--register", REGISTER],
+                             capture_output=True, text=True)
+        report = json.loads(out.stdout)
+        assert out.returncode == 0 and report["pass"], (log, report)
+        assert report["violations"] == [], (log, report)
+        checked += 1
+    return checked
+
+
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
@@ -68,13 +86,15 @@ def got(tmp_path_factory):
     base = str(tmp_path_factory.mktemp("slice-time"))
     first = Slice(os.path.join(base, "build"))
     first.build()
-    out, threads = {}, []
+    out, threads, slices = {}, [], []
     for name in CASES:
-        t = threading.Thread(target=_run, args=(name, Slice(os.path.join(base, name), bin_dir=first.bin), out))
+        slices.append(Slice(os.path.join(base, name), bin_dir=first.bin))
+        t = threading.Thread(target=_run, args=(name, slices[-1], out))
         t.start()
         threads.append(t)
     for t in threads:
         t.join()
+    out["_sim_logs"] = [log for sl in slices for log in sl.sim_logs]
     return out
 
 
@@ -132,3 +152,7 @@ def test_no_sync_is_claimed_from_the_time_source(got, name):
         assert _all(ps, "tsync") == ["unknown"], ps
         assert _all(ps, "tscope") == ["report"], ps
         assert _all(ps, "dacc") == [], ps
+
+
+def test_only_read_only_lines_reached_the_device(got):
+    assert _check(got["_sim_logs"]) == len(CASES), got["_sim_logs"]

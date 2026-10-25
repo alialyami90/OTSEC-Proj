@@ -20,9 +20,11 @@ Evidence class: simulated. Disk exhaustion of the file system itself (E-03,
 F-013, F-014) is not this test: the quota is the limit here.
 """
 
+import json
 import os
 import re
 import shutil
+import subprocess
 import time
 
 import pytest
@@ -30,7 +32,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import Slice
+from slicerun import CHECK, REGISTER, Slice
 
 import sys
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
@@ -64,6 +66,22 @@ def _added(s):
 
 def _rows(added):
     return [l for l in profile_sel751.grown_ser(added).split(b"\r\n") if profile_sel751.SER_ROW.match(l)]
+
+
+def _check(logs):
+    """check.py over each recording that exists: only read-only register
+    lines, nothing before a prompt, nothing non-printable (V-S7 (b))."""
+    checked = 0
+    for log in logs:
+        if not os.path.exists(log):
+            continue
+        out = subprocess.run([sys.executable, CHECK, "--log", log, "--register", REGISTER],
+                             capture_output=True, text=True)
+        report = json.loads(out.stdout)
+        assert out.returncode == 0 and report["pass"], (log, report)
+        assert report["violations"] == [], (log, report)
+        checked += 1
+    return checked
 
 
 @pytest.fixture(scope="module")
@@ -139,3 +157,8 @@ def test_nothing_unforwarded_was_evicted(run):
     assert stats["matched"] == 8 + run.added, stats
     # The rows read before the store filled are among them.
     assert run.added >= run.added_when_full
+
+
+def test_only_read_only_lines_reached_the_device(run):
+    # Across the fill, the kill and restart while full, and the resumed runs.
+    assert _check(run.sim_logs) >= 1, run.sim_logs
