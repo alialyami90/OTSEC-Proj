@@ -100,7 +100,7 @@ func newCredStore(t *testing.T) *credFixture {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.json")
 	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
-	if err := InitState(filepath.Join(dir, "state.json")); err != nil {
+	if err := InitState(filepath.Join(dir, "state.json"), c.t.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	gens, err := OpenState(filepath.Join(dir, "state.json"), c.now)

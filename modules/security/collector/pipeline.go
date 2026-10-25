@@ -261,7 +261,7 @@ func (p *Pipeline) install(req *authz.CollectorRequest) error {
 //  7. The invocation the collector builds passes C2's checks against the
 //     asset and profile (Validate, ValidateWith, CheckAgainst): asset not
 //     suspended, a binding that compares something, a credential only where
-//     C1 allows one.
+//     C1 allows one; and no earlier run's outcome suspended the asset.
 //  8. The failed-auth floor, then the profile's minimum interval.
 //  9. One session per device: no other run to the asset is open.
 //  10. The credential: current version active, bound to this use, its
@@ -303,6 +303,9 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 	// 7.
 	inv, err := p.invocation(req, e, ep)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := p.cfg.State.CheckSuspended(body.AssetID); err != nil {
 		return "", nil, err
 	}
 	// 8.
@@ -394,8 +397,20 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 			p.cfg.Alarm(fmt.Errorf("collector: record TIDLE of %s: %w", asset, err))
 		}
 	}
-	if report.Suspend != "" && plan.Credential != nil {
-		if _, _, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, report.Suspend); err != nil {
+	// The outcome code's suspensions apply even when the result fails the
+	// checks below: suspending is the cautious direction.
+	code := outcomeCode(report.Outcome)
+	if r := code.Suspends(); r != "" {
+		if err := p.cfg.State.SuspendAsset(asset, r, plan.Invocation.InvocationID); err != nil {
+			p.cfg.Alarm(fmt.Errorf("collector: suspend asset %s (%s): %w", asset, r, err))
+		}
+	}
+	credSuspend := report.Suspend
+	if credSuspend == "" {
+		credSuspend = authz.SuspendReason(code.SuspendsCredential())
+	}
+	if credSuspend != "" && plan.Credential != nil {
+		if _, _, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: suspend %s: %w", plan.Credential.ID, err))
 		}
 	}
@@ -408,6 +423,17 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 	}
 	p.checkResult(plan, report.Outcome)
 	return report.Outcome
+}
+
+// outcomeCode is the error code of the outcome's result, read leniently: ""
+// when the result is ok or does not decode. An unknown code reads as
+// failed.unknown, which suspends nothing.
+func outcomeCode(o collectorwire.RunOutcome) adapter.Code {
+	res, err := adapter.DecodeResult(o.Result)
+	if err != nil || res.Error == nil {
+		return ""
+	}
+	return res.Error.Code.Effective()
 }
 
 // runSafely calls the runner, and turns a panic into an alarm and an empty

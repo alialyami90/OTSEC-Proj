@@ -42,7 +42,7 @@ func provision(l layout, nodeID string, now func() time.Time) (bool, error) {
 	if !marker {
 		return false, fmt.Errorf("%w: no %s", errLostState, l.provision)
 	}
-	if err := collector.InitState(l.state); err != nil {
+	if err := collector.InitState(l.state, time.Now()); err != nil {
 		return false, err
 	}
 	if err := collector.InitCredStore(l.credentials, nodeID, now); err != nil {

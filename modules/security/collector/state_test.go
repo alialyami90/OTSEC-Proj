@@ -3,12 +3,15 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 )
 
@@ -21,10 +24,11 @@ func (c *clock) now() time.Time { return c.t }
 func newState(t *testing.T) (string, *State, *clock) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.json")
-	if err := InitState(path); err != nil {
+	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	// Created an hour ago, so the fresh state's own floor has passed.
+	if err := InitState(path, c.t.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
 	s, err := OpenState(path, c.now)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +43,7 @@ func isRateLimited(err error) bool {
 
 func TestInitStateRefusesExisting(t *testing.T) {
 	path, _, _ := newState(t)
-	if err := InitState(path); err == nil {
+	if err := InitState(path, time.Now()); err == nil {
 		t.Fatal("InitState overwrote an existing state")
 	}
 }
@@ -318,5 +322,82 @@ func TestFamilyFloorDurable(t *testing.T) {
 	}
 	if got := again.FamilyFloors()["sel-751"]; got != f {
 		t.Fatalf("floor %+v, want %+v", got, f)
+	}
+}
+
+// A fresh state does not know what the previous one held, so every asset is
+// inside the longest floor from its creation: a reinstall never shortens a
+// floor (A1, collector_seq reset).
+func TestFreshStateFloor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	c := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	if err := InitState(path, c.t); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []time.Duration{0, 30*time.Minute + 59*time.Second} {
+		c.t = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC).Add(d)
+		if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+			t.Fatalf("fresh state at +%s: %v", d, err)
+		}
+	}
+	c.t = time.Date(2026, 10, 24, 12, 31, 0, 0, time.UTC)
+	if err := s.CheckFloor(testAsset); err != nil {
+		t.Fatalf("after the floor: %v", err)
+	}
+	// A clock set back before the creation is inside the floor.
+	c.t = time.Date(2026, 10, 24, 11, 0, 0, 0, time.UTC)
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+		t.Fatalf("clock before creation: %v", err)
+	}
+}
+
+func TestStateWithoutCreationRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{"format":"otsec.collector-state/0.1","collector_seq":0,"assets":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenState(path, nil); !errors.Is(err, ErrStateUnavailable) {
+		t.Fatalf("state without created_utc: %v", err)
+	}
+}
+
+func TestAssetSuspension(t *testing.T) {
+	path, s, c := newState(t)
+	if err := s.CheckSuspended(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SuspendAsset(testAsset, "made-up", "inv-1"); err == nil {
+		t.Fatal("an unknown reason was recorded")
+	}
+	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, ""); err == nil {
+		t.Fatal("a suspension without its invocation was recorded")
+	}
+	if err := s.SuspendAsset(testAsset, asset.SuspendUnexpectedLevel, "inv-1"); err != nil {
+		t.Fatal(err)
+	}
+	// A later reason does not replace the first, except identity-mismatch.
+	if err := s.SuspendAsset(testAsset, asset.SuspendLanguageNotEnglish, "inv-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckSuspended(testAsset); codeOf(err) != authz.RefuseAssetNotEnrolled || !strings.Contains(err.Error(), "unexpected-access-level") {
+		t.Fatalf("suspended asset: %v", err)
+	}
+	if err := s.SuspendAsset(testAsset, asset.SuspendIdentityMismatch, "inv-3"); err != nil {
+		t.Fatal(err)
+	}
+	// Durable.
+	again, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := again.CheckSuspended(testAsset); !strings.Contains(fmt.Sprint(err), "identity-mismatch") || !strings.Contains(err.Error(), "inv-3") {
+		t.Fatalf("after reopening: %v", err)
+	}
+	if err := again.CheckSuspended("another-asset"); err != nil {
+		t.Fatalf("another asset: %v", err)
 	}
 }
