@@ -42,6 +42,7 @@ foreach ($k in $checks.Keys) {
     $r = Denied $checks[$k]
     Result $k $r.Denied $r.Why
 }
+$ErrorActionPreference = 'Continue'
 $out = & sc.exe config otsec-node start= disabled 2>&1 | Out-String
 Result 'N-sc-config' ($out -match 'FAILED 5' -or $out -match 'Access is denied') ($out -replace '\s+', ' ')
 Set-Content -Path (Join-Path $LogDir 'nonadmin-done') -Value (Get-Date -Format o)

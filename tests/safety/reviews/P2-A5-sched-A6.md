@@ -60,3 +60,36 @@ Please either refuse a second schedule entry for the same asset and endpoint, or
 - Linux: vet, gofmt and `go test` of platform/node, store, winsvc and cmd/otsec pass.
 - Verdict: **accept** for everything that runs without administrator rights. Nits 4 and 5 are left to A5.
 - Still not run: the installer (W-1 to W-4, `-collector-config`, `collector\public`, the WER value). It needs administrator rights on ALI's PC and waits on ALI's answer. Until it runs, `install_windows.go` has no evidence beyond compiling.
+
+## Installer run as administrator at `c1f9e27`: accepted, with the limits below
+
+ALI approved this run on 2026-10-25 (decision card: "Yes, on this PC, then clean up") and started the elevated step. It ran on ALI's PC (Windows 11 Pro 10.0.26200), with `otsec.exe` built from `c1f9e27` (`CGO_ENABLED=0`, portable Go 1.26.0) and the scripts in `tests/safety/windows_installer/` at `ca08b6d`. Logs are in `otsec-ci-a6\ci-logs\installer\run2\` on that PC. Evidence class: **native Windows host, simulated device**. No device was contacted, and no collector ran: `otsec-collector.exe` was a renamed copy of `otsec.exe`, installed but never started.
+
+The first attempt (`run1`) stopped right after its preflight, before it changed anything. The cause was a bug in my script: `sc` is an alias of `Set-Content` in Windows PowerShell. It was fixed in `ca08b6d`.
+
+| Check | Result |
+| --- | --- |
+| W-4: `OTSEC\store` pre-created by the normal user, then install | Refused: "C:\ProgramData\OTSEC exists with another owner; the installer stops (W-4)". Exit 1, no service created |
+| Install | Exit 0 |
+| The 7 directory descriptors | Each one is `O:BA`, protected, with exactly the ACEs of `TestDirs`, using the real service SIDs |
+| `config\node.json` | Inherited SY, BA, and node read. No collector or user entry |
+| `collector\collector.json` (`-collector-config`) | Owner BA, inherited SY, BA, and collector read (`0x1200a9`). No node entry |
+| `collector\state\provision` | Written |
+| Both services | `NT SERVICE\<name>`, SID type `UNRESTRICTED`, required privileges `SeChangeNotifyPrivilege` only, restart after 60 s with a reset of 86400 s (from `sc qc`, `qsidtype`, `qprivs` and `qfailure`) |
+| WER `ExcludedApplications\otsec-collector.exe` | `1` (DWORD) |
+| W-3 rule | Outbound, Block, TCP, remote port 23, service `otsec-node`, enabled |
+| Event log sources | Both present |
+| Second install | Refused ("node.json exists"). `node.json` unchanged |
+| Non-admin user | Refused for all of these: read `collector.json` and `node.json`, list `credentials` and `store`, write in `store`, `config`, `collector\public` and `Program Files\OTSEC`, create a folder in `OTSEC`, and `sc config otsec-node` (FAILED 5) |
+| `otsec-node` service started for 90 s | Running as `NT SERVICE\otsec-node`, store created (`audit.db`, `evidence.db`, reserves, `status.json`). With no collector, the scheduled run ended `collection-no-decision` ("no reply"), as the node's fail-closed path requires. `otsec health` read it |
+| Uninstall, then cleanup | Exit 0. Services, event sources, firewall rule and WER value removed. `OTSEC` folders deleted by the script. Then checked again from a non-admin shell: nothing left |
+
+**Script defect, not an installer defect.** `S-otsec-node` and `S-otsec-collector` printed FAIL. With a single match, `$privs` was a plain string, so `$privs[0]` was the letter `S`. The `sc qprivs` output in the same log shows `PRIVILEGES : SeChangeNotifyPrivilege` for both services, and the per-check details say the same. The script is fixed in #96 (`@(...)`). I count both service checks as passing, on the raw `sc` output.
+
+**Not covered here, owed until A3's collector binary exists:**
+- W-1: the pipe impostor.
+- W-2 on a live token. Only the configured privilege list was checked here.
+- W-3 by connection: only the collector reaching port 23.
+- The collector's first start from the provision marker.
+
+Verdict: the installer is **accepted**, which closes the last item of my #92 review. The four items above stay open for the slice tests.
