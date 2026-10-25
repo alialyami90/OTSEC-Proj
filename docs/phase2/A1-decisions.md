@@ -160,4 +160,5 @@ A3's §9 design remains the target. Until it lands, the file resolver is a gate 
 - A PR merges when its reviewers accept it and every job in `.github/workflows/ci.yml` is green on its head: `go` on Linux and Windows, `python`, and `integration`.
 - The owner's PC is the backup. It is used when GitHub cannot run a job, such as a test that needs administrator rights on a real Windows installation (A6's installer check), or when Actions is unavailable. Each PC result names the commit and is posted on the PR.
 - A red job on main is fixed before anything else merges, unless the PR being merged is the fix.
+- The owner's PC is never registered as a self-hosted runner (A3). In a public repository, a pull request from anyone could otherwise run code on it.
 - The Phase 2 gate still needs the slice suite on Windows and on Linux with rsyslog, from one main commit. GitHub's `windows-latest` and `integration` jobs provide that.
