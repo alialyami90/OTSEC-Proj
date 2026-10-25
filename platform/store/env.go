@@ -256,7 +256,12 @@ func CheckProtectedDir(dir string) error { return checkProtectedDir(dir) }
 //     included.
 //
 // On Linux, a development platform only, readers are not used: the file
-// may be read by its owner and group, and written by nobody (0440).
+// may be read by its owner and group, and written by nobody (0440). A
+// mode check does not prove that this account could not have written the
+// file: the directory's owner can make it writable, plant a file and
+// restore the mode. On Linux it guards against mistakes only; the
+// boundary is evidenced on Windows only (A3). The same holds for
+// ReadProtectedFile and CheckProtectedDir.
 func ReadProtectedFileFor(path string, max int64, readers []string) ([]byte, error) {
 	return readProtectedFor(path, max, readers)
 }
