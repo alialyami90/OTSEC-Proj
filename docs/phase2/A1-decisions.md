@@ -206,6 +206,10 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
   - A changed `install_key_id` is therefore a reset too. The chain still breaks on any gap, which is correct.
   - The node checks the install key before it sends each request, not when a reply arrives. A changed key holds collection before anything reaches the new collector (A6 on #101).
   - From its first start, the node records in the audit chain the install key it trusts. A number that goes back while the key stays the same is not a reinstall. It is a restore of old collector stores, for example `credentials.json` and `state.json` restored together, and it is never acknowledged: collection stays held until the collector is reinstalled with a new key (A6 on #101).
+  - Record names, from A3's C8 0.2:
+    - The trusted key is `collector.install_key`, written at the node's first start before its first request. Each `collector.seq_reset_ack` makes its key the trusted one.
+    - `first_seen` is optional, because a reset found by the key before a request has no reply yet. When it is present, it is checked.
+    - The chain breaks on a reset that keeps the trusted key or an earlier reset's key, and on a key change without an acknowledged reset.
   - `collector_epoch` in C7 0.2 replies remains the stronger fix.
 - **Collection is held after a reset until an admin acknowledges.**
   - Alarm-only collection was allowed only if a reset could not weaken a safety control.
@@ -223,7 +227,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 
     Then the node holds collection on every asset and raises an alarm.
   - Audit pruning never passes the checkpoint's `through_seq`, so the tail the rebuild needs always exists (A6 on #101).
-  - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own.
+  - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own. `asset.suspension_clear` is keyed by asset, C1 reason and reference, and the node takes the reason from the suspension it matched.
   - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed. The register revision check stays.
 - **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
 - **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
