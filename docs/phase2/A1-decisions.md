@@ -232,3 +232,16 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 - **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
 - **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
 - **Reviews.** A6 reviews the node work for reliability and fault injection. A3 reviews it for the trust boundary on the clear path.
+
+## D2-16: A relay's TIDLE bounds the floor only on a direct Ethernet Telnet path
+
+**Context (A6 on #114, A2):**
+- `sel751` can now report the TIDLE it parsed from `SHO P 1` (`Config.TIDLE`). The collector could use it in place of the 31-minute fallback for the floor after an exit without QUI.
+- TIDLE is the time-out of the relay's own Ethernet Telnet. Through a port server to a serial port, Level 1 lasts as long as that port's `T_OUT`, which can be longer than TIDLE, or 0 (no time-out at all).
+- C1 cannot say which path an endpoint takes.
+
+**Rulings:**
+- **The collector does not wire `Config.TIDLE` in Phase 2.** The floor after an exit without QUI stays the 31-minute fallback. `sel751` may report the value, but it does not shorten a floor. Under D2-10 every endpoint is loopback, so nothing is lost.
+- **C1 gains an endpoint path before any `device-observed` endpoint** (A2's proposal): for example `path: "direct"` or `"port-server"`. A reported TIDLE may set the floor only on `direct`.
+- **A port-server path is refused until it has its own rule.** With `T_OUT` unknown or 0, no floor bounds Level 1 after an exit without QUI, so the fallback is not safe there either. The rule needs evidence of the port's `T_OUT` (a hardware or configuration check, H-13).
+- **Gate item:** the C1 path field and the port-server rule are owed before the first `device-observed` endpoint, together with the C7 0.2 signed admin requests (D2-15).
