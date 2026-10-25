@@ -119,3 +119,7 @@ func (p *PKI) ServerTLS(permitted string) *tls.Config {
 		},
 	}
 }
+
+// ErrNeedsElevation is LockTLS's error on Windows when the process may not
+// make Administrators the owner; a test skips on it.
+var ErrNeedsElevation = errors.New("nodeconfigtest: making Administrators the owner needs an elevated process")

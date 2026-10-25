@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,7 +17,7 @@ import (
 )
 
 // forwardConfig is a node with one required, auditing relp-tls target at
-// port, and its test PKI written to tls_dir.
+// port, and its test PKI written to tls_dir, not yet locked (lockTLS).
 func forwardConfig(t *testing.T, port int, mod func(*nodeconfigtest.Config)) (*nodeconfigtest.Config, *nodeconfigtest.PKI, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,11 +30,28 @@ func forwardConfig(t *testing.T, port int, mod func(*nodeconfigtest.Config)) (*n
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The locked directory can only be removed once it is unlocked; the copy
+	// keeps the path a test case may change.
+	locked := *nc
+	t.Cleanup(func() { locked.UnlockTLS() })
 	nc.AddRELPTarget("central", "127.0.0.1", port, "test-ca", "test-client", "test/durable-ack", true)
 	if mod != nil {
 		mod(nc)
 	}
 	return nc, p, dir
+}
+
+// lockTLS gives tls_dir and its files the D2-12 rule: on Linux files 0400
+// and the directory 0500; on Windows owner Administrators and read only for
+// this account, which needs an elevated test, so the test skips otherwise
+// (GitHub's Windows runners are elevated).
+func lockTLS(t *testing.T, nc *nodeconfigtest.Config) {
+	t.Helper()
+	if err := nc.LockTLS(); errors.Is(err, nodeconfigtest.ErrNeedsElevation) {
+		t.Skip(err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func parse(t *testing.T, nc *nodeconfigtest.Config) *Config {
@@ -59,6 +77,7 @@ func TestNodeForwardsEveryStream(t *testing.T) {
 	}
 	defer srv.Close()
 	nc.Targets[0]["port"] = srv.Addr().Port
+	lockTLS(t, nc)
 	c := parse(t, nc)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -116,19 +135,29 @@ func TestNodeForwardsEveryStream(t *testing.T) {
 }
 
 // A bad TLS reference stops the node before anything is sent, and nothing
-// falls back to another reference (D2-12).
+// falls back to another reference (D2-12). Each case changes the files
+// before tls_dir is locked, or loosens them after.
 func TestBadTLSReferenceStopsTheNode(t *testing.T) {
-	cases := map[string]func(t *testing.T, nc *nodeconfigtest.Config){
-		"missing trust anchors": func(t *testing.T, nc *nodeconfigtest.Config) {
+	type change func(t *testing.T, nc *nodeconfigtest.Config)
+	type tlsCase struct{ before, after change }
+	loosen := func(name string) change {
+		return func(t *testing.T, nc *nodeconfigtest.Config) {
+			if err := nc.LoosenTLS(name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	cases := map[string]tlsCase{
+		"missing trust anchors": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
 			os.Remove(filepath.Join(nc.TLSDir, "test-ca.pem"))
-		},
-		"missing key": func(t *testing.T, nc *nodeconfigtest.Config) {
+		}},
+		"missing key": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
 			os.Remove(filepath.Join(nc.TLSDir, "test-client.key"))
-		},
-		"another node's name": func(t *testing.T, nc *nodeconfigtest.Config) {
+		}},
+		"another node's name": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
 			nc.Targets[0]["durable_ack"].(map[string]any)["permitted_peer"] = "site-b-node1"
-		},
-		"key does not match": func(t *testing.T, nc *nodeconfigtest.Config) {
+		}},
+		"key does not match": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
 			other := nodeconfigtest.New("site-a-node1", filepath.Join(t.TempDir(), "store"))
 			if _, err := other.WritePKI("127.0.0.1", "x", "x"); err != nil {
 				t.Fatal(err)
@@ -140,44 +169,71 @@ func TestBadTLSReferenceStopsTheNode(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(nc.TLSDir, "test-client.key"), b, 0o600); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"trust anchors hold a key": func(t *testing.T, nc *nodeconfigtest.Config) {
+		}},
+		"trust anchors hold a key": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
 			b, _ := os.ReadFile(filepath.Join(nc.TLSDir, "test-client.key"))
 			os.WriteFile(filepath.Join(nc.TLSDir, "test-ca.pem"), b, 0o600)
-		},
+		}},
+		"trust anchors too large": {before: func(t *testing.T, nc *nodeconfigtest.Config) {
+			b, _ := os.ReadFile(filepath.Join(nc.TLSDir, "test-ca.pem"))
+			big := make([]byte, 0, MaxTLSFileBytes+len(b))
+			for len(big) <= MaxTLSFileBytes {
+				big = append(big, b...)
+			}
+			os.WriteFile(filepath.Join(nc.TLSDir, "test-ca.pem"), big, 0o600)
+		}},
+		"key the node can write":           {after: loosen("test-client.key")},
+		"certificate the node can write":   {after: loosen("test-client.crt")},
+		"trust anchors the node can write": {after: loosen("test-ca.pem")},
+		"tls_dir the node can write":       {after: loosen("")},
 	}
-	if runtime.GOOS != "windows" {
-		cases["key others can read"] = func(t *testing.T, nc *nodeconfigtest.Config) {
-			os.Chmod(filepath.Join(nc.TLSDir, "test-client.key"), 0o644)
-		}
-		cases["key is a link"] = func(t *testing.T, nc *nodeconfigtest.Config) {
-			k := filepath.Join(nc.TLSDir, "test-client.key")
-			moved := filepath.Join(t.TempDir(), "k")
-			os.Rename(k, moved)
-			if err := os.Symlink(moved, k); err != nil {
-				t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		own := func(name string) change {
+			return func(t *testing.T, nc *nodeconfigtest.Config) {
+				if err := nc.OwnTLS(name); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
-		cases["certificate is a link"] = func(t *testing.T, nc *nodeconfigtest.Config) {
-			k := filepath.Join(nc.TLSDir, "test-client.crt")
-			moved := filepath.Join(t.TempDir(), "c")
-			os.Rename(k, moved)
-			if err := os.Symlink(moved, k); err != nil {
-				t.Fatal(err)
+		cases["key owned by the node"] = tlsCase{after: own("test-client.key")}
+		cases["tls_dir owned by the node"] = tlsCase{after: own("")}
+	} else {
+		cases["key others can read"] = tlsCase{after: func(t *testing.T, nc *nodeconfigtest.Config) {
+			os.Chmod(nc.TLSDir, 0o700)
+			os.Chmod(filepath.Join(nc.TLSDir, "test-client.key"), 0o444)
+			os.Chmod(nc.TLSDir, 0o500)
+		}}
+		link := func(name string) change {
+			return func(t *testing.T, nc *nodeconfigtest.Config) {
+				k := filepath.Join(nc.TLSDir, name)
+				moved := filepath.Join(t.TempDir(), name)
+				os.Rename(k, moved)
+				os.Chmod(moved, 0o400)
+				if err := os.Symlink(moved, k); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
-		cases["tls_dir is a link"] = func(t *testing.T, nc *nodeconfigtest.Config) {
-			link := filepath.Join(t.TempDir(), "tls-link")
-			if err := os.Symlink(nc.TLSDir, link); err != nil {
+		cases["key is a link"] = tlsCase{before: link("test-client.key")}
+		cases["certificate is a link"] = tlsCase{before: link("test-client.crt")}
+		cases["tls_dir is a link"] = tlsCase{after: func(t *testing.T, nc *nodeconfigtest.Config) {
+			l := filepath.Join(t.TempDir(), "tls-link")
+			if err := os.Symlink(nc.TLSDir, l); err != nil {
 				t.Fatal(err)
 			}
-			nc.TLSDir = link
-		}
+			nc.TLSDir = l
+		}}
 	}
-	for name, mutate := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			nc, _, dir := forwardConfig(t, 2514, nil)
-			mutate(t, nc)
+			if tc.before != nil {
+				tc.before(t, nc)
+			}
+			lockTLS(t, nc)
+			if tc.after != nil {
+				tc.after(t, nc)
+			}
 			c := parse(t, nc)
 			r, _, _ := start(t, c, dir)
 			defer r.Close()
@@ -194,8 +250,10 @@ func TestBadTLSReferenceStopsTheNode(t *testing.T) {
 			}
 		})
 	}
-	// The unchanged PKI loads, so each case above fails for its own reason.
+	// The unchanged, locked PKI loads, so each case above fails for its own
+	// reason.
 	nc, _, dir := forwardConfig(t, 2514, nil)
+	lockTLS(t, nc)
 	r, _, _ := start(t, parse(t, nc), dir)
 	defer r.Close()
 	if _, err := NewForwarding(r); err != nil {
@@ -210,9 +268,13 @@ func TestTLSReferenceIsAName(t *testing.T) {
 		"path in reference": func(nc *nodeconfigtest.Config) {
 			nc.Targets[0]["tls"].(map[string]any)["client_credential_ref"] = "../store/evidence"
 		},
-		"separator":        func(nc *nodeconfigtest.Config) { nc.Targets[0]["tls"].(map[string]any)["trust_anchor_ref"] = `ca\x` },
-		"no tls_dir":       func(nc *nodeconfigtest.Config) { nc.TLSDir = "" },
-		"relative tls_dir": func(nc *nodeconfigtest.Config) { nc.TLSDir = "tls" },
+		"separator": func(nc *nodeconfigtest.Config) { nc.Targets[0]["tls"].(map[string]any)["trust_anchor_ref"] = `ca\x` },
+		"device name": func(nc *nodeconfigtest.Config) {
+			nc.Targets[0]["tls"].(map[string]any)["client_credential_ref"] = "con"
+		},
+		"numbered device name": func(nc *nodeconfigtest.Config) { nc.Targets[0]["tls"].(map[string]any)["trust_anchor_ref"] = "com1" },
+		"no tls_dir":           func(nc *nodeconfigtest.Config) { nc.TLSDir = "" },
+		"relative tls_dir":     func(nc *nodeconfigtest.Config) { nc.TLSDir = "tls" },
 	} {
 		nc, _, _ := forwardConfig(t, 2514, mutate)
 		if _, err := ParseConfig(nc.Bytes()); err == nil {
@@ -226,6 +288,7 @@ func TestTLSReferenceIsAName(t *testing.T) {
 // forward.unreachable health event.
 func TestUnreachableRaisedOncePerOutage(t *testing.T) {
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
+	lockTLS(t, nc)
 	c := parse(t, nc)
 	var mu sync.Mutex
 	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)

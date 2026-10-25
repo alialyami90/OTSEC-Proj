@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"path/filepath"
 
@@ -108,3 +109,15 @@ func OpenReadOnly(ctx context.Context, dir string, node cnode.ID, id c5.Database
 }
 
 var errReadOnly = errors.New("store: database opened read-only")
+
+// readAtMost reads f to its end, refusing more than max bytes.
+func readAtMost(f io.Reader, path string, max int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
+	}
+	return b, nil
+}

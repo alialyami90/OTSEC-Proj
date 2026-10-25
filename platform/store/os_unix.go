@@ -103,3 +103,48 @@ func CreateDir(dir, account string) error {
 	// Mkdir applies the umask, which can only remove bits from 0700.
 	return checkDir(dir)
 }
+
+func readProtected(path string, max int64) ([]byte, error) {
+	// O_NOFOLLOW refuses a link; O_NONBLOCK keeps a FIFO from blocking the
+	// open, and the handle check below refuses it.
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w (a link is refused)", path, err)
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if perm := st.Mode().Perm(); perm&0o277 != 0 {
+		return nil, fmt.Errorf("%s has mode %04o; it must be readable by its owner only and not writable (0400)", path, perm)
+	}
+	if st.Size() > max {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
+	}
+	return readAtMost(f, path, max)
+}
+
+func checkProtectedDir(dir string) error {
+	fd, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open directory %s: %w (a link is refused)", dir, err)
+	}
+	f := os.NewFile(uintptr(fd), dir)
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	if perm := st.Mode().Perm(); perm&0o277 != 0 {
+		return fmt.Errorf("directory %s has mode %04o; it must be usable by its owner only and not writable (0500)", dir, perm)
+	}
+	return nil
+}

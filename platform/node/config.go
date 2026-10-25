@@ -252,8 +252,8 @@ func (c *Config) check() error {
 			if ref == "" {
 				continue
 			}
-			if !tlsRefPattern.MatchString(ref) {
-				fail("targets[%d].tls.%s %q is not a reference (%s)", i, field, ref, tlsRefPattern)
+			if !tlsRefPattern.MatchString(ref) || windowsDeviceName(ref) {
+				fail("targets[%d].tls.%s %q is not a reference (%s, and not a Windows device name such as con)", i, field, ref, tlsRefPattern)
 			}
 			if c.TLSDir == "" {
 				fail("targets[%d].tls.%s is set, so tls_dir is required", i, field)
@@ -316,6 +316,17 @@ var ErrNotLoopback = errors.New("collection endpoints and listeners must be loop
 // loopback reports whether host is a loopback IP literal: an IPv4 address
 // in 127.0.0.0/8 or ::1, with no zone and no IPv4-mapped form. A host name
 // is never resolved, so the check does not depend on name resolution.
+// windowsDeviceName reports a name Windows opens as a device whatever its
+// extension (con.pem is the console), so a TLS reference may not be one
+// (D2-12). The open also checks the handle is a file on disk.
+func windowsDeviceName(name string) bool {
+	switch name {
+	case "con", "prn", "aux", "nul":
+		return true
+	}
+	return len(name) == 4 && (name[:3] == "com" || name[:3] == "lpt") && name[3] >= '0' && name[3] <= '9'
+}
+
 func loopback(host string) bool {
 	a, err := netip.ParseAddr(host)
 	if err != nil || a.Zone() != "" {

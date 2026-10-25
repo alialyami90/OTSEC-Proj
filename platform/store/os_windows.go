@@ -99,10 +99,25 @@ func checkACL(what, path string, protected bool) error {
 	if err != nil {
 		return fmt.Errorf("%s %s: read DACL: %w", what, path, err)
 	}
+	return checkSD(what, path, sd, protected, false)
+}
+
+// writeRights are the access rights that let a holder change a file or
+// directory, its entries, its attributes or its security descriptor.
+const writeRights = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | // FILE_WRITE_DATA/ADD_FILE, APPEND_DATA/ADD_SUBDIRECTORY, WRITE_EA, DELETE_CHILD, WRITE_ATTRIBUTES
+	windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_WRITE | windows.GENERIC_ALL
+
+// checkSD applies the store's rule to a security descriptor: the owner and
+// every allow entry must be this account, SYSTEM or Administrators, and a
+// protected DACL when protected is set. readOnly also requires an owner
+// other than this account, which could rewrite the DACL, and no write right
+// in this account's entries, inherit-only ones included (D2-12).
+func checkSD(what, path string, sd *windows.SECURITY_DESCRIPTOR, protected, readOnly bool) error {
 	allowed, err := allowedSIDs()
 	if err != nil {
 		return err
 	}
+	self := allowed[0]
 	ok := func(sid *windows.SID) bool {
 		for _, a := range allowed {
 			if windows.EqualSid(sid, a) {
@@ -122,8 +137,11 @@ func checkACL(what, path string, protected bool) error {
 	if err != nil {
 		return err
 	}
-	if !ok(owner) {
+	if owner == nil || !ok(owner) {
 		return fmt.Errorf("%s %s is owned by %s; the owner must be this account, SYSTEM or Administrators (W-4)", what, path, owner)
+	}
+	if readOnly && windows.EqualSid(owner, self) {
+		return fmt.Errorf("%s %s is owned by this account, which could rewrite its DACL; the owner must be SYSTEM or Administrators (D2-12)", what, path)
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil {
@@ -145,11 +163,77 @@ func checkACL(what, path string, protected bool) error {
 			if !ok(sid) {
 				return fmt.Errorf("%s %s grants access to %s; only this account, SYSTEM and Administrators may have access", what, path, sid)
 			}
+			if readOnly && windows.EqualSid(sid, self) && ace.Mask&writeRights != 0 {
+				return fmt.Errorf("%s %s lets this account write (access %#x); it may only read (D2-12)", what, path, ace.Mask)
+			}
 		default:
 			return fmt.Errorf("%s %s: ACE %d has type %d, which this check does not read", what, path, i, ace.Header.AceType)
 		}
 	}
 	return nil
+}
+
+func readProtected(path string, max int64) ([]byte, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	// FILE_FLAG_OPEN_REPARSE_POINT opens a link or junction itself, so the
+	// attribute check below refuses it instead of following it.
+	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	f := os.NewFile(uintptr(h), path)
+	defer f.Close()
+	if t, err := windows.GetFileType(h); err != nil || t != windows.FILE_TYPE_DISK {
+		return nil, fmt.Errorf("%s is not a file on disk (a device such as CON is refused)", path)
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
+		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
+	}
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return nil, fmt.Errorf("%s: read DACL: %w", path, err)
+	}
+	if err := checkSD("file", path, sd, false, true); err != nil {
+		return nil, err
+	}
+	if size := int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow); size > max {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
+	}
+	return readAtMost(f, path, max)
+}
+
+func checkProtectedDir(dir string) error {
+	p, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(p, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return fmt.Errorf("open directory %s: %w", dir, err)
+	}
+	defer windows.CloseHandle(h)
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return fmt.Errorf("%s: %w", dir, err)
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return fmt.Errorf("%s is not a plain directory (a junction or link is refused)", dir)
+	}
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return fmt.Errorf("%s: read DACL: %w", dir, err)
+	}
+	return checkSD("directory", dir, sd, true, true)
 }
 
 // allowedSIDs are the process's own account, SYSTEM and Administrators.

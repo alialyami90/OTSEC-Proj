@@ -219,17 +219,21 @@ func exists(p string) (bool, error) {
 	return false, err
 }
 
-// CheckPrivateFile refuses a file the node keeps private, such as its TLS
-// client key, unless it exists, is a plain file and not a link, and only
-// this account, SYSTEM and Administrators can reach it: mode 0600 or
-// tighter on Linux, the store directory's owner and ACE rule on Windows.
-func CheckPrivateFile(path string) error {
-	ok, err := exists(path)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("%s does not exist", path)
-	}
-	return checkFile(path)
-}
+// ReadProtectedFile reads a file the node may read but never change, such
+// as a TLS trust anchor or its client key (D2-12). It opens the file
+// without following a link or reparse point and checks the opened handle,
+// not the path: it must be a regular file on disk (no device such as
+// CON), of at most max bytes, that only this account, SYSTEM and
+// Administrators can reach, and that this account cannot write. On Linux
+// that is mode 0400 (no write bit, nothing for group and others); on
+// Windows the store's owner and ACE rule, with an owner other than this
+// account and no write right in this account's entries. Errors name the
+// path only, never the content.
+func ReadProtectedFile(path string, max int64) ([]byte, error) { return readProtected(path, max) }
+
+// CheckProtectedDir refuses a directory that would let this account change
+// the files in it (D2-12): the store directory rule (checkDir), with no
+// write for this account. On Linux that is mode 0500; on Windows a
+// protected DACL, an owner other than this account, and no write right in
+// this account's entries. A link or reparse point is refused.
+func CheckProtectedDir(dir string) error { return checkProtectedDir(dir) }
