@@ -43,11 +43,16 @@ func forwardConfig(t *testing.T, port int, mod func(*nodeconfigtest.Config)) (*n
 
 // lockTLS gives tls_dir and its files the D2-12 rule: on Linux files 0400
 // and the directory 0500; on Windows owner Administrators and read only for
-// this account, which needs an elevated test, so the test skips otherwise
-// (GitHub's Windows runners are elevated).
+// this account, which needs an elevated test. A non-elevated run skips,
+// except under GitHub Actions (whose Windows runners are elevated) or with
+// OTSEC_REQUIRE_ELEVATED=1, where it fails, so CI never passes these cases
+// by skipping them (A6 #98).
 func lockTLS(t *testing.T, nc *nodeconfigtest.Config) {
 	t.Helper()
 	if err := nc.LockTLS(); errors.Is(err, nodeconfigtest.ErrNeedsElevation) {
+		if os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("OTSEC_REQUIRE_ELEVATED") == "1" {
+			t.Fatal(err)
+		}
 		t.Skip(err)
 	} else if err != nil {
 		t.Fatal(err)
