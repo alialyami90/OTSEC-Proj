@@ -20,7 +20,7 @@ Owner: A6. These scripts run A5's installer (`otsec install`, `platform/winsvc`)
 
 - **Covered:**
   - W-4: a pre-created folder stops the installer.
-  - The exact directory ACEs from `TestDirs`.
+  - The exact directory ACEs from `TestDirs`, including `config\tls` (D2-12). That check and the two non-admin `config\tls` refusals were added after the 2026-10-25 run and have not run yet.
   - `node.json`, and `collector.json` from `-collector-config`.
   - The provision marker and `collector\public`.
   - Each service's configuration: virtual account, unrestricted SID, `SeChangeNotifyPrivilege` as the only privilege, restart on failure.
