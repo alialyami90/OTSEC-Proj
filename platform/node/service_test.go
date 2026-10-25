@@ -12,13 +12,24 @@ import (
 // with service.start and service.stop in the chain.
 func TestRunStartsAndStops(t *testing.T) {
 	c, dir := schedConfig(t, nil)
-	ctx, cancel := context.WithTimeout(bg, 300*time.Millisecond)
+	// Stop once status says the node is collecting, not after a fixed time:
+	// opening the stores can take longer than any short period on a slow
+	// runner, and a Run cut off during start fails for that reason alone.
+	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
-	var lines []string
-	if err := Run(ctx, c, func(s string) { lines = append(lines, s) }); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, c, func(string) {}) }()
+	var st StatusFile
+	var err error
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if st, err = ReadStatus(StatusPath(c)); err == nil && st.Collecting {
+			break
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	st, err := ReadStatus(StatusPath(c))
 	if err != nil || !st.Collecting || st.Node != "site-a-node1" {
 		t.Fatalf("status %+v: %v", st, err)
 	}
