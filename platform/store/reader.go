@@ -63,7 +63,9 @@ func OpenReadOnly(ctx context.Context, dir string, node cnode.ID, id c5.Database
 	d := &DB{opt: Options{Dir: dir, Node: node, Database: c5.Database{ID: id}}, path: path, db: sdb, conn: conn, readOnly: true,
 		streams: map[c5.StreamID]c5.StreamClass{}, quotas: map[c5.StreamClass]c5.Quota{},
 		full: map[c5.StreamClass]bool{}, warned: map[c5.StreamClass]bool{}}
-	for _, q := range []string{"PRAGMA query_only=1", "PRAGMA busy_timeout=5000", "PRAGMA temp_store=MEMORY"} {
+	// busy_timeout first, as in connPragmas, so no statement reads the
+	// file before a WAL recovery it meets can be waited for.
+	for _, q := range []string{"PRAGMA busy_timeout=5000", "PRAGMA query_only=1", "PRAGMA temp_store=MEMORY"} {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return nil, fmt.Errorf("open %s read-only: %s: %w", path, q, err)
