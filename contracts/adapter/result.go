@@ -749,6 +749,10 @@ func (c *check) identity(r Result, code Code) {
 	if (code == RefusedIdentityMismatch || code == FailedIdentityMismatchLate) && id.Result != IdentityMismatch {
 		c.fail("%s needs identity.result mismatch", code)
 	}
+	// Nothing was read, so nothing was compared (0.3).
+	if code == FailedIdentityUnreadable && id.Result != IdentityNotChecked {
+		c.fail("%s needs identity.result not-checked", code)
+	}
 	if r.Status == StatusOK && id.Result != IdentityMatch {
 		c.fail("status ok needs a matching identity")
 	}

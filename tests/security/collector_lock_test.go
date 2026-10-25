@@ -109,6 +109,23 @@ func readLockFixture(t *testing.T, name string) []byte {
 // the asset's one endpoint at host:port.
 func lockPipeline(t *testing.T, host string, port int, runner collector.Runner) (*collector.Pipeline, uint64, error) {
 	t.Helper()
+	r, err := newRig(t, host, port, runner, nil)
+	return r.pipe, r.rev, err
+}
+
+// rig is a collector pipeline and the state behind it.
+type rig struct {
+	pipe      *collector.Pipeline
+	rev       uint64
+	state     *collector.State
+	statePath string
+	nodeID    string
+}
+
+// newRig builds the pipeline of lockPipeline; mod, if set, changes its
+// configuration before NewPipeline.
+func newRig(t *testing.T, host string, port int, runner collector.Runner, mod func(*collector.PipelineConfig)) (rig, error) {
+	t.Helper()
 	dir := t.TempDir()
 	now := func() time.Time { return time.Date(2026, 10, 25, 7, 0, 0, 0, time.UTC) }
 	statePath := filepath.Join(dir, "state.json")
@@ -148,12 +165,16 @@ func lockPipeline(t *testing.T, host string, port int, runner collector.Runner) 
 		t.Fatal(err)
 	}
 	a.Endpoints[0].Host, a.Endpoints[0].Port = host, port
-	pipe, err := collector.NewPipeline(collector.PipelineConfig{
+	cfg := collector.PipelineConfig{
 		NodeID: string(a.NodeID), PolicyVersion: 3,
 		Assets: []collector.Enrolled{{Asset: a, Profile: p}},
 		State:  st, Creds: creds, Registers: regs, Runner: runner, Now: now,
-	})
-	return pipe, uint64(pkg.Revision), err
+	}
+	if mod != nil {
+		mod(&cfg)
+	}
+	pipe, err := collector.NewPipeline(cfg)
+	return rig{pipe: pipe, rev: uint64(pkg.Revision), state: st, statePath: statePath, nodeID: string(a.NodeID)}, err
 }
 
 func lockRun(assetID string, rev uint64) *authz.CollectorRequest {

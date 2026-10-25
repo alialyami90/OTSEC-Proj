@@ -486,36 +486,40 @@ func (s *session) expect(want string) adapter.Code {
 }
 
 // identifyID reads the ID reply and checks the FID against the declared one.
-// A reply with no readable FID is a mismatch with nothing observed: the
-// device did not print the declared FID.
+// Only a FID that was read and differs is a mismatch, which suspends the
+// asset. A reply with no readable FID compares nothing: it is a format this
+// adapter does not know (no STX and ETX, a firmware or port setting), not
+// evidence of another device, so it suspends nothing; ACC is still not sent
+// (C2 0.3, A6 on #118).
 func (s *session) identifyID() adapter.Code {
 	off, rx := s.lastReply()
 	exp := s.expected[attrFID]
 	msg, err := frame(rx, off)
-	var rep idReport
-	if err == nil {
-		rep, err = parseID(msg)
+	if err != nil {
+		s.detail = "the ID reply is not one message framed by STX and ETX; nothing compared"
+		return adapter.FailedIdentityUnreadable
 	}
-	if err == nil {
-		// An empty value has no span to point at (C2 spans are never
-		// empty), so it is not read: an empty FID is no FID.
-		if c, ok := rep.field("CID"); ok && c.value != "" {
-			s.cid = &found{c.value, c.span}
-		}
-		if f, ok := rep.field("FID"); ok && f.value != "" {
-			s.fid = &found{f.value, f.span}
-			s.items = append(s.items, adapter.IdentityItem{Name: attrFID, Expected: exp, Observed: f.value, Span: f.span})
-			if f.value == exp {
-				return ""
-			}
-			s.mismatch = attrFID
-			return adapter.RefusedIdentityMismatch
-		}
+	rep, err := parseID(msg)
+	if err != nil {
+		s.detail = "the ID reply prints a key twice; nothing compared"
+		return adapter.FailedIdentityUnreadable
 	}
-	s.items = append(s.items, adapter.IdentityItem{Name: attrFID, Expected: exp, Span: textSpan(rx, off)})
-	s.mismatch = attrFID
-	s.detail = "the ID reply has no readable FID line"
-	return adapter.RefusedIdentityMismatch
+	// An empty value has no span to point at (C2 spans are never empty), so
+	// it is not read: an empty FID is no FID.
+	if c, ok := rep.field("CID"); ok && c.value != "" {
+		s.cid = &found{c.value, c.span}
+	}
+	if f, ok := rep.field("FID"); ok && f.value != "" {
+		s.fid = &found{f.value, f.span}
+		s.items = append(s.items, adapter.IdentityItem{Name: attrFID, Expected: exp, Observed: f.value, Span: f.span})
+		if f.value == exp {
+			return ""
+		}
+		s.mismatch = attrFID
+		return adapter.RefusedIdentityMismatch
+	}
+	s.detail = "the ID reply has no FID line with a value; nothing compared"
+	return adapter.FailedIdentityUnreadable
 }
 
 // authenticate runs the auth phase (HR-3, C-17, C-19, AP-23, D1-20).
@@ -939,22 +943,6 @@ func (s *session) commit() {
 // lastReply returns the last committed reply as stored, and its offset.
 func (s *session) lastReply() (int64, []byte) {
 	return s.replyOff, s.rec.t.Data[s.replyOff : s.replyOff+s.replyLen]
-}
-
-// textSpan is the longest run of rx with no framing byte, so a span that
-// stands for a whole unreadable reply never covers STX or ETX.
-func textSpan(rx []byte, off int64) adapter.Span {
-	best, start := adapter.Span{Offset: off}, 0
-	for i := 0; i <= len(rx); i++ {
-		if i < len(rx) && bytes.IndexByte([]byte{0x00, stx, etx, 0x11, 0x13}, rx[i]) < 0 {
-			continue
-		}
-		if int64(i-start) > best.Length {
-			best = adapter.Span{Offset: off + int64(start), Length: int64(i - start)}
-		}
-		start = i + 1
-	}
-	return best
 }
 
 // result builds the C2 result. Observations go to C1 only from a session

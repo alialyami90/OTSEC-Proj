@@ -100,7 +100,8 @@ $inputs = Join-Path $LogDir 'inputs'
 New-Item -ItemType Directory -Force -Path $inputs | Out-Null
 $storeDir = Join-Path $pd 'store'
 $nodeCfg = Join-Path $inputs 'node.json'
-$json = (Get-Content -Raw -LiteralPath (Join-Path $here 'node.template.json')).Replace('STOREDIR', $storeDir.Replace('\', '\\'))
+$publicDir = Join-Path $pd 'collector\public'
+$json = (Get-Content -Raw -LiteralPath (Join-Path $here 'node.template.json')).Replace('STOREDIR', $storeDir.Replace('\', '\\')).Replace('PUBLICDIR', $publicDir.Replace('\', '\\'))
 [IO.File]::WriteAllText($nodeCfg, $json)
 $collCfg = Join-Path $inputs 'collector.json'
 Copy-Item -LiteralPath (Join-Path $here 'collector.stand-in.json') -Destination $collCfg -Force
@@ -212,8 +213,10 @@ try {
     while (-not (Test-Path -LiteralPath $done) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
     Result 'N-handover' (Test-Path -LiteralPath $done) 'non-admin checks finished before the timeout'
 
-    # ---- Start the node service briefly. No collector runs, so its runs
-    # fail closed at the pipe; nothing reaches a device.
+    # ---- Start the node service briefly. No collector runs, so no
+    # install-key.json is in collector\public and every request is held
+    # (collector-install-key-unreadable, D2-15) before the pipe; nothing
+    # reaches a device.
     $t0 = Get-Date
     try { Start-Service -Name 'otsec-node' } catch { Note "Start-Service: $($_.Exception.Message)" }
     Start-Sleep -Seconds $ServiceRunSeconds

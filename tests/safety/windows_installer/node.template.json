@@ -147,6 +147,7 @@
     }
   ],
   "collector_pipe": "\\\\.\\pipe\\otsec-collector",
+  "collector_public_dir": "PUBLICDIR",
   "policy_version": 3,
-  "register_version": 2
+  "register_version": 3
 }

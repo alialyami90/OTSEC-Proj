@@ -84,7 +84,7 @@ Every command an adapter may issue is listed here before it is implemented. Comm
 | Device family | Command | Parameters (validated) | Classification | Timeout / rate limit | Pagination / prompt handling | Classification evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | SEL-751 | `ACC` | none on the line; password sent separately on prompt | read-only (session level 0 to 1 only) | proposed: 10 s per step; one attempt per invocation | expects `Password: ?` then `=>`; on a re-prompt, close without sending (D19) | S22 Table 7.17, p. 7.33 |
-| SEL-751 | `ID` | none | read-only (Level 0) | proposed: 10 s; at most once per session | reads to prompt; verify every line checksum | S22 Table 7.43, Figure 7.38 |
+| SEL-751 | `ID` | none | read-only (Level 0) | proposed: 10 s; at most once per session | reads to prompt; verify every line checksum. A FID that differs from the declared one: `refused.identity_mismatch`, and the asset stays suspended until an administrator clears it. A reply that cannot be read (no STX and ETX, no FID line): `failed.identity_unreadable`, no suspension, retried at the next scheduled run (C2 0.3) | S22 Table 7.43, Figure 7.38 |
 | SEL-751 | `SER` | none (range and date forms documented but not registered) | read-only | proposed: 30 s; byte cap 512 KiB; minimum 60 s between invocations per device | reads to prompt; `No Data Available` when empty; paging not documented | S22 Table 7.63 |
 | SEL-751 | `SHO G` (**proposed**, needs A1/A6 approval) | none | read-only | proposed: 10 s | reads to prompt | S22 Command Summary |
 | SEL-751 | `SHO P 1` (**proposed**, needs A1/A6 approval) | none | read-only | proposed: 10 s | reads to prompt | S22 Command Summary |

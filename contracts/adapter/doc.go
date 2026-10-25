@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.2: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.3: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -63,6 +63,11 @@
 //     "Password: ?" with nothing sent at all (refused.session_pending_password).
 //   - The auth phase is ACC once, after "=", after an accepted language probe
 //     and after a matching identity item read in the probe phase (AP-27).
+//   - An ID reply that cannot be read (no frame, no FID line or an empty
+//     FID) compares nothing: failed.identity_unreadable, from 0.3, with
+//     identity not-checked and ID the last line sent. It suspends nothing.
+//     refused.identity_mismatch is kept for a FID that was read and differs
+//     (A6 on #118).
 //   - The credential slot: the password prompt received after ACC, then one
 //     segment that is exactly the redaction marker and one line end
 //     (HR-3, C-17). password_prompt says whether the prompt was received.
@@ -101,6 +106,9 @@
 //   - 0.1 (#51): the first contract.
 //   - 0.2 (D2-14): failed.unexpected_password_prompt, and the QUI exemption
 //     for refused.language_probe_rejected. Results of 0.1 read unchanged.
+//   - 0.3 (A6 on #118): failed.identity_unreadable. Results of 0.1 and 0.2
+//     read unchanged; a 0.2 adapter reports an unreadable ID reply as
+//     refused.identity_mismatch.
 //
 // # For the consumers of a result
 //
