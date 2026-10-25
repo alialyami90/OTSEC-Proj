@@ -76,6 +76,7 @@ type Scheduler struct {
 	collHold  string                      // why no request is sent to the collector, from collectorHold
 	collClear map[string]string           // asset ID: ref of a clear the collector has not accepted (assetclear.go)
 	clearFile *clearSuspension            // the clear-suspension.json checkClear last read, nil when none
+	results   map[string]AssetResult      // asset ID: its last sent run (results.go)
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -84,7 +85,7 @@ type Scheduler struct {
 // it (not in Phase 2).
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
-		susp: map[string]asset.Suspension{}, collClear: map[string]string{}}
+		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -239,12 +240,29 @@ type Report struct {
 	Events int
 	// Alarm is the collection alarm the run raised, if any.
 	Alarm string
+	// Code is the outcome's C2 error code, empty for a run without one.
+	Code adapter.Code
+	// Refusal is the collector's refusal code for a refused run.
+	Refusal string
 }
 
 // RunOnce runs schedule entry i once. Calls must not overlap: the node
 // runs its schedule from one goroutine (Run), and a run's suspension
 // decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
+	rep := s.runOnce(ctx, i)
+	if rep.Sent {
+		// The run's records are in the audit stream now. Fold them, so that
+		// status shows the collector's numbering after this run, not only
+		// before the next one (A6 on #118).
+		s.settle(ctx)
+		s.recordResult(s.rt.cfg.Schedule[i].AssetID, rep)
+		s.rt.opt.Status.Write(string(s.rt.cfg.NodeID))
+	}
+	return rep
+}
+
+func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	col := s.rt.cfg.Schedule[i]
 	s.settle(ctx)
 	s.checkClear(ctx)
@@ -303,6 +321,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 		if resp.Reply.Refusal != nil {
 			code = string(resp.Reply.Refusal.Code.Normalize())
 		}
+		rep.Refusal = code
 		if rec, err := s.requestRecord(req, audit.OutcomeDenied, code, resp.Reply.CollectorSeq); err == nil {
 			s.appendAudit(ctx, col.AssetID, append(s.resetFirst(resp.Reply.CollectorSeq), rec))
 		} else {
@@ -339,7 +358,8 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	inv := resp.Reply.InvocationID
 	// The outcome code's suspension is recorded before anything else is
 	// decided, whatever becomes of the outcome (A1).
-	s.suspend(ctx, col.AssetID, inv, outcomeCode(resp))
+	rep.Code = outcomeCode(resp)
+	s.suspend(ctx, col.AssetID, inv, rep.Code)
 
 	switch {
 	case resp.Quarantine != nil:

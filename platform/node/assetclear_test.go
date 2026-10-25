@@ -222,6 +222,12 @@ func TestRefusedClearHolds(t *testing.T) {
 	if n := countAlarms(st, AlarmCollectorStillSuspended); n != 2 {
 		t.Fatalf("%d collector-still-suspended alarms, want one more for the missing file", n)
 	}
+	// A file naming the asset with another ref is not the owed clear, so
+	// nothing is sent either (A6 on #120).
+	writeClear(t, nc, relayID, "inv-run-other")
+	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorStillSuspended || col.nClears() != 2 || col.n() != 1 {
+		t.Fatalf("another ref: run %+v, %d clears, %d runs", rep, col.nClears(), col.n())
+	}
 	// Written again, the clear goes through.
 	writeClear(t, nc, relayID, ref)
 	m.refuse = ""
@@ -293,5 +299,10 @@ func TestApplyCollectorClear(t *testing.T) {
 	applyCollectorClear(m, &audit.Record{Action: audit.ActionAssetSuspensionClear, Target: &audit.Target{AssetID: relayID}, CorrelationID: "inv-b"})
 	if m[relayID] != "inv-b" {
 		t.Fatalf("a node clear opens an owed clear: %v", m)
+	}
+	// A later suspension leaves it owed: the collector still holds the
+	// earlier one until it accepts (A6 on #120).
+	if applyCollectorClear(m, &audit.Record{Action: audit.ActionAssetSuspend, Target: &audit.Target{AssetID: relayID}, CorrelationID: "inv-c"}) || m[relayID] != "inv-b" {
+		t.Fatalf("a later suspension changed the owed clear: %v", m)
 	}
 }
