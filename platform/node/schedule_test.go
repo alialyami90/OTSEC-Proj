@@ -48,12 +48,18 @@ func schedConfig(t *testing.T, mod func(*nodeconfigtest.Config)) (*Config, strin
 	if mod != nil {
 		mod(nc)
 	}
+	if err := nc.WriteInstallKey(testInstallKey); err != nil {
+		t.Fatal(err)
+	}
 	c, err := ParseConfig(nc.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c, dir
 }
+
+// testInstallKey is the collector install key ID schedConfig publishes.
+const testInstallKey = "ik_test_first"
 
 func readFile(t *testing.T, p string) []byte {
 	t.Helper()
@@ -345,7 +351,9 @@ func TestAuditFullSendsNothing(t *testing.T) {
 	if f.n() != 0 {
 		t.Fatalf("%d requests sent with no audit receipt", f.n())
 	}
-	if n := countAlarms(st, AlarmAuditUnavailable); n != 3 {
+	// The first record the node cannot write is collector.install_key,
+	// before the first request; its hold is raised once, not per run.
+	if n := countAlarms(st, AlarmAuditUnavailable); n != 1 {
 		t.Fatalf("%d audit-unavailable alarms", n)
 	}
 }

@@ -5,12 +5,17 @@
 package nodeconfigtest
 
 import (
+	"crypto/ecdh"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"otsec.local/otsec/modules/security/seal"
 )
 
 // Config is a node configuration under construction. Its fields are the
@@ -29,6 +34,8 @@ type Config struct {
 	RegisterVersion uint64           `json:"register_version"`
 	TLSDir          string           `json:"tls_dir,omitempty"`
 	AdminDir        string           `json:"admin_dir,omitempty"`
+	// CollectorPublicDir holds install-key.json (WriteInstallKey).
+	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 }
 
 type Store struct {
@@ -77,16 +84,60 @@ func New(node, storeDir string) *Config {
 		Store: Store{Dir: storeDir, WarnFraction: 0.8, Quotas: map[string]int64{
 			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "platform": q, "audit": q,
 		}},
-		Listeners:       []Listener{},
-		Assets:          []map[string]any{},
-		Targets:         []map[string]any{},
-		Schedule:        []Collection{},
-		CollectorPipe:   pipe,
-		CollectorPeer:   peer,
-		PolicyVersion:   3,
-		RegisterVersion: 3,
-		TLSDir:          filepath.Join(filepath.Dir(storeDir), "tls"),
+		Listeners:          []Listener{},
+		Assets:             []map[string]any{},
+		Targets:            []map[string]any{},
+		Schedule:           []Collection{},
+		CollectorPipe:      pipe,
+		CollectorPeer:      peer,
+		PolicyVersion:      3,
+		RegisterVersion:    3,
+		TLSDir:             filepath.Join(filepath.Dir(storeDir), "tls"),
+		CollectorPublicDir: filepath.Join(filepath.Dir(storeDir), "collector-public"),
 	}
+}
+
+// InstallKey is the test install key named name: an X25519 key whose
+// private half is the SHA-256 of name, with its derived key ID and
+// fingerprint (seal.KeyID, seal.Fingerprint), so one name always gives the
+// same key and different names give different keys.
+func InstallKey(name string) (keyID, publicKey, fingerprint string) {
+	sum := sha256.Sum256([]byte(name))
+	priv, err := ecdh.X25519().NewPrivateKey(sum[:])
+	if err != nil {
+		panic(err) // any 32 bytes are an X25519 private key
+	}
+	pub := priv.PublicKey().Bytes()
+	return seal.KeyID(pub), base64.StdEncoding.EncodeToString(pub), seal.Fingerprint(pub)
+}
+
+// InstallKeyID is the key ID of InstallKey(name).
+func InstallKeyID(name string) string {
+	id, _, _ := InstallKey(name)
+	return id
+}
+
+// WriteInstallKey writes install-key.json in CollectorPublicDir as the
+// collector does (A3 #106), for the test install key named name.
+func (c *Config) WriteInstallKey(name string) error {
+	if err := os.MkdirAll(c.CollectorPublicDir, 0o700); err != nil {
+		return err
+	}
+	id, pub, fp := InstallKey(name)
+	// Indented and ending in a newline, as cmd/otsec-collector's
+	// publishInstallKey writes it (A3 #106), so the node's strict read is
+	// tested against the real writer's shape.
+	b, err := json.MarshalIndent(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": id,
+		"public_key": pub, "fingerprint": fp}, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmp := filepath.Join(c.CollectorPublicDir, ".install-key.tmp")
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(c.CollectorPublicDir, "install-key.json"))
 }
 
 // AddSEL751 adds a simulated SEL-751 reached over Telnet at host:port (A6's
