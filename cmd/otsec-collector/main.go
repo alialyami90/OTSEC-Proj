@@ -27,7 +27,7 @@ import (
 
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
-	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 func main() {
@@ -132,15 +132,15 @@ func start(data string, log *slog.Logger) (*running, error) {
 // folder for an asset.clear_suspension request, checking the folder and
 // then the file every time: owned by SYSTEM or Administrators, a protected
 // DACL, and nothing more than read for the node or the collector, so
-// neither service could have written what it reads (store.CheckProtectedDirFor,
-// ReadProtectedFileFor). On Linux, a development platform only, the check
+// neither service could have written what it reads (protect.CheckDirFor,
+// ReadFileFor). On Linux, a development platform only, the check
 // is the mode. readers are the node's identity and the collector's own.
 func clearFileReader(dir string, readers []string) func() ([]byte, error) {
 	return func() ([]byte, error) {
-		if err := store.CheckProtectedDirFor(dir, readers); err != nil {
+		if err := protect.CheckDirFor(dir, readers); err != nil {
 			return nil, err
 		}
-		return store.ReadProtectedFileFor(filepath.Join(dir, collector.ClearSuspensionFileName), collector.MaxClearSuspensionBytes, readers)
+		return protect.ReadFileFor(filepath.Join(dir, collector.ClearSuspensionFileName), collector.MaxClearSuspensionBytes, readers)
 	}
 }
 

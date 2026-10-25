@@ -97,7 +97,7 @@ type PipelineConfig struct {
 	// ReadClearFile returns the administrator's clear-suspension.json
 	// (ClearSuspensionFileName) from the folder the node and the collector
 	// both read, after checking that neither service can write the folder
-	// or the file (store.CheckProtectedDirFor, ReadProtectedFileFor). It
+	// or the file (protect.CheckDirFor, ReadFileFor). It
 	// is read again for every asset.clear_suspension request, never
 	// cached. Nil means no folder is configured, so no asset suspension
 	// can be cleared.
