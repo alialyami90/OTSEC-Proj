@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/internal/strictjson"
@@ -19,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.1"
+const ContractID = "otsec.audit/0.2"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -37,6 +38,8 @@ var (
 	codePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 	clockWordRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)     // an open clock source word
 	operationIDPat  = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`) // TODO(C3): exported pattern
+	// TODO(C2): C2's code syntax, status then name, e.g. failed.auth_rejected.
+	c2CodePattern = regexp.MustCompile(`^(ok|refused|failed|partial)\.[a-z][a-z0-9_]{0,63}$`)
 )
 
 // Time is the platform timestamp of a record: C4's event.Received, so audit
@@ -86,7 +89,7 @@ type Actor struct {
 	AuthMethod string              `json:"auth_method,omitempty"`
 }
 
-// Action is the closed set of audited actions in 0.1. A reader that meets an
+// Action is the closed set of audited actions in 0.2. A reader that meets an
 // action it does not know keeps the record (the chain covers it) and shows it
 // as ActionUnrecognized.
 type Action string
@@ -122,7 +125,13 @@ const (
 	ActionNodePostureChange    Action = "node.posture_change"         // a posture label or standing condition was raised or cleared
 	ActionNodeMigrationDate    Action = "node.migration_date"         // an admin recorded or changed the OS migration date (HR-9)
 	ActionAssetCollectorAssign Action = "asset.collector_assign"      // collection of an asset moved to another node (A1 D1-3)
-	ActionUnrecognized         Action = "unrecognized"                // reader fallback only; never written
+	// 0.2 (docs/phase2/A3-c8-seq-reset.md). All five are written by the node.
+	ActionCollectorInstallKey  Action = "collector.install_key"   // the node trusts this collector install key (first start)
+	ActionCollectorSeqReset    Action = "collector.seq_reset"     // the collector's numbering restarted: a reinstall
+	ActionCollectorSeqResetAck Action = "collector.seq_reset_ack" // an admin acknowledged a reset on the key they confirmed
+	ActionAssetSuspend         Action = "asset.suspend"           // the node suspended an asset (C1 Suspension)
+	ActionAssetSuspensionClear Action = "asset.suspension_clear"  // an admin cleared an asset suspension
+	ActionUnrecognized         Action = "unrecognized"            // reader fallback only; never written
 )
 
 var actions = map[Action]bool{}
@@ -136,9 +145,16 @@ func init() {
 		ActionRoleRevoke, ActionPolicyApply, ActionAuditChainStart, ActionAuditCheckpoint, ActionAuditExport,
 		ActionClockChange, ActionStorageAlarm, ActionServiceStart, ActionServiceStop,
 		ActionStoreModeChange, ActionNodePostureChange, ActionNodeMigrationDate, ActionAssetCollectorAssign,
+		ActionCollectorInstallKey, ActionCollectorSeqReset, ActionCollectorSeqResetAck, ActionAssetSuspend, ActionAssetSuspensionClear,
 	} {
 		actions[a] = true
 	}
+}
+
+// actionSince is the minor that added an action; absent means 0.1. A record
+// stamped with an earlier minor cannot carry it.
+var actionSince = map[Action]int{
+	ActionCollectorInstallKey: 2, ActionCollectorSeqReset: 2, ActionCollectorSeqResetAck: 2, ActionAssetSuspend: 2, ActionAssetSuspensionClear: 2,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -200,6 +216,40 @@ type Record struct {
 	CorrelationID    string `json:"correlation_id,omitempty"` // C7 request ID, or the C2 invocation ID for invocationActions
 	CollectorSeq     uint64 `json:"collector_seq,omitempty"`  // the collector's number for an event it reported (C7-A5-2)
 	Detail           string `json:"detail,omitempty"`         // free text; never a secret or raw device output
+
+	// PreviousHigh and FirstSeen are on collector.seq_reset only (0.2): the
+	// highest collector_seq recorded before the reset (0 when none was),
+	// and the number on the reply that showed it. FirstSeen is absent when
+	// the node found the reset by the install key before sending anything.
+	PreviousHigh *uint64 `json:"previous_high,omitempty"`
+	FirstSeen    uint64  `json:"first_seen,omitempty"`
+	// InstallKeyID is a collector install key ID, on collector.install_key,
+	// collector.seq_reset and collector.seq_reset_ack only (0.2): the key the
+	// node trusts, the new key a reset found, and the key an admin
+	// acknowledged.
+	InstallKeyID string `json:"install_key_id,omitempty"`
+	// Suspension is on asset.suspend and asset.suspension_clear only (0.2).
+	// The suspension's ref (the C2 invocation ID, or the operator principal
+	// for reason operator) is correlation_id.
+	Suspension *Suspension `json:"suspension,omitempty"`
+}
+
+// Suspension names a C1 asset suspension on asset.suspend and
+// asset.suspension_clear.
+type Suspension struct {
+	Reason asset.SuspensionReason `json:"reason"`
+	// Code is the C2 outcome code that set it (Code.Suspends). Present on
+	// asset.suspend except for reason operator; absent on a clear.
+	Code string `json:"code,omitempty"`
+}
+
+func knownSuspension(r asset.SuspensionReason) bool {
+	switch r {
+	case asset.SuspendIdentityMismatch, asset.SuspendAuthFailed, asset.SuspendPasswordPromptAbsent,
+		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel, asset.SuspendOperator:
+		return true
+	}
+	return false
 }
 
 // collectorActions are the actions only the collector performs. The node
@@ -276,6 +326,12 @@ func (r *Record) Validate() error {
 	if !actions[r.Action] {
 		return fmt.Errorf("audit: unknown action %q", r.Action)
 	}
+	if since := actionSince[r.Action]; since > got.Minor {
+		return fmt.Errorf("audit: %s is new in 0.%d, so a 0.%d record cannot carry it", r.Action, since, got.Minor)
+	}
+	if err := r.validateNodeState(); err != nil {
+		return err
+	}
 	switch r.Outcome {
 	case OutcomeAllowed, OutcomeSucceeded, OutcomeInfo:
 		if r.ReasonCode != "" && !codePattern.MatchString(r.ReasonCode) {
@@ -345,7 +401,7 @@ func (r *Record) Validate() error {
 			return fmt.Errorf("audit: digest %q is not sha256:<hex>", d)
 		}
 	}
-	if r.CorrelationID != "" && !idPattern.MatchString(r.CorrelationID) {
+	if r.CorrelationID != "" && !idPattern.MatchString(r.CorrelationID) && r.Suspension == nil {
 		return errors.New("audit: correlation id")
 	}
 	// The digest is known only when the session ends; audit before act
@@ -358,6 +414,56 @@ func (r *Record) Validate() error {
 	}
 	if len(r.Detail) > 512 {
 		return errors.New("audit: detail over 512 bytes")
+	}
+	return nil
+}
+
+// validateNodeState checks the 0.2 node-state actions and their fields: each
+// field only on its actions, and each action with exactly its fields.
+func (r *Record) validateNodeState() error {
+	reset := r.Action == ActionCollectorSeqReset
+	ack := r.Action == ActionCollectorSeqResetAck || r.Action == ActionCollectorInstallKey
+	susp := r.Action == ActionAssetSuspend || r.Action == ActionAssetSuspensionClear
+	if (r.PreviousHigh != nil || r.FirstSeen != 0) && !reset {
+		return fmt.Errorf("audit: previous_high and first_seen belong on %s, not %s", ActionCollectorSeqReset, r.Action)
+	}
+	if r.InstallKeyID != "" && !reset && !ack {
+		return fmt.Errorf("audit: install_key_id belongs on the collector key and reset actions, not %s", r.Action)
+	}
+	if r.Suspension != nil && !susp {
+		return fmt.Errorf("audit: suspension belongs on %s and %s, not %s", ActionAssetSuspend, ActionAssetSuspensionClear, r.Action)
+	}
+	if !reset && !ack && !susp {
+		return nil
+	}
+	if r.Outcome != OutcomeInfo || r.Actor.Type != authz.PrincipalNode {
+		return fmt.Errorf("audit: %s is written by the node (actor type node) with outcome info", r.Action)
+	}
+	switch {
+	case reset:
+		if r.PreviousHigh == nil {
+			return fmt.Errorf("audit: %s needs previous_high", r.Action)
+		}
+	case susp:
+		if r.Target == nil || !assetIDPattern.MatchString(r.Target.AssetID) || r.Suspension == nil || !knownSuspension(r.Suspension.Reason) {
+			return fmt.Errorf("audit: %s needs a target asset and a C1 suspension reason", r.Action)
+		}
+		// The ref is the C2 invocation ID, or an operator's C7 principal ID.
+		if !asset.ValidPrincipalID(r.CorrelationID) {
+			return fmt.Errorf("audit: %s needs the suspension's ref as correlation_id", r.Action)
+		}
+		code := r.Suspension.Code
+		switch {
+		case r.Action == ActionAssetSuspensionClear && code != "":
+			return errors.New("audit: asset.suspension_clear names the suspension, not its C2 code")
+		case r.Action == ActionAssetSuspend && r.Suspension.Reason == asset.SuspendOperator && code != "":
+			return errors.New("audit: an operator suspension has no C2 code")
+		case r.Action == ActionAssetSuspend && r.Suspension.Reason != asset.SuspendOperator && !c2CodePattern.MatchString(code):
+			return fmt.Errorf("audit: asset.suspend needs the C2 code that set it, not %q", code)
+		}
+	}
+	if (reset || ack) && !idPattern.MatchString(r.InstallKeyID) {
+		return fmt.Errorf("audit: %s needs install_key_id", r.Action)
 	}
 	return nil
 }

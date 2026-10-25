@@ -160,9 +160,13 @@ func TestRefusedReportDoesNotStall(t *testing.T) {
 			if st.ReportErr == nil {
 				t.Error("no ReportErr while refused")
 			}
-			// Sent and confirmed, but the cursor waits for the reports.
+			// Sent and confirmed, but the cursor waits for the reports;
+			// Status says how far the target confirmed.
 			if c := r.m.cursor(serStream); c != 0 {
 				t.Errorf("ser cursor %d saved past an owed report", c)
+			}
+			if ss := st.Streams[serStream]; ss.Cursor != 0 || ss.Confirmed != 5 {
+				t.Errorf("ser status %+v, want cursor 0 and confirmed 5", ss)
 			}
 			hs.refuse.Store(false)
 		}

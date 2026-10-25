@@ -66,6 +66,9 @@ func TestOpenStateFailsClosed(t *testing.T) {
 		"no assets":      write("noassets.json", `{"format":"otsec.collector-state/0.1","collector_seq":4}`),
 		"bad time":       write("time.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"unconfirmed_auth_utc":"yesterday"}}}`),
 		"negative TIDLE": write("tidle.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"tidle_seconds":-1}}}`),
+		"bad last run":   write("run.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"last_run_utc":"soon"}}}`),
+		"bad floor hash": write("fam.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"families":{"sel-751":{"revision":2,"payload_sha256":"ABCD"}}}`),
+		"bad install":    write("inst.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"installs":["x"]}`),
 	}
 	for name, p := range cases {
 		if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
@@ -253,5 +256,67 @@ func TestFloorGateAlarmsOnFailedClear(t *testing.T) {
 	}
 	if err := s2.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("after a failed clear and a restart: %v", err)
+	}
+}
+
+func TestMinimumInterval(t *testing.T) {
+	_, s, c := newState(t)
+	if err := s.CheckInterval(testAsset, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BeginRun(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckInterval(testAsset, time.Minute); !isRateLimited(err) {
+		t.Fatalf("inside the interval: %v", err)
+	}
+	c.t = c.t.Add(time.Minute)
+	if err := s.CheckInterval(testAsset, time.Minute); err != nil {
+		t.Fatalf("after the interval: %v", err)
+	}
+	c.t = c.t.Add(-time.Hour) // the clock went back
+	if err := s.CheckInterval(testAsset, time.Minute); !isRateLimited(err) {
+		t.Fatalf("a run in the future counts as recent: %v", err)
+	}
+}
+
+func TestInstallBudget(t *testing.T) {
+	path, s, c := newState(t)
+	for i := 0; i < 3; i++ {
+		if err := s.TakeInstall(3, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		c.t = c.t.Add(time.Minute)
+	}
+	if err := s.TakeInstall(3, time.Hour); !isRateLimited(err) {
+		t.Fatalf("fourth install: %v", err)
+	}
+	// The budget survives a restart.
+	again, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := again.TakeInstall(3, time.Hour); !isRateLimited(err) {
+		t.Fatalf("budget reset by a restart: %v", err)
+	}
+	c.t = c.t.Add(58 * time.Minute) // the first install leaves the window
+	if err := again.TakeInstall(3, time.Hour); err != nil {
+		t.Fatalf("after the window: %v", err)
+	}
+}
+
+func TestFamilyFloorDurable(t *testing.T) {
+	path, s, c := newState(t)
+	f := authz.FamilyFloor{Revision: 7}
+	f.PayloadSHA256[0] = 0xab
+	if err := s.SetFamilyFloor("sel-751", f); err != nil {
+		t.Fatal(err)
+	}
+	again, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.FamilyFloors()["sel-751"]; got != f {
+		t.Fatalf("floor %+v, want %+v", got, f)
 	}
 }
