@@ -17,6 +17,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.egress_violation.json`: The adapter's next line failed the egress check and was never sent; QUI, then close.
 - `results/valid/failed.identity_mismatch.json`: The SER header serial differs from the declared serial: identity mismatch after authentication (C1-A3-5).
 - `results/valid/failed.internal.json`: A collector fault after the FID check: the failed-auth floor could not be recorded, so ACC is not sent, and at Level 0 no QUI is needed.
+- `results/valid/failed.internal-wake-password-prompt.json`: The wake was answered by `Password: ?`. Nothing more is sent, not even QUI. The wake may have landed as a blank password, so the collector sets the failed-auth floor for the asset.
 - `results/valid/failed.response_too_large.json`: The SER reply reaches `max_response_bytes` (shown short); QUI, then close.
 - `results/valid/failed.timeout.json`: The SER reply stops part-way; the step timeout expires; QUI, then close.
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.

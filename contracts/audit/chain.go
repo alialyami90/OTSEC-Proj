@@ -109,7 +109,9 @@ func VerifyChain(node string, stored [][]byte, from, head *Checkpoint) error {
 // collector number after it is that number, and numbers the new collector
 // gave before it are a gap, not excused. The install key the node trusts
 // (collector.install_key, then each acknowledged reset) must be known at a
-// reset and must change there, and no reset repeats an earlier one's key. A
+// reset and must change there, and no reset goes to a key the chain
+// trusted or reset to before: that is an earlier install's stores coming
+// back, a restore. A
 // collector.seq_reset_ack names the key of the open reset, and a
 // collector.install_key may not change a trusted key without a reset. A
 // restart with no reset record breaks the chain, as in 0.1.
@@ -145,9 +147,12 @@ type SeqState struct {
 	// OpenResetKey is the install key of a collector.seq_reset not yet
 	// acknowledged, or "".
 	OpenResetKey string `json:"open_reset_key,omitempty"`
-	// ResetKeys are the install keys of every reset so far, in chain order.
-	// No later reset may repeat one.
-	ResetKeys []string `json:"reset_keys,omitempty"`
+	// UsedKeys are the install keys the chain has trusted or reset to so
+	// far, in the order they appeared: the collector.install_key key and
+	// every reset's key. No later reset may use one, so an install whose
+	// stores come back after another key was trusted is a restore, never a
+	// reinstall.
+	UsedKeys []string `json:"used_keys,omitempty"`
 	// FirstSeen is the first_seen of the latest reset while no collector
 	// record has followed it, or 0.
 	FirstSeen uint64 `json:"first_seen,omitempty"`
@@ -165,12 +170,21 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 	lo := from.After
 	trusted, open, firstSeen := from.TrustedKey, from.OpenResetKey, from.FirstSeen
 	keys := map[string]bool{}
-	resetKeys := append([]string(nil), from.ResetKeys...)
-	for _, k := range resetKeys {
+	usedKeys := append([]string(nil), from.UsedKeys...)
+	for _, k := range usedKeys {
 		keys[k] = true
 	}
+	use := func(k string) {
+		if !keys[k] {
+			keys[k] = true
+			usedKeys = append(usedKeys, k)
+		}
+	}
 	if open != "" && !keys[open] {
-		return SeqState{}, broken("the starting state's open reset key %s is not among its reset keys", open)
+		return SeqState{}, broken("the starting state's open reset key %s is not among its used keys", open)
+	}
+	if trusted != "" && !keys[trusted] {
+		return SeqState{}, broken("the starting state's trusted key %s is not among its used keys", trusted)
 	}
 	cover := func(hi uint64) error {
 		for n := range seen {
@@ -200,11 +214,12 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 			if trusted == "" {
 				return SeqState{}, broken("collector.seq_reset with no trusted install key before it: a restore cannot be told from a reinstall")
 			}
-			if keys[r.InstallKeyID] || r.InstallKeyID == trusted {
-				return SeqState{}, broken("collector.seq_reset keeps install key %s: not a reinstall", r.InstallKeyID)
+			// Any key trusted or reset before, not only the trusted one: the
+			// stores of an earlier install coming back are a restore.
+			if keys[r.InstallKeyID] {
+				return SeqState{}, broken("collector.seq_reset to install key %s, which the chain trusted or reset to before: not a reinstall", r.InstallKeyID)
 			}
-			keys[r.InstallKeyID] = true
-			resetKeys = append(resetKeys, r.InstallKeyID)
+			use(r.InstallKeyID)
 			seen, lo, open, firstSeen = map[uint64]bool{}, 0, r.InstallKeyID, r.FirstSeen
 			continue
 		case ActionCollectorSeqResetAck:
@@ -218,6 +233,7 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 				return SeqState{}, broken("collector.install_key %s changes the trusted key without an acknowledged reset", r.InstallKeyID)
 			}
 			trusted = r.InstallKeyID
+			use(trusted)
 			continue
 		}
 		if r.CollectorSeq == 0 {
@@ -243,7 +259,7 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 	if err := cover(through); err != nil {
 		return SeqState{}, err
 	}
-	return SeqState{After: through, TrustedKey: trusted, OpenResetKey: open, ResetKeys: resetKeys, FirstSeen: firstSeen}, nil
+	return SeqState{After: through, TrustedKey: trusted, OpenResetKey: open, UsedKeys: usedKeys, FirstSeen: firstSeen}, nil
 }
 
 // OpenSuspension is one asset suspension the node holds (0.2), keyed by the

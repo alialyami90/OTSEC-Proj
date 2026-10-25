@@ -72,6 +72,8 @@ type Scheduler struct {
 	unaudited []unaudited                 // suspensions not yet in the audit stream
 	fileStale bool                        // the checkpoint does not hold susp
 	settleMu  sync.Mutex                  // serializes settle, so records apply once in order
+	cs        collectorState              // the collector's keys and numbering (seqreset.go)
+	collHold  string                      // why no request is sent to the collector, from collectorHold
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -244,11 +246,22 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	col := s.rt.cfg.Schedule[i]
 	s.settle(ctx)
 	s.checkClear(ctx)
+	s.checkAck(ctx)
+	s.mu.Lock()
+	s.collHold = "" // collectorHold below decides again
+	s.mu.Unlock()
 	if why := s.stopped(col.AssetID); why != "" {
 		return Report{Alarm: AlarmCollectionDisabled}
 	}
 	if s.suspended(col.AssetID) {
 		return Report{Alarm: AlarmAssetSuspended}
+	}
+	if code, detail := s.collectorHold(ctx); code != "" {
+		s.raiseOnceKey("collector "+code, "", code, detail)
+		return Report{Alarm: code}
+	}
+	for _, c := range []string{AlarmInstallKeyUnreadable, AlarmCollectorReset, AlarmCollectorRestored, AlarmAuditUnavailable} {
+		s.clearQuietKey("collector " + c)
 	}
 	if code, detail := s.cannotKeep(ctx); code != "" {
 		s.raiseOnce(col.AssetID, code, detail)
@@ -286,7 +299,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 			code = string(resp.Reply.Refusal.Code.Normalize())
 		}
 		if rec, err := s.requestRecord(req, audit.OutcomeDenied, code, resp.Reply.CollectorSeq); err == nil {
-			s.appendAudit(ctx, col.AssetID, []c5.Record{rec})
+			s.appendAudit(ctx, col.AssetID, append(s.resetFirst(resp.Reply.CollectorSeq), rec))
 		} else {
 			s.rt.opt.Status.Raise(col.AssetID, AlarmAuditUnavailable, "collector.request denied record: "+err.Error())
 		}
@@ -296,7 +309,10 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 
 	// Accepted: the decision, then every collector-reported record the
 	// node holds, in one audit batch, whatever happens to the outcome.
-	recs := []c5.Record{}
+	// A reply numbered at or below the epoch's high, from a collector whose
+	// key changed since the check before the request, is a reset; its
+	// record goes first (seqreset.go).
+	recs := s.resetFirst(resp.Reply.CollectorSeq)
 	if rec, err := s.requestRecord(req, audit.OutcomeAllowed, "", resp.Reply.CollectorSeq); err == nil {
 		recs = append(recs, rec)
 	} else {
@@ -537,6 +553,9 @@ func (s *Scheduler) stopped(assetID string) string {
 	defer s.mu.Unlock()
 	if s.node != "" {
 		return s.node
+	}
+	if s.collHold != "" {
+		return s.collHold
 	}
 	return s.halted[assetID]
 }

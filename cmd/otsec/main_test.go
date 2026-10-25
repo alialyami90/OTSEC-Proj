@@ -41,7 +41,11 @@ func ranNode(t *testing.T) (string, *node.Config) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "node.json")
-	if err := nodeconfigtest.New("site-a-node1", storeDir).AddSEL751(relayID, "", 2323, 300).Write(path); err != nil {
+	nc := nodeconfigtest.New("site-a-node1", storeDir).AddSEL751(relayID, "", 2323, 300)
+	if err := nc.WriteInstallKey("ik_test_first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := nc.Write(path); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := node.LoadConfig(path)
