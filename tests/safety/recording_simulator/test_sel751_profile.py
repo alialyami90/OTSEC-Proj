@@ -261,5 +261,35 @@ class DstSer(unittest.TestCase):
         self.assertEqual(out.count(b"Serial No"), fig.count(b"Serial No"))
 
 
+class ScriptSer(unittest.TestCase):
+    """ser="script": the SYNTHESIZED V-S4 buffer sequence."""
+
+    def test_reads_follow_the_script_across_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = os.path.join(tmp, "n")
+            seen = []
+            for k in range(9):
+                # A new responder per read, as for a new session or a
+                # restarted simulator: the count is in the file.
+                r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser="script",
+                                                      growth=profile_sel751.SerGrowth(state, 1))
+                r.level = 1
+                out = r.handle(b"SER").out
+                rows = [m.groups()[1:] for m in (profile_sel751.SER_ROW.match(l) for l in out.split(b"\r\n")) if m]
+                nums = [int(m[1]) for m in (profile_sel751.SER_ROW.match(l) for l in out.split(b"\r\n")) if m]
+                self.assertEqual(nums, list(range(len(rows), 0, -1)))
+                seen.append(rows)
+        fig = profile_sel751._figure_rows()
+        self.assertEqual(seen[0], fig)
+        self.assertEqual(seen[1][:5], fig[3:])
+        self.assertEqual(seen[1][5], seen[1][6])          # two identical rows
+        self.assertFalse(set(seen[2]) & set(seen[1]))     # cleared
+        self.assertEqual(len(seen[4]), 3)
+        self.assertNotIn(seen[3][1], seen[4])             # D removed from the middle
+        self.assertEqual(seen[6], seen[5][2:] + seen[5][2:4])
+        self.assertEqual(seen[7], seen[6])                # the last again after the end
+        self.assertEqual(seen[8], seen[6])
+
+
 if __name__ == "__main__":
     unittest.main()

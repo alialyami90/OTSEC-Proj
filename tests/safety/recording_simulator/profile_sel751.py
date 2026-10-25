@@ -48,6 +48,14 @@ time twice, and time going backwards in print order), under a header that
 says "Time Source: External" (Table 7.16: a time-code input is attached,
 which says nothing about lock).
 
+SYNTHESIZED buffer script, not documented (V-S4): ser="script" serves, at
+the n-th SER read, SCRIPT[n] (the last one again after the end), counting
+reads in --profile-ser-state so the count survives a restart. The reads
+are: Figure 10.16; its oldest three rows gone and two identical new rows;
+the buffer cleared with two new rows; one more row; a middle row removed
+and one more; four rows of repeating chatter; and the chatter again, which
+overlaps the previous read at two offsets.
+
 SYNTHESIZED fault cases, not documented (V-S12): ser="hang" sends the
 figure's header and its first four rows, then nothing more for that SER (no
 prompt; later lines are answered as usual); ser="malformed" sends the figure
@@ -224,6 +232,48 @@ def dst_ser():
     return CRLF.join(head + body)
 
 
+def _synth(k, element, state):
+    t = datetime.datetime(2007, 2, 28, 14, 0, 0) + datetime.timedelta(seconds=k)
+    return (t.strftime("%m/%d/%Y").encode(), t.strftime("%H:%M:%S").encode() + b".250", element, state)
+
+
+_A = _synth(1, b"51P1P", b"Asserted")
+_C, _D, _E = _synth(10, b"TRIP", b"Asserted"), _synth(11, b"TRIP", b"Deasserted"), _synth(12, b"51AP", b"Asserted")
+_G = _synth(13, b"51AP", b"Deasserted")
+_H, _I = _synth(20, b"51P1P", b"Asserted"), _synth(21, b"51P1P", b"Deasserted")
+
+
+def _figure_rows():
+    return [m.groups()[1:] for m in (SER_ROW.match(l) for l in _load("ser-fig-10-16.txt").split(CRLF)) if m]
+
+
+SCRIPT = (
+    lambda f: f,                          # 1: the figure
+    lambda f: f[3:] + [_A, _A],           # 2: oldest three gone; two identical new rows
+    lambda f: [_C, _D],                   # 3: cleared, then two new rows
+    lambda f: [_C, _D, _E],               # 4: one more
+    lambda f: [_C, _E, _G],               # 5: D removed from the middle; one more
+    lambda f: [_E, _G, _H, _I, _H, _I],   # 6: chatter
+    lambda f: [_H, _I, _H, _I, _H, _I],   # 7: chatter again: two possible overlaps
+)
+
+
+def script_rows(n):
+    """The rows of SCRIPT[n] (0-based; the last after the end), oldest first."""
+    return SCRIPT[min(n, len(SCRIPT) - 1)](_figure_rows())
+
+
+def script_ser(n):
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line)
+    rows = script_rows(n)
+    return CRLF.join(head + [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)])
+
+
 class SerGrowth:
     """The count of synthesized rows, kept in a file so that it survives a
     simulator restart (the device's buffer does). Each SER read adds `step`."""
@@ -264,6 +314,7 @@ class SEL751DocResponder:
         self.ser = _load("ser-fig-10-16.txt") if ser in ("example", "grow", "hang", "malformed") else None
         if ser == "dst":
             self.ser = dst_ser()
+        self.script = growth if ser == "script" else None
         self.hang = ser == "hang"
         if ser == "malformed":
             self.ser = self.ser.replace(b"5     02/28/2007   13:54:10.003", b"5     02/28/2007   13:5X:10.003")
@@ -424,6 +475,8 @@ class SEL751DocResponder:
         if text == "SER":
             if self.ser is not None and self.growth is not None:
                 self.ser = grown_ser(self.growth.read())
+            if self.script is not None:
+                self.ser = script_ser(self.script.read() - 1)
             if self.hang:
                 lines = self.ser.split(CRLF)
                 cut = next(i for i, l in enumerate(lines) if SER_ROW.match(l)) + 4
