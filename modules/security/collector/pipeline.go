@@ -349,8 +349,10 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 	return inv.InvocationID, &runWork{p: p, plan: plan, release: release}, nil
 }
 
-// runWork is an accepted run. Whichever of Run and Discard the server calls,
-// the secret is wiped and the device freed exactly once.
+// runWork is an accepted run. Whichever of Run and Discard the server calls
+// first, the run happens at most once, and the secret is wiped and the
+// device freed exactly once. A later call does nothing, so it can never run
+// without the claim or free a claim a later run holds (D9; A6 on #97).
 type runWork struct {
 	p       *Pipeline
 	plan    RunPlan
@@ -358,22 +360,26 @@ type runWork struct {
 	once    sync.Once
 }
 
+// Run runs the plan. Called after Run or Discard, it runs nothing and
+// returns an outcome with no result.
 func (w *runWork) Run(ctx context.Context) collectorwire.RunOutcome {
-	defer w.finish()
-	return w.p.execute(ctx, w.plan)
+	out := collectorwire.RunOutcome{InvocationID: w.plan.Invocation.InvocationID}
+	w.once.Do(func() {
+		defer w.finish()
+		out = w.p.execute(ctx, w.plan)
+	})
+	return out
 }
 
 // Discard frees what the decision holds when the run never starts: no
 // connection is made, and the floor and interval stay as recorded.
-func (w *runWork) Discard() { w.finish() }
+func (w *runWork) Discard() { w.once.Do(w.finish) }
 
 func (w *runWork) finish() {
-	w.once.Do(func() {
-		if w.plan.Secret != nil {
-			w.plan.Secret.Close()
-		}
-		w.release()
-	})
+	if w.plan.Secret != nil {
+		w.plan.Secret.Close()
+	}
+	w.release()
 }
 
 // execute runs the plan and applies what the run reported to the stores.

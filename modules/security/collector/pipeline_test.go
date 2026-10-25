@@ -738,3 +738,27 @@ func TestDiscardReleasesRun(t *testing.T) {
 		t.Fatalf("run after a discard: %+v", reply)
 	}
 }
+
+// A run finishes once. A late Discard after Run must not free a claim that
+// a later run on the same asset holds, or two sessions could reach one
+// device (D9; A6 on #97).
+func TestRunWorkFinishesOnce(t *testing.T) {
+	f := newPipeline(t)
+	reply, work := f.pipe.Handle(context.Background(), pipeRun("sel.id", ""))
+	if !reply.Accepted() {
+		t.Fatalf("reply %+v", reply)
+	}
+	work.Run(context.Background())
+	if !f.pipe.claim(testAsset) {
+		t.Fatal("the asset is still busy after Run")
+	}
+	// The claim above stands for a later run on the same asset.
+	work.Discard()
+	work.Run(context.Background())
+	if f.pipe.claim(testAsset) {
+		t.Fatal("a late Discard or Run freed a later run's claim")
+	}
+	if f.runner.count() != 1 {
+		t.Fatalf("runner called %d times, want 1", f.runner.count())
+	}
+}
