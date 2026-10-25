@@ -47,7 +47,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `schedule[]` | `id` (the C7 schedule principal the runs are made for), `asset_id`, `endpoint`, `operation` (a C3 operation ID such as `sel.ser.read_all`), `params` (optional), `credential_ref` (a C7 handle, absent for a level 0 operation) and `every_seconds` | see below |
 | `collector_pipe` | Where the collector listens | `\\.\pipe\<name>` on Windows; an absolute socket path on Linux |
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
-| `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config` |
+| `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config\admin`, which the node and the collector both read and neither writes |
 | `collector_public_dir` | Where the collector publishes `install-key.json` (A3 #106); the node reads it before every request (D2-15) | absolute; required when anything is scheduled. The installer requires `OTSEC\collector\public` |
 | `tls_dir` | The directory holding the files the targets' TLS references name (D2-12, lab only) | absolute; required when a target names a reference. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
@@ -109,10 +109,10 @@ The node keeps its own copy of the C1 suspension each run's outcome code sets (`
 
   A record like this met while the node runs holds it the same way, until a restart rebuilds the suspensions. It is also held while any `asset.suspend` record is not yet in the audit stream, even when the checkpoint holds the suspension, until the audit write succeeds (A1, D2-15 at 0ef6641). The chain is the record. The scheduler retries before every run.
 - **Pruning stops at the checkpoint.** When the audit stream has a required consumer, the node adds one more, `node-suspensions`, whose cursor is the checkpoint's `through_seq`. It moves only after the checkpoint is written, so C5 never prunes an audit record that a rebuild would need. Without a required audit consumer the stream is never pruned, and the node adds nothing, since its cursor alone would make unforwarded records prunable (C5-A3-2).
-- **Clearing.** An administrator writes `clear-suspension.json` in `admin_dir` (`OTSEC\config` when installed): `{"schema": "otsec.clear-suspension/0.1", "asset_id": ..., "ref": ...}`.
-  - The file is read like a TLS file: no link, at most 4 KiB, and not writable by the node.
+- **Clearing.** An administrator writes `clear-suspension.json` in `admin_dir` (`OTSEC\config\admin` when installed): `{"schema": "otsec.clear-suspension/0.1", "asset_id": ..., "ref": ...}`.
+  - The file is read as the collector reads it (A3 #117): no link, at most 4 KiB, owned by SYSTEM or Administrators, and nothing more than read and traverse for the node or the collector (`protect.ReadFileFor` with `AdminReaders`). It is decoded strictly: keys exactly as named, no duplicate, nothing after the object.
   - The node clears one suspension, only on an exact asset and ref match, and writes `asset.suspension_clear` before it schedules the asset again.
-  - The file is read only from an `admin_dir` the node cannot write and that is not a link (`protect.CheckDir`, checked before every read, A3 on #107). Otherwise nothing is read, and it is raised once.
+  - The file is read only from an `admin_dir` neither service can write and that is not a link (`protect.CheckDirFor` with `AdminReaders`, checked before every read, A3 on #107 and #117). Otherwise nothing is read, and it is raised once.
   - A file that does not match, or that names a suspension already cleared, changes nothing and is raised once.
   - A clear of a suspension whose `asset.suspend` is not yet in the audit stream waits until it is, and says so. Written first, it would name a suspension the chain does not hold, and C8 0.2 would break the chain on it (A6 on #107).
   - The node never clears on its own.

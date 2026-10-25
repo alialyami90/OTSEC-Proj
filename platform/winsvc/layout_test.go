@@ -20,6 +20,7 @@ func TestDirs(t *testing.T) {
 		`OTSEC`:                       "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;" + node + ")(A;;0x1200a9;;;" + coll + ")",
 		`OTSEC/config`:                "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + node + ")",
 		`OTSEC/config/tls`:            "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + node + ")",
+		`OTSEC/config/admin`:          "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + node + ")(A;OICI;0x1200a9;;;" + coll + ")",
 		`OTSEC/store`:                 "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + node + ")",
 		`OTSEC/collector`:             "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + coll + ")",
 		`OTSEC/collector/credentials`: "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + coll + ")",
@@ -39,9 +40,10 @@ func TestDirs(t *testing.T) {
 				t.Errorf("%s grants %s", rel, bad)
 			}
 		}
-		// Only the root and collector/public name both services; in
-		// collector/public the node reads and never writes.
-		if strings.Contains(d.SDDL, coll) && strings.Contains(d.SDDL, node) && rel != "OTSEC" && rel != "OTSEC/collector/public" {
+		// Only the root, config/admin and collector/public name both
+		// services; in collector/public the node reads and never writes,
+		// and in config/admin neither writes.
+		if strings.Contains(d.SDDL, coll) && strings.Contains(d.SDDL, node) && rel != "OTSEC" && rel != "OTSEC/config/admin" && rel != "OTSEC/collector/public" {
 			t.Errorf("%s grants both services", rel)
 		}
 	}

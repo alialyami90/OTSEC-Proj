@@ -15,8 +15,15 @@ import (
 // control for SYSTEM and Administrators and read for this account, which
 // the files inherit. Making Administrators the owner needs an elevated
 // process; a non-elevated test gets ErrNeedsElevation.
-func (c *Config) LockTLS() error {
-	if err := c.setDACL(c.TLSDir, true, "FR"); err != nil {
+func (c *Config) LockTLS() error { return c.lock("") }
+
+// ShareTLS is LockTLS for a directory another service also reads, as the
+// installer lays out OTSEC\config\admin: the DACL also gives reader (a
+// SID string) read and traverse, inherited by the files.
+func (c *Config) ShareTLS(reader string) error { return c.lock("(A;OICI;0x1200a9;;;" + reader + ")") }
+
+func (c *Config) lock(extra string) error {
+	if err := c.setDACL(c.TLSDir, true, "FR", extra); err != nil {
 		return err
 	}
 	// An empty, unprotected DACL leaves each file only what it inherits.
@@ -56,15 +63,15 @@ func (c *Config) LockTLS() error {
 
 // UnlockTLS gives this account full control of tls_dir and its files
 // again, so they can be changed or removed.
-func (c *Config) UnlockTLS() error { return c.setDACL(c.TLSDir, true, "FA") }
+func (c *Config) UnlockTLS() error { return c.setDACL(c.TLSDir, true, "FA", "") }
 
 // LoosenTLS gives this account write access to one file in tls_dir, or to
 // tls_dir itself when name is empty, after LockTLS.
 func (c *Config) LoosenTLS(name string) error {
 	if name == "" {
-		return c.setDACL(c.TLSDir, true, "FA")
+		return c.setDACL(c.TLSDir, true, "FA", "")
 	}
-	return c.setDACL(filepath.Join(c.TLSDir, name), false, "FA")
+	return c.setDACL(filepath.Join(c.TLSDir, name), false, "FA", "")
 }
 
 // OwnTLS makes this account the owner of one file in tls_dir, or of
@@ -82,8 +89,9 @@ func (c *Config) OwnTLS(name string) error {
 }
 
 // setDACL gives path a protected DACL: full control for SYSTEM and
-// Administrators, and selfAccess for this account; inheritable when dir.
-func (c *Config) setDACL(path string, dir bool, selfAccess string) error {
+// Administrators, selfAccess for this account, and the extra entries in
+// SDDL; inheritable when dir.
+func (c *Config) setDACL(path string, dir bool, selfAccess, extra string) error {
 	u, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
@@ -92,8 +100,8 @@ func (c *Config) setDACL(path string, dir bool, selfAccess string) error {
 	if dir {
 		inherit = "OICI"
 	}
-	sd, err := windows.SecurityDescriptorFromString(fmt.Sprintf("D:P(A;%[1]s;FA;;;SY)(A;%[1]s;FA;;;BA)(A;%[1]s;%[2]s;;;%[3]s)",
-		inherit, selfAccess, u.User.Sid))
+	sd, err := windows.SecurityDescriptorFromString(fmt.Sprintf("D:P(A;%[1]s;FA;;;SY)(A;%[1]s;FA;;;BA)(A;%[1]s;%[2]s;;;%[3]s)%[4]s",
+		inherit, selfAccess, u.User.Sid, extra))
 	if err != nil {
 		return err
 	}
