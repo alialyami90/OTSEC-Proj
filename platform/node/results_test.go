@@ -204,28 +204,47 @@ func TestPartialIsAFailure(t *testing.T) {
 
 // The last result keeps the C2 detail of an outcome that passed its
 // checks, which tells apart runs that end with the same code (A6, V-S12),
-// and never one from a quarantined outcome or one C2 does not allow.
+// and never one from a quarantined or refused outcome, one not yet judged,
+// or one C2 does not allow.
 func TestResultDetail(t *testing.T) {
 	for _, c := range []struct {
-		quarantine   bool
-		detail, want string
+		quarantine, badState  bool
+		detail, want, outcome string
 	}{
-		{false, "second password prompt", "second password prompt"},
-		{true, "second password prompt", ""},
-		{false, "bell\x07", ""}, // not as C2 bounds it, so not kept
+		{false, false, "second password prompt", "second password prompt", "ok"},
+		{true, false, "second password prompt", "", "quarantined"},
+		// Not as C2 bounds it: A4's normalizer refuses the result, and a
+		// refused result's detail is not kept (A1 on #135).
+		{false, false, "bell\x07", "", "quarantined"},
+		// A run that stops before the normalizer has judged the result
+		// keeps no detail either (A3 on #136).
+		{false, true, "second password prompt", "", "ok"},
 	} {
 		cfg, dir := schedConfig(t, nil)
 		r, st, _ := start(t, cfg, dir)
+		if c.badState {
+			if err := r.Store(SERStream(relayID)).SaveSourceCursor(bg, SERStream(relayID), []byte("not a state")); err != nil {
+				t.Fatal(err)
+			}
+		}
 		col := suspendingCollector(t, c.quarantine)
 		base := col.answer
 		col.answer = func(req *authz.CollectorRequest) (collectorclient.Response, error) {
 			resp, err := base(req)
 			if resp.Outcome != nil {
+				// A lowercase UUID, so that A4's normalizer accepts the
+				// result and the detail is one of an outcome that passed.
+				resp.Reply.InvocationID = okInvocation
+				resp.Outcome.InvocationID = okInvocation
+				resp.Outcome.Result.InvocationID = okInvocation
 				resp.Outcome.Result.Error = &adapter.Error{Code: adapter.FailedAuthRejected, Detail: c.detail}
 			}
 			return resp, err
 		}
-		newScheduler(t, r, col).RunOnce(bg, 0)
+		rep := newScheduler(t, r, col).RunOnce(bg, 0)
+		if rep.Outcome != c.outcome {
+			t.Fatalf("%+v: outcome %q (%+v)", c, rep.Outcome, rep)
+		}
 		if a := st.Snapshot("x").Assets[relayID]; a.Code != string(adapter.FailedAuthRejected) || a.Detail != c.want {
 			t.Fatalf("%+v: %+v", c, a)
 		}
