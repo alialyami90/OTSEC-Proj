@@ -34,6 +34,9 @@ import (
 //     1.11.0 name mode matches the CN even when the certificate has SANs
 //     for other names (#76). A durable_ack copied from another node's
 //     target fails here (A3 #81 S-2).
+//   - The client certificate must be for client authentication (an
+//     extended key usage that names it, or none) and valid now. The
+//     collector refuses it otherwise; this gives the reason at load.
 func ClientTLS(t *syslog.Target, roots *x509.CertPool, client *tls.Certificate) (*tls.Config, error) {
 	if t == nil {
 		return nil, fmt.Errorf("%w: no target", ErrConfig)
@@ -54,6 +57,14 @@ func ClientTLS(t *syslog.Target, roots *x509.CertPool, client *tls.Certificate) 
 		leaf, err := leafOf(client)
 		if err != nil {
 			return nil, fmt.Errorf("%w: target %s: client certificate: %v", ErrConfig, t.Name, err)
+		}
+		// The collector refuses these at the handshake too; checking at
+		// load gives the admin the reason instead of a TLS alert (A3 #89).
+		if len(leaf.ExtKeyUsage) > 0 && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth) && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageAny) {
+			return nil, fmt.Errorf("%w: target %s: the node's client certificate is not for client authentication", ErrConfig, t.Name)
+		}
+		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+			return nil, fmt.Errorf("%w: target %s: the node's client certificate is valid from %s to %s", ErrConfig, t.Name, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
 		if d := t.DurableAck; d != nil && !slices.Contains(certNames(leaf), d.PermittedPeer) {
 			return nil, fmt.Errorf("%w: target %s: the collector permits %q, and the node's client certificate names %q", ErrConfig, t.Name, d.PermittedPeer, certNames(leaf))

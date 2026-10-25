@@ -21,21 +21,20 @@ Any failure ends the session, and the next session resends everything after the 
 - SPKI pins when the target has them;
 - the node's client certificate, which is always sent.
 
-For a required target, the client certificate must carry `durable_ack.permitted_peer` as its CN or as one of its DNS names (A3 #81 S-2). `DialTLS` and `DialTCP` turn a target into a `Config.Dial`.
+For a required target, the client certificate must carry `durable_ack.permitted_peer` as its CN or as one of its DNS names (A3 #81 S-2). The certificate must also be for client authentication and valid at load (A3 #89). `DialTLS` and `DialTCP` turn a target into a `Config.Dial`.
 
 ## Seams
 
 | With | What | State |
 | --- | --- | --- |
 | A5 (node, `cmd/otsec`) | The node builds a `Forwarder` for each target, using `syslog.Consumers` for the C5 consumers. It hands over each stream's `Outbox` and `CursorStore` (the audit stream from its own database) and a `HealthSink`. The sink commits the pending C4 health event on the health stream and returns its key once the commit has returned. It resolves `trust_anchor_ref` and `client_credential_ref` and calls `ClientTLS` at load, so a target whose `permitted_peer` is not the node's name fails to load. It shows `Status` and raises `forward.unreachable` for a required target from `Status.LastConfirmed`. | Built here; wiring is A5's. |
-| A5 (C5) | The forwarder relies on four store behaviours: `SaveCursor` returns after a full commit; it refuses a regress and an ahead; `Read` past the prune point returns the first retained events; `LoadCursors` reads the database. The tests use an in-memory store with these behaviours (`helpers_test.go`), not A5's. | Assumed from C5. To check against `platform/store` once it merges. |
+| A5 (C5) | The forwarder relies on four store behaviours: `SaveCursor` returns after a full commit; it refuses a regress and an ahead; `Read` past the prune point returns the first retained events; `LoadCursors` reads the database. A best-effort target also uses `CommitIndex.LastCommittedBy` for its window start. The unit tests use an in-memory store with these behaviours (`helpers_test.go`). | A6 ran the forwarder over the real `platform/store` in the #89 review (clean, close, serverclose, a 500, a restart, a TXNR rollover): no loss, and the cursor ended at the last seq. |
 | A6 (slice) | A6's receiver (`tests/integration/slice/relp_receiver.py`, #76) is the oracle for the Windows leg, and rsyslog is the oracle for the Linux leg. The two differ on the client name: A6's receiver reads the SAN, or the CN when there is no SAN, while librelp also matches the CN when a SAN is present (A6's finding). The forwarder accepts `permitted_peer` as the CN or a SAN, so it works with both. | A6 accepted my review of the receiver at c00acce. |
 | C6 | `PermittedPeer` now says what the name check rests on: the trust anchor must issue no certificate carrying the node's name, as CN or SAN, to anyone else (A6's librelp finding). The change is to the doc comment only; no rule changed. | In this PR. |
 
 ## Known limits
 
 - **Repeats after a restart.** `forward.too-large`, `forward.text-omitted` and `forward.unreachable` are raised once per process for the event or range they name, however many sessions delivery takes (A6). A node restart before the target passes the event raises it once more: a duplicate alarm, never a lost one.
-- **A new best-effort target starts at the first retained event**, not at the first event in its replay window as C6 says (A6 nit). The forwarder has no C5 `CommitIndex` to find that event. Only the lab-only plain `relp` target is best-effort in mode A, so this waits until a best-effort RELP target is needed.
 - **A hold without a release rule** stops its stream until someone acts. That covers an audit record `RenderAudit` refuses, a record that does not decode or render, a `forward.*` event that is itself too large, and a too-large event on the health stream. `Status.Streams[...].Blocked` says why.
 - **Mode B** (RFC 5425, TCP, UDP) is not built. The Phase 2 slice uses `relp-tls` only.
 
@@ -53,6 +52,8 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestResumesFromSavedCursor`, `TestSkippedRangeReported` | Resume at cursor+1. A pruned range is reported as `forward.unreachable` (11-20) and forwarded. |
 | `TestTextOmitted`, `TestTooLargeHeldThenPassed`, `TestUnrenderableHolds` | The C6 size rules, and holds that never skip. |
 | `TestLastTXNRReopens` | At the last TXNR the session drains, sends `close` and reopens, with no duplicates. |
+| `TestBestEffortStartsAtWindow` | A new best-effort target (lab-only plain `relp`, one-hour window) starts at the first event committed in its window: of 15 events, the 10 committed two hours ago are not sent, and nothing is reported as skipped. Each event stream of a best-effort target needs a C5 `CommitIndex` (`Stream.Index`). (A6 #89 nit.) |
+| `TestClientTLSChecksLeaf` | At load, the node's client certificate must be for client authentication (an EKU naming it, `any`, or none) and valid now; serverAuth-only, expired and not-yet-valid certificates are refused with the reason (A3 #89). |
 | `TestNewRefuses`, `TestClientTLSRefuses`, `TestTLSPeerChecks`, `TestDialTCPOnlyForPlainRELP` | Configuration refusals. Against a TLS collector, the forwarder refuses: the wrong name; another CA; a certificate without serverAuth; TLS below 1.2; a pin mismatch. The collector refuses the node when it permits another name. |
 | `TestRsyslogExactlyOnce` | **P2-A4 acceptance, local rsyslog.** 500 events through imrelp over TLS with `tls.authmode="name"`, one permitted peer, a Direct ruleset queue and omfile `sync="on"`: the file holds every eid exactly once, in order. |
 | `TestRsyslogKilledMidStream` | rsyslogd is killed with SIGKILL once about 1,000 of 3,000 events are confirmed, then restarted. Every event confirmed before the kill is in the file, and every event arrives. Three runs gave 4 to 6 duplicates, within one window of 8. |

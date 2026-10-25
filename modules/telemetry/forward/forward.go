@@ -25,6 +25,10 @@ type Stream struct {
 	Audit   bool // the audit stream: sealed C8 bytes, rendered with RenderAudit
 	Outbox  store.Outbox
 	Cursors store.CursorStore
+	// Index finds where a new best-effort target starts: the first event
+	// committed in its replay window (C6). Required for an event stream of
+	// a best-effort target; unused otherwise.
+	Index store.CommitIndex
 }
 
 // HealthSink commits a platform health event the forwarder raises
@@ -125,8 +129,11 @@ func New(cfg Config) (*Forwarder, error) {
 		seen[s.ID] = true
 		if s.Audit {
 			audits++
-		} else if s.ID == cfg.HealthStream {
-			health = true
+		} else {
+			health = health || s.ID == cfg.HealthStream
+			if t.Class == syslog.ClassBestEffort && s.Index == nil {
+				return nil, fmt.Errorf("%w: stream %q of best-effort target %s needs a commit index", ErrConfig, s.ID, t.Name)
+			}
 		}
 	}
 	if audits > 1 || (audits == 1) != t.Audit {
@@ -296,10 +303,24 @@ func (s *session) loadCursors() error {
 		if err != nil {
 			return fmt.Errorf("forward: load cursors of %s: %w", st.ID, err)
 		}
+		found := false
 		for _, c := range cs {
 			if c.Consumer == s.f.consumer && c.Stream == st.ID {
-				s.saved[i], s.read[i] = c.Through, c.Through
+				s.saved[i], s.read[i], found = c.Through, c.Through, true
 			}
+		}
+		// A new required target starts at the first retained event, so it
+		// receives everything still held. A new best-effort target starts
+		// at the first event in its replay window (C6-A5-2); the audit
+		// stream has no window and starts at the first retained record.
+		t := s.f.cfg.Target
+		if !found && t.Class == syslog.ClassBestEffort && !st.Audit {
+			from := time.Now().Add(-time.Duration(t.ReplaySeconds) * time.Second)
+			after, err := st.Index.LastCommittedBy(s.ctx, st.ID, from)
+			if err != nil {
+				return fmt.Errorf("forward: find the replay window of %s: %w", st.ID, err)
+			}
+			s.read[i] = after
 		}
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = s.saved[i] })
 	}
@@ -376,8 +397,9 @@ func (s *session) peek(i int) (*store.Stored, error) {
 			if ev.Key.Stream != st.ID || seq <= s.read[i] {
 				return nil, fmt.Errorf("forward: outbox of %s returned %s after %d", st.ID, ev.Key, s.read[i])
 			}
-			// A first read with no cursor starts at the first retained
-			// event: a new target receives what is still held (C6-A5-2).
+			// A new required target reads from 0 and takes the first
+			// retained event as its start, so nothing is reported. Past
+			// a cursor or a best-effort window start, a jump is a loss.
 			if seq > s.read[i]+1 && s.read[i] > 0 {
 				if err := s.skipped(st.ID, s.read[i]+1, seq-1); err != nil {
 					return nil, err

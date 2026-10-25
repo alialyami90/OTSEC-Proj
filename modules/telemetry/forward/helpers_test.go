@@ -74,11 +74,16 @@ var serial = big.NewInt(100)
 
 func (p *pki) issue(t testing.TB, cn string, dns []string, usage x509.ExtKeyUsage) tls.Certificate {
 	t.Helper()
+	return p.issueAt(t, cn, dns, []x509.ExtKeyUsage{usage}, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+}
+
+func (p *pki) issueAt(t testing.TB, cn string, dns []string, usage []x509.ExtKeyUsage, from, until time.Time) tls.Certificate {
+	t.Helper()
 	k := key(t)
 	serial.Add(serial, big.NewInt(1))
 	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: cn}, DNSNames: dns,
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
+		NotBefore: from, NotAfter: until,
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usage}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, p.caCert, &k.PublicKey, p.caKey)
 	if err != nil {
 		t.Fatal(err)
@@ -182,6 +187,43 @@ func (m *memStore) commitRaw(stream store.StreamID, b []byte) store.Key {
 	k := event.EventID{NodeID: node, Stream: stream, Seq: m.last[stream]}
 	m.events[stream] = append(m.events[stream], store.Stored{Key: k, Event: b})
 	return k
+}
+
+// commitAt is commit with the commit time set, for replay windows.
+func (m *memStore) commitAt(t testing.TB, stream store.StreamID, e event.Event, at time.Time) store.Key {
+	k := m.commit(t, stream, e)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	evs := m.events[stream]
+	evs[len(evs)-1].CommittedAt = at
+	return k
+}
+
+func (m *memStore) LastCommitted(_ context.Context, stream store.StreamID) (store.Seq, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.last[stream], nil
+}
+
+func (m *memStore) LastCommittedBy(_ context.Context, stream store.StreamID, at time.Time) (store.Seq, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var seq store.Seq
+	for _, e := range m.events[stream] {
+		if !e.CommittedAt.After(at) {
+			seq = e.Key.Seq
+		}
+	}
+	return seq, nil
+}
+
+func (m *memStore) FirstRetained(_ context.Context, stream store.StreamID) (store.Seq, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if evs := m.events[stream]; len(evs) > 0 {
+		return evs[0].Key.Seq, nil
+	}
+	return 0, nil
 }
 
 func (m *memStore) prune(stream store.StreamID, through store.Seq) {
