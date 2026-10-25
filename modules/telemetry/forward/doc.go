@@ -30,8 +30,16 @@
 //     quota), the event it is about is still sent and the report is kept
 //     and committed later, in order; Status.Unreported counts them. A
 //     forwarder stalled on its own report would never drain the store that
-//     refused it. A too-large event whose report is refused holds only its
-//     own stream and is reported again on the next loop.
+//     refused it. Until the report is committed, the cursor of the stream
+//     it is about is not saved past that event or gap, so a restart sends
+//     the event again or finds the gap again and raises the report again
+//     (A6 #94). The health stream of a required target is not held this
+//     way: its cursor is what frees the stream that refused the report. A
+//     too-large event whose report is refused holds only its own stream and
+//     is reported again on the next loop.
+//   - A new best-effort target saves its replay window start as its cursor
+//     on its first session, so a target that confirms nothing for a while
+//     does not move its start forward and pass events over unreported.
 //   - Size. A message whose device text or summary was dropped to fit is
 //     sent and reported as forward.text-omitted. An event
 //     that does not fit at all holds its stream: the forwarder raises

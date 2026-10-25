@@ -139,7 +139,8 @@ func (r *refusing) Emit(ctx context.Context, h event.Health) (store.Key, error) 
 
 // A health stream that refuses the forwarder's reports does not stop it:
 // the events are still sent, the reports are counted and committed once the
-// sink accepts again (A4 review of #98: a full store must still drain).
+// sink accepts again (A4 review of #98: a full store must still drain), and
+// the cursor is saved past them only then (A6 #94).
 func TestRefusedReportDoesNotStall(t *testing.T) {
 	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
 	hs := &refusing{sink: r.cfg.Health.(sink)}
@@ -153,14 +154,18 @@ func TestRefusedReportDoesNotStall(t *testing.T) {
 			return false
 		}
 		st := f.Status()
-		if !refused && r.m.cursor(serStream) == 5 && st.Unreported == 5 {
+		if !refused && st.Confirmed >= 5 && st.Unreported == 5 {
 			refused = true
 			if st.ReportErr == nil {
 				t.Error("no ReportErr while refused")
 			}
+			// Sent and confirmed, but the cursor waits for the reports.
+			if c := r.m.cursor(serStream); c != 0 {
+				t.Errorf("ser cursor %d saved past an owed report", c)
+			}
 			hs.refuse.Store(false)
 		}
-		return refused && st.Unreported == 0 && r.m.cursor(hlStream) == 5
+		return refused && st.Unreported == 0 && r.m.cursor(hlStream) == 5 && r.m.cursor(serStream) == 5
 	}, func(x *Forwarder) { f = x })
 	if f.Status().ReportErr != nil {
 		t.Errorf("ReportErr %v after every report committed", f.Status().ReportErr)
@@ -190,11 +195,11 @@ func TestRefusedReportsSummarised(t *testing.T) {
 		if f == nil {
 			return false
 		}
-		if !refused && r.m.cursor(serStream) == 5 && f.Status().Unreported == 5 {
+		if !refused && f.Status().Confirmed >= 5 && f.Status().Unreported == 5 {
 			refused = true
 			hs.refuse.Store(false)
 		}
-		return refused && f.Status().Unreported == 0 && r.m.cursor(hlStream) == 3
+		return refused && f.Status().Unreported == 0 && r.m.cursor(hlStream) == 3 && r.m.cursor(serStream) == 5
 	}, func(x *Forwarder) { f = x; f.maxOwed = 2 })
 	var summary bool
 	for _, m := range r.srv.Acked() {
@@ -231,4 +236,124 @@ func TestTooLargeReportRefused(t *testing.T) {
 		}
 		return refused && r.m.cursor(other) == 2
 	}, func(x *Forwarder) { f = x })
+}
+
+// A6 #94 must: a refused report survives a restart. While it is owed the
+// cursor stays before the event it is about, so the next process sends the
+// event again and raises the report again.
+func TestOwedReportSurvivesRestart(t *testing.T) {
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	r.fill(5)
+	var f *Forwarder
+	r.run(func() bool {
+		return f != nil && f.Status().Confirmed >= 5 && f.Status().Unreported == 5
+	}, func(x *Forwarder) { f = x })
+	if c := r.m.cursor(serStream); c != 0 {
+		t.Fatalf("ser cursor %d saved past owed reports", c)
+	}
+	// The process stops with the reports owed; the next one is accepted.
+	hs.refuse.Store(false)
+	r.run(func() bool { return r.m.cursor(serStream) == 5 && len(r.m.keys(hlStream)) == 5 }, nil)
+	if n := r.healthCount(event.HealthForwardTextOmitted); n < 5 {
+		t.Errorf("%d forward.text-omitted forwarded after the restart, want 5", n)
+	}
+}
+
+// The same for a skipped range: the cursor stays before the gap, so the
+// next process finds it again and reports it.
+func TestOwedGapSurvivesRestart(t *testing.T) {
+	r := newRig(t, nil, nil)
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	r.fill(30)
+	if err := r.m.SaveCursor(t.Context(), store.Cursor{Consumer: "siem-a", Stream: serStream, Through: 10}); err != nil {
+		t.Fatal(err)
+	}
+	r.m.prune(serStream, 20)
+	var f *Forwarder
+	r.run(func() bool {
+		return f != nil && f.Status().Confirmed >= 10 && f.Status().Unreported == 1
+	}, func(x *Forwarder) { f = x })
+	if c := r.m.cursor(serStream); c != 10 {
+		t.Fatalf("ser cursor %d, want 10: saved past an unreported gap", c)
+	}
+	hs.refuse.Store(false)
+	r.run(func() bool { return r.m.cursor(serStream) == 30 && r.m.cursor(hlStream) >= 1 }, nil)
+	var found bool
+	for _, m := range r.srv.Acked() {
+		s := string(m.Data)
+		found = found || strings.Contains(s, `htype="forward.unreachable"`) && strings.Contains(s, `first_skipped=11`) && strings.Contains(s, `last_skipped=20`)
+	}
+	if !found {
+		t.Error("no forward.unreachable for 11-20 after the restart")
+	}
+}
+
+// The health stream of a required target is never held for an owed
+// report: its cursor is what frees the stream that refused it.
+func TestRequiredHealthStreamNotHeld(t *testing.T) {
+	r := newRig(t, nil, nil)
+	hs := &refusing{sink: r.cfg.Health.(sink)}
+	hs.refuse.Store(true)
+	r.cfg.Health = hs
+	for range 30 {
+		r.m.commit(t, hlStream, healthEvent(event.HealthSourceSilent, nil))
+	}
+	if err := r.m.SaveCursor(t.Context(), store.Cursor{Consumer: "siem-a", Stream: hlStream, Through: 10}); err != nil {
+		t.Fatal(err)
+	}
+	r.m.prune(hlStream, 20)
+	var f *Forwarder
+	r.run(func() bool {
+		return f != nil && r.m.cursor(hlStream) == 30 && f.Status().Unreported == 1
+	}, func(x *Forwarder) { f = x })
+}
+
+// A6 #94 should: a new best-effort target saves its window start as its
+// cursor before anything is confirmed, so a later process does not move
+// the start past events that were inside the window when it began.
+func TestBestEffortStartSaved(t *testing.T) {
+	var refuse atomic.Bool
+	refuse.Store(true)
+	srv, err := relptest.Start(nil, func(int, relptest.Message) relptest.Action {
+		if refuse.Load() {
+			return relptest.Refuse
+		}
+		return relptest.Ack
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	tg := newTarget(t, srv.Addr().Port, func(x *syslog.Target) { plainRELP(x); x.ReplaySeconds = 2 })
+	dial, err := DialTCP(tg, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newStore()
+	e := row8(t)
+	for range 10 {
+		m.commitAt(t, serStream, e, time.Now().Add(-time.Hour))
+	}
+	for range 5 {
+		m.commit(t, serStream, e)
+	}
+	r := &rig{t: t, m: m, srv: srv, tg: tg, cfg: Config{
+		Target:       tg,
+		Streams:      []Stream{{ID: serStream, Outbox: m, Cursors: m, Index: m}, {ID: hlStream, Outbox: m, Cursors: m, Index: m}},
+		HealthStream: hlStream, Dial: dial, Health: sink{t: t, m: m},
+		ResponseTimeout: 2 * time.Second, Poll: 10 * time.Millisecond, RetryMin: 5 * time.Millisecond,
+	}}
+	// The collector refuses everything: nothing is confirmed, but the
+	// window start is saved.
+	r.run(func() bool { return m.cursor(serStream) == 10 && srv.Conns() >= 2 }, nil)
+	// The window passes the 5 recent events; a new process still sends
+	// them, from the saved start.
+	time.Sleep(2500 * time.Millisecond)
+	refuse.Store(false)
+	r.run(func() bool { return m.cursor(serStream) == 15 }, nil)
 }

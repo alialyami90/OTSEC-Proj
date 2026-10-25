@@ -35,6 +35,8 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 ## Known limits
 
 - **Repeats after a restart.** `forward.too-large`, `forward.text-omitted` and `forward.unreachable` are raised once per process for the event or range they name, however many sessions delivery takes (A6). A node restart before the target passes the event raises it once more: a duplicate alarm, never a lost one.
+- **One report can still be lost.** A report about an event or gap on the health stream of a required target does not hold that stream's cursor (holding it could keep the stream that refused the report full for good). If the process stops while such a report is owed, the next process does not raise it again. Every other owed report is raised again after a restart. A reserve on `platform/health` for the forwarder's own `forward.*` events (A6's option b) would close this; that is the store's to decide (A5).
+- **Owed reports hold cursors.** While a report is owed, the cursor of the stream it is about stays before that event, so for a required target the store cannot prune that stream past it. That stream's class can then reach its own quota while the health stream is full; both are alarmed. After a reconnect, events confirmed past the held cursor are sent again (receivers remove duplicates by eid).
 - **A hold without a release rule** stops its stream until someone acts. That covers an audit record `RenderAudit` refuses, a record that does not decode or render, a `forward.*` event that is itself too large, and a too-large event on the health stream. `Status.Streams[...].Blocked` says why.
 - **Mode B** (RFC 5425, TCP, UDP) is not built. The Phase 2 slice uses `relp-tls` only.
 
@@ -48,6 +50,10 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestRefusedReportDoesNotStall` | A HealthSink that refuses (a health stream at quota) does not stop forwarding: the events are sent, `Status.Unreported` counts the reports, and they are committed once the sink accepts. |
 | `TestRefusedReportsSummarised` | Past the owed limit, refused reports are counted per type and committed as one summary event. |
 | `TestTooLargeReportRefused` | A too-large event whose report is refused holds only its own stream; the others drain, and it is released once the report is committed and confirmed. |
+| `TestOwedReportSurvivesRestart` | Refused `forward.text-omitted` reports are raised again by the next process: the cursor stayed before the events (A6 #94). |
+| `TestOwedGapSurvivesRestart` | A refused `forward.unreachable` for a skipped range is raised again by the next process: the cursor stayed before the gap (A6 #94). |
+| `TestRequiredHealthStreamNotHeld` | A required target's health stream cursor is not held for an owed report, so it can still free the stream that refused it. |
+| `TestBestEffortStartSaved` | A new best-effort target saves its window start before anything is confirmed; a later process still sends the events that were inside the window when it began (A6 #94). |
 | `TestStatusOpen` | `Status.Open` is set while an idle session is open and cleared when the collector goes away. |
 | `TestOpenNeedsRELPVersion0` | An open answered without `relp_version=0` is refused (A2). |
 | `TestSessionChecksOpenAnswer` | An open answered with a 500, or without `commands=syslog`, ends the session at the open, and no syslog frame reaches the collector (A6). |
