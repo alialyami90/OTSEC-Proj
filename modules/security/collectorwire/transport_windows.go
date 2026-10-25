@@ -129,7 +129,26 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 		if !errors.Is(err, windows.ERROR_NO_DATA) {
 			return nil, err
 		}
-		windows.DisconnectNamedPipe(h)
+		if windows.DisconnectNamedPipe(h) == nil {
+			continue
+		}
+		// The instance cannot be reset, and waiting on it again would
+		// fail the same way at once: a spin (A2). It is replaced by a
+		// fresh one, created before the old one is closed so the name
+		// stays held; if that fails the listener stops, as below.
+		nh, err := l.instance(false)
+		l.mu.Lock()
+		if err != nil {
+			l.next, l.closed = 0, true
+		} else {
+			l.next = nh
+		}
+		l.mu.Unlock()
+		windows.CloseHandle(h)
+		if err != nil {
+			return nil, fmt.Errorf("collectorwire: replace pipe instance: %w", err)
+		}
+		h = nh
 	}
 	// Create the next instance before handing this one off, so the name
 	// stays held by the collector. If that fails the listener cannot go on
