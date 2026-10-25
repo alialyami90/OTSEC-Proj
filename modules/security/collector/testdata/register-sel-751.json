@@ -1,8 +1,8 @@
 {
   "contract": "otsec.register/0.1",
   "family": "sel-751",
-  "revision": 2,
-  "issued": "2026-10-24",
+  "revision": 3,
+  "issued": "2026-10-25",
   "owner": "A2",
   "sources": [
     {
@@ -411,15 +411,19 @@
         {
           "source": "S22",
           "ref": "Table 7.63 p.7.75 'SER C or R  Clears/resets the SER records'  Access Level 1"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.6 (Spanish column: SER D o R clears the SER; SER D also has sel.ser.d)"
         }
       ],
       "evidence": {
         "class": "documented-untested"
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
-      "notes": "Level 1. Covers C and R.",
+      "notes": "Level 1. Covers C and R. Revision 3: the pattern now matches R as its notes always said; revision 2 left SER R to sel.ser.other_args (unknown).",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*SER\\w*\\s+C\\b.*"
+      "pattern": "(?i)\\s*SER\\w*\\s+(C|R)\\b.*"
     },
     {
       "id": "sel.ser.d",
@@ -467,6 +471,10 @@
         {
           "source": "S22",
           "ref": "Command Summary (Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.4 (Spanish column: HIS D o R and HIS HIF D o R clear history; HIS HIF DT o RT clears all HIF history)"
         }
       ],
       "evidence": {
@@ -474,7 +482,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*HIS\\w*\\s+(\\S+\\s+)?(C|R|CA|RA)\\b.*"
+      "pattern": "(?i)\\s*HIS\\w*\\s+(\\S+\\s+)?(C|R|CA|RA|D|DT|RT)\\b.*"
     },
     {
       "id": "sel.tri",
@@ -516,6 +524,23 @@
       "pattern": "(?i)\\s*MET\\w*\\s+R(D|E|M|P)\\b.*"
     },
     {
+      "id": "sel.met.reset.es",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*MED\\w*\\s+R(D|E|M|P)\\b.*",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary p.5 (Spanish column: MED RD, MED RE, MED RM and MED RP reset meter data, Level 1)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Resets demand, energy, max/min or peak meter data.",
+      "notes": "Spanish form, in its own rule: in one alternation with the English word, Go's regexp parser would factor out the shared first letters and authz.ValidateSecret would derive a shorter mnemonic.",
+      "access_level": "1"
+    },
+    {
       "id": "sel.pro.reset",
       "citations": [
         {
@@ -540,6 +565,10 @@
         {
           "source": "S22",
           "ref": "Level 1"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.7 (Spanish column: BAN R resets latched targets)"
         }
       ],
       "evidence": {
@@ -547,7 +576,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*TAR\\w*\\s+R\\b.*"
+      "pattern": "(?i)\\s*(TAR|BAN)\\w*\\s+R\\b.*"
     },
     {
       "id": "sel.sta.args",
@@ -555,6 +584,10 @@
         {
           "source": "S22",
           "ref": "Table 7.68 p.7.80 (STA C/R clears self-test status and restarts the relay, Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.9 (Spanish column: EST C o R clears the self-test status)"
         }
       ],
       "evidence": {
@@ -562,7 +595,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*STA\\w*\\s+\\S.*"
+      "pattern": "(?i)\\s*(STA|EST)\\w*\\s+\\S.*"
     },
     {
       "id": "sel.breaker.ope",
@@ -574,6 +607,10 @@
         {
           "source": "S22",
           "ref": "no dedicated table in Section 7 index"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.8 (Spanish column: ABR opens the breaker)"
         }
       ],
       "evidence": {
@@ -581,7 +618,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*OPE\\w*(\\s.*)?"
+      "pattern": "(?i)\\s*(OPE|ABR)\\w*(\\s.*)?"
     },
     {
       "id": "sel.breaker.clo",
@@ -601,6 +638,23 @@
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
       "pattern": "(?i)\\s*CLO\\w*(\\s.*)?"
+    },
+    {
+      "id": "sel.breaker.clo.es",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*CER\\w*(\\s.*)?",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary p.7 (Spanish column: CER closes the breaker, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Closes the breaker.",
+      "notes": "Spanish form, in its own rule: in one alternation with the English word, Go's regexp parser would factor out the shared first letters and authz.ValidateSecret would derive a shorter mnemonic.",
+      "access_level": "2"
     },
     {
       "id": "sel.output.pul",
@@ -638,6 +692,10 @@
         {
           "source": "S22",
           "ref": "Table 7.65 p.7.76 (SET, Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.8 (Spanish column: AJU changes settings; p.9 AJU ... TERSO)"
         }
       ],
       "evidence": {
@@ -645,7 +703,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*SET\\w*(\\s.*)?"
+      "pattern": "(?i)\\s*(SET|AJU)\\w*(\\s.*)?"
     },
     {
       "id": "sel.settings.pas",
@@ -695,6 +753,23 @@
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
       "pattern": "(?i)\\s*GRO\\w*\\s+\\S.*"
+    },
+    {
+      "id": "sel.settings.group.es",
+      "classification": "state-changing",
+      "pattern": "(?i)\\s*GRU\\w*\\s+\\S.*",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary p.8 (Spanish column: GRUPO n changes the active group, Level 2)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Changes the active settings group.",
+      "notes": "Spanish form, in its own rule: in one alternation with the English word, Go's regexp parser would factor out the shared first letters and authz.ValidateSecret would derive a shorter mnemonic.",
+      "access_level": "2"
     },
     {
       "id": "sel.defaults.r_s",
@@ -751,6 +826,10 @@
         {
           "source": "S22",
           "ref": "Table 7.47 p.7.65 (LDP C clears load profile, Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.4 (Spanish column: LDP D clears the load profile)"
         }
       ],
       "evidence": {
@@ -758,7 +837,7 @@
       },
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*LDP\\w*\\s+C\\b.*"
+      "pattern": "(?i)\\s*LDP\\w*\\s+(C|D)\\b.*"
     },
     {
       "id": "sel.clock.set",
@@ -770,6 +849,10 @@
         {
           "source": "S22",
           "ref": "setting forms Level 1"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.2 (Spanish column: FEC sets the date); Command Summary p.7 (Spanish column: HORA sets the time)"
         }
       ],
       "evidence": {
@@ -778,7 +861,7 @@
       "side_effects": "State change or unknown effect; see classification and notes. Never sent.",
       "notes": "Would corrupt SER time stamps.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*(DAT|TIM)\\w*\\s+\\S.*"
+      "pattern": "(?i)\\s*(DAT|TIM|FEC|HOR)\\w*\\s+\\S.*"
     },
     {
       "id": "sel.irig",
@@ -951,6 +1034,10 @@
         {
           "source": "S22",
           "ref": "Command Summary (BRE R/W, Level 2)"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.7 (Spanish column: INT R resets and INT W presets breaker wear data)"
         }
       ],
       "evidence": {
@@ -958,7 +1045,7 @@
       },
       "side_effects": "Changes breaker wear data.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*BRE\\w*\\s+(R|W)\\b.*",
+      "pattern": "(?i)\\s*(BRE|INT)\\w*\\s+(R|W)\\b.*",
       "access_level": "2"
     },
     {
@@ -987,6 +1074,10 @@
         {
           "source": "S22",
           "ref": "Level 2"
+        },
+        {
+          "source": "S22",
+          "ref": "Command Summary p.7 (Spanish column: 89A m and 89A n m open disconnects, Level 2)"
         }
       ],
       "evidence": {
@@ -994,7 +1085,7 @@
       },
       "side_effects": "Operates disconnects.",
       "classification": "state-changing",
-      "pattern": "(?i)\\s*89(C|O)\\w*(\\s.*)?",
+      "pattern": "(?i)\\s*89(C|O|A)\\w*(\\s.*)?",
       "access_level": "2"
     },
     {
@@ -1062,6 +1153,26 @@
       "classification": "state-changing",
       "pattern": "(?i)\\s*CAS\\w*(\\s.*)?",
       "access_level": "any (S35)"
+    },
+    {
+      "id": "sel.unapproved.command",
+      "classification": "unknown",
+      "pattern": "(?i)\\s*(CAL|ABR|CAS|HEL|CBR|PAR|CER|SAL|CEV|TAR|CHI|AFT|CLD|HIS|CLO|LDP|CME|MAC|COM|PAS|CON|SET|COP|TES|COU|89A|AJU|BAN|CSE|EST|FEC|GOO|HOR|INI|LOG|MED|PIN|SNS|THE|89C|ANA|BNA|CST|DAT|ETH|FGS|GRO|HSG|INT|LOO|MET|PRP|RST|STA|TIM|2AC|89O|AYU|BRE|CSU|DNA|EVE|FIL|GRU|HSR|IRI|L_D|MOS|OPE|PUL|R_S|SUM|TRI|VEC)\\w*(\\s.*)?",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Command Summary pp.1-9 (every command word, English and Spanish columns)"
+        },
+        {
+          "source": "S22",
+          "ref": "Table C.2 p.C.2 (Compressed ASCII commands)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "Documented as displays, session control or commands with their own deny rules; none is approved. Never sent.",
+      "notes": "Every documented command word with no approved line, whole and with any arguments, so that each is a command mnemonic for authz.ValidateSecret (C7-A6-3). Earlier rules decide first, so a state-changing form still reports its own rule. The alternation is ordered so that no two neighbours share a first character (build_sel751.py interleave): do not sort it."
     }
   ],
   "firmware": {
@@ -2016,6 +2127,7 @@
     ]
   },
   "notes": [
+    "Revision 3 by A2 (content owner), 2026-10-25: every documented command word of S22 (Command Summary pp.1-9, English and Spanish, and Table C.2) is a deny-rule mnemonic, and the Spanish state-changing forms are denied. Allowlist decisions are unchanged.",
     "Revision 2 by A2 (content owner), 2026-10-24, from A1's Phase 0 conversion: C3 review changes 3 and 4 and the sel.ser.other_args citation (docs/phase1/reviews/C3-A2.md). Allowlist decisions are unchanged.",
     "Converted by A1 on 2026-10-24 from the Phase 0 draft (register status: draft; A1 approved SHO G and SHO P 1 on 2026-10-23 (docs/agent-handoffs.md, commit 4481653 on claude/project-thread-hperik); A6 re-review pending; allowlist status: Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently. UPDATE 2026-10-23 18:48Z: the owner accepted the inheritance inference as an owner risk (ADR-0005). The allowed entries are classed 'inferred (owner-accepted)', never 'documented'.).",
     "Matching (Phase 0): Each pattern is a Python re.fullmatch against one received line. Allowed entries are exact canonical forms the adapter may send. Denied entries document known dangerous lines and are case-insensitive and abbreviation-tolerant on purpose. Any line matching no entry is a violation (deny by default).",

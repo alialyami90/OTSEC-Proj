@@ -184,7 +184,7 @@ func pipeRun(op, cred string) *authz.CollectorRequest {
 	return &authz.CollectorRequest{
 		Contract: authz.ContractID, Kind: authz.KindRun, RequestID: "req-1",
 		OnBehalfOf: schedule, PolicyVersion: policyVersion,
-		Run: &authz.RunBody{AssetID: testAsset, OperationID: op, Params: map[string]string{}, CredentialRef: cred, RegisterVersion: 2},
+		Run: &authz.RunBody{AssetID: testAsset, OperationID: op, Params: map[string]string{}, CredentialRef: cred, RegisterVersion: 3},
 	}
 }
 
@@ -673,20 +673,20 @@ func TestRegisterActivation(t *testing.T) {
 	tampered := signedRegister(t, payload, f.release, "release-2026")
 	var env register.Envelope
 	json.Unmarshal(tampered, &env)
-	env.Payload = bytes.Replace(env.Payload, []byte(`"revision": 2`), []byte(`"revision": 9`), 1)
+	env.Payload = bytes.Replace(env.Payload, []byte(`"revision": 3`), []byte(`"revision": 9`), 1)
 	bad["tampered"], _ = json.Marshal(env)
 	for name, b := range bad {
 		if _, err := f.registers.Activate(b); !errors.Is(err, authz.ErrRegisterRejected) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if pkg, _, ok := f.registers.Active("sel-751"); !ok || pkg.Revision != 2 {
+	if pkg, _, ok := f.registers.Active("sel-751"); !ok || pkg.Revision != 3 {
 		t.Fatal("a rejected package changed the active one")
 	}
-	// Revision 3 activates and raises the persisted floor; revision 2 is
+	// Revision 4 activates and raises the persisted floor; revision 3 is
 	// then a rollback, also after a restart.
-	rev3 := bytes.Replace(payload, []byte(`"revision": 2`), []byte(`"revision": 3`), 1)
-	if _, err := f.registers.Activate(signedRegister(t, rev3, f.release, "release-2026")); err != nil {
+	rev4 := bytes.Replace(payload, []byte(`"revision": 3`), []byte(`"revision": 4`), 1)
+	if _, err := f.registers.Activate(signedRegister(t, rev4, f.release, "release-2026")); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := OpenState(f.state.path, f.clock.now)
@@ -699,7 +699,7 @@ func TestRegisterActivation(t *testing.T) {
 		t.Fatalf("rollback after restart: %v", err)
 	}
 	revoked := NewRegisters(reopened, []authz.TrustAnchor{{KeyID: "release-2026", PublicKey: pub, Status: authz.KeyRevoked}})
-	if _, err := revoked.Activate(signedRegister(t, rev3, f.release, "release-2026")); !errors.Is(err, authz.ErrRegisterRejected) {
+	if _, err := revoked.Activate(signedRegister(t, rev4, f.release, "release-2026")); !errors.Is(err, authz.ErrRegisterRejected) {
 		t.Fatalf("revoked key: %v", err)
 	}
 }

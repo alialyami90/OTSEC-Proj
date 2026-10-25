@@ -32,7 +32,7 @@ func runReq() *authz.CollectorRequest {
 		OnBehalfOf:    authz.Principal{Type: authz.PrincipalSchedule, ID: "sch-ser-751-feeder-3"},
 		PolicyVersion: 3,
 		Run: &authz.RunBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", OperationID: "sel.ser.read_all",
-			Params: map[string]string{}, CredentialRef: "cred_7f3k2m9q4x", RegisterVersion: 2},
+			Params: map[string]string{}, CredentialRef: "cred_7f3k2m9q4x", RegisterVersion: 3},
 	}
 }
 
