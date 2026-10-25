@@ -105,6 +105,27 @@ func CreateDir(dir, account string) error {
 }
 
 func readProtected(path string, max int64) ([]byte, error) {
+	return readModeChecked(path, max, func(perm os.FileMode) error {
+		if perm&0o277 != 0 {
+			return fmt.Errorf("%s has mode %04o; it must be readable by its owner only and not writable (0400)", path, perm)
+		}
+		return nil
+	})
+}
+
+// readProtectedFor is the Linux rule for a file other services also read:
+// readers are Windows SIDs and are not used here; group read stands in for
+// them. Linux is a development platform only (A3).
+func readProtectedFor(path string, max int64, readers []string) ([]byte, error) {
+	return readModeChecked(path, max, func(perm os.FileMode) error {
+		if perm&^0o440 != 0 {
+			return fmt.Errorf("%s has mode %04o; only its owner and group may read it, and nobody may write it (0440)", path, perm)
+		}
+		return nil
+	})
+}
+
+func readModeChecked(path string, max int64, mode func(os.FileMode) error) ([]byte, error) {
 	// O_NOFOLLOW refuses a link; O_NONBLOCK keeps a FIFO from blocking the
 	// open, and the handle check below refuses it.
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
@@ -120,8 +141,8 @@ func readProtected(path string, max int64) ([]byte, error) {
 	if !st.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
-	if perm := st.Mode().Perm(); perm&0o277 != 0 {
-		return nil, fmt.Errorf("%s has mode %04o; it must be readable by its owner only and not writable (0400)", path, perm)
+	if err := mode(st.Mode().Perm()); err != nil {
+		return nil, err
 	}
 	if st.Size() > max {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
@@ -130,6 +151,26 @@ func readProtected(path string, max int64) ([]byte, error) {
 }
 
 func checkProtectedDir(dir string) error {
+	return checkDirMode(dir, func(perm os.FileMode) error {
+		if perm&0o277 != 0 {
+			return fmt.Errorf("directory %s has mode %04o; it must be usable by its owner only and not writable (0500)", dir, perm)
+		}
+		return nil
+	})
+}
+
+// checkProtectedDirFor is checkProtectedDir with group read and traverse
+// standing in for the readers, as readProtectedFor.
+func checkProtectedDirFor(dir string, readers []string) error {
+	return checkDirMode(dir, func(perm os.FileMode) error {
+		if perm&^0o550 != 0 {
+			return fmt.Errorf("directory %s has mode %04o; only its owner and group may use it, and nobody may write it (0550)", dir, perm)
+		}
+		return nil
+	})
+}
+
+func checkDirMode(dir string, mode func(os.FileMode) error) error {
 	fd, err := syscall.Open(dir, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("open directory %s: %w (a link is refused)", dir, err)
@@ -143,8 +184,5 @@ func checkProtectedDir(dir string) error {
 	if !st.IsDir() {
 		return fmt.Errorf("%s is not a directory", dir)
 	}
-	if perm := st.Mode().Perm(); perm&0o277 != 0 {
-		return fmt.Errorf("directory %s has mode %04o; it must be usable by its owner only and not writable (0500)", dir, perm)
-	}
-	return nil
+	return mode(st.Mode().Perm())
 }
