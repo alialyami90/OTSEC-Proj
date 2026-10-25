@@ -519,6 +519,14 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	}
 	s.settleMu.Lock()
 	defer s.settleMu.Unlock()
+	// The directory first (A3 on #107): a file the node could have written
+	// itself is no administrator's. On Linux the file check reads only the
+	// mode, so a node-writable directory would let the node plant a 0400
+	// file; on Windows another account could write one into it.
+	if err := store.CheckProtectedDir(s.rt.cfg.AdminDir); err != nil {
+		s.refuseClear("dir "+err.Error(), "", "admin_dir refused, so "+ClearSuspensionFileName+" is not read: "+err.Error())
+		return
+	}
 	path := filepath.Join(s.rt.cfg.AdminDir, ClearSuspensionFileName)
 	b, err := store.ReadProtectedFile(path, MaxClearSuspensionBytes)
 	if errors.Is(err, fs.ErrNotExist) {

@@ -61,6 +61,7 @@ func suspendConfig(t *testing.T) (*Config, string, *nodeconfigtest.Config) {
 	if err := store.CreateDir(nc.TLSDir, ""); err != nil {
 		t.Fatal(err)
 	}
+	lockTLS(t, nc)
 	locked := *nc
 	t.Cleanup(func() { locked.UnlockTLS() })
 	return c, dir, nc
@@ -541,6 +542,52 @@ func TestPrunedPastCheckpointHoldsAtLoad(t *testing.T) {
 	}
 	if why := s.Halted("any-other-asset"); why != AlarmSuspensionsUnknown {
 		t.Fatalf("node not held as unknown: %q", why)
+	}
+}
+
+// clear-suspension.json is read only from an admin_dir the node cannot
+// write and that is not a link (A3 on #107): otherwise the node, or
+// another account, could have written the file. A matching clear in such a
+// directory changes nothing and is raised once.
+func TestClearNeedsProtectedAdminDir(t *testing.T) {
+	for _, name := range []string{"writable", "link"} {
+		t.Run(name, func(t *testing.T) {
+			c, dir, nc := suspendConfig(t)
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			s := newScheduler(t, r, suspendingCollector(t, false))
+			s.RunOnce(bg, 0)
+			writeClear(t, nc, relayID, s.Suspensions()[relayID].Ref)
+			switch name {
+			case "writable":
+				if err := nc.LoosenTLS(""); err != nil {
+					t.Fatal(err)
+				}
+			case "link":
+				link := filepath.Join(t.TempDir(), "admin-link")
+				if err := os.Symlink(nc.AdminDir, link); err != nil {
+					t.Skip("cannot create a link here: ", err)
+				}
+				s.rt.cfg.AdminDir = link
+			}
+			s.RunOnce(bg, 0)
+			s.RunOnce(bg, 0)
+			if !s.suspended(relayID) {
+				t.Fatal("cleared from an unprotected admin_dir")
+			}
+			if _, clears := suspensionRecords(t, r); len(clears) != 0 {
+				t.Fatalf("asset.suspension_clear records %+v", clears)
+			}
+			n := 0
+			for _, a := range st.Snapshot("site-a-node1").Alarms {
+				if a.Code == AlarmSuspensionClearRefused {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Fatalf("%d clear-refused alarms", n)
+			}
+		})
 	}
 }
 

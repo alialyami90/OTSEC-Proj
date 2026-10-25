@@ -111,6 +111,7 @@ The node keeps its own copy of the C1 suspension each run's outcome code sets (`
 - **Clearing.** An administrator writes `clear-suspension.json` in `admin_dir` (`OTSEC\config` when installed): `{"schema": "otsec.clear-suspension/0.1", "asset_id": ..., "ref": ...}`.
   - The file is read like a TLS file: no link, at most 4 KiB, and not writable by the node.
   - The node clears one suspension, only on an exact asset and ref match, and writes `asset.suspension_clear` before it schedules the asset again.
+  - The file is read only from an `admin_dir` the node cannot write and that is not a link (`store.CheckProtectedDir`, checked before every read, A3 on #107). Otherwise nothing is read, and it is raised once.
   - A file that does not match, or that names a suspension already cleared, changes nothing and is raised once.
   - A clear of a suspension whose `asset.suspend` is not yet in the audit stream waits until it is, and says so. Written first, it would name a suspension the chain does not hold, and C8 0.2 would break the chain on it (A6 on #107).
   - The node never clears on its own.
