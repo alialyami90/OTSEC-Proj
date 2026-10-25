@@ -12,8 +12,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// peer stands for a reader service's SID, such as the collector's.
-const peer = "S-1-5-80-1111111111-2222222222-3333333333-4444444444-555555555"
+// peer stands for a reader service's SID, such as the collector's. Each
+// subauthority fits in 32 bits, so the SID prints as written.
+const peer = "S-1-5-80-1111111111-2222222222-3333333333-4000000000-555555555"
 
 // checkSDFor is A3's rule for a file or directory other named services
 // also read (OTSEC\config\admin): checked over security descriptors in
@@ -64,7 +65,7 @@ func TestCheckSDFor(t *testing.T) {
 			t.Errorf("%s: %v, want ok %v", c.name, err, c.ok)
 		}
 	}
-	for _, bad := range []string{"S-1-3-0", "S-1-3-4", "not a SID", "S-1-5-80-1;(A;;FA;;;WD)"} {
+	for _, bad := range []string{"S-1-3-0", "S-1-3-4", "not a SID", "S-1-5-80-1;(A;;FA;;;WD)", "S-1-5-80-4444444444"} {
 		if _, err := readerSIDs([]string{bad}); err == nil {
 			t.Errorf("reader %q accepted", bad)
 		}

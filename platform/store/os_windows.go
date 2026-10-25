@@ -283,6 +283,11 @@ func readerSIDs(readers []string) ([]*windows.SID, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reader %q is not a SID: %w", r, err)
 		}
+		if !strings.EqualFold(sid.String(), r) {
+			// StringToSid saturates a subauthority above 32 bits, so the
+			// SID checked would not be the one named.
+			return nil, fmt.Errorf("reader %q is not a SID as written (it reads as %s)", r, sid)
+		}
 		if r == creatorOwner || r == ownerRights {
 			return nil, fmt.Errorf("reader %s names an owner, not a service", r)
 		}
