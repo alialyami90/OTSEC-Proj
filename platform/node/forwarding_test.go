@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/telemetry/forward"
 	"otsec.local/otsec/modules/telemetry/forward/relptest"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
@@ -334,5 +336,92 @@ func TestUnreachableRaisedOncePerOutage(t *testing.T) {
 	}
 	if count(healthTypes(t, r), "forward.unreachable") != 1 {
 		t.Fatalf("health events %v", healthTypes(t, r))
+	}
+}
+
+// A stream the forwarder holds raises forward-held once per reason, and its
+// waiting events do not make the target unreachable (A4 #98).
+func TestHeldStreamIsNotUnreachable(t *testing.T) {
+	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
+	lockTLS(t, nc)
+	c := parse(t, nc)
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	// Every stream with events is held, and the rest are confirmed through
+	// their last seq.
+	fs := forward.Status{Streams: map[c5.StreamID]forward.StreamStatus{}}
+	for _, id := range tg.streams {
+		last, _ := r.Store(id).LastCommitted(bg, id)
+		if last > 0 {
+			fs.Streams[id] = forward.StreamStatus{Blocked: "event does not fit"}
+		}
+	}
+	if len(fs.Streams) == 0 {
+		t.Fatal("no stream has events")
+	}
+	codes := func(code string) int {
+		n := 0
+		for _, a := range st.Snapshot("site-a-node1").Alarms {
+			if a.Code == code && a.Target == "central" {
+				n++
+			}
+		}
+		return n
+	}
+	fw.check(bg, tg, fs)
+	mu.Lock()
+	now = now.Add(time.Hour)
+	mu.Unlock()
+	fw.check(bg, tg, fs)
+	if n := codes(AlarmForwardHeld); n != len(fs.Streams) {
+		t.Fatalf("%d forward-held alarms for %d held streams", n, len(fs.Streams))
+	}
+	if codes(AlarmForwardUnreachable) != 0 {
+		t.Fatal("held streams raised forward-unreachable")
+	}
+	// Released, the same events are waiting, and an hour without a
+	// confirmation is an outage.
+	fs.Streams = nil
+	fw.check(bg, tg, fs)
+	if codes(AlarmForwardUnreachable) != 1 {
+		t.Fatal("released streams did not raise forward-unreachable")
+	}
+}
+
+// The forwarder's health events follow Runtime.health's rule: nothing is
+// appended unless the health database accepts events (A4 #98).
+func TestHealthSinkRefusesOutsideCollecting(t *testing.T) {
+	nc, _, dir := forwardConfig(t, 9, nil)
+	r, _, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	h := healthSink{r}
+	he := event.Health{Type: event.HealthForwardTextOmitted, Details: map[string]string{"target": "central"}}
+	if _, err := h.Emit(bg, he); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	d := r.dbFor(HealthStream)
+	r.state.Lock()
+	d.report.Mode = c5.ModeDrainOnly
+	r.state.Unlock()
+	if _, err := h.Emit(bg, he); err == nil {
+		t.Fatal("emitted in drain-only")
+	} else {
+		t.Log(err)
+	}
+	if after, _ := r.Store(HealthStream).LastCommitted(bg, HealthStream); after != before {
+		t.Fatalf("health stream went from %d to %d", before, after)
 	}
 }

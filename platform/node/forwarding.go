@@ -121,54 +121,60 @@ func (fw *Forwarding) Run(ctx context.Context) {
 // AlarmForwardUnreachable and AlarmForwardHeld, each once per condition.
 // The node calls it before every Tick.
 func (fw *Forwarding) Check(ctx context.Context) {
-	now := fw.rt.opt.Now()
 	for _, tg := range fw.targets {
-		st := tg.f.Status()
-		ts := TargetStatus{Class: string(tg.t.Class), LastConfirmed: st.LastConfirmed.UTC(), Confirmed: st.Confirmed,
-			Streams: map[string]TargetStreamState{}}
-		if st.LastConfirmed.IsZero() {
-			ts.LastConfirmed = time.Time{}
-		}
-		if st.LastErr != nil {
-			ts.LastErr = st.LastErr.Error()
-		}
-		waiting := false
-		for _, id := range tg.streams {
-			ss := st.Streams[id]
-			state := TargetStreamState{Cursor: uint64(ss.Cursor), Blocked: ss.Blocked}
-			if db := fw.rt.Store(id); db != nil {
-				if last, err := db.LastCommitted(ctx, id); err == nil {
-					state.Last = uint64(last)
-					waiting = waiting || last > ss.Cursor
-				}
-			}
-			ts.Streams[string(id)] = state
-			if ss.Blocked == "" {
-				delete(tg.held, id)
-			} else if tg.held[id] != ss.Blocked {
-				tg.held[id] = ss.Blocked
-				fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardHeld, fmt.Sprintf("stream %s held: %s", id, ss.Blocked))
-			}
-		}
-		fw.rt.opt.Status.SetTarget(tg.t.Name, ts)
+		fw.check(ctx, tg, tg.f.Status())
+	}
+}
 
-		last := st.LastConfirmed
-		if last.Before(tg.since) {
-			last = tg.since
-		}
-		down := tg.t.Class == syslog.ClassRequired && waiting && now.Sub(last) >= UnreachableAfter
-		switch {
-		case down && !tg.unreachable:
-			tg.unreachable = true
-			detail := fmt.Sprintf("events waiting and nothing confirmed for %s", now.Sub(last).Round(time.Second))
-			if st.LastErr != nil {
-				detail += "; last session: " + st.LastErr.Error()
+// check is Check for one target and its forwarder's status.
+func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) {
+	now := fw.rt.opt.Now()
+	ts := TargetStatus{Class: string(tg.t.Class), LastConfirmed: st.LastConfirmed.UTC(), Confirmed: st.Confirmed,
+		Streams: map[string]TargetStreamState{}}
+	if st.LastConfirmed.IsZero() {
+		ts.LastConfirmed = time.Time{}
+	}
+	if st.LastErr != nil {
+		ts.LastErr = st.LastErr.Error()
+	}
+	waiting := false
+	for _, id := range tg.streams {
+		ss := st.Streams[id]
+		state := TargetStreamState{Cursor: uint64(ss.Cursor), Blocked: ss.Blocked}
+		if db := fw.rt.Store(id); db != nil {
+			if last, err := db.LastCommitted(ctx, id); err == nil {
+				state.Last = uint64(last)
+				// A held stream is reported as forward-held; its events
+				// do not count as waiting on the target (A4 #98).
+				waiting = waiting || (last > ss.Cursor && ss.Blocked == "")
 			}
-			fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardUnreachable, detail)
-			fw.rt.health(ctx, event.HealthForwardUnreachable, map[string]string{"target": tg.t.Name})
-		case !down:
-			tg.unreachable = false
 		}
+		ts.Streams[string(id)] = state
+		if ss.Blocked == "" {
+			delete(tg.held, id)
+		} else if tg.held[id] != ss.Blocked {
+			tg.held[id] = ss.Blocked
+			fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardHeld, fmt.Sprintf("stream %s held: %s", id, ss.Blocked))
+		}
+	}
+	fw.rt.opt.Status.SetTarget(tg.t.Name, ts)
+
+	last := st.LastConfirmed
+	if last.Before(tg.since) {
+		last = tg.since
+	}
+	down := tg.t.Class == syslog.ClassRequired && waiting && now.Sub(last) >= UnreachableAfter
+	switch {
+	case down && !tg.unreachable:
+		tg.unreachable = true
+		detail := fmt.Sprintf("events waiting and nothing confirmed for %s", now.Sub(last).Round(time.Second))
+		if st.LastErr != nil {
+			detail += "; last session: " + st.LastErr.Error()
+		}
+		fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardUnreachable, detail)
+		fw.rt.health(ctx, event.HealthForwardUnreachable, map[string]string{"target": tg.t.Name, "reason": detail})
+	case !down:
+		tg.unreachable = false
 	}
 }
 
@@ -177,9 +183,14 @@ func (fw *Forwarding) Check(ctx context.Context) {
 type healthSink struct{ rt *Runtime }
 
 func (h healthSink) Emit(ctx context.Context, he event.Health) (c5.Key, error) {
-	log := h.rt.Log(HealthStream)
+	// The same rule as Runtime.health: nothing is appended in a mode that
+	// does not accept events (A4 #98).
+	_, log, mode := h.rt.view(h.rt.dbFor(HealthStream))
 	if log == nil {
 		return c5.Key{}, errors.New("node: the health stream's database is not open")
+	}
+	if !mode.AcceptsEvents() {
+		return c5.Key{}, fmt.Errorf("node: the health stream's database is in mode %s, which accepts no events", mode)
 	}
 	rec, err := h.rt.healthEventRecord(HealthStream, he)
 	if err != nil {
