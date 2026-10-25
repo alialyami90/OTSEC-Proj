@@ -284,6 +284,40 @@ Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.
 - the dialer reaches only its endpoint;
 - register activation: unknown key, wrong key, tampered payload, revoked key, and rollback after a restart are all refused.
 
+## Collector binary and service (PR 4)
+
+`cmd/otsec-collector run -data <dir>` is the whole command. On Windows, `-data` defaults to `%ProgramData%\OTSEC` and the binary runs as the service `otsec-collector` when the service manager starts it (A5's command line: `"<exe>" run -data %ProgramData%\OTSEC`), or in the foreground otherwise. On Linux, the development platform, `-data` is required and the binary runs in the foreground until SIGINT or SIGTERM.
+
+### Start, in order
+
+1. **Hardening, before anything else (T-5).** A failure stops the start.
+   - All platforms: `GOTRACEBACK` containing `crash` or `wer` is refused, because the runtime would then write or hand off a dump. A lower level set from code is ignored by the runtime, so the setting is refused rather than overridden.
+   - Linux: `PR_SET_DUMPABLE` 0 (no core file, and no ptrace by other processes of the same user) and `RLIMIT_CORE` 0.
+   - Windows: no fault dialog (`SetErrorMode`), `WerAddExcludedApplication` for the collector's own account (best effort, because under the SCM the virtual account's hive may not be loaded), and a required machine-wide WER exclusion: `HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications`, value `otsec-collector.exe` = 1, set by the installer. That the exclusion also stops WER `LocalDumps` is [inferred] from the WER documentation. It is T-5 on the Windows site image and has not been run.
+   - Other platforms refuse to start.
+2. **Configuration.** `collector\collector.json` (`otsec.collector-config/0.1`) is decoded strictly with `collectorwire.DecodeStrict`: node ID, policy version, IPC endpoint, the enrolled assets with their C1 profiles (matched by ID and version), the register trust anchors, the signed register packages, and the install budget. Any error stops the start. The file is written by the installer and is readable by the collector account only.
+3. **First start.** The stores are created only when both are missing and the installer's marker `collector\state\provision` is present. They are created by the collector's own account, because DPAPI user scope protects the store key for that account. The marker is then removed. One store present without the other, or both missing without the marker, is **lost state** and stops the start: creating new stores would reopen every failure floor, restart `collector_seq`, and make an install key no admin has pinned. A crash between creating the two stores leaves one of them, so the next start stops and the site reinstalls.
+4. **Stores.** `OpenState` and `OpenCredStore`. The install key's fingerprint is logged, so the admin can compare it with the one they pin.
+5. **Public install key.** When `collector\public` exists, the collector writes `install-key.json` (key ID, public key, fingerprint) for the node to publish. Nothing in it is secret. Its integrity is what the admin's pinned fingerprint checks (T-12).
+6. **Register packages.** Every package is verified against the trust anchors and the floors; a rejected package raises an alarm and stays inactive, so its operations are refused.
+7. **Serve.** `collectorwire.Listen` on the configured endpoint: on Windows the default pipe and the node service's SID as the only peer; on Linux the socket path and peer UID from the configuration.
+
+### The hosted adapter
+
+`hostedRunner()` returns nil until A2's `sel751.Run` is on main. Until then, every run that passes the checks is refused with `not_invocable`, and only credential requests do work.
+
+### Logs
+
+On Windows a service logs to the Event Log under the source `otsec-collector`, which the installer registers. Error level goes to Error, Warn to Warning, and the rest to Information. In the foreground the log goes to standard error. What is logged is the same as the server's: request ID, status, refusal code and collector_seq.
+
+### Tests (`main_test.go`)
+
+- `TestParseConfig`: a good configuration, and 12 refusals: an unknown field, a case variant of a field name, another format, a bad node ID, policy version 0, a bad asset, a missing profile, a profile of another version, a bad anchor key or status, trailing data, and (on Linux) no IPC endpoint.
+- `TestProvision`: both stores missing without the marker is refused; with it, the first start creates both and removes the marker; a second start leaves them; one store missing is refused even with a marker, and the missing store is not recreated.
+- `TestCheckTraceback` and `TestHarden`: hardening runs in a child process, and on Linux the child is shown non-dumpable with a zero core limit.
+- `TestServe`, end to end over a Unix socket: first start, an install sealed by the client against the published key and its pinned fingerprint, a run refused with `not_invocable`, a stop, a restart without the marker, and a scan of every log line and every file the collector wrote for the test secret (the binary's part of T-5 and T-8). It found the server rule that PR 3 fixed.
+- `FuzzParseConfig`.
+
 ## Open items
 
 - **PC run of the Windows transport.** One risk to check there: a service's process token may not grant another service `TOKEN_QUERY`. If it does not, `Dial` fails closed, and the collector must grant the node's SID `TOKEN_QUERY` on its own token at startup. A5's service accounts (`platform/winsvc`) decide which case applies.
@@ -291,5 +325,6 @@ Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.
 - **The shared-secret count has no field in the C7 reply.** `InstallResult.SharedWith` exists, but `CollectorReply` cannot carry it. Given the oracle above, it belongs in a collector-reported C8 install record, not in the reply. That is a C7 or C8 0.2 candidate.
 - **The sealing parameters** (HKDF salt and info) are fixed by `modules/security/seal`, not by C7. They are a C7 0.2 candidate, so that a browser client using WebCrypto can be checked against the contract.
 - **Removal is logical, not physical (A6 on #90).** Revocation removes the ciphertext from the current store file. But an earlier copy can still hold it: the blocks of an earlier file, a backup, a volume shadow copy, or a crash-left `credentials.json.tmp`. Reading such a copy needs the store key, so only the collector's account, SYSTEM or an administrator could read it, and design section 10 already lists those as able to read every secret. **So revoking a compromised secret must always be paired with changing it on the device.** **Putting such a copy back is refused.** The store carries a generation, which is 1 at creation and goes up by one at every write. The State records the highest generation written or opened (`cred_generation`), and `OpenCredStore` refuses a store older than the record. The store file is written first and the record second, so a crash between them leaves the store ahead, and the next open accepts it and catches the record up (`TestRestoredStoreRefused`, `TestStoreAheadOfRecord`). **The collector alone refuses a store restored by itself, not one restored together with its state (A6 on #97).** Restoring both files from one backup or volume shadow copy, the realistic case, passes this check. It brings back a revoked secret and rolls back the install budget, the failed-auth floors and the register family floors (register rollback). The backstop is the node: the restored `collector_seq` goes back while the install key is unchanged, which D2-15 and the C8 0.2 `collector.seq_reset` rules treat as a restore. The node holds collection, and an unchanged key is never acknowledged.
+- **Owed from A5's installer:** the `collector\public` directory (written by the collector, readable by the node), the Event Log source `otsec-collector`, and the WER value above. Without the WER value the collector refuses to start, which is the intended failure.
 - **C7 0.2 candidates from the pipeline:** `endpoint_id` in `RunBody`, so an asset with two outbound endpoints can be collected; and refusal codes for the Phase 2 locks and for a suspended asset, which use `asset_not_enrolled` today.
 - **C7 0.2 candidate.** C7 has no `DecodeReply`. `collectorwire.DecodeStrict` is therefore a copy of the contracts' internal strict decoder: a struct key must be exactly a field name, so `STATUS` and `ſtatus` are refused (A6's review of #79). A contract-level `DecodeReply` would let the copy go. Until then the two must be kept in step.
