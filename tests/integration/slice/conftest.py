@@ -17,3 +17,4 @@ def need(cond, reason):
 def tls(tmp_path_factory):
     need(harness.TLSMaterial.openssl(), "openssl not on PATH (needed to make test certificates)")
     return harness.TLSMaterial(str(tmp_path_factory.mktemp("tls"))).make()
+

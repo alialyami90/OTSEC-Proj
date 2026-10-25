@@ -187,5 +187,109 @@ class DocumentedIdExamples(unittest.TestCase):
         self.assertEqual(len(self.bad_lines("id-fig-3-20.txt")), 6)
 
 
+
+class GrowingSer(unittest.TestCase):
+    """ser="grow": SYNTHESIZED rows added at each read (V-S4, V-S6)."""
+
+    def test_no_rows_added_is_figure_10_16(self):
+        self.assertEqual(profile_sel751.grown_ser(0), profile_sel751._load("ser-fig-10-16.txt"))
+
+    def test_rows_renumber_newest_first(self):
+        lines = profile_sel751.grown_ser(5).split(profile_sel751.CRLF)
+        rows = [profile_sel751.SER_ROW.match(l) for l in lines]
+        rows = [m for m in rows if m]
+        self.assertEqual([int(m[1]) for m in rows], list(range(13, 0, -1)))
+        times = [m[3] for m in rows]
+        self.assertEqual(times, sorted(times))
+        self.assertEqual(len(set(m.groups()[1:] for m in rows)), 13)
+        # The figure's rows keep their fields; only their numbers move.
+        fig = [profile_sel751.SER_ROW.match(l) for l in profile_sel751._load("ser-fig-10-16.txt").split(profile_sel751.CRLF)]
+        self.assertEqual([m.groups()[1:] for m in fig if m], [m.groups()[1:] for m in rows[:8]])
+
+    def test_growth_survives_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "grow")
+            self.assertEqual(profile_sel751.SerGrowth(path, 4).read(), 4)
+            self.assertEqual(profile_sel751.SerGrowth(path, 4).read(), 8)
+
+
+class SerFaults(unittest.TestCase):
+    """ser="hang" and ser="malformed": SYNTHESIZED faults for V-S12."""
+
+    def ser(self, mode, stx_etx=True):
+        r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser=mode, stx_etx=stx_etx)
+        r.level = 1
+        return r, r.handle(b"SER")
+
+    def test_hang_stops_inside_the_message(self):
+        r, reply = self.ser("hang")
+        self.assertTrue(reply.out.startswith(b"\x02"))
+        self.assertNotIn(b"\x03", reply.out)
+        self.assertFalse(reply.out.rstrip().endswith(b"=>"))
+        rows = [l for l in reply.out.split(profile_sel751.CRLF) if profile_sel751.SER_ROW.match(l)]
+        self.assertEqual([l.split()[0] for l in rows], [b"8", b"7", b"6", b"5"])
+        # The relay answers the next line as usual.
+        self.assertTrue(r.handle(b"QUI").out.endswith(b"="))
+
+    def test_malformed_damages_one_row_only(self):
+        _, good = self.ser("example")
+        _, bad = self.ser("malformed")
+        diff = [(a, b) for a, b in zip(good.out.split(b"\r\n"), bad.out.split(b"\r\n")) if a != b]
+        self.assertEqual(len(diff), 1)
+        self.assertIn(b"13:5X:10.003", diff[0][1])
+        self.assertIsNone(profile_sel751.SER_ROW.match(diff[0][1]))
+
+
+class DstSer(unittest.TestCase):
+    """ser="dst": SYNTHESIZED rows in a fall-back hour (V-S3)."""
+
+    def test_rows_and_header(self):
+        r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser="dst")
+        r.level = 1
+        out = r.handle(b"SER").out
+        self.assertIn(b"Time Source: External", out)
+        self.assertNotIn(b"Time Source: Internal", out)
+        rows = [profile_sel751.SER_ROW.match(l) for l in out.split(profile_sel751.CRLF)]
+        rows = [m for m in rows if m]
+        self.assertEqual([int(m[1]) for m in rows], [6, 5, 4, 3, 2, 1])
+        times = [m[3] for m in rows]
+        self.assertGreater(times[1], times[2])  # the clock stepped back
+        self.assertEqual(times.count(b"01:45:00.000"), 2)
+        # The header lines other than the report time and source are the figure's.
+        fig = profile_sel751._load("ser-fig-10-16.txt")
+        self.assertIn(b"FID = SEL-751-R100-V0-Z001001-D20070410", out)
+        self.assertEqual(out.count(b"Serial No"), fig.count(b"Serial No"))
+
+
+class ScriptSer(unittest.TestCase):
+    """ser="script": the SYNTHESIZED V-S4 buffer sequence."""
+
+    def test_reads_follow_the_script_across_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = os.path.join(tmp, "n")
+            seen = []
+            for k in range(9):
+                # A new responder per read, as for a new session or a
+                # restarted simulator: the count is in the file.
+                r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser="script",
+                                                      growth=profile_sel751.SerGrowth(state, 1))
+                r.level = 1
+                out = r.handle(b"SER").out
+                rows = [m.groups()[1:] for m in (profile_sel751.SER_ROW.match(l) for l in out.split(b"\r\n")) if m]
+                nums = [int(m[1]) for m in (profile_sel751.SER_ROW.match(l) for l in out.split(b"\r\n")) if m]
+                self.assertEqual(nums, list(range(len(rows), 0, -1)))
+                seen.append(rows)
+        fig = profile_sel751._figure_rows()
+        self.assertEqual(seen[0], fig)
+        self.assertEqual(seen[1][:5], fig[3:])
+        self.assertEqual(seen[1][5], seen[1][6])          # two identical rows
+        self.assertFalse(set(seen[2]) & set(seen[1]))     # cleared
+        self.assertEqual(len(seen[4]), 3)
+        self.assertNotIn(seen[3][1], seen[4])             # D removed from the middle
+        self.assertEqual(seen[6], seen[5][2:] + seen[5][2:4])
+        self.assertEqual(seen[7], seen[6])                # the last again after the end
+        self.assertEqual(seen[8], seen[6])
+
+
 if __name__ == "__main__":
     unittest.main()

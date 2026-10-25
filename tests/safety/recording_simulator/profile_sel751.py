@@ -34,6 +34,33 @@ Documented (p. = manual page):
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
 
+SYNTHESIZED, not documented (ser="grow", for V-S4 and V-S6): each SER read
+adds rows after Figure 10.16's newest, in the figure's layout, and renumbers
+every row so row 1 is the newest (Table 7.63, p. 7.75). The added rows
+(elements from the figure, one second apart, after its last time) are test
+data, not a documentation example, and support only `simulated` claims about
+the platform's handling of a buffer that changes between reads.
+
+SYNTHESIZED time cases, not documented (V-S3): ser="dst" serves six rows
+inside a US daylight-saving fall-back hour, printed as a relay whose clock
+stepped back from 01:59:59.999 to 01:00:00 would print them (the same wall
+time twice, and time going backwards in print order), under a header that
+says "Time Source: External" (Table 7.16: a time-code input is attached,
+which says nothing about lock).
+
+SYNTHESIZED buffer script, not documented (V-S4): ser="script" serves, at
+the n-th SER read, SCRIPT[n] (the last one again after the end), counting
+reads in --profile-ser-state so the count survives a restart. The reads
+are: Figure 10.16; its oldest three rows gone and two identical new rows;
+the buffer cleared with two new rows; one more row; a middle row removed
+and one more; four rows of repeating chatter; and the chatter again, which
+overlaps the previous read at two offsets.
+
+SYNTHESIZED fault cases, not documented (V-S12): ser="hang" sends the
+figure's header and its first four rows, then nothing more for that SER (no
+prompt; later lines are answered as usual); ser="malformed" sends the figure
+with row 5's TIME damaged ("13:5X:10.003"), so that one row does not parse.
+
 Not stated in the manual, modelled as a switch (A2's C7 review): whether a new
 Telnet connection inherits the state a session left behind when it closed
 without QUIT, before TIDLE expires (p. 7.16 says only that the relay stays
@@ -52,6 +79,7 @@ commands that have a different Spanish name are rejected with the English
 error text.
 """
 
+import datetime
 import os
 import re
 import time
@@ -139,10 +167,140 @@ class RelayState:
         self.until = time.monotonic() + self.tidle if (level > 0 or awaiting) else 0.0
 
 
+SER_ROW = re.compile(rb"^(\d+)\s+(\d\d/\d\d/\d{4})\s+(\d\d:\d\d:\d\d\.\d{3})\s+(\S+)\s+(\S+)$")
+GROW_ELEMENTS = (b"51P1P", b"51AP", b"51P1T", b"TRIP")
+
+
+def ser_row(num, date, time, element, state):
+    """One SER row in Figure 10.16's column layout."""
+    return b"%-6d%s   %s   %-25s%s" % (num, date, time, element, state)
+
+
+def grown_rows(added):
+    """The rows of a grown SER buffer, oldest first as printed: Figure
+    10.16's eight, then `added` synthesized rows, numbered so the newest is
+    row 1. Each row is (date, time, element, state)."""
+    rows = []
+    for line in _load("ser-fig-10-16.txt").split(CRLF):
+        m = SER_ROW.match(line)
+        if m:
+            rows.append(m.groups()[1:])
+    base = datetime.datetime(2007, 2, 28, 13, 54, 11)
+    for k in range(added):
+        t = base + datetime.timedelta(seconds=k)
+        rows.append((t.strftime("%m/%d/%Y").encode(), t.strftime("%H:%M:%S").encode() + b".000",
+                     GROW_ELEMENTS[k % 4], b"Asserted" if (k // 4) % 2 == 0 else b"Deasserted"))
+    return rows
+
+
+def grown_ser(added):
+    """The SER reply after `added` synthesized rows: the figure's header,
+    then every row renumbered (SYNTHESIZED, see the module documentation)."""
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line)
+    rows = grown_rows(added)
+    body = [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)]
+    return CRLF.join(head + body)
+
+
+DST_ROWS = (
+    (b"11/01/2026", b"01:45:00.000", b"51P1P", b"Asserted"),
+    (b"11/01/2026", b"01:59:59.999", b"51P1P", b"Deasserted"),
+    (b"11/01/2026", b"01:00:00.001", b"51AP", b"Asserted"),
+    (b"11/01/2026", b"01:30:00.000", b"TRIP", b"Asserted"),
+    (b"11/01/2026", b"01:45:00.000", b"51P1T", b"Asserted"),
+    (b"11/01/2026", b"02:00:00.000", b"TRIP", b"Deasserted"),
+)
+
+
+def dst_ser():
+    """The SER reply for ser="dst" (SYNTHESIZED, see the module
+    documentation): Figure 10.16's header with the report time and the time
+    source changed, then DST_ROWS, newest last as row 1."""
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line.replace(b"Date: 02/28/2007   Time: 16:34:28", b"Date: 11/01/2026   Time: 02:05:00")
+                    .replace(b"Time Source: Internal", b"Time Source: External"))
+    body = [ser_row(len(DST_ROWS) - i, *r) for i, r in enumerate(DST_ROWS)]
+    return CRLF.join(head + body)
+
+
+def _synth(k, element, state):
+    t = datetime.datetime(2007, 2, 28, 14, 0, 0) + datetime.timedelta(seconds=k)
+    return (t.strftime("%m/%d/%Y").encode(), t.strftime("%H:%M:%S").encode() + b".250", element, state)
+
+
+_A = _synth(1, b"51P1P", b"Asserted")
+_C, _D, _E = _synth(10, b"TRIP", b"Asserted"), _synth(11, b"TRIP", b"Deasserted"), _synth(12, b"51AP", b"Asserted")
+_G = _synth(13, b"51AP", b"Deasserted")
+_H, _I = _synth(20, b"51P1P", b"Asserted"), _synth(21, b"51P1P", b"Deasserted")
+
+
+def _figure_rows():
+    return [m.groups()[1:] for m in (SER_ROW.match(l) for l in _load("ser-fig-10-16.txt").split(CRLF)) if m]
+
+
+SCRIPT = (
+    lambda f: f,                          # 1: the figure
+    lambda f: f[3:] + [_A, _A],           # 2: oldest three gone; two identical new rows
+    lambda f: [_C, _D],                   # 3: cleared, then two new rows
+    lambda f: [_C, _D, _E],               # 4: one more
+    lambda f: [_C, _E, _G],               # 5: D removed from the middle; one more
+    lambda f: [_E, _G, _H, _I, _H, _I],   # 6: chatter
+    lambda f: [_H, _I, _H, _I, _H, _I],   # 7: chatter again: two possible overlaps
+)
+
+
+def script_rows(n):
+    """The rows of SCRIPT[n] (0-based; the last after the end), oldest first."""
+    return SCRIPT[min(n, len(SCRIPT) - 1)](_figure_rows())
+
+
+def script_ser(n):
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line)
+    rows = script_rows(n)
+    return CRLF.join(head + [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)])
+
+
+class SerGrowth:
+    """The count of synthesized rows, kept in a file so that it survives a
+    simulator restart (the device's buffer does). Each SER read adds `step`."""
+
+    def __init__(self, path, step):
+        self.path, self.step = path, step
+
+    def read(self):
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                n = int(f.read().strip() or 0)
+        except FileNotFoundError:
+            n = 0
+        n += self.step
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str(n))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, self.path)
+        return n
+
+
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
-                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False):
+                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None):
         self.password = password          # None models "Level 1 password disabled"
         # p. 7.28: "The relay transmits all messages in the following format:
         # <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
@@ -153,7 +311,14 @@ class SEL751DocResponder:
         self.level, self.awaiting, self.attempts = relay.take() if relay else (0, None, 0)
         self.inherited = self.level > 0 or self.awaiting is not None
         self.elevated_here = False        # this session raised the level
-        self.ser = _load("ser-fig-10-16.txt") if ser == "example" else None
+        self.ser = _load("ser-fig-10-16.txt") if ser in ("example", "grow", "hang", "malformed") else None
+        if ser == "dst":
+            self.ser = dst_ser()
+        self.script = growth if ser == "script" else None
+        self.hang = ser == "hang"
+        if ser == "malformed":
+            self.ser = self.ser.replace(b"5     02/28/2007   13:54:10.003", b"5     02/28/2007   13:5X:10.003")
+        self.growth = growth if ser == "grow" else None
         self.id = _load("id-fig-7-38.txt")
         if fid is not None:
             self.id = _replace_id_field(self.id, b"FID=" + fid, fid_checksum_ok)
@@ -239,7 +404,7 @@ class SEL751DocResponder:
         if self.vulnerable and not self.exposed:
             self.exposed = True
             reply.effects = list(reply.effects) + [self._exposure()]
-        if self.stx_etx:
+        if self.stx_etx and not getattr(reply, "unframed", False):
             reply.out = self._frame(reply.out)
         return reply
 
@@ -308,6 +473,17 @@ class SEL751DocResponder:
         if text == "SHO P 1":
             return Reply(self._show_port1() + self._prompt())
         if text == "SER":
+            if self.ser is not None and self.growth is not None:
+                self.ser = grown_ser(self.growth.read())
+            if self.script is not None:
+                self.ser = script_ser(self.script.read() - 1)
+            if self.hang:
+                lines = self.ser.split(CRLF)
+                cut = next(i for i, l in enumerate(lines) if SER_ROW.match(l)) + 4
+                # Cut inside the message: STX sent, ETX and the prompt never.
+                reply = Reply((b"\x02" if self.stx_etx else CRLF) + CRLF.join(lines[:cut]) + CRLF)
+                reply.unframed = True
+                return reply
             body = self.ser if self.ser is not None else b"No Data Available"
             return Reply(CRLF + body + self._prompt())
         return Reply(CRLF + UNMODELLED + self._prompt())

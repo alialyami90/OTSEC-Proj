@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/authz"
@@ -94,11 +95,12 @@ func main() {
 	relpPort := fs.Int("relp-port", 0, "setup: the RELP receiver's port on 127.0.0.1")
 	every := fs.Int("every", 60, "setup: the SER schedule interval, seconds")
 	repo := fs.String("repo", ".", "setup: the repository root, for the fixtures")
+	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas)
 	case "install-credential":
 		err = installCredential(*root)
 	default:
@@ -110,7 +112,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -146,6 +148,17 @@ func setup(root, repo string, simPort, relpPort, every int) error {
 	nc.CollectorPipe = l.Socket
 	nc.CollectorPublicDir = l.PublicDir
 	nc.AdminDir = l.AdminDir
+	for _, q := range strings.Split(quotas, ",") {
+		if q == "" {
+			continue
+		}
+		class, n, ok := strings.Cut(q, "=")
+		v, err := strconv.ParseInt(n, 10, 64)
+		if _, known := nc.Store.Quotas[class]; !ok || !known || err != nil {
+			return fmt.Errorf("-quota %q: want class=bytes with a class the node configures", q)
+		}
+		nc.Store.Quotas[class] = v
+	}
 	nc.AddSEL751(assetID, "127.0.0.1", simPort, every)
 	setSerial(nc.Assets[0], simSerial)
 	nc.AddRELPTarget("upstream", "127.0.0.1", relpPort, anchorRef, clientRef, durableAckRef, false)

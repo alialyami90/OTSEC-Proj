@@ -28,14 +28,19 @@ def _go_build(out, pkg):
 class Slice:
     """One run of the slice; every process is stopped at teardown."""
 
-    def __init__(self, d):
+    def __init__(self, d, bin_dir=None):
+        """bin_dir: binaries another Slice built, shared instead of building."""
         self.d = d
-        self.bin = os.path.join(d, "bin")
+        self.bin = bin_dir or os.path.join(d, "bin")
         self.root = os.path.join(d, "root")
-        os.makedirs(self.bin)
+        os.makedirs(self.d, exist_ok=True)
+        os.makedirs(self.bin, exist_ok=True)
         os.mkdir(self.root, 0o700)
         self.procs = {}
         self.logs = {}
+        self.argv = {}
+        self.sim_extra = ()
+        self.sim_password = CANARY
 
     def exe(self, name):
         return os.path.join(self.bin, name + (".exe" if os.name == "nt" else ""))
@@ -46,26 +51,50 @@ class Slice:
         _go_build(self.exe("slicehelper"), "./tests/integration/slice/slicehelper")
 
     def spawn(self, name, argv, env=None):
-        out = open(os.path.join(self.d, name + ".log"), "wb")
+        # Appended, so a restarted process keeps its earlier output.
+        out = open(os.path.join(self.d, name + ".log"), "ab")
         self.logs[name] = out.name
         p = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, env=env)
         self.procs[name] = p
+        self.argv[name] = (argv, env)
         return p
 
-    def start(self, fid=harness.ALLOWED_FID, framed=True):
-        self.sim_logs = []
-        self.relp_log = os.path.join(self.d, "relp.jsonl")
-        sim = self.start_simulator(fid, framed=framed)
-        relp_port = harness.free_port()
-        out = subprocess.run([self.exe("slicehelper"), "setup", "-root", self.root, "-sim-port", str(sim.port),
-                              "-relp-port", str(relp_port), "-repo", harness.REPO],
-                             check=True, capture_output=True)
-        self.layout = json.loads(out.stdout)
-        relp = harness.Proc([sys.executable, harness.RECEIVER, "--port", str(relp_port), "--log", self.relp_log,
+    def kill(self, name):
+        """SIGKILL: no shutdown path runs."""
+        p = self.procs[name]
+        if p.poll() is None:
+            p.kill()
+        p.wait(10)
+
+    def respawn(self, name):
+        """The killed node or collector, started again as before."""
+        argv, env = self.argv[name]
+        return self.spawn(name, argv, env)
+
+    def start_receiver(self):
+        """The RELP receiver on the run's port, appending to relp_log."""
+        relp = harness.Proc([sys.executable, harness.RECEIVER, "--port", str(self.relp_port), "--log", self.relp_log,
                              "--cert", self.layout["server_cert"], "--key", self.layout["server_key"],
                              "--ca", self.layout["ca"], "--require-client-cert",
                              "--permitted-peer", self.layout["node_id"]])
         self.procs["receiver"] = relp.p
+        return relp
+
+    def start(self, fid=harness.ALLOWED_FID, framed=True, sim_extra=(), sim_password=CANARY, setup_extra=()):
+        """sim_password: the device's Level 1 password, CANARY unless a test
+        wants the installed credential to be wrong. setup_extra: more
+        slicehelper setup flags."""
+        self.sim_logs = []
+        self.sim_extra = tuple(sim_extra)
+        self.sim_password = sim_password
+        self.relp_log = os.path.join(self.d, "relp.jsonl")
+        sim = self.start_simulator(fid, framed=framed)
+        self.relp_port = harness.free_port()
+        out = subprocess.run([self.exe("slicehelper"), "setup", "-root", self.root, "-sim-port", str(sim.port),
+                              "-relp-port", str(self.relp_port), "-repo", harness.REPO, *setup_extra],
+                             check=True, capture_output=True)
+        self.layout = json.loads(out.stdout)
+        self.start_receiver()
         self.spawn("collector", [self.exe("otsec-collector"), "run", "-data", self.layout["collector_data"]])
         key = os.path.join(self.layout["public_dir"], "install-key.json")
         assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
@@ -80,10 +109,10 @@ class Slice:
         logging to a new file: sim_log is always the current one."""
         self.sim_log = os.path.join(self.d, f"sim{len(self.sim_logs)}.jsonl")
         self.sim_logs.append(self.sim_log)
-        sim = harness.start_simulator(self.sim_log, CANARY, fid=fid, extra=("--port", str(port)) if port else (),
-                                      framed=framed)
+        extra = self.sim_extra + (("--port", str(port)) if port else ())
+        sim = harness.start_simulator(self.sim_log, self.sim_password, fid=fid, extra=extra, framed=framed)
         self.procs["simulator"] = sim.p
-        self.sim_port = sim.port
+        self.sim_port, self.sim_fid, self.sim_framed = sim.port, fid, framed
         return sim
 
     def replace_simulator(self, fid):

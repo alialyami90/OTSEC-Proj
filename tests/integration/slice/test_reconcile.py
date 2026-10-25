@@ -89,3 +89,55 @@ def test_a4_golden_row8_matches_transcription():
     assert rc.first(ps, "dtext").encode() == ROWS[0]
     assert rc.first(ps, "rsha256") == hashlib.sha256(ROWS[0]).hexdigest()
     assert rc.first(ps, "dt") == rc.row_time_text(ROWS[0])
+
+
+# The grown buffer (ser="grow"): rows renumber at every read, so the oracle
+# keys them on their content and allows a resend under the same event ID.
+
+def grown(added):
+    import sys
+    sys.path.insert(0, os.path.join(REPO, "tests", "safety", "recording_simulator"))
+    import profile_sel751
+    return [l for l in profile_sel751.grown_ser(added).split(b"\r\n") if profile_sel751.SER_ROW.match(l)]
+
+
+def grown_messages():
+    """Two reads: 12 rows (8 new to the node), then 16 (4 new), each event's
+    dtext as printed at the read that first saw it."""
+    first, second = grown(4), grown(8)
+    msgs = [message(r, i + 1) for i, r in enumerate(first)]
+    return msgs + [message(r, len(first) + i + 1) for i, r in enumerate(second[len(first):])], second
+
+
+def test_grown_good_passes():
+    msgs, rows = grown_messages()
+    problems, stats = rc.reconcile_grown(msgs, rows)
+    assert problems == [] and stats["matched"] == 16 and stats["duplicates"] == 0, (problems, stats)
+
+
+def test_grown_numbers_change_between_reads():
+    # The first read's row 12 is the second read's row 16: the same row.
+    assert grown(4)[0].split()[0] == b"12" and grown(8)[0].split()[0] == b"16"
+    assert rc.row_key(grown(4)[0]) == rc.row_key(grown(8)[0])
+
+
+def test_grown_resend_under_the_same_eid_is_a_duplicate_not_a_problem():
+    msgs, rows = grown_messages()
+    problems, stats = rc.reconcile_grown(msgs + msgs[3:7], rows)
+    assert problems == [] and stats["duplicates"] == 4, (problems, stats)
+
+
+@pytest.mark.parametrize("name,mutate,needle", [
+    ("lost", lambda m: m[:5] + m[6:], "never arrived"),
+    ("resend differs", lambda m: m + [m[2].replace(b"site-a6 otsec", b"site-a6 otsex")], "different bytes"),
+    ("row twice", lambda m: m + [m[2].replace(b"a6/ser:3", b"a6/ser:99")], "two events"),
+    ("reordered", lambda m: [m[1].replace(b"a6/ser:2", b"a6/ser:1"), m[0].replace(b"a6/ser:1", b"a6/ser:2")] + m[2:],
+     "print order"),
+    ("not printed", lambda m: m + [message(b"99    01/01/2030   00:00:00.000   TRIP                     Asserted", 77)],
+     "not a row the device printed"),
+    ("wrong evc", lambda m: [m[0].replace(b'evc="simulated"', b'evc="hardware-verified"')] + m[1:], "evc="),
+])
+def test_grown_oracle_catches(name, mutate, needle):
+    msgs, rows = grown_messages()
+    problems, _ = rc.reconcile_grown(mutate(msgs), rows)
+    assert any(needle in p for p in problems), (name, problems)

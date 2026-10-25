@@ -386,8 +386,15 @@ def main():
     ap.add_argument("--profile-fid", help="sel-751-doc: FID in the ID reply, line checksum recomputed")
     ap.add_argument("--profile-stx-etx", action="store_true",
                     help="sel-751-doc: frame messages in STX ... ETX (p. 7.28)")
-    ap.add_argument("--profile-ser", choices=("example", "none"), default="example",
-                    help="sel-751-doc: SER answers Figure 10.16, or No Data Available")
+    ap.add_argument("--profile-ser", choices=("example", "none", "grow", "hang", "malformed", "dst", "script"),
+                    default="example",
+                    help="sel-751-doc: SER answers Figure 10.16, No Data Available, or Figure 10.16 "
+                         "with SYNTHESIZED rows added at each read (needs --profile-ser-state); "
+                         "SYNTHESIZED faults: hang stops after four rows, malformed damages one row; "
+                         "SYNTHESIZED dst: rows in a fall-back hour under Time Source: External; "
+                         "SYNTHESIZED script: the V-S4 buffer sequence (needs --profile-ser-state)")
+    ap.add_argument("--profile-ser-grow", type=int, default=4, help="sel-751-doc grow: rows added per SER read")
+    ap.add_argument("--profile-ser-state", help="sel-751-doc grow: file holding the count of added rows")
     ap.add_argument("--profile-inherit", choices=("none", "level", "prompt"), default="none",
                     help="sel-751-doc: what a new connection inherits before TIDLE (see profile_sel751)")
     ap.add_argument("--profile-tidle", type=float, default=900.0, help="sel-751-doc: TIDLE in seconds")
@@ -395,6 +402,8 @@ def main():
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
     args = ap.parse_args()
+    if args.profile_ser in ("grow", "script") and not args.profile_ser_state:
+        ap.error("--profile-ser grow and script need --profile-ser-state")
     if args.transport == "ssh" and not (args.user and args.password):
         ap.error("--transport ssh needs --user and --password")
     cfg = Config(
@@ -411,7 +420,10 @@ def main():
         cfg.responder_factory = profile_sel751.factory(
             password=(args.profile_password or "").encode("latin-1") or None,
             fid=args.profile_fid.encode("latin-1") if args.profile_fid else None,
-            stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay)
+            stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay,
+            growth=profile_sel751.SerGrowth(args.profile_ser_state,
+                                            1 if args.profile_ser == "script" else args.profile_ser_grow)
+            if args.profile_ser in ("grow", "script") else None)
 
     async def run():
         rec = Recorder(args.log)
