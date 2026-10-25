@@ -36,6 +36,7 @@ var resultWant = map[string]string{
 	"unexpected-password-prompt-at-0.1":                "is new in 0.2, so a 0.1 result cannot carry it",
 	"identity-unreadable-at-0.2":                       "is new in 0.3, so a 0.2 result cannot carry it",
 	"identity-unreadable-with-mismatch":                "ends the invocation with an identity_mismatch code",
+	"identity-unreadable-with-match":                   "failed.identity_unreadable needs identity.result not-checked",
 	"identity-unreadable-without-id":                   "ID is the last line sent, in the probe phase",
 	"identity-unreadable-after-rejected-probe":         "ID is the last line sent, in the probe phase, after an accepted probe",
 	"unexpected-password-prompt-then-quit":             "is a password attempt",
@@ -197,6 +198,15 @@ func TestUnknownCodeReadsAsFailedUnknown(t *testing.T) {
 	r := loadResult(t, "failed.unknown")
 	if r.Error.Code.Known() || r.Error.Code.Effective() != FailedUnknown || r.Error.Code.Status() != StatusFailed {
 		t.Fatalf("code %q: known %v, effective %s", r.Error.Code, r.Error.Code.Known(), r.Error.Code.Effective())
+	}
+}
+
+// failed.identity_unreadable is decided before ACC and suspends nothing
+// (0.3, A6 on #118 and #122).
+func TestIdentityUnreadableCode(t *testing.T) {
+	c := FailedIdentityUnreadable
+	if c.Stage() != StageBeforeAuth || c.Since() != 3 || c.Suspends() != "" || c.SuspendsCredential() != "" || c.Status() != StatusFailed {
+		t.Fatalf("stage %s, since %d, suspends %q, credential %q, status %s", c.Stage(), c.Since(), c.Suspends(), c.SuspendsCredential(), c.Status())
 	}
 }
 

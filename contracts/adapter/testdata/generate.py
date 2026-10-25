@@ -699,6 +699,14 @@ def invalid_results(good):
     r["status"] = "failed"
     out["identity-unreadable-with-mismatch"] = r
 
+    # The unframed golden claiming the FID it shows as a match: nothing else
+    # is wrong with it (A6 on #122).
+    r = copy.deepcopy(good["failed.identity_unreadable"])
+    data = base64.b64decode(r["transcript"]["data"])
+    i = data.index(FID.encode())
+    r["identity"] = {"result": "match", "items": [item("firmware_id", FID, FID, {"offset": i, "length": len(FID)})]}
+    out["identity-unreadable-with-match"] = r
+
     s = Session()
     s.connect()
     s.probe()

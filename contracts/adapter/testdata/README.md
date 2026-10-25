@@ -110,6 +110,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/status-disagrees-with-code.json`: Status failed with a `refused.` code.
 - `results/invalid/identity-unreadable-at-0.2.json`: `failed.identity_unreadable` in a 0.2 result: the code is new in 0.3.
 - `results/invalid/identity-unreadable-with-mismatch.json`: `failed.identity_unreadable` with a FID that was read and differs: that is `refused.identity_mismatch`.
+- `results/invalid/identity-unreadable-with-match.json`: `failed.identity_unreadable` claiming the FID its unframed reply shows as a match: the code needs identity not-checked.
 - `results/invalid/identity-unreadable-without-id.json`: `failed.identity_unreadable` with no `ID` sent.
 - `results/invalid/identity-unreadable-after-rejected-probe.json`: `failed.identity_unreadable` after a rejected probe, which ends the session (D16).
 - `results/invalid/unexpected-password-prompt-at-0.1.json`: `failed.unexpected_password_prompt` in a 0.1 result: the code is new in 0.2.
