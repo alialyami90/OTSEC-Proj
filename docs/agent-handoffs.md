@@ -687,3 +687,83 @@ On 2026-10-24 at 19:15Z the owner accepted the Phase 1 exit and started Phase 2 
 - No safety or security objection is open.
 - The V-S checks in scope pass: V-S6, V-S7 and V-S9.
 - `docs/phase-2-exit.md` records what is `simulated`, and what needs a lab relay before it can be called supported.
+
+## Phase 3 task briefs (drafted 2026-10-25; issued only on the owner's acceptance of the Phase 2 exit)
+
+Phase 3 hardens the slice so that a `device-observed` endpoint can later be allowed, and closes the Phase 2 conditions in [phase-2-exit.md](phase-2-exit.md). It adds no product capability. Nothing in it contacts a device. The decisions every brief relies on are D2-11, D2-12, D2-16, D2-20 and D2-21 in [phase2/A1-decisions.md](phase2/A1-decisions.md).
+
+### Common rules for every Phase 3 brief
+
+- The Phase 2 common rules stand: no device, write only to owned paths (D2-1), the dependency list (D2-2), tests with their evidence class, small PRs, a handoff at the end.
+- **Testing (D2-13, extended):** GitHub Actions is the main test path. A PR merges when its reviewers accept it and all seven CI jobs are green on its head. The owner's PC is the second Windows run, used only through the owner's own elevated session; nothing is installed there beyond what the owner approved.
+- **Contract changes** bump the minor version, carry a reader for the previous version where a stored artefact may still exist, and record the rollback note in the release notes (`level_open`, C2 0.3 and `unanswered`, and now any field below).
+- **Evidence class** stays `simulated`. H-01 to H-15 remain prepared only.
+
+### Task P3-A5/A6: The slice against the installed Windows services (gate condition 1)
+- Objective and rationale: the end-to-end suite has run on Linux only. The shipped configuration is two Windows services under the SCM with the installer's WER exclusion and the admin folder's SIDs (D2-21). Running the slice against them closes the one gate item carried as a condition.
+- Owner agents: A5 (the harness path to installed services) and A6 (the run and its record). A1 coordinates the owner's session.
+- Required inputs and dependencies: the installer and `OTSEC_REQUIRE_ELEVATED=1` run at `c486e42`; `tests/integration/slice/`; the owner's PC and the owner's UAC approval for each elevated step.
+- Files or modules the agent may modify: A5: `platform/`, `deploy/`, `tests/integration/slice/slicerun.py` and `slicehelper/` only for a Windows service mode; A6: `tests/integration/slice/`, `docs/verification.md`.
+- Expected interfaces: a slice mode that drives the installed `otsec-node` and `otsec-collector` services instead of spawning processes: start and stop through the SCM, the collector's named-pipe or socket path as installed, the administrator's file through the installed `config\admin`. The simulator and the RELP receiver stay user processes on 127.0.0.1.
+- Deliverable: `test_slice_e2e.py`, `identity` and `failures` passing against the installed services on the owner's PC, with the run's log and commit recorded in `docs/verification.md`; the Windows row of V-S6 and V-S9 stated as run or not run.
+- Acceptance tests: every row arrives once (reconcile), the recording check passes, the password is nowhere, and the services are left as the installer left them (the uninstall row still passes).
+- Explicit exclusions: no change to the installer's privileges or ACLs to make a test pass; no self-hosted runner on the owner's PC; no run while the owner is away.
+- Uncertainty or safety risks: a kill test against installed services needs SCM stop semantics, which differ from SIGKILL; state that difference rather than hiding it.
+
+### Task P3-A3: Admin-signed C7 requests (C7 0.4) and the §9 node key store
+- Objective and rationale: D2-11 found that a compromised node can use the install path as an equality oracle for passwords; the interim install budget bounds but does not stop it. Independently authenticated requests remove the oracle. D2-12's file resolver for TLS references is lab-only and must be replaced before any `device-observed` endpoint.
+- Owner agent: A3. A5 implements the node side of the key store. A2 reviews for IED compatibility of the request fields.
+- Required inputs and dependencies: D2-11's ruling (the signed fields, the fixed domain-separation prefix, the single-use nonce spent durably, the maximum lifetime); `docs/phase1/A3-credential-design.md` §9; C7 0.3 and C8 0.2 on `main`.
+- Files or modules the agent may modify: `contracts/authz/` (C7, with A1's approval), `contracts/audit/` only if a new record type is needed, `modules/security/`, `modules/access/`, `docs/phase1/A3-credential-design.md`, `docs/phase3/A3-*.md`.
+- Expected interfaces: a signed request envelope for install, revoke and clear-suspension with the fields D2-11 lists; a verifier in the collector that spends the nonce before any decision and refuses an expiry past the maximum; a key register and a non-exportable node key behind the C6 reference resolver, with the file resolver kept only behind an explicit lab flag.
+- Deliverable: C7 0.4 with its contract tests; the collector refusing every unsigned or mis-bound request with one refusal code and no equality leak; the install budget retained as defence in depth; the node resolving `trust_anchor_ref` and `client_credential_ref` from the key store on Windows, files only with the lab flag.
+- Acceptance tests (A6 independent): a replayed nonce is refused after a restart; a signature for one operation is refused for another; a request bound to another node ID is refused; a swapped sealed secret under a genuine signature is refused; no reply or log differs between a wrong guess and a right one; mutation of the verifier's checks is caught.
+- Explicit exclusions: no real administrator key; no vendor-default or real-device password in any fixture (D2-11); no change to the collector's run path.
+- Uncertainty or safety risks: the admin key's distribution and rotation are an operational procedure, to be written down and reviewed by A6, not solved in code here.
+
+### Task P3-A2: The C1 endpoint path field, the port-server rule, and `DATE_F` from `SHO G`
+- Objective and rationale: D2-16 requires an endpoint to say whether it is a direct Ethernet path or a port server before any `device-observed` endpoint, because only the direct path's `TIDLE` bounds the floor. The SER date order follows `DATE_F`, which the report does not print; the normalizer assumes MDY and flags it, so a DMY relay would misread days of 12 or less.
+- Owner agent: A2. A3 reviews the floor rule; A4 reviews the `DATE_F` hand-off into C4.
+- Required inputs and dependencies: D2-16 and D2-20; C1 and C3 on `main`; the SEL-751 manual's `SHO G` and `DATE_F` references (Table 4.90, Table 7.67); A6's simulator profile for the `SHO G` reply.
+- Files or modules the agent may modify: `contracts/asset/` (C1, with A1's approval), `contracts/register/` content for `SHO G` (C3, signed), `modules/ied/sel751/`, `modules/ied/telnet/`, `tests/fixtures/ied/`, `docs/device-capabilities.md`, `docs/phase3/A2-*.md`.
+- Expected interfaces: C1 gains `path` with the values `direct` and `port-server`; an endpoint with no path or an unknown one is refused like a port server; `SHO G` as a Level 1 read-only register entry; `sel751` reports `DATE_F` in the C2 result's device settings so that A4's normalizer takes the order from it rather than assuming MDY, with a parse error (never a skip) for a row that does not fit.
+- Deliverable: C1 0.x with a reader for the previous version; the register entry and its deny-corpus check; the parser and its fuzz target; the goldens for MDY, YMD and DMY; the port-server refusal as a C2 refusal code.
+- Acceptance tests (A6 independent): the three date orders reconcile against the simulator's rows; a DMY profile no longer produces the MDY assumption flag; a `port-server` endpoint gets zero sessions; the reported `TIDLE` shortens a floor only on `direct` and only after an `ok` or `partial` run.
+- Explicit exclusions: the port-server floor rule itself stays refused until `T_OUT` evidence exists (H-13); no checksum enforcement (V-S19 (d) stays a recorded gap until H-01 or H-13).
+- Uncertainty or safety risks: the `SHO G` layout is documented but untested; mark the parser `documented-untested` and keep every assumption in the goldens.
+
+### Task P3-A5: Audited quarantine export, a clear for a halted asset, and the failed-open retry
+- Objective and rationale: quarantine streams have no consumer and are never pruned, so a device whose outcomes are quarantined run after run fills adapter-evidence for good and halts with `collection-no-quarantine-room` until an operator acts; today there is nothing an operator can do except reinstall. The failed-open retry is the approved brief in `docs/phase2/A5-p3-failed-open-retry.md`.
+- Owner agent: A5. A3 reviews the export's trust boundary and the clear's authorization; A6 writes the contract tests.
+- Required inputs and dependencies: C5 0.x and C8 0.2 on `main`; #135's pruning and the quarantine-room alarms; D2-15's administrator file pattern; the approved failed-open brief.
+- Files or modules the agent may modify: `contracts/store/` (C5, with A1's approval), `platform/store/`, `platform/node/`, `cmd/otsec/`, `docs/phase3/A5-*.md`.
+- Expected interfaces: `otsec quarantine export <asset> <dir>` as a read-only CLI that writes each quarantined outcome with its raw bytes and hash and a manifest, then records `quarantine.exported` in the audit chain; an administrator's `clear-quarantine.json` in `config/admin`, modelled on `clear-suspension.json`, that removes only outcomes named in a completed export and records `quarantine.cleared` with the manifest hash; the `Resume` from `ModeFailed` exactly as the failed-open brief states.
+- Deliverable: the export and clear with their audit records; the retry with its typed cause; `otsec health` showing an exported-but-not-cleared quarantine.
+- Acceptance tests (A6 independent): nothing is removed without a matching export manifest; a tampered manifest is refused; the export never runs while the node holds the exclusive lock in a way that breaks it (busy_timeout evidence); the failed-open brief's four cases; mutation of the clear's checks is caught.
+- Explicit exclusions: no automatic deletion of quarantined evidence; no clear through the node's own IPC; no change to the pruning of confirmed events.
+- Uncertainty or safety risks: an operator clearing evidence is a state-changing operation; it must be administrator-authorized the way D2-15's clear is, and A3 must agree before the PR opens.
+
+### Task P3-A6: V-S8 end to end, the Phase 3 contract tests, and the installed-services run
+- Objective and rationale: V-S8 (raw evidence preserved) passes in units only; end to end, every stored event's raw hash must equal the bytes the recording shows the simulator sent, including after a forced parser failure. A6 also writes the independent tests for every task above.
+- Owner agent: A6.
+- Required inputs and dependencies: the recording simulator and its `--profile` switches; `tests/integration/slice/`; the PRs of P3-A2, P3-A3 and P3-A5 as they open.
+- Files or modules the agent may modify: `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`.
+- Deliverable: `test_slice_evidence_e2e.py` (V-S8), the acceptance tests named in each brief above, the Windows record of P3-A5/A6, and the Phase 3 status table.
+- Acceptance tests: each check fails on a deliberately broken build (mutation), as in Phase 2.
+- Explicit exclusions: no hardware runs without the owner's authorization.
+- Uncertainty or safety risks: as in Phase 2, the simulator and the adapter come from the same manuals; agreement between them is not hardware evidence.
+
+### Order
+
+1. P3-A2 (C1 path, `SHO G`), P3-A3 (C7 0.4) and P3-A5 (failed-open retry first, then the export) start at once and in parallel; each contract change is its own PR with A1's approval.
+2. P3-A6 writes V-S8 end to end now and the acceptance tests as each PR opens.
+3. P3-A5/A6 on the owner's PC runs when the owner has a session free; it does not block the others.
+4. Phase 4's first expansion (configuration and baseline monitoring, then asset management and IDS, or the owner's order) is briefed when the owner says so, not before.
+
+### Phase 3 exit gate (A1 decides)
+
+- The slice passes against the installed Windows services on the owner's PC from one commit on `main`.
+- C7 0.4, the C1 path field, the `DATE_F` read and the key store are merged with their reviewers' records, and A6's negative tests for each pass in CI.
+- The quarantine export and clear, and the failed-open retry, are merged and tested.
+- V-S8 passes end to end.
+- No safety or security objection is open, and `docs/phase-3-exit.md` records what remains `simulated`.
