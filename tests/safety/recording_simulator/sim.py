@@ -386,11 +386,12 @@ def main():
     ap.add_argument("--profile-fid", help="sel-751-doc: FID in the ID reply, line checksum recomputed")
     ap.add_argument("--profile-stx-etx", action="store_true",
                     help="sel-751-doc: frame messages in STX ... ETX (p. 7.28)")
-    ap.add_argument("--profile-ser", choices=("example", "none", "grow", "hang", "malformed"),
+    ap.add_argument("--profile-ser", choices=("example", "none", "grow", "hang", "malformed", "dst"),
                     default="example",
                     help="sel-751-doc: SER answers Figure 10.16, No Data Available, or Figure 10.16 "
                          "with SYNTHESIZED rows added at each read (needs --profile-ser-state); "
-                         "SYNTHESIZED faults: hang stops after four rows, malformed damages one row")
+                         "SYNTHESIZED faults: hang stops after four rows, malformed damages one row; "
+                         "SYNTHESIZED dst: rows in a fall-back hour under Time Source: External")
     ap.add_argument("--profile-ser-grow", type=int, default=4, help="sel-751-doc grow: rows added per SER read")
     ap.add_argument("--profile-ser-state", help="sel-751-doc grow: file holding the count of added rows")
     ap.add_argument("--profile-inherit", choices=("none", "level", "prompt"), default="none",

@@ -41,6 +41,13 @@ every row so row 1 is the newest (Table 7.63, p. 7.75). The added rows
 data, not a documentation example, and support only `simulated` claims about
 the platform's handling of a buffer that changes between reads.
 
+SYNTHESIZED time cases, not documented (V-S3): ser="dst" serves six rows
+inside a US daylight-saving fall-back hour, printed as a relay whose clock
+stepped back from 01:59:59.999 to 01:00:00 would print them (the same wall
+time twice, and time going backwards in print order), under a header that
+says "Time Source: External" (Table 7.16: a time-code input is attached,
+which says nothing about lock).
+
 SYNTHESIZED fault cases, not documented (V-S12): ser="hang" sends the
 figure's header and its first four rows, then nothing more for that SER (no
 prompt; later lines are answered as usual); ser="malformed" sends the figure
@@ -192,6 +199,31 @@ def grown_ser(added):
     return CRLF.join(head + body)
 
 
+DST_ROWS = (
+    (b"11/01/2026", b"01:45:00.000", b"51P1P", b"Asserted"),
+    (b"11/01/2026", b"01:59:59.999", b"51P1P", b"Deasserted"),
+    (b"11/01/2026", b"01:00:00.001", b"51AP", b"Asserted"),
+    (b"11/01/2026", b"01:30:00.000", b"TRIP", b"Asserted"),
+    (b"11/01/2026", b"01:45:00.000", b"51P1T", b"Asserted"),
+    (b"11/01/2026", b"02:00:00.000", b"TRIP", b"Deasserted"),
+)
+
+
+def dst_ser():
+    """The SER reply for ser="dst" (SYNTHESIZED, see the module
+    documentation): Figure 10.16's header with the report time and the time
+    source changed, then DST_ROWS, newest last as row 1."""
+    lines = _load("ser-fig-10-16.txt").split(CRLF)
+    head = []
+    for line in lines:
+        if SER_ROW.match(line):
+            break
+        head.append(line.replace(b"Date: 02/28/2007   Time: 16:34:28", b"Date: 11/01/2026   Time: 02:05:00")
+                    .replace(b"Time Source: Internal", b"Time Source: External"))
+    body = [ser_row(len(DST_ROWS) - i, *r) for i, r in enumerate(DST_ROWS)]
+    return CRLF.join(head + body)
+
+
 class SerGrowth:
     """The count of synthesized rows, kept in a file so that it survives a
     simulator restart (the device's buffer does). Each SER read adds `step`."""
@@ -230,6 +262,8 @@ class SEL751DocResponder:
         self.inherited = self.level > 0 or self.awaiting is not None
         self.elevated_here = False        # this session raised the level
         self.ser = _load("ser-fig-10-16.txt") if ser in ("example", "grow", "hang", "malformed") else None
+        if ser == "dst":
+            self.ser = dst_ser()
         self.hang = ser == "hang"
         if ser == "malformed":
             self.ser = self.ser.replace(b"5     02/28/2007   13:54:10.003", b"5     02/28/2007   13:5X:10.003")

@@ -240,5 +240,26 @@ class SerFaults(unittest.TestCase):
         self.assertIsNone(profile_sel751.SER_ROW.match(diff[0][1]))
 
 
+class DstSer(unittest.TestCase):
+    """ser="dst": SYNTHESIZED rows in a fall-back hour (V-S3)."""
+
+    def test_rows_and_header(self):
+        r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser="dst")
+        r.level = 1
+        out = r.handle(b"SER").out
+        self.assertIn(b"Time Source: External", out)
+        self.assertNotIn(b"Time Source: Internal", out)
+        rows = [profile_sel751.SER_ROW.match(l) for l in out.split(profile_sel751.CRLF)]
+        rows = [m for m in rows if m]
+        self.assertEqual([int(m[1]) for m in rows], [6, 5, 4, 3, 2, 1])
+        times = [m[3] for m in rows]
+        self.assertGreater(times[1], times[2])  # the clock stepped back
+        self.assertEqual(times.count(b"01:45:00.000"), 2)
+        # The header lines other than the report time and source are the figure's.
+        fig = profile_sel751._load("ser-fig-10-16.txt")
+        self.assertIn(b"FID = SEL-751-R100-V0-Z001001-D20070410", out)
+        self.assertEqual(out.count(b"Serial No"), fig.count(b"Serial No"))
+
+
 if __name__ == "__main__":
     unittest.main()
