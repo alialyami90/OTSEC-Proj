@@ -156,7 +156,10 @@ type SeqState struct {
 // VerifyCollectorSeqFrom is VerifyCollectorSeq for one window of a chain
 // verified window by window: it starts in the state from, checks recs up to
 // through, and returns the state at the window's end for the next call.
-// Verified in any split, a chain gives the same result as verified whole.
+// through is a number of the epoch the window ends in: after a reset in the
+// window, the new collector's latest number (0 if none yet), not the old
+// epoch's high. Verified in any split, a chain gives the same result as
+// verified whole.
 func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqState, error) {
 	seen := map[uint64]bool{}
 	lo := from.After
