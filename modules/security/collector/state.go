@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,9 +248,9 @@ func (s *State) CheckFloor(asset string) error {
 
 // SuspendAsset records, durably, that the outcome of invocation set reason
 // on asset (adapter.Code.Suspends). An existing suspension keeps its reason,
-// except that identity-mismatch replaces any other, as for credentials.
-// Nothing in C7 0.1 clears it: only a fresh state does, after its floor
-// (docs/phase2/A3-collector.md, open items).
+// except that identity-mismatch replaces any other, as for credentials, and
+// then names the later invocation. Only ClearAssetSuspension lifts it, for
+// a C7 0.2 asset.clear_suspension, or a fresh state, after its floor.
 func (s *State) SuspendAsset(id string, reason asset.SuspensionReason, invocation string) error {
 	if !knownSuspension(reason) || invocation == "" {
 		return fmt.Errorf("collector: suspend asset %s: reason %q by %q", id, reason, invocation)
@@ -262,8 +263,8 @@ func (s *State) SuspendAsset(id string, reason asset.SuspensionReason, invocatio
 }
 
 // CheckSuspended returns nil when no run has suspended asset, a refusal with
-// asset_not_enrolled when one has (C7 0.1 has no code for it; a 0.2
-// candidate), and ErrStateUnavailable when the state is broken.
+// asset_not_enrolled when one has (C7 has no code for it; a candidate for
+// a later minor), and ErrStateUnavailable when the state is broken.
 func (s *State) CheckSuspended(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -274,6 +275,39 @@ func (s *State) CheckSuspended(id string) error {
 		return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s", id, a.Suspended, a.SuspendedBy)}
 	}
 	return nil
+}
+
+// ClearAssetSuspension lifts, durably, the suspension of asset that the
+// invocation ref set (C7 0.2, D2-15). It refuses with suspension_mismatch,
+// and changes nothing, when another invocation suspended the asset: a clear
+// names one suspension exactly, so a stale clear cannot lift a later one.
+// An asset that is not suspended is already where the clear would leave
+// it, so that returns nil and writes nothing: a retry after a lost reply,
+// or a clear sent to a reinstalled collector, then succeeds and the node's
+// status settles (A5 on #117). Any reason may be cleared, as on the node;
+// a credential's suspension is separate and not touched.
+func (s *State) ClearAssetSuspension(id, ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	a := s.doc.Assets[id]
+	switch {
+	case a.Suspended == "":
+		return nil
+	case a.SuspendedBy != ref:
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s, not %s", id, a.Suspended, a.SuspendedBy, ref)}
+	}
+	a.Suspended, a.SuspendedBy = "", ""
+	next := s.doc
+	next.Assets = maps.Clone(s.doc.Assets)
+	if a == (assetState{}) {
+		delete(next.Assets, id)
+	} else {
+		next.Assets[id] = a
+	}
+	return s.write(next)
 }
 
 func knownSuspension(r asset.SuspensionReason) bool {

@@ -10,6 +10,7 @@ import (
 
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/register"
+	"otsec.local/otsec/contracts/version"
 )
 
 // MaxRequestBytes bounds one collector request on the wire.
@@ -24,6 +25,7 @@ const (
 	KindCredentialInstall   RequestKind = "credential.install"
 	KindCredentialRevoke    RequestKind = "credential.revoke"
 	KindCredentialClearSusp RequestKind = "credential.clear_suspension"
+	KindAssetClearSusp      RequestKind = "asset.clear_suspension" // since 0.2
 	maxParams                           = 8
 	maxParamValueLen                    = 64
 	requestIDPatternSrc                 = `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`
@@ -33,7 +35,14 @@ const (
 var (
 	requestIDPattern = regexp.MustCompile(requestIDPatternSrc)
 	paramNamePattern = regexp.MustCompile(paramNamePatternSrc)
+	// invocationRefPattern is a C2 invocation ID, a lowercase UUID.
+	// TODO(C2): C2 imports this package, so the pattern is a copy.
+	invocationRefPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
+
+// kindSince is the minor that added a request kind; absent means 0.1. A
+// request stamped with an earlier minor cannot ask for it.
+var kindSince = map[RequestKind]int{KindAssetClearSusp: 2}
 
 // CollectorRequest is the only message the main process sends to the
 // collector. It is strict: decode it with DecodeRequest, never with a lenient
@@ -49,6 +58,7 @@ type CollectorRequest struct {
 	CredentialInstall   *CredentialInstallBody   `json:"credential_install,omitempty"`
 	CredentialRevoke    *CredentialRevokeBody    `json:"credential_revoke,omitempty"`
 	CredentialClearSusp *CredentialClearSuspBody `json:"credential_clear_suspension,omitempty"`
+	AssetClearSusp      *AssetClearSuspBody      `json:"asset_clear_suspension,omitempty"`
 }
 
 // RunBody asks the collector to run one C3 operation on one enrolled asset.
@@ -82,6 +92,23 @@ type CredentialClearSuspBody struct {
 	Version uint32 `json:"version"`
 }
 
+// AssetClearSuspBody asks the collector to clear its own suspension of one
+// asset (0.2, D2-15). The node sends it on its own behalf, after it has
+// recorded its own asset.suspension_clear from the administrator's
+// clear-suspension.json. The collector does not take the request's word
+// for it: it reads the same administrator file itself and clears only when
+// the body, the file and the invocation that suspended the asset all name
+// the same asset and ref. Anything else is refused with
+// suspension_mismatch and changes nothing. A clear of an asset the
+// collector does not hold suspended, with a matching file, is accepted and
+// changes nothing, so a retry after a lost reply settles. It never touches a credential's
+// suspension, and credential.clear_suspension never touches an asset's.
+type AssetClearSuspBody struct {
+	AssetID string `json:"asset_id"`
+	// Ref is the C2 invocation ID whose outcome suspended the asset.
+	Ref string `json:"ref"`
+}
+
 // RefusalCode is the closed set of reasons the collector refuses a request.
 // A reader that meets a code it does not know treats it as RefuseUnknown.
 type RefusalCode string
@@ -106,6 +133,7 @@ const (
 	RefuseRateLimited        RefusalCode = "rate_limited"                // minimum interval or failed-auth floor not elapsed
 	RefuseSecretRejected     RefusalCode = "secret_rejected"             // write-time validation failed
 	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
+	RefuseSuspensionMismatch RefusalCode = "suspension_mismatch"         // since 0.2: the asset is not suspended by ref, or the administrator's file is absent, refused or names another
 	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
@@ -115,7 +143,7 @@ var RefusalCodes = []RefusalCode{
 	RefusePrincipal, RefuseUnknownOperation, RefuseNotInvocable, RefuseBadParams,
 	RefuseAssetNotEnrolled, RefuseCredentialMismatch, RefuseCredentialUnusable,
 	RefuseRegisterUnverified, RefuseRegisterVersion, RefusePolicyVersion, RefuseBusy,
-	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseUnknown,
+	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseUnknown,
 }
 
 // Normalize maps an unknown code to RefuseUnknown.
@@ -172,7 +200,7 @@ type CollectorReply struct {
 // or unknown counts as not accepted, and so does a reply with no collector
 // sequence number, because its decision could not be accounted for in audit.
 func (r CollectorReply) Accepted() bool {
-	return r.Contract == ContractID && r.Status == ReplyAccepted && r.Refusal == nil && r.CollectorSeq != 0
+	return AcceptsContract(r.Contract) && r.Status == ReplyAccepted && r.Refusal == nil && r.CollectorSeq != 0
 }
 
 // DecodeRequest decodes and validates one request strictly. Every error is a
@@ -197,7 +225,7 @@ func DecodeRequest(data []byte) (*CollectorRequest, error) {
 // Validate checks a request's syntax and principal rules. It does not consult
 // the register; ValidateAgainst does that.
 func (r *CollectorRequest) Validate() error {
-	if r.Contract != ContractID {
+	if !AcceptsContract(r.Contract) {
 		return refuse(RefuseContract, "contract %q", r.Contract)
 	}
 	if !requestIDPattern.MatchString(r.RequestID) {
@@ -210,13 +238,18 @@ func (r *CollectorRequest) Validate() error {
 		return refuse(RefuseInvalid, "policy_version must be at least 1")
 	}
 	set := 0
-	for _, present := range []bool{r.Run != nil, r.CredentialInstall != nil, r.CredentialRevoke != nil, r.CredentialClearSusp != nil} {
+	for _, present := range []bool{r.Run != nil, r.CredentialInstall != nil, r.CredentialRevoke != nil, r.CredentialClearSusp != nil, r.AssetClearSusp != nil} {
 		if present {
 			set++
 		}
 	}
 	if set != 1 {
 		return refuse(RefuseInvalid, "exactly one body must be set, got %d", set)
+	}
+	if since, ok := kindSince[r.Kind]; ok {
+		if got, _ := version.Parse(r.Contract); got.Minor < since {
+			return refuse(RefuseInvalid, "kind %q needs otsec.authz/0.%d or later", r.Kind, since)
+		}
 	}
 	switch r.Kind {
 	case KindRun:
@@ -259,6 +292,22 @@ func (r *CollectorRequest) Validate() error {
 			}
 		default:
 			return refuse(RefuseInvalid, "body does not match kind %q", r.Kind)
+		}
+		return nil
+	case KindAssetClearSusp:
+		if r.AssetClearSusp == nil {
+			return refuse(RefuseInvalid, "kind asset.clear_suspension needs an asset_clear_suspension body")
+		}
+		// The node relays the administrator's file (D2-15); a person or a
+		// schedule never asks the collector for it directly.
+		if r.OnBehalfOf.Type != PrincipalNode {
+			return refuse(RefusePrincipal, "asset clear requests come from the node, not %s", r.OnBehalfOf.Type)
+		}
+		if !assetIDPattern.MatchString(r.AssetClearSusp.AssetID) {
+			return refuse(RefuseInvalid, "asset_id")
+		}
+		if !invocationRefPattern.MatchString(r.AssetClearSusp.Ref) {
+			return refuse(RefuseInvalid, "ref")
 		}
 		return nil
 	default:

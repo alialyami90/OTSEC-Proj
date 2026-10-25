@@ -32,6 +32,11 @@ type layout struct {
 	provision   string // collector\state\provision: the installer's first-start marker
 	credentials string // collector\credentials\credentials.json
 	publicKey   string // collector\public\install-key.json: public, the node reads it
+	// admin is config\admin, the administrators' folder the node and the
+	// collector both read and neither writes: owner BA, a protected DACL,
+	// read and traverse for each service (A5, #108). It holds
+	// clear-suspension.json (C7 0.2 asset.clear_suspension).
+	admin string
 }
 
 func newLayout(data string) layout {
@@ -42,6 +47,7 @@ func newLayout(data string) layout {
 		provision:   filepath.Join(c, "state", "provision"),
 		credentials: filepath.Join(c, "credentials", "credentials.json"),
 		publicKey:   filepath.Join(c, "public", "install-key.json"),
+		admin:       filepath.Join(data, "config", "admin"),
 	}
 }
 

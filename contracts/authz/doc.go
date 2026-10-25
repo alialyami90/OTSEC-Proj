@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.1: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.2: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -20,8 +20,9 @@
 //     messages are rejected (contracts/README.md). The only request that can
 //     lead to device I/O is "run", which names a C3 operation ID and an
 //     enrolled asset. It cannot carry a command line, a register change, limits
-//     or a secret. Credential install, revoke and clear-suspension are the only
-//     other kinds, and none of them causes device I/O.
+//     or a secret. Credential install, revoke and clear-suspension, and
+//     (since 0.2) asset.clear_suspension, are the only other kinds, and none
+//     of them causes device I/O.
 //   - Register package verification (VerifyRegisterPackage): Ed25519 only,
 //     release keys from the node's trust anchors, a signed statement that binds
 //     the payload digest and package version, and an anti-rollback floor. Any
@@ -98,6 +99,25 @@
 //   - Suspend reasons are C1's names (SuspendReason). identity-mismatch means
 //     the password went to another device: it cannot be cleared on the same
 //     version (ClearableInPlace), only by rotation or re-commissioning.
+//   - Asset suspensions (0.2, D2-15). A run whose outcome code suspends the
+//     asset (C2 Code.Suspends) is recorded by the collector with the
+//     invocation that set it, and every later run to the asset is refused.
+//     Only asset.clear_suspension lifts it. The node sends it on its own
+//     behalf, after recording its own asset.suspension_clear from the
+//     administrator's clear-suspension.json. The collector reads that file
+//     itself, from the administrators' folder the node and the collector
+//     both read, after checking the folder and the file are writable by
+//     neither service. It clears only when the request, the file and its
+//     own record all name the same asset and invocation. A refused folder,
+//     a missing or malformed file, or a file, request or record naming
+//     another invocation is suspension_mismatch, and nothing changes. A
+//     matching clear of an asset the collector does not hold suspended is
+//     accepted and changes nothing, so a retry after a lost reply, or a
+//     clear sent to a reinstalled collector, settles. So a compromised node cannot lift the collector's
+//     suspension without the administrator's file, and a file planted
+//     without the node's request lifts nothing. The two clears are
+//     separate: asset.clear_suspension never touches a credential's
+//     suspension, and credential.clear_suspension never touches an asset's.
 //   - Audit before act (A1 D1-11). The main process sends a request only after
 //     its C8 collector.request record holds a C5 receipt. With a full or
 //     failed audit store, no request is sent, so collection that uses a
@@ -121,6 +141,15 @@
 // leaves out once the collector reports a later number, but cannot restore
 // it. The compromised process cannot read a stored secret, send a raw line,
 // or use a credential outside its binding.
+//
+// # Versions
+//
+// A reader accepts every minor of major 0 (AcceptsContract,
+// contracts/README.md), and requests stay strict. A request stamped with
+// a minor older than its kind is refused as invalid: asset.clear_suspension
+// needs 0.2. The labels bound into the sealing (the seal AAD and the HKDF
+// info, both "otsec.authz/0.1 ...") are fixed byte strings, not the
+// contract version, and do not change with it.
 //
 // # What it leaves out
 //

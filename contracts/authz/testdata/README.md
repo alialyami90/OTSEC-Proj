@@ -9,8 +9,11 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/valid/credential-install.json` | An admin installs version 2 of a lab-only Telnet credential, as ciphertext sealed to the collector. |
 | `requests/valid/credential-revoke.json` | An admin revokes a credential after rotation. |
 | `requests/valid/credential-clear-suspension.json` | An admin clears a suspension on the exact version they reviewed. |
+| `requests/valid/asset-clear-suspension.json` | 0.2: the node asks the collector to clear its suspension of one asset, naming the invocation that suspended it. The collector still reads the administrator's file itself before it clears. |
 | `requests/invalid/bad_params__line-break-in-param.json` | A parameter value carrying CR LF and a second command. |
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
+| `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
+| `requests/invalid/invalid__asset-clear-suspension-stamped-0.1.json` | An asset clear stamped 0.1, which does not have that kind. |
 | `requests/invalid/invalid__body-does-not-match-kind.json` | Kind `run` with a revoke body. |
 | `requests/invalid/invalid__engineering-purpose.json` | A credential whose purpose is not `collect-readonly`. |
 | `requests/invalid/invalid__params-missing.json` | A run with no `params` object; it must be present, even if empty. |
@@ -23,6 +26,7 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/invalid/malformed__trailing-data.json` | A valid request followed by a second object. |
 | `requests/invalid/oversize__padded-request.json` | A request over 8 KiB. |
 | `requests/invalid/principal_not_permitted__person-asks-for-device-io.json` | A person asks for device I/O directly (AP-15). |
+| `requests/invalid/principal_not_permitted__person-clears-asset-suspension.json` | A person asks the collector to clear an asset suspension directly; only the node relays the administrator's file (D2-15). |
 | `requests/invalid/principal_not_permitted__schedule-installs-credential.json` | A schedule tries to install a credential. |
 | `requests/invalid/unknown_field__case-folded-key.json` | A second `Kind` key next to `kind`. Go's own decoder would let `Kind` overwrite `kind`; the shared strict decoder accepts only exact field names (D1-10). |
 | `requests/invalid/unknown_field__command-at-top-level.json` | A `command` field next to the request. |
