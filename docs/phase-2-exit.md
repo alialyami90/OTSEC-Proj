@@ -115,6 +115,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
   - V-S7's 24-hour soak and its byte-for-byte transcript comparison;
   - V-S18 (central) and V-S20 (OS support).
 - **V-S2 end to end** covers one documented SER example. The criterion asks for three, from two sections.
+- **A database that fails at open stays failed until the node restarts.** C5 says `ModeFailed` needs a restart. Main's store-full run at `9c50395` showed the cost: after a crash, the node's open met `otsec health`'s open during WAL recovery and failed with `SQLITE_BUSY_RECOVERY`, so every run stopped until the next restart. #138 removes that cause by setting `busy_timeout` before any statement that reads the file. A bounded retry of a transient open failure is proposed for Phase 3 (A5), and health shows the failed database meanwhile.
 - **The floor's full 31 minutes** were not run end to end, because that is too long for CI. The tests show the refusals inside the floor.
 - **Hardware.** H-01 to H-15 are written and were not run, as the owner directed.
 
@@ -157,6 +158,23 @@ D2-1 to D2-21 are in `docs/phase2/A1-decisions.md`. These matter most for later 
   - a node or collector at C2 0.3 quarantines a run with `language_probe: "unanswered"`.
 - **Carried from Phase 1:** residual SER loss with repeated keys (D1-17), plaintext Telnet to the relay (lab only, ADR-0005), PEN 32473, and the 31-minute floor on a flaky link.
 
+## Where the eight capabilities stand
+
+The owner asked where each requested capability lands. Nothing has been dropped. Phase 2 built one workflow on purpose, as the brief directs.
+
+| Capability (brief §1) | Phase 2 | Planned |
+| --- | --- | --- |
+| 1.1 Asset management and monitoring | One asset, identified by FID, with suspension, health and last result. No inventory or discovery. | Phase 4, with each new SEL family. |
+| 1.2 Secure engineering and remote access | Not built. The threat model and the Q1 comparison are in Phase 0. | Phase 4, item 3. |
+| 1.3 Configuration and baseline monitoring | Not built. `SHO P 1` is read for posture only. | Phase 4, item 1. |
+| 1.4 Syslog and SER collection | SER retrieval, normalization, evidence and RELP/TLS forwarding, end to end. Receiving device Syslog is designed (C1 listeners, C4, C6) and not built. | Receiving: proposed for Phase 4 beside item 1, as the vendor-neutral path of ADR-0006. |
+| 1.5 Custom IED command framework | The C2 adapter, the signed C3 register, the read-only egress check and the hosted SEL-751 adapter. | Each new family extends it. |
+| 1.6 Intrusion detection and anomaly detection | Not built. Zeek and Suricata are evaluated in Phase 0. | Phase 4, item 4. |
+| 1.7 Modular and additive architecture | Contracts C1 to C8 (Phase 1), two binaries, D2-1's import rule enforced by test. | Done for the slice. |
+| 1.8 Centralized and distributed deployment | Single-site node only, under the SCM. No central role (V-S18). | Phase 4, item 5. |
+
+The Phase 4 order is the brief's recommendation. The owner may reorder it, for example to bring IDS or asset inventory forward.
+
 ## Next coordinated tasks (proposed; the owner decides)
 
 1. **The Windows slice against the installed services** (A5 and A6, on the owner's PC with the owner's UAC approval). Closes gate condition 1.
@@ -164,7 +182,8 @@ D2-1 to D2-21 are in `docs/phase2/A1-decisions.md`. These matter most for later 
 3. **A3's §9 node key store** (A3 with A5). Replaces the D2-12 file resolver.
 4. **An audited quarantine export and a way to clear a halted asset** (A5 with A3).
 5. **V-S8 end to end**: every stored event's raw hash checked against the recording (A6).
-6. **Then Phase 4's first expansion**, in the order the brief recommends, starting with configuration and baseline monitoring, re-ranked by measured risk.
+6. **A bounded retry of a transient open failure** (A5, C5 amendment; A6 contract tests, A3 review): `Resume` from `ModeFailed` only for `store-open-failed` with a busy or locked cause, at most once per tick, with the suspension rebuild before any run and a `store.mode_change` on recovery. Integrity, format and settings failures stay terminal.
+7. **Then Phase 4's first expansion**, in the order the brief recommends, starting with configuration and baseline monitoring, re-ranked by measured risk.
 
 A lab relay, if the owner authorizes one, would let A6 run the H checks and move items from `simulated` to `hardware-verified`.
 
