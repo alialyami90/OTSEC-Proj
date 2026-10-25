@@ -11,7 +11,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | ID | Package | Identifier | Owner | Status (2026-10-24) |
 | --- | --- | --- | --- | --- |
 | C1 | `contracts/asset` | `otsec.asset/0.1` | A2 | Merged (#32). D1-24 `Endpoint.target` pending (A2). |
-| C2 | `contracts/adapter` | `otsec.adapter/0.3` | A2 | Merged (#51). 0.2: `failed.unexpected_password_prompt` and the probe QUI exemption (D2-14). 0.3: `failed.identity_unreadable`, which suspends nothing (A6 on #118). |
+| C2 | `contracts/adapter` | `otsec.adapter/0.4` | A2 | Merged (#51). 0.2: `failed.unexpected_password_prompt` and the probe QUI exemption (D2-14). 0.3: `failed.identity_unreadable`, which suspends nothing (A6 on #118, D2-17). 0.4: the unanswered language probe, reported as `failed.timeout` or `failed.transport_closed` (A6, V-S12). |
 | C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) | Merged (#27, #32); SEL-751 content rev 3. |
 | C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
 | C5 | `contracts/store` | `otsec.store/0.1` | A5 | Merged (#33). |

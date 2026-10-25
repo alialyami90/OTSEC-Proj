@@ -183,6 +183,12 @@ const (
 	ProbeAccepted ProbeOutcome = "accepted"
 	ProbeRejected ProbeOutcome = "rejected"
 	ProbeNotRun   ProbeOutcome = "not-run"
+	// ProbeUnanswered (0.4): the QUI probe was sent and no prompt followed
+	// before the step timed out or the connection closed. Nothing is known
+	// about the port's language, so nothing more is sent (D16), but the code
+	// is failed.timeout or failed.transport_closed, which suspend nothing: a
+	// slow link is not a language fault (A6, V-S12).
+	ProbeUnanswered ProbeOutcome = "unanswered"
 )
 
 // EchoScan is closed.
@@ -285,7 +291,7 @@ var (
 	Directions       = []Direction{Sent, Received}
 	Phases           = []Phase{PhaseProbe, PhaseAuth, PhaseOperate, PhaseClose}
 	RedactionReasons = []RedactionReason{RedactCredential, RedactEcho}
-	ProbeOutcomes    = []ProbeOutcome{ProbeAccepted, ProbeRejected, ProbeNotRun}
+	ProbeOutcomes    = []ProbeOutcome{ProbeAccepted, ProbeRejected, ProbeNotRun, ProbeUnanswered}
 	EchoScans        = []EchoScan{EchoScanPerformed, EchoScanNotApplicable}
 	IdentityResults  = []IdentityResult{IdentityMatch, IdentityMismatch, IdentityNotChecked}
 )
@@ -568,6 +574,12 @@ func (c *check) session(r Result, code Code) {
 	t, s := r.Transcript, r.Session
 	if !contains(ProbeOutcomes, s.LanguageProbe) {
 		c.fail("session.language_probe %q is not a probe outcome", s.LanguageProbe)
+	}
+	if s.LanguageProbe == ProbeUnanswered && c.minor < 4 {
+		c.fail("session.language_probe %q is new in 0.4, so a 0.%d result cannot carry it", s.LanguageProbe, c.minor)
+	}
+	if s.LanguageProbe == ProbeUnanswered && code != FailedTimeout && code != FailedTransportClosed {
+		c.fail("session: an unanswered probe ends with %s or %s", FailedTimeout, FailedTransportClosed)
 	}
 	if !contains(EchoScans, s.EchoScan) {
 		c.fail("session.echo_scan %q is not an echo-scan value", s.EchoScan)

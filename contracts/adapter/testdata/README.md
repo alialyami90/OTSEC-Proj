@@ -25,7 +25,9 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.4 result with a code 0.3 does not know: read as `failed.unknown`.
+- `results/valid/failed.unknown.json`: A 0.5 result with a code 0.4 does not know: read as `failed.unknown`.
+- `results/valid/failed.timeout-probe-unanswered.json`: No reply to the `QUI` probe before the step timeout (0.4, A6 on V-S12): `language_probe` unanswered, nothing more sent, nothing suspended.
+- `results/valid/failed.transport_closed-probe-unanswered.json`: Only the echo of the `QUI` probe, then the connection closed: as above.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
 - `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3). Otherwise as `ok`: records, the serial check and the observations.
 - `results/valid/ok-with-echo.json`: As `ok`, but the relay echoes the password; the echo is redacted too (C-A2-3).
@@ -108,6 +110,10 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/span-includes-stx.json`: The SER header span is widened back over the STX that opens the relay's message (S22 p. 7.28). A record is the text between the framing bytes, never the bytes themselves.
 - `results/invalid/span-on-echo-redaction.json`: An observation span points at the echo redaction.
 - `results/invalid/status-disagrees-with-code.json`: Status failed with a `refused.` code.
+- `results/invalid/probe-unanswered-at-0.3.json`: An unanswered probe in a 0.3 result: the outcome is new in 0.4.
+- `results/invalid/probe-unanswered-as-language-fault.json`: An unanswered probe reported as `refused.language_probe_rejected`.
+- `results/invalid/probe-unanswered-after-a-prompt.json`: A probe reply that ends in `=` claimed as unanswered: the grammar decides it.
+- `results/invalid/probe-unanswered-then-id.json`: `ID` sent after an unanswered probe (D16).
 - `results/invalid/identity-unreadable-at-0.2.json`: `failed.identity_unreadable` in a 0.2 result: the code is new in 0.3.
 - `results/invalid/identity-unreadable-with-mismatch.json`: `failed.identity_unreadable` with a FID that was read and differs: that is `refused.identity_mismatch`.
 - `results/invalid/identity-unreadable-with-match.json`: `failed.identity_unreadable` claiming the FID its unframed reply shows as a match: the code needs identity not-checked.

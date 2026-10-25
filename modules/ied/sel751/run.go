@@ -409,11 +409,21 @@ func (s *session) dialogue() adapter.Code {
 	if code := s.send(adapter.PhaseProbe, "QUI"); code != "" {
 		return code
 	}
-	_, err = s.await(time.Time{}, false)
+	p, err = s.await(time.Time{}, false)
 	rx := s.reply
 	s.commit()
+	if err != nil && p == "" && !errors.Is(err, errTooLarge) {
+		// No prompt before the step timed out or the connection closed:
+		// unanswered, which says nothing about the port's language. Nothing
+		// more is sent (D16), but a slow link is not a language fault, so
+		// the code is the timeout's or the close's (C2 0.4; A6, V-S12).
+		s.facts.LanguageProbe = adapter.ProbeUnanswered
+		code := s.stepFailed(err)
+		s.detail = "no prompt after the QUI language probe; nothing more sent"
+		return code
+	}
 	if !adapter.ProbeReplyAccepted(rx) {
-		// Any reply but the grammar's, a timeout or a closed connection
+		// Any other reply but the grammar's, one past the response budget
 		// included, is a rejected probe: the port's commands are unknown,
 		// so nothing more is sent (D16).
 		s.facts.LanguageProbe = adapter.ProbeRejected

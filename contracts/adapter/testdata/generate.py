@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = "otsec.adapter/0.1"
 SCHEMA_0_2 = "otsec.adapter/0.2"  # results that need a 0.2 rule or code (D2-14)
 SCHEMA_0_3 = "otsec.adapter/0.3"  # results that need a 0.3 code (A6 on #118)
+SCHEMA_0_4 = "otsec.adapter/0.4"  # results that need a 0.4 probe outcome (A6, V-S12)
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 FID = "SEL-751-R501-V0-Z104101-D20260910"       # S22 Table A.1 p. A.2
@@ -443,6 +444,22 @@ def results():
     out["failed.device_error"] = s.result("failed", "failed.device_error", {"result": "match", "items": items},
                                           warnings=[maxacc_warning(s)])
 
+    # No prompt after the QUI probe: a slow link or a closed connection is
+    # not a language fault, so the probe is unanswered and the code suspends
+    # nothing. Nothing more is sent (D16; 0.4, A6 on V-S12).
+    s = Session()
+    s.connect()
+    s.tx("probe", b"QUI\r\n")  # then nothing until the step timeout
+    s.facts["language_probe"] = "unanswered"
+    out["failed.timeout-probe-unanswered"] = s.result("failed", "failed.timeout", schema=SCHEMA_0_4)
+
+    s = Session()
+    s.connect()
+    s.tx("probe", b"QUI\r\n")
+    s.rx("probe", b"QUI\r\n")  # the echo, then the connection closed
+    s.facts["language_probe"] = "unanswered"
+    out["failed.transport_closed-probe-unanswered"] = s.result("failed", "failed.transport_closed", schema=SCHEMA_0_4)
+
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
@@ -494,7 +511,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_4", schema="otsec.adapter/0.4")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_5", schema="otsec.adapter/0.5")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -686,6 +703,31 @@ def invalid_results(good):
     r = copy.deepcopy(good["probe-rejected-at-level1"])
     r["schema"] = SCHEMA
     out["probe-rejected-at-level1-at-0.1"] = r
+
+    # The unanswered probe (0.4): its own minor, only with a timeout or a
+    # close, never after a reply that ends in a prompt, and nothing after it.
+    r = copy.deepcopy(good["failed.timeout-probe-unanswered"])
+    r["schema"] = SCHEMA_0_3
+    out["probe-unanswered-at-0.3"] = r
+
+    r = copy.deepcopy(good["failed.timeout-probe-unanswered"])
+    r["status"], r["error"] = "refused", {"code": "refused.language_probe_rejected"}
+    out["probe-unanswered-as-language-fault"] = r
+
+    s = Session()
+    s.connect()
+    s.tx("probe", b"QUI\r\n")
+    s.rx("probe", framed(b"QUI\r\n", b"Comando no valido\r\n", b"="))  # answered, off the grammar
+    s.facts["language_probe"] = "unanswered"
+    out["probe-unanswered-after-a-prompt"] = s.result("failed", "failed.timeout", schema=SCHEMA_0_4)
+
+    s = Session()
+    s.connect()
+    s.tx("probe", b"QUI\r\n")
+    s.rx("probe", b"QUI\r\n")
+    s.tx("probe", b"ID\r\n")
+    s.facts["language_probe"] = "unanswered"
+    out["probe-unanswered-then-id"] = s.result("failed", "failed.timeout", schema=SCHEMA_0_4)
 
     # failed.identity_unreadable (0.3): its own minor, identity not-checked,
     # and ID the last line sent, after an accepted probe.
