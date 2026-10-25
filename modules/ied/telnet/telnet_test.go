@@ -263,3 +263,77 @@ func TestNewRefusesBadConfig(t *testing.T) {
 		t.Error("nil connection accepted")
 	}
 }
+
+// A read deadline that expires is reported and ends nothing: the adapter
+// waits out the quiet interval after a prompt with short deadlines.
+func TestReadTimeoutKeepsSession(t *testing.T) {
+	near, far := net.Pipe()
+	defer far.Close()
+	c, err := New(near, Config{MaxReceived: 64, MaxCommands: 4, Egress: allow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	buf := make([]byte, 8)
+	_ = c.SetDeadline(time.Now().Add(10 * time.Millisecond))
+	if _, err := c.Read(buf); !isTimeout(err) {
+		t.Fatalf("error %v, want a timeout", err)
+	}
+	go far.Write([]byte("=>"))
+	_ = c.SetDeadline(time.Now().Add(time.Second))
+	n, err := c.Read(buf)
+	if err != nil || string(buf[:n]) != "=>" {
+		t.Fatalf("after a timeout: %q, %v", buf[:n], err)
+	}
+	go func() { _ = far.Close() }()
+	if _, err := c.Read(buf); err == nil || isTimeout(err) {
+		t.Fatalf("after the peer closed: %v, want the session ended", err)
+	}
+	if _, err := c.Read(buf); err == nil {
+		t.Fatal("a closed session read again")
+	}
+}
+
+// The wake is one bare line end, once, and only before anything else.
+func TestSendWake(t *testing.T) {
+	c, f := session(t, Config{})
+	if err := c.SendWake(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendWake(); !errors.Is(err, ErrEgress) {
+		t.Errorf("second wake: %v", err)
+	}
+	if f.wrote.String() != "\r\n" || f.writes != 1 {
+		t.Errorf("wrote %q in %d writes", f.wrote.String(), f.writes)
+	}
+
+	c, f = session(t, Config{})
+	if err := c.Send([]byte("QUI\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendWake(); !errors.Is(err, ErrEgress) {
+		t.Errorf("wake after a line: %v", err)
+	}
+	c, _ = session(t, Config{})
+	if err := c.SendSecret([]byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SendWake(); !errors.Is(err, ErrEgress) {
+		t.Errorf("wake after the secret: %v", err)
+	}
+	if f.wrote.String() != "QUI\r\n" {
+		t.Errorf("wrote %q", f.wrote.String())
+	}
+
+	// Refusals written while reading do not count as a line.
+	c, f = session(t, Config{}, []byte{cmdIAC, cmdDO, 1, 'x'})
+	if n, err := c.Read(make([]byte, 4)); n != 1 || err != nil {
+		t.Fatalf("read %d, %v", n, err)
+	}
+	if err := c.SendWake(); err != nil {
+		t.Errorf("wake after a refusal: %v", err)
+	}
+	if want := string([]byte{cmdIAC, cmdWONT, 1}) + "\r\n"; f.wrote.String() != want {
+		t.Errorf("wrote %q, want %q", f.wrote.String(), want)
+	}
+}

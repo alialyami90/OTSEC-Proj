@@ -91,7 +91,7 @@ func New(node, storeDir string) *Config {
 		CollectorPipe:      pipe,
 		CollectorPeer:      peer,
 		PolicyVersion:      3,
-		RegisterVersion:    2,
+		RegisterVersion:    3,
 		TLSDir:             filepath.Join(filepath.Dir(storeDir), "tls"),
 		CollectorPublicDir: filepath.Join(filepath.Dir(storeDir), "collector-public"),
 	}

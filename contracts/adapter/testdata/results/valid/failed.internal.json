@@ -6,14 +6,14 @@
     "id": "sel-751-ascii",
     "version": "0.1.0-example"
   },
-  "register_version": 2,
+  "register_version": 3,
   "target": "simulated",
   "status": "failed",
   "started_at": "2026-10-24T09:15:00.0Z",
-  "ended_at": "2026-10-24T09:15:00.4Z",
+  "ended_at": "2026-10-24T09:15:00.6Z",
   "transcript": {
-    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz0=",
-    "sha256": "a24ab70aa732c1320086da1d35cdc98d825b0f85a77a48528f5a4469348642cf",
+    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPQ==",
+    "sha256": "c58a620b5402317347c41441fd37a0025f8df72e66c55558864a41a392f1242d",
     "segments": [
       {
         "offset": 0,
@@ -42,6 +42,20 @@
         "dir": "rx",
         "phase": "probe",
         "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 113,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 117,
+        "length": 205,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.5Z"
       }
     ],
     "redactions": []
@@ -57,7 +71,18 @@
     "quit_sent": false
   },
   "identity": {
-    "result": "not-checked"
+    "result": "match",
+    "items": [
+      {
+        "name": "firmware_id",
+        "expected": "SEL-751-R501-V0-Z104101-D20260910",
+        "observed": "SEL-751-R501-V0-Z104101-D20260910",
+        "span": {
+          "offset": 127,
+          "length": 33
+        }
+      }
+    ]
   },
   "error": {
     "code": "failed.internal"

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorwire"
 )
@@ -30,8 +31,10 @@ var ErrStateUnavailable = errors.New("collector: durable state unavailable")
 
 // State is the collector's durable state (A3 credential design, section 3;
 // D1-20 as amended): the collector_seq counter; per asset the time of the
-// last unconfirmed authentication, the TIDLE last read from it and the time
-// of the last run that connected to it; per register family the
+// last unconfirmed authentication, the TIDLE last read from it, the time
+// of the last run that connected to it and a suspension a run set on it;
+// when the state was created, which starts a failed-auth floor on every
+// asset; per register family the
 // anti-rollback floor (C3-A3-4); and the times of recent credential installs
 // (the install budget).
 //
@@ -54,11 +57,15 @@ type State struct {
 }
 
 type stateDoc struct {
-	Format       string                 `json:"format"`
-	CollectorSeq uint64                 `json:"collector_seq"` // the last number handed out; 0 before the first
-	Assets       map[string]assetState  `json:"assets"`
-	Families     map[string]familyFloor `json:"families,omitempty"`
-	Installs     []string               `json:"installs,omitempty"` // RFC 3339 UTC times of recent installs, oldest first
+	Format       string `json:"format"`
+	CollectorSeq uint64 `json:"collector_seq"` // the last number handed out; 0 before the first
+	// CreatedUTC is when InitState created the file. Every asset is inside
+	// a failed-auth floor from then (CheckFloor), so a reinstall never
+	// shortens a floor the previous state held (A1, collector_seq reset).
+	CreatedUTC string                 `json:"created_utc"`
+	Assets     map[string]assetState  `json:"assets"`
+	Families   map[string]familyFloor `json:"families,omitempty"`
+	Installs   []string               `json:"installs,omitempty"` // RFC 3339 UTC times of recent installs, oldest first
 	// CredGeneration is the highest credential store generation this
 	// collector has written or opened; an older store is a restored copy
 	// and is refused (A6 on #90).
@@ -80,18 +87,28 @@ type assetState struct {
 	// LastRunUTC is when the last accepted run to the asset began, for the
 	// profile's minimum interval.
 	LastRunUTC string `json:"last_run_utc,omitempty"`
+	// Suspended is the C1 reason a run's outcome code set on the asset
+	// (adapter.Code.Suspends), and SuspendedBy the invocation; empty when
+	// none. Runs to the asset are refused until it is cleared.
+	Suspended   asset.SuspensionReason `json:"suspended,omitempty"`
+	SuspendedBy string                 `json:"suspended_by,omitempty"`
 }
 
 // MaxStateBytes bounds the state file. One asset entry is about 100 bytes,
 // so this holds tens of thousands of assets, far beyond one node.
 const MaxStateBytes = 4 << 20
 
-// InitState creates the state file at path. It refuses to overwrite an
-// existing file. The installer calls it once (A5, platform/winsvc); its
-// directory must already carry the collector's protected DACL (W-4) or, on
-// Linux, mode 0700.
-func InitState(path string) error {
-	b, err := json.Marshal(stateDoc{Format: StateFormat, Assets: map[string]assetState{}})
+// InitState creates the state file at path, recording now as its creation
+// time. It refuses to overwrite an existing file. The collector calls it once,
+// at its first start (cmd/otsec-collector, provision); the directory must
+// already carry the collector's protected DACL (W-4) or, on Linux, mode 0700.
+//
+// A fresh state does not know what the previous one held: an ACC left
+// unconfirmed, or a suspension. So every asset is inside the longest
+// failed-auth floor (31 minutes with TIDLE unknown) from now, and the new
+// collector authenticates to nothing before that has passed.
+func InitState(path string, now time.Time) error {
+	b, err := json.Marshal(stateDoc{Format: StateFormat, CreatedUTC: now.UTC().Format(time.RFC3339Nano), Assets: map[string]assetState{}})
 	if err != nil {
 		return err
 	}
@@ -147,6 +164,9 @@ func OpenState(path string, now func() time.Time) (*State, error) {
 }
 
 func checkStateDoc(doc stateDoc) error {
+	if _, err := time.Parse(time.RFC3339Nano, doc.CreatedUTC); err != nil {
+		return fmt.Errorf("created_utc: %v", err)
+	}
 	for id, a := range doc.Assets {
 		for _, ts := range []string{a.UnconfirmedAuthUTC, a.LastRunUTC} {
 			if ts == "" {
@@ -158,6 +178,9 @@ func checkStateDoc(doc stateDoc) error {
 		}
 		if a.TIDLESeconds < 0 {
 			return fmt.Errorf("asset %s: negative TIDLE", id)
+		}
+		if (a.Suspended == "") != (a.SuspendedBy == "") || (a.Suspended != "" && !knownSuspension(a.Suspended)) {
+			return fmt.Errorf("asset %s: suspension %q by %q is not a known reason with its invocation", id, a.Suspended, a.SuspendedBy)
 		}
 	}
 	for fam, f := range doc.Families {
@@ -209,15 +232,57 @@ func (s *State) CheckFloor(asset string) error {
 		return s.broken
 	}
 	a := s.doc.Assets[asset]
-	if a.UnconfirmedAuthUTC == "" {
-		return nil
-	}
-	t, _ := time.Parse(time.RFC3339Nano, a.UnconfirmedAuthUTC) // checked on open and on write
 	floor := authz.FailureFloor(time.Duration(a.TIDLESeconds) * time.Second)
-	if authz.InsideFailureFloor(t, s.now(), floor) {
-		return &authz.Refusal{Code: authz.RefuseRateLimited, Detail: fmt.Sprintf("failed-auth floor of %s from %s", floor, a.UnconfirmedAuthUTC)}
+	for _, from := range []string{a.UnconfirmedAuthUTC, s.doc.CreatedUTC} {
+		if from == "" {
+			continue
+		}
+		t, _ := time.Parse(time.RFC3339Nano, from) // checked on open and on write
+		if authz.InsideFailureFloor(t, s.now(), floor) {
+			return &authz.Refusal{Code: authz.RefuseRateLimited, Detail: fmt.Sprintf("failed-auth floor of %s from %s", floor, from)}
+		}
 	}
 	return nil
+}
+
+// SuspendAsset records, durably, that the outcome of invocation set reason
+// on asset (adapter.Code.Suspends). An existing suspension keeps its reason,
+// except that identity-mismatch replaces any other, as for credentials.
+// Nothing in C7 0.1 clears it: only a fresh state does, after its floor
+// (docs/phase2/A3-collector.md, open items).
+func (s *State) SuspendAsset(id string, reason asset.SuspensionReason, invocation string) error {
+	if !knownSuspension(reason) || invocation == "" {
+		return fmt.Errorf("collector: suspend asset %s: reason %q by %q", id, reason, invocation)
+	}
+	return s.update(id, func(a *assetState) {
+		if a.Suspended == "" || reason == asset.SuspendIdentityMismatch {
+			a.Suspended, a.SuspendedBy = reason, invocation
+		}
+	})
+}
+
+// CheckSuspended returns nil when no run has suspended asset, a refusal with
+// asset_not_enrolled when one has (C7 0.1 has no code for it; a 0.2
+// candidate), and ErrStateUnavailable when the state is broken.
+func (s *State) CheckSuspended(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	if a := s.doc.Assets[id]; a.Suspended != "" {
+		return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s", id, a.Suspended, a.SuspendedBy)}
+	}
+	return nil
+}
+
+func knownSuspension(r asset.SuspensionReason) bool {
+	switch r {
+	case asset.SuspendIdentityMismatch, asset.SuspendAuthFailed, asset.SuspendPasswordPromptAbsent,
+		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel, asset.SuspendOperator:
+		return true
+	}
+	return false
 }
 
 // BeginAuth records, durably, that ACC is about to be sent to asset. The

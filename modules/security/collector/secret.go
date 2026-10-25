@@ -23,10 +23,11 @@ var (
 // Go cannot promise that no other copy exists (design section 10); the
 // handle keeps the window short.
 type SecretHandle struct {
-	mu     sync.Mutex
-	b      []byte
-	used   bool
-	closed bool
+	mu      sync.Mutex
+	b       []byte
+	used    bool
+	scanned bool // EchoSpans has seen the first reply after Use
+	closed  bool
 }
 
 // Use calls f once with a copy of the secret, and wipes the copy when f
@@ -49,9 +50,28 @@ func (h *SecretHandle) Use(f func(secret []byte) error) error {
 	return f(c)
 }
 
+// minPartialEcho is the shortest leading part of the secret that EchoSpans
+// redacts at the end of a cut reply.
+const minPartialEcho = 3
+
 // EchoSpans returns the non-overlapping ranges of rx that equal the secret,
-// as half-open [start, end) offsets, so the adapter can redact each one. It
-// returns nil once the handle is closed.
+// as half-open [start, end) offsets, so the adapter can redact each one.
+//
+// The first reply after Use, the reply to the password line, can also end
+// inside an echo, when it was cut by the response budget, a timeout or a
+// close. For that reply only, a trailing run of at least minPartialEcho bytes
+// that equals the start of the secret is returned too. Later replies get
+// whole matches only: a partial match on device data would redact it, and
+// the redaction would show the secret's first bytes (A6 on #106). The first
+// reply is the first call after Use, which is how the SEL-751 adapter calls
+// it (#99: every non-empty reply once the secret is sent, in order).
+//
+// A reply that ends in a prompt was not cut, so its tail is never treated as
+// a partial echo: no partial match is returned when rx, without trailing
+// spaces, NUL, XON and XOFF, ends in "=", ">" or "?", the last byte of every
+// SEL prompt (=, =>, =>>, Password: ?). A cut echo that ends in one of those
+// bytes is then not redacted; that, and a cut shorter than minPartialEcho,
+// is what this leaves. It returns nil once the handle is closed.
 func (h *SecretHandle) EchoSpans(rx []byte) [][2]int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -59,7 +79,8 @@ func (h *SecretHandle) EchoSpans(rx []byte) [][2]int {
 		return nil
 	}
 	var spans [][2]int
-	for off := 0; off <= len(rx)-len(h.b); {
+	off := 0
+	for off <= len(rx)-len(h.b) {
 		i := bytes.Index(rx[off:], h.b)
 		if i < 0 {
 			break
@@ -67,7 +88,34 @@ func (h *SecretHandle) EchoSpans(rx []byte) [][2]int {
 		spans = append(spans, [2]int{off + i, off + i + len(h.b)})
 		off += i + len(h.b)
 	}
+	first := h.used && !h.scanned
+	if h.used {
+		h.scanned = true
+	}
+	if !first || endsInPromptByte(rx) {
+		return spans
+	}
+	for n := min(len(h.b)-1, len(rx)-off); n >= minPartialEcho; n-- {
+		if bytes.Equal(rx[len(rx)-n:], h.b[:n]) {
+			spans = append(spans, [2]int{len(rx) - n, len(rx)})
+			break
+		}
+	}
 	return spans
+}
+
+// endsInPromptByte reports whether rx, without trailing spaces, NUL, XON and
+// XOFF, ends in the last byte of a SEL prompt.
+func endsInPromptByte(rx []byte) bool {
+	t := bytes.TrimRight(rx, " \x00\x11\x13")
+	if len(t) == 0 {
+		return false
+	}
+	switch t[len(t)-1] {
+	case '=', '>', '?':
+		return true
+	}
+	return false
 }
 
 // Close wipes the secret. It is safe to call more than once.

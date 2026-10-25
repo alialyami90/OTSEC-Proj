@@ -28,8 +28,16 @@
 //     then CR LF, in one Write. Config.Egress does not see it, since no
 //     register line can match a password; the adapter calls it only from its
 //     credential slot (HR-3, C-17), and the transport refuses a second call.
+//   - SendWake writes one bare CR LF, the line end that wakes a port that
+//     printed nothing on connect. It is allowed once, and only before any
+//     other line, so it can never follow a prompt it would answer (C2: the
+//     wake is first, once, and only into silence).
 //   - The refusals are the only other bytes it writes: three bytes each,
 //     IAC WONT x or IAC DONT x, written from inside Read.
+//
+// A read that times out ends nothing: the caller sets short deadlines to
+// wait for the quiet interval after a prompt, so a timeout is returned and
+// the session goes on. Any other read error ends the session.
 //
 // What it leaves out: options, subnegotiation, urgent data (the Synch
 // signal's data mark is discarded like any other command), and concurrency.
@@ -103,6 +111,7 @@ type Conn struct {
 	pending    []byte           // data decoded but not yet returned
 	readBuf    []byte
 	secretSent bool
+	wrote      bool // a line, the wake or the secret was written
 }
 
 type parseState int
@@ -146,6 +155,12 @@ func (c *Conn) Read(p []byte) (int, error) {
 			}
 		}
 		if err != nil && c.err == nil {
+			if isTimeout(err) {
+				if len(c.pending) > 0 {
+					break
+				}
+				return 0, err
+			}
 			c.err = err
 		}
 	}
@@ -302,7 +317,19 @@ func (c *Conn) SendSecret(secret []byte) error {
 	return c.write(b)
 }
 
+// SendWake writes CR LF, once, before any other line or the secret.
+func (c *Conn) SendWake() error {
+	if c.err != nil {
+		return c.err
+	}
+	if c.wrote {
+		return fmt.Errorf("%w: the wake is sent once, before any other line", ErrEgress)
+	}
+	return c.write([]byte("\r\n"))
+}
+
 func (c *Conn) write(b []byte) error {
+	c.wrote = true
 	n, err := c.nc.Write(b)
 	if err == nil && n != len(b) {
 		err = fmt.Errorf("telnet: short write, %d of %d bytes", n, len(b))
@@ -332,6 +359,11 @@ func printable(b []byte) error {
 		}
 	}
 	return nil
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // SetDeadline sets the read and write deadline of the socket.
