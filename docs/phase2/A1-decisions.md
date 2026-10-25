@@ -291,6 +291,20 @@ The only way out was a collector reinstall. That fails closed, but the cause was
 
 **Evidence: simulated.** A6 ran it end to end on the real binaries with the node killed mid-run: the node adopted the suspension, and one administrator file cleared both sides.
 
+## D2-19: A probe with no reply suspends nothing (C2 0.4)
+
+**Context (A6 V-S12, A2 #133):** A6's end-to-end run delayed every reply by 20 s against a 15 s step timeout. Up to C2 0.3 the adapter reported a probe with no reply as `refused.language_probe_rejected`. That suspended the asset as `language-not-english` until an administrator cleared it. The same delay later in the session gives `failed.timeout`, which suspends nothing. A slow link is not evidence of a Spanish port.
+
+**Ruling:** C2 becomes `otsec.adapter/0.4`, with a fourth probe outcome, `unanswered`. A2 owns C2, A1 approved the change, and A3 (suspension path) and A6 (safety) reviewed it.
+- **When it applies.** No prompt follows `QUI` before the step times out or the connection closes. Part of a reply with no prompt counts too, because the grammar needs the whole reply and a prompt ends one.
+- **What it does.** The code is `failed.timeout` or `failed.transport_closed`, and neither suspends anything. `QUI` is the last line sent (D16), and C2 checks that. The floor is untouched, because this happens before `ACC`.
+- **Unchanged.** A reply that ends in a prompt is judged by the grammar, and one outside it still gives `refused.language_probe_rejected` and suspends (D2-17). A reply past the response budget is still a rejected probe (A6's requested test, which kills the mutant that would change this).
+- **A repeat** sends only the wake and `QUI` at Level 0, at the schedule's rate. ADR-0005 found no Spanish command that begins with `QUI`. A port that really is Spanish gives its full reply on a later run, and the grammar rejects it. The cost is some failed runs before the suspension, and no line is ever sent outside the register (A6). `collection-repeated-failure` after 3 failures makes the repeats visible.
+- **Versioning.** A 0.3 reader rejects `language_probe: "unanswered"`, because the enum is closed. A node or collector rolled back on its own would quarantine such a run. The first release that carries this says so, beside D2-20's rollback note.
+- **Open for V-S12 (A6 with A5):** health shows `failed.timeout` for both a late device and a hung `SER`. The result's detail tells them apart, but health does not show it.
+
+**Evidence: simulated.** A6 ran the late-device case on the PR's binaries: `failed.timeout`, no suspension, no `asset-suspended` alarm. 6 of 8 mutants were killed, one survivor was equivalent, and the other was killed by the added test (A1 re-ran it). Whether a real relay's QUI reply matches the grammar remains H-12.
+
 ## D2-20: The failed-auth floor holds from ACC until QUI (amends D1-20)
 
 **Context (A6 on D2-16, A3 #131):** D1-20 cleared the floor on `=>`. A6 killed the collector after `=>` and before QUI. Nothing was left in the state, but the relay may hold Level 1 until `TIDLE` after the last line. On main the next session landed on the open level 61 s later, and only the adapter's `refused.session_elevated` stopped it.
