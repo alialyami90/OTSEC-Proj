@@ -423,8 +423,10 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 	out, err := normalize.Normalize(o.Result, inv, a, normalize.Input{Node: s.rt.cfg.NodeID, Stream: event.Stream(stream),
 		HealthStream: event.Stream(HealthStream), ClockResolutionNS: rx.ResolutionNS, Clock: rx.Clock, Prev: prev})
 	if err != nil {
-		// A refused result is kept as quarantine, never as events.
+		// A refused result is kept as quarantine, never as events, and
+		// its detail is not kept: it did not pass every check (A1 on #135).
 		rep.Outcome = "quarantined"
+		rep.Detail = ""
 		s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, err.Error(), false)
 		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
 		return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the normalizer refused the result; kept as quarantine")

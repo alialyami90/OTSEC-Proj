@@ -560,10 +560,11 @@ func TestNormalizerRefusalEndsWithOneHealthEvent(t *testing.T) {
 	defer r.Close()
 	f := &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
 		return collectorclient.Response{Reply: accepted(req, 1),
-			Outcome: &collectorclient.Outcome{InvocationID: "inv-refused", ResultJSON: []byte(`{}`)}}, nil
+			Outcome: &collectorclient.Outcome{InvocationID: "inv-refused", ResultJSON: []byte(`{}`),
+				Result: adapter.Result{Error: &adapter.Error{Code: adapter.FailedTimeout, Detail: "read timed out"}}}}, nil
 	}}
 	s := newScheduler(t, r, f)
-	if rep := s.RunOnce(bg, 0); rep.Outcome != "quarantined" || rep.Alarm != AlarmResultRefused {
+	if rep := s.RunOnce(bg, 0); rep.Outcome != "quarantined" || rep.Alarm != AlarmResultRefused || rep.Detail != "" {
 		t.Fatalf("%+v", rep)
 	}
 	if n, _ := r.Store(QuarantineStream(relayID)).LastCommitted(bg, QuarantineStream(relayID)); n != 2 {
