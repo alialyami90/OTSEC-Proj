@@ -247,3 +247,21 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 - **An endpoint with no path, or an unknown one, is refused like a port server** once the field exists (A2).
 - **A reported TIDLE counts only from an `ok` or `partial` run**, because the serial check comes after `SHO P 1` (A2, A3 on #114).
 - **Gate item:** the C1 path field and the port-server rule are owed before the first `device-observed` endpoint, together with the admin-signed C7 requests (D2-15).
+
+## D2-17: An ID reply the adapter cannot read suspends nothing (C2 0.3)
+
+**Context (A6 on #118, A2 #122):** A6's end-to-end run fed the simulator's `ID` reply without its STX and ETX frame. `sel751` reported `refused.identity_mismatch`, and the asset was suspended until an administrator cleared it. A reply the adapter cannot read is not evidence of another device.
+
+**Ruling:** C2 becomes `otsec.adapter/0.3` with `failed.identity_unreadable`. A2 owns C2, A1 approves the change, and A3 (the suspension path) and A6 (safety) review it.
+- **When it applies.** The ID reply has no STX and ETX frame, prints a key twice, has no FID line, or has an empty FID. A FID visible in unframed text is neither accepted nor called a mismatch: the adapter does not read unframed text.
+- **What it does.**
+  - It is decided before auth. ACC is never sent and no credential is used.
+  - Identity is `not-checked`, and the reply bytes stay in the transcript.
+  - It suspends neither the asset nor the credential. A repeat sends only the Level 0 wake, `QUI` and `ID`, which are read-only register lines, at the schedule's rate.
+  - The floor and QUI behaviour are unchanged.
+- **`refused.identity_mismatch` keeps its suspension** and now covers only a FID that was read and differs.
+- **Not silent.** Every run reports the failure. The node's `otsec health` is to show each asset's last code and consecutive failures, so a relay that never frames `ID` is visible (A5).
+- **`refused.language_probe_rejected` keeps its suspension** on an unreadable QUI reply. A port that may not be English risks commands meaning something else, as with register rev 3's Spanish state-changing mnemonics (ADR-0005).
+- **Versioning.** Results of 0.1 and 0.2 validate unchanged. A 0.2 result cannot carry the new code. The `failed.unknown` example moves to 0.4.
+
+**Evidence: simulated.** Whether a relay or a port server ever strips the `ID` frame is for H-12 and H-13. If one does, the frame rule changes, and this ruling changes with it.
