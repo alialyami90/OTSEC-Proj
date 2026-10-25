@@ -115,7 +115,7 @@ func TestCheckLinesRefuses(t *testing.T) {
 		"two lines":           {replaceSegment(base, ser, []byte("SER\r\nSER\r\n")), "one line with one line end"},
 		"ID in auth":          {replaceSegment(base, sentSegment(t, base, PhaseAuth, "ACC"), []byte("ID\r\n")), "may not be sent in phase auth"},
 		"ACC in probe":        {replaceSegment(base, sentSegment(t, base, PhaseProbe, "ID"), []byte("ACC\r\n")), "may not be sent in phase probe"},
-		"register revision":   {func() Result { r := base; r.RegisterVersion = 1; return r }(), "package is revision 2"},
+		"register revision":   {func() Result { r := base; r.RegisterVersion = 1; return r }(), "package is revision 3"},
 		"other invocation ID": {func() Result { r := base; r.InvocationID = "00000000-0000-4000-8000-000000000000"; return r }(), "is for invocation"},
 	}
 	// Nothing the platform sends can carry a framing or flow-control byte:

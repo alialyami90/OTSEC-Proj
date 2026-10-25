@@ -121,9 +121,9 @@ func TestContentDecidesLikePhase0(t *testing.T) {
 	}
 }
 
-// TestContentAllowlistUnchanged: the lines the collector may send, and the
-// lines it refuses, are the Phase 0 ones. Only citations, evidence and the
-// classification of the deny-by-default SER rule change.
+// TestContentAllowlistUnchanged: the lines the collector may send are the
+// Phase 0 ones, and every line Phase 0 refuses is still refused. Deny rules
+// only grow (TestContentDenyRulesOnlyGrow).
 func TestContentAllowlistUnchanged(t *testing.T) {
 	old, p := load(t), loadContent(t)
 	strip := func(o Operation) Operation { o.Citations, o.Notes = nil, ""; return o }
@@ -141,14 +141,7 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 	if !reflect.DeepEqual(old.Preconditions, p.Preconditions) || !reflect.DeepEqual(old.Warnings, p.Warnings) {
 		t.Error("preconditions or warnings changed")
 	}
-	if len(old.Denied) != len(p.Denied) {
-		t.Fatalf("%d deny rules, want %d", len(p.Denied), len(old.Denied))
-	}
-	for i, d := range p.Denied {
-		o := old.Denied[i]
-		if d.ID != o.ID || d.Pattern != o.Pattern || d.AccessLevel != o.AccessLevel {
-			t.Errorf("deny rule %s changed", o.ID)
-		}
+	for _, d := range p.Denied {
 		if d.ID == "sel.ser.other_args" {
 			if d.Classification != Unknown || d.Evidence.Class != DocumentedUntested {
 				t.Errorf("sel.ser.other_args: %s, %s", d.Classification, d.Evidence.Class)
@@ -156,8 +149,6 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 			if d.Citations[0].Source != "S22" {
 				t.Errorf("sel.ser.other_args cites %s", d.Citations[0].Source)
 			}
-		} else if d.Classification != o.Classification {
-			t.Errorf("deny rule %s reclassified", d.ID)
 		}
 	}
 	for _, s := range p.Sources {
@@ -178,5 +169,280 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 		if v, _ := m.Match(l); v != VerdictOperation && v != VerdictSessionControl {
 			t.Errorf("allow corpus %q classified %s", l, v)
 		}
+	}
+}
+
+// rev2 is revision 2 as signed, pinned for the rollback floor and for these
+// comparisons.
+func loadRev2(t *testing.T) *Package {
+	t.Helper()
+	data, err := os.ReadFile("testdata/sel-751-rev2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Decode(data)
+	if err != nil || p.Revision != 2 {
+		t.Fatalf("revision 2: %v", err)
+	}
+	return p
+}
+
+// TestContentDenyRulesOnlyGrow: revision 3 keeps every revision 2 deny rule,
+// in the same order, with its classification, access level and citations.
+// Only the listed rules gain Spanish forms, and only the listed rules are new.
+func TestContentDenyRulesOnlyGrow(t *testing.T) {
+	old, p := loadRev2(t), loadContent(t)
+	if p.Revision != 3 {
+		t.Fatalf("revision %d, want 3", p.Revision)
+	}
+	extended := map[string]bool{
+		"sel.disconnect": true, "sel.breaker.ope": true, "sel.settings.set": true, "sel.clock.set": true,
+		"sel.tar.reset": true, "sel.sta.args": true, "sel.breaker.data": true, "sel.his.clear": true,
+		"sel.ldp.clear": true, "sel.ser.clear": true,
+	}
+	added := map[string]bool{
+		"sel.breaker.clo.es": true, "sel.settings.group.es": true, "sel.met.reset.es": true,
+		"sel.unapproved.command": true,
+	}
+	byID := map[string]DenyRule{}
+	var order []string
+	for _, d := range p.Denied {
+		byID[d.ID] = d
+		if !added[d.ID] {
+			order = append(order, d.ID)
+		}
+		if added[d.ID] && d.Evidence.Class != DocumentedUntested {
+			t.Errorf("%s: evidence %s, want documented-untested", d.ID, d.Evidence.Class)
+		}
+	}
+	if len(p.Denied) != len(old.Denied)+len(added) {
+		t.Errorf("%d deny rules, want %d", len(p.Denied), len(old.Denied)+len(added))
+	}
+	if p.Denied[len(p.Denied)-1].ID != "sel.unapproved.command" {
+		t.Error("sel.unapproved.command is not last, so a state-changing form could report it")
+	}
+	for i, o := range old.Denied {
+		d, ok := byID[o.ID]
+		if !ok || order[i] != o.ID {
+			t.Errorf("deny rule %s is gone or moved", o.ID)
+			continue
+		}
+		if d.Classification != o.Classification || d.AccessLevel != o.AccessLevel || d.SideEffects != o.SideEffects ||
+			d.Evidence != o.Evidence {
+			t.Errorf("deny rule %s reclassified", o.ID)
+		}
+		if !reflect.DeepEqual(d.Citations[:len(o.Citations)], o.Citations) {
+			t.Errorf("deny rule %s lost a citation", o.ID)
+		}
+		if (d.Pattern != o.Pattern) != extended[o.ID] {
+			t.Errorf("deny rule %s: pattern %q, was %q", o.ID, d.Pattern, o.Pattern)
+		}
+	}
+	for id := range added {
+		if _, ok := byID[id]; !ok {
+			t.Errorf("deny rule %s missing", id)
+		}
+	}
+	// Every line revision 2 refuses, revision 3 refuses.
+	m2, _ := NewMatcher(old)
+	m3, err := NewMatcher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := corpus(t, "sel-deny-corpus.txt")
+	for _, w := range commandForms {
+		lines = append(lines, w.form)
+	}
+	for _, l := range lines {
+		v2, _ := m2.Match(l)
+		v3, id := m3.Match(l)
+		if v2 == VerdictDenied && v3 != VerdictDenied {
+			t.Errorf("%q: revision 2 denies it, revision 3 gives %s %s", l, v3, id)
+		}
+	}
+}
+
+// formKind says what the register must make of a documented form.
+type formKind int
+
+const (
+	approved formKind = iota // an approved line: operation or session line
+	changes                  // changes state: denied by a state-changing rule
+	other                    // any other form: denied, or for a word with an approved line, at least not permitted
+)
+
+// commandForms is every documented form of S22 that the tests check: the
+// Relay Command Summary (pages 1 to 9 at the end of the manual, English and
+// Spanish columns) and Table C.2 (Compressed ASCII). Placeholders in the
+// manual (n, m, k, date, filename) are filled with sample values. A form is
+// listed once even where English and Spanish print it alike.
+var commandForms = []struct {
+	form, lang, page string
+	kind             formKind
+}{
+	// Access Level 0.
+	{"ACC", "en es", "1", approved}, {"ID", "en es", "1", approved}, {"QUI", "en", "1", approved},
+	{"QUIT", "en", "1", other}, {"SAL", "es", "1", other},
+	// Access Level 1.
+	{"2AC", "en es", "1", changes},
+	{"BRE", "en", "1", other}, {"INT", "es", "1", other},
+	{"CEV", "en es", "1", other}, {"CEV 1", "en es", "1", other}, {"CEV 1 R", "en es", "1", other},
+	{"CEV HIF 1", "en es", "1", other},
+	{"COM A", "en es", "1", other}, {"COM B", "en es", "1", other},
+	{"COM C", "en es", "2", changes}, {"COM C A", "en es", "2", changes}, {"COM C B", "en es", "2", changes},
+	{"COM L A", "en es", "2", other}, {"COM PTP", "en es", "2", other},
+	{"COM PTP C", "en es", "2", changes}, {"COM PTP R", "en es", "2", changes},
+	{"COM S A", "en es", "2", other}, {"COM S B", "en es", "2", other},
+	{"COU", "en es", "2", other}, {"COU 5", "en es", "2", other},
+	{"DATE", "en", "2", other}, {"DATE 10/25/2026", "en", "2", changes},
+	{"FEC", "es", "2", other}, {"FEC 25/10/2026", "es", "2", changes},
+	{"ETH", "en es", "2", other},
+	{"EVE", "en es", "2", other}, {"EVE 1", "en es", "2", other}, {"EVE 1 R", "en es", "2", other},
+	{"FIL DIR", "en es", "2", changes}, {"FIL READ SET_1.TXT", "en es", "2", changes},
+	{"FIL SHOW SET_1.TXT", "en es", "3", changes},
+	{"FGS", "en es", "3", other}, {"FGS 1", "en es", "3", other}, {"FGS S", "en es", "3", other},
+	{"FGS S 1 L", "en es", "3", other}, {"FGS S 1 C", "en es", "3", changes}, {"FGS S ALL C", "en es", "3", changes},
+	{"GOOSE", "en es", "3", other}, {"GOOSE S ALL L", "en es", "3", other},
+	{"GOOSE S 1 C", "en es", "3", changes}, {"GOOSE S ALL C", "en es", "3", changes},
+	{"GROUP", "en", "3", other}, {"GRUPO", "es", "3", other},
+	{"HELP", "en", "3", other}, {"AYUDA", "es", "3", other},
+	{"HIS", "en es", "4", other}, {"HIS 5", "en es", "4", other}, {"HIS 50INC", "en es", "4", other},
+	{"HIS C", "en", "4", changes}, {"HIS R", "en es", "4", changes}, {"HIS D", "es", "4", changes},
+	{"HIS HIF 1", "en es", "4", other}, {"HIS HIF C", "en", "4", changes}, {"HIS HIF R", "en es", "4", changes},
+	{"HIS HIF D", "es", "4", changes}, {"HIS HIF CA", "en", "4", changes}, {"HIS HIF RA", "en", "4", changes},
+	{"HIS HIF DT", "es", "4", changes}, {"HIS HIF RT", "es", "4", changes},
+	{"HIS IGF", "en es", "4", other}, {"HIS IGF C", "en es", "4", changes},
+	{"HSG", "en es", "4", other}, {"HSR", "en es", "4", other}, {"IRIG", "en es", "4", changes},
+	{"LDP", "en es", "4", other}, {"LDP 1 10", "en es", "4", other},
+	{"LDP C", "en", "4", changes}, {"LDP D", "es", "4", changes},
+	{"LOG HIF 1", "en es", "4", other}, {"MAC", "en es", "4", other},
+	{"MET", "en", "4", other}, {"MET F", "en", "4", other}, {"MET 5", "en", "4", other}, {"MET AI", "en", "4", other},
+	{"MED", "es", "4", other}, {"MED EA", "es", "4", other},
+	{"MET DE", "en", "5", other}, {"MET T", "en", "5", other}, {"MED A", "es", "5", other}, {"MED V", "es", "5", other},
+	{"MET RD", "en", "5", changes}, {"MET RE", "en", "5", changes}, {"MET RM", "en", "5", changes},
+	{"MET RP", "en", "5", changes},
+	{"MED RD", "es", "5", changes}, {"MED RE", "es", "5", changes}, {"MED RM", "es", "5", changes},
+	{"MED RP", "es", "5", changes},
+	{"PING 192.0.2.1 5", "en es", "5", changes},
+	{"PRP", "en es", "5", other}, {"RSTP", "en es", "5", other},
+	{"SER", "en es", "5", approved}, {"SER 10/01/2026", "en es", "5", other},
+	{"SER 10/01/2026 10/25/2026", "en es", "6", other}, {"SER 5", "en es", "6", other},
+	{"SER 1 10", "en es", "6", other},
+	{"SER C", "en", "6", changes}, {"SER R", "en es", "6", changes}, {"SER D", "en es", "6", changes},
+	{"SER B", "es", "6", other},
+	{"SHO 1", "en", "6", other}, {"SHO G", "en", "6", approved}, {"SHO P 1", "en", "6", approved},
+	{"SHO P 2", "en", "6", other}, {"SHO R", "en", "6", other},
+	{"MOS 1", "es", "6", other}, {"MOS G", "es", "6", other}, {"MOS P 1", "es", "6", other},
+	{"STA", "en", "6", other}, {"STA S", "en", "6", changes}, {"EST", "es", "6", other}, {"EST S", "es", "6", changes},
+	{"SUM", "en es", "6", other}, {"SUM 1", "en es", "6", other}, {"SUM HIF 1", "en es", "6", other},
+	{"SUM C", "en es", "6", changes}, {"SUM R", "en es", "6", changes},
+	{"TAR", "en", "6", other}, {"TAR 1", "en", "6", other}, {"BAN", "es", "6", other}, {"BAN 1", "es", "6", other},
+	{"TAR R", "en", "7", changes}, {"BAN R", "es", "7", changes},
+	{"TIME", "en", "7", other}, {"TIME 12:00:00", "en", "7", changes},
+	{"HORA", "es", "7", other}, {"HORA 12:00:00", "es", "7", changes},
+	{"TRI", "en es", "7", changes}, {"TRI HIF", "en es", "7", changes},
+	// Access Level 2.
+	{"89C 1", "en es", "7", changes}, {"89C 1 2", "en es", "7", changes},
+	{"89O 1", "en", "7", changes}, {"89O 1 2", "en", "7", changes},
+	{"89A 1", "es", "7", changes}, {"89A 1 2", "es", "7", changes},
+	{"AFT", "en es", "7", changes}, {"ANA 1 50 10", "en es", "7", changes},
+	{"BRE R", "en", "7", changes}, {"BRE W", "en", "7", changes},
+	{"INT R", "es", "7", changes}, {"INT W", "es", "7", changes},
+	{"CAL", "en es", "7", changes}, {"CLO", "en", "7", changes}, {"CER", "es", "7", changes},
+	{"CON RB01 1", "en es", "7", changes},
+	{"COPY 1 2", "en es", "8", changes}, {"FIL WRITE SET_1.TXT", "en es", "8", changes},
+	{"GROUP 2", "en", "8", changes}, {"GRUPO 2", "es", "8", changes},
+	{"HSR C", "en es", "8", changes}, {"INI HIF", "en es", "8", changes}, {"L_D", "en es", "8", changes},
+	{"LOO", "en es", "8", changes}, {"LOO A", "en es", "8", changes}, {"LOO R", "en es", "8", changes},
+	{"OPE", "en", "8", changes}, {"ABR", "es", "8", changes},
+	{"PARTNO", "en es", "8", changes}, {"PAS 1", "en es", "8", changes}, {"PAS 2", "en es", "8", changes},
+	{"PUL OUT101", "en es", "8", changes}, {"PUL OUT101 5", "en es", "8", changes}, {"R_S", "en es", "8", changes},
+	{"SET 1", "en", "8", changes}, {"SET P 1", "en", "9", changes}, {"SET G TERSE", "en", "9", changes},
+	{"AJU 1", "es", "8", changes}, {"AJU P 1", "es", "9", changes}, {"AJU G TERSO", "es", "9", changes},
+	{"STA C", "en", "9", changes}, {"STA R", "en", "9", changes}, {"EST C", "es", "9", changes},
+	{"EST R", "es", "9", changes},
+	{"TEST DB A 1", "en es", "9", changes}, {"THE P", "en es", "9", changes}, {"THE R", "en es", "9", changes},
+	{"VEC D", "en es", "9", other}, {"VEC E", "en es", "9", other},
+	// Access Level C.
+	{"PAS C", "en es", "9", changes},
+	// Compressed ASCII (Table C.2).
+	{"BNAME", "en", "C.2", other}, {"CASCII", "en", "C.2", changes}, {"CBRE", "en", "C.2", other},
+	{"CEVENT", "en", "C.2", other}, {"CHISTORY", "en", "C.2", other}, {"CLDP", "en", "C.2", other},
+	{"CMETER", "en", "C.2", other}, {"CSE", "en", "C.2", changes}, {"CSTATUS", "en", "C.2", other},
+	{"CSUMMARY", "en", "C.2", other}, {"DNAME", "en", "C.2", other}, {"SNS", "en", "C.2", other},
+}
+
+// TestContentCommandForms: no documented form is permitted except the
+// approved lines; every form that changes state, English or Spanish, is
+// denied by a state-changing rule; and every other form is denied, except
+// the other forms of a word that has an approved line, which stay unlisted.
+// Lower-case forms decide the same way, since the relay accepts both.
+func TestContentCommandForms(t *testing.T) {
+	p := loadContent(t)
+	m, err := NewMatcher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	class := map[string]Classification{}
+	for _, d := range p.Denied {
+		class[d.ID] = d.Classification
+	}
+	hasApproved := map[string]bool{"ACC": true, "ID": true, "QUI": true, "SHO": true, "SER": true}
+	for _, w := range commandForms {
+		v, id := m.Match(w.form)
+		switch w.kind {
+		case approved:
+			if v != VerdictOperation && v != VerdictSessionControl {
+				t.Errorf("%s (p.%s): %s %s, want an approved line", w.form, w.page, v, id)
+			}
+			continue
+		case changes:
+			if v != VerdictDenied || class[id] != StateChanging {
+				t.Errorf("%s (%s p.%s): %s %s, want a state-changing deny rule", w.form, w.lang, w.page, v, id)
+			}
+		case other:
+			word := strings.Fields(w.form)[0]
+			if len(word) > 3 {
+				word = word[:3]
+			}
+			if v != VerdictDenied && !(hasApproved[word] && v == VerdictUnlisted) {
+				t.Errorf("%s (%s p.%s): %s %s, want denied", w.form, w.lang, w.page, v, id)
+			}
+		}
+		if lv, lid := m.Match(strings.ToLower(w.form)); lv != v || lid != id {
+			t.Errorf("%s in lower case: %s %s, upper case %s %s", w.form, lv, lid, v, id)
+		}
+	}
+}
+
+// TestContentApprovedLinesPermitted: every line the SEL-751 dialogue sends is
+// still permitted in its phase and matches no deny rule: the wake (an empty
+// line), the QUI probe, ID before ACC, ACC, the operate reads and QUI at the
+// close (docs/phase2/A2-sel751.md).
+func TestContentApprovedLinesPermitted(t *testing.T) {
+	p := loadContent(t)
+	m, err := NewMatcher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		ph   Phase
+		line string
+	}{
+		{PhaseProbe, "QUI"}, {PhaseProbe, "ID"}, {PhaseAuth, "ACC"},
+		{PhaseOperate, "ID"}, {PhaseOperate, "SHO P 1"}, {PhaseOperate, "SHO G"}, {PhaseOperate, "SER"},
+		{PhaseClose, "QUI"},
+	} {
+		if _, id, err := m.Permit(c.ph, c.line); err != nil {
+			t.Errorf("%s in %s: %v (%s)", c.line, c.ph, err, id)
+		}
+		if id := m.denied(c.line); id != "" {
+			t.Errorf("%s matches deny rule %s", c.line, id)
+		}
+	}
+	// The wake is not a register line (telnet.Conn.SendWake sends it), but
+	// no rule may deny it either.
+	if id := m.denied(""); id != "" {
+		t.Errorf("the empty wake line matches deny rule %s", id)
 	}
 }
