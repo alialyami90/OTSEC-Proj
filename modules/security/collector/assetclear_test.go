@@ -138,8 +138,8 @@ func TestAssetClearPrincipal(t *testing.T) {
 
 // TestAssetClear: the request, the file and the suspension match, so the
 // suspension is lifted durably and the next run reaches the runner. A
-// repeat of the same clear then lifts nothing, and a planted file alone
-// never did.
+// planted file alone never lifted it, and the same clear does not lift a
+// later suspension.
 func TestAssetClear(t *testing.T) {
 	file := &adminFile{b: clearFileFor(testAsset, suspendingRun)}
 	f := suspendedPipeline(t, file)
@@ -161,9 +161,38 @@ func TestAssetClear(t *testing.T) {
 	if reply, _ := f.run(t, pipeRun("sel.id", "")); !reply.Accepted() || f.runner.count() != 1 {
 		t.Fatalf("run after the clear: %+v", reply)
 	}
-	again, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun))
-	if refusalOf(again) != authz.RefuseSuspensionMismatch || !strings.Contains(again.Refusal.Detail, "not suspended") {
+	// A retry after a lost reply: the asset is already clear, so it is
+	// accepted and changes nothing (A5 on #117).
+	if again, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun)); !again.Accepted() {
 		t.Fatalf("repeat: %+v", again)
+	}
+	if err := f.state.CheckSuspended(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	// A run suspends the asset again: the old clear, file and request
+	// alike, does not lift the new suspension.
+	if err := f.state.SuspendAsset(testAsset, asset.SuspendAuthFailed, laterRun); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun)); refusalOf(again) != authz.RefuseSuspensionMismatch {
+		t.Fatalf("old clear after a new suspension: %+v", again)
+	}
+	f.stillSuspended(t, laterRun)
+}
+
+// TestAssetClearReinstalled: a reinstalled collector holds no suspensions,
+// so a clear that matches the administrator's file is accepted and the
+// node's "collector still suspended" status can settle (A5 on #117). A
+// request that does not match the file is still refused.
+func TestAssetClearReinstalled(t *testing.T) {
+	f := newPipeline(t, func(c *PipelineConfig, _ *pipeFixture) {
+		c.ReadClearFile = (&adminFile{b: clearFileFor(testAsset, suspendingRun)}).read
+	})
+	if reply, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun)); !reply.Accepted() {
+		t.Fatalf("clear on a state without the suspension: %+v", reply)
+	}
+	if reply, _ := f.pipe.Handle(context.Background(), clearRequest(testAsset, laterRun)); refusalOf(reply) != authz.RefuseSuspensionMismatch {
+		t.Fatalf("request not matching the file: %+v", reply)
 	}
 }
 
@@ -213,7 +242,7 @@ func TestAssetAndCredentialClearsAreSeparate(t *testing.T) {
 func TestClearAssetSuspensionState(t *testing.T) {
 	_, state, _ := newState(t)
 	var r *authz.Refusal
-	if err := state.ClearAssetSuspension(testAsset, suspendingRun); !errors.As(err, &r) || r.Code != authz.RefuseSuspensionMismatch {
+	if err := state.ClearAssetSuspension(testAsset, suspendingRun); err != nil {
 		t.Fatalf("clear of an asset not suspended: %v", err)
 	}
 	if err := state.SuspendAsset(testAsset, asset.SuspendPasswordPromptAbsent, suspendingRun); err != nil {

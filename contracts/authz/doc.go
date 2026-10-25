@@ -109,9 +109,11 @@
 //     both read, after checking the folder and the file are writable by
 //     neither service. It clears only when the request, the file and its
 //     own record all name the same asset and invocation. A refused folder,
-//     a missing or malformed file, a file or request naming another
-//     invocation, or an asset not suspended is suspension_mismatch, and
-//     nothing changes. So a compromised node cannot lift the collector's
+//     a missing or malformed file, or a file, request or record naming
+//     another invocation is suspension_mismatch, and nothing changes. A
+//     matching clear of an asset the collector does not hold suspended is
+//     accepted and changes nothing, so a retry after a lost reply, or a
+//     clear sent to a reinstalled collector, settles. So a compromised node cannot lift the collector's
 //     suspension without the administrator's file, and a file planted
 //     without the node's request lifts nothing. The two clears are
 //     separate: asset.clear_suspension never touches a credential's

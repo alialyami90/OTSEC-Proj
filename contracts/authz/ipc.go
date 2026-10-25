@@ -99,7 +99,9 @@ type CredentialClearSuspBody struct {
 // for it: it reads the same administrator file itself and clears only when
 // the body, the file and the invocation that suspended the asset all name
 // the same asset and ref. Anything else is refused with
-// suspension_mismatch and changes nothing. It never touches a credential's
+// suspension_mismatch and changes nothing. A clear of an asset the
+// collector does not hold suspended, with a matching file, is accepted and
+// changes nothing, so a retry after a lost reply settles. It never touches a credential's
 // suspension, and credential.clear_suspension never touches an asset's.
 type AssetClearSuspBody struct {
 	AssetID string `json:"asset_id"`

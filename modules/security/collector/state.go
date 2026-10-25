@@ -279,9 +279,12 @@ func (s *State) CheckSuspended(id string) error {
 
 // ClearAssetSuspension lifts, durably, the suspension of asset that the
 // invocation ref set (C7 0.2, D2-15). It refuses with suspension_mismatch,
-// and changes nothing, when the asset is not suspended or another
-// invocation suspended it: a clear names one suspension exactly, so a stale
-// clear cannot lift a later one. Any reason may be cleared, as on the node;
+// and changes nothing, when another invocation suspended the asset: a clear
+// names one suspension exactly, so a stale clear cannot lift a later one.
+// An asset that is not suspended is already where the clear would leave
+// it, so that returns nil and writes nothing: a retry after a lost reply,
+// or a clear sent to a reinstalled collector, then succeeds and the node's
+// status settles (A5 on #117). Any reason may be cleared, as on the node;
 // a credential's suspension is separate and not touched.
 func (s *State) ClearAssetSuspension(id, ref string) error {
 	s.mu.Lock()
@@ -292,7 +295,7 @@ func (s *State) ClearAssetSuspension(id, ref string) error {
 	a := s.doc.Assets[id]
 	switch {
 	case a.Suspended == "":
-		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is not suspended", id)}
+		return nil
 	case a.SuspendedBy != ref:
 		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s, not %s", id, a.Suspended, a.SuspendedBy, ref)}
 	}
