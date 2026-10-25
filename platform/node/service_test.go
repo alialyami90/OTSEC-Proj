@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +19,14 @@ func TestRunStartsAndStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, c, func(string) {}) }()
+	// The OS log carries the alarm that says why a record was not
+	// written: service.stop was missing once under go test -race ./...,
+	// and 120 runs of this test alone did not reproduce it.
+	var logMu sync.Mutex
+	var oslog []string
+	go func() {
+		done <- Run(ctx, c, func(l string) { logMu.Lock(); oslog = append(oslog, l); logMu.Unlock() })
+	}()
 	var st StatusFile
 	var err error
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
@@ -37,7 +45,9 @@ func TestRunStartsAndStops(t *testing.T) {
 	defer r.Close()
 	acts := auditActions(t, r)
 	if count(acts, audit.ActionServiceStart) != 2 || count(acts, audit.ActionServiceStop) != 1 {
-		t.Fatalf("audit: %v", acts)
+		logMu.Lock()
+		defer logMu.Unlock()
+		t.Fatalf("audit: %v; OS log: %q", acts, oslog)
 	}
 	if ep := CollectorEndpoint(c); ep.Address != c.CollectorPipe || ep.Peer == "" {
 		t.Fatalf("collector endpoint %+v", ep)

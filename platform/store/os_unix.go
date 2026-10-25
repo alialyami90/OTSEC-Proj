@@ -125,6 +125,10 @@ func readProtectedFor(path string, max int64, readers []string) ([]byte, error) 
 	})
 }
 
+func readPublic(path string, max int64) ([]byte, error) { return readModeChecked(path, max, nil) }
+
+// readModeChecked opens path and applies mode to its permission bits; a
+// nil mode is a public file, whose mode is not checked.
 func readModeChecked(path string, max int64, mode func(os.FileMode) error) ([]byte, error) {
 	// O_NOFOLLOW refuses a link; O_NONBLOCK keeps a FIFO from blocking the
 	// open, and the handle check below refuses it.
@@ -141,13 +145,15 @@ func readModeChecked(path string, max int64, mode func(os.FileMode) error) ([]by
 	if !st.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
-	if err := mode(st.Mode().Perm()); err != nil {
-		return nil, err
-	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Nlink > 1 {
-		// As on Windows (A6 on #108): a hard link would carry a file from
-		// another path into the checked directory.
-		return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, sys.Nlink)
+	if mode != nil {
+		if err := mode(st.Mode().Perm()); err != nil {
+			return nil, err
+		}
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok && sys.Nlink > 1 {
+			// As on Windows (A6 on #108): a hard link would carry a file
+			// from another path into the checked directory.
+			return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, sys.Nlink)
+		}
 	}
 	if st.Size() > max {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)

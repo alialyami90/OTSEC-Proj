@@ -63,6 +63,11 @@ type Config struct {
 	// README). The node only reads it. Empty means no such file is read,
 	// so a suspension cannot be cleared.
 	AdminDir string `json:"admin_dir,omitempty"`
+	// CollectorPublicDir is where the collector publishes its
+	// install-key.json (A3 #106). The node reads the key before every
+	// request to find a reinstall (D2-15). Required when anything is
+	// scheduled.
+	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 
 	assets  []asset.Asset
 	targets []*syslog.Target
@@ -270,6 +275,12 @@ func (c *Config) check() error {
 	}
 	if c.AdminDir != "" && !filepath.IsAbs(c.AdminDir) {
 		fail("admin_dir %q is not an absolute path", c.AdminDir)
+	}
+	if c.CollectorPublicDir != "" && !filepath.IsAbs(c.CollectorPublicDir) {
+		fail("collector_public_dir %q is not an absolute path", c.CollectorPublicDir)
+	}
+	if len(c.Schedule) > 0 && c.CollectorPublicDir == "" {
+		fail("collector_public_dir is required when anything is scheduled: the node reads the collector's install key before every request")
 	}
 
 	schedules := map[string]bool{}

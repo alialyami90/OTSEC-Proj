@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/adapter"
@@ -163,6 +164,7 @@ type session struct {
 	records          []adapter.Record
 	mismatch         string // the attribute that differed
 	detail           string
+	tidleReported    bool // Config.TIDLE was called (at most once per run)
 }
 
 func (s *session) run() adapter.Code {
@@ -611,6 +613,7 @@ func (s *session) read(id string) adapter.Code {
 		s.detail = "the settings reply does not parse"
 		return adapter.FailedDeviceError
 	}
+	s.reportTIDLE(set)
 	whole := adapter.Span{Offset: msg.off, Length: int64(len(msg.text))}
 	for _, w := range p.Warnings {
 		if w.ReadBy != id {
@@ -633,6 +636,37 @@ func (s *session) read(id string) adapter.Code {
 		}
 	}
 	return ""
+}
+
+// reportTIDLE hands the port's Telnet time-out to the collector, once, when
+// the same reply shows LANG := ENGLISH, the register's language precondition,
+// and TIDLE is 1 to 30 minutes, digits only (S22 Table 4.104).
+func (s *session) reportTIDLE(set map[string]setting) {
+	if s.cfg.TIDLE == nil || s.tidleReported || !s.english(set) {
+		return
+	}
+	v, ok := set["TIDLE"]
+	if !ok || len(v.value) == 0 || len(v.value) > 2 || strings.Trim(v.value, "0123456789") != "" {
+		return
+	}
+	n, _ := strconv.Atoi(v.value)
+	if n < 1 || n > 30 {
+		return
+	}
+	s.tidleReported = true
+	s.cfg.TIDLE(time.Duration(n) * time.Minute)
+}
+
+// english reports whether these settings show LANG := ENGLISH and the
+// register makes that a precondition (ADR-0005).
+func (s *session) english(set map[string]setting) bool {
+	for _, c := range s.cfg.Register.Preconditions {
+		if c.Setting == "LANG" && c.Equals == "ENGLISH" {
+			v, ok := set["LANG"]
+			return ok && v.value == "ENGLISH"
+		}
+	}
+	return false
 }
 
 // operate runs the invocation's operation and reads its reply.

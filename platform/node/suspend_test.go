@@ -173,7 +173,7 @@ func TestUnknownSuspensionsHoldEverything(t *testing.T) {
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
-	if err := writeSuspensions(filepath.Join(c.Store.Dir, SuspensionsFileName), 1<<40, nil, nil); err != nil {
+	if err := writeSuspensions(filepath.Join(c.Store.Dir, SuspensionsFileName), 1<<40, nil, nil, collectorState{}); err != nil {
 		t.Fatal(err)
 	}
 	col := suspendingCollector(t, false)

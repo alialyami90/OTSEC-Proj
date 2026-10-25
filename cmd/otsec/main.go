@@ -321,6 +321,15 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		sp := st.Suspensions[a]
 		fmt.Fprintf(w, "SUSPENDED %s: %s since %s; cleared only by an administrator naming ref %s\n", safe(a), safe(string(sp.Reason)), safe(sp.Since), safe(sp.Ref))
 	}
+	if c := st.Collector; c != nil {
+		fmt.Fprintf(w, "collector install key: trusted %s, collector_seq high %d\n", safe(keyOrNone(c.TrustedKey)), c.High)
+		if c.OpenResetKey != "" {
+			fmt.Fprintf(w, "COLLECTOR RESET: new install key %s beside trusted %s; nothing is sent until an administrator confirms its fingerprint and acknowledges it\n", safe(c.OpenResetKey), safe(keyOrNone(c.TrustedKey)))
+		}
+		if c.Restored {
+			fmt.Fprintln(w, "COLLECTOR RESTORED: collector_seq went back under the trusted key; nothing is sent, and this is not acknowledged")
+		}
+	}
 	names := make([]string, 0, len(st.Targets))
 	for n := range st.Targets {
 		names = append(names, n)
@@ -388,4 +397,11 @@ func sortedDBs(m map[c5.DatabaseID]c5.Mode) []c5.DatabaseID {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+func keyOrNone(k string) string {
+	if k == "" {
+		return "(none)"
+	}
+	return k
 }

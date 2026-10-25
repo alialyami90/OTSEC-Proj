@@ -48,6 +48,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `collector_pipe` | Where the collector listens | `\\.\pipe\<name>` on Windows; an absolute socket path on Linux |
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
 | `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config` |
+| `collector_public_dir` | Where the collector publishes `install-key.json` (A3 #106); the node reads it before every request (D2-15) | absolute; required when anything is scheduled. The installer requires `OTSEC\collector\public` |
 | `tls_dir` | The directory holding the files the targets' TLS references name (D2-12, lab only) | absolute; required when a target names a reference. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
 
@@ -117,6 +118,18 @@ The node keeps its own copy of the C1 suspension each run's outcome code sets (`
   - The node never clears on its own.
   - Once `otsec health` no longer lists the suspension, the administrator removes `clear-suspension.json`. The node cannot delete it, and a file left in place names a cleared ref, so it changes nothing and raises `asset-suspension-clear-refused` once (A3 on #107).
 - **Interim.** The file is the Phase 2 interim. Before any `device-observed` endpoint, the clear becomes an admin-signed C7 0.2 request (D2-11, D2-15).
+
+## Collector reset (D2-15)
+
+A reinstall that loses the collector's stores starts its `collector_seq` again at 1 and loses its failed-auth floors. The node finds it and holds every credentialed request until an administrator acknowledges it (C8 0.2, `docs/phase2/A3-c8-seq-reset.md`). The state follows from the audit stream and is kept in the checkpoint beside the suspensions, so it survives a restart.
+
+- **The trusted key.** At its first start (or first 0.2 start) the node writes `collector.install_key` with the collector's key before its first request. After that, each acknowledged reset sets it.
+- **Before every request** the node reads `install-key.json` in `collector_public_dir` with `store.ReadPublicFile`: a regular file, not a link or device, at most 4 KiB, schema `otsec.collector.install_key/0.1` with `key_id`, `public_key` and `fingerprint`, nothing else. The key ID and the fingerprint must both be derived from the public key (`seal.InstallKey.PublicKeyBytes`, `seal.Fingerprint`), so the key ID an administrator acknowledges is the key whose fingerprint they confirmed (A3 on #109). On Windows it is opened shared for delete, so the collector can rename a new one over it. Any read error holds every request (`collector-install-key-unreadable`). A key the node has trusted or recorded a reset to before is a restore of old stores or another process, never a reinstall, since a reinstall makes a new key: it writes nothing, sends nothing and cannot be acknowledged (`collector-restored`; A3, A6 and A1 on #109). Any other key the node does not trust is a reinstall: it writes `collector.seq_reset` (`previous_high`, the new `install_key_id`, no `first_seen`) and sends nothing (`collector-reset`).
+- **The backstop.** A reply numbered at or below the highest `collector_seq` of the current epoch is a reset. If the key changed since the check before the request, `collector.seq_reset` with `first_seen` goes first in that reply's audit batch. If it did not, it is a restore of old collector stores or an impostor (`collector-restored`): nothing more is sent, and no acknowledgement lifts it. Only a reinstall with a new key, which is a reset, does. The same holds when the key cannot be read at that point: the reply's records are applied under the trusted key and read as a restore. That is the safe reading, and the chain then fails `audit.VerifyCollectorSeq` there even if it was really a reinstall (A3 on #109).
+- **Acknowledging.** After confirming the new key's fingerprint (T-12) and reviewing the suspensions and the active register revisions, an administrator writes `seq-reset-ack.json` in `admin_dir`: `{"schema": "otsec.seq-reset-ack/0.1", "install_key_id": ...}`. It is read like `clear-suspension.json`. Only a file naming the open reset's key, while the collector is still on that key, acknowledges it: the node writes `collector.seq_reset_ack` and resumes. Another key changes nothing and is raised once; a file left from an earlier reset is ignored.
+- **`otsec health`** shows the trusted key and the collector_seq high, and after a reinstall the new key beside the trusted one.
+- **A record the node would not have written** (a reset that keeps the trusted key, an acknowledgement of no open reset, a second trusted key) holds every asset, as a bad suspension record does.
+- **Interim.** The acknowledgement file is the Phase 2 interim; before any `device-observed` endpoint it becomes an admin-signed C7 0.2 request (D2-15).
 
 ## TLS references (D2-12, lab only)
 
