@@ -182,7 +182,7 @@ The Phase 4 order is the brief's recommendation. The owner may reorder it, for e
 3. **A3's §9 node key store** (A3 with A5). Replaces the D2-12 file resolver.
 4. **An audited quarantine export and a way to clear a halted asset** (A5 with A3).
 5. **V-S8 end to end**: every stored event's raw hash checked against the recording (A6).
-6. **A bounded retry of a transient open failure** (A5, C5 amendment; A6 contract tests, A3 review): `Resume` from `ModeFailed` only for `store-open-failed` with a busy or locked cause, at most once per tick, with the suspension rebuild before any run and a `store.mode_change` on recovery. Integrity, format and settings failures stay terminal.
+6. **A bounded retry of a transient open failure** (A5, C5 amendment; A6 contract tests, A3 review; brief in `docs/phase2/A5-p3-failed-open-retry.md`): `Resume` from `ModeFailed` only for `store-open-failed` with a busy or locked cause, at most once per tick, with the suspension rebuild before any run and a `store.mode_change` on recovery. Integrity, format and settings failures stay terminal.
 7. **Then Phase 4's first expansion**, in the order the brief recommends, starting with configuration and baseline monitoring, re-ranked by measured risk.
 
 A lab relay, if the owner authorizes one, would let A6 run the H checks and move items from `simulated` to `hardware-verified`.
