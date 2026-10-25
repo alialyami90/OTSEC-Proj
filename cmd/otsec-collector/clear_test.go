@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorclient"
@@ -80,7 +80,7 @@ func TestServeAssetClear(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SuspendAsset(assetID, asset.SuspendAuthFailed, ref); err != nil {
+	if err := st.SuspendAsset(assetID, adapter.FailedAuthRejected, ref); err != nil {
 		t.Fatal(err)
 	}
 	clearFile := `{"schema":"` + collector.ClearSuspensionSchema + `","asset_id":"` + assetID + `","ref":"` + ref + `"}`

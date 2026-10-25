@@ -781,8 +781,13 @@ func TestOutcomeCodeSuspends(t *testing.T) {
 	f.runner.result = readFixture(t, "result-ok.json")
 	f.clock.t = f.clock.t.Add(time.Hour) // past the interval and any floor
 	reply, _ := f.run(t, pipeRun("sel.id", ""))
-	if refusalOf(reply) != authz.RefuseAssetNotEnrolled || !strings.Contains(reply.Refusal.Detail, "suspended (unexpected-access-level)") {
+	if refusalOf(reply) != authz.RefuseAssetSuspended || !strings.Contains(reply.Refusal.Detail, "suspended (unexpected-access-level)") {
 		t.Fatalf("run to a suspended asset: %+v", reply)
+	}
+	// The refusal names the suspension, so a node that never recorded it
+	// can adopt it (C7 0.3, A6 on #120).
+	if h, err := reply.HeldSuspension(); err != nil || h == nil || h.Reason != asset.SuspendUnexpectedLevel || h.Ref != f.runner.plans[0].Invocation.InvocationID || h.Code != string(adapter.FailedUnexpectedLevel) {
+		t.Fatalf("held suspension %+v, %v", h, err)
 	}
 	if f.runner.count() != 1 {
 		t.Fatal("the run to the suspended asset reached the runner")
@@ -831,7 +836,7 @@ func TestOutcomeCodeSuspendsInvalidResult(t *testing.T) {
 			f.runner.result = readFixture(t, "result-ok.json")
 			f.clock.t = f.clock.t.Add(time.Hour)
 			reply, _ := f.run(t, pipeRun("sel.id", ""))
-			if refusalOf(reply) != authz.RefuseAssetNotEnrolled || f.runner.count() != 1 {
+			if refusalOf(reply) != authz.RefuseAssetSuspended || f.runner.count() != 1 {
 				t.Errorf("%s/%s: next run %+v, runner called %d times", code, name, reply, f.runner.count())
 			}
 			if want := code.SuspendsCredential(); want != "" {

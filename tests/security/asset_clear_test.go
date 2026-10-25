@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collector"
@@ -109,15 +110,24 @@ func clearRig(t *testing.T) (rig, *adminDir, *dialRunner) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.state.SuspendAsset(lockAsset, asset.SuspendIdentityMismatch, invX); err != nil {
+	if err := r.state.SuspendAsset(lockAsset, adapter.RefusedIdentityMismatch, invX); err != nil {
 		t.Fatal(err)
 	}
 	return r, d, runner
 }
 
-// stillSuspended checks the asset is suspended in memory, on disk, and to
-// a run request, which must not reach the runner.
+// heldX is the suspension clearRig sets (C7 0.3 names it in refusals).
+var heldX = authz.HeldSuspension{Reason: asset.SuspendIdentityMismatch, Ref: invX, Code: string(adapter.RefusedIdentityMismatch)}
+
+// stillSuspended checks the asset is suspended by clearRig's invX in
+// memory, on disk, and to a run request, which must not reach the runner.
 func stillSuspended(t *testing.T, r rig, runner *dialRunner) {
+	t.Helper()
+	stillSuspendedBy(t, r, runner, heldX)
+}
+
+// stillSuspendedBy is stillSuspended for the suspension held.
+func stillSuspendedBy(t *testing.T, r rig, runner *dialRunner, held authz.HeldSuspension) {
 	t.Helper()
 	if err := r.state.CheckSuspended(lockAsset); err == nil {
 		t.Error("the asset is no longer suspended in memory")
@@ -135,10 +145,11 @@ func stillSuspended(t *testing.T, r rig, runner *dialRunner) {
 	}
 	if reply.Accepted() || len(runner.dials) != 0 {
 		t.Errorf("a run to the suspended asset was accepted (%+v) or dialled %v", reply.Refusal, runner.dials)
-	} else if reply.Refusal == nil || reply.Refusal.Code != authz.RefuseAssetNotEnrolled || !strings.Contains(reply.Refusal.Detail, "is suspended") {
-		// C7 has no suspended code; the collector refuses asset_not_enrolled
-		// and names the suspension. Any other refusal is the rig, not the
-		// suspension.
+	} else if r := reply.Refusal; r == nil || r.Code != authz.RefuseAssetSuspended || !strings.Contains(r.Detail, "is suspended") ||
+		r.Suspension == nil || *r.Suspension != held {
+		// C7 0.3: the collector refuses asset_suspended and names the
+		// suspension it holds, with its C2 code. Any other refusal is the
+		// rig, not the suspension.
 		t.Errorf("the run was refused for another reason: %+v", reply.Refusal)
 	}
 }
@@ -337,9 +348,13 @@ func TestAssetClearRetryThenLaterSuspension(t *testing.T) {
 			t.Fatalf("clear %d refused: %+v", i, reply.Refusal)
 		}
 	}
-	if err := r.state.SuspendAsset(lockAsset, asset.SuspendAuthFailed, invY); err != nil {
+	if err := r.state.SuspendAsset(lockAsset, adapter.FailedAuthRejected, invY); err != nil {
 		t.Fatal(err)
 	}
-	refusedWith(t, r, clearRequest(r, lockAsset, invX), authz.RefuseSuspensionMismatch)
-	stillSuspended(t, r, runner)
+	reply := refusedWith(t, r, clearRequest(r, lockAsset, invX), authz.RefuseSuspensionMismatch)
+	later := authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: invY, Code: string(adapter.FailedAuthRejected)}
+	if reply.Refusal.Suspension == nil || *reply.Refusal.Suspension != later {
+		t.Errorf("the mismatch names %+v, want the later suspension %+v", reply.Refusal.Suspension, later)
+	}
+	stillSuspendedBy(t, r, runner, later)
 }

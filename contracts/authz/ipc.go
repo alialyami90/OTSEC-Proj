@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/contracts/version"
@@ -134,6 +135,7 @@ const (
 	RefuseSecretRejected     RefusalCode = "secret_rejected"             // write-time validation failed
 	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
 	RefuseSuspensionMismatch RefusalCode = "suspension_mismatch"         // since 0.2: the asset is not suspended by ref, or the administrator's file is absent, refused or names another
+	RefuseAssetSuspended     RefusalCode = "asset_suspended"             // since 0.3: the collector holds the asset suspended; Refusal.Suspension names it
 	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
@@ -143,7 +145,7 @@ var RefusalCodes = []RefusalCode{
 	RefusePrincipal, RefuseUnknownOperation, RefuseNotInvocable, RefuseBadParams,
 	RefuseAssetNotEnrolled, RefuseCredentialMismatch, RefuseCredentialUnusable,
 	RefuseRegisterUnverified, RefuseRegisterVersion, RefusePolicyVersion, RefuseBusy,
-	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseUnknown,
+	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseAssetSuspended, RefuseUnknown,
 }
 
 // Normalize maps an unknown code to RefuseUnknown.
@@ -160,6 +162,72 @@ func (c RefusalCode) Normalize() RefusalCode {
 type Refusal struct {
 	Code   RefusalCode `json:"code"`
 	Detail string      `json:"detail,omitempty"` // never contains a secret or a raw line
+	// Suspension (since 0.3) is the asset suspension the collector holds:
+	// always set with asset_suspended, and set with suspension_mismatch
+	// when the collector holds a suspension other than the one the clear
+	// named. The node adopts it (see the package documentation, "Asset
+	// suspensions").
+	Suspension *HeldSuspension `json:"suspension,omitempty"`
+}
+
+// HeldSuspension is an asset suspension the collector holds (since 0.3):
+// its C1 reason, the invocation that set it, a lowercase UUID, and the C2
+// outcome code that set it, which the node's C8 asset.suspend record needs
+// (A5 on #125). Code is empty for a suspension recorded before the
+// collector kept codes; the node does not adopt one without a code.
+type HeldSuspension struct {
+	Reason asset.SuspensionReason `json:"reason"`
+	Ref    string                 `json:"ref"`
+	Code   string                 `json:"code,omitempty"`
+}
+
+// heldCodePattern is the shape of a C2 code that suspends: a refusal or a
+// failure. TODO(C2): C2 imports this package, so whether the code is known
+// and suspends with Reason (adapter.Code.Suspends) is the reader's check.
+var heldCodePattern = regexp.MustCompile(`^(refused|failed)\.[a-z][a-z0-9_]{0,63}$`)
+
+// Validate checks the reason is a C1 reason an outcome code sets (operator
+// suspensions are the node's, and the collector never holds one), the ref
+// an invocation ID, and the code, when present, shaped as a C2 refusal or
+// failure. The node must also check that the code is a known C2 code whose
+// Suspends is Reason before it adopts the suspension.
+func (h HeldSuspension) Validate() error {
+	switch h.Reason {
+	case asset.SuspendIdentityMismatch, asset.SuspendAuthFailed, asset.SuspendPasswordPromptAbsent,
+		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel:
+	default:
+		return fmt.Errorf("authz: held suspension: %q is not a reason an outcome code sets", h.Reason)
+	}
+	if !invocationRefPattern.MatchString(h.Ref) {
+		return errors.New("authz: held suspension: ref is not an invocation ID (lowercase UUID)")
+	}
+	if h.Code != "" && !heldCodePattern.MatchString(h.Code) {
+		return fmt.Errorf("authz: held suspension: %q is not a C2 refusal or failure code", h.Code)
+	}
+	return nil
+}
+
+// assetSuspendedSince is the minor that added asset_suspended and
+// Refusal.Suspension.
+const assetSuspendedSince = 3
+
+// ForRequest is the refusal as the reply to a request stamped contract. A
+// request stamped before 0.3 comes from a reader that knows neither
+// asset_suspended nor the suspension field, and decodes replies strictly,
+// so it gets what 0.2 collectors replied: asset_not_enrolled, the same
+// detail, and no suspension.
+func (r *Refusal) ForRequest(contract string) *Refusal {
+	if r == nil || (r.Code != RefuseAssetSuspended && r.Suspension == nil) {
+		return r
+	}
+	if got, err := version.Parse(contract); err == nil && got.Minor >= assetSuspendedSince {
+		return r
+	}
+	out := &Refusal{Code: r.Code, Detail: r.Detail}
+	if out.Code == RefuseAssetSuspended {
+		out.Code = RefuseAssetNotEnrolled
+	}
+	return out
 }
 
 func (r *Refusal) Error() string {
@@ -201,6 +269,29 @@ type CollectorReply struct {
 // sequence number, because its decision could not be accounted for in audit.
 func (r CollectorReply) Accepted() bool {
 	return AcceptsContract(r.Contract) && r.Status == ReplyAccepted && r.Refusal == nil && r.CollectorSeq != 0
+}
+
+// HeldSuspension is the asset suspension a refused reply says the
+// collector holds, checked, or nil when it names none. A reply whose
+// suspension is malformed, sits on another code, or is missing from
+// asset_suspended is an error: the node then cannot adopt it, and alarms.
+func (r CollectorReply) HeldSuspension() (*HeldSuspension, error) {
+	if r.Refusal == nil {
+		return nil, nil
+	}
+	h := r.Refusal.Suspension
+	switch {
+	case r.Refusal.Code == RefuseAssetSuspended && h == nil:
+		return nil, errors.New("authz: asset_suspended names no suspension")
+	case h == nil:
+		return nil, nil
+	case r.Refusal.Code != RefuseAssetSuspended && r.Refusal.Code != RefuseSuspensionMismatch:
+		return nil, fmt.Errorf("authz: a suspension on refusal %s", r.Refusal.Code)
+	}
+	if err := h.Validate(); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 // DecodeRequest decodes and validates one request strictly. Every error is a

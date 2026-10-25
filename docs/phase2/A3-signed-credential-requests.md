@@ -1,12 +1,12 @@
-# Admin-signed credential requests (C7 0.3 candidate, D2-11)
+# Admin-signed credential requests (C7 0.4 candidate, D2-11)
 
-Owner: A3. Status: the C7 candidate named by D2-11 (merged in #91), aligned with it. D2-11 called it 0.2; it moved to 0.3 when 0.2 took `asset.clear_suspension` (A1, condition 1 on the collector-clear design). Nothing here is implemented. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
+Owner: A3. Status: the C7 candidate named by D2-11 (merged in #91), aligned with it. D2-11 called it 0.2; it moved to 0.3 when 0.2 took `asset.clear_suspension` (A1, condition 1 on the collector-clear design), and to 0.4 when 0.3 took `asset_suspended` (A6 on #120). Nothing here is implemented. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
 
 **Phase 2 condition (D2-11).** Until this control is merged, no credential installed in Phase 2 may be a vendor default password or a password used on any real device. At 10 installs an hour, a compromised node can test every published SEL factory password within the first hour, so the budget alone does not protect such a secret.
 
 ## Problem
 
-In C7 0.1 and 0.2 the node service builds every credential request and asserts the human principal itself. A compromised node service can therefore originate a request in the name of any person:
+In C7 0.1 to 0.3 the node service builds every credential request and asserts the human principal itself. A compromised node service can therefore originate a request in the name of any person:
 
 - **Install.** The node holds the collector's public install key, so it can seal any guess and install it under a new reference whose plaintext scope differs from the target's. The reuse rule replies `secret_rejected` exactly when the guess equals a stored secret. Any refusal that depends on equality leaks equality, however it is worded (D2-11).
 - **Revoke.** It stops collection from a device.
@@ -16,7 +16,7 @@ The Phase 2 install budget (10 per hour per node) only bounds the rate.
 
 ## Rule
 
-From C7 0.3, the collector accepts a credential request only if an administrator signed it, with a key whose public half is pinned in the collector's own configuration. The node can relay a request but cannot originate one, and it cannot change one.
+From C7 0.4, the collector accepts a credential request only if an administrator signed it, with a key whose public half is pinned in the collector's own configuration. The node can relay a request but cannot originate one, and it cannot change one.
 
 ## The envelope
 
@@ -24,7 +24,7 @@ A credential request carries `admin_signed` in place of the three 0.1 bodies:
 
 ```json
 {
-  "contract": "otsec.authz/0.3",
+  "contract": "otsec.authz/0.4",
   "kind": "credential.install",
   "request_id": "...",
   "on_behalf_of": {"type": "human", "id": "admin@site-a"},
@@ -41,9 +41,9 @@ A credential request carries `admin_signed` in place of the three 0.1 bodies:
 The signature is Ed25519 over a fixed domain-separation prefix followed by the payload bytes. The prefix names the contract version and the operation:
 
 ```
-otsec.authz/0.3 admin-request credential.install\n
-otsec.authz/0.3 admin-request credential.revoke\n
-otsec.authz/0.3 admin-request credential.clear_suspension\n
+otsec.authz/0.4 admin-request credential.install\n
+otsec.authz/0.4 admin-request credential.revoke\n
+otsec.authz/0.4 admin-request credential.clear_suspension\n
 ```
 
 The collector builds the prefix from the outer `kind` and its own contract version, never from the payload. A signature for one operation is therefore never valid for another, a signature for another contract version is never valid for this one, and neither is ever valid as a register signature. This is the same construction as register packages: the signed bytes are carried as they are, so no canonical JSON is needed.
@@ -52,7 +52,7 @@ The payload is strict JSON, decoded only after the signature verifies:
 
 | Field | Meaning |
 | --- | --- |
-| `format` | `otsec.authz.admin-request/0.3` |
+| `format` | `otsec.authz.admin-request/0.4` |
 | `kind` | Must equal the outer `kind`. |
 | `principal` | The admin. Must equal `on_behalf_of` and the principal the key is pinned for. |
 | `admin_key_id` | Must equal the outer `key_id`. The outer copy only selects the key; this one is signed, so key rotation and revocation can be audited from the signed record alone. |
@@ -114,7 +114,7 @@ The install budget stays. It now bounds how fast a real admin can be pressed int
 - The 257th unexpired nonce is refused, and expiry frees space.
 - A byte scan shows that no payload, secret or signature appears in logs or in the C8 record beyond the key ID and the nonce.
 
-## Contract changes for C7 0.3
+## Contract changes for C7 0.4
 
 - `CollectorRequest.AdminSigned` replaces `CredentialInstall`, `CredentialRevoke` and `CredentialClearSusp` on the wire. The body types stay, inside the payload.
 - New refusal codes: `admin_unverified` and `admin_replay`.
