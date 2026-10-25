@@ -65,6 +65,7 @@ type CredStore struct {
 	now    func() time.Time
 	rnd    io.Reader
 
+	gens   GenerationLog
 	mu     sync.Mutex
 	doc    credDoc
 	broken error
@@ -78,7 +79,8 @@ type credDoc struct {
 	Format        string        `json:"format"`
 	NodeID        string        `json:"node_id"`
 	KeyProtection string        `json:"key_protection"`
-	StoreKey      string        `json:"store_key"` // base64 of the protected store key
+	Generation    uint64        `json:"generation"` // 1 at creation, one more at every write
+	StoreKey      string        `json:"store_key"`  // base64 of the protected store key
 	InstallKey    installKeyDoc `json:"install_key"`
 	Entries       []credEntry   `json:"entries"`
 }
@@ -110,6 +112,20 @@ type CredStoreConfig struct {
 	Now func() time.Time
 	// Rand is the randomness source; nil means crypto/rand. Tests only.
 	Rand io.Reader
+	// Generations is where the store's generation is recorded outside the
+	// store: the collector's State. Required.
+	Generations GenerationLog
+}
+
+// GenerationLog records the credential store's generation outside the
+// store file, so that a restored older copy of the file is refused (A6 on
+// #90). Removal from the store is logical: a backup, a volume shadow copy or
+// a crash-left temporary file can still hold a revoked secret, and without
+// this record, putting such a copy back would bring the secret back into
+// use. *State implements it.
+type GenerationLog interface {
+	CredGeneration() uint64
+	RaiseCredGeneration(uint64) error
 }
 
 // InitCredStore creates the credential store at path for nodeID: a new
@@ -153,6 +169,7 @@ func InitCredStore(path, nodeID string, now func() time.Time) error {
 		Format:        CredStoreFormat,
 		NodeID:        nodeID,
 		KeyProtection: keyProtection,
+		Generation:    1,
 		StoreKey:      b64(protected),
 		InstallKey: installKeyDoc{
 			KeyID:      keyID,
@@ -204,6 +221,12 @@ func OpenCredStore(path string, cfg CredStoreConfig) (*CredStore, error) {
 		return fail("store key protection %q; this platform uses %q", doc.KeyProtection, keyProtection)
 	case doc.Entries == nil:
 		return fail("no entries list")
+	case doc.Generation == 0:
+		return fail("no generation")
+	case cfg.Generations == nil:
+		return fail("no generation record")
+	case doc.Generation < cfg.Generations.CredGeneration():
+		return fail("store generation %d is older than the %d this collector recorded: a restored copy, refused", doc.Generation, cfg.Generations.CredGeneration())
 	}
 	protected, err := unb64(doc.StoreKey, 1, 1<<12)
 	if err != nil {
@@ -227,6 +250,12 @@ func OpenCredStore(path string, cfg CredStoreConfig) (*CredStore, error) {
 	if err := checkEntries(doc.Entries, cfg.NodeID); err != nil {
 		return fail("%v", err)
 	}
+	// A store ahead of the record is one whose write finished before the
+	// record's did; the record catches up.
+	if err := cfg.Generations.RaiseCredGeneration(doc.Generation); err != nil {
+		return fail("record generation: %v", err)
+	}
+	s.gens = cfg.Generations
 	return s, nil
 }
 
@@ -683,9 +712,14 @@ func (s *CredStore) copyDoc() credDoc {
 	return next
 }
 
-// write replaces the file with next and, only on success, adopts it. Any
-// failure breaks the store.
+// write replaces the file with next and, only on success, adopts it, then
+// records its generation in the State. The file goes first: a crash between
+// the two leaves the store ahead of the record, which the next open accepts
+// and records, never behind it. Any failure breaks the store; a failure to
+// record comes after the file changed, so the change stands and the caller
+// sees an error, the safe direction for a revoke.
 func (s *CredStore) write(next credDoc) error {
+	next.Generation = s.doc.Generation + 1
 	err := checkEntries(next.Entries, s.nodeID)
 	var b []byte
 	if err == nil {
@@ -702,6 +736,10 @@ func (s *CredStore) write(next credDoc) error {
 		return s.broken
 	}
 	s.doc = next
+	if err := s.gens.RaiseCredGeneration(next.Generation); err != nil {
+		s.broken = fmt.Errorf("%w: record generation of %s: %v", ErrStateUnavailable, s.path, err)
+		return s.broken
+	}
 	return nil
 }
 

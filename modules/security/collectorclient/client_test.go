@@ -358,9 +358,9 @@ func (h *runHandler) Handle(ctx context.Context, req *authz.CollectorRequest) (a
 	first := h.seq.Add(4) - 3
 	recs := session(h.t, first)
 	return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: invocation, CollectorSeq: seq},
-		func(context.Context) collectorwire.RunOutcome {
+		collector.WorkFunc(func(context.Context) collectorwire.RunOutcome {
 			return collectorwire.RunOutcome{InvocationID: invocation, Result: resultOK(h.t), Audit: recs}
-		}
+		})
 }
 
 func (h *runHandler) Refuse(ctx context.Context, id string, r *authz.Refusal) authz.CollectorReply {
