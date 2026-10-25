@@ -229,7 +229,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
   - Audit pruning never passes the checkpoint's `through_seq`, so the tail the rebuild needs always exists (A6 on #101).
   - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own. `asset.suspension_clear` is keyed by asset, C1 reason and reference, and the node takes the reason from the suspension it matched.
   - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed. The register revision check stays.
-- **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
+- **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 requests, as D2-11 requires for install, revoke and clear-suspension. C7 0.2 is A3's `asset.clear_suspension`, the collector side of the clear, so the signed requests come in the minor after it (A1 on A3's collector-clear design).
 - **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
 - **Reviews.** A6 reviews the node work for reliability and fault injection. A3 reviews it for the trust boundary on the clear path.
 
@@ -243,5 +243,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 **Rulings:**
 - **The collector does not wire `Config.TIDLE` in Phase 2.** The floor after an exit without QUI stays the 31-minute fallback. `sel751` may report the value, but it does not shorten a floor. Under D2-10 every endpoint is loopback, so nothing is lost.
 - **C1 gains an endpoint path before any `device-observed` endpoint** (A2's proposal): for example `path: "direct"` or `"port-server"`. A reported TIDLE may set the floor only on `direct`.
-- **A port-server path is refused until it has its own rule.** With `T_OUT` unknown or 0, no floor bounds Level 1 after an exit without QUI, so the fallback is not safe there either. The rule needs evidence of the port's `T_OUT` (a hardware or configuration check, H-13).
-- **Gate item:** the C1 path field and the port-server rule are owed before the first `device-observed` endpoint, together with the C7 0.2 signed admin requests (D2-15).
+- **A port-server path is refused until it has its own rule.** With `T_OUT` unknown or 0, no floor bounds Level 1 after an exit without QUI, so the fallback is not safe there either. The same holds for the failed-auth floor, because a pending `Password: ?` also times out by TIDLE on the direct path only (A3). The rule needs evidence of the port's `T_OUT` (a hardware or configuration check, H-13).
+- **An endpoint with no path, or an unknown one, is refused like a port server** once the field exists (A2).
+- **A reported TIDLE counts only from an `ok` or `partial` run**, because the serial check comes after `SHO P 1` (A2, A3 on #114).
+- **Gate item:** the C1 path field and the port-server rule are owed before the first `device-observed` endpoint, together with the admin-signed C7 requests (D2-15).
