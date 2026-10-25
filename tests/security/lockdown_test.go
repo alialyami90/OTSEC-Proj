@@ -75,6 +75,41 @@ func TestD210NodeRefusesNonLoopbackEndpoint(t *testing.T) {
 	}
 }
 
+// Every endpoint other than inbound Syslog is checked, scheduled or not
+// (A5 review of #93): a second, unscheduled telnet endpoint on a
+// non-loopback host is refused just as the scheduled one is.
+func TestD210NodeRefusesUnscheduledEndpoint(t *testing.T) {
+	dir := storeDir(t)
+	withSecond := func(transport, host string, port int) []byte {
+		c := nodeconfigtest.New("site-a-node1", dir).AddSEL751(relayID, "127.0.0.1", 2323, 300)
+		eps := c.Assets[0]["endpoints"].([]any)
+		second := map[string]any{}
+		for k, v := range eps[0].(map[string]any) {
+			second[k] = v
+		}
+		second["id"], second["transport"], second["host"], second["port"] = "port2", transport, host, port
+		c.Assets[0]["endpoints"] = append(eps, second)
+		return c.Bytes()
+	}
+	for _, host := range []string{"10.0.0.5", "192.168.1.10", "::ffff:127.0.0.1"} {
+		if _, err := node.ParseConfig(withSecond("telnet", host, 23)); !errors.Is(err, node.ErrNotLoopback) {
+			t.Errorf("unscheduled telnet endpoint on %q: %v, want ErrNotLoopback", host, err)
+		}
+	}
+	if _, err := node.ParseConfig(withSecond("telnet", "127.0.0.1", 23)); err != nil {
+		t.Errorf("unscheduled loopback telnet endpoint refused: %v", err)
+	}
+	// An inbound Syslog endpoint names a sender the node only receives
+	// from and never connects to, so D2-10 does not apply to it (A1, D2-10
+	// "collection endpoints"; A5). Pinned so that a change to that reading
+	// is a deliberate one.
+	for _, tr := range []string{"syslog-udp", "syslog-tcp", "syslog-tls"} {
+		if _, err := node.ParseConfig(withSecond(tr, "10.0.0.5", 514)); err != nil {
+			t.Errorf("inbound %s sender on 10.0.0.5 refused: %v", tr, err)
+		}
+	}
+}
+
 func TestD210NodeRefusesNonLoopbackListener(t *testing.T) {
 	dir := storeDir(t)
 	// Valid ip:port that is not loopback: refused under D2-10.
@@ -82,9 +117,11 @@ func TestD210NodeRefusesNonLoopbackListener(t *testing.T) {
 		"0.0.0.0:6514", "[::]:6514", "10.0.0.5:6514", "192.168.1.10:514", "[fe80::1%1]:514",
 		"[::ffff:127.0.0.1]:6514", "[::1%1]:6514",
 	} {
-		c := nodeconfigtest.New("site-a-node1", dir).AddListener("syslog-in", "syslog-tls", addr)
-		if _, err := node.ParseConfig(c.Bytes()); !errors.Is(err, node.ErrNotLoopback) {
-			t.Errorf("listener %q: %v, want ErrNotLoopback", addr, err)
+		for _, tr := range []string{"syslog-udp", "syslog-tcp", "syslog-tls"} {
+			c := nodeconfigtest.New("site-a-node1", dir).AddListener("syslog-in", tr, addr)
+			if _, err := node.ParseConfig(c.Bytes()); !errors.Is(err, node.ErrNotLoopback) {
+				t.Errorf("%s listener %q: %v, want ErrNotLoopback", tr, addr, err)
+			}
 		}
 	}
 	// Not an ip:port at all: refused, whatever the reason.
@@ -95,9 +132,11 @@ func TestD210NodeRefusesNonLoopbackListener(t *testing.T) {
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:6514", "[::1]:6514"} {
-		c := nodeconfigtest.New("site-a-node1", dir).AddListener("syslog-in", "syslog-tls", addr)
-		if _, err := node.ParseConfig(c.Bytes()); err != nil {
-			t.Errorf("listener %q refused: %v", addr, err)
+		for _, tr := range []string{"syslog-udp", "syslog-tcp", "syslog-tls"} {
+			c := nodeconfigtest.New("site-a-node1", dir).AddListener("syslog-in", tr, addr)
+			if _, err := node.ParseConfig(c.Bytes()); err != nil {
+				t.Errorf("%s listener %q refused: %v", tr, addr, err)
+			}
 		}
 	}
 }
