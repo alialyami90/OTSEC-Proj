@@ -175,7 +175,7 @@ try {
         Note "sc qfailure $svc :: $($fl -replace '\s+', ' ')"
         $okAcct = $qc -match "SERVICE_START_NAME\s*:\s*NT SERVICE\\$svc"
         $okSid = $sid -match 'SERVICE_SID_TYPE\s*:\s*UNRESTRICTED'
-        $privs = [regex]::Matches($pr, 'Se[A-Za-z]+Privilege') | ForEach-Object { $_.Value }
+        $privs = @([regex]::Matches($pr, 'Se[A-Za-z]+Privilege') | ForEach-Object { $_.Value })
         $okPriv = ($privs.Count -eq 1 -and $privs[0] -eq 'SeChangeNotifyPrivilege')
         $okFail = $fl -match 'RESTART'
         Result "S-$svc" ($okAcct -and $okSid -and $okPriv -and $okFail) "virtual account: $okAcct; unrestricted SID: $okSid; privileges: $($privs -join ','); restart on failure: $okFail"
