@@ -71,11 +71,12 @@ class Proc:
                 self.p.wait(10)
 
 
-def start_simulator(log, password, fid=ALLOWED_FID, extra=()):
+def start_simulator(log, password, fid=ALLOWED_FID, extra=(), framed=True):
     """The recording simulator with the SEL-751 documented profile, Telnet on
-    an OS-chosen port. password is a test value (D2-5)."""
+    an OS-chosen port. password is a test value (D2-5). framed=False sends
+    the ID reply without its STX and ETX (S22 p. 7.28 has them)."""
     argv = [sys.executable, SIM, "--transport", "tcp", "--telnet", "--port", "0", "--log", log,
-            "--profile", "sel-751-doc", "--profile-password", password, "--profile-stx-etx"]
+            "--profile", "sel-751-doc", "--profile-password", password] + (["--profile-stx-etx"] if framed else [])
     if fid:
         argv += ["--profile-fid", fid]
     return Proc(argv + list(extra))

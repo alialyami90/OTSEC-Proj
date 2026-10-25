@@ -29,7 +29,6 @@ Evidence class: simulated. The simulator answers from manual examples
 evidence.
 """
 
-import base64
 import json
 import os
 import shutil
@@ -42,101 +41,12 @@ import pytest
 import harness
 import reconcile
 from conftest import need
+from slicerun import CANARY, CHECK, REGISTER, Slice
 
-# A test value (D2-5): 11 printable characters, inside the SEL-751 profile's
-# secret policy (at most 12).
-CANARY = "A6slice-9Qx"
-CHECK = os.path.join(harness.REPO, "tests", "safety", "recording_simulator", "check.py")
-REGISTER = os.path.join(harness.REPO, "tests", "safety", "recording_simulator", "sel751-collector-register.json")
 RUNS = 2
 # The first run starts 60 s after the node, the second at least 60 s after
 # the first ends (node.MinIntervalSeconds).
 RUN_TIMEOUT = 75.0 * RUNS + 30.0
-
-
-def _go_build(out, pkg):
-    subprocess.run(["go", "build", "-o", out, pkg], cwd=harness.REPO, check=True)
-
-
-class Slice:
-    """One run of the slice; every process is stopped at teardown."""
-
-    def __init__(self, d):
-        self.d = d
-        self.bin = os.path.join(d, "bin")
-        self.root = os.path.join(d, "root")
-        os.makedirs(self.bin)
-        os.mkdir(self.root, 0o700)
-        self.procs = {}
-        self.logs = {}
-
-    def exe(self, name):
-        return os.path.join(self.bin, name + (".exe" if os.name == "nt" else ""))
-
-    def build(self):
-        _go_build(self.exe("otsec"), "./cmd/otsec")
-        _go_build(self.exe("otsec-collector"), "./cmd/otsec-collector")
-        _go_build(self.exe("slicehelper"), "./tests/integration/slice/slicehelper")
-
-    def spawn(self, name, argv, env=None):
-        out = open(os.path.join(self.d, name + ".log"), "wb")
-        self.logs[name] = out.name
-        p = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, env=env)
-        self.procs[name] = p
-        return p
-
-    def start(self):
-        self.sim_log = os.path.join(self.d, "sim.jsonl")
-        self.relp_log = os.path.join(self.d, "relp.jsonl")
-        sim = harness.start_simulator(self.sim_log, CANARY)
-        self.procs["simulator"] = sim.p
-        relp_port = harness.free_port()
-        out = subprocess.run([self.exe("slicehelper"), "setup", "-root", self.root, "-sim-port", str(sim.port),
-                              "-relp-port", str(relp_port), "-repo", harness.REPO],
-                             check=True, capture_output=True)
-        self.layout = json.loads(out.stdout)
-        relp = harness.Proc([sys.executable, harness.RECEIVER, "--port", str(relp_port), "--log", self.relp_log,
-                             "--cert", self.layout["server_cert"], "--key", self.layout["server_key"],
-                             "--ca", self.layout["ca"], "--require-client-cert",
-                             "--permitted-peer", self.layout["node_id"]])
-        self.procs["receiver"] = relp.p
-        self.spawn("collector", [self.exe("otsec-collector"), "run", "-data", self.layout["collector_data"]])
-        key = os.path.join(self.layout["public_dir"], "install-key.json")
-        assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
-            "the collector did not publish its install key and socket:\n" + self.text("collector")
-        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
-        subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
-                       check=True, capture_output=True, env=env)
-        self.spawn("node", [self.exe("otsec"), "node", "-config", self.layout["node_config"]])
-
-    def text(self, name):
-        with open(self.logs[name], "rb") as f:
-            return f.read().decode("utf-8", "replace")
-
-    def sessions_closed(self):
-        if not os.path.exists(self.sim_log):
-            return 0
-        return sum(1 for r in harness.read_log(self.sim_log) if r["event"] == "session_close")
-
-    def received(self):
-        if not os.path.exists(self.relp_log):
-            return []
-        return [base64.b64decode(r["b64"]) for r in harness.read_log(self.relp_log) if r.get("event") == "syslog"]
-
-    def ser_received(self):
-        return [m for m in self.received() if b' kind="ser" ' in m]
-
-    def stop(self):
-        for name in ("node", "collector", "receiver", "simulator"):
-            p = self.procs.get(name)
-            if p is None or p.poll() is not None:
-                continue
-            p.terminate()
-            try:
-                p.wait(10)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait(10)
 
 
 @pytest.fixture(scope="module")
