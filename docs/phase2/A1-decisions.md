@@ -284,6 +284,6 @@ The only way out was a collector reinstall. That fails closed, but the cause was
   - the node already holds another suspension of the asset;
   - the ref is the one whose clear the node is sending.
 - **`operator` is never a held suspension.** The collector suspends only from run outcomes. An operator suspension has a principal ID as its ref and no C2 code.
-- **Versioning.** A request stamped before 0.3 gets the 0.2 reply (`asset_not_enrolled`, no field), because replies decode strictly. The seal labels are unchanged. The admin-signed requests (D2-11, D2-15) move to the 0.4 candidate.
+- **Versioning.** A request stamped before 0.3 gets the 0.2 reply, because replies decode strictly: a run gets `asset_not_enrolled`, and a clear keeps `suspension_mismatch`, in both cases without the field. The seal labels are unchanged. The admin-signed requests (D2-11, D2-15) move to the 0.4 candidate.
 
 **Evidence: simulated.** A6 ran it end to end on the real binaries with the node killed mid-run: the node adopted the suspension, and one administrator file cleared both sides.
