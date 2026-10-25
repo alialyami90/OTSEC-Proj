@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/store"
 )
 
 // Prune removes confirmed events from every open database in which a
@@ -25,15 +26,7 @@ func (r *Runtime) Prune(ctx context.Context) {
 	r.pruneMu.Lock()
 	defer r.pruneMu.Unlock()
 	for _, d := range r.dbs {
-		// The read lock is held through the prune, so Tick cannot close
-		// the handle under it when it resumes the database.
-		r.state.RLock()
-		db, mode := d.db, d.report.Mode
-		var err error
-		if db != nil && (mode == c5.ModeCollecting || mode == c5.ModeDrainOnly) {
-			err = r.pruneDB(ctx, d, db)
-		}
-		r.state.RUnlock()
+		err := r.pruneDB(ctx, d)
 		key := "prune " + string(d.spec.ID)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if r.quiet(key, true) {
@@ -55,51 +48,59 @@ func pruneTarget(q c5.Quota, target float64) float64 {
 	return target * float64(limit)
 }
 
-func (r *Runtime) pruneDB(ctx context.Context, d *database, db interface {
-	c5.Pruner
-	c5.CursorStore
-	c5.CommitIndex
-	ClassBytes(context.Context, c5.StreamClass) (int64, error)
-}) error {
-	over := func() (bool, error) {
-		for _, q := range d.spec.Quotas {
-			used, err := db.ClassBytes(ctx, q.Class)
-			if err != nil {
-				return false, err
-			}
-			if float64(used) > pruneTarget(q, d.policy.PruneTarget) {
-				return true, nil
-			}
-		}
-		return false, nil
-	}
+// pruneDB runs prune passes on d while a class is above its target and a
+// pass still deletes something. The state read lock is held through each
+// pass, so Tick cannot close the handle under it, and released between
+// passes, so a Tick waiting to resume a database, and the readers queued
+// behind it, wait for one pass at most (A3 on #135).
+func (r *Runtime) pruneDB(ctx context.Context, d *database) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		more, err := over()
+		r.state.RLock()
+		db, mode := d.db, d.report.Mode
+		more, err := false, error(nil)
+		if db != nil && (mode == c5.ModeCollecting || mode == c5.ModeDrainOnly) {
+			more, err = r.prunePass(ctx, d, db)
+		}
+		r.state.RUnlock()
 		if err != nil || !more {
 			return err
 		}
-		pass := 0
-		for _, s := range d.spec.Streams {
-			b, err := c5.ComputeBoundary(ctx, db, db, d.policy.Consumers, s.ID, s.Class, r.opt.Now())
-			if errors.Is(err, &c5.Error{Code: c5.CodeNoConsumers}) {
-				continue
-			}
-			if err != nil {
-				return fmt.Errorf("stream %s: %w", s.ID, err)
-			}
-			n, err := db.PruneStep(ctx, b, d.policy.PruneStepEvents)
-			if err != nil {
-				return fmt.Errorf("stream %s: %w", s.ID, err)
-			}
-			pass += n
-		}
-		if pass == 0 {
-			return nil
-		}
 	}
+}
+
+// prunePass is one pass of pruneDB: one step per stream, if a class is
+// above its target. It reports whether another pass may be needed.
+func (r *Runtime) prunePass(ctx context.Context, d *database, db *store.DB) (bool, error) {
+	over := false
+	for _, q := range d.spec.Quotas {
+		used, err := db.ClassBytes(ctx, q.Class)
+		if err != nil {
+			return false, err
+		}
+		over = over || float64(used) > pruneTarget(q, d.policy.PruneTarget)
+	}
+	if !over {
+		return false, nil
+	}
+	pass := 0
+	for _, s := range d.spec.Streams {
+		b, err := c5.ComputeBoundary(ctx, db, db, d.policy.Consumers, s.ID, s.Class, r.opt.Now())
+		if errors.Is(err, &c5.Error{Code: c5.CodeNoConsumers}) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("stream %s: %w", s.ID, err)
+		}
+		n, err := db.PruneStep(ctx, b, d.policy.PruneStepEvents)
+		if err != nil {
+			return false, fmt.Errorf("stream %s: %w", s.ID, err)
+		}
+		pass += n
+	}
+	return pass > 0, nil
 }
 
 // quiet records whether the condition k holds and reports whether it has
