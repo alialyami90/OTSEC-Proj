@@ -31,9 +31,14 @@ var resultWant = map[string]string{
 	"ok-without-quit":                                  "ended with QUI",
 	"ok-with-error-code":                               "status ok carries no error",
 	"status-disagrees-with-code":                       `implies status "refused", not "failed"`,
-	"unknown-code-at-0.1":                              "is not in the otsec.adapter/0.2 taxonomy",
+	"unknown-code-at-0.1":                              "is not in the otsec.adapter/0.3 taxonomy",
 	"probe-rejected-at-level1-at-0.1":                  "so the session ends with QUI",
 	"unexpected-password-prompt-at-0.1":                "is new in 0.2, so a 0.1 result cannot carry it",
+	"identity-unreadable-at-0.2":                       "is new in 0.3, so a 0.2 result cannot carry it",
+	"identity-unreadable-with-mismatch":                "ends the invocation with an identity_mismatch code",
+	"identity-unreadable-with-match":                   "failed.identity_unreadable needs identity.result not-checked",
+	"identity-unreadable-without-id":                   "ID is the last line sent, in the probe phase",
+	"identity-unreadable-after-rejected-probe":         "ID is the last line sent, in the probe phase, after an accepted probe",
 	"unexpected-password-prompt-then-quit":             "is a password attempt",
 	"unexpected-password-prompt-for-rejected-password": "Level 1 was reached, an operate line was the last sent",
 	"span-in-sent-bytes":                               "covers sent bytes",
@@ -42,7 +47,7 @@ var resultWant = map[string]string{
 	"identity-mismatch-reported-ok":                    "ends the invocation with an identity_mismatch code",
 	"warning-without-value":                            "either the observed value or missing",
 	"simulator-reported-as-device":                     "target must be",
-	"other-major":                                      "not readable as otsec.adapter/0.2",
+	"other-major":                                      "not readable as otsec.adapter/0.3",
 	"span-includes-stx":                                "includes an STX or ETX framing byte",
 	"read-rows-exceeded-with-parsed-record":            "parses no record (D1-12)",
 	"read-rows-exceeded-without-detail":                "needs a detail giving the row count",
@@ -88,7 +93,7 @@ var invocationWant = map[string]string{
 	"deadline-below-step":   "deadline_ms 1000 is outside",
 	"no-expected-identity":  "expected_identity is required",
 	"params-with-free-text": "is not a parameter name and value",
-	"other-major":           "not readable as otsec.adapter/0.2",
+	"other-major":           "not readable as otsec.adapter/0.3",
 	"credential-ref-not-c7": "not a C7 credential reference ID",
 	"principal-ref-not-c7":  "not a C7 principal ID",
 }
@@ -193,6 +198,15 @@ func TestUnknownCodeReadsAsFailedUnknown(t *testing.T) {
 	r := loadResult(t, "failed.unknown")
 	if r.Error.Code.Known() || r.Error.Code.Effective() != FailedUnknown || r.Error.Code.Status() != StatusFailed {
 		t.Fatalf("code %q: known %v, effective %s", r.Error.Code, r.Error.Code.Known(), r.Error.Code.Effective())
+	}
+}
+
+// failed.identity_unreadable is decided before ACC and suspends nothing
+// (0.3, A6 on #118 and #122).
+func TestIdentityUnreadableCode(t *testing.T) {
+	c := FailedIdentityUnreadable
+	if c.Stage() != StageBeforeAuth || c.Since() != 3 || c.Suspends() != "" || c.SuspendsCredential() != "" || c.Status() != StatusFailed {
+		t.Fatalf("stage %s, since %d, suspends %q, credential %q, status %s", c.Stage(), c.Since(), c.Suspends(), c.SuspendsCredential(), c.Status())
 	}
 }
 
@@ -573,7 +587,7 @@ func TestDecodeInvocationRejectsTrailingData(t *testing.T) {
 // Results read every 0.x minor: unknown fields are ignored.
 func TestResultIgnoresUnknownFields(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join("testdata", "results", "valid", "ok.json"))
-	b = []byte(strings.Replace(string(b), `"schema": "otsec.adapter/0.1"`, `"added_in_0_3": {"x": 1}, "schema": "otsec.adapter/0.3"`, 1))
+	b = []byte(strings.Replace(string(b), `"schema": "otsec.adapter/0.1"`, `"added_in_0_4": {"x": 1}, "schema": "otsec.adapter/0.4"`, 1))
 	if _, err := DecodeResult(b); err != nil {
 		t.Fatalf("unknown field rejected: %v", err)
 	}
