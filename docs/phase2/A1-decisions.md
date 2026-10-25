@@ -136,3 +136,31 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 
   The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. Revoke and clear-suspension carry the same requirement (A3 review of #91). A revoke stops collection, and a clear lifts a safety floor, so neither may be originated by the node. A3's design, [A3-signed-credential-requests.md](A3-signed-credential-requests.md), is the C7 0.2 candidate.
 - This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
+
+## D2-12: TLS references resolve from files in Phase 2 (lab only)
+
+**Context (A5):** the node must resolve C6 `trust_anchor_ref` and `client_credential_ref` before it can forward. A3's design (credential design §9) uses `nodekey_` references, a node key register, and a non-exportable key in the `NT SERVICE\otsec-node` certificate store, created from a CSR the node generates. That is C7 0.2 work. It needs a Windows certificate store implementation, which will not be ready for the slice.
+
+**Ruling:** for Phase 2 only, the node resolves these references from files. This resolver is labelled lab-only.
+- The node configuration gains `tls_dir`. On Windows this is `OTSEC\config\tls`.
+- `<ref>.pem` holds a trust anchor. `<ref>.crt` and `<ref>.key` hold a client credential.
+- References match `^[a-z0-9_-]+$`, so a reference cannot name another path.
+- `tls_dir` itself must pass the store's directory rule, which also refuses junctions.
+- Each file must be a regular file. Symbolic links, reparse points and Windows device names (such as `con.pem`) are refused. The checks run on the opened handle, not on the path, and each file has a size limit.
+- Every file must pass the same owner and ACE rule, not only the key: mode 0600 on Linux, or the store's owner and ACE rule on Windows (A3's #84 notes apply). The node itself has no write access to any of them. A trust anchor the node could write would let an attacker sit in the middle of the required audit path (A3 review of #95).
+- No file content appears in any log or error.
+- `forward.ClientTLS` resolves and checks everything before the node starts. A missing or bad reference stops the node; it never falls back to another reference.
+- The certificates and keys are test material only (D2-5). No key used here is used anywhere else. The key is stored unencrypted, which is part of the gate limitation below.
+
+A3's §9 design remains the target. Until it lands, the file resolver is a gate limitation, and a `device-observed` deployment (lifting D2-4 or D2-10) needs §9 first. A3 reviews this resolver.
+
+## D2-13: GitHub Actions is the main test path again
+
+**Owner (2026-10-25, 05:10Z):** "Its public now. Double check nothing private or secret is in my repo. If making my repo has nothing to worry about. Make github my main testing again." A3 audited every ref, PR and issue of the now-public repository and found it clean (A3 report `A3-public-repo-audit-2026-10-25.md` in the project files).
+
+**Rules (this replaces the order in D1-26 and D2-7):**
+- A PR merges when its reviewers accept it and every job in `.github/workflows/ci.yml` is green on its head: `go` on Linux and Windows, `python`, and `integration`.
+- The owner's PC is the backup. It is used when GitHub cannot run a job, such as a test that needs administrator rights on a real Windows installation (A6's installer check), or when Actions is unavailable. Each PC result names the commit and is posted on the PR.
+- A red job on main is fixed before anything else merges, unless the PR being merged is the fix.
+- The owner's PC is never registered as a self-hosted runner (A3). In a public repository, a pull request from anyone could otherwise run code on it.
+- The Phase 2 gate still needs the slice suite on Windows and on Linux with rsyslog, from one main commit. GitHub's `windows-latest` and `integration` jobs provide that.
