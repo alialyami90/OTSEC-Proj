@@ -313,9 +313,6 @@ var ErrDeviceObserved = errors.New("device-observed endpoints and listeners are 
 // ErrNotLoopback marks a refusal under D2-10.
 var ErrNotLoopback = errors.New("collection endpoints and listeners must be loopback IP literals in Phase 2 (D2-10); host names, localhost included, are refused, and lifting this needs the owner's authorization of a named lab device")
 
-// loopback reports whether host is a loopback IP literal: an IPv4 address
-// in 127.0.0.0/8 or ::1, with no zone and no IPv4-mapped form. A host name
-// is never resolved, so the check does not depend on name resolution.
 // windowsDeviceName reports a name Windows opens as a device whatever its
 // extension (con.pem is the console), so a TLS reference may not be one
 // (D2-12). The open also checks the handle is a file on disk.
@@ -327,6 +324,9 @@ func windowsDeviceName(name string) bool {
 	return len(name) == 4 && (name[:3] == "com" || name[:3] == "lpt") && name[3] >= '0' && name[3] <= '9'
 }
 
+// loopback reports whether host is a loopback IP literal: an IPv4 address
+// in 127.0.0.0/8 or ::1, with no zone and no IPv4-mapped form. A host name
+// is never resolved, so the check does not depend on name resolution.
 func loopback(host string) bool {
 	a, err := netip.ParseAddr(host)
 	if err != nil || a.Zone() != "" {

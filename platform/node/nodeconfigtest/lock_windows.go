@@ -19,6 +19,16 @@ func (c *Config) LockTLS() error {
 	if err := c.setDACL(c.TLSDir, true, "FR"); err != nil {
 		return err
 	}
+	// An empty, unprotected DACL leaves each file only what it inherits.
+	// (ACLFromEntries cannot build one: it dereferences its nil old ACL.)
+	emptySD, err := windows.SecurityDescriptorFromString("D:")
+	if err != nil {
+		return err
+	}
+	empty, _, err := emptySD.DACL()
+	if err != nil {
+		return err
+	}
 	paths := []string{c.TLSDir}
 	ents, err := os.ReadDir(c.TLSDir)
 	if err != nil {
@@ -26,11 +36,6 @@ func (c *Config) LockTLS() error {
 	}
 	for _, e := range ents {
 		p := filepath.Join(c.TLSDir, e.Name())
-		// An empty, unprotected DACL leaves each file only what it inherits.
-		empty, err := windows.ACLFromEntries(nil, nil)
-		if err != nil {
-			return err
-		}
 		if err := windows.SetNamedSecurityInfo(p, windows.SE_FILE_OBJECT,
 			windows.DACL_SECURITY_INFORMATION|windows.UNPROTECTED_DACL_SECURITY_INFORMATION, nil, nil, empty, nil); err != nil {
 			return err
