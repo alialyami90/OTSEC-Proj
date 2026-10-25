@@ -124,8 +124,13 @@ const MaxOwed = 1024
 
 // StreamStatus is one stream of the target.
 type StreamStatus struct {
-	Cursor  store.Seq // last position saved for this target
-	Blocked string    // why the stream is held, "" when it is not
+	Cursor store.Seq // last position saved for this target
+	// Confirmed is the last position this target has confirmed, at least
+	// Cursor. It is ahead of Cursor while a refused report about the
+	// stream is owed (Status.Unreported), so the node compares the
+	// stream's last seq with this, not Cursor, to tell what is waiting.
+	Confirmed store.Seq
+	Blocked   string // why the stream is held, "" when it is not
 }
 
 // New checks the configuration. Only mode A targets are accepted: relp-tls,
@@ -400,6 +405,7 @@ func (s *session) loadCursors() error {
 			}
 		}
 		s.conf[i], s.known[i] = s.saved[i], found
+		s.f.setStream(st.ID, func(x *StreamStatus) { x.Confirmed = max(x.Confirmed, s.saved[i]) })
 		// A new required target starts at the first retained event, so it
 		// receives everything still held. A new best-effort target starts
 		// at the first event in its replay window (C6-A5-2); the audit
@@ -410,6 +416,7 @@ func (s *session) loadCursors() error {
 				return fmt.Errorf("forward: no window start for %s", st.ID)
 			}
 			s.read[i], s.conf[i], s.known[i] = after, after, true
+			s.f.setStream(st.ID, func(x *StreamStatus) { x.Confirmed = max(x.Confirmed, after) })
 		}
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = s.saved[i] })
 	}
@@ -686,6 +693,7 @@ func (s *session) release() error {
 		}
 		st := s.f.cfg.Streams[i]
 		s.conf[i], s.hold[i] = h.seq, nil
+		s.f.setStream(st.ID, func(x *StreamStatus) { x.Confirmed = max(x.Confirmed, h.seq) })
 		if err := s.save(i, h.seq); err != nil {
 			return err
 		}
@@ -861,6 +869,7 @@ func (s *session) receive(wait time.Duration) error {
 	s.flight = s.flight[k:]
 	for i, seq := range upto {
 		s.conf[i] = seq
+		s.f.setStream(s.f.cfg.Streams[i].ID, func(x *StreamStatus) { x.Confirmed = max(x.Confirmed, seq) })
 		if err := s.save(i, seq); err != nil {
 			return err
 		}
