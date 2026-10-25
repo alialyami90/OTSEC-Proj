@@ -1,6 +1,8 @@
 # Admin-signed credential requests (C7 0.2 candidate, D2-11)
 
-Owner: A3. Status: proposal for A1 and A6. Nothing here is implemented. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
+Owner: A3. Status: the C7 0.2 candidate named by D2-11 (merged in #91), aligned with it. Nothing here is implemented. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
+
+**Phase 2 condition (D2-11).** Until this control is merged, no credential installed in Phase 2 may be a vendor default password or a password used on any real device. At 10 installs an hour, a compromised node can test every published SEL factory password within the first hour, so the budget alone does not protect such a secret.
 
 ## Problem
 
@@ -36,7 +38,15 @@ A credential request carries `admin_signed` in place of the three 0.1 bodies:
 }
 ```
 
-The signature is Ed25519 over `"otsec.authz/0.2 admin-request\n"` followed by the payload bytes. This is the same construction as register packages: the signed bytes are carried as they are, so no canonical JSON is needed, and the domain prefix keeps a register signature and an admin signature from ever being valid for each other.
+The signature is Ed25519 over a fixed domain-separation prefix followed by the payload bytes. The prefix names the contract version and the operation:
+
+```
+otsec.authz/0.2 admin-request credential.install\n
+otsec.authz/0.2 admin-request credential.revoke\n
+otsec.authz/0.2 admin-request credential.clear_suspension\n
+```
+
+The collector builds the prefix from the outer `kind` and its own contract version, never from the payload. A signature for one operation is therefore never valid for another, a signature for another contract version is never valid for this one, and neither is ever valid as a register signature. This is the same construction as register packages: the signed bytes are carried as they are, so no canonical JSON is needed.
 
 The payload is strict JSON, decoded only after the signature verifies:
 
@@ -45,10 +55,11 @@ The payload is strict JSON, decoded only after the signature verifies:
 | `format` | `otsec.authz.admin-request/0.2` |
 | `kind` | Must equal the outer `kind`. |
 | `principal` | The admin. Must equal `on_behalf_of` and the principal the key is pinned for. |
+| `admin_key_id` | Must equal the outer `key_id`. The outer copy only selects the key; this one is signed, so key rotation and revocation can be audited from the signed record alone. |
 | `node_id` | Must equal the collector's node ID. |
 | `install_key_id` | Must equal the collector's current install key ID. Together with `node_id`, this stops a signed request from being replayed to another collector, or to this one after its install key changes. |
 | `nonce` | 16 random bytes, base64url. Single use. |
-| `issued_at`, `expires_at` | RFC 3339 UTC. `expires_at` is at most 15 minutes after `issued_at`. |
+| `issued_at`, `expires_at` | RFC 3339 UTC. The maximum lifetime is fixed at 15 minutes: the collector refuses an `expires_at` more than 15 minutes after `issued_at`, or more than 15 minutes after its own clock. |
 | `credential_install`, `credential_revoke` or `credential_clear_suspension` | Exactly one, matching `kind`. These are the 0.1 bodies unchanged. An install body includes the whole `SealedSecret` (ephemeral key, nonce, ciphertext, recipient key ID). |
 
 **The signature covers the sealed secret.** Otherwise a compromised node could take one genuine signed install and replace the sealed secret with its own guess under the same signature. It would learn one equality result per genuine install, and the admin's real secret would never be stored.
@@ -61,9 +72,9 @@ These run before any check of the 0.1 install, revoke or clear order. Each failu
 
 1. `admin_signed` is present for a credential kind, and absent for a run.
 2. `key_id` names a pinned admin key whose status is `active`, and `algorithm` is `ed25519`.
-3. The signature verifies over the domain prefix and the payload. The payload is at most 64 KiB.
-4. The payload decodes strictly. `kind`, `principal`, `node_id` and `install_key_id` match as in the table.
-5. The time window: `issued_at` is not more than 2 minutes ahead of the collector's clock, `expires_at` has not passed, and the window is at most 15 minutes.
+3. The signature verifies over the prefix for the outer `kind` and the payload. The payload is at most 64 KiB.
+4. The payload decodes strictly. `kind`, `principal`, `admin_key_id`, `node_id` and `install_key_id` match as in the table.
+5. The time window: `issued_at` is not more than 2 minutes ahead of the collector's clock, `expires_at` has not passed, and `expires_at` is no more than the fixed 15-minute maximum ahead of either `issued_at` or the collector's clock.
 6. **The nonce is spent durably before anything else is decided.** It is written to the state file, with its expiry, before the request reaches the install budget or the store. A request that a later check refuses has still spent its nonce, so a signed request is good for exactly one decision. A nonce already in the file is refused with `admin_replay`.
 
 The state file keeps a nonce until its `expires_at` has passed. Nothing older than 15 minutes is ever kept, and the file holds at most 256 unexpired nonces; beyond that, requests are refused with `rate_limited`. A collector clock set back keeps nonces longer, which is safe. A clock set forward drops them early, but step 5 then refuses the same requests as expired.
@@ -95,10 +106,11 @@ The install budget stays. It now bounds how fast a real admin can be pressed int
 
 - A good install, revoke and clear are each accepted.
 - A missing envelope, an unknown key, a revoked key, a key ID not derived from its key, another algorithm, a bad signature, a register-domain signature, an oversize payload and an unknown payload field are each refused with `admin_unverified`, before the budget or the store is touched.
-- Each signed-field mismatch is refused: kind, principal, node, install key ID, and the sealed secret replaced after signing.
+- Each signed-field mismatch is refused: kind, principal, admin key ID, node, install key ID, and the sealed secret replaced after signing.
+- A signature made for one operation, presented with another `kind`, is refused, and so is a signature made under another contract version's prefix.
 - Replay of the same request, including after a restart, is refused with `admin_replay`.
 - A request a later check refuses still spends its nonce.
-- Expired, not yet valid and over-long windows are refused.
+- Expired, not yet valid and over-long windows are refused, including an `expires_at` that is within 15 minutes of `issued_at` but more than 15 minutes ahead of the collector's clock.
 - The 257th unexpired nonce is refused, and expiry frees space.
 - A byte scan shows that no payload, secret or signature appears in logs or in the C8 record beyond the key ID and the nonce.
 
@@ -106,5 +118,5 @@ The install budget stays. It now bounds how fast a real admin can be pressed int
 
 - `CollectorRequest.AdminSigned` replaces `CredentialInstall`, `CredentialRevoke` and `CredentialClearSusp` on the wire. The body types stay, inside the payload.
 - New refusal codes: `admin_unverified` and `admin_replay`.
-- `AdminRequestSigningContext` and `AdminRequestSigningInput(payload)` sit beside `RegisterSigningInput`, plus a verifier like `VerifyRegisterPackage`, so that A6 can test the client and the collector against one definition.
+- `AdminRequestSigningInput(kind, payload)` sits beside `RegisterSigningInput` and builds the per-operation prefix, plus a verifier like `VerifyRegisterPackage`, so that A6 can test the client and the collector against one definition.
 - The collector configuration gains `admin_keys`. That is A3's format, not a contract.
