@@ -550,6 +550,17 @@ func (g *FloorGate) Confirmed(ctx context.Context) {
 	}
 }
 
+// Unconfirmed records an authentication attempt the adapter did not make
+// through BeforeACC: bytes that may have landed in a password prompt, such
+// as a wake answered by "Password: ?" (A3 on #99). It sets the floor even
+// when the run's context has ended, since that is the safe side; a failure
+// is an alarm.
+func (g *FloorGate) Unconfirmed() {
+	if err := g.state.BeginAuth(g.asset); err != nil && g.Alarm != nil {
+		g.Alarm(fmt.Errorf("collector: set floor for %s after an unconfirmed attempt: %w", g.asset, err))
+	}
+}
+
 // LoginConfirmed reports whether Confirmed was called in this run: the
 // session reached Level 1, so the relay keeps that level until QUI or TIDLE.
 func (g *FloorGate) LoginConfirmed() bool { return g.confirmed.Load() }

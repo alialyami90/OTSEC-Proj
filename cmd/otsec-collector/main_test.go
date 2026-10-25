@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,7 +49,15 @@ func testConfig(t testing.TB, socket string) map[string]any {
 	var a map[string]any
 	json.Unmarshal(fixture(t, "sel-751-simulated.json"), &a)
 	ep := a["endpoints"].([]any)[0].(map[string]any)
-	ep["host"], ep["port"] = "127.0.0.1", 2323
+	// A loopback port nothing listens on, so a run that reaches the
+	// adapter ends as failed.connect.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	ep["host"], ep["port"] = "127.0.0.1", port
 	var p any
 	json.Unmarshal(fixture(t, "profile-sel-751-ascii.json"), &p)
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
@@ -282,9 +291,13 @@ func TestServe(t *testing.T) {
 	run := &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindRun, RequestID: "req-run",
 		OnBehalfOf:    authz.Principal{Type: authz.PrincipalSchedule, ID: "sch-ser-751-feeder-3"},
 		PolicyVersion: 3, Run: &authz.RunBody{AssetID: ref.AssetID, OperationID: "sel.ser.read_all", Params: map[string]string{}, CredentialRef: ref.ID, RegisterVersion: 2}}
+	// A fresh install opens no session to any asset for the longest floor
+	// (the fresh-state floor), so the run is refused before the hosted
+	// SEL-751 adapter. The adapter's runs are tested in the collector
+	// package (runner_sel751_test.go).
 	resp, err = client.Do(ctx, run)
-	if err != nil || resp.Reply.Refusal == nil || resp.Reply.Refusal.Code != authz.RefuseNotInvocable {
-		t.Fatalf("run without an adapter: %+v %v", resp.Reply, err)
+	if err != nil || resp.Reply.Refusal == nil || resp.Reply.Refusal.Code != authz.RefuseRateLimited {
+		t.Fatalf("level 1 run on a fresh install: %+v %v", resp.Reply, err)
 	}
 	if err := r.stop(); err != nil {
 		t.Fatal(err)

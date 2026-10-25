@@ -854,3 +854,52 @@ func readFixtureFrom(t testing.TB, path string) []byte {
 	}
 	return b
 }
+
+// credential.suspend is recorded only for a suspension that happened (A6
+// on #112): not when the store's write fails, nor when the credential was
+// revoked during the run, so there was nothing to suspend.
+func TestCredentialSuspendRecordedOnlyWhenDone(t *testing.T) {
+	for name, during := range map[string]func(t *testing.T, f *pipeFixture){
+		"store write fails": func(t *testing.T, f *pipeFixture) {
+			if err := os.Mkdir(f.path+".tmp", 0o700); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"revoked during the run": func(t *testing.T, f *pipeFixture) {
+			if _, err := f.store.Revoke(authz.CredentialRevokeBody{RefID: pipeCred, Reason: authz.RevokeOperator}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newPipeline(t)
+			f.installCanary(t)
+			f.runner.script = func(ctx context.Context, plan RunPlan, r *fakeRunner) RunReport {
+				rep := r.login(ctx, plan, true)
+				during(t, f)
+				rep.Suspend = authz.SuspendAuthFailed
+				return rep
+			}
+			reply, o := f.run(t, pipeRun("sel.ser.read_all", pipeCred))
+			if !reply.Accepted() || o == nil {
+				t.Fatalf("run: %+v", reply)
+			}
+			for _, raw := range o.Audit {
+				if bytes.Contains(raw, []byte(`"credential.suspend"`)) {
+					t.Fatalf("credential.suspend recorded: %s", raw)
+				}
+			}
+		})
+	}
+	// The control: a suspension that happens is recorded.
+	f := newPipeline(t)
+	f.installCanary(t)
+	f.runner.script = func(ctx context.Context, plan RunPlan, r *fakeRunner) RunReport {
+		rep := r.login(ctx, plan, true)
+		rep.Suspend = authz.SuspendAuthFailed
+		return rep
+	}
+	if _, o := f.run(t, pipeRun("sel.ser.read_all", pipeCred)); o == nil || len(o.Audit) != 1 || !bytes.Contains(o.Audit[0], []byte(`"credential.suspend"`)) {
+		t.Fatalf("no credential.suspend for a suspension: %+v", o)
+	}
+}
