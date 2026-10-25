@@ -446,6 +446,26 @@ func TestUncleanExitSetsFloor(t *testing.T) {
 	}
 }
 
+// D2-16, A6: the floor set before ACC stays while Level 1 is open, after
+// "=>", and goes only once the session has sent QUI.
+func TestFloorHeldUntilQUI(t *testing.T) {
+	f := newPipeline(t)
+	f.installCanary(t)
+	var during error
+	f.runner.script = func(ctx context.Context, plan RunPlan, r *fakeRunner) RunReport {
+		rep := r.login(ctx, plan, true)
+		during = f.state.CheckFloor(testAsset)
+		return rep
+	}
+	f.run(t, pipeRun("sel.ser.read_all", pipeCred))
+	if codeOf(during) != authz.RefuseRateLimited {
+		t.Fatalf("floor between \"=>\" and QUI: %v, want rate_limited", during)
+	}
+	if err := f.state.CheckFloor(testAsset); err != nil {
+		t.Fatalf("floor after QUI: %v", err)
+	}
+}
+
 // A report the runner leaves at its zero value is read cautiously.
 func TestZeroReportIsCautious(t *testing.T) {
 	f := newPipeline(t)

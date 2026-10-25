@@ -492,11 +492,18 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 			plan.Audit.Add(audit.ActionCredentialSuspend, audit.OutcomeSucceeded, suspendReason(credSuspend), nil)
 		}
 	}
-	if plan.Floor.LoginConfirmed() && !report.QUISent {
+	switch {
+	case plan.Floor.LoginConfirmed() && !report.QUISent:
 		// Level 1 may outlive the connection until TIDLE expires: set the
 		// floor again so no session lands on it (no TIDLE reconnect).
 		if err := p.cfg.State.BeginAuth(asset); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: set floor after unclean exit from %s: %w", asset, err))
+		}
+	case plan.Floor.LoginConfirmed():
+		// QUI was sent, so the relay is back at Level 0: the floor kept
+		// since "=>" can go (D2-16).
+		if err := p.cfg.State.EndAuth(asset); err != nil {
+			p.cfg.Alarm(fmt.Errorf("collector: clear floor after QUI to %s: %w", asset, err))
 		}
 	}
 	report.Outcome.Audit = plan.Audit.Records()

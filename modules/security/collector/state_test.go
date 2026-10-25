@@ -70,16 +70,53 @@ func TestOpenStateFailsClosed(t *testing.T) {
 		"unknown field":  write("unk.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"reset":true}`),
 		"duplicate key":  write("dup.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"collector_seq":1,"assets":{}}`),
 		"no assets":      write("noassets.json", `{"format":"otsec.collector-state/0.1","collector_seq":4}`),
-		"bad time":       write("time.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"unconfirmed_auth_utc":"yesterday"}}}`),
-		"negative TIDLE": write("tidle.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"tidle_seconds":-1}}}`),
-		"bad last run":   write("run.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{"a":{"last_run_utc":"soon"}}}`),
-		"bad floor hash": write("fam.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"families":{"sel-751":{"revision":2,"payload_sha256":"ABCD"}}}`),
-		"bad install":    write("inst.json", `{"format":"otsec.collector-state/0.1","collector_seq":4,"assets":{},"installs":["x"]}`),
+		"bad time":       write("time.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{"a":{"unconfirmed_auth_utc":"yesterday"}}}`),
+		"negative TIDLE": write("tidle.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{"a":{"tidle_seconds":-1}}}`),
+		"bad last run":   write("run.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{"a":{"last_run_utc":"soon"}}}`),
+		"bad floor hash": write("fam.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{},"families":{"sel-751":{"revision":2,"payload_sha256":"ABCD"}}}`),
+		"bad install":    write("inst.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{},"installs":["x"]}`),
 	}
 	for name, p := range cases {
 		if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
 			t.Errorf("%s: %v, want ErrStateUnavailable", name, err)
 		}
+	}
+	// The cases that name one bad field carry a creation time, so they are
+	// refused for that field, not for the missing time: the same file with
+	// the field fixed opens.
+	ok := write("ok.json", `{"format":"otsec.collector-state/0.1","created_utc":"2026-10-24T11:00:00Z","collector_seq":4,"assets":{"a":{"unconfirmed_auth_utc":"2026-10-24T11:00:00Z","tidle_seconds":60,"last_run_utc":"2026-10-24T11:00:00Z"}}}`)
+	if _, err := OpenState(ok, nil); err != nil {
+		t.Fatalf("the fixed file: %v", err)
+	}
+}
+
+// An open level is checked when the state is opened: it needs the floor
+// stamped with it, or a restart would have nothing to count from but its
+// own opening, and no stamp to say the level was ever entered.
+func TestOpenStateChecksLevel(t *testing.T) {
+	path, s, _ := newState(t)
+	if err := s.OpenLevel(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenState(path, nil); err != nil {
+		t.Fatalf("a valid open level: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(good, &doc); err != nil {
+		t.Fatal(err)
+	}
+	delete(doc["assets"].(map[string]any)[testAsset].(map[string]any), "unconfirmed_auth_utc")
+	b, _ := json.Marshal(doc)
+	p := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenState(p, nil); !errors.Is(err, ErrStateUnavailable) {
+		t.Errorf("an open level with no floor: %v, want ErrStateUnavailable", err)
 	}
 }
 
@@ -198,15 +235,40 @@ func TestFailedAuthFloor(t *testing.T) {
 	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
 		t.Fatalf("TIDLE 5 min, 5:59 after ACC: %v", err)
 	}
-	// Other assets are unaffected; a confirmed login clears the floor.
+	// Other assets are unaffected. A confirmed login keeps the floor, from
+	// "=>", until the session has sent QUI (D2-16, A6).
 	if err := s.CheckFloor("other-testAsset"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmAuth(testAsset); err != nil {
+	if err := s.OpenLevel(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	c.t = time.Date(2026, 10, 24, 12, 10, 0, 0, time.UTC)
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+		t.Fatalf("Level 1 open: %v, want rate_limited", err)
+	}
+	if err := s.EndAuth(testAsset); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CheckFloor(testAsset); err != nil {
-		t.Fatalf("after confirm: %v", err)
+		t.Fatalf("after QUI: %v", err)
+	}
+}
+
+// A session left without QUI (BeginAuth after OpenLevel) closes the level:
+// the floor runs from then, not from when the next process opens the state.
+func TestBeginAuthClosesLevel(t *testing.T) {
+	path, s, c := newState(t)
+	s.BeginAuth(testAsset)
+	s.OpenLevel(testAsset)
+	s.BeginAuth(testAsset)
+	c.t = time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC)
+	s2, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.CheckFloor(testAsset); err != nil {
+		t.Fatalf("an hour after a closed level: %v", err)
 	}
 }
 
@@ -258,6 +320,62 @@ func TestFloorSurvivesKill(t *testing.T) {
 	}
 }
 
+// A6 on D2-16: the process is killed after "=>" confirmed the login and
+// before QUI. The relay may hold Level 1 until TIDLE after the last line,
+// so a new process opening the state, however much later by the clock it
+// was stamped, refuses the asset for the floor from when it opened.
+func TestOpenLevelSurvivesKill(t *testing.T) {
+	if os.Getenv("OTSEC_LEVEL_HELPER") != "" {
+		s, err := OpenState(os.Getenv("OTSEC_LEVEL_HELPER"), nil)
+		if err != nil {
+			os.Exit(3)
+		}
+		g := NewFloorGate(s, testAsset)
+		g.Alarm = func(error) { os.Exit(5) }
+		if err := g.BeforeACC(context.Background()); err != nil {
+			os.Exit(4)
+		}
+		g.Confirmed(context.Background())
+		p, _ := os.FindProcess(os.Getpid())
+		p.Kill() // as a crash between "=>" and QUI
+		select {}
+	}
+	path, _, _ := newState(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOpenLevelSurvivesKill$")
+	cmd.Env = append(os.Environ(), "OTSEC_LEVEL_HELPER="+path)
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() == 3 || ee.ExitCode() == 4 || ee.ExitCode() == 5 {
+		t.Fatalf("helper: %v", err)
+	}
+	// Restart a day after the stamps, with TIDLE known to be 5 minutes:
+	// the stamps alone would let the asset through.
+	restart := time.Now().Add(24 * time.Hour)
+	clk := &clock{t: restart}
+	s, err := OpenState(path, clk.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTIDLE(testAsset, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+		t.Fatalf("after a kill between \"=>\" and QUI: %v, want rate_limited", err)
+	}
+	floor := authz.FailureFloor(5 * time.Minute)
+	clk.t = restart.Add(floor - time.Second)
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+		t.Fatalf("inside the floor from the restart: %v, want rate_limited", err)
+	}
+	clk.t = restart.Add(floor)
+	if err := s.CheckFloor(testAsset); err != nil {
+		t.Fatalf("the floor after the restart: %v", err)
+	}
+	if err := s.EndAuth(testAsset); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A write that fails breaks the state: the in-memory copy may no longer
 // match the disk, so nothing more is decided from it.
 func TestFailedWriteBreaksState(t *testing.T) {
@@ -297,12 +415,15 @@ func TestFloorGate(t *testing.T) {
 		t.Fatalf("after BeforeACC: %v", err)
 	}
 	g.Confirmed(context.Background())
-	if err := s.CheckFloor(testAsset); err != nil {
-		t.Fatalf("after Confirmed: %v", err)
+	if !g.LoginConfirmed() {
+		t.Fatal("Confirmed not recorded")
+	}
+	if err := s.CheckFloor(testAsset); !isRateLimited(err) {
+		t.Fatalf("after Confirmed, before QUI: %v", err)
 	}
 }
 
-func TestFloorGateAlarmsOnFailedClear(t *testing.T) {
+func TestFloorGateAlarmsOnFailedOpenLevel(t *testing.T) {
 	path, s, c := newState(t)
 	g := NewFloorGate(s, testAsset)
 	var alarmed error
@@ -322,7 +443,7 @@ func TestFloorGateAlarmsOnFailedClear(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s2.CheckFloor(testAsset); !isRateLimited(err) {
-		t.Fatalf("after a failed clear and a restart: %v", err)
+		t.Fatalf("after a failed OpenLevel and a restart: %v", err)
 	}
 }
 
