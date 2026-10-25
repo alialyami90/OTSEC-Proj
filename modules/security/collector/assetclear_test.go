@@ -146,7 +146,7 @@ func TestAssetClear(t *testing.T) {
 	f.installCanary(t)
 	f.clock.t = f.clock.t.Add(time.Hour) // past the fresh-state floor
 	// The file alone, with no request: the run is still refused.
-	if reply, _ := f.run(t, pipeRun("sel.id", "")); refusalOf(reply) != authz.RefuseAssetNotEnrolled || file.reads != 0 {
+	if reply, _ := f.run(t, pipeRun("sel.id", "")); refusalOf(reply) != authz.RefuseAssetSuspended || file.reads != 0 {
 		t.Fatalf("run with only the file: %+v (reads %d)", reply, file.reads)
 	}
 	reply, work := f.pipe.Handle(context.Background(), clearRequest(testAsset, suspendingRun))
@@ -257,4 +257,43 @@ func TestClearAssetSuspensionState(t *testing.T) {
 	if err := state.CheckSuspended(testAsset); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestHeldSuspensionNamed: a refusal because the collector holds the asset
+// suspended names that suspension (C7 0.3), so a node that never recorded
+// it, because the suspending run's reply was lost, can adopt it and clear
+// it the normal way (A6 on #120). A clear naming another invocation is
+// told which one is held. A request stamped before 0.3 gets the 0.2 reply.
+func TestHeldSuspensionNamed(t *testing.T) {
+	held := authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: suspendingRun}
+	f := suspendedPipeline(t, &adminFile{b: clearFileFor(testAsset, laterRun)})
+	f.installCanary(t)
+	f.clock.t = f.clock.t.Add(time.Hour) // past the fresh-state floor
+	check := func(name string, reply authz.CollectorReply, code authz.RefusalCode, want *authz.HeldSuspension) {
+		t.Helper()
+		got, err := reply.HeldSuspension()
+		if refusalOf(reply) != code || err != nil || (got == nil) != (want == nil) || (got != nil && *got != *want) {
+			t.Errorf("%s: %+v, held %+v, %v; want %s naming %+v", name, reply.Refusal, got, err, code, want)
+		}
+		if reply.CollectorSeq == 0 {
+			t.Errorf("%s: no collector_seq", name)
+		}
+	}
+	reply, _ := f.run(t, pipeRun("sel.id", ""))
+	check("run", reply, authz.RefuseAssetSuspended, &held)
+	reply, _ = f.pipe.Handle(context.Background(), clearRequest(testAsset, laterRun))
+	check("clear naming another invocation", reply, authz.RefuseSuspensionMismatch, &held)
+
+	old := pipeRun("sel.id", "")
+	old.Contract = "otsec.authz/0.2"
+	reply, _ = f.run(t, old)
+	check("run stamped 0.2", reply, authz.RefuseAssetNotEnrolled, nil)
+	oldClear := clearRequest(testAsset, laterRun)
+	oldClear.Contract = "otsec.authz/0.2"
+	reply, _ = f.pipe.Handle(context.Background(), oldClear)
+	check("clear stamped 0.2", reply, authz.RefuseSuspensionMismatch, nil)
+	if f.runner.count() != 0 {
+		t.Fatal("a run to the suspended asset reached the runner")
+	}
+	f.stillSuspended(t, suspendingRun)
 }

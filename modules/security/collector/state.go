@@ -263,8 +263,10 @@ func (s *State) SuspendAsset(id string, reason asset.SuspensionReason, invocatio
 }
 
 // CheckSuspended returns nil when no run has suspended asset, a refusal with
-// asset_not_enrolled when one has (C7 has no code for it; a candidate for
-// a later minor), and ErrStateUnavailable when the state is broken.
+// asset_suspended naming the suspension when one has (C7 0.3), and
+// ErrStateUnavailable when the state is broken. The node adopts a
+// suspension it does not hold from that refusal, so one whose run reply
+// was lost can still be cleared (A6 on #120).
 func (s *State) CheckSuspended(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -272,7 +274,8 @@ func (s *State) CheckSuspended(id string) error {
 		return s.broken
 	}
 	if a := s.doc.Assets[id]; a.Suspended != "" {
-		return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s", id, a.Suspended, a.SuspendedBy)}
+		return &authz.Refusal{Code: authz.RefuseAssetSuspended, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s", id, a.Suspended, a.SuspendedBy),
+			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy}}
 	}
 	return nil
 }
@@ -297,7 +300,8 @@ func (s *State) ClearAssetSuspension(id, ref string) error {
 	case a.Suspended == "":
 		return nil
 	case a.SuspendedBy != ref:
-		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s, not %s", id, a.Suspended, a.SuspendedBy, ref)}
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: fmt.Sprintf("asset %s is suspended (%s) by invocation %s, not %s", id, a.Suspended, a.SuspendedBy, ref),
+			Suspension: &authz.HeldSuspension{Reason: a.Suspended, Ref: a.SuspendedBy}}
 	}
 	a.Suspended, a.SuspendedBy = "", ""
 	next := s.doc

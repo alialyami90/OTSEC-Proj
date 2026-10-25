@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/contracts/version"
@@ -134,6 +135,7 @@ const (
 	RefuseSecretRejected     RefusalCode = "secret_rejected"             // write-time validation failed
 	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
 	RefuseSuspensionMismatch RefusalCode = "suspension_mismatch"         // since 0.2: the asset is not suspended by ref, or the administrator's file is absent, refused or names another
+	RefuseAssetSuspended     RefusalCode = "asset_suspended"             // since 0.3: the collector holds the asset suspended; Refusal.Suspension names it
 	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
@@ -143,7 +145,7 @@ var RefusalCodes = []RefusalCode{
 	RefusePrincipal, RefuseUnknownOperation, RefuseNotInvocable, RefuseBadParams,
 	RefuseAssetNotEnrolled, RefuseCredentialMismatch, RefuseCredentialUnusable,
 	RefuseRegisterUnverified, RefuseRegisterVersion, RefusePolicyVersion, RefuseBusy,
-	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseUnknown,
+	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseAssetSuspended, RefuseUnknown,
 }
 
 // Normalize maps an unknown code to RefuseUnknown.
@@ -160,6 +162,57 @@ func (c RefusalCode) Normalize() RefusalCode {
 type Refusal struct {
 	Code   RefusalCode `json:"code"`
 	Detail string      `json:"detail,omitempty"` // never contains a secret or a raw line
+	// Suspension (since 0.3) is the asset suspension the collector holds:
+	// always set with asset_suspended, and set with suspension_mismatch
+	// when the collector holds a suspension other than the one the clear
+	// named. The node adopts it (see the package documentation, "Asset
+	// suspensions").
+	Suspension *HeldSuspension `json:"suspension,omitempty"`
+}
+
+// HeldSuspension is an asset suspension the collector holds: its C1 reason
+// and the invocation that set it, a lowercase UUID (since 0.3).
+type HeldSuspension struct {
+	Reason asset.SuspensionReason `json:"reason"`
+	Ref    string                 `json:"ref"`
+}
+
+// Validate checks the reason is a C1 suspension reason and the ref an
+// invocation ID.
+func (h HeldSuspension) Validate() error {
+	switch h.Reason {
+	case asset.SuspendIdentityMismatch, asset.SuspendAuthFailed, asset.SuspendPasswordPromptAbsent,
+		asset.SuspendLanguageNotEnglish, asset.SuspendFirmwareNotAllowed, asset.SuspendUnexpectedLevel, asset.SuspendOperator:
+	default:
+		return fmt.Errorf("authz: held suspension: %q is not a C1 suspension reason", h.Reason)
+	}
+	if !invocationRefPattern.MatchString(h.Ref) {
+		return errors.New("authz: held suspension: ref is not an invocation ID (lowercase UUID)")
+	}
+	return nil
+}
+
+// assetSuspendedSince is the minor that added asset_suspended and
+// Refusal.Suspension.
+const assetSuspendedSince = 3
+
+// ForRequest is the refusal as the reply to a request stamped contract. A
+// request stamped before 0.3 comes from a reader that knows neither
+// asset_suspended nor the suspension field, and decodes replies strictly,
+// so it gets what 0.2 collectors replied: asset_not_enrolled, the same
+// detail, and no suspension.
+func (r *Refusal) ForRequest(contract string) *Refusal {
+	if r == nil || (r.Code != RefuseAssetSuspended && r.Suspension == nil) {
+		return r
+	}
+	if got, err := version.Parse(contract); err == nil && got.Minor >= assetSuspendedSince {
+		return r
+	}
+	out := &Refusal{Code: r.Code, Detail: r.Detail}
+	if out.Code == RefuseAssetSuspended {
+		out.Code = RefuseAssetNotEnrolled
+	}
+	return out
 }
 
 func (r *Refusal) Error() string {
@@ -201,6 +254,29 @@ type CollectorReply struct {
 // sequence number, because its decision could not be accounted for in audit.
 func (r CollectorReply) Accepted() bool {
 	return AcceptsContract(r.Contract) && r.Status == ReplyAccepted && r.Refusal == nil && r.CollectorSeq != 0
+}
+
+// HeldSuspension is the asset suspension a refused reply says the
+// collector holds, checked, or nil when it names none. A reply whose
+// suspension is malformed, sits on another code, or is missing from
+// asset_suspended is an error: the node then cannot adopt it, and alarms.
+func (r CollectorReply) HeldSuspension() (*HeldSuspension, error) {
+	if r.Refusal == nil {
+		return nil, nil
+	}
+	h := r.Refusal.Suspension
+	switch {
+	case r.Refusal.Code == RefuseAssetSuspended && h == nil:
+		return nil, errors.New("authz: asset_suspended names no suspension")
+	case h == nil:
+		return nil, nil
+	case r.Refusal.Code != RefuseAssetSuspended && r.Refusal.Code != RefuseSuspensionMismatch:
+		return nil, fmt.Errorf("authz: a suspension on refusal %s", r.Refusal.Code)
+	}
+	if err := h.Validate(); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 // DecodeRequest decodes and validates one request strictly. Every error is a

@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.2: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.3: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -118,6 +118,20 @@
 //     without the node's request lifts nothing. The two clears are
 //     separate: asset.clear_suspension never touches a credential's
 //     suspension, and credential.clear_suspension never touches an asset's.
+//   - Held suspensions (0.3, A6 on #120). A run refused because the
+//     collector holds the asset suspended is refused with asset_suspended,
+//     and the refusal's suspension names the C1 reason and the invocation
+//     that set it. A clear refused with suspension_mismatch names the
+//     suspension the collector holds, if it holds one. The node adopts a
+//     named suspension it does not hold: it records its own asset.suspend
+//     with that reason and ref, so the administrator's clear works as for
+//     any other. Otherwise a suspension whose run reply was lost, or which
+//     the node never recorded, could be lifted only by reinstalling the
+//     collector. Adopting only adds a restriction the collector already
+//     enforces, so a collector that names a false suspension stops nothing
+//     it could not already refuse. CollectorReply.HeldSuspension checks
+//     the named suspension; one that fails it is not adopted, and the node
+//     alarms.
 //   - Audit before act (A1 D1-11). The main process sends a request only after
 //     its C8 collector.request record holds a C5 receipt. With a full or
 //     failed audit store, no request is sent, so collection that uses a
@@ -147,7 +161,10 @@
 // A reader accepts every minor of major 0 (AcceptsContract,
 // contracts/README.md), and requests stay strict. A request stamped with
 // a minor older than its kind is refused as invalid: asset.clear_suspension
-// needs 0.2. The labels bound into the sealing (the seal AAD and the HKDF
+// needs 0.2. Replies are decoded strictly too, so the collector answers a
+// request in its own minor (Refusal.ForRequest): a request stamped before
+// 0.3 gets asset_not_enrolled for a suspended asset, as 0.2 collectors
+// replied, and no suspension field. The labels bound into the sealing (the seal AAD and the HKDF
 // info, both "otsec.authz/0.1 ...") are fixed byte strings, not the
 // contract version, and do not change with it.
 //

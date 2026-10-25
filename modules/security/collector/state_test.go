@@ -420,7 +420,8 @@ func TestAssetSuspension(t *testing.T) {
 	if err := s.SuspendAsset(testAsset, asset.SuspendLanguageNotEnglish, "inv-2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CheckSuspended(testAsset); codeOf(err) != authz.RefuseAssetNotEnrolled || !strings.Contains(err.Error(), "unexpected-access-level") {
+	if err := s.CheckSuspended(testAsset); codeOf(err) != authz.RefuseAssetSuspended || !strings.Contains(err.Error(), "unexpected-access-level") ||
+		*err.(*authz.Refusal).Suspension != (authz.HeldSuspension{Reason: asset.SuspendUnexpectedLevel, Ref: "inv-1"}) {
 		t.Fatalf("suspended asset: %v", err)
 	}
 	if err := s.SuspendAsset(testAsset, asset.SuspendIdentityMismatch, "inv-3"); err != nil {

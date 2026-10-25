@@ -16,7 +16,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
 | C5 | `contracts/store` | `otsec.store/0.1` | A5 | Merged (#33). |
 | C6 | `contracts/syslog` | `otsec.syslog/0.2` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). |
-| C7 | `contracts/authz` | `otsec.authz/0.2` | A3 | 0.1 merged (#38). 0.2 adds `asset.clear_suspension` and `suspension_mismatch` (D2-15, A1). |
+| C7 | `contracts/authz` | `otsec.authz/0.3` | A3 | 0.1 merged (#38). 0.2 adds `asset.clear_suspension` and `suspension_mismatch` (D2-15, A1). 0.3 adds `asset_suspended` and the held suspension it names, which the node adopts (A6 on #120). |
 | C8 | `contracts/audit` | `otsec.audit/0.2` | A3 | 0.1 merged (#38); 0.2 adds the node-state actions (D2-15). |
 | — | `contracts/version` | identifier parsing and the compatibility rule | A1 | Merged (#26). |
 | — | `contracts/node` | node ID and stream token, shared by C1 and C4 (D1-1) | A1 (maintained by A4) | Merged (#29). |

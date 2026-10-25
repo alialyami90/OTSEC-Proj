@@ -10,8 +10,9 @@ import (
 
 // ContractID is the identifier every C7 message this package writes
 // carries. 0.2 added the asset.clear_suspension request and the
-// suspension_mismatch refusal (D2-15, A1).
-const ContractID = "otsec.authz/0.2"
+// suspension_mismatch refusal (D2-15, A1). 0.3 added the asset_suspended
+// refusal and the suspension it names (A6 on #120).
+const ContractID = "otsec.authz/0.3"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a

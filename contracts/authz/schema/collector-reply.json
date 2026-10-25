@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.2/collector-reply",
+  "$id": "otsec.authz/0.3/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -60,12 +60,39 @@
             "secret_rejected",
             "collector_state_unavailable",
             "suspension_mismatch",
+            "asset_suspended",
             "refused_unknown"
           ]
         },
         "detail": {
           "type": "string",
           "maxLength": 512
+        },
+        "suspension": {
+          "type": "object",
+          "description": "Since 0.3. The asset suspension the collector holds: always with asset_suspended, and with suspension_mismatch when the collector holds a suspension other than the one the clear named. Never sent in reply to a request stamped before 0.3.",
+          "required": [
+            "reason",
+            "ref"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "enum": [
+                "identity-mismatch",
+                "auth-failed",
+                "password-prompt-absent",
+                "language-not-english",
+                "firmware-not-allowlisted",
+                "unexpected-access-level",
+                "operator"
+              ]
+            },
+            "ref": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
         }
       }
     }

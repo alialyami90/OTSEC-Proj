@@ -228,7 +228,7 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		r = &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"}
 	}
 	if r != nil {
-		return refused(req.RequestID, seq, asRefusal(r)), nil
+		return refused(req.RequestID, seq, asRefusal(r).ForRequest(req.Contract)), nil
 	}
 	return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, CollectorSeq: seq}, nil
 }
