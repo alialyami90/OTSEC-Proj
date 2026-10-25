@@ -21,6 +21,9 @@ func TestDecodeStrict(t *testing.T) {
 		`{"a":1,"in":{"b":2},"l":[{"b":1},{"b":1}]}`,
 		` {"a":1} `,
 		`{"r":{"x":1,"y":{"x":2}}}`,
+		// A raw value is a map to the checker: exact duplicates are refused,
+		// case variants are its own decoder's business (C2, C8 strict).
+		`{"r":{"x":1,"X":2}}`,
 	}
 	for _, s := range ok {
 		var d doc
@@ -30,11 +33,13 @@ func TestDecodeStrict(t *testing.T) {
 	}
 	bad := map[string]string{
 		`{"a":1,"a":2}`:                 "duplicate",
-		`{"a":1,"A":2}`:                 "duplicate",
+		`{"a":1,"A":2}`:                 "not a field name",
+		`{"A":1}`:                       "not a field name",
+		"{\"\u017fx\":1}":               "not a field name",
 		`{"in":{"b":1,"b":2}}`:          "duplicate",
 		`{"l":[{"b":1,"b":2}]}`:         "duplicate",
 		`{"r":{"x":1,"x":2}}`:           "duplicate",
-		`{"a":1,"z":2}`:                 "unknown field",
+		`{"a":1,"z":2}`:                 "not a field name",
 		`{"a":1}{"a":2}`:                "trailing",
 		`{"a":1} x`:                     "",
 		"{\"a\":1,\"in\":{\"b\":\xff}}": "UTF-8",
@@ -113,6 +118,9 @@ func TestDecodeReplyStrict(t *testing.T) {
 	for _, s := range []string{
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","collector_seq":7,"collector_seq":8}`,
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","collector_seq":7,"note":"x"}`,
+		// A6's review of #79: Unicode and ASCII case variants of a field name.
+		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"refused","ſtatus":"accepted","collector_seq":7}`,
+		`{"contract":"otsec.authz/0.1","request_id":"r1","STATUS":"accepted","collector_seq":7}`,
 	} {
 		if _, err := DecodeReply([]byte(s)); err == nil {
 			t.Errorf("accepted %s", s)

@@ -1,0 +1,353 @@
+// Package node is the site node's runtime: its configuration, the store
+// layout derived from it, startup recovery, alarms and health. It is owned
+// by A5 (A1 D2-1). The configuration format is documented in README.md.
+package node
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+
+	"otsec.local/otsec/contracts/asset"
+	cnode "otsec.local/otsec/contracts/node"
+	"otsec.local/otsec/contracts/syslog"
+)
+
+// ConfigSchema identifies the node configuration format. It is A5's file
+// format, not a shared contract (D2-6): a loader accepts exactly this
+// value.
+const ConfigSchema = "otsec.nodeconfig/0.1"
+
+// MaxConfigBytes bounds the file the loader reads.
+const MaxConfigBytes = 4 << 20
+
+// MinIntervalSeconds is the shortest collection interval. A relay's
+// session limits are small (C1 SessionLimits), and SER does not need
+// faster polling for the slice.
+const MinIntervalSeconds = 60
+
+// Config is a loaded, checked node configuration.
+type Config struct {
+	Schema        string            `json:"schema"`
+	NodeID        cnode.ID          `json:"node_id"`
+	Store         StoreConfig       `json:"store"`
+	Listeners     []Listener        `json:"listeners"`
+	Assets        []json.RawMessage `json:"assets"`
+	Targets       []json.RawMessage `json:"targets"`
+	Schedule      []Collection      `json:"schedule"`
+	CollectorPipe string            `json:"collector_pipe"`
+	// CollectorPeer is the identity the collector must hold (collectorwire
+	// Endpoint.Peer). On Windows it may be empty, which means the
+	// otsec-collector service SID; on Linux it is the collector's uid.
+	CollectorPeer string `json:"collector_peer,omitempty"`
+	// PolicyVersion and RegisterVersion are named in every run request.
+	// The collector refuses a request whose versions are not its own
+	// (policy_version, register_version), so the node never runs against a
+	// register it was not commissioned with.
+	PolicyVersion   uint64 `json:"policy_version"`
+	RegisterVersion uint64 `json:"register_version"`
+
+	assets  []asset.Asset
+	targets []*syslog.Target
+}
+
+// StoreConfig is where the store lives and how much each class may use.
+type StoreConfig struct {
+	Dir string `json:"dir"`
+	// Quotas maps each C5 stream class to its bytes. Every class the
+	// configuration needs must have one; see Layout.
+	Quotas       map[string]int64 `json:"quotas"`
+	WarnFraction float64          `json:"warn_fraction"`
+}
+
+// Listener is a Syslog listener on the node. Phase 2 starts none (the UDP
+// listener waits for the owner's plaintext decision), but the format holds
+// them so that D2-4 is enforced from the first file.
+type Listener struct {
+	ID        string          `json:"id"`
+	Transport asset.Transport `json:"transport"` // syslog-udp, syslog-tcp or syslog-tls
+	Address   string          `json:"address"`   // ip:port the node listens on
+	// Target is what is behind the listener: a simulator or a real device
+	// network (D1-24 amendment). The loader refuses device-observed (D2-4).
+	Target asset.EvidenceClass `json:"target"`
+}
+
+// Collection is one scheduled adapter run.
+type Collection struct {
+	// ID is the schedule principal the runs are made on behalf of (C7
+	// PrincipalSchedule). It names the schedule in every audit record.
+	ID      string `json:"id"`
+	AssetID string `json:"asset_id"`
+	// Endpoint is the asset's endpoint ID the collector connects to.
+	Endpoint string `json:"endpoint"`
+	// Operation is the C3 register operation ID, for example
+	// "sel.ser.read_all". The collector checks it against the signed
+	// register; the node only names it.
+	Operation string `json:"operation"`
+	// Params are the operation's parameters; the collector checks them
+	// against the register's grammar.
+	Params map[string]string `json:"params,omitempty"`
+	// CredentialRef is the C7 credential reference for an operation above
+	// access level 0, absent for a level 0 operation (C7-A2-5). It is a
+	// handle only; no secret is in the configuration.
+	CredentialRef string `json:"credential_ref,omitempty"`
+	EverySeconds  int    `json:"every_seconds"`
+}
+
+var (
+	tokenPattern     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	operationPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
+)
+
+// LoadConfig reads and checks the configuration at path.
+func LoadConfig(path string) (*Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(io.LimitReader(f, MaxConfigBytes+1)); err != nil {
+		return nil, err
+	}
+	if buf.Len() > MaxConfigBytes {
+		return nil, fmt.Errorf("node config %s is larger than %d bytes", path, MaxConfigBytes)
+	}
+	return ParseConfig(buf.Bytes())
+}
+
+// ParseConfig decodes and checks a configuration. Decoding is strict: an
+// unknown field, a duplicate or case-variant key, or data after the object
+// is refused. Assets are C1 records (asset.Decode) and targets are C6
+// targets (syslog.ParseTarget), each with its own contract's checks.
+func ParseConfig(b []byte) (*Config, error) {
+	if err := checkKeys(b); err != nil {
+		return nil, fmt.Errorf("node config: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var c Config
+	if err := dec.Decode(&c); err != nil {
+		return nil, fmt.Errorf("node config: %w", err)
+	}
+	if err := c.check(); err != nil {
+		return nil, fmt.Errorf("node config: %w", err)
+	}
+	return &c, nil
+}
+
+func (c *Config) check() error {
+	var errs []error
+	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+
+	if c.Schema != ConfigSchema {
+		fail("schema %q, want %q", c.Schema, ConfigSchema)
+	}
+	if !c.NodeID.Valid() {
+		fail("node_id %q is not a lowercase DNS label", c.NodeID)
+	}
+	if !filepath.IsAbs(c.Store.Dir) {
+		fail("store.dir %q is not an absolute path", c.Store.Dir)
+	}
+	if !(c.Store.WarnFraction > 0 && c.Store.WarnFraction < 1) {
+		fail("store.warn_fraction %v not in (0,1)", c.Store.WarnFraction)
+	}
+	for class, n := range c.Store.Quotas {
+		if !knownClass(class) {
+			fail("store.quotas: unknown class %q", class)
+		} else if n <= 0 {
+			fail("store.quotas.%s must be positive", class)
+		}
+	}
+	if err := checkPipe(c.CollectorPipe); err != nil {
+		errs = append(errs, err)
+	}
+	if runtime.GOOS != "windows" && c.CollectorPeer == "" {
+		fail("collector_peer is required on %s: the collector's uid", runtime.GOOS)
+	}
+	if c.PolicyVersion == 0 || c.RegisterVersion == 0 {
+		fail("policy_version and register_version must be at least 1")
+	}
+
+	ids := map[string]bool{}
+	for i, l := range c.Listeners {
+		p := fmt.Sprintf("listeners[%d]", i)
+		if !tokenPattern.MatchString(l.ID) || ids[l.ID] {
+			fail("%s.id %q is not a unique token", p, l.ID)
+		}
+		ids[l.ID] = true
+		if !l.Transport.Inbound() {
+			fail("%s.transport %q is not a Syslog transport", p, l.Transport)
+		}
+		if ap, err := netip.ParseAddrPort(l.Address); err != nil {
+			fail("%s.address %q is not ip:port", p, l.Address)
+		} else if !loopback(ap.Addr().String()) {
+			fail("%s.address %q: %w", p, l.Address, ErrNotLoopback)
+		}
+		if err := checkTarget(p, l.Target); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	c.assets = c.assets[:0]
+	byID := map[string]asset.Asset{}
+	for i, raw := range c.Assets {
+		a, err := asset.Decode(raw)
+		if err != nil {
+			fail("assets[%d]: %v", i, err)
+			continue
+		}
+		if _, dup := byID[a.AssetID]; dup {
+			fail("assets[%d]: asset %s listed twice", i, a.AssetID)
+		}
+		for j, ep := range a.Endpoints {
+			p := fmt.Sprintf("assets[%d].endpoints[%d]", i, j)
+			if err := checkTarget(p, ep.Target); err != nil {
+				errs = append(errs, err)
+			}
+			// An inbound Syslog endpoint names the device as a sender; every
+			// other endpoint is one a collector connects to (D2-10).
+			if !ep.Transport.Inbound() && !loopback(ep.Host) {
+				fail("%s.host %q: %w", p, ep.Host, ErrNotLoopback)
+			}
+		}
+		byID[a.AssetID] = a
+		c.assets = append(c.assets, a)
+	}
+	if err := asset.CheckSenders(c.assets); err != nil {
+		errs = append(errs, err)
+	}
+
+	c.targets = c.targets[:0]
+	names := map[string]bool{}
+	for i, raw := range c.Targets {
+		t, err := syslog.ParseTarget(raw)
+		if err != nil {
+			fail("targets[%d]: %v", i, err)
+			continue
+		}
+		if names[t.Name] {
+			fail("targets[%d]: name %q used twice", i, t.Name)
+		}
+		names[t.Name] = true
+		c.targets = append(c.targets, t)
+	}
+
+	schedules := map[string]bool{}
+	for i, s := range c.Schedule {
+		p := fmt.Sprintf("schedule[%d]", i)
+		if schedules[s.ID] {
+			fail("%s.id %q used twice", p, s.ID)
+		}
+		schedules[s.ID] = true
+		// The request is checked as C7 checks it, so a schedule the
+		// collector would refuse for its syntax does not load.
+		if err := c.runRequest(i, "req-config-check").Validate(); err != nil {
+			fail("%s: %v", p, err)
+		}
+		a, ok := byID[s.AssetID]
+		switch {
+		case !ok:
+			fail("%s: asset %q is not in assets", p, s.AssetID)
+		case a.NodeID != c.NodeID:
+			// One collecting node per asset (D1-3).
+			fail("%s: asset %s is collected by node %s, not %s", p, s.AssetID, a.NodeID, c.NodeID)
+		default:
+			ep, ok := endpoint(a, s.Endpoint)
+			if !ok {
+				fail("%s: asset %s has no endpoint %q", p, s.AssetID, s.Endpoint)
+			} else if ep.Transport.Inbound() {
+				fail("%s: endpoint %q is inbound Syslog, not a collector endpoint", p, s.Endpoint)
+			}
+		}
+		if !operationPattern.MatchString(s.Operation) {
+			fail("%s.operation %q is not a register operation ID", p, s.Operation)
+		}
+		if s.EverySeconds < MinIntervalSeconds {
+			fail("%s.every_seconds %d below %d", p, s.EverySeconds, MinIntervalSeconds)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	if _, err := c.Layout(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ErrDeviceObserved marks a refusal under D2-4.
+var ErrDeviceObserved = errors.New("device-observed endpoints and listeners are refused in Phase 2 (D2-4); lifting this needs the owner's authorization of a named lab device")
+
+// ErrNotLoopback marks a refusal under D2-10.
+var ErrNotLoopback = errors.New("collection endpoints and listeners must be loopback IP literals in Phase 2 (D2-10); host names, localhost included, are refused, and lifting this needs the owner's authorization of a named lab device")
+
+// loopback reports whether host is a loopback IP literal: an IPv4 address
+// in 127.0.0.0/8 or ::1, with no zone and no IPv4-mapped form. A host name
+// is never resolved, so the check does not depend on name resolution.
+func loopback(host string) bool {
+	a, err := netip.ParseAddr(host)
+	if err != nil || a.Zone() != "" {
+		return false
+	}
+	return (a.Is4() && a.IsLoopback()) || a == netip.IPv6Loopback()
+}
+
+// checkTarget enforces D2-4: in Phase 2 everything behind an endpoint or a
+// listener is a simulator. Any other value is refused too, never defaulted
+// (D1-24).
+func checkTarget(path string, t asset.EvidenceClass) error {
+	switch t {
+	case asset.Simulated:
+		return nil
+	case asset.DeviceObserved:
+		return fmt.Errorf("%s.target: %w", path, ErrDeviceObserved)
+	}
+	return fmt.Errorf("%s.target %q is not %s", path, t, asset.Simulated)
+}
+
+func checkPipe(p string) error {
+	if runtime.GOOS == "windows" {
+		if !strings.HasPrefix(p, `\\.\pipe\`) || len(p) == len(`\\.\pipe\`) {
+			return fmt.Errorf(`collector_pipe %q is not a local pipe name \\.\pipe\<name>`, p)
+		}
+		return nil
+	}
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("collector_pipe %q is not an absolute socket path", p)
+	}
+	return nil
+}
+
+func endpoint(a asset.Asset, id string) (asset.Endpoint, bool) {
+	for _, ep := range a.Endpoints {
+		if ep.ID == id {
+			return ep, true
+		}
+	}
+	return asset.Endpoint{}, false
+}
+
+// AssetRecords returns the decoded C1 assets, as a 0.1 reader reads them.
+func (c *Config) AssetRecords() []asset.Asset { return append([]asset.Asset{}, c.assets...) }
+
+// ForwardTargets returns the decoded C6 targets.
+func (c *Config) ForwardTargets() []*syslog.Target { return append([]*syslog.Target{}, c.targets...) }
+
+// Asset returns the asset with id.
+func (c *Config) Asset(id string) (asset.Asset, bool) {
+	for _, a := range c.assets {
+		if a.AssetID == id {
+			return a, true
+		}
+	}
+	return asset.Asset{}, false
+}

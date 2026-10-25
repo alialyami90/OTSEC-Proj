@@ -1,13 +1,9 @@
 package collectorwire
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
-	"unicode/utf8"
 
 	"otsec.local/otsec/contracts/authz"
 )
@@ -81,84 +77,4 @@ func DecodeReply(b []byte) (authz.CollectorReply, error) {
 		return authz.CollectorReply{}, fmt.Errorf("collectorwire: reply: %w", err)
 	}
 	return r, nil
-}
-
-// DecodeStrict decodes one JSON value into v and refuses what a lenient
-// decoder would let through: invalid UTF-8, a duplicate object key at any
-// depth (which a reader could resolve differently from the writer), a field
-// v does not define, and anything after the value. The contracts have the
-// same rules in their own strict decoder (D1-10), which is internal to
-// contracts/.
-func DecodeStrict(b []byte, v any) error {
-	if !utf8.Valid(b) {
-		return errors.New("not UTF-8")
-	}
-	if err := checkDuplicateKeys(b); err != nil {
-		return err
-	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return errors.New("trailing data after the JSON value")
-	}
-	return nil
-}
-
-// checkDuplicateKeys walks the token stream and refuses an object that
-// names a key twice. Keys are compared exactly and also case-folded,
-// because encoding/json matches field names case-insensitively, so "Kind"
-// and "kind" would land in the same field.
-func checkDuplicateKeys(b []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	type frame struct {
-		object bool
-		keys   map[string]bool
-		key    bool // the next token in this object is a key
-	}
-	var stack []*frame
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		var top *frame
-		if len(stack) > 0 {
-			top = stack[len(stack)-1]
-		}
-		if top != nil && top.object && top.key {
-			if d, ok := tok.(json.Delim); ok && d == '}' {
-				stack = stack[:len(stack)-1]
-				continue
-			}
-			k, ok := tok.(string)
-			if !ok {
-				return errors.New("object key is not a string")
-			}
-			fk := strings.ToLower(k)
-			if top.keys[fk] {
-				return fmt.Errorf("duplicate key %q", k)
-			}
-			top.keys[fk] = true
-			top.key = false
-			continue
-		}
-		if top != nil && top.object {
-			top.key = true // the value is consumed below; the next token is a key
-		}
-		switch d, _ := tok.(json.Delim); d {
-		case '{':
-			stack = append(stack, &frame{object: true, keys: map[string]bool{}, key: true})
-		case '[':
-			stack = append(stack, &frame{})
-		case ']':
-			stack = stack[:len(stack)-1]
-		}
-	}
 }

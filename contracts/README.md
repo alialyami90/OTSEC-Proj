@@ -15,7 +15,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) | Merged (#27, #32); SEL-751 content rev 2. |
 | C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
 | C5 | `contracts/store` | `otsec.store/0.1` | A5 | Merged (#33). |
-| C6 | `contracts/syslog` | `otsec.syslog/0.1` | A4 | Merged (#42, #59: `evc`). |
+| C6 | `contracts/syslog` | `otsec.syslog/0.2` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). |
 | C7 | `contracts/authz` | `otsec.authz/0.1` | A3 | Merged (#38). D1-20 amendment wording pending (A3). |
 | C8 | `contracts/audit` | `otsec.audit/0.1` | A3 | Merged (#38). |
 | — | `contracts/version` | identifier parsing and the compatibility rule | A1 | Merged (#26). |

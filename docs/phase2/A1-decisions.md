@@ -93,6 +93,8 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The PR records the Windows run as owed. A6 keeps the list of owed runs and runs them once Go is available on the PC.
 - The Phase 2 gate still requires the slice suite to pass on Windows (P2 exit gate). D2-8 delays the Windows evidence. It does not waive it.
 
+**Ended 2026-10-24, 22:49Z.** With the owner's approval (decision card, 22:22Z), A6 put portable Go 1.26.0 inside OTSEC on the owner's PC. The owed Windows Go runs then passed at main 04c9525, #84 and #89. From now on D2-7 applies in full: every PR is tested on Windows on the PC before it merges. The PC has no C compiler, so `go test -race` runs on Linux only.
+
 ## D2-9: RELP/TLS peer check is by name, not by CA alone
 
 **Evidence:** A6, `desk`/`simulated`, rsyslogd 8.2312.0 with librelp 1.11.0. With `tls.authmode="certvalid"`, imrelp accepted a self-signed client certificate that the CA never signed. With `tls.authmode="name"` and `tls.permittedPeer` set to the node's name, imrelp refused that certificate, a missing certificate, and a stranger's certificate.
@@ -103,3 +105,62 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The forwarder checks the receiver's name in the same way, so neither side relies on the CA alone.
 - A4 writes both rules into C6 as a minor revision, reviewed by A3 and A6.
 - The slice harness configures rsyslog this way.
+
+**Amendment (2026-10-24, A6, `desk`/`simulated`, librelp 1.11.0):** name mode accepted a CA-signed client certificate whose subject CN was the permitted peer while its SAN named another node. The peer check therefore holds only if the CA never puts a node's name in a certificate held by anything other than that node. Commissioning rule: the node CA issues a certificate carrying a node's name, as CN or as a SAN entry, only to that node, and issues no certificate whose CN differs from its SAN dNSName. A4 adds this rule to C6's commissioning text in the next C6 revision. A6's receiver is stricter than librelp (SAN first, CN only when there is no SAN), so tests against it do not depend on this rule.
+
+## D2-10: A third lock: collection endpoints and listeners are loopback only
+
+**Reason (A6, review of #84):** both D2-4 locks read the same `target` label, which an administrator sets. An endpoint with a real relay's address labelled `simulated` passes both. In Phase 2 the only device is the simulator on the same host (D2-3), so a lock that ignores the label costs little and stops a typo from pointing a credentialed session at real equipment.
+
+**Rules:**
+- The node's loader refuses a configuration in which a collection endpoint's host, or a Syslog listener's bind address, is not a loopback IP literal (127.0.0.0/8 or `::1`) (A5).
+- The collector refuses a run whose endpoint host is not a loopback IP literal (A3).
+- Host names are refused, `localhost` included, so the check never depends on name resolution.
+- Forwarding targets are not covered, because the upstream collector is not a device.
+- Each lock gets its own negative test (A6). Lifting either lock follows D2-4: the owner authorizes a named lab device, and the authorization is recorded in a decision.
+
+## D2-11: The credential install path is a guessing oracle for a compromised node
+
+**Finding (A3, #90):** the node service holds the public half of the collector's install key. It can therefore seal any guess and install it under a new reference whose plaintext scope differs from the target's. The reuse rule replies `secret_rejected` exactly when the guess equals a stored secret, and SEL default passwords are well known. Any refusal that depends on equality leaks equality, however it is worded. The oracle goes away only when the node cannot originate an install.
+
+**Ruling:**
+- **Phase 2:** A3's durable install budget (10 installs per hour per node, refused with `rate_limited`, and no shared count in any reply) is accepted as an interim control. It is acceptable because every Phase 2 credential is a lab-only test value (D2-5), no secret of another scope exists, and D2-4 and D2-10 keep every endpoint on the simulator. The budget bounds broad guessing, but it does not stop the attack the finding describes. At 10 per hour, a compromised node can test every published SEL factory password within the first hour (A6 review of #91). So the interim ruling holds only under this condition: no credential installed in Phase 2 is a vendor default password, or a password used on any real device. A6 tests the budget once it lands: the 11th install in an hour is refused with `rate_limited`, the refusal survives a collector restart, and the reply carries no count.
+- **Before any `device-observed` endpoint** (that is, before D2-4 or D2-10 is lifted), installs must be authenticated independently of the node. An administrator signs the request with a key whose public half is pinned in the collector, out of band. The signature binds:
+  - the reference and the scope;
+  - the sealed secret itself, so that a node cannot swap its own guess under a genuine signature;
+  - the node ID and the install key ID;
+  - the operation (install, revoke or clear-suspension) and the contract version, as a fixed domain-separation prefix, so that a signature for one operation is never valid for another;
+  - the admin key's ID, so that rotation and revocation of that key can be audited;
+  - an expiry, which the collector refuses if it lies further ahead than a fixed maximum lifetime;
+  - a single-use nonce, which the collector spends durably before it makes any decision.
+
+  The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. Revoke and clear-suspension carry the same requirement (A3 review of #91). A revoke stops collection, and a clear lifts a safety floor, so neither may be originated by the node. A3's design, [A3-signed-credential-requests.md](A3-signed-credential-requests.md), is the C7 0.2 candidate.
+- This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
+
+## D2-12: TLS references resolve from files in Phase 2 (lab only)
+
+**Context (A5):** the node must resolve C6 `trust_anchor_ref` and `client_credential_ref` before it can forward. A3's design (credential design §9) uses `nodekey_` references, a node key register, and a non-exportable key in the `NT SERVICE\otsec-node` certificate store, created from a CSR the node generates. That is C7 0.2 work. It needs a Windows certificate store implementation, which will not be ready for the slice.
+
+**Ruling:** for Phase 2 only, the node resolves these references from files. This resolver is labelled lab-only.
+- The node configuration gains `tls_dir`. On Windows this is `OTSEC\config\tls`.
+- `<ref>.pem` holds a trust anchor. `<ref>.crt` and `<ref>.key` hold a client credential.
+- References match `^[a-z0-9_-]+$`, so a reference cannot name another path.
+- `tls_dir` itself must pass the store's directory rule, which also refuses junctions.
+- Each file must be a regular file. Symbolic links, reparse points and Windows device names (such as `con.pem`) are refused. The checks run on the opened handle, not on the path, and each file has a size limit.
+- Every file must pass the same owner and ACE rule, not only the key: mode 0600 on Linux, or the store's owner and ACE rule on Windows (A3's #84 notes apply). The node itself has no write access to any of them. A trust anchor the node could write would let an attacker sit in the middle of the required audit path (A3 review of #95).
+- No file content appears in any log or error.
+- `forward.ClientTLS` resolves and checks everything before the node starts. A missing or bad reference stops the node; it never falls back to another reference.
+- The certificates and keys are test material only (D2-5). No key used here is used anywhere else. The key is stored unencrypted, which is part of the gate limitation below.
+
+A3's §9 design remains the target. Until it lands, the file resolver is a gate limitation, and a `device-observed` deployment (lifting D2-4 or D2-10) needs §9 first. A3 reviews this resolver.
+
+## D2-13: GitHub Actions is the main test path again
+
+**Owner (2026-10-25, 05:10Z):** "Its public now. Double check nothing private or secret is in my repo. If making my repo has nothing to worry about. Make github my main testing again." A3 audited every ref, PR and issue of the now-public repository and found it clean (A3 report `A3-public-repo-audit-2026-10-25.md` in the project files).
+
+**Rules (this replaces the order in D1-26 and D2-7):**
+- A PR merges when its reviewers accept it and every job in `.github/workflows/ci.yml` is green on its head: `go` on Linux and Windows, `python`, and `integration`.
+- The owner's PC is the backup. It is used when GitHub cannot run a job, such as a test that needs administrator rights on a real Windows installation (A6's installer check), or when Actions is unavailable. Each PC result names the commit and is posted on the PR.
+- A red job on main is fixed before anything else merges, unless the PR being merged is the fix.
+- The owner's PC is never registered as a self-hosted runner (A3). In a public repository, a pull request from anyone could otherwise run code on it.
+- The Phase 2 gate still needs the slice suite on Windows and on Linux with rsyslog, from one main commit. GitHub's `windows-latest` and `integration` jobs provide that.

@@ -314,3 +314,41 @@ func TestPeerRefusedKeepsServing(t *testing.T) {
 		t.Fatalf("reply %+v", r)
 	}
 }
+
+// A client that sends an oversize frame with its body still gets the
+// refusal: the body is never read as a request, and the server drains it
+// (bounded) instead of closing on unread data (A6 review of #79).
+func TestOversizeBodyStillGetsRefusal(t *testing.T) {
+	h := &fakeHandler{}
+	ln, _ := startServer(t, h)
+	c := ln.dial(t)
+	defer c.Close()
+	n := authz.MaxRequestBytes + 1000
+	sent := make(chan error, 1)
+	go func() {
+		c.Write(binary.BigEndian.AppendUint32(nil, uint32(n)))
+		_, err := c.Write(make([]byte, n))
+		sent <- err
+	}()
+	b, err := collectorwire.ReadFrame(c, collectorwire.MaxReplyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := collectorwire.DecodeReply(b)
+	if err != nil || r.Refusal == nil || r.Refusal.Code != authz.RefuseOversize {
+		t.Fatalf("reply %+v, %v", r, err)
+	}
+	if handled, _ := h.counts(); handled != 0 {
+		t.Fatal("oversize request reached Handle")
+	}
+	// The whole body was accepted: the server drained it rather than
+	// leaving it unread.
+	select {
+	case err := <-sent:
+		if err != nil {
+			t.Fatalf("body write: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not drain the body")
+	}
+}

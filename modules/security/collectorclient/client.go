@@ -30,6 +30,18 @@ import (
 // accepted reply, whose collector_seq the node must audit.
 var ErrOutcomeUnknown = errors.New("collectorclient: run accepted, outcome unknown")
 
+// ErrOutcomeQuarantined means the outcome arrived but failed a check. It is
+// always returned together with ErrOutcomeUnknown, and the Response carries
+// the outcome as Quarantine: evidence the node must keep, never a result.
+var ErrOutcomeQuarantined = errors.New("collectorclient: outcome failed verification; kept as quarantined evidence")
+
+// ErrUnauthorizedLine means Result.CheckLines failed on the node: by the
+// node's own copy of the register, the session put a line on the wire that
+// the run was not allowed to send. It is returned together with
+// ErrOutcomeQuarantined. The node raises a safety alarm (brief section 7,
+// EP-4).
+var ErrUnauthorizedLine = errors.New("collectorclient: the transcript holds a line the register does not permit for this run")
+
 // ErrProtocol means the collector's reply broke C7. No decision can be read
 // from it.
 var ErrProtocol = errors.New("collectorclient: reply breaks C7")
@@ -69,6 +81,35 @@ type Response struct {
 	// Outcome is set only for an accepted run whose outcome arrived and
 	// passed every check.
 	Outcome *Outcome
+	// Quarantine is set when the outcome arrived but failed a check
+	// (ErrOutcomeQuarantined). Exactly one of Outcome and Quarantine is set
+	// when an outcome frame was read; neither when none arrived.
+	Quarantine *Quarantine
+}
+
+// Quarantine is a run outcome that failed verification. Nothing in it is a
+// result: the node must not normalize it, forward its observations or treat
+// the run as succeeded. It is evidence of what the collector reported, and
+// it is never discarded (brief section 1.4; EP-1): the node stores Raw as
+// quarantined evidence and records the run as outcome unknown.
+type Quarantine struct {
+	// Raw is the outcome frame exactly as received.
+	Raw []byte
+	// Reason is the check that failed. A CheckLines failure quotes the
+	// line it refused, and a faulty adapter could in principle have sent
+	// anything as a line, so Reason belongs with the quarantined evidence,
+	// not in an operational log.
+	Reason string
+	// UnauthorizedLine is true when CheckLines failed: the safety case.
+	UnauthorizedLine bool
+	// ResultJSON is the C2 result as sent, when the envelope decoded.
+	ResultJSON []byte
+	// Audit holds the records that each pass audit.ValidatePending, in the
+	// collector's order, even when the failed check was about the records
+	// as a set (order, correlation, pairing, digest). Each one is valid C8
+	// on its own; whether the node writes them, and how it marks them, is
+	// the node's decision, stated in docs/phase2/A3-collector.md.
+	Audit []PendingRecord
 }
 
 // Outcome is a checked run outcome.
@@ -138,9 +179,10 @@ func (c *Client) Do(ctx context.Context, req *authz.CollectorRequest) (Response,
 	if err != nil {
 		return resp, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
 	}
-	out, err := checkOutcome(req, reply, ob, c.Register)
+	out, q, err := checkOutcome(req, reply, ob, c.Register)
 	if err != nil {
-		return resp, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
+		resp.Quarantine = q
+		return resp, err
 	}
 	resp.Outcome = out
 	return resp, nil
@@ -190,59 +232,84 @@ var invocationActions = map[audit.Action]bool{
 }
 
 // checkOutcome applies C2 and C8 to an outcome and ties it to the request
-// and the reply.
-func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []byte, reg func(uint64) *register.Package) (*Outcome, error) {
+// and the reply. On any failure it returns the outcome as a Quarantine.
+func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []byte, reg func(uint64) *register.Package) (*Outcome, *Quarantine, error) {
+	q := &Quarantine{Raw: b}
+	fail := func(cause error) (*Outcome, *Quarantine, error) {
+		q.Reason = cause.Error()
+		if q.UnauthorizedLine {
+			return nil, q, fmt.Errorf("%w: %w: %w: %v", ErrOutcomeUnknown, ErrOutcomeQuarantined, ErrUnauthorizedLine, cause)
+		}
+		return nil, q, fmt.Errorf("%w: %w: %v", ErrOutcomeUnknown, ErrOutcomeQuarantined, cause)
+	}
 	o, err := collectorwire.DecodeOutcome(b)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
+	q.ResultJSON = []byte(o.Result)
+	// Keep every record that is valid on its own before judging the set,
+	// so a failure later still leaves the session records with the node.
+	recs := make([]*audit.Record, len(o.Audit))
+	var recErr error
+	for i, raw := range o.Audit {
+		rec, err := audit.ValidatePending(raw)
+		if err != nil {
+			if recErr == nil {
+				recErr = fmt.Errorf("audit record %d: %w", i, err)
+			}
+			continue
+		}
+		recs[i] = rec
+		q.Audit = append(q.Audit, PendingRecord{Raw: []byte(raw), Record: rec})
+	}
+
 	if o.InvocationID != reply.InvocationID {
-		return nil, fmt.Errorf("outcome for invocation %q, reply named %q", o.InvocationID, reply.InvocationID)
+		return fail(fmt.Errorf("outcome for invocation %q, reply named %q", o.InvocationID, reply.InvocationID))
 	}
 	res, err := adapter.DecodeResult(o.Result)
 	if err != nil {
-		return nil, fmt.Errorf("result: %w", err)
+		return fail(fmt.Errorf("result: %w", err))
 	}
 	if err := res.Validate(); err != nil {
-		return nil, fmt.Errorf("result: %w", err)
+		return fail(fmt.Errorf("result: %w", err))
 	}
 	if res.InvocationID != reply.InvocationID || res.OperationID != req.Run.OperationID || res.RegisterVersion != req.Run.RegisterVersion {
-		return nil, fmt.Errorf("result is for invocation %q, operation %q, register %d; the run was %q, %q, %d",
-			res.InvocationID, res.OperationID, res.RegisterVersion, reply.InvocationID, req.Run.OperationID, req.Run.RegisterVersion)
+		return fail(fmt.Errorf("result is for invocation %q, operation %q, register %d; the run was %q, %q, %d",
+			res.InvocationID, res.OperationID, res.RegisterVersion, reply.InvocationID, req.Run.OperationID, req.Run.RegisterVersion))
 	}
 	if reg != nil {
 		p := reg(req.Run.RegisterVersion)
 		if p == nil {
-			return nil, fmt.Errorf("no verified register package %d on the node to check the lines against", req.Run.RegisterVersion)
+			return fail(fmt.Errorf("no verified register package %d on the node to check the lines against", req.Run.RegisterVersion))
 		}
 		// CheckLines reads only the invocation's identity, operation and
 		// parameters, which the node knows from its own request.
 		inv := adapter.Invocation{InvocationID: reply.InvocationID, OperationID: req.Run.OperationID, Params: req.Run.Params}
 		if err := res.CheckLines(p, inv); err != nil {
-			return nil, fmt.Errorf("result: %w", err)
+			q.UnauthorizedLine = true
+			return fail(fmt.Errorf("result: %w", err))
 		}
 	}
+	if recErr != nil {
+		return fail(recErr)
+	}
 
-	out := &Outcome{InvocationID: o.InvocationID, Result: res, ResultJSON: []byte(o.Result)}
+	out := &Outcome{InvocationID: o.InvocationID, Result: res, ResultJSON: []byte(o.Result), Audit: q.Audit}
 	last := reply.CollectorSeq
 	var opens, closes int
-	for i, raw := range o.Audit {
-		rec, err := audit.ValidatePending(raw)
-		if err != nil {
-			return nil, fmt.Errorf("audit record %d: %w", i, err)
-		}
+	for i, rec := range recs {
 		if !audit.CollectorReported(rec) {
-			return nil, fmt.Errorf("audit record %d: %s %s is not an event the collector reports", i, rec.Action, rec.Outcome)
+			return fail(fmt.Errorf("audit record %d: %s %s is not an event the collector reports", i, rec.Action, rec.Outcome))
 		}
 		// Numbers rise within one run. They need not be contiguous here,
 		// because runs on other assets take numbers in between; the audit
 		// chain as a whole is contiguous (audit.VerifyCollectorSeq).
 		if rec.CollectorSeq <= last {
-			return nil, fmt.Errorf("audit record %d: collector_seq %d after %d", i, rec.CollectorSeq, last)
+			return fail(fmt.Errorf("audit record %d: collector_seq %d after %d", i, rec.CollectorSeq, last))
 		}
 		last = rec.CollectorSeq
 		if invocationActions[rec.Action] && rec.CorrelationID != o.InvocationID {
-			return nil, fmt.Errorf("audit record %d: %s correlates to %q, not this invocation", i, rec.Action, rec.CorrelationID)
+			return fail(fmt.Errorf("audit record %d: %s correlates to %q, not this invocation", i, rec.Action, rec.CorrelationID))
 		}
 		switch rec.Action {
 		case audit.ActionDeviceSessionOpen:
@@ -250,19 +317,18 @@ func checkOutcome(req *authz.CollectorRequest, reply authz.CollectorReply, b []b
 		case audit.ActionDeviceSessionClose:
 			closes++
 			if rec.TranscriptSHA256 != res.Transcript.SHA256 {
-				return nil, fmt.Errorf("audit record %d: session close names transcript %s, result has %s", i, rec.TranscriptSHA256, res.Transcript.SHA256)
+				return fail(fmt.Errorf("audit record %d: session close names transcript %s, result has %s", i, rec.TranscriptSHA256, res.Transcript.SHA256))
 			}
 		}
-		out.Audit = append(out.Audit, PendingRecord{Raw: []byte(raw), Record: rec})
 	}
 	// One run is at most one session (C2 MaxConcurrentSessions, D9). A
 	// transcript with any bytes means a session was opened, and its digest
 	// must reach the chain through the close record (D1-25).
 	if opens > 1 || closes != opens {
-		return nil, fmt.Errorf("%d session open and %d session close records; want at most one, paired", opens, closes)
+		return fail(fmt.Errorf("%d session open and %d session close records; want at most one, paired", opens, closes))
 	}
 	if len(res.Transcript.Data) > 0 && opens == 0 {
-		return nil, errors.New("result has a transcript but no session records")
+		return fail(errors.New("result has a transcript but no session records"))
 	}
-	return out, nil
+	return out, nil, nil
 }

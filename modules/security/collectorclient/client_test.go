@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
@@ -199,12 +200,27 @@ func TestCheckLinesOnTheNode(t *testing.T) {
 	other.Run.OperationID = "sel.id"
 	other.Run.CredentialRef = ""
 	res := json.RawMessage(strings.Replace(string(resultOK(t)), `"sel.ser.read_all"`, `"sel.id"`, 1))
-	c = scripted(t, mustJSON(t, accepted(10)), outcome(t, invocation, res, session(t, 11)))
+	frame := outcome(t, invocation, res, session(t, 11))
+	c = scripted(t, mustJSON(t, accepted(10)), frame)
 	c.Register = held
-	_, err := c.Do(ctx(t), other)
+	resp, err := c.Do(ctx(t), other)
 	t.Logf("other operation: %v", err)
-	if !errors.Is(err, ErrOutcomeUnknown) || !strings.Contains(err.Error(), "lines") {
-		t.Fatalf("got %v, want ErrOutcomeUnknown from CheckLines", err)
+	if !errors.Is(err, ErrOutcomeUnknown) || !errors.Is(err, ErrOutcomeQuarantined) || !errors.Is(err, ErrUnauthorizedLine) {
+		t.Fatalf("got %v, want ErrOutcomeUnknown, ErrOutcomeQuarantined and ErrUnauthorizedLine", err)
+	}
+	// The evidence of the unauthorized line stays with the node: the frame
+	// as received, the transcript holding the line, and the session records
+	// whose close names the transcript's digest (A6 and A1 on #79).
+	q := resp.Quarantine
+	if resp.Outcome != nil || q == nil || !q.UnauthorizedLine || string(q.Raw) != string(frame) {
+		t.Fatalf("quarantine %+v", q)
+	}
+	r, derr := adapter.DecodeResult(q.ResultJSON)
+	if derr != nil || !strings.Contains(string(r.Transcript.Data), "SER\r\n") {
+		t.Fatalf("transcript not reachable from the quarantine: %v", derr)
+	}
+	if len(q.Audit) != 4 || q.Audit[3].Record.TranscriptSHA256 != r.Transcript.SHA256 || !strings.Contains(q.Reason, "sel.ser.read_all") {
+		t.Fatalf("quarantine records %d, reason %q", len(q.Audit), q.Reason)
 	}
 
 	c = scripted(t, mustJSON(t, accepted(10)), outcome(t, invocation, resultOK(t), session(t, 11)))
@@ -273,8 +289,12 @@ func TestBadOutcomeIsOutcomeUnknown(t *testing.T) {
 	for name, ob := range cases {
 		resp, err := scripted(t, mustJSON(t, accepted(10)), ob).Do(ctx(t), runReq())
 		t.Logf("%s: %v", name, err)
-		if !errors.Is(err, ErrOutcomeUnknown) || !resp.Reply.Accepted() || resp.Outcome != nil {
-			t.Errorf("%s: outcome %v, err %v; want ErrOutcomeUnknown with the accepted reply", name, resp.Outcome != nil, err)
+		if !errors.Is(err, ErrOutcomeUnknown) || !errors.Is(err, ErrOutcomeQuarantined) || !resp.Reply.Accepted() || resp.Outcome != nil {
+			t.Errorf("%s: outcome %v, err %v; want ErrOutcomeQuarantined with the accepted reply", name, resp.Outcome != nil, err)
+		}
+		// Nothing that arrived is dropped.
+		if q := resp.Quarantine; q == nil || string(q.Raw) != string(ob) || q.Reason == "" || q.UnauthorizedLine {
+			t.Errorf("%s: quarantine %+v", name, q)
 		}
 	}
 }
@@ -283,7 +303,7 @@ func TestBadOutcomeIsOutcomeUnknown(t *testing.T) {
 // (its collector_seq must be audited) and treats the run as outcome unknown.
 func TestLostOutcomeKeepsReply(t *testing.T) {
 	resp, err := scripted(t, mustJSON(t, accepted(10))).Do(ctx(t), runReq())
-	if !errors.Is(err, ErrOutcomeUnknown) || resp.Reply.CollectorSeq != 10 || resp.Outcome != nil {
+	if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrOutcomeQuarantined) || resp.Reply.CollectorSeq != 10 || resp.Outcome != nil || resp.Quarantine != nil {
 		t.Fatalf("%+v, %v", resp, err)
 	}
 }

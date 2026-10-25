@@ -383,6 +383,14 @@ def main():
     ap.add_argument("--profile", choices=("placeholder", "sel-751-doc"), default="placeholder",
                     help="sel-751-doc answers from SEL-751 manual examples (profile_sel751.py)")
     ap.add_argument("--profile-password", help="sel-751-doc: Level 1 password; omit to model passwords disabled")
+    ap.add_argument("--profile-fid", help="sel-751-doc: FID in the ID reply, line checksum recomputed")
+    ap.add_argument("--profile-stx-etx", action="store_true",
+                    help="sel-751-doc: frame messages in STX ... ETX (p. 7.28)")
+    ap.add_argument("--profile-ser", choices=("example", "none"), default="example",
+                    help="sel-751-doc: SER answers Figure 10.16, or No Data Available")
+    ap.add_argument("--profile-inherit", choices=("none", "level", "prompt"), default="none",
+                    help="sel-751-doc: what a new connection inherits before TIDLE (see profile_sel751)")
+    ap.add_argument("--profile-tidle", type=float, default=900.0, help="sel-751-doc: TIDLE in seconds")
     ap.add_argument("--max-sessions", type=int, help="tcp only: refuse connections beyond this count")
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
@@ -397,15 +405,27 @@ def main():
         max_sessions=args.max_sessions)
     if args.profile == "sel-751-doc":
         import profile_sel751
+        relay = None
+        if args.profile_inherit != "none":
+            relay = profile_sel751.RelayState(inherit=args.profile_inherit, tidle=args.profile_tidle)
         cfg.responder_factory = profile_sel751.factory(
-            password=(args.profile_password or "").encode("latin-1") or None)
+            password=(args.profile_password or "").encode("latin-1") or None,
+            fid=args.profile_fid.encode("latin-1") if args.profile_fid else None,
+            stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay)
 
     async def run():
         rec = Recorder(args.log)
         if args.transport == "ssh":
-            await start_ssh(rec, args.host, args.port, args.user, args.password, cfg)
+            server = await start_ssh(rec, args.host, args.port, args.user, args.password, cfg)
         else:
-            await start_tcp(rec, args.host, args.port, cfg)
+            server = await start_tcp(rec, args.host, args.port, cfg)
+        # With --port 0 the OS picks the port; a harness reads it from this
+        # first line on stdout.
+        if hasattr(server, "get_port"):
+            port = server.get_port()
+        else:
+            port = server.sockets[0].getsockname()[1]
+        print(json.dumps({"event": "ready", "host": args.host, "port": port}), flush=True)
         await asyncio.Event().wait()
 
     asyncio.run(run())
