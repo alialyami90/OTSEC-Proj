@@ -642,6 +642,33 @@ func TestCommittedSuspensionNotWrittenTwice(t *testing.T) {
 	}
 }
 
+// A clear whose append reported an error but was committed is found in
+// the stream before the file is matched again, so it is not written twice:
+// C8 0.2 breaks the chain on a second clear. Here the run's own settle has
+// not applied it, as when its fold could not read the stream.
+func TestCommittedClearNotWrittenTwice(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	s := newScheduler(t, r, suspendingCollector(t, false))
+	s.RunOnce(bg, 0)
+	sp := s.Suspensions()[relayID]
+	if err := s.commitSuspensionRecord(bg, audit.ActionAssetSuspensionClear, relayID, sp, "", "test"); err != nil {
+		t.Fatal(err)
+	}
+	writeClear(t, nc, relayID, sp.Ref)
+	s.checkClear(bg)
+	if _, clears := suspensionRecords(t, r); len(clears) != 1 {
+		t.Fatalf("%d asset.suspension_clear records", len(clears))
+	}
+	if why := s.Halted("any-other-asset"); why != "" {
+		t.Fatalf("node held: %q", why)
+	}
+	if s.suspended(relayID) {
+		t.Fatal("still suspended after the committed clear")
+	}
+}
+
 // A suspension record the node cannot apply stops every run on the node,
 // at a start's rebuild and when the running node meets it: a clear of a
 // suspension that is not open breaks C8 0.2's rules, and a second

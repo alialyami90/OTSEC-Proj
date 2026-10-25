@@ -536,6 +536,16 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 		s.refuseClear(key, "", fmt.Sprintf("%s is not a %s object with asset_id and ref", ClearSuspensionFileName, ClearSuspensionSchema))
 		return
 	}
+	// Match against the stream as it stands, even when the run's settle
+	// could not read it: a clear whose append reported an error but was
+	// committed is applied here, and not written a second time, which C8
+	// 0.2 breaks the chain on.
+	if err := s.fold(ctx, true); err != nil {
+		if s.foldOK(err) {
+			s.refuseClear("read "+key, cl.AssetID, "the audit stream could not be read, so the clear was not matched; nothing cleared: "+err.Error())
+		}
+		return
+	}
 	s.mu.Lock()
 	sp, ok := s.susp[cl.AssetID]
 	unwritten := slices.ContainsFunc(s.unaudited, func(u unaudited) bool { return u.assetID == cl.AssetID && u.sp.Ref == cl.Ref })
