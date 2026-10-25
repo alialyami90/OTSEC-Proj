@@ -85,6 +85,7 @@ func sddl(grants ...grant) string {
 //	OTSEC                      node and collector may traverse
 //	OTSEC\config               node reads (its configuration)
 //	OTSEC\config\tls           node reads (TLS reference files, D2-12)
+//	OTSEC\config\admin         node and collector read (administrator files, D2-15)
 //	OTSEC\store                node full control: the C5 store and status
 //	OTSEC\collector             collector reads (collector.json, A3)
 //	OTSEC\collector\credentials collector full control (A3 credential design)
@@ -95,7 +96,9 @@ func sddl(grants ...grant) string {
 // Users and Everyone included, has any access. The node has no entry on
 // OTSEC\collector, so it cannot list it or read collector.json; it reaches
 // collector\public by its full path, which needs only the traverse right
-// SeChangeNotifyPrivilege gives, the one privilege it keeps (W-2).
+// SeChangeNotifyPrivilege gives, the one privilege it keeps (W-2). The
+// collector reaches config\admin the same way: it has no entry on
+// OTSEC\config, so it cannot read node.json.
 func Dirs(programData string) []Dir {
 	node := collectorwire.ServiceSID(NodeService)
 	coll := collectorwire.ServiceSID(CollectorService)
@@ -104,6 +107,7 @@ func Dirs(programData string) []Dir {
 		{root, sddl(grant{node, accessTraverse, false}, grant{coll, accessTraverse, false})},
 		{filepath.Join(root, "config"), sddl(grant{node, accessTraverse, true})},
 		{TLSDir(programData), sddl(grant{node, accessTraverse, true})},
+		{AdminDir(programData), sddl(grant{node, accessTraverse, true}, grant{coll, accessTraverse, true})},
 		{StoreDir(programData), sddl(grant{node, accessFull, true})},
 		{filepath.Join(root, "collector"), sddl(grant{coll, accessTraverse, true})},
 		{filepath.Join(root, "collector", "credentials"), sddl(grant{coll, accessFull, true})},
@@ -160,11 +164,14 @@ const MaxCollectorConfigBytes = 4 << 20
 func TLSDir(programData string) string { return filepath.Join(programData, "OTSEC", "config", "tls") }
 
 // AdminDir is the admin_dir the node configuration must name when it has
-// one: OTSEC\config, where an administrator leaves the Phase 2 interim
-// files such as clear-suspension.json. The node reads it and cannot write
-// it, and files an administrator creates there are owned by
-// Administrators, as node.Scheduler requires (store.ReadProtectedFile).
-func AdminDir(programData string) string { return filepath.Join(programData, "OTSEC", "config") }
+// one: OTSEC\config\admin, where an administrator leaves the Phase 2
+// interim files such as clear-suspension.json and seq-reset-ack.json. The
+// node and the collector both read it and neither can write it (A3 #117),
+// and files an administrator creates there are owned by Administrators,
+// as both require (protect.ReadFileFor with node.AdminReaders).
+func AdminDir(programData string) string {
+	return filepath.Join(programData, "OTSEC", "config", "admin")
+}
 
 // StoreDir is the store directory the node configuration must name.
 func StoreDir(programData string) string { return filepath.Join(programData, "OTSEC", "store") }

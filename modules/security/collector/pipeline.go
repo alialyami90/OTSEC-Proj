@@ -15,6 +15,7 @@ import (
 
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collectorwire"
@@ -57,6 +58,13 @@ type RunPlan struct {
 	// each event the run reports, durably.
 	ReplySeq uint64
 	NextSeq  func() (uint64, error)
+	// Principal is the schedule the run is for; its records name it as the
+	// actor, in the collector role.
+	Principal authz.Principal
+	// Audit builds the records the run reports, numbered from NextSeq. The
+	// pipeline puts them in the outcome after the runner returns, with the
+	// credential suspension it applies; a runner never sets Outcome.Audit.
+	Audit *RunAudit
 }
 
 // RunReport is what a run tells the pipeline besides the outcome. Its zero
@@ -94,6 +102,14 @@ type PipelineConfig struct {
 	// per hour.
 	InstallLimit  int
 	InstallWindow time.Duration
+	// ReadClearFile returns the administrator's clear-suspension.json
+	// (ClearSuspensionFileName) from the folder the node and the collector
+	// both read, after checking that neither service can write the folder
+	// or the file (protect.CheckDirFor, ReadFileFor). It
+	// is read again for every asset.clear_suspension request, never
+	// cached. Nil means no folder is configured, so no asset suspension
+	// can be cleared.
+	ReadClearFile func() ([]byte, error)
 	// Alarm receives safety and integrity failures: a state write that
 	// failed after a run, a result that fails the collector's own checks,
 	// a runner panic. Nil drops them; the binary always sets it.
@@ -206,6 +222,8 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		r = p.human(req, func() error { _, err := p.cfg.Creds.Revoke(*req.CredentialRevoke); return err })
 	case req.Kind == authz.KindCredentialClearSusp && req.CredentialClearSusp != nil:
 		r = p.human(req, func() error { _, err := p.cfg.Creds.ClearSuspension(*req.CredentialClearSusp); return err })
+	case req.Kind == authz.KindAssetClearSusp && req.AssetClearSusp != nil:
+		r = p.clearAsset(req)
 	default:
 		r = &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"}
 	}
@@ -222,6 +240,58 @@ func (p *Pipeline) human(req *authz.CollectorRequest, f func() error) error {
 		return &authz.Refusal{Code: authz.RefusePrincipal, Detail: "credential requests come from a person with the admin role"}
 	}
 	return f()
+}
+
+// ClearSuspensionFileName, ClearSuspensionSchema and
+// MaxClearSuspensionBytes are the node's (platform/node): the collector
+// reads the same administrator file. cmd/otsec-collector's tests keep
+// them equal.
+const (
+	ClearSuspensionFileName = "clear-suspension.json"
+	ClearSuspensionSchema   = "otsec.clear-suspension/0.1"
+	MaxClearSuspensionBytes = 4 << 10
+)
+
+type clearFile struct {
+	Schema  string `json:"schema"`
+	AssetID string `json:"asset_id"`
+	Ref     string `json:"ref"`
+}
+
+// clearAsset decides an asset.clear_suspension (C7 0.2, D2-15). The node
+// asks after it has recorded its own clear, but the request alone clears
+// nothing: the collector reads the administrator's file itself, and the
+// request, the file and the invocation that suspended the asset must all
+// name the same asset and ref. Anything else is suspension_mismatch and
+// changes nothing, so the asset stays suspended here. The decision reaches
+// the audit chain as the node's collector.request record for this reply.
+func (p *Pipeline) clearAsset(req *authz.CollectorRequest) error {
+	if req.OnBehalfOf.Type != authz.PrincipalNode {
+		return &authz.Refusal{Code: authz.RefusePrincipal, Detail: "asset clear requests come from the node"}
+	}
+	body := *req.AssetClearSusp
+	if _, ok := p.assets[body.AssetID]; !ok {
+		return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: body.AssetID}
+	}
+	if p.cfg.ReadClearFile == nil {
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: "no administrators' folder is configured"}
+	}
+	b, err := p.cfg.ReadClearFile()
+	if err != nil {
+		msg := err.Error()
+		if len(msg) > 256 {
+			msg = msg[:256] // the reply detail is bounded (C7 reply schema)
+		}
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: ClearSuspensionFileName + " not read: " + msg}
+	}
+	var f clearFile
+	if err := collectorwire.DecodeStrict(b, &f); err != nil || f.Schema != ClearSuspensionSchema {
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: ClearSuspensionFileName + " is not a " + ClearSuspensionSchema + " object"}
+	}
+	if f.AssetID != body.AssetID || f.Ref != body.Ref {
+		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: "the request and " + ClearSuspensionFileName + " name different suspensions"}
+	}
+	return p.cfg.State.ClearAssetSuspension(body.AssetID, body.Ref)
 }
 
 // install spends one install from the budget, then installs. The budget is
@@ -348,8 +418,10 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		Invocation: inv, Asset: e.Asset, Profile: e.Profile, Endpoint: ep, Register: pkg,
 		Credential: cred, Secret: secret, Floor: NewFloorGate(p.cfg.State, body.AssetID),
 		Dial: endpointDialer(ep), ReplySeq: seq, NextSeq: p.cfg.State.NextSeq,
+		Principal: req.OnBehalfOf,
 	}
 	plan.Floor.Alarm = p.cfg.Alarm
+	plan.Audit = newRunAudit(p, &plan)
 	return inv.InvocationID, &runWork{p: p, plan: plan, release: release}, nil
 }
 
@@ -411,8 +483,13 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 		credSuspend = authz.SuspendReason(code.SuspendsCredential())
 	}
 	if credSuspend != "" && plan.Credential != nil {
-		if _, _, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
+		if _, changed, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: suspend %s: %w", plan.Credential.ID, err))
+		} else if changed {
+			// Only a suspension that happened is recorded: not one the
+			// store refused, nor a credential already suspended or
+			// revoked (A6 on #112).
+			plan.Audit.Add(audit.ActionCredentialSuspend, audit.OutcomeSucceeded, suspendReason(credSuspend), nil)
 		}
 	}
 	if plan.Floor.LoginConfirmed() && !report.QUISent {
@@ -422,6 +499,7 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 			p.cfg.Alarm(fmt.Errorf("collector: set floor after unclean exit from %s: %w", asset, err))
 		}
 	}
+	report.Outcome.Audit = plan.Audit.Records()
 	p.checkResult(plan, report.Outcome)
 	return report.Outcome
 }

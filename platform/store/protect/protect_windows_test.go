@@ -1,6 +1,6 @@
 //go:build windows
 
-package store
+package protect
 
 import (
 	"errors"
@@ -117,28 +117,28 @@ func TestProtectedForOnDisk(t *testing.T) {
 			t.Skip("needs an elevated process: ", err)
 		}
 	}
-	if err := CheckProtectedDirFor(dir, []string{peer}); err != nil {
+	if err := CheckDirFor(dir, []string{peer}); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := ReadProtectedFileFor(file, 64, []string{peer}); err != nil || string(b) != "{}" {
+	if b, err := ReadFileFor(file, 64, []string{peer}); err != nil || string(b) != "{}" {
 		t.Fatalf("%q: %v", b, err)
 	}
-	if err := CheckProtectedDir(dir); err == nil || !strings.Contains(err.Error(), peer) {
+	if err := CheckDir(dir); err == nil || !strings.Contains(err.Error(), peer) {
 		t.Fatalf("plain check: %v", err)
 	}
-	if _, err := ReadProtectedFileFor(file, 64, nil); err == nil {
+	if _, err := ReadFileFor(file, 64, nil); err == nil {
 		t.Fatal("read with the reader not named")
 	}
 	hard := filepath.Join(dir, "hard.json")
 	if err := os.Link(file, hard); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadProtectedFileFor(hard, 64, []string{peer}); err == nil {
+	if _, err := ReadFileFor(hard, 64, []string{peer}); err == nil {
 		t.Fatal("a file with two hard links read")
 	}
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(dir, link); err == nil {
-		if err := CheckProtectedDirFor(link, []string{peer}); err == nil {
+		if err := CheckDirFor(link, []string{peer}); err == nil {
 			t.Fatal("a link accepted")
 		}
 	} else if !errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {

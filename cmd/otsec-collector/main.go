@@ -21,11 +21,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 func main() {
@@ -112,8 +114,9 @@ func start(data string, log *slog.Logger) (*running, error) {
 	}
 	pipe, err := collector.NewPipeline(collector.PipelineConfig{
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
-		State: state, Creds: creds, Registers: regs, Runner: hostedRunner(),
+		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm},
 		InstallLimit: cfg.InstallLimit, Alarm: alarm,
+		ReadClearFile: clearFileReader(l.admin, []string{cfg.Endpoint.Peer, collectorwire.ServiceSID(collectorwire.CollectorService)}),
 	})
 	if err != nil {
 		return nil, err
@@ -125,13 +128,24 @@ func start(data string, log *slog.Logger) (*running, error) {
 	return serveOn(ln, pipe, log), nil
 }
 
+// clearFileReader reads clear-suspension.json in the administrators'
+// folder for an asset.clear_suspension request, checking the folder and
+// then the file every time: owned by SYSTEM or Administrators, a protected
+// DACL, and nothing more than read for the node or the collector, so
+// neither service could have written what it reads (protect.CheckDirFor,
+// ReadFileFor). On Linux, a development platform only, the check
+// is the mode. readers are the node's identity and the collector's own.
+func clearFileReader(dir string, readers []string) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		if err := protect.CheckDirFor(dir, readers); err != nil {
+			return nil, err
+		}
+		return protect.ReadFileFor(filepath.Join(dir, collector.ClearSuspensionFileName), collector.MaxClearSuspensionBytes, readers)
+	}
+}
+
 func serveOn(ln net.Listener, h collector.Handler, log *slog.Logger) *running {
 	r := &running{srv: &collector.Server{Handler: h, Log: log}, done: make(chan error, 1)}
 	go func() { r.done <- r.srv.Serve(ln) }()
 	return r
 }
-
-// hostedRunner is the adapter the collector hosts. A2's sel751.Run is wired
-// in when it lands; until then every run is refused with not_invocable and
-// only credential requests are served.
-func hostedRunner() collector.Runner { return nil }

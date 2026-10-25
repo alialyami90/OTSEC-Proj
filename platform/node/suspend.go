@@ -19,7 +19,8 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/collectorclient"
-	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/modules/security/collectorwire"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 // The node keeps its own copy of the C1 suspensions its runs' outcome codes
@@ -59,6 +60,17 @@ const SuspensionsFileName = "suspensions.json"
 // interim; before any device-observed endpoint the clear becomes an
 // admin-signed C7 request (A1).
 const ClearSuspensionFileName = "clear-suspension.json"
+
+// AdminReaders are the services that read admin_dir besides
+// Administrators and SYSTEM: the node and the collector, whose service
+// SIDs each hold read and traverse there and nothing more
+// (winsvc.Dirs, OTSEC\config\admin). Both services pass the same list to
+// protect.CheckDirFor and ReadFileFor, so a file either could have
+// written is refused by both (A3 #117). On Linux, a development platform
+// only, the list is not used.
+func AdminReaders() []string {
+	return []string{collectorwire.ServiceSID(collectorwire.NodeService), collectorwire.ServiceSID(collectorwire.CollectorService)}
+}
 
 const (
 	suspensionsSchema       = "otsec.node-suspensions/0.1"
@@ -529,12 +541,12 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	// itself is no administrator's. On Linux the file check reads only the
 	// mode, so a node-writable directory would let the node plant a 0400
 	// file; on Windows another account could write one into it.
-	if err := store.CheckProtectedDir(s.rt.cfg.AdminDir); err != nil {
+	if err := protect.CheckDirFor(s.rt.cfg.AdminDir, AdminReaders()); err != nil {
 		s.refuseClear("dir "+err.Error(), "", "admin_dir refused, so "+ClearSuspensionFileName+" is not read: "+err.Error())
 		return
 	}
 	path := filepath.Join(s.rt.cfg.AdminDir, ClearSuspensionFileName)
-	b, err := store.ReadProtectedFile(path, MaxClearSuspensionBytes)
+	b, err := protect.ReadFileFor(path, MaxClearSuspensionBytes, AdminReaders())
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
@@ -544,9 +556,9 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	}
 	key := "file " + digest(b)
 	var cl clearSuspension
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cl); err != nil || dec.More() || cl.Schema != ClearSuspensionSchema || cl.AssetID == "" || cl.Ref == "" {
+	// Strict as the collector reads it (A3 #117): keys exactly as named,
+	// no duplicate, nothing after the object.
+	if err := collectorwire.DecodeStrict(b, &cl); err != nil || cl.Schema != ClearSuspensionSchema || cl.AssetID == "" || cl.Ref == "" {
 		s.refuseClear(key, "", fmt.Sprintf("%s is not a %s object with asset_id and ref", ClearSuspensionFileName, ClearSuspensionSchema))
 		return
 	}

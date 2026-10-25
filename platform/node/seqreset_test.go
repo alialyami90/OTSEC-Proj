@@ -1,15 +1,18 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorclient"
+	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
 
@@ -136,6 +139,7 @@ func TestUnreadableInstallKeyHolds(t *testing.T) {
 		},
 		"extra":     func() { os.WriteFile(path, withField(t, good, "x", "1"), 0o600) },
 		"trailing":  func() { os.WriteFile(path, append(slices.Clone(good), `{}`...), 0o600) },
+		"key case":  func() { os.WriteFile(path, bytes.Replace(good, []byte(`"key_id"`), []byte(`"KEY_ID"`), 1), 0o600) },
 		"too large": func() { os.WriteFile(path, make([]byte, maxInstallKeyBytes+1), 0o600) },
 		"a link":    func() { os.WriteFile(path+".real", good, 0o600); os.Remove(path); os.Symlink(path+".real", path) },
 		"no key id": func() {
@@ -233,6 +237,60 @@ func TestReinstallHoldsUntilAcknowledged(t *testing.T) {
 		t.Fatalf("%d ack-refused alarms, want one for each wrong key and one for the writable directory", n)
 	}
 	verifySeq(t, r, 2)
+}
+
+// seq-reset-ack.json in admin_dir as the installer lays it out, shared
+// with the collector (A6 on #119): read under the shared-reader rule and
+// decoded strictly, as clear-suspension.json is. A key in another case, a
+// duplicate key or a trailing value acknowledges nothing, and on Windows
+// neither does a file a service outside AdminReaders may read; the right
+// file in the shared layout does.
+func TestAckFromSharedAdminDir(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	n := &numbering{next: 1}
+	col := n.collector()
+	s := newScheduler(t, r, col)
+	s.RunOnce(bg, 0)
+	if err := nc.WriteInstallKey("ik_test_second"); err != nil {
+		t.Fatal(err)
+	}
+	n.next = 1
+	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorReset || col.n() != 1 {
+		t.Fatalf("after the reinstall: run %+v, %d requests", rep, col.n())
+	}
+	coll := collectorwire.ServiceSID(collectorwire.CollectorService)
+	head := `{"schema":"` + SeqResetAckSchema + `",`
+	right := kid("ik_test_second")
+	held := map[string]string{
+		"key case":  head + `"INSTALL_KEY_ID":"` + right + `"}`,
+		"duplicate": head + `"install_key_id":"other","install_key_id":"` + right + `"}`,
+		"trailing":  head + `"install_key_id":"` + right + `"}{}`,
+	}
+	for name, body := range held {
+		writeShared(t, nc, SeqResetAckFileName, []byte(body), coll)
+		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorReset || col.n() != 1 {
+			t.Fatalf("%s: run %+v, %d requests", name, rep, col.n())
+		}
+	}
+	good, _ := json.Marshal(map[string]string{"schema": SeqResetAckSchema, "install_key_id": right})
+	if runtime.GOOS == "windows" {
+		writeShared(t, nc, SeqResetAckFileName, good, strangerSID)
+		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmCollectorReset || col.n() != 1 {
+			t.Fatalf("a reader not in AdminReaders: run %+v, %d requests", rep, col.n())
+		}
+	}
+	if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 0 {
+		t.Fatalf("acks %+v", acks)
+	}
+	writeShared(t, nc, SeqResetAckFileName, good, coll)
+	if rep := s.RunOnce(bg, 0); !rep.Sent || col.n() != 2 {
+		t.Fatalf("acknowledged in the shared layout: run %+v, %d requests", rep, col.n())
+	}
+	if acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck); len(acks) != 1 || acks[0].InstallKeyID != right {
+		t.Fatalf("acks %+v", acks)
+	}
 }
 
 // A reset or an acknowledgement whose append reported an error but was

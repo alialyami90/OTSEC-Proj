@@ -138,7 +138,7 @@ Transport tests (`collectorwire/transport_test.go`) run on both Linux and Window
 - **A failed write breaks the state.** Every later call returns `ErrStateUnavailable`, which the run pipeline turns into `collector_state_unavailable`, until the collector restarts and reads the file again.
 - **The file is created once, at the first start** (`InitState`). `OpenState` never creates it. A missing, unreadable, oversize or unknown file is `ErrStateUnavailable`, never a fresh state, because a fresh one would reopen every floor and restart `collector_seq` at 1.
 - **A fresh state starts a floor on every asset (PR 4, A1 on the `collector_seq` reset).** `InitState` records `created_utc`, which is required. `CheckFloor` treats it as an unconfirmed authentication on every asset, so after a reinstall the collector authenticates to nothing for the longest floor (31 minutes, `TIDLE` unknown), and a clock set back before it counts as inside. The previous state may have held an `ACC` left unconfirmed, and a fresh state cannot know, so a reinstall never shortens a floor. A creation time set ahead by a wrong clock holds every asset until real time passes it, and only a reinstall clears that. This is the safe direction, but an operator who sees every run refused with `rate_limited` after a reinstall should check the clock (A6 on #106).
-- **Asset suspensions (PR 4).** `SuspendAsset` records the C1 reason an outcome code set (`adapter.Code.Suspends`) with the invocation, durably, and `CheckSuspended` refuses runs to the asset. A later reason does not replace the first, except `identity-mismatch`, as for credentials. Nothing in C7 0.1 clears one, and a fresh state does not hold them (see Open items).
+- **Asset suspensions (PR 4).** `SuspendAsset` records the C1 reason an outcome code set (`adapter.Code.Suspends`) with the invocation, durably, and `CheckSuspended` refuses runs to the asset. A later reason does not replace the first, except `identity-mismatch`, as for credentials, which then names the later invocation. `ClearAssetSuspension` lifts one only for the invocation that set it, for a C7 0.2 `asset.clear_suspension` (see "Asset clears" below), and a fresh state does not hold them.
 - **`NextSeq`** writes the new number before handing it out, so a number is never used twice. A crash after it leaves a gap, which `audit.VerifyCollectorSeq` shows.
 - **The floor.** `BeginAuth` records the attempt before `ACC` is sent, and `ConfirmAuth` clears it only on `=>`. `CheckFloor` refuses with `rate_limited` inside `authz.FailureFloor` (`TIDLE` plus one minute, 31 minutes when unknown), and a time later than the clock counts as inside. `SetTIDLE` keeps only 1 to 30 minutes and records anything else as unknown.
 - **`FloorGate`** binds the state to one asset for one run, with the seam's `BeforeACC` and `Confirmed`. A failure to clear leaves the floor set and calls `Alarm`. A compile-time assertion checks it against `sel751.FloorGate`.
@@ -251,13 +251,14 @@ Nothing before the accepted reply opens a connection.
 
 ### After the reply
 
-The accepted run's work calls the `Runner`, with a deadline of the invocation's deadline plus 10 s. The SEL-751 runner wraps A2's `sel751.Run` and follows when it lands. The `RunPlan` carries:
+The accepted run's work calls the `Runner`, with a deadline of the invocation's deadline plus 10 s. The SEL-751 runner (`SEL751Runner`, below) wraps A2's `sel751.Run`. The `RunPlan` carries:
 
 - the invocation, asset, profile, endpoint and register;
 - the credential and `SecretHandle`;
 - the asset's `FloorGate`;
 - a dialer that connects only to the endpoint's own host and port over TCP and checks D2-10 again;
-- the reply's number and `NextSeq` for the events the run reports.
+- the reply's number and `NextSeq` for the events the run reports;
+- the schedule principal the run is for, and `RunAudit`, which builds the run's C8 records under that actor.
 
 When the runner returns, the pipeline:
 
@@ -270,6 +271,26 @@ When the runner returns, the pipeline:
 ### Credential requests
 
 Install, revoke and clear are refused unless a person asked (`principal_not_permitted`). An install first spends one from the **install budget**: 10 per hour per node by default, durable in the state file, and refused with `rate_limited`. The budget is spent before any check, so a request a later check refuses still counts. An install dated after the clock stays in the window, so after a clock that ran far ahead is corrected, installs are refused until real time catches up. That fails closed, and it is why an admin may see `rate_limited` with no recent installs. This bounds guessing through the reuse rule (see Open items).
+
+### Asset clears (C7 0.2)
+
+A1 approved the design (D2-15 follow-up), with four conditions: C7 0.2 with the signed requests moved to the next minor, a "collector still suspended" node status (A5), separate asset and credential clears, and A6's denial tests.
+
+- **Who asks.** The node, on its own behalf (`on_behalf_of` type `node`, the node ID), after it has recorded its own `asset.suspension_clear` from the administrator's `clear-suspension.json`. C7 `Validate` refuses any other principal, and the pipeline checks again. The kind needs contract 0.2 or later; a request stamped 0.1 is `invalid`.
+- **What the collector checks.** The request alone clears nothing. For every request the collector:
+  1. checks `config\admin`, the folder the node and the collector both read and neither writes, with `protect.CheckDirFor`;
+  2. reads `clear-suspension.json` with `protect.ReadFileFor`, with the readers set to the node's identity and the collector's own service SID;
+  3. decodes it strictly (`otsec.clear-suspension/0.1`, `asset_id` and `ref`, with no other field, duplicate key or trailing data);
+  4. requires the request and the file to name the same asset and ref, and its own state to hold the suspension that this ref set.
+
+  Only then does it clear the suspension, durably, and reply accepted.
+- **Denials.** A refused folder, a missing, malformed or other-schema file, a file or request naming another asset or invocation, or a suspension a later run set is `suspension_mismatch`. A state that cannot be written is `collector_state_unavailable`. Nothing changes, and the asset stays suspended at the collector.
+- **Already clear.** When the request and the file match but the collector holds no suspension of the asset, the clear is accepted and changes nothing (A5 on #117). That is the retry after a lost reply, or a clear sent to a reinstalled collector, whose fresh state holds no suspensions. Without it, the node's "collector still suspended" status would never settle, because the node sees only the code.
+- **Audit.** The reply carries a `collector_seq`, and the node writes it as its `collector.request` record, allowed or denied, so the chain shows the node's clear and then the collector's decision.
+- **What it holds against.** A compromised node cannot lift the collector's suspension without the administrator's file, which it cannot write. A planted file lifts nothing without the node's request.
+- **Separate from credentials.** `asset.clear_suspension` never touches a credential's suspension, and `credential.clear_suspension` never touches an asset's.
+- **Tests.** `assetclear_test.go`: each denial above, with the asset still suspended in memory and on disk and the refusal numbered; a person, a schedule or a system principal refused before the file is read; a matching clear lifting the suspension durably so the next run reaches the runner; a retry and a reinstalled collector accepted with nothing changed, while the same clear does not lift a later suspension; a file with no request lifting nothing; the separation both ways; and the state's own rule. `cmd/otsec-collector/clear_test.go` runs the request over the socket through the binary's wiring: a folder the collector could write is refused, and a 0550 folder with a 0440 file clears. It also keeps the file name, schema and size bound equal to the node's. `contracts/authz` adds the kind's goldens (valid; stamped 0.1; ref not an invocation; a person asking) and `TestAssetClearSuspension`.
+- **The binary.** `cmd/otsec-collector` reads `config\admin` under the data directory (`%ProgramData%\OTSEC\config\admin`). A5's installer creates it owned by Administrators, with a protected DACL: full control for SYSTEM and Administrators, and read and traverse for each service. If it is missing or wrong, every asset clear is refused.
 
 ### Register packages
 
@@ -312,13 +333,44 @@ Tests (`pipeline_test.go`, with the C1 simulated SEL-751 asset moved to 127.0.0.
 
 ### The hosted adapter
 
-`hostedRunner()` returns nil until A2's `sel751.Run` is on main. Until then, every run that passes the checks is refused with `not_invocable`, and only credential requests do work.
+The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2's `sel751.Run` with the plan's asset, profile, register, endpoint and dialer. It follows these rules from the reviews of #97 and #99:
 
-The SEL-751 runner will follow these rules, which came from the reviews of #97 and #99:
+- **Never pass a nil `*SecretHandle` as `sel751.Config.Secret`** (A2 on #97). A nil pointer stored in the interface is not a nil interface, so `Run` would refuse every Level 0 run as `failed.internal`. `cfg.Secret` and `cfg.Floor` are set only when `plan.Secret != nil`. `TestSEL751RunnerLevel0` fails without this.
+- **A session that ends at `Password: ?` counts as an unconfirmed attempt** (A3 on #99, A6 on #112). The wake line end, or `ID` when the relay greeted with its prompt and no wake was sent, may have landed as a password, and a Level 0 run has no floor gate to record it. When the bytes received since the last line sent end at the password prompt, under sel751's prompt rule (NUL, XON and XOFF ignored, trailing spaces trimmed, the prompt first or after CR, LF, STX or ETX), the runner sets the floor through `FloorGate.Unconfirmed`, whatever the result's code and even after the run's context has ended. On the `ACC` path the gate has already set it. The rule is a copy, because sel751's `promptOf` is unexported. `TestSEL751RunnerPasswordPromptSetsFloor` and `TestEndsAtPasswordPrompt` cover it.
+- **`RunReport.TIDLE` stays 0 until `sel751` reports the TIDLE it parsed** (A2 on #97). Until then, the floor after an exit without QUI is the 31-minute fallback, which is the safe side.
+- `RunReport.QUISent` is the result's `quit_sent`. When no login was confirmed it is true, because the pipeline reads it only after a confirmed login.
 
-- **Never pass a nil `*SecretHandle` as `sel751.Config.Secret`** (A2 on #97). A nil pointer stored in the interface is not a nil interface, so `Run` would refuse every Level 0 run as `failed.internal`. `cfg.Secret` and `cfg.Floor` are set only when `plan.Secret != nil`.
-- **A wake answered by `Password: ?` counts as an unconfirmed attempt** (A3 on #99). The bare line end probably landed as a blank password. A Level 0 run has no floor gate, so nothing else records it. When a result is `failed.internal` with `wake_sent` true and its last received bytes end in the password prompt, the runner sets the floor for the asset. A2 is adding a golden for this path.
-- **`RunReport.TIDLE` stays 0 until `sel751` reports the TIDLE it parsed** (A2 on #97, A2's follow-up). Until then, the floor after an exit without QUI is the 31-minute fallback, which is the safe side.
+**The records a run reports (C7-A5-2).** The runner adds them through `RunAudit` in the order the session ran, and the pipeline puts them in the outcome. A runner never sets `Outcome.Audit` itself. Each record is C8 0.2 and is checked with `audit.ValidatePending` before it is reported. Its actor is the schedule principal in the collector role, its target is the asset, transport, downstream label, credential and register family, its correlation ID is the invocation ID, and its `collector_seq` is taken durably from the state. A record that cannot be numbered or does not validate is not reported. That raises an alarm, and the node sees the missing number as a gap.
+
+| Record | When | Outcome and reason |
+| --- | --- | --- |
+| `device.session.open` | a connection was made (any transcript bytes) | succeeded |
+| `credential.use` | the credential was sent | succeeded when the login was confirmed (`=>`); otherwise failed, with the C2 code's name, for example `auth_rejected` |
+| `device.posture_warning` | each C2 warning | warning, with the C3 warning ID without `warn.`, for example `maxacc_above_1` |
+| `device.refused` | a C2 refusal | denied, with the code's name, for example `identity_mismatch` |
+| `device.op` | the operation completed (`ok`, `partial`), or failed after the operate phase sent something | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes. A Level 0 read sends its line in the probe phase, so it has no digest. |
+| `device.session.close` | after an open | succeeded; failed with `qui_not_sent` after a confirmed login without QUI (C7-A6-2); always with the transcript digest (D1-25) |
+| `credential.suspend` | the pipeline suspended the credential after the run; not when the store refused the write, nor when the credential was already suspended or revoked | succeeded, with the C7 reason using `_`, for example `auth_failed` |
+
+An asset suspension has no collector action in C8. The node writes `asset.suspend` from the outcome code (D2-15).
+
+Tests (`runner_sel751_test.go`) drive the whole pipeline with the runner hosted, against a far end on a loopback TCP port that replays a C2 golden's transcript. That covers the D2-10 dialer, the credential store, the floor and the suspensions. Every transcript is invented, so this is simulated evidence only.
+- **Eight goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. For each one, the test checks:
+  - the result code;
+  - the transcript digest, which is the golden's;
+  - the exact record sequence, under the node's own outcome checks;
+  - each record's actor and target (asset, transport, downstream label, family, credential and version), `device.op`'s `operation_id` and its digest recomputed from the operate-phase lines, and each posture warning's `detail` (A6 on #112);
+  - no alarm;
+  - the floor;
+  - the asset and credential suspensions;
+  - that the secret is nowhere in the outcome.
+- **A Level 0 ID read** with no secret: no credential record, no digest, and no floor.
+- **A line answered by the password prompt** sets the floor: the wake (the C2 golden `failed.internal-wake-password-prompt`), and `ID` after a relay that greeted with its prompt, so no wake was sent.
+- **`credential.suspend` only for a suspension that happened:** none when the store's write fails or the credential was revoked during the run.
+- **An echo of the secret cut short.** The relay echoes the first five bytes of the secret and hangs up. Those bytes are redacted in the stored transcript, which pins the reply order behind `EchoSpans`' partial rule (A6 on #106).
+- Removing the nil-secret guard, the `Unconfirmed` call or the pipeline's record hand-off each fails a test.
+
+**Finding for A2: the C2 goldens' test secret cannot be installed.** `otsec-lab-pw-1` is 14 bytes, and the SEL-751 profile's secret policy refuses it at install (`secret_rejected`, length). The goldens' transcripts hold only the redaction marker, so these tests send and expect the canary `Canary-7f3K` instead, and the stored transcripts and digests are the golden's. A golden secret within the policy would let a test use the goldens' own secret.
 
 ### Logs
 
@@ -329,17 +381,17 @@ On Windows a service logs to the Event Log under the source `otsec-collector`, w
 - `TestParseConfig`: a good configuration, and 12 refusals: an unknown field, a case variant of a field name, another format, a bad node ID, policy version 0, a bad asset, a missing profile, a profile of another version, a bad anchor key or status, trailing data, and (on Linux) no IPC endpoint.
 - `TestProvision`: both stores missing without the marker is refused; with it, the first start creates both and removes the marker; a second start leaves them; one store missing is refused even with a marker, and the missing store is not recreated; a leftover marker with both stores present is removed, and losing both stores afterwards is refused.
 - `TestCheckTraceback` and `TestHarden`: hardening runs in a child process, and on Linux the child is shown non-dumpable with a zero core limit.
-- `TestServe`, end to end over a Unix socket: first start, an install sealed by the client against the published key and its pinned fingerprint, a run refused with `not_invocable`, a stop, a restart without the marker, and a scan of every log line and every file the collector wrote for the test secret (the binary's part of T-5 and T-8). It found the server rule that PR 3 fixed.
+- `TestServe`, end to end over a Unix socket: first start, an install sealed by the client against the published key and its pinned fingerprint, a run refused with `rate_limited` by the fresh-state floor, a stop, a restart without the marker, and a scan of every log line and every file the collector wrote for the test secret (the binary's part of T-5 and T-8). It found the server rule that PR 3 fixed.
 - `FuzzParseConfig`.
 
 ## Open items
 
 - **PC run of the Windows transport.** One risk to check there: a service's process token may not grant another service `TOKEN_QUERY`. If it does not, `Dial` fails closed, and the collector must grant the node's SID `TOKEN_QUERY` on its own token at startup. A5's service accounts (`platform/winsvc`) decide which case applies.
-- **The install path is a guessing oracle for a compromised node service (A3 finding, for A1 and A6).** The node service holds the install key's public half, so it can seal any guess. It installs the guess under a new reference whose plaintext scope differs from the target's. The reply is `secret_rejected` for the reuse rule exactly when the guess equals a stored secret, and nothing is destroyed. SEL default passwords are well known, so a short list could confirm that a site still uses one. The secret still cannot leave through the collector, but the node service could carry it to another host on the station LAN. Every attempt is a collector-numbered decision, so a node that hides them leaves `collector_seq` gaps. In Phase 2 every device credential is lab-only Telnet, so no target of another scope exists yet. PR 3 adds a durable install budget (10 per hour per node by default, `rate_limited`). It bounds the rate, but it does not remove the oracle: a few known default passwords fit in one hour. The shared count must not go into the reply either, because it would be the same oracle within one scope. **Ruled in D2-11 (#91):** the budget is accepted for Phase 2 only. Before any `device-observed` endpoint, every credential request must be signed by an administrator whose key is pinned in the collector. The design, a C7 0.2 candidate, is in [A3-signed-credential-requests.md](A3-signed-credential-requests.md). Until it merges this is an open high risk.
+- **The install path is a guessing oracle for a compromised node service (A3 finding, for A1 and A6).** The node service holds the install key's public half, so it can seal any guess. It installs the guess under a new reference whose plaintext scope differs from the target's. The reply is `secret_rejected` for the reuse rule exactly when the guess equals a stored secret, and nothing is destroyed. SEL default passwords are well known, so a short list could confirm that a site still uses one. The secret still cannot leave through the collector, but the node service could carry it to another host on the station LAN. Every attempt is a collector-numbered decision, so a node that hides them leaves `collector_seq` gaps. In Phase 2 every device credential is lab-only Telnet, so no target of another scope exists yet. PR 3 adds a durable install budget (10 per hour per node by default, `rate_limited`). It bounds the rate, but it does not remove the oracle: a few known default passwords fit in one hour. The shared count must not go into the reply either, because it would be the same oracle within one scope. **Ruled in D2-11 (#91):** the budget is accepted for Phase 2 only. Before any `device-observed` endpoint, every credential request must be signed by an administrator whose key is pinned in the collector. The design, now a C7 0.3 candidate (0.2 took `asset.clear_suspension`), is in [A3-signed-credential-requests.md](A3-signed-credential-requests.md). Until it merges this is an open high risk.
 - **The shared-secret count has no field in the C7 reply.** `InstallResult.SharedWith` exists, but `CollectorReply` cannot carry it. Given the oracle above, it belongs in a collector-reported C8 install record, not in the reply. That is a C7 or C8 0.2 candidate.
-- **The sealing parameters** (HKDF salt and info) are fixed by `modules/security/seal`, not by C7. They are a C7 0.2 candidate, so that a browser client using WebCrypto can be checked against the contract.
+- **The sealing parameters** (HKDF salt and info) are fixed by `modules/security/seal`, not by C7. They are a C7 candidate, so that a browser client using WebCrypto can be checked against the contract.
 - **Removal is logical, not physical (A6 on #90).** Revocation removes the ciphertext from the current store file. But an earlier copy can still hold it: the blocks of an earlier file, a backup, a volume shadow copy, or a crash-left `credentials.json.tmp`. Reading such a copy needs the store key, so only the collector's account, SYSTEM or an administrator could read it, and design section 10 already lists those as able to read every secret. **So revoking a compromised secret must always be paired with changing it on the device.** **Putting such a copy back is refused.** The store carries a generation, which is 1 at creation and goes up by one at every write. The State records the highest generation written or opened (`cred_generation`), and `OpenCredStore` refuses a store older than the record. The store file is written first and the record second, so a crash between them leaves the store ahead, and the next open accepts it and catches the record up (`TestRestoredStoreRefused`, `TestStoreAheadOfRecord`). **The collector alone refuses a store restored by itself, not one restored together with its state (A6 on #97).** Restoring both files from one backup or volume shadow copy, the realistic case, passes this check. It brings back a revoked secret and rolls back the install budget, the failed-auth floors and the register family floors (register rollback). The backstop is the node: the restored `collector_seq` goes back while the install key is unchanged, which D2-15 and the C8 0.2 `collector.seq_reset` rules treat as a restore. The node holds collection, and an unchanged key is never acknowledged.
 - **Owed from A5's installer:** the `collector\public` directory (written by the collector, readable by the node), the Event Log source `otsec-collector`, and the WER value above. Without the WER value the collector refuses to start, which is the intended failure.
-- **Clearing an asset suspension.** C7 0.1 has no request for it, so in Phase 2 only a reinstall clears one, and a reinstall clears every one, behind the fresh state's 31-minute floor. A clear request belongs with the admin-signed requests (C7 0.2). Until then, the node should hold the suspension too (C1 `Suspension` from the outcome code), so a reinstalled collector is not the only record.
-- **C7 0.2 candidates from the pipeline:** `endpoint_id` in `RunBody`, so an asset with two outbound endpoints can be collected; and refusal codes for the Phase 2 locks and for a suspended asset, which use `asset_not_enrolled` today.
-- **C7 0.2 candidate.** C7 has no `DecodeReply`. `collectorwire.DecodeStrict` is therefore a copy of the contracts' internal strict decoder: a struct key must be exactly a field name, so `STATUS` and `ſtatus` are refused (A6's review of #79). A contract-level `DecodeReply` would let the copy go. Until then the two must be kept in step.
+- **Asset clears trust the folder's DACL.** C7 0.2 `asset.clear_suspension` relies on `config\admin` being writable only by Administrators and SYSTEM. On Linux, a development platform only, the check is the mode alone. Before any `device-observed` endpoint, the clear becomes an admin-signed request (D2-15, [A3-signed-credential-requests.md](A3-signed-credential-requests.md)).
+- **C7 candidates from the pipeline (not taken in 0.2):** `endpoint_id` in `RunBody`, so an asset with two outbound endpoints can be collected; and refusal codes for the Phase 2 locks and for a suspended asset, which use `asset_not_enrolled` today.
+- **C7 candidate.** C7 has no `DecodeReply`. `collectorwire.DecodeStrict` is therefore a copy of the contracts' internal strict decoder: a struct key must be exactly a field name, so `STATUS` and `ſtatus` are refused (A6's review of #79). A contract-level `DecodeReply` would let the copy go. Until then the two must be kept in step.

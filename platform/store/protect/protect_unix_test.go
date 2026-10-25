@@ -1,6 +1,6 @@
 //go:build !windows
 
-package store
+package protect
 
 import (
 	"os"
@@ -28,7 +28,7 @@ func TestProtectedForModes(t *testing.T) {
 		os.Chmod(dir, 0o700)
 		os.Chmod(file, c.mode)
 		os.Chmod(dir, 0o550)
-		_, err := ReadProtectedFileFor(file, 64, []string{"S-1-5-80-1"})
+		_, err := ReadFileFor(file, 64, []string{"S-1-5-80-1"})
 		if (err == nil) != c.ok {
 			t.Errorf("file %04o: %v, want ok %v", c.mode, err, c.ok)
 		}
@@ -38,7 +38,7 @@ func TestProtectedForModes(t *testing.T) {
 		ok   bool
 	}{{0o500, true}, {0o550, true}, {0o700, false}, {0o570, false}, {0o555, false}, {0o551, false}} {
 		os.Chmod(dir, c.mode)
-		err := CheckProtectedDirFor(dir, nil)
+		err := CheckDirFor(dir, nil)
 		if (err == nil) != c.ok {
 			t.Errorf("directory %04o: %v, want ok %v", c.mode, err, c.ok)
 		}
@@ -48,14 +48,14 @@ func TestProtectedForModes(t *testing.T) {
 	if err := os.Symlink(dir, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckProtectedDirFor(link, nil); err == nil {
+	if err := CheckDirFor(link, nil); err == nil {
 		t.Fatal("a linked directory accepted")
 	}
 	flink := filepath.Join(t.TempDir(), "flink")
 	if err := os.Symlink(file, flink); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadProtectedFileFor(flink, 64, nil); err == nil {
+	if _, err := ReadFileFor(flink, 64, nil); err == nil {
 		t.Fatal("a linked file accepted")
 	}
 	os.Chmod(dir, 0o700)
@@ -64,10 +64,10 @@ func TestProtectedForModes(t *testing.T) {
 	}
 	os.Chmod(dir, 0o550)
 	os.Chmod(file, 0o440)
-	if _, err := ReadProtectedFileFor(file, 64, nil); err == nil {
+	if _, err := ReadFileFor(file, 64, nil); err == nil {
 		t.Fatal("a file with two hard links read")
 	}
-	if err := CheckProtectedDir(dir); err == nil {
+	if err := CheckDir(dir); err == nil {
 		t.Fatal("the plain check accepted group access")
 	}
 }

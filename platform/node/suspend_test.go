@@ -2,9 +2,12 @@ package node
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/collectorclient"
+	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
 )
@@ -430,6 +434,92 @@ func TestBadClearFileChangesNothing(t *testing.T) {
 	}
 	if n != 3 {
 		t.Fatalf("%d clear-refused alarms for three bad files", n)
+	}
+	if _, clears := suspensionRecords(t, r); len(clears) != 0 {
+		t.Fatalf("clear records %+v", clears)
+	}
+}
+
+// strangerSID is a service SID that is not in AdminReaders.
+const strangerSID = "S-1-5-80-1111111111-2222222222-3333333333-4000000000-555555555"
+
+// writeShared writes name in admin_dir and locks the directory as the
+// installer lays out OTSEC\config\admin, with reader as the other
+// service's read entry (nodeconfigtest.ShareTLS). Like lockTLS, a
+// non-elevated Windows run skips, except under GitHub Actions or with
+// OTSEC_REQUIRE_ELEVATED=1.
+func writeShared(t *testing.T, nc *nodeconfigtest.Config, name string, body []byte, reader string) {
+	t.Helper()
+	nc.UnlockTLS()
+	if err := os.WriteFile(filepath.Join(nc.AdminDir, name), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := nc.ShareTLS(reader); errors.Is(err, nodeconfigtest.ErrNeedsElevation) {
+		if os.Getenv("GITHUB_ACTIONS") == "true" || os.Getenv("OTSEC_REQUIRE_ELEVATED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip(err)
+	} else if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// admin_dir as the installer lays it out, shared with the collector (A3
+// #117): a directory and file the collector may also read are accepted,
+// and on Windows a read entry for a service not in AdminReaders is
+// refused, as it is by the collector.
+func TestAdminDirSharedWithCollector(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := suspendingCollector(t, false)
+	s := newScheduler(t, r, col)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	b, _ := json.Marshal(map[string]string{"schema": ClearSuspensionSchema, "asset_id": relayID, "ref": ref})
+	share := func(reader string) { t.Helper(); writeShared(t, nc, ClearSuspensionFileName, b, reader) }
+	if runtime.GOOS == "windows" {
+		share(strangerSID)
+		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmAssetSuspended {
+			t.Fatalf("a reader not in AdminReaders: run %+v", rep)
+		}
+		if !slices.ContainsFunc(st.Snapshot("site-a-node1").Alarms, func(a StatusAlarm) bool { return a.Code == AlarmSuspensionClearRefused }) {
+			t.Fatal("no clear-refused alarm for a reader not in AdminReaders")
+		}
+	}
+	share(collectorwire.ServiceSID(collectorwire.CollectorService))
+	if rep := s.RunOnce(bg, 0); rep.Alarm == AlarmAssetSuspended {
+		t.Fatalf("shared admin_dir: run %+v", rep)
+	}
+	if _, clears := suspensionRecords(t, r); len(clears) != 1 || clears[0].CorrelationID != ref {
+		t.Fatalf("clear records %+v", clears)
+	}
+}
+
+// clear-suspension.json is decoded as strictly as the collector decodes
+// it (A3 #117): a key in another case, a duplicate key or a value after
+// the object clears nothing, even when it names the held suspension, so
+// the node never clears what the collector would refuse.
+func TestClearFileDecodedStrictly(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	col := suspendingCollector(t, false)
+	s := newScheduler(t, r, col)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	head := `{"schema":"` + ClearSuspensionSchema + `",`
+	for name, body := range map[string]string{
+		"key case":  head + `"ASSET_ID":"` + relayID + `","ref":"` + ref + `"}`,
+		"duplicate": head + `"asset_id":"other","asset_id":"` + relayID + `","ref":"` + ref + `"}`,
+		"trailing":  head + `"asset_id":"` + relayID + `","ref":"` + ref + `"}{}`,
+	} {
+		nc.UnlockTLS()
+		os.WriteFile(filepath.Join(nc.AdminDir, ClearSuspensionFileName), []byte(body), 0o600)
+		lockTLS(t, nc)
+		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmAssetSuspended {
+			t.Fatalf("%s: run %+v", name, rep)
+		}
 	}
 	if _, clears := suspensionRecords(t, r); len(clears) != 0 {
 		t.Fatalf("clear records %+v", clears)

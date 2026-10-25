@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.1/collector-request",
+  "$id": "otsec.authz/0.2/collector-request",
   "title": "Collector request (C7). Strict: unknown fields, duplicate keys and trailing data are rejected. Only 'run' can lead to device I/O.",
   "type": "object",
   "additionalProperties": false,
@@ -13,14 +13,17 @@
   ],
   "properties": {
     "contract": {
-      "const": "otsec.authz/0.1"
+      "type": "string",
+      "pattern": "^otsec\\.authz/0\\.(0|[1-9][0-9]*)$",
+      "description": "Any minor of major 0 is read (contracts/README.md). asset.clear_suspension needs 0.2 or later."
     },
     "kind": {
       "enum": [
         "run",
         "credential.install",
         "credential.revoke",
-        "credential.clear_suspension"
+        "credential.clear_suspension",
+        "asset.clear_suspension"
       ]
     },
     "request_id": {
@@ -106,7 +109,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.1/credential-ref"
+          "$ref": "otsec.authz/0.2/credential-ref"
         },
         "sealed": {
           "type": "object",
@@ -187,6 +190,27 @@
           "minimum": 1
         }
       }
+    },
+    "asset_clear_suspension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "ref"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "The C2 invocation ID whose outcome suspended the asset. The collector clears only when this, the administrator's clear-suspension.json and its own record of the suspension all match."
+        }
+      },
+      "description": "Since 0.2 (D2-15). Sent by the node, on its own behalf, after it recorded its own asset.suspension_clear."
     }
   },
   "oneOf": [
@@ -221,6 +245,11 @@
           {
             "required": [
               "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
             ]
           }
         ]
@@ -258,6 +287,11 @@
             "required": [
               "credential_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
           }
         ]
       }
@@ -294,6 +328,11 @@
             "required": [
               "credential_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
           }
         ]
       }
@@ -329,6 +368,60 @@
           {
             "required": [
               "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "contract": {
+          "not": {
+            "enum": [
+              "otsec.authz/0.0",
+              "otsec.authz/0.1"
+            ]
+          }
+        },
+        "kind": {
+          "const": "asset.clear_suspension"
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "node"
+            }
+          }
+        }
+      },
+      "required": [
+        "asset_clear_suspension"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
             ]
           }
         ]

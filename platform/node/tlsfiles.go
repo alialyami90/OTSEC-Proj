@@ -10,7 +10,7 @@ import (
 
 	"otsec.local/otsec/contracts/syslog"
 	"otsec.local/otsec/modules/telemetry/forward"
-	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/store/protect"
 )
 
 // MaxTLSFileBytes bounds each file a TLS reference names.
@@ -33,9 +33,9 @@ const (
 // required target whose permitted_peer is not the client certificate's
 // name (D2-12):
 //
-//   - tls_dir must pass store.CheckProtectedDir: the store directory rule,
+//   - tls_dir must pass protect.CheckDir: the store directory rule,
 //     junctions and links refused, and no write for the node;
-//   - every file is read with store.ReadProtectedFile: checked on the
+//   - every file is read with protect.ReadFile: checked on the
 //     opened handle, a regular file on disk, at most MaxTLSFileBytes,
 //     owner and ACE rule, no write for the node;
 //   - no error quotes file content, so a parse failure says only which
@@ -50,7 +50,7 @@ func (c *Config) TargetTLS(t *syslog.Target) (*tls.Config, error) {
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("target %s: tls_dir is not set", t.Name)
 	}
-	if err := store.CheckProtectedDir(c.TLSDir); err != nil {
+	if err := protect.CheckDir(c.TLSDir); err != nil {
 		return nil, fmt.Errorf("target %s: tls_dir: %w", t.Name, err)
 	}
 	anchors := t.TLS.TrustAnchorRef + TrustAnchorSuffix
@@ -105,5 +105,5 @@ func (c *Config) readTLSFile(name string) ([]byte, error) {
 	if c.TLSDir == "" {
 		return nil, errors.New("tls_dir is not set")
 	}
-	return store.ReadProtectedFile(filepath.Join(c.TLSDir, name), MaxTLSFileBytes)
+	return protect.ReadFile(filepath.Join(c.TLSDir, name), MaxTLSFileBytes)
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.1/collector-reply",
+  "$id": "otsec.authz/0.2/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -11,7 +11,8 @@
   ],
   "properties": {
     "contract": {
-      "const": "otsec.authz/0.1"
+      "type": "string",
+      "pattern": "^otsec\\.authz/0\\.(0|[1-9][0-9]*)$"
     },
     "request_id": {
       "type": "string"
@@ -58,6 +59,7 @@
             "rate_limited",
             "secret_rejected",
             "collector_state_unavailable",
+            "suspension_mismatch",
             "refused_unknown"
           ]
         },

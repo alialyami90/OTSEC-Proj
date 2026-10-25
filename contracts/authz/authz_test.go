@@ -231,6 +231,72 @@ func TestRunAgainstRegister(t *testing.T) {
 	}
 }
 
+// TestAssetClearSuspension covers the 0.2 kind (D2-15, A1): only the node
+// asks, only under 0.2 or later, with exactly its own body, and an asset
+// and a ref of the right shape. Older kinds stay readable under 0.1.
+func TestAssetClearSuspension(t *testing.T) {
+	raw, err := os.ReadFile("testdata/requests/valid/asset-clear-suspension.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := DecodeRequest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Kind != KindAssetClearSusp || req.AssetClearSusp == nil || req.AssetClearSusp.Ref == "" {
+		t.Fatalf("decoded %+v", req)
+	}
+	for name, c := range map[string]struct {
+		change func(*CollectorRequest)
+		want   RefusalCode
+	}{
+		"schedule":         {func(r *CollectorRequest) { r.OnBehalfOf = Principal{Type: PrincipalSchedule, ID: "sch-1"} }, RefusePrincipal},
+		"system":           {func(r *CollectorRequest) { r.OnBehalfOf = Principal{Type: PrincipalSystem, ID: "svc"} }, RefusePrincipal},
+		"stamped 0.1":      {func(r *CollectorRequest) { r.Contract = "otsec.authz/0.1" }, RefuseInvalid},
+		"stamped 0.0":      {func(r *CollectorRequest) { r.Contract = "otsec.authz/0.0" }, RefuseInvalid},
+		"other major":      {func(r *CollectorRequest) { r.Contract = "otsec.authz/1.2" }, RefuseContract},
+		"upper-case asset": {func(r *CollectorRequest) { r.AssetClearSusp.AssetID = strings.ToUpper(r.AssetClearSusp.AssetID) }, RefuseInvalid},
+		"empty ref":        {func(r *CollectorRequest) { r.AssetClearSusp.Ref = "" }, RefuseInvalid},
+		"credential body too": {func(r *CollectorRequest) {
+			r.CredentialClearSusp = &CredentialClearSuspBody{RefID: "cred_7f3k2m9q4x", Version: 1}
+		}, RefuseInvalid},
+		"credential body only": {func(r *CollectorRequest) {
+			r.AssetClearSusp, r.CredentialClearSusp = nil, &CredentialClearSuspBody{RefID: "cred_7f3k2m9q4x", Version: 1}
+		}, RefuseInvalid},
+		"credential kind": {func(r *CollectorRequest) {
+			r.Kind = KindCredentialClearSusp
+			r.OnBehalfOf = Principal{Type: PrincipalHuman, ID: "alice"}
+		}, RefuseInvalid},
+	} {
+		r := *req
+		b := *req.AssetClearSusp
+		r.AssetClearSusp = &b
+		c.change(&r)
+		var ref *Refusal
+		if err := r.Validate(); !errors.As(err, &ref) || ref.Code != c.want {
+			t.Errorf("%s: got %v, want %s", name, err, c.want)
+		}
+	}
+	// A later minor of the same major is read; its new kinds are not known
+	// here, so they are refused as unknown kinds, not by the version.
+	r := *req
+	r.Contract = "otsec.authz/0.9"
+	if err := r.Validate(); err != nil {
+		t.Errorf("0.9: %v", err)
+	}
+	// Kinds from 0.1 are still read under 0.1.
+	old, err := os.ReadFile("testdata/requests/valid/credential-clear-suspension.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeRequest(old); err != nil || !strings.Contains(string(old), `"otsec.authz/0.1"`) {
+		t.Errorf("0.1 credential clear: %v", err)
+	}
+	if RefuseSuspensionMismatch.Normalize() != RefuseSuspensionMismatch {
+		t.Error("suspension_mismatch is not in RefusalCodes")
+	}
+}
+
 func TestReplyFailsClosed(t *testing.T) {
 	for _, raw := range []string{
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"accepted","invocation_id":"inv-1","collector_seq":7}`,
