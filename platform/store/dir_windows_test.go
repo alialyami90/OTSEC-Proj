@@ -4,6 +4,7 @@ package store
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -53,5 +54,23 @@ func TestDirDACLChecked(t *testing.T) {
 	}
 	if err := CreateDir(users, ""); err == nil {
 		t.Fatal("CreateDir adopted an existing directory with a bad DACL")
+	}
+
+	// The account is parsed as a SID, so SDDL in it cannot add an entry
+	// (A3 #84 note 1).
+	if err := CreateDir(filepath.Join(t.TempDir(), "sddl"), "S-1-5-18)(A;OICI;FA;;;WD"); err == nil {
+		t.Fatal("CreateDir took SDDL in the account")
+	}
+	if err := CreateDir(filepath.Join(t.TempDir(), "alias"), "WD"); err == nil {
+		t.Fatal("CreateDir took the SDDL alias WD for Everyone")
+	}
+
+	// A junction to a good directory is refused (A3 #84 note 4).
+	junction := filepath.Join(t.TempDir(), "junction")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, good).CombinedOutput(); err != nil {
+		t.Fatalf("mklink: %v: %s", err, out)
+	}
+	if _, err := env(junction).Lock(bg); err == nil {
+		t.Fatal("lock taken through a junction")
 	}
 }

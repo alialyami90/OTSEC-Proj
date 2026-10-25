@@ -33,8 +33,10 @@ function Result([string]$id, [bool]$ok, [string]$detail) {
     Write-Output $line
 }
 function Note([string]$text) { Add-Content -Path $results -Value "NOTE $text"; Write-Output "NOTE $text" }
-# Native stderr must not become a terminating error under 'Stop'.
-function Sc([string[]]$a) { $ErrorActionPreference = 'Continue'; (& sc.exe @a 2>&1 | Out-String) }
+# Native stderr must not become a terminating error under 'Stop'. Not named
+# Sc: in Windows PowerShell 'sc' is an alias of Set-Content, and an alias
+# wins over a function.
+function ScExe([string[]]$a) { $ErrorActionPreference = 'Continue'; (& sc.exe @a 2>&1 | Out-String) }
 function Sddl([string]$path) {
     (Get-Acl -LiteralPath $path).GetSecurityDescriptorSddlForm('Owner, Access')
 }
@@ -85,9 +87,14 @@ if ($blockers.Count -gt 0) {
 }
 Result 'P-1' $true "preflight clean (WER key existed before: $werKeyExisted)"
 
-$nodeSid = ([regex]::Match((Sc @('showsid', 'otsec-node')), 'S-1-5-80-[0-9-]+')).Value
-$collSid = ([regex]::Match((Sc @('showsid', 'otsec-collector')), 'S-1-5-80-[0-9-]+')).Value
+$nodeSid = ([regex]::Match((ScExe @('showsid', 'otsec-node')), 'S-1-5-80-[0-9-]+')).Value
+$collSid = ([regex]::Match((ScExe @('showsid', 'otsec-collector')), 'S-1-5-80-[0-9-]+')).Value
 Note "service SIDs: otsec-node $nodeSid, otsec-collector $collSid"
+if (-not $nodeSid -or -not $collSid -or $nodeSid -eq $collSid) {
+    Result 'P-2' $false 'could not read the service SIDs with sc.exe showsid; nothing was changed'
+    Stop-Transcript | Out-Null
+    exit 5
+}
 
 $inputs = Join-Path $LogDir 'inputs'
 New-Item -ItemType Directory -Force -Path $inputs | Out-Null
@@ -161,14 +168,14 @@ try {
 
     # Services (W-2 configuration; the token check needs a running collector).
     foreach ($svc in $services) {
-        $qc = Sc @('qc', $svc); $sid = Sc @('qsidtype', $svc); $pr = Sc @('qprivs', $svc); $fl = Sc @('qfailure', $svc)
+        $qc = ScExe @('qc', $svc); $sid = ScExe @('qsidtype', $svc); $pr = ScExe @('qprivs', $svc); $fl = ScExe @('qfailure', $svc)
         Note "sc qc $svc :: $($qc -replace '\s+', ' ')"
         Note "sc qsidtype $svc :: $($sid -replace '\s+', ' ')"
         Note "sc qprivs $svc :: $($pr -replace '\s+', ' ')"
         Note "sc qfailure $svc :: $($fl -replace '\s+', ' ')"
         $okAcct = $qc -match "SERVICE_START_NAME\s*:\s*NT SERVICE\\$svc"
         $okSid = $sid -match 'SERVICE_SID_TYPE\s*:\s*UNRESTRICTED'
-        $privs = [regex]::Matches($pr, 'Se[A-Za-z]+Privilege') | ForEach-Object { $_.Value }
+        $privs = @([regex]::Matches($pr, 'Se[A-Za-z]+Privilege') | ForEach-Object { $_.Value })
         $okPriv = ($privs.Count -eq 1 -and $privs[0] -eq 'SeChangeNotifyPrivilege')
         $okFail = $fl -match 'RESTART'
         Result "S-$svc" ($okAcct -and $okSid -and $okPriv -and $okFail) "virtual account: $okAcct; unrestricted SID: $okSid; privileges: $($privs -join ','); restart on failure: $okFail"

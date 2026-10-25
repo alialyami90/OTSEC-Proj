@@ -23,15 +23,20 @@ type Status struct {
 	oslog func(string)
 	now   func() time.Time
 
-	mu     sync.Mutex
-	modes  map[c5.DatabaseID]c5.Mode
-	alarms []StatusAlarm
+	mu      sync.Mutex
+	modes   map[c5.DatabaseID]c5.Mode
+	alarms  []StatusAlarm
+	targets map[string]TargetStatus
 }
 
-// StatusAlarm is one alarm as node status shows it.
+// StatusAlarm is one alarm as node status shows it: a store alarm, which
+// names its database and has a C5 alarm code, or a collection alarm, which
+// names its asset and has a code below.
 type StatusAlarm struct {
-	Database c5.DatabaseID `json:"database"`
-	Code     c5.AlarmCode  `json:"code"`
+	Database c5.DatabaseID `json:"database,omitempty"`
+	Asset    string        `json:"asset_id,omitempty"`
+	Target   string        `json:"target,omitempty"`
+	Code     string        `json:"code"`
 	At       time.Time     `json:"at"`
 	Class    string        `json:"class,omitempty"`
 	Stream   string        `json:"stream,omitempty"`
@@ -48,6 +53,29 @@ type StatusFile struct {
 	Alarms  []StatusAlarm             `json:"alarms"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
+	// Targets is each forwarding target's state, from its forwarder.
+	Targets map[string]TargetStatus `json:"targets,omitempty"`
+}
+
+// TargetStatus is one forwarding target as node status shows it.
+type TargetStatus struct {
+	Class string `json:"class"`
+	// LastConfirmed is when the target last confirmed a transaction in
+	// this process; zero if never.
+	LastConfirmed time.Time `json:"last_confirmed,omitempty"`
+	Confirmed     uint64    `json:"confirmed"`
+	// LastErr is why the last session ended. It is the forwarder's error
+	// text, which never holds event content.
+	LastErr string                       `json:"last_error,omitempty"`
+	Streams map[string]TargetStreamState `json:"streams"`
+}
+
+// TargetStreamState is one stream of a target: the saved cursor, the
+// stream's last committed seq, and why the stream is held, if it is.
+type TargetStreamState struct {
+	Cursor  uint64 `json:"cursor"`
+	Last    uint64 `json:"last"`
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // StatusSchema identifies the status file format.
@@ -70,10 +98,60 @@ func (s *Status) Alarm(db c5.DatabaseID, a c5.Alarm) {
 	if a.At.IsZero() {
 		a.At = s.now()
 	}
-	sa := StatusAlarm{Database: db, Code: a.Code, At: a.At.UTC(), Class: string(a.Class), Stream: string(a.Stream), Step: string(a.Step), Detail: a.Detail}
+	sa := StatusAlarm{Database: db, Code: string(a.Code), At: a.At.UTC(), Class: string(a.Class), Stream: string(a.Stream), Step: string(a.Step), Detail: a.Detail}
 	if s.oslog != nil {
 		s.oslog(fmt.Sprintf("otsec store %s: %s %s", db, a.Code, a.Detail))
 	}
+	s.add(sa)
+}
+
+// Collection alarm codes. AlarmUnauthorizedLine is the safety case: by the
+// node's own register, a session sent a line its run was not allowed to
+// send, and collection from that asset stops until the node restarts.
+const (
+	AlarmUnauthorizedLine   = "collection-unauthorized-line"
+	AlarmAuditUnavailable   = "collection-audit-unavailable"
+	AlarmOutcomeUnknown     = "collection-outcome-unknown"
+	AlarmCollectorRefused   = "collection-refused"
+	AlarmNoDecision         = "collection-no-decision"
+	AlarmResultRefused      = "collection-result-refused"
+	AlarmEvidenceNotStored  = "collection-evidence-not-stored"
+	AlarmCollectionDisabled = "collection-disabled"
+	// AlarmQuarantineNotStored stops every credentialed run on the node:
+	// the evidence of a failed run could not be kept.
+	AlarmQuarantineNotStored = "collection-quarantine-not-stored"
+	AlarmNoQuarantineRoom    = "collection-no-quarantine-room"
+)
+
+// Raise records a collection alarm for asset. detail goes to the OS log, so
+// it never holds device text: a quarantine's reason stays with the
+// quarantined evidence.
+func (s *Status) Raise(asset, code, detail string) {
+	if s.oslog != nil {
+		s.oslog(fmt.Sprintf("otsec collection %s: %s %s", asset, code, detail))
+	}
+	s.add(StatusAlarm{Asset: asset, Code: code, At: s.now().UTC(), Detail: detail})
+}
+
+// RaiseTarget records a forwarding alarm for target.
+func (s *Status) RaiseTarget(target, code, detail string) {
+	if s.oslog != nil {
+		s.oslog(fmt.Sprintf("otsec forward %s: %s %s", target, code, detail))
+	}
+	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
+}
+
+// SetTarget records target's state.
+func (s *Status) SetTarget(name string, ts TargetStatus) {
+	s.mu.Lock()
+	if s.targets == nil {
+		s.targets = map[string]TargetStatus{}
+	}
+	s.targets[name] = ts
+	s.mu.Unlock()
+}
+
+func (s *Status) add(sa StatusAlarm) {
 	s.mu.Lock()
 	s.alarms = append(s.alarms, sa)
 	if len(s.alarms) > MaxStatusAlarms {
@@ -105,6 +183,12 @@ func (s *Status) Snapshot(node string) StatusFile {
 		}
 	}
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
+	if len(s.targets) > 0 {
+		f.Targets = map[string]TargetStatus{}
+		for n, ts := range s.targets {
+			f.Targets[n] = ts
+		}
+	}
 	return f
 }
 
@@ -135,4 +219,27 @@ func (s *Status) Write(node string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), s.path)
+}
+
+// StatusFileName is the status file's name in the store directory, where
+// only the node's account, SYSTEM and Administrators can read it.
+const StatusFileName = "status.json"
+
+// StatusPath is where the node writes its status file.
+func StatusPath(c *Config) string { return filepath.Join(c.Store.Dir, StatusFileName) }
+
+// ReadStatus reads a status file the node wrote.
+func ReadStatus(path string) (StatusFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return StatusFile{}, err
+	}
+	var f StatusFile
+	if err := json.Unmarshal(b, &f); err != nil {
+		return StatusFile{}, fmt.Errorf("status file %s: %w", path, err)
+	}
+	if f.Schema != StatusSchema {
+		return StatusFile{}, fmt.Errorf("status file %s is %q, want %q", path, f.Schema, StatusSchema)
+	}
+	return f, nil
 }
