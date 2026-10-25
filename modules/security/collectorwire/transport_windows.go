@@ -115,8 +115,21 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 	h := l.next
 	l.mu.Unlock()
 
-	if err := connectPipe(h, l.closeEv); err != nil {
-		return nil, err
+	// A client can open the waiting instance and close it again before
+	// ConnectNamedPipe is called: a node that refused this server, or one
+	// that exited mid-dial. ConnectNamedPipe then fails with ERROR_NO_DATA.
+	// That is no connection, not a listener failure: the instance is
+	// disconnected and waits again. Returning the error instead would stop
+	// the collector's Serve loop, and leave the instance unusable.
+	for {
+		err := connectPipe(h, l.closeEv)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, windows.ERROR_NO_DATA) {
+			return nil, err
+		}
+		windows.DisconnectNamedPipe(h)
 	}
 	// Create the next instance before handing this one off, so the name
 	// stays held by the collector. If that fails the listener cannot go on

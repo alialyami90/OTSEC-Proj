@@ -108,7 +108,15 @@ func TestTransportRefusesOtherServer(t *testing.T) {
 	got := make(chan int, 1)
 	go func() {
 		c, err := ln.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			// The client refused and left before Accept took the
+			// connection, and the listener was then closed: nothing was
+			// received.
+			got <- 0
+			return
+		}
 		if err != nil {
+			t.Errorf("Accept: %v", err)
 			got <- -1
 			return
 		}
@@ -126,6 +134,9 @@ func TestTransportRefusesOtherServer(t *testing.T) {
 		}
 		t.Fatalf("Dial: %v, want ErrPeerRefused", err)
 	}
+	// Under load the client can finish before the server reaches Accept,
+	// which then waits for the next client; closing the listener ends it.
+	ln.Close()
 	if n := <-got; n != 0 {
 		t.Fatalf("server received %d bytes from a client that refused it", n)
 	}
