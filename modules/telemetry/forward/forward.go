@@ -89,12 +89,16 @@ type Status struct {
 	Streams map[store.StreamID]StreamStatus
 	// LastConfirmed is when a transaction was last confirmed, zero if never
 	// in this process. The node raises forward.unreachable for a required
-	// target from it.
+	// target from it and from Open.
 	LastConfirmed time.Time
 	// Confirmed counts confirmed transactions in this process.
 	Confirmed uint64
 	// LastErr is why the last session ended, nil while none has failed.
 	LastErr error
+	// Open is when the collector answered the current session's open, zero
+	// while no session is open. A required target with Open zero is down
+	// even when nothing is waiting to be sent.
+	Open time.Time
 }
 
 // StreamStatus is one stream of the target.
@@ -271,6 +275,8 @@ func (f *Forwarder) session(ctx context.Context) error {
 	if err := s.open(); err != nil {
 		return err
 	}
+	f.update(func(x *Status) { x.Open = time.Now() })
+	defer f.update(func(x *Status) { x.Open = time.Time{} })
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

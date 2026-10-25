@@ -96,3 +96,25 @@ func TestClientTLSChecksLeaf(t *testing.T) {
 }
 
 var _ store.CommitIndex = (*memStore)(nil)
+
+// Status.Open is set while a session is open, even with nothing to send,
+// and cleared when the collector goes away, so the node can tell a quiet
+// target from a down one.
+func TestStatusOpen(t *testing.T) {
+	r := newRig(t, nil, nil)
+	var f *Forwarder
+	opened := false
+	r.run(func() bool {
+		if f == nil {
+			return false
+		}
+		if !opened && !f.Status().Open.IsZero() {
+			opened = true
+			r.srv.Close()
+		}
+		return opened && f.Status().Open.IsZero() && f.Status().LastErr != nil
+	}, func(x *Forwarder) { f = x })
+	if f.Status().Confirmed != 0 {
+		t.Errorf("confirmed %d with nothing committed", f.Status().Confirmed)
+	}
+}
