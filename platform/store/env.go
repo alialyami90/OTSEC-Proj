@@ -223,7 +223,7 @@ func exists(p string) (bool, error) {
 // as a TLS trust anchor or its client key (D2-12). It opens the file
 // without following a link or reparse point and checks the opened handle,
 // not the path: it must be a regular file on disk (no device such as
-// CON), of at most max bytes, that only this account, SYSTEM and
+// CON) with one hard link, of at most max bytes, that only this account, SYSTEM and
 // Administrators can reach, and that this account cannot write. On Linux
 // that is mode 0400 (no write bit, nothing for group and others); on
 // Windows the store's owner and ACE rule, with an owner other than this
@@ -237,3 +237,39 @@ func ReadProtectedFile(path string, max int64) ([]byte, error) { return readProt
 // protected DACL, an owner other than this account, and no write right in
 // this account's entries. A link or reparse point is refused.
 func CheckProtectedDir(dir string) error { return checkProtectedDir(dir) }
+
+// ReadProtectedFileFor is ReadProtectedFile for a file that other named
+// services may read too, such as an administrator's file in
+// OTSEC\config\admin that both the node and the collector read (A3,
+// A1). readers are the SIDs of those services, as strings; this account
+// may be among them or not.
+//
+// On Windows the rule is stricter than ReadProtectedFile's (A3):
+//   - the owner is SYSTEM or Administrators, never this account or a
+//     reader;
+//   - an entry for this account or a reader is an ACCESS_ALLOWED_ACE whose
+//     mask is within read and traverse (0x1200a9); a generic bit, any
+//     other right, or another entry type is refused, never mapped;
+//   - every other allow entry names SYSTEM or Administrators; CREATOR
+//     OWNER, OWNER RIGHTS and any other SID are refused;
+//   - inherited entries are checked as explicit ones, inherit-only ones
+//     included.
+//
+// On Linux, a development platform only, readers are not used: the file
+// may be read by its owner and group, and written by nobody (0440). A
+// mode check does not prove that this account could not have written the
+// file: the directory's owner can make it writable, plant a file and
+// restore the mode. On Linux it guards against mistakes only; the
+// boundary is evidenced on Windows only (A3). The same holds for
+// ReadProtectedFile and CheckProtectedDir.
+func ReadProtectedFileFor(path string, max int64, readers []string) ([]byte, error) {
+	return readProtectedFor(path, max, readers)
+}
+
+// CheckProtectedDirFor is CheckProtectedDir for a directory that the
+// readers may also read, under ReadProtectedFileFor's rule; the DACL must
+// also be protected, so nothing comes down from the parent. On Linux the
+// mode must be within 0550.
+func CheckProtectedDirFor(dir string, readers []string) error {
+	return checkProtectedDirFor(dir, readers)
+}
