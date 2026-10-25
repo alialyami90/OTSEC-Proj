@@ -104,7 +104,11 @@ func CreateDir(dir, account string) error {
 	return checkDir(dir)
 }
 
-func readProtected(path string, max int64) ([]byte, error) {
+func readProtected(path string, max int64) ([]byte, error) { return readChecked(path, max, true) }
+
+func readPublic(path string, max int64) ([]byte, error) { return readChecked(path, max, false) }
+
+func readChecked(path string, max int64, protected bool) ([]byte, error) {
 	// O_NOFOLLOW refuses a link; O_NONBLOCK keeps a FIFO from blocking the
 	// open, and the handle check below refuses it.
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
@@ -120,7 +124,7 @@ func readProtected(path string, max int64) ([]byte, error) {
 	if !st.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
-	if perm := st.Mode().Perm(); perm&0o277 != 0 {
+	if perm := st.Mode().Perm(); protected && perm&0o277 != 0 {
 		return nil, fmt.Errorf("%s has mode %04o; it must be readable by its owner only and not writable (0400)", path, perm)
 	}
 	if st.Size() > max {

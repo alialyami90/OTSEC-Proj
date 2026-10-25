@@ -29,8 +29,9 @@ type InstallOptions struct {
 	// installs the node service only.
 	CollectorExe string
 	// Config is the node configuration to install. It is copied to
-	// ConfigPath and must name StoreDir as store.dir, and TLSDir as tls_dir
-	// and AdminDir as admin_dir when it sets them.
+	// ConfigPath and must name StoreDir as store.dir, and TLSDir as
+	// tls_dir, AdminDir as admin_dir and PublicDir as collector_public_dir
+	// when it sets them.
 	Config string
 	// CollectorConfig is A3's collector configuration, copied to
 	// CollectorConfigPath. It is required with CollectorExe and refused
@@ -258,6 +259,9 @@ func installConfig(src, pd string) error {
 	}
 	if cfg.TLSDir != "" && !strings.EqualFold(filepath.Clean(cfg.TLSDir), TLSDir(pd)) {
 		return fmt.Errorf("winsvc: tls_dir is %s; the installed node reads its TLS files from %s", cfg.TLSDir, TLSDir(pd))
+	}
+	if cfg.CollectorPublicDir != "" && !strings.EqualFold(filepath.Clean(cfg.CollectorPublicDir), PublicDir(pd)) {
+		return fmt.Errorf("winsvc: collector_public_dir is %s; the installed collector publishes its install key in %s", cfg.CollectorPublicDir, PublicDir(pd))
 	}
 	dst := ConfigPath(pd)
 	if _, err := os.Lstat(dst); err == nil {

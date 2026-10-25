@@ -173,14 +173,24 @@ func checkSD(what, path string, sd *windows.SECURITY_DESCRIPTOR, protected, read
 	return nil
 }
 
-func readProtected(path string, max int64) ([]byte, error) {
+func readProtected(path string, max int64) ([]byte, error) { return readChecked(path, max, true) }
+
+func readPublic(path string, max int64) ([]byte, error) { return readChecked(path, max, false) }
+
+func readChecked(path string, max int64, protected bool) ([]byte, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
+	// A public file is shared for write and delete too, so that its
+	// writer can rename a new one over it while the node reads (A3 #106).
+	share := uint32(windows.FILE_SHARE_READ)
+	if !protected {
+		share |= windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
+	}
 	// FILE_FLAG_OPEN_REPARSE_POINT opens a link or junction itself, so the
 	// attribute check below refuses it instead of following it.
-	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil,
+	h, err := windows.CreateFile(p, windows.GENERIC_READ, share, nil,
 		windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -197,12 +207,14 @@ func readProtected(path string, max int64) ([]byte, error) {
 	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
 		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
 	}
-	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return nil, fmt.Errorf("%s: read DACL: %w", path, err)
-	}
-	if err := checkSD("file", path, sd, false, true); err != nil {
-		return nil, err
+	if protected {
+		sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			return nil, fmt.Errorf("%s: read DACL: %w", path, err)
+		}
+		if err := checkSD("file", path, sd, false, true); err != nil {
+			return nil, err
+		}
 	}
 	if size := int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow); size > max {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)

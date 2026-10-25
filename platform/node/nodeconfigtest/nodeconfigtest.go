@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 )
 
 // Config is a node configuration under construction. Its fields are the
@@ -29,6 +30,8 @@ type Config struct {
 	RegisterVersion uint64           `json:"register_version"`
 	TLSDir          string           `json:"tls_dir,omitempty"`
 	AdminDir        string           `json:"admin_dir,omitempty"`
+	// CollectorPublicDir holds install-key.json (WriteInstallKey).
+	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 }
 
 type Store struct {
@@ -77,16 +80,36 @@ func New(node, storeDir string) *Config {
 		Store: Store{Dir: storeDir, WarnFraction: 0.8, Quotas: map[string]int64{
 			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "platform": q, "audit": q,
 		}},
-		Listeners:       []Listener{},
-		Assets:          []map[string]any{},
-		Targets:         []map[string]any{},
-		Schedule:        []Collection{},
-		CollectorPipe:   pipe,
-		CollectorPeer:   peer,
-		PolicyVersion:   3,
-		RegisterVersion: 2,
-		TLSDir:          filepath.Join(filepath.Dir(storeDir), "tls"),
+		Listeners:          []Listener{},
+		Assets:             []map[string]any{},
+		Targets:            []map[string]any{},
+		Schedule:           []Collection{},
+		CollectorPipe:      pipe,
+		CollectorPeer:      peer,
+		PolicyVersion:      3,
+		RegisterVersion:    2,
+		TLSDir:             filepath.Join(filepath.Dir(storeDir), "tls"),
+		CollectorPublicDir: filepath.Join(filepath.Dir(storeDir), "collector-public"),
 	}
+}
+
+// WriteInstallKey writes install-key.json in CollectorPublicDir as the
+// collector does (A3 #106), naming key ID keyID. The public key and
+// fingerprint are fixed test values: the node reads only the key ID.
+func (c *Config) WriteInstallKey(keyID string) error {
+	if err := os.MkdirAll(c.CollectorPublicDir, 0o700); err != nil {
+		return err
+	}
+	b, err := json.Marshal(map[string]string{"schema": "otsec.collector.install_key/0.1", "key_id": keyID,
+		"public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "fingerprint": "sha256:" + strings.Repeat("0", 64)})
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(c.CollectorPublicDir, ".install-key.tmp")
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(c.CollectorPublicDir, "install-key.json"))
 }
 
 // AddSEL751 adds a simulated SEL-751 reached over Telnet at host:port (A6's

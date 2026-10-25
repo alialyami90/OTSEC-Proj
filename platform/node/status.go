@@ -31,6 +31,7 @@ type Status struct {
 	targets map[string]TargetStatus
 	// suspensions are the scheduler's current asset suspensions.
 	suspensions map[string]asset.Suspension
+	collector   *CollectorStatus
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -62,6 +63,19 @@ type StatusFile struct {
 	// Suspensions are the assets the node will not collect from until an
 	// administrator clears them (suspend.go).
 	Suspensions map[string]asset.Suspension `json:"suspensions,omitempty"`
+	// Collector is the collector's install keys as the audit stream gives
+	// them (seqreset.go): the trusted key and, after a reinstall, the new
+	// one beside it, for the administrator's fingerprint check.
+	Collector *CollectorStatus `json:"collector,omitempty"`
+}
+
+// CollectorStatus is the collector's keys and numbering as node status
+// shows them.
+type CollectorStatus struct {
+	TrustedKey   string `json:"trusted_key,omitempty"`
+	OpenResetKey string `json:"open_reset_key,omitempty"`
+	High         uint64 `json:"high"`
+	Restored     bool   `json:"restored,omitempty"`
 }
 
 // TargetStatus is one forwarding target as node status shows it.
@@ -165,6 +179,13 @@ func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Unlock()
 }
 
+// SetCollector records the collector's keys and numbering.
+func (s *Status) SetCollector(c *CollectorStatus) {
+	s.mu.Lock()
+	s.collector = c
+	s.mu.Unlock()
+}
+
 // SetTarget records target's state.
 func (s *Status) SetTarget(name string, ts TargetStatus) {
 	s.mu.Lock()
@@ -209,6 +230,10 @@ func (s *Status) Snapshot(node string) StatusFile {
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
 	if len(s.suspensions) > 0 {
 		f.Suspensions = maps.Clone(s.suspensions)
+	}
+	if s.collector != nil {
+		c := *s.collector
+		f.Collector = &c
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}

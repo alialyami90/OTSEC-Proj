@@ -231,6 +231,15 @@ func exists(p string) (bool, error) {
 // path only, never the content.
 func ReadProtectedFile(path string, max int64) ([]byte, error) { return readProtected(path, max) }
 
+// ReadPublicFile reads a file another service writes for this one, such as
+// the collector's install-key.json: the handle checks of ReadProtectedFile
+// (a regular file on disk, not a link, reparse point or device, at most max
+// bytes) without its owner and mode rule, since the writer owns the file.
+// Its integrity comes from the directory's DACL. On Windows the file is
+// opened shared for write and delete, so the writer can rename a new file
+// over it meanwhile.
+func ReadPublicFile(path string, max int64) ([]byte, error) { return readPublic(path, max) }
+
 // CheckProtectedDir refuses a directory that would let this account change
 // the files in it (D2-12): the store directory rule (checkDir), with no
 // write for this account. On Linux that is mode 0500; on Windows a
