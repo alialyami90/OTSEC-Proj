@@ -112,7 +112,7 @@ func start(data string, log *slog.Logger) (*running, error) {
 	}
 	pipe, err := collector.NewPipeline(collector.PipelineConfig{
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
-		State: state, Creds: creds, Registers: regs, Runner: hostedRunner(),
+		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm},
 		InstallLimit: cfg.InstallLimit, Alarm: alarm,
 	})
 	if err != nil {
@@ -130,8 +130,3 @@ func serveOn(ln net.Listener, h collector.Handler, log *slog.Logger) *running {
 	go func() { r.done <- r.srv.Serve(ln) }()
 	return r
 }
-
-// hostedRunner is the adapter the collector hosts. A2's sel751.Run is wired
-// in when it lands; until then every run is refused with not_invocable and
-// only credential requests are served.
-func hostedRunner() collector.Runner { return nil }

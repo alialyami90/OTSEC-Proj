@@ -15,6 +15,7 @@ import (
 
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collectorwire"
@@ -57,6 +58,13 @@ type RunPlan struct {
 	// each event the run reports, durably.
 	ReplySeq uint64
 	NextSeq  func() (uint64, error)
+	// Principal is the schedule the run is for; its records name it as the
+	// actor, in the collector role.
+	Principal authz.Principal
+	// Audit builds the records the run reports, numbered from NextSeq. The
+	// pipeline puts them in the outcome after the runner returns, with the
+	// credential suspension it applies; a runner never sets Outcome.Audit.
+	Audit *RunAudit
 }
 
 // RunReport is what a run tells the pipeline besides the outcome. Its zero
@@ -348,8 +356,10 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		Invocation: inv, Asset: e.Asset, Profile: e.Profile, Endpoint: ep, Register: pkg,
 		Credential: cred, Secret: secret, Floor: NewFloorGate(p.cfg.State, body.AssetID),
 		Dial: endpointDialer(ep), ReplySeq: seq, NextSeq: p.cfg.State.NextSeq,
+		Principal: req.OnBehalfOf,
 	}
 	plan.Floor.Alarm = p.cfg.Alarm
+	plan.Audit = newRunAudit(p, &plan)
 	return inv.InvocationID, &runWork{p: p, plan: plan, release: release}, nil
 }
 
@@ -413,6 +423,8 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 	if credSuspend != "" && plan.Credential != nil {
 		if _, _, err := p.cfg.Creds.Suspend(plan.Credential.ID, plan.Credential.Version, credSuspend); err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: suspend %s: %w", plan.Credential.ID, err))
+		} else {
+			plan.Audit.Add(audit.ActionCredentialSuspend, audit.OutcomeSucceeded, suspendReason(credSuspend), nil)
 		}
 	}
 	if plan.Floor.LoginConfirmed() && !report.QUISent {
@@ -422,6 +434,7 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 			p.cfg.Alarm(fmt.Errorf("collector: set floor after unclean exit from %s: %w", asset, err))
 		}
 	}
+	report.Outcome.Audit = plan.Audit.Records()
 	p.checkResult(plan, report.Outcome)
 	return report.Outcome
 }
