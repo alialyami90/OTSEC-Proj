@@ -211,7 +211,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
   - Alarm-only collection was allowed only if a reset could not weaken a safety control.
   - The floor holds from PR 4.
   - Asset suspensions do not survive in the collector, and the node keeps none yet. The condition is not met.
-  - The admin acknowledges by confirming the new install key (T-12) and writing `OTSEC\config\seq-reset-ack.json`, which the node can read but not write. The node refuses an acknowledgement that names the key it already trusted.
+  - The admin acknowledges by confirming the new install key (T-12) and writing `OTSEC\config\seq-reset-ack.json`, which the node can read but not write. The node refuses an acknowledgement that names the key it already trusted. Before acknowledging, the admin also checks the active register revisions: a fresh state loses the collector's family floors, and node-side suspensions do not carry them (A3 on #101).
 - **The node keeps asset suspensions (A5, `platform/node`).**
   - The node records a suspension from `Code.Suspends` on every outcome, even one that fails validation. It audits it as `asset.suspend` (C8 0.2, because collector records do not carry the C2 code reliably) and writes it durably before the next schedule decision.
   - If the `asset.suspend` audit record cannot be written, the node holds all collection on every asset, not only the suspended one, until it can, whatever happens to the file. A hold kept only in memory would be lost on a restart (A5 and A6 on #101).
@@ -224,7 +224,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
     Then the node holds collection on every asset and raises an alarm.
   - Audit pruning never passes the checkpoint's `through_seq`, so the tail the rebuild needs always exists (A6 on #101).
   - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own.
-  - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed.
+  - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed. The register revision check stays.
 - **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
 - **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
 - **Reviews.** A6 reviews the node work for reliability and fault injection. A3 reviews it for the trust boundary on the clear path.
