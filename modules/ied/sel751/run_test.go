@@ -29,7 +29,7 @@ import (
 // this is simulated evidence only.
 
 const (
-	testSecret = "otsec-lab-pw-1" // a test value, never a real credential
+	testSecret = "Lab!pw-0451" // a test value, never a real credential; TestTestSecretInstalls
 	goldenDir  = "../../../contracts/adapter/testdata"
 	fidR402    = "SEL-751-R402-V2-Z102100-D20250731"
 	fidOther   = "SEL-751-R500-V1-Z103101-D20260910"
@@ -311,6 +311,9 @@ var replays = []replay{
 		}
 	}},
 	{golden: "failed.internal", setup: func(_ *inputs, cfg *Config) { cfg.Floor.(*floor).fail = true }},
+	// The wake answered by the password prompt: nothing more is sent, and
+	// the collector sets the floor from the result (A3 on #99).
+	{golden: "failed.internal-wake-password-prompt"},
 	// C2 0.2 (D2-14): the two device states FuzzRun found.
 	{golden: "failed.unexpected_password_prompt"},
 	{golden: "probe-rejected-at-level1"},
@@ -330,8 +333,21 @@ var floorCalls = map[string]string{
 	"failed.unexpected_password_prompt": "before,confirmed",
 	// Nothing after a rejected probe, so the floor is never touched (D16).
 	"probe-rejected-at-level1": "",
+	// Nothing after the wake: ACC is never reached, so the adapter does not
+	// touch the floor; the collector sets it from the result.
+	"failed.internal-wake-password-prompt": "",
 	// The floor stays set: no "=>" confirmed the attempt.
 	"failed.auth_rejected": "before", "failed.unexpected_access_level": "before", "failed.internal": "before",
+}
+
+// reportsTIDLE are the replays whose SHO P 1 reply shows an English port
+// with TIDLE := 15, so Config.TIDLE is called once with 15 minutes. No other
+// replay calls it: the Spanish port's TIDLE is not read (D16).
+var reportsTIDLE = map[string]bool{
+	"ok": true, "ok-with-echo": true, "ok-missing-setting": true, "partial.parse_errors": true,
+	"partial.read_rows_exceeded": true, "refused.firmware_condition_not_met": true, "failed.identity_mismatch": true,
+	"failed.access_level_dropped": true, "failed.device_error": true, "failed.timeout": true,
+	"failed.transport_closed": true, "failed.response_too_large": true, "failed.unexpected_password_prompt": true,
 }
 
 func TestReplayGoldens(t *testing.T) {
@@ -341,7 +357,9 @@ func TestReplayGoldens(t *testing.T) {
 			f := load(t)
 			sec := &secret{b: []byte(testSecret)}
 			fl := &floor{}
+			var tidles []time.Duration
 			cfg := Config{Secret: sec, Floor: fl, Now: clock(),
+				TIDLE: func(d time.Duration) { tidles = append(tidles, d) },
 				hooks: &hooks{quiet: 20 * time.Millisecond, wakeWait: 50 * time.Millisecond}}
 			if rp.setup != nil {
 				rp.setup(&f, &cfg)
@@ -381,6 +399,9 @@ func TestReplayGoldens(t *testing.T) {
 			}
 			if w := floorCalls[rp.golden]; strings.Join(fl.calls, ",") != w {
 				t.Errorf("floor calls %v, want %q", fl.calls, w)
+			}
+			if reportsTIDLE[rp.golden] != (len(tidles) == 1 && tidles[0] == 15*time.Minute) || len(tidles) > 1 {
+				t.Errorf("TIDLE reported %v, want 15m: %v", tidles, reportsTIDLE[rp.golden])
 			}
 		})
 	}

@@ -72,6 +72,13 @@ type Config struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// Now is the clock for transcript times; nil means time.Now.
 	Now func() time.Time
+	// TIDLE, when set, is called at most once per run, with the port's
+	// Telnet time-out, when SHO P 1 read LANG := ENGLISH and TIDLE is a
+	// whole number of minutes from 1 to 30 (S22 Table 4.104, TELNET
+	// TIMEOUT). The collector uses it for the failed-auth floor
+	// (authz.FailureFloor). It is not called for any other value, which
+	// leaves the floor at its longest.
+	TIDLE func(time.Duration)
 
 	hooks *hooks // tests only
 }
