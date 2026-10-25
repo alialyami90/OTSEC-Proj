@@ -188,3 +188,33 @@ A3's §9 design remains the target. Until it lands, the file resolver is a gate 
   - The `failed.unknown` example moves to 0.3, because 0.2 now knows every code it defines.
 
 Both states are simulated (fuzz-found). A capture that shows either one (H-13, H-15) is evidence for or against the ruling.
+
+## D2-15: After a collector_seq reset, collection is held until an admin acknowledges; the node keeps asset suspensions
+
+**Context (A5, A3):**
+- A reinstall that loses both collector stores starts a fresh state, so `collector_seq` starts again at 1. `audit.VerifyCollectorSeq` then reports the chain as broken, and nothing records the reinstall or raises an alarm.
+- A5 proposed a C8 record for the reset. A3 drafted it as C8 0.2: [A3-c8-seq-reset.md](A3-c8-seq-reset.md), in the project files.
+- While reviewing #100, A3 found that #97 records no asset suspension from `Code.Suspends`, and that a fresh collector state held no failed-auth floor. Both are fixed in A3's PR 4.
+- The node keeps no C1 suspensions (A5).
+
+**Rulings:**
+- **The C8 0.2 draft is approved in direction.** A6 still reviews it. A3 writes it into `contracts/audit`, because C8 is A3's.
+  - The record is `collector.seq_reset`, with `previous_high`, `first_seen` and `install_key_id`. The admin's acknowledgement is `collector.seq_reset_ack`.
+  - `VerifyCollectorSeq` treats each reset as an epoch boundary. A restart without the record still breaks the chain.
+- **The node also detects a reset by the install key, not only by the number.**
+  - A reinstalled collector whose first reply the node sees can carry a number above the old high mark, for example after replies were lost while the node was down.
+  - A changed `install_key_id` is therefore a reset too. The chain still breaks on any gap, which is correct.
+  - `collector_epoch` in C7 0.2 replies remains the stronger fix.
+- **Collection is held after a reset until an admin acknowledges.**
+  - Alarm-only collection was allowed only if a reset could not weaken a safety control.
+  - The floor holds from PR 4.
+  - Asset suspensions do not survive in the collector, and the node keeps none yet. The condition is not met.
+  - The admin acknowledges by confirming the new install key (T-12) and writing `OTSEC\config\seq-reset-ack.json`, which the node can read but not write.
+- **The node keeps asset suspensions (A5, `platform/node`).**
+  - The node records a suspension from `Code.Suspends` on every outcome, even one that fails validation. It writes it durably before the next schedule decision, and if that write fails, it holds collection on the asset.
+  - If the file is unreadable, the node rebuilds it from the audit stream, applying clears in chain order. If the rebuild fails, the node holds collection on every asset and raises an alarm.
+  - An admin clears a suspension by writing `OTSEC\config\clear-suspension.json`, which names the asset and the exact invocation reference. The node clears only an exact match and audits `asset.suspension_clear` (C8 0.2) before scheduling again. It never clears on its own.
+  - Once node-side suspensions land, the manual suspension review before a reset acknowledgement is no longer needed.
+- **Interim only.** The acknowledgement and clear files are the Phase 2 interim. Before any `device-observed` endpoint, both become admin-signed C7 0.2 requests, as D2-11 requires for install, revoke and clear-suspension.
+- **Gate item.** A3's PR 4 must carry the asset suspension and the fresh-state floor before any adapter is hosted. On main, `hostedRunner` is nil, so no run reaches a device.
+- **Reviews.** A6 reviews the node work for reliability and fault injection. A3 reviews it for the trust boundary on the clear path.
