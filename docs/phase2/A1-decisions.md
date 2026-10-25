@@ -93,6 +93,8 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - The PR records the Windows run as owed. A6 keeps the list of owed runs and runs them once Go is available on the PC.
 - The Phase 2 gate still requires the slice suite to pass on Windows (P2 exit gate). D2-8 delays the Windows evidence. It does not waive it.
 
+**Ended 2026-10-24, 22:49Z.** With the owner's approval (decision card, 22:22Z), A6 put portable Go 1.26.0 inside OTSEC on the owner's PC. The owed Windows Go runs then passed at main 04c9525, #84 and #89. From now on D2-7 applies in full: every PR is tested on Windows on the PC before it merges. The PC has no C compiler, so `go test -race` runs on Linux only.
+
 ## D2-9: RELP/TLS peer check is by name, not by CA alone
 
 **Evidence:** A6, `desk`/`simulated`, rsyslogd 8.2312.0 with librelp 1.11.0. With `tls.authmode="certvalid"`, imrelp accepted a self-signed client certificate that the CA never signed. With `tls.authmode="name"` and `tls.permittedPeer` set to the node's name, imrelp refused that certificate, a missing certificate, and a stranger's certificate.
@@ -116,3 +118,21 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 - Host names are refused, `localhost` included, so the check never depends on name resolution.
 - Forwarding targets are not covered, because the upstream collector is not a device.
 - Each lock gets its own negative test (A6). Lifting either lock follows D2-4: the owner authorizes a named lab device, and the authorization is recorded in a decision.
+
+## D2-11: The credential install path is a guessing oracle for a compromised node
+
+**Finding (A3, #90):** the node service holds the public half of the collector's install key. It can therefore seal any guess and install it under a new reference whose plaintext scope differs from the target's. The reuse rule replies `secret_rejected` exactly when the guess equals a stored secret, and SEL default passwords are well known. Any refusal that depends on equality leaks equality, however it is worded. The oracle goes away only when the node cannot originate an install.
+
+**Ruling:**
+- **Phase 2:** A3's durable install budget (10 installs per hour per node, refused with `rate_limited`, and no shared count in any reply) is accepted as an interim control. It is acceptable because every Phase 2 credential is a lab-only test value (D2-5), no secret of another scope exists, and D2-4 and D2-10 keep every endpoint on the simulator. The budget bounds broad guessing, but it does not stop the attack the finding describes. At 10 per hour, a compromised node can test every published SEL factory password within the first hour (A6 review of #91). So the interim ruling holds only under this condition: no credential installed in Phase 2 is a vendor default password, or a password used on any real device. A6 tests the budget once it lands: the 11th install in an hour is refused with `rate_limited`, the refusal survives a collector restart, and the reply carries no count.
+- **Before any `device-observed` endpoint** (that is, before D2-4 or D2-10 is lifted), installs must be authenticated independently of the node. An administrator signs the request with a key whose public half is pinned in the collector, out of band. The signature binds:
+  - the reference and the scope;
+  - the sealed secret itself, so that a node cannot swap its own guess under a genuine signature;
+  - the node ID and the install key ID;
+  - the operation (install, revoke or clear-suspension) and the contract version, as a fixed domain-separation prefix, so that a signature for one operation is never valid for another;
+  - the admin key's ID, so that rotation and revocation of that key can be audited;
+  - an expiry, which the collector refuses if it lies further ahead than a fixed maximum lifetime;
+  - a single-use nonce, which the collector spends durably before it makes any decision.
+
+  The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. Revoke and clear-suspension carry the same requirement (A3 review of #91). A revoke stops collection, and a clear lifts a safety floor, so neither may be originated by the node. A3's design, [A3-signed-credential-requests.md](A3-signed-credential-requests.md), is the C7 0.2 candidate.
+- This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
