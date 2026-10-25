@@ -71,6 +71,7 @@ type Layout struct {
 	CollectorData string `json:"collector_data"`
 	Socket        string `json:"socket"`
 	PublicDir     string `json:"public_dir"`
+	AdminDir      string `json:"admin_dir"`
 	StoreDir      string `json:"store_dir"`
 	ServerCert    string `json:"server_cert"`
 	ServerKey     string `json:"server_key"`
@@ -118,6 +119,10 @@ func setup(root, repo string, simPort, relpPort, every int) error {
 	l.CollectorData = filepath.Join(root, "data")
 	coll := filepath.Join(l.CollectorData, "collector")
 	l.PublicDir = filepath.Join(coll, "public")
+	// The administrators' folder both services read clear-suspension.json
+	// from (D2-15, #119): on Linux the rule is the mode, 0550, so the test
+	// opens it only to leave a file there, as an administrator would.
+	l.AdminDir = filepath.Join(l.CollectorData, "config", "admin")
 	runDir := filepath.Join(root, "run")
 	l.Socket = filepath.Join(runDir, "collector.sock")
 	l.StoreDir = filepath.Join(root, "node", "store")
@@ -125,6 +130,12 @@ func setup(root, repo string, simPort, relpPort, every int) error {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err
 		}
+	}
+	if err := os.MkdirAll(l.AdminDir, 0o750); err != nil {
+		return err
+	}
+	if err := os.Chmod(l.AdminDir, 0o550); err != nil {
+		return err
 	}
 	if err := store.CreateDir(l.StoreDir, ""); err != nil {
 		return err
@@ -134,6 +145,7 @@ func setup(root, repo string, simPort, relpPort, every int) error {
 	nc := nodeconfigtest.New(nodeID, l.StoreDir)
 	nc.CollectorPipe = l.Socket
 	nc.CollectorPublicDir = l.PublicDir
+	nc.AdminDir = l.AdminDir
 	nc.AddSEL751(assetID, "127.0.0.1", simPort, every)
 	setSerial(nc.Assets[0], simSerial)
 	nc.AddRELPTarget("upstream", "127.0.0.1", relpPort, anchorRef, clientRef, durableAckRef, false)
