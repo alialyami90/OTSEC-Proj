@@ -92,7 +92,7 @@ A6 mutated the owners' code for each gate change, and A1 re-ran selected mutants
 **Conditions carried into Phase 3:**
 
 - the Windows slice run against the installed services (gate item 1);
-- the D2-11 admin-signed C7 requests, the C1 endpoint path field and the port-server rule (D2-16), and A3's §9 key store (D2-12), all before any `device-observed` endpoint;
+- the D2-11 admin-signed C7 requests, the C1 endpoint path field and the port-server rule (D2-16), the C3 read of `DATE_F` through `SHO G`, and A3's §9 key store (D2-12), all before any `device-observed` endpoint;
 - the Phase 1 conditions still open: the pinned-key enrollment rule (before any SSH family) and replacing PEN 32473 (before production).
 
 ## Owner decisions needed
@@ -127,6 +127,8 @@ Everything below rests on the SEL-751 manual (S22, date code 20260910), the simu
 - **Level 1 after a dropped connection.** D2-20 holds the floor until QUI, because the relay may keep Level 1 until `TIDLE`. Whether it does is H-15 (b).
 - **A pending password across connections** (H-15 (a)), and the `TIDLE` of a port-server path (D2-16, H-13).
 - **Identity.** The FID ground truth exists only on a device (H-01).
+- **ID line checksums.** V-S19 (d) is not met: `sel751` parses the checksums but does not enforce them (A2, `docs/phase2/A2-sel751.md`), because a corrupted FID still fails the exact-match check and the manual's own Figure 3.20 prints six checksums that do not hold. Whether a real relay's checksums hold waits on H-01 or H-13.
+- **The date order.** SER dates print the same in MDY and DMY, and `DATE_F` is not read, so the normalizer assumes MDY and flags it (A4). On a relay set to DMY, every date with a day of 12 or less would be wrong, though flagged. Reading `DATE_F` needs a C3 change to read `SHO G` (A2), carried as a condition before any `device-observed` endpoint.
 - **The SER buffer under overrun and after a clear** (H-07), and timestamps across time-source loss and DST (H-10).
 - **Device load and limits**: the session limit, lockout and CPU load at the poll rate (H-03 to H-05).
 - **V-S7 (b) on hardware**: settings and the SER buffer unchanged after 24 h (H-08).
@@ -178,7 +180,7 @@ The Phase 4 order is the brief's recommendation. The owner may reorder it, for e
 ## Next coordinated tasks (proposed; the owner decides)
 
 1. **The Windows slice against the installed services** (A5 and A6, on the owner's PC with the owner's UAC approval). Closes gate condition 1.
-2. **Admin-signed C7 requests** (A3, C7 0.4), with **the C1 endpoint path field and the port-server rule** (A2, D2-16). Both are needed before any `device-observed` endpoint.
+2. **Admin-signed C7 requests** (A3, C7 0.4), with **the C1 endpoint path field and the port-server rule** (A2, D2-16) and **the C3 read of `DATE_F` through `SHO G`** (A2). All three are needed before any `device-observed` endpoint.
 3. **A3's §9 node key store** (A3 with A5). Replaces the D2-12 file resolver.
 4. **An audited quarantine export and a way to clear a halted asset** (A5 with A3).
 5. **V-S8 end to end**: every stored event's raw hash checked against the recording (A6).
