@@ -39,6 +39,10 @@ func suspendingCollector(t *testing.T, quarantine bool) *fakeCollector {
 	seq := uint64(0)
 	return &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
 		seq++
+		if req.Kind == authz.KindAssetClearSusp {
+			return collectorclient.Response{Reply: authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID,
+				Status: authz.ReplyAccepted, CollectorSeq: seq}}, nil
+		}
 		rep := accepted(req, seq)
 		// Each run gets its own invocation ID, as the collector gives.
 		rep.InvocationID = fmt.Sprintf("inv-run-%d", seq)
@@ -177,7 +181,7 @@ func TestUnknownSuspensionsHoldEverything(t *testing.T) {
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
-	if err := writeSuspensions(filepath.Join(c.Store.Dir, SuspensionsFileName), 1<<40, nil, nil, collectorState{}); err != nil {
+	if err := writeSuspensions(filepath.Join(c.Store.Dir, SuspensionsFileName), 1<<40, nil, nil, collectorState{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	col := suspendingCollector(t, false)

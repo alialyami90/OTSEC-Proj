@@ -47,7 +47,8 @@ const (
 	// stream, which it clears only once it is. Nothing was cleared.
 	AlarmSuspensionClearRefused = "asset-suspension-clear-refused"
 	// AlarmSuspensionCleared: an administrator's clear was recorded and
-	// applied; the asset's runs resume.
+	// applied; the asset's runs resume once the collector has accepted it
+	// too (assetclear.go).
 	AlarmSuspensionCleared = "asset-suspension-cleared"
 )
 
@@ -90,6 +91,10 @@ type suspensionsFile struct {
 	// Collector is the collector's keys and numbering through ThroughSeq
 	// (seqreset.go).
 	Collector collectorState `json:"collector"`
+	// CollectorClears are the clears the node has recorded that the
+	// collector has not yet accepted: asset ID to the suspension's ref
+	// (assetclear.go).
+	CollectorClears map[string]string `json:"collector_clears,omitempty"`
 }
 
 type pendingSuspension struct {
@@ -150,17 +155,21 @@ func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 		}
 		pending = append(pending, unaudited{u.AssetID, sp, u.Code})
 	}
+	cc := f.CollectorClears
+	if cc == nil {
+		cc = map[string]string{}
+	}
 	s.mu.Lock()
-	s.susp, s.through, s.unaudited, s.cs = m, uint64(through), pending, f.Collector
+	s.susp, s.through, s.unaudited, s.cs, s.collClear = m, uint64(through), pending, f.Collector, cc
 	s.mu.Unlock()
 	if err := s.fold(ctx, false); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	snapshot, pending, through2, cs := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs
+	snapshot, pending, through2, cs, cc := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs, maps.Clone(s.collClear)
 	s.fileStale = true
 	s.mu.Unlock()
-	if err := writeSuspensions(s.suspensionsPath(), through2, snapshot, pending, cs); err != nil {
+	if err := writeSuspensions(s.suspensionsPath(), through2, snapshot, pending, cs, cc); err != nil {
 		// The audit stream holds every suspension; settle writes the
 		// checkpoint later.
 		s.rt.opt.Status.Raise("", AlarmSuspensionNotDurable, "suspension checkpoint not written; the next start reads the audit stream again: "+err.Error())
@@ -367,9 +376,9 @@ func (s *Scheduler) settleLocked(ctx context.Context) {
 	s.mu.Unlock()
 	if stale {
 		s.mu.Lock()
-		snapshot, pending, cs := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs
+		snapshot, pending, cs, cc := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs, maps.Clone(s.collClear)
 		s.mu.Unlock()
-		if fileErr = writeSuspensions(s.suspensionsPath(), through, snapshot, pending, cs); fileErr == nil {
+		if fileErr = writeSuspensions(s.suspensionsPath(), through, snapshot, pending, cs, cc); fileErr == nil {
 			s.mu.Lock()
 			s.fileStale = s.through != through
 			s.mu.Unlock()
@@ -443,6 +452,10 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 			if err == nil {
 				err = applyCollector(&s.cs, rec)
 			}
+			accepted := false
+			if err == nil {
+				accepted = applyCollectorClear(s.collClear, rec)
+			}
 			if err == nil {
 				if rec.Action == audit.ActionAssetSuspend {
 					s.unaudited = slices.DeleteFunc(s.unaudited, func(u unaudited) bool {
@@ -456,7 +469,10 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 				return badRecord{st.Key.Seq, err}
 			}
 			if announce && changed && rec.Action == audit.ActionAssetSuspensionClear {
-				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator; runs resume")
+				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator; runs resume once the collector accepts the clear")
+			}
+			if announce && accepted {
+				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "the collector accepted the "+rec.Detail+"; runs resume")
 			}
 			after = st.Key.Seq
 		}
@@ -537,6 +553,9 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	}
 	s.settleMu.Lock()
 	defer s.settleMu.Unlock()
+	s.mu.Lock()
+	s.clearFile = nil // set again below only from a file read and decoded now
+	s.mu.Unlock()
 	// The directory first (A3 on #107): a file the node could have written
 	// itself is no administrator's. On Linux the file check reads only the
 	// mode, so a node-writable directory would let the node plant a 0400
@@ -562,6 +581,10 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 		s.refuseClear(key, "", fmt.Sprintf("%s is not a %s object with asset_id and ref", ClearSuspensionFileName, ClearSuspensionSchema))
 		return
 	}
+	s.mu.Lock()
+	file := cl
+	s.clearFile = &file
+	s.mu.Unlock()
 	// Match against the stream as it stands, even when the run's settle
 	// could not read it: a clear whose append reported an error but was
 	// committed is applied here, and not written a second time, which C8
@@ -577,6 +600,11 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	unwritten := slices.ContainsFunc(s.unaudited, func(u unaudited) bool { return u.assetID == cl.AssetID && u.sp.Ref == cl.Ref })
 	s.mu.Unlock()
 	if !ok || sp.Ref != cl.Ref {
+		if !ok && s.collectorClearing(cl.AssetID, cl.Ref) {
+			// The node cleared it; the file stays until the collector has
+			// accepted the clear too, since it reads the same file.
+			return
+		}
 		s.refuseClear(key, cl.AssetID, fmt.Sprintf("%s names suspension %s, which this asset does not hold; nothing cleared", ClearSuspensionFileName, cl.Ref))
 		return
 	}
@@ -614,6 +642,7 @@ func (s *Scheduler) Suspensions() map[string]asset.Suspension {
 
 func (s *Scheduler) publishSuspensions() {
 	s.rt.opt.Status.SetSuspensions(s.Suspensions())
+	s.rt.opt.Status.SetCollectorClears(s.CollectorClears())
 	s.publishCollector()
 }
 
@@ -655,8 +684,8 @@ func readSuspensions(path string) (suspensionsFile, error) {
 
 // writeSuspensions writes the checkpoint as the status file is written:
 // a temporary file, flushed, then renamed.
-func writeSuspensions(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState) error {
-	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs}
+func writeSuspensions(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string) error {
+	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc}
 	for _, u := range pending {
 		f.Unaudited = append(f.Unaudited, pendingSuspension{AssetID: u.assetID, Ref: u.sp.Ref, Code: u.code})
 	}

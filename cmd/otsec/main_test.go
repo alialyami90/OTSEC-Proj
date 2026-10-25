@@ -209,3 +209,17 @@ func TestHealthShowsSuspensions(t *testing.T) {
 		t.Fatalf("health: %d %s\n%s", code, errs, out)
 	}
 }
+
+// health lists each clear the node has recorded that the collector has
+// not yet accepted, and tells the administrator to keep the file in place.
+func TestHealthShowsCollectorStillSuspended(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetCollectorClears(map[string]string{relayID: "inv-run-1"})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1, the collector has not accepted the clear yet; runs stay held, and " + node.ClearSuspensionFileName + " stays in place until this line is gone"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}

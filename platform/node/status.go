@@ -31,6 +31,7 @@ type Status struct {
 	targets map[string]TargetStatus
 	// suspensions are the scheduler's current asset suspensions.
 	suspensions map[string]asset.Suspension
+	collClears  map[string]string
 	collector   *CollectorStatus
 }
 
@@ -63,6 +64,11 @@ type StatusFile struct {
 	// Suspensions are the assets the node will not collect from until an
 	// administrator clears them (suspend.go).
 	Suspensions map[string]asset.Suspension `json:"suspensions,omitempty"`
+	// CollectorClears are the clears the node has recorded that the
+	// collector has not yet accepted, asset ID to the suspension's ref
+	// (assetclear.go). The asset's runs are held until it does, and
+	// clear-suspension.json must stay in place until then.
+	CollectorClears map[string]string `json:"collector_clears,omitempty"`
 	// Collector is the collector's install keys as the audit stream gives
 	// them (seqreset.go): the trusted key and, after a reinstall, the new
 	// one beside it, for the administrator's fingerprint check.
@@ -179,6 +185,14 @@ func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Unlock()
 }
 
+// SetCollectorClears records the clears the collector has not yet
+// accepted.
+func (s *Status) SetCollectorClears(m map[string]string) {
+	s.mu.Lock()
+	s.collClears = m
+	s.mu.Unlock()
+}
+
 // SetCollector records the collector's keys and numbering.
 func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Lock()
@@ -230,6 +244,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
 	if len(s.suspensions) > 0 {
 		f.Suspensions = maps.Clone(s.suspensions)
+	}
+	if len(s.collClears) > 0 {
+		f.CollectorClears = maps.Clone(s.collClears)
 	}
 	if s.collector != nil {
 		c := *s.collector
