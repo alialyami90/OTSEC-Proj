@@ -13,21 +13,25 @@ Seven slices run side by side, one fault each:
   upstream      the RELP receiver is killed after the first run and stays
                 down;
   store         the adapter-evidence quota leaves room for one run's
-                outcome and no more (the quarantine room, schedule.go).
+                outcome and no more (the quarantine room, schedule.go), and
+                the receiver is down from the start, so nothing is confirmed
+                and nothing can be pruned (since #135 the node prunes
+                confirmed events while it runs, V-S9).
 
 Pass, for each: within 60 s of the failing run (for upstream, 125 s of the
-kill: see test_within_60s_of_the_failing_run), otsec health shows a failure that names it, and no failing run
-is shown or reported upstream as ok. The seven failures are told apart by
-what health shows: the last run's code, or the alarm it raised (EXPECT).
+kill, D2-21: see test_within_60s_of_the_failing_run), otsec health shows a
+failure that names it, and no failing run is shown or reported upstream as
+ok. The seven failures are told apart by what health shows: the last run's
+code and its C2 detail (#135), or the alarm it raised (EXPECT).
 
 A late device leaves the QUI language probe unanswered (C2 0.4, D2-19):
 failed.timeout, and nothing suspended. Until C2 0.4 it was a rejected probe
 that suspended the asset as language-not-english.
 
-Not yet told apart: the late device and the SER that hangs both show only
-"last run failed.timeout" in health. The result's detail differs, but health
-does not show it (open with A5, V-S12). KNOWN_SAME lists that pair so the
-test still catches any other pair that merges.
+The late device and the SER that hangs share failed.timeout. They are told
+apart only by the detail: the late device's names the unanswered probe, and
+the hung SER's is empty, since the adapter gives a step timeout no detail
+(open with A2, V-S12).
 
 Evidence class: simulated. The device-side faults are the simulator's, not
 a relay's failure signatures (H-04, H-05).
@@ -49,7 +53,7 @@ from slicerun import CANARY, Slice
 FIRST_RUN = 100.0
 # One schedule interval, the 15 s step timeout, and the time to report.
 DEADLINE = 60.0 + 15.0 + 25.0
-LAST_RUN = re.compile(r"^(?:FAILING )?asset \S+: last run (\S+) at (\S+?)(?: \(([^)]*)\))?(?:;.*)?$", re.M)
+LAST_RUN = re.compile(r"^(?:FAILING )?asset \S+: last run (\S+)(?: \(([^)]*)\))? at (\S+?)(?: \(collector refused: [^)]*\))?(?:;.*)?$", re.M)
 ALARM = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\s+(.+?)\s{2,}(\S+)\s{2,}(.*)$", re.M)
 # The quarantine room (platform/node/schedule.go): collectorwire's largest
 # outcome, the largest reason, and 16 KiB.
@@ -65,8 +69,10 @@ def _signs(health, since):
     that run started after since, and the alarm codes raised after since."""
     out = set()
     m = LAST_RUN.search(health)
-    if m and _utc(m[2]) >= since - 1:
-        out.add("run:" + m[1] + (f" ({m[3]})" if m[3] else ""))
+    if m and _utc(m[3]) >= since - 1:
+        out.add("run:" + m[1])
+        if m[2]:
+            out.add(f"run:{m[1]} ({m[2]})")
     for a in ALARM.finditer(health):
         if _utc(a[1]) >= since - 1:
             out.add("alarm:" + a[3])
@@ -83,8 +89,6 @@ EXPECT = {
     "store": "alarm:collection-no-quarantine-room",
 }
 
-
-KNOWN_SAME = {("hang", "timeout")}
 
 
 def _failure(signs):
@@ -107,6 +111,8 @@ def _run_case(name, s, out):
     try:
         s.start(**CASES[name])
         t0 = time.time()
+        if name == "store":
+            s.kill("receiver")
         if name == "unreachable":
             s.kill("simulator")
         if name in ("upstream", "store"):
@@ -116,7 +122,10 @@ def _run_case(name, s, out):
             if name == "upstream":
                 s.kill("receiver")
         r["inject"] = t0 = time.time() if name in ("upstream", "store") else t0
-        got = harness.wait_for(lambda: _failure(_signs(s.health(), t0)), FIRST_RUN + DEADLINE, step=1.0)
+        def expected():
+            signs = _failure(_signs(s.health(), t0))
+            return signs if EXPECT[name] in signs else None
+        got = harness.wait_for(expected, FIRST_RUN + DEADLINE, step=1.0)
         r["seen"] = time.time()
         r["signs"] = sorted(got or ())
         if name not in ("upstream", "store"):
@@ -185,8 +194,9 @@ def test_no_failing_run_reports_ok(cases, name):
     assert not any("run:ok" == x for x in r["signs"]), r["signs"]
     reported = [x.get("status") for x in r["runs_reported"]]
     if name == "store":
-        # The first run was good; the next is not sent, so not reported.
-        assert reported[:1] == ["ok"] and "ok" not in reported[1:], reported
+        # The receiver is down throughout, so the first run, which was
+        # good, is not reported either; the next is not sent.
+        assert "ok" not in reported[1:], reported
     else:
         assert reported and "ok" not in reported, (name, reported)
 
@@ -195,7 +205,7 @@ def test_the_failures_are_told_apart(cases):
     signs = {name: frozenset(r.get("signs", ())) for name, r in cases.items()}
     for a in signs:
         for b in signs:
-            if a < b and (a, b) not in KNOWN_SAME:
+            if a < b:
                 assert signs[a] != signs[b], (a, b, signs[a])
 
 
