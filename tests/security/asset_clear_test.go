@@ -351,6 +351,10 @@ func TestAssetClearRetryThenLaterSuspension(t *testing.T) {
 	if err := r.state.SuspendAsset(lockAsset, adapter.FailedAuthRejected, invY); err != nil {
 		t.Fatal(err)
 	}
-	refusedWith(t, r, clearRequest(r, lockAsset, invX), authz.RefuseSuspensionMismatch)
-	stillSuspendedBy(t, r, runner, authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: invY, Code: string(adapter.FailedAuthRejected)})
+	reply := refusedWith(t, r, clearRequest(r, lockAsset, invX), authz.RefuseSuspensionMismatch)
+	later := authz.HeldSuspension{Reason: asset.SuspendAuthFailed, Ref: invY, Code: string(adapter.FailedAuthRejected)}
+	if reply.Refusal.Suspension == nil || *reply.Refusal.Suspension != later {
+		t.Errorf("the mismatch names %+v, want the later suspension %+v", reply.Refusal.Suspension, later)
+	}
+	stillSuspendedBy(t, r, runner, later)
 }
