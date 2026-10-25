@@ -34,14 +34,16 @@ const (
 	// are not sent until an administrator clears the suspension.
 	AlarmAssetSuspended = "asset-suspended"
 	// AlarmSuspensionNotDurable: a suspension or a clear was not written to
-	// the audit stream or to the checkpoint. With neither, every
-	// credentialed run on the node stops, because a restart would lose it.
+	// the audit stream or to the checkpoint. While a suspension is not in
+	// the audit stream, every run on the node stops, level 0 included,
+	// because the chain is the record (D2-15).
 	AlarmSuspensionNotDurable = "asset-suspension-not-durable"
 	// AlarmSuspensionsUnknown: the suspensions could not be read or
-	// rebuilt, so every credentialed run on the node stops.
+	// rebuilt, so every run on the node stops, level 0 included.
 	AlarmSuspensionsUnknown = "asset-suspensions-unknown"
-	// AlarmSuspensionClearRefused: clear-suspension.json was refused, or
-	// names no current suspension. Nothing was cleared.
+	// AlarmSuspensionClearRefused: clear-suspension.json was refused,
+	// names no current suspension, or names one not yet in the audit
+	// stream, which it clears only once it is. Nothing was cleared.
 	AlarmSuspensionClearRefused = "asset-suspension-clear-refused"
 	// AlarmSuspensionCleared: an administrator's clear was recorded and
 	// applied; the asset's runs resume.
@@ -90,7 +92,7 @@ type clearSuspension struct {
 // loadSuspensions reads the checkpoint and applies every asset.suspend and
 // asset.suspension_clear record after it, in chain order. A missing or
 // unreadable checkpoint means the whole stream is read. An error means the
-// suspensions are unknown; the caller stops every credentialed run.
+// suspensions are unknown; the caller stops every run on the node.
 func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 	f, err := readSuspensions(s.suspensionsPath())
 	switch {
@@ -308,6 +310,11 @@ type unaudited struct {
 func (s *Scheduler) settle(ctx context.Context) {
 	s.settleMu.Lock()
 	defer s.settleMu.Unlock()
+	s.settleLocked(ctx)
+}
+
+// settleLocked is settle with settleMu held.
+func (s *Scheduler) settleLocked(ctx context.Context) {
 	auditErr := s.fold(ctx, true)
 	if !s.foldOK(auditErr) {
 		return
@@ -440,7 +447,7 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 }
 
 // foldOK reports whether settle may go on after fold returned err. A bad
-// record stops every credentialed run on the node.
+// record stops every run on the node, level 0 included.
 func (s *Scheduler) foldOK(err error) bool {
 	bad := badRecord{}
 	if !errors.As(err, &bad) {
@@ -449,13 +456,13 @@ func (s *Scheduler) foldOK(err error) bool {
 	s.mu.Lock()
 	s.node = AlarmSuspensionsUnknown
 	s.mu.Unlock()
-	s.raiseOnceKey("suspension record", "", AlarmSuspensionsUnknown, "suspensions cannot be rebuilt past an audit record; every credentialed run on this node is stopped: "+bad.Error())
+	s.raiseOnceKey("suspension record", "", AlarmSuspensionsUnknown, "suspensions cannot be rebuilt past an audit record; every run on this node is stopped: "+bad.Error())
 	return false
 }
 
 // badRecord is an audit record the suspensions cannot be rebuilt past: it
 // does not parse, or breaks C8 0.2's suspension rules. Unlike a read
-// error, retrying does not help, so every credentialed run stops.
+// error, retrying does not help, so every run on the node stops.
 type badRecord struct {
 	seq c5.Seq
 	err error
@@ -498,12 +505,20 @@ func (s *Scheduler) saveCursor(ctx context.Context, through uint64) {
 
 // checkClear applies clear-suspension.json in admin_dir, if there is one.
 // It clears one suspension, only on an exact asset and ref match, and only
-// once the clear is in the audit stream. Anything else changes nothing and
-// is raised once per file content.
+// once the clear is in the audit stream. A clear of a suspension whose
+// asset.suspend is not yet in the stream waits: written first, the clear
+// would name a suspension the chain does not hold, and C8 0.2 breaks the
+// chain on it (A6 on #107). Anything else changes nothing and is raised
+// once per file content.
+//
+// It holds settleMu throughout, so no settle folds or writes between the
+// match and the clear.
 func (s *Scheduler) checkClear(ctx context.Context) {
 	if s.rt.cfg.AdminDir == "" {
 		return
 	}
+	s.settleMu.Lock()
+	defer s.settleMu.Unlock()
 	path := filepath.Join(s.rt.cfg.AdminDir, ClearSuspensionFileName)
 	b, err := store.ReadProtectedFile(path, MaxClearSuspensionBytes)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -523,9 +538,14 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	}
 	s.mu.Lock()
 	sp, ok := s.susp[cl.AssetID]
+	unwritten := slices.ContainsFunc(s.unaudited, func(u unaudited) bool { return u.assetID == cl.AssetID && u.sp.Ref == cl.Ref })
 	s.mu.Unlock()
 	if !ok || sp.Ref != cl.Ref {
 		s.refuseClear(key, cl.AssetID, fmt.Sprintf("%s names suspension %s, which this asset does not hold; nothing cleared", ClearSuspensionFileName, cl.Ref))
+		return
+	}
+	if unwritten {
+		s.refuseClear("unaudited "+key, cl.AssetID, fmt.Sprintf("suspension %s is not yet in the audit stream; nothing cleared, and the clear waits until it is", cl.Ref))
 		return
 	}
 	if err := s.commitSuspensionRecord(ctx, audit.ActionAssetSuspensionClear, cl.AssetID, sp, "", "cleared by "+ClearSuspensionFileName); err != nil {
@@ -535,7 +555,7 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 	// The clear applies from the stream, as at a start: settle's fold
 	// finds it and lifts the suspension. A checkpoint that still holds the
 	// cleared suspension errs on the safe side.
-	s.settle(ctx)
+	s.settleLocked(ctx)
 }
 
 func (s *Scheduler) refuseClear(key, assetID, detail string) {

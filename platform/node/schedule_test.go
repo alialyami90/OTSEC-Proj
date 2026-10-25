@@ -576,7 +576,7 @@ func TestNoQuarantineRoomSendsNothing(t *testing.T) {
 	}
 }
 
-// A quarantine the store refuses stops every credentialed run on the node.
+// A quarantine the store refuses stops every run on the node, level 0 included.
 func TestQuarantineNotStoredStopsTheNode(t *testing.T) {
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["adapter-evidence"] = QuarantineRoom + 1024 })
 	r, st, _ := start(t, c, dir)

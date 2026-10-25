@@ -435,6 +435,115 @@ func TestBadClearFileChangesNothing(t *testing.T) {
 	}
 }
 
+// A clear of a suspension whose asset.suspend is not yet in the audit
+// stream waits until it is (A6's probe on #107). Written first, the clear
+// would name a suspension the chain does not hold, and the node's next
+// settle would hold every asset as unknown, for good.
+func TestClearOfUnauditedSuspensionWaits(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	s := newScheduler(t, r, suspendingCollector(t, false))
+	db := r.find(AuditDB)
+	r.state.Lock()
+	log := db.log
+	db.log = nil
+	r.state.Unlock()
+	s.suspend(bg, relayID, "inv-test", "failed.auth_rejected")
+	r.state.Lock()
+	db.log = log
+	r.state.Unlock()
+
+	// The audit stream is back, but no settle has written the suspension
+	// yet when the clear is read.
+	writeClear(t, nc, relayID, "inv-test")
+	s.checkClear(bg)
+	if sus, clears := suspensionRecords(t, r); len(sus) != 0 || len(clears) != 0 {
+		t.Fatalf("before the suspension is written: suspends %+v, clears %+v", sus, clears)
+	}
+	if !s.suspended(relayID) {
+		t.Fatal("cleared before the suspension was in the audit stream")
+	}
+	refused := 0
+	for _, a := range st.Snapshot("site-a-node1").Alarms {
+		if a.Code == AlarmSuspensionClearRefused && a.Asset == relayID {
+			refused++
+		}
+	}
+	if refused != 1 {
+		t.Fatalf("%d clear-refused alarms for the waiting clear", refused)
+	}
+
+	s.settle(bg)
+	if why := s.Halted("any-other-asset"); why != "" {
+		t.Fatalf("node held after the suspension was written: %q", why)
+	}
+	s.checkClear(bg)
+	if why := s.Halted("any-other-asset"); why != "" {
+		t.Fatalf("node held after the clear: %q", why)
+	}
+	if s.suspended(relayID) {
+		t.Fatal("still suspended once the clear could apply")
+	}
+	suspendAt, clearAt := -1, -1
+	for i, rec := range auditRecords(t, r) {
+		switch rec.Action {
+		case audit.ActionAssetSuspend:
+			suspendAt = i
+		case audit.ActionAssetSuspensionClear:
+			clearAt = i
+		}
+	}
+	if suspendAt < 0 || clearAt < suspendAt {
+		t.Fatalf("asset.suspend at %d, asset.suspension_clear at %d", suspendAt, clearAt)
+	}
+}
+
+// A start whose checkpoint is behind audit records already pruned cannot
+// rebuild the suspensions those records hold, so it holds every asset and
+// sends nothing (A6 on #107). Here the checkpoint is lost after a prune
+// that its cursor allowed, and the asset's suspension is only in the
+// pruned part of the stream.
+func TestPrunedPastCheckpointHoldsAtLoad(t *testing.T) {
+	c, dir := schedConfig(t, nil)
+	r, _, _ := start(t, c, dir)
+	s := newScheduler(t, r, suspendingCollector(t, false))
+	s.RunOnce(bg, 0)
+	if !s.suspended(relayID) {
+		t.Fatal("not suspended")
+	}
+	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
+	db := r.Store(AuditStream)
+	last, err := db.LastCommitted(bg, AuditStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveCursor(bg, c5.Cursor{Consumer: fwd.ID, Stream: AuditStream, Through: last}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := c5.ComputeBoundary(bg, db, db, pruneConsumers([]c5.Consumer{fwd}), AuditStream, c5.ClassAudit, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.PruneStep(bg, b, 1000); err != nil || n == 0 {
+		t.Fatalf("pruned %d: %v", n, err)
+	}
+	s.suspend(bg, "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", "inv-other", "failed.auth_rejected")
+	r.Close()
+	os.Remove(filepath.Join(c.Store.Dir, SuspensionsFileName))
+
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	col := suspendingCollector(t, false)
+	s = newScheduler(t, r, col)
+	if rep := s.RunOnce(bg, 0); col.n() != 0 || rep.Alarm != AlarmCollectionDisabled {
+		t.Fatalf("run %+v sent %d requests", rep, col.n())
+	}
+	if why := s.Halted("any-other-asset"); why != AlarmSuspensionsUnknown {
+		t.Fatalf("node not held as unknown: %q", why)
+	}
+}
+
 // A cleared suspension stays cleared across a restart, from the checkpoint
 // or, without one, from the chain: the rebuild applies the clear after the
 // suspension, in chain order (A1, D2-15).
@@ -533,7 +642,7 @@ func TestCommittedSuspensionNotWrittenTwice(t *testing.T) {
 	}
 }
 
-// A suspension record the node cannot apply stops every credentialed run,
+// A suspension record the node cannot apply stops every run on the node,
 // at a start's rebuild and when the running node meets it: a clear of a
 // suspension that is not open breaks C8 0.2's rules, and a second
 // suspension of an asset already suspended breaks the node's one per asset.

@@ -33,7 +33,7 @@ Evidence class of everything here: `simulated`. No real device was ever involved
 - **Where it is kept.** On `quarantine/<asset_id>`, in the evidence database, class `adapter-evidence`. No target consumes it, so nothing forwards it, and C5 never prunes a stream with no consumer.
 - **What is stored.** One batch of two records: the frame exactly as received, then the reason, each as its own capture. The reason never goes to status, the OS log or the CLI.
 - **Unauthorized line.** The alarm is `collection-unauthorized-line`, and collection from the asset stops. The stop is durable: `NewScheduler` reads the quarantine stream at startup.
-- **Room.** No run is sent unless `adapter-evidence` has `QuarantineRoom` (8 MiB + 32 KiB) left. A quarantine the store still refuses raises `collection-quarantine-not-stored`, stops every credentialed run on the node, and is audited if audit is available.
+- **Room.** No run is sent unless `adapter-evidence` has `QuarantineRoom` (8 MiB + 32 KiB) left. A quarantine the store still refuses raises `collection-quarantine-not-stored`, stops every run on the node, level 0 included, and is audited if audit is available.
 
 ## Tests and where they ran
 
@@ -60,8 +60,8 @@ Linux container, Go 1.26, and, for #92 at `b2a604d`, A6's native Windows run on 
 | A suspension survives a restart, from the checkpoint or rebuilt from the chain; a clear does too | `TestSuspensionSurvivesRestart` (checkpoint, none, corrupt); `TestClearSurvivesRestart` |
 | Suspensions that cannot be rebuilt, or a suspension not in the audit stream, hold all collection until fixed | `TestUnknownSuspensionsHoldEverything`; `TestUnauditedSuspensionHoldsTheNode` (held with the checkpoint written or not; the hold lifts once the audit write succeeds) |
 | A suspension not written when the node stopped is written at the next start, which holds the node until it is; a record committed despite an append error is not written again; a record that breaks C8 0.2's suspension rules, or a second suspension of one asset, holds every asset, running or at a start | `TestUnauditedSuspensionSurvivesRestart`; `TestCommittedSuspensionNotWrittenTwice`; `TestBadSuspensionRecordHoldsEverything` (orphan clear, second suspension) |
-| Audit pruning never passes the checkpoint's `through_seq`, and follows it once written, also after a restart's rebuild | `TestPruneStopsAtCheckpoint` |
-| A clear needs an exact asset and ref match, is audited before the next request, and a stale, mismatched or malformed file changes nothing and is raised once | `TestClearSuspension`; `TestBadClearFileChangesNothing` |
+| Audit pruning never passes the checkpoint's `through_seq`, and follows it once written, also after a restart's rebuild; a start whose checkpoint is behind records already pruned holds every asset | `TestPruneStopsAtCheckpoint`; `TestPrunedPastCheckpointHoldsAtLoad` (A6 on #107). Removing the gap check fails it |
+| A clear needs an exact asset and ref match, is audited before the next request, and a stale, mismatched or malformed file changes nothing and is raised once; a clear of a suspension not yet in the audit stream waits until it is | `TestClearSuspension`; `TestBadClearFileChangesNothing`; `TestClearOfUnauditedSuspensionWaits` (A6's probe on #107). Removing the wait fails it: the clear goes first and the node holds as unknown |
 | Tick and runs share the runtime | `TestTickAlongsideRuns` under `-race` |
 | A store directory that is a link, and a database file that is a link or that others can read, are refused (A3 #84 notes 3 and 4) | `TestFileModes`. Mutating the file check fails it |
 | The CLI writes nothing to the store | `cmd/otsec` `TestReadOnlyCommands`. A stopped node's WAL file is created empty, with the database's mode, which SQLite does for a reader; nothing else changes |

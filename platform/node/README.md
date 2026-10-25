@@ -91,7 +91,7 @@ Each run:
 
 On an unauthorized line, the alarm is `collection-unauthorized-line` and collection from the asset stops. The stop is durable: at startup `NewScheduler` finds the quarantine on the stream and keeps the asset stopped. Phase 2 has no way to clear the stop, so a halted asset fails closed. Clearing it needs an audited admin operation, which is out of Phase 2 scope (A1): it is a Phase 3 item for A3 and A5, recorded as a limitation in `docs/phase-2-exit.md`.
 
-If a quarantine cannot be stored, the alarm is `collection-quarantine-not-stored`, and every credentialed run on the node stops.
+If a quarantine cannot be stored, the alarm is `collection-quarantine-not-stored`, and every run on the node, level 0 included, stops.
 
 ## Suspensions (D2-15)
 
@@ -112,6 +112,7 @@ The node keeps its own copy of the C1 suspension each run's outcome code sets (`
   - The file is read like a TLS file: no link, at most 4 KiB, and not writable by the node.
   - The node clears one suspension, only on an exact asset and ref match, and writes `asset.suspension_clear` before it schedules the asset again.
   - A file that does not match, or that names a suspension already cleared, changes nothing and is raised once.
+  - A clear of a suspension whose `asset.suspend` is not yet in the audit stream waits until it is, and says so. Written first, it would name a suspension the chain does not hold, and C8 0.2 would break the chain on it (A6 on #107).
   - The node never clears on its own.
 - **Interim.** The file is the Phase 2 interim. Before any `device-observed` endpoint, the clear becomes an admin-signed C7 0.2 request (D2-11, D2-15).
 

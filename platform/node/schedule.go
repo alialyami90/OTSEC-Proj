@@ -64,7 +64,7 @@ type Scheduler struct {
 
 	mu     sync.Mutex
 	halted map[string]string // asset ID: why its collection is stopped
-	node   string            // non-empty: every credentialed run is stopped
+	node   string            // non-empty: every run on the node is stopped, level 0 included
 	quiet  map[string]bool   // alarm codes already raised for the current condition
 
 	susp      map[string]asset.Suspension // asset ID: its suspension (suspend.go)
@@ -84,7 +84,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
-		rt.opt.Status.Raise("", AlarmSuspensionsUnknown, "suspensions could not be read or rebuilt; every credentialed run on this node is stopped: "+err.Error())
+		rt.opt.Status.Raise("", AlarmSuspensionsUnknown, "suspensions could not be read or rebuilt; every run on this node is stopped: "+err.Error())
 	} else {
 		// Writes a suspension the checkpoint lists as unaudited, or holds
 		// the node until it can.
@@ -237,7 +237,9 @@ type Report struct {
 	Alarm string
 }
 
-// RunOnce runs schedule entry i once.
+// RunOnce runs schedule entry i once. Calls must not overlap: the node
+// runs its schedule from one goroutine (Run), and a run's suspension
+// decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	col := s.rt.cfg.Schedule[i]
 	s.settle(ctx)
@@ -427,7 +429,7 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 // quarantine stream, in one batch: the bytes exactly as received, then the
 // reason, each as the capture of its own event. The reason can quote a
 // device line, so it is kept here and never in status or a log. If the
-// batch cannot be committed, every credentialed run on the node stops,
+// batch cannot be committed, every run on the node stops, level 0 included,
 // because evidence of a failed run would otherwise be lost.
 func (s *Scheduler) quarantine(ctx context.Context, rep Report, col Collection, invocationID string, raw []byte, reason string, unauthorized bool) {
 	if len(reason) > maxReasonBytes {
@@ -455,7 +457,7 @@ func (s *Scheduler) quarantine(ctx context.Context, rep Report, col Collection, 
 		s.mu.Lock()
 		s.node = AlarmQuarantineNotStored
 		s.mu.Unlock()
-		s.rt.opt.Status.Raise(col.AssetID, AlarmQuarantineNotStored, "quarantine not stored; every credentialed run on this node is stopped: "+err.Error())
+		s.rt.opt.Status.Raise(col.AssetID, AlarmQuarantineNotStored, "quarantine not stored; every run on this node is stopped: "+err.Error())
 		s.rt.audit(ctx, audit.ActionPolicyApply, audit.OutcomeFailed, "quarantine_not_stored", "quarantine of asset "+col.AssetID+" not stored; collection stopped on this node")
 	}
 }

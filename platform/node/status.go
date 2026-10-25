@@ -134,7 +134,7 @@ const (
 	AlarmResultRefused      = "collection-result-refused"
 	AlarmEvidenceNotStored  = "collection-evidence-not-stored"
 	AlarmCollectionDisabled = "collection-disabled"
-	// AlarmQuarantineNotStored stops every credentialed run on the node:
+	// AlarmQuarantineNotStored stops every run on the node, level 0 included:
 	// the evidence of a failed run could not be kept.
 	AlarmQuarantineNotStored = "collection-quarantine-not-stored"
 	AlarmNoQuarantineRoom    = "collection-no-quarantine-room"
