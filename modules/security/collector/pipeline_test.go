@@ -214,7 +214,7 @@ func (f *pipeFixture) run(t *testing.T, req *authz.CollectorRequest) (authz.Coll
 	if work == nil {
 		return reply, nil
 	}
-	o := work(context.Background())
+	o := work.Run(context.Background())
 	return reply, &o
 }
 
@@ -700,5 +700,41 @@ func TestRegisterActivation(t *testing.T) {
 	revoked := NewRegisters(reopened, []authz.TrustAnchor{{KeyID: "release-2026", PublicKey: pub, Status: authz.KeyRevoked}})
 	if _, err := revoked.Activate(signedRegister(t, rev3, f.release, "release-2026")); !errors.Is(err, authz.ErrRegisterRejected) {
 		t.Fatalf("revoked key: %v", err)
+	}
+}
+
+// A discarded run (its reply never reached the node) wipes the secret and
+// frees the device without calling the runner, and Discard after Run, or
+// twice, does nothing more (A6 on #97).
+func TestDiscardReleasesRun(t *testing.T) {
+	f := newPipeline(t)
+	f.installCanary(t)
+	reply, work := f.pipe.Handle(context.Background(), pipeRun("sel.ser.read_all", pipeCred))
+	if !reply.Accepted() {
+		t.Fatalf("reply %+v", reply)
+	}
+	rw := work.(*runWork)
+	if rw.plan.Secret.EchoSpans(canary) == nil {
+		t.Fatal("the accepted run holds no secret")
+	}
+	if f.pipe.claim(testAsset) {
+		t.Fatal("the asset is not busy while the run is pending")
+	}
+	work.Discard()
+	work.Discard()
+	if rw.plan.Secret.EchoSpans(canary) != nil {
+		t.Fatal("secret handle still holds the secret after Discard")
+	}
+	if !f.pipe.claim(testAsset) {
+		t.Fatal("the asset is still busy after Discard")
+	}
+	f.pipe.release(testAsset)
+	if f.runner.count() != 0 {
+		t.Fatal("Discard called the runner")
+	}
+	// The next run is decided normally once the interval has passed.
+	f.clock.t = f.clock.t.Add(2 * time.Minute)
+	if reply, _ := f.run(t, pipeRun("sel.id", "")); !reply.Accepted() {
+		t.Fatalf("run after a discard: %+v", reply)
 	}
 }

@@ -208,10 +208,10 @@ func acceptRun(work Work) func(*authz.CollectorRequest, uint64) (authz.Collector
 
 func TestAcceptedRunSendsOutcomeAfterReply(t *testing.T) {
 	release := make(chan struct{})
-	h := &fakeHandler{decide: acceptRun(func(ctx context.Context) collectorwire.RunOutcome {
+	h := &fakeHandler{decide: acceptRun(WorkFunc(func(ctx context.Context) collectorwire.RunOutcome {
 		<-release
 		return collectorwire.RunOutcome{InvocationID: "inv-1", Result: json.RawMessage(`{"r":1}`), Audit: []json.RawMessage{}}
-	})}
+	}))}
 	ln, _ := startServer(t, h)
 	r, c := exchange(t, ln, frame(runRequest))
 	defer c.Close()
@@ -234,7 +234,7 @@ func TestAcceptedRunSendsOutcomeAfterReply(t *testing.T) {
 // a bug; the node gets no reply rather than a decision it cannot account
 // for.
 func TestHandlerContractBreachDropsConnection(t *testing.T) {
-	noop := Work(func(context.Context) collectorwire.RunOutcome { return collectorwire.RunOutcome{} })
+	noop := WorkFunc(func(context.Context) collectorwire.RunOutcome { return collectorwire.RunOutcome{} })
 	breaches := map[string]func(*authz.CollectorRequest, uint64) (authz.CollectorReply, Work){
 		"accepted without work": acceptRun(nil),
 		"refused with work": func(req *authz.CollectorRequest, seq uint64) (authz.CollectorReply, Work) {
@@ -276,7 +276,7 @@ func TestAcceptedCredentialRequest(t *testing.T) {
 	if !r.Accepted() || r.InvocationID != "" {
 		t.Fatalf("reply %+v", r)
 	}
-	noop := Work(func(context.Context) collectorwire.RunOutcome { return collectorwire.RunOutcome{} })
+	noop := WorkFunc(func(context.Context) collectorwire.RunOutcome { return collectorwire.RunOutcome{} })
 	for name, d := range map[string]func(*authz.CollectorRequest, uint64) (authz.CollectorReply, Work){
 		"with work":          accept("inv-1", noop),
 		"with an invocation": accept("inv-1", nil),
@@ -292,9 +292,9 @@ func TestAcceptedCredentialRequest(t *testing.T) {
 }
 
 func TestOutcomeForAnotherInvocationDropped(t *testing.T) {
-	h := &fakeHandler{decide: acceptRun(func(ctx context.Context) collectorwire.RunOutcome {
+	h := &fakeHandler{decide: acceptRun(WorkFunc(func(ctx context.Context) collectorwire.RunOutcome {
 		return collectorwire.RunOutcome{InvocationID: "inv-2", Result: json.RawMessage(`{}`)}
-	})}
+	}))}
 	ln, _ := startServer(t, h)
 	r, c := exchange(t, ln, frame(runRequest))
 	defer c.Close()
@@ -308,11 +308,11 @@ func TestOutcomeForAnotherInvocationDropped(t *testing.T) {
 
 func TestCloseCancelsWork(t *testing.T) {
 	started := make(chan struct{})
-	h := &fakeHandler{decide: acceptRun(func(ctx context.Context) collectorwire.RunOutcome {
+	h := &fakeHandler{decide: acceptRun(WorkFunc(func(ctx context.Context) collectorwire.RunOutcome {
 		close(started)
 		<-ctx.Done()
 		return collectorwire.RunOutcome{InvocationID: "inv-1", Result: json.RawMessage(`{}`)}
-	})}
+	}))}
 	ln := newMemListener()
 	s := &Server{Handler: h, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	go s.Serve(ln)
@@ -382,5 +382,71 @@ func TestOversizeBodyStillGetsRefusal(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not drain the body")
+	}
+}
+
+// trackedWork records which of its methods the server called.
+type trackedWork struct {
+	runs, discards atomic.Int32
+	done           chan struct{}
+}
+
+func newTrackedWork() *trackedWork { return &trackedWork{done: make(chan struct{}, 2)} }
+
+func (w *trackedWork) Run(context.Context) collectorwire.RunOutcome {
+	w.runs.Add(1)
+	w.done <- struct{}{}
+	return collectorwire.RunOutcome{InvocationID: "inv-1", Result: json.RawMessage(`{}`)}
+}
+
+func (w *trackedWork) Discard() { w.discards.Add(1); w.done <- struct{}{} }
+
+func (w *trackedWork) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-w.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server called neither Run nor Discard")
+	}
+}
+
+// When the accepted reply cannot be written (the node left), the run never
+// starts and the server discards it, so the device and the secret are
+// released (A6 on #97).
+func TestUnwrittenReplyDiscardsWork(t *testing.T) {
+	w := newTrackedWork()
+	gone := make(chan struct{})
+	h := &fakeHandler{decide: func(req *authz.CollectorRequest, seq uint64) (authz.CollectorReply, Work) {
+		<-gone // the node has hung up before the reply is written
+		return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted,
+			InvocationID: "inv-1", CollectorSeq: seq}, w
+	}}
+	ln, _ := startServer(t, h)
+	c := ln.dial(t)
+	if _, err := c.Write(frame(runRequest)); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	close(gone)
+	w.wait(t)
+	if w.runs.Load() != 0 || w.discards.Load() != 1 {
+		t.Fatalf("runs %d, discards %d", w.runs.Load(), w.discards.Load())
+	}
+}
+
+// Work handed out with a broken reply is discarded, not leaked.
+func TestContractBreachDiscardsWork(t *testing.T) {
+	w := newTrackedWork()
+	h := &fakeHandler{decide: func(req *authz.CollectorRequest, seq uint64) (authz.CollectorReply, Work) {
+		return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyRefused,
+			Refusal: &authz.Refusal{Code: authz.RefuseBusy}, CollectorSeq: seq}, w
+	}}
+	ln, _ := startServer(t, h)
+	c := ln.dial(t)
+	defer c.Close()
+	c.Write(frame(runRequest))
+	w.wait(t)
+	if w.runs.Load() != 0 || w.discards.Load() != 1 {
+		t.Fatalf("runs %d, discards %d", w.runs.Load(), w.discards.Load())
 	}
 }

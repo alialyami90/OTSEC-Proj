@@ -24,11 +24,29 @@ import (
 	"otsec.local/otsec/modules/security/collectorwire"
 )
 
-// Work is the run an accepted request leads to. The server calls it after
-// the accepted reply has been written, and sends what it returns as the
-// RunOutcome frame. It must return an outcome even when the run fails: a
-// failure is a C2 result, never a missing frame.
-type Work func(ctx context.Context) collectorwire.RunOutcome
+// Work is the run an accepted request leads to. The server calls exactly one
+// of its methods, once:
+//
+//   - Run, after the accepted reply has been written. What it returns is sent
+//     as the RunOutcome frame. It must return an outcome even when the run
+//     fails: a failure is a C2 result, never a missing frame.
+//   - Discard, when the run will never start: the reply could not be
+//     written, or the handler broke the reply contract. It releases what the
+//     accepted decision holds (the device, a decrypted secret) without any
+//     device I/O (A6 on #97).
+type Work interface {
+	Run(ctx context.Context) collectorwire.RunOutcome
+	Discard()
+}
+
+// WorkFunc is a Work that holds nothing to release.
+type WorkFunc func(ctx context.Context) collectorwire.RunOutcome
+
+// Run calls f.
+func (f WorkFunc) Run(ctx context.Context) collectorwire.RunOutcome { return f(ctx) }
+
+// Discard does nothing.
+func (WorkFunc) Discard() {}
 
 // Handler decides requests. It owns collector_seq: every reply it returns
 // carries the next number, durably recorded, because each decision is an
@@ -194,6 +212,9 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 	if acceptedRun != (work != nil) || (acceptedRun && reply.InvocationID == "") || (!acceptedRun && reply.InvocationID != "") {
 		s.log().Error("collector: handler broke the reply contract; dropping connection",
 			"request_id", reply.RequestID, "status", reply.Status, "has_work", work != nil)
+		if work != nil {
+			work.Discard()
+		}
 		return
 	}
 	out, err := json.Marshal(reply)
@@ -204,6 +225,9 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 		s.log().Warn("collector: reply not written", "request_id", reply.RequestID, "collector_seq", reply.CollectorSeq, "err", err)
 		// The run was accepted and numbered but the node did not get the
 		// reply; it must not start, since the node cannot record it.
+		if work != nil {
+			work.Discard()
+		}
 		return
 	}
 	s.log().Info("collector: request decided", "request_id", reply.RequestID, "status", reply.Status,
@@ -216,7 +240,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 	// The run has no deadline from this connection: the adapter's own
 	// limits (C2 deadline_ms) bound it, and Close cancels ctx.
 	c.SetDeadline(time.Time{})
-	outcome := work(ctx)
+	outcome := work.Run(ctx)
 	if outcome.InvocationID != reply.InvocationID {
 		s.log().Error("collector: outcome invocation_id differs from the reply; dropping connection", "request_id", reply.RequestID)
 		return

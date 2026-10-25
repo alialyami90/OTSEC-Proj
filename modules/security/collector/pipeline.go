@@ -346,13 +346,34 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		Dial: endpointDialer(ep), ReplySeq: seq, NextSeq: p.cfg.State.NextSeq,
 	}
 	plan.Floor.Alarm = p.cfg.Alarm
-	return inv.InvocationID, func(ctx context.Context) collectorwire.RunOutcome {
-		defer release()
-		if secret != nil {
-			defer secret.Close()
+	return inv.InvocationID, &runWork{p: p, plan: plan, release: release}, nil
+}
+
+// runWork is an accepted run. Whichever of Run and Discard the server calls,
+// the secret is wiped and the device freed exactly once.
+type runWork struct {
+	p       *Pipeline
+	plan    RunPlan
+	release func()
+	once    sync.Once
+}
+
+func (w *runWork) Run(ctx context.Context) collectorwire.RunOutcome {
+	defer w.finish()
+	return w.p.execute(ctx, w.plan)
+}
+
+// Discard frees what the decision holds when the run never starts: no
+// connection is made, and the floor and interval stay as recorded.
+func (w *runWork) Discard() { w.finish() }
+
+func (w *runWork) finish() {
+	w.once.Do(func() {
+		if w.plan.Secret != nil {
+			w.plan.Secret.Close()
 		}
-		return p.execute(ctx, plan)
-	}, nil
+		w.release()
+	})
 }
 
 // execute runs the plan and applies what the run reported to the stores.
