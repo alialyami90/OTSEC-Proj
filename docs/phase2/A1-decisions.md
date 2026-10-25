@@ -136,3 +136,18 @@ GitHub Actions is blocked because the repository is private, and Go is not yet o
 
   The node can relay an install but cannot originate one, so only someone who already holds administrative authority can reach the reuse result. Revoke and clear-suspension carry the same requirement (A3 review of #91). A revoke stops collection, and a clear lifts a safety floor, so neither may be originated by the node. A3's design, [A3-signed-credential-requests.md](A3-signed-credential-requests.md), is the C7 0.2 candidate.
 - This stays an open high risk in the Phase 2 exit report until that control is merged. A6 may challenge the interim ruling with a test or evidence. A safety or security objection from A6 is not overruled by this decision (brief §5.7).
+
+## D2-12: TLS references resolve from files in Phase 2 (lab only)
+
+**Context (A5):** the node must resolve C6 `trust_anchor_ref` and `client_credential_ref` before it can forward. A3's design (credential design §9) uses `nodekey_` references, a node key register, and a non-exportable key in the `NT SERVICE\otsec-node` certificate store, created from a CSR the node generates. That is C7 0.2 work. It needs a Windows certificate store implementation, which will not be ready for the slice.
+
+**Ruling:** for Phase 2 only, the node resolves these references from files. This resolver is labelled lab-only.
+- The node configuration gains `tls_dir`. On Windows this is `OTSEC\config\tls`.
+- `<ref>.pem` holds a trust anchor. `<ref>.crt` and `<ref>.key` hold a client credential.
+- References match `^[a-z0-9_-]+$`, so a reference cannot name another path.
+- Each file must be a regular file. Symbolic links and reparse points are refused.
+- The key file is refused unless only the node's account can read it: mode 0600 on Linux, or the store's owner and ACE rule on Windows (A3's #84 notes apply).
+- `forward.ClientTLS` resolves and checks everything before the node starts. A missing or bad reference stops the node; it never falls back to another reference.
+- The certificates and keys are test material only (D2-5). No key used here is used anywhere else.
+
+A3's §9 design remains the target. Until it lands, the file resolver is a gate limitation, and a `device-observed` deployment (lifting D2-4 or D2-10) needs §9 first. A3 reviews this resolver.
