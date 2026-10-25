@@ -338,6 +338,22 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintln(w, "COLLECTOR RESTORED: collector_seq went back under the trusted key; nothing is sent, and this is not acknowledged")
 		}
 	}
+	assets := make([]string, 0, len(st.Assets))
+	for a := range st.Assets {
+		assets = append(assets, a)
+	}
+	sort.Strings(assets)
+	for _, a := range assets {
+		r := st.Assets[a]
+		line := fmt.Sprintf("asset %s: last run %s at %s", safe(a), safe(r.Code), r.At.Format(time.RFC3339))
+		if r.Refusal != "" {
+			line += " (collector refused: " + safe(r.Refusal) + ")"
+		}
+		if r.Failures > 0 {
+			line = "FAILING " + line + fmt.Sprintf("; %d failed in a row since the node started", r.Failures)
+		}
+		fmt.Fprintln(w, line)
+	}
 	names := make([]string, 0, len(st.Targets))
 	for n := range st.Targets {
 		names = append(names, n)

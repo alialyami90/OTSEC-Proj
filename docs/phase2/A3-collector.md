@@ -363,14 +363,14 @@ The collector hosts `collector.SEL751Runner` (`runner_sel751.go`), which runs A2
 | `credential.use` | the credential was sent | succeeded when the login was confirmed (`=>`); otherwise failed, with the C2 code's name, for example `auth_rejected` |
 | `device.posture_warning` | each C2 warning | warning, with the C3 warning ID without `warn.`, for example `maxacc_above_1` |
 | `device.refused` | a C2 refusal | denied, with the code's name, for example `identity_mismatch` |
-| `device.op` | the operation completed (`ok`, `partial`), or failed after the operate phase sent something | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes. A Level 0 read sends its line in the probe phase, so it has no digest. |
+| `device.op` | the operation completed (`ok`, `partial`), or the run failed. A failure before the operate phase is recorded too, so every failed run names its code (for example `identity_unreadable` or `internal`), except a failed login, which `credential.use` already names | succeeded, or failed with the code's name. `bytes_sent_digest` covers the stored operate-phase bytes, and is absent when none were sent. A Level 0 read sends its line in the probe phase, so it has no digest. |
 | `device.session.close` | after an open | succeeded; failed with `qui_not_sent` after a confirmed login without QUI (C7-A6-2); always with the transcript digest (D1-25) |
 | `credential.suspend` | the pipeline suspended the credential after the run; not when the store refused the write, nor when the credential was already suspended or revoked | succeeded, with the C7 reason using `_`, for example `auth_failed` |
 
 An asset suspension has no collector action in C8. The node writes `asset.suspend` from the outcome code (D2-15).
 
 Tests (`runner_sel751_test.go`) drive the whole pipeline with the runner hosted, against a far end on a loopback TCP port that replays a C2 golden's transcript. That covers the D2-10 dialer, the credential store, the floor and the suspensions. Every transcript is invented, so this is simulated evidence only.
-- **Eight goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. For each one, the test checks:
+- **Twelve goldens:** `ok`, `ok-with-echo`, `failed.auth_rejected`, `refused.identity_mismatch`, `refused.language_not_english`, `failed.identity_unreadable`, `failed.identity_mismatch`, `failed.device_error`, `failed.unexpected_access_level`, `refused.password_prompt_absent`, `failed.transport_closed` and `partial.parse_errors`. `TestSEL751RunnerFailureBeforeOperate` also cuts the `ok` transcript before the login, before the login is confirmed, and after it is confirmed but before the operate phase, so `device.op` is pinned on both sides of a confirmed login (A6 on #124). For each one, the test checks:
   - the result code;
   - the transcript digest, which is the golden's;
   - the exact record sequence, under the node's own outcome checks;

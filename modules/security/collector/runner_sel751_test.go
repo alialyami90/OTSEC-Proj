@@ -299,6 +299,17 @@ func TestSEL751RunnerGoldens(t *testing.T) {
 		// again.
 		{golden: "refused.language_not_english", floorSet: true, assetSusp: asset.SuspendLanguageNotEnglish,
 			want: "device.session.open/succeeded credential.use/succeeded device.refused/denied/language_not_english device.session.close/failed/qui_not_sent"},
+		// A failure before the operate phase names its code on device.op
+		// (A3 on #122): before the login, and after a confirmed one.
+		{golden: "failed.identity_unreadable",
+			want: "device.session.open/succeeded device.op/failed/identity_unreadable device.session.close/succeeded"},
+		{golden: "failed.identity_mismatch", credSusp: true, assetSusp: asset.SuspendIdentityMismatch,
+			want: "device.session.open/succeeded credential.use/succeeded device.posture_warning/warning/maxacc_above_1 device.op/failed/identity_mismatch device.session.close/succeeded credential.suspend/succeeded/identity_mismatch"},
+		{golden: "failed.device_error",
+			want: "device.session.open/succeeded credential.use/succeeded device.posture_warning/warning/maxacc_above_1 device.op/failed/device_error device.session.close/succeeded"},
+		// A login that was not confirmed is named by credential.use alone.
+		{golden: "failed.unexpected_access_level", floorSet: true, credSusp: true, assetSusp: asset.SuspendUnexpectedLevel,
+			want: "device.session.open/succeeded credential.use/failed/unexpected_access_level device.session.close/succeeded credential.suspend/succeeded/unexpected_access_level"},
 		{golden: "refused.password_prompt_absent", assetSusp: asset.SuspendPasswordPromptAbsent,
 			want: "device.session.open/succeeded device.refused/denied/password_prompt_absent device.session.close/succeeded"},
 		{golden: "failed.transport_closed", hangUp: true, floorSet: true,
@@ -332,6 +343,42 @@ func TestSEL751RunnerGoldens(t *testing.T) {
 			if len(st) != 1 || (st[0].State == authz.CredentialSuspended) != c.credSusp {
 				t.Errorf("credential after the run: %+v, want suspended %v", st, c.credSusp)
 			}
+		})
+	}
+}
+
+// A run cut off before the operate phase names its code on device.op,
+// whether the login had not happened or was confirmed; one cut off before
+// the login was confirmed is named by credential.use alone (A3 on #122, A6
+// on #124). The relay hangs up after the reply to the last line listed.
+func TestSEL751RunnerFailureBeforeOperate(t *testing.T) {
+	ok := replayTurns(goldenResult(t, "ok"))
+	for _, c := range []struct {
+		name  string
+		last  string // the last line the far end answers
+		turns int
+		want  string
+	}{
+		{"before the login", "ID\r\n", 4,
+			"device.session.open/succeeded device.op/failed/transport_closed device.session.close/succeeded"},
+		{"login not confirmed", "ACC\r\n", 5,
+			"device.session.open/succeeded credential.use/failed/transport_closed device.session.close/succeeded"},
+		{"after a confirmed login", string(canary) + "\r\n", 6,
+			"device.session.open/succeeded credential.use/succeeded device.op/failed/transport_closed device.session.close/failed/qui_not_sent"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := string(ok[c.turns-1].expect); got != c.last {
+				t.Fatalf("turn %d expects %q, want %q: the ok golden changed", c.turns, got, c.last)
+			}
+			f, l := hostedFixture(t)
+			_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.ser.read_all", pipeCred), ok[:c.turns], true)
+			if resultCode(res) != adapter.FailedTransportClosed {
+				t.Fatalf("result %s", resultCode(res))
+			}
+			if got := shape(recs); got != c.want {
+				t.Errorf("records\n got %s\nwant %s", got, c.want)
+			}
+			checkFields(t, recs, res, "sel.ser.read_all", true)
 		})
 	}
 }
@@ -389,7 +436,7 @@ func TestSEL751RunnerPasswordPromptSetsFloor(t *testing.T) {
 			if c.check != nil {
 				c.check(t, res)
 			}
-			if got, want := shape(recs), "device.session.open/succeeded device.session.close/succeeded"; got != want {
+			if got, want := shape(recs), "device.session.open/succeeded device.op/failed/internal device.session.close/succeeded"; got != want {
 				t.Errorf("records\n got %s\nwant %s", got, want)
 			}
 			if err := f.state.CheckFloor(testAsset); err == nil {
