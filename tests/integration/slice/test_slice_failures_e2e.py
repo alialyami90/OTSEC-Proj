@@ -20,12 +20,14 @@ kill: see test_within_60s_of_the_failing_run), otsec health shows a failure that
 is shown or reported upstream as ok. The seven failures are told apart by
 what health shows: the last run's code, or the alarm it raised (EXPECT).
 
-A late device is not reported as a timeout. The first line sent is the
-language probe (QUI, ADR-0005), and a probe with no reply in the step
-timeout is a rejected probe by design (D16): refused.language_probe_rejected,
-which suspends the asset as language-not-english until an administrator
-clears it. A6 raised the misleading reason with A1 and A2; this test pins
-what the product does today.
+A late device leaves the QUI language probe unanswered (C2 0.4, D2-19):
+failed.timeout, and nothing suspended. Until C2 0.4 it was a rejected probe
+that suspended the asset as language-not-english.
+
+Not yet told apart: the late device and the SER that hangs both show only
+"last run failed.timeout" in health. The result's detail differs, but health
+does not show it (open with A5, V-S12). KNOWN_SAME lists that pair so the
+test still catches any other pair that merges.
 
 Evidence class: simulated. The device-side faults are the simulator's, not
 a relay's failure signatures (H-04, H-05).
@@ -74,12 +76,15 @@ def _signs(health, since):
 EXPECT = {
     "unreachable": "run:failed.connect",
     "auth": "run:failed.auth_rejected",
-    "timeout": "run:refused.language_probe_rejected",
+    "timeout": "run:failed.timeout",
     "hang": "run:failed.timeout",
     "malformed": "run:partial.parse_errors",
     "upstream": "alarm:forward-unreachable",
     "store": "alarm:collection-no-quarantine-room",
 }
+
+
+KNOWN_SAME = {("hang", "timeout")}
 
 
 def _failure(signs):
@@ -189,5 +194,11 @@ def test_the_failures_are_told_apart(cases):
     signs = {name: frozenset(r.get("signs", ())) for name, r in cases.items()}
     for a in signs:
         for b in signs:
-            if a < b:
+            if a < b and (a, b) not in KNOWN_SAME:
                 assert signs[a] != signs[b], (a, b, signs[a])
+
+
+def test_a_late_device_suspends_nothing(cases):
+    # D2-19: an unanswered probe is not a language fault.
+    assert "alarm:asset-suspended" not in cases["timeout"]["signs"], cases["timeout"]["signs"]
+    assert "SUSPENDED" not in cases["timeout"]["health"], cases["timeout"]["health"]
