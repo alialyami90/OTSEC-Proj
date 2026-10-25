@@ -15,6 +15,8 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.connect.json`: Decided before connecting: empty transcript, not connected, identity not checked.
 - `results/valid/failed.device_error.json`: `SER` answered `Invalid Command`. QUI, then close.
 - `results/valid/failed.egress_violation.json`: The adapter's next line failed the egress check and was never sent; QUI, then close.
+- `results/valid/failed.identity_unreadable.json`: The documented `ID` reply without STX and ETX (0.3, A6 on #118): nothing compared, identity not-checked, ACC not sent, nothing suspended.
+- `results/valid/failed.identity_unreadable-no-fid-line.json`: A framed `ID` reply with no FID line: as above.
 - `results/valid/failed.identity_mismatch.json`: The SER header serial differs from the declared serial: identity mismatch after authentication (C1-A3-5).
 - `results/valid/failed.internal.json`: A collector fault after the FID check: the failed-auth floor could not be recorded, so ACC is not sent, and at Level 0 no QUI is needed.
 - `results/valid/failed.internal-wake-password-prompt.json`: The wake was answered by `Password: ?`. Nothing more is sent, not even QUI. The wake may have landed as a blank password, so the collector sets the failed-auth floor for the asset.
@@ -23,7 +25,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.3 result with a code 0.2 does not know: read as `failed.unknown`.
+- `results/valid/failed.unknown.json`: A 0.4 result with a code 0.3 does not know: read as `failed.unknown`.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
 - `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3). Otherwise as `ok`: records, the serial check and the observations.
 - `results/valid/ok-with-echo.json`: As `ok`, but the relay echoes the password; the echo is redacted too (C-A2-3).
@@ -106,6 +108,10 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/span-includes-stx.json`: The SER header span is widened back over the STX that opens the relay's message (S22 p. 7.28). A record is the text between the framing bytes, never the bytes themselves.
 - `results/invalid/span-on-echo-redaction.json`: An observation span points at the echo redaction.
 - `results/invalid/status-disagrees-with-code.json`: Status failed with a `refused.` code.
+- `results/invalid/identity-unreadable-at-0.2.json`: `failed.identity_unreadable` in a 0.2 result: the code is new in 0.3.
+- `results/invalid/identity-unreadable-with-mismatch.json`: `failed.identity_unreadable` with a FID that was read and differs: that is `refused.identity_mismatch`.
+- `results/invalid/identity-unreadable-without-id.json`: `failed.identity_unreadable` with no `ID` sent.
+- `results/invalid/identity-unreadable-after-rejected-probe.json`: `failed.identity_unreadable` after a rejected probe, which ends the session (D16).
 - `results/invalid/unexpected-password-prompt-at-0.1.json`: `failed.unexpected_password_prompt` in a 0.1 result: the code is new in 0.2.
 - `results/invalid/unexpected-password-prompt-for-rejected-password.json`: `failed.unexpected_password_prompt` for a rejected password, which never reached Level 1 (that is `failed.auth_rejected`).
 - `results/invalid/unexpected-password-prompt-then-quit.json`: QUI sent after `Password: ?` at Level 1: a password attempt (C-19).

@@ -62,6 +62,12 @@ const (
 	RefusedSessionPendingPassword Code = "refused.session_pending_password"
 	RefusedLanguageProbe          Code = "refused.language_probe_rejected" // QUI reply did not match the probe grammar (ADR-0005)
 	RefusedIdentityMismatch       Code = "refused.identity_mismatch"       // ID at Level 0 differs from the declared identity (AP-27, B-05)
+	// FailedIdentityUnreadable (0.3): the ID reply could not be read, so
+	// nothing was compared: no STX and ETX frame, no FID line, or an empty
+	// FID. A reply the adapter cannot read is not evidence of another
+	// device, so the asset is not suspended. ACC is not sent (AP-27), and a
+	// repeat sends the same Level 0 lines and no password (A6 on #118).
+	FailedIdentityUnreadable Code = "failed.identity_unreadable"
 
 	// The auth phase.
 	RefusedPasswordPromptAbsent Code = "refused.password_prompt_absent" // ACC reached Level 1 with no prompt: credential not sent (AP-23)
@@ -127,6 +133,7 @@ var codes = map[Code]codeInfo{
 	RefusedInvocationMismatch:      {StageBeforeConnect, 1, "", ""},
 	RefusedLanguageProbe:           {StageBeforeAuth, 1, asset.SuspendLanguageNotEnglish, ""},
 	RefusedIdentityMismatch:        {StageBeforeAuth, 1, asset.SuspendIdentityMismatch, ""},
+	FailedIdentityUnreadable:       {StageBeforeAuth, 3, "", ""},
 	RefusedPasswordPromptAbsent:    {StageAuth, 1, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
 	FailedAuthRejected:             {StageAuth, 1, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
 	FailedUnexpectedLevel:          {StageAuth, 1, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
@@ -187,8 +194,10 @@ func (c Code) Stage() Stage { return codes[c.Effective()].stage }
 // this code, or "" when the code suspends nothing. Codes after a connection
 // suspend when repeating the invocation would send the device the same
 // traffic, or the same password, again for the same outcome. Refusals before
-// connecting send nothing and repeat harmlessly. Credential suspension
-// is C7's (A3 C1-A3-5).
+// connecting send nothing and repeat harmlessly. An unreadable ID reply
+// (failed.identity_unreadable) does not suspend: a repeat sends only the
+// Level 0 wake, QUI and ID, never ACC, and each run is reported as a
+// failure. Credential suspension is C7's (A3 C1-A3-5).
 func (c Code) Suspends() asset.SuspensionReason { return codes[c.Effective()].suspends }
 
 // SuspendsCredential is the C7 suspension reason the collector sets on the
