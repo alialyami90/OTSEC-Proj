@@ -589,7 +589,7 @@ On 2026-10-24 at 19:15Z the owner accepted the Phase 1 exit and started Phase 2 
 - Deliverable:
   - the collector binary and service;
   - the credential store: sealed install with the pinned fingerprint, then revoke and clear;
-  - durable collector state, written before `ACC` and cleared only on `=>`;
+  - durable collector state, written before `ACC` and cleared only after QUI (cleared on `=>` until D2-20);
   - checks in order before any connection: the role check, the `device-observed` refusal, the register signature, then the floor;
   - one session per device;
   - no `TIDLE` reconnect after an unclean exit (ADR-0007 item 3);
