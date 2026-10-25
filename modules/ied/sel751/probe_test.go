@@ -2,6 +2,7 @@ package sel751
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/adapter"
@@ -23,26 +24,45 @@ func TestProbeUnanswered(t *testing.T) {
 		steps[len(steps)-1] = step{expect: []byte("QUI\r\n"), reply: []byte(reply)}
 		return steps
 	}
+	// before is what the far end sends before the reply to QUI, so a budget
+	// of before+n ends n bytes into that reply.
+	var before int64
+	for _, st := range probe[:len(probe)-1] {
+		before += int64(len(st.reply))
+	}
+	budget := func(n int64) func(*adapter.Limits) {
+		return func(l *adapter.Limits) { l.MaxResponseBytes = before + n }
+	}
 	cases := []struct {
 		name   string
 		steps  []step
 		hangUp bool
+		limits func(*adapter.Limits)
 		want   adapter.Code
 		probe  adapter.ProbeOutcome
 	}{
-		{"silence until the step timeout", with(""), false, adapter.FailedTimeout, adapter.ProbeUnanswered},
-		{"the echo, then silence", with("QUI\r\n"), false, adapter.FailedTimeout, adapter.ProbeUnanswered},
+		{"silence until the step timeout", with(""), false, nil, adapter.FailedTimeout, adapter.ProbeUnanswered},
+		{"the echo, then silence", with("QUI\r\n"), false, nil, adapter.FailedTimeout, adapter.ProbeUnanswered},
 		// Part of a reply with no prompt is not judged: the grammar needs the
 		// whole reply, and a prompt ends one.
-		{"part of an off-grammar reply, then silence", with("QUI\r\n\x02Comando no"), false, adapter.FailedTimeout, adapter.ProbeUnanswered},
-		{"the echo, then the connection closed", with("QUI\r\n"), true, adapter.FailedTransportClosed, adapter.ProbeUnanswered},
-		{"the control: an off-grammar reply that ends in a prompt", with("QUI\r\n\x02Comando no valido\r\n\x03="), false,
+		{"part of an off-grammar reply, then silence", with("QUI\r\n\x02Comando no"), false, nil, adapter.FailedTimeout, adapter.ProbeUnanswered},
+		{"the echo, then the connection closed", with("QUI\r\n"), true, nil, adapter.FailedTransportClosed, adapter.ProbeUnanswered},
+		// The controls. An off-grammar reply that ends in a prompt, and a
+		// reply past the response budget with no prompt, are rejected
+		// probes: the bytes arrived, so the link is not the cause (A6 on
+		// #133).
+		{"an off-grammar reply that ends in a prompt", with("QUI\r\n\x02Comando no valido\r\n\x03="), false, nil,
+			adapter.RefusedLanguageProbe, adapter.ProbeRejected},
+		{"a reply past the response budget, with no prompt", with("QUI\r\n\x02" + strings.Repeat("Comando no valido ", 8)), false, budget(40),
 			adapter.RefusedLanguageProbe, adapter.ProbeRejected},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := load(t)
 			f.inv.Limits.StepTimeoutMS = 300
+			if c.limits != nil {
+				c.limits(&f.inv.Limits)
+			}
 			res, fl := runSteps(t, f, Config{}, c.steps, c.hangUp)
 			if err := res.Validate(); err != nil {
 				t.Fatalf("result does not validate: %v", err)
