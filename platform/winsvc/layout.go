@@ -84,6 +84,7 @@ func sddl(grants ...grant) string {
 //
 //	OTSEC                      node and collector may traverse
 //	OTSEC\config               node reads (its configuration)
+//	OTSEC\config\tls           node reads (TLS reference files, D2-12)
 //	OTSEC\store                node full control: the C5 store and status
 //	OTSEC\collector             collector reads (collector.json, A3)
 //	OTSEC\collector\credentials collector full control (A3 credential design)
@@ -102,6 +103,7 @@ func Dirs(programData string) []Dir {
 	return []Dir{
 		{root, sddl(grant{node, accessTraverse, false}, grant{coll, accessTraverse, false})},
 		{filepath.Join(root, "config"), sddl(grant{node, accessTraverse, true})},
+		{TLSDir(programData), sddl(grant{node, accessTraverse, true})},
 		{StoreDir(programData), sddl(grant{node, accessFull, true})},
 		{filepath.Join(root, "collector"), sddl(grant{coll, accessTraverse, true})},
 		{filepath.Join(root, "collector", "credentials"), sddl(grant{coll, accessFull, true})},
@@ -149,6 +151,13 @@ func CollectorConfigPath(programData string) string {
 // MaxCollectorConfigBytes bounds the collector configuration the installer
 // copies.
 const MaxCollectorConfigBytes = 4 << 20
+
+// TLSDir is the tls_dir the node configuration must name when it has one
+// (D2-12). Its DACL gives the node read and no write, owner
+// Administrators, as node.Config.TargetTLS requires. An administrator
+// copies the reference files in, so they inherit that DACL; a moved file
+// keeps its own and the node refuses it if that grants anything else.
+func TLSDir(programData string) string { return filepath.Join(programData, "OTSEC", "config", "tls") }
 
 // StoreDir is the store directory the node configuration must name.
 func StoreDir(programData string) string { return filepath.Join(programData, "OTSEC", "store") }

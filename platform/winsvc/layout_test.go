@@ -19,6 +19,7 @@ func TestDirs(t *testing.T) {
 	want := map[string]string{
 		`OTSEC`:                       "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;" + node + ")(A;;0x1200a9;;;" + coll + ")",
 		`OTSEC/config`:                "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + node + ")",
+		`OTSEC/config/tls`:            "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + node + ")",
 		`OTSEC/store`:                 "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + node + ")",
 		`OTSEC/collector`:             "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;" + coll + ")",
 		`OTSEC/collector/credentials`: "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + coll + ")",

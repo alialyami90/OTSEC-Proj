@@ -102,7 +102,13 @@ A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the
 | `<client_credential_ref>.crt` | The node's client certificate chain |
 | `<client_credential_ref>.key` | Its private key |
 
-A reference matches `[a-z0-9][a-z0-9_-]{0,63}`, so it cannot name a path. The node refuses `tls_dir` itself if it is a link, and refuses any of the files if it is a link or another reparse point (`Lstat`). The key must also pass `store.CheckPrivateFile`: mode 0600 or tighter on Linux, and on Windows the store's rule (owner and allow entries only the node's account, SYSTEM and Administrators). The installer's `OTSEC\config` DACL gives the node read access only.
+A reference matches `[a-z0-9][a-z0-9_-]{0,63}` and is not a Windows device name (`con`, `nul`, `com1` and the like), so it cannot name a path or a device. The node may read these files and must not be able to change them (D2-12):
+
+- **`tls_dir`** passes `store.CheckProtectedDir`: a plain directory, not a link or junction, opened without following one. On Linux its mode is 0500. On Windows it has a protected DACL whose allow entries name only the node's account, SYSTEM and Administrators, an owner other than the node's account, and no write right in the node's entries.
+- **Each file** is read with `store.ReadProtectedFile`, which checks the opened handle, not the path: a regular file on disk (no link, reparse point or device), at most 1 MiB, mode 0400 on Linux, and on Windows the same owner and allow-entry rule as `tls_dir`.
+- **No error or log quotes file content.** A parse failure names the file only.
+
+The installer creates `OTSEC\config\tls` (owner Administrators, node read only) and refuses a configuration whose `tls_dir` is anything else. An administrator copies the files in, so they inherit that DACL; a moved file keeps its own, and the node refuses it if that grants anything more. The client key is unencrypted at rest. That is part of the D2-12 gate limitation, and A3's node key register (credential design section 9) must replace this before any `device-observed` deployment.
 
 Every reference is resolved and checked through A4's `forward.ClientTLS` before the node starts. A missing or bad file, or a client certificate whose name is not the target's `durable_ack.permitted_peer`, stops the node. Nothing falls back to another reference.
 
