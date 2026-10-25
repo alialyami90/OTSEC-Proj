@@ -68,7 +68,9 @@ func (r *SEL751Runner) Run(ctx context.Context, plan RunPlan) RunReport {
 
 // wakeHitPassword reports a session whose wake was answered by the
 // password prompt: sel751 ends it as failed.internal with wake_sent, and
-// the last bytes received are the prompt.
+// the last bytes received are the prompt. It also fires when ID, after the
+// wake, is answered by the prompt (A2 on #112); that is failed.internal
+// too, and setting the floor there is the safe side.
 func wakeHitPassword(res adapter.Result) bool {
 	if res.Error == nil || res.Error.Code != adapter.FailedInternal || !res.Session.WakeSent {
 		return false
