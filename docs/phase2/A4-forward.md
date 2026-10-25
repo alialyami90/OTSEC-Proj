@@ -54,6 +54,9 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestOwedGapSurvivesRestart` | A refused `forward.unreachable` for a skipped range is raised again by the next process: the cursor stayed before the gap (A6 #94). |
 | `TestRequiredHealthStreamNotHeld` | A required target's health stream cursor is not held for an owed report, so it can still free the stream that refused it. |
 | `TestBestEffortStartSaved` | A new best-effort target saves its window start before anything is confirmed; a later process still sends the events that were inside the window when it began (A6 #94). |
+| `TestBestEffortStartSavedWhileDown` | The window start is saved as the cursor even while the collector cannot be dialled (A6 #94). |
+| `TestBestEffortGapFromZero` | A start of 0 is a known start: events pruned after it are reported as `forward.unreachable` (A6 #94). |
+| `TestBestEffortNoFalseGap` | Events pruned before a new best-effort target existed raise nothing; it starts at the first retained event. |
 | `TestStatusOpen` | `Status.Open` is set while an idle session is open and cleared when the collector goes away. |
 | `TestOpenNeedsRELPVersion0` | An open answered without `relp_version=0` is refused (A2). |
 | `TestSessionChecksOpenAnswer` | An open answered with a 500, or without `commands=syslog`, ends the session at the open, and no syslog frame reaches the collector (A6). |

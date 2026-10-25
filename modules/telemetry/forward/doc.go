@@ -38,8 +38,11 @@
 //     too-large event whose report is refused holds only its own stream and
 //     is reported again on the next loop.
 //   - A new best-effort target saves its replay window start as its cursor
-//     on its first session, so a target that confirms nothing for a while
-//     does not move its start forward and pass events over unreported.
+//     before it first dials, so a target that confirms nothing for a while,
+//     or cannot reach its collector, does not move its start forward and
+//     pass events over unreported. With nothing committed before the
+//     window, it starts before the first retained event: what was pruned
+//     before the target existed is not its loss.
 //   - Size. A message whose device text or summary was dropped to fit is
 //     sent and reported as forward.text-omitted. An event
 //     that does not fit at all holds its stream: the forwarder raises

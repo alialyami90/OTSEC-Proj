@@ -283,7 +283,61 @@ type session struct {
 	stopped bool // TXNRs used up: drain, close, reopen
 }
 
+// prepare works out, once per process, where each event stream of a
+// best-effort target without a cursor starts: after the last event
+// committed before its replay window, or before the first retained event
+// when none was (what was pruned before the target existed is not its
+// loss). It saves that start as the cursor before the collector is even
+// dialled, so a target that confirms nothing for a while, or cannot reach
+// its collector, does not move its start forward and pass events over
+// unreported (A6 #94). Events up to the start are outside the window, so
+// saving it gives up nothing the target was owed.
+func (f *Forwarder) prepare(ctx context.Context) error {
+	t := f.cfg.Target
+	if t.Class != syslog.ClassBestEffort {
+		return nil
+	}
+	for _, st := range f.cfg.Streams {
+		if _, ok := f.start[st.ID]; ok || st.Audit {
+			continue
+		}
+		cs, err := st.Cursors.LoadCursors(ctx, st.ID)
+		if err != nil {
+			return fmt.Errorf("forward: load cursors of %s: %w", st.ID, err)
+		}
+		if i := slices.IndexFunc(cs, func(c store.Cursor) bool { return c.Consumer == f.consumer && c.Stream == st.ID }); i >= 0 {
+			f.start[st.ID] = cs[i].Through
+			continue
+		}
+		after, err := st.Index.LastCommittedBy(ctx, st.ID, time.Now().Add(-time.Duration(t.ReplaySeconds)*time.Second))
+		if err == nil && after == 0 {
+			var first store.Seq
+			if first, err = st.Index.FirstRetained(ctx, st.ID); err == nil {
+				if first > 0 {
+					after = first - 1
+				} else {
+					after, err = st.Index.LastCommitted(ctx, st.ID)
+				}
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("forward: find the replay window of %s: %w", st.ID, err)
+		}
+		if after > 0 {
+			if err := st.Cursors.SaveCursor(ctx, store.Cursor{Consumer: f.consumer, Stream: st.ID, Through: after}); err != nil {
+				return fmt.Errorf("forward: save cursor %s: %w", st.ID, err)
+			}
+			f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = after })
+		}
+		f.start[st.ID] = after
+	}
+	return nil
+}
+
 func (f *Forwarder) session(ctx context.Context) error {
+	if err := f.prepare(ctx); err != nil {
+		return err
+	}
 	conn, err := f.cfg.Dial(ctx)
 	if err != nil {
 		return fmt.Errorf("forward: dial %s: %w", f.cfg.Target.Name, err)
@@ -350,26 +404,12 @@ func (s *session) loadCursors() error {
 		// receives everything still held. A new best-effort target starts
 		// at the first event in its replay window (C6-A5-2); the audit
 		// stream has no window and starts at the first retained record.
-		// The window start is worked out once and saved as the cursor, so a
-		// target that confirms nothing for a while does not move its start
-		// forward each session and pass events over unreported (A6 #94).
-		// Events up to it are outside the window, so saving it gives up
-		// nothing the target was owed.
-		t := s.f.cfg.Target
-		if !found && t.Class == syslog.ClassBestEffort && !st.Audit {
+		if !found && s.f.cfg.Target.Class == syslog.ClassBestEffort && !st.Audit {
 			after, ok := s.f.start[st.ID]
 			if !ok {
-				from := time.Now().Add(-time.Duration(t.ReplaySeconds) * time.Second)
-				var err error
-				if after, err = st.Index.LastCommittedBy(s.ctx, st.ID, from); err != nil {
-					return fmt.Errorf("forward: find the replay window of %s: %w", st.ID, err)
-				}
-				s.f.start[st.ID] = after
+				return fmt.Errorf("forward: no window start for %s", st.ID)
 			}
 			s.read[i], s.conf[i], s.known[i] = after, after, true
-			if err := s.save(i, after); err != nil {
-				return err
-			}
 		}
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Cursor = s.saved[i] })
 	}

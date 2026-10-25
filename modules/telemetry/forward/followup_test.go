@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -356,4 +357,109 @@ func TestBestEffortStartSaved(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond)
 	refuse.Store(false)
 	r.run(func() bool { return m.cursor(serStream) == 15 }, nil)
+}
+
+// bestEffortRig is a lab-only plain relp best-effort target with a one-hour
+// window over m, dialled through dial when it is set.
+func bestEffortRig(t *testing.T, m *memStore, dial func(context.Context) (net.Conn, error)) *rig {
+	t.Helper()
+	srv, err := relptest.Start(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	tg := newTarget(t, srv.Addr().Port, plainRELP)
+	tcp, err := DialTCP(tg, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dial == nil {
+		dial = tcp
+	}
+	return &rig{t: t, m: m, srv: srv, tg: tg, cfg: Config{
+		Target:       tg,
+		Streams:      []Stream{{ID: serStream, Outbox: m, Cursors: m, Index: m}, {ID: hlStream, Outbox: m, Cursors: m, Index: m}},
+		HealthStream: hlStream, Dial: func(ctx context.Context) (net.Conn, error) { return dial(ctx) }, Health: sink{t: t, m: m},
+		ResponseTimeout: 2 * time.Second, Poll: 10 * time.Millisecond, RetryMin: 5 * time.Millisecond, RetryMax: 20 * time.Millisecond,
+	}}
+}
+
+// The window start is saved even while the collector cannot be reached
+// (A6 #94).
+func TestBestEffortStartSavedWhileDown(t *testing.T) {
+	m := newStore()
+	e := row8(t)
+	for range 10 {
+		m.commitAt(t, serStream, e, time.Now().Add(-2*time.Hour))
+	}
+	for range 5 {
+		m.commit(t, serStream, e)
+	}
+	var dials atomic.Int32
+	r := bestEffortRig(t, m, func(context.Context) (net.Conn, error) {
+		dials.Add(1)
+		return nil, errors.New("collector down")
+	})
+	r.run(func() bool { return m.cursor(serStream) == 10 && dials.Load() >= 2 }, nil)
+}
+
+// With nothing committed before the window, the start is the first
+// retained event, so a jump past it later is reported, even from seq 0
+// (A6 #94).
+func TestBestEffortGapFromZero(t *testing.T) {
+	m := newStore()
+	for range 5 {
+		m.commit(t, serStream, row8(t))
+	}
+	var down atomic.Bool
+	down.Store(true)
+	var dials atomic.Int32
+	var r *rig
+	r = bestEffortRig(t, m, func(ctx context.Context) (net.Conn, error) {
+		dials.Add(1)
+		if down.Load() {
+			return nil, errors.New("collector down")
+		}
+		d, _ := DialTCP(r.tg, time.Second)
+		return d(ctx)
+	})
+	r.run(func() bool {
+		if down.Load() && dials.Load() >= 2 {
+			// The start (0) was worked out before the first dial; 1-2 are
+			// then pruned before the target reads them.
+			m.prune(serStream, 2)
+			down.Store(false)
+		}
+		return !down.Load() && m.cursor(serStream) == 5 && m.cursor(hlStream) >= 1
+	}, nil)
+	var found bool
+	for _, msg := range r.srv.Acked() {
+		s := string(msg.Data)
+		found = found || strings.Contains(s, `htype="forward.unreachable"`) && strings.Contains(s, `first_skipped=1`) && strings.Contains(s, `last_skipped=2`)
+	}
+	if !found {
+		t.Error("no forward.unreachable for 1-2")
+	}
+}
+
+// Events pruned before a new best-effort target existed are not its loss:
+// it starts at the first retained event and reports nothing.
+func TestBestEffortNoFalseGap(t *testing.T) {
+	m := newStore()
+	e := row8(t)
+	for range 5 {
+		m.commitAt(t, serStream, e, time.Now().Add(-2*time.Hour))
+	}
+	for range 5 {
+		m.commit(t, serStream, e)
+	}
+	m.prune(serStream, 5)
+	r := bestEffortRig(t, m, nil)
+	r.run(func() bool { return m.cursor(serStream) == 10 }, nil)
+	if n := r.healthCount(event.HealthForwardUnreachable); n != 0 {
+		t.Errorf("%d forward.unreachable for events pruned before the target existed", n)
+	}
+	if ids := eids(t, r.srv.Acked()); len(ids) != 5 {
+		t.Errorf("sent %v, want 6-10", ids)
+	}
 }
