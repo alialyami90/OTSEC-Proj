@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"time"
 
 	"otsec.local/otsec/modules/security/collector"
@@ -66,24 +65,46 @@ func exists(path string) (bool, error) {
 	}
 }
 
-// publishInstallKey writes the public install key and its fingerprint for
-// the node to publish, when the public directory exists. It holds nothing
-// secret; its integrity is what the admin's pinned fingerprint checks.
+// installKeySchema names the shape of install-key.json, so that a reader
+// can refuse a file it does not know.
+const installKeySchema = "otsec.collector.install_key/0.1"
+
+// publishedKey is install-key.json: the public install key and its
+// fingerprint, for the node to read before every request (D2-15) and to
+// publish (T-12). Nothing in it is secret; its integrity is what the
+// admin's pinned fingerprint checks.
+type publishedKey struct {
+	Schema      string `json:"schema"`
+	KeyID       string `json:"key_id"`
+	PublicKey   string `json:"public_key"` // standard base64, 32 bytes (seal.InstallKey)
+	Fingerprint string `json:"fingerprint"`
+}
+
+// publishInstallKey writes install-key.json at every start, before the
+// collector serves. It writes a temporary file, syncs it and renames it over
+// the old one, so a reader sees the old file or the new one, never part of
+// one. The public directory is the installer's (A5), and a missing one is an
+// error, not a skip.
 func publishInstallKey(l layout, s *collector.CredStore) error {
-	if ok, err := exists(filepath.Dir(l.publicKey)); err != nil || !ok {
-		return err
-	}
 	k := s.InstallKey()
-	b, err := json.MarshalIndent(struct {
-		KeyID       string `json:"key_id"`
-		PublicKey   string `json:"public_key"`
-		Fingerprint string `json:"fingerprint"`
-	}{k.KeyID, k.PublicKey, s.Fingerprint()}, "", "  ")
+	b, err := json.MarshalIndent(publishedKey{installKeySchema, k.KeyID, k.PublicKey, s.Fingerprint()}, "", "  ")
 	if err != nil {
 		return err
 	}
 	tmp := l.publicKey + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, l.publicKey)

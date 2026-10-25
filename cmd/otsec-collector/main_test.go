@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -221,18 +222,19 @@ func TestServe(t *testing.T) {
 	}
 	defer r.stop()
 
-	var pub struct {
-		KeyID       string `json:"key_id"`
-		PublicKey   string `json:"public_key"`
-		Fingerprint string `json:"fingerprint"`
-	}
+	var pub publishedKey
 	b, err := os.ReadFile(l.publicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	json.Unmarshal(b, &pub)
+	if err := json.Unmarshal(b, &pub); err != nil || pub.Schema != installKeySchema || pub.KeyID == "" || pub.PublicKey == "" {
+		t.Fatalf("install-key.json: %s (%v)", b, err)
+	}
 	if !strings.Contains(logs.String(), pub.Fingerprint) {
 		t.Fatal("fingerprint not logged")
+	}
+	if _, err := os.Stat(l.publicKey + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary file left: %v", err)
 	}
 
 	client := collectorclient.New(collectorwire.Endpoint{Address: socket, Peer: strconv.Itoa(os.Getuid())})
@@ -284,6 +286,36 @@ func TestServe(t *testing.T) {
 	}
 	r2.stop()
 	_ = asset.Contract
+}
+
+// The node checks install-key.json before every request (D2-15), so a
+// collector that cannot publish it does not start.
+func TestStartNeedsPublicDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Windows service path needs the installer's WER exclusion and the service accounts (PC run)")
+	}
+	data := t.TempDir()
+	l := newLayout(data)
+	sockDir := filepath.Join(t.TempDir(), "run")
+	for _, d := range []string{filepath.Dir(l.state), filepath.Dir(l.credentials), sockDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(l.config, marshal(t, testConfig(t, filepath.Join(sockDir, "collector.sock"))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(l.provision, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := start(data, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		r.stop()
+		t.Fatal("started without the public directory")
+	}
+	if !strings.Contains(err.Error(), "install key not published") {
+		t.Fatalf("refused for another reason: %v", err)
+	}
 }
 
 func FuzzParseConfig(f *testing.F) {

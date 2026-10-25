@@ -95,8 +95,10 @@ func start(data string, log *slog.Logger) (*running, error) {
 	// The fingerprint is public. The admin compares it with the one
 	// recorded at commissioning before sealing anything (T-12).
 	log.Info("collector install key", "key_id", key.KeyID, "fingerprint", creds.Fingerprint(), "first_start", created)
+	// The node checks this file before every request to find a reinstall
+	// (D2-15), so the collector does not serve without it.
 	if err := publishInstallKey(l, creds); err != nil {
-		log.Warn("install key not published", "err", err)
+		return nil, fmt.Errorf("install key not published: %w", err)
 	}
 	regs := collector.NewRegisters(state, cfg.Anchors)
 	for i, env := range cfg.Registers {
