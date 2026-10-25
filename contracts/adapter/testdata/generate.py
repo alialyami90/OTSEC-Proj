@@ -349,12 +349,16 @@ def results():
     # 0.2 (D2-14): a reply at Level 1 ends in "Password: ?". Anything sent now
     # would be a password attempt, so nothing is, not even QUI (C-19). Not
     # seen on a device; A2's FuzzRun found the state.
+    # SHO P 1 comes first, as in every Level 1 read (D16), and its posture
+    # warning is reported whatever the outcome (A2 on #100).
     s = Session()
     items, _ = to_level1(s)
+    s.sho_p1()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", b"SER\r\n\r\nPassword: ? ")
     out["failed.unexpected_password_prompt"] = s.result(
-        "failed", "failed.unexpected_password_prompt", {"result": "match", "items": items}, schema=SCHEMA_0_2)
+        "failed", "failed.unexpected_password_prompt", {"result": "match", "items": items},
+        warnings=[maxacc_warning(s)], schema=SCHEMA_0_2)
 
     # 0.2 (D2-14): the probe reply prints a level prompt. D16 sends nothing
     # after a rejected probe, so this session reached Level 1 and ends
