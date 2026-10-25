@@ -324,8 +324,20 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			confirmed = ts.LastConfirmed.Format(time.RFC3339)
 		}
 		fmt.Fprintf(w, "target %s (%s): %d confirmed, last %s\n", safe(n), ts.Class, ts.Confirmed, confirmed)
+		if ts.Open.IsZero() {
+			fmt.Fprintln(w, "  no session open")
+		} else {
+			fmt.Fprintf(w, "  session open since %s\n", ts.Open.Format(time.RFC3339))
+		}
 		if ts.LastErr != "" {
 			fmt.Fprintf(w, "  last session ended: %s\n", safe(ts.LastErr))
+		}
+		if ts.Unreported > 0 || ts.ReportErr != "" {
+			fmt.Fprintf(w, "  forward health events not yet recorded: %d", ts.Unreported)
+			if ts.ReportErr != "" {
+				fmt.Fprintf(w, " (last refusal: %s)", safe(ts.ReportErr))
+			}
+			fmt.Fprintln(w)
 		}
 		streams := make([]string, 0, len(ts.Streams))
 		for s := range ts.Streams {
@@ -334,7 +346,7 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		sort.Strings(streams)
 		for _, s := range streams {
 			ss := ts.Streams[s]
-			line := fmt.Sprintf("  %s: cursor %d of %d", safe(s), ss.Cursor, ss.Last)
+			line := fmt.Sprintf("  %s: confirmed %d of %d, cursor %d", safe(s), ss.Confirmed, ss.Last, ss.Cursor)
 			if ss.Blocked != "" {
 				line += ", HELD: " + safe(ss.Blocked)
 			}

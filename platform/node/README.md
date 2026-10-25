@@ -121,11 +121,11 @@ This is an interim. A3's node key register (credential design, section 9: a non-
 
 ## Forwarding
 
-`NewForwarding` builds one A4 forwarder per target over the target's C5 consumers. Each stream's `Outbox` and `CursorStore` is a live view that looks the open database up on every call, because `Tick` can replace a database's handle when it resumes one. The audit stream comes from the audit database, with `Audit` set. The health sink commits each `forward.*` event on `platform/health` and returns its key after the commit.
+`NewForwarding` builds one A4 forwarder per target over the target's C5 consumers. Each stream's `Outbox`, `CursorStore` and `Index` (the C5 `CommitIndex` a best-effort target starts its replay window from, A4 #94) is a live view that looks the open database up on every call, because `Tick` can replace a database's handle when it resumes one. The audit stream comes from the audit database, with `Audit` set. The health sink commits each `forward.*` event on `platform/health` and returns its key after the commit; it refuses while that database's mode accepts no events, and the forwarder keeps the report and commits it later (A4 #94, shown as "not yet recorded" in `otsec health`).
 
 Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`targets`, shown by `otsec health`) and raises two alarms, each once per condition:
 
-- `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
+- `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s, or has had no session open for 60 s even with nothing waiting (`Status.Open`). Waiting means past what the target confirmed (`StreamStatus.Confirmed`, A4 #103), not past the cursor, which stays behind while a report about the stream is owed. A held stream's events do not count as waiting. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
 - `forward-held`: a stream is held, with the forwarder's reason.
 
 ## Example

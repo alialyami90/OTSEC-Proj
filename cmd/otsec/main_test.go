@@ -160,3 +160,33 @@ func TestUsage(t *testing.T) {
 		t.Errorf("missing config: %d %s", code, errs)
 	}
 }
+
+// health shows each forwarding target: confirmations, whether a session is
+// open, the last session error, refused forward health events, each
+// stream's confirmed position, cursor and hold, and the target's alarms.
+func TestHealthShowsTargets(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetTarget("central", node.TargetStatus{Class: "required", Confirmed: 3, LastErr: "dial refused",
+		Unreported: 2, ReportErr: "mode drain-only",
+		Streams: map[string]node.TargetStreamState{"platform/health": {Cursor: 3, Confirmed: 4, Last: 6, Blocked: "too large"}}})
+	st.RaiseTarget("central", node.AlarmForwardUnreachable, "no session open for 1m0s")
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"target central (required): 3 confirmed, last never in this process",
+		"  no session open",
+		"  last session ended: dial refused",
+		"  forward health events not yet recorded: 2 (last refusal: mode drain-only)",
+		"  platform/health: confirmed 4 of 6, cursor 3, HELD: too large",
+		node.AlarmForwardUnreachable,
+		"target central",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+}

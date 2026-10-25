@@ -18,7 +18,8 @@ import (
 // Forwarding alarms, raised from each forwarder's Status.
 const (
 	// AlarmForwardUnreachable: a required target has events waiting and has
-	// confirmed nothing for UnreachableAfter.
+	// confirmed nothing for UnreachableAfter, or has had no session open
+	// for that long.
 	AlarmForwardUnreachable = "forward-unreachable"
 	// AlarmForwardHeld: a stream of the target is held (forward.Status
 	// Blocked), so nothing after the held event reaches the target.
@@ -49,6 +50,7 @@ type target struct {
 	f       *forward.Forwarder
 	streams []c5.StreamID
 	since   time.Time // when this process started forwarding
+	open    time.Time // when Check last saw a session open
 
 	// Alarms already raised for the current condition, so Check raises
 	// each once until the condition clears. Used only by Check.
@@ -139,16 +141,27 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 	if st.LastErr != nil {
 		ts.LastErr = st.LastErr.Error()
 	}
+	if !st.Open.IsZero() {
+		ts.Open = st.Open.UTC()
+		tg.open = now
+	}
+	ts.Unreported = st.Unreported
+	if st.ReportErr != nil {
+		ts.ReportErr = st.ReportErr.Error()
+	}
 	waiting := false
 	for _, id := range tg.streams {
 		ss := st.Streams[id]
-		state := TargetStreamState{Cursor: uint64(ss.Cursor), Blocked: ss.Blocked}
+		state := TargetStreamState{Cursor: uint64(ss.Cursor), Confirmed: uint64(ss.Confirmed), Blocked: ss.Blocked}
 		if db := fw.rt.Store(id); db != nil {
 			if last, err := db.LastCommitted(ctx, id); err == nil {
 				state.Last = uint64(last)
-				// A held stream is reported as forward-held; its events
-				// do not count as waiting on the target (A4 #98).
-				waiting = waiting || (last > ss.Cursor && ss.Blocked == "")
+				// What is waiting is what the target has not confirmed:
+				// the cursor stays behind while a report about the stream
+				// is owed (A4 #103). A held stream is reported as
+				// forward-held; its events do not count as waiting (A4
+				// #98).
+				waiting = waiting || (last > ss.Confirmed && ss.Blocked == "")
 			}
 		}
 		ts.Streams[string(id)] = state
@@ -161,15 +174,24 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 	}
 	fw.rt.opt.Status.SetTarget(tg.t.Name, ts)
 
-	last := st.LastConfirmed
-	if last.Before(tg.since) {
-		last = tg.since
-	}
-	down := tg.t.Class == syslog.ClassRequired && waiting && now.Sub(last) >= UnreachableAfter
+	// A required target is down when it has events waiting and has
+	// confirmed nothing for UnreachableAfter, or when no session has been
+	// open for that long, even with nothing waiting (A4 #94: Status.Open).
+	confirmed := later(st.LastConfirmed, tg.since)
+	opened := later(tg.open, tg.since)
+	required := tg.t.Class == syslog.ClassRequired
+	stalled := required && waiting && now.Sub(confirmed) >= UnreachableAfter
+	closed := required && st.Open.IsZero() && now.Sub(opened) >= UnreachableAfter
+	down := stalled || closed
 	switch {
 	case down && !tg.unreachable:
 		tg.unreachable = true
-		detail := fmt.Sprintf("events waiting and nothing confirmed for %s", now.Sub(last).Round(time.Second))
+		var detail string
+		if stalled {
+			detail = fmt.Sprintf("events waiting and nothing confirmed for %s", now.Sub(confirmed).Round(time.Second))
+		} else {
+			detail = fmt.Sprintf("no session open for %s", now.Sub(opened).Round(time.Second))
+		}
 		if st.LastErr != nil {
 			detail += "; last session: " + st.LastErr.Error()
 		}
@@ -178,6 +200,13 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 	case !down:
 		tg.unreachable = false
 	}
+}
+
+func later(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return b
+	}
+	return a
 }
 
 // healthSink commits the forwarder's health events on platform/health and
