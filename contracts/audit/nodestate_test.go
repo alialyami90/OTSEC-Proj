@@ -124,6 +124,15 @@ func TestNodeStateRecordsValidate(t *testing.T) {
 	}
 }
 
+// withKey puts a collector.install_key first, as a 0.2 node writes it
+// before its first request, unless the chain already starts with one.
+func withKey(recs []Record) []Record {
+	if len(recs) > 0 && recs[0].Action == ActionCollectorInstallKey {
+		return recs
+	}
+	return append([]Record{installKey("x25519-0000000000000000")}, recs...)
+}
+
 func TestVerifyCollectorSeqAcrossReset(t *testing.T) {
 	const k1, k2 = "x25519-1111111111111111", "x25519-2222222222222222"
 	ok := map[string]struct {
@@ -147,7 +156,7 @@ func TestVerifyCollectorSeqAcrossReset(t *testing.T) {
 		"a 0.1-style chain":              {[]Record{decided(1), decided(2)}, 0, 2},
 	}
 	for name, c := range ok {
-		if err := VerifyCollectorSeq(parsed(t, c.recs...), c.after, c.through); err != nil {
+		if err := VerifyCollectorSeq(parsed(t, withKey(c.recs)...), c.after, c.through); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -179,9 +188,14 @@ func TestVerifyCollectorSeqAcrossReset(t *testing.T) {
 		"tail missing after a reset":     {[]Record{decided(1), reset(1, 1, k1), decided(1)}, 0, 2},
 	}
 	for name, c := range broken {
-		if err := VerifyCollectorSeq(parsed(t, c.recs...), c.after, c.through); !errors.Is(err, ErrChainBroken) {
+		if err := VerifyCollectorSeq(parsed(t, withKey(c.recs)...), c.after, c.through); !errors.Is(err, ErrChainBroken) {
 			t.Errorf("%s: got %v", name, err)
 		}
+	}
+	// A6 on #105: with no trusted key before it, a reset cannot be told from
+	// a restore that keeps the key, so it breaks the chain.
+	if err := VerifyCollectorSeq(parsed(t, decided(1), reset(1, 1, k1), decided(1)), 0, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("reset with no trusted key: got %v", err)
 	}
 }
 
@@ -243,40 +257,134 @@ func TestVerifySuspensionsFromCheckpoint(t *testing.T) {
 	}
 }
 
-// A window that starts after the collector.install_key, or inside an open
-// reset, verifies from the state the checkpoint holds, and returns the state
-// at its end (A5 on #105).
+// A chain verified window by window, with the SeqState carried between the
+// windows, gives the result of the whole chain (A6 on #105).
 func TestVerifyCollectorSeqFrom(t *testing.T) {
-	const k1, k2, k3 = "x25519-1111111111111111", "x25519-2222222222222222", "x25519-3333333333333333"
-	type tc struct {
-		recs           []Record
-		after, through uint64
-		start, end     SeqStart
+	const ka, kb, kc = "x25519-aaaaaaaaaaaaaaaa", "x25519-bbbbbbbbbbbbbbbb", "x25519-cccccccccccccccc"
+	window := func(from SeqState, through uint64, recs ...Record) (SeqState, error) {
+		t.Helper()
+		return VerifyCollectorSeqFrom(parsed(t, recs...), from, through)
 	}
-	ok := map[string]tc{
-		"trusted key from the checkpoint": {[]Record{decided(4), decided(5)}, 3, 5, SeqStart{TrustedKey: k1}, SeqStart{TrustedKey: k1}},
-		"reset in the window":             {[]Record{decided(4), reset(4, 1, k2), decided(1)}, 3, 1, SeqStart{TrustedKey: k1}, SeqStart{TrustedKey: k1, OpenResetKey: k2}},
-		"ack of a reset before the window": {[]Record{decided(3), ack(k2), decided(4)}, 2, 4,
-			SeqStart{TrustedKey: k1, OpenResetKey: k2}, SeqStart{TrustedKey: k2}},
-		"zero start is VerifyCollectorSeq": {[]Record{decided(1), reset(1, 1, k1), decided(1)}, 0, 1, SeqStart{}, SeqStart{OpenResetKey: k1}},
+
+	// A6's probe: a boundary between a reset and its acknowledgement.
+	st, err := window(SeqState{}, 1, installKey(ka), decided(1), decided(2), decided(3), reset(3, 1, kb), decided(1))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name, c := range ok {
-		end, err := VerifyCollectorSeqFrom(parsed(t, c.recs...), c.after, c.through, c.start)
-		if err != nil || end != c.end {
-			t.Errorf("%s: end %+v, %v; want %+v", name, end, err, c.end)
-		}
+	if want := (SeqState{After: 1, TrustedKey: ka, OpenResetKey: kb, ResetKeys: []string{kb}}); fmt.Sprint(st) != fmt.Sprint(want) {
+		t.Fatalf("state after window 1: %+v", st)
 	}
-	broken := map[string]tc{
-		"reset keeps the checkpoint's trusted key": {recs: []Record{decided(4), reset(4, 1, k1), decided(1)}, after: 3, through: 1, start: SeqStart{TrustedKey: k1}},
-		"reset repeats the open reset's key":       {recs: []Record{decided(3), reset(3, 1, k2), decided(1)}, after: 2, through: 1, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
-		"install_key changes the checkpoint's key": {recs: []Record{installKey(k3), decided(4)}, after: 3, through: 4, start: SeqStart{TrustedKey: k1}},
-		"install_key during an open reset":         {recs: []Record{installKey(k2), decided(3)}, after: 2, through: 3, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
-		"ack on another key than the open reset":   {recs: []Record{decided(3), ack(k3)}, after: 2, through: 3, start: SeqStart{TrustedKey: k1, OpenResetKey: k2}},
-		"ack with nothing open at the start":       {recs: []Record{decided(4), ack(k1)}, after: 3, through: 4, start: SeqStart{TrustedKey: k1}},
+	st, err = window(st, 2, ack(kb), decided(2))
+	if err != nil {
+		t.Fatalf("window 2 after the split: %v", err)
+	}
+	if want := (SeqState{After: 2, TrustedKey: kb, ResetKeys: []string{kb}}); fmt.Sprint(st) != fmt.Sprint(want) {
+		t.Fatalf("state after window 2: %+v", st)
+	}
+
+	// A6's probe: a restore that keeps the key, in a window that starts
+	// after the collector.install_key record.
+	st, err = window(SeqState{}, 1, installKey(ka), decided(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := window(st, 1, decided(2), reset(2, 1, ka), decided(1)); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("same-key reset in a later window: %v", err)
+	}
+	if err := VerifyCollectorSeq(parsed(t, decided(2), reset(2, 1, ka), decided(1)), 1, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("same-key reset with no state: %v", err)
+	}
+
+	// A boundary between a reset and its first_seen record.
+	st, err = window(SeqState{After: 1, TrustedKey: ka}, 0, reset(1, 1, kb))
+	if err != nil || st.FirstSeen != 1 || st.After != 0 {
+		t.Fatalf("window ending at the reset: %+v, %v", st, err)
+	}
+	if _, err := window(st, 1, decided(1)); err != nil {
+		t.Errorf("first_seen in the next window: %v", err)
+	}
+	if _, err := window(st, 2, decided(2)); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("first record of the next window is not first_seen: %v", err)
+	}
+
+	// A reset key from an earlier window is never repeated.
+	if _, err := window(SeqState{After: 1, TrustedKey: kc, ResetKeys: []string{kb, kc}}, 1, decided(2), reset(2, 1, kb), decided(1)); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("reset repeating an earlier window's key: %v", err)
+	}
+
+	broken := map[string]struct {
+		from    SeqState
+		through uint64
+		recs    []Record
+	}{
+		"reset keeps the state's trusted key": {SeqState{After: 3, TrustedKey: ka}, 1, []Record{decided(4), reset(4, 1, ka), decided(1)}},
+		"reset repeats the open reset's key":  {SeqState{After: 2, TrustedKey: ka, OpenResetKey: kb, ResetKeys: []string{kb}}, 1, []Record{decided(3), reset(3, 1, kb), decided(1)}},
+		"install_key changes the state's key": {SeqState{After: 3, TrustedKey: ka}, 4, []Record{installKey(kc), decided(4)}},
+		"install_key during an open reset":    {SeqState{After: 2, TrustedKey: ka, OpenResetKey: kb, ResetKeys: []string{kb}}, 3, []Record{installKey(kb), decided(3)}},
+		"ack on another key":                  {SeqState{After: 2, TrustedKey: ka, OpenResetKey: kb, ResetKeys: []string{kb}}, 3, []Record{decided(3), ack(kc)}},
+		"ack with nothing open":               {SeqState{After: 3, TrustedKey: ka}, 4, []Record{decided(4), ack(ka)}},
+		"open key not among the reset keys":   {SeqState{After: 2, TrustedKey: ka, OpenResetKey: kb}, 3, []Record{decided(3)}},
+		"through below the state's after":     {SeqState{After: 3, TrustedKey: ka}, 2, nil},
 	}
 	for name, c := range broken {
-		if _, err := VerifyCollectorSeqFrom(parsed(t, c.recs...), c.after, c.through, c.start); !errors.Is(err, ErrChainBroken) {
+		if _, err := window(c.from, c.through, c.recs...); !errors.Is(err, ErrChainBroken) {
 			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}
+
+// Every split of a chain into two windows gives what the whole chain gives:
+// the same end state when it verifies, a break when it does not.
+func TestVerifyCollectorSeqEverySplit(t *testing.T) {
+	const ka, kb, kc = "x25519-aaaaaaaaaaaaaaaa", "x25519-bbbbbbbbbbbbbbbb", "x25519-cccccccccccccccc"
+	// throughAt is the newest collector number of the current epoch after
+	// the first n records: what the collector had reported by then.
+	throughAt := func(recs []Record, n int) uint64 {
+		var hi uint64
+		for _, r := range recs[:n] {
+			switch {
+			case r.Action == ActionCollectorSeqReset:
+				hi = 0
+			case r.CollectorSeq > hi:
+				hi = r.CollectorSeq
+			}
+		}
+		return hi
+	}
+	chains := map[string]struct {
+		recs []Record
+		ok   bool
+	}{
+		"two resets": {[]Record{installKey(ka), decided(1), decided(2), reset(2, 1, kb), decided(1), ack(kb), decided(2),
+			reset(2, 0, kc), ack(kc), decided(1)}, true},
+		"same-key restore":       {[]Record{installKey(ka), decided(1), decided(2), reset(2, 1, ka), decided(1)}, false},
+		"repeat of a reset key":  {[]Record{installKey(ka), decided(1), reset(1, 1, kb), decided(1), ack(kb), reset(1, 1, kb), decided(1)}, false},
+		"gap after an ack":       {[]Record{installKey(ka), decided(1), reset(1, 1, kb), decided(1), ack(kb), decided(3)}, false},
+		"restart with no reset":  {[]Record{installKey(ka), decided(1), decided(2), decided(1)}, false},
+		"first_seen not first":   {[]Record{installKey(ka), decided(1), reset(1, 2, kb), decided(1), decided(2)}, false},
+		"ack before its reset":   {[]Record{installKey(ka), decided(1), ack(kb), reset(1, 1, kb), decided(1)}, false},
+		"key change at an ack":   {[]Record{installKey(ka), decided(1), reset(1, 1, kb), decided(1), ack(kb), installKey(kc)}, false},
+		"window ends at a reset": {[]Record{installKey(ka), decided(1), reset(1, 1, kb)}, true},
+	}
+	for name, c := range chains {
+		all := parsed(t, c.recs...)
+		through := throughAt(c.recs, len(c.recs))
+		whole, werr := VerifyCollectorSeqFrom(all, SeqState{}, through)
+		if (werr == nil) != c.ok {
+			t.Fatalf("%s whole: %v", name, werr)
+		}
+		for n := 0; n <= len(all); n++ {
+			mid, err := VerifyCollectorSeqFrom(all[:n], SeqState{}, throughAt(c.recs, n))
+			if err == nil {
+				var end SeqState
+				end, err = VerifyCollectorSeqFrom(all[n:], mid, through)
+				if err == nil && fmt.Sprint(end) != fmt.Sprint(whole) {
+					t.Errorf("%s split at %d: end %+v, whole %+v", name, n, end, whole)
+				}
+			}
+			if (err == nil) != c.ok {
+				t.Errorf("%s split at %d: %v, whole %v", name, n, err, werr)
+			}
 		}
 	}
 }

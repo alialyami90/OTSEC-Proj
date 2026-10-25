@@ -34,7 +34,7 @@ Each field is allowed only on its own actions. `asset.suspend` exists because co
 
 ## How the chain is verified
 
-`VerifyCollectorSeq(recs, after, through)` has the same signature as in 0.1. A 0.1 chain verifies exactly as before. Records are read in chain order.
+`VerifyCollectorSeq(recs, after, through)` has the same signature as in 0.1. A 0.1 chain with no reset verifies exactly as before. Records are read in chain order.
 
 - **A reset closes an epoch.** The numbers before it must be exactly `after+1 .. previous_high`, each on one record, with nothing above. `previous_high ≥ after` is required. The epoch may be empty, for example when the verification window starts just before the reset.
 - **The next epoch starts at 1.** It must hold `1 .. ` the next reset's `previous_high`, or `through` for the last epoch.
@@ -42,7 +42,8 @@ Each field is allowed only on its own actions. `asset.suspend` exists because co
 - **The key must change.** The trusted key comes from `collector.install_key` and then from each acknowledgement. A reset whose key equals the trusted key, or any earlier reset's key, breaks the chain. A `collector.install_key` that changes a trusted key without an acknowledged reset breaks it too.
 - **An acknowledgement** must name the key of the open reset. A second acknowledgement, or one with no open reset, breaks the chain.
 - **A restart with no reset record** still breaks the chain, as in 0.1.
-- **A window that starts at a checkpoint (A5 on #105).** A node that prunes up to a checkpoint no longer has the `collector.install_key` or the reset that set the trusted key. `VerifyCollectorSeqFrom(recs, after, through, start)` takes `SeqStart{TrustedKey, OpenResetKey}` from the checkpoint and returns the state at the window's end, for the next checkpoint. Keys of resets before the window are known to it only through `start`, so the rule that no reset repeats an earlier key holds within the window and against `start`. `VerifyCollectorSeq` is the same with a zero `start`.
+- **A known trusted key at every reset (A6 on #105).** With no trusted key before it, a reset cannot be told from a restore that keeps the key, so it breaks the chain. A 0.2 node writes `collector.install_key` before its first request, and a node upgraded from 0.1 writes it at its first 0.2 start, so an honest chain always has one.
+- **Window by window (A5 and A6 on #105).** `VerifyCollectorSeq(recs, after, through)` keeps no state between calls. A verifier that checks a chain in windows, such as a node that prunes up to a checkpoint, uses `VerifyCollectorSeqFrom(recs, from SeqState, through) (SeqState, error)` and stores the returned state with its checkpoint. `SeqState` holds `After`, the trusted key, the open reset's key, the keys of every earlier reset, and a `first_seen` not yet recorded. The zero value is the start of the chain. Verified in any split, a chain gives the same result as verified whole, and `TestVerifyCollectorSeqEverySplit` checks this for every split of nine chains.
 
 `VerifySuspensions(from, recs)` checks that each `asset.suspend` opens a suspension, keyed by asset, reason and ref, that is not already open. Each `asset.suspension_clear` must name one that is open. `from` is the open set at the start: `nil` for a chain from its first record, or the node's checkpoint when `recs` is the tail after it, so that a clear of a suspension opened before the checkpoint verifies (A5 on #105). It returns the suspensions still open as `OpenSuspension{AssetID, Reason, Ref, Code}`, which is what the node rebuilds from and checkpoints. The node's suspension file is a checkpoint carrying the audit seq it reflects (A5). Pruning stays within the checkpoint (D2-15).
 
@@ -79,5 +80,10 @@ A6 asked whether a numbered decision can bypass the node. It cannot. The collect
   - one reset, a reset then an acknowledgement, two resets, a reset before any record, a window from a verified point, a window that starts at the reset, a window inside epoch 2, a reset found by the key, and the trusted key carried by the acknowledgement, all verify;
   - 18 broken cases each break the chain: a restart without a reset, a gap before the reset, `previous_high` above, below, or under `after`, numbers below `first_seen`, a first record that is not `first_seen`, a missing `first_seen`, a repeated key, a reset that keeps the trusted or the acknowledged key, a key change without a reset or before the acknowledgement, an acknowledgement without a reset, on another key, or twice, and missing tails.
 - **Suspensions:** the open set after a clear, and a clear with nothing set, on another ref, on another reason, a double clear, and a duplicate suspend each break the chain. From a checkpoint: a tail clearing a suspension the checkpoint holds verifies, but fails without the checkpoint; a suspend of one the checkpoint holds, and a checkpoint holding one twice, break it.
-- **Windows from a checkpoint (`TestVerifyCollectorSeqFrom`):** 4 windows verify and return the expected end state, and 6 break: a reset keeping the checkpoint's trusted key or the open reset's key, an `install_key` that changes the checkpoint's key or comes during an open reset, and an acknowledgement on another key or with nothing open.
+- **Windows (`TestVerifyCollectorSeqFrom`, `TestVerifyCollectorSeqEverySplit`):**
+  - A6's two probes: a split between a reset and its acknowledgement verifies, and a restore that keeps the key breaks in a later window;
+  - a split between a reset and its `first_seen` record;
+  - a reset repeating a key from an earlier window;
+  - 8 broken starting states and windows;
+  - every two-window split of 9 chains (2 that verify and 7 that break) gives the whole chain's result and end state.
 - **Schema** `schema/record.json`: the five actions and four fields, with their conditional requirements.

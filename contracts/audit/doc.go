@@ -81,10 +81,10 @@
 //
 // VerifyCollectorSeq reads each reset as an epoch boundary, and
 // VerifySuspensions checks that each clear names an open suspension. A node
-// that prunes to a checkpoint verifies the tail from the checkpoint's state:
-// VerifyCollectorSeqFrom takes the trusted and open-reset keys (SeqStart),
-// and VerifySuspensions the open set; each returns the state at the end. A
-// record stamped 0.1 cannot carry any of these actions or their fields.
+// that verifies window by window carries the state between windows:
+// VerifyCollectorSeqFrom takes and returns a SeqState, and VerifySuspensions
+// the open set. A record stamped 0.1 cannot carry any of these actions or
+// their fields.
 //
 // # What it leaves out
 //
