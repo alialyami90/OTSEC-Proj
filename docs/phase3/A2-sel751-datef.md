@@ -26,6 +26,8 @@ Each case names the test that shows it. A6 is asked to test each one independent
 
 Case 15 stops at the adapter's result. The normalizer and the forwarder are not in it: A4's normalizer takes the order from `DATE_F` in its follow-up to C2 0.5 (A4 on #164), and the full slice reconcile in YMD and DMY follows that. Simulated evidence only.
 
+Every SER capture now keeps the whole `SHO G` reply (case 9). No Global setting carries a credential (A3): the Global settings section of S22 (pp. 4.225 to 4.248, Tables 4.84 to 4.102) defines no password, key or user setting. Passwords are set with the `PAS` command (Table 7.52, p. 7.69) and are not settings; `MAXACC` and the network settings are Port settings (`SET P`, from Table 4.103), which `SHO G` does not print. The one free-text Global setting is the Event Messenger text `MPTX01` to `MPTX32` (Table 4.85, 148 characters), a message an engineer types, so the capture keeps whatever was typed there. This is documented-untested: it comes from the manual's tables, not from a relay's `SHO G` reply.
+
 A run under a register without a context read (revision 3) sends no `SHO G`, reports no settings and parses rows as before; its consumer keeps the MDY assumption and its flag (C2 0.5 doc).
 
 ## Fixture changes in other owners' files
