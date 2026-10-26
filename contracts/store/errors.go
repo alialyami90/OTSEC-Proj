@@ -37,6 +37,12 @@ const (
 	CodeAuditUnavailable Code = "audit-unavailable"
 	// CodeStartupFailed: a startup step failed and startup stopped.
 	CodeStartupFailed Code = "startup-failed"
+	// CodeOpenBusy (0.2): StartupEnv.Open failed only because another
+	// connection held the database busy or locked past the store's busy
+	// timeout. It is the one open failure Resume retries (Report.OpenBusy);
+	// an implementation sets it from the database's own error code, never
+	// from error text, and never for any other cause.
+	CodeOpenBusy Code = "open-busy"
 )
 
 // Error is the error type of this contract. Detail is free text that never

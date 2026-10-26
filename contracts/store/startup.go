@@ -59,7 +59,9 @@ type StartupEnv interface {
 	// FreeBytes is the free space on the store's volume.
 	FreeBytes(ctx context.Context) (int64, error)
 	// Open opens (or, if absent, creates) the database. A new database is
-	// created with auto_vacuum=INCREMENTAL before its first table.
+	// created with auto_vacuum=INCREMENTAL before its first table. An open
+	// that failed only because the database was busy or locked returns an
+	// error that is CodeOpenBusy (0.2); every other failure must not be.
 	Open(ctx context.Context) (RecoveryStore, error)
 	// CreateReserve writes a reserve of exactly bytes, flushed, or removes
 	// what it wrote and fails: a partial reserve hides a shortfall.
@@ -182,6 +184,8 @@ const (
 	// the store below the headroom.
 	ModeBlocked Mode = "blocked"
 	// ModeFailed: a step failed and startup stopped. Report.Err says which.
+	// It needs a restart, except after an open that was only busy
+	// (Report.OpenBusy), which Resume retries (0.2).
 	ModeFailed Mode = "failed"
 )
 
@@ -204,6 +208,17 @@ type Report struct {
 	Unlock func()
 	// Err is set in ModeFailed.
 	Err error
+}
+
+// OpenBusy reports whether r stopped in ModeFailed at the open step only
+// because the database was busy or locked (CodeOpenBusy). It is the one
+// failure Resume retries (0.2).
+func (r Report) OpenBusy() bool {
+	if r.Mode != ModeFailed || len(r.Steps) == 0 {
+		return false
+	}
+	last := r.Steps[len(r.Steps)-1]
+	return last.Step == StepOpen && errors.Is(last.Err, &Error{Code: CodeOpenBusy})
 }
 
 // RunStartup runs startup recovery in the order ADR-0004 item 8 and F-013
@@ -353,6 +368,11 @@ func (s *startup) fromInspect(ctx context.Context) {
 			return
 		}
 	}
+	s.fromHeadroom(ctx, free)
+}
+
+// fromHeadroom runs steps 4 to 8, with free the volume's free space.
+func (s *startup) fromHeadroom(ctx context.Context, free int64) {
 	if free < s.p.OpenHeadroomBytes {
 		err := fmt.Errorf("%d bytes free, %d needed to open the store", free, s.p.OpenHeadroomBytes)
 		s.r.Steps = append(s.r.Steps, StepResult{Step: StepHeadroom, Err: err})
@@ -435,13 +455,21 @@ func (s *startup) recover(ctx context.Context, st RecoveryStore) {
 //     node calls it after forwarding has saved a cursor (proposal: at most
 //     every 60 s). It returns ModeCollecting only when pruning and compaction
 //     succeed and both reserves exist again.
+//   - From ModeFailed after an open that was only busy (prev.OpenBusy,
+//     0.2), Resume re-runs steps 4 to 8: the reserves were released before
+//     that open, so steps 2 and 3 are not repeated. The node calls it at
+//     most once per tick. A retry that is busy again stays ModeFailed with
+//     OpenBusy set, so the next tick tries again.
 //   - From any other mode it returns prev unchanged: ModeCollecting needs
-//     nothing, and ModeFailed needs a restart.
+//     nothing, and every other ModeFailed needs a restart. A failed lock,
+//     inspection, release, settings or integrity check, and an open that
+//     failed for any reason but busy, are never retried: a database that
+//     is damaged or not this node's must not be reopened silently.
 //
 // Every Report whose Mode differs from prev's is a ModeChange the node
 // reports as a health event and an audit record (ModeChangeOf).
 func Resume(ctx context.Context, env StartupEnv, p StartupPolicy, prev Report) Report {
-	if prev.Mode != ModeBlocked && prev.Mode != ModeDrainOnly {
+	if prev.Mode != ModeBlocked && prev.Mode != ModeDrainOnly && !prev.OpenBusy() {
 		return prev
 	}
 	s := &startup{env: env, p: p, r: &Report{Unlock: prev.Unlock}, cap: ModeCollecting}
@@ -455,6 +483,15 @@ func Resume(ctx context.Context, env StartupEnv, p StartupPolicy, prev Report) R
 	}
 	if prev.Mode == ModeBlocked {
 		s.fromInspect(ctx)
+		return *s.r
+	}
+	if prev.Mode == ModeFailed {
+		free, err := s.env.FreeBytes(ctx)
+		if err != nil {
+			s.fail(StepHeadroom, AlarmInspectFailed, err)
+			return *s.r
+		}
+		s.fromHeadroom(ctx, free)
 		return *s.r
 	}
 	s.r.Store = prev.Store

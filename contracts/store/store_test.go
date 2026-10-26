@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -18,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 1 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 2 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -748,6 +749,98 @@ func TestResumeFromDrainOnly(t *testing.T) {
 	}
 	if got := f.retained("s"); got[0] <= 1 || got[0] > 181 {
 		t.Fatalf("first retained %d", got[0])
+	}
+}
+
+// errBusy is an open that failed only because the database was busy, as
+// an implementation reports it (0.2).
+var errBusy = fmt.Errorf("open: %w", &Error{Code: CodeOpenBusy, Err: errInjected})
+
+// 0.2: an open that was only busy is retried by Resume, from the headroom
+// check, under the lock already held, with no reserve released again; a
+// retry that is busy again stays failed and retryable.
+func TestResumeRetriesBusyOpen(t *testing.T) {
+	f := existing()
+	f.fail["Open"] = errBusy
+	p := policy()
+	r := RunStartup(context.Background(), f, p)
+	if r.Mode != ModeFailed || !r.OpenBusy() || r.Unlock == nil || !hasAlarm(r, AlarmOpenFailed) {
+		t.Fatalf("mode %s busy %v alarms %v", r.Mode, r.OpenBusy(), r.Alarms)
+	}
+	// The fake's calls are kept, not reset, so its check that the store is
+	// opened only after a reserve was released sees the first run's release.
+	n := len(f.calls)
+	again := Resume(context.Background(), f, p, r) // still busy
+	if again.Mode != ModeFailed || !again.OpenBusy() || again.Unlock == nil {
+		t.Fatalf("busy retry: mode %s busy %v", again.Mode, again.OpenBusy())
+	}
+	if got, want := f.calls[n:], []string{"FreeBytes", "Open"}; !slices.Equal(got, want) {
+		t.Fatalf("busy retry calls %v, want %v", got, want)
+	}
+	delete(f.fail, "Open")
+	n = len(f.calls)
+	next := Resume(context.Background(), f, p, again)
+	if next.Mode != ModeCollecting || next.Store == nil || next.Unlock == nil || next.OpenBusy() {
+		t.Fatalf("mode %s calls %v", next.Mode, f.calls[n:])
+	}
+	if got := f.calls[n:]; got[0] != "FreeBytes" || indexOf(got, "Lock") >= 0 || indexOf(got, "StoreExists") >= 0 ||
+		slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "ReleaseReserve") }) {
+		t.Fatalf("retry repeated a step before the headroom check: %v", got)
+	}
+	if len(f.violations) > 0 {
+		t.Fatal(f.violations)
+	}
+	if c, ok := ModeChangeOf(again, next, f.now); !ok || c.From != ModeFailed || c.To != ModeCollecting {
+		t.Fatalf("mode change %+v %v", c, ok)
+	}
+}
+
+// A busy retry with too little free space waits in ModeBlocked, as a
+// first open would; it never opens below the headroom.
+func TestResumeBusyOpenBelowHeadroom(t *testing.T) {
+	f := existing()
+	f.fail["Open"] = errBusy
+	p := policy()
+	r := RunStartup(context.Background(), f, p)
+	delete(f.fail, "Open")
+	f.free = p.OpenHeadroomBytes - 1
+	f.calls = nil
+	if next := Resume(context.Background(), f, p, r); next.Mode != ModeBlocked || indexOf(f.calls, "Open") >= 0 {
+		t.Fatalf("mode %s calls %v", next.Mode, f.calls)
+	}
+}
+
+// Every other failure stays failed: no call, prev unchanged. That covers
+// each step before the open, an open that failed for another reason, and
+// a busy error from a step after the open, which is not an open that was
+// only busy.
+func TestResumeLeavesOtherFailuresAlone(t *testing.T) {
+	for _, c := range []struct {
+		call string
+		err  error
+	}{
+		{"Lock", errBusy},
+		{"StoreExists", errBusy},
+		{"ReserveExists:recovery", errBusy},
+		{"ReleaseReserve:recovery", errBusy},
+		{"FreeBytes", errBusy},
+		{"Open", errInjected},
+		{"Open", fmt.Errorf("open: %w", &Error{Code: CodeInvalid, Err: errInjected})},
+		{"CheckSettings", errBusy},
+		{"QuickCheck", errBusy},
+	} {
+		f := existing()
+		f.fail[c.call] = c.err
+		r := RunStartup(context.Background(), f, policy())
+		if r.Mode != ModeFailed || r.OpenBusy() {
+			t.Errorf("%s %v: mode %s busy %v", c.call, c.err, r.Mode, r.OpenBusy())
+			continue
+		}
+		delete(f.fail, c.call)
+		f.calls = nil
+		if next := Resume(context.Background(), f, policy(), r); next.Mode != ModeFailed || len(f.calls) != 0 {
+			t.Errorf("%s %v: resumed to %s with calls %v", c.call, c.err, next.Mode, f.calls)
+		}
 	}
 }
 
