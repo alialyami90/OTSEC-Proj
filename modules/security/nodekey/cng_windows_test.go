@@ -91,14 +91,19 @@ func TestCNGKeyLifecycle(t *testing.T) {
 	if err := keys.Restrict(&ecdsa.PrivateKey{}); err == nil {
 		t.Fatal("restricted a key CNG did not create")
 	}
-	dacl, err := keys.dacl(name)
+	if d, err := keys.dacl(name); err == nil {
+		t.Logf("final dacl: %s", d)
+	}
+	// The DACL is compared as parsed ACEs: the KSP stores GR as its
+	// specific rights and SDDL names some SIDs by alias (CI on #157).
+	aces, protected, err := keys.keyACEs(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("final dacl: %s", dacl)
-	if !strings.HasPrefix(dacl, "D:P") || !strings.Contains(dacl, ";;;SY)") || !strings.Contains(dacl, ";;;BA)") ||
-		!strings.Contains(dacl, me) || strings.Contains(dacl, ";;;WD)") || strings.Contains(dacl, ";;;AU)") || strings.Contains(dacl, ";;;BU)") {
-		t.Fatalf("dacl %s", dacl)
+	const system, admins = "S-1-5-18", "S-1-5-32-544"
+	const manage = windows.WRITE_DAC | windows.WRITE_OWNER | windows.DELETE | windows.GENERIC_WRITE | windows.GENERIC_ALL
+	if !protected || len(aces) != 3 || aces[system] == 0 || aces[system] != aces[admins] || aces[me] == 0 || aces[me]&manage != 0 {
+		t.Fatalf("protected %v, aces %#x", protected, aces)
 	}
 	if err := keys.exportPrivate(name); err != nil {
 		t.Fatalf("export after restrict: %v", err)

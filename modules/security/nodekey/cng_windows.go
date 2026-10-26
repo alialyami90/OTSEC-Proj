@@ -267,24 +267,64 @@ func (s *cngSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byt
 	return asn1.Marshal(struct{ R, S *big.Int }{new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])})
 }
 
-// dacl returns the key's DACL as SDDL (tests).
-func (c CNG) dacl(name string) (string, error) {
+// securityDescriptor reads the key's DACL (tests).
+func (c CNG) securityDescriptor(name string) (*windows.SECURITY_DESCRIPTOR, error) {
 	key, err := c.openKey(name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer free(key)
 	var n uint32
 	call(procGetProperty, key, utf16(securityDescrProperty), 0, 0, uintptr(unsafe.Pointer(&n)), uintptr(daclSecurityInfo))
 	if n == 0 {
-		return "", errors.New("no security descriptor")
+		return nil, errors.New("no security descriptor")
 	}
 	buf := make([]byte, n)
 	if err := call(procGetProperty, key, utf16(securityDescrProperty), uintptr(unsafe.Pointer(&buf[0])), uintptr(n),
 		uintptr(unsafe.Pointer(&n)), uintptr(daclSecurityInfo)); err != nil {
+		return nil, err
+	}
+	return (*windows.SECURITY_DESCRIPTOR)(unsafe.Pointer(&buf[0])), nil // buf stays reachable through it
+}
+
+// dacl returns the key's DACL as SDDL (tests, for the log).
+func (c CNG) dacl(name string) (string, error) {
+	sd, err := c.securityDescriptor(name)
+	if err != nil {
 		return "", err
 	}
-	return (*windows.SECURITY_DESCRIPTOR)(unsafe.Pointer(&buf[0])).String(), nil
+	return sd.String(), nil
+}
+
+// keyACEs returns the key's DACL as allow-ACE masks by SID string, and
+// whether the DACL is protected (tests). Any ACE other than an allow ACE is
+// an error: the DACL this package writes has none.
+func (c CNG) keyACEs(name string) (map[string]uint32, bool, error) {
+	sd, err := c.securityDescriptor(name)
+	if err != nil {
+		return nil, false, err
+	}
+	control, _, err := sd.Control()
+	if err != nil {
+		return nil, false, err
+	}
+	acl, _, err := sd.DACL()
+	if err != nil {
+		return nil, false, err
+	}
+	out := map[string]uint32{}
+	for i := uint32(0); i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			return nil, false, err
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			return nil, false, fmt.Errorf("ACE %d has type %d", i, ace.Header.AceType)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()
+		out[sid] |= uint32(ace.Mask)
+	}
+	return out, control&windows.SE_DACL_PROTECTED != 0, nil
 }
 
 // exportPrivate tries to read the private key out (tests: it must fail).
