@@ -37,7 +37,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
 import profile_sel751  # noqa: E402

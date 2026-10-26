@@ -29,7 +29,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 FIRST_RUN = 100.0
 
