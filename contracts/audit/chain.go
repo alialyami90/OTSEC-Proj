@@ -175,9 +175,14 @@ type SeqState struct {
 // epoch's high. Verified in any split, a chain gives the same result as
 // verified whole, with one exception (0.4): a window that ends after a
 // first decision whose reply was lost, and before the repeat that names it,
-// reports the gap as it stood then. The repeat comes within the signed
-// request's lifetime (C7 MaxAdminLifetime), so a verifier whose windows end
-// at least that long ago does not see it.
+// reports the gap as it stood then. So a reader of a window report should
+// know that a gap younger than the admin request window (C7
+// MaxAdminLifetime, 15 minutes) at the window's end may still be covered by
+// a repeat: verified again from the last good state, through a window that
+// holds the repeat, it is reported as covered. A verifier whose windows end
+// at least that long ago never sees it. The exception fails the safe way:
+// a gap reported early is a bounded, visible false alarm, never a gap
+// missed (A1 on #187).
 func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqState, error) {
 	seen := map[uint64]bool{}
 	lo := from.After

@@ -196,3 +196,34 @@ func TestRepeatAcrossAReset(t *testing.T) {
 		t.Fatalf("got %v, want a broken chain", err)
 	}
 }
+
+// TestRepeatAcrossWindows (A1 on #187): a window that ends between a lost
+// first reply and its repeat reports the gap; verified again from the last
+// good state, the next window, which holds the repeat, reports it covered,
+// as the whole chain does.
+func TestRepeatAcrossWindows(t *testing.T) {
+	start := Record{Actor: Actor{Type: authz.PrincipalSystem, ID: "node"}, Action: ActionAuditChainStart, Outcome: OutcomeInfo}
+	other := testAdmin()
+	other.Nonce = "BBECAwQFBgcICQoLDA0ODw"
+	recs := seqRecords(t, []Record{
+		start,
+		{Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-0", CollectorSeq: 1, Verified: other},
+		{Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeInfo, CorrelationID: "req-1", Claimed: testAdmin()},
+		// Decision 2 accepted req-1; its reply was lost. The node resends.
+		{Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-1", CollectorSeq: 3, Verified: testAdmin(), RepeatOf: 2},
+	})
+	// The window ends after decision 2 was handed out, before the repeat.
+	if _, err := VerifyCollectorSeqFrom(recs[:3], SeqState{}, 2); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("window before the repeat: got %v, want the gap reported", err)
+	}
+	good, err := VerifyCollectorSeqFrom(recs[:3], SeqState{}, 1)
+	if err != nil {
+		t.Fatalf("last good state: %v", err)
+	}
+	if _, err := VerifyCollectorSeqFrom(recs[3:], good, 3); err != nil {
+		t.Fatalf("the next window, holding the repeat: %v", err)
+	}
+	if err := VerifyCollectorSeq(recs, 0, 3); err != nil {
+		t.Fatalf("whole chain: %v", err)
+	}
+}

@@ -142,7 +142,9 @@
 //     repeat_of names the first decision on the same signed bytes, which
 //     did nothing again. VerifyCollectorSeq counts repeat_of as accounting
 //     for that first decision: when the first reply was lost, the repeat
-//     is the record of it.
+//     is the record of it. A window report can therefore show a gap younger
+//     than the admin request window (15 minutes) that a later repeat
+//     covers; see VerifyCollectorSeqFrom.
 //
 // A record stamped 0.3 or earlier cannot carry these fields, and they are
 // on collector.request only: claimed with outcome info, verified and
