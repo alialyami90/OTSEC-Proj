@@ -11,7 +11,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
-const Identifier = "otsec.event/0.1"
+const Identifier = "otsec.event/0.2"
 
 // NodeID names a platform node: a lowercase DNS label, defined in
 // contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
@@ -173,6 +173,14 @@ const (
 type Sender struct {
 	Address string `json:"address"`            // IP address, host name or local endpoint as observed
 	AssetID string `json:"asset_id,omitempty"` // TODO(C1): C1 asset ID of the sender when known
+	// TLSLeafSHA256 (0.2) is the lowercase hex SHA-256 of the DER
+	// certificate the sender presented and the node verified, so an
+	// investigator, and later C1 pinned keys, can see which certificate
+	// spoke (A3 on #150). Required with origin_auth tls-mutual in an event
+	// of 0.2 or later, and forbidden with any other origin_auth. It proves
+	// that a certificate from the configured set was used, not which device
+	// sent the message: it never raises the asset binding's confidence.
+	TLSLeafSHA256 string `json:"tls_leaf_sha256,omitempty"`
 }
 
 // OriginAuth records how the sender was authenticated (A3 AP-22). Closed.

@@ -688,8 +688,8 @@ func c2Refusal(err error) *authz.Refusal {
 	return &authz.Refusal{Code: code, Detail: err.Error()}
 }
 
-// collectionEndpoint applies D2-4 and D2-10 to the asset and returns its one
-// outbound endpoint. C7 0.1 runs carry no endpoint ID, so an asset with more
+// collectionEndpoint applies D2-4, D2-10 and the C1 path rule (D2-16) to
+// the asset and returns its one outbound endpoint. C7 0.1 runs carry no endpoint ID, so an asset with more
 // than one outbound endpoint is refused rather than guessed at.
 func collectionEndpoint(a asset.Asset) (asset.Endpoint, error) {
 	var out []asset.Endpoint
@@ -714,6 +714,11 @@ func collectionEndpoint(a asset.Asset) (asset.Endpoint, error) {
 	case out[0].Target != asset.Simulated:
 		return asset.Endpoint{}, &authz.Refusal{Code: authz.RefuseAssetNotEnrolled,
 			Detail: fmt.Sprintf("D2-4: endpoint %s is not labelled simulated", out[0].ID)}
+	}
+	// C1 0.2: only a direct path gets a session. The adapter checks it too,
+	// before it dials (defence in depth).
+	if err := out[0].CheckPath(); err != nil {
+		return asset.Endpoint{}, &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: err.Error()}
 	}
 	return out[0], nil
 }

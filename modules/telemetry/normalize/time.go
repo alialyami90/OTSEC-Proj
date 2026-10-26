@@ -54,12 +54,21 @@ func deviceTime(date, tm string, in Input, timeSource string) event.DeviceTime {
 			dt.ResolutionNS *= 10
 		}
 	}
-	leap := s == 60
 	valid := okDate && okTime && mo >= 1 && mo <= 12 && d >= 1 && d <= daysIn(y, mo) && h <= 23 && mi <= 59 && s <= 60
 	if !valid {
 		dt.Flags = append(dt.Flags, "invalid-time")
 		return dt
 	}
+	setWall(&dt, y, mo, d, h, mi, s, frac)
+	return dt
+}
+
+// setWall states dt's wall clock, and its UTC when dt.Offset is known, for
+// a date and time already checked to be in range (seconds up to 60). A leap
+// second is the last second of a UTC day: with a known offset its UTC minute
+// must be 23:59, otherwise dt gets invalid-time; with an unknown offset any
+// local minute could be (C4 accepts it). C4 states no UTC for it.
+func setWall(dt *event.DeviceTime, y, mo, d, h, mi, s int, frac string) {
 	wall := date4(y) + "-" + two(mo) + "-" + two(d) + "T" + two(h) + ":" + two(mi) + ":" + two(s)
 	if frac != "" {
 		wall += "." + frac
@@ -73,19 +82,16 @@ func deviceTime(date, tm string, in Input, timeSource string) event.DeviceTime {
 			off = -off
 		}
 	}
-	if leap {
-		// A leap second is the last second of a UTC day. With a known
-		// offset its UTC minute must be 23:59; with an unknown offset any
-		// local minute could be (C4 accepts it). C4 states no UTC for it.
+	if s == 60 {
 		if dt.Offset != "unknown" {
 			u := time.Date(y, time.Month(mo), d, h, mi, 59, 0, time.UTC).Add(-off)
 			if u.Hour() != 23 || u.Minute() != 59 {
 				dt.Flags = append(dt.Flags, "invalid-time")
-				return dt
+				return
 			}
 		}
 		dt.WallClock = wall
-		return dt
+		return
 	}
 	dt.WallClock = wall
 	if dt.Offset != "unknown" {
@@ -96,7 +102,6 @@ func deviceTime(date, tm string, in Input, timeSource string) event.DeviceTime {
 		}
 		dt.UTC += "Z"
 	}
-	return dt
 }
 
 // parseDate reads a date of exactly the printed form: the parts in order,

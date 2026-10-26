@@ -1,4 +1,4 @@
-// Package event is contract C4, otsec.event/0.1: the event every module
+// Package event is contract C4, otsec.event/0.2: the event every module
 // produces and the timestamp model every other contract imports.
 //
 // # What it covers
@@ -87,4 +87,13 @@
 // open sets. Source.EvidenceClass is open to later minors only: an event of
 // 0.1 takes device-observed or simulated, and a later minor's new class is
 // read as simulated (D1-23). Every other enum is closed.
+//
+// # Versions
+//
+//   - 0.1: the first contract (#29, #42, #59).
+//   - 0.2 (A4, approved by A1 after A3's review of #150):
+//     source.sender.tls_leaf_sha256, the SHA-256 of the certificate a
+//     tls-mutual sender presented. Required with tls-mutual from 0.2 and
+//     forbidden otherwise; binding confidence is unchanged by it. A 0.1
+//     event reads unchanged, and a 0.1 reader ignores the field.
 package event

@@ -13,6 +13,7 @@ Generated from the documented-example fixtures named below, then frozen. None of
 | `rtac-syslog-user-logon.json` | The RTAC Syslog example (A2's fixture `tests/fixtures/ied/sel/rtac/documented-example/syslog-user-logon.txt`, SEL-5033 IM 20260925 p. 636). The event time is the millisecond time inside MSG; the HEADER send time, 9.4 s later, is kept only as a native field. Received over UDP, so `origin_auth` is `none`. The space in `SystemTags. User_Logged_On` is kept as S23 prints it; whether the RTAC sends it on the wire is unverified (C6-A2-4). |
 | `health-ser-gap.json` | A platform `ser.gap` event: the next read of the same SER stream had no overlap with the previous one. |
 | `constructed-invalid-date.json` | **Constructed, not from the manual.** Row 8 with the date changed to `02/30/2007`. The native time is kept, `wall_clock` is absent, the flag is `invalid-time`, and parse status is `partial`. The record is kept, not dropped (EP-1). Its evidence is the row itself. |
+| `constructed-rtac-tls-mutual.json` | **Constructed, not from the manual (C4 0.2).** The RTAC example as if received over RFC 5425 from a sender that presented a certificate from the listener's CA set: `origin_auth` `tls-mutual` and `source.sender.tls_leaf_sha256`. The fingerprint is the SHA-256 of the text `illustrative: not a certificate; C4 0.2 example`, not of any certificate. Binding stays `sender-address` / `configured`: the certificate does not name the asset. |
 | `constructed-leap-second.json` | **Constructed, not from the manual.** Row 8 at `12/31/2016 23:59:60.602`. Second 60 is accepted at 23:59. No UTC is stated, so a consumer that has the leap-second table may convert it. |
 
 ## Invalid
@@ -50,3 +51,12 @@ Each file is `sel751-fig10-16-row8.json` with one change (the two platform cases
 | `evidence-class-missing.json` | missing | no | A device event that does not say whether its device was real or a simulator (D1-23). |
 | `evidence-class-not-observed.json` | enum | no | `documented` is a C1 class, but a 0.1 event's far end is `device-observed` or `simulated`, nothing else. The schema covers every 0.x minor, and the enum is open to later minors, so only `Validate` refuses it. |
 | `platform-event-with-evidence-class.json` | forbidden | no | A platform event has no far end to classify. |
+
+These four start from `constructed-rtac-tls-mutual.json` (C4 0.2) with one change each.
+
+| File | Code | Schema | What it shows |
+| --- | --- | --- | --- |
+| `tls-leaf-at-0.1.json` | forbidden | no | Stamped `otsec.event/0.1`: the fingerprint is new in 0.2. |
+| `tls-leaf-without-mutual.json` | forbidden | no | `tls-server-only` verified no sender certificate, so there is none to name. |
+| `tls-leaf-not-hex.json` | evidence | yes | The fingerprint in uppercase hex: it must be lowercase, as every C4 hash is. |
+| `tls-mutual-without-leaf.json` | missing | no | A `tls-mutual` event of 0.2 that does not name the certificate that spoke. |
