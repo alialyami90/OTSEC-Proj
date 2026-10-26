@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 2 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 3 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -947,6 +947,43 @@ func TestAlarmHealthTypes(t *testing.T) {
 	} {
 		if got := a.HealthType(); got != want {
 			t.Errorf("%s: %s, want %s", a, got, want)
+		}
+	}
+}
+
+// 0.3 (D3-1): CheckDiscard, the argument check every Discarder runs.
+func TestCheckDiscard(t *testing.T) {
+	const q StreamID = "quarantine/relay1"
+	step := make([]Seq, DiscardStepEvents)
+	for i := range step {
+		step[i] = Seq(i + 1)
+	}
+	reader := []Consumer{{ID: "central", Stream: q, Delivery: Required}}
+	other := []Consumer{{ID: "central", Stream: "relay1/ser", Delivery: Required}}
+	for _, c := range []struct {
+		name      string
+		consumers []Consumer
+		stream    StreamID
+		seqs      []Seq
+		ok        bool
+	}{
+		{"one seq", nil, q, []Seq{7}, true},
+		{"a full step", other, q, step, true},
+		{"over a step", nil, q, append(step, Seq(DiscardStepEvents+1)), false},
+		{"no seqs", nil, q, nil, false},
+		{"seq 0", nil, q, []Seq{1, 0}, false},
+		{"repeated seq", nil, q, []Seq{3, 4, 3}, false},
+		{"not a quarantine stream", nil, "relay1/ser", []Seq{1}, false},
+		{"prefix inside the ID", nil, "relay1/quarantine/x", []Seq{1}, false},
+		{"bare prefix", nil, QuarantinePrefix, []Seq{1}, false},
+		{"read by a consumer", reader, q, []Seq{1}, false},
+	} {
+		err := CheckDiscard(c.consumers, c.stream, c.seqs)
+		if c.ok != (err == nil) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if err != nil && !errors.Is(err, &Error{Code: CodeInvalid}) {
+			t.Errorf("%s: %v is not %s", c.name, err, CodeInvalid)
 		}
 	}
 }

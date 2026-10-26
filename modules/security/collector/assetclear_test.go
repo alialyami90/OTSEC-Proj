@@ -222,7 +222,7 @@ func TestAssetAndCredentialClearsAreSeparate(t *testing.T) {
 	}
 	credClear := &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialClearSusp, RequestID: "req-cred-clear",
 		OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion, CredentialClearSusp: &authz.CredentialClearSuspBody{RefID: pipeCred, Version: 1}}
-	if reply, _ := f.pipe.Handle(context.Background(), credClear); !reply.Accepted() {
+	if reply, _ := f.pipe.Handle(context.Background(), f.signed(t, credClear)); !reply.Accepted() {
 		t.Fatalf("credential clear: %+v", reply)
 	}
 	f.stillSuspended(t, suspendingRun)

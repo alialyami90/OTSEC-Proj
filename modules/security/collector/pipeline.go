@@ -98,8 +98,15 @@ type PipelineConfig struct {
 	// Limits are the C2 limits of every invocation, except MinIntervalMS,
 	// which is the profile's. Zero values take DefaultLimits.
 	Limits adapter.Limits
+	// AdminKeys are the administrators' public keys, pinned out of band
+	// (collector.json admin_keys). From C7 0.4 every credential request,
+	// and an asset clear an administrator signed, is checked against them
+	// (authz.VerifyAdminRequest). None pinned means every such request is
+	// refused.
+	AdminKeys []authz.AdminKey
 	// InstallLimit installs are allowed per InstallWindow. Zero means 10
-	// per hour.
+	// per hour. The budget stays as defence in depth: it now bounds how
+	// fast a real administrator can be pressed into signing (D2-11).
 	InstallLimit  int
 	InstallWindow time.Duration
 	// ReadClearFile returns the administrator's clear-suspension.json
@@ -208,6 +215,22 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 			Detail: fmt.Sprintf("request names policy %d, the collector has %d", req.PolicyVersion, p.cfg.PolicyVersion)}), nil
 	}
 	var r error
+	if req.AdminSigned != nil || isCredentialKind(req.Kind) {
+		// Every credential request, and a signed asset clear, must be an
+		// administrator's signed request (C7 0.4, D2-11). The checks and
+		// the nonce come before anything else is decided: before the
+		// install budget, the store and the reuse rule, so no reply to an
+		// unsigned or mis-bound request depends on a stored secret.
+		var admin *authz.AdminRequest
+		admin, r = p.verifyAdmin(req)
+		if r == nil {
+			r = p.decideAdmin(req, admin)
+		}
+		if r != nil {
+			return refused(req.RequestID, seq, asRefusal(r).ForRequest(req.Contract)), nil
+		}
+		return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, CollectorSeq: seq}, nil
+	}
 	switch {
 	case req.Kind == authz.KindRun && req.Run != nil:
 		var work Work
@@ -216,12 +239,6 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		if r == nil {
 			return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: invID, CollectorSeq: seq}, work
 		}
-	case req.Kind == authz.KindCredentialInstall && req.CredentialInstall != nil:
-		r = p.install(req)
-	case req.Kind == authz.KindCredentialRevoke && req.CredentialRevoke != nil:
-		r = p.human(req, func() error { _, err := p.cfg.Creds.Revoke(*req.CredentialRevoke); return err })
-	case req.Kind == authz.KindCredentialClearSusp && req.CredentialClearSusp != nil:
-		r = p.human(req, func() error { _, err := p.cfg.Creds.ClearSuspension(*req.CredentialClearSusp); return err })
 	case req.Kind == authz.KindAssetClearSusp && req.AssetClearSusp != nil:
 		r = p.clearAsset(req)
 	default:
@@ -233,13 +250,62 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 	return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, CollectorSeq: seq}, nil
 }
 
-// human runs a credential change after checking again that a person asked
-// for it (C7 Validate already refuses anything else).
-func (p *Pipeline) human(req *authz.CollectorRequest, f func() error) error {
-	if req.OnBehalfOf.Type != authz.PrincipalHuman {
-		return &authz.Refusal{Code: authz.RefusePrincipal, Detail: "credential requests come from a person with the admin role"}
+func isCredentialKind(k authz.RequestKind) bool {
+	return k == authz.KindCredentialInstall || k == authz.KindCredentialRevoke || k == authz.KindCredentialClearSusp
+}
+
+// verifyAdmin checks an admin-signed request against the pinned keys, this
+// collector's node and current install key, and the clock, then spends its
+// nonce durably. Every failure is admin_unverified naming the check, and
+// raises an alarm with the reason, which never holds the payload: a
+// request the node invented, altered or replayed is worth an operator's
+// look.
+func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (*authz.AdminRequest, error) {
+	bind := authz.AdminBinding{NodeID: p.cfg.NodeID, InstallKeyID: p.cfg.Creds.InstallKey().KeyID}
+	// Judged at the state's admin clock, which never goes back, so a
+	// clock put back cannot reopen a spent request's window (A6 on #153).
+	at, behind := p.cfg.State.AdminClock()
+	if behind > authz.MaxAdminClockSkew {
+		p.cfg.Alarm(fmt.Errorf("collector: the clock is %s behind the last admin decision; %s request %s is judged at %s",
+			behind.Round(time.Second), req.Kind, req.RequestID, at.UTC().Format(time.RFC3339)))
 	}
-	return f()
+	admin, err := authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, at)
+	if err == nil {
+		err = p.cfg.State.SpendAdminNonce(admin.Nonce, admin.Expires())
+	}
+	var rej *authz.AdminRejected
+	switch {
+	case err == nil:
+		return admin, nil
+	case errors.As(err, &rej):
+		p.cfg.Alarm(fmt.Errorf("collector: %s request %s refused: %w", req.Kind, req.RequestID, err))
+		return nil, rej.Refusal()
+	default:
+		return nil, err // the state could not record the nonce
+	}
+}
+
+// decideAdmin runs a verified admin request's body, as the 0.3 request
+// in the clear ran, with the signed principal.
+func (p *Pipeline) decideAdmin(req *authz.CollectorRequest, a *authz.AdminRequest) error {
+	switch {
+	case a.CredentialInstall != nil:
+		return p.install(*a.CredentialInstall)
+	case a.CredentialRevoke != nil:
+		_, err := p.cfg.Creds.Revoke(*a.CredentialRevoke)
+		return err
+	case a.CredentialClearSusp != nil:
+		_, err := p.cfg.Creds.ClearSuspension(*a.CredentialClearSusp)
+		return err
+	case a.AssetClearSusp != nil:
+		// The administrator signed the clear, so the collector needs no
+		// file from the shared folder: the request names the suspension.
+		if _, ok := p.assets[a.AssetClearSusp.AssetID]; !ok {
+			return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: a.AssetClearSusp.AssetID}
+		}
+		return p.cfg.State.ClearAssetSuspension(a.AssetClearSusp.AssetID, a.AssetClearSusp.Ref)
+	}
+	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"} // VerifyAdminRequest refuses this first
 }
 
 // ClearSuspensionFileName, ClearSuspensionSchema and
@@ -295,22 +361,21 @@ func (p *Pipeline) clearAsset(req *authz.CollectorRequest) error {
 }
 
 // install spends one install from the budget, then installs. The budget is
-// spent before any check, so a request that a later check refuses still
-// counts: that is what bounds guessing through the reuse rule.
-func (p *Pipeline) install(req *authz.CollectorRequest) error {
-	return p.human(req, func() error {
-		if err := p.cfg.State.TakeInstall(p.cfg.InstallLimit, p.cfg.InstallWindow); err != nil {
-			return err
-		}
-		var t InstallTarget
-		if e, ok := p.assets[req.CredentialInstall.Ref.AssetID]; ok {
-			a := e.Asset
-			t.Asset = &a
-			t.Register, _, _ = p.cfg.Registers.Active(e.Profile.ProductFamily)
-		}
-		_, err := p.cfg.Creds.Install(*req.CredentialInstall, t)
+// spent before any check of the body, so a request that a later check
+// refuses still counts: that bounds guessing through the reuse rule, now
+// by an administrator who signs (D2-11).
+func (p *Pipeline) install(body authz.CredentialInstallBody) error {
+	if err := p.cfg.State.TakeInstall(p.cfg.InstallLimit, p.cfg.InstallWindow); err != nil {
 		return err
-	})
+	}
+	var t InstallTarget
+	if e, ok := p.assets[body.Ref.AssetID]; ok {
+		a := e.Asset
+		t.Asset = &a
+		t.Register, _, _ = p.cfg.Registers.Active(e.Profile.ProductFamily)
+	}
+	_, err := p.cfg.Creds.Install(body, t)
+	return err
 }
 
 // decideRun runs the checks for a run, in this order, and stops at the

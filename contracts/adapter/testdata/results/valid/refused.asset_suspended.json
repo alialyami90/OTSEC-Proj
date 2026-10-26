@@ -6,7 +6,7 @@
     "id": "sel-751-ascii",
     "version": "0.1.0-example"
   },
-  "register_version": 3,
+  "register_version": 4,
   "target": "simulated",
   "status": "refused",
   "started_at": "2026-10-24T09:15:00.0Z",
