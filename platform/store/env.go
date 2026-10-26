@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"time"
 
+	"modernc.org/sqlite"
+
 	c5 "otsec.local/otsec/contracts/store"
 )
 
@@ -159,8 +161,37 @@ func (e *Env) FreeBytes(ctx context.Context) (int64, error) {
 }
 
 // Open opens the database, creating it if absent.
+// An open that failed only because another connection held the database
+// busy or locked past busy_timeout is c5.CodeOpenBusy, which C5 0.2's
+// Resume retries; every other failure is returned as it is.
 func (e *Env) Open(ctx context.Context) (c5.RecoveryStore, error) {
-	return open(ctx, e.Path(), e.opt)
+	st, err := open(ctx, e.Path(), e.opt)
+	if err != nil && busy(err) {
+		return nil, &c5.Error{Code: c5.CodeOpenBusy, Detail: "database busy or locked", Err: err}
+	}
+	return st, err
+}
+
+// SQLite's primary result codes for a database another connection holds
+// (https://sqlite.org/rescode.html). Extended codes, such as 261
+// SQLITE_BUSY_RECOVERY, carry the primary code in their low byte.
+const (
+	sqliteBusy   = 5
+	sqliteLocked = 6
+)
+
+// busy reports whether err is SQLite's own SQLITE_BUSY or SQLITE_LOCKED,
+// in any extended form, read from the driver's error code, never its text.
+func busy(err error) bool {
+	var se *sqlite.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch se.Code() & 0xff {
+	case sqliteBusy, sqliteLocked:
+		return true
+	}
+	return false
 }
 
 // AsDB returns the *DB behind a RecoveryStore that Open returned. The node

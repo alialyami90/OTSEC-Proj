@@ -1,4 +1,4 @@
-# C5 `otsec.store/0.1`: store, outbox and delivery semantics
+# C5 `otsec.store/0.2`: store, outbox and delivery semantics
 
 Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24; revised for A4's review ([reviews/C5-A4.md](reviews/C5-A4.md)), A3's review (`reviews/C5-A3.md`, PR #37), A6's review (`reviews/C5-A6.md`, PR #40) and A1's decisions D1-3 to D1-5 and D1-11.
 
@@ -92,7 +92,8 @@ Common to both, and to `failed`:
 
 - **Collection stops at the device.** `Mode.AcceptsEvents` is true only in `collecting`. In every other mode the collector stops pulling SER, so records stay in the relay's own buffer. If that buffer wraps before collection resumes, the next collection reports the loss as a C4 `ser.gap` event, never as silence. Syslog stream listeners refuse new data, and datagram listeners drop and count it (section 6).
 - **Every mode change is reported** on the node's health surface, as a C4 platform event on `platform/health`, and as an audit record. `ModeChangeOf(prev, next, at)` gives the change with the alarms that caused it. The health type is `store.mode-changed` (to be confirmed with A4 as part of C4's open `store.*` set). The audit record is C8's action `store.mode_change`, with the new mode as `reason_code` and the alarms in `detail` (A3).
-- `failed` has no exit except a restart. `Resume` leaves `failed` and `collecting` unchanged (`TestResumeLeavesOtherModesAlone`).
+- `failed` has no exit except a restart, with one exception since 0.2. `Resume` leaves `collecting` unchanged, and `failed` too, unless the open was only busy (`TestResumeLeavesOtherModesAlone`, `TestResumeLeavesOtherFailuresAlone`).
+- **0.2, a busy open (P3-A5).** When `StartupEnv.Open` fails only because another connection held the database busy or locked past the store's busy timeout, it returns `open-busy` (`CodeOpenBusy`). The implementation sets that code from SQLite's own result code (`SQLITE_BUSY` or `SQLITE_LOCKED`, in any extended form), never from error text. `Report.OpenBusy` is true for such a report, and `Resume` re-runs steps 4 to 8 under the lock it already holds. The reserves were released before that open, so steps 2 and 3 are not repeated. A retry that meets a busy database again stays `failed` with `OpenBusy`. A retry short of headroom goes to `blocked`, as a first open would. Every other failure stays terminal: lock, inspection, release, settings, integrity, and an open that failed for any other reason, including a file that is not a database. The node retries at most once per tick (`TestResumeRetriesBusyOpen`, `TestResumeBusyOpenBelowHeadroom`; the store's `TestOpenBusyIsTyped`).
 
 **Nothing else opens the store before recovery completes, or after.** The lock from step 1 is held for the life of the node. Support tools and the UI read through the node, never the files. Phase 2 has to choose the OS mechanism for this. *(proposed)* There are two layers:
 
