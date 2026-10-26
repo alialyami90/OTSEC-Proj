@@ -32,3 +32,19 @@ A3's condition on #150, recorded here: before any device-observed Syslog listene
 ## D3-4: the register envelope accepts every minor the reader decodes (C3 0.2, #156)
 
 Date: 2026-10-26. `authz.VerifyRegisterPackage` compared the envelope's `contract` to `register.ContractID` exactly, so after an upgrade to C3 0.2 every 0.1-stamped envelope in a collector configuration would be refused until re-stamped (SC-18). The envelope is a wrapper; what carries security is the signed payload, which names its own contract and is validated by `register.Validate`, and the anti-rollback floor. **Ruling:** the envelope check accepts any contract in `register.Readable`, with a test that a 0.1 envelope around a 0.1 payload still verifies. A3 owns the line and reviews it on #156, or lands it as its own PR before the Phase 3 gate; if A3 shows a security reason for the exact match, the release note stands instead.
+
+## D3-5: plaintext Syslog receive is allowed, enabled per listener (owner decision)
+
+Date: 2026-10-26. The owner answered A1's question on #150 ("Allow plaintext Syslog (UDP/TCP) receive outside the lab, or TLS only?") with **"Allow plaintext, per listener."** Consequences:
+
+- A4's listener (#150) is unchanged: `Config.Plaintext` is the switch for RFC 6587 TCP and RFC 5426 UDP, and TLS (RFC 5425) is the default.
+- A5's node configuration (#154) carries the setting per listener. It is never implied by the lab flag alone, a plaintext listener is shown in health and recorded at start, and a configuration with no explicit setting is TLS.
+- The reason is evidence: SEL-2488 and SEL-2730M Syslog is documented as UDP (#149), and many fielded devices cannot send TLS. A plaintext listener's messages keep the evidence class the listener is configured with and carry `sender.transport` so an analyst can see they were not authenticated.
+- Unchanged: the D2-4/D2-10 loopback lock on collection endpoints until the hardware gate, A3's unknown-sender condition (D3-3) before any device-observed listener, and the binding rule that plaintext never raises binding confidence.
+
+## D3-6: the audit chain must show a restart the busy-open retry made invisible (#147)
+
+Date: 2026-10-26. A6's independent check of the node's busy-open retry (#147) passed on two conditions. Both land in #147, not as follow-ups, because #147 is what makes each path reachable:
+
+1. The only new path that lifts an asset's halt (`reload` after the retry opened `evidence.db`) had no test of the D2-15 control, that an unauthorized-line quarantine keeps the asset halted. A5 adds both halves (stays halted with `collection-disabled`; resumes when no such line exists).
+2. When `audit.db` was busy at start, the process's `service.start` and `store.mode_change` records were never written, so the chain shows "audit: failed to collecting" with no record that the node restarted; before #147 a failed audit database kept the node down. When the retry opens `audit.db`, the node writes the unrecorded records with their original times before any run, or, if a chain ordering rule forbids that, one record naming them. The "not recorded" alarm gets its own code instead of `audit-store-full`.
