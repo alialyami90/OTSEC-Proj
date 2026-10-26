@@ -20,6 +20,7 @@ An administrator sets the path. It is never taken from what the far end reports.
 | `path: port-server` | "is behind a port server, refused until its timeouts have evidence (H-13)" |
 | a path this reader does not know (raw struct) | "path ... is not one this reader knows" |
 | a Syslog endpoint | "the node only listens on" it |
+| a transport this reader does not know, even with `path: direct` | "transport ... is not one this reader knows" (A6 on #149) |
 
 This is A1's ruling (a), strict: D2-16 says "refused like a port server once the field exists", with no carve-out for simulated targets.
 

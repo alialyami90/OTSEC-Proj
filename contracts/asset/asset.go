@@ -135,12 +135,17 @@ var ErrPathRefused = errors.New("refused like a port server (D2-16)")
 // CheckPath reports whether the node may open a session on the endpoint.
 // Only a direct path is allowed. A port-server path is refused until there
 // is evidence of how a port server's timeouts interact with the device's
-// (H-13); an endpoint with no path, which every 0.1 record has, and a path
-// this reader does not know are refused the same way, so an existing node's
+// (H-13); an endpoint with no path, which every 0.1 record has, a path
+// this reader does not know, and a transport it does not know are refused
+// the same way, so an existing node's
 // endpoints are refused after an upgrade until an administrator sets the
 // path (D2-16). Call it before connecting, never after.
 func (ep Endpoint) CheckPath() error {
 	switch {
+	case !contains(Transports, ep.Transport):
+		// A transport from a later minor is not assumed to be one the node
+		// dials (A6 on #149).
+		return fmt.Errorf("asset: endpoint %s transport %q is not one this reader knows: %w", ep.ID, ep.Transport, ErrPathRefused)
 	case ep.Transport.Inbound():
 		return fmt.Errorf("asset: endpoint %s is a %s endpoint the node only listens on: %w", ep.ID, ep.Transport, ErrPathRefused)
 	case ep.Path == Direct:

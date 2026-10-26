@@ -325,6 +325,10 @@ func TestCheckPath(t *testing.T) {
 	}
 	unknown := load(t, "sel-751-simulated.json").Endpoints[0]
 	unknown.Path = "jump-host" // a raw struct, not read through Decode
+	upper := load(t, "sel-751-simulated.json").Endpoints[0]
+	upper.Path = "Direct"
+	transport := load(t, "sel-751-simulated.json").Endpoints[0]
+	transport.Transport = "modbus-tcp" // direct, on a transport this reader does not know
 	for name, c := range map[string]struct {
 		ep   Endpoint
 		want string
@@ -332,6 +336,8 @@ func TestCheckPath(t *testing.T) {
 		"0.1 record":  {old.Endpoints[0], "endpoint port1-telnet has no path"},
 		"port server": {load(t, "sel-751-port-server.json").Endpoints[0], "is behind a port server"},
 		"unknown":     {unknown, `path "jump-host" is not one this reader knows`},
+		"upper case":  {upper, `path "Direct" is not one this reader knows`},
+		"transport":   {transport, `transport "modbus-tcp" is not one this reader knows`},
 		"syslog":      {load(t, "sel-rtac-syslog.json").Endpoints[0], "the node only listens on"},
 	} {
 		err := c.ep.CheckPath()
