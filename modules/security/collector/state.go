@@ -115,7 +115,8 @@ type assetState struct {
 	// then confirmed the login, and the session has not since ended with
 	// QUI. Empty when no authentication is pending and no Level 1 is open.
 	UnconfirmedAuthUTC string `json:"unconfirmed_auth_utc,omitempty"`
-	// LevelOpen is set from "=>" until the session sends QUI (D2-16, A6).
+	// LevelOpen is set from "=>" until the session has closed after QUI
+	// (D2-16, A6).
 	// A process that dies in between leaves it set: the relay may keep
 	// Level 1 until TIDLE after the last line, which was no later than
 	// the death, so the next process counts the floor from when it opened
