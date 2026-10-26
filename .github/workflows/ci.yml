@@ -27,6 +27,14 @@ jobs:
         run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^platform/experiments/'))"
       - run: go vet ./...
       - run: go test ./...
+      # The CNG key tests (A3, #157) make machine keys, so they need an
+      # elevated process; the hosted Windows runner is one. Here they must
+      # run, never skip, and -v shows that they did (A1).
+      - name: nodekey CNG tests
+        if: runner.os == 'Windows'
+        env:
+          OTSEC_REQUIRE_ELEVATED: "1"
+        run: go test -count=1 -run TestCNG -v ./modules/security/nodekey
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15
