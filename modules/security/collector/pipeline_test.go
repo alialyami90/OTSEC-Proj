@@ -150,9 +150,10 @@ func newPipeline(t *testing.T, opts ...pipeOption) *pipeFixture {
 		NodeID: testNode, PolicyVersion: policyVersion,
 		Assets: []Enrolled{{Asset: simAsset(t), Profile: simProfile(t)}},
 		State:  f.state, Creds: f.store, Registers: f.registers, Runner: f.runner,
-		Now:   f.clock.now,
-		NewID: func() string { return pipeInvocation },
-		Alarm: func(err error) { f.alarmMu.Lock(); f.alarms = append(f.alarms, err); f.alarmMu.Unlock() },
+		AdminKeys: []authz.AdminKey{testAdminKey()},
+		Now:       f.clock.now,
+		NewID:     func() string { return pipeInvocation },
+		Alarm:     func(err error) { f.alarmMu.Lock(); f.alarms = append(f.alarms, err); f.alarmMu.Unlock() },
 	}
 	for _, o := range opts {
 		o(&cfg, f)
@@ -188,7 +189,13 @@ func pipeRun(op, cred string) *authz.CollectorRequest {
 	}
 }
 
+// installRequest is the administrator's signed install of secret as ref.
 func installRequest(t *testing.T, f *pipeFixture, ref authz.CredentialRef, secret []byte) *authz.CollectorRequest {
+	return f.signed(t, bareInstall(t, f, ref, secret))
+}
+
+// bareInstall is the install with its body in the clear, as C7 0.3 sent it.
+func bareInstall(t *testing.T, f *pipeFixture, ref authz.CredentialRef, secret []byte) *authz.CollectorRequest {
 	return &authz.CollectorRequest{
 		Contract: authz.ContractID, Kind: authz.KindCredentialInstall, RequestID: "req-install",
 		OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion,
@@ -546,17 +553,18 @@ func TestCredentialRequests(t *testing.T) {
 	f.store.Suspend(pipeCred, 2, authz.SuspendOperator)
 	clear := &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialClearSusp, RequestID: "req-clear",
 		OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion, CredentialClearSusp: &authz.CredentialClearSuspBody{RefID: pipeCred, Version: 2}}
-	if reply, _ := f.pipe.Handle(ctx, clear); !reply.Accepted() {
+	if reply, _ := f.pipe.Handle(ctx, f.signed(t, clear)); !reply.Accepted() {
 		t.Fatalf("clear: %+v", reply)
 	}
 	revoke := &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialRevoke, RequestID: "req-revoke",
 		OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion, CredentialRevoke: &authz.CredentialRevokeBody{RefID: pipeCred, Reason: authz.RevokeOperator}}
-	if reply, _ := f.pipe.Handle(ctx, revoke); !reply.Accepted() {
+	if reply, _ := f.pipe.Handle(ctx, f.signed(t, revoke)); !reply.Accepted() {
 		t.Fatalf("revoke: %+v", reply)
 	}
-	sched := *revoke
+	// A schedule cannot send one: the signed principal is a person.
+	sched := *f.signed(t, revoke)
 	sched.OnBehalfOf = schedule
-	if reply, _ := f.pipe.Handle(ctx, &sched); refusalOf(reply) != authz.RefusePrincipal {
+	if reply, _ := f.pipe.Handle(ctx, &sched); refusalOf(reply) != authz.RefuseAdminUnverified {
 		t.Fatalf("revoke by a schedule: %+v", reply)
 	}
 }
