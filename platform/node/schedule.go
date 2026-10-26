@@ -716,7 +716,10 @@ func noDecisionDetail(err error) string {
 	case errors.Is(err, collectorclient.ErrProtocol):
 		return "the collector's reply breaks C7"
 	case errors.Is(err, collectorwire.ErrPeerRefused):
-		return "the collector's identity was refused"
+		// The reason comes from the node's own OS calls (OpenProcess,
+		// OpenProcessToken, the SID check), not from the collector, so
+		// it is shown (A3 on #179).
+		return "the collector's identity was refused: " + err.Error()
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return "no reply before the deadline"
 	}

@@ -34,11 +34,19 @@ const (
 	MinUnknownBytes = 256 << 10
 	MaxUnknownBytes = 1 << 20
 	// ReceivedRecordFactor and ReceivedRecordOverhead bound the stored
-	// event of one received frame: at most factor × frame + overhead
-	// bytes. Measured on 8192-byte frames (simulated): 1.44× for random
+	// event of any frame a listener accepts: at most ReceivedRecordBound
+	// (factor × MaxMessage + overhead) bytes. It is a bound over the
+	// listener's MaxMessage, not per frame: a small frame can store at far
+	// more than factor × its own size, since a dialect's fields copy its
+	// text (a 1024-byte RTAC frame of '<' stores as 19985 bytes, A6 on
+	// #174). Measured on 8192-byte frames (simulated): 1.44× for random
 	// bytes, 2.5× for ASCII text, 3.5× for quotes and 7.48× for control
 	// characters or '<', which the JSON encoder escapes to six bytes in
-	// the normalized message.
+	// the normalized message. The node's listeners use MaxMessage 8192,
+	// where the worst frame measured stores at 61201 of 69632 bytes; at
+	// receive's minimum of 2048 the margin is small, 19985 of 20480 in
+	// A6's measurement (TestReceivedRecordBound pins both). A
+	// configurable MaxMessage would need a larger overhead first.
 	ReceivedRecordFactor   = 8
 	ReceivedRecordOverhead = 4 << 10
 )
@@ -50,8 +58,14 @@ const (
 	streamQueue      = 64
 )
 
+// ReceivedRecordBound is the largest stored event of a frame a listener
+// with this MaxMessage accepts.
+func ReceivedRecordBound(maxMessage int64) int64 {
+	return ReceivedRecordFactor*maxMessage + ReceivedRecordOverhead
+}
+
 // HeldBatchBytes is the largest stream batch a listener may hold for the
-// store: Queue frames of MaxMessage, each at its record bound.
+// store: Queue frames, each at its record bound.
 const HeldBatchBytes = streamQueue * (ReceivedRecordFactor*streamMaxMessage + ReceivedRecordOverhead)
 
 // listenerClass is the C5 class a listener's stream takes (Layout).

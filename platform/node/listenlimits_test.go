@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -8,7 +9,9 @@ import (
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/telemetry/normalize"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
 
@@ -278,5 +281,54 @@ func TestTargetSmallForListeners(t *testing.T) {
 	}
 	if got := raised(false); len(got) != 0 {
 		t.Fatalf("without listeners: %+v", got)
+	}
+}
+
+// The stored event of any frame a listener accepts stays within
+// ReceivedRecordBound of its MaxMessage, at the node's 8192 and at
+// receive's minimum of 2048, where small frames come nearest (A6 on
+// #174): hostile fills in each dialect's longest fields, the RTAC Logger's
+// tag at its 1024-byte packet limit, and the truncated flag a listener
+// adds. A4's normalize TestSyslogSizeBounds covers more shapes at 8192.
+func TestReceivedRecordBound(t *testing.T) {
+	const (
+		h3164 = "<13>Oct 26 12:00:00 host app: "
+		h5424 = "<13>1 2026-10-26T12:00:00Z host app - - "
+		hRTAC = "<190>Mar 21 2015 12:10:08 SEL-3530-xxxxxx RTAC Logger: 2015-03-21 12:09:58.593, I, S, "
+	)
+	for _, maxMessage := range []int64{2048, streamMaxMessage} {
+		cut := func(s string) []byte { return []byte(s[:min(len(s), int(maxMessage))]) }
+		bound := ReceivedRecordBound(maxMessage)
+		var worst int
+		for _, c := range []string{"<", `"`, `\`, "]", "\x01", "\xff", "a"} {
+			fill := strings.Repeat(c, int(maxMessage))
+			frames := [][]byte{
+				cut(h3164 + fill),
+				cut(h5424 + "- " + fill),
+				cut(h5424 + `[x@1 a="` + fill[:int(maxMessage)-len(h5424)-12] + `"]`),
+				cut(fill),
+				cut(hRTAC + strings.Repeat(c, 1024-len(hRTAC)-3) + ", m"),
+			}
+			for _, frame := range frames {
+				for _, d := range normalize.Dialects {
+					e, err := normalize.Syslog(normalize.SyslogInput{Node: "site-a-node1", Stream: "syslog/l0", Message: frame,
+						Sender: "127.0.0.1", Auth: event.AuthNone, EvidenceClass: asset.Simulated, Dialect: d,
+						Flags:    []string{normalize.FlagTruncated},
+						Received: event.Received{UTC: "2026-10-26T15:00:00.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}})
+					if err != nil {
+						t.Fatalf("%d-byte frame %q, %s: %v", len(frame), frame[:16], d, err)
+					}
+					b, err := json.Marshal(e)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if int64(len(b)) > bound {
+						t.Errorf("MaxMessage %d: %d-byte frame %q (%s) stores as %d bytes, bound %d", maxMessage, len(frame), frame[:16], d, len(b), bound)
+					}
+					worst = max(worst, len(b))
+				}
+			}
+		}
+		t.Logf("MaxMessage %d: worst stored %d, bound %d (margin %.1f%%)", maxMessage, worst, bound, 100*float64(bound-int64(worst))/float64(bound))
 	}
 }
