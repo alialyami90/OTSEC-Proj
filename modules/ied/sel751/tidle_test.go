@@ -143,3 +143,65 @@ func TestTIDLENil(t *testing.T) {
 		t.Fatalf("status %s", res.Status)
 	}
 }
+
+// TestTIDLEOnlyAfterOKOrPartial: SHO P 1 shows TIDLE := 15 in every one of
+// these runs, but only a run that ended ok or partial reports it (P3-A2,
+// A6's acceptance; A3): a failed or refused session may have left the port
+// in a state TIDLE does not describe, so the floor stays at its longest.
+func TestTIDLEOnlyAfterOKOrPartial(t *testing.T) {
+	for g, want := range map[string]bool{
+		"ok": true, "partial.parse_errors": true, "partial.parse_errors-date-f-unknown": true,
+		"partial.read_rows_exceeded": true,
+		"failed.device_error":        false, "failed.identity_mismatch": false, "failed.access_level_dropped": false,
+		"failed.timeout": false, "refused.firmware_condition_not_met": false,
+	} {
+		t.Run(g, func(t *testing.T) {
+			f := load(t)
+			if g == "refused.firmware_condition_not_met" {
+				f.declare("firmware_id", fidR402)
+			}
+			if g == "failed.timeout" {
+				f.inv.Limits.StepTimeoutMS = 300
+			}
+			var got []time.Duration
+			res, _ := runSteps(t, f, Config{TIDLE: func(d time.Duration) { got = append(got, d) }}, script(golden(t, g)), false)
+			if !bytes.Contains(res.Transcript.Data, []byte("TIDLE   := 15")) {
+				t.Fatalf("SHO P 1 was not read: %s %+v", res.Status, res.Error)
+			}
+			if want != (res.Status == adapter.StatusOK || res.Status == adapter.StatusPartial) {
+				t.Fatalf("status %s %+v", res.Status, res.Error)
+			}
+			if reported := len(got) == 1 && got[0] == 15*time.Minute; reported != want || len(got) > 1 {
+				t.Errorf("%s: TIDLE reported %v, want %v", res.Status, got, want)
+			}
+		})
+	}
+}
+
+// TestTIDLEOnlyFromSHOP1: TIDLE is the port's, so it is taken only from the
+// reply to the read that serves the language precondition (SHO P 1). With
+// that one's TIDLE out of range or absent, a SHO G reply that shows LANG :=
+// ENGLISH and TIDLE := 1 reports nothing (A6 on #175).
+func TestTIDLEOnlyFromSHOP1(t *testing.T) {
+	for name, line := range map[string]string{"out of range": "TIDLE   := 31\r\n", "absent": ""} {
+		t.Run(name, func(t *testing.T) {
+			steps := replaceReply(t, withTIDLE(t, line), "SHO G", func(b []byte) []byte {
+				if !bytes.Contains(b, []byte("FAULT ")) {
+					t.Fatal("no FAULT line in the SHO G reply")
+				}
+				return bytes.Replace(b, []byte("FAULT "), []byte("LANG    := ENGLISH  TIDLE   := 1\r\nFAULT "), 1)
+			})
+			var got []time.Duration
+			res, _ := runSteps(t, load(t), Config{TIDLE: func(d time.Duration) { got = append(got, d) }}, steps, false)
+			if res.Status != adapter.StatusOK {
+				t.Fatalf("status %s %+v", res.Status, res.Error)
+			}
+			if !bytes.Contains(res.Transcript.Data, []byte("TIDLE   := 1\r\n")) {
+				t.Fatal("the SHO G reply's TIDLE is not in the transcript")
+			}
+			if len(got) != 0 {
+				t.Errorf("TIDLE reported %v from SHO G", got)
+			}
+		})
+	}
+}

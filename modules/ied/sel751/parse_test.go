@@ -269,6 +269,15 @@ func TestParseSettings(t *testing.T) {
 	if set["LANG"].value != "ENGLISH" || set["MAXACC"].value != "1" || set["RID"].value != "FEEDER 1" {
 		t.Errorf("%+v", set)
 	}
+	// A name may start with a digit (S22 Table 4.84: 51SAT), and is read
+	// whole: 1LANG is a setting of its own, never LANG (A6 on #85).
+	set, err = parseSettings(message{text: []byte("DATE_F   := MDY            51SAT    := Y\r\n1LANG := ENGLISH\r\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := set["LANG"]; ok || set["51SAT"].value != "Y" || set["DATE_F"].value != "MDY" || set["1LANG"].value != "ENGLISH" {
+		t.Errorf("%+v", set)
+	}
 	for name, text := range map[string]string{
 		"no value":      "MAXACC  :=\r\n",
 		"no name":       ":= 1\r\n",
@@ -281,7 +290,6 @@ func TestParseSettings(t *testing.T) {
 		"trailing words":    "LANG := ENGLISH  trailing words\r\n",
 		"lower-case prefix": "xLANG := ENGLISH\r\n",
 		"hyphenated name":   "EN-LANG := ENGLISH\r\n",
-		"digit prefix":      "1LANG := ENGLISH\r\n",
 		"value split":       "TID := FEEDER  1\r\n",
 	} {
 		if _, err := parseSettings(message{text: []byte(text)}); err == nil {

@@ -165,9 +165,9 @@ func TestCheckLinesContext(t *testing.T) {
 // a setting no context read names, is refused, though Validate passes both.
 func TestCheckLinesSettingProvenance(t *testing.T) {
 	p, inv := sel751Package(t), validInvocation(t)
-	base := loadResult(t, "ok-with-settings")
+	base := loadResult(t, "ok")
 	if err := base.CheckLines(p, inv); err != nil {
-		t.Fatalf("ok-with-settings: %v", err)
+		t.Fatalf("ok: %v", err)
 	}
 	d := base.Transcript.Data
 	at := func(needle string, after int) Span {
@@ -288,7 +288,7 @@ func TestResultCheckAgainst(t *testing.T) {
 // survives a JSON round trip byte for byte (A4 on #164): a span that takes
 // in the CR after DATE_F's value selects its bytes, and is still refused.
 func TestSettingValuePrintable(t *testing.T) {
-	r := loadResult(t, "ok-with-settings")
+	r := loadResult(t, "ok")
 	st := r.Settings[0]
 	st.Span.Length++
 	st.Value = string(r.Transcript.Data[st.Span.Offset : st.Span.Offset+st.Span.Length])

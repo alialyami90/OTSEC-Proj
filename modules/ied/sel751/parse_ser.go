@@ -3,6 +3,7 @@ package sel751
 import (
 	"errors"
 	"regexp"
+	"time"
 
 	"otsec.local/otsec/contracts/adapter"
 )
@@ -103,4 +104,26 @@ func parseSER(m message) (serReport, error) {
 		r.rows = append(r.rows, row)
 	}
 	return r, nil
+}
+
+// settingDateF is the one context read this build understands: the order
+// of the DATE column of every SER row (S22 Table 4.84 p. 4.225, p. 7.31;
+// D3-2). dateLayouts are its values, as Go layouts. That the rows follow
+// DATE_F is inferred from p. 7.31, not stated (register rev 4), so the
+// parser is documented-untested until a capture shows it (H-13).
+const settingDateF = "DATE_F"
+
+var dateLayouts = map[string]string{"MDY": "01/02/2006", "YMD": "2006/01/02", "DMY": "02/01/2006"}
+
+// dateFits reports whether date is a calendar date printed in the DATE_F
+// order named by order: two-digit month and day, four-digit year, "/"
+// between, and a day that month has. An order this build does not know
+// fits no date, so a row is never read in a guessed order.
+func dateFits(order, date string) bool {
+	layout, ok := dateLayouts[order]
+	if !ok {
+		return false
+	}
+	_, err := time.Parse(layout, date)
+	return err == nil
 }

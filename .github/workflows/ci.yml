@@ -75,10 +75,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp openssl
       - run: rsyslogd -v && openssl version
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
-      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py
+      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py --ignore=tests/integration/slice/test_slice_busy_open_e2e.py
   # The long slice files (7 to 9 minutes each), one job per file so each
   # stays inside its limit and they run beside the integration job, which
-  # ignores exactly these three (A1, #132).
+  # ignores exactly these (A1, #132; busy_open added by A6 with A1's approval).
   integration-long:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -89,6 +89,7 @@ jobs:
           - test_slice_interruptions_e2e.py
           - test_slice_buffer_e2e.py
           - test_slice_store_full_e2e.py
+          - test_slice_busy_open_e2e.py
     env:
       OTSEC_SLICE_REQUIRED: "1"
     steps:
