@@ -135,7 +135,7 @@ func chainC1(t *testing.T) {
 		return at
 	}
 	a := asset.Asset{
-		Schema:  "otsec.asset/0.1",
+		Schema:  "otsec.asset/0.2",
 		AssetID: chainAsset,
 		NodeID:  "site-a6-node-1",
 		Attributes: []asset.Attribute{
@@ -147,7 +147,7 @@ func chainC1(t *testing.T) {
 			declared("serial_number", "A6CHAIN000000001"),
 			declared("ip_address", "192.0.2.61"),
 		},
-		Endpoints: []asset.Endpoint{{ID: "port1-telnet", Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23, Target: asset.Simulated,
+		Endpoints: []asset.Endpoint{{ID: "port1-telnet", Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23, Target: asset.Simulated, Path: asset.Direct,
 			DownstreamSecurity: asset.DownstreamSecurity{Level: asset.SecurityLevel("plaintext-unauthenticated"),
 				Acknowledgement: &asset.Acknowledgement{By: "admin:a6", At: at, Reason: "A6 chain test, simulated, lab only", Scope: asset.AckScope("lab-only")}}}},
 		IdentityBinding: asset.IdentityBinding{Method: asset.BindingMethod("device-reported"), Strength: asset.BindingStrength("spoofable"),

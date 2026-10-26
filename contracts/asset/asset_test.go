@@ -2,6 +2,7 @@ package asset
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,12 +25,15 @@ var invalidWant = map[string]string{
 	"binding-attribute-not-declared":              `"sel.cid" has no operator-declared value`,
 	"platform-node-on-relay":                      "platform_node is allowed only",
 	"os-out-of-support-without-condition":         "needs the standing condition",
-	"unknown-device-class-at-0.1":                 "is not one of the 0.1 values",
+	"unknown-device-class-at-0.1":                 "is not one of the 0.2 values",
+	"path-at-0.1":                                 "path is not in otsec.asset/0.1",
+	"unknown-path-in-own-minor":                   `path "jump-host" is not one of the 0.2 values`,
+	"path-on-syslog-endpoint":                     "path is set on a syslog-udp endpoint",
 	"unprefixed-unknown-attribute":                `name "cid" is neither`,
 	"simulator-value-labelled-device":             "go together",
 	"session-observation-without-span":            "needs the transcript span",
 	"missing-vendor":                              `required attribute "vendor"`,
-	"other-major":                                 "not readable as otsec.asset/0.1",
+	"other-major":                                 "not readable as otsec.asset/0.2",
 	"asset-id-from-device-content":                "is not a lowercase UUID",
 	"serial-labelled-encrypted":                   "serial is plaintext-unauthenticated",
 	"ssh-authenticated-without-pinned-key":        "only pinned-key authenticates the device",
@@ -290,16 +294,56 @@ func TestLaterMinorReadsDown(t *testing.T) {
 	if a := load(t, "later-minor.json"); a.DeviceClass() != FallbackDeviceClass {
 		t.Errorf("unknown device class read as %q", a.DeviceClass())
 	}
-	// A valid 0.1 record reads unchanged.
-	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "sel-751-simulated.json"))
-	var raw Asset
-	if err := json.Unmarshal(b, &raw); err != nil {
-		t.Fatal(err)
+	if a := load(t, "later-minor-unknown-path.json"); a.Endpoints[0].Path != FallbackPath || a.Endpoints[0].CheckPath() == nil {
+		t.Errorf("unknown path read as %q", a.Endpoints[0].Path)
 	}
-	got, _ := json.Marshal(load(t, "sel-751-simulated.json"))
-	want, _ := json.Marshal(raw)
-	if string(got) != string(want) {
-		t.Error("Decode changed a valid 0.1 record")
+	// A valid record of this minor or an earlier one reads unchanged.
+	for _, name := range []string{"sel-751-simulated.json", "sel-751-at-0.1.json"} {
+		b, _ := os.ReadFile(filepath.Join("testdata", "valid", name))
+		var raw Asset
+		if err := json.Unmarshal(b, &raw); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := json.Marshal(load(t, name))
+		want, _ := json.Marshal(raw)
+		if string(got) != string(want) {
+			t.Errorf("Decode changed %s", name)
+		}
+	}
+}
+
+// Only a direct path gets a session. No path (a 0.1 record), a port server
+// and a path this reader does not know are each refused with their own
+// reason, all wrapping ErrPathRefused (D2-16, H-13).
+func TestCheckPath(t *testing.T) {
+	if err := load(t, "sel-751-simulated.json").Endpoints[0].CheckPath(); err != nil {
+		t.Fatalf("direct refused: %v", err)
+	}
+	old := load(t, "sel-751-at-0.1.json")
+	if old.Schema != "otsec.asset/0.1" {
+		t.Fatalf("example is %s", old.Schema)
+	}
+	unknown := load(t, "sel-751-simulated.json").Endpoints[0]
+	unknown.Path = "jump-host" // a raw struct, not read through Decode
+	upper := load(t, "sel-751-simulated.json").Endpoints[0]
+	upper.Path = "Direct"
+	transport := load(t, "sel-751-simulated.json").Endpoints[0]
+	transport.Transport = "modbus-tcp" // direct, on a transport this reader does not know
+	for name, c := range map[string]struct {
+		ep   Endpoint
+		want string
+	}{
+		"0.1 record":  {old.Endpoints[0], "endpoint port1-telnet has no path"},
+		"port server": {load(t, "sel-751-port-server.json").Endpoints[0], "is behind a port server"},
+		"unknown":     {unknown, `path "jump-host" is not one this reader knows`},
+		"upper case":  {upper, `path "Direct" is not one this reader knows`},
+		"transport":   {transport, `transport "modbus-tcp" is not one this reader knows`},
+		"syslog":      {load(t, "sel-rtac-syslog.json").Endpoints[0], "the node only listens on"},
+	} {
+		err := c.ep.CheckPath()
+		if err == nil || !errors.Is(err, ErrPathRefused) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q wrapping ErrPathRefused", name, err, c.want)
+		}
 	}
 }
 
@@ -342,7 +386,8 @@ func TestCredentialAllowed(t *testing.T) {
 	}
 }
 
-// A 0.1 record is read strictly; only a later minor may add fields (S-1).
+// A record of this minor or an earlier one is read strictly; only a later
+// minor may add fields (S-1).
 func TestOwnMinorIsStrict(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "sel-751-simulated.json"))
 	var m map[string]any
@@ -350,7 +395,7 @@ func TestOwnMinorIsStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	m["zz_new"] = 1
-	for schema, ok := range map[string]bool{"otsec.asset/0.1": false, "otsec.asset/0.0": false, "otsec.asset/0.2": true} {
+	for schema, ok := range map[string]bool{"otsec.asset/0.2": false, "otsec.asset/0.1": false, "otsec.asset/0.0": false, "otsec.asset/0.3": true} {
 		m["schema"] = schema
 		b, _ := json.Marshal(m)
 		if _, err := Decode(b); (err == nil) != ok {

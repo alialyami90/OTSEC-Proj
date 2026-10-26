@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.2"
+const ContractID = "otsec.audit/0.3"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -131,7 +131,11 @@ const (
 	ActionCollectorSeqResetAck Action = "collector.seq_reset_ack" // an admin acknowledged a reset on the key they confirmed
 	ActionAssetSuspend         Action = "asset.suspend"           // the node suspended an asset (C1 Suspension)
 	ActionAssetSuspensionClear Action = "asset.suspension_clear"  // an admin cleared an asset suspension
-	ActionUnrecognized         Action = "unrecognized"            // reader fallback only; never written
+	// 0.3 (P3-A5 quarantine export and clear, A1 D3-1). Both are written by
+	// the node.
+	ActionQuarantineExported Action = "quarantine.exported" // the node verified an export manifest against its quarantine stream
+	ActionQuarantineCleared  Action = "quarantine.cleared"  // the node applied an administrator's quarantine clear, before removing anything
+	ActionUnrecognized       Action = "unrecognized"        // reader fallback only; never written
 )
 
 var actions = map[Action]bool{}
@@ -146,6 +150,7 @@ func init() {
 		ActionClockChange, ActionStorageAlarm, ActionServiceStart, ActionServiceStop,
 		ActionStoreModeChange, ActionNodePostureChange, ActionNodeMigrationDate, ActionAssetCollectorAssign,
 		ActionCollectorInstallKey, ActionCollectorSeqReset, ActionCollectorSeqResetAck, ActionAssetSuspend, ActionAssetSuspensionClear,
+		ActionQuarantineExported, ActionQuarantineCleared,
 	} {
 		actions[a] = true
 	}
@@ -155,6 +160,7 @@ func init() {
 // stamped with an earlier minor cannot carry it.
 var actionSince = map[Action]int{
 	ActionCollectorInstallKey: 2, ActionCollectorSeqReset: 2, ActionCollectorSeqResetAck: 2, ActionAssetSuspend: 2, ActionAssetSuspensionClear: 2,
+	ActionQuarantineExported: 3, ActionQuarantineCleared: 3,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -232,7 +238,40 @@ type Record struct {
 	// The suspension's ref (the C2 invocation ID, or the operator principal
 	// for reason operator) is correlation_id.
 	Suspension *Suspension `json:"suspension,omitempty"`
+	// Quarantine is on quarantine.exported and quarantine.cleared only
+	// (0.3). The stream is quarantine/<target.asset_id>.
+	Quarantine *Quarantine `json:"quarantine,omitempty"`
 }
+
+// Quarantine names one verified export of an asset's quarantine stream
+// (P3-A5): the manifest the node checked, and the range of the stream it
+// lists. Every stored seq in first_seq..last_seq is listed, and only those
+// (items of them), so the range names exactly the verified set; a clear
+// removes only seqs in it.
+type Quarantine struct {
+	// ManifestSHA256 is the SHA-256 of the manifest's bytes as the node
+	// read them, lowercase hex.
+	ManifestSHA256 string `json:"manifest_sha256"`
+	FirstSeq       uint64 `json:"first_seq"`
+	LastSeq        uint64 `json:"last_seq"`
+	// Items is how many seqs the manifest lists, at least one and at most
+	// the range's length.
+	Items uint64 `json:"items"`
+	// ClearSHA256 is the SHA-256 of the clear-quarantine.json bytes the
+	// node applied, lowercase hex. On quarantine.cleared only, required
+	// there.
+	ClearSHA256 string `json:"clear_sha256,omitempty"`
+	// RequestedBy is the principal clear-quarantine.json names. On
+	// quarantine.cleared only, required there. The file is not signed, so
+	// this is what the file says, not who wrote it: the actor stays the
+	// node, as on asset.suspension_clear, until a signed admin request
+	// replaces the file.
+	RequestedBy string `json:"requested_by,omitempty"`
+}
+
+// ReasonAlreadyCleared is quarantine.cleared's reason_code when the chain
+// already holds a clear of the same manifest: the file changed nothing.
+const ReasonAlreadyCleared = "already_cleared"
 
 // Suspension names a C1 asset suspension on asset.suspend and
 // asset.suspension_clear.
@@ -424,6 +463,7 @@ func (r *Record) validateNodeState() error {
 	reset := r.Action == ActionCollectorSeqReset
 	ack := r.Action == ActionCollectorSeqResetAck || r.Action == ActionCollectorInstallKey
 	susp := r.Action == ActionAssetSuspend || r.Action == ActionAssetSuspensionClear
+	quar := r.Action == ActionQuarantineExported || r.Action == ActionQuarantineCleared
 	if (r.PreviousHigh != nil || r.FirstSeen != 0) && !reset {
 		return fmt.Errorf("audit: previous_high and first_seen belong on %s, not %s", ActionCollectorSeqReset, r.Action)
 	}
@@ -432,6 +472,12 @@ func (r *Record) validateNodeState() error {
 	}
 	if r.Suspension != nil && !susp {
 		return fmt.Errorf("audit: suspension belongs on %s and %s, not %s", ActionAssetSuspend, ActionAssetSuspensionClear, r.Action)
+	}
+	if r.Quarantine != nil && !quar {
+		return fmt.Errorf("audit: quarantine belongs on %s and %s, not %s", ActionQuarantineExported, ActionQuarantineCleared, r.Action)
+	}
+	if quar {
+		return r.validateQuarantine()
 	}
 	if !reset && !ack && !susp {
 		return nil
@@ -464,6 +510,52 @@ func (r *Record) validateNodeState() error {
 	}
 	if (reset || ack) && !idPattern.MatchString(r.InstallKeyID) {
 		return fmt.Errorf("audit: %s needs install_key_id", r.Action)
+	}
+	return nil
+}
+
+// validateQuarantine checks the 0.3 quarantine actions. Both are written by
+// the node, about one asset, with the verified range. quarantine.exported
+// is info. quarantine.cleared is succeeded when the clear passed every
+// check and is recorded before anything is removed (audit before act; the
+// removal is resumed from this record), or info with reason
+// already_cleared when the chain already held a clear of the manifest and
+// the file changed nothing.
+func (r *Record) validateQuarantine() error {
+	q := r.Quarantine
+	if r.Actor.Type != authz.PrincipalNode {
+		return fmt.Errorf("audit: %s is written by the node (actor type node)", r.Action)
+	}
+	if r.Target == nil || !assetIDPattern.MatchString(r.Target.AssetID) {
+		return fmt.Errorf("audit: %s needs a target asset", r.Action)
+	}
+	if q == nil || !hashPattern.MatchString(q.ManifestSHA256) {
+		return fmt.Errorf("audit: %s needs quarantine.manifest_sha256", r.Action)
+	}
+	if q.FirstSeq == 0 || q.LastSeq < q.FirstSeq || q.Items == 0 || q.Items > q.LastSeq-q.FirstSeq+1 {
+		return fmt.Errorf("audit: %s range %d..%d with %d items", r.Action, q.FirstSeq, q.LastSeq, q.Items)
+	}
+	switch r.Action {
+	case ActionQuarantineExported:
+		if r.Outcome != OutcomeInfo {
+			return errors.New("audit: quarantine.exported has outcome info")
+		}
+		if q.ClearSHA256 != "" || q.RequestedBy != "" {
+			return errors.New("audit: clear_sha256 and requested_by belong on quarantine.cleared")
+		}
+	case ActionQuarantineCleared:
+		switch {
+		case r.Outcome == OutcomeSucceeded && r.ReasonCode == "":
+		case r.Outcome == OutcomeInfo && r.ReasonCode == ReasonAlreadyCleared:
+		default:
+			return errors.New("audit: quarantine.cleared is succeeded, or info with reason already_cleared")
+		}
+		if !hashPattern.MatchString(q.ClearSHA256) {
+			return errors.New("audit: quarantine.cleared needs quarantine.clear_sha256")
+		}
+		if err := (authz.Principal{Type: authz.PrincipalHuman, ID: q.RequestedBy}).Validate(); err != nil {
+			return fmt.Errorf("audit: quarantine.cleared requested_by: %w", err)
+		}
 	}
 	return nil
 }

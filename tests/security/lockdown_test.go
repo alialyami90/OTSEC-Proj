@@ -3,6 +3,7 @@ package security
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"otsec.local/otsec/platform/node"
@@ -88,6 +89,9 @@ func TestD210NodeRefusesUnscheduledEndpoint(t *testing.T) {
 			second[k] = v
 		}
 		second["id"], second["transport"], second["host"], second["port"] = "port2", transport, host, port
+		if strings.HasPrefix(transport, "syslog-") {
+			delete(second, "path") // C1 0.2: a Syslog endpoint has no path
+		}
 		c.Assets[0]["endpoints"] = append(eps, second)
 		return c.Bytes()
 	}
