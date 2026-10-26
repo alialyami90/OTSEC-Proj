@@ -297,6 +297,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	}
 	fmt.Fprintf(w, "node %s, status written %s\n", st.Node, st.Written.Format(time.RFC3339))
 	fmt.Fprintf(w, "collecting: %v\n", st.Collecting)
+	if st.RunsHeld != "" {
+		fmt.Fprintf(w, "RUNS HELD: %s; every run on this node is stopped while this line shows\n", safe(st.RunsHeld))
+	}
 	for _, db := range sortedDBs(st.Modes) {
 		fmt.Fprintf(w, "database %s: %s\n", db, st.Modes[db])
 	}
