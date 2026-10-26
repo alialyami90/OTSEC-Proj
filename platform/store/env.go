@@ -184,10 +184,13 @@ const (
 // in any extended form, read from the driver's error code, never its text.
 func busy(err error) bool {
 	var se *sqlite.Error
-	if !errors.As(err, &se) {
-		return false
-	}
-	switch se.Code() & 0xff {
+	return errors.As(err, &se) && busyCode(se.Code())
+}
+
+// busyCode reports whether a SQLite result code, primary or extended, is
+// SQLITE_BUSY or SQLITE_LOCKED.
+func busyCode(code int) bool {
+	switch code & 0xff {
 	case sqliteBusy, sqliteLocked:
 		return true
 	}

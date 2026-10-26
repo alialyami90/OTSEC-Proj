@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/contracts/syslog/0.1/target.json",
-  "title": "otsec.syslog/0.1 target",
+  "$id": "https://otsec.local/contracts/syslog/0.3/target.json",
+  "title": "otsec.syslog/0.3 target",
   "description": "C6 forwarding target. Strict: unknown fields are rejected. Rules that need more than one field (required only on relp-tls, framing per transport, size limit per format and transport, TLS settings exactly on TLS transports, relp_window in mode A, replay_seconds in mode B, audit only on required relp-tls, client_credential_ref on required and audit targets, durable_ack exactly on required targets, acknowledgement exactly on insecure transports) are enforced by Target.Validate in Go.",
   "type": "object",
   "additionalProperties": false,

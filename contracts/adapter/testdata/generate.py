@@ -35,7 +35,7 @@ SERIAL = "SIM0000000000001"                      # invented
 SERIAL_OTHER = "SIM0000000000002"                # invented
 CID = "E754"                                      # shape from S22 Figure 7.38
 RED = b"[REDACTED]"
-REGISTER_REVISION = 3  # contracts/register/testdata/sel-751.json
+REGISTER_REVISION = 4  # contracts/register/testdata/sel-751.json
 SER_FIELDS = ["#", "DATE", "TIME", "ELEMENT", "STATE"]  # the S22 Figure 10.16 header line, as printed
 STX, ETX = b"\x02", b"\x03"
 

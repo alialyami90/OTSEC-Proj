@@ -293,3 +293,71 @@ class ScriptSer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DateFormat(unittest.TestCase):
+    """DATE_F (Table 4.84, p. 4.225): SHO G shows it, and every date the
+    responder prints follows its order (ASSUMED for SER rows, see the
+    profile's documentation)."""
+
+    FIG = profile_sel751._load("ser-fig-10-16.txt")
+
+    def reply(self, line, date_f="MDY", ser="example"):
+        r = profile_sel751.SEL751DocResponder(None, password=None, date_f=date_f, ser=ser)
+        r.handle(b"ACC")
+        return r.handle(line).out
+
+    def test_show_global_names_date_f(self):
+        for f in profile_sel751.DATE_FORMATS:
+            out = self.reply(b"SHO G", f)
+            self.assertIn(b"General Global Settings", out)
+            self.assertEqual(re.findall(rb"DATE_F\s+:= (\S+)", out), [f.encode()])
+            self.assertTrue(out.endswith(b"\r\n=>"))
+            for name in (b"PHROT", b"FNOM", b"DX1FBLK", b"METHRES", b"51SAT", b"FAULT"):
+                self.assertEqual(len(re.findall(rb"(?:^|\s)" + name + rb"\s+:= ", out)), 1, name)
+        self.assertIn(b"FAULT    := 50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP\r\n", self.reply(b"SHO G"))
+
+    def test_show_global_from_a_setting(self):
+        out = self.reply(b"SHO G DATE_F", "DMY")
+        self.assertNotIn(b"PHROT", out)
+        self.assertIn(b"DATE_F   := DMY", out)
+        self.assertIn(b"FAULT", out)
+        self.assertIn(profile_sel751.UNMODELLED, self.reply(b"SHO G NOPE"))
+
+    def test_mdy_is_figure_10_16(self):
+        self.assertEqual(self.reply(b"SER"), b"\r\n" + self.FIG + b"\r\n=>")
+
+    def test_every_date_follows_date_f(self):
+        want = {"MDY": b"02/28/2007", "YMD": b"2007/02/28", "DMY": b"28/02/2007"}
+        for f, date in want.items():
+            out = self.reply(b"SER", f)
+            dates = re.findall(rb"(?<![\d/])\d+/\d+/\d+(?![\d/])", out)
+            # The header's date and each of the eight rows'.
+            self.assertEqual(dates, [date] * 9, f)
+            # Nothing else changes: the bytes are the figure's with the dates moved.
+            self.assertEqual(out.replace(date, b"02/28/2007"), b"\r\n" + self.FIG + b"\r\n=>", f)
+
+    def test_synthesized_replies_follow_date_f(self):
+        out = self.reply(b"SER", "YMD", ser="dst")
+        self.assertIn(b"Date: 2026/11/01", out)
+        self.assertEqual(len(re.findall(rb"2026/11/01   \d\d:", out)), 6)
+        self.assertNotIn(b"11/01/2026", out)
+
+    def test_command_header_follows_date_f(self):
+        r = profile_sel751.SEL751DocResponder(None, password=None, date_f="DMY")
+        out = r.handle(b"ACC").out
+        self.assertRegex(out, rb"Date: (\d\d)/(\d\d)/\d{4} Time:")
+        d, m = re.search(rb"Date: (\d\d)/(\d\d)/", out).groups()
+        self.assertLessEqual(int(m), 12)
+        self.assertLessEqual(int(d), 31)
+
+    def test_unknown_order_refused(self):
+        with self.assertRaises(ValueError):
+            profile_sel751.SEL751DocResponder(None, date_f="mdy")
+
+    def test_reads_stay_read_only(self):
+        """A collector that reads SHO G before SER passes the recording check."""
+        login = [(b"ACC\r\n", b"Password: ?"), (PASSWORD + b"\r\n", b"=>")]
+        events, _, received, report = run(login + [(b"SHO G\r\n", b"=>"), (b"SER\r\n", b"=>"), (b"QUI\r\n", b"\r\n=")])
+        self.assertTrue(report["pass"], report)
+        self.assertIn(b"DATE_F   := MDY", received)

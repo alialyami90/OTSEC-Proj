@@ -125,7 +125,7 @@ func TestDecode(t *testing.T) {
 		"field of another object":    insert(b, `"kind": "ser",`, ` "seq": 5,`),
 		"trailing data":              append(append([]byte{}, b...), []byte(" {}")...),
 		"not an object":              []byte(`[]`),
-		"later minor, duplicate key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "severity": "a", "severity": "b",`),
+		"later minor, duplicate key": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.9"`), 1), `"kind": "ser",`, ` "severity": "a", "severity": "b",`),
 	}
 	for name, doc := range rejected {
 		if _, err := Decode(doc); !slices.Contains(Codes(err), CodeDecode) {
@@ -133,7 +133,7 @@ func TestDecode(t *testing.T) {
 		}
 	}
 	accepted := map[string][]byte{
-		"later minor, new field": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.2"`), 1), `"kind": "ser",`, ` "severity": {"level": "high"},`),
+		"later minor, new field": insert(bytes.Replace(b, []byte(`"otsec.event/0.1"`), []byte(`"otsec.event/0.9"`), 1), `"kind": "ser",`, ` "severity": {"level": "high"},`),
 	}
 	for name, doc := range accepted {
 		if _, err := Decode(doc); err != nil {
@@ -184,6 +184,10 @@ var invalid = map[string]Code{
 	"evidence-class-missing":             CodeMissing,
 	"evidence-class-not-observed":        CodeEnum,
 	"platform-event-with-evidence-class": CodeForbidden,
+	"tls-leaf-at-0.1":                    CodeForbidden,
+	"tls-leaf-without-mutual":            CodeForbidden,
+	"tls-leaf-not-hex":                   CodeEvidence,
+	"tls-mutual-without-leaf":            CodeMissing,
 }
 
 func TestInvalidExamples(t *testing.T) {
@@ -436,18 +440,23 @@ func TestSimulated(t *testing.T) {
 	if err := e.Validate(); err != nil {
 		t.Fatalf("device-observed refused: %v", err)
 	}
-	// The enum is open to later minors (A6 D1-23 review change 1): a 0.2
-	// class is kept and read as simulated; a 0.1 event takes only the two.
+	// The enum is open to later minors (A6 D1-23 review change 1): a later
+	// minor's class is kept and read as simulated; an event of this
+	// reader's minor or earlier takes only the two, at 0.1 and, since C4
+	// 0.2, at exactly 0.2 (A6, the boundary 0.2 moves).
 	e.Source.EvidenceClass = "lab-replay"
-	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("0.1 event with an unknown class validated")
+	for _, schema := range []string{"otsec.event/0.1", "otsec.event/0.2"} {
+		e.Schema = schema
+		if !slices.Contains(Codes(e.Validate()), CodeEnum) {
+			t.Errorf("%s event with an unknown class validated", schema)
+		}
 	}
-	e.Schema = "otsec.event/0.2"
+	e.Schema = "otsec.event/0.3"
 	if err := e.Validate(); err != nil || !e.Source.Simulated() {
-		t.Errorf("0.2 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
+		t.Errorf("0.3 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
 	}
 	e.Source.EvidenceClass = "Not A Token"
 	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("0.2 event with a malformed class validated")
+		t.Error("0.3 event with a malformed class validated")
 	}
 }

@@ -421,7 +421,7 @@ func (s *Scheduler) storedRange(ctx context.Context, assetID string, first, last
 	stream := QuarantineStream(assetID)
 	db := s.rt.Store(stream)
 	if db == nil {
-		return nil, errors.New("evidence database not open")
+		return nil, errEvidenceNotOpen
 	}
 	var out []c5.Stored
 	after := c5.Seq(first - 1)
@@ -637,6 +637,7 @@ func (s *Scheduler) clearDone(ctx context.Context, h, assetID string) {
 		s.mu.Lock()
 		if err == nil && !halted && s.halted[assetID] == AlarmUnauthorizedLine {
 			delete(s.halted, assetID)
+			delete(s.haltUnread, assetID)
 		}
 		s.mu.Unlock()
 		switch {
@@ -695,7 +696,7 @@ func (s *Scheduler) anyStored(ctx context.Context, assetID string, first, last u
 	stream := QuarantineStream(assetID)
 	db := s.rt.Store(stream)
 	if db == nil {
-		return false, errors.New("evidence database not open")
+		return false, errEvidenceNotOpen
 	}
 	got, err := db.Read(ctx, stream, c5.Seq(first-1), 1)
 	if err != nil {

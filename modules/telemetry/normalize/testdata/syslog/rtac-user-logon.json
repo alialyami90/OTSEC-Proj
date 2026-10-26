@@ -1,0 +1,111 @@
+{
+  "schema": "otsec.event/0.2",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "syslog/lab-tls",
+    "seq": 0
+  },
+  "origin": "device",
+  "kind": "syslog",
+  "source": {
+    "asset": {
+      "id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+      "binding": {
+        "method": "sender-address",
+        "confidence": "configured"
+      }
+    },
+    "sender": {
+      "address": "127.0.0.1",
+      "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+      "tls_leaf_sha256": "4cf4f5b1b058c022a3f463c2630eb37d2a9c039826bc7d18c6028dab9efa1e4a"
+    },
+    "origin_auth": "tls-mutual",
+    "evidence_class": "simulated"
+  },
+  "collection": {
+    "method": "syslog-receive",
+    "parser": {
+      "name": "otsec-syslog",
+      "version": "0.1"
+    },
+    "parse_status": "ok"
+  },
+  "received": {
+    "utc": "2026-10-26T15:00:00.000000Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized"
+    }
+  },
+  "device_time": {
+    "native": "2015-03-21 12:09:58.593",
+    "native_encoding": "text",
+    "format": "sel-rtac-logger",
+    "wall_clock": "2015-03-21T12:09:58.593",
+    "offset": "unknown",
+    "offset_basis": "none",
+    "resolution_ns": 1000000
+  },
+  "native": {
+    "bytes": "PDE5MD5NYXIgMjEgMjAxNSAxMjoxMDowOCBTRUwtMzUzMC14eHh4eHggUlRBQyBMb2dnZXI6IDIwMTUtMDMtMjEgMTI6MDk6NTguNTkzLCBJbmZvcm1hdGlvbmFsLCBTZWN1cml0eSwgU3lzdGVtVGFncy4gVXNlcl9Mb2dnZWRfT24sICdTRUwgbG9nZ2VkIG9uIGRldmljZSB2aWEgV2ViJy4=",
+    "record_sha256": "4e0f658fdd23d43e9cdf20a477a411317855d4d30d44c9e88463519b9aa74847",
+    "record_length": 164,
+    "evidence": {
+      "sha256": "4e0f658fdd23d43e9cdf20a477a411317855d4d30d44c9e88463519b9aa74847",
+      "length": 164
+    },
+    "span": {
+      "offset": 0,
+      "length": 164
+    },
+    "fields": [
+      {
+        "name": "pri",
+        "value": "190"
+      },
+      {
+        "name": "timestamp",
+        "value": "Mar 21 2015 12:10:08"
+      },
+      {
+        "name": "hostname",
+        "value": "SEL-3530-xxxxxx"
+      },
+      {
+        "name": "app",
+        "value": "RTAC Logger"
+      },
+      {
+        "name": "event_time",
+        "value": "2015-03-21 12:09:58.593"
+      },
+      {
+        "name": "level",
+        "value": "Informational"
+      },
+      {
+        "name": "category",
+        "value": "Security"
+      },
+      {
+        "name": "tag",
+        "value": "SystemTags. User_Logged_On"
+      },
+      {
+        "name": "message",
+        "value": "'SEL logged on device via Web'."
+      },
+      {
+        "name": "msg",
+        "value": "RTAC Logger: 2015-03-21 12:09:58.593, Informational, Security, SystemTags. User_Logged_On, 'SEL logged on device via Web'."
+      }
+    ]
+  },
+  "normalized": {
+    "subject": "SystemTags. User_Logged_On",
+    "subject_type": "rtac-tag",
+    "value": "'SEL logged on device via Web'.",
+    "category": "unmapped"
+  }
+}

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/store/protect"
@@ -112,10 +113,23 @@ func start(data string, log *slog.Logger) (*running, error) {
 		}
 		log.Info("register package active", "family", pkg.Family, "revision", pkg.Revision)
 	}
+	// The admin keys are public. With none active, every credential
+	// request is refused, so a collector with no way to receive a
+	// credential says so at start.
+	active := 0
+	for _, k := range cfg.AdminKeys {
+		log.Info("admin key pinned", "key_id", k.KeyID, "principal", k.Principal, "status", k.Status)
+		if k.Status == authz.KeyActive {
+			active++
+		}
+	}
+	if active == 0 {
+		alarm(errors.New("no active admin key pinned: every credential request will be refused"))
+	}
 	pipe, err := collector.NewPipeline(collector.PipelineConfig{
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
 		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm},
-		InstallLimit: cfg.InstallLimit, Alarm: alarm,
+		AdminKeys: cfg.AdminKeys, InstallLimit: cfg.InstallLimit, Alarm: alarm,
 		ReadClearFile: clearFileReader(l.admin, []string{cfg.Endpoint.Peer, collectorwire.ServiceSID(collectorwire.CollectorService)}),
 	})
 	if err != nil {

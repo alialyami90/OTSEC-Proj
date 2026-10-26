@@ -1,4 +1,4 @@
-// Package syslog is contract C6, otsec.syslog/0.2: how a C4 event leaves a
+// Package syslog is contract C6, otsec.syslog/0.3: how a C4 event leaves a
 // node for an upstream Syslog collector, and what the node accepts back.
 //
 // # What it covers
@@ -101,7 +101,10 @@
 //     for people, built from fixed tokens and from normalized values only
 //     when they match a conservative character set.
 //   - Size. A message never exceeds the target's limit and is never split or
-//     cut. When it would exceed the limit, Render applies two steps in order
+//     cut. The limit applies to the whole rendered message, so every
+//     parameter counts against it, tlsleaf included (75 octets with its
+//     separator); no fixed allowance is reserved. When it would exceed the
+//     limit, Render applies two steps in order
 //     and stops at the first that fits: (1) the device text is replaced by
 //     dtext_omitted="size" (rsha256 and rlen still identify the record, which
 //     stays in the store), then (2) the MSG summary is dropped. Each step is
@@ -124,7 +127,12 @@
 //     (report "unsupported version", keep the message) apart from a
 //     malformed event (report "invalid"). Receivers upgrade before the nodes
 //     that write to them, so in normal operation the first case means the
-//     upgrade order was not followed.
+//     upgrade order was not followed. 0.3 adds one parameter, tlsleaf: the
+//     SHA-256 of the sender's verified TLS leaf certificate, which C4 0.2
+//     carries on every tls-mutual event. It names the certificate that
+//     authenticated the sender; it does not change the asset binding. A
+//     target stamped 0.3 means the same as one stamped 0.2, and ParseMessage
+//     reads a 0.3 message unchanged, since it keeps every parameter.
 //   - Audit records (C8, from the C8-A4 review). An audit record is never
 //     rendered from fields: C8 forbids re-encoding sealed bytes, and the
 //     chain is verified over exactly those bytes. RenderAudit puts the

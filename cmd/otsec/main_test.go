@@ -212,6 +212,60 @@ func TestHealthShowsSuspensions(t *testing.T) {
 	}
 }
 
+// health says when a node-wide hold is current, and says nothing once it
+// has ended, though its alarm stays in the history (A3 on #147).
+func TestHealthShowsRunsHeld(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetRunsHeld(node.AlarmSuspensionsUnknown)
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "RUNS HELD: " + node.AlarmSuspensionsUnknown + "; every run on this node is stopped while this line shows"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+	st.SetRunsHeld("")
+	st.Write("site-a-node1")
+	if out, _, _ := otsec(t, "health", "-config", path); strings.Contains(out, "RUNS HELD") {
+		t.Fatalf("health still shows a hold that ended:\n%s", out)
+	}
+}
+
+// health shows each Syslog listener: whether it is open, its counts and
+// last message, and any drop, hold or unknown sender (P3-A4).
+func TestHealthShowsListeners(t *testing.T) {
+	path, cfg := ranNode(t)
+	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetListeners(map[string]node.ListenerStatus{
+		"lab-udp": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Plaintext: true, Open: true, Received: 7, Stored: 5, LastMessage: at,
+			Dropped: map[string]int64{"store": 1, "rate-limit": 1}, UnknownSenders: 2, UnknownOverflow: true},
+		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached"},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"listener lab-udp (syslog-udp 127.0.0.1:5514): open, 7 received, 5 stored, last message 2026-10-26T12:00:00Z",
+		"  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)",
+		"  DROPPED: rate-limit 1, store 1",
+		"  UNKNOWN SENDERS: 2 and more not tracked; their messages are kept with no asset",
+		"listener lab-tls (syslog-tls 127.0.0.1:6514): NOT OPEN, 0 received, 0 stored, last message never in this process",
+		"  HELD: the store is not taking this listener's messages; senders are not read meanwhile",
+		"  connections refused: tls 3",
+		"  last error: store: quota reached",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, "PLAINTEXT"); n != 1 {
+		t.Errorf("%d PLAINTEXT lines, want 1 (the TLS listener has none):\n%s", n, out)
+	}
+}
+
 // health lists each clear the node has recorded that the collector has
 // not yet accepted, and tells the administrator to keep the file in place.
 func TestHealthShowsCollectorStillSuspended(t *testing.T) {

@@ -45,10 +45,18 @@ type Store struct {
 }
 
 type Listener struct {
-	ID        string `json:"id"`
-	Transport string `json:"transport"`
-	Address   string `json:"address"`
-	Target    string `json:"target"`
+	ID        string       `json:"id"`
+	Transport string       `json:"transport"`
+	Address   string       `json:"address"`
+	Target    string       `json:"target"`
+	Plaintext bool         `json:"plaintext,omitempty"`
+	TLS       *ListenerTLS `json:"tls,omitempty"`
+}
+
+type ListenerTLS struct {
+	CredentialRef     string `json:"credential_ref"`
+	SenderCARef       string `json:"sender_ca_ref,omitempty"`
+	RequireSenderCert bool   `json:"require_sender_cert,omitempty"`
 }
 
 type Collection struct {
@@ -91,7 +99,7 @@ func New(node, storeDir string) *Config {
 		CollectorPipe:      pipe,
 		CollectorPeer:      peer,
 		PolicyVersion:      3,
-		RegisterVersion:    3,
+		RegisterVersion:    4,
 		TLSDir:             filepath.Join(filepath.Dir(storeDir), "tls"),
 		CollectorPublicDir: filepath.Join(filepath.Dir(storeDir), "collector-public"),
 	}
@@ -213,9 +221,44 @@ func (c *Config) AddRELPTarget(name, host string, port int, trustAnchor, clientC
 	return c
 }
 
-// AddListener adds a simulated Syslog listener.
+// AddListener adds a simulated Syslog listener that loads: a syslog-tls
+// listener names the credential "test-listener" in tls_dir, and a
+// plaintext one sets the lab-only flag.
 func (c *Config) AddListener(id, transport, address string) *Config {
-	c.Listeners = append(c.Listeners, Listener{ID: id, Transport: transport, Address: address, Target: "simulated"})
+	l := Listener{ID: id, Transport: transport, Address: address, Target: "simulated"}
+	if transport == "syslog-tls" {
+		l.TLS = &ListenerTLS{CredentialRef: "test-listener"}
+	} else {
+		l.Plaintext = true
+	}
+	c.Listeners = append(c.Listeners, l)
+	return c
+}
+
+// AddSyslogSender gives the asset an inbound Syslog endpoint: host is the
+// sender's address as a listener sees it, and port 0 matches any listener
+// port.
+func (c *Config) AddSyslogSender(assetID, epID, transport, host string, port int) *Config {
+	for _, a := range c.Assets {
+		if a["asset_id"] != assetID {
+			continue
+		}
+		// Without a pinned key, TLS does not authenticate the device, so a
+		// TLS sender is encrypted-weak (C1).
+		level := "plaintext-unauthenticated"
+		if transport == "syslog-tls" {
+			level = "encrypted-weak"
+		}
+		ds := map[string]any{"level": level, "acknowledgement": map[string]any{
+			"by": "admin:lab-admin", "at": "2026-10-24T09:00:00Z",
+			"reason": "Simulated sender only (ADR-0005)", "scope": "lab-only",
+		}}
+		ep := map[string]any{"id": epID, "transport": transport, "host": host, "target": "simulated", "downstream_security": ds}
+		if port != 0 {
+			ep["port"] = port
+		}
+		a["endpoints"] = append(a["endpoints"].([]any), ep)
+	}
 	return c
 }
 

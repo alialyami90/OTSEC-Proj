@@ -14,7 +14,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every target.
-const Identifier = "otsec.syslog/0.2"
+const Identifier = "otsec.syslog/0.3"
 
 // Target is one upstream collector.
 type Target struct {
@@ -317,7 +317,7 @@ func Codes(err error) []Code {
 }
 
 var (
-	self        = version.ID{Name: "syslog", Major: 0, Minor: 2}
+	self        = version.ID{Name: "syslog", Major: 0, Minor: 3}
 	namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	refPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 	pinPattern  = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
