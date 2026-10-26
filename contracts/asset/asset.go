@@ -19,9 +19,9 @@ import (
 // Contract is this package's identifier. Readers accept every 0.x minor
 // (contracts/version) and ignore fields they do not know, but reject case
 // variants and duplicate keys (strictjson.Forward, D1-10).
-const Contract = "otsec.asset/0.1"
+const Contract = "otsec.asset/0.2"
 
-var self = version.ID{Name: "asset", Major: 0, Minor: 1}
+var self = version.ID{Name: "asset", Major: 0, Minor: 2}
 
 // Asset is one device the platform knows about.
 type Asset struct {
@@ -104,6 +104,54 @@ type Endpoint struct {
 	// in every minor, and a value outside the two is refused, never read as
 	// either.
 	Target EvidenceClass `json:"target"`
+	// Path is how the node reaches an endpoint it connects to: direct, or
+	// through a port server (a terminal or serial server between the node
+	// and the device). Added in 0.2. An admin sets it; it is never taken
+	// from the far end. Only a direct path gets a session (CheckPath): a
+	// port-server path is refused until its timeout behaviour has evidence
+	// (H-13), and an endpoint with no path, or a path this reader does not
+	// know, is refused like one (D2-16). It is not set on a Syslog endpoint,
+	// which the node never connects to.
+	Path Path `json:"path,omitempty"`
+}
+
+// Path is how the node reaches an endpoint (Endpoint.Path).
+type Path string
+
+const (
+	// Direct: the node's connection ends at the device itself, so a session
+	// state the device reports (for example its idle timeout) is the state
+	// the connection sees.
+	Direct Path = "direct"
+	// PortServer: the connection ends at a port server, which keeps its own
+	// session state and timeouts in front of the device (H-13).
+	PortServer Path = "port-server"
+)
+
+// ErrPathRefused is wrapped by every error CheckPath returns, so a caller
+// can map any of them to one refusal.
+var ErrPathRefused = errors.New("refused like a port server (D2-16)")
+
+// CheckPath reports whether the node may open a session on the endpoint.
+// Only a direct path is allowed. A port-server path is refused until there
+// is evidence of how a port server's timeouts interact with the device's
+// (H-13); an endpoint with no path, which every 0.1 record has, and a path
+// this reader does not know are refused the same way, so an existing node's
+// endpoints are refused after an upgrade until an administrator sets the
+// path (D2-16). Call it before connecting, never after.
+func (ep Endpoint) CheckPath() error {
+	switch {
+	case ep.Transport.Inbound():
+		return fmt.Errorf("asset: endpoint %s is a %s endpoint the node only listens on: %w", ep.ID, ep.Transport, ErrPathRefused)
+	case ep.Path == Direct:
+		return nil
+	case ep.Path == "":
+		return fmt.Errorf("asset: endpoint %s has no path; an administrator must set it: %w", ep.ID, ErrPathRefused)
+	case ep.Path == PortServer:
+		return fmt.Errorf("asset: endpoint %s is behind a port server, refused until its timeouts have evidence (H-13): %w", ep.ID, ErrPathRefused)
+	default:
+		return fmt.Errorf("asset: endpoint %s path %q is not one this reader knows: %w", ep.ID, ep.Path, ErrPathRefused)
+	}
 }
 
 // DownstreamSecurity is A3 §4.5's label for the link from the node to the
@@ -193,11 +241,12 @@ type PostureLabel struct {
 
 // --- closed enumerations ---------------------------------------------------
 //
-// Every enum below is closed: a 0.1 reader rejects a value it does not know
-// in a 0.1 message. A message stamped with a later 0.x minor may carry values
-// added since; a 0.1 reader accepts the message and reads such a value as the
-// enum's fallback, never as anything more trusted. Decode applies the
-// fallbacks (Asset.Effective), so a 0.1 consumer never sees a later value.
+// Every enum below is closed: this reader rejects a value it does not know
+// in a message of its own minor or an earlier one. A message stamped with a
+// later 0.x minor may carry values added since; this reader accepts the
+// message and reads such a value as the enum's fallback, never as anything
+// more trusted. Decode applies the fallbacks (Asset.Effective), so a consumer
+// never sees a later value. 0.2 added one enum, Path; the others are 0.1's.
 
 // Confidence is derived from the observations by fixed rules, so it can be
 // checked rather than asserted:
@@ -346,6 +395,7 @@ var (
 	EvidenceClasses   = []EvidenceClass{DeviceObserved, Simulated, OperatorDeclared, Documented, Inferred}
 	SourceMethods     = []SourceMethod{AdapterSession, SyslogReceived, PassiveNetwork, OperatorEntry, DocumentSource, Derived, SimulatorRun}
 	Transports        = []Transport{Telnet, SSH, Serial, SyslogUDP, SyslogTCP, SyslogTLS}
+	Paths             = []Path{Direct, PortServer}
 	SecurityLevels    = []SecurityLevel{EncryptedAuthenticated, EncryptedWeak, PlaintextUnauthenticated}
 	BindingMethods    = []BindingMethod{DeviceReported, AddressOnly, PinnedKey}
 	BindingStrengths  = []BindingStrength{Spoofable, Cryptographic}
@@ -373,6 +423,9 @@ const (
 	// does not know, and a device-observed value from a source method it
 	// does not know: never as a device observation.
 	FallbackEvidenceClass = Inferred
+	// FallbackPath is how a 0.2 reader reads a path it does not know: as a
+	// port server, which gets no session (CheckPath).
+	FallbackPath = PortServer
 )
 
 // StrengthOf is the strength a binding method implies.
@@ -510,9 +563,9 @@ func Decode(b []byte) (Asset, error) {
 	return a.Effective(), nil
 }
 
-// Effective is the record as a 0.1 reader reads it. Values a later minor
-// added are read down to the least trusted 0.1 value, wherever they carry
-// trust (A6 C1 review change 2):
+// Effective is the record as this reader reads it. Values a later minor
+// added are read down to the least trusted value this reader knows,
+// wherever they carry trust (A6 C1 review change 2):
 //
 //   - binding strength is always StrengthOf(method): spoofable unless the
 //     method is pinned-key;
@@ -522,9 +575,13 @@ func Decode(b []byte) (Asset, error) {
 //     a simulator-session value always reads as simulated;
 //   - a confidence 0.1 does not know is recomputed from the observations;
 //   - a downstream security level 0.1 does not know reads as
-//     FallbackSecurityLevel.
+//     FallbackSecurityLevel;
+//   - an endpoint path 0.2 does not know reads as FallbackPath, so it gets
+//     no session. No path stays no path, which CheckPath refuses with its
+//     own reason.
 //
-// For a valid 0.1 record, Effective returns the record unchanged. Device
+// For a valid record of this minor or an earlier one, Effective returns it
+// unchanged. Device
 // class is not rewritten; read it with DeviceClass.
 func (a Asset) Effective() Asset {
 	out := a
@@ -543,6 +600,9 @@ func (a Asset) Effective() Asset {
 	for i := range out.Endpoints {
 		if !contains(SecurityLevels, out.Endpoints[i].DownstreamSecurity.Level) {
 			out.Endpoints[i].DownstreamSecurity.Level = FallbackSecurityLevel
+		}
+		if p := out.Endpoints[i].Path; p != "" && !contains(Paths, p) {
+			out.Endpoints[i].Path = FallbackPath
 		}
 	}
 	out.IdentityBinding.Attributes = slices.Clone(a.IdentityBinding.Attributes)
@@ -625,6 +685,7 @@ func (a Asset) Validate() error {
 		return err
 	}
 	v.later = id.Minor > self.Minor
+	v.minor = id.Minor
 
 	if !ValidAssetID(a.AssetID) {
 		v.fail("asset_id %q is not a lowercase UUID", a.AssetID)
@@ -846,6 +907,16 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 		// defaulted (D1-24).
 		v.fail("%s.target %q is not %s or %s (D1-24)", p, ep.Target, DeviceObserved, Simulated)
 	}
+	switch {
+	case ep.Path == "":
+		// Valid in every minor; CheckPath refuses a session to it.
+	case v.minor < 2:
+		v.fail("%s.path is not in otsec.asset/0.%d; it was added in 0.2", p, v.minor)
+	case ep.Transport.Inbound():
+		v.fail("%s.path is set on a %s endpoint, which the node never connects to", p, ep.Transport)
+	default:
+		v.enum(p+".path", string(ep.Path), Paths)
+	}
 	ds := ep.DownstreamSecurity
 	v.enum(p+".downstream_security.level", string(ds.Level), SecurityLevels)
 	if AlwaysPlaintext(ep.Transport) && ds.Level != PlaintextUnauthenticated {
@@ -1017,6 +1088,7 @@ func (a Asset) WeakestDownstreamSecurity() (SecurityLevel, bool) {
 
 type validator struct {
 	later bool // message is from a later minor: unknown enum values read as fallback
+	minor int  // the message's minor
 	errs  []error
 }
 
@@ -1042,7 +1114,7 @@ func (v *validator) enum(path, val string, allowed any) {
 	if v.later && tokenPattern.MatchString(val) {
 		return
 	}
-	v.fail("%s %q is not one of the 0.1 values", path, val)
+	v.fail("%s %q is not one of the 0.%d values", path, val, self.Minor)
 }
 
 func enumContains(allowed any, val string) bool {
@@ -1057,6 +1129,8 @@ func enumContains(allowed any, val string) bool {
 		return contains(xs, SourceMethod(val))
 	case []Transport:
 		return contains(xs, Transport(val))
+	case []Path:
+		return contains(xs, Path(val))
 	case []SecurityLevel:
 		return contains(xs, SecurityLevel(val))
 	case []BindingMethod:

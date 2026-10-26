@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.asset/0.1",
-  "title": "otsec.asset/0.1 asset record (C1)",
-  "description": "Structural schema only. Not strict: readers ignore unknown fields and accept every 0.x minor, reading an enum value added in a later minor as that enum's fallback. Cross-field rules (confidence derived from observations, at most one observation per evidence class and method, simulated values only from simulator sessions, session observations carrying a transcript span, Telnet, serial and plain Syslog always plaintext-unauthenticated, encrypted-authenticated only with a pinned-key binding, an acknowledgement with scope for every level below encrypted-authenticated, binding strength implied by method, binding attributes having an operator-declared value, platform_node only on class server, os-out-of-support needing a condition) are enforced by Asset.Validate in contracts/asset. The enum lists here are checked against the Go lists by schema_test.go.",
+  "$id": "otsec.asset/0.2",
+  "title": "otsec.asset/0.2 asset record (C1)",
+  "description": "Structural schema only. Not strict: readers ignore unknown fields and accept every 0.x minor, reading an enum value added in a later minor as that enum's fallback. Cross-field rules (confidence derived from observations, at most one observation per evidence class and method, simulated values only from simulator sessions, session observations carrying a transcript span, Telnet, serial and plain Syslog always plaintext-unauthenticated, encrypted-authenticated only with a pinned-key binding, an acknowledgement with scope for every level below encrypted-authenticated, binding strength implied by method, binding attributes having an operator-declared value, platform_node only on class server, os-out-of-support needing a condition, path only from 0.2 and never on a Syslog endpoint) are enforced by Asset.Validate in contracts/asset. The enum lists here are checked against the Go lists by schema_test.go.",
   "type": "object",
   "required": ["schema", "asset_id", "node_id", "attributes", "identity_binding"],
   "properties": {
@@ -76,6 +76,7 @@
         "id": {"$ref": "#/$defs/token"},
         "target": {"enum": ["device-observed", "simulated"], "description": "D1-24: set by an admin, never from the far end; never defaulted."},
         "transport": {"$ref": "#/$defs/transport"},
+        "path": {"$ref": "#/$defs/path", "description": "Added in 0.2 (D2-16). Not set on a Syslog endpoint, and not allowed in a 0.1 record. Only direct gets a session; no path, port-server, or a value this reader does not know is refused (Endpoint.CheckPath)."},
         "host": {"type": "string"},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
         "serial_device": {"type": "string"},
@@ -121,6 +122,7 @@
     "evidenceClass": {"enum": ["device-observed", "simulated", "operator-declared", "documented", "inferred"]},
     "sourceMethod": {"enum": ["adapter-session", "syslog-received", "passive-network", "operator-entry", "document", "derived", "simulator-session"]},
     "transport": {"enum": ["telnet", "ssh", "serial", "syslog-udp", "syslog-tcp", "syslog-tls"]},
+    "path": {"enum": ["direct", "port-server"]},
     "securityLevel": {"enum": ["encrypted-authenticated", "encrypted-weak", "plaintext-unauthenticated"]},
     "bindingMethod": {"enum": ["device-reported", "address-only", "pinned-key"]},
     "bindingStrength": {"enum": ["spoofable", "cryptographic"]},
