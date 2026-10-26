@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/register"
@@ -75,8 +76,11 @@ func DecodeRegisterEnvelope(data []byte) (*register.Envelope, error) {
 // VerifyRegisterPackage applies the C7 rules to a register envelope, in this
 // order, and parses the payload only after the signature verifies:
 //
-//  1. The envelope is present, carries the C3 contract identifier, and names
-//     algorithm "ed25519". No other algorithm is accepted.
+//  1. The envelope is present, carries a C3 contract identifier this reader
+//     decodes (register.Readable), and names algorithm "ed25519". No other
+//     algorithm is accepted. The envelope's contract is not signed, so it is
+//     a label only: the signed payload names its own contract, which
+//     register.Decode checks.
 //  2. KeyID names exactly one trust anchor, whose status is active and whose
 //     key has the Ed25519 size.
 //  3. The payload is non-empty and at most MaxRegisterPayload bytes.
@@ -95,7 +99,7 @@ func VerifyRegisterPackage(env *register.Envelope, anchors []TrustAnchor, floors
 	if env == nil {
 		return nil, FamilyFloor{}, reject("unsigned package: no envelope")
 	}
-	if env.Contract != register.ContractID {
+	if !slices.Contains(register.Readable, env.Contract) {
 		return nil, FamilyFloor{}, reject("envelope contract %q", env.Contract)
 	}
 	if env.Algorithm != "ed25519" {

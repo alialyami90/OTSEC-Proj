@@ -5,7 +5,8 @@ so the rollback floor can be tested against it.
 
 Run from this directory with
 `python3 -I build_sel751.py <S22 text, e.g. $OTSEC_SEL751_TEXT>`. The output
-is committed; content_sel751_test.go checks it. The changes from the Phase 0
+is committed; content_sel751_test.go checks it. sel-751-rev3.json is
+revision 3, written on the way to revision 4 and pinned for the comparisons. The changes from the Phase 0
 package are A2's C3 review changes 3 and 4 and the sel.ser.other_args
 citation (docs/phase1/reviews/C3-A2.md):
 
@@ -244,6 +245,49 @@ def rev3(p):
                          "the Spanish state-changing forms are denied. Allowlist decisions are unchanged.")
 
 
+def rev4(p):
+    """Revision 4 (C3 0.2, D3-2): DATE_F is read with SHO G before SER, so the
+    SER's dates are read in the relay's own order, and SHO G's citation names
+    the table that holds DATE_F. No line, deny rule or condition changes."""
+    p["contract"] = "otsec.register/0.2"
+    p["revision"] = 4
+    p["issued"] = "2026-10-26"
+    for o in p["operations"]:
+        if o["id"] == "sel.settings.show_global":
+            for c in o["citations"]:
+                if c["ref"] == "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH, DATE_F)":
+                    c["ref"] = "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH)"
+            o["citations"].append({"source": "S22", "ref": "Table 4.84 p.4.225 (DATE_F: MDY, YMD, DMY; default MDY) and p.4.226"})
+    # Keys in the order the Go struct writes them: context before operations.
+    rebuilt = {}
+    for k, v in p.items():
+        if k == "operations":
+            rebuilt["context"] = [{
+                "id": "ctx.date_f",
+                "setting": "DATE_F",
+                "read_by": "sel.settings.show_global",
+                "for": ["sel.ser.read_all"],
+                "values": ["MDY", "YMD", "DMY"],
+                "reason": "The relay prints dates in the order DATE_F sets: Month/Day/Year, Year/Month/Day or "
+                          "Day/Month/Year (S22 Table 4.84 p.4.225, p.4.226). S22 p.7.31 states it for the date of "
+                          "a command response; that the SER rows follow the same setting is inferred, not stated. "
+                          "A SER read without DATE_F, or with a value outside these, is not parsed with a guessed "
+                          "order (P3-A2).",
+            }]
+        rebuilt[k] = v
+    p.clear()
+    p.update(rebuilt)
+    p["notes"].insert(0, "Revision 4 by A2 (content owner), 2026-10-26, format otsec.register/0.2 (D3-2): context "
+                         "ctx.date_f reads DATE_F with SHO G for SER, and SHO G cites Table 4.84 for DATE_F instead "
+                         "of Table 4.90. Lines, deny rules, preconditions and warnings are unchanged.")
+
+
+def write(p, name):
+    with open(os.path.join(HERE, name), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(p, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
 def main():
     check_words(sys.argv[1])
     rs = rows(sys.argv[1])
@@ -285,10 +329,9 @@ def main():
                       "two rows. Three rows (R200-V1, R200-V0, R111) say the version was not released and have no FID."
                       % (len(k), len(rs)))
     rev3(p)
-
-    with open(os.path.join(HERE, "sel-751.json"), "w", encoding="utf-8", newline="\n") as f:
-        json.dump(p, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    write(p, "sel-751-rev3.json")
+    rev4(p)
+    write(p, "sel-751.json")
 
 
 if __name__ == "__main__":

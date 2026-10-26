@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,39 @@ import (
 var canary = []byte("Canary-7f3K")
 
 const testNode = "site-a-node1"
+
+// testAdminPriv is the test administrator's key (the C7 golden's seed), a
+// test key only (D2-5).
+var testAdminPriv = func() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("otsec test admin key 1"))
+	return ed25519.NewKeyFromSeed(seed[:])
+}()
+
+func testAdminPub() ed25519.PublicKey { return testAdminPriv.Public().(ed25519.PublicKey) }
+
+// adminSigned returns req as the test administrator's request to this
+// collector: its body moves into a signed payload bound to the node and the
+// collector's install key.
+func adminSigned(t testing.TB, req *authz.CollectorRequest, installKeyID string) *authz.CollectorRequest {
+	t.Helper()
+	nonce := make([]byte, authz.AdminNonceLen)
+	rand.Read(nonce)
+	now := time.Now().UTC()
+	env, err := authz.SignAdminRequest(testAdminPriv, authz.AdminRequest{
+		Format: authz.AdminRequestFormat, Kind: req.Kind, Principal: req.OnBehalfOf,
+		AdminKeyID: authz.AdminKeyID(testAdminPub()), NodeID: testNode, InstallKeyID: installKeyID,
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce), IssuedAt: now.Format(time.RFC3339),
+		ExpiresAt: now.Add(10 * time.Minute).Format(time.RFC3339), CredentialInstall: req.CredentialInstall,
+		CredentialRevoke: req.CredentialRevoke, CredentialClearSusp: req.CredentialClearSusp, AssetClearSusp: req.AssetClearSusp,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := *req
+	out.CredentialInstall, out.CredentialRevoke, out.CredentialClearSusp, out.AssetClearSusp = nil, nil, nil, nil
+	out.AdminSigned = env
+	return &out
+}
 
 func fixture(t testing.TB, name string) []byte {
 	t.Helper()
@@ -75,6 +109,8 @@ func testConfig(t testing.TB, socket string) map[string]any {
 		"profiles":      []any{p},
 		"trust_anchors": []any{map[string]any{"key_id": "release-2026", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
 		"registers":     []any{env},
+		"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(testAdminPub()),
+			"public_key": base64.StdEncoding.EncodeToString(testAdminPub()), "principal": "admin@site-a", "status": "active"}},
 	}
 }
 
@@ -93,7 +129,8 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Assets) != 1 || len(c.Anchors) != 1 || len(c.Registers) != 1 || c.PolicyVersion != 3 {
+	if len(c.Assets) != 1 || len(c.Anchors) != 1 || len(c.Registers) != 1 || c.PolicyVersion != 3 ||
+		len(c.AdminKeys) != 1 || !c.AdminKeys[0].PublicKey.Equal(testAdminPub()) || c.AdminKeys[0].Principal != "admin@site-a" {
 		t.Fatalf("config %+v", c)
 	}
 	edit := func(m func(map[string]any)) []byte {
@@ -115,7 +152,24 @@ func TestParseConfig(t *testing.T) {
 		}),
 		"anchor key":    edit(func(d map[string]any) { d["trust_anchors"].([]any)[0].(map[string]any)["public_key"] = "AAAA" }),
 		"anchor status": edit(func(d map[string]any) { d["trust_anchors"].([]any)[0].(map[string]any)["status"] = "maybe" }),
-		"trailing data": append(marshal(t, good), '{', '}'),
+		"admin key":     edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["public_key"] = "AAAA" }),
+		"admin key id": edit(func(d map[string]any) {
+			d["admin_keys"].([]any)[0].(map[string]any)["key_id"] = "ed25519-0000000000000000"
+		}),
+		"admin key twice": edit(func(d map[string]any) {
+			k := d["admin_keys"].([]any)[0]
+			d["admin_keys"] = []any{k, k}
+		}),
+		"admin key short": edit(func(d map[string]any) {
+			// 31 bytes under its own derived ID: only the size check refuses it.
+			short := testAdminPub()[:31]
+			k := d["admin_keys"].([]any)[0].(map[string]any)
+			k["public_key"], k["key_id"] = base64.StdEncoding.EncodeToString(short), authz.AdminKeyID(short)
+		}),
+		"admin principal": edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["principal"] = "" }),
+		"admin status":    edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["status"] = "maybe" }),
+		"admin extra":     edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["private_key"] = "x" }),
+		"trailing data":   append(marshal(t, good), '{', '}'),
 	} {
 		if _, err := parseConfig(b); err == nil {
 			t.Errorf("%s accepted", name)
@@ -283,8 +337,15 @@ func TestServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := client.Do(ctx, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialInstall, RequestID: "req-install",
-		OnBehalfOf: admin, PolicyVersion: 3, CredentialInstall: &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}})
+	install := &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialInstall, RequestID: "req-install",
+		OnBehalfOf: admin, PolicyVersion: 3, CredentialInstall: &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}}
+	// Unsigned, it is refused (C7 0.4); signed by the pinned admin key, it
+	// is installed.
+	resp, err := client.Do(ctx, install)
+	if err != nil || resp.Reply.Refusal == nil || resp.Reply.Refusal.Code != authz.RefuseAdminUnverified || resp.Reply.Refusal.Check != authz.AdminCheckEnvelope {
+		t.Fatalf("unsigned install: %+v %v", resp.Reply, err)
+	}
+	resp, err = client.Do(ctx, adminSigned(t, install, pub.KeyID))
 	if err != nil || !resp.Reply.Accepted() {
 		t.Fatalf("install: %+v %v", resp.Reply, err)
 	}

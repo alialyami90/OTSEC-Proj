@@ -1,8 +1,8 @@
 {
-  "contract": "otsec.register/0.1",
+  "contract": "otsec.register/0.2",
   "family": "sel-751",
-  "revision": 3,
-  "issued": "2026-10-25",
+  "revision": 4,
+  "issued": "2026-10-26",
   "owner": "A2",
   "sources": [
     {
@@ -243,6 +243,22 @@
       "reason": "ADR-0005 (owner decision 2026-10-23 on MAXACC; A1 ruling on FTPACC and HTTPACC from A6 F-006): HTTPACC above 1 on Port 1 lets the port reach Level 2; recorded and warned, collection continues. Default 2 (S22 Port 1 settings)."
     }
   ],
+  "context": [
+    {
+      "id": "ctx.date_f",
+      "setting": "DATE_F",
+      "read_by": "sel.settings.show_global",
+      "for": [
+        "sel.ser.read_all"
+      ],
+      "values": [
+        "MDY",
+        "YMD",
+        "DMY"
+      ],
+      "reason": "The relay prints dates in the order DATE_F sets: Month/Day/Year, Year/Month/Day or Day/Month/Year (S22 Table 4.84 p.4.225, p.4.226). S22 p.7.31 states it for the date of a command response; that the SER rows follow the same setting is inferred, not stated. A SER read without DATE_F, or with a value outside these, is not parsed with a guessed order (P3-A2)."
+    }
+  ],
   "operations": [
     {
       "id": "sel.id",
@@ -299,7 +315,11 @@
         },
         {
           "source": "S22",
-          "ref": "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH, DATE_F)"
+          "ref": "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH)"
+        },
+        {
+          "source": "S22",
+          "ref": "Table 4.84 p.4.225 (DATE_F: MDY, YMD, DMY; default MDY) and p.4.226"
         }
       ],
       "evidence": {
@@ -2127,6 +2147,7 @@
     ]
   },
   "notes": [
+    "Revision 4 by A2 (content owner), 2026-10-26, format otsec.register/0.2 (D3-2): context ctx.date_f reads DATE_F with SHO G for SER, and SHO G cites Table 4.84 for DATE_F instead of Table 4.90. Lines, deny rules, preconditions and warnings are unchanged.",
     "Revision 3 by A2 (content owner), 2026-10-25: every documented command word of S22 (Command Summary pp.1-9, English and Spanish, and Table C.2) is a deny-rule mnemonic, and the Spanish state-changing forms are denied. Allowlist decisions are unchanged.",
     "Revision 2 by A2 (content owner), 2026-10-24, from A1's Phase 0 conversion: C3 review changes 3 and 4 and the sel.ser.other_args citation (docs/phase1/reviews/C3-A2.md). Allowlist decisions are unchanged.",
     "Converted by A1 on 2026-10-24 from the Phase 0 draft (register status: draft; A1 approved SHO G and SHO P 1 on 2026-10-23 (docs/agent-handoffs.md, commit 4481653 on claude/project-thread-hperik); A6 re-review pending; allowlist status: Accepted by A1 for the simulated slice on 2026-10-23 (ADR-0005). The R400-R402 condition is accepted: SHO P 1 must read EHTTP := N, or collection is refused. The inheritance inference is classed 'inferred'. Before collecting from any real relay, the owner must either get SEL to confirm it or accept the inference in writing (owner pre-production list). A6 checks the list independently. UPDATE 2026-10-23 18:48Z: the owner accepted the inheritance inference as an owner risk (ADR-0005). The allowed entries are classed 'inferred (owner-accepted)', never 'documented'.).",

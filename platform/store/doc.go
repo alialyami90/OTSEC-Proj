@@ -1,4 +1,4 @@
-// Package store is the SQLite implementation of C5 otsec.store/0.2
+// Package store is the SQLite implementation of C5 otsec.store/0.3
 // (contracts/store). It is owned by A5 (A1 D2-1). One DB is one database of
 // a node's Layout: one file, one writer module, one OS lock. The node runs
 // contracts/store.RunStartup over an Env for each database and then appends

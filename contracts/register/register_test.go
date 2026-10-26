@@ -543,3 +543,79 @@ func TestWarnings(t *testing.T) {
 		t.Errorf("equals warning raised wrongly")
 	}
 }
+
+// TestContext: the 0.2 context reads and A1's D3-2 conditions. Each case
+// edits A2's SEL-751 content, revision 4, which reads DATE_F with SHO G for
+// SER.
+func TestContext(t *testing.T) {
+	data, err := os.ReadFile(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit := func(f func(m map[string]any)) []byte {
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatal(err)
+		}
+		f(m)
+		out, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	ctx := func(m map[string]any) map[string]any { return entry(m, "context", 0) }
+	op := func(m map[string]any, id string) map[string]any {
+		for _, o := range list(m, "operations") {
+			if o.(map[string]any)["id"] == id {
+				return o.(map[string]any)
+			}
+		}
+		t.Fatalf("no operation %s", id)
+		return nil
+	}
+	p, err := Decode(edit(func(map[string]any) {}))
+	if err != nil {
+		t.Fatalf("revision 4 rejected: %v", err)
+	}
+	if got := p.ContextFor("sel.ser.read_all"); len(got) != 1 || got[0].Setting != "DATE_F" || got[0].ReadBy != "sel.settings.show_global" {
+		t.Errorf("ContextFor(SER) = %+v", got)
+	}
+	if got := p.ContextFor("sel.settings.show_port1"); len(got) != 0 {
+		t.Errorf("ContextFor(SHO P 1) = %+v", got)
+	}
+	for name, c := range map[string]struct {
+		f    func(m map[string]any)
+		want string
+	}{
+		"context in a 0.1 package": {func(m map[string]any) { m["contract"] = "otsec.register/0.1" }, "new in 0.2"},
+		"a later minor":            {func(m map[string]any) { m["contract"] = "otsec.register/0.3" }, "want one of"},
+		"unknown field":            {func(m map[string]any) { ctx(m)["default"] = "MDY" }, "not a field name"},
+		"ID of another entry":      {func(m map[string]any) { ctx(m)["id"] = "sel.id" }, "duplicated"},
+		"lower-case setting":       {func(m map[string]any) { ctx(m)["setting"] = "date_f" }, "needs a setting"},
+		"no reason":                {func(m map[string]any) { ctx(m)["reason"] = "" }, "needs a setting"},
+		"for nothing":              {func(m map[string]any) { ctx(m)["for"] = []any{} }, "needs a setting"},
+		"no values":                {func(m map[string]any) { ctx(m)["values"] = []any{} }, "needs a setting"},
+		"lower-case value":         {func(m map[string]any) { ctx(m)["values"] = []any{"MDY", "dmy"} }, `value "dmy"`},
+		"repeated value":           {func(m map[string]any) { ctx(m)["values"] = []any{"MDY", "MDY"} }, `value "MDY"`},
+		"read by a session line":   {func(m map[string]any) { ctx(m)["read_by"] = "sel.session.qui" }, "not an operation run in operate"},
+		"read by a deny rule":      {func(m map[string]any) { ctx(m)["read_by"] = "sel.ser.clear" }, "not an operation run in operate"},
+		"for a deny rule":          {func(m map[string]any) { ctx(m)["for"] = []any{"sel.ser.clear"} }, "not another operation"},
+		"for itself":               {func(m map[string]any) { ctx(m)["for"] = []any{"sel.settings.show_global"} }, "not another operation"},
+		"for twice":                {func(m map[string]any) { ctx(m)["for"] = []any{"sel.ser.read_all", "sel.ser.read_all"} }, "not another operation"},
+		// D3-2: read at the same or a lower level than the operation it is for.
+		"read above the level it is for": {func(m map[string]any) { op(m, "sel.settings.show_global")["access_level"] = "2" }, "above"},
+		"for a level 0 operation":        {func(m map[string]any) { ctx(m)["for"] = []any{"sel.id"} }, "above"},
+		"a level with no known order":    {func(m map[string]any) { op(m, "sel.settings.show_global")["access_level"] = "C" }, "above"},
+		// Levels compare as numbers, not text: "10" sorts before "2" as text (A6 on #156).
+		"read at 10 for an operation at 2": {func(m map[string]any) {
+			op(m, "sel.settings.show_global")["access_level"] = "10"
+			op(m, "sel.ser.read_all")["access_level"] = "2"
+		}, "above"},
+	} {
+		_, err := Decode(edit(c.f))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", name, err, c.want)
+		}
+	}
+}
