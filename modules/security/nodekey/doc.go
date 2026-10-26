@@ -42,11 +42,11 @@
 //
 //   - On Windows, CNG: a machine-scope key in the Microsoft Software Key
 //     Storage Provider, or the Platform Crypto Provider (TPM) where T-2
-//     shows it works, with its export policy off. Its DACL lets SYSTEM and
-//     the listed users (the node service) use it, and lets Administrators
-//     read and change the DACL and delete it, but not use it. The
-//     administrator who creates the key may use it only until its request
-//     is signed (Request calls Restrict).
+//     shows it works, with its export policy off. Once its request is signed,
+//     its DACL gives SYSTEM and Administrators full control and lets the
+//     listed users (the node service) use it; no other account has any
+//     right (Request calls Restrict). Nobody, an administrator included,
+//     can read the private key out.
 //   - LabFiles: PKCS #8 files in a directory, for Linux tests and the lab.
 //     The key is as exposed as any file the node can read. A5 constructs it
 //     only behind the lab flag, as the D2-12 resolver is.

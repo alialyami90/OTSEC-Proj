@@ -377,9 +377,9 @@ func (r *Register) find(ref string, state State) int {
 // key in keys, adds it to the register as pending, and returns a PKCS #10
 // certificate request, signed by the key, for a CA to issue a certificate
 // from. Only the request leaves the provider. Once the request is signed,
-// a CNG key is restricted to SYSTEM and the node service (CNG.Restrict),
-// so the administrator who made it cannot use it. On any error the key is
-// deleted and the register is unchanged.
+// a CNG key gets its final DACL (CNG.Restrict): SYSTEM, Administrators and
+// the node service. On any error the key is deleted and the register is
+// unchanged.
 func (r *Register) Request(keys Keys, ref string, subject pkix.Name, by string, now time.Time) ([]byte, error) {
 	if !RefPattern.MatchString(ref) {
 		return nil, fmt.Errorf("nodekey: ref %q", ref)
@@ -398,7 +398,7 @@ func (r *Register) Request(keys Keys, ref string, subject pkix.Name, by string, 
 	}
 	csr, entry, err := pendingEntry(signer, keys.Provider(), ref, version, subject, by, now)
 	if rk, ok := keys.(restricter); ok && err == nil {
-		// The request is signed: the creator gives up its use of the key.
+		// The request is signed: the key gets the DACL it keeps.
 		err = rk.Restrict(signer)
 	}
 	if err == nil {

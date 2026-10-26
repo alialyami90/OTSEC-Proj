@@ -39,12 +39,12 @@ func needElevated(t *testing.T) {
 	}
 }
 
-func cngKeyName() string {
-	return KeyName(fmt.Sprintf("nodekey_citest%d", time.Now().UnixNano()%1e12), 1)
+func cngKeyName(tag string) string {
+	return KeyName(fmt.Sprintf("nodekey_%s%d", tag, time.Now().UnixNano()%1e12), 1)
 }
 
-// created makes a key and deletes it at the end through its creating
-// handle, which works whatever its DACL has become.
+// created makes a key and tries to delete it at the end, reporting a key
+// it could not delete.
 func created(t *testing.T, keys CNG, name string) crypto.Signer {
 	t.Helper()
 	s, err := keys.Create(name)
@@ -52,10 +52,7 @@ func created(t *testing.T, keys CNG, name string) crypto.Signer {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := keys.Open(name); errors.Is(err, ErrNoKey) {
-			return // the test deleted it
-		}
-		if err := deleteCreated(s); err != nil {
+		if err := keys.Delete(name); err != nil {
 			t.Errorf("cleanup: %s is left: %v", name, err)
 		}
 	})
@@ -63,8 +60,8 @@ func created(t *testing.T, keys CNG, name string) crypto.Signer {
 }
 
 // TestCNGKeyLifecycle: a CNG key signs where it lives, cannot be exported,
-// and after Restrict is usable by the listed users and has the DACL
-// section 9 names.
+// gets the final DACL once, and is then usable by the listed users and
+// deletable by an administrator.
 func TestCNGKeyLifecycle(t *testing.T) {
 	needElevated(t)
 	me, err := currentUser()
@@ -72,7 +69,7 @@ func TestCNGKeyLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys := CNG{Users: []string{me}} // the test stands in for the node service
-	name := cngKeyName()
+	name := cngKeyName("citest")
 	s := created(t, keys, name)
 	if _, err := keys.Create(name); err == nil {
 		t.Fatal("an existing key created again")
@@ -85,6 +82,9 @@ func TestCNGKeyLifecycle(t *testing.T) {
 	if err := keys.exportPrivate(name); err != nil {
 		t.Fatalf("export: %v", err)
 	}
+	if d, err := keys.dacl(name); err == nil {
+		t.Logf("default dacl: %s", d)
+	}
 	if err := keys.Restrict(s); err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,13 @@ func TestCNGKeyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("dacl after restrict: %s", dacl)
-	if !strings.Contains(dacl, "D:P") || !strings.Contains(dacl, ";;;SY)") || !strings.Contains(dacl, me) || strings.Contains(dacl, ";;;WD)") {
+	t.Logf("final dacl: %s", dacl)
+	if !strings.HasPrefix(dacl, "D:P") || !strings.Contains(dacl, ";;;SY)") || !strings.Contains(dacl, ";;;BA)") ||
+		!strings.Contains(dacl, me) || strings.Contains(dacl, ";;;WD)") || strings.Contains(dacl, ";;;AU)") || strings.Contains(dacl, ";;;BU)") {
 		t.Fatalf("dacl %s", dacl)
+	}
+	if err := keys.exportPrivate(name); err != nil {
+		t.Fatalf("export after restrict: %v", err)
 	}
 	o, err := keys.Open(name)
 	if err != nil {
@@ -110,36 +114,53 @@ func TestCNGKeyLifecycle(t *testing.T) {
 		t.Fatalf("sign after restrict: %v", err)
 	}
 	if err := keys.Delete(name); err != nil {
-		t.Fatalf("delete: %v", err)
+		t.Fatalf("an administrator cannot delete the key: %v", err)
 	}
 	if _, err := keys.Open(name); !errors.Is(err, ErrNoKey) {
 		t.Fatalf("after delete: %v", err)
 	}
 }
 
-// TestCNGCreatorLosesUse: with no user listed, Restrict leaves the key to
-// SYSTEM, so the administrator who made it can no longer sign with it.
-func TestCNGCreatorLosesUse(t *testing.T) {
+// TestCNGRightsProbe records what the Software KSP lets an elevated
+// administrator do with a key, by name, under each Administrators ACE
+// (SYSTEM always has full control). It is the evidence the production DACL
+// (CNG.sddl) is chosen from, and it fails only if the production row stops
+// behaving as CNG documents: use, DACL read, delete.
+func TestCNGRightsProbe(t *testing.T) {
 	needElevated(t)
 	keys := CNG{}
-	name := cngKeyName()
-	s := created(t, keys, name)
-	if err := keys.Restrict(s); err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256([]byte("otsec nodekey test"))
-	o, err := keys.Open(name)
-	t.Logf("creator opens the restricted key: %v", err)
-	if err == nil {
-		if _, err := o.Sign(rand.Reader, digest[:], nil); err == nil {
-			t.Fatal("the creator still signs with a restricted key")
-		} else {
-			t.Logf("creator signs: %v", err)
+	digest := sha256.Sum256([]byte("otsec nodekey probe"))
+	res := func(err error) string {
+		if err == nil {
+			return "ok"
 		}
+		return err.Error()
 	}
-	// An administrator removes a restricted key by name (retiring a node's
-	// key). The cleanup deletes it through the creating handle if not.
-	if err := keys.Delete(name); err != nil {
-		t.Errorf("an administrator cannot delete the restricted key by name: %v", err)
+	for _, rights := range []string{"GA", "GR", "GRGW", "FA", "RCWDSD", "RCWDWOSD"} {
+		name := cngKeyName("probe")
+		s, err := keys.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sddl := "D:P(A;;GA;;;SY)(A;;" + rights + ";;;BA)"
+		setErr := setDACL(s.(*cngSigner).key, sddl)
+		var signErr, readErr, resetErr error
+		o, openErr := keys.Open(name)
+		if openErr == nil {
+			_, signErr = o.Sign(rand.Reader, digest[:], nil)
+			if k, err := keys.openKey(name); err == nil {
+				resetErr = setDACL(k, sddl)
+				free(k)
+			} else {
+				resetErr = err
+			}
+		}
+		_, readErr = keys.dacl(name)
+		delErr := keys.Delete(name)
+		t.Logf("BA %-9s set=%s open=%s sign=%s readDACL=%s setAgain=%s delete=%s",
+			rights, res(setErr), res(openErr), res(signErr), res(readErr), res(resetErr), res(delErr))
+		if rights == "GA" && (setErr != nil || openErr != nil || signErr != nil || readErr != nil || delErr != nil) {
+			t.Errorf("the production Administrators ACE does not behave as designed")
+		}
 	}
 }

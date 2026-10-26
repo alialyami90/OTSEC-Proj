@@ -79,17 +79,16 @@ func (c CNG) open() (uintptr, error) {
 
 func free(h uintptr) { procFreeObject.Call(h) }
 
-// sddl is the key's DACL: SYSTEM and users may use it, Administrators may
-// read and change the DACL and delete the key, and nobody else has any
-// right. While the request is signed, the creator may use it too.
-func (c CNG) sddl(creator string) (string, error) {
+// sddl is the key's final DACL: SYSTEM and Administrators have full
+// control, the listed users may use it, and nobody else has any right.
+// Administrators keep use of the key because the Software KSP needs read
+// and write on the key to change its DACL or delete it (CI on #157, see
+// TestCNGRightsProbe), and an administrator can act as SYSTEM in any case:
+// the boundary is non-export and every other account.
+func (c CNG) sddl() (string, error) {
 	var b strings.Builder
-	b.WriteString("D:P(A;;GA;;;SY)(A;;RCWDSD;;;BA)")
-	users := c.Users
-	if creator != "" {
-		users = append(users[:len(users):len(users)], creator)
-	}
-	for _, u := range users {
+	b.WriteString("D:P(A;;GA;;;SY)(A;;GA;;;BA)")
+	for _, u := range c.Users {
 		sid, err := windows.StringToSid(u)
 		if err != nil {
 			return "", fmt.Errorf("nodekey: user %q is not a SID", u)
@@ -120,13 +119,8 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 	if !keyNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("nodekey: key name %q", name)
 	}
-	creator, err := currentUser()
-	if err != nil {
-		return nil, err
-	}
-	sddl, err := c.sddl(creator)
-	if err != nil {
-		return nil, err
+	if _, err := c.sddl(); err != nil {
+		return nil, err // a bad user SID is refused before any key exists
 	}
 	prov, err := c.open()
 	if err != nil {
@@ -153,9 +147,6 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 	if err := call(procFinalizeKey, key, ncryptSilentFlag); err != nil {
 		return fail(err)
 	}
-	if err := setDACL(key, sddl); err != nil {
-		return fail(err)
-	}
 	pub, err := publicKey(key)
 	if err != nil {
 		return fail(err)
@@ -163,16 +154,16 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 	return &cngSigner{key: key, pub: pub}, nil
 }
 
-// Restrict sets the DACL the key keeps once its request is signed: the
-// creator no longer has use of it. It needs the signer Create returned: a
-// handle opened later by name has only the rights the creator's DACL
-// grants, which do not include changing it (CI, #157).
+// Restrict sets the key's final DACL (sddl), once, through the handle
+// Create returned: until then the key has the provider's default DACL for
+// a machine key. The KSP does not let a key's DACL be changed a second
+// time through any handle (CI on #157), so this is the only DACL change.
 func (c CNG) Restrict(created crypto.Signer) error {
 	s, ok := created.(*cngSigner)
 	if !ok {
 		return errors.New("nodekey: restrict: not a key this provider created")
 	}
-	sddl, err := c.sddl("")
+	sddl, err := c.sddl()
 	if err != nil {
 		return err
 	}
@@ -274,25 +265,6 @@ func (s *cngSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byt
 		return nil, fmt.Errorf("nodekey: sign: %d bytes", n)
 	}
 	return asn1.Marshal(struct{ R, S *big.Int }{new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])})
-}
-
-// deleteCreated deletes a key through the handle Create returned, which
-// keeps its rights after Restrict (tests: cleanup).
-func deleteCreated(created crypto.Signer) error {
-	s, ok := created.(*cngSigner)
-	if !ok {
-		return errors.New("not a CNG key")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.key == 0 {
-		return nil
-	}
-	err := call(procDeleteKey, s.key, ncryptSilentFlag)
-	if err == nil {
-		s.key = 0 // NCryptDeleteKey frees the handle
-	}
-	return err
 }
 
 // dacl returns the key's DACL as SDDL (tests).

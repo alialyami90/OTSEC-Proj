@@ -7,13 +7,16 @@ import "crypto"
 // a crypto.Signer that asks CNG to sign, and nothing can read the private
 // key out, not the node and not an administrator.
 //
-// Create makes the key with a DACL that lets SYSTEM and the creating
-// administrator use it, so the administrator's tool can sign the
-// certificate request; Restrict then replaces the DACL, through the handle
-// Create returned, with the one the key keeps: SYSTEM and Users may use it,
-// and Administrators may only read and change the DACL and delete the key.
-// The collector service is in neither. Request calls Restrict after the
-// certificate request is signed. The administrator's tool runs elevated.
+// Create makes the key with the provider's default DACL for a machine key,
+// so the administrator's tool can sign the certificate request. Request
+// then calls Restrict, which sets the DACL the key keeps, once, through the
+// handle Create returned: SYSTEM and Administrators have full control, and
+// the listed Users (the node service) may use the key. No other account,
+// the collector service among them, has any right. Administrators are not
+// excluded from use: the Software KSP needs read and write on a key to
+// change its DACL or delete it, and an administrator can act as SYSTEM in
+// any case (TestCNGRightsProbe, CI on #157). The administrator's tool runs
+// elevated.
 //
 // On other systems every method returns an error.
 type CNG struct {
