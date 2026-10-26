@@ -434,7 +434,11 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.5 result read by a 0.4 reader; no 0.4 adapter writes it",
+	"failed.unknown": "a 0.6 result read by a 0.5 reader; no 0.5 adapter writes it",
+	// Both arrive in Run with the DATE_F read and the before-connect path
+	// check (P3-A2, the sel751 PR after C2 0.5).
+	"ok-with-settings":                   "SHO G and DATE_F are not read by Run yet (P3-A2, next PR)",
+	"refused.endpoint_path":              "refused before Run by the collector until Run's own path check lands (P3-A2, next PR)",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",
