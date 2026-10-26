@@ -63,6 +63,11 @@ type fileConfig struct {
 	Profiles      []json.RawMessage `json:"profiles"`
 	TrustAnchors  []anchorConfig    `json:"trust_anchors"`
 	Registers     []json.RawMessage `json:"registers"`
+	// AdminKeys are the administrators' public keys (C7 0.4, D2-11). Every
+	// credential request must be signed by one of them; with none, every
+	// one is refused. A change takes effect at restart, and the node cannot
+	// make one: it cannot write this file.
+	AdminKeys []adminKeyConfig `json:"admin_keys,omitempty"`
 	// InstallLimit is installs per hour; 0 means the pipeline's default.
 	InstallLimit int `json:"install_limit,omitempty"`
 }
@@ -82,6 +87,16 @@ type anchorConfig struct {
 	Status    string `json:"status"`     // active or revoked
 }
 
+// adminKeyConfig pins one administrator's key for one person.
+type adminKeyConfig struct {
+	// KeyID must be authz.AdminKeyID of the key: "ed25519-" and the first
+	// 16 hex digits of its SHA-256.
+	KeyID     string `json:"key_id"`
+	PublicKey string `json:"public_key"` // standard base64, 32 bytes
+	Principal string `json:"principal"`  // the human principal ID it speaks for
+	Status    string `json:"status"`     // active or revoked
+}
+
 // config is the checked configuration.
 type config struct {
 	NodeID        string
@@ -89,6 +104,7 @@ type config struct {
 	Endpoint      collectorwire.Endpoint
 	Assets        []collector.Enrolled
 	Anchors       []authz.TrustAnchor
+	AdminKeys     []authz.AdminKey
 	Registers     [][]byte
 	InstallLimit  int
 }
@@ -175,6 +191,28 @@ func parseConfig(b []byte) (config, error) {
 			return config{}, fmt.Errorf("collector config: trust_anchors[%d]: status %q", i, a.Status)
 		}
 		c.Anchors = append(c.Anchors, authz.TrustAnchor{KeyID: a.KeyID, PublicKey: ed25519.PublicKey(pub), Status: st})
+	}
+	seen := map[string]bool{}
+	for i, k := range fc.AdminKeys {
+		pub, err := base64.StdEncoding.Strict().DecodeString(k.PublicKey)
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			return config{}, fmt.Errorf("collector config: admin_keys[%d]: public_key is not 32 bytes of strict base64", i)
+		}
+		if id := authz.AdminKeyID(pub); k.KeyID != id {
+			return config{}, fmt.Errorf("collector config: admin_keys[%d]: key_id %q is not the key's, %q", i, k.KeyID, id)
+		}
+		if seen[k.KeyID] {
+			return config{}, fmt.Errorf("collector config: admin key %s appears twice", k.KeyID)
+		}
+		seen[k.KeyID] = true
+		if err := (authz.Principal{Type: authz.PrincipalHuman, ID: k.Principal}).Validate(); err != nil {
+			return config{}, fmt.Errorf("collector config: admin_keys[%d]: principal: %v", i, err)
+		}
+		st := authz.KeyStatus(k.Status)
+		if st != authz.KeyActive && st != authz.KeyRevoked {
+			return config{}, fmt.Errorf("collector config: admin_keys[%d]: status %q", i, k.Status)
+		}
+		c.AdminKeys = append(c.AdminKeys, authz.AdminKey{KeyID: k.KeyID, PublicKey: ed25519.PublicKey(pub), Principal: k.Principal, Status: st})
 	}
 	for _, r := range fc.Registers {
 		c.Registers = append(c.Registers, []byte(r))

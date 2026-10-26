@@ -41,7 +41,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `store.dir` | Store directory | absolute path. The store also checks the directory itself: mode 0700 on Linux, and the installer's DACL on Windows. A link or a junction there is refused, and so is a database file that is a link or whose own mode or DACL is wider |
 | `store.quotas` | Bytes per C5 class, keyed by class name (`adapter-evidence`, `syslog-stream`, `syslog-datagram`, `platform`, `audit`) | each positive. Every class the layout needs must have one |
 | `store.warn_fraction` | Fraction of a quota that raises `store-quota-warning` | in (0, 1) |
-| `listeners[]` | Syslog listeners: `id`, `transport` (`syslog-udp`, `syslog-tcp` or `syslog-tls`), `address` (`ip:port`) and `target` | unique ids; `simulated` only (D2-4); a loopback address (D2-10). Phase 2 starts no listener |
+| `listeners[]` | Syslog listeners: `id`, `transport` (`syslog-udp`, `syslog-tcp` or `syslog-tls`), `address` (`ip:port`), `target`, and `plaintext` or `tls` | unique ids; `simulated` only (D2-4); a loopback address (D2-10). A `syslog-udp` or `syslog-tcp` listener must set `"plaintext": true`, its own per-listener setting (owner decision D3-5). No other flag implies it, and an entry without it is TLS. A `syslog-tls` listener must not set it, and needs `tls`: `credential_ref`, optional `sender_ca_ref`, and `require_sender_cert`, which needs `sender_ca_ref`. See "Syslog listeners" |
 | `assets[]` | C1 asset records | `asset.Decode`; every endpoint `simulated`; every collection endpoint on a loopback IP literal (D2-10); `asset.CheckSenders` across all assets |
 | `targets[]` | C6 forwarding targets | `syslog.ParseTarget`; unique names |
 | `schedule[]` | `id` (the C7 schedule principal the runs are made for), `asset_id`, `endpoint`, `operation` (a C3 operation ID such as `sel.ser.read_all`), `params` (optional), `credential_ref` (a C7 handle, absent for a level 0 operation) and `every_seconds` | see below |
@@ -49,7 +49,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
 | `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config\admin`, which the node and the collector both read and neither writes |
 | `collector_public_dir` | Where the collector publishes `install-key.json` (A3 #106); the node reads it before every request (D2-15) | absolute; required when anything is scheduled. The installer requires `OTSEC\collector\public` |
-| `tls_dir` | The directory holding the files the targets' TLS references name (D2-12, lab only) | absolute; required when a target names a reference. See "TLS references" |
+| `tls_dir` | The directory holding the files the targets' and listeners' TLS references name (D2-12, lab only) | absolute; required when a target or listener names a reference. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
 
 A `schedule[]` entry is checked as follows:
@@ -155,13 +155,15 @@ A reinstall that loses the collector's stores starts its `collector_seq` again a
 
 ## TLS references (D2-12, lab only)
 
-A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the node's client credential (`tls.client_credential_ref`). In Phase 2 each reference names files in `tls_dir`:
+A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the node's client credential (`tls.client_credential_ref`). A TLS listener names its own credential and its senders' CA set (`tls.credential_ref`, `tls.sender_ca_ref`). In Phase 2 each reference names files in `tls_dir`:
 
 | File | Holds |
 | --- | --- |
 | `<trust_anchor_ref>.pem` | The CA set that verifies the collector: certificates only |
 | `<client_credential_ref>.crt` | The node's client certificate chain |
 | `<client_credential_ref>.key` | Its private key |
+| `<credential_ref>.crt`, `.key` | A TLS listener's certificate chain, for server authentication, and its key |
+| `<sender_ca_ref>.pem` | The CA set a TLS listener's senders must chain to: certificates only |
 
 A reference matches `[a-z0-9][a-z0-9_-]{0,63}` and is not a Windows device name (`con`, `nul`, `com1` and the like), so it cannot name a path or a device. The node may read these files and must not be able to change them (D2-12):
 
@@ -179,6 +181,18 @@ The installer creates `OTSEC\config\tls` (owner Administrators, node read only) 
 Every reference is resolved and checked through A4's `forward.ClientTLS` before the node starts. A missing or bad file, or a client certificate whose name is not the target's `durable_ack.permitted_peer`, stops the node. Nothing falls back to another reference.
 
 This is an interim. A3's node key register (credential design, section 9: a non-exportable key in the `NT SERVICE\otsec-node` certificate store, made from a certificate request the node generates) replaces it, and must land before any `device-observed` deployment.
+
+## Syslog listeners (P3-A4)
+
+`NewListening` builds one A4 `receive.Receiver` per configured listener, and `Run` binds them all before the schedule starts. A listener the configuration names is never silently absent: a bad TLS reference, a sender table that does not build, or an address that cannot be bound stops the node, and the listeners already bound are released.
+
+- **Stream and class.** Each listener commits to `syslog/<id>` in the syslog database: `syslog-datagram` for UDP and `syslog-stream` otherwise (see the layout above). Its `Log` is a live view, as the forwarders' streams are. While the database is not open, or is in a mode that accepts no events, the view refuses the batch and nothing is written. The listener then follows its class: a stream batch is held and retried with the connection unread (refuse-new), and a datagram batch is dropped and counted (drop-and-count).
+- **Senders.** The sender table is `receive.SendersFor` over the C1 assets: every inbound endpoint with the listener's transport whose port is unset or the listener's port. Its `host` is the sender's IP literal. Any other sender's message is kept with `asset-unresolved` and alarmed once as `syslog.unknown-source` (A4).
+- **Plaintext (D3-5).** Plaintext Syslog receive is allowed, per listener: a `syslog-udp` or `syslog-tcp` listener runs only with `"plaintext": true` in its own entry, which no lab flag or other setting implies, and TLS is the default. Such a listener has no sender authentication or integrity: any host on the path can send or alter a message, and the sender's address is its only identity. So the node records each plaintext listener at every start as `node.posture_change` (reason `plaintext_listener`, naming the listener, transport and bound address), status marks it `plaintext`, and `otsec health` prints a `PLAINTEXT` line under it. Its events say so too: A4's receiver gives them `origin_auth` `none`, and their stream `syslog/<id>` names the listener. The D2-4 and D2-10 rules on listeners (simulated targets, loopback addresses) are unchanged.
+- **TLS.** A `syslog-tls` listener's `tls` section names files in `tls_dir` under the same rules as a target's: `<credential_ref>.crt` and `.key` are the listener's certificate and key, and `<sender_ca_ref>.pem` is the CA set a sender's certificate must chain to (`Config.ListenerTLS`, then `receive.ServerTLS`). Nothing falls back to plaintext. Attribution is still by address, because C1 pinned-key is not built.
+- **Health.** The listener's health events, `syslog.unknown-source`, `syslog.unknown-budget` and `intake.drop-counted`, go through the forwarder's health sink to `platform/health`. Every 10 s, with the forwarding check, the node copies each listener's state into status (`listeners`) and rewrites the status file. `otsec health` prints one line per listener: open or not, received and stored, and the last message. It adds a line for each of: held, dropped by reason, refused connections by reason, truncated or misframed messages, unknown senders, and the last error.
+- **Limits.** The node uses A4's default `receive.Limits`. Sizing `UnknownBytes` from the syslog class quota and the upstream outage a site must ride out is open (A4's proposal).
+- **A listener that stops** on its own while the node runs raises `syslog-listener-stopped`. The others keep serving.
 
 ## Forwarding
 

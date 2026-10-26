@@ -35,6 +35,7 @@ type Status struct {
 	collClears  map[string]string
 	collector   *CollectorStatus
 	assets      map[string]AssetResult
+	listeners   map[string]ListenerStatus
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -78,6 +79,8 @@ type StatusFile struct {
 	// Assets is each scheduled asset's last run that reached the collector
 	// in this process (results.go).
 	Assets map[string]AssetResult `json:"assets,omitempty"`
+	// Listeners is each Syslog listener's state (listening.go).
+	Listeners map[string]ListenerStatus `json:"listeners,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -186,6 +189,13 @@ func (s *Status) RaiseTarget(target, code, detail string) {
 	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
 }
 
+// SetListeners records the Syslog listeners' state.
+func (s *Status) SetListeners(m map[string]ListenerStatus) {
+	s.mu.Lock()
+	s.listeners = m
+	s.mu.Unlock()
+}
+
 // SetSuspensions records the node's current asset suspensions.
 func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Lock()
@@ -271,6 +281,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	}
 	if len(s.assets) > 0 {
 		f.Assets = maps.Clone(s.assets)
+	}
+	if len(s.listeners) > 0 {
+		f.Listeners = maps.Clone(s.listeners)
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
