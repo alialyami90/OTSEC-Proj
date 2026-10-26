@@ -147,8 +147,11 @@ func Normalize(res adapter.Result, inv adapter.Invocation, a asset.Asset, in Inp
 // a caller's order that disagrees is refused, and so is a result with a
 // parsed row but no DATE_F, or one this package does not know, because
 // the adapter must leave such rows unparsed (their bytes are then kept as
-// parse-failed events). A refused result is kept by the caller as
-// quarantine, with its bytes, and alarmed (R1.4). An earlier result has no
+// parse-failed events). A caller's order is a defect in the input
+// (ErrInput); a parsed row without a usable DATE_F is a defect in the
+// result (ErrResult, A1 on the DATE_F plan, which had said ErrInput). A
+// refused result is kept by the caller as quarantine, with its bytes, and
+// alarmed (R1.4). An earlier result has no
 // settings, and the caller's order stands.
 func dateOrder(res adapter.Result, caller string) (string, error) {
 	id, err := version.Parse(res.Schema)
