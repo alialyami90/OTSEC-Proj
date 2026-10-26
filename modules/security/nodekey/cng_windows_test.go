@@ -130,11 +130,12 @@ func TestCNGKeyLifecycle(t *testing.T) {
 // administrator do with a key, by name, under each Administrators ACE
 // (SYSTEM always has full control). It is the evidence the production DACL
 // (CNG.sddl) is chosen from, and it fails only if the production row stops
-// behaving as CNG documents: use, DACL read, delete.
+// allowing use, DACL read, a DACL change and delete.
 func TestCNGRightsProbe(t *testing.T) {
 	needElevated(t)
 	keys := CNG{}
 	digest := sha256.Sum256([]byte("otsec nodekey probe"))
+	notTried := errors.New("-")
 	res := func(err error) string {
 		if err == nil {
 			return "ok"
@@ -149,7 +150,10 @@ func TestCNGRightsProbe(t *testing.T) {
 		}
 		sddl := "D:P(A;;GA;;;SY)(A;;" + rights + ";;;BA)"
 		setErr := setDACL(s.(*cngSigner).key, sddl)
-		var signErr, readErr, resetErr error
+		// Sign and the second DACL change need the key open by name; when
+		// that fails they are not tried, and the log shows "-".
+		signErr, resetErr := notTried, notTried
+		var readErr error
 		o, openErr := keys.Open(name)
 		if openErr == nil {
 			_, signErr = o.Sign(rand.Reader, digest[:], nil)
@@ -164,7 +168,7 @@ func TestCNGRightsProbe(t *testing.T) {
 		delErr := keys.Delete(name)
 		t.Logf("BA %-9s set=%s open=%s sign=%s readDACL=%s setAgain=%s delete=%s",
 			rights, res(setErr), res(openErr), res(signErr), res(readErr), res(resetErr), res(delErr))
-		if rights == "GA" && (setErr != nil || openErr != nil || signErr != nil || readErr != nil || delErr != nil) {
+		if rights == "GA" && (setErr != nil || openErr != nil || signErr != nil || readErr != nil || resetErr != nil || delErr != nil) {
 			t.Errorf("the production Administrators ACE does not behave as designed")
 		}
 	}

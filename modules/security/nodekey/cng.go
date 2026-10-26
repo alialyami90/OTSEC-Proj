@@ -13,10 +13,10 @@ import "crypto"
 // handle Create returned: SYSTEM and Administrators have full control, and
 // the listed Users (the node service) may use the key. No other account,
 // the collector service among them, has any right. Administrators are not
-// excluded from use: the Software KSP needs read and write on a key to
-// change its DACL or delete it, and an administrator can act as SYSTEM in
-// any case (TestCNGRightsProbe, CI on #157). The administrator's tool runs
-// elevated.
+// excluded from use: an administrator must keep write-DAC and delete to
+// retire the key, write-DAC lets them grant themselves use, and they can
+// act as SYSTEM in any case (TestCNGRightsProbe, CI on #157). The
+// administrator's tool runs elevated.
 //
 // On other systems every method returns an error.
 type CNG struct {
