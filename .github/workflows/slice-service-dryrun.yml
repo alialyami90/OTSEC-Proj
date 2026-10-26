@@ -3,7 +3,7 @@
 name: slice-service-dryrun
 on:
   push:
-    branches: [claude/project-thread-xni3ff-svcdry]
+    branches: [claude/project-thread-qj1j9d-svcdry]
 permissions:
   contents: read
 jobs:
