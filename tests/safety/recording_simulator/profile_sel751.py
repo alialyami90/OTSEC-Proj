@@ -25,6 +25,13 @@ Documented (p. = manual page):
   messages are framed <STX> lines <CRLF> <ETX> (switch stx_etx)  p. 7.28
   Telnet: two concurrent sessions on PORT 1 (p. 7.13); without QUIT the
     relay stays at the elevated level until TIDLE expires (p. 7.16)
+  SHO G (Level 1) shows the global settings; the General Global Settings
+    are PHROT, FNOM, DX1FBLK, DATE_F, METHRES, 51SAT and FAULT, factory
+    defaults as listed (Table 7.67 p. 7.77; Table 4.84 p. 4.225); SHO G s
+    starts at setting s (Table 7.67, parameter s)
+  DATE_F (MDY, YMD or DMY) sets the date presentation format (p. 4.226);
+    the Date of a command response follows it (Table 7.16 notes, p. 7.31),
+    as do SER date arguments (p. 7.75); switch date_f, MDY by default
   SHO P n (Level 1) shows the settings of port n; Port 1 is Ethernet and
     carries MAXACC, LANG, FTPACC and HTTPACC (Table 7.67 p. 7.77;
     Table 4.104 p. 4.249-4.251, factory defaults)
@@ -69,7 +76,15 @@ elevated). RelayState(inherit=None) gives every connection a fresh Level 0
 behind; inherit="prompt" also carries a pending "Password: ?" and the failed
 attempt count, so the next connection's first line is read as a password.
 
-ASSUMED (not stated in the manual): the QUIT reply (see quit_reply);
+ASSUMED (not stated in the manual): SER rows print their DATE in DATE_F's
+order too (A2's inference, D3-2; the manual shows SER rows in MDY only),
+with two digits for day and month and four for the year as in Figure 10.16,
+the separator "/" as in the DAT examples (p. 1.14); the SHO G reply holds
+only the General Global Settings (a relay prints more sections, for example
+the IEC 61850 mode settings on p. G.28), headed "Global Settings" as in
+Figure 10.6, in the SHO P 1 layout below; SHO G s with an s that is not one
+of those settings gets the placeholder;
+the QUIT reply (see quit_reply);
 commands are case-insensitive; no
 character echo; an unmodelled but valid command gets a placeholder; the
 response text of clear commands is a placeholder; the layout of SHO P 1
@@ -89,6 +104,19 @@ DOC = os.path.join(HERE, "documented", "sel-751")
 CRLF = b"\r\n"
 PROMPTS = {0: b"=", 1: b"=>", 2: b"=>>"}
 UNMODELLED = b"[simulator: command not modelled from documentation]"
+DATE_FORMATS = ("MDY", "YMD", "DMY")
+# Table 4.84 (p. 4.225), factory defaults, in the table's order; DATE_F is
+# the responder's date_f.
+GLOBAL_GENERAL = (("PHROT", "ABC"), ("FNOM", "60"), ("DX1FBLK", "Y"), ("DATE_F", None), ("METHRES", "Y"),
+                  ("51SAT", "Y"), ("FAULT", "50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP"))
+_MDY = re.compile(rb"(?<![\d/])(\d\d)/(\d\d)/(\d{4})(?![\d/])")
+
+
+def in_date_order(blob, date_f):
+    """Every mm/dd/yyyy date in blob printed in DATE_F's order (ASSUMED
+    layout, see the module documentation)."""
+    order = {"MDY": rb"\1/\2/\3", "YMD": rb"\3/\1/\2", "DMY": rb"\2/\1/\3"}[date_f]
+    return _MDY.sub(order, blob)
 # ASSUMED layout for SHO P 1: section headings, KEY := value columns, and
 # quoted strings follow the SEL-400 Series IM 20260730 `SHO P 5` example
 # (p. 15.49) and the SEL-751 `SHO` example (p. 7.78). Heading names and where
@@ -300,7 +328,11 @@ class SerGrowth:
 class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
-                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None):
+                 fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None,
+                 date_f="MDY"):
+        if date_f not in DATE_FORMATS:
+            raise ValueError(f"date_f {date_f!r}: want one of {DATE_FORMATS}")
+        self.date_f = date_f
         self.password = password          # None models "Level 1 password disabled"
         # p. 7.28: "The relay transmits all messages in the following format:
         # <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
@@ -362,12 +394,37 @@ class SEL751DocResponder:
         flush()
         return CRLF + CRLF.join(out) + CRLF
 
+    def _show_global(self, start=None):
+        """SHO G [s]: the General Global Settings, from s if given (None if
+        s is not one of them)."""
+        names = [n for n, _ in GLOBAL_GENERAL]
+        if start is not None and start not in names:
+            return None
+        out, cells = [b"Global Settings", b"", b"General Global Settings"], []
+        for name, value in GLOBAL_GENERAL[names.index(start) if start else 0:]:
+            cell = f"{name:<8} := {self.date_f if value is None else value}".encode()
+            if len(cell) > 25:
+                # A SELOGIC equation takes its own line (Figure 10.3).
+                if cells:
+                    out.append(b"".join(c.ljust(27) for c in cells).rstrip())
+                    cells = []
+                out.append(cell)
+                continue
+            cells.append(cell)
+            if len(cells) == 3:
+                out.append(b"".join(c.ljust(27) for c in cells).rstrip())
+                cells = []
+        if cells:
+            out.append(b"".join(c.ljust(27) for c in cells).rstrip())
+        return CRLF + CRLF.join(out) + CRLF
+
     def _prompt(self):
         return CRLF + PROMPTS[self.level]
 
     def _header(self):
         t = time.gmtime()
-        stamp = time.strftime("%m/%d/%Y Time: %H:%M:%S", t).encode() + b".000"
+        stamp = in_date_order(time.strftime("%m/%d/%Y", t).encode(), self.date_f) + \
+            time.strftime(" Time: %H:%M:%S", t).encode() + b".000"
         return (self.rid.ljust(42) + b"Date: " + stamp + CRLF +
                 self.tid.ljust(42) + b"Time Source: Internal" + CRLF)
 
@@ -472,6 +529,9 @@ class SEL751DocResponder:
                          effects=["metering reset requested; relay asks for Y/N confirmation (p. 7.68)"])
         if text == "SHO P 1":
             return Reply(self._show_port1() + self._prompt())
+        if text == "SHO G" or text.startswith("SHO G "):
+            out = self._show_global(text[6:].strip() or None)
+            return Reply(out + self._prompt() if out else CRLF + UNMODELLED + self._prompt())
         if text == "SER":
             if self.ser is not None and self.growth is not None:
                 self.ser = grown_ser(self.growth.read())
@@ -481,10 +541,10 @@ class SEL751DocResponder:
                 lines = self.ser.split(CRLF)
                 cut = next(i for i, l in enumerate(lines) if SER_ROW.match(l)) + 4
                 # Cut inside the message: STX sent, ETX and the prompt never.
-                reply = Reply((b"\x02" if self.stx_etx else CRLF) + CRLF.join(lines[:cut]) + CRLF)
+                reply = Reply((b"\x02" if self.stx_etx else CRLF) + in_date_order(CRLF.join(lines[:cut]), self.date_f) + CRLF)
                 reply.unframed = True
                 return reply
-            body = self.ser if self.ser is not None else b"No Data Available"
+            body = in_date_order(self.ser, self.date_f) if self.ser is not None else b"No Data Available"
             return Reply(CRLF + body + self._prompt())
         return Reply(CRLF + UNMODELLED + self._prompt())
 
@@ -505,6 +565,8 @@ class SEL751DocResponder:
                 return Reply(CRLF + b"Invalid Access Level" + self._prompt())
             if text == "MOS P 1":
                 return Reply(self._show_port1() + self._prompt())
+            if text == "MOS G":
+                return Reply(self._show_global() + self._prompt())
             return Reply(CRLF + UNMODELLED + self._prompt())
         if self.level >= 1 and re.fullmatch(r"SER\w*\s+[DR]\b.*", text):
             self.ser = None

@@ -194,7 +194,15 @@ class Session:
     """Line handling shared by all transports. `write` sends bytes to the client."""
 
     def __init__(self, recorder, session_id, write, cfg):
-        self.rec, self.id, self._write, self.cfg = recorder, session_id, write, cfg
+        self.rec, self.id, self.cfg = recorder, session_id, cfg
+
+        def _write(data):
+            # GT-REC for the device side (V-S8): every byte the simulator
+            # sends, in order, so stored evidence can be checked against it.
+            if data:
+                recorder.write("sent", session=session_id, b64=base64.b64encode(data).decode())
+            write(data)
+        self._write = _write
         self.responder = cfg.responder_factory(cfg)
         self.buf = b""
         self.ready = False
@@ -356,6 +364,8 @@ async def start_tcp(recorder, host, port, cfg=None):
                         recorder.write("telnet", session=sid,
                                        b64=base64.b64encode(s).decode())
                     if replies:
+                        recorder.write("sent", session=sid, telnet=True,
+                                       b64=base64.b64encode(replies).decode())
                         writer.write(replies)
                 session.feed(data)
         except ConnectionError as exc:
@@ -398,6 +408,8 @@ def main():
     ap.add_argument("--profile-inherit", choices=("none", "level", "prompt"), default="none",
                     help="sel-751-doc: what a new connection inherits before TIDLE (see profile_sel751)")
     ap.add_argument("--profile-tidle", type=float, default=900.0, help="sel-751-doc: TIDLE in seconds")
+    ap.add_argument("--profile-date-f", choices=("MDY", "YMD", "DMY"), default="MDY",
+                    help="sel-751-doc: Global setting DATE_F; SHO G shows it and every date prints in its order")
     ap.add_argument("--max-sessions", type=int, help="tcp only: refuse connections beyond this count")
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
@@ -420,7 +432,7 @@ def main():
         cfg.responder_factory = profile_sel751.factory(
             password=(args.profile_password or "").encode("latin-1") or None,
             fid=args.profile_fid.encode("latin-1") if args.profile_fid else None,
-            stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay,
+            stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay, date_f=args.profile_date_f,
             growth=profile_sel751.SerGrowth(args.profile_ser_state,
                                             1 if args.profile_ser == "script" else args.profile_ser_grow)
             if args.profile_ser in ("grow", "script") else None)
