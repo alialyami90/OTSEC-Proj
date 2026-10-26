@@ -17,7 +17,7 @@ const AuditMsgID = "AUDIT"
 // record and is never its source: a receiver takes every fact from the
 // sealed bytes in MSG, and checks that the parameters agree with them.
 //
-//	v     C6 identifier of the rendering, for example otsec.syslog/0.2
+//	v     C6 identifier of the rendering, for example otsec.syslog/0.3
 //	ac    C8 identifier of the record, for example otsec.audit/0.1
 //	node  the record's node_id
 //	seq   the record's seq

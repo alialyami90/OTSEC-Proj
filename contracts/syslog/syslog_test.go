@@ -226,6 +226,7 @@ var goldens = []struct{ file, event, target string }{
 	{"sel751-row8.rfc5424.txt", "sel751-fig10-16-row8", "tls-best-effort"},
 	{"sel751-row8.rfc3164.txt", "sel751-fig10-16-row8", "udp-rfc3164"},
 	{"rtac-syslog.rfc5424.txt", "rtac-syslog-user-logon", "relp-tls-required"},
+	{"rtac-tls-mutual.rfc5424.txt", "constructed-rtac-tls-mutual", "relp-tls-required"},
 	{"health-ser-gap.rfc5424.txt", "health-ser-gap", "relp-tls-required"},
 	{"constructed-invalid-date.rfc5424.txt", "constructed-invalid-date", "tls-best-effort"},
 }
@@ -279,6 +280,13 @@ func TestRenderReadBack(t *testing.T) {
 			if rcv, _ := m.Get("rcv"); rcv != e.Received.UTC {
 				t.Errorf("%s: rcv %q", ef, rcv)
 			}
+			var leaf string
+			if e.Source.Sender != nil {
+				leaf = e.Source.Sender.TLSLeafSHA256
+			}
+			if got, ok := m.Get("tlsleaf"); got != leaf || ok != (leaf != "") {
+				t.Errorf("%s on %s: tlsleaf %q, want %q", ef, tf, got, leaf)
+			}
 			text, ok := m.DeviceText()
 			switch {
 			case e.Native == nil || e.Native.Bytes == nil:
@@ -319,7 +327,12 @@ func TestHeaderTimestampAtMostSixDigits(t *testing.T) {
 // withBytes returns the RTAC example carrying b as its record (and its
 // whole evidence), and s as its normalized subject.
 func withBytes(t *testing.T, b []byte, subject string) *event.Event {
-	e := loadEvent(t, "rtac-syslog-user-logon")
+	return withBytesOn(t, "rtac-syslog-user-logon", b, subject)
+}
+
+// withBytesOn is withBytes on another C4 example.
+func withBytesOn(t *testing.T, name string, b []byte, subject string) *event.Event {
+	e := loadEvent(t, name)
 	sum := sha256.Sum256(b)
 	h := hex.EncodeToString(sum[:])
 	e.Native.Bytes, e.Native.RecordSHA256, e.Native.RecordLength = b, h, int64(len(b))
@@ -465,6 +478,72 @@ func TestOversize(t *testing.T) {
 	if _, _, err := Render(g, tg); !slices.Contains(Codes(err), CodeTooLarge) {
 		t.Errorf("fixed fields over the limit: %v", err)
 	}
+}
+
+// C6 0.3 tlsleaf (A1, C6 0.3 condition 1): the parameter counts against the
+// limit like every other, so on a 2048-octet target the device text is kept
+// at exactly 2048 octets and omitted at one octet more, and the threshold
+// moves by exactly the parameter's 75 octets against the same event at C4
+// 0.1, which has no fingerprint. tlsleaf survives the omission.
+func TestTLSLeafSizeBoundary(t *testing.T) {
+	tg := loadTarget(t, "relp-tls-required")
+	tg.MaxMessageOctets = DefaultMaxOctets
+	leaf := loadEvent(t, "constructed-rtac-tls-mutual").Source.Sender.TLSLeafSHA256
+	render := func(withLeaf bool, n int) ([]byte, Outcome) {
+		t.Helper()
+		e := withBytesOn(t, "constructed-rtac-tls-mutual", bytes.Repeat([]byte("A"), n), "SystemTags. User_Logged_On")
+		if !withLeaf {
+			e.Schema, e.Source.Sender.TLSLeafSHA256 = "otsec.event/0.1", ""
+		}
+		msg, out, err := Render(e, tg)
+		if err != nil {
+			t.Fatalf("leaf %v with %d octets: %v", withLeaf, n, err)
+		}
+		return msg, out
+	}
+	// fit is the longest record whose text is kept, found by trying every
+	// length, so it does not depend on how Render measures.
+	fit := func(withLeaf bool) int {
+		t.Helper()
+		for n := 0; n < DefaultMaxOctets; n++ {
+			if _, out := render(withLeaf, n+1); out.TextOmitted {
+				return n
+			}
+		}
+		t.Fatalf("leaf %v: text never omitted", withLeaf)
+		return 0
+	}
+	with, without := fit(true), fit(false)
+	if want := len(` tlsleaf="` + leaf + `"`); want != 75 || without-with != want {
+		t.Errorf("threshold moved by %d octets, tlsleaf is %d", without-with, want)
+	}
+	msg, out := render(true, with)
+	if len(msg) != DefaultMaxOctets || out.TextOmitted {
+		t.Errorf("at the threshold: %d octets, %+v", len(msg), out)
+	}
+	if v, _ := mustParse(t, msg).Get("tlsleaf"); v != leaf {
+		t.Errorf("at the threshold: tlsleaf %q", v)
+	}
+	msg, out = render(true, with+1)
+	m := mustParse(t, msg)
+	if len(msg) > DefaultMaxOctets || !out.TextOmitted || out.SummaryDropped {
+		t.Errorf("one octet over: %d octets, %+v", len(msg), out)
+	}
+	if v, _ := m.Get("dtext_omitted"); v != OmitSize {
+		t.Errorf("one octet over: dtext_omitted %q", v)
+	}
+	if v, _ := m.Get("tlsleaf"); v != leaf {
+		t.Errorf("one octet over: tlsleaf %q", v)
+	}
+}
+
+func mustParse(t *testing.T, b []byte) *Message {
+	t.Helper()
+	m, err := ParseMessage(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
 }
 
 func TestRenderRejectsInvalidInput(t *testing.T) {

@@ -49,7 +49,7 @@ type Param struct {
 // name when the value is not printable UTF-8 (see printable); the value is
 // then standard base64 of the bytes. Repeated names keep the event's order.
 //
-//	v        C6 identifier of the rendering, for example otsec.syslog/0.2
+//	v        C6 identifier of the rendering, for example otsec.syslog/0.3
 //	ev       C4 identifier of the event, for example otsec.event/0.1
 //	eid      C4 event ID, canonical text; receivers remove duplicates by it
 //	origin   device or platform
@@ -57,6 +57,9 @@ type Param struct {
 //	asset    C1 asset ID of the subject
 //	abind    binding method/confidence, for example adapter-target/configured
 //	sender   sender address as observed by the node
+//	tlsleaf  SHA-256 of the sender's verified TLS leaf certificate, on a
+//	         tls-mutual event only (C4 0.2, C6 0.3); never omitted to fit
+//	         the size limit
 //	auth     C4 origin_auth
 //	evc      C4 evidence_class: device-observed or simulated (D1-23); on
 //	         every device event, never omitted to fit the size limit
@@ -133,6 +136,7 @@ func params(e *event.Event, omit string, content bool) []Param {
 	}
 	if s := e.Source.Sender; s != nil {
 		add("sender", s.Address)
+		opt("tlsleaf", s.TLSLeafSHA256)
 	}
 	add("auth", string(e.Source.OriginAuth))
 	opt("evc", string(e.Source.EvidenceClass))
