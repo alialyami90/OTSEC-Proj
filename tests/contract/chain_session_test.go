@@ -168,12 +168,12 @@ func buildChainSession(t *testing.T) (*chainRun, error) {
 				Source: asset.Source{Method: asset.SourceMethod("operator-entry"), Ref: "operator:a6-chain", ObservedAt: "2026-10-24T11:00:00Z"}}}}
 	}
 	r.asset = asset.Asset{
-		Schema: "otsec.asset/0.1", AssetID: chainAsset, NodeID: chainNode,
+		Schema: "otsec.asset/0.2", AssetID: chainAsset, NodeID: chainNode,
 		Attributes: []asset.Attribute{
 			declared("device_class", "protective-relay"), declared("vendor", "sel"), declared("product_family", "sel-751"),
 			declared("firmware_id", allowedFID), declared("serial_number", chainSerial), declared("ip_address", "192.0.2.61"),
 		},
-		Endpoints: []asset.Endpoint{{ID: chainEndpoint, Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23, Target: asset.Simulated,
+		Endpoints: []asset.Endpoint{{ID: chainEndpoint, Transport: asset.Transport("telnet"), Host: "192.0.2.61", Port: 23, Target: asset.Simulated, Path: asset.Direct,
 			DownstreamSecurity: asset.DownstreamSecurity{Level: asset.SecurityLevel("plaintext-unauthenticated"),
 				Acknowledgement: &asset.Acknowledgement{By: "admin:a6", At: "2026-10-24T11:00:00Z", Reason: "A6 chain test, simulated, lab only", Scope: asset.AckScope("lab-only")}}}},
 		IdentityBinding: asset.IdentityBinding{Method: asset.BindingMethod("device-reported"), Strength: asset.BindingStrength("spoofable"),
