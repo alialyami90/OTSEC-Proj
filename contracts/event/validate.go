@@ -68,7 +68,7 @@ var (
 	hexForm        = regexp.MustCompile(`^(?:[0-9a-f]{2})+$`)
 )
 
-var self = version.ID{Name: "event", Major: 0, Minor: 1}
+var self = version.ID{Name: "event", Major: 0, Minor: 2}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
@@ -166,6 +166,7 @@ func checkDeviceEvent(c *checker, e *Event) {
 	if s.Sender != nil && strings.TrimSpace(s.Sender.Address) == "" {
 		c.fail(CodeMissing, "source.sender.address", "empty")
 	}
+	checkTLSLeaf(c, e)
 	// evidence_class is open to later minors (D1-23): a class this reader
 	// does not know is kept and read as simulated through Source.Simulated.
 	// An event of this minor or earlier takes only the two values.
@@ -239,6 +240,28 @@ func checkPlatformEvent(c *checker, e *Event) {
 	}
 	if e.Normalized != nil {
 		checkNormalized(c, e.Normalized)
+	}
+}
+
+// checkTLSLeaf applies the 0.2 sender certificate rule: a fingerprint only
+// with tls-mutual and only from 0.2, and always with tls-mutual from 0.2.
+func checkTLSLeaf(c *checker, e *Event) {
+	s := &e.Source
+	leaf := ""
+	if s.Sender != nil {
+		leaf = s.Sender.TLSLeafSHA256
+	}
+	v, err := version.Parse(e.Schema)
+	from02 := err == nil && v.Minor >= 2
+	switch {
+	case leaf != "" && !from02:
+		c.fail(CodeForbidden, "source.sender.tls_leaf_sha256", "new in otsec.event/0.2; this event is %s", e.Schema)
+	case leaf != "" && s.OriginAuth != AuthTLSMutual:
+		c.fail(CodeForbidden, "source.sender.tls_leaf_sha256", "only a tls-mutual sender has a verified certificate; origin_auth is %q", s.OriginAuth)
+	case leaf != "" && !hexSHA256.MatchString(leaf):
+		c.fail(CodeEvidence, "source.sender.tls_leaf_sha256", "not a lowercase hex SHA-256")
+	case leaf == "" && from02 && s.OriginAuth == AuthTLSMutual:
+		c.fail(CodeMissing, "source.sender.tls_leaf_sha256", "a tls-mutual event of 0.2 or later names the certificate that spoke")
 	}
 }
 

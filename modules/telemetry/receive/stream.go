@@ -124,6 +124,7 @@ func (r *Receiver) release(addr netip.Addr) {
 func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.Addr) {
 	defer c.Close()
 	auth := event.AuthNone
+	var cert []byte // the verified leaf of a tls-mutual sender
 	if r.tlsCfg != nil {
 		tc := tls.Server(c, r.tlsCfg)
 		hctx, cancel := context.WithTimeout(ctx, r.lim.HandshakeTimeout)
@@ -137,8 +138,8 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 			return
 		}
 		auth = event.AuthTLSServerOnly
-		if len(tc.ConnectionState().VerifiedChains) > 0 {
-			auth = event.AuthTLSMutual
+		if chains := tc.ConnectionState().VerifiedChains; len(chains) > 0 {
+			auth, cert = event.AuthTLSMutual, chains[0][0].Raw
 		}
 		c = tc
 	}
@@ -169,7 +170,7 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 		if fr != nil {
 			r.update(func(s *Status) { s.Received++ })
 			select {
-			case q <- msg{frame: *fr, from: from, auth: auth, rcv: r.cfg.Received()}:
+			case q <- msg{frame: *fr, from: from, auth: auth, cert: cert, rcv: r.cfg.Received()}:
 			case <-cctx.Done():
 				// The grace after stopping has ended with the writer still
 				// held by the store: the frame is read but cannot be

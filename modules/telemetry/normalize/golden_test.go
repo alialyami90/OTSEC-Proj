@@ -91,6 +91,7 @@ func TestFig1016MatchesC4Goldens(t *testing.T) {
 	for i := range out.Events {
 		e := out.Events[i]
 		e.ID.Seq = uint64(i + 1)
+		asFrozen(t, &e)
 		got, err := json.Marshal(&e)
 		if err != nil {
 			t.Fatal(err)
@@ -106,6 +107,17 @@ func TestFig1016MatchesC4Goldens(t *testing.T) {
 	}
 }
 
+// asFrozen stamps a produced event with the minor its C4 golden was frozen
+// at, 0.1. C4 0.2 added only sender.tls_leaf_sha256, which no SER event
+// carries, so the rest must match byte for byte.
+func asFrozen(t *testing.T, e *event.Event) {
+	t.Helper()
+	if e.Schema != event.Identifier || (e.Source.Sender != nil && e.Source.Sender.TLSLeafSHA256 != "") {
+		t.Fatalf("schema %s, sender %+v", e.Schema, e.Source.Sender)
+	}
+	e.Schema = "otsec.event/0.1"
+}
+
 // With DATE_F and the UTC offset known, row 8 matches the known-offset
 // golden: no assumption flag, and UTC stated as wall clock minus offset.
 func TestKnownOffsetMatchesC4Golden(t *testing.T) {
@@ -117,6 +129,7 @@ func TestKnownOffsetMatchesC4Golden(t *testing.T) {
 	}
 	e := out.Events[0]
 	e.ID.Seq = 1
+	asFrozen(t, &e)
 	got, _ := json.Marshal(&e)
 	want := canonical(t, readFile(t, c4Testdata+"valid/sel751-row8-known-offset.json"))
 	if !bytes.Equal(got, want) {

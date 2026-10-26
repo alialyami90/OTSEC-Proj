@@ -87,6 +87,11 @@ type SyslogInput struct {
 	// Auth is how the sender was authenticated: none (UDP, TCP),
 	// tls-server-only or tls-mutual.
 	Auth event.OriginAuth
+	// SenderCert is the DER certificate a tls-mutual sender presented and
+	// the listener verified; required with tls-mutual and refused
+	// otherwise. Its SHA-256 is the event's sender.tls_leaf_sha256 (C4
+	// 0.2). It never raises the binding's confidence.
+	SenderCert []byte
 	// AssetID is the C1 asset the sender address maps to, or "" when no
 	// asset has an inbound endpoint for it.
 	AssetID string
@@ -118,6 +123,10 @@ func Syslog(in SyslogInput) (event.Event, error) {
 	sha := hex.EncodeToString(sum[:])
 	n := int64(len(in.Message))
 	src := event.Source{Sender: &event.Sender{Address: in.Sender}, OriginAuth: in.Auth, EvidenceClass: in.EvidenceClass}
+	if len(in.SenderCert) > 0 {
+		leaf := sha256.Sum256(in.SenderCert)
+		src.Sender.TLSLeafSHA256 = hex.EncodeToString(leaf[:])
+	}
 	var flags []string
 	if in.AssetID != "" {
 		// The direct sender is the subject: a relayed message arrives from
@@ -183,6 +192,8 @@ func (in SyslogInput) check() error {
 		return fmt.Errorf("%w: sender %q", ErrInput, in.Sender)
 	case !slices.Contains(event.AllowedOriginAuth[event.MethodSyslogReceive], in.Auth):
 		return fmt.Errorf("%w: origin_auth %q", ErrInput, in.Auth)
+	case (in.Auth == event.AuthTLSMutual) != (len(in.SenderCert) > 0):
+		return fmt.Errorf("%w: a sender certificate goes with tls-mutual and only with it (origin_auth %q)", ErrInput, in.Auth)
 	case in.EvidenceClass != asset.DeviceObserved && in.EvidenceClass != asset.Simulated:
 		return fmt.Errorf("%w: evidence class %q", ErrInput, in.EvidenceClass)
 	case !slices.Contains(Dialects, in.Dialect):

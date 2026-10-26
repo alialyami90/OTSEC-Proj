@@ -24,10 +24,14 @@ const (
 	sysAsset    = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"
 )
 
+// sysCert stands for a tls-mutual sender's DER certificate. Syslog only
+// hashes it, so these bytes are not a certificate.
+var sysCert = []byte("test: not a certificate")
+
 func sysInput(msg []byte, d Dialect) SyslogInput {
 	return SyslogInput{
 		Node: testNode, Stream: sysStream, Message: msg, Sender: "127.0.0.1",
-		Auth: event.AuthTLSMutual, AssetID: sysAsset, EvidenceClass: asset.Simulated, Dialect: d,
+		Auth: event.AuthTLSMutual, SenderCert: sysCert, AssetID: sysAsset, EvidenceClass: asset.Simulated, Dialect: d,
 		Received: event.Received{UTC: "2026-10-26T15:00:00.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}},
 	}
 }
@@ -325,6 +329,16 @@ func TestSyslogSource(t *testing.T) {
 	if e.Source.Sender.Address != "127.0.0.1" || e.Source.Sender.AssetID != sysAsset || e.Source.OriginAuth != event.AuthTLSMutual {
 		t.Errorf("sender %+v auth %s", e.Source.Sender, e.Source.OriginAuth)
 	}
+	// C4 0.2: the certificate that spoke is named, and the binding is no
+	// stronger for it.
+	if e.Schema != event.Identifier || e.Source.Sender.TLSLeafSHA256 != sha256hex(sysCert) {
+		t.Errorf("schema %s, tls leaf %q", e.Schema, e.Source.Sender.TLSLeafSHA256)
+	}
+	in0 := sysInput(msg, DialectRFC)
+	in0.Auth, in0.SenderCert = event.AuthTLSServerOnly, nil
+	if e := mustSyslog(t, in0); e.Source.Sender.TLSLeafSHA256 != "" {
+		t.Errorf("tls-server-only event names a certificate")
+	}
 	in := sysInput(msg, DialectRFC)
 	in.AssetID = ""
 	in.Flags = []string{FlagTruncated}
@@ -333,12 +347,14 @@ func TestSyslogSource(t *testing.T) {
 		t.Errorf("unknown sender: asset %+v flags %v status %s", e.Source.Asset, e.Flags, e.Collection.ParseStatus)
 	}
 	for name, mut := range map[string]func(*SyslogInput){
-		"empty message":   func(in *SyslogInput) { in.Message = nil },
-		"no sender":       func(in *SyslogInput) { in.Sender = " " },
-		"session auth":    func(in *SyslogInput) { in.Auth = event.AuthSession },
-		"no class":        func(in *SyslogInput) { in.EvidenceClass = "" },
-		"unknown dialect": func(in *SyslogInput) { in.Dialect = "sel-2488" },
-		"bad stream":      func(in *SyslogInput) { in.Stream = "Syslog:x" },
+		"empty message":    func(in *SyslogInput) { in.Message = nil },
+		"no sender":        func(in *SyslogInput) { in.Sender = " " },
+		"session auth":     func(in *SyslogInput) { in.Auth = event.AuthSession },
+		"mutual, no cert":  func(in *SyslogInput) { in.SenderCert = nil },
+		"cert, not mutual": func(in *SyslogInput) { in.Auth = event.AuthNone },
+		"no class":         func(in *SyslogInput) { in.EvidenceClass = "" },
+		"unknown dialect":  func(in *SyslogInput) { in.Dialect = "sel-2488" },
+		"bad stream":       func(in *SyslogInput) { in.Stream = "Syslog:x" },
 	} {
 		in := sysInput(msg, DialectRFC)
 		mut(&in)

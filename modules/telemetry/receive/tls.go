@@ -24,8 +24,9 @@ import (
 //     a certificate must chain to clients, never to the system roots, and
 //     is refused at the handshake otherwise; requireClient refuses a sender
 //     that presents none. A sender that proved its certificate gets
-//     tls-mutual. Its certificate is not tied to an asset (C1 pinned-key is
-//     not built), so the event's asset is still bound by sender address.
+//     tls-mutual, and its events carry the certificate's SHA-256 (C4 0.2).
+//     The certificate is not tied to an asset (C1 pinned-key is not
+//     built), so the event's asset is still bound by sender address.
 func ServerTLS(cert *tls.Certificate, clients *x509.CertPool, requireClient bool) (*tls.Config, error) {
 	if cert == nil {
 		return nil, fmt.Errorf("%w: no listener certificate", ErrConfig)
