@@ -30,7 +30,7 @@ const (
 	// unknown senders included.
 	DialectRFC Dialect = "rfc"
 	// DialectRTAC is the SEL RTAC Logger: RFC 3164 with a year in the
-	// header, and the event time, level, category, tag and description in
+	// header, and the event time, level, category, tag and message in
 	// MSG (S23 Table 8.16 and the example on p. 636, documented-untested).
 	// The header time is the RTAC's send time; the event time is the tag's
 	// time stamp, so device_time is the event time.
@@ -68,7 +68,7 @@ const (
 	FlagFraming = "frame-invalid"
 )
 
-// rtacMaxValue bounds normalized.value for the RTAC description: the RTAC
+// rtacMaxValue bounds normalized.value for the RTAC message: the RTAC
 // limits a whole packet to 1024 bytes (S23 p. 636).
 const rtacMaxValue = 1024
 
@@ -426,6 +426,10 @@ func msg(p *parsed, b []byte) {
 
 var months = []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
+// offsetToken is a header token that looks like a UTC offset, never taken
+// for a HOSTNAME.
+var offsetToken = regexp.MustCompile(`^(Z|[+-][0-9]{2}(:?[0-9]{2})?)$`)
+
 // tagForm is a common RFC 3164 TAG with an optional [PID], then ':'.
 var tagForm = regexp.MustCompile(`^([A-Za-z0-9_./-]{1,48})(?:\[([!-Z^-~]{1,128})\])?:`)
 
@@ -447,6 +451,12 @@ func parse3164(p *parsed, b []byte, d Dialect, rcv time.Time) {
 	host := ""
 	if len(b) > 0 {
 		h, after, ok := token(b[1:], 255)
+		if ok && offsetToken.MatchString(h) {
+			// Possibly a UTC offset sent after the time (the SEL-2488 says
+			// its time stamps carry one, and S26 shows no wire form, D24).
+			// It is not read as the host, or as an offset.
+			ok = false
+		}
 		if !ok {
 			p.status = event.ParsePartial
 			p.time = &dt
@@ -630,8 +640,10 @@ func rfc3339Time(s, format string) event.DeviceTime {
 const rtacPrefix = "RTAC Logger: "
 
 // rtac reads the RTAC Logger MSG: "RTAC Logger: " then five parts
-// separated by ", ": event time, level, category, tag and description. The
-// description may itself hold ", ", so the split stops at five parts. It
+// separated by ", ": event time, level, category, tag and message. S23
+// Table 8.16 lists the Log Message and then the Logging Comment, when one is
+// set, after the tag; neither is delimited safely, so both stay in message,
+// and the split stops at five parts because they may hold ", ". It
 // reports false when the MSG does not have that shape.
 func rtac(p *parsed, b []byte) bool {
 	if !bytes.HasPrefix(b, []byte(rtacPrefix)) || !utf8.Valid(b) {
@@ -642,7 +654,7 @@ func rtac(p *parsed, b []byte) bool {
 		return false
 	}
 	p.add("app", strings.TrimSuffix(rtacPrefix, ": "))
-	for i, name := range []string{"event_time", "level", "category", "tag", "description"} {
+	for i, name := range []string{"event_time", "level", "category", "tag", "message"} {
 		p.add(name, parts[i])
 	}
 	p.add("msg", string(b))

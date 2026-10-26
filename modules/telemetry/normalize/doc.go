@@ -99,8 +99,9 @@
 //     the host, with no value: the message text is native, not a reading.
 //     The category is unmapped.
 //   - The dialect comes from the asset, never from the message. The RTAC
-//     dialect reads MSG as event time, level, category, tag and
-//     description (S23 p. 636): device_time is the event time, because the
+//     dialect reads MSG as event time, level, category, tag and message
+//     (the Log Message, then the Logging Comment when one is set; S23 Table
+//     8.16 and p. 636): device_time is the event time, because the
 //     header time is when the RTAC sent the message, and the subject is the
 //     tag. Its layout rests on one manual example (documented-untested).
 //

@@ -92,7 +92,7 @@
         "value": "SystemTags. User_Logged_On"
       },
       {
-        "name": "description",
+        "name": "message",
         "value": "'SEL logged on device via Web'."
       },
       {

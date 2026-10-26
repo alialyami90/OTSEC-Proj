@@ -70,7 +70,7 @@ func TestSyslogRTAC(t *testing.T) {
 	want := map[string]string{
 		"pri": "190", "timestamp": "Mar 21 2015 12:10:08", "hostname": "SEL-3530-xxxxxx",
 		"app": "RTAC Logger", "event_time": "2015-03-21 12:09:58.593", "level": "Informational",
-		"category": "Security", "tag": "SystemTags. User_Logged_On", "description": "'SEL logged on device via Web'.",
+		"category": "Security", "tag": "SystemTags. User_Logged_On", "message": "'SEL logged on device via Web'.",
 		"msg": strings.SplitN(string(msg), "SEL-3530-xxxxxx ", 2)[1],
 	}
 	if got := fieldMap(e); !maps.Equal(got, want) {
@@ -234,6 +234,18 @@ func TestSyslogHostile(t *testing.T) {
 		{"3164 lower-case month", "<13>oct 11 22:14:15 h x", event.ParsePartial, nil},
 		{"3164 timestamp then nothing", "<13>Oct 11 22:14:15", event.ParseOK, nil},
 		{"3164 hostname control byte", "<13>Oct 11 22:14:15 h\x01st x", event.ParsePartial, nil},
+		{"3164 offset token after the time", "<37>Jul 09 2009 08:17:29 -07:00 myhostname Login: x", event.ParsePartial, func(t *testing.T, e event.Event) {
+			f := fieldMap(e)
+			if _, ok := f["hostname"]; ok || e.Normalized != nil || f["msg"] != "-07:00 myhostname Login: x" || e.DeviceTime.Offset != "unknown" {
+				t.Errorf("fields %v normalized %+v time %+v", f, e.Normalized, e.DeviceTime)
+			}
+		}},
+		{"3164 hours-only offset token", "<37>Jul 09 2009 08:17:29 +03 h x", event.ParsePartial, nil},
+		{"3164 offset glued to the time", "<37>Jul 09 2009 08:17:29-07 myhostname x", event.ParsePartial, func(t *testing.T, e event.Event) {
+			if f := fieldMap(e); f["hostname"] != "" || e.Normalized != nil || e.DeviceTime != nil {
+				t.Errorf("fields %v normalized %+v time %+v", f, e.Normalized, e.DeviceTime)
+			}
+		}},
 		{"3164 rfc3339 stamp", "<13>2026-10-26T14:00:00.5+03:00 h x", event.ParseOK, func(t *testing.T, e event.Event) {
 			if dt := e.DeviceTime; dt.Format != FormatRFC3339 || dt.UTC != "2026-10-26T11:00:00.5Z" || dt.OffsetBasis != event.BasisOnWire {
 				t.Errorf("device time %+v", dt)
