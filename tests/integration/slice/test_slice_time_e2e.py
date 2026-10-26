@@ -36,7 +36,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 import sys
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
