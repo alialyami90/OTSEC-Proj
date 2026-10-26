@@ -340,8 +340,12 @@ func checkEntries(es []credEntry, nodeID string) error {
 	return nil
 }
 
-// InstallKey returns the public install key the node publishes.
+// InstallKey returns the public install key the node publishes. Every
+// write replaces s.doc, so it is read under the lock (A6 on #186: -race
+// under concurrent installs).
 func (s *CredStore) InstallKey() seal.InstallKey {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return seal.InstallKey{KeyID: s.doc.InstallKey.KeyID, PublicKey: s.doc.InstallKey.PublicKey}
 }
 

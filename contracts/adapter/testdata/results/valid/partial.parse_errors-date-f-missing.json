@@ -1,0 +1,254 @@
+{
+  "schema": "otsec.adapter/0.5",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel.ser.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.1.0-example"
+  },
+  "register_version": 4,
+  "target": "simulated",
+  "status": "partial",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:01.8Z",
+  "transcript": {
+    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPUFDQw0KQUNDDQpQYXNzd29yZDogPyBbUkVEQUNURURdDQoCDQoNClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDMNCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCkxldmVsIDENCgM9PlNITyBQIDENClNITyBQIDENCgJQb3J0IDENCg0KTUFYQUNDICA6PSAyDQpGQVNUT1AgIDo9IE4NCkxBTkcgICAgOj0gRU5HTElTSA0KRUhUVFAgICA6PSBODQpGVFBBQ0MgIDo9IDENCkhUVFBBQ0MgOj0gMQ0KVElETEUgICA6PSAxNQ0KDQoDPT5TSE8gRw0KU0hPIEcNCgINCkdsb2JhbCBTZXR0aW5ncw0KDQpQSFJPVCAgICA6PSBBQkMgICAgIEZOT00gICAgOj0gNjANCkZBVUxUICAgIDo9IDUwRzFQIE9SIDUwTjFQIE9SIDUxUDFQIE9SIDUxUVAgT1IgNTBRMVAgT1IgVFJJUA0KSVJJR0MgICAgOj0gTk9ORSAgICBVVENfT0ZGIDo9IDAuMDAgICAgICAgICAgRFNUX0JFR006PSBPRkYNCg0KAz0+U0VSDQpTRVINCgINClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDQuMTEyDQpGRUVERVIgMSAgICAgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQpTZXJpYWwgTm8gPSBTSU0wMDAwMDAwMDAwMDAxDQpGSUQgPSBTRUwtNzUxLVI1MDEtVjAtWjEwNDEwMS1EMjAyNjA5MTAgICAgIENJRCA9IEU3NTQNCg0KIyAgICBEQVRFICAgICAgIFRJTUUgICAgICAgICAgIEVMRU1FTlQgICAgICAgICAgIFNUQVRFDQoyICAgIDEwLzI0LzIwMjYgMDk6MTA6MDEuMDA0ICAgSU4xMDEgICAgICAgICAgICAgQXNzZXJ0ZWQNCjEgICAgMTAvMjQvMjAyNiAwOToxMDowMS4yNTEgICBJTjEwMSAgICAgICAgICAgICBEZWFzc2VydGVkDQoNCgM9PlFVSQ0KUVVJDQoCDQpTRUwtNzUxICAgICAgICAgIERhdGU6IDEwLzI0LzIwMjYgIFRpbWU6IDA5OjE1OjA1DQpGRUVERVIgMSAgICAgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQoDPQ==",
+    "sha256": "fa41ca6899e21ea02633a11d10ba82034f6f2a8550b65ade62b633abe5c4542a",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 2,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 2,
+        "length": 3,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 5,
+        "length": 5,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 10,
+        "length": 103,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 113,
+        "length": 4,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 117,
+        "length": 205,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.5Z"
+      },
+      {
+        "offset": 322,
+        "length": 5,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.6Z"
+      },
+      {
+        "offset": 327,
+        "length": 17,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.7Z"
+      },
+      {
+        "offset": 344,
+        "length": 12,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.8Z"
+      },
+      {
+        "offset": 356,
+        "length": 110,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.9Z"
+      },
+      {
+        "offset": 466,
+        "length": 9,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.0Z"
+      },
+      {
+        "offset": 475,
+        "length": 130,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.1Z"
+      },
+      {
+        "offset": 605,
+        "length": 7,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.2Z"
+      },
+      {
+        "offset": 612,
+        "length": 192,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.3Z"
+      },
+      {
+        "offset": 804,
+        "length": 5,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.4Z"
+      },
+      {
+        "offset": 809,
+        "length": 374,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.5Z"
+      },
+      {
+        "offset": 1183,
+        "length": 5,
+        "dir": "tx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:01.6Z"
+      },
+      {
+        "offset": 1188,
+        "length": 103,
+        "dir": "rx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:01.7Z"
+      }
+    ],
+    "redactions": [
+      {
+        "offset": 344,
+        "length": 10,
+        "reason": "credential",
+        "component": "transport"
+      }
+    ]
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": true,
+    "language_probe": "accepted",
+    "password_prompt": true,
+    "credential_sent": true,
+    "echo_scan": "performed",
+    "access_level": "1",
+    "quit_sent": true
+  },
+  "identity": {
+    "result": "match",
+    "items": [
+      {
+        "name": "firmware_id",
+        "expected": "SEL-751-R501-V0-Z104101-D20260910",
+        "observed": "SEL-751-R501-V0-Z104101-D20260910",
+        "span": {
+          "offset": 127,
+          "length": 33
+        }
+      },
+      {
+        "name": "serial_number",
+        "expected": "SIM0000000000001",
+        "observed": "SIM0000000000001",
+        "span": {
+          "offset": 926,
+          "length": 16
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "partial.parse_errors",
+    "detail": "DATE_F was not read as one of the register's values; no row's date is parsed"
+  },
+  "observations": [
+    {
+      "name": "firmware_id",
+      "value": "SEL-751-R501-V0-Z104101-D20260910",
+      "span": {
+        "offset": 127,
+        "length": 33
+      }
+    },
+    {
+      "name": "sel.cid",
+      "value": "E754",
+      "span": {
+        "offset": 224,
+        "length": 4
+      }
+    },
+    {
+      "name": "serial_number",
+      "value": "SIM0000000000001",
+      "span": {
+        "offset": 926,
+        "length": 16
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "warn.maxacc_above_1",
+      "setting": "MAXACC",
+      "observed": "2",
+      "span": {
+        "offset": 495,
+        "length": 12
+      }
+    }
+  ],
+  "records": [
+    {
+      "kind": "sel.ser.row",
+      "span": {
+        "offset": 1058,
+        "length": 57
+      },
+      "context_span": {
+        "offset": 817,
+        "length": 185
+      },
+      "parse_ok": false
+    },
+    {
+      "kind": "sel.ser.row",
+      "span": {
+        "offset": 1117,
+        "length": 59
+      },
+      "context_span": {
+        "offset": 817,
+        "length": 185
+      },
+      "parse_ok": false
+    }
+  ]
+}

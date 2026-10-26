@@ -69,11 +69,16 @@ func DecodeOutcome(b []byte) (RunOutcome, error) {
 }
 
 // DecodeReply decodes a CollectorReply strictly: an unknown field, a
-// duplicate key or trailing data is an error. It does not judge the reply;
-// a caller still uses Accepted, which fails closed.
+// duplicate key or trailing data is an error, and so is a reply whose C7
+// 0.5 fields its stamp or status rules out (authz.CollectorReply.Validate).
+// It does not otherwise judge the reply; a caller still uses Accepted,
+// which fails closed.
 func DecodeReply(b []byte) (authz.CollectorReply, error) {
 	var r authz.CollectorReply
 	if err := DecodeStrict(b, &r); err != nil {
+		return authz.CollectorReply{}, fmt.Errorf("collectorwire: reply: %w", err)
+	}
+	if err := r.Validate(); err != nil {
 		return authz.CollectorReply{}, fmt.Errorf("collectorwire: reply: %w", err)
 	}
 	return r, nil

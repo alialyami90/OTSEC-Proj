@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,11 +16,12 @@ import (
 // No unregistered line reaches the socket (P2-A2 acceptance). The oracle is
 // written out here from the register content, not derived from the code
 // under test: for a SER read, the only lines that may be written are these,
-// each only in its phase.
+// each only in its phase. SHO G is register revision 4's context read for
+// SER (ctx.date_f, C3 0.2).
 var mayWrite = map[adapter.Phase][]string{
 	adapter.PhaseProbe:   {"QUI", "ID"},
 	adapter.PhaseAuth:    {"ACC"},
-	adapter.PhaseOperate: {"SHO P 1", "SER"},
+	adapter.PhaseOperate: {"SHO P 1", "SHO G", "SER"},
 	adapter.PhaseClose:   {"QUI"},
 }
 
@@ -91,6 +93,35 @@ func TestEgressRefusesUnregistered(t *testing.T) {
 				t.Errorf("%s %q: written %v (err %v), want %v", ph, l, wrote, err, want)
 			}
 		}
+	}
+}
+
+// SHO G is written in a SER run only because the register names it as the
+// run's context read: with the context taken out of the same package, the
+// line the dialogue asks for is refused (D3-2; CheckLines has the
+// contract's side, TestCheckLinesContext).
+func TestEgressContextReadOnlyFromTheRegister(t *testing.T) {
+	f := load(t)
+	reg := *f.reg
+	reg.Context = nil
+	s := &session{inv: f.inv, cfg: Config{Asset: f.asset, Profile: f.profile, Register: &reg,
+		Secret: &secret{b: []byte(testSecret)}, Floor: &floor{},
+		Dial: func(context.Context, string, string) (net.Conn, error) { return nil, nil }}, level: -1}
+	if code := s.check(); code != "" {
+		t.Fatalf("check: %s", code)
+	}
+	w := &wire{}
+	c, err := telnet.New(w, telnet.Config{MaxReceived: 1024, MaxCommands: 4, Egress: s.egress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.conn = c
+	s.phase, s.want = adapter.PhaseOperate, "SHO G"
+	if err := s.conn.Send([]byte("SHO G\r\n")); err == nil || w.Len() > 0 {
+		t.Fatalf("SHO G written without a context read: %v, %q", err, w.String())
+	}
+	if slices.Contains(s.reads(), "sel.settings.show_global") {
+		t.Errorf("reads %v name SHO G without a context read", s.reads())
 	}
 }
 
