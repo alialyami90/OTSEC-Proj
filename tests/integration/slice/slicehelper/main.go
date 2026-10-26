@@ -5,7 +5,7 @@
 // (D2-3). Every value it writes is a test value (D2-5), and every endpoint
 // is a loopback simulator (D2-10).
 //
-//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S]
+//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S] [-programdata DIR -node-peer SID]
 //	slicehelper install-credential -root DIR      (secret from OTSEC_SLICE_SECRET)
 //
 // setup writes the node configuration through A5's nodeconfigtest (D2-6),
@@ -14,6 +14,18 @@
 // the fresh-state floor (A3 #106) has elapsed: the run stands for a
 // collector commissioned earlier, which is the state a site is in. It
 // prints a JSON object with the paths the suite needs.
+//
+// With -programdata, setup writes the inputs of the Windows installer
+// instead (P3-A5/A6, OTSEC_SLICE_SERVICE=1 in slicerun.py): node.json
+// naming the installed layout under that %ProgramData% (platform/winsvc),
+// the TLS reference files in a staging folder for the suite to copy into
+// the installed tls_dir, and two collector configurations, which differ
+// only in ipc.node_peer. The first names -node-peer, the account running
+// the suite, because install-credential is sent from that account and the
+// collector's pipe admits one peer; the second names the otsec-node
+// service. It creates nothing under %ProgramData% and no collector store:
+// the installer creates the folders and the installed collector its own
+// stores, under its own account.
 //
 // install-credential is the administrator's step that the node relays in
 // production: it reads the collector's published install key, seals the
@@ -50,6 +62,7 @@ import (
 	"otsec.local/otsec/modules/security/seal"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/winsvc"
 )
 
 const (
@@ -66,6 +79,9 @@ const (
 	// test_relp_receiver.py; the node may use a required target only with
 	// such a check on record.
 	durableAckRef = "tests/integration/slice/test_relp_receiver.py"
+	// collectorPipe is the installed collector's pipe, as A6's installer
+	// check names it (tests/safety/windows_installer/node.template.json).
+	collectorPipe = `\\.\pipe\otsec-collector`
 )
 
 // Layout is what setup prints and install-credential reads back.
@@ -85,6 +101,18 @@ type Layout struct {
 	FID           string `json:"fid"`
 	Serial        string `json:"serial"`
 	CredentialRef string `json:"credential_ref"`
+	// CollectorPeer is the collector's identity, which install-credential
+	// requires of the end of the socket or pipe: this account's uid, or
+	// the otsec-collector service SID in the installed layout.
+	CollectorPeer string `json:"collector_peer"`
+	// The installed layout only (-programdata): the installer's inputs,
+	// the staged TLS files, and where they go.
+	NodeConfigSource     string `json:"node_config_source,omitempty"`
+	CollectorConfig      string `json:"collector_config,omitempty"`
+	CollectorConfigFinal string `json:"collector_config_final,omitempty"`
+	CollectorConfigPath  string `json:"collector_config_path,omitempty"`
+	TLSStage             string `json:"tls_stage,omitempty"`
+	TLSDir               string `json:"tls_dir,omitempty"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
 }
@@ -104,11 +132,17 @@ func main() {
 	every := fs.Int("every", 60, "setup: the SER schedule interval, seconds")
 	repo := fs.String("repo", ".", "setup: the repository root, for the fixtures")
 	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
+	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
+	nodePeer := fs.String("node-peer", "", "setup with -programdata: the SID of the account that sends install-credential")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas)
+		if (*programData == "") != (*nodePeer == "") {
+			err = errors.New("-programdata and -node-peer are given together or not at all")
+			break
+		}
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *programData, *nodePeer)
 	case "install-credential":
 		err = installCredential(*root)
 	default:
@@ -120,39 +154,33 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas, programData, nodePeer string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
 	l := Layout{Root: root, NodeID: nodeID, AssetID: assetID, FID: simFID, Serial: simSerial,
 		CredentialRef: nodeconfigtest.TestCredentialRef}
-	l.CollectorData = filepath.Join(root, "data")
-	coll := filepath.Join(l.CollectorData, "collector")
-	l.PublicDir = filepath.Join(coll, "public")
-	// The administrators' folder both services read clear-suspension.json
-	// from (D2-15, #119): on Linux the rule is the mode, 0550, so the test
-	// opens it only to leave a file there, as an administrator would.
-	l.AdminDir = filepath.Join(l.CollectorData, "config", "admin")
-	runDir := filepath.Join(root, "run")
-	l.Socket = filepath.Join(runDir, "collector.sock")
-	l.StoreDir = filepath.Join(root, "node", "store")
-	for _, d := range []string{filepath.Join(coll, "state"), filepath.Join(coll, "credentials"), l.PublicDir, runDir, filepath.Dir(l.StoreDir)} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+	installed := programData != ""
+	var coll string
+	if installed {
+		if err := installedLayout(&l, programData); err != nil {
 			return err
 		}
-	}
-	if err := os.MkdirAll(l.AdminDir, 0o750); err != nil {
-		return err
-	}
-	if err := os.Chmod(l.AdminDir, 0o550); err != nil {
-		return err
-	}
-	if err := store.CreateDir(l.StoreDir, ""); err != nil {
-		return err
+	} else {
+		var err error
+		if coll, err = processLayout(&l); err != nil {
+			return err
+		}
+		nodePeer = l.CollectorPeer
 	}
 
 	// The node: one simulated SEL-751 and one required RELP/TLS target.
 	nc := nodeconfigtest.New(nodeID, l.StoreDir)
+	if installed {
+		// Written to the staging folder; the suite copies the files into
+		// the installed tls_dir, where they inherit its DACL.
+		nc.TLSDir = l.TLSStage
+	}
 	nc.CollectorPipe = l.Socket
 	nc.CollectorPublicDir = l.PublicDir
 	nc.AdminDir = l.AdminDir
@@ -174,12 +202,18 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 	if err != nil {
 		return err
 	}
-	if err := nc.LockTLS(); err != nil {
-		return err
-	}
-	l.NodeConfig = filepath.Join(root, "node", "node.json")
-	if err := nc.Write(l.NodeConfig); err != nil {
-		return err
+	if installed {
+		nc.TLSDir = l.TLSDir
+		if err := nc.Write(l.NodeConfigSource); err != nil {
+			return err
+		}
+	} else {
+		if err := nc.LockTLS(); err != nil {
+			return err
+		}
+		if err := nc.Write(l.NodeConfig); err != nil {
+			return err
+		}
 	}
 	// The receiver's server certificate, from the same test CA.
 	l.ServerCert, l.ServerKey, l.CA = filepath.Join(root, "relp-server.crt"), filepath.Join(root, "relp-server.key"), filepath.Join(root, "relp-ca.pem")
@@ -187,7 +221,7 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 	if err != nil {
 		return err
 	}
-	caPEM, err := os.ReadFile(filepath.Join(nc.TLSDir, anchorRef+".pem"))
+	caPEM, err := os.ReadFile(filepath.Join(stageOr(l.TLSStage, nc.TLSDir), anchorRef+".pem"))
 	if err != nil {
 		return err
 	}
@@ -227,31 +261,45 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 	if err := os.WriteFile(l.AdminKey, []byte(base64.StdEncoding.EncodeToString(adminPriv.Seed())), 0o600); err != nil {
 		return err
 	}
-	cfg := map[string]any{
-		"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
-		"ipc":           map[string]any{"address": l.Socket, "node_peer": strconv.Itoa(os.Getuid())},
-		"assets":        []any{nc.Assets[0]},
-		"profiles":      []any{json.RawMessage(profile)},
-		"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
-		"registers":     []any{env},
-		"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
-			"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
+	collectorConfig := func(peer string) ([]byte, error) {
+		return json.MarshalIndent(map[string]any{
+			"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
+			"ipc":           map[string]any{"address": l.Socket, "node_peer": peer},
+			"assets":        []any{nc.Assets[0]},
+			"profiles":      []any{json.RawMessage(profile)},
+			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
+			"registers":     []any{env},
+			"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
+				"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
+		}, "", "  ")
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := collectorConfig(nodePeer)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(coll, "collector.json"), b, 0o600); err != nil {
-		return err
-	}
-	// Both stores, created an hour ago: no first-start marker is needed,
-	// and the fresh-state floor has passed.
-	aged := time.Now().Add(-time.Hour)
-	if err := collector.InitState(filepath.Join(coll, "state", "state.json"), aged); err != nil {
-		return err
-	}
-	if err := collector.InitCredStore(filepath.Join(coll, "credentials", "credentials.json"), nodeID, func() time.Time { return aged }); err != nil {
-		return err
+	if installed {
+		final, err := collectorConfig(collectorwire.ServiceSID(collectorwire.NodeService))
+		if err != nil {
+			return err
+		}
+		for path, b := range map[string][]byte{l.CollectorConfig: b, l.CollectorConfigFinal: final} {
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(coll, "collector.json"), b, 0o600); err != nil {
+			return err
+		}
+		// Both stores, created an hour ago: no first-start marker is
+		// needed, and the fresh-state floor has passed.
+		aged := time.Now().Add(-time.Hour)
+		if err := collector.InitState(filepath.Join(coll, "state", "state.json"), aged); err != nil {
+			return err
+		}
+		if err := collector.InitCredStore(filepath.Join(coll, "credentials", "credentials.json"), nodeID, func() time.Time { return aged }); err != nil {
+			return err
+		}
 	}
 
 	out, err := json.MarshalIndent(l, "", "  ")
@@ -263,6 +311,66 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 	}
 	fmt.Println(string(out))
 	return nil
+}
+
+// processLayout lays the run out under its root for processes the suite
+// spawns, and returns the collector's folder.
+func processLayout(l *Layout) (string, error) {
+	l.CollectorData = filepath.Join(l.Root, "data")
+	coll := filepath.Join(l.CollectorData, "collector")
+	l.PublicDir = filepath.Join(coll, "public")
+	// The administrators' folder both services read clear-suspension.json
+	// from (D2-15, #119): on Linux the rule is the mode, 0550, so the test
+	// opens it only to leave a file there, as an administrator would.
+	l.AdminDir = filepath.Join(l.CollectorData, "config", "admin")
+	runDir := filepath.Join(l.Root, "run")
+	l.Socket = filepath.Join(runDir, "collector.sock")
+	l.StoreDir = filepath.Join(l.Root, "node", "store")
+	l.NodeConfig = filepath.Join(l.Root, "node", "node.json")
+	l.CollectorPeer = strconv.Itoa(os.Getuid())
+	for _, d := range []string{filepath.Join(coll, "state"), filepath.Join(coll, "credentials"), l.PublicDir, runDir, filepath.Dir(l.StoreDir)} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return "", err
+		}
+	}
+	if err := os.MkdirAll(l.AdminDir, 0o750); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(l.AdminDir, 0o550); err != nil {
+		return "", err
+	}
+	return coll, store.CreateDir(l.StoreDir, "")
+}
+
+// installedLayout names the installer's layout under programData
+// (platform/winsvc) and the run's staging files under the root.
+func installedLayout(l *Layout, programData string) error {
+	if !filepath.IsAbs(programData) {
+		return fmt.Errorf("-programdata %q is not an absolute path", programData)
+	}
+	l.CollectorData = winsvc.DataDir(programData)
+	l.PublicDir = winsvc.PublicDir(programData)
+	l.AdminDir = winsvc.AdminDir(programData)
+	l.StoreDir = winsvc.StoreDir(programData)
+	l.TLSDir = winsvc.TLSDir(programData)
+	l.NodeConfig = winsvc.ConfigPath(programData)
+	l.CollectorConfigPath = winsvc.CollectorConfigPath(programData)
+	l.Socket = collectorPipe
+	l.CollectorPeer = collectorwire.ServiceSID(collectorwire.CollectorService)
+	inputs := filepath.Join(l.Root, "install")
+	l.NodeConfigSource = filepath.Join(inputs, "node.json")
+	l.CollectorConfig = filepath.Join(inputs, "collector-install.json")
+	l.CollectorConfigFinal = filepath.Join(inputs, "collector.json")
+	l.TLSStage = filepath.Join(inputs, "tls")
+	return os.MkdirAll(inputs, 0o700)
+}
+
+// stageOr is the staging folder when there is one, else dir.
+func stageOr(stage, dir string) string {
+	if stage != "" {
+		return stage
+	}
+	return dir
 }
 
 // setSerial replaces the declared serial_number, which AddSEL751 writes as
@@ -328,7 +436,7 @@ func installCredential(root string) error {
 	if err != nil {
 		return err
 	}
-	client := collectorclient.New(collectorwire.Endpoint{Address: l.Socket, Peer: strconv.Itoa(os.Getuid())})
+	client := collectorclient.New(collectorwire.Endpoint{Address: l.Socket, Peer: l.CollectorPeer})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	nonce := make([]byte, authz.AdminNonceLen)
