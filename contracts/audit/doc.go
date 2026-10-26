@@ -133,7 +133,8 @@
 //     what the envelope and payload say, and nothing has checked it yet: a
 //     forged file claims whatever it likes.
 //   - verified is on the allowed record: C7 CollectorReply.Admin, what the
-//     collector checked against its pinned keys. A reader that wants to
+//     collector checked against its pinned keys. The record's actor is the
+//     verified person (type human, the same ID), so it names one person. A reader that wants to
 //     know who authorised an action reads verified, never claimed. A
 //     claimed group whose request was then refused stays in the chain as
 //     evidence of the attempt.

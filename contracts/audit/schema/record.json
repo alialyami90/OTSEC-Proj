@@ -363,7 +363,7 @@
     },
     "verified": {
       "$ref": "#/$defs/admin",
-      "description": "0.4: on collector.request allowed only. C7 CollectorReply.Admin: what the collector checked."
+      "description": "0.4: on collector.request allowed only. C7 CollectorReply.Admin: what the collector checked. The record's actor is the verified person: type human, and id equal to verified.principal (not expressible here)."
     },
     "repeat_of": {
       "type": "integer",
@@ -808,6 +808,31 @@
           "verified",
           "collector_seq"
         ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "verified"
+        ]
+      },
+      "then": {
+        "required": [
+          "actor"
+        ],
+        "properties": {
+          "actor": {
+            "required": [
+              "type",
+              "id"
+            ],
+            "properties": {
+              "type": {
+                "const": "human"
+              }
+            }
+          }
+        }
       }
     }
   ],

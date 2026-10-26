@@ -558,9 +558,9 @@ func (r *Record) validateNodeState() error {
 
 // validateAdmin checks the 0.4 admin fields: claimed only on a
 // collector.request info record, verified and repeat_of only on an allowed
-// one, repeat_of only with verified and below the record's own
-// collector_seq (the repeat has its own number), and none on a record
-// stamped 0.3 or earlier.
+// one, with the verified person as its actor, repeat_of only with verified
+// and below the record's own collector_seq (the repeat has its own number),
+// and none on a record stamped 0.3 or earlier.
 func (r *Record) validateAdmin(minor int) error {
 	if r.Claimed == nil && r.Verified == nil && r.RepeatOf == 0 {
 		return nil
@@ -585,6 +585,12 @@ func (r *Record) validateAdmin(minor int) error {
 	if r.Verified != nil {
 		if err := r.Verified.validate(); err != nil {
 			return fmt.Errorf("audit: verified: %w", err)
+		}
+		// A reader takes who authorised the action from verified, so the
+		// record names one person: the actor is the verified person (A1 on
+		// #187).
+		if r.Actor.Type != authz.PrincipalHuman || r.Actor.ID != r.Verified.Principal {
+			return errors.New("audit: the actor of a record with verified is the verified person")
 		}
 	}
 	if r.RepeatOf != 0 && (r.Verified == nil || r.RepeatOf >= r.CollectorSeq) {

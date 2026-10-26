@@ -272,7 +272,9 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 			return SeqState{}, broken("collector_seq %d appears on two records", r.CollectorSeq)
 		}
 		seen[r.CollectorSeq] = true
-		if r.Verified == nil {
+		// The verifier holds its own rule, not ParseRecord's: only an
+		// accepted decision is a first or a repeat (A6 and A1 on #187).
+		if r.Verified == nil || r.Action != ActionCollectorRequest || r.Outcome != OutcomeAllowed {
 			continue
 		}
 		if r.RepeatOf == 0 {

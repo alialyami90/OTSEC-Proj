@@ -68,6 +68,20 @@ func TestAdminFields(t *testing.T) {
 		"verified on another action": func(r *Record) {
 			r.Action, r.Outcome, r.CorrelationID, r.Verified = ActionCredentialInstall, OutcomeSucceeded, "", testAdmin()
 		},
+		// A6: the action rule on its own, with an outcome claimed allows.
+		"claimed on service.start": func(r *Record) {
+			r.Action, r.Outcome, r.CollectorSeq, r.CorrelationID, r.Claimed = ActionServiceStart, OutcomeInfo, 0, "", testAdmin()
+		},
+		// A1 on #187: the record names one person.
+		"verified, actor another person": func(r *Record) {
+			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalHuman, ID: "bob@site-a", Role: authz.RoleAdmin}
+		},
+		"verified, actor the node": func(r *Record) {
+			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}
+		},
+		"verified, actor a schedule of the same ID": func(r *Record) {
+			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalSchedule, ID: "admin@site-a"}
+		},
 		"bad key id":        func(r *Record) { a := testAdmin(); a.AdminKeyID = "admin-1"; r.Verified = a },
 		"bad nonce":         func(r *Record) { a := testAdmin(); a.Nonce = "short"; r.Verified = a },
 		"bad payload hash":  func(r *Record) { a := testAdmin(); a.PayloadSHA256 = strings.ToUpper(a.PayloadSHA256); r.Verified = a },
@@ -225,5 +239,48 @@ func TestRepeatAcrossWindows(t *testing.T) {
 	}
 	if err := VerifyCollectorSeq(recs, 0, 3); err != nil {
 		t.Fatalf("whole chain: %v", err)
+	}
+}
+
+// TestRepeatOnlyFromAnAcceptance (A6 and A1 on #187): VerifyCollectorSeq
+// holds its own rule for records it did not parse: a denied record, or a
+// record of another action, carrying verified and repeat_of covers
+// nothing and is no first decision.
+func TestRepeatOnlyFromAnAcceptance(t *testing.T) {
+	start := &Record{Action: ActionAuditChainStart}
+	for name, r := range map[string]*Record{
+		"denied":         {Action: ActionCollectorRequest, Outcome: OutcomeDenied, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
+		"another action": {Action: ActionCredentialInstall, Outcome: OutcomeSucceeded, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
+	} {
+		if err := VerifyCollectorSeq([]*Record{start, r}, 0, 2); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("%s covers the gap: %v", name, err)
+		}
+	}
+	// A denied record is no first decision for a later repeat to match.
+	denied := &Record{Action: ActionCollectorRequest, Outcome: OutcomeDenied, CollectorSeq: 1, Verified: testAdmin()}
+	repeat := &Record{Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1}
+	if err := VerifyCollectorSeq([]*Record{start, denied, repeat}, 0, 2); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("a repeat matched a denial: %v", err)
+	}
+}
+
+// TestRepeatDoesNotReachAcrossAReset (A6's mutant on #187): the first
+// decisions are per epoch. A repeat in the new epoch naming a number that
+// was an admin acceptance before the reset, and is a run after it, does
+// not match the old acceptance.
+func TestRepeatDoesNotReachAcrossAReset(t *testing.T) {
+	node := Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}
+	collector := Actor{Type: authz.PrincipalSchedule, ID: "sch-ser-751-feeder-3", Role: authz.RoleCollector}
+	high := uint64(1)
+	recs := seqRecords(t, []Record{
+		{Actor: Actor{Type: authz.PrincipalSystem, ID: "node"}, Action: ActionAuditChainStart, Outcome: OutcomeInfo},
+		{Actor: node, Action: ActionCollectorInstallKey, Outcome: OutcomeInfo, InstallKeyID: "ik-old"},
+		{Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-1", CollectorSeq: 1, Verified: testAdmin()},
+		{Actor: node, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo, InstallKeyID: "ik-new", PreviousHigh: &high},
+		{Actor: collector, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-run", CollectorSeq: 1},
+		{Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-1", CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
+	})
+	if err := VerifyCollectorSeq(recs, 0, 2); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("got %v, want a broken chain", err)
 	}
 }

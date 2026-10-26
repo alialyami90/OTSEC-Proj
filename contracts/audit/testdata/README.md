@@ -28,3 +28,6 @@ The admin group in these uses the C7 test admin key's ID (`ed25519-183d5080d1a2e
 | `invalid/repeat-without-verified.json` | A repeat names what was verified. |
 | `invalid/repeat-of-a-later-decision.json` | `repeat_of` must be below the record's own `collector_seq`. The schema cannot compare two fields, so this one passes the schema and fails `Validate`. |
 | `invalid/claimed-with-payload.json` | The group is closed: no payload, signature or secret rides along. |
+| `valid/collector-request-admin-verified.json` (above) | Also the valid case of the actor rule: the actor is the verified person, type human. |
+| `invalid/verified-actor-another-person.json` | The actor is a person other than `verified.principal`. The schema cannot compare the two, so this one passes the schema and fails `Validate`. |
+| `invalid/verified-actor-the-node.json` | The actor is the node, not the verified person. |
