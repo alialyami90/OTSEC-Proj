@@ -7,7 +7,7 @@ package contract
 // settings are new in 0.5; and CheckLines refuses a setting that no context
 // read of the invocation's operation names, or whose span does not lie in
 // the reply to the line that reads it (from the end of that send to the
-// next send). Cases are made by editing the valid ok-with-settings example;
+// next send). Cases are made by editing the valid ok example;
 // each provenance case passes Validate, so only CheckLines can refuse it.
 // Ground truth: GT-HAND.
 
@@ -31,7 +31,7 @@ func c2v05(t *testing.T) (adapter.Result, *register.Package, adapter.Invocation)
 		}
 		return b
 	}
-	r, err := adapter.DecodeResult(read("adapter", "testdata", "results", "valid", "ok-with-settings.json"))
+	r, err := adapter.DecodeResult(read("adapter", "testdata", "results", "valid", "ok.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
