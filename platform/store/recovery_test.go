@@ -157,6 +157,19 @@ func TestOpenBusyIsTyped(t *testing.T) {
 	}
 }
 
+// The busy codes, primary and extended, against codes that are not busy
+// (A6 on #145): 5 SQLITE_BUSY, 6 SQLITE_LOCKED, 261 BUSY_RECOVERY, 262
+// LOCKED_SHAREDCACHE, 517 BUSY_SNAPSHOT; 1 ERROR, 11 CORRUPT, 14
+// CANTOPEN, 26 NOTADB, 13 FULL, 10 IOERR, 266 IOERR_READ.
+func TestBusyCodes(t *testing.T) {
+	for code, want := range map[int]bool{5: true, 6: true, 261: true, 262: true, 517: true,
+		1: false, 11: false, 14: false, 26: false, 13: false, 10: false, 266: false} {
+		if busyCode(code) != want {
+			t.Errorf("busyCode(%d) = %v", code, !want)
+		}
+	}
+}
+
 func TestBusyReadsTheCodeNotTheText(t *testing.T) {
 	if busy(errors.New("database is locked (5) (SQLITE_BUSY)")) {
 		t.Fatal("busy matched an error's text")
