@@ -77,6 +77,13 @@ type Scheduler struct {
 	collClear map[string]string           // asset ID: ref of a clear the collector has not accepted (assetclear.go)
 	clearFile *clearSuspension            // the clear-suspension.json checkClear last read, nil when none
 	results   map[string]AssetResult      // asset ID: its last sent run (results.go)
+	// reloadSusp: the suspensions were not loaded because the audit
+	// database was not open; reload loads them once it is (P3-A5).
+	reloadSusp bool
+	// haltUnread: assets held as halted because their quarantine stream
+	// could not be read, the evidence database not being open; reload
+	// reads it once it is (P3-A5).
+	haltUnread map[string]bool
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -85,10 +92,11 @@ type Scheduler struct {
 // it (not in Phase 2).
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
-		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}}
+		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
+		s.reloadSusp = errors.Is(err, errAuditNotOpen)
 		rt.opt.Status.Raise("", AlarmSuspensionsUnknown, "suspensions could not be read or rebuilt; every run on this node is stopped: "+err.Error())
 	} else {
 		// Writes a suspension the checkpoint lists as unaudited, or holds
@@ -103,6 +111,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 		if err != nil {
 			// Unreadable quarantine: the asset may hold a halt, so it is
 			// treated as holding one.
+			s.haltUnread[col.AssetID] = errors.Is(err, errEvidenceNotOpen)
 			halted, err = true, fmt.Errorf("quarantine of %s unreadable: %w", col.AssetID, err)
 			rt.opt.Status.Raise(col.AssetID, AlarmCollectionDisabled, err.Error())
 		}
@@ -121,7 +130,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 func (s *Scheduler) durableHalt(ctx context.Context, assetID string) (bool, error) {
 	db := s.rt.Store(QuarantineStream(assetID))
 	if db == nil {
-		return false, errors.New("evidence database not open")
+		return false, errEvidenceNotOpen
 	}
 	var after c5.Seq
 	for {
@@ -267,6 +276,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 
 func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	col := s.rt.cfg.Schedule[i]
+	s.reload(ctx)
 	s.settle(ctx)
 	s.checkClear(ctx)
 	s.checkAck(ctx)

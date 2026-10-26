@@ -237,14 +237,34 @@ type queued struct {
 func (r *Runtime) Tick(ctx context.Context) {
 	for _, d := range r.dbs {
 		r.state.Lock()
-		if d.report.Mode != c5.ModeBlocked && d.report.Mode != c5.ModeDrainOnly {
+		prev := d.report
+		var next c5.Report
+		switch {
+		case prev.OpenBusy():
+			// A database that failed at an open that was only busy is
+			// retried once per tick (C5 0.2, P3-A5); every other failure
+			// stays failed until a restart. It has no open store, so the
+			// retry, which waits out the busy timeout, runs without the
+			// state lock, and Tick is its only writer.
+			r.state.Unlock()
+			sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
+			next = c5.Resume(sctx, d.env, d.policy, prev)
+			cancel()
+			if next.OpenBusy() {
+				// Busy again: the alarm the first failure raised still
+				// holds, so it is not raised at every tick.
+				continue
+			}
+			r.state.Lock()
+		case prev.Mode == c5.ModeBlocked || prev.Mode == c5.ModeDrainOnly:
+			sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
+			next = c5.Resume(sctx, d.env, d.policy, prev)
+			cancel()
+		default:
 			r.state.Unlock()
 			continue
 		}
-		prev := d.report
-		sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
-		d.report = c5.Resume(sctx, d.env, d.policy, prev)
-		cancel()
+		d.report = next
 		if err := r.adopt(d); err != nil {
 			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmOpenFailed, At: r.opt.Now(), Detail: err.Error()})
 		}

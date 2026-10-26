@@ -107,6 +107,17 @@ C5 startup prunes confirmed events only while a database's total usage is above 
 - **Pages.** Freed pages are reused by later commits. Compaction remains a startup step.
 - **Quarantines are kept.** A `quarantine/<asset_id>` stream has no consumers, so it is never pruned: its records are the evidence A3 requires of an outcome that failed a check, and a reason can quote a device line no consumer may receive. Repeated quarantines can therefore fill `adapter-evidence` for good. That is the intended end state (A6 on #135): runs stop with `collection-no-quarantine-room`, after `collection-quarantine-room-low` warned first, until an operator acts. Phase 2 has no operation to export or remove a quarantine, so acting means moving the store aside; an audited one is a Phase 3 item, with clearing a halted asset.
 
+## A busy open at start (C5 0.2, P3-A5)
+
+A database whose open failed at start only because another connection held it busy or locked past the store's busy timeout is `failed` with C5 0.2's `OpenBusy`. Every `Tick` retries it once with `c5.Resume`, from the headroom check, under the lock the node already holds. Every other failure still needs a restart.
+
+- **Alarm once.** A retry that is busy again changes nothing. The alarm the first failure raised still stands, and no new one is raised.
+- **No state lock while waiting.** A failed database has no open store, so the retry, which can wait out the busy timeout (about 10 s for a held file), runs without the state lock. Readers of the other databases do not wait for it.
+- **Audited.** A retry that opens the database is a `store.mode_change` from `failed`, in the audit stream and as a health event, like any other mode change.
+- **Nothing runs until the scheduler has caught up.** At start, the scheduler could not load the suspensions without the audit database, nor read a quarantine stream without the evidence database. Every run therefore went through the node-wide hold or the asset's halt. Before each run, the scheduler retries what it could not do (`reload.go`):
+  - It loads the suspensions as at start, from the checkpoint and the audit stream, and only then ends the `asset-suspensions-unknown` hold, raising `asset-suspensions-rebuilt`. A load that fails for another reason keeps every run held.
+  - It reads the halted asset's quarantine stream again. The asset runs again only if no unauthorized-line quarantine is there.
+
 ## Suspensions (D2-15)
 
 The node keeps its own copy of the C1 suspension each run's outcome code sets (`adapter.Code.Suspends`). A collector reinstalled from fresh state does not hold the old collector's suspensions, so the node's copy is what keeps a suspended asset suspended (A1, D2-15).
