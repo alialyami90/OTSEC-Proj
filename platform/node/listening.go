@@ -89,10 +89,8 @@ func (ls *Listening) Addr(id string) net.Addr { return ls.bound[id] }
 
 // close releases bound listeners that will not serve.
 func (ls *Listening) close(rs []*receive.Receiver) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	for _, r := range rs {
-		r.Serve(ctx)
+		r.Close()
 	}
 }
 
