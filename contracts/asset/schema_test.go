@@ -60,6 +60,7 @@ func TestSchemaEnumsMatchGo(t *testing.T) {
 		"evidenceClass":    sorted(EvidenceClasses),
 		"sourceMethod":     sorted(SourceMethods),
 		"transport":        sorted(Transports),
+		"path":             sorted(Paths),
 		"securityLevel":    sorted(SecurityLevels),
 		"bindingMethod":    sorted(BindingMethods),
 		"bindingStrength":  sorted(BindingStrengths),

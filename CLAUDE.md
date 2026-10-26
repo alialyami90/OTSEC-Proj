@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-The repository contains no product code yet. Phase 0 is complete (exit gate passed with conditions, 2026-10-23; owner accepted 2026-10-24). Phase 1 is complete (contracts C1 to C8 on `main`, exit gate passed with conditions, 2026-10-24; the owner started Phase 2 the same day). Phase 2 (the simulated SEL-751 SER-to-Syslog slice) is in progress: briefs in `docs/agent-handoffs.md`, decisions in `docs/phase2/A1-decisions.md`. The runtime language is Go (ADR-0003) with Python for verification tooling only.
+The repository contains no product code yet. Phase 0 is complete (exit gate passed with conditions, 2026-10-23; owner accepted 2026-10-24). Phase 1 is complete (contracts C1 to C8 on `main`, exit gate passed with conditions, 2026-10-24; the owner started Phase 2 the same day). Phase 2 (the simulated SEL-751 SER-to-Syslog slice) passed its exit gate with conditions on 2026-10-25 (`docs/phase-2-exit.md`; briefs in `docs/agent-handoffs.md`, decisions in `docs/phase2/A1-decisions.md`). On 2026-10-26 the owner clarified the monitoring goals and the collection-method order (ADR-0008, requirements R1.8, R3.6, R3.7, R4.8, R4.9, R6.7, R9); Phase 3 briefs are in `docs/agent-handoffs.md`. The runtime language is Go (ADR-0003) with Python for verification tooling only.
 
 Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
 

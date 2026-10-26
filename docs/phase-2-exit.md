@@ -198,6 +198,8 @@ The Phase 4 order is the brief's recommendation. The owner may reorder it, for e
 
 A lab relay, if the owner authorizes one, would let A6 run the H checks and move items from `simulated` to `hardware-verified`.
 
+**Amended 2026-10-26.** The owner clarified the monitoring goals and the collection-method order ([ADR-0008](decisions/ADR-0008-monitoring-goals-and-collection-method-order.md)). The Phase 3 list above gains Syslog receive (A4) and the capability-matrix rungs (A2); the Phase 4 order becomes: configuration retrieval, baseline and prior approval; the event-behaviour baseline; vulnerability applicability with the asset module; IDS; secure engineering access; the central role. The briefs in `docs/agent-handoffs.md` are the current plan.
+
 ## Owner sign-off
 
-Pending.
+Accepted with the conditions above on 2026-10-26, when the owner, after clarifying the monitoring goals (ADR-0008), instructed A1 to start Phase 3.

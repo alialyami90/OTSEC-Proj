@@ -5,7 +5,7 @@
 
 ## What it does
 
-`New(Config)` checks one listener: one C1 Syslog transport, an IP-literal `ip:port`, the listener's target, its sender table, a C5 `Appender`, a health sink and a clock. `Listen` binds it. `Serve` receives until its context ends, then gives queued messages `Limits.Grace` to commit.
+`New(Config)` checks one listener: one C1 Syslog transport, an IP-literal `ip:port`, the listener's target, its sender table, a C5 `Appender`, a health sink and a clock. `Listen` binds it. `Serve` receives until its context ends, then gives queued messages `Limits.Grace` to commit. `Close` releases a bound listener that will not be served (A5, for a node that cannot start all its listeners).
 
 - **syslog-tls (RFC 5425).** `ServerTLS` builds the configuration from the listener certificate and an optional CA set for senders. A sender that presents a certificate must chain to that set, and a listener can require one. Events say `tls-mutual` or `tls-server-only`.
 - **syslog-tcp (RFC 6587) and syslog-udp (RFC 5426).** These run only with `Config.Plaintext`, the lab-only flag, until the owner decides on plaintext Syslog. Their events say `none`.
@@ -30,6 +30,7 @@
 | A3 | The new inbound surface: TLS policy, the limits table below, the plaintext flag, and storage behaviour under flood. | F1 and F2 addressed; re-review requested. |
 | A5 (sizing) | `UnknownBytes` bounds unattributed storage per window, not in all (see Known limits). The node should set it from the syslog class quota and the upstream outage it must ride out. | Proposal to A5. |
 | A2 | The RFC 3164 year-after-day reading and the RTAC Logger split, against the three documented examples and A2's notes on #149 (the 2488 offset is not on the wire example; the 2730M sample contradicts its own table). | Review requested on the PR. |
+| A6 (unknown senders) | An unknown sender's event keeps the listener's evidence class, as C4 says; it is not capped at `simulated`. A6 confirmed that `asset-unresolved` is enough, and will hold three invariants on every unresolved event: no asset is touched, it counts toward no per-asset or per-family claim, and it is kept whole and alarmed once per address. | Agreed with A6. |
 | A6 | The acceptance tests in the brief (table below). For V-S8 on this origin, the oracle is the sender's own bytes: every stored `native.bytes` and `record_sha256` must equal what the test process sent, frame by frame. | A6's to write. |
 
 ### Limits (defaults)
@@ -69,7 +70,7 @@ Mutation check: 45 mutants, one for each check in the parser, the framer, the li
 
 - **No acknowledgement on RFC 5425 or RFC 6587.** Messages queued in memory are lost without the sender knowing if they are not committed within `Grace` of a stop. That is at most `Queue` messages per connection. RELP receive would close this; it is not built.
 - **Duplicates are kept, not removed.** A device can send the same bytes on purpose, such as a repeating alarm (R4.8 will count those).
-- **The unknown budget is per window, not in all.** Over an upstream outage of T, unknown senders can store up to `UnknownBytes` × (1 + T / `UnknownWindow`): 25 MiB in a day at the defaults. A separate C5 stream and quota for unknown senders would bound it absolutely. That needs a C5 class and a layout change, so it is not built.
+- **The unknown budget is per window, not in all.** Over an upstream outage of T, unknown senders can store up to `UnknownBytes` × (1 + T / `UnknownWindow`): 25 MiB in a day at the defaults. A separate C5 stream and quota for unknown senders would bound it absolutely. That needs a C5 class and a layout change, so it is not built: A1 deferred it for Phase 3. A3 holds it as a condition before any device-observed listener: either unknown senders get their own C5 stream and quota, or the node refuses a syslog quota too small for listeners × `UnknownBytes` × the planned outage, and health shows the unknown share.
 - **A message whose record cannot be built** (a fault in this package) is dropped alone, counted as `store`; the rest of its batch is stored. No test can reach that path, because `normalize.Syslog` builds an event for any bytes.
 - **Attribution is by address.** That is spoofable on UDP and TCP, and on TLS until C1 pinned keys exist. A relay's address names the relay.
 - **The SEL-2488 UTC offset.** S26 says its time stamps carry one, but the only wire example has none (A2, #149). The parser reads the example as RFC 3164 with a year and states no offset. A message with an offset in an unexpected place keeps its bytes and its header text, and is partial if the header no longer parses.

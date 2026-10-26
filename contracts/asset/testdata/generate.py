@@ -42,7 +42,7 @@ def declared(name, value, by="operator:commissioning-sheet-07"):
 
 def relay():
     return {
-        "schema": "otsec.asset/0.1",
+        "schema": "otsec.asset/0.2",
         "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
         "node_id": "site-a-node1",
         "attributes": [
@@ -61,6 +61,7 @@ def relay():
         ],
         "endpoints": [{
             "id": "port1-telnet", "transport": "telnet", "host": "192.0.2.21", "port": 23, "target": "simulated",
+            "path": "direct",
             "downstream_security": {
                 "level": "plaintext-unauthenticated",
                 "acknowledgement": {"by": "admin:lab-admin", "at": T0,
@@ -75,7 +76,7 @@ def relay():
 
 def node():
     return {
-        "schema": "otsec.asset/0.1",
+        "schema": "otsec.asset/0.2",
         "asset_id": "9a0c6e42-1f7b-4d38-a5c9-3e8b2d1f6a07",
         "node_id": "site-a-node1",
         "attributes": [
@@ -97,7 +98,7 @@ def node():
 
 def rtac():
     return {
-        "schema": "otsec.asset/0.1",
+        "schema": "otsec.asset/0.2",
         "asset_id": "c41f8a2d-6b0e-4e97-8d13-5a2c9f7b0e64",
         "node_id": "site-a-node1",
         "attributes": [
@@ -138,9 +139,28 @@ def mismatch():
     return a
 
 
+def relay_0_1():
+    # D2-16: a record written before 0.2 has no path. It is still read, and
+    # Endpoint.CheckPath refuses a session to it until an administrator sets
+    # the path.
+    a = relay()
+    a["schema"] = "otsec.asset/0.1"
+    for ep in a["endpoints"]:
+        ep.pop("path", None)
+    return a
+
+
+def port_server():
+    # D2-16, H-13: a valid record whose endpoint is behind a port server, so
+    # CheckPath refuses a session to it.
+    a = relay()
+    a["endpoints"][0]["path"] = "port-server"
+    return a
+
+
 def later(fn):
     a = relay()
-    a["schema"] = "otsec.asset/0.2"
+    a["schema"] = "otsec.asset/0.3"
     fn(a)
     return a
 
@@ -158,6 +178,7 @@ LATER = {
     "later-minor-binding-without-pre-credential": lambda a: a.update(identity_binding={
         "method": "tpm-attested", "strength": "cryptographic", "attributes": ["firmware_id"]}),
     "later-minor-unknown-confidence": lambda a: attr(a, "firmware_id").update(confidence="verified"),
+    "later-minor-unknown-path": lambda a: a["endpoints"][0].update(path="jump-host"),
     "later-minor-unknown-evidence-class": lambda a: attr(a, "sel.cid")["observations"][0].update(
         evidence_class="hardware-verified", source={"method": "adapter-session", "ref": INV, "observed_at": T1,
                                                      "span": {"offset": CID_AT, "length": 4}}),
@@ -261,7 +282,7 @@ INVALID = {
         attributes=["firmware_id", "sel.cid"])),
     "platform-node-on-relay": (relay, lambda a: a.update(platform_node={"posture": []})),
     "os-out-of-support-without-condition": (node, lambda a: a["platform_node"]["posture"][0].pop("condition")),
-    "unknown-device-class-at-0.1": (relay, lambda a: a["attributes"].__setitem__(0, declared("device_class", "protection-gateway"))),
+    "unknown-device-class-at-0.1": (relay_0_1, lambda a: a["attributes"].__setitem__(0, declared("device_class", "protection-gateway"))),
     "unprefixed-unknown-attribute": (relay, lambda a: a["attributes"].append(declared("cid", "E754"))),
     "simulator-value-labelled-device": (relay, lambda a: attr(a, "firmware_id")["observations"][1].update(
         evidence_class="device-observed")),
@@ -287,6 +308,9 @@ INVALID = {
         attributes=["serial_number"], pre_credential=["firmware_id"])),
     "address-only-with-pre-credential": (rtac, lambda a: a["identity_binding"].update(
         pre_credential=["ip_address"])),
+    "path-at-0.1": (relay_0_1, lambda a: a["endpoints"][0].update(path="direct")),
+    "unknown-path-in-own-minor": (relay, lambda a: a["endpoints"][0].update(path="jump-host")),
+    "path-on-syslog-endpoint": (rtac, lambda a: a["endpoints"][0].update(path="direct")),
     "endpoint-without-target": (relay, lambda a: a["endpoints"][0].pop("target")),
     "endpoint-target-documented": (relay, lambda a: a["endpoints"][0].update(target="documented")),
     "later-minor-endpoint-target-unknown": (relay, lambda a: (a.update(schema="otsec.asset/0.3"),
@@ -332,6 +356,8 @@ def main():
     write("valid/site-node.json", node())
     write("valid/sel-rtac-syslog.json", rtac())
     write("valid/sel-751-address-only.json", address_only_relay())
+    write("valid/sel-751-at-0.1.json", relay_0_1())
+    write("valid/sel-751-port-server.json", port_server())
     write("valid/later-minor.json", later_minor())
     for name, fn in LATER.items():
         write(f"valid/{name}.json", later(fn))

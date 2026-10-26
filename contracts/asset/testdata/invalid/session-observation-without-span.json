@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.asset/0.1",
+  "schema": "otsec.asset/0.2",
   "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
   "node_id": "site-a-node1",
   "attributes": [
@@ -136,6 +136,7 @@
       "host": "192.0.2.21",
       "port": 23,
       "target": "simulated",
+      "path": "direct",
       "downstream_security": {
         "level": "plaintext-unauthenticated",
         "acknowledgement": {

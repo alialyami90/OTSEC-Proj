@@ -60,6 +60,10 @@ type CollectorRequest struct {
 	CredentialRevoke    *CredentialRevokeBody    `json:"credential_revoke,omitempty"`
 	CredentialClearSusp *CredentialClearSuspBody `json:"credential_clear_suspension,omitempty"`
 	AssetClearSusp      *AssetClearSuspBody      `json:"asset_clear_suspension,omitempty"`
+	// AdminSigned (since 0.4) carries a request an administrator signed,
+	// in place of its body, which exists only inside the signed payload.
+	// The collector checks it with VerifyAdminRequest.
+	AdminSigned *AdminSigned `json:"admin_signed,omitempty"`
 }
 
 // RunBody asks the collector to run one C3 operation on one enrolled asset.
@@ -136,6 +140,7 @@ const (
 	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
 	RefuseSuspensionMismatch RefusalCode = "suspension_mismatch"         // since 0.2: the asset is not suspended by ref, or the administrator's file is absent, refused or names another
 	RefuseAssetSuspended     RefusalCode = "asset_suspended"             // since 0.3: the collector holds the asset suspended; Refusal.Suspension names it
+	RefuseAdminUnverified    RefusalCode = "admin_unverified"            // since 0.4: an admin request is unsigned, or its signature, binding, window or nonce fails (VerifyAdminRequest)
 	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
@@ -145,7 +150,7 @@ var RefusalCodes = []RefusalCode{
 	RefusePrincipal, RefuseUnknownOperation, RefuseNotInvocable, RefuseBadParams,
 	RefuseAssetNotEnrolled, RefuseCredentialMismatch, RefuseCredentialUnusable,
 	RefuseRegisterUnverified, RefuseRegisterVersion, RefusePolicyVersion, RefuseBusy,
-	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseAssetSuspended, RefuseUnknown,
+	RefuseRateLimited, RefuseSecretRejected, RefuseStateUnavailable, RefuseSuspensionMismatch, RefuseAssetSuspended, RefuseAdminUnverified, RefuseUnknown,
 }
 
 // Normalize maps an unknown code to RefuseUnknown.
@@ -168,6 +173,11 @@ type Refusal struct {
 	// named. The node adopts it (see the package documentation, "Asset
 	// suspensions").
 	Suspension *HeldSuspension `json:"suspension,omitempty"`
+	// Check (since 0.4) is set with admin_unverified only: the check the
+	// admin-signed request failed. The node's C8 collector.request record
+	// carries it, so an operator can tell a replay from a bad signature
+	// afterwards (A1); it is the same for a wrong guess and a right one.
+	Check AdminCheck `json:"check,omitempty"`
 }
 
 // HeldSuspension is an asset suspension the collector holds (since 0.3):
@@ -211,21 +221,36 @@ func (h HeldSuspension) Validate() error {
 // Refusal.Suspension.
 const assetSuspendedSince = 3
 
-// ForRequest is the refusal as the reply to a request stamped contract. A
-// request stamped before 0.3 comes from a reader that knows neither
-// asset_suspended nor the suspension field, and decodes replies strictly,
-// so it gets what 0.2 collectors replied: asset_not_enrolled, the same
-// detail, and no suspension.
+// ForRequest is the refusal as the reply to a request stamped contract,
+// in codes and fields that request's reader knows:
+//   - before 0.3, a reader knows neither asset_suspended nor the
+//     suspension field, and decodes replies strictly, so it gets what 0.2
+//     collectors replied: asset_not_enrolled, the same detail, and no
+//     suspension;
+//   - before 0.4, a reader does not know admin_unverified, so an unsigned
+//     admin request gets principal_not_permitted: its sender may not ask
+//     for it without an administrator's signature.
 func (r *Refusal) ForRequest(contract string) *Refusal {
-	if r == nil || (r.Code != RefuseAssetSuspended && r.Suspension == nil) {
+	if r == nil || (r.Code != RefuseAssetSuspended && r.Code != RefuseAdminUnverified && r.Suspension == nil) {
 		return r
 	}
-	if got, err := version.Parse(contract); err == nil && got.Minor >= assetSuspendedSince {
-		return r
+	got, err := version.Parse(contract)
+	minor := 0
+	if err == nil {
+		minor = got.Minor
 	}
-	out := &Refusal{Code: r.Code, Detail: r.Detail}
-	if out.Code == RefuseAssetSuspended {
-		out.Code = RefuseAssetNotEnrolled
+	out := &Refusal{Code: r.Code, Detail: r.Detail, Suspension: r.Suspension, Check: r.Check}
+	if minor < assetSuspendedSince {
+		out.Suspension = nil
+		if out.Code == RefuseAssetSuspended {
+			out.Code = RefuseAssetNotEnrolled
+		}
+	}
+	if minor < adminSignedSince {
+		out.Check = ""
+		if out.Code == RefuseAdminUnverified {
+			out.Code = RefusePrincipal
+		}
 	}
 	return out
 }
@@ -329,7 +354,7 @@ func (r *CollectorRequest) Validate() error {
 		return refuse(RefuseInvalid, "policy_version must be at least 1")
 	}
 	set := 0
-	for _, present := range []bool{r.Run != nil, r.CredentialInstall != nil, r.CredentialRevoke != nil, r.CredentialClearSusp != nil, r.AssetClearSusp != nil} {
+	for _, present := range []bool{r.Run != nil, r.CredentialInstall != nil, r.CredentialRevoke != nil, r.CredentialClearSusp != nil, r.AssetClearSusp != nil, r.AdminSigned != nil} {
 		if present {
 			set++
 		}
@@ -337,10 +362,22 @@ func (r *CollectorRequest) Validate() error {
 	if set != 1 {
 		return refuse(RefuseInvalid, "exactly one body must be set, got %d", set)
 	}
-	if since, ok := kindSince[r.Kind]; ok {
-		if got, _ := version.Parse(r.Contract); got.Minor < since {
-			return refuse(RefuseInvalid, "kind %q needs otsec.authz/0.%d or later", r.Kind, since)
+	got, _ := version.Parse(r.Contract)
+	if since, ok := kindSince[r.Kind]; ok && got.Minor < since {
+		return refuse(RefuseInvalid, "kind %q needs otsec.authz/0.%d or later", r.Kind, since)
+	}
+	if r.AdminSigned != nil {
+		// The envelope's contents are VerifyAdminRequest's to check, so
+		// that every way it can fail is one refusal (admin_unverified).
+		switch {
+		case got.Minor < adminSignedSince:
+			return refuse(RefuseInvalid, "admin_signed needs otsec.authz/0.%d or later", adminSignedSince)
+		case !adminKinds[r.Kind]:
+			return refuse(RefuseInvalid, "kind %q is not signed by an administrator", r.Kind)
+		case r.OnBehalfOf.Type != PrincipalHuman:
+			return refuse(RefusePrincipal, "an admin-signed request is on behalf of a person, not %s", r.OnBehalfOf.Type)
 		}
+		return nil
 	}
 	switch r.Kind {
 	case KindRun:
@@ -357,53 +394,67 @@ func (r *CollectorRequest) Validate() error {
 		if r.OnBehalfOf.Type != PrincipalHuman {
 			return refuse(RefusePrincipal, "credential requests come from a person with the admin role")
 		}
-		switch {
-		case r.Kind == KindCredentialInstall && r.CredentialInstall != nil:
-			if err := r.CredentialInstall.Ref.Validate(); err != nil {
-				return refuse(RefuseInvalid, "%v", err)
-			}
-			if r.CredentialInstall.Ref.CreatedBy != r.OnBehalfOf {
-				return refuse(RefuseInvalid, "ref.created_by must be the requesting admin")
-			}
-			if err := r.CredentialInstall.Sealed.Validate(); err != nil {
-				return refuse(RefuseInvalid, "%v", err)
-			}
-		case r.Kind == KindCredentialRevoke && r.CredentialRevoke != nil:
-			if !credentialRefIDPattern.MatchString(r.CredentialRevoke.RefID) {
-				return refuse(RefuseInvalid, "ref_id")
-			}
-			switch r.CredentialRevoke.Reason {
-			case RevokeRotated, RevokeCompromised, RevokeDecommissioned, RevokeOperator:
-			default:
-				return refuse(RefuseInvalid, "revoke reason %q", r.CredentialRevoke.Reason)
-			}
-		case r.Kind == KindCredentialClearSusp && r.CredentialClearSusp != nil:
-			if !credentialRefIDPattern.MatchString(r.CredentialClearSusp.RefID) || r.CredentialClearSusp.Version == 0 {
-				return refuse(RefuseInvalid, "ref_id or version")
-			}
-		default:
-			return refuse(RefuseInvalid, "body does not match kind %q", r.Kind)
-		}
-		return nil
 	case KindAssetClearSusp:
-		if r.AssetClearSusp == nil {
-			return refuse(RefuseInvalid, "kind asset.clear_suspension needs an asset_clear_suspension body")
-		}
 		// The node relays the administrator's file (D2-15); a person or a
-		// schedule never asks the collector for it directly.
+		// schedule never asks the collector for it directly, except as an
+		// admin-signed request (0.4), checked above.
 		if r.OnBehalfOf.Type != PrincipalNode {
 			return refuse(RefusePrincipal, "asset clear requests come from the node, not %s", r.OnBehalfOf.Type)
 		}
-		if !assetIDPattern.MatchString(r.AssetClearSusp.AssetID) {
-			return refuse(RefuseInvalid, "asset_id")
-		}
-		if !invocationRefPattern.MatchString(r.AssetClearSusp.Ref) {
-			return refuse(RefuseInvalid, "ref")
-		}
-		return nil
 	default:
 		return refuse(RefuseInvalid, "unknown kind %q", r.Kind)
 	}
+	return validateBody(r.Kind, r.OnBehalfOf, requestBodies{CredentialInstall: r.CredentialInstall,
+		CredentialRevoke: r.CredentialRevoke, CredentialClearSusp: r.CredentialClearSusp, AssetClearSusp: r.AssetClearSusp})
+}
+
+// requestBodies are the bodies of the kinds other than run, in the clear
+// (up to 0.3) or inside an admin-signed payload (0.4).
+type requestBodies struct {
+	CredentialInstall   *CredentialInstallBody
+	CredentialRevoke    *CredentialRevokeBody
+	CredentialClearSusp *CredentialClearSuspBody
+	AssetClearSusp      *AssetClearSuspBody
+}
+
+// validateBody checks that the one body set matches kind and passes its
+// rules. The caller has checked that exactly one is set.
+func validateBody(kind RequestKind, by Principal, b requestBodies) error {
+	switch {
+	case kind == KindCredentialInstall && b.CredentialInstall != nil:
+		if err := b.CredentialInstall.Ref.Validate(); err != nil {
+			return refuse(RefuseInvalid, "%v", err)
+		}
+		if b.CredentialInstall.Ref.CreatedBy != by {
+			return refuse(RefuseInvalid, "ref.created_by must be the requesting admin")
+		}
+		if err := b.CredentialInstall.Sealed.Validate(); err != nil {
+			return refuse(RefuseInvalid, "%v", err)
+		}
+	case kind == KindCredentialRevoke && b.CredentialRevoke != nil:
+		if !credentialRefIDPattern.MatchString(b.CredentialRevoke.RefID) {
+			return refuse(RefuseInvalid, "ref_id")
+		}
+		switch b.CredentialRevoke.Reason {
+		case RevokeRotated, RevokeCompromised, RevokeDecommissioned, RevokeOperator:
+		default:
+			return refuse(RefuseInvalid, "revoke reason %q", b.CredentialRevoke.Reason)
+		}
+	case kind == KindCredentialClearSusp && b.CredentialClearSusp != nil:
+		if !credentialRefIDPattern.MatchString(b.CredentialClearSusp.RefID) || b.CredentialClearSusp.Version == 0 {
+			return refuse(RefuseInvalid, "ref_id or version")
+		}
+	case kind == KindAssetClearSusp && b.AssetClearSusp != nil:
+		if !assetIDPattern.MatchString(b.AssetClearSusp.AssetID) {
+			return refuse(RefuseInvalid, "asset_id")
+		}
+		if !invocationRefPattern.MatchString(b.AssetClearSusp.Ref) {
+			return refuse(RefuseInvalid, "ref")
+		}
+	default:
+		return refuse(RefuseInvalid, "body does not match kind %q", kind)
+	}
+	return nil
 }
 
 func (b *RunBody) validate() error {

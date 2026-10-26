@@ -1,6 +1,7 @@
 package receive
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -231,4 +232,44 @@ func TestUnknownBudgetAlarmRetried(t *testing.T) {
 	send(func() bool { return strings.Contains(g.r.Status().LastErr, "unknown-budget alarm") })
 	g.health.fail.Store(false)
 	send(func() bool { return len(g.health.of(HealthUnknownBudget)) == 1 })
+}
+
+// TestClose: a bound listener that will not be served is released, and its
+// address can be bound again; a serving one is refused.
+func TestClose(t *testing.T) {
+	for _, tr := range []asset.Transport{asset.SyslogTCP, asset.SyslogUDP} {
+		cfg := Config{Node: testNode, ID: "lab", Stream: testStream, Transport: tr, Address: "127.0.0.1:0",
+			Target: asset.Simulated, Plaintext: true, Senders: testSenders(), Log: nopLog{}, Health: &sink{}, Received: received}
+		r, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := r.Listen()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Close(); err != nil {
+			t.Fatalf("%s: %v", tr, err)
+		}
+		if err := r.Close(); err != nil {
+			t.Errorf("%s: second close: %v", tr, err)
+		}
+		if err := r.Serve(context.Background()); err == nil {
+			t.Errorf("%s: served after close", tr)
+		}
+		cfg.Address = a.String()
+		again, err := New(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := again.Listen(); err != nil {
+			t.Errorf("%s: address not released: %v", tr, err)
+		}
+		again.Close()
+	}
+	g := newRig(t, asset.SyslogTCP, nil)
+	g.wait("open", func() bool { return g.r.Status().Open })
+	if err := g.r.Close(); err == nil {
+		t.Error("closed a serving listener")
+	}
 }

@@ -340,6 +340,27 @@ func (r *Receiver) Listen() (net.Addr, error) {
 	return ln.Addr(), nil
 }
 
+// Close releases a bound listener that will not be served, for a node that
+// cannot start all its listeners. It is not for stopping one: a serving
+// listener stops when Serve's context ends, and Close refuses it. Serve
+// after Close returns an error; Close twice is a no-op.
+func (r *Receiver) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.st.Open {
+		return fmt.Errorf("receive: listener %s is serving; end Serve's context to stop it", r.cfg.ID)
+	}
+	var err error
+	if r.ln != nil {
+		err = r.ln.Close()
+	}
+	if r.pc != nil {
+		err = r.pc.Close()
+	}
+	r.ln, r.pc = nil, nil
+	return err
+}
+
 // Serve receives until ctx ends, then closes the listener, lets queued
 // messages commit for up to Limits.Grace, and returns nil. Listen must have
 // succeeded.
