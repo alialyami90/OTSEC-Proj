@@ -269,6 +269,31 @@ def test_text_omitted_is_reported(got):
     assert long_eid in named, (long_eid, named)
 
 
+def _leaf_sha256(path):
+    """SHA-256 of the DER of the first certificate in a PEM file: the
+    certificate the test's sender presents, hashed here, never read back
+    from the node."""
+    pem = open(path).read()
+    block = pem[pem.index("-----BEGIN CERTIFICATE-----"):pem.index("-----END CERTIFICATE-----") + 25]
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(block)).hexdigest()
+
+
+def test_forwarded_tls_events_name_the_sender_certificate(got):
+    """C6 0.3 (A4, #170): every forwarded tls-mutual event carries tlsleaf,
+    the SHA-256 of the certificate the sender presented, the long one whose
+    text was omitted included; UDP events carry none; v is 0.3."""
+    want = _leaf_sha256(got["layout"]["sender_cert"])
+    tls, udp = got["fwd"].get("syslog/a6-tls", []), got["fwd"].get("syslog/a6-udp", [])
+    assert tls and udp
+    for ps in tls:
+        assert [v for n, v in ps if n == "tlsleaf"] == [want], ps
+    assert ("dtext_omitted", "size") in tls[4] and first(tls[4], "tlsleaf") == want
+    for ps in udp:
+        assert first(ps, "tlsleaf") is None, ps
+    for ps in tls + udp:
+        assert first(ps, "v") == "otsec.syslog/0.3", ps
+
+
 def test_refused_senders_left_nothing(got):
     for m in got["all_received"]:
         assert b"no certificate" not in m and b"wrong CA" not in m
