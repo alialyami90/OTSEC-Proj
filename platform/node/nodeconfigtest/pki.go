@@ -101,6 +101,29 @@ func (p *PKI) Issue(name string, usage x509.ExtKeyUsage) (tls.Certificate, error
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: k}, nil
 }
 
+// WriteListenerCredential issues a server certificate for host and writes
+// it and its key into c.TLSDir as <ref>.crt and <ref>.key, the files a TLS
+// listener's credential_ref names.
+func (c *Config) WriteListenerCredential(p *PKI, ref, host string) (tls.Certificate, error) {
+	cert, err := p.Issue(host, x509.ExtKeyUsageServerAuth)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	for name, b := range map[string][]byte{
+		ref + ".crt": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}),
+		ref + ".key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+	} {
+		if err := os.WriteFile(filepath.Join(c.TLSDir, name), b, 0o600); err != nil {
+			return tls.Certificate{}, err
+		}
+	}
+	return cert, nil
+}
+
 // ServerTLS is the collector's TLS configuration as D2-9 commissions it:
 // the node's chain to the test CA, and its name on a one-name
 // permitted-peer list.
