@@ -230,8 +230,54 @@ func TestAdminRepeatOnlyTheSameBytes(t *testing.T) {
 	reply, _ = f.pipe.Handle(ctx, stamped(old, authz.ContractID))
 	wantAdminRefusal(t, "accepted at 0.4, resent at 0.5", reply, authz.AdminCheckReplay)
 
-	if n := len(f.reopenState(t).doc.AdminDecisions); n != 1 {
-		t.Fatalf("%d decisions kept, want only the 0.5 acceptance", n)
+	// A 0.4 reader has no repeat answer: a request accepted at 0.5 and
+	// resent stamped 0.4 is a replay (A6's mutant M1 on #186).
+	revoke := f.signed(t, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialRevoke, RequestID: "req-revoke",
+		OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion, CredentialRevoke: &authz.CredentialRevokeBody{RefID: pipeCred, Reason: authz.RevokeOperator}})
+	if reply, _ := f.pipe.Handle(ctx, revoke); !reply.Accepted() || reply.Admin == nil {
+		t.Fatalf("0.5 revoke: %+v", reply)
+	}
+	reply, _ = f.pipe.Handle(ctx, stamped(revoke, "otsec.authz/0.4"))
+	wantAdminRefusal(t, "accepted at 0.5, resent at 0.4", reply, authz.AdminCheckReplay)
+
+	if n := len(f.reopenState(t).doc.AdminDecisions); n != 2 {
+		t.Fatalf("%d decisions kept, want only the two 0.5 acceptances", n)
+	}
+}
+
+// TestAdminRepeatNamesAnEarlierDecision (A6 F1 on #186): two sends of the
+// same bytes overlap. The first takes its number, the second is numbered
+// after it but decided first; the first then finds a decision above its
+// own number and is refused as a replay, never answered with a repeat_of
+// that C7's Validate refuses. A later send still gets the repeat.
+func TestAdminRepeatNamesAnEarlierDecision(t *testing.T) {
+	f := newPipeline(t)
+	ctx := context.Background()
+	req := f.nodeRequest(t, authz.KindNodeSeqResetAck)
+	early, err := f.state.NextSeq() // the first send, numbered but not yet verified
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := f.pipe.Handle(ctx, req)
+	if !second.Accepted() || second.CollectorSeq <= early {
+		t.Fatalf("second send: %+v", second)
+	}
+	_, repeatOf, err := f.pipe.verifyAdmin(req, early)
+	if repeatOf != 0 || adminCheckOf(authz.CollectorReply{Refusal: asRefusal(err)}) != authz.AdminCheckReplay {
+		t.Fatalf("the earlier-numbered send: repeat_of %d, %v", repeatOf, err)
+	}
+	if _, repeatOf, err := f.pipe.verifyAdmin(req, second.CollectorSeq); repeatOf != 0 || err == nil {
+		t.Fatalf("the decision's own number: repeat_of %d, %v", repeatOf, err)
+	}
+	third, _ := f.pipe.Handle(ctx, req)
+	if !third.Accepted() || third.RepeatOf != second.CollectorSeq {
+		t.Fatalf("a later send: %+v", third)
+	}
+	if err := third.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if a := f.alarmList(); len(a) != 2 {
+		t.Fatalf("alarms %v, want one per refused send", a)
 	}
 }
 

@@ -221,7 +221,7 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		// the nonce come before anything else is decided: before the
 		// install budget, the store and the reuse rule, so no reply to an
 		// unsigned or mis-bound request depends on a stored secret.
-		admin, repeatOf, r := p.verifyAdmin(req)
+		admin, repeatOf, r := p.verifyAdmin(req, seq)
 		if r == nil && repeatOf == 0 {
 			r = p.decideAdmin(req, admin)
 			if r == nil {
@@ -281,7 +281,12 @@ func isCredentialKind(k authz.RequestKind) bool {
 // collector_seq, the nonce is not spent again, and the caller runs nothing
 // (C7 0.5). The request has passed every check first, so a repeat is only
 // ever the bytes the administrator signed, inside their window.
-func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (admin *authz.AdminRequest, repeatOf uint64, err error) {
+//
+// seq is this decision's number. Two sends of the same bytes can overlap:
+// the one numbered first can find the decision the other recorded, under a
+// higher number. A repeat names an earlier decision, so that is refused as
+// a replay, the answer the second send got before 0.5 (A6 F1 on #186).
+func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest, seq uint64) (admin *authz.AdminRequest, repeatOf uint64, err error) {
 	bind := authz.AdminBinding{NodeID: p.cfg.NodeID, InstallKeyID: p.cfg.Creds.InstallKey().KeyID}
 	// Judged at the state's admin clock, which never goes back, so a
 	// clock put back cannot reopen a spent request's window (A6 on #153).
@@ -293,7 +298,11 @@ func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (admin *authz.AdminR
 	admin, err = authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, at)
 	if err == nil && authz.AnswersRepeat(req.Contract) {
 		if first, ok := p.cfg.State.AdminRepeat(admin.Nonce, authz.AdminPayloadSHA256(req.AdminSigned)); ok {
-			return admin, first, nil
+			if first < seq {
+				return admin, first, nil
+			}
+			err = &authz.AdminRejected{Check: authz.AdminCheckReplay,
+				Reason: fmt.Sprintf("decided as collector_seq %d, after this decision %d", first, seq)}
 		}
 	}
 	if err == nil {
