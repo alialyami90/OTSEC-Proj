@@ -50,7 +50,7 @@ The administrator writes `clear-quarantine.json` in `admin_dir`, modelled on `cl
 1. **A3-1.** The chain must hold a `quarantine.exported` record with that manifest hash for that asset. The node takes the stream, range and seq list from the record and the manifest copy it verified, and never trusts a manifest file on its own.
 2. **A3-4.** If the chain already holds a succeeded `quarantine.cleared` for that hash, the file changes nothing. The node records it as stale: `quarantine.cleared` with outcome `info`, reason `already_cleared`. A stale file never removes anything new.
 3. **A3-2, all or nothing.** The node re-reads every listed item from the stream. If any listed seq is gone, or its event or capture hash differs, nothing is removed and the clear is refused. Only the listed seqs are ever removed, never the whole stream and never a record added after the export.
-4. **A3-3.** The node writes `quarantine.cleared` (outcome `succeeded`) with the clear file's SHA-256, the manifest hash, the stream, the range `first..last`, the count and the named principal. It gets that record's C5 receipt before removing anything (audit before act, D1-11). With no receipt, nothing is removed.
+4. **A3-3.** The node writes `quarantine.cleared` (outcome `succeeded`) with the clear file's SHA-256, the manifest hash, the stream, the range `first..last`, the count, and the named principal as `requested_by`. It gets that record's C5 receipt before removing anything (audit before act, D1-11). With no receipt, nothing is removed.
 5. **Removal in bounded steps.** The node removes the listed seqs through C5's `Discard`, at most `DiscardStepEvents` (16) per call and one step per tick (A1 (c)). The steps run before any run of that asset. Until the range is empty, `quarantine-clear-incomplete` is raised and `otsec health` shows it.
 6. **The halt.** If the asset was halted for an unauthorized line, the halt ends only after the whole range is gone and `durableHalt` finds no unauthorized-line quarantine left. It never ends mid-removal (A3).
 
@@ -74,9 +74,9 @@ A file applied again after the clear finished is stale under A3-4 and changes no
   - A seq no longer stored is skipped, so a resume can call it with seqs a killed step already removed.
   - Refuses a stream outside the prefix, a stream a consumer reads or that has a persisted cursor, an empty list, a repeated seq and seq 0.
   - The contract text says it is called only after an audited administrator clear and never automatically. #135's pruning is unchanged.
-- **C8 (A3's contract): two actions.**
-  - `quarantine.exported`: actor type `node`, detail as in step 2.
-  - `quarantine.cleared`: actor type `admin` carrying the file's `principal`, with outcome `succeeded`, or `info` with reason `already_cleared` for a stale file.
+- **C8 0.3 (A3's contract, #155): two actions.** Both have actor type `node` and a `quarantine` object holding `manifest_sha256`, `first_seq`, `last_seq` and `items`.
+  - `quarantine.exported`: outcome `info`.
+  - `quarantine.cleared`: outcome `succeeded`, or `info` with reason `already_cleared` for a stale file. It also carries `clear_sha256` and `requested_by`, the principal the file names. The actor is the node, not the administrator: as with `asset.suspension_clear`, an unsigned file cannot prove who wrote it (A3; A1 to rule).
 
   Both are written only by the node.
 
