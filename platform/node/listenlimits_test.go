@@ -1,0 +1,278 @@
+package node
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"otsec.local/otsec/contracts/asset"
+	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
+)
+
+// sizingConfig is a configuration with listeners of the given transports
+// and the two syslog quotas.
+func sizingConfig(stream, datagram int64, hours int, transports ...string) *Config {
+	c := &Config{SyslogOutageHours: hours, Store: StoreConfig{Quotas: map[string]int64{
+		string(c5.ClassSyslogStream): stream, string(c5.ClassSyslogDatagram): datagram,
+	}}}
+	for i, tr := range transports {
+		c.Listeners = append(c.Listeners, Listener{ID: fmt.Sprintf("l%d", i), Transport: asset.Transport(tr)})
+	}
+	return c
+}
+
+// Each listener's hourly unknown budget is a share of its class quota:
+// every listener of the class together may store at most a quarter of the
+// quota from unknown senders over the planned outage, and no listener more
+// than A4's 1 MiB an hour. The bound is what the node shows.
+func TestListenerSizings(t *testing.T) {
+	const mib = 1 << 20
+	for _, tc := range []struct {
+		name       string
+		c          *Config
+		id         string
+		per, bound int64
+		class      c5.StreamClass
+		hours      int64
+	}{
+		{"one listener, default outage", sizingConfig(64*mib, 64*mib, 0, "syslog-tcp"), "l0", 64 * mib / 4 / 25, 64 * mib / 4 / 25 * 25, c5.ClassSyslogStream, 24},
+		{"two of a class share it", sizingConfig(64*mib, 64*mib, 0, "syslog-tls", "syslog-tcp"), "l1", 64 * mib / 4 / 50, 64 * mib / 4 / 50 * 50, c5.ClassSyslogStream, 24},
+		{"classes are sized apart", sizingConfig(64*mib, 32*mib, 0, "syslog-tls", "syslog-udp"), "l1", 32 * mib / 4 / 25, 32 * mib / 4 / 25 * 25, c5.ClassSyslogDatagram, 24},
+		{"capped at A4's default", sizingConfig(4096*mib, 64*mib, 0, "syslog-tcp"), "l0", mib, 25 * mib, c5.ClassSyslogStream, 24},
+		{"a longer outage takes less an hour", sizingConfig(512*mib, 64*mib, 168, "syslog-tcp"), "l0", 512 * mib / 4 / 169, 512 * mib / 4 / 169 * 169, c5.ClassSyslogStream, 168},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.c.ListenerSizings()
+			if err != nil {
+				t.Fatal(err)
+			}
+			sz := got[tc.id]
+			if sz.UnknownBytes != tc.per || sz.UnknownBound != tc.bound || sz.Class != tc.class || sz.OutageHours != tc.hours {
+				t.Fatalf("%+v, want %d an hour, bound %d, class %s, %d h", sz, tc.per, tc.bound, tc.class, tc.hours)
+			}
+			if sz.UnknownBound > sz.Quota/UnknownQuotaShare || sz.limits().UnknownBytes != tc.per {
+				t.Fatalf("bound %d over a quarter of %d, or limits %+v", sz.UnknownBound, sz.Quota, sz.limits())
+			}
+		})
+	}
+}
+
+// A quota too small for the unknown senders' floor over the outage, or a
+// stream quota that cannot hold one whole batch beside their share, is
+// refused, and so is the configuration that names it (HR-11, D3-3).
+func TestListenerSizingsRefused(t *testing.T) {
+	const mib = 1 << 20
+	for _, tc := range []struct {
+		name string
+		c    *Config
+		want string
+	}{
+		{"below the floor", sizingConfig(25*mib-1, 64*mib, 0, "syslog-tcp"), "must be at least 26214400 bytes"},
+		{"three listeners share it", sizingConfig(64*mib, 64*mib, 0, "syslog-tcp", "syslog-tls", "syslog-tcp"), "too small for 3 listeners"},
+		{"datagram too", sizingConfig(64*mib, 10*mib, 0, "syslog-udp"), "store.quotas.syslog-datagram"},
+		{"no room for a held batch", sizingConfig(4*mib, 64*mib, 1, "syslog-tcp"), "cannot hold one received stream batch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.c.ListenerSizings(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %v, want %q", err, tc.want)
+			}
+		})
+	}
+	// A datagram batch is dropped, not held, so the same quota is enough
+	// for a UDP listener.
+	if _, err := sizingConfig(64*mib, 4*mib, 1, "syslog-udp").ListenerSizings(); err != nil {
+		t.Fatal(err)
+	}
+	// The exact floor passes.
+	if _, err := sizingConfig(25*mib, 64*mib, 0, "syslog-tcp").ListenerSizings(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The loader checks syslog_outage_hours and refuses a quota the listeners
+// cannot be sized from; without listeners, any quota loads.
+func TestOutageHoursConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mod  func(*nodeconfigtest.Config)
+		want string
+	}{
+		{"negative", func(nc *nodeconfigtest.Config) { nc.SyslogOutageHours = -1 }, "syslog_outage_hours -1 not in [0, 720]"},
+		{"too long", func(nc *nodeconfigtest.Config) { nc.SyslogOutageHours = 721 }, "syslog_outage_hours 721 not in [0, 720]"},
+		{"quota too small", func(nc *nodeconfigtest.Config) {
+			nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+			nc.Store.Quotas["syslog-stream"] = 1 << 20
+		}, "HR-11, D3-3"},
+		{"longest outage with the test quota", func(nc *nodeconfigtest.Config) {
+			nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+			nc.SyslogOutageHours = 720
+		}, "too small for 1 listeners"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nc, _ := listenConfig(t, tc.mod)
+			if _, err := ParseConfig(nc.Bytes()); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %v, want %q", err, tc.want)
+			}
+		})
+	}
+	nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.Store.Quotas["syslog-stream"] = 1 << 20
+		nc.SyslogOutageHours = 720
+	})
+	if _, err := ParseConfig(nc.Bytes()); err != nil {
+		t.Fatalf("no listeners: %v", err)
+	}
+}
+
+// The node passes the sized budget to the listener: with a stream quota
+// that sizes it at A4's 256 KiB floor, an unknown sender's messages past it
+// are dropped as unknown-budget well before A4's 1 MiB default would drop
+// them, and status shows the budget, the bound and the bytes stored.
+func TestListenerUsesSizedBudget(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+		nc.Store.Quotas["syslog-stream"] = MinUnknownBytes * 25 * UnknownQuotaShare
+	})
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls := serve(t, r)
+
+	line := "<13>Oct 26 12:00:00 stranger " + strings.Repeat("x", 8000) + "\n"
+	c := dialFrom(t, "tcp", "127.0.0.2", ls.Addr("lab-tcp"))
+	const sent = 40
+	for range sent {
+		if _, err := c.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	var got ListenerStatus
+	for {
+		ls.Publish()
+		got = st.Snapshot("x").Listeners["lab-tcp"]
+		if got.Stored+got.Dropped["unknown-budget"] >= sent {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("listener status: %+v", got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got.Dropped["unknown-budget"] == 0 || got.Stored == 0 {
+		t.Fatalf("stored %d, dropped %v: the sized budget was not applied", got.Stored, got.Dropped)
+	}
+	u := got.Unknown
+	if u == nil || u.HourlyBytes != MinUnknownBytes || u.BoundBytes != MinUnknownBytes*25 || u.OutageHours != 24 || u.QuotaBytes != MinUnknownBytes*100 {
+		t.Fatalf("unknown share in status: %+v", u)
+	}
+	var stored int64
+	got2, err := r.Store(ListenerStream("lab-tcp")).Read(bg, ListenerStream("lab-tcp"), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got2 {
+		stored += int64(len(s.Event))
+	}
+	// The receiver spends the pending event's bytes and the store keeps it
+	// with its seq written in, so the two differ by the seq's digits only.
+	if diff := stored - u.StoredBytes; u.StoredBytes == 0 || diff < 0 || diff > int64(len(got2))*4 || u.StoredBytes > MinUnknownBytes+4096 {
+		t.Fatalf("unknown stored %d bytes in status, %d in the stream (%d events)", u.StoredBytes, stored, len(got2))
+	}
+}
+
+// A syslog-tls listener's certificate expiry is in status, and the node
+// raises syslog-listener-certificate-expiring once when it comes within 30
+// days and once more when it has passed.
+func TestListenerCertExpiry(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nc.WriteListenerCredential(p, "test-listener", "127.0.0.1"); err != nil {
+			t.Fatal(err)
+		}
+		nc.AddListener("lab-tls", "syslog-tls", "127.0.0.1:0")
+	})
+	locked := *nc
+	t.Cleanup(func() { locked.UnlockTLS() })
+	lockTLS(t, nc)
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls, err := NewListening(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	na := ls.notAfter["lab-tls"]
+	if na.IsZero() {
+		t.Fatal("no certificate expiry kept")
+	}
+	alarms := func() []string {
+		var out []string
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == AlarmListenerCertExpiring && a.Target == "listener lab-tls" {
+				out = append(out, a.Detail)
+			}
+		}
+		return out
+	}
+	at := func(d time.Duration) {
+		r.opt.Now = func() time.Time { return na.Add(d) }
+		ls.Publish()
+	}
+	at(-31 * 24 * time.Hour)
+	if got := st.Snapshot("x").Listeners["lab-tls"]; !got.CertNotAfter.Equal(na) || len(alarms()) != 0 {
+		t.Fatalf("31 days out: %+v, alarms %q", got, alarms())
+	}
+	at(-29 * 24 * time.Hour)
+	at(-28 * 24 * time.Hour)
+	if a := alarms(); len(a) != 1 || !strings.Contains(a[0], "expires at "+na.UTC().Format(time.RFC3339)) || !strings.Contains(a[0], "test-listener.crt") {
+		t.Fatalf("29 days out: %q", a)
+	}
+	at(time.Second)
+	at(time.Hour)
+	if a := alarms(); len(a) != 2 || !strings.Contains(a[1], "expired at") {
+		t.Fatalf("expired: %q", a)
+	}
+}
+
+// With listeners, a target whose max_message_octets cannot carry a
+// received message's text whole is warned about at start; one sized at
+// RecommendedTargetOctets is not, and without listeners nothing is raised.
+func TestTargetSmallForListeners(t *testing.T) {
+	targets := func(nc *nodeconfigtest.Config) {
+		nc.AddRELPTarget("small", "127.0.0.1", 6514, "test-ca", "test-client", "V-S6-test", false)
+		nc.AddRELPTarget("whole", "127.0.0.1", 6515, "test-ca", "test-client", "V-S6-test", false)
+		nc.Targets[1]["max_message_octets"] = RecommendedTargetOctets
+	}
+	raised := func(withListener bool) []StatusAlarm {
+		nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+			targets(nc)
+			if withListener {
+				nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0")
+			}
+		})
+		r, st, _ := start(t, parse(t, nc), dir)
+		defer r.Close()
+		ls, err := NewListening(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ls.Listen(); err != nil {
+			t.Fatal(err)
+		}
+		defer ls.close(ls.receivers)
+		return slices.DeleteFunc(st.Snapshot("x").Alarms, func(a StatusAlarm) bool { return a.Code != AlarmTargetSmallForListeners })
+	}
+	got := raised(true)
+	if len(got) != 1 || got[0].Target != "small" || !strings.Contains(got[0].Detail, "max_message_octets is 2048; a received message whose text does not fit") ||
+		!strings.Contains(got[0].Detail, fmt.Sprint(RecommendedTargetOctets)) {
+		t.Fatalf("with a listener: %+v", got)
+	}
+	if got := raised(false); len(got) != 0 {
+		t.Fatalf("without listeners: %+v", got)
+	}
+}

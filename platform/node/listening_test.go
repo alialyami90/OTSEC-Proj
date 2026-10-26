@@ -296,7 +296,7 @@ func TestLiveLogRefusesWithoutDatabase(t *testing.T) {
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {})
 	r, _, _ := start(t, parse(t, nc), dir)
 	defer r.Close()
-	if _, err := (liveLog{r, ListenerStream("absent")}).AppendBatch(bg, []c5.Record{{Stream: ListenerStream("absent")}}); err == nil {
+	if _, err := (liveLog{r, ListenerStream("absent"), nil}).AppendBatch(bg, []c5.Record{{Stream: ListenerStream("absent")}}); err == nil {
 		t.Fatal("a batch for a stream with no open database was accepted")
 	}
 }

@@ -36,14 +36,18 @@ const MinIntervalSeconds = 60
 
 // Config is a loaded, checked node configuration.
 type Config struct {
-	Schema        string            `json:"schema"`
-	NodeID        cnode.ID          `json:"node_id"`
-	Store         StoreConfig       `json:"store"`
-	Listeners     []Listener        `json:"listeners"`
-	Assets        []json.RawMessage `json:"assets"`
-	Targets       []json.RawMessage `json:"targets"`
-	Schedule      []Collection      `json:"schedule"`
-	CollectorPipe string            `json:"collector_pipe"`
+	Schema    string      `json:"schema"`
+	NodeID    cnode.ID    `json:"node_id"`
+	Store     StoreConfig `json:"store"`
+	Listeners []Listener  `json:"listeners"`
+	// SyslogOutageHours is the upstream outage the syslog classes must
+	// ride out with listeners' unknown senders storing all the while
+	// (ListenerSizings); 0 means DefaultSyslogOutageHours.
+	SyslogOutageHours int               `json:"syslog_outage_hours,omitempty"`
+	Assets            []json.RawMessage `json:"assets"`
+	Targets           []json.RawMessage `json:"targets"`
+	Schedule          []Collection      `json:"schedule"`
+	CollectorPipe     string            `json:"collector_pipe"`
 	// CollectorPeer is the identity the collector must hold (collectorwire
 	// Endpoint.Peer). On Windows it may be empty, which means the
 	// otsec-collector service SID; on Linux it is the collector's uid.
@@ -205,6 +209,13 @@ func (c *Config) check() error {
 			fail("store.quotas: unknown class %q", class)
 		} else if n <= 0 {
 			fail("store.quotas.%s must be positive", class)
+		}
+	}
+	if c.SyslogOutageHours < 0 || c.SyslogOutageHours > MaxSyslogOutageHours {
+		fail("syslog_outage_hours %d not in [0, %d]", c.SyslogOutageHours, MaxSyslogOutageHours)
+	} else if len(c.Listeners) > 0 && len(errs) == 0 {
+		if _, err := c.ListenerSizings(); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if err := checkPipe(c.CollectorPipe); err != nil {

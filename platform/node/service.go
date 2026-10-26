@@ -44,6 +44,10 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if err := ls.Listen(); err != nil {
 		return err
 	}
+	if len(cfg.Listeners) > 0 {
+		ls.Publish()
+		st.Write(string(cfg.NodeID))
+	}
 	listened := make(chan struct{})
 	go func() {
 		defer close(listened)

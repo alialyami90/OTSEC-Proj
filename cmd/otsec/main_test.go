@@ -220,7 +220,11 @@ func TestHealthShowsListeners(t *testing.T) {
 	st.SetListeners(map[string]node.ListenerStatus{
 		"lab-udp": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Plaintext: true, Open: true, Received: 7, Stored: 5, LastMessage: at,
 			Dropped: map[string]int64{"store": 1, "rate-limit": 1}, UnknownSenders: 2, UnknownOverflow: true},
-		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached"},
+		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached",
+			Unknown:      &node.UnknownShare{HourlyBytes: 671088, BoundBytes: 16777200, QuotaBytes: 67108864, OutageHours: 24, StoredBytes: 20582},
+			CertNotAfter: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)},
+		"lab-tls2": {Transport: "syslog-tls", Address: "127.0.0.1:6515", CertNotAfter: time.Now().Add(10 * 24 * time.Hour).UTC().Truncate(time.Second)},
+		"lab-tls3": {Transport: "syslog-tls", Address: "127.0.0.1:6516", CertNotAfter: time.Date(2100, 1, 2, 3, 4, 5, 0, time.UTC)},
 	})
 	st.Write("site-a-node1")
 	out, errs, code := otsec(t, "health", "-config", path)
@@ -236,6 +240,10 @@ func TestHealthShowsListeners(t *testing.T) {
 		"  HELD: the store is not taking this listener's messages; senders are not read meanwhile",
 		"  connections refused: tls 3",
 		"  last error: store: quota reached",
+		"  unknown senders stored 20582 bytes since start; budget 671088 bytes an hour; with this class's other listeners at most 16777200 bytes, 24% of the 67108864-byte quota, over a 24 h outage (HR-11)",
+		"  CERTIFICATE EXPIRED at 2020-01-02T03:04:05Z: senders that check it refuse it",
+		"listener lab-tls2 (syslog-tls 127.0.0.1:6515): NOT OPEN, 0 received, 0 stored, last message never in this process\n  CERTIFICATE EXPIRES at ",
+		"listener lab-tls3 (syslog-tls 127.0.0.1:6516): NOT OPEN, 0 received, 0 stored, last message never in this process\n  certificate valid until 2100-01-02T03:04:05Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("health lacks %q:\n%s", want, out)
