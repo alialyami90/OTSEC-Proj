@@ -10,7 +10,14 @@
 //     events it produced.
 //   - Time is C4's event.Received: a UTC value, its resolution, and the node
 //     clock's state, with C4's closed sync values. It is always the node's
-//     clock (C8-A4-3).
+//     clock (C8-A4-3): the host clock that the node and its collector share.
+//     A collector stamps the records it relays as it acts; the node stamps
+//     its own records when it builds them. Chain order is commit order, not
+//     time order: a run's relayed records are committed after the node's
+//     decision record, so they follow it in seq and read earlier by the
+//     run's duration. Per correlation, the request record's time is at or
+//     before every relayed record's, and those are at or before the
+//     decision's (D3-8).
 //   - Correlation. A collector.request record carries the C7 request ID as
 //     correlation_id. Every device.* and credential.use record carries the C2
 //     invocation ID, which C4 events carry as collection.invocation_id, so
