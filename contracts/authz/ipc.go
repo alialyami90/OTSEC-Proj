@@ -1,6 +1,8 @@
 package authz
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,12 @@ const (
 	KindCredentialRevoke    RequestKind = "credential.revoke"
 	KindCredentialClearSusp RequestKind = "credential.clear_suspension"
 	KindAssetClearSusp      RequestKind = "asset.clear_suspension" // since 0.2
+	// The node kinds (since 0.5) are admin-signed only. The collector
+	// verifies, spends the nonce and numbers the decision, and changes
+	// nothing of its own; the node acts on its own part only once the
+	// collector has accepted (CollectorReply.AdminAcceptance).
+	KindNodeQuarantineClear RequestKind = "node.quarantine_clear"
+	KindNodeSeqResetAck     RequestKind = "node.seq_reset_ack"
 	maxParams                           = 8
 	maxParamValueLen                    = 64
 	requestIDPatternSrc                 = `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`
@@ -43,7 +51,11 @@ var (
 
 // kindSince is the minor that added a request kind; absent means 0.1. A
 // request stamped with an earlier minor cannot ask for it.
-var kindSince = map[RequestKind]int{KindAssetClearSusp: 2}
+var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince}
+
+// nodeKindsSince is the minor that added the node kinds, the repeat answer
+// and CollectorReply.Admin.
+const nodeKindsSince = 5
 
 // CollectorRequest is the only message the main process sends to the
 // collector. It is strict: decode it with DecodeRequest, never with a lenient
@@ -113,6 +125,22 @@ type AssetClearSuspBody struct {
 	// Ref is the C2 invocation ID whose outcome suspended the asset.
 	Ref string `json:"ref"`
 }
+
+// NodeQuarantineClearBody (since 0.5) is an administrator's clear of one
+// quarantine the node holds (D3-1): the asset, a C1 asset ID, and the
+// SHA-256 of the quarantine manifest the administrator reviewed. The
+// collector checks its syntax only; the node checks it against its own
+// quarantine before it clears.
+type NodeQuarantineClearBody struct {
+	AssetID        string `json:"asset_id"`
+	ManifestSHA256 string `json:"manifest_sha256"`
+}
+
+// NodeSeqResetAckBody (since 0.5) acknowledges a collector_seq reset. It
+// is empty: the install key it acknowledges is the payload's
+// install_key_id, which the collector refuses unless it is its current
+// key, so a second copy here could only disagree.
+type NodeSeqResetAckBody struct{}
 
 // RefusalCode is the closed set of reasons the collector refuses a request.
 // A reader that meets a code it does not know treats it as RefuseUnknown.
@@ -287,6 +315,77 @@ type CollectorReply struct {
 	// CollectorSeq numbers this decision among every event the collector
 	// reports (C7-A5-2). See the package documentation, "Collector sequence".
 	CollectorSeq uint64 `json:"collector_seq"`
+	// RepeatOf (since 0.5) is set on an accepted reply to admin-signed
+	// bytes the collector had already accepted: the collector_seq of that
+	// first decision. The collector did nothing again; this reply has its
+	// own collector_seq like any other. See the package documentation,
+	// "The node kinds and the repeat answer".
+	RepeatOf uint64 `json:"repeat_of,omitempty"`
+	// Admin (since 0.5) is set on every accepted reply to an admin-signed
+	// request stamped 0.5 or later, and on no other reply: what the
+	// collector verified.
+	Admin *AdminAccepted `json:"admin,omitempty"`
+}
+
+// AdminAccepted is what the collector verified of an admin-signed request
+// it accepted (since 0.5). The node's C8 record of the reply carries it,
+// so the record of the request holds what the payload claimed and the
+// record of the reply what was verified. PayloadSHA256 binds the
+// acceptance to the exact signed bytes sent (AdminPayloadSHA256).
+type AdminAccepted struct {
+	AdminKeyID    string    `json:"admin_key_id"`
+	Principal     Principal `json:"principal"`
+	Nonce         string    `json:"nonce"`
+	PayloadSHA256 string    `json:"payload_sha256"`
+}
+
+// AdminPayloadSHA256 is the lowercase hex SHA-256 of a signed request's
+// payload bytes: the bytes the signature covers, as sent.
+func AdminPayloadSHA256(env *AdminSigned) string {
+	sum := sha256.Sum256(env.Payload)
+	return hex.EncodeToString(sum[:])
+}
+
+// AnswersRepeat reports whether a request stamped contract may get the
+// repeat answer and CollectorReply.Admin: from 0.5. An older reader decodes
+// replies strictly and knows neither field, so it gets what a 0.4
+// collector replied: a resent request is refused as a replay.
+func AnswersRepeat(contract string) bool {
+	got, err := version.Parse(contract)
+	return err == nil && got.Minor >= nodeKindsSince
+}
+
+// AdminAcceptance checks that r accepts exactly the admin-signed request
+// sent, and returns what the collector verified. The node acts on its own
+// part of an admin request (a node kind, or its side of an asset clear)
+// only when this returns no error: the reply answers this request ID, is
+// accepted and numbered, names the payload's hash, the envelope's key and
+// the request's person, and a repeat names an earlier decision.
+func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted, error) {
+	switch {
+	case sent == nil || sent.AdminSigned == nil:
+		return nil, errors.New("authz: the request sent is not admin-signed")
+	case !r.Accepted():
+		return nil, errors.New("authz: the reply does not accept the request")
+	case r.RequestID != sent.RequestID:
+		return nil, errors.New("authz: the reply answers another request")
+	case r.Admin == nil:
+		return nil, errors.New("authz: the acceptance names nothing the collector verified")
+	case r.RepeatOf >= r.CollectorSeq:
+		return nil, fmt.Errorf("authz: repeat_of %d is not an earlier decision than %d", r.RepeatOf, r.CollectorSeq)
+	}
+	a := r.Admin
+	switch {
+	case a.PayloadSHA256 != AdminPayloadSHA256(sent.AdminSigned):
+		return nil, errors.New("authz: the acceptance is for other signed bytes")
+	case a.AdminKeyID != sent.AdminSigned.KeyID:
+		return nil, errors.New("authz: the acceptance names another admin key")
+	case a.Principal != sent.OnBehalfOf:
+		return nil, errors.New("authz: the acceptance names another person")
+	case !adminNoncePattern.MatchString(a.Nonce):
+		return nil, errors.New("authz: the acceptance's nonce is malformed")
+	}
+	return a, nil
 }
 
 // Accepted reports whether the reply accepts the request. Anything malformed
@@ -415,6 +514,8 @@ type requestBodies struct {
 	CredentialRevoke    *CredentialRevokeBody
 	CredentialClearSusp *CredentialClearSuspBody
 	AssetClearSusp      *AssetClearSuspBody
+	NodeQuarantineClear *NodeQuarantineClearBody // admin-signed only
+	NodeSeqResetAck     *NodeSeqResetAckBody     // admin-signed only
 }
 
 // validateBody checks that the one body set matches kind and passes its
@@ -451,11 +552,22 @@ func validateBody(kind RequestKind, by Principal, b requestBodies) error {
 		if !invocationRefPattern.MatchString(b.AssetClearSusp.Ref) {
 			return refuse(RefuseInvalid, "ref")
 		}
+	case kind == KindNodeQuarantineClear && b.NodeQuarantineClear != nil:
+		if !assetIDPattern.MatchString(b.NodeQuarantineClear.AssetID) {
+			return refuse(RefuseInvalid, "asset_id")
+		}
+		if !sha256HexPattern.MatchString(b.NodeQuarantineClear.ManifestSHA256) {
+			return refuse(RefuseInvalid, "manifest_sha256")
+		}
+	case kind == KindNodeSeqResetAck && b.NodeSeqResetAck != nil:
 	default:
 		return refuse(RefuseInvalid, "body does not match kind %q", kind)
 	}
 	return nil
 }
+
+// sha256HexPattern is a SHA-256 digest in lowercase hex.
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func (b *RunBody) validate() error {
 	if !assetIDPattern.MatchString(b.AssetID) {

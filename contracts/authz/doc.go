@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.4: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.5: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -23,7 +23,10 @@
 //     or a secret. Credential install, revoke and clear-suspension, and
 //     (since 0.2) asset.clear_suspension, are the only other kinds, and none
 //     of them causes device I/O. From 0.4 an administrator signs them
-//     (AdminSigned); see "Admin-signed requests".
+//     (AdminSigned); see "Admin-signed requests". From 0.5 two node kinds,
+//     node.quarantine_clear and node.seq_reset_ack, exist only signed: the
+//     collector verifies them and changes nothing of its own, and the node
+//     acts only once the collector has accepted.
 //   - Register package verification (VerifyRegisterPackage): Ed25519 only,
 //     release keys from the node's trust anchors, a signed statement that binds
 //     the payload digest and package version, and an anti-rollback floor. Any
@@ -181,6 +184,36 @@
 // administrator can still learn equality through the reuse rule, at the
 // install budget's rate; the administrator could install any secret anyway.
 //
+// # The node kinds and the repeat answer
+//
+// The node holds no admin key and verifies no signature: it relays an
+// administrator's signed file to the collector unchanged and acts on its own
+// part (the node kinds, and its side of an asset clear) only after the
+// collector accepts (A5's design, docs/phase3/A5-signed-admin-files.md). From
+// 0.5 every accepted reply to an admin-signed request names what the
+// collector verified (CollectorReply.Admin): the key, the person, the nonce
+// and the SHA-256 of the payload bytes. CollectorReply.AdminAcceptance is the
+// node's check that a reply accepts exactly the bytes it sent.
+//
+// A reply can be lost after the collector has accepted and spent the nonce,
+// and the node sends the same file again. Up to 0.4 that resend is refused
+// as a replay, so a node part never ran. From 0.5 the collector keeps, for
+// each nonce it spent on an accepted request and until that nonce expires,
+// the payload's SHA-256 and the decision's collector_seq. The same nonce
+// with byte-identical payload bytes, which must still pass every check in
+// VerifyAdminRequest, is accepted again with RepeatOf naming the first
+// decision, and the collector does nothing again; the reply takes its own
+// collector_seq like any other. Any other payload with a spent nonce is
+// refused as a replay, as before, so the answer tells a sender nothing it
+// did not already hold: only a sender with the exact signed bytes gets it.
+// A request refused after its nonce was spent is not repeated: its resend
+// is refused as a replay. Only requests stamped 0.5 or later get the
+// repeat answer or Admin (AnswersRepeat); an older reader decodes replies
+// strictly and gets what a 0.4 collector replied. After the request
+// expires, a resend is refused with window, and the administrator signs it
+// again: each node kind, and the collector's side of an asset clear, is
+// idempotent.
+//
 // # Collector sequence
 //
 // The collector numbers every event it reports to the node: each reply to a
@@ -210,7 +243,11 @@
 // 0.3 gets asset_not_enrolled for a suspended asset, as 0.2 collectors
 // replied, and no suspension field. A request stamped before 0.4 gets
 // principal_not_permitted in place of admin_unverified. AdminSigned needs
-// 0.4. The labels bound into the sealing (the seal AAD and the HKDF
+// 0.4. The node kinds need 0.5, and so do the repeat answer and
+// CollectorReply.Admin. The admin payload's format stays
+// otsec.authz.admin-request/0.4, and the signing prefix names
+// otsec.authz/0.4, so a 0.4 request verifies unchanged; a 0.4 reader
+// refuses a node body in the payload as a payload error. The labels bound into the sealing (the seal AAD and the HKDF
 // info, both "otsec.authz/0.1 ...") are fixed byte strings, not the
 // contract version, and do not change with it.
 //

@@ -10,7 +10,8 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/valid/credential-revoke.json` | An admin revokes a credential after rotation. |
 | `requests/valid/credential-clear-suspension.json` | An admin clears a suspension on the exact version they reviewed. |
 | `requests/valid/asset-clear-suspension.json` | 0.2: the node asks the collector to clear its suspension of one asset, naming the invocation that suspended it. The collector still reads the administrator's file itself before it clears. |
-| `requests/valid/admin-signed-credential-install.json` | 0.4: the same install, signed by a test admin key (seed: SHA-256 of `otsec test admin key 1`, test only, D2-5). The body travels only inside the signed payload. `TestAdminSignedGolden` rebuilds it byte for byte and verifies it. |
+| `requests/valid/admin-signed-credential-install.json` | 0.4: the same install, stamped 0.4, signed by a test admin key (seed: SHA-256 of `otsec test admin key 1`, test only, D2-5). The body travels only inside the signed payload. `TestAdminSignedGolden` rebuilds it byte for byte and verifies it. |
+| `requests/valid/admin-signed-node-quarantine-clear.json` | 0.5: an administrator's signed clear of one quarantine the node holds, with the same test key and nonce. The body names the asset and the manifest's SHA-256 (of `otsec test quarantine manifest`, not a real manifest). `TestNodeQuarantineClearGolden` rebuilds and verifies it. |
 | `requests/invalid/bad_params__line-break-in-param.json` | A parameter value carrying CR LF and a second command. |
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
 | `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
