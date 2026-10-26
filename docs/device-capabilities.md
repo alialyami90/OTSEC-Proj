@@ -97,6 +97,8 @@ A finding that applies to several families: **on SEL ASCII relays a Level 1 logi
 | Configuration | SFTP or SCP: `unsupported` (Table 7.5). | FTP `SET_ALL.TXT` and `CFG.TXT`, marked read-only: `documented-untested` (pp. 7.88–7.89). Same block as above, plus `FTPACC` defaults to 2 (Table 4.104 p. 4.250). | `SHO G`, `SHO P 1` at Level 1: `documented-untested` (Table 7.67 p. 7.77); in the register, `SHO G` reads `DATE_F` for `SER` from revision 4. | Rung 3, partly built (the two lines the collector needs). |
 | Identity | SNMPv3: `unsupported`. No SNMP agent in Table 7.5. | `ID` at Level 0: `documented-untested` (Table 7.43, Figure 7.38 p. 7.64), built and `simulated`. `CFG.TXT` over FTP carries RELAYTYPE, FID, BFID and PARTNO (Figure 7.46), blocked as above. | Passive. | Rung 2, built. |
 
+The Port 1 web server is excluded from every rung (A6 on #183). It is HTTP, not HTTPS. `EHTTP := Y`, `HTTPACC := 2` and `HTTPPORT := 80` are its defaults (Table 4.104 p. 4.251). Its Reports pages, the SER included, open at Level 1 or 2 (p. 3.2), so it would be a cleartext path for the same Level 1 password. Its Event Reports page also clears the event history and triggers an event (p. 3.4), and the manual does not say which access level those actions need. Class: `documented-untested`.
+
 ### SEL-787-4 (S34)
 
 The same file and command model as the SEL-751.
