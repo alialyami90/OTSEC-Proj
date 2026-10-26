@@ -457,11 +457,18 @@ func TestExpiring(t *testing.T) {
 	if got := r.Expiring(now, 30*24*time.Hour); len(got) != 0 {
 		t.Fatalf("30 days: %v", got)
 	}
-	if got := r.Expiring(now, 100*24*time.Hour); len(got) != 1 || got[0] != clientRef {
+	if got := r.Expiring(now, 100*24*time.Hour); len(got) != 1 || got[0].Ref != clientRef || got[0].Kind != KindTLSKey ||
+		!got[0].NotAfter.Equal(now.Add(90*24*time.Hour)) {
 		t.Fatalf("100 days: %v", got)
 	}
-	if got := r.Expiring(now, 400*24*time.Hour); len(got) != 2 {
+	got := r.Expiring(now, 400*24*time.Hour)
+	if len(got) != 2 {
 		t.Fatalf("400 days: %v", got)
+	}
+	for _, x := range got {
+		if x.Kind == KindTrustAnchors && !x.NotAfter.Equal(now.Add(365*24*time.Hour)) {
+			t.Fatalf("anchors expire at %s", x.NotAfter)
+		}
 	}
 }
 
@@ -502,5 +509,33 @@ func TestLabFiles(t *testing.T) {
 	}
 	if err := keys.Delete(name); err != nil {
 		t.Fatalf("second delete: %v", err)
+	}
+}
+
+// TestOneExpiredAnchorRefusesTheSet: a trust-anchors set is trusted whole or
+// not at all, and Expiring names it by its earliest certificate.
+func TestOneExpiredAnchorRefusesTheSet(t *testing.T) {
+	ca := newCA(t, "otsec test ca")
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "otsec test ca short"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(10 * 24 * time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	short, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &k.PublicKey, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegister(testNode)
+	if err := r.SetAnchors(anchorsRef, [][]byte{ca.cert.Raw, short}, admin, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.TrustAnchors(anchorsRef, now); err != nil {
+		t.Fatal(err)
+	}
+	got := r.Expiring(now, 30*24*time.Hour)
+	if len(got) != 1 || got[0].Ref != anchorsRef || !got[0].NotAfter.Equal(now.Add(10*24*time.Hour)) {
+		t.Fatalf("expiring: %v", got)
+	}
+	if pool, _, err := r.TrustAnchors(anchorsRef, now.Add(20*24*time.Hour)); err == nil || pool != nil {
+		t.Fatal("a set with an expired certificate resolved")
 	}
 }

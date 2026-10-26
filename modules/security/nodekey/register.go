@@ -276,7 +276,9 @@ func (r *Register) active(ref string, kind Kind) (*Entry, error) {
 
 // TrustAnchors resolves a trust-anchors reference: its certificates as a
 // pool, and the entry, whose version and fingerprint the node's C8 record
-// names. Every certificate must be valid at now.
+// names. Every certificate must be valid at now: one expired certificate
+// refuses the whole set, so the set of trusted peers never shrinks or
+// changes silently, and Expiring reports it 30 days ahead.
 func (r *Register) TrustAnchors(ref string, now time.Time) (*x509.CertPool, *Entry, error) {
 	e, err := r.active(ref, KindTrustAnchors)
 	if err != nil {
@@ -327,19 +329,31 @@ func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certi
 	return &tls.Certificate{Certificate: slices.Clone(e.Certificates), PrivateKey: signer, Leaf: leaf}, e, nil
 }
 
+// Expiry is an active reference whose earliest certificate expires soon.
+type Expiry struct {
+	Ref      string
+	Kind     Kind
+	NotAfter time.Time // the earliest NotAfter among the entry's certificates
+}
+
 // Expiring lists the active references with a certificate that expires
-// before now+within, for node health (section 9: 30 days ahead).
-func (r *Register) Expiring(now time.Time, within time.Duration) []string {
-	var out []string
+// before now+within, for node health (section 9: 30 days ahead). A
+// trust-anchors set is listed when any one of its certificates expires
+// soon, because TrustAnchors refuses the whole set once one has expired.
+func (r *Register) Expiring(now time.Time, within time.Duration) []Expiry {
+	var out []Expiry
 	for _, e := range r.Entries {
 		if e.State != StateActive {
 			continue
 		}
+		var first time.Time
 		for _, der := range e.Certificates {
-			if c, err := x509.ParseCertificate(der); err == nil && c.NotAfter.Before(now.Add(within)) {
-				out = append(out, e.Ref)
-				break
+			if c, err := x509.ParseCertificate(der); err == nil && (first.IsZero() || c.NotAfter.Before(first)) {
+				first = c.NotAfter
 			}
+		}
+		if !first.IsZero() && first.Before(now.Add(within)) {
+			out = append(out, Expiry{Ref: e.Ref, Kind: e.Kind, NotAfter: first.UTC()})
 		}
 	}
 	return out
