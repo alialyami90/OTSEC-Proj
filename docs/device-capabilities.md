@@ -77,6 +77,104 @@ All rows from S23 (RTAC SEL-5033 instruction manual, 20260925) unless stated.
 | Available CLI commands | none on the device for monitoring; `AcRtacCmd` runs on the engineering PC | — | `unsupported` (device shell) | S24 Section 1 | No command register entries. |
 | Operational limitations and safety notes | account lockout after 3 failed attempts; watchdog risk under traffic load; logins can drive OUT101 if so configured | — | `documented-untested` | S23 pp. 434, 602–603, 633–635 | See D20–D23. |
 
+## Collection-method rungs (ADR-0008)
+
+ADR-0008 makes the collection-method order a rule, recorded here per family. For each kind of data the rungs are tried in order, and an adapter for a lower rung is built only when the higher rungs are absent or unsafe for that family (decision 3):
+
+- **Events:** rung 1 is device-generated Syslog; rung 2 is a file fetch (SFTP or SCP first, then HTTPS, FTP only where nothing better exists); rung 3 is command-line `SER` (Telnet, SSH or serial).
+- **Configuration:** rung 1 is a secure file transfer; rung 2 is FTP; rung 3 is command-line `SHO`.
+- **Identity:** rung 1 is SNMPv3; rung 2 is another read path (an `ID` command, a configuration file); rung 3 is passive observation.
+
+Each cell gives the evidence class and the citation. A rung is `unsupported` when the device's own list of ports or protocols leaves it out, and `unknown` when the source has no such list and does not mention it. "Reached" is the highest rung that is both documented and safe for a monitoring credential, and says whether anything is built. Every cell is from documents: nothing here was tried on a device, and the Phase 2 adapter is `simulated`. No FTP or SNMP code is planned in Phase 3.
+
+A finding that applies to several families: **on SEL ASCII relays a Level 1 login is not read-only.** `SER C` and `SER R` clear the SER at Level 1 (S22 Table 7.63; S34 Table 7.46 p. 7.62), which is why the register allows only exact lines (D1, D3).
+
+### SEL-751 (S22)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `unsupported`. Not in the Port 1 protocol list (Table 7.5). | FTP `/REPORTS/SER.TXT`, marked read-only, the `SER` response as a file: `documented-untested` (Table 7.82 p. 7.89; p. 10.40). No SFTP or SCP (Table 7.5). Blocked: whether a Level 1 FTP login can write is `unknown` ([A2-sel751-ftp.md](phase3/A2-sel751-ftp.md)). | `SER` at Level 1 over Telnet: `documented-untested` (Table 7.63 p. 7.75); the Phase 2 adapter is `simulated`. | Rung 3, built. |
+| Configuration | SFTP or SCP: `unsupported` (Table 7.5). | FTP `SET_ALL.TXT` and `CFG.TXT`, marked read-only: `documented-untested` (pp. 7.88–7.89). Same block as above, plus `FTPACC` defaults to 2 (Table 4.104 p. 4.250). | `SHO G`, `SHO P 1` at Level 1: `documented-untested` (Table 7.67 p. 7.77); in the register, `SHO G` reads `DATE_F` for `SER` from revision 4. | Rung 3, partly built (the two lines the collector needs). |
+| Identity | SNMPv3: `unsupported`. No SNMP agent in Table 7.5. | `ID` at Level 0: `documented-untested` (Table 7.43, Figure 7.38 p. 7.64), built and `simulated`. `CFG.TXT` over FTP carries RELAYTYPE, FID, BFID and PARTNO (Figure 7.46), blocked as above. | Passive. | Rung 2, built. |
+
+The Port 1 web server is excluded from every rung (A6 on #183). It is HTTP, not HTTPS. `EHTTP := Y`, `HTTPACC := 2` and `HTTPPORT := 80` are its defaults (Table 4.104 p. 4.251). Its Reports pages, the SER included, open at Level 1 or 2 (p. 3.2), so it would be a cleartext path for the same Level 1 password. Its Event Reports page also clears the event history and triggers an event (p. 3.4), and the manual does not say which access level those actions need. Class: `documented-untested`.
+
+### SEL-787-4 (S34)
+
+The same file and command model as the SEL-751.
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `unsupported`. Port 1 lists Modbus TCP, FTP, EtherNet/IP, IEC 61850, DNP3, SNTP, PTP, Telnet, C37.118, PRP and RSTP (Table 7.4 p. 7.13). | FTP `/REPORTS/SER.TXT`, read-only: `documented-untested` (Table 7.63 p. 7.76). FTP logs in with the password of the `FTPACC` level (p. 7.16), `FTPACC` defaults to 2 (p. 4.138), and whether a Level 1 FTP login can write is `unknown`, as for the SEL-751. | `SER` at Level 1: `documented-untested` (Table 7.46 p. 7.62). | Rung 3 eligible, not built (needs its own profile and register). |
+| Configuration | `unsupported` (Table 7.4). | FTP `SET_ALL.TXT` and `CFG.TXT`: `documented-untested` (Table 7.61 p. 7.74; p. 7.75). Same block. | `SHO G`, `SHO P k` and the other `SHO` forms at Level 1: `documented-untested` (Table 7.50 p. 7.64). `FIL READ` is Level 1 and `FIL WRITE` Level 2 (Table 7.24 p. 7.48). | Rung 3 eligible, not built. |
+| Identity | SNMPv3: `unsupported` (Table 7.4). | `ID` at Level 0: `documented-untested` (Table 7.31 p. 7.53). `CFG.TXT` (Figure 7.36 p. 7.74) over FTP, blocked. | Passive. | Rung 2 eligible, not built. |
+
+### SEL-400 series: SEL-451, SEL-411L, SEL-400G (S32)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `unsupported`. Not in the protocol list (Table 15.1 pp. 15.1–15.2); on Ethernet, IP means FTP, HTTP, Telnet, SNTP, MMS, DNP and C37.118 (Table 15.4 note a, p. 15.7). | FTP `REPORTS/SER.TXT` at Level 1: `documented-untested` (Table 15.8 p. 15.21; Table 15.10 p. 15.24). **Hazard:** "Report clears/resets when retrieved though use of a serial port" (Table 15.10 note b), and the SEL-451 R324 release (D20200229) "Modified firmware to retain stored data after successful reads of SER.TXT ... over Ethernet connections" (S32, SEL-451 part, p. A.9), so earlier firmware may clear the SER on an FTP read: `inferred`. A rung-2 collector needs a firmware floor and never the serial file interface. | `SER` at Level 1: `documented-untested` (Table 14.116 p. 14.55). | Rung 2 candidate, not built (Phase 4 decision). |
+| Configuration | SFTP or SCP: `unsupported` (Table 15.4 note a). | FTP `SETTINGS/SET_ALL.TXT` and `CFG.TXT`: `documented-untested`. Unlike the SEL-751, the manual states per file that every settings file reads at Level 1 and that no file writes at Level 1 (writes need P, A, O or 2; Table 15.9 pp. 15.23–15.24). The FTP login is an access-level command and its password, one connection, three failures in a minute pulse SALARM and BADPASS (p. 15.16); the FTP server defaults off (Table 12.15 p. 12.12). Still cleartext (D7). | `SHO` at Level 1: `documented-untested` (Table 14.123 p. 14.59). | Rung 2 candidate: documented as read-only at Level 1, needs A3's acceptance of the cleartext login and a hardware check. |
+| Identity | SNMPv3: `unsupported` (Table 15.4 note a). | `ID` at Level 0: `documented-untested` (Table 14.88 p. 14.42). `CFG.XML` carries the firmware identification (p. 15.22), at Level 1 over FTP. | Passive. | Rung 2 eligible, not built. |
+
+### SEL-311L (S33)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `unsupported`. "The SEL-311L does not support Syslog functionality" (p. K.6). | `unknown`. Ethernet is an optional card, and S33 documents FTP only for that card's firmware upgrade (pp. B.17–B.18). The card's own manual is not in hand. | `SER` at Level 1: `documented-untested` (Table 10.8 p. 10.25). | Rung 3 eligible, not built. |
+| Configuration | `unknown`, as above. | `unknown`, as above. | `SHO` at Level 1: `documented-untested` (Table 10.8; Table 10.10 p. 10.39). | Rung 3 eligible, not built. |
+| Identity | SNMP: `unknown`. Not mentioned in S33. | `ID` at Level 0: `documented-untested` (p. 10.22). | Passive. | Rung 2 eligible, not built. |
+
+### SEL RTAC: SEL-3505, SEL-3530, SEL-3555-2 with SEL-5033 software (S23; hardware S36–S38)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog of logged tags, RFC 3164, facility 23: `documented-untested` (S23 pp. 635–636; fixture `sel/rtac/documented-example/syslog-user-logon.txt`). | SFTP (or FTP, one mode per project) `Events` directory, readable by the Monitor role: `documented-untested` (S23 Table 2.40 pp. 116–117). It holds the event files of connected devices (CEV, COMTRADE), not the RTAC's own SOE or security log. | `unsupported`: no device shell for monitoring (S24 Section 1). | Rung 1; A4's receiver (Phase 3). |
+| Configuration | SFTP: `documented-untested`, **not eligible**. The `Projects` directory is readable only by Administrator and Engineer accounts, which can also write it, and `Configuration` only by Administrator (S23 Table 2.40 pp. 116–117). No read-only account reads the configuration. | FTP: the same server and accounts, cleartext; not eligible. | `unsupported` (S24 Section 1). | None. |
+| Identity | SNMPv3 agent, system and interface MIBs with firmware version and host name: `documented-untested` (S23 p. 355). Present only if the project adds the agent. | Syslog hostname, operator-set and weak (S23 p. 636). | Passive. | Rung 1 eligible, not built (Phase 4 item 3). |
+
+### SEL-2488 (S26)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `documented-untested` (p. 18.4; Appendix D p. D.2; fixture `sel/2488/documented-example/syslog-login-failed.txt`, whose SOURCE.md records that p. 18.4 says time stamps carry a UTC offset and the wire example on p. D.2 has none). | `unsupported`. The device's IP ports are DHCP, NTP, SNMP, HTTPS and PTP (Table I.1 p. I.1); no file-transfer service. The local report in the web interface (Figure 18.1 p. 18.2) is not a file fetch. | `unsupported`: no command-line service in Table I.1. | Rung 1; A4's receiver (Phase 3). |
+| Configuration | Not a protocol rung: settings export is a web-interface step that needs the Administrator role (Section 24, pp. 24.1–24.2). Not eligible for a monitoring credential. | `unsupported` (Table I.1). | `unsupported` (Table I.1). | None. The Monitor role has read-only access to settings in the web interface (p. 10.3), with no documented machine interface. |
+| Identity | SNMPv3 `GET`, `GETNEXT` and `WALK` of the dashboard status: `documented-untested` (p. 18.6; v3 settings Table 19.1 p. 19.3). Which OIDs carry the model and firmware is `unknown` until the SEL MIBs (downloadable from the device, p. 19.6) are read. | HTTPS web interface, Monitor role. | Passive. | Rung 1 eligible, not built. |
+
+### SEL-2730M (S43)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog to three destinations: `documented-untested` (p. 60; Appendix E pp. 126–128; fixture `sel/2730m/documented-example/syslog-invalid-login.txt`, whose sample on p. 126 contradicts Table E.3 p. 128). | `unsupported`. The logical ports are HTTP (redirect), HTTPS and SNMP read-only, and the switch "does not support any external file systems" (p. 156). | `unsupported` (p. 156). | Rung 1; A4's receiver (Phase 3). |
+| Configuration | Not a protocol rung: settings export in the web interface "by using an active and authorized user" (p. 97; p. 156). Which role may export is not stated: `unknown`. | `unsupported` (p. 156). | `unsupported` (p. 156). | None. The Monitor role has read-only access to most settings (p. 31). |
+| Identity | SNMPv3, read-only: `documented-untested` (pp. 83–84; port 161 "SNMP read-only", p. 156). The FID is in the Entity MIB (p. 155). SNMPv1 and v2c are also accepted (p. 83) and must not be used: the community string is plaintext. | HTTPS web interface, Monitor role. | Passive. | Rung 1 eligible, not built. |
+
+### SEL-2731 and SEL-2741 (S27, S28; management from S29 in RSTP mode and S30 in OT SDN mode)
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | RSTP mode: Syslog: `documented-untested` (S29 p. 28, p. 48, Appendix C pp. 67–69). OT SDN mode: Syslog event logs (S30 Appendix C p. 19). | `unsupported` in RSTP mode: HTTPS and SNMP read-only only, no external file systems (S29 p. 76). OT SDN: `unknown`. | `unsupported` in RSTP mode (S29 p. 76). OT SDN: `unknown`. | Rung 1; A4's receiver (Phase 3). |
+| Configuration | RSTP mode: settings export in the web interface (S29 p. 57; p. 76), role not stated: `unknown`. OT SDN mode: flows are configured by the SEL-5056 controller (S31, not read): `unknown`. | `unsupported` in RSTP mode (S29 p. 76). | `unsupported` in RSTP mode (S29 p. 76). | None. |
+| Identity | RSTP mode: SNMPv3 with a required cryptographic algorithm, no DES (S29 p. 43); FID in the Entity MIB (S29 p. 75): `documented-untested`. OT SDN mode: SNMP read-only status, v2c or v3, v3 configured through the SEL-5056 (S30 p. 7). | HTTPS web interface, Monitor role (S29 p. 11). | Passive. | Rung 1 eligible, not built. |
+
+### SEL-3355-2 (S25)
+
+A Windows or Linux computer. ADR-0006 gives it vendor-neutral coverage, plus the SEL SysMon hardware agent.
+
+| Data | Rung 1 | Rung 2 | Rung 3 | Reached |
+| --- | --- | --- | --- | --- |
+| Events | Syslog: `unknown`; S25 documents none. The SEL Alarm Service writes Windows Event Log entries (p. 6.3); forwarding them is an operating-system matter. | `unknown`. | `unsupported`: no SEL command interface. | None. |
+| Configuration | Operating-system configuration, vendor-neutral. The BIOS settings and SMBIOS event log are local (p. 4.5). | — | — | None. |
+| Identity | SNMP through the standard Windows SNMP Service, extended by the SEL SysMon SNMP Agent Extension with hardware diagnostics (p. 7.7): `documented-untested`. The SNMP version is not stated: `unknown`. | — | Passive. | Rung 1 eligible if the operating system runs SNMPv3, not built. |
+
+### Syslog dialects (D24, updated)
+
+D24 recorded three dialects from the Phase 0 reading. The fixtures added for A4 correct two of them:
+
+- **SEL-2488.** p. 18.4 says time stamps include the UTC offset, but the only wire example (p. D.2) is plain RFC 3164 with no offset. The offset appears only in the web report (Figure 18.1 p. 18.2), in hours, with trailing zeros of the fraction dropped. Whether the wire form carries it is `unknown` until a capture.
+- **SEL-2730M.** The sample on p. 126 ("Invalid login attempt by: …") does not match the message text Table E.3 gives for the same event on p. 128 ("Login to {interface}: failed from {IP address}"). A parser keyed to either text alone is unproven.
+- The RTAC's message has seven MSG components, adding Log Message and Logging Comment (S23 Table 8.16 p. 636).
+
 ## Approved command register
 
 Every command an adapter may issue is listed here before it is implemented. Commands are classified `read-only` or `state-changing`; `state-changing` commands are never reachable through monitoring permissions (R5.3, R5.7).
@@ -101,8 +199,9 @@ Sanitized real device outputs live under `tests/fixtures/ied/<vendor>/<model>/`.
 | `sel/751/documented-example/id-response-fig7-38.txt` | SEL-751 (manual example) | not stated in figure | S22 Figure 7.38, p. 7.64 | none (manual uses X placeholders) |
 | `sel/751/documented-example/id-response-fig3-20.txt` | SEL-751 (manual example), negative case | not stated | S22 Figure 3.20, p. 3.14 | none; 6 of 12 checksums wrong in the manual |
 | `sel/751/documented-example/ser-report-fig10-16.txt` | SEL-751 (manual example) | not stated | S22 Figure 10.16, p. 10.40 | none; column spacing not authoritative |
-
 | `sel/400-series/documented-example/cse-report-fig9-17.txt` | SEL-400 series (manual example, FID SEL-411L 2001) | as printed | S32 Figure 9.17, p. 9.30 | none; 7 of 9 checksums wrong in the manual (D25) |
 | `sel/rtac/documented-example/syslog-user-logon.txt` | SEL RTAC (manual example) | not stated | S23 p. 636 | none; hostname placeholder is the manual's |
+| `sel/2488/documented-example/syslog-login-failed.txt` | SEL-2488 (manual example) | not stated | S26 p. D.2 | none; the manual's host and address; no UTC offset in the example (D24) |
+| `sel/2730m/documented-example/syslog-invalid-login.txt` | SEL-2730M (manual example) | not stated | S43 p. 126 | none; contradicts the manual's Table E.3 (D24) |
 
 These are `documented-example` fixtures transcribed from the OEM manual (see their `SOURCE.md`). They are not device output and support at most `documented-untested` or `simulated` claims. No real device output exists yet.

@@ -23,10 +23,11 @@ delay puts them. Also:
     before its minimum interval allows the next, and started again 0.5 to
     5 s later.
 
-The simulator and the collector are not killed mid-session. A session cut
-between the password and "=>" sets the 31-minute floor by design (D2-16),
-which is too long to wait for here; a collector killed after "=>" leaves
-no floor at all, which A6 raised with A3 separately.
+The simulator and the collector are not killed mid-session, nor the
+collector while its state still holds the floor. A session cut between
+the password and QUI sets the TIDLE + 1 min floor by design (D2-16,
+D2-20), which is too long to wait for here; test_slice_floor_e2e checks
+that floor after a kill inside the level.
 
 Then the interruptions stop, two clean runs pass, and the node's health
 must show every stream confirmed. What is checked, against ground truth
@@ -153,7 +154,12 @@ class Interrupter:
         interval keeps the next one at least 20 s away; and that run's
         session has opened and closed, so a run accepted but not yet
         connected is not taken for idle (A5 on #147, seed 564077: a kill
-        then left the failed-auth floor running past the wind-down)."""
+        then left the failed-auth floor running past the wind-down); and
+        then the collector's own state holds no floor. The collector clears
+        level_open once the run has returned, about 10 ms after the
+        simulator records QUI and the close; a kill in that window leaves
+        the TIDLE + 1 min floor, the safe side (D2-16; seed 48628 on #183).
+        test_slice_floor_e2e pins the floor after a kill inside the level."""
         if self._session_open():
             return False
         if not collector:
@@ -162,7 +168,10 @@ class Interrupter:
         if at is None or time.time() - at >= 40:
             return False
         recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
-        return any(r["event"] == "session_close" and r["t"] >= at for r in recs)
+        if not any(r["event"] == "session_close" and r["t"] >= at for r in recs):
+            return False
+        st = self.s.collector_asset()
+        return not st.get("level_open") and not st.get("unconfirmed_auth_utc")
 
     def one(self):
         kind = self.rng.choice(["receiver", "node", "simulator", "collector"])

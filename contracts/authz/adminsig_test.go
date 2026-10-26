@@ -64,9 +64,17 @@ func adminPayload(t *testing.T, kind RequestKind) AdminRequest {
 		p.CredentialClearSusp = &CredentialClearSuspBody{RefID: "cred_7f3k2m9q4x", Version: 2}
 	case KindAssetClearSusp:
 		p.AssetClearSusp = &AssetClearSuspBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", Ref: "6f1c2e8a-0000-4000-8000-0000000000a1"}
+	case KindNodeQuarantineClear:
+		p.NodeQuarantineClear = &NodeQuarantineClearBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", ManifestSHA256: testManifestSHA256}
+	case KindNodeSeqResetAck:
+		p.NodeSeqResetAck = &NodeSeqResetAckBody{}
 	}
 	return p
 }
+
+// testManifestSHA256 is the SHA-256 of "otsec test quarantine manifest";
+// no manifest has it.
+const testManifestSHA256 = "47468d8ca5f3ebb058dc452f3669a7ed64c69b953a20294801b75147fd43f636"
 
 func signedRequest(t *testing.T, priv ed25519.PrivateKey, p AdminRequest) *CollectorRequest {
 	t.Helper()
@@ -389,6 +397,9 @@ func TestAdminRefusalForOlderRequests(t *testing.T) {
 func TestAdminSignedGolden(t *testing.T) {
 	const path = "testdata/requests/valid/admin-signed-credential-install.json"
 	req := signedRequest(t, testAdminPriv, adminPayload(t, KindCredentialInstall))
+	// Stamped 0.4, as a 0.4 node sends it: a 0.5 reader decodes and
+	// verifies it unchanged.
+	req.Contract = "otsec.authz/0.4"
 	want, err := json.MarshalIndent(req, "", "  ")
 	if err != nil {
 		t.Fatal(err)
