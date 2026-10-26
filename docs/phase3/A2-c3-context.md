@@ -64,4 +64,4 @@ The collector's own register copies (`modules/security/collector/testdata/`, `mo
 
 ## Tests
 
-`TestContext` (18 refusal cases and `ContextFor`), `TestContentRev4`, `TestCheckLinesContext` (a `SHO G` in a `SER` run is permitted; with the context moved to `SHO P 1`, the same line is refused), `TestSEL751Rev4SupersedesRev3`, and the JSON schema accepts revisions 2, 3 and 4 and the Phase 0 package. `go vet`, `gofmt` and `go test ./...` pass locally.
+`TestContext` (19 refusal cases and `ContextFor`), `TestContentRev4`, `TestCheckLinesContext` (a `SHO G` in a `SER` run is permitted; with the context moved to `SHO P 1`, the same line is refused), `TestSEL751Rev4SupersedesRev3`, and the JSON schema accepts revisions 2, 3 and 4 and the Phase 0 package. `go vet`, `gofmt` and `go test ./...` pass locally.

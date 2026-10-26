@@ -607,6 +607,11 @@ func TestContext(t *testing.T) {
 		"read above the level it is for": {func(m map[string]any) { op(m, "sel.settings.show_global")["access_level"] = "2" }, "above"},
 		"for a level 0 operation":        {func(m map[string]any) { ctx(m)["for"] = []any{"sel.id"} }, "above"},
 		"a level with no known order":    {func(m map[string]any) { op(m, "sel.settings.show_global")["access_level"] = "C" }, "above"},
+		// Levels compare as numbers, not text: "10" sorts before "2" as text (A6 on #156).
+		"read at 10 for an operation at 2": {func(m map[string]any) {
+			op(m, "sel.settings.show_global")["access_level"] = "10"
+			op(m, "sel.ser.read_all")["access_level"] = "2"
+		}, "above"},
 	} {
 		_, err := Decode(edit(c.f))
 		if err == nil || !strings.Contains(err.Error(), c.want) {
