@@ -82,9 +82,8 @@ type StoreConfig struct {
 	WarnFraction float64          `json:"warn_fraction"`
 }
 
-// Listener is a Syslog listener on the node. Phase 2 starts none (the UDP
-// listener waits for the owner's plaintext decision), but the format holds
-// them so that D2-4 is enforced from the first file.
+// Listener is a Syslog listener on the node (P3-A4; see "Syslog
+// listeners" in the README).
 type Listener struct {
 	ID        string          `json:"id"`
 	Transport asset.Transport `json:"transport"` // syslog-udp, syslog-tcp or syslog-tls
@@ -92,6 +91,29 @@ type Listener struct {
 	// Target is what is behind the listener: a simulator or a real device
 	// network (D1-24 amendment). The loader refuses device-observed (D2-4).
 	Target asset.EvidenceClass `json:"target"`
+	// LabPlaintext is the lab-only flag a syslog-tcp or syslog-udp
+	// listener must set, until the owner decides on plaintext Syslog
+	// (ADR-0005). The loader refuses it on syslog-tls and requires it on
+	// the others, so a plaintext listener is never one by default.
+	LabPlaintext bool `json:"lab_plaintext,omitempty"`
+	// TLS is a syslog-tls listener's references, required for that
+	// transport and refused for the others.
+	TLS *ListenerTLS `json:"tls,omitempty"`
+}
+
+// ListenerTLS names a TLS listener's files in tls_dir, as a target's
+// references do (D2-12, lab only, until A3's node key store; see "TLS
+// references" in the README).
+type ListenerTLS struct {
+	// CredentialRef names the listener's certificate chain
+	// (<ref>.crt) and its key (<ref>.key).
+	CredentialRef string `json:"credential_ref"`
+	// SenderCARef names the CA set a sender's certificate must chain to
+	// (<ref>.pem). Empty: no sender certificate is asked for.
+	SenderCARef string `json:"sender_ca_ref,omitempty"`
+	// RequireSenderCert refuses a sender that presents no certificate. It
+	// needs SenderCARef.
+	RequireSenderCert bool `json:"require_sender_cert,omitempty"`
 }
 
 // Collection is one scheduled adapter run.
@@ -209,6 +231,32 @@ func (c *Config) check() error {
 		}
 		if err := checkTarget(p, l.Target); err != nil {
 			errs = append(errs, err)
+		}
+		switch {
+		case l.Transport == asset.SyslogTLS && l.LabPlaintext:
+			fail("%s.lab_plaintext is set on a syslog-tls listener", p)
+		case l.Transport == asset.SyslogTLS && l.TLS == nil:
+			fail("%s: a syslog-tls listener needs a tls section", p)
+		case l.Transport != asset.SyslogTLS && l.TLS != nil:
+			fail("%s.tls is set on a %s listener", p, l.Transport)
+		case l.Transport.Inbound() && l.Transport != asset.SyslogTLS && !l.LabPlaintext:
+			fail("%s: a %s listener is plaintext and needs lab_plaintext, the lab-only flag (ADR-0005)", p, l.Transport)
+		}
+		if l.TLS != nil {
+			if l.TLS.RequireSenderCert && l.TLS.SenderCARef == "" {
+				fail("%s.tls.require_sender_cert needs sender_ca_ref", p)
+			}
+			for field, ref := range map[string]string{"credential_ref": l.TLS.CredentialRef, "sender_ca_ref": l.TLS.SenderCARef} {
+				if ref == "" && field == "sender_ca_ref" {
+					continue
+				}
+				if !tlsRefPattern.MatchString(ref) || windowsDeviceName(ref) {
+					fail("%s.tls.%s %q is not a reference (%s, and not a Windows device name such as con)", p, field, ref, tlsRefPattern)
+				}
+				if c.TLSDir == "" {
+					fail("%s.tls.%s is set, so tls_dir is required", p, field)
+				}
+			}
 		}
 	}
 
