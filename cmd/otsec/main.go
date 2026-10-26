@@ -4,8 +4,14 @@
 //	otsec assets -config <file>   list the configured assets
 //	otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
 //	otsec health -config <file>   show node status, database modes and alarms
+//	otsec quarantine export -config <file> <asset> <dir>   export an asset's quarantine (administrator)
 //	otsec install -config <file> [-collector-exe <path> -collector-config <file>]   Windows, elevated
 //	otsec uninstall                                                                 Windows, elevated
+//
+// quarantine export writes the asset's quarantine stream, byte for byte,
+// to a new protected directory, and copies its manifest into admin_dir for
+// the node to check and record (node.ExportQuarantine). It reads the store
+// read-only, as the others do.
 //
 // assets, events and health are read-only: they open the store read-only
 // beside a running node (store.OpenReadOnly) and never write to it, to the
@@ -47,6 +53,7 @@ const usage = `usage:
   otsec assets -config <file>
   otsec events -config <file> [-stream <id>] [-after <seq>] [-limit <n>] [-json]
   otsec health -config <file>
+  otsec quarantine export -config <file> <asset> <dir>
   otsec install -config <file> [-collector-exe <path> -collector-config <file>]
   otsec uninstall
 `
@@ -55,6 +62,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+	if args[0] == "quarantine" {
+		return quarantine(ctx, args[1:], stdout, stderr)
 	}
 	fs := flag.NewFlagSet("otsec "+args[0], flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -100,6 +110,36 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return report(stderr, err)
+}
+
+// quarantine runs `otsec quarantine export -config <file> <asset> <dir>`.
+func quarantine(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "export" {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	fs := flag.NewFlagSet("otsec quarantine export", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "node configuration file (otsec.nodeconfig/0.1)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if *configPath == "" || fs.NArg() != 2 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	cfg, err := node.LoadConfig(*configPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	assetID, dir := fs.Arg(0), fs.Arg(1)
+	m, err := node.ExportQuarantine(ctx, cfg, assetID, dir, time.Now())
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "exported %d records of %s (seqs %d to %d) to %s\n", len(m.Items), m.Stream, m.Items[0].Seq, m.Items[len(m.Items)-1].Seq, dir)
+	fmt.Fprintf(stdout, "manifest copied to admin_dir as %s; the node records it as quarantine.exported once it has checked it against its stream (otsec health)\n", node.QuarantineExportFileName(assetID))
+	return 0
 }
 
 func report(stderr io.Writer, err error) int {
@@ -331,6 +371,13 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	sort.Strings(clearing)
 	for _, a := range clearing {
 		fmt.Fprintf(w, "COLLECTOR STILL SUSPENDED %s: the node cleared ref %s, the collector has not accepted the clear yet; runs stay held, and %s stays in place until this line is gone\n", safe(a), safe(st.CollectorClears[a]), node.ClearSuspensionFileName)
+	}
+	for _, q := range st.Quarantine {
+		if q.Clearing {
+			fmt.Fprintf(w, "QUARANTINE CLEAR INCOMPLETE %s: manifest %s, seqs %d to %d; removing %d per tick, and runs of this asset are held until it is done\n", safe(q.AssetID), q.ManifestSHA256, q.FirstSeq, q.LastSeq, c5.DiscardStepEvents)
+		} else {
+			fmt.Fprintf(w, "QUARANTINE EXPORTED, NOT CLEARED %s: manifest %s, seqs %d to %d (%d items); %s naming it removes them\n", safe(q.AssetID), q.ManifestSHA256, q.FirstSeq, q.LastSeq, q.Items, node.ClearQuarantineFileName)
+		}
 	}
 	if c := st.Collector; c != nil {
 		fmt.Fprintf(w, "collector install key: trusted %s, collector_seq high %d\n", safe(keyOrNone(c.TrustedKey)), c.High)

@@ -20,7 +20,8 @@ const TickInterval = 60 * time.Second
 // which stops the node on a bad TLS reference or an address it cannot
 // bind), the scheduler through the collector at cfg's pipe, and
 // Tick every TickInterval and Forwarding.Check every CheckInterval. oslog receives every alarm line (the Event Log under the
-// SCM, stderr otherwise). It returns nil when ctx ends, after service.stop
+// SCM, stderr otherwise). Each tick also does the scheduler's part of a
+// quarantine export and clear (Scheduler.QuarantineTick). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
 func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	st := NewStatus(StatusPath(cfg), oslog, nil)
@@ -64,6 +65,7 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 				return
 			case <-t.C:
 				rt.Tick(ctx)
+				sched.QuarantineTick(ctx)
 			}
 		}
 	}()

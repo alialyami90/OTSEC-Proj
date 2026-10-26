@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -307,6 +308,62 @@ func TestHealthShowsAssetResults(t *testing.T) {
 	} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("health: %d %s\nwant %q in\n%s", code, errs, want, out)
+		}
+	}
+}
+
+// quarantine export writes the asset's quarantine to a new directory
+// without changing the store, refuses a directory that exists, and says
+// when it could not copy the manifest for the node.
+func TestQuarantineExportCommand(t *testing.T) {
+	path, cfg := ranNode(t)
+	before := snapshot(t, cfg.Store.Dir)
+	dir := filepath.Join(t.TempDir(), "export")
+	out, errs, code := otsec(t, "quarantine", "export", "-config", path, relayID, dir)
+	if code != 1 || !strings.Contains(errs, "the export is complete in "+dir) || !strings.Contains(errs, "no admin_dir") {
+		t.Fatalf("export without admin_dir: %d %q %q", code, out, errs)
+	}
+	var m node.QuarantineManifest
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil || json.Unmarshal(b, &m) != nil || len(m.Items) != 2 || m.AssetID != relayID {
+		t.Fatalf("manifest: %v %+v", err, m)
+	}
+	after := snapshot(t, cfg.Store.Dir)
+	for name, b := range before {
+		if !bytes.Equal(after[name], b) {
+			t.Errorf("%s changed under the export", name)
+		}
+	}
+	if _, errs, code := otsec(t, "quarantine", "export", "-config", path, relayID, dir); code != 1 || !strings.Contains(errs, "exists") {
+		t.Fatalf("export into an existing directory: %d %s", code, errs)
+	}
+	for _, args := range [][]string{{"quarantine"}, {"quarantine", "import", "-config", path, relayID, dir}, {"quarantine", "export", "-config", path, relayID}} {
+		if _, _, code := otsec(t, args...); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+}
+
+// health shows each recorded export still to clear, and a clear whose
+// removal is not done.
+func TestHealthShowsQuarantine(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetQuarantine([]node.QuarantineStatus{
+		{AssetID: relayID, ManifestSHA256: strings.Repeat("a", 64), FirstSeq: 1, LastSeq: 18, Items: 18},
+		{AssetID: relayID, ManifestSHA256: strings.Repeat("b", 64), FirstSeq: 19, LastSeq: 40, Items: 22, Clearing: true},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"QUARANTINE EXPORTED, NOT CLEARED " + relayID + ": manifest " + strings.Repeat("a", 64) + ", seqs 1 to 18 (18 items); clear-quarantine.json naming it removes them",
+		"QUARANTINE CLEAR INCOMPLETE " + relayID + ": manifest " + strings.Repeat("b", 64) + ", seqs 19 to 40; removing 16 per tick, and runs of this asset are held until it is done",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
 		}
 	}
 }
