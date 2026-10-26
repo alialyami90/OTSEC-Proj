@@ -173,6 +173,11 @@ type Refusal struct {
 	// named. The node adopts it (see the package documentation, "Asset
 	// suspensions").
 	Suspension *HeldSuspension `json:"suspension,omitempty"`
+	// Check (since 0.4) is set with admin_unverified only: the check the
+	// admin-signed request failed. The node's C8 collector.request record
+	// carries it, so an operator can tell a replay from a bad signature
+	// afterwards (A1); it is the same for a wrong guess and a right one.
+	Check AdminCheck `json:"check,omitempty"`
 }
 
 // HeldSuspension is an asset suspension the collector holds (since 0.3):
@@ -234,15 +239,18 @@ func (r *Refusal) ForRequest(contract string) *Refusal {
 	if err == nil {
 		minor = got.Minor
 	}
-	out := &Refusal{Code: r.Code, Detail: r.Detail, Suspension: r.Suspension}
+	out := &Refusal{Code: r.Code, Detail: r.Detail, Suspension: r.Suspension, Check: r.Check}
 	if minor < assetSuspendedSince {
 		out.Suspension = nil
 		if out.Code == RefuseAssetSuspended {
 			out.Code = RefuseAssetNotEnrolled
 		}
 	}
-	if minor < adminSignedSince && out.Code == RefuseAdminUnverified {
-		out.Code = RefusePrincipal
+	if minor < adminSignedSince {
+		out.Check = ""
+		if out.Code == RefuseAdminUnverified {
+			out.Code = RefusePrincipal
+		}
 	}
 	return out
 }

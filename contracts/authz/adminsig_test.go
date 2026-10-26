@@ -290,7 +290,7 @@ func TestAdminRequestRefusals(t *testing.T) {
 				t.Fatalf("got %+v, %v; want check %s", got, err, c.check)
 			}
 			ref := rej.Refusal()
-			if ref.Code != RefuseAdminUnverified || ref.Detail != "admin signature not verified: "+string(c.check) || ref.Suspension != nil {
+			if ref.Code != RefuseAdminUnverified || ref.Detail != "admin signature not verified: "+string(c.check) || ref.Check != c.check || ref.Suspension != nil {
 				t.Fatalf("refusal %+v", ref)
 			}
 			if strings.Contains(err.Error(), "AwMDAwMD") || strings.Contains(err.Error(), "BAQEBAQE") {
@@ -373,11 +373,12 @@ func TestAdminRefusalForOlderRequests(t *testing.T) {
 		"otsec.authz/0.4": RefuseAdminUnverified, "otsec.authz/0.5": RefuseAdminUnverified,
 		"otsec.authz/0.3": RefusePrincipal, "otsec.authz/0.1": RefusePrincipal,
 	} {
-		if got := r.ForRequest(contract); got.Code != want || got.Detail != r.Detail {
+		got := r.ForRequest(contract)
+		if got.Code != want || got.Detail != r.Detail || (got.Check != "") != (want == RefuseAdminUnverified) {
 			t.Errorf("%s: %+v, want %s", contract, got, want)
 		}
 	}
-	if r.Code != RefuseAdminUnverified {
+	if r.Code != RefuseAdminUnverified || r.Check != AdminCheckEnvelope {
 		t.Error("ForRequest changed the refusal it was given")
 	}
 }
@@ -411,5 +412,34 @@ func TestAdminSignedGolden(t *testing.T) {
 	}
 	if _, err := VerifyAdminRequest(dec, testAdminKeys(), testAdminBind, testAdminNow); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The reply schema's check enum is exactly AdminChecks.
+func TestReplySchemaChecks(t *testing.T) {
+	raw, err := os.ReadFile("schema/collector-reply.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties struct {
+			Refusal struct {
+				Properties struct {
+					Check struct{ Enum []AdminCheck }
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	got := s.Properties.Refusal.Properties.Check.Enum
+	if len(got) != len(AdminChecks) {
+		t.Fatalf("schema checks %v, want %v", got, AdminChecks)
+	}
+	for i := range got {
+		if got[i] != AdminChecks[i] {
+			t.Fatalf("schema checks %v, want %v", got, AdminChecks)
+		}
 	}
 }

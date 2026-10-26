@@ -121,8 +121,9 @@ type AdminBinding struct {
 }
 
 // AdminCheck names the check a signed request failed. The reply carries it
-// only in a fixed detail; the collector's audit record carries it, so an
-// operator can tell a replay from a bad signature afterwards (A1).
+// (Refusal.Check, and a fixed detail) and nothing else about the request,
+// and the node's C8 record of the reply carries it, so an operator can tell
+// a replay from a bad signature afterwards (A1).
 type AdminCheck string
 
 const (
@@ -160,7 +161,7 @@ func (e *AdminRejected) Refusal() *Refusal { return AdminRefusal(e.Check) }
 
 // AdminRefusal is the refusal for a failed check.
 func AdminRefusal(check AdminCheck) *Refusal {
-	return &Refusal{Code: RefuseAdminUnverified, Detail: "admin signature not verified: " + string(check)}
+	return &Refusal{Code: RefuseAdminUnverified, Detail: "admin signature not verified: " + string(check), Check: check}
 }
 
 func adminReject(check AdminCheck, format string, a ...any) *AdminRejected {

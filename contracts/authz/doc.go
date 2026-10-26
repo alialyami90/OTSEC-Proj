@@ -169,10 +169,11 @@
 // before any other decision, so a signed request is good for one decision,
 // even across a restart, and only then applies the install budget, the
 // store and the reuse rule. Every failure, the collector's replay and
-// capacity checks included, is refused with admin_unverified and a fixed
-// detail naming only the check (AdminRefusal): no reply to an unsigned or
-// mis-bound request depends on any stored secret. The collector's audit
-// record names the failed check (A1). Admin keys are pinned in the
+// capacity checks included, is refused with admin_unverified, the check's
+// name (Refusal.Check) and a fixed detail naming only the check
+// (AdminRefusal): no reply to an unsigned or mis-bound request depends on
+// any stored secret. The node's C8 record of the reply names the check
+// (A1). Admin keys are pinned in the
 // collector's own configuration out of band; one key speaks for one
 // person, and its ID is derived from it (AdminKeyID).
 //
