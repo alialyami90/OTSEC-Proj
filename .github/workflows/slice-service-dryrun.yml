@@ -25,7 +25,7 @@ jobs:
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
       - run: openssl version
       - name: slice against the installed services
-        run: python -m pytest -v -rs -x --basetemp="$env:RUNNER_TEMP\slice" tests/integration/slice/test_slice_e2e.py tests/integration/slice/test_slice_identity_e2e.py tests/integration/slice/test_slice_failures_e2e.py
+        run: python -m pytest -v -rs --basetemp="$env:RUNNER_TEMP\slice" tests/integration/slice/test_slice_e2e.py tests/integration/slice/test_slice_identity_e2e.py tests/integration/slice/test_slice_failures_e2e.py
       - name: run logs
         if: always()
         run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\slice" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
