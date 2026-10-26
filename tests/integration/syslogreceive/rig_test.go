@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -124,7 +123,7 @@ type rig struct {
 func open(t *testing.T, quota int64) (*c5.Log, string) {
 	t.Helper()
 	d := filepath.Join(t.TempDir(), "store")
-	if err := os.Mkdir(d, 0o700); err != nil {
+	if err := store.CreateDir(d, ""); err != nil {
 		t.Fatal(err)
 	}
 	db := c5.Database{

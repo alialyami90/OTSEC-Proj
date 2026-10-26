@@ -60,7 +60,7 @@ func env(t *testing.T, dir string) *store.Env {
 func dir(t *testing.T) string {
 	t.Helper()
 	d := filepath.Join(t.TempDir(), "store")
-	if err := os.Mkdir(d, 0o700); err != nil {
+	if err := store.CreateDir(d, ""); err != nil {
 		t.Fatal(err)
 	}
 	return d

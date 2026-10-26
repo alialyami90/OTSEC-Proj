@@ -47,7 +47,7 @@ func database(quota int64) c5.Database {
 func open(t *testing.T, quota int64) (*store.DB, string) {
 	t.Helper()
 	d := filepath.Join(t.TempDir(), "store")
-	if err := os.Mkdir(d, 0o700); err != nil {
+	if err := store.CreateDir(d, ""); err != nil {
 		t.Fatal(err)
 	}
 	db := database(quota)
