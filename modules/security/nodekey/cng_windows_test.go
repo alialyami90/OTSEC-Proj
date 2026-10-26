@@ -151,9 +151,10 @@ func TestCNGRightsProbe(t *testing.T) {
 		sddl := "D:P(A;;GA;;;SY)(A;;" + rights + ";;;BA)"
 		created := s.(*cngSigner).key
 		setErr := setDACL(created, sddl)
-		// A second change through the creating handle (run 2 on #157 got
-		// NTE_PERM there under a DACL that granted write-DAC), as against
-		// one through a handle opened by name.
+		// A second change through the creating handle, as well as one
+		// through a handle opened by name: run 2 on #157 got NTE_PERM on
+		// the creating handle under an ACE of read-control, write-DAC and
+		// delete.
 		creatingErr := setDACL(created, sddl)
 		// Sign and the second DACL change need the key open by name; when
 		// that fails they are not tried, and the log shows "-".

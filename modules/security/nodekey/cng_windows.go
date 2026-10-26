@@ -157,8 +157,9 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 // Restrict sets the key's final DACL (sddl), once, through the handle
 // Create returned: until then the key has the provider's default DACL for
 // a machine key. The KSP checks a later DACL change or delete against the
-// DACL then in force, so the Administrators ACE keeps write-DAC and delete
-// (TestCNGRightsProbe, CI on #157): an administrator can retire the key.
+// DACL then in force, through any handle: a change needs generic write,
+// not write-DAC alone, and a delete needs delete (TestCNGRightsProbe, CI
+// on #157). Administrators' full control covers both.
 func (c CNG) Restrict(created crypto.Signer) error {
 	s, ok := created.(*cngSigner)
 	if !ok {
