@@ -688,9 +688,13 @@ On 2026-10-24 at 19:15Z the owner accepted the Phase 1 exit and started Phase 2 
 - The V-S checks in scope pass: V-S6, V-S7 and V-S9.
 - `docs/phase-2-exit.md` records what is `simulated`, and what needs a lab relay before it can be called supported.
 
-## Phase 3 task briefs (drafted 2026-10-25; issued only on the owner's acceptance of the Phase 2 exit)
+## Owner clarification and Phase 2 acceptance — 2026-10-26
 
-Phase 3 hardens the slice so that a `device-observed` endpoint can later be allowed, and closes the Phase 2 conditions in [phase-2-exit.md](phase-2-exit.md). It adds no product capability. Nothing in it contacts a device. The decisions every brief relies on are D2-11, D2-12, D2-16, D2-20 and D2-21 in [phase2/A1-decisions.md](phase2/A1-decisions.md).
+On 2026-10-26 the owner clarified the monitoring goals and the collection-method order (recorded in [ADR-0008](decisions/ADR-0008-monitoring-goals-and-collection-method-order.md) and `docs/requirements.md` R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9), asked that they be in the Phase 3 and Phase 4 plan, and then said: "After you finish with the update I gave you, start on phase 3." A1 records that as the owner's acceptance of the Phase 2 exit with its conditions ([phase-2-exit.md](phase-2-exit.md)).
+
+## Phase 3 task briefs (issued 2026-10-26)
+
+Phase 3 hardens the slice so that a `device-observed` endpoint can later be allowed, closes the Phase 2 conditions in [phase-2-exit.md](phase-2-exit.md), and starts the owner's monitoring goals at their first rung: received Syslog (R4.1, R4.9) and the capability-matrix record of which rung each SEL family reaches (R3.7, R4.9, R1.8). Nothing in it contacts a device. The decisions every brief relies on are D2-11, D2-12, D2-16, D2-20 and D2-21 in [phase2/A1-decisions.md](phase2/A1-decisions.md) and ADR-0008.
 
 ### Common rules for every Phase 3 brief
 
@@ -728,9 +732,21 @@ Phase 3 hardens the slice so that a `device-observed` endpoint can later be allo
 - Files or modules the agent may modify: `contracts/asset/` (C1, with A1's approval), `contracts/register/` content for `SHO G` (C3, signed), `modules/ied/sel751/`, `modules/ied/telnet/`, `tests/fixtures/ied/`, `docs/device-capabilities.md`, `docs/phase3/A2-*.md`.
 - Expected interfaces: C1 gains `path` with the values `direct` and `port-server`; an endpoint with no path or an unknown one is refused like a port server; `SHO G` as a Level 1 read-only register entry; `sel751` reports `DATE_F` in the C2 result's device settings so that A4's normalizer takes the order from it rather than assuming MDY, with a parse error (never a skip) for a row that does not fit.
 - Deliverable: C1 0.x with a reader for the previous version; the register entry and its deny-corpus check; the parser and its fuzz target; the goldens for MDY, YMD and DMY; the port-server refusal as a C2 refusal code.
-- Acceptance tests (A6 independent): the three date orders reconcile against the simulator's rows; a DMY profile no longer produces the MDY assumption flag; a `port-server` endpoint gets zero sessions; the reported `TIDLE` shortens a floor only on `direct` and only after an `ok` or `partial` run.
-- Explicit exclusions: the port-server floor rule itself stays refused until `T_OUT` evidence exists (H-13); no checksum enforcement (V-S19 (d) stays a recorded gap until H-01 or H-13).
-- Uncertainty or safety risks: the `SHO G` layout is documented but untested; mark the parser `documented-untested` and keep every assumption in the goldens.
+- **Second deliverable (ADR-0008): the collection-method rungs in the capability matrix.** For every SEL family in `docs/device-capabilities.md`, three columns with their evidence class and citation: the event rung (received Syslog; file fetch over SFTP, SCP, HTTPS or FTP; command-line SER), the configuration rung (secure file transfer; FTP; command-line `SHO`), and the identity rung (SNMPv3; another read path; passive). For the SEL-751, the FTP assessment ADR-0008 decision 4 asks for: what `FTPACC := 1` permits, whether `/REPORTS` and the settings files are readable at that level, and what the manual says about writes at Level 1, each `documented-untested`. No FTP code in Phase 3.
+- Acceptance tests (A6 independent): the three date orders reconcile against the simulator's rows; a DMY profile no longer produces the MDY assumption flag; a `port-server` endpoint gets zero sessions; the reported `TIDLE` shortens a floor only on `direct` and only after an `ok` or `partial` run. The matrix columns carry a citation on every cell (A6 spot-checks ten).
+- Explicit exclusions: the port-server floor rule itself stays refused until `T_OUT` evidence exists (H-13); no checksum enforcement (V-S19 (d) stays a recorded gap until H-01 or H-13); no SNMP or FTP adapter yet.
+- Uncertainty or safety risks: the `SHO G` layout is documented but untested; mark the parser `documented-untested` and keep every assumption in the goldens. A3's FTP objection (D7, D8) stands until the assessment is read.
+
+### Task P3-A4: Syslog receive (R4.1, the first rung of R4.9)
+- Objective and rationale: the owner's first rung for events is device-generated Syslog. SEL switches, the RTAC, the SEL-2488 and the SEL-3620 emit it; the contracts already carry it (C1 listener endpoints, C4 `origin: syslog`, C5 `syslog-stream` and `syslog-datagram` classes) and nothing is built. This is also the vendor-neutral path of ADR-0006.
+- Owner agent: A4. A5 wires the listener into the node and the C5 classes; A3 reviews the listener as a new inbound surface; A2 reviews the per-family message layouts.
+- Required inputs and dependencies: C1, C4, C5 and C6 on `main`; the documented examples in `tests/fixtures/ied/` (RTAC user logon, SEL-2730M, SEL-2488) and A2's per-family notes; the owner's open decision on plaintext Syslog outside the lab (carried from Phase 1).
+- Files or modules the agent may modify: `modules/telemetry/receive/` (new), `modules/telemetry/normalize/` for `origin: syslog`, `tests/fixtures/network/`, `docs/phase3/A4-*.md`; A5: `platform/node/` and `platform/store/` for the listener wiring and the classes.
+- Expected interfaces: a listener per C1 listener endpoint for RFC 5425 (TLS, mutual where the sender supports it) and, under the lab-only flag until the owner decides, RFC 6587 TCP and RFC 5426 UDP; parsing of RFC 3164 and RFC 5424 with the raw datagram or frame stored before parsing (R4.4); correlation of the source address to a C1 asset, or a `syslog.unknown-source` record kept and alarmed, never dropped; per-source rate limiting and the C5 quota rules; the existing outbox and forwarder unchanged.
+- Deliverable: received Syslog from a sender on 127.0.0.1 stored, normalized, correlated and forwarded end to end on the real binaries; `otsec health` showing each listener and its last message; the per-family parse goldens for the three documented examples.
+- Acceptance tests (A6 independent): every received frame's raw bytes are stored and hash-match what the sender sent (V-S8 for this origin); hostile framing (oversized, truncated, non-UTF-8, octet-count lies, nested priority) never crashes or hangs the node and never loses an earlier message; a flood from one source is rate-limited without affecting another source; a TLS sender with the wrong anchor is refused; an unknown source is kept and alarmed; duplicates from a retrying TCP sender are detectable through the raw hash and are never silently dropped.
+- Explicit exclusions: no device sends to the platform in Phase 3 (every sender is a test process); no plaintext listener outside the lab flag until the owner decides; no event-behaviour baseline (R4.8) yet.
+- Uncertainty or safety risks: a listener is an inbound surface on the site node; A3 reviews its exposure, its parsing under hostile input, and its storage behaviour under flood before the PR merges.
 
 ### Task P3-A5: Audited quarantine export, a clear for a halted asset, and the failed-open retry
 - Objective and rationale: quarantine streams have no consumer and are never pruned, so a device whose outcomes are quarantined run after run fills adapter-evidence for good and halts with `collection-no-quarantine-room` until an operator acts; today there is nothing an operator can do except reinstall. The failed-open retry is the approved brief in `docs/phase2/A5-p3-failed-open-retry.md`.
@@ -749,21 +765,23 @@ Phase 3 hardens the slice so that a `device-observed` endpoint can later be allo
 - Required inputs and dependencies: the recording simulator and its `--profile` switches; `tests/integration/slice/`; the PRs of P3-A2, P3-A3 and P3-A5 as they open.
 - Files or modules the agent may modify: `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`.
 - Deliverable: `test_slice_evidence_e2e.py` (V-S8), the acceptance tests named in each brief above, the Windows record of P3-A5/A6, and the Phase 3 status table.
+- **Second deliverable (ADR-0008):** measurable acceptance criteria in `docs/verification.md` for R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9, written before any of them is implemented, each with its ground truth named and what needs hardware marked. The R4.8 criteria must fix the observation-period semantics and the false-positive measure; the R9 criteria must fix what evidence makes a finding `confirmed`.
 - Acceptance tests: each check fails on a deliberately broken build (mutation), as in Phase 2.
 - Explicit exclusions: no hardware runs without the owner's authorization.
 - Uncertainty or safety risks: as in Phase 2, the simulator and the adapter come from the same manuals; agreement between them is not hardware evidence.
 
 ### Order
 
-1. P3-A2 (C1 path, `SHO G`), P3-A3 (C7 0.4) and P3-A5 (failed-open retry first, then the export) start at once and in parallel; each contract change is its own PR with A1's approval.
-2. P3-A6 writes V-S8 end to end now and the acceptance tests as each PR opens.
+1. P3-A2 (C1 path, `SHO G`, then the matrix rungs), P3-A3 (C7 0.4), P3-A4 (Syslog receive) and P3-A5 (failed-open retry first, then the export) start at once and in parallel; each contract change is its own PR with A1's approval.
+2. P3-A6 writes the new acceptance criteria and V-S8 end to end now, and the acceptance tests as each PR opens.
 3. P3-A5/A6 on the owner's PC runs when the owner has a session free; it does not block the others.
-4. Phase 4's first expansion (configuration and baseline monitoring, then asset management and IDS, or the owner's order) is briefed when the owner says so, not before.
+4. Phase 4 is briefed after the Phase 3 gate, in the order ADR-0008 sets: (1) configuration retrieval, baseline and prior approval (R3, with the SEL-751 rung decided on A2's FTP assessment); (2) the event-behaviour baseline (R4.8); (3) vulnerability applicability (R9) with the asset module's SNMPv3 identity (R1.8); (4) IDS (R6); (5) secure engineering access (R2); (6) the central role (R8). The owner may reorder.
 
 ### Phase 3 exit gate (A1 decides)
 
 - The slice passes against the installed Windows services on the owner's PC from one commit on `main`.
 - C7 0.4, the C1 path field, the `DATE_F` read and the key store are merged with their reviewers' records, and A6's negative tests for each pass in CI.
 - The quarantine export and clear, and the failed-open retry, are merged and tested.
-- V-S8 passes end to end.
+- V-S8 passes end to end, and received Syslog passes A6's tests end to end on the real binaries.
+- The capability matrix states the rung each SEL family reaches, with citations, and `docs/verification.md` has criteria for every requirement ADR-0008 added.
 - No safety or security objection is open, and `docs/phase-3-exit.md` records what remains `simulated`.

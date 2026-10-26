@@ -15,6 +15,7 @@ Phase 0 (evidence and assumption challenge) passed its exit gate with conditions
 | `docs/` | Requirements, architecture, threat model, device capabilities, verification, handoffs, decision records | A1 (shared); A6 owns `docs/verification.md` |
 | `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | A1 |
 | `modules/ied/` | IED adapters, device identification, native output parsers | A2 |
+| `modules/asset/` | Asset monitoring and management: SNMPv3 and other device-facing identity and health reads, inventory logic (ADR-0008) | A2 |
 | `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | A3 |
 | `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | A4 |
 | `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | A5 |
