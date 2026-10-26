@@ -35,7 +35,7 @@ The other two conditions are behaviour, written into the doc comment and checked
 
 - This reader decodes 0.1 and 0.2 packages. A later minor is invalid, since C3 readers are strict. A node that has not been upgraded therefore refuses a 0.2 package, raises the SC-18 alarm, and keeps the floor and package it has (fail closed).
 - `SigningDomain` stays `"otsec.register/0.1 package\n"` in every minor. It is a domain-separation tag, not a version, and the payload names its own contract inside the signed bytes. A signature made over a 0.1 package is unchanged.
-- The envelope's `contract` is the reader's own identifier, now `otsec.register/0.2`, and `authz.VerifyRegisterPackage` is unchanged: it compares the envelope's contract with `register.ContractID`. **Release note:** after an upgrade, a collector configured with a register envelope stamped `otsec.register/0.1` rejects it with the SC-18 alarm until the envelope is re-stamped `0.2`. The payload and signature stay as they are; no new signature is needed. Accepting both envelope stamps would be a one-line change in C7, and is A3's call; I left C7 alone.
+- The envelope's `contract` is a label, not signed. `authz.VerifyRegisterPackage` accepts any stamp in `register.Readable` (0.1 or 0.2) and refuses any other (A3's #159, A1's D3-4); the signed payload names its own contract, which `register.Decode` checks. An envelope stamped 0.1 in an existing collector configuration therefore keeps working after an upgrade, with no re-stamp and no new signature.
 
 ## SEL-751 content, revision 4
 

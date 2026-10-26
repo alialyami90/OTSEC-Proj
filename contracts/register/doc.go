@@ -47,11 +47,11 @@
 //   - 0.2 adds context. This reader decodes 0.1 and 0.2 packages; a 0.1
 //     package with context is invalid. A later minor is invalid here, because
 //     the reader is strict, so a node that has not been upgraded refuses a
-//     0.2 package and keeps the floor it has (fail closed). The envelope
-//     names the reader's contract (0.2) and may carry a package of either
-//     minor. SigningDomain stays "otsec.register/0.1 package\n" in every minor,
-//     so a signature made over a 0.1 package is unchanged; moving a signed 0.1
-//     package into a 0.2 envelope needs no new signature.
+//     0.2 package and keeps the floor it has (fail closed). The envelope's
+//     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),
+//     and the signed payload names its own contract. SigningDomain stays
+//     "otsec.register/0.1 package\n" in every minor, so a signature made over
+//     a 0.1 package is unchanged.
 //
 // Readers are strict: unknown fields, unknown parameter kinds and unknown
 // classifications make the package invalid. A package that fails validation
