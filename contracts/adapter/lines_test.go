@@ -111,11 +111,11 @@ func TestCheckLinesRefuses(t *testing.T) {
 	}{
 		"PAS in operate":      {replaceSegment(base, ser, []byte("PAS 1 X\r\n")), "may not be sent in phase operate"},
 		"SER C":               {replaceSegment(base, ser, []byte("SER C\r\n")), "may not be sent in phase operate"},
-		"read not needed":     {replaceSegment(base, ser, []byte("SHO G\r\n")), "does not run or need"},
+		"read not needed":     {replaceSegment(base, ser, []byte("ID\r\n")), "does not run or need"},
 		"two lines":           {replaceSegment(base, ser, []byte("SER\r\nSER\r\n")), "one line with one line end"},
 		"ID in auth":          {replaceSegment(base, sentSegment(t, base, PhaseAuth, "ACC"), []byte("ID\r\n")), "may not be sent in phase auth"},
 		"ACC in probe":        {replaceSegment(base, sentSegment(t, base, PhaseProbe, "ID"), []byte("ACC\r\n")), "may not be sent in phase probe"},
-		"register revision":   {func() Result { r := base; r.RegisterVersion = 1; return r }(), "package is revision 3"},
+		"register revision":   {func() Result { r := base; r.RegisterVersion = 1; return r }(), "package is revision 4"},
 		"other invocation ID": {func() Result { r := base; r.InvocationID = "00000000-0000-4000-8000-000000000000"; return r }(), "is for invocation"},
 	}
 	// Nothing the platform sends can carry a framing or flow-control byte:
@@ -135,6 +135,27 @@ func TestCheckLinesRefuses(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", n, err, c.want)
 		}
+	}
+}
+
+// A context read (C3 0.2, D3-2) is permitted only in an invocation of an
+// operation it is for: SHO G reads DATE_F for SER, and is refused in a run
+// of anything else (A1's condition, A6's deny case).
+func TestCheckLinesContext(t *testing.T) {
+	p, inv := sel751Package(t), validInvocation(t)
+	if inv.OperationID != "sel.ser.read_all" || len(p.ContextFor(inv.OperationID)) != 1 {
+		t.Fatalf("the SEL-751 package has no context read for %s", inv.OperationID)
+	}
+	base := loadResult(t, "failed.device_error")
+	shoG := replaceSegment(base, sentSegment(t, base, PhaseOperate, "SER"), []byte("SHO G\r\n"))
+	if err := shoG.CheckLines(p, inv); err != nil {
+		t.Errorf("SHO G in a SER run: %v", err)
+	}
+	other := *p
+	other.Context = slices.Clone(p.Context)
+	other.Context[0].For = []string{"sel.settings.show_port1"}
+	if err := shoG.CheckLines(&other, inv); err == nil || !strings.Contains(err.Error(), "does not run or need") {
+		t.Errorf("SHO G for another operation's context: %v", err)
 	}
 }
 
