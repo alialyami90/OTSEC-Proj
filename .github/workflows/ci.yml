@@ -36,6 +36,9 @@ jobs:
         env:
           OTSEC_REQUIRE_ELEVATED: "1"
         run: go test -count=1 -run TestCNG -v ./modules/security/nodekey
+      - name: nodekey claims (A6)
+        if: runner.os == 'Windows' && !cancelled()
+        run: go test -count=1 -run TestA6NodeKey -v ./tests/security
       - run: go test ./...
   python:
     runs-on: ubuntu-latest
