@@ -77,15 +77,18 @@ type Scheduler struct {
 	collClear map[string]string           // asset ID: ref of a clear the collector has not accepted (assetclear.go)
 	clearFile *clearSuspension            // the clear-suspension.json checkClear last read, nil when none
 	results   map[string]AssetResult      // asset ID: its last sent run (results.go)
+	quar      map[string]*quarantineEntry // manifest SHA-256: a recorded export (quarantine.go)
+	quarDone  map[string]bool             // manifest SHA-256: its range stores nothing now
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
 // quarantine stream first: an asset with a quarantined unauthorized line
-// stays stopped across restarts, until an audited operator action clears
-// it (not in Phase 2).
+// stays stopped across restarts, until an administrator's audited export
+// and clear removes it (quarantine.go).
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
-		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}}
+		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{},
+		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -113,6 +116,9 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 			}
 		}
 	}
+	// A clear stopped partway holds its asset from the first run on; the
+	// ticks finish it from the chain's record (quarantine.go).
+	s.refreshQuarantine(ctx)
 	return s, nil
 }
 
@@ -278,6 +284,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	}
 	if s.suspended(col.AssetID) {
 		return Report{Alarm: AlarmAssetSuspended}
+	}
+	if s.clearing(col.AssetID) {
+		return Report{Alarm: AlarmQuarantineClearIncomplete}
 	}
 	if code, detail := s.collectorHold(ctx); code != "" {
 		s.raiseOnceKey("collector "+code, "", code, detail)

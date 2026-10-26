@@ -95,6 +95,10 @@ type suspensionsFile struct {
 	// collector has not yet accepted: asset ID to the suspension's ref
 	// (assetclear.go).
 	CollectorClears map[string]string `json:"collector_clears,omitempty"`
+	// Quarantine is every quarantine.exported record through ThroughSeq,
+	// by manifest hash, with what the chain holds about its clear
+	// (quarantine.go).
+	Quarantine map[string]quarantineEntry `json:"quarantine,omitempty"`
 }
 
 type pendingSuspension struct {
@@ -162,17 +166,21 @@ func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 	if cc == nil {
 		cc = map[string]string{}
 	}
+	quar := map[string]*quarantineEntry{}
+	for h, e := range f.Quarantine {
+		quar[h] = &e
+	}
 	s.mu.Lock()
-	s.susp, s.through, s.unaudited, s.cs, s.collClear = m, uint64(through), pending, f.Collector, cc
+	s.susp, s.through, s.unaudited, s.cs, s.collClear, s.quar = m, uint64(through), pending, f.Collector, cc, quar
 	s.mu.Unlock()
 	if err := s.fold(ctx, false); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	snapshot, pending, through2, cs, cc := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs, maps.Clone(s.collClear)
+	snapshot, pending, through2, cs, cc, q := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs, maps.Clone(s.collClear), s.quarSnapshot()
 	s.fileStale = true
 	s.mu.Unlock()
-	if err := writeSuspensions(s.suspensionsPath(), through2, snapshot, pending, cs, cc); err != nil {
+	if err := writeCheckpoint(s.suspensionsPath(), through2, snapshot, pending, cs, cc, q); err != nil {
 		// The audit stream holds every suspension; settle writes the
 		// checkpoint later.
 		s.rt.opt.Status.Raise("", AlarmSuspensionNotDurable, "suspension checkpoint not written; the next start reads the audit stream again: "+err.Error())
@@ -398,9 +406,9 @@ func (s *Scheduler) settleLocked(ctx context.Context) {
 	s.mu.Unlock()
 	if stale {
 		s.mu.Lock()
-		snapshot, pending, cs, cc := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs, maps.Clone(s.collClear)
+		snapshot, pending, cs, cc, q := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs, maps.Clone(s.collClear), s.quarSnapshot()
 		s.mu.Unlock()
-		if fileErr = writeSuspensions(s.suspensionsPath(), through, snapshot, pending, cs, cc); fileErr == nil {
+		if fileErr = writeCheckpoint(s.suspensionsPath(), through, snapshot, pending, cs, cc, q); fileErr == nil {
 			s.mu.Lock()
 			s.fileStale = s.through != through
 			s.mu.Unlock()
@@ -477,6 +485,7 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 			accepted := false
 			if err == nil {
 				accepted = applyCollectorClear(s.collClear, rec)
+				applyQuarantine(s.quar, rec)
 			}
 			if err == nil {
 				if rec.Action == audit.ActionAssetSuspend {
@@ -704,10 +713,27 @@ func readSuspensions(path string) (suspensionsFile, error) {
 	return f, nil
 }
 
-// writeSuspensions writes the checkpoint as the status file is written:
-// a temporary file, flushed, then renamed.
+// writeSuspensions writes a checkpoint that holds no quarantine exports.
 func writeSuspensions(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string) error {
-	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc}
+	return writeCheckpoint(path, through, m, pending, cs, cc, nil)
+}
+
+// quarSnapshot copies the recorded exports for the checkpoint. The caller
+// holds s.mu.
+func (s *Scheduler) quarSnapshot() map[string]quarantineEntry {
+	out := make(map[string]quarantineEntry, len(s.quar))
+	for h, e := range s.quar {
+		c := *e
+		c.Clears = slices.Clone(e.Clears)
+		out[h] = c
+	}
+	return out
+}
+
+// writeCheckpoint writes the checkpoint as the status file is written:
+// a temporary file, flushed, then renamed.
+func writeCheckpoint(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string, q map[string]quarantineEntry) error {
+	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc, Quarantine: q}
 	for _, u := range pending {
 		f.Unaudited = append(f.Unaudited, pendingSuspension{AssetID: u.assetID, Ref: u.sp.Ref, Code: u.code, Adopted: u.adopted})
 	}
