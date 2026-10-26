@@ -13,8 +13,8 @@
 //     tls-server-only. The certificate is not tied to an asset yet (C1
 //     pinned-key), so attribution is by address in every case.
 //   - syslog-tcp (RFC 6587) and syslog-udp (RFC 5426) are plaintext: New
-//     refuses them unless Config.Plaintext, the lab-only flag, is set, until
-//     the owner decides on plaintext Syslog outside the lab. Their events
+//     refuses them unless Config.Plaintext is set: plaintext is enabled per
+//     listener by the operator, TLS being the default (D3-5). Their events
 //     say origin_auth none.
 //
 // # Rules

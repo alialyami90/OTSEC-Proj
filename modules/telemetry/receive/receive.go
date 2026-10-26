@@ -74,8 +74,8 @@ type Config struct {
 	Target asset.EvidenceClass
 	// TLS is ServerTLS's configuration, required for syslog-tls only.
 	TLS *tls.Config
-	// Plaintext must be true for syslog-tcp and syslog-udp: the lab-only
-	// flag, until the owner decides on plaintext Syslog (ADR-0005).
+	// Plaintext must be true for syslog-tcp and syslog-udp: plaintext is
+	// enabled per listener by the operator, TLS being the default (D3-5).
 	Plaintext bool
 	Senders   Senders
 	Log       Appender
@@ -249,7 +249,6 @@ type Receiver struct {
 	cfg    Config
 	lim    Limits
 	limit  *limiter
-	lab    bool
 	tlsCfg *tls.Config
 
 	mu       sync.Mutex
@@ -287,7 +286,7 @@ func New(cfg Config) (*Receiver, error) {
 		}
 	case asset.SyslogTCP, asset.SyslogUDP:
 		if !cfg.Plaintext {
-			return bad("%s is plaintext; it runs only under the lab-only flag until the owner decides", cfg.Transport)
+			return bad("%s is plaintext; it runs only when the operator enables plaintext for this listener", cfg.Transport)
 		}
 		if cfg.TLS != nil {
 			return bad("%s takes no TLS configuration", cfg.Transport)
@@ -314,7 +313,7 @@ func New(cfg Config) (*Receiver, error) {
 		}
 	}
 	r := &Receiver{
-		cfg: cfg, lim: lim, limit: newLimiter(lim), lab: cfg.Plaintext, tlsCfg: cfg.TLS,
+		cfg: cfg, lim: lim, limit: newLimiter(lim), tlsCfg: cfg.TLS,
 		perSrc: map[netip.Addr]int{}, unknown: map[netip.Addr]bool{}, reported: map[string]int64{},
 		budget: bucket{tokens: float64(lim.UnknownBytes)},
 		st:     Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
