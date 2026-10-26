@@ -121,7 +121,9 @@ type Limits struct {
 	UnknownBytes  int64
 	UnknownWindow time.Duration
 	// Queue is how many messages wait for the store per connection, or for
-	// the datagram listener (defaults 64 and 1024).
+	// the datagram listener (defaults 64 and 1024). A stream batch is also
+	// at most Queue, so a connection holds at most 2 x Queue + 1 messages
+	// read and not stored.
 	Queue int
 	// Retry is the wait before a refused stream batch is tried again
 	// (default 1 s). Grace is how long queued messages may still commit

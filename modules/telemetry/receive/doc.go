@@ -85,8 +85,9 @@
 //   - RFC 5425 and RFC 6587 have no acknowledgement. A sender cannot know
 //     what was stored, so messages queued in memory when the node stops,
 //     and not committed within Limits.Grace, are lost without the sender
-//     knowing (at most Limits.Queue per connection). RELP receive would
-//     close this; it is not built.
+//     knowing: at most 2 x Limits.Queue + 1 per connection (the batch
+//     being committed, the queue behind it, and the frame being read).
+//     RELP receive would close this; it is not built.
 //   - Duplicates are kept. A sender that retries after a reconnect may send
 //     a message twice; both are stored, and their record_sha256 is equal, so
 //     a reader can find them. Nothing is removed as a duplicate, because a

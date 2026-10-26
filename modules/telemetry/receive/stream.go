@@ -191,14 +191,17 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 }
 
 // write commits a connection's frames in order, as many per batch as are
-// waiting. A batch the store refuses is held and tried again every
+// waiting, up to Limits.Queue, so a connection never has more than
+// 2 x Queue + 1 frames read and not stored: the batch in hand, the queue
+// behind it and the frame the reader holds. A batch the store refuses is held and tried again every
 // Limits.Retry until it commits or cctx ends (refuse-new): a stream message
 // is never dropped while the node runs.
 func (r *Receiver) write(cctx context.Context, q <-chan msg) {
+	most := min(store.MaxBatch, r.lim.Queue)
 	for m := range q {
 		batch := []msg{m}
 	fill:
-		for len(batch) < store.MaxBatch {
+		for len(batch) < most {
 			select {
 			case m, ok := <-q:
 				if !ok {

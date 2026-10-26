@@ -273,3 +273,36 @@ func TestClose(t *testing.T) {
 		t.Error("closed a serving listener")
 	}
 }
+
+// TestStreamStopLoss (A6): with the store refusing, a connection holds at
+// most 2 x Queue + 1 frames read and not stored (the held batch, the queue,
+// the frame in hand), and no more is read from the sender.
+func TestStreamStopLoss(t *testing.T) {
+	const queue = 8
+	g := newRig(t, asset.SyslogTCP, func(c *Config) { c.Limits.Queue = queue })
+	g.store.refuse.Store(true)
+	c := g.dial(addrA)
+	defer c.Close()
+	frames := make([]string, 100)
+	for i := range frames {
+		frames[i] = m1
+	}
+	go c.Write(octet(frames...))
+	g.wait("held", func() bool { return g.r.Status().Held })
+	var last int64 = -1
+	g.wait("reader blocked", func() bool {
+		n := g.r.Status().Received
+		time.Sleep(50 * time.Millisecond)
+		stable := n == g.r.Status().Received && n == last
+		last = n
+		return stable
+	})
+	// The batch in hand is at most Queue, and smaller when the writer took
+	// it before the reader had filled the queue; the queue and the frame in
+	// hand are always full.
+	if n := g.r.Status().Received; n > 2*queue+1 || n < queue+2 {
+		t.Errorf("read %d frames with nothing stored, want %d to 2 x %d + 1", n, queue+2, queue)
+	}
+	g.store.refuse.Store(false)
+	g.wait("all stored", func() bool { return g.store.count() == len(frames) })
+}
