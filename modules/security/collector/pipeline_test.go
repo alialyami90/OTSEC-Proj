@@ -328,6 +328,8 @@ func TestRunRefusals(t *testing.T) {
 		{name: "D2-10 documentation address", opts: []pipeOption{withAsset(func(a *asset.Asset) { a.Endpoints[0].Host = "192.0.2.21" })}, want: authz.RefuseAssetNotEnrolled},
 		{name: "D2-10 mapped", opts: []pipeOption{withAsset(func(a *asset.Asset) { a.Endpoints[0].Host = "::ffff:127.0.0.1" })}, want: authz.RefuseAssetNotEnrolled},
 		{name: "D2-10 private", opts: []pipeOption{withAsset(func(a *asset.Asset) { a.Endpoints[0].Host = "10.0.0.5" })}, want: authz.RefuseAssetNotEnrolled},
+		{name: "port-server path", opts: []pipeOption{withAsset(func(a *asset.Asset) { a.Endpoints[0].Path = asset.PortServer })}, want: authz.RefuseAssetNotEnrolled},
+		{name: "no path", opts: []pipeOption{withAsset(func(a *asset.Asset) { a.Endpoints[0].Path = "" })}, want: authz.RefuseAssetNotEnrolled},
 		{name: "no verified register", opts: []pipeOption{func(c *PipelineConfig, f *pipeFixture) { c.Registers = NewRegisters(f.state, nil) }}, want: authz.RefuseRegisterUnverified},
 		{name: "no adapter hosted", opts: []pipeOption{func(c *PipelineConfig, _ *pipeFixture) { c.Runner = nil }}, want: authz.RefuseNotInvocable},
 		{name: "register version", req: func() *authz.CollectorRequest { r := pipeRun("sel.id", ""); r.Run.RegisterVersion = 1; return r }, want: authz.RefuseRegisterVersion},
