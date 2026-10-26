@@ -17,6 +17,11 @@ import (
 // serveStreams accepts TCP or TLS connections until ctx ends. cctx is the
 // commit context, which outlives ctx by Grace.
 func (r *Receiver) serveStreams(ctx, cctx context.Context) error {
+	reported := make(chan struct{})
+	go func() {
+		defer close(reported)
+		r.reportDrops(ctx, cctx)
+	}()
 	var wg sync.WaitGroup
 	conns := map[net.Conn]bool{}
 	var mu sync.Mutex
@@ -35,6 +40,9 @@ func (r *Receiver) serveStreams(ctx, cctx context.Context) error {
 		if err != nil {
 			if ctx.Err() != nil {
 				wg.Wait()
+				<-reported
+				// Every writer has stored or dropped what it read.
+				r.reportOnce(cctx)
 				return nil
 			}
 			r.update(func(s *Status) { s.LastErr = "accept: " + err.Error() })
@@ -72,22 +80,37 @@ func (r *Receiver) serveStreams(ctx, cctx context.Context) error {
 }
 
 // admit counts a new connection from addr, or refuses it over the limits.
+// Unknown senders together hold at most MaxUnknownConns, so however many
+// addresses can reach the port, the other connections stay free for
+// configured devices.
 func (r *Receiver) admit(addr netip.Addr) bool {
+	_, known := r.cfg.Senders[addr]
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.st.Connections >= r.lim.MaxConns || r.perSrc[addr] >= r.lim.MaxConnsPerSource {
 		r.st.Refused["limit"]++
 		return false
 	}
+	if !known && r.st.UnknownConnections >= r.lim.MaxUnknownConns {
+		r.st.Refused["unknown-limit"]++
+		return false
+	}
 	r.st.Connections++
+	if !known {
+		r.st.UnknownConnections++
+	}
 	r.perSrc[addr]++
 	return true
 }
 
 func (r *Receiver) release(addr netip.Addr) {
+	_, known := r.cfg.Senders[addr]
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.st.Connections--
+	if !known {
+		r.st.UnknownConnections--
+	}
 	if r.perSrc[addr]--; r.perSrc[addr] <= 0 {
 		delete(r.perSrc, addr)
 	}
@@ -96,7 +119,8 @@ func (r *Receiver) release(addr netip.Addr) {
 // serveConn reads one connection's frames and hands them, in order, to one
 // writer that commits them. The queue between them is Limits.Queue frames
 // long: when the store is slow or refusing, the reader stops reading, and
-// TCP flow control holds the sender. Nothing read is dropped.
+// TCP flow control holds the sender. Nothing read from a known sender is
+// dropped; an unknown sender's message past the unknown budget is.
 func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.Addr) {
 	defer c.Close()
 	auth := event.AuthNone
@@ -119,6 +143,10 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 		c = tc
 	}
 	_, known := r.cfg.Senders[from]
+	idle := r.lim.IdleTimeout
+	if !known {
+		idle = r.lim.UnknownIdleTimeout
+	}
 	q := make(chan msg, r.lim.Queue)
 	done := make(chan struct{})
 	go func() {
@@ -130,7 +158,7 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 		<-done
 	}()
 	f := &framer{r: bufio.NewReaderSize(c, 4096), max: r.lim.MaxMessage, deadline: c.SetReadDeadline,
-		idle: r.lim.IdleTimeout, whole: r.lim.FrameTimeout, now: time.Now}
+		idle: idle, whole: r.lim.FrameTimeout, now: time.Now}
 	var discarded, empty int64
 	for {
 		fr, err := f.next()
@@ -191,8 +219,13 @@ func (r *Receiver) write(cctx context.Context, q <-chan msg) {
 }
 
 // commit stores a stream batch, waiting while the store refuses it. It
-// returns false when cctx ends first.
+// returns false when cctx ends first. The records are built once, so a
+// held batch spends the unknown budget once.
 func (r *Receiver) commit(cctx context.Context, batch []msg) bool {
+	recs, kept := r.records(cctx, batch)
+	if len(recs) == 0 {
+		return true
+	}
 	held := false
 	defer func() {
 		if held {
@@ -202,13 +235,9 @@ func (r *Receiver) commit(cctx context.Context, batch []msg) bool {
 		}
 	}()
 	for {
-		recs, err := r.records(batch)
-		var receipts []store.Receipt
+		receipts, err := r.cfg.Log.AppendBatch(cctx, recs)
 		if err == nil {
-			receipts, err = r.cfg.Log.AppendBatch(cctx, recs)
-		}
-		if err == nil {
-			r.stored(cctx, batch, receipts)
+			r.stored(cctx, kept, receipts)
 			return true
 		}
 		r.mu.Lock()

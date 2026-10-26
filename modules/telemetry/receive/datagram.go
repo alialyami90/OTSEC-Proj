@@ -96,33 +96,30 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 				break fill
 			}
 		}
-		recs, err := r.records(batch)
-		var receipts []store.Receipt
-		if err == nil {
-			receipts, err = r.cfg.Log.AppendBatch(cctx, recs)
-		}
 		var n int64
 		for _, m := range batch {
 			n += int64(len(m.msg))
 		}
+		recs, kept := r.records(cctx, batch)
+		if len(recs) == 0 {
+			r.queued.Add(-n)
+			continue
+		}
+		receipts, err := r.cfg.Log.AppendBatch(cctx, recs)
 		r.queued.Add(-n)
 		if err != nil {
 			r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
-			r.drop(DropStore, int64(len(batch)))
+			r.drop(DropStore, int64(len(kept)))
 			continue
 		}
-		r.stored(cctx, batch, receipts)
+		r.stored(cctx, kept, receipts)
 	}
 }
 
-func (r *Receiver) drop(reason string, n int64) {
-	r.update(func(s *Status) { s.Dropped[reason] += n })
-}
-
-// reportDrops reports the datagrams dropped since the last report, one
+// reportDrops reports the messages dropped since the last report, one
 // intake.drop-counted event per reason, every Limits.ReportEvery until ctx
-// ends (serveDatagrams reports once more after its writer stops). A report that cannot be committed is kept
-// and its count goes into the next one.
+// ends (Serve reports once more after its writers stop). A report that
+// cannot be committed is kept and its count goes into the next one.
 func (r *Receiver) reportDrops(ctx, cctx context.Context) {
 	t := time.NewTicker(r.lim.ReportEvery)
 	defer t.Stop()

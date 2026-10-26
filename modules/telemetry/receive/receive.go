@@ -20,17 +20,25 @@ import (
 	"otsec.local/otsec/modules/telemetry/normalize"
 )
 
-// HealthUnknownSource is the C4 health type raised the first time a sender
-// that no asset claims is heard on a listener. Its message is stored like
-// any other, with asset-unresolved (C4's type set is open).
-const HealthUnknownSource = "syslog.unknown-source"
-
-// Drop reasons, the reason detail of intake.drop-counted. Only datagrams
-// are dropped; a stream is slowed or held instead.
+// Health types this package raises (C4's type set is open).
 const (
-	DropRateLimit = "rate-limit" // the sender, or all unknown senders, over their rate
-	DropQueueFull = "queue-full" // arriving faster than the store commits
-	DropStore     = "store"      // the store refused the batch (quota, or not open)
+	// HealthUnknownSource is raised the first time a sender that no asset
+	// claims is heard on a listener. Its message is stored like any other,
+	// with asset-unresolved.
+	HealthUnknownSource = "syslog.unknown-source"
+	// HealthUnknownBudget is raised when unknown senders' messages are
+	// dropped because their storage budget (Limits.UnknownBytes) is spent,
+	// at most once per Limits.UnknownWindow.
+	HealthUnknownBudget = "syslog.unknown-budget"
+)
+
+// Drop reasons, the reason detail of intake.drop-counted. A known sender's
+// stream message is never dropped: its stream is slowed or held instead.
+const (
+	DropRateLimit     = "rate-limit"     // a datagram: the sender, or all unknown senders, over their rate
+	DropQueueFull     = "queue-full"     // a datagram arriving faster than the store commits
+	DropStore         = "store"          // a datagram batch the store refused (quota, or not open), or a message whose record could not be built
+	DropUnknownBudget = "unknown-budget" // an unknown sender's message past Limits.UnknownBytes
 )
 
 // ErrConfig is returned by New and ServerTLS for a configuration the
@@ -95,11 +103,23 @@ type Limits struct {
 	MaxSources int
 	// MaxConns and MaxConnsPerSource bound open stream connections
 	// (defaults 64 and 4); a connection over either is closed at accept.
-	MaxConns, MaxConnsPerSource int
+	// MaxUnknownConns bounds those from unknown senders (default 16, or a
+	// quarter of MaxConns if less; below MaxConns), so the rest are kept
+	// for configured devices.
+	MaxConns, MaxConnsPerSource, MaxUnknownConns int
 	// IdleTimeout closes a connection that starts no frame for this long
-	// (default 10 minutes); FrameTimeout bounds one frame once its first
-	// byte is in (default 30 s); HandshakeTimeout bounds TLS (default 10 s).
-	IdleTimeout, FrameTimeout, HandshakeTimeout time.Duration
+	// (default 10 minutes; UnknownIdleTimeout, default 30 s, for an unknown
+	// sender); FrameTimeout bounds one frame once its first byte is in
+	// (default 30 s); HandshakeTimeout bounds TLS (default 10 s).
+	IdleTimeout, UnknownIdleTimeout, FrameTimeout, HandshakeTimeout time.Duration
+	// UnknownBytes is how many record bytes all unknown senders together
+	// may store per UnknownWindow (defaults 1 MiB per hour; at least
+	// 256 KiB), so unattributed traffic cannot fill the class quota that
+	// configured devices' events need. It is a token bucket: up to
+	// UnknownBytes at once, refilled evenly over the window. A message past
+	// it is dropped and counted as unknown-budget.
+	UnknownBytes  int64
+	UnknownWindow time.Duration
 	// Queue is how many messages wait for the store per connection, or for
 	// the datagram listener (defaults 64 and 1024).
 	Queue int
@@ -142,7 +162,13 @@ func (l Limits) withDefaults(udp bool) Limits {
 	def(&l.MaxSources, 4096)
 	def(&l.MaxConns, 64)
 	def(&l.MaxConnsPerSource, 4)
+	def(&l.MaxUnknownConns, min(16, max(1, l.MaxConns/4)))
 	defD(&l.IdleTimeout, 10*time.Minute)
+	defD(&l.UnknownIdleTimeout, min(30*time.Second, l.IdleTimeout))
+	if l.UnknownBytes == 0 {
+		l.UnknownBytes = 1 << 20
+	}
+	defD(&l.UnknownWindow, time.Hour)
 	defD(&l.FrameTimeout, 30*time.Second)
 	defD(&l.HandshakeTimeout, 10*time.Second)
 	if udp {
@@ -160,6 +186,10 @@ func (l Limits) withDefaults(udp bool) Limits {
 	return l
 }
 
+// minUnknownBytes keeps the unknown budget above the largest record one
+// datagram can make, so no single message is refused for its size alone.
+const minUnknownBytes = 256 << 10
+
 func (l Limits) validate() error {
 	switch {
 	case l.MaxMessage < 2048 || l.MaxMessage > 65536:
@@ -168,8 +198,14 @@ func (l Limits) validate() error {
 		return errors.New("rates must be positive and bursts at least 1")
 	case l.MaxSources < 1 || l.MaxConns < 1 || l.MaxConnsPerSource < 1 || l.Queue < 1 || l.MaxUnknown < 1 || l.MaxQueueBytes < maxDatagram:
 		return errors.New("counts must be positive")
-	case l.IdleTimeout < 0 || l.FrameTimeout < 0 || l.HandshakeTimeout < 0 || l.Retry < 0 || l.Grace < 0 || l.ReportEvery < 0:
+	case l.MaxUnknownConns < 1 || l.MaxUnknownConns >= l.MaxConns:
+		return fmt.Errorf("max unknown connections %d not in [1, max connections %d)", l.MaxUnknownConns, l.MaxConns)
+	case l.UnknownBytes < minUnknownBytes:
+		return fmt.Errorf("unknown bytes %d below %d", l.UnknownBytes, minUnknownBytes)
+	case l.IdleTimeout < 0 || l.UnknownIdleTimeout < 0 || l.FrameTimeout < 0 || l.HandshakeTimeout < 0 || l.Retry < 0 || l.Grace < 0 || l.ReportEvery < 0 || l.UnknownWindow <= 0:
 		return errors.New("durations must be positive")
+	case l.UnknownIdleTimeout > l.IdleTimeout:
+		return errors.New("the unknown-sender idle timeout is above the idle timeout")
 	}
 	return nil
 }
@@ -180,17 +216,19 @@ type Status struct {
 	Transport asset.Transport
 	Address   string
 	Open      bool // bound and serving
-	// Connections is the number of open stream connections.
-	Connections int
+	// Connections is the number of open stream connections;
+	// UnknownConnections counts those from unknown senders.
+	Connections, UnknownConnections int
 	// Received counts messages read off the wire; Stored counts those
 	// committed with a receipt. LastMessage is when the last was stored.
 	Received, Stored int64
 	LastMessage      time.Time
-	// Dropped counts datagrams dropped, by reason (DropRateLimit,
-	// DropQueueFull, DropStore).
+	// Dropped counts messages dropped, by reason (DropRateLimit,
+	// DropQueueFull, DropStore, DropUnknownBudget).
 	Dropped map[string]int64
 	// Refused counts stream connections closed before any frame was read,
-	// by reason: "limit" (MaxConns or MaxConnsPerSource) or "tls".
+	// by reason: "limit" (MaxConns or MaxConnsPerSource), "unknown-limit"
+	// (MaxUnknownConns) or "tls".
 	Refused map[string]int64
 	// Truncated and Misframed count stored messages with FlagTruncated and
 	// FlagFraming. Discarded counts bytes past MaxMessage in an over-long
@@ -218,6 +256,8 @@ type Receiver struct {
 	st       Status
 	held     int
 	perSrc   map[netip.Addr]int
+	budget   bucket    // unknown senders' record bytes
+	budgetAt time.Time // when HealthUnknownBudget was last raised
 	unknown  map[netip.Addr]bool
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
@@ -276,7 +316,8 @@ func New(cfg Config) (*Receiver, error) {
 	r := &Receiver{
 		cfg: cfg, lim: lim, limit: newLimiter(lim), lab: cfg.Plaintext, tlsCfg: cfg.TLS,
 		perSrc: map[netip.Addr]int{}, unknown: map[netip.Addr]bool{}, reported: map[string]int64{},
-		st: Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
+		budget: bucket{tokens: float64(lim.UnknownBytes)},
+		st:     Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
 	return r, nil
 }
@@ -389,19 +430,83 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 	return store.Record{Stream: r.cfg.Stream, Class: class, Event: b}, nil
 }
 
-// records builds the records of a batch. A message that cannot be built
-// is a fault in this package, never in the bytes (normalize.Syslog takes
-// any bytes); it is reported and the batch fails.
-func (r *Receiver) records(ms []msg) ([]store.Record, error) {
+// records builds the records of a batch, one by one, and returns them with
+// the messages they hold. Two kinds of message are left out, dropped and
+// counted:
+//
+//   - one whose record cannot be built. That is a fault in this package,
+//     never in the bytes (normalize.Syslog takes any bytes), and it costs
+//     only that message, not the batch;
+//   - an unknown sender's message past the unknown budget, so unattributed
+//     traffic never takes the storage configured devices' events need.
+func (r *Receiver) records(ctx context.Context, ms []msg) ([]store.Record, []msg) {
 	recs := make([]store.Record, 0, len(ms))
+	kept := ms[:0:0]
+	var faults, over int64
 	for _, m := range ms {
 		rec, err := r.record(m)
 		if err != nil {
-			return nil, err
+			faults++
+			r.update(func(s *Status) { s.LastErr = "record from " + m.from.String() + ": " + err.Error() })
+			continue
+		}
+		if _, known := r.cfg.Senders[m.from]; !known && !r.spend(len(rec.Event)) {
+			over++
+			continue
 		}
 		recs = append(recs, rec)
+		kept = append(kept, m)
 	}
-	return recs, nil
+	if faults > 0 {
+		r.drop(DropStore, faults)
+	}
+	if over > 0 {
+		r.drop(DropUnknownBudget, over)
+		r.alarmBudget(ctx)
+	}
+	return recs, kept
+}
+
+// spend takes n bytes from the unknown senders' budget and reports whether
+// they were there.
+func (r *Receiver) spend(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	size := float64(r.lim.UnknownBytes)
+	r.budget.refill(time.Now(), size/r.lim.UnknownWindow.Seconds(), size)
+	if r.budget.tokens < float64(n) {
+		return false
+	}
+	r.budget.tokens -= float64(n)
+	return true
+}
+
+// alarmBudget raises HealthUnknownBudget, at most once per UnknownWindow.
+// The dropped messages themselves are counted in intake.drop-counted. An
+// alarm that cannot be committed is raised again at the next drop.
+func (r *Receiver) alarmBudget(ctx context.Context) {
+	r.mu.Lock()
+	now := time.Now()
+	if !r.budgetAt.IsZero() && now.Sub(r.budgetAt) < r.lim.UnknownWindow {
+		r.mu.Unlock()
+		return
+	}
+	r.budgetAt = now
+	r.mu.Unlock()
+	h := event.Health{Type: HealthUnknownBudget, Details: map[string]string{
+		"listener": r.cfg.ID, "transport": string(r.cfg.Transport),
+		"budget_bytes": strconv.FormatInt(r.lim.UnknownBytes, 10), "window": r.lim.UnknownWindow.String(),
+	}}
+	if _, err := r.cfg.Health.Emit(ctx, h); err != nil {
+		r.mu.Lock()
+		r.budgetAt = time.Time{}
+		r.st.LastErr = "unknown-budget alarm: " + err.Error()
+		r.mu.Unlock()
+	}
+}
+
+func (r *Receiver) drop(reason string, n int64) {
+	r.update(func(s *Status) { s.Dropped[reason] += n })
 }
 
 // stored notes a committed batch and raises the unknown-source alarm for

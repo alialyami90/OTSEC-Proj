@@ -549,6 +549,10 @@ func TestNewRefuses(t *testing.T) {
 		"bad stream":               func(c *Config) { c.Stream = "Syslog:x" },
 		"bad node":                 func(c *Config) { c.Node = "Node_1" },
 		"small max message":        func(c *Config) { c.Limits.MaxMessage = 100 },
+		"no conns kept for known":  func(c *Config) { c.Limits.MaxConns, c.Limits.MaxUnknownConns = 8, 8 },
+		"small unknown budget":     func(c *Config) { c.Limits.UnknownBytes = 1000 },
+		"negative unknown window":  func(c *Config) { c.Limits.UnknownWindow = -time.Second },
+		"unknown idle above idle":  func(c *Config) { c.Limits.IdleTimeout, c.Limits.UnknownIdleTimeout = time.Second, time.Minute },
 		"sender without asset":     func(c *Config) { c.Senders = Senders{addrA: {Target: asset.Simulated}} },
 		"mapped sender": func(c *Config) {
 			c.Senders = Senders{netip.MustParseAddr("::ffff:127.0.0.1"): {AssetID: assetA, Target: asset.Simulated}}

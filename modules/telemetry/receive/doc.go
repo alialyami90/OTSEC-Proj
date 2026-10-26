@@ -39,10 +39,10 @@
 //     inbound endpoints). A known sender is the subject, bound by
 //     sender-address with confidence configured; its dialect comes from the
 //     asset (DialectOf), never from the message. An unknown sender's
-//     message is stored the same way with asset-unresolved, never dropped,
-//     and the first message from each unknown address raises
-//     syslog.unknown-source on the health stream, with the stored event as
-//     its related ID. Past Limits.MaxUnknown addresses one summary alarm is
+//     message is stored the same way with asset-unresolved, within the
+//     unknown budget below, and the first message from each unknown
+//     address raises syslog.unknown-source on the health stream, with the
+//     stored event as its related ID. Past Limits.MaxUnknown addresses one summary alarm is
 //     raised instead, and nothing more is remembered.
 //   - Evidence class: device-observed only when both the asset's endpoint
 //     and the listener are; an unknown sender takes the listener's (C4,
@@ -53,6 +53,14 @@
 //     stream over its rate is slowed: the connection is read no faster, and
 //     TCP flow control holds the sender. A datagram over its rate is
 //     dropped and counted.
+//   - Unknown senders cannot displace configured devices (A3 F1, F2).
+//     They hold at most Limits.MaxUnknownConns stream connections, so the
+//     rest stay free for configured devices, and an idle one is closed
+//     after Limits.UnknownIdleTimeout. All of them together may store at
+//     most Limits.UnknownBytes of records per Limits.UnknownWindow (a token
+//     bucket); a message past it is dropped and counted as unknown-budget,
+//     and syslog.unknown-budget is raised at most once per window. A known
+//     sender's stream message is never dropped.
 //   - Storage full follows the C5 class. syslog-stream (TCP, TLS) is
 //     refuse-new: a refused batch is held and retried, the connection is not
 //     read meanwhile (Status.Held), and nothing read is dropped while the
@@ -60,11 +68,14 @@
 //     like a datagram over its rate or past the queue, is dropped and
 //     counted, and the counts are reported as intake.drop-counted every
 //     Limits.ReportEvery and when the listener stops.
-//   - Bounded. Connections (in all and per sender), the queue per
-//     connection, the datagram queue's bytes, the rate limiter's table and
-//     the unknown-sender table all have limits, and every read has a
-//     deadline, so no sender can grow the node's memory or hold a
-//     connection without sending.
+//   - A message whose record cannot be built is a fault in this package.
+//     It is dropped and counted as store, alone: the rest of its batch is
+//     stored.
+//   - Bounded. Connections (in all, per sender and for unknown senders),
+//     the queue per connection, the datagram queue's bytes, the rate
+//     limiter's table and the unknown-sender table all have limits, and
+//     every read has a deadline, so no sender can grow the node's memory
+//     or hold a connection without sending.
 //   - Order. One connection's messages commit in the order they arrived,
 //     and so do datagrams. Messages of different connections interleave in
 //     commit order.
@@ -83,4 +94,9 @@
 //   - A relay's address names the relay, not the device it relays for.
 //   - Address attribution is spoofable on UDP and TCP, and on TLS without
 //     pinned keys (C1 binding address-only).
+//   - The unknown budget bounds unattributed storage per window, not in
+//     all: over an upstream outage of T it can store up to UnknownBytes x
+//     (1 + T/UnknownWindow). The node should size it from the class quota
+//     and the outage it must ride out. A separate C5 stream and quota for
+//     unknown senders would bound it absolutely; it is not built.
 package receive

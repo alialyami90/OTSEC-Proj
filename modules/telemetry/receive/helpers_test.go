@@ -41,10 +41,13 @@ var (
 
 // memCommitter is an in-memory C5 Committer behind a real store.Log, so
 // every receipt is a real one. With refuse set it refuses every batch as a
-// full quota does, having written nothing.
+// full quota does, having written nothing; with quota set it refuses a
+// batch that would take its records' bytes past quota.
 type memCommitter struct {
 	mu     sync.Mutex
 	recs   []store.Record
+	bytes  int
+	quota  int
 	refuse atomic.Bool
 	calls  atomic.Int64
 }
@@ -56,9 +59,23 @@ func (m *memCommitter) CommitBatch(_ context.Context, stream store.StreamID, rec
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	n := 0
+	for _, r := range recs {
+		n += len(r.Event)
+	}
+	if m.quota > 0 && m.bytes+n > m.quota {
+		return store.Commit{}, &store.Error{Code: store.CodeQuotaReached, Detail: "test quota"}
+	}
+	m.bytes += n
 	first := store.Seq(len(m.recs) + 1)
 	m.recs = append(m.recs, recs...)
 	return store.Commit{Node: testNode, Stream: stream, FirstSeq: first, Count: len(recs), Sync: store.SyncFull, At: time.Now()}, nil
+}
+
+func (m *memCommitter) setQuota(n int) {
+	m.mu.Lock()
+	m.quota = n
+	m.mu.Unlock()
 }
 
 // events decodes every committed event, in commit order.
