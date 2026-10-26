@@ -15,7 +15,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | C3 | `contracts/register` | `otsec.register/0.2` | A1 (format), A2 (content) | Merged (#27, #32); 0.2 adds context reads (D3-2); SEL-751 content rev 4. |
 | C4 | `contracts/event` | `otsec.event/0.2` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). 0.2: `source.sender.tls_leaf_sha256`, the certificate a `tls-mutual` sender presented; binding confidence unchanged (A3 on #150, A1). |
 | C5 | `contracts/store` | `otsec.store/0.3` | A5 | Merged (#33). 0.2: `open-busy`, the one open failure `Resume` retries without a restart (P3-A5). 0.3: `Discarder`, bounded removal of named events from a quarantine stream (D3-1). |
-| C6 | `contracts/syslog` | `otsec.syslog/0.2` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). |
+| C6 | `contracts/syslog` | `otsec.syslog/0.3` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). 0.3 adds `tlsleaf`, the C4 0.2 sender fingerprint (Phase 3, A1). |
 | C7 | `contracts/authz` | `otsec.authz/0.4` | A3 | 0.1 merged (#38). 0.2 adds `asset.clear_suspension` and `suspension_mismatch` (D2-15, A1). 0.3 adds `asset_suspended` and the held suspension it names, which the node adopts (A6 on #120). 0.4 adds admin-signed requests (`admin_signed`, `VerifyAdminRequest`) and the `admin_unverified` refusal (D2-11, P3-A3). |
 | C8 | `contracts/audit` | `otsec.audit/0.3` | A3 | 0.1 merged (#38); 0.2 adds the node-state actions (D2-15); 0.3 adds quarantine.exported and quarantine.cleared (P3-A5, D3-1). |
 | — | `contracts/version` | identifier parsing and the compatibility rule | A1 | Merged (#26). |
