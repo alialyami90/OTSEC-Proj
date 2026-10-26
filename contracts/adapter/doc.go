@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.4: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.5: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -25,8 +25,9 @@
 //     cover every byte exactly once, each with its transport phase and time;
 //     redaction markers for the password and any echo of it; what the
 //     session established (language probe, password prompt, access level,
-//     QUI); the identity check; posture warnings; identity observations and
-//     parsed records, each pointing at its bytes.
+//     QUI); the identity check; posture warnings; identity observations,
+//     parsed records and, from 0.5, the device settings a consumer needs to
+//     read them, each pointing at its bytes.
 //   - The language-probe reply grammar (probe.go), so the transport and A6's
 //     tests use one definition (ADR-0005, A6 F-007).
 //   - SEL framing. The SEL-751 sends every message as <STX>, the lines with
@@ -44,6 +45,8 @@
 // package and the invocation, and is the oracle for "no unauthorized write".
 //
 //   - A refusal before connecting has an empty transcript: nothing was sent.
+//     From 0.5 that includes refused.endpoint_path, for an endpoint whose C1
+//     path is not direct (D2-16, H-13).
 //   - Every line follows a prompt, and a prompt counts only at the start of a
 //     line: first in the received bytes, or after CR, LF, STX or ETX. Probe
 //     lines and ACC follow "=", operate lines "=>", and the close-phase QUI
@@ -101,8 +104,9 @@
 //     QUI would be a password attempt (C-19).
 //   - A session-control or unknown operation can never be invoked (C-A2-1),
 //     and a level 0 operation never carries a credential (C7-A2-5).
-//   - Records and observations point into received bytes only, never into a
-//     redaction.
+//   - Records, observations and settings point into received bytes only,
+//     never into a redaction. A setting's span selects exactly its value,
+//     and a setting is reported at most once.
 //   - error.detail is the collector's own words: at most 256 bytes of
 //     printable ASCII, never device text.
 //   - An unknown error code reads as failed.unknown, a failure. A code
@@ -120,11 +124,21 @@
 //   - 0.4 (A6, V-S12): the unanswered language probe. Earlier results read
 //     unchanged; a 0.3 adapter reports an unanswered probe as
 //     refused.language_probe_rejected.
+//   - 0.5 (P3-A2): refused.endpoint_path, and Result.settings. Earlier
+//     results read unchanged; they carry no settings, so a consumer reads
+//     every setting as unknown (for DATE_F, the normalizer keeps its MDY
+//     assumption and its flag).
 //
 // # For the consumers of a result
 //
 //   - Records: RecordFields names the fields of each kind. A record was
 //     received at Transcript.ReceivedAt(record.Span).
+//   - Settings: Result.Setting(name). For sel.ser.read_all the SEL-751
+//     adapter reports DATE_F (MDY, YMD or DMY, S22 Table 4.84), the order of
+//     the DATE field in every sel.ser.row. A value outside the three is
+//     reported as printed, never replaced by a default. A row whose date
+//     the adapter cannot read in the reported order is a parse error
+//     (parse_ok false, bytes kept), never a skip (D3-2).
 //   - Clock: C2 0.1 carries times only. The producer takes C4 received
 //     resolution_ns and clock.sync from the node's clock status at ended_at
 //     (A4 C2 review change 4).

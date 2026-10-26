@@ -26,6 +26,7 @@ SCHEMA = "otsec.adapter/0.1"
 SCHEMA_0_2 = "otsec.adapter/0.2"  # results that need a 0.2 rule or code (D2-14)
 SCHEMA_0_3 = "otsec.adapter/0.3"  # results that need a 0.3 code (A6 on #118)
 SCHEMA_0_4 = "otsec.adapter/0.4"  # results that need a 0.4 probe outcome (A6, V-S12)
+SCHEMA_0_5 = "otsec.adapter/0.5"  # results that need a 0.5 code or field (P3-A2)
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 FID = "SEL-751-R501-V0-Z104101-D20260910"       # S22 Table A.1 p. A.2
@@ -177,6 +178,20 @@ class Session:
         self.p1_start = start
         return start
 
+    def sho_g(self, date_f="MDY"):
+        """SHO G (S22 Table 7.67, Level 1). The layout is modelled on the
+        global settings block of an event report (S22 Figure 10.3) and is
+        approximate; DATE_F is the setting of S22 Table 4.84. Returns the
+        DATE_F value's span."""
+        self.tx("operate", b"SHO G\r\n")
+        rows = ["Global Settings", "",
+                "PHROT    := ABC     FNOM    := 60      DATE_F := %s" % date_f,
+                "FAULT    := 50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP",
+                "IRIGC    := NONE    UTC_OFF := 0.00          DST_BEGM:= OFF"]
+        start = self.rx("operate", framed(b"SHO G\r\n", "\r\n" + "\r\n".join(rows) + "\r\n\r\n", b"=>"))
+        self.g_start = start
+        return self.span(("DATE_F := %s" % date_f).encode(), start)
+
     def ser(self, serial=SERIAL, bad_row=False, prompt=b"=>", n_rows=None):
         self.tx("operate", b"SER\r\n")
         # Row 1 is the newest (S22 Figure 10.16).
@@ -224,7 +239,8 @@ class Session:
         self.facts["quit_sent"] = True
         self.facts["access_level"] = self.facts["access_level"] or "0"
 
-    def result(self, status, code=None, identity=None, observations=(), warnings=(), records=(), schema=SCHEMA):
+    def result(self, status, code=None, identity=None, observations=(), warnings=(), records=(), schema=SCHEMA,
+               settings=()):
         r = {
             "schema": schema,
             "invocation_id": INV,
@@ -252,6 +268,8 @@ class Session:
             r["warnings"] = list(warnings)
         if records:
             r["records"] = list(records)
+        if settings:
+            r["settings"] = list(settings)
         return r
 
 
@@ -274,11 +292,19 @@ def maxacc_warning(s):
             "span": s.span("MAXACC  := 2", s.p1_start)}
 
 
-def full(bad_row=False, echo=False, n_rows=None):
+def full(bad_row=False, echo=False, n_rows=None, date_f=None):
     s = Session()
     items, fid_span = to_level1(s, echo=echo)
     s.sho_p1()
     w = maxacc_warning(s)
+    settings, schema = (), SCHEMA
+    if date_f is not None:
+        # 0.5: the DATE_F value, so the normalizer reads the SER date order
+        # from the device rather than assuming MDY (D2-20).
+        sp = s.sho_g(date_f)
+        n = len("DATE_F := ")
+        settings, schema = [{"name": "DATE_F", "value": date_f,
+                             "span": {"offset": sp["offset"] + n, "length": sp["length"] - n}}], SCHEMA_0_5
     recs = s.ser(bad_row=bad_row, n_rows=n_rows)
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
@@ -292,7 +318,7 @@ def full(bad_row=False, echo=False, n_rows=None):
         r["error"]["detail"] = "%d rows; profile sel-751-ascii max_read_rows is 1024 (D1-12)" % n_rows
         return r
     status, code = ("partial", "partial.parse_errors") if bad_row else ("ok", None)
-    return s.result(status, code, {"result": "match", "items": items}, obs, [w], recs)
+    return s.result(status, code, {"result": "match", "items": items}, obs, [w], recs, schema=schema, settings=settings)
 
 
 # -- results: one valid example per outcome --------------------------------
@@ -307,10 +333,12 @@ BEFORE_CONNECT = [
 
 def results():
     out = {"ok": full(), "ok-with-echo": full(echo=True), "partial.parse_errors": full(bad_row=True),
-           "partial.read_rows_exceeded": full(n_rows=1025)}
+           "partial.read_rows_exceeded": full(n_rows=1025), "ok-with-settings": full(date_f="MDY")}
 
     for code in BEFORE_CONNECT:
         out[code] = Session().result(code.split(".")[0], code)
+    # 0.5: the C1 endpoint's path is not direct (D2-16, H-13). Nothing sent.
+    out["refused.endpoint_path"] = Session().result("refused", "refused.endpoint_path", schema=SCHEMA_0_5)
 
     s = Session()
     s.connect(prompt=b"\r\n=>")  # a session left at Level 1 (S22 p. 7.16): nothing more is sent
@@ -511,7 +539,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_5", schema="otsec.adapter/0.5")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_6", schema="otsec.adapter/0.6")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -759,6 +787,35 @@ def invalid_results(good):
     s.probe(reply=framed(b"QUI\r\n", b"Comando no valido\r\n", b"="))
     s.ident(frame=False)
     out["identity-unreadable-after-rejected-probe"] = s.result("failed", "failed.identity_unreadable", schema=SCHEMA_0_3)
+
+    # 0.5: refused.endpoint_path and settings belong to their own minor.
+    r = copy.deepcopy(good["refused.endpoint_path"])
+    r["schema"] = SCHEMA_0_4
+    out["endpoint-path-at-0.4"] = r
+
+    r = copy.deepcopy(good["ok-with-settings"])
+    r["schema"] = SCHEMA_0_4
+    out["settings-at-0.4"] = r
+
+    # A setting's span selects exactly its value, in received bytes, and a
+    # setting is reported once: the normalizer reads the date order from it.
+    r = copy.deepcopy(good["ok-with-settings"])
+    r["settings"][0]["value"] = "DMY"
+    out["setting-span-not-value"] = r
+
+    r = copy.deepcopy(good["ok-with-settings"])
+    r["settings"].append(copy.deepcopy(r["settings"][0]))
+    out["setting-reported-twice"] = r
+
+    r = copy.deepcopy(good["ok-with-settings"])
+    r["settings"][0]["name"] = "date_f"
+    out["setting-name-not-a-setting"] = r
+
+    r = copy.deepcopy(good["ok-with-settings"])
+    data = base64.b64decode(r["transcript"]["data"])
+    i = data.index(b"SHO G\r\n")  # the sent line, not the echo
+    r["settings"][0].update(value="SHO", span={"offset": i, "length": 3})
+    out["setting-span-in-sent-bytes"] = r
 
     # failed.unexpected_password_prompt (0.2, D2-14): its own minor, no QUI,
     # and the bytes must show Level 1 and the prompt.

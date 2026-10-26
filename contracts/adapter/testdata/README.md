@@ -25,12 +25,14 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.5 result with a code 0.4 does not know: read as `failed.unknown`.
+- `results/valid/failed.unknown.json`: A 0.6 result with a code 0.5 does not know: read as `failed.unknown`.
 - `results/valid/failed.timeout-probe-unanswered.json`: No reply to the `QUI` probe before the step timeout (0.4, A6 on V-S12): `language_probe` unanswered, nothing more sent, nothing suspended.
 - `results/valid/failed.transport_closed-probe-unanswered.json`: Only the echo of the `QUI` probe, then the connection closed: as above.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
 - `results/valid/ok-missing-setting.json`: `MAXACC` is absent from the `SHO P 1` output, so its warning is raised with `missing` and the whole response as span (A3). Otherwise as `ok`: records, the serial check and the observations.
 - `results/valid/ok-with-echo.json`: As `ok`, but the relay echoes the password; the echo is redacted too (C-A2-3).
+- `results/valid/ok-with-settings.json`: 0.5. As `ok`, with `SHO G` after `SHO P 1` and the `DATE_F` value (`MDY`) reported in `settings`, its span selecting exactly the value (D2-20). The `SHO G` layout is modelled on the global block of S22 Figure 10.3 and is approximate; S22 prints no `SHO G` reply.
+- `results/valid/refused.endpoint_path.json`: 0.5. The C1 endpoint's path is not direct (no path, a port server, or unknown): nothing sent, nothing suspended (D2-16, H-13).
 - `results/valid/ok.json`: Full session: wake (the device printed nothing on connect), `=`, QUI probe accepted, `ID` FID check, `ACC`, password (redacted), `SHO P 1` with `MAXACC := 2` (warning), `SER` with two rows, QUI. Identity match on FID and serial.
 - `results/valid/partial.parse_errors.json`: As `ok`, with a third SER row the parser cannot read: `parse_ok` false, bytes kept (EP-1).
 - `results/valid/partial.read_rows_exceeded.json`: The SER reply has 1,025 invented rows, more than the profile's `max_read_rows` of 1,024 (D1-12). The bytes are kept and no record is parsed. S22 Table 7.63 says the relay holds 1,024 rows, so on a real SEL-751 this would mean the far end is not behaving as the manual says.
@@ -143,3 +145,9 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `invocations/invalid/principal-ref-not-c7.json`: A principal reference with a space, which C7's principal ID syntax refuses.
 - `invocations/invalid/params-with-free-text.json`: A parameter value with free text and a separator.
 - `invocations/invalid/unknown-field.json`: An extra `command` field: invocations are strict.
+- `results/invalid/endpoint-path-at-0.4.json`: `refused.endpoint_path` in a 0.4 result: the code is 0.5's.
+- `results/invalid/settings-at-0.4.json`: `settings` in a 0.4 result: the field is 0.5's.
+- `results/invalid/setting-span-not-value.json`: `DATE_F` reported as `DMY` while its span selects `MDY`.
+- `results/invalid/setting-reported-twice.json`: `DATE_F` reported twice.
+- `results/invalid/setting-name-not-a-setting.json`: a setting name in lower case, not a device setting name.
+- `results/invalid/setting-span-in-sent-bytes.json`: a setting whose span covers the sent `SHO G` line.

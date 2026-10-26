@@ -46,6 +46,10 @@ type Result struct {
 	Observations []Observation `json:"observations,omitempty"`
 	Warnings     []Warning     `json:"warnings,omitempty"`
 	Records      []Record      `json:"records,omitempty"`
+	// Settings (0.5) are device settings read in this session that a
+	// consumer needs to read the records, for example DATE_F, the date
+	// order of the SER rows (D2-20). Each points at its value's bytes.
+	Settings []Setting `json:"settings,omitempty"`
 }
 
 // AdapterRef names the adapter build and its parser (A4 EP-4).
@@ -229,6 +233,27 @@ type Observation struct {
 	Span  Span   `json:"span"`
 }
 
+// Setting is one device setting as the device printed it (0.5). Name is
+// the device's own setting name; Value is exactly the bytes at Span, in a
+// received segment, so a consumer can check it against the transcript. The
+// adapter reports only what it read: a setting it did not read is absent,
+// never defaulted, and a consumer that needs it treats it as unknown.
+type Setting struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Span  Span   `json:"span"`
+}
+
+// Setting returns the setting named name, if the result carries it.
+func (r Result) Setting(name string) (Setting, bool) {
+	for _, s := range r.Settings {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return Setting{}, false
+}
+
 // Warning is a posture warning: a setting read from the device that does
 // not stop collection but must be shown (ADR-0005 MAXACC ruling).
 type Warning struct {
@@ -395,6 +420,25 @@ func (r Result) Validate() error {
 			c.fail("warnings[%d]: needs a register warning code, a setting name, and either the observed value or missing", i)
 		}
 		c.rxSpan(fmt.Sprintf("warnings[%d].span", i), w.Span, t)
+	}
+	if len(r.Settings) > 0 && c.minor < 5 {
+		c.fail("settings are new in 0.5, so a 0.%d result cannot carry them", c.minor)
+	}
+	seen := map[string]bool{}
+	for i, st := range r.Settings {
+		p := fmt.Sprintf("settings[%d]", i)
+		if !settingName.MatchString(st.Name) || st.Value == "" {
+			c.fail("%s: needs a setting name and a value", p)
+		}
+		if seen[st.Name] {
+			c.fail("%s: %s is reported twice", p, st.Name)
+		}
+		seen[st.Name] = true
+		c.rxSpan(p+".span", st.Span, t)
+		if sp := st.Span; sp.Offset >= 0 && sp.Length > 0 && sp.Offset+sp.Length <= int64(len(t.Data)) &&
+			string(t.Data[sp.Offset:sp.Offset+sp.Length]) != st.Value {
+			c.fail("%s: the span does not select the value %q", p, st.Value)
+		}
 	}
 	for i, rec := range r.Records {
 		if !recordKind.MatchString(rec.Kind) {
