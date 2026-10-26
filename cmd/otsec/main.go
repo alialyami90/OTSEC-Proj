@@ -410,6 +410,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			last = ls.LastMessage.Format(time.RFC3339)
 		}
 		fmt.Fprintf(w, "listener %s (%s %s): %s, %d received, %d stored, last message %s\n", safe(id), ls.Transport, safe(ls.Address), state, ls.Received, ls.Stored, last)
+		if ls.Plaintext {
+			fmt.Fprintln(w, "  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)")
+		}
 		if ls.Held {
 			fmt.Fprintln(w, "  HELD: the store is not taking this listener's messages; senders are not read meanwhile")
 		}

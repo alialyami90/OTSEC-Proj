@@ -218,7 +218,7 @@ func TestHealthShowsListeners(t *testing.T) {
 	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
 	st.SetListeners(map[string]node.ListenerStatus{
-		"lab-udp": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Open: true, Received: 7, Stored: 5, LastMessage: at,
+		"lab-udp": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Plaintext: true, Open: true, Received: 7, Stored: 5, LastMessage: at,
 			Dropped: map[string]int64{"store": 1, "rate-limit": 1}, UnknownSenders: 2, UnknownOverflow: true},
 		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached"},
 	})
@@ -229,6 +229,7 @@ func TestHealthShowsListeners(t *testing.T) {
 	}
 	for _, want := range []string{
 		"listener lab-udp (syslog-udp 127.0.0.1:5514): open, 7 received, 5 stored, last message 2026-10-26T12:00:00Z",
+		"  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)",
 		"  DROPPED: rate-limit 1, store 1",
 		"  UNKNOWN SENDERS: 2 and more not tracked; their messages are kept with no asset",
 		"listener lab-tls (syslog-tls 127.0.0.1:6514): NOT OPEN, 0 received, 0 stored, last message never in this process",
@@ -239,6 +240,9 @@ func TestHealthShowsListeners(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("health lacks %q:\n%s", want, out)
 		}
+	}
+	if n := strings.Count(out, "PLAINTEXT"); n != 1 {
+		t.Errorf("%d PLAINTEXT lines, want 1 (the TLS listener has none):\n%s", n, out)
 	}
 }
 

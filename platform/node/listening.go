@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/audit"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/telemetry/receive"
 )
@@ -27,6 +28,7 @@ type Listening struct {
 	rt        *Runtime
 	receivers []*receive.Receiver
 	bound     map[string]net.Addr
+	plaintext map[string]bool
 }
 
 // NewListening checks every listener of the runtime's configuration and
@@ -35,7 +37,7 @@ type Listening struct {
 // falls back to plaintext. The sender table comes from the C1 assets'
 // inbound endpoints (receive.SendersFor).
 func NewListening(rt *Runtime) (*Listening, error) {
-	ls := &Listening{rt: rt, bound: map[string]net.Addr{}}
+	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{}}
 	for _, l := range rt.cfg.Listeners {
 		ap, err := netip.ParseAddrPort(l.Address)
 		if err != nil {
@@ -49,7 +51,7 @@ func NewListening(rt *Runtime) (*Listening, error) {
 		cfg := receive.Config{
 			Node: rt.cfg.NodeID, ID: l.ID, Stream: stream,
 			Transport: l.Transport, Address: l.Address, Target: l.Target,
-			Plaintext: l.LabPlaintext,
+			Plaintext: l.Plaintext,
 			Senders:   senders,
 			Log:       liveLog{rt, stream},
 			Health:    healthSink{rt},
@@ -65,13 +67,15 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			return nil, err
 		}
 		ls.receivers = append(ls.receivers, r)
+		ls.plaintext[l.ID] = l.Plaintext
 	}
 	return ls, nil
 }
 
 // Listen binds every listener. If one cannot bind, those already bound are
 // closed and the node stops: a listener the configuration names is never
-// silently absent.
+// silently absent. Once all are bound, each plaintext listener is recorded
+// as node.posture_change, at every start (D3-5).
 func (ls *Listening) Listen() error {
 	for i, r := range ls.receivers {
 		a, err := r.Listen()
@@ -81,8 +85,18 @@ func (ls *Listening) Listen() error {
 		}
 		ls.bound[r.Status().ID] = a
 	}
+	for _, r := range ls.receivers {
+		if s := r.Status(); ls.plaintext[s.ID] {
+			ls.rt.audit(context.Background(), audit.ActionNodePostureChange, audit.OutcomeInfo, ReasonPlaintextListener,
+				fmt.Sprintf("listener %s receives %s on %s in plaintext: no sender authentication or integrity (D3-5)", s.ID, s.Transport, ls.bound[s.ID]))
+		}
+	}
 	return nil
 }
+
+// ReasonPlaintextListener is the reason_code of the node.posture_change
+// record a plaintext listener gets at start.
+const ReasonPlaintextListener = "plaintext_listener"
 
 // Addr is the address listener id is bound to, or nil before Listen.
 func (ls *Listening) Addr(id string) net.Addr { return ls.bound[id] }
@@ -123,7 +137,9 @@ func (ls *Listening) Publish() {
 	}
 	m := make(map[string]ListenerStatus, len(ls.receivers))
 	for _, r := range ls.receivers {
-		m[r.Status().ID] = listenerStatus(r.Status())
+		s := listenerStatus(r.Status())
+		s.Plaintext = ls.plaintext[r.Status().ID]
+		m[r.Status().ID] = s
 	}
 	ls.rt.opt.Status.SetListeners(m)
 }
@@ -132,8 +148,11 @@ func (ls *Listening) Publish() {
 // (receive.Status). LastErr is the listener's error text, which never holds
 // message content.
 type ListenerStatus struct {
-	Transport          asset.Transport  `json:"transport"`
-	Address            string           `json:"address"`
+	Transport asset.Transport `json:"transport"`
+	Address   string          `json:"address"`
+	// Plaintext: the listener is syslog-tcp or syslog-udp, with no sender
+	// authentication or integrity (D3-5).
+	Plaintext          bool             `json:"plaintext,omitempty"`
 	Open               bool             `json:"open"`
 	Connections        int              `json:"connections"`
 	UnknownConnections int              `json:"unknown_connections,omitempty"`

@@ -91,11 +91,14 @@ type Listener struct {
 	// Target is what is behind the listener: a simulator or a real device
 	// network (D1-24 amendment). The loader refuses device-observed (D2-4).
 	Target asset.EvidenceClass `json:"target"`
-	// LabPlaintext is the lab-only flag a syslog-tcp or syslog-udp
-	// listener must set, until the owner decides on plaintext Syslog
-	// (ADR-0005). The loader refuses it on syslog-tls and requires it on
-	// the others, so a plaintext listener is never one by default.
-	LabPlaintext bool `json:"lab_plaintext,omitempty"`
+	// Plaintext is the per-listener setting a syslog-tcp or syslog-udp
+	// listener must set (owner decision D3-5). Such a listener has no
+	// sender authentication or integrity. The loader refuses it on
+	// syslog-tls and requires it on the others, so a listener is plaintext
+	// only where its own entry says so: no other flag implies it, and an
+	// entry without it is TLS. Health shows it, and every start records it
+	// as node.posture_change.
+	Plaintext bool `json:"plaintext,omitempty"`
 	// TLS is a syslog-tls listener's references, required for that
 	// transport and refused for the others.
 	TLS *ListenerTLS `json:"tls,omitempty"`
@@ -233,14 +236,14 @@ func (c *Config) check() error {
 			errs = append(errs, err)
 		}
 		switch {
-		case l.Transport == asset.SyslogTLS && l.LabPlaintext:
-			fail("%s.lab_plaintext is set on a syslog-tls listener", p)
+		case l.Transport == asset.SyslogTLS && l.Plaintext:
+			fail("%s.plaintext is set on a syslog-tls listener", p)
 		case l.Transport == asset.SyslogTLS && l.TLS == nil:
 			fail("%s: a syslog-tls listener needs a tls section", p)
 		case l.Transport != asset.SyslogTLS && l.TLS != nil:
 			fail("%s.tls is set on a %s listener", p, l.Transport)
-		case l.Transport.Inbound() && l.Transport != asset.SyslogTLS && !l.LabPlaintext:
-			fail("%s: a %s listener is plaintext and needs lab_plaintext, the lab-only flag (ADR-0005)", p, l.Transport)
+		case l.Transport.Inbound() && l.Transport != asset.SyslogTLS && !l.Plaintext:
+			fail("%s: a %s listener has no sender authentication or integrity and needs \"plaintext\": true (D3-5)", p, l.Transport)
 		}
 		if l.TLS != nil {
 			if l.TLS.RequireSenderCert && l.TLS.SenderCARef == "" {

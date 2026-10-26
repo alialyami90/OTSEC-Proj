@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
@@ -121,8 +122,18 @@ func TestListenersStoreAndAttribute(t *testing.T) {
 		t.Fatal(err)
 	}
 	udp := waitStored(t, ls, st, "lab-udp", 1)
-	if !udp.Open || udp.Received != 1 || udp.LastMessage.IsZero() || udp.Transport != "syslog-udp" {
+	if !udp.Open || udp.Received != 1 || udp.LastMessage.IsZero() || udp.Transport != "syslog-udp" || !udp.Plaintext {
 		t.Fatalf("udp listener status: %+v", udp)
+	}
+	// Each plaintext listener is recorded at start (D3-5).
+	var posture []string
+	for _, rec := range auditRecords(t, r) {
+		if rec.Action == audit.ActionNodePostureChange && rec.ReasonCode == ReasonPlaintextListener {
+			posture = append(posture, rec.Detail)
+		}
+	}
+	if len(posture) != 2 || !strings.HasPrefix(posture[0], "listener lab-udp receives syslog-udp on 127.0.0.1:") || !strings.HasPrefix(posture[1], "listener lab-tcp receives syslog-tcp on 127.0.0.1:") {
+		t.Fatalf("plaintext listeners recorded: %q", posture)
 	}
 	evs := streamEvents(t, r, ListenerStream("lab-udp"))
 	if len(evs) != 1 {
@@ -208,7 +219,12 @@ func TestTLSListenerFromReferences(t *testing.T) {
 	if _, err := c.Write([]byte("<13>1 - - - - - - mutual\n")); err != nil {
 		t.Fatal(err)
 	}
-	waitStored(t, ls, st, "lab-tls", 1)
+	if got := waitStored(t, ls, st, "lab-tls", 1); got.Plaintext {
+		t.Fatalf("tls listener shown as plaintext: %+v", got)
+	}
+	if slices.ContainsFunc(auditRecords(t, r), func(rec *audit.Record) bool { return rec.ReasonCode == ReasonPlaintextListener }) {
+		t.Fatal("tls listener recorded as plaintext")
+	}
 	evs := streamEvents(t, r, ListenerStream("lab-tls"))
 	if len(evs) != 1 || !bytes.Contains(evs[0].Native.Bytes, []byte("mutual")) || evs[0].Source.OriginAuth != "tls-mutual" {
 		t.Fatalf("stored: %d events, %+v", len(evs), evs)
@@ -292,12 +308,12 @@ func TestListenerConfigRules(t *testing.T) {
 		mod  func(*nodeconfigtest.Listener)
 		want string
 	}{
-		"udp without the lab flag": {func(l *nodeconfigtest.Listener) { l.Transport, l.TLS, l.LabPlaintext = "syslog-udp", nil, false }, "needs lab_plaintext"},
-		"tcp without the lab flag": {func(l *nodeconfigtest.Listener) { l.Transport, l.TLS, l.LabPlaintext = "syslog-tcp", nil, false }, "needs lab_plaintext"},
-		"tls with the lab flag":    {func(l *nodeconfigtest.Listener) { l.LabPlaintext = true }, "lab_plaintext is set on a syslog-tls"},
-		"tls without a section":    {func(l *nodeconfigtest.Listener) { l.TLS = nil }, "needs a tls section"},
+		"udp without plaintext": {func(l *nodeconfigtest.Listener) { l.Transport, l.TLS, l.Plaintext = "syslog-udp", nil, false }, `needs "plaintext": true`},
+		"tcp without plaintext": {func(l *nodeconfigtest.Listener) { l.Transport, l.TLS, l.Plaintext = "syslog-tcp", nil, false }, `needs "plaintext": true`},
+		"tls with plaintext":    {func(l *nodeconfigtest.Listener) { l.Plaintext = true }, "plaintext is set on a syslog-tls"},
+		"tls without a section": {func(l *nodeconfigtest.Listener) { l.TLS = nil }, "needs a tls section"},
 		"udp with a tls section": {func(l *nodeconfigtest.Listener) {
-			l.Transport, l.LabPlaintext = "syslog-udp", true
+			l.Transport, l.Plaintext = "syslog-udp", true
 		}, "tls is set on a syslog-udp"},
 		"require without a CA":   {func(l *nodeconfigtest.Listener) { l.TLS.RequireSenderCert = true }, "needs sender_ca_ref"},
 		"credential is a path":   {func(l *nodeconfigtest.Listener) { l.TLS.CredentialRef = "../key" }, "is not a reference"},

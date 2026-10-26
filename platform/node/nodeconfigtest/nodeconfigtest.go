@@ -45,12 +45,12 @@ type Store struct {
 }
 
 type Listener struct {
-	ID           string       `json:"id"`
-	Transport    string       `json:"transport"`
-	Address      string       `json:"address"`
-	Target       string       `json:"target"`
-	LabPlaintext bool         `json:"lab_plaintext,omitempty"`
-	TLS          *ListenerTLS `json:"tls,omitempty"`
+	ID        string       `json:"id"`
+	Transport string       `json:"transport"`
+	Address   string       `json:"address"`
+	Target    string       `json:"target"`
+	Plaintext bool         `json:"plaintext,omitempty"`
+	TLS       *ListenerTLS `json:"tls,omitempty"`
 }
 
 type ListenerTLS struct {
@@ -229,7 +229,7 @@ func (c *Config) AddListener(id, transport, address string) *Config {
 	if transport == "syslog-tls" {
 		l.TLS = &ListenerTLS{CredentialRef: "test-listener"}
 	} else {
-		l.LabPlaintext = true
+		l.Plaintext = true
 	}
 	c.Listeners = append(c.Listeners, l)
 	return c
