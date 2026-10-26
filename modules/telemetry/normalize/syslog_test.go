@@ -387,7 +387,9 @@ func golden(t *testing.T, name string, e event.Event) {
 			t.Fatal(err)
 		}
 	}
-	want := readFile(t, path)
+	// A golden is this package's own JSON, not evidence: a Windows checkout
+	// may have turned its line ends into CRLF, which says nothing about it.
+	want := bytes.ReplaceAll(readFile(t, path), []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
 		t.Errorf("%s differs from the golden; run with -update after checking the change\n got %s", name, got)
 	}
