@@ -149,7 +149,12 @@ func TestCNGRightsProbe(t *testing.T) {
 			t.Fatal(err)
 		}
 		sddl := "D:P(A;;GA;;;SY)(A;;" + rights + ";;;BA)"
-		setErr := setDACL(s.(*cngSigner).key, sddl)
+		created := s.(*cngSigner).key
+		setErr := setDACL(created, sddl)
+		// A second change through the creating handle (run 2 on #157 got
+		// NTE_PERM there under a DACL that granted write-DAC), as against
+		// one through a handle opened by name.
+		creatingErr := setDACL(created, sddl)
 		// Sign and the second DACL change need the key open by name; when
 		// that fails they are not tried, and the log shows "-".
 		signErr, resetErr := notTried, notTried
@@ -166,8 +171,8 @@ func TestCNGRightsProbe(t *testing.T) {
 		}
 		_, readErr = keys.dacl(name)
 		delErr := keys.Delete(name)
-		t.Logf("BA %-9s set=%s open=%s sign=%s readDACL=%s setAgain=%s delete=%s",
-			rights, res(setErr), res(openErr), res(signErr), res(readErr), res(resetErr), res(delErr))
+		t.Logf("BA %-9s set=%s againCreating=%s open=%s sign=%s readDACL=%s againByName=%s delete=%s",
+			rights, res(setErr), res(creatingErr), res(openErr), res(signErr), res(readErr), res(resetErr), res(delErr))
 		if rights == "GA" && (setErr != nil || openErr != nil || signErr != nil || readErr != nil || resetErr != nil || delErr != nil) {
 			t.Errorf("the production Administrators ACE does not behave as designed")
 		}
