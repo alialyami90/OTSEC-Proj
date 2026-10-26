@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.3/collector-request",
+  "$id": "otsec.authz/0.4/collector-request",
   "title": "Collector request (C7). Strict: unknown fields, duplicate keys and trailing data are rejected. Only 'run' can lead to device I/O.",
   "type": "object",
   "additionalProperties": false,
@@ -15,7 +15,7 @@
     "contract": {
       "type": "string",
       "pattern": "^otsec\\.authz/0\\.(0|[1-9][0-9]*)$",
-      "description": "Any minor of major 0 is read (contracts/README.md). asset.clear_suspension needs 0.2 or later."
+      "description": "Any minor of major 0 is read (contracts/README.md). asset.clear_suspension needs 0.2 or later; admin_signed needs 0.4 or later."
     },
     "kind": {
       "enum": [
@@ -109,7 +109,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.3/credential-ref"
+          "$ref": "otsec.authz/0.4/credential-ref"
         },
         "sealed": {
           "type": "object",
@@ -211,6 +211,36 @@
         }
       },
       "description": "Since 0.2 (D2-15). Sent by the node, on its own behalf, after it recorded its own asset.suspension_clear."
+    },
+    "admin_signed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_id",
+        "algorithm",
+        "payload",
+        "signature"
+      ],
+      "description": "Since 0.4 (D2-11). An administrator's signed request, in place of its body, which exists only inside the payload (otsec.authz/0.4/admin-request). The signature is Ed25519 over the bytes 'otsec.authz/0.4 admin-request <kind>' and a line feed, followed by the payload. The collector refuses an unsigned admin request, and every failed check, with admin_unverified.",
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "description": "Selects the pinned admin key. Any string: an unknown or malformed ID is refused with admin_unverified, not invalid."
+        },
+        "algorithm": {
+          "type": "string",
+          "description": "Must be ed25519, or admin_unverified."
+        },
+        "payload": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "description": "The exact signed JSON bytes, at most 4096 before encoding."
+        },
+        "signature": {
+          "type": "string",
+          "contentEncoding": "base64"
+        }
+      }
     }
   },
   "oneOf": [
@@ -250,6 +280,11 @@
           {
             "required": [
               "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "admin_signed"
             ]
           }
         ]
@@ -292,6 +327,11 @@
             "required": [
               "asset_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "admin_signed"
+            ]
           }
         ]
       }
@@ -333,6 +373,11 @@
             "required": [
               "asset_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "admin_signed"
+            ]
           }
         ]
       }
@@ -373,6 +418,11 @@
           {
             "required": [
               "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "admin_signed"
             ]
           }
         ]
@@ -422,6 +472,72 @@
           {
             "required": [
               "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "admin_signed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "contract": {
+          "not": {
+            "enum": [
+              "otsec.authz/0.0",
+              "otsec.authz/0.1",
+              "otsec.authz/0.2",
+              "otsec.authz/0.3"
+            ]
+          }
+        },
+        "kind": {
+          "enum": [
+            "credential.install",
+            "credential.revoke",
+            "credential.clear_suspension",
+            "asset.clear_suspension"
+          ]
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "human"
+            }
+          }
+        }
+      },
+      "required": [
+        "admin_signed"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
             ]
           }
         ]

@@ -114,7 +114,7 @@ func TestNoSecretFields(t *testing.T) {
 			walk(f.Type, path+"."+f.Name)
 		}
 	}
-	for _, v := range []any{CollectorRequest{}, CollectorReply{}, CredentialRef{}, CredentialStatus{}} {
+	for _, v := range []any{CollectorRequest{}, CollectorReply{}, CredentialRef{}, CredentialStatus{}, AdminRequest{}} {
 		walk(reflect.TypeOf(v), reflect.TypeOf(v).Name())
 	}
 }

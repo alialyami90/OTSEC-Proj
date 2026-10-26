@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.3/collector-reply",
+  "$id": "otsec.authz/0.4/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -61,6 +61,7 @@
             "collector_state_unavailable",
             "suspension_mismatch",
             "asset_suspended",
+            "admin_unverified",
             "refused_unknown"
           ]
         },
