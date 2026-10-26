@@ -21,19 +21,20 @@ import (
 // Config is a node configuration under construction. Its fields are the
 // file's sections; tests may change any of them before Bytes or Write.
 type Config struct {
-	Schema          string           `json:"schema"`
-	NodeID          string           `json:"node_id"`
-	Store           Store            `json:"store"`
-	Listeners       []Listener       `json:"listeners"`
-	Assets          []map[string]any `json:"assets"`
-	Targets         []map[string]any `json:"targets"`
-	Schedule        []Collection     `json:"schedule"`
-	CollectorPipe   string           `json:"collector_pipe"`
-	CollectorPeer   string           `json:"collector_peer,omitempty"`
-	PolicyVersion   uint64           `json:"policy_version"`
-	RegisterVersion uint64           `json:"register_version"`
-	TLSDir          string           `json:"tls_dir,omitempty"`
-	AdminDir        string           `json:"admin_dir,omitempty"`
+	Schema            string           `json:"schema"`
+	NodeID            string           `json:"node_id"`
+	Store             Store            `json:"store"`
+	Listeners         []Listener       `json:"listeners"`
+	SyslogOutageHours int              `json:"syslog_outage_hours,omitempty"`
+	Assets            []map[string]any `json:"assets"`
+	Targets           []map[string]any `json:"targets"`
+	Schedule          []Collection     `json:"schedule"`
+	CollectorPipe     string           `json:"collector_pipe"`
+	CollectorPeer     string           `json:"collector_peer,omitempty"`
+	PolicyVersion     uint64           `json:"policy_version"`
+	RegisterVersion   uint64           `json:"register_version"`
+	TLSDir            string           `json:"tls_dir,omitempty"`
+	AdminDir          string           `json:"admin_dir,omitempty"`
 	// CollectorPublicDir holds install-key.json (WriteInstallKey).
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 }

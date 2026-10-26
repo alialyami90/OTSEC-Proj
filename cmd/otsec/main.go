@@ -435,6 +435,20 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			}
 			fmt.Fprintf(w, "  UNKNOWN SENDERS: %d%s; their messages are kept with no asset\n", ls.UnknownSenders, more)
 		}
+		if u := ls.Unknown; u != nil {
+			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
+				u.StoredBytes, u.HourlyBytes, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
+		}
+		if na := ls.CertNotAfter; !na.IsZero() {
+			switch left := time.Until(na); {
+			case left <= 0:
+				fmt.Fprintf(w, "  CERTIFICATE EXPIRED at %s: senders that check it refuse it\n", na.Format(time.RFC3339))
+			case left <= node.ListenerCertWarning:
+				fmt.Fprintf(w, "  CERTIFICATE EXPIRES at %s: replace it and restart the node before then\n", na.Format(time.RFC3339))
+			default:
+				fmt.Fprintf(w, "  certificate valid until %s\n", na.Format(time.RFC3339))
+			}
+		}
 		if ls.LastErr != "" {
 			fmt.Fprintf(w, "  last error: %s\n", safe(ls.LastErr))
 		}
@@ -486,4 +500,12 @@ func keyOrNone(k string) string {
 		return "(none)"
 	}
 	return k
+}
+
+// percent is n as a whole percentage of of, rounded down.
+func percent(n, of int64) int64 {
+	if of <= 0 {
+		return 0
+	}
+	return n * 100 / of
 }
