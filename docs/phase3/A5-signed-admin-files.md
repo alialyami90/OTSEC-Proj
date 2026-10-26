@@ -1,6 +1,6 @@
 # Signed administrator files and the node's relay: design (P3-A5)
 
-Status: proposal for review (2026-10-26). Owner: A5. Reviewers: A3 (trust boundaries, C7), A1 (contract approval), A2 (request fields), A6 (tests). It covers the two items A1 assigned to A5's signed clear-* task:
+Status: relay design approved by A1 (2026-10-26). The two new C7 kinds are approved in principle for 0.5 and A3 drafts them. The transition is (a) with conditions, which A3 has still to agree. Owner: A5. Reviewers: A3 (trust boundaries, C7), A1 (contract approval), A2 (request fields), A6 (tests). It covers the two items A1 assigned to A5's signed clear-* task:
 
 1. **The node's relay of signed admin requests,** `credential.install` included. Today no node path relays one on either platform (A3 on #179). On Windows, an administrator can install a credential on an installed collector only by temporarily pointing `ipc.node_peer` at their own account.
 2. **The administrator's files become signed requests,** so the audit actor is the person, not the node (D3-3). The files are `clear-suspension.json`, `clear-quarantine.json` and `seq-reset-ack.json`.
@@ -63,12 +63,13 @@ The collector's decision is accept-and-record, with no state of its own beyond t
 
 ## Transition
 
-The 0.1 unsigned files stay accepted, with the node as actor as today (D3-3), until A1 sets the point at which they are refused. Two options:
+A1 chose option (a) on 2026-10-26, subject to A3's agreement on #181. The 0.1 unsigned files stay accepted, with the node as actor as today (D3-3), until the first `device-observed` endpoint. Option (b), refusing them at once, would break the slice for no safety gain while every endpoint is simulated. A1's conditions:
 
-- **(a)** At the first `device-observed` endpoint, the same gate as the other Phase 2 interim items. This is the proposal.
-- **(b)** At once, on every endpoint.
+- **It is enforced in code, not by convention.** The node refuses an unsigned file whenever its configuration holds any endpoint that is not marked lab or simulated, and a test pins that.
+- **Every unsigned file the node accepts is visible.** Each one raises an alarm and writes an audit record that names it as unsigned.
+- **The exit report lists it** as a known limitation.
 
-Option (b) would break the slice until A6's harness signs its files. Under either option, a node that sees both an unsigned file and a signed request for the same clear acts on the signed one only.
+When a node sees both an unsigned file and a signed request for the same clear, it acts on the signed one only.
 
 ## Plan
 
@@ -88,4 +89,3 @@ Tests in PR 1 include:
 
 - **A3:** is the node's unverified decode of the payload, for the record only, acceptable? Its values appear in the record before the collector decides, labelled unverified.
 - **A3:** should the collector still check `clear-suspension.json` for an unsigned asset clear during the transition, as it does today? The proposal says yes, unchanged.
-- **A1:** the transition point, (a) or (b).
