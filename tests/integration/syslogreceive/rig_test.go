@@ -290,13 +290,21 @@ func (g *rig) events() []stored {
 	return out
 }
 
-// waitN waits until at least n events are stored.
+// waitN waits until at least n events are stored, or until no new event
+// has been stored for d: a slow store, as on a busy Windows runner, is
+// still progress, and only a stall ends the wait early (#183, job
+// 121863122339: 193 of 301 after a fixed 20 s). waitN never waits more
+// than two minutes in all.
 func (g *rig) waitN(n int, d time.Duration) []stored {
 	g.t.Helper()
-	end := time.Now().Add(d)
+	now := time.Now()
+	moved, limit, seen := now, now.Add(2*time.Minute), -1
 	for {
 		ev := g.events()
-		if len(ev) >= n || time.Now().After(end) {
+		if len(ev) != seen {
+			seen, moved = len(ev), time.Now()
+		}
+		if len(ev) >= n || time.Since(moved) > d || time.Now().After(limit) {
 			return ev
 		}
 		time.Sleep(20 * time.Millisecond)

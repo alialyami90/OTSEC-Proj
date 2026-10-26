@@ -352,9 +352,36 @@ func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 
 // TestStreamFloodIsSlowedNotDropped: A writes 400 messages over TCP at five
 // times its rate; B's messages on another connection are stored promptly;
-// every one of A's is stored in order, and nothing is dropped.
+// every one of A's is stored in order, and nothing is dropped. "Promptly"
+// is against this store: B's lag behind A's flood may exceed its lag with
+// no flood (measured first, on the same rig) by at most 2 s, so a slow
+// store on a busy runner is not taken for A holding B back (#187, job
+// 121862674585: 3.8 s on a runner whose store tests took 368 s).
 func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: 50, Burst: 50})
+	b := dialFrom(t, ipB, "tcp", g.addr)
+	quiet := func(prefix string) (lag time.Duration) {
+		sent := time.Now()
+		for i := 0; i < 10; i++ {
+			fmt.Fprintf(b, "<13>%s %d\n", prefix, i)
+		}
+		for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+			n := 0
+			for _, s := range g.events() {
+				if s.Asset.ID == assetB && strings.HasPrefix(string(s.Bytes), "<13>"+prefix+" ") {
+					n++
+				}
+			}
+			if n == 10 {
+				return time.Since(sent)
+			}
+		}
+		return 0
+	}
+	alone := quiet("alone")
+	if alone == 0 {
+		t.Fatal("B's 10 messages with no flood were not stored in 30 s")
+	}
 	a := dialFrom(t, ipA, "tcp", g.addr)
 	w := bufio.NewWriter(a)
 	for i := 0; i < 400; i++ {
@@ -363,30 +390,12 @@ func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 	began := time.Now()
 	go w.Flush()
 	time.Sleep(500 * time.Millisecond)
-	b := dialFrom(t, ipB, "tcp", g.addr)
-	sentB := time.Now()
-	for i := 0; i < 10; i++ {
-		fmt.Fprintf(b, "<13>quiet %d\n", i)
+	lagB := quiet("quiet")
+	t.Logf("B's 10 messages: %s with no flood, %s behind A's flood", alone, lagB)
+	if lagB == 0 || lagB > alone+2*time.Second {
+		t.Errorf("B's 10 messages took %s behind A's flood, %s with none", lagB, alone)
 	}
-	var lagB time.Duration
-	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-		nB := 0
-		for _, s := range g.events() {
-			if s.Asset.ID == assetB {
-				nB++
-			}
-		}
-		if nB == 10 && lagB == 0 {
-			lagB = time.Since(sentB)
-		}
-		if lagB != 0 {
-			break
-		}
-	}
-	if lagB == 0 || lagB > 2*time.Second {
-		t.Errorf("B's 10 messages took %s behind A's flood", lagB)
-	}
-	ev := g.waitN(410, 20*time.Second)
+	ev := g.waitN(420, 20*time.Second)
 	var fromA []stored
 	for _, s := range ev {
 		if s.Asset.ID == assetA {
@@ -701,18 +710,34 @@ func TestUnknownSendersCannotDisplaceDevices(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		fmt.Fprintf(a, "<13>device %d\n", i)
 	}
-	time.Sleep(3 * time.Second)
+	// Wait until the known sender's 20 are stored and all 200 of the
+	// unknown sender's are stored or dropped, while either moves: the
+	// store serializes commits, so on a slow store the known sender waits
+	// behind the unknown sender's commits in flight, which the budget
+	// bounds (#187, job 121862674585: known 0 after a fixed 3 s).
 	var known, unknown int
 	var unknownBytes int64
-	for _, s := range g.events() {
-		if s.Asset != nil {
-			known++
-		} else {
-			unknown++
-			unknownBytes += int64(len(s.Raw))
+	var st receive.Status
+	moved, was := time.Now(), -1
+	for limit := time.Now().Add(2 * time.Minute); ; time.Sleep(50 * time.Millisecond) {
+		known, unknown, unknownBytes = 0, 0, 0
+		for _, s := range g.events() {
+			if s.Asset != nil {
+				known++
+			} else {
+				unknown++
+				unknownBytes += int64(len(s.Raw))
+			}
+		}
+		st = g.r.Status()
+		progress := known + unknown + int(st.Dropped[receive.DropUnknownBudget])
+		if progress != was {
+			was, moved = progress, time.Now()
+		}
+		if progress == 220 || time.Since(moved) > 10*time.Second || time.Now().After(limit) {
+			break
 		}
 	}
-	st := g.r.Status()
 	t.Logf("known %d, unknown %d (%d record bytes), dropped %+v", known, unknown, unknownBytes, st.Dropped)
 	if known != 20 {
 		t.Errorf("known sender: %d of 20 stored", known)
