@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"time"
@@ -238,8 +239,13 @@ func writeAdminCopy(adminDir, name string, b []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp.Name(), 0o440); err != nil {
-		return err
+	if runtime.GOOS != "windows" {
+		// On Windows the mode would set the read-only attribute, which
+		// stops the next export from replacing the copy; admin_dir's DACL
+		// is what protects it there.
+		if err := os.Chmod(tmp.Name(), 0o440); err != nil {
+			return err
+		}
 	}
 	return os.Rename(tmp.Name(), filepath.Join(adminDir, name))
 }
