@@ -213,11 +213,11 @@ func TestRecordRules(t *testing.T) {
 	}
 	// A later minor is accepted; unknown actions normalise to unrecognized.
 	later := good
-	later.Contract = "otsec.audit/0.3"
+	later.Contract = "otsec.audit/0.4"
 	if err := later.Validate(); err != nil {
 		t.Fatalf("later minor: %v", err)
 	}
-	if Action("device.new_in_0_3").Normalize() != ActionUnrecognized {
+	if Action("device.new_in_0_4").Normalize() != ActionUnrecognized {
 		t.Fatal("normalize")
 	}
 }
@@ -274,8 +274,8 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 	}
 	// An unknown, harmless field from a later minor is kept; the same field
 	// on a record of this minor is refused (C8-A6-2).
-	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.3"`, 1)
-	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_3":1,"outcome"`, 1))); err != nil {
+	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.4"`, 1)
+	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_4":1,"outcome"`, 1))); err != nil {
 		t.Fatalf("unknown field in a later minor: %v", err)
 	}
 	if _, err := ParseRecord([]byte(strings.Replace(string(ok), `"outcome"`, `"api_token":"x","outcome"`, 1))); !errors.Is(err, ErrRecordRejected) {
