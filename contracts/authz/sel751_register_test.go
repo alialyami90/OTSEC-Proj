@@ -154,3 +154,31 @@ func TestSEL751Rev4SupersedesRev3(t *testing.T) {
 		t.Fatalf("revision 3 after revision 4: %v", err)
 	}
 }
+
+// TestRegisterEnvelopeStamps: the envelope's contract is an unsigned label,
+// so after the upgrade to 0.2 an envelope still stamped 0.1 is accepted, for
+// either payload. The payload's own contract is checked by register.Decode.
+// A stamp this reader does not decode is refused.
+func TestRegisterEnvelopeStamps(t *testing.T) {
+	rev3, _ := readSEL751Content(t, "sel-751-rev3.json")
+	rev4, _ := readSEL751Content(t, "sel-751.json")
+	rel := newSigner(t, "release-2026-1", 1)
+	anchors := []TrustAnchor{{KeyID: rel.id, PublicKey: rel.pub, Status: KeyActive}}
+	stamped := func(payload []byte, contract string) *register.Envelope {
+		e := rel.seal(payload)
+		e.Contract = contract
+		return e
+	}
+	for _, c := range register.Readable {
+		for rev, payload := range map[uint64][]byte{3: rev3, 4: rev4} {
+			if pkg, _, err := VerifyRegisterPackage(stamped(payload, c), anchors, map[string]FamilyFloor{}); err != nil || pkg.Revision != rev {
+				t.Errorf("revision %d stamped %s: %v", rev, c, err)
+			}
+		}
+	}
+	for _, c := range []string{"", "otsec.register/0.3", "otsec.register/1.0", "otsec.register/0.2 ", "otsec.authz/0.4"} {
+		if _, _, err := VerifyRegisterPackage(stamped(rev4, c), anchors, map[string]FamilyFloor{}); !errors.Is(err, ErrRegisterRejected) {
+			t.Errorf("stamped %q: %v", c, err)
+		}
+	}
+}
