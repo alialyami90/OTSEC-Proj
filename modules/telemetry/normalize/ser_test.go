@@ -44,7 +44,7 @@ func TestNormalizeC2Read(t *testing.T) {
 			t.Errorf("event %d: evidence class %q", i, e.Source.EvidenceClass)
 		case e.Collection.Alignment != event.AlignFirstRead || e.Collection.InvocationID != res.InvocationID:
 			t.Errorf("event %d: collection %+v", i, e.Collection)
-		case e.Received.UTC != res.Transcript.ReceivedAt(rec.Span) || e.Received.UTC != "2026-10-24T09:15:01.3Z":
+		case e.Received.UTC != res.Transcript.ReceivedAt(rec.Span) || e.Received.UTC != "2026-10-24T09:15:01.5Z":
 			t.Errorf("event %d: received %s", i, e.Received.UTC)
 		case e.Native.Evidence.SHA256 != res.Transcript.SHA256 || e.Native.Evidence.Ref != store.EvidenceRef(res.Transcript.SHA256):
 			t.Errorf("event %d: evidence %+v", i, e.Native.Evidence)

@@ -17,9 +17,14 @@ import (
 type setting struct {
 	name, value string
 	span        adapter.Span // "NAME := value", as printed (C2 warning span)
+	valueSpan   adapter.Span // the value alone (C2 0.5 settings span)
 }
 
-var settingRE = regexp.MustCompile(`([A-Z][A-Z0-9_]*) *:= *(\S+(?: \S+)*?)(?: {2,}|$)`)
+// A name may start with a digit: S22 Table 4.84 (p. 4.225) lists 51SAT
+// among the global settings SHO G prints, and A6's independent SHO G reply
+// (#166) prints it. A name is still matched whole, never a suffix of a
+// longer token (tiles), so 1LANG is never read as LANG.
+var settingRE = regexp.MustCompile(`([A-Z0-9][A-Z0-9_]*) *:= *(\S+(?: \S+)*?)(?: {2,}|$)`)
 
 var errMalformedSetting = errors.New("sel751: a setting without a name or a value")
 
@@ -46,7 +51,7 @@ func parseSettings(m message) (map[string]setting, error) {
 			if _, dup := out[name]; dup {
 				return nil, fmt.Errorf("%w: setting %q", errDuplicateKey, name)
 			}
-			out[name] = setting{name: name, value: string(t[g[4]:g[5]]), span: l.span(g[2], g[5])}
+			out[name] = setting{name: name, value: string(t[g[4]:g[5]]), span: l.span(g[2], g[5]), valueSpan: l.span(g[4], g[5])}
 		}
 	}
 	return out, nil
