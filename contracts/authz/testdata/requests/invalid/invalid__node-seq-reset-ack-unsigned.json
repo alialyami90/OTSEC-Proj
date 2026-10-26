@@ -1,0 +1,10 @@
+{
+  "contract": "otsec.authz/0.5",
+  "kind": "node.seq_reset_ack",
+  "request_id": "req-20261026-0002",
+  "on_behalf_of": {
+    "type": "human",
+    "id": "alice@site-a"
+  },
+  "policy_version": 3
+}
