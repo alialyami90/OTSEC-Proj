@@ -87,7 +87,7 @@ func TestForwardsEveryEventOnce(t *testing.T) {
 	}
 	// Each message is the C6 rendering.
 	m := r.srv.Acked()[0].Data
-	if !strings.Contains(string(m), ` v="otsec.syslog/0.2" `) || !strings.Contains(string(m), ` evc="simulated" `) {
+	if !strings.Contains(string(m), ` v="`+syslog.Identifier+`" `) || !strings.Contains(string(m), ` evc="simulated" `) {
 		t.Errorf("message %s", m)
 	}
 }

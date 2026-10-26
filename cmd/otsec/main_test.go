@@ -211,6 +211,25 @@ func TestHealthShowsSuspensions(t *testing.T) {
 	}
 }
 
+// health says when a node-wide hold is current, and says nothing once it
+// has ended, though its alarm stays in the history (A3 on #147).
+func TestHealthShowsRunsHeld(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetRunsHeld(node.AlarmSuspensionsUnknown)
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "RUNS HELD: " + node.AlarmSuspensionsUnknown + "; every run on this node is stopped while this line shows"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+	st.SetRunsHeld("")
+	st.Write("site-a-node1")
+	if out, _, _ := otsec(t, "health", "-config", path); strings.Contains(out, "RUNS HELD") {
+		t.Fatalf("health still shows a hold that ended:\n%s", out)
+	}
+}
+
 // health shows each Syslog listener: whether it is open, its counts and
 // last message, and any drop, hold or unknown sender (P3-A4).
 func TestHealthShowsListeners(t *testing.T) {

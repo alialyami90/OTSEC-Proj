@@ -47,7 +47,7 @@ None of these is device output. Host names use `example.net` (RFC 2606), address
 
 ## Rendered messages
 
-Each file in `rendered/` is `Render` output for one C4 golden example (`contracts/event/testdata/valid/`) on one valid target. They were generated once with `go test ./contracts/syslog -run Golden -update` and then frozen. A4 checked them by hand against the parameter table in `render.go`: the PRI (facility 16, severity 5 for device events and 4 for health), the header, the order of the parameters, escaping, and the summary. `TestRenderReadBack` also reads every example back on every target, so they are not only self-consistent. The files are marked `-text` so a Windows checkout cannot change their bytes. They were regenerated once for D1-23, and the only change was `evc="simulated"` after `auth` on the four device events.
+Each file in `rendered/` is `Render` output for one C4 golden example (`contracts/event/testdata/valid/`) on one valid target. They were generated once with `go test ./contracts/syslog -run Golden -update` and then frozen. A4 checked them by hand against the parameter table in `render.go`: the PRI (facility 16, severity 5 for device events and 4 for health), the header, the order of the parameters, escaping, and the summary. `TestRenderReadBack` also reads every example back on every target, so they are not only self-consistent. The files are marked `-text` so a Windows checkout cannot change their bytes. They were regenerated for D1-23, and the only change was `evc="simulated"` after `auth` on the four device events. They were regenerated again for C6 0.3, and the only change was `v="otsec.syslog/0.3"` in every file, the two audit files included; `rtac-tls-mutual.rfc5424.txt` was added then and checked by hand the same way, with `tlsleaf` after `sender` holding the C4 example's fingerprint.
 
 The two `audit-*.rfc5424.txt` files are `RenderAudit` output for records 1 and 4 of C8's chain example (`contracts/audit/testdata/chain/slice-session.jsonl`) on `relp-tls-audit`. They were generated with `go test ./contracts/syslog -run GoldenAudit -update` and checked by hand:
 - the PRI is facility 16 with severity 5 for the `info` chain start and 4 for the `denied` refusal;
@@ -62,6 +62,7 @@ The two `audit-*.rfc5424.txt` files are `RenderAudit` output for records 1 and 4
 | `sel751-row8.rfc5424.txt` | SEL-751 Figure 10.16 row 8 | `tls-best-effort` |
 | `sel751-row8.rfc3164.txt` | the same row, without device content (`content_omitted="config"`: no `dtext`, `subj`, `val`, `cat` or summary; D1-22) | `udp-rfc3164` |
 | `rtac-syslog.rfc5424.txt` | the RTAC Syslog example. The RTAC's own message, `<190>` included, sits escaped in `dtext`. | `relp-tls-required` |
+| `rtac-tls-mutual.rfc5424.txt` | the constructed C4 0.2 tls-mutual RTAC example: `ev="otsec.event/0.2"`, `auth="tls-mutual"` and `tlsleaf` after `sender`. Its fingerprint is not of a real certificate (see `contracts/event/testdata/NOTES.md`). | `relp-tls-required` |
 | `health-ser-gap.rfc5424.txt` | a `ser.gap` platform event, severity 4 | `relp-tls-required` |
 | `constructed-invalid-date.rfc5424.txt` | the constructed `02/30/2007` row: `dt` without `dwall` | `tls-best-effort` |
 

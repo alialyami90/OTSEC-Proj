@@ -42,6 +42,10 @@ const (
 	// AlarmSuspensionsUnknown: the suspensions could not be read or
 	// rebuilt, so every run on the node stops, level 0 included.
 	AlarmSuspensionsUnknown = "asset-suspensions-unknown"
+	// AlarmSuspensionsRebuilt: the suspensions are rebuilt after the audit
+	// database, which was not open at start, opened on a retry (C5 0.2,
+	// P3-A5). It ends AlarmSuspensionsUnknown, and runs go again.
+	AlarmSuspensionsRebuilt = "asset-suspensions-rebuilt"
 	// AlarmSuspensionClearRefused: clear-suspension.json was refused,
 	// names no current suspension, or names one not yet in the audit
 	// stream, which it clears only once it is. Nothing was cleared.
@@ -131,7 +135,7 @@ func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 	}
 	db := s.rt.Store(AuditStream)
 	if db == nil {
-		return errors.New("audit database not open")
+		return errAuditNotOpen
 	}
 	through := c5.Seq(f.ThroughSeq)
 	last, err := db.LastCommitted(ctx, AuditStream)

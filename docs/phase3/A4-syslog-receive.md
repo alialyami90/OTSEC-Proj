@@ -62,7 +62,7 @@
 | An unknown source is kept and alarmed | `TestUnknownSender`, `TestUnknownAlarmRetried`, `TestUnknownSendersBounded` |
 | Duplicates from a retrying TCP sender are detectable by the raw hash and never dropped | `TestTLSMutual` (a repeated message is stored twice with equal `record_sha256`) |
 | Storage full | `TestStreamQuotaHolds` (refuse-new, order kept), `TestDatagramQuotaDrops` (drop-and-count, reported), `TestDatagramQueueBytes`, `TestShutdownCommitsQueued` |
-| End to end on the real binaries, `otsec health` per listener | Needs A5's wiring; not in this PR. |
+| End to end on the real binaries, `otsec health` per listener | A5 wired the listeners and the health line in #154 (`TestHealthShowsListeners`). The run on the real binaries is A6's and has not been done. |
 
 Mutation check: 45 mutants, one for each check in the parser, the framer, the limiter, TLS, attribution, the unknown-sender table, the storage paths, and (after A3's review) the unknown connection limit, idle timeout, budget, budget alarm and their configuration checks. All 45 are killed. Three survived the first round; `TestSyslogRTACOtherMessage` and `TestTLSOptionalClient` were added for them.
 
@@ -85,3 +85,54 @@ Mutation check: 45 mutants, one for each check in the parser, the framer, the li
 - `modules/telemetry/receive/`: `doc.go`, `receive.go`, `stream.go`, `datagram.go`, `frame.go`, `limit.go`, `senders.go`, `tls.go`, and their tests.
 - `modules/telemetry/normalize/`: `syslog.go`, `syslog_test.go`, `syslog_sel_test.go`, `testdata/syslog/` (three goldens), `doc.go`. In `time.go`, the wall-clock step is factored out as `setWall` and shared with the SER path, with no change to SER output (the SER goldens are unchanged).
 - `docs/phase3/A4-syslog-receive.md` (this note).
+
+## Handoff (P3-A4)
+
+**Completed.**
+- The listener and the parser: #150, merged. A5 wired them into the node and `otsec health` in #154.
+- C4 0.2: a mutual-TLS event names the sender's certificate in `source.sender.tls_leaf_sha256`, the SHA-256 of the verified leaf (#167).
+- C6 0.3: the forwarder carries that fingerprint upstream as `tlsleaf`, after `sender`.
+- Parse goldens for the three documented SEL examples: RTAC, SEL-2488 and SEL-2730M.
+
+**Evidence.** The evidence class is `simulated` throughout. Every sender is a test process on loopback, and no device was contacted.
+- Go tests run in CI on Linux and Windows, with `-race`. The acceptance table above maps each brief item to its tests.
+- 45 mutants of the receive checks are all killed.
+- `TestStreamStopLoss` pins the stop-loss bound at 2 × `Queue` + 1.
+- For C6 0.3, `TestTLSLeafSizeBoundary` finds the size threshold by trying every record length on a 2048-octet target:
+  - at the threshold the message is exactly 2048 octets and keeps its text;
+  - one octet more omits the text;
+  - the threshold moves by exactly the 75 octets of `tlsleaf`;
+  - `tlsleaf` survives the omission.
+
+  Removing the parameter, or dropping it with the text, fails the tests.
+- Reviews of #150: A3 accepted after F1 and F2; A6 passed it after the stop-loss fix. On #167, A3 accepted and A1 reviewed. A6's independent pass on C6 0.3 is pending; A1 made it a condition.
+
+**Interfaces.**
+- `receive`: `Config`, `Limits`, `Status`, `Listen`, `Serve` and `Close`, as A5 uses them in #154.
+- `normalize.Syslog`: `SyslogInput.SenderCert` is the verified leaf's DER bytes. It is required with `tls-mutual` and refused without it.
+- C4 0.2 adds `source.sender.tls_leaf_sha256`. It is required on a tls-mutual event from 0.2, forbidden otherwise, and forbidden before 0.2. Readers of 0.1 read 0.2 through `strictjson.Forward`.
+- C6 0.3 adds `tlsleaf`. A target stamped 0.3 means the same as one stamped 0.2. `ParseMessage` keeps every parameter, so a 0.2 reader is unaffected.
+
+**Limitations.**
+- Everything under Known limits above still holds.
+- The fingerprint says which certificate authenticated the sender. It does not bind the asset: attribution stays `sender-address`/`configured` until C1 has pinned keys.
+- No end-to-end run of received Syslog on the real binaries yet.
+- No RELP receive, so the stop-loss window remains.
+
+**Risks.**
+- The listener is an inbound surface on the site node (A3's review of #150).
+- The unknown-sender budget is per window, not in all: HR-11 (D3-3). A3 holds a condition before any device-observed listener.
+- Plaintext receive is per listener and operator-enabled: HR-12 (D3-5). Its events say `none`, and its attribution can be spoofed.
+- A collector rule that reads `tlsleaf` as the device's identity would over-trust it.
+
+**Dependencies.**
+- A6: received Syslog end to end on the real binaries (V-S8 for this origin), and the independent pass on C6 0.3.
+- A5: set `UnknownBytes` from the syslog class quota and the outage the node must ride out.
+- Upgrade order: collectors upgrade before nodes, as C6 requires.
+- Next for A4: the `DATE_F` read, after A2's adapter PR merges.
+
+**Files.**
+- `modules/telemetry/receive/` and `modules/telemetry/normalize/`, as listed under Files above.
+- `contracts/event/`: C4 0.2, #167.
+- `contracts/syslog/`: C6 0.3, this PR. That covers `render.go`, `target.go`, `doc.go`, `audit.go`, `schema/target.json`, `syslog_test.go`, `testdata/NOTES.md` and `testdata/rendered/`.
+- `contracts/README.md` and this note.
