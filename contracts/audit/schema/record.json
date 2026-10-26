@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.3/record",
+  "$id": "otsec.audit/0.4/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -356,6 +356,19 @@
         }
       },
       "description": "0.3: on quarantine.exported and quarantine.cleared only, required there. The stream is quarantine/<target.asset_id>."
+    },
+    "claimed": {
+      "$ref": "#/$defs/admin",
+      "description": "0.4: on collector.request info only. What the admin-signed request the node sends says, unchecked."
+    },
+    "verified": {
+      "$ref": "#/$defs/admin",
+      "description": "0.4: on collector.request allowed only. C7 CollectorReply.Admin: what the collector checked."
+    },
+    "repeat_of": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "0.4: on collector.request allowed only, with verified, below collector_seq (not expressible here). The first decision a C7 0.5 repeat answer names; VerifyCollectorSeq counts it as accounted for."
     }
   },
   "allOf": [
@@ -712,6 +725,124 @@
           }
         ]
       }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "claimed"
+            ]
+          },
+          {
+            "required": [
+              "verified"
+            ]
+          },
+          {
+            "required": [
+              "repeat_of"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "const": "collector.request"
+          },
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([4-9]|[1-9][0-9]{1,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "claimed"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "info"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "verified"
+            ]
+          },
+          {
+            "required": [
+              "repeat_of"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "allowed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "repeat_of"
+        ]
+      },
+      "then": {
+        "required": [
+          "verified",
+          "collector_seq"
+        ]
+      }
     }
-  ]
+  ],
+  "$defs": {
+    "admin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "admin_key_id",
+        "principal",
+        "nonce",
+        "payload_sha256"
+      ],
+      "properties": {
+        "admin_key_id": {
+          "type": "string",
+          "pattern": "^ed25519-[0-9a-f]{16}$",
+          "description": "C7 authz.AdminKeyID"
+        },
+        "principal": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$",
+          "description": "A human principal ID (C7)"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$",
+          "description": "C7 AdminRequest.nonce"
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the signed payload bytes as sent (C7 AdminPayloadSHA256)"
+        }
+      }
+    }
+  }
 }

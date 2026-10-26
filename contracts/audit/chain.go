@@ -129,6 +129,15 @@ func VerifyChain(node string, stored [][]byte, from, head *Checkpoint) error {
 // already so in 0.1. A real reset can hide the old epoch's tail behind the
 // node's own previous_high: a verifier that holds a higher number for the
 // old epoch from outside the node (forwarded upstream) should compare it.
+//
+// From 0.4, an allowed collector.request record with repeat_of (the C7 0.5
+// repeat answer) also accounts for the first decision it names. The node
+// resends a signed request when the first reply was lost, so that decision
+// often has no record of its own; the repeat says what it was. When the
+// first decision does have a record, it must be the allowed record of the
+// same signed request (the same verified fields). A repeat whose own reply
+// is lost is a gap like any other: the next repeat names the first
+// decision, not it.
 func VerifyCollectorSeq(recs []*Record, after, through uint64) error {
 	_, err := VerifyCollectorSeqFrom(recs, SeqState{After: after}, through)
 	return err
@@ -164,7 +173,11 @@ type SeqState struct {
 // through is a number of the epoch the window ends in: after a reset in the
 // window, the new collector's latest number (0 if none yet), not the old
 // epoch's high. Verified in any split, a chain gives the same result as
-// verified whole.
+// verified whole, with one exception (0.4): a window that ends after a
+// first decision whose reply was lost, and before the repeat that names it,
+// reports the gap as it stood then. The repeat comes within the signed
+// request's lifetime (C7 MaxAdminLifetime), so a verifier whose windows end
+// at least that long ago does not see it.
 func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqState, error) {
 	seen := map[uint64]bool{}
 	lo := from.After
@@ -199,6 +212,7 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 		}
 		return nil
 	}
+	firsts := map[uint64]*Admin{} // allowed admin decisions in this epoch, by collector_seq
 	for _, r := range recs {
 		switch r.Action {
 		case ActionCollectorSeqReset:
@@ -221,6 +235,7 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 			}
 			use(r.InstallKeyID)
 			seen, lo, open, firstSeen = map[uint64]bool{}, 0, r.InstallKeyID, r.FirstSeen
+			firsts = map[uint64]*Admin{}
 			continue
 		case ActionCollectorSeqResetAck:
 			if open == "" || open != r.InstallKeyID {
@@ -252,6 +267,24 @@ func VerifyCollectorSeqFrom(recs []*Record, from SeqState, through uint64) (SeqS
 			return SeqState{}, broken("collector_seq %d appears on two records", r.CollectorSeq)
 		}
 		seen[r.CollectorSeq] = true
+		if r.Verified == nil {
+			continue
+		}
+		if r.RepeatOf == 0 {
+			firsts[r.CollectorSeq] = r.Verified
+			continue
+		}
+		if r.RepeatOf <= lo {
+			continue // verified in an earlier window
+		}
+		if !seen[r.RepeatOf] {
+			seen[r.RepeatOf] = true
+			firsts[r.RepeatOf] = r.Verified
+			continue
+		}
+		if first := firsts[r.RepeatOf]; first == nil || *first != *r.Verified {
+			return SeqState{}, broken("collector_seq %d repeats %d, which is not an acceptance of the same signed request", r.CollectorSeq, r.RepeatOf)
+		}
 	}
 	if through < lo {
 		return SeqState{}, broken("through %d is below the last verified collector_seq %d", through, lo)
