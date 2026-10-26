@@ -1,6 +1,8 @@
-// Package normalize turns a C2 adapter result into C4 events (P2-A4).
+// Package normalize turns native records into C4 events: a C2 adapter
+// result's SEL ASCII SER rows (P2-A4, Normalize), and a received Syslog
+// message (P3-A4, Syslog; see "Received Syslog" below).
 //
-// Phase 2 normalizes one record kind, the SEL ASCII SER row (sel.ser.row),
+// Phase 2 normalizes one adapter record kind, the SEL ASCII SER row (sel.ser.row),
 // read by the sel.ser.read_all operation. Normalize takes the C2 result, the
 // invocation it answers and the C1 asset, and returns pending C4 events
 // (seq 0) for the rows that are new since the previous read, platform health
@@ -69,8 +71,41 @@
 // on its own (agreed with A5, not yet built), so a crash in between repeats
 // the gap and never loses it.
 //
+// # Received Syslog
+//
+// Syslog builds one pending event per message, for any bytes at all; the
+// listener (modules/telemetry/receive) supplies the sender, its asset and
+// the receive time.
+//
+//   - The message is the record and its own evidence: native.bytes are the
+//     bytes received, record_sha256 and evidence.sha256 are their SHA-256,
+//     and there is no separate C5 capture.
+//   - RFC 5424 is recognised by VERSION after PRI; anything else after a
+//     valid PRI is read as RFC 3164. Three time forms are read where RFC
+//     3164 puts TIMESTAMP: "Mmm dd hh:mm:ss" (no year: the year nearest the
+//     receive time is assumed, with year-absent and year-assumed), "Mmm dd
+//     yyyy hh:mm:ss" (the RTAC, SEL-2488 and SEL-2730M examples) and an RFC
+//     3339 time. Only a time with its offset on the wire states UTC.
+//   - Fields are the parts as printed: pri, version, timestamp, hostname,
+//     app_name, procid, msgid, structured_data and msg for RFC 5424; pri,
+//     timestamp, hostname, tag, pid and msg for RFC 3164. A value that is
+//     not valid UTF-8 is left out, because JSON would replace its bytes; the
+//     bytes stay in native.bytes and the message is partial.
+//   - Status: failed without a valid PRI (0 to 191, no leading zero);
+//     partial when a part could not be read, a time could not be decoded,
+//     or the listener flagged the frame (frame-truncated, frame-invalid);
+//     ok otherwise.
+//   - Normalized: the subject is the application (APP-NAME or TAG) or else
+//     the host, with no value: the message text is native, not a reading.
+//     The category is unmapped.
+//   - The dialect comes from the asset, never from the message. The RTAC
+//     dialect reads MSG as event time, level, category, tag and
+//     description (S23 p. 636): device_time is the event time, because the
+//     header time is when the RTAC sent the message, and the subject is the
+//     tag. Its layout rests on one manual example (documented-untested).
+//
 // # What it leaves out
 //
-// Meaning: every event's category is unmapped (Q3). Received Syslog, other
-// record kinds and other families are later work. Nothing here does I/O.
+// Meaning: every event's category is unmapped (Q3). Other record kinds and
+// other families are later work. Nothing here does I/O.
 package normalize
