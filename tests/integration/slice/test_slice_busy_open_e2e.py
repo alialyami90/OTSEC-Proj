@@ -159,9 +159,8 @@ def test_the_restart_reaches_the_chain(got):
         t = _utc(rows[i])
         assert got["respawn_utc"] - datetime.timedelta(seconds=5) <= t < got["released_utc"], (show[i], got["respawn_utc"], got["released_utc"])
     # Kept with their own times, so they are earlier than the recovery and
-    # in the order they were made. (Across the whole chain, a run's relayed
-    # collector records can be timed a few ms before the node's
-    # collector.request that precedes them; that is not this PR's.)
+    # in the order they were made. (Across the whole chain, chain order is
+    # commit order, not time order: D3-8, checked below.)
     times = [_utc(rows[i]) for i in restart + [rec]]
     assert all(a <= b for a, b in zip(times, times[1:])), [show[i] for i in restart + [rec]]
     assert not [r for r in rows if r["action"] == "storage.alarm" and "audit_not_recorded" in json.dumps(r)], show
@@ -173,3 +172,49 @@ def test_only_read_only_lines_reached_the_device(got):
                              capture_output=True, text=True)
         report = json.loads(out.stdout)
         assert out.returncode == 0 and report["pass"], (log, report)
+
+
+def test_relayed_records_are_timed_between_their_request_and_its_decision(got):
+    """D3-8 (A1, #171): chain order is commit order. Per collector request,
+    the node's info record is stamped and committed before the request
+    leaves; the decision (allowed) is stamped after the reply and committed
+    first in its batch, followed by the collector's relayed records, which
+    the collector stamped as it acted. So, per request: info seq < decision
+    seq < every relayed seq, and info time <= every relayed time <= decision
+    time. Relayed records carry the invocation ID, not the request ID; they
+    belong to the decision whose batch they follow, and an invocation ID
+    never appears after two decisions."""
+    rows = got["audit"]
+    show = lambda r: (r["seq"], r["time"]["utc"], r["action"], r["outcome"], r.get("correlation_id"), r.get("collector_seq"))
+    info, decision, relayed, owner = {}, {}, {}, {}
+    current = None
+    for r in rows:
+        if r["action"] == "collector.request":
+            rid = r["correlation_id"]
+            if r["outcome"] == "info":
+                assert rid not in info, show(r)
+                info[rid] = r
+                current = None
+            else:
+                assert rid not in decision, show(r)
+                decision[rid] = r
+                current = rid if r["outcome"] == "allowed" else None
+            continue
+        if r.get("collector_seq") and r["action"] != "collector.request":
+            assert current is not None, ("a relayed record outside a decision's batch", show(r))
+            inv = r["correlation_id"]
+            assert owner.setdefault(inv, current) == current, ("invocation after two decisions", inv, show(r))
+            relayed.setdefault(current, []).append(r)
+        elif r["action"] not in ("collector.seq_reset",):
+            current = None
+    checked = 0
+    for rid, d in decision.items():
+        i = info.get(rid)
+        assert i is not None, ("a decision with no info record", show(d))
+        assert i["seq"] < d["seq"] and _utc(i) <= _utc(d), (show(i), show(d))
+        for r in relayed.get(rid, []):
+            assert d["seq"] < r["seq"], (show(i), show(d), show(r))
+            assert _utc(i) <= _utc(r) <= _utc(d), ("relayed record timed outside its request", show(i), show(r), show(d))
+            checked += 1
+    # The slice ran at least twice, each with a session open and close.
+    assert sum(1 for d in decision.values() if d["outcome"] == "allowed") >= 2 and checked >= 4, [show(r) for r in rows]
