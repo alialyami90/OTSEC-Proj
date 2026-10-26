@@ -1,4 +1,4 @@
-// Package asset is contract C1, otsec.asset/0.1: how the platform identifies
+// Package asset is contract C1, otsec.asset/0.2: how the platform identifies
 // a device, what it knows about it and how well, how it reaches it, and which
 // capability profile applies.
 //
@@ -23,6 +23,11 @@
 //     session or received value labelled device-observed needs an endpoint
 //     whose target is device-observed, and a simulator value one whose target
 //     is simulated.
+//   - Each endpoint's path, added in 0.2: direct, or through a port server.
+//     Only a direct path gets a session (Endpoint.CheckPath). A port server
+//     is refused until its timeouts have evidence (H-13), and no path (every
+//     0.1 record) or an unknown one is refused the same way, explicitly
+//     rather than as a parse failure, until an administrator sets it (D2-16).
 //   - The identity binding: which attributes the collector compares, and how
 //     strong that comparison is. See "What the identity binding proves" below.
 //   - A suspension that stops collection from the asset until an operator
@@ -103,6 +108,15 @@
 // (a replaced relay), it gets a new asset ID and the old record is retired
 // with its history, so events never mix two physical devices under one ID
 // (C1-A4-3).
+//
+// # Versions
+//
+//   - 0.1 (#32): the record, endpoints with target (D1-24), the binding,
+//     suspension, posture, and capability profiles.
+//   - 0.2: Endpoint.path (D2-16, ADR-0008). A 0.1 record is still read; its
+//     endpoints have no path, so CheckPath refuses a session to them. A 0.1
+//     record that carries a path is invalid. Capability profiles are
+//     unchanged and may stay at 0.1.
 //
 // # What it leaves out
 //
