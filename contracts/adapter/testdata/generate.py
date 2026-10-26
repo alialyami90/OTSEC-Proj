@@ -58,10 +58,25 @@ def ts(n):
     return "2026-10-24T09:15:%02d.%dZ" % (n // 10, n % 10)
 
 
-class Session:
-    """Builds a transcript one segment at a time."""
+# The date 2026-10-24 in each DATE_F order (S22 Table 4.84 p. 4.225). A
+# relay prints the dates of its command responses in that order (p. 7.31);
+# that the SER rows follow it too is inferred (register rev 4). An order
+# the adapter does not know prints as MDY here: no layout is assumed for it.
+DATES = {"MDY": "10/24/2026", "YMD": "2026/10/24", "DMY": "24/10/2026"}
 
-    def __init__(self):
+
+def date(order):
+    return DATES.get(order, DATES["MDY"])
+
+
+class Session:
+    """Builds a transcript one segment at a time. date_f is the relay's
+    DATE_F, the order of every date it prints; rows_date_f, when set, prints
+    the SER rows in another order, a relay the adapter must not misread."""
+
+    def __init__(self, date_f="MDY", rows_date_f=None):
+        self.date_f = date_f
+        self.rows_date_f = rows_date_f or date_f
         self.data = b""
         self.segments = []
         self.redactions = []
@@ -96,6 +111,9 @@ class Session:
         end = self.data.index(ETX, start)
         return {"offset": start, "length": end - start}
 
+    def hdate(self):
+        return date(self.date_f).encode()
+
     def last_span(self):
         s = self.segments[-1]
         return {"offset": s["offset"], "length": s["length"]}
@@ -113,7 +131,7 @@ class Session:
     def probe(self, reply=None):
         self.tx("probe", b"QUI\r\n")
         if reply is None:
-            reply = framed(b"QUI\r\n", b"\r\nSEL-751          Date: 10/24/2026  Time: 09:15:00\r\n"
+            reply = framed(b"QUI\r\n", b"\r\nSEL-751          Date: " + self.hdate() + b"  Time: 09:15:00\r\n"
                                         b"FEEDER 1         Time Source: Internal\r\n\r\n", b"=")
             self.facts["language_probe"] = "accepted"
         else:
@@ -145,7 +163,7 @@ class Session:
             self.facts["password_prompt"] = True
             self.rx("auth", b"ACC\r\nPassword: ? ")
         else:
-            self.rx("auth", framed(b"ACC\r\n", b"\r\nSEL-751          Date: 10/24/2026  Time: 09:15:02\r\n"
+            self.rx("auth", framed(b"ACC\r\n", b"\r\nSEL-751          Date: " + self.hdate() + b"  Time: 09:15:02\r\n"
                                                 b"FEEDER 1         Time Source: Internal\r\n\r\nLevel 1\r\n", b"=>"))
             self.facts["access_level"] = "1"
 
@@ -161,7 +179,7 @@ class Session:
         if echo:
             body = RED
         level, prompt = {"level1": (b"Level 1", b"=>"), "level2": (b"Level 2", b"=>>")}[outcome]
-        off = self.rx("auth", framed(body, b"\r\n\r\nSEL-751          Date: 10/24/2026  Time: 09:15:03\r\n"
+        off = self.rx("auth", framed(body, b"\r\n\r\nSEL-751          Date: " + self.hdate() + b"  Time: 09:15:03\r\n"
                                            b"FEEDER 1         Time Source: Internal\r\n\r\n" + level + b"\r\n", prompt))
         if echo:
             self.redactions.append({"offset": off, "length": len(RED), "reason": "echo", "component": "transport"})
@@ -178,44 +196,51 @@ class Session:
         self.p1_start = start
         return start
 
-    def sho_g(self, date_f="MDY"):
+    def sho_g(self, drop_date_f=False):
         """SHO G (S22 Table 7.67, Level 1). The layout is modelled on the
         global settings block of an event report (S22 Figure 10.3) and is
-        approximate; DATE_F is the setting of S22 Table 4.84. Returns the
-        DATE_F value's span."""
+        approximate (documented-untested); DATE_F is the setting of S22
+        Table 4.84. drop_date_f leaves DATE_F out. Sets self.settings to
+        the C2 0.5 settings the adapter reports."""
         self.tx("operate", b"SHO G\r\n")
+        pair = "" if drop_date_f else "DATE_F := %s" % self.date_f
         rows = ["Global Settings", "",
-                "PHROT    := ABC     FNOM    := 60      DATE_F := %s" % date_f,
+                ("PHROT    := ABC     FNOM    := 60      " + pair).rstrip(),
                 "FAULT    := 50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP",
                 "IRIGC    := NONE    UTC_OFF := 0.00          DST_BEGM:= OFF"]
         start = self.rx("operate", framed(b"SHO G\r\n", "\r\n" + "\r\n".join(rows) + "\r\n\r\n", b"=>"))
-        self.g_start = start
-        return self.span(("DATE_F := %s" % date_f).encode(), start)
+        self.settings = []
+        if not drop_date_f:
+            sp = self.span(pair.encode(), start)
+            n = len("DATE_F := ")
+            self.settings = [{"name": "DATE_F", "value": self.date_f,
+                              "span": {"offset": sp["offset"] + n, "length": sp["length"] - n}}]
 
     def ser(self, serial=SERIAL, bad_row=False, prompt=b"=>", n_rows=None):
         self.tx("operate", b"SER\r\n")
         # Row 1 is the newest (S22 Figure 10.16).
+        d = date(self.rows_date_f)
         rows = [
-            "1    10/24/2026 09:10:01.251   IN101             Deasserted",
-            "2    10/24/2026 09:10:01.004   IN101             Asserted",
+            "1    %s 09:10:01.251   IN101             Deasserted" % d,
+            "2    %s 09:10:01.004   IN101             Asserted" % d,
         ]
         if bad_row:
-            rows.append("3    10/24/2026 09:1#:0?.###   IN102             Asserted")
+            rows.append("3    %s 09:1#:0?.###   IN102             Asserted" % d)
         if n_rows is not None:
             # Invented rows, one second apart, newest first.
             secs = [9 * 3600 + 10 * 60 - i for i in range(1, n_rows + 1)]
-            rows = ["%-4d 10/24/2026 %02d:%02d:%02d.000   IN101             %s"
-                    % (i, t // 3600, t // 60 % 60, t % 60, ("Asserted", "Deasserted")[i % 2])
+            rows = ["%-4d %s %02d:%02d:%02d.000   IN101             %s"
+                    % (i, d, t // 3600, t // 60 % 60, t % 60, ("Asserted", "Deasserted")[i % 2])
                     for i, t in zip(range(1, n_rows + 1), secs)]
         # The report prints the oldest row first: the highest number at the
         # top and row 1 last (S22 Figure 10.16, the response to SER 8).
         rows.reverse()
         text = framed(b"SER\r\n", "\r\n"
-                "SEL-751          Date: 10/24/2026  Time: 09:15:04.112\r\n"
+                "SEL-751          Date: %s  Time: 09:15:04.112\r\n"
                 "FEEDER 1         Time Source: Internal\r\n\r\n"
                 "Serial No = %s\r\n"
                 "FID = %s     CID = %s\r\n\r\n"
-                "#    DATE       TIME           ELEMENT           STATE\r\n" % (serial, FID, CID)
+                "#    DATE       TIME           ELEMENT           STATE\r\n" % (date(self.date_f), serial, FID, CID)
                 + "\r\n".join(rows) + "\r\n\r\n", prompt)
         start = self.rx("operate", text)
         self.ser_start = start
@@ -234,7 +259,7 @@ class Session:
 
     def quit(self):
         self.tx("close", b"QUI\r\n")
-        self.rx("close", framed(b"QUI\r\n", b"\r\nSEL-751          Date: 10/24/2026  Time: 09:15:05\r\n"
+        self.rx("close", framed(b"QUI\r\n", b"\r\nSEL-751          Date: " + self.hdate() + b"  Time: 09:15:05\r\n"
                                              b"FEEDER 1         Time Source: Internal\r\n\r\n", b"="))
         self.facts["quit_sent"] = True
         self.facts["access_level"] = self.facts["access_level"] or "0"
@@ -292,19 +317,17 @@ def maxacc_warning(s):
             "span": s.span("MAXACC  := 2", s.p1_start)}
 
 
-def full(bad_row=False, echo=False, n_rows=None, date_f=None):
-    s = Session()
+def full(bad_row=False, echo=False, n_rows=None, date_f="MDY", rows_date_f=None, drop_date_f=False):
+    """A SER run that completes. SHO G is read after SHO P 1 and before SER
+    (register rev 4, ctx.date_f; C3 0.2), and DATE_F is reported (C2 0.5).
+    A row is parsed only if its date is a calendar date in DATE_F's order;
+    a DATE_F that is missing or not MDY, YMD or DMY leaves every row
+    unparsed (D3-2: a parse error, never a skip)."""
+    s = Session(date_f, rows_date_f)
     items, fid_span = to_level1(s, echo=echo)
     s.sho_p1()
     w = maxacc_warning(s)
-    settings, schema = (), SCHEMA
-    if date_f is not None:
-        # 0.5: the DATE_F value, so the normalizer reads the SER date order
-        # from the device rather than assuming MDY (D2-20).
-        sp = s.sho_g(date_f)
-        n = len("DATE_F := ")
-        settings, schema = [{"name": "DATE_F", "value": date_f,
-                             "span": {"offset": sp["offset"] + n, "length": sp["length"] - n}}], SCHEMA_0_5
+    s.sho_g(drop_date_f)
     recs = s.ser(bad_row=bad_row, n_rows=n_rows)
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
@@ -312,13 +335,25 @@ def full(bad_row=False, echo=False, n_rows=None, date_f=None):
     obs = [{"name": "firmware_id", "value": FID, "span": fid_span},
            {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
            {"name": "serial_number", "value": SERIAL, "span": ser_span}]
+    ident = {"result": "match", "items": items}
     if n_rows is not None:
         # More rows than max_read_rows: the bytes are kept, nothing is parsed.
-        r = s.result("partial", "partial.read_rows_exceeded", {"result": "match", "items": items}, obs, [w])
+        r = s.result("partial", "partial.read_rows_exceeded", ident, obs, [w], schema=SCHEMA_0_5, settings=s.settings)
         r["error"]["detail"] = "%d rows; profile sel-751-ascii max_read_rows is 1024 (D1-12)" % n_rows
         return r
-    status, code = ("partial", "partial.parse_errors") if bad_row else ("ok", None)
-    return s.result(status, code, {"result": "match", "items": items}, obs, [w], recs, schema=schema, settings=settings)
+    known = not drop_date_f and date_f in DATES
+    misfit = 0
+    for rec in recs:
+        if rec["parse_ok"] and (not known or rows_date_f not in (None, date_f)):
+            rec["parse_ok"] = False
+            del rec["fields"]
+            misfit += 1
+    status, code = ("partial", "partial.parse_errors") if bad_row or misfit else ("ok", None)
+    r = s.result(status, code, ident, obs, [w], recs, schema=SCHEMA_0_5, settings=s.settings)
+    if misfit:
+        r["error"]["detail"] = ("%d rows have a date that does not fit DATE_F %s" % (misfit, date_f) if known else
+                                "DATE_F was not read as one of the register's values; no row's date is parsed")
+    return r
 
 
 # -- results: one valid example per outcome --------------------------------
@@ -333,7 +368,14 @@ BEFORE_CONNECT = [
 
 def results():
     out = {"ok": full(), "ok-with-echo": full(echo=True), "partial.parse_errors": full(bad_row=True),
-           "partial.read_rows_exceeded": full(n_rows=1025), "ok-with-settings": full(date_f="MDY")}
+           "partial.read_rows_exceeded": full(n_rows=1025),
+           # The three DATE_F orders (S22 Table 4.84), and the three ways the
+           # order is not known: a value outside the three, no DATE_F in SHO
+           # G, and rows printed in another order than DATE_F's.
+           "ok-date-ymd": full(date_f="YMD"), "ok-date-dmy": full(date_f="DMY"),
+           "partial.parse_errors-date-f-unknown": full(date_f="MYD"),
+           "partial.parse_errors-date-f-missing": full(drop_date_f=True),
+           "partial.parse_errors-date-misfit": full(date_f="DMY", rows_date_f="MDY")}
 
     for code in BEFORE_CONNECT:
         out[code] = Session().result(code.split(".")[0], code)
@@ -406,6 +448,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", b"SER\r\n\r\nPassword: ? ")
     out["failed.unexpected_password_prompt"] = s.result(
@@ -447,6 +490,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.ser(serial=SERIAL_OTHER)
     sp = s.span(SERIAL_OTHER, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL_OTHER, sp))
@@ -458,6 +502,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.ser(prompt=b"=")  # the prompt fell back to Level 0 (TIDLE)
     s.facts["access_level"] = "1"
     out["failed.access_level_dropped"] = s.result("failed", "failed.access_level_dropped",
@@ -466,6 +511,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", framed(b"SER\r\n", b"Invalid Command\r\n\r\n", b"=>"))
     s.quit()
@@ -491,6 +537,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", b"SER\r\n" + STX + b"\r\nSEL-751   ")  # then nothing until the step timeout
     s.quit()
@@ -500,6 +547,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", b"SER\r\n" + STX + b"\r\nSEL-751   ")  # then the connection closed
     out["failed.transport_closed"] = s.result("failed", "failed.transport_closed", {"result": "match", "items": items},
@@ -508,6 +556,7 @@ def results():
     s = Session()
     items, _ = to_level1(s)
     s.sho_p1()
+    s.sho_g()
     s.tx("operate", b"SER\r\n")
     s.rx("operate", b"SER\r\n" + STX + b"\r\n" + b"1    10/24/2026 09:10:01.004   IN101             Asserted\r\n" * 3)
     s.quit()
@@ -548,6 +597,7 @@ def results():
     items, fid_span = to_level1(s)
     s.sho_p1(drop_maxacc=True)
     p1 = s.message_span()  # the whole SHO P 1 message, inside STX and ETX
+    s.sho_g()
     recs = s.ser()
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
@@ -556,7 +606,8 @@ def results():
            {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
            {"name": "serial_number", "value": SERIAL, "span": ser_span}]
     out["ok-missing-setting"] = s.result("ok", None, {"result": "match", "items": items}, obs, [
-        {"code": "warn.maxacc_above_1", "setting": "MAXACC", "missing": True, "span": p1}], recs)
+        {"code": "warn.maxacc_above_1", "setting": "MAXACC", "missing": True, "span": p1}], recs,
+        schema=SCHEMA_0_5, settings=s.settings)
     return out
 
 
@@ -793,25 +844,25 @@ def invalid_results(good):
     r["schema"] = SCHEMA_0_4
     out["endpoint-path-at-0.4"] = r
 
-    r = copy.deepcopy(good["ok-with-settings"])
+    r = copy.deepcopy(good["ok"])
     r["schema"] = SCHEMA_0_4
     out["settings-at-0.4"] = r
 
     # A setting's span selects exactly its value, in received bytes, and a
     # setting is reported once: the normalizer reads the date order from it.
-    r = copy.deepcopy(good["ok-with-settings"])
+    r = copy.deepcopy(good["ok"])
     r["settings"][0]["value"] = "DMY"
     out["setting-span-not-value"] = r
 
-    r = copy.deepcopy(good["ok-with-settings"])
+    r = copy.deepcopy(good["ok"])
     r["settings"].append(copy.deepcopy(r["settings"][0]))
     out["setting-reported-twice"] = r
 
-    r = copy.deepcopy(good["ok-with-settings"])
+    r = copy.deepcopy(good["ok"])
     r["settings"][0]["name"] = "date_f"
     out["setting-name-not-a-setting"] = r
 
-    r = copy.deepcopy(good["ok-with-settings"])
+    r = copy.deepcopy(good["ok"])
     data = base64.b64decode(r["transcript"]["data"])
     i = data.index(b"SHO G\r\n")  # the sent line, not the echo
     r["settings"][0].update(value="SHO", span={"offset": i, "length": 3})

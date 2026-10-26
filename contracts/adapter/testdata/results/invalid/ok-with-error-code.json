@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.adapter/0.1",
+  "schema": "otsec.adapter/0.5",
   "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
   "operation_id": "sel.ser.read_all",
   "adapter": {
@@ -10,10 +10,10 @@
   "target": "simulated",
   "status": "ok",
   "started_at": "2026-10-24T09:15:00.0Z",
-  "ended_at": "2026-10-24T09:15:01.6Z",
+  "ended_at": "2026-10-24T09:15:01.8Z",
   "transcript": {
-    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPUFDQw0KQUNDDQpQYXNzd29yZDogPyBbUkVEQUNURURdDQoCDQoNClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDMNCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCkxldmVsIDENCgM9PlNITyBQIDENClNITyBQIDENCgJQb3J0IDENCg0KTUFYQUNDICA6PSAyDQpGQVNUT1AgIDo9IE4NCkxBTkcgICAgOj0gRU5HTElTSA0KRUhUVFAgICA6PSBODQpGVFBBQ0MgIDo9IDENCkhUVFBBQ0MgOj0gMQ0KVElETEUgICA6PSAxNQ0KDQoDPT5TRVINClNFUg0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowNC4xMTINCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNClNlcmlhbCBObyA9IFNJTTAwMDAwMDAwMDAwMDENCkZJRCA9IFNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCAgICAgQ0lEID0gRTc1NA0KDQojICAgIERBVEUgICAgICAgVElNRSAgICAgICAgICAgRUxFTUVOVCAgICAgICAgICAgU1RBVEUNCjIgICAgMTAvMjQvMjAyNiAwOToxMDowMS4wMDQgICBJTjEwMSAgICAgICAgICAgICBBc3NlcnRlZA0KMSAgICAxMC8yNC8yMDI2IDA5OjEwOjAxLjI1MSAgIElOMTAxICAgICAgICAgICAgIERlYXNzZXJ0ZWQNCg0KAz0+UVVJDQpRVUkNCgINClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDUNCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCgM9",
-    "sha256": "af5054264a1ffe38fae3cb35b568ee9b38102e64254200dff6c8e9a11b195dfe",
+    "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowMA0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQkZJRD1CT09UTERSLVI1MDAtVjAtWjAwMDAwMC1EMjAwOTA5MjUiLCIwMDAwIg0KIkNJRD1FNzU0IiwiMDAwMCINCiJERVZJRD1GRUVERVIgMSIsIjAwMDAiDQoiREVWQ09ERT05MSIsIjAwMDAiDQoiUEFSVE5PPTc1MTUwMUExQTVBMFg4QzA4MCIsIjAwMDAiDQoDPUFDQw0KQUNDDQpQYXNzd29yZDogPyBbUkVEQUNURURdDQoCDQoNClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjQvMjAyNiAgVGltZTogMDk6MTU6MDMNCkZFRURFUiAxICAgICAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCkxldmVsIDENCgM9PlNITyBQIDENClNITyBQIDENCgJQb3J0IDENCg0KTUFYQUNDICA6PSAyDQpGQVNUT1AgIDo9IE4NCkxBTkcgICAgOj0gRU5HTElTSA0KRUhUVFAgICA6PSBODQpGVFBBQ0MgIDo9IDENCkhUVFBBQ0MgOj0gMQ0KVElETEUgICA6PSAxNQ0KDQoDPT5TSE8gRw0KU0hPIEcNCgINCkdsb2JhbCBTZXR0aW5ncw0KDQpQSFJPVCAgICA6PSBBQkMgICAgIEZOT00gICAgOj0gNjAgICAgICBEQVRFX0YgOj0gTURZDQpGQVVMVCAgICA6PSA1MEcxUCBPUiA1ME4xUCBPUiA1MVAxUCBPUiA1MVFQIE9SIDUwUTFQIE9SIFRSSVANCklSSUdDICAgIDo9IE5PTkUgICAgVVRDX09GRiA6PSAwLjAwICAgICAgICAgIERTVF9CRUdNOj0gT0ZGDQoNCgM9PlNFUg0KU0VSDQoCDQpTRUwtNzUxICAgICAgICAgIERhdGU6IDEwLzI0LzIwMjYgIFRpbWU6IDA5OjE1OjA0LjExMg0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KU2VyaWFsIE5vID0gU0lNMDAwMDAwMDAwMDAwMQ0KRklEID0gU0VMLTc1MS1SNTAxLVYwLVoxMDQxMDEtRDIwMjYwOTEwICAgICBDSUQgPSBFNzU0DQoNCiMgICAgREFURSAgICAgICBUSU1FICAgICAgICAgICBFTEVNRU5UICAgICAgICAgICBTVEFURQ0KMiAgICAxMC8yNC8yMDI2IDA5OjEwOjAxLjAwNCAgIElOMTAxICAgICAgICAgICAgIEFzc2VydGVkDQoxICAgIDEwLzI0LzIwMjYgMDk6MTA6MDEuMjUxICAgSU4xMDEgICAgICAgICAgICAgRGVhc3NlcnRlZA0KDQoDPT5RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNC8yMDI2ICBUaW1lOiAwOToxNTowNQ0KRkVFREVSIDEgICAgICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz0=",
+    "sha256": "31bfcaa53e67f141debffd59f7281a972b17e1fb6b41cb37de1c8939c7bfee2f",
     "segments": [
       {
         "offset": 0,
@@ -101,31 +101,45 @@
       },
       {
         "offset": 605,
-        "length": 5,
+        "length": 7,
         "dir": "tx",
         "phase": "operate",
         "at": "2026-10-24T09:15:01.2Z"
       },
       {
-        "offset": 610,
-        "length": 374,
+        "offset": 612,
+        "length": 211,
         "dir": "rx",
         "phase": "operate",
         "at": "2026-10-24T09:15:01.3Z"
       },
       {
-        "offset": 984,
+        "offset": 823,
         "length": 5,
         "dir": "tx",
-        "phase": "close",
+        "phase": "operate",
         "at": "2026-10-24T09:15:01.4Z"
       },
       {
-        "offset": 989,
+        "offset": 828,
+        "length": 374,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:01.5Z"
+      },
+      {
+        "offset": 1202,
+        "length": 5,
+        "dir": "tx",
+        "phase": "close",
+        "at": "2026-10-24T09:15:01.6Z"
+      },
+      {
+        "offset": 1207,
         "length": 103,
         "dir": "rx",
         "phase": "close",
-        "at": "2026-10-24T09:15:01.5Z"
+        "at": "2026-10-24T09:15:01.7Z"
       }
     ],
     "redactions": [
@@ -164,7 +178,7 @@
         "expected": "SIM0000000000001",
         "observed": "SIM0000000000001",
         "span": {
-          "offset": 727,
+          "offset": 945,
           "length": 16
         }
       }
@@ -191,7 +205,7 @@
       "name": "serial_number",
       "value": "SIM0000000000001",
       "span": {
-        "offset": 727,
+        "offset": 945,
         "length": 16
       }
     }
@@ -211,11 +225,11 @@
     {
       "kind": "sel.ser.row",
       "span": {
-        "offset": 859,
+        "offset": 1077,
         "length": 57
       },
       "context_span": {
-        "offset": 618,
+        "offset": 836,
         "length": 185
       },
       "parse_ok": true,
@@ -245,11 +259,11 @@
     {
       "kind": "sel.ser.row",
       "span": {
-        "offset": 918,
+        "offset": 1136,
         "length": 59
       },
       "context_span": {
-        "offset": 618,
+        "offset": 836,
         "length": 185
       },
       "parse_ok": true,
@@ -275,6 +289,16 @@
           "value": "Deasserted"
         }
       ]
+    }
+  ],
+  "settings": [
+    {
+      "name": "DATE_F",
+      "value": "MDY",
+      "span": {
+        "offset": 690,
+        "length": 3
+      }
     }
   ],
   "error": {

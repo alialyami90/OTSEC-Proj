@@ -72,20 +72,21 @@ type Config struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// Now is the clock for transcript times; nil means time.Now.
 	Now func() time.Time
-	// TIDLE, when set, is called at most once per run, with the port's
-	// Telnet time-out, when SHO P 1 read LANG := ENGLISH and TIDLE is a
-	// whole number of minutes from 1 to 30 (S22 Table 4.104, TELNET
-	// TIMEOUT). The collector uses it for the failed-auth floor
-	// (authz.FailureFloor). It is not called for any other value, which
-	// leaves the floor at its longest.
+	// TIDLE, when set, is called at most once per run, after the run and
+	// only when it ended ok or partial, with the port's Telnet time-out,
+	// when SHO P 1 read LANG := ENGLISH and TIDLE is a whole number of
+	// minutes from 1 to 30 (S22 Table 4.104, TELNET TIMEOUT). The collector
+	// uses it for the failed-auth floor (authz.FailureFloor). It is not
+	// called for any other value or outcome, which leaves the floor at its
+	// longest.
 	//
-	// Assumption (A6 on #114): the session runs over the relay's own
-	// Ethernet Telnet, whose time-out TIDLE is. Through a port server to a
-	// serial port, the session's time-out is that port's T_OUT, which SHO
-	// P 1 does not show and which may be longer or 0. C1 cannot yet say
-	// which path an endpoint takes, so before any device endpoint either C1
-	// declares it and the collector sets TIDLE only for direct Ethernet
-	// Telnet, or the collector leaves TIDLE unset.
+	// TIDLE is the time-out of the relay's own Ethernet Telnet. Through a
+	// port server to a serial port, the session's time-out is that port's
+	// T_OUT, which SHO P 1 does not show and which may be longer or 0 (A6
+	// on #114). Run therefore opens a session only on an endpoint whose C1
+	// path is direct, and refuses any other with refused.endpoint_path
+	// before connecting (D2-16, H-13), so a reported TIDLE is always a
+	// direct path's.
 	TIDLE func(time.Duration)
 
 	hooks *hooks // tests only
