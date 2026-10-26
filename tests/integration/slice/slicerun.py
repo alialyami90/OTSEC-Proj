@@ -134,6 +134,34 @@ class ServiceProc:
         return None if state == RUNNING else code
 
 
+class ServiceLogs(dict):
+    """Slice.logs in service mode: a service's file is rewritten with its
+    Application log events whenever it is looked up while the services are
+    installed, so a test that reads the files before teardown reads them
+    as they stand (A3 on #179)."""
+
+    def __init__(self, inst):
+        super().__init__()
+        self.inst = inst
+
+    def _refresh(self, name):
+        if name in SERVICES and self.inst.installed and dict.__contains__(self, name):
+            with open(dict.__getitem__(self, name), "w", encoding="utf-8") as f:
+                f.write(self.inst.events(name))
+
+    def __getitem__(self, name):
+        self._refresh(name)
+        return dict.__getitem__(self, name)
+
+    def items(self):
+        for name in list(dict.keys(self)):
+            self._refresh(name)
+        return dict.items(self)
+
+    def values(self):
+        return [v for _, v in self.items()]
+
+
 class Installed:
     """The installed services of one service-mode run, and their removal."""
 
@@ -437,6 +465,9 @@ class Slice:
         """start() in service mode: install, the credential, then both
         services (see the module docstring)."""
         inst, l = self.service, self.layout
+        logs = ServiceLogs(inst)
+        logs.update(self.logs)
+        self.logs = logs
         for name in SERVICES:
             self.logs[name] = os.path.join(self.d, name + ".log")
             self.procs[name] = ServiceProc(inst, name)
@@ -522,9 +553,6 @@ class Slice:
             os.chmod(d, 0o550)
 
     def text(self, name):
-        if self.service and self.service.installed and name in SERVICES:
-            with open(self.logs[name], "w", encoding="utf-8") as f:
-                f.write(self.service.events(name))
         with open(self.logs[name], "rb") as f:
             return f.read().decode("utf-8", "replace")
 
