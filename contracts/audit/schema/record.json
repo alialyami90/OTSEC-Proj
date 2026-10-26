@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.2/record",
+  "$id": "otsec.audit/0.3/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -161,7 +161,9 @@
         "collector.seq_reset",
         "collector.seq_reset_ack",
         "asset.suspend",
-        "asset.suspension_clear"
+        "asset.suspension_clear",
+        "quarantine.exported",
+        "quarantine.cleared"
       ]
     },
     "outcome": {
@@ -312,6 +314,48 @@
         }
       },
       "description": "0.2: on asset.suspend and asset.suspension_clear only, required there. The ref is correlation_id."
+    },
+    "quarantine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256",
+        "first_seq",
+        "last_seq",
+        "items"
+      ],
+      "properties": {
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the manifest's bytes as the node read them"
+        },
+        "first_seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "At least first_seq"
+        },
+        "items": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Seqs the manifest lists, at most last_seq - first_seq + 1"
+        },
+        "clear_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "On quarantine.cleared only, required there: SHA-256 of clear-quarantine.json as applied"
+        },
+        "requested_by": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$",
+          "description": "On quarantine.cleared only, required there: the principal clear-quarantine.json names (not authenticated; the actor is the node)"
+        }
+      },
+      "description": "0.3: on quarantine.exported and quarantine.cleared only, required there. The stream is quarantine/<target.asset_id>."
     }
   },
   "allOf": [
@@ -535,6 +579,138 @@
             "suspension"
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "quarantine.exported",
+              "quarantine.cleared"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "quarantine",
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "required": [
+              "asset_id"
+            ]
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "quarantine"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "quarantine.exported"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "quarantine": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "clear_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "requested_by"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "quarantine.cleared"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "info"
+            ]
+          },
+          "quarantine": {
+            "required": [
+              "clear_sha256",
+              "requested_by"
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "outcome": {
+                "const": "succeeded"
+              }
+            },
+            "not": {
+              "required": [
+                "reason_code"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "outcome": {
+                "const": "info"
+              },
+              "reason_code": {
+                "const": "already_cleared"
+              }
+            },
+            "required": [
+              "reason_code"
+            ]
+          }
+        ]
       }
     }
   ]

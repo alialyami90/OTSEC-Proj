@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,7 +76,21 @@ type stateDoc struct {
 	// collector has written or opened; an older store is a restored copy
 	// and is refused (A6 on #90).
 	CredGeneration uint64 `json:"cred_generation,omitempty"`
+	// AdminNonces are the nonces of admin-signed requests spent and not
+	// yet expired, each with its expires_at (C7 0.4, D2-11).
+	AdminNonces map[string]string `json:"admin_nonces,omitempty"`
+	// AdminClockUTC is the latest clock reading at which an admin nonce
+	// was spent. Admin requests are judged, and nonces dropped, at no
+	// earlier time (AdminClock), so a clock put back cannot reopen the
+	// window of a request whose nonce is gone (A6 on #153).
+	AdminClockUTC string `json:"admin_clock_utc,omitempty"`
 }
+
+// MaxAdminNonces is how many unexpired admin nonces the state holds; past
+// it, signed requests are refused until some expire. No signed request
+// lives longer than authz.MaxAdminLifetime, so this bounds the rate of
+// admin requests at 256 per 15 minutes.
+const MaxAdminNonces = 256
 
 // familyFloor is authz.FamilyFloor as stored.
 type familyFloor struct {
@@ -215,7 +230,91 @@ func checkStateDoc(doc stateDoc) error {
 			return fmt.Errorf("installs: %v", err)
 		}
 	}
+	if len(doc.AdminNonces) > MaxAdminNonces {
+		return fmt.Errorf("admin_nonces: %d, limit %d", len(doc.AdminNonces), MaxAdminNonces)
+	}
+	if doc.AdminClockUTC != "" {
+		if _, err := time.Parse(time.RFC3339Nano, doc.AdminClockUTC); err != nil {
+			return fmt.Errorf("admin_clock_utc: %v", err)
+		}
+	}
+	for n, ts := range doc.AdminNonces {
+		if !adminNoncePattern.MatchString(n) {
+			return errors.New("admin_nonces: a nonce is not 22 base64url characters")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, ts); err != nil {
+			return fmt.Errorf("admin_nonces: %v", err)
+		}
+	}
 	return nil
+}
+
+// adminNoncePattern is the C7 0.4 nonce's shape (authz.AdminRequest).
+var adminNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+
+// AdminClock is the time admin requests are judged at: the clock, or the
+// latest time a nonce was spent if the clock is behind it. behind is how
+// far the clock is behind that time, zero when it is not.
+func (s *State) AdminClock() (at time.Time, behind time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.adminClock()
+}
+
+func (s *State) adminClock() (time.Time, time.Duration) {
+	now := s.now()
+	high, _ := time.Parse(time.RFC3339Nano, s.doc.AdminClockUTC) // checked on open; zero when unset
+	if high.After(now) {
+		return high, high.Sub(now)
+	}
+	return now, 0
+}
+
+// SpendAdminNonce records, durably, that the admin-signed request with
+// nonce and expiry has been decided. It runs after authz.VerifyAdminRequest
+// and before any other decision, so a request a later check refuses has
+// still spent its nonce, and a signed request is good for one decision,
+// across restarts too (D2-11). A nonce already held is refused with check
+// replay, and a request past MaxAdminNonces with check capacity.
+//
+// Expired nonces are dropped as it writes, judged at AdminClock, and the
+// spend raises AdminClockUTC to that time. A dropped nonce has therefore
+// expired by AdminClock, which never goes back, so VerifyAdminRequest at
+// AdminClock refuses its request as expired even after the clock is put
+// back (A6 on #153). A clock set forward keeps AdminClock forward with
+// it: admin requests are refused as expired until real time catches up,
+// the safe side, and the collector raises an alarm while the clock is
+// behind (Pipeline).
+func (s *State) SpendAdminNonce(nonce string, expires time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	now, _ := s.adminClock()
+	if !expires.After(now) {
+		// VerifyAdminRequest at AdminClock refuses this first; the state
+		// holds the rule itself as well.
+		return &authz.AdminRejected{Check: authz.AdminCheckWindow, Reason: "expired by the admin clock"}
+	}
+	if _, spent := s.doc.AdminNonces[nonce]; spent {
+		return &authz.AdminRejected{Check: authz.AdminCheckReplay, Reason: "nonce already spent"}
+	}
+	kept := make(map[string]string, len(s.doc.AdminNonces)+1)
+	for n, ts := range s.doc.AdminNonces {
+		t, _ := time.Parse(time.RFC3339Nano, ts) // checked on open and on write
+		if t.After(now) {
+			kept[n] = ts
+		}
+	}
+	if len(kept) >= MaxAdminNonces {
+		return &authz.AdminRejected{Check: authz.AdminCheckCapacity, Reason: fmt.Sprintf("%d unexpired admin nonces held", len(kept))}
+	}
+	kept[nonce] = expires.UTC().Format(time.RFC3339Nano)
+	next := s.doc
+	next.AdminNonces = kept
+	next.AdminClockUTC = now.UTC().Format(time.RFC3339Nano)
+	return s.write(next)
 }
 
 // NextSeq hands out the next collector_seq number, written durably first. A

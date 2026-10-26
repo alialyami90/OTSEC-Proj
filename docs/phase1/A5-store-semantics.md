@@ -1,4 +1,4 @@
-# C5 `otsec.store/0.2`: store, outbox and delivery semantics
+# C5 `otsec.store/0.3`: store, outbox and delivery semantics
 
 Owner: A5. Reviewers: A4, A6, A3. Brief: P1-A5 in [../agent-handoffs.md](../agent-handoffs.md). Code: [contracts/store](../../contracts/store/). Status: draft for review, 2026-10-24; revised for A4's review ([reviews/C5-A4.md](reviews/C5-A4.md)), A3's review (`reviews/C5-A3.md`, PR #37), A6's review (`reviews/C5-A6.md`, PR #40) and A1's decisions D1-3 to D1-5 and D1-11.
 
@@ -57,6 +57,10 @@ Native evidence: a `Record` may point at a `Capture` (a whole SER report, a data
 - **No forced prune.** C5 0.1 has no path that prunes past the boundary, under storage pressure or otherwise. A full store stops intake (section 6) and drains (section 4a). D1-5 requires any future forced prune to be an explicit loss with a gap marker and an audit record; it would need a C5 version change and A1's approval.
 - **A stream with no consumer is never pruned** (`no-consumers`). The site is the system of record (Q6), and V-S9 allows no un-forwarded native record to be evicted. A node with no upstream configured fills its quota and then applies the storage-full policy.
 - **Pruning happens in small transactions** (*(proposed)* 50 events), because one large delete can need more WAL than a full disk has (E-A5-3).
+- **0.3, discarding from a quarantine stream (D3-1).** A stream whose ID starts with `quarantine/` (`QuarantinePrefix`) holds outcomes the node refused. No consumer reads it, so it is never pruned. `Discarder.Discard` is the only other way an event leaves a store. It removes named seqs of such a stream, with their native bytes, normalized form and any capture no retained record of any stream still refers to, in one transaction at `FULL`. It exists to carry out an administrator's clear that the node has already audited and checked (audit before act). Nothing calls it on its own. Its rules:
+  - It refuses, with `invalid` and nothing removed: a stream outside the prefix, a stream a declared consumer reads or that has a persisted cursor, an empty list, more than `DiscardStepEvents` seqs, a repeated seq and seq 0 (`CheckDiscard`, `TestDiscardRefusals`).
+  - A named seq that is no longer stored is skipped, not refused, so a clear stopped partway is finished by calling it again with the same seqs (`TestDiscardNamedSeqs`).
+  - One call removes at most 16 events (`DiscardStepEvents`). Named seqs can sit anywhere in a stream, so each one can touch its own pages: the event's leaf, the capture's, and their index leaves. Measured over a 40,000-event stream with a 1 KiB capture per event, 16 seqs spread across it wrote 387 KB of WAL, inside `WALBoundBytes` (512 KiB), which the recovery reserve is twice. 50 seqs wrote 997 KB, nearly the whole reserve (`TestDiscardStepWALBound`; evidence class: simulated).
 
 ## 4. Startup recovery order
 

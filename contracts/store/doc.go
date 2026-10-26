@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.2: how a site node keeps,
+// Package store is contract C5, otsec.store/0.3: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5. Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
@@ -14,7 +14,10 @@
 //   - The outbox and consumer cursors: at-least-once delivery, required and
 //     best-effort consumers, and a prune boundary derived from persisted
 //     cursors on every call, never from memory (Outbox, CursorStore,
-//     Boundary, ComputeBoundary, Pruner).
+//     Boundary, ComputeBoundary, Pruner). Since 0.3, the named events of a
+//     quarantine stream, which no consumer reads, can be removed in bounded
+//     steps to carry out an administrator's audited clear (Discarder,
+//     QuarantinePrefix, DiscardStepEvents, D3-1).
 //   - The startup recovery order on a store that may be full: the reserve is
 //     released before the store is first opened, a failed release stops
 //     startup, nothing else opens the store before recovery completes, and a
@@ -47,4 +50,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.2"
+const Identifier = "otsec.store/0.3"

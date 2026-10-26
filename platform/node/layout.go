@@ -33,9 +33,7 @@ func SERStream(assetID string) c5.StreamID { return c5.StreamID("ser/" + assetID
 // consumer, so no Syslog target forwards it, and a C5 stream with no
 // consumer is never pruned (CodeNoConsumers): the quarantine stays on the
 // node until an operator deals with it, bounded only by the class quota.
-func QuarantineStream(assetID string) c5.StreamID { return c5.StreamID(quarantinePrefix + assetID) }
-
-const quarantinePrefix = "quarantine/"
+func QuarantineStream(assetID string) c5.StreamID { return c5.StreamID(c5.QuarantinePrefix + assetID) }
 
 // ListenerStream is the stream of the messages a listener receives.
 func ListenerStream(listenerID string) c5.StreamID { return c5.StreamID("syslog/" + listenerID) }
@@ -107,7 +105,7 @@ func (c *Config) Consumers() ([]c5.Consumer, error) {
 	}
 	var events []c5.StreamID
 	for s, class := range l.StreamClasses() {
-		if class != c5.ClassAudit && !strings.HasPrefix(string(s), quarantinePrefix) {
+		if class != c5.ClassAudit && !strings.HasPrefix(string(s), c5.QuarantinePrefix) {
 			events = append(events, s)
 		}
 	}

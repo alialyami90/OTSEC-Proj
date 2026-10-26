@@ -1,6 +1,6 @@
 # Admin-signed credential requests (C7 0.4 candidate, D2-11)
 
-Owner: A3. Status: the C7 candidate named by D2-11 (merged in #91), aligned with it. D2-11 called it 0.2; it moved to 0.3 when 0.2 took `asset.clear_suspension` (A1, condition 1 on the collector-clear design), and to 0.4 when 0.3 took `asset_suspended` (A6 on #120). **Phase 3 (P3-A3):** the C7 0.4 contract implements it (`contracts/authz/adminsig.go`), with these changes agreed with A1: every failure, replay included, is refused with the one code `admin_unverified` and a fixed detail naming the check, and the collector's audit record names the check (there is no `admin_replay`); the payload limit is 4 KiB, because a whole request is at most 8 KiB; `asset.clear_suspension` is signed with the same envelope, taken signed by the collector once the node relays the admin's signed file. The collector side follows in its own PR. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
+Owner: A3. Status: the C7 candidate named by D2-11 (merged in #91), aligned with it. D2-11 called it 0.2; it moved to 0.3 when 0.2 took `asset.clear_suspension` (A1, condition 1 on the collector-clear design), and to 0.4 when 0.3 took `asset_suspended` (A6 on #120). **Phase 3 (P3-A3):** the C7 0.4 contract implements it (`contracts/authz/adminsig.go`), with these changes agreed with A1: every failure, replay included, is refused with the one code `admin_unverified` and a fixed detail naming the check, and the collector's audit record names the check (there is no `admin_replay`); the payload limit is 4 KiB, because a whole request is at most 8 KiB; `asset.clear_suspension` is signed with the same envelope. The contract merged in #146. **The collector side** (`modules/security/collector`, P3-A3 part 2) verifies every request of a credential kind, and any request that carries `admin_signed`, against the `admin_keys` pinned in `collector.json`, spends the nonce in its state file before any other decision, and alarms with the failed check. It also takes a signed `asset.clear_suspension`, which needs no file from the administrators' folder; the node's unsigned clear with the folder file stays as the interim path until the A5 pair moves it. D2-11 requires this control to be merged before any `device-observed` endpoint, that is before D2-4 or D2-10 is lifted. Until then it is an open high risk.
 
 **Phase 2 condition (D2-11).** Until this control is merged, no credential installed in Phase 2 may be a vendor default password or a password used on any real device. At 10 installs an hour, a compromised node can test every published SEL factory password within the first hour, so the budget alone does not protect such a secret.
 
@@ -72,14 +72,16 @@ These run before any check of the 0.1 install, revoke or clear order. Each failu
 
 1. `admin_signed` is present for a credential kind, and absent for a run.
 2. `key_id` names a pinned admin key whose status is `active`, and `algorithm` is `ed25519`.
-3. The signature verifies over the prefix for the outer `kind` and the payload. The payload is at most 64 KiB.
+3. The signature verifies over the prefix for the outer `kind` and the payload. The payload is at most 4 KiB.
 4. The payload decodes strictly. `kind`, `principal`, `admin_key_id`, `node_id` and `install_key_id` match as in the table.
 5. The time window: `issued_at` is not more than 2 minutes ahead of the collector's clock, `expires_at` has not passed, and `expires_at` is no more than the fixed 15-minute maximum ahead of either `issued_at` or the collector's clock.
-6. **The nonce is spent durably before anything else is decided.** It is written to the state file, with its expiry, before the request reaches the install budget or the store. A request that a later check refuses has still spent its nonce, so a signed request is good for exactly one decision. A nonce already in the file is refused with `admin_replay`.
+6. **The nonce is spent durably before anything else is decided.** It is written to the state file, with its expiry, before the request reaches the install budget or the store. A request that a later check refuses has still spent its nonce, so a signed request is good for exactly one decision. A nonce already in the file is refused with `admin_unverified`, check `replay`.
 
-The state file keeps a nonce until its `expires_at` has passed. Nothing older than 15 minutes is ever kept, and the file holds at most 256 unexpired nonces; beyond that, requests are refused with `rate_limited`. A collector clock set back keeps nonces longer, which is safe. A clock set forward drops them early, but step 5 then refuses the same requests as expired.
+The state file keeps a nonce until its `expires_at` has passed. Nothing older than 15 minutes is ever kept, and the file holds at most 256 unexpired nonces; beyond that, requests are refused with `admin_unverified`, check `capacity`. A collector clock set back keeps nonces longer, which is safe. A clock set forward drops them early, but step 5 then refuses the same requests as expired.
 
 The install budget stays. It now bounds how fast a real admin can be pressed into signing.
+
+**The admin's client** issues a request with a lifetime well under the 15-minute maximum less the 2-minute skew allowance (A1 on #146); the test helpers use 10 minutes.
 
 ## Admin keys
 
@@ -108,7 +110,7 @@ The install budget stays. It now bounds how fast a real admin can be pressed int
 - A missing envelope, an unknown key, a revoked key, a key ID not derived from its key, another algorithm, a bad signature, a register-domain signature, an oversize payload and an unknown payload field are each refused with `admin_unverified`, before the budget or the store is touched.
 - Each signed-field mismatch is refused: kind, principal, admin key ID, node, install key ID, and the sealed secret replaced after signing.
 - A signature made for one operation, presented with another `kind`, is refused, and so is a signature made under another contract version's prefix.
-- Replay of the same request, including after a restart, is refused with `admin_replay`.
+- Replay of the same request, including after a restart, is refused with check `replay`.
 - A request a later check refuses still spends its nonce.
 - Expired, not yet valid and over-long windows are refused, including an `expires_at` that is within 15 minutes of `issued_at` but more than 15 minutes ahead of the collector's clock.
 - The 257th unexpired nonce is refused, and expiry frees space.
@@ -117,7 +119,7 @@ The install budget stays. It now bounds how fast a real admin can be pressed int
 ## Contract changes for C7 0.4
 
 - `CollectorRequest.AdminSigned` replaces `CredentialInstall`, `CredentialRevoke` and `CredentialClearSusp` on the wire. The body types stay, inside the payload.
-- New refusal codes: `admin_unverified` and `admin_replay`.
+- New refusal code: `admin_unverified`, with `check` naming the failed check (there is no `admin_replay`).
 - `AdminRequestSigningInput(kind, payload)` sits beside `RegisterSigningInput` and builds the per-operation prefix, plus a verifier like `VerifyRegisterPackage`, so that A6 can test the client and the collector against one definition.
 - The collector configuration gains `admin_keys`. That is A3's format, not a contract.
 - `asset.clear_suspension` (0.2) carries no signature: the collector trusts the administrators' folder's DACL for `clear-suspension.json`. When the file becomes a signed admin request (D2-15, "Interim only"), the same envelope carries it, with its own prefix, and the collector stops reading the folder.
