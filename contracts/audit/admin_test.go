@@ -76,6 +76,9 @@ func TestAdminFields(t *testing.T) {
 		"verified, actor another person": func(r *Record) {
 			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalHuman, ID: "bob@site-a", Role: authz.RoleAdmin}
 		},
+		"verified, actor differs only in case": func(r *Record) {
+			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalHuman, ID: "Admin@site-a", Role: authz.RoleAdmin}
+		},
 		"verified, actor the node": func(r *Record) {
 			r.Verified, r.Actor = testAdmin(), Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}
 		},
@@ -251,6 +254,8 @@ func TestRepeatOnlyFromAnAcceptance(t *testing.T) {
 	for name, r := range map[string]*Record{
 		"denied":         {Action: ActionCollectorRequest, Outcome: OutcomeDenied, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
 		"another action": {Action: ActionCredentialInstall, Outcome: OutcomeSucceeded, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
+		// A6: the action check on its own, with the outcome a repeat has.
+		"another action, allowed": {Action: ActionCredentialInstall, Outcome: OutcomeAllowed, CollectorSeq: 2, Verified: testAdmin(), RepeatOf: 1},
 	} {
 		if err := VerifyCollectorSeq([]*Record{start, r}, 0, 2); !errors.Is(err, ErrChainBroken) {
 			t.Errorf("%s covers the gap: %v", name, err)
