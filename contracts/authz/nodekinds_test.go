@@ -146,6 +146,12 @@ func TestAdminAcceptance(t *testing.T) {
 			a.Nonce = "x"
 			r.Admin = &a
 		},
+		// A6 on #184: a well-formed nonce that is not the payload's.
+		"another nonce": func(r *CollectorReply, _ **CollectorRequest) {
+			a := *r.Admin
+			a.Nonce = "AAAAAAAAAAAAAAAAAAAAAA"
+			r.Admin = &a
+		},
 		"unsigned request": func(_ *CollectorReply, sent **CollectorRequest) {
 			u := *req
 			u.AdminSigned = nil
