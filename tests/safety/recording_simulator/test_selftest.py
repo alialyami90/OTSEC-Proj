@@ -10,6 +10,7 @@ Run from the repository root:
 """
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -188,6 +189,14 @@ class TelnetInbandSelfTest(unittest.TestCase):
     def test_passwords_never_recorded(self):
         self.assertNotIn(INBAND_PASSWORD.decode(), self.raw_log)
         self.assertNotIn("wrongpw", self.raw_log)
+
+    def test_sent_bytes_are_recorded_in_order(self):
+        # Everything the client read is the start of what the log says the
+        # simulator sent (the client stops reading at its last marker).
+        sent = b"".join(base64.b64decode(e["b64"]) for e in self.events if e["event"] == "sent")
+        self.assertTrue(self.received)
+        self.assertEqual(sent[:len(self.received)], self.received)
+        self.assertIn(bytes([0xFF, 0xFE, 0x18, 0xFF, 0xFC, 0x01]), sent)
 
     def test_cr_nul_terminator_recognised(self):
         terms = {e["text"]: e["term"] for e in self.events if e["event"] == "line"}
