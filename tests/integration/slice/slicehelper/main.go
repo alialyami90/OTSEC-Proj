@@ -17,9 +17,12 @@
 //
 // install-credential is the administrator's step that the node relays in
 // production: it reads the collector's published install key, seals the
-// secret to it and sends credential.install over the collector socket as
-// a human principal. The secret comes from the environment, never argv
-// (V-S11).
+// secret to it, signs the request with the administrator's key (C7 0.4,
+// D2-11) and sends credential.install over the collector socket as a
+// human principal. The secret comes from the environment, never argv
+// (V-S11). The administrator's key is a test key setup makes for the run
+// and pins in collector.json; its seed stays under the run's root, outside
+// the collector's data, as the private key stays with the administrator.
 package main
 
 import (
@@ -82,7 +85,12 @@ type Layout struct {
 	FID           string `json:"fid"`
 	Serial        string `json:"serial"`
 	CredentialRef string `json:"credential_ref"`
+	// AdminKey is the test administrator's Ed25519 seed, made by setup.
+	AdminKey string `json:"admin_key"`
 }
+
+// adminPrincipal is the person the test administrator's key speaks for.
+var adminPrincipal = authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site-a"}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -209,6 +217,16 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 	}
 	env := register.Envelope{Contract: register.ContractID, Algorithm: "ed25519", KeyID: "a6-slice-release",
 		Payload: payload, Signature: ed25519.Sign(priv, authz.RegisterSigningInput(payload))}
+	// The administrator's key, made for this run: its seed for
+	// install-credential, its public half pinned in collector.json.
+	adminPub, adminPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	l.AdminKey = filepath.Join(root, "admin-test-key.seed")
+	if err := os.WriteFile(l.AdminKey, []byte(base64.StdEncoding.EncodeToString(adminPriv.Seed())), 0o600); err != nil {
+		return err
+	}
 	cfg := map[string]any{
 		"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
 		"ipc":           map[string]any{"address": l.Socket, "node_peer": strconv.Itoa(os.Getuid())},
@@ -216,6 +234,8 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string) error
 		"profiles":      []any{json.RawMessage(profile)},
 		"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
 		"registers":     []any{env},
+		"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
+			"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
 	}
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -285,7 +305,16 @@ func installCredential(root string) error {
 	if err := json.Unmarshal(kb, &key); err != nil {
 		return err
 	}
-	admin := authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site-a"}
+	admin := adminPrincipal
+	seed, err := os.ReadFile(l.AdminKey)
+	if err != nil {
+		return err
+	}
+	rawSeed, err := base64.StdEncoding.Strict().DecodeString(string(seed))
+	if err != nil || len(rawSeed) != ed25519.SeedSize {
+		return errors.New("the admin test key is not a base64 Ed25519 seed")
+	}
+	adminPriv := ed25519.NewKeyFromSeed(rawSeed)
 	ref := authz.CredentialRef{
 		ID: l.CredentialRef, AssetID: l.AssetID, NodeID: l.NodeID, EndpointID: "port1-telnet",
 		Transport: authz.TransportTelnet, Purpose: authz.PurposeCollectReadOnly, AccessLevel: "1",
@@ -302,9 +331,25 @@ func installCredential(root string) error {
 	client := collectorclient.New(collectorwire.Endpoint{Address: l.Socket, Peer: strconv.Itoa(os.Getuid())})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	nonce := make([]byte, authz.AdminNonceLen)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	signed, err := authz.SignAdminRequest(adminPriv, authz.AdminRequest{
+		Format: authz.AdminRequestFormat, Kind: authz.KindCredentialInstall, Principal: admin,
+		AdminKeyID: authz.AdminKeyID(adminPriv.Public().(ed25519.PublicKey)), NodeID: l.NodeID, InstallKeyID: key.KeyID,
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce), IssuedAt: now.Format(time.RFC3339),
+		// Under the 15-minute maximum less the 2-minute skew allowance, so
+		// a collector clock a little ahead still accepts it (A1 on #146).
+		ExpiresAt:         now.Add(10 * time.Minute).Format(time.RFC3339),
+		CredentialInstall: &authz.CredentialInstallBody{Ref: ref, Sealed: sealed},
+	})
+	if err != nil {
+		return err
+	}
 	resp, err := client.Do(ctx, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialInstall,
-		RequestID: "a6-slice-install", OnBehalfOf: admin, PolicyVersion: 3,
-		CredentialInstall: &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}})
+		RequestID: "a6-slice-install", OnBehalfOf: admin, PolicyVersion: 3, AdminSigned: signed})
 	if err != nil {
 		return err
 	}
