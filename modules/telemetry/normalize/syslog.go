@@ -68,13 +68,14 @@ const (
 	FlagFraming = "frame-invalid"
 )
 
-// rtacMaxMSG bounds the MSG read as an RTAC Logger message: the RTAC
-// limits a whole packet to 1024 bytes (S23 p. 636), so a longer MSG is not
-// one. Each part is kept as a field, the whole MSG as msg, and the tag and
-// message as the normalized subject and value, so without this bound one
-// frame's text would be stored up to four times and rendered three times
-// (A4 on #169).
-const rtacMaxMSG = 1024
+// rtacMaxPacket bounds a message read as an RTAC Logger message: the RTAC
+// sends RFC 3164 with a packet limit of 1024 bytes (S23 Section 8, p. 635;
+// RFC 3164 section 4.1 counts PRI and HEADER in it), so a longer message is
+// not one. Each part is kept as a field, the whole MSG as msg, and the tag
+// and message as the normalized subject and value, so without this bound
+// one frame's text would be stored up to four times and rendered three
+// times (A4 on #169).
+const rtacMaxPacket = 1024
 
 // SyslogInput is one received Syslog message and what the listener knows
 // about it.
@@ -208,6 +209,7 @@ func (in SyslogInput) check() error {
 
 // parsed is what the parser read from one message.
 type parsed struct {
+	frame       int // length of the whole message
 	status      event.ParseStatus
 	fields      []event.Field
 	time        *event.DeviceTime
@@ -225,7 +227,7 @@ func (p *parsed) add(name, value string) {
 // and the message is then partial. Fields may overlap: msg is the whole MSG
 // part, and tag and pid are read from its start.
 func parseSyslog(b []byte, d Dialect, rcv time.Time) parsed {
-	p := parsed{status: event.ParseFailed}
+	p := parsed{frame: len(b), status: event.ParseFailed}
 	pri, rest, ok := readPRI(b)
 	if !ok {
 		return p
@@ -659,10 +661,10 @@ const rtacPrefix = "RTAC Logger: "
 // Table 8.16 lists the Log Message and then the Logging Comment, when one is
 // set, after the tag; neither is delimited safely, so both stay in message,
 // and the split stops at five parts because they may hold ", ". It
-// reports false when the MSG does not have that shape or is longer than
-// rtacMaxMSG.
+// reports false when the MSG does not have that shape or the message is
+// longer than rtacMaxPacket.
 func rtac(p *parsed, b []byte) bool {
-	if len(b) > rtacMaxMSG || !bytes.HasPrefix(b, []byte(rtacPrefix)) || !utf8.Valid(b) {
+	if p.frame > rtacMaxPacket || !bytes.HasPrefix(b, []byte(rtacPrefix)) || !utf8.Valid(b) {
 		return false
 	}
 	parts := strings.SplitN(string(b[len(rtacPrefix):]), ", ", 5)

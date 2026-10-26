@@ -24,9 +24,9 @@ import (
 // (platform must not be a dependency of modules); a change on either side
 // must change both.
 const (
-	maxFrame      = 8192                             // receive.Limits.MaxMessage default
-	storedBound   = 8*maxFrame + 4<<10               // node: ReceivedRecordFactor × MaxMessage + ReceivedRecordOverhead
-	renderedBound = 2*(maxFrame+2*rtacMaxMSG) + 2048 // node.RecommendedTargetOctets
+	maxFrame      = 8192                                // receive.Limits.MaxMessage default
+	storedBound   = 8*maxFrame + 4<<10                  // node: ReceivedRecordFactor × MaxMessage + ReceivedRecordOverhead
+	renderedBound = 2*(maxFrame+2*rtacMaxPacket) + 2048 // node.RecommendedTargetOctets
 )
 
 // hostileFrames are frames of at most maxFrame bytes built to make the
@@ -56,7 +56,7 @@ func hostileFrames() map[string][]byte {
 		// RTAC: the longest MSG still read as RTAC, its text in the tag,
 		// in the message, and split between them; and longer ones.
 		at := func(parts ...string) []byte { return cut(hRTAC + strings.Join(parts, ", ")) }
-		room := rtacMaxMSG - len("RTAC Logger: 2015-03-21 12:09:58.593, I, S, , ")
+		room := rtacMaxPacket - len(hRTAC+"I, S, , ")
 		out["rtac-tag-"+name] = at("I", "S", strings.Repeat(c, room/len(c)), "m")
 		out["rtac-message-"+name] = at("I", "S", "T", strings.Repeat(c, room/len(c)))
 		out["rtac-split-"+name] = at("I", "S", strings.Repeat(c, room/2/len(c)), strings.Repeat(c, room/2/len(c)))
@@ -104,29 +104,29 @@ func TestSyslogSizeBounds(t *testing.T) {
 	t.Logf("largest stored %d (bound %d), largest rendered %d (bound %d)", maxStored, storedBound, maxRendered, renderedBound)
 }
 
-// A MSG over rtacMaxMSG is not read as an RTAC Logger message (S23 p. 636:
-// the RTAC limits a whole packet to 1024 bytes): it is partial, with the
-// whole MSG as msg and the host as its subject, no RTAC part is copied into
-// a field or the normalized subject or value, and its bytes and hashes are
-// kept like any other frame's.
+// A message over rtacMaxPacket is not read as an RTAC Logger message (S23
+// Section 8, p. 635: RFC 3164 with a 1024-byte packet limit): it is partial,
+// with the whole MSG as msg and the host as its subject, no RTAC part is
+// copied into a field or the normalized subject or value, and its bytes and
+// hashes are kept like any other frame's.
 func TestSyslogRTACOverlong(t *testing.T) {
 	head := "<190>Mar 21 2015 12:10:08 SEL-3530-xxxxxx "
 	body := "RTAC Logger: 2015-03-21 12:09:58.593, Informational, Security, SystemTags. X, "
-	for _, n := range []int{rtacMaxMSG, rtacMaxMSG + 1} {
-		msg := body + strings.Repeat("m", n-len(body))
-		e := mustSyslog(t, sysInput([]byte(head+msg), DialectRTAC))
+	for _, n := range []int{rtacMaxPacket, rtacMaxPacket + 1} {
+		frame := []byte(head + body + strings.Repeat("m", n-len(head)-len(body)))
+		msg := string(frame[len(head):])
+		e := mustSyslog(t, sysInput(frame, DialectRTAC))
 		f := fieldMap(e)
 		read := e.Collection.ParseStatus == event.ParseOK && f["tag"] == "SystemTags. X" && e.Normalized.Subject == "SystemTags. X"
-		if read != (n <= rtacMaxMSG) {
-			t.Errorf("MSG of %d bytes: status %s, fields %d, normalized %+v", n, e.Collection.ParseStatus, len(f), e.Normalized.Subject)
+		if read != (n <= rtacMaxPacket) {
+			t.Errorf("message of %d bytes: status %s, fields %d, normalized %+v", n, e.Collection.ParseStatus, len(f), e.Normalized.Subject)
 		}
-		if n > rtacMaxMSG && (f["msg"] != msg || e.Normalized.Subject != "SEL-3530-xxxxxx" || e.Normalized.Value != "" || e.DeviceTime != nil) {
-			t.Errorf("overlong MSG: fields %v, normalized %+v, device time %+v", len(f), e.Normalized, e.DeviceTime)
+		if n > rtacMaxPacket && (e.Collection.ParseStatus != event.ParsePartial || f["msg"] != msg || e.Normalized.Subject != "SEL-3530-xxxxxx" || e.Normalized.Value != "" || e.DeviceTime != nil) {
+			t.Errorf("overlong message: status %s, fields %v, normalized %+v, device time %+v", e.Collection.ParseStatus, len(f), e.Normalized, e.DeviceTime)
 		}
 		// Partial, never dropped: the frame's bytes and hashes are kept (R1.4).
-		frame := []byte(head + msg)
 		if nv := e.Native; nv == nil || !bytes.Equal(nv.Bytes, frame) || nv.RecordSHA256 != sha256hex(frame) || nv.RecordLength != int64(len(frame)) || nv.Evidence.SHA256 != sha256hex(frame) {
-			t.Errorf("MSG of %d bytes: native bytes or hashes not kept", n)
+			t.Errorf("message of %d bytes: native bytes or hashes not kept", n)
 		}
 	}
 }
