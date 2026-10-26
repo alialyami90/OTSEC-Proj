@@ -280,6 +280,13 @@ var replays = []replay{
 	{golden: "ok-missing-setting"},
 	{golden: "partial.parse_errors"},
 	{golden: "partial.read_rows_exceeded"},
+	// DATE_F from SHO G (register rev 4, D3-2): the three orders, and the
+	// three ways the order is unknown, which leave the rows unparsed.
+	{golden: "ok-date-ymd"},
+	{golden: "ok-date-dmy"},
+	{golden: "partial.parse_errors-date-f-unknown"},
+	{golden: "partial.parse_errors-date-f-missing"},
+	{golden: "partial.parse_errors-date-misfit"},
 	{golden: "refused.session_elevated"},
 	{golden: "refused.session_pending_password"},
 	{golden: "refused.language_probe_rejected"},
@@ -329,7 +336,10 @@ var replays = []replay{
 var floorCalls = map[string]string{
 	"ok": "before,confirmed", "ok-with-echo": "before,confirmed", "ok-missing-setting": "before,confirmed",
 	"partial.parse_errors": "before,confirmed", "partial.read_rows_exceeded": "before,confirmed",
-	"refused.password_prompt_absent": "before,confirmed", "refused.language_not_english": "before,confirmed",
+	"ok-date-ymd": "before,confirmed", "ok-date-dmy": "before,confirmed",
+	"partial.parse_errors-date-f-unknown": "before,confirmed", "partial.parse_errors-date-f-missing": "before,confirmed",
+	"partial.parse_errors-date-misfit": "before,confirmed",
+	"refused.password_prompt_absent":   "before,confirmed", "refused.language_not_english": "before,confirmed",
 	"refused.firmware_condition_not_met": "before,confirmed", "failed.identity_mismatch": "before,confirmed",
 	"failed.access_level_dropped": "before,confirmed", "failed.device_error": "before,confirmed",
 	"failed.timeout": "before,confirmed", "failed.transport_closed": "before,confirmed",
@@ -344,14 +354,16 @@ var floorCalls = map[string]string{
 	"failed.auth_rejected": "before", "failed.unexpected_access_level": "before", "failed.internal": "before",
 }
 
-// reportsTIDLE are the replays whose SHO P 1 reply shows an English port
-// with TIDLE := 15, so Config.TIDLE is called once with 15 minutes. No other
-// replay calls it: the Spanish port's TIDLE is not read (D16).
+// reportsTIDLE are the replays that end ok or partial after a SHO P 1 reply
+// showing an English port with TIDLE := 15, so Config.TIDLE is called once
+// with 15 minutes. No other replay calls it: a failed or refused run's
+// TIDLE is not reported, though SHO P 1 showed it (P3-A2), and the Spanish
+// port's TIDLE is not read at all (D16).
 var reportsTIDLE = map[string]bool{
 	"ok": true, "ok-with-echo": true, "ok-missing-setting": true, "partial.parse_errors": true,
-	"partial.read_rows_exceeded": true, "refused.firmware_condition_not_met": true, "failed.identity_mismatch": true,
-	"failed.access_level_dropped": true, "failed.device_error": true, "failed.timeout": true,
-	"failed.transport_closed": true, "failed.response_too_large": true, "failed.unexpected_password_prompt": true,
+	"partial.read_rows_exceeded": true, "ok-date-ymd": true, "ok-date-dmy": true,
+	"partial.parse_errors-date-f-unknown": true, "partial.parse_errors-date-f-missing": true,
+	"partial.parse_errors-date-misfit": true,
 }
 
 func TestReplayGoldens(t *testing.T) {
@@ -434,11 +446,7 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown": "a 0.6 result read by a 0.5 reader; no 0.5 adapter writes it",
-	// Both arrive in Run with the DATE_F read and the before-connect path
-	// check (P3-A2, the sel751 PR after C2 0.5).
-	"ok-with-settings":                   "SHO G and DATE_F are not read by Run yet (P3-A2, next PR)",
-	"refused.endpoint_path":              "refused before Run by the collector until Run's own path check lands (P3-A2, next PR)",
+	"failed.unknown":                     "a 0.6 result read by a 0.5 reader; no 0.5 adapter writes it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",
@@ -504,6 +512,9 @@ var beforeConnect = []struct {
 	}},
 	{"refused.firmware_not_allowlisted", func(f *inputs, _ *Config) { f.declare("firmware_id", fidDenied) }},
 	{"refused.credential_unavailable", func(_ *inputs, cfg *Config) { cfg.Secret = nil }},
+	// C1 0.2 (D2-16, H-13): a port server gets no session, and no dial.
+	// TestEndpointPathRefused covers no path and an unknown path.
+	{"refused.endpoint_path", func(f *inputs, _ *Config) { f.asset.Endpoints[0].Path = asset.PortServer }},
 	{"failed.connect", nil},
 }
 

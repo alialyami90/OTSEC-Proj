@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -133,11 +134,23 @@ func hostedFixture(t *testing.T) (*pipeFixture, net.Listener) {
 		withAsset(func(a *asset.Asset) { a.Endpoints[0].Port = port }),
 		func(c *PipelineConfig, f *pipeFixture) { c.Runner = &SEL751Runner{Alarm: c.Alarm} },
 	)
+	// The register on main (revision 4): its context read puts SHO G before
+	// SER, as the C2 goldens do (C3 0.2, D3-2).
+	if _, err := f.registers.Activate(signedRegister(t, readFixtureFrom(t, "../../../contracts/register/testdata/sel-751.json"), f.release, "release-2026")); err != nil {
+		t.Fatal(err)
+	}
 	reply, work := f.pipe.Handle(context.Background(), installRequest(t, f, pipeRef(1), canary))
 	if !reply.Accepted() || work != nil {
 		t.Fatalf("install: %+v", reply)
 	}
 	return f, l
+}
+
+// hostedReq is pipeRun at the register revision hostedFixture activates.
+func hostedReq(op, cred string) *authz.CollectorRequest {
+	r := pipeRun(op, cred)
+	r.Run.RegisterVersion = 4
+	return r
 }
 
 // hostedRun runs one request against a far end playing turns.
@@ -322,7 +335,7 @@ func TestSEL751RunnerGoldens(t *testing.T) {
 			t.Parallel()
 			f, l := hostedFixture(t)
 			want := goldenResult(t, c.golden)
-			_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.ser.read_all", pipeCred), replayTurns(want), c.hangUp)
+			_, res, recs, _ := hostedRun(t, f, l, hostedReq("sel.ser.read_all", pipeCred), replayTurns(want), c.hangUp)
 			if resultCode(res) != resultCode(want) || res.Transcript.SHA256 != want.Transcript.SHA256 {
 				t.Fatalf("result %s (transcript %s), want %s (%s)", resultCode(res), res.Transcript.SHA256, resultCode(want), want.Transcript.SHA256)
 			}
@@ -371,7 +384,7 @@ func TestSEL751RunnerFailureBeforeOperate(t *testing.T) {
 				t.Fatalf("turn %d expects %q, want %q: the ok golden changed", c.turns, got, c.last)
 			}
 			f, l := hostedFixture(t)
-			_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.ser.read_all", pipeCred), ok[:c.turns], true)
+			_, res, recs, _ := hostedRun(t, f, l, hostedReq("sel.ser.read_all", pipeCred), ok[:c.turns], true)
 			if resultCode(res) != adapter.FailedTransportClosed {
 				t.Fatalf("result %s", resultCode(res))
 			}
@@ -390,7 +403,7 @@ func TestSEL751RunnerLevel0(t *testing.T) {
 	f, l := hostedFixture(t)
 	ok := replayTurns(goldenResult(t, "ok"))
 	turns := append(ok[:4:4], ok[len(ok)-1]) // wake, QUI probe, ID; then the closing QUI
-	_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.id", ""), turns, false)
+	_, res, recs, _ := hostedRun(t, f, l, hostedReq("sel.id", ""), turns, false)
 	if res.Status != adapter.StatusOK || res.Session.CredentialSent || !res.Session.QuitSent {
 		t.Fatalf("result %s: %+v", resultCode(res), res.Session)
 	}
@@ -429,7 +442,7 @@ func TestSEL751RunnerPasswordPromptSetsFloor(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f, l := hostedFixture(t)
-			_, res, recs, _ := hostedRun(t, f, l, pipeRun("sel.id", ""), c.turns, false)
+			_, res, recs, _ := hostedRun(t, f, l, hostedReq("sel.id", ""), c.turns, false)
 			if resultCode(res) != adapter.FailedInternal || res.Session.WakeSent != c.wake || res.Session.CredentialSent {
 				t.Fatalf("result %s: %+v", resultCode(res), res.Session)
 			}
@@ -507,7 +520,7 @@ func TestSEL751RunnerCutEcho(t *testing.T) {
 	}
 	turns = turns[:i+1]
 	turns[i].reply = append([]byte(nil), canary[:5]...)
-	_, res, recs, wire := hostedRun(t, f, l, pipeRun("sel.ser.read_all", pipeCred), turns, true)
+	_, res, recs, wire := hostedRun(t, f, l, hostedReq("sel.ser.read_all", pipeCred), turns, true)
 	if bytes.Contains(res.Transcript.Data, canary[:5]) || bytes.Contains(wire, canary[:5]) {
 		t.Fatalf("part of the secret is stored: %q", res.Transcript.Data)
 	}
@@ -516,5 +529,32 @@ func TestSEL751RunnerCutEcho(t *testing.T) {
 	}
 	if !strings.HasPrefix(shape(recs), "device.session.open/succeeded credential.use/") {
 		t.Errorf("records %s", shape(recs))
+	}
+}
+
+// A context read is permitted only by a package that declares it (A3 on
+// D3-2): the C2 ok golden, with SHO G between SHO P 1 and SER, checked
+// against revision 3, which has no context, is a line on the wire the
+// register does not allow.
+func TestContextReadRefusedUnderRev3(t *testing.T) {
+	f := newPipeline(t) // revision 3 active
+	f.installCanary(t)
+	var m map[string]any
+	if err := json.Unmarshal(readFixtureFrom(t, "../../../contracts/adapter/testdata/results/valid/ok.json"), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["register_version"] = 3
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := adapter.DecodeResult(b); err != nil || !bytes.Contains(r.Transcript.Data, []byte("SHO G\r\n")) {
+		t.Fatalf("the ok golden has no SHO G: %v", err)
+	}
+	f.runner.result = b
+	f.run(t, pipeRun("sel.ser.read_all", pipeCred))
+	a := f.alarmList()
+	if len(a) != 1 || !strings.Contains(a[0].Error(), "does not allow") || !strings.Contains(a[0].Error(), "SHO G") {
+		t.Fatalf("alarms: %v", a)
 	}
 }
