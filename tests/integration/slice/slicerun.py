@@ -78,6 +78,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 import harness
@@ -90,6 +91,11 @@ REGISTER = os.path.join(harness.REPO, "tests", "safety", "recording_simulator", 
 
 
 SERVICE = os.environ.get("OTSEC_SLICE_SERVICE") == "1"
+# The installed services, their folders and the W-3 rule are machine-wide,
+# so in service mode one Slice holds the machine from start() to stop(): a
+# test that runs cases in threads (test_slice_failures_e2e) runs them one
+# after another there.
+_MACHINE = threading.Lock()
 SERVICES = {"node": "otsec-node", "collector": "otsec-collector"}
 # platform/winsvc: the W-3 rule, the T-5 WER value, the event log sources.
 FIREWALL_RULE = "otsec-node: no outbound Telnet (W-3)"
@@ -440,6 +446,8 @@ class Slice:
         sim = self.start_simulator(fid, framed=framed)
         self.relp_port = harness.free_port()
         if SERVICE:
+            _MACHINE.acquire()
+            self.holds_machine = True
             self.service = Installed(self.d, self.exe("otsec"), self.exe("otsec-collector"))
             atexit.register(self._teardown)
             sid = _run(["whoami", "/user", "/fo", "csv", "/nh"]).stdout.strip().split(",")[-1].strip('"')
@@ -589,6 +597,10 @@ class Slice:
             self._teardown()
         except AssertionError as e:
             failed = e
+        finally:
+            if getattr(self, "holds_machine", False):
+                self.holds_machine = False
+                _MACHINE.release()
         for name in ("node", "collector", "receiver", "simulator"):
             p = self.procs.get(name)
             if isinstance(p, ServiceProc) or p is None or p.poll() is not None:
