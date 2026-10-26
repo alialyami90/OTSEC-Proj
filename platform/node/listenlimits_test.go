@@ -243,6 +243,10 @@ func TestListenerCertExpiry(t *testing.T) {
 // received message's text whole is warned about at start; one sized at
 // RecommendedTargetOctets is not, and without listeners nothing is raised.
 func TestTargetSmallForListeners(t *testing.T) {
+	// A4's worst case on #169, an 8147-byte RTAC frame, renders at 21161.
+	if RecommendedTargetOctets != 22528 || RecommendedTargetOctets < 21161 {
+		t.Fatalf("RecommendedTargetOctets %d", RecommendedTargetOctets)
+	}
 	targets := func(nc *nodeconfigtest.Config) {
 		nc.AddRELPTarget("small", "127.0.0.1", 6514, "test-ca", "test-client", "V-S6-test", false)
 		nc.AddRELPTarget("whole", "127.0.0.1", 6515, "test-ca", "test-client", "V-S6-test", false)

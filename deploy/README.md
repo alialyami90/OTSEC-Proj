@@ -25,8 +25,8 @@ The platform quota needs headroom too. A forwarder passes an event that is too l
 
 With Syslog listeners (`platform/node/README.md`, "Syslog listeners"):
 
-- **The syslog quotas** must hold the unknown senders' share over the planned upstream outage (`syslog_outage_hours`, default 24 h) at A4's floor of 256 KiB an hour per listener: at least `listeners × 256 KiB × (1 + hours) × 4` per class, which is 25 MiB for one listener and 24 h. A `syslog-stream` quota also needs 4.25 MiB for one held batch. The node refuses a smaller quota at load and says what it needs (HR-11, D3-3). Size the quota for the known devices' traffic over the outage on top of that.
-- **Targets** should set `max_message_octets` to at least 18432. Below that, a long received message is forwarded with its hash and length only, and the node raises `target-small-for-listeners` at start.
+- **The syslog quotas** must hold the unknown senders' share over the planned upstream outage (`syslog_outage_hours`, default 24 h) at A4's floor of 256 KiB an hour per listener: at least `listeners × 256 KiB × (1 + hours) × 4` per class, which is 25 MiB for one listener and 24 h. A `syslog-stream` quota also needs 4.25 MiB for one held batch. The node refuses a smaller quota at load and says what it needs (HR-11, D3-3). Size the quota for the known devices' traffic over the outage on top of that. Each node restart during an outage lets unknown senders store one more hour's budget.
+- **Targets** should set `max_message_octets` to at least 22528. Below that, a long received message is forwarded with its hash and length only, and the node raises `target-small-for-listeners` at start.
 - **Listener certificates** are read at start only. Watch for `syslog-listener-certificate-expiring` (raised 30 days before expiry) and replace the files, then restart the node.
 
 ## Windows host rules (Phase 2)

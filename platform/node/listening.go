@@ -41,10 +41,16 @@ const ListenerCertWarning = 30 * 24 * time.Hour
 const AlarmTargetSmallForListeners = "target-small-for-listeners"
 
 // RecommendedTargetOctets fits a forwarded event holding a received
-// message of streamMaxMessage bytes: its text, escaped or carried as
-// base64, takes at most twice its length, and the header and structured
-// data take less than 2048 octets.
-const RecommendedTargetOctets = 2*streamMaxMessage + 2048
+// message of streamMaxMessage bytes: its text and the subject and value a
+// dialect takes from it (RTAC: up to renderedFieldMax bytes each), escaped
+// or carried as base64, take at most twice their length, and the rest of
+// the header and structured data less than 2048 octets (A4 on #169: an
+// 8147-byte RTAC frame renders at 21161 octets).
+const RecommendedTargetOctets = 2*(streamMaxMessage+2*renderedFieldMax) + 2048
+
+// renderedFieldMax is the longest subj or val C6 renders from a received
+// message's dialect fields.
+const renderedFieldMax = 1024
 
 // Listening runs the node's Syslog listeners (P3-A4): one receive.Receiver
 // per configured listener, committing to the listener's stream in the

@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
@@ -15,7 +16,9 @@ import (
 // UnknownBytes × (1 + T) in their class quota, which known devices share.
 // The node sizes UnknownBytes so that every listener of a class together
 // can take at most a quarter of that quota over the planned outage, and
-// refuses a quota too small for that. A received stream batch commits all
+// refuses a quota too small for that. Each node start refills the budget,
+// so a node restarted R times in the outage can store UnknownBytes × R more
+// from unknown senders. A received stream batch commits all
 // or nothing, so the quota must also hold one whole batch beside the
 // unknown share, or a large batch is held for good.
 const (
@@ -123,7 +126,7 @@ func (c *Config) ListenerSizings() (map[string]ListenerSizing, error) {
 }
 
 // limits is listener id's receive.Limits: A4's defaults with the sized
-// unknown budget.
+// unknown budget, per hour as the sizing assumes.
 func (sz ListenerSizing) limits() receive.Limits {
-	return receive.Limits{UnknownBytes: sz.UnknownBytes}
+	return receive.Limits{UnknownBytes: sz.UnknownBytes, UnknownWindow: time.Hour}
 }
