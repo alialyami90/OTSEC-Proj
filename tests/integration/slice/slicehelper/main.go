@@ -15,22 +15,24 @@
 // collector commissioned earlier, which is the state a site is in. It
 // prints a JSON object with the paths the suite needs.
 //
-// install-credential is the administrator's step that the node relays in
-// production: it reads the collector's published install key, seals the
-// secret to it, signs the request with the administrator's key (C7 0.4,
-// D2-11) and sends credential.install over the collector socket as a
-// human principal. The secret comes from the environment, never argv
-// (V-S11). The administrator's key is a test key setup makes for the run
-// and pins in collector.json; its seed stays under the run's root, outside
-// the collector's data, as the private key stays with the administrator.
+// install-credential is the administrator's step: it reads the
+// collector's published install key, seals the secret to it, signs the
+// credential.install with the administrator's key (C7 0.4, D2-11) and
+// leaves it in admin_dir as an admin-request file, which the running node
+// relays to the collector (P3-A5, #181). It then waits for node status to
+// show the collector's decision. The secret comes from the environment,
+// never argv (V-S11). The administrator's key is a test key setup makes
+// for the run and pins in collector.json; its seed stays under the run's
+// root, outside the collector's data, as the private key stays with the
+// administrator.
 package main
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -45,9 +47,8 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collector"
-	"otsec.local/otsec/modules/security/collectorclient"
-	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/modules/security/seal"
+	"otsec.local/otsec/platform/node"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
 )
@@ -87,6 +88,20 @@ type Layout struct {
 	CredentialRef string `json:"credential_ref"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
+}
+
+// leaveAdminFile writes an administrator's file into admin_dir as one
+// would on Linux, where the rule is the mode: the directory opened for the
+// write and closed again (0550), and the file read-only (0440).
+func leaveAdminFile(dir, name string, b []byte) error {
+	if err := os.Chmod(dir, 0o750); err != nil {
+		return err
+	}
+	err := os.WriteFile(filepath.Join(dir, name), b, 0o440)
+	if cerr := os.Chmod(dir, 0o550); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // adminPrincipal is the person the test administrator's key speaks for.
@@ -328,9 +343,6 @@ func installCredential(root string) error {
 	if err != nil {
 		return err
 	}
-	client := collectorclient.New(collectorwire.Endpoint{Address: l.Socket, Peer: strconv.Itoa(os.Getuid())})
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
 	nonce := make([]byte, authz.AdminNonceLen)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
@@ -348,14 +360,36 @@ func installCredential(root string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := client.Do(ctx, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialInstall,
-		RequestID: "a6-slice-install", OnBehalfOf: admin, PolicyVersion: 3, AdminSigned: signed})
+	file, err := json.Marshal(map[string]any{"schema": node.AdminRequestFileSchema, "kind": authz.KindCredentialInstall, "signed": signed})
 	if err != nil {
 		return err
 	}
-	if !resp.Reply.Accepted() {
-		return fmt.Errorf("credential.install refused: %+v", resp.Reply.Refusal)
+	name := "admin-request-install-" + hex.EncodeToString(nonce) + ".json"
+	if err := leaveAdminFile(l.AdminDir, name, file); err != nil {
+		return err
 	}
-	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(resp.Reply.CollectorSeq, 10) + `}`)
+	// The node relays it within node.RelayEverySeconds; the collector's
+	// decision shows in node status.
+	var decided node.AdminRequestStatus
+	deadline := time.Now().Add(4 * node.RelayEverySeconds * time.Second)
+	for decided.State == "" || decided.State == "waiting" {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the node did not relay %s within %s (status: %+v)", name, 4*node.RelayEverySeconds*time.Second, decided)
+		}
+		time.Sleep(250 * time.Millisecond)
+		st, err := node.ReadStatus(filepath.Join(l.StoreDir, node.StatusFileName))
+		if err != nil {
+			continue // the node has not written status yet
+		}
+		for _, a := range st.AdminRequests {
+			if a.File == name {
+				decided = a
+			}
+		}
+	}
+	if decided.State != "accepted" {
+		return fmt.Errorf("credential.install %s: %s (%s)", name, decided.State, decided.Detail)
+	}
+	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(decided.CollectorSeq, 10) + `}`)
 	return nil
 }
