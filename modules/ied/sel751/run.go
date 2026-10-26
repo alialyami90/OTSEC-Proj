@@ -677,7 +677,7 @@ func (s *session) read(id string) adapter.Code {
 		s.detail = "the settings reply does not parse"
 		return adapter.FailedDeviceError
 	}
-	s.noteTIDLE(set)
+	s.noteTIDLE(id, set)
 	whole := adapter.Span{Offset: msg.off, Length: int64(len(msg.text))}
 	for _, w := range p.Warnings {
 		if w.ReadBy != id {
@@ -745,11 +745,13 @@ func (s *session) readContext(id string, set map[string]setting) {
 	}
 }
 
-// noteTIDLE keeps the port's Telnet time-out, the first time a reply shows
-// LANG := ENGLISH, the register's language precondition, and TIDLE is 1 to
-// 30 minutes, digits only (S22 Table 4.104).
-func (s *session) noteTIDLE(set map[string]setting) {
-	if s.tidle != 0 || !s.english(set) {
+// noteTIDLE keeps the port's Telnet time-out from the reply to the read
+// that serves the register's language precondition (SHO P 1), when it shows
+// LANG := ENGLISH and TIDLE is 1 to 30 minutes, digits only (S22 Table
+// 4.104). No other reply's TIDLE is taken, even when that one's is out of
+// range (A6 on #175): a context read such as SHO G is not the port's.
+func (s *session) noteTIDLE(id string, set map[string]setting) {
+	if s.tidle != 0 || !s.english(id, set) {
 		return
 	}
 	v, ok := set["TIDLE"]
@@ -776,11 +778,12 @@ func (s *session) reportTIDLE(code adapter.Code) {
 	}
 }
 
-// english reports whether these settings show LANG := ENGLISH and the
-// register makes that a precondition (ADR-0005).
-func (s *session) english(set map[string]setting) bool {
+// english reports whether these settings, read with id, show LANG :=
+// ENGLISH and the register makes that a precondition read with id
+// (ADR-0005).
+func (s *session) english(id string, set map[string]setting) bool {
 	for _, c := range s.cfg.Register.Preconditions {
-		if c.Setting == "LANG" && c.Equals == "ENGLISH" {
+		if c.Setting == "LANG" && c.Equals == "ENGLISH" && c.ReadBy == id {
 			v, ok := set["LANG"]
 			return ok && v.value == "ENGLISH"
 		}
