@@ -315,12 +315,13 @@ type CollectorReply struct {
 	// CollectorSeq numbers this decision among every event the collector
 	// reports (C7-A5-2). See the package documentation, "Collector sequence".
 	CollectorSeq uint64 `json:"collector_seq"`
-	// Repeat (since 0.5) is set on an accepted reply to admin-signed bytes
-	// the collector had already accepted: the collector did nothing again,
-	// numbered no new decision, and CollectorSeq is the first decision's
-	// number. See the package documentation, "The node kinds and the
-	// repeat answer".
-	Repeat bool `json:"repeat,omitempty"`
+	// RepeatOf (since 0.5) is set on an accepted reply to admin-signed
+	// bytes the collector had already accepted: the collector_seq of that
+	// first decision. The collector did nothing again; this reply has its
+	// own collector_seq like any other, so the node's rule that each reply
+	// is numbered above the last one it saw holds (A1 on #184). See the
+	// package documentation, "The node kinds and the repeat answer".
+	RepeatOf uint64 `json:"repeat_of,omitempty"`
 	// Admin (since 0.5) is set on every accepted reply to an admin-signed
 	// request stamped 0.5 or later, and on no other reply: what the
 	// collector verified.
@@ -359,9 +360,9 @@ func AnswersRepeat(contract string) bool {
 // sent, and returns what the collector verified. The node acts on its own
 // part of an admin request (a node kind, or its side of an asset clear)
 // only when this returns no error: the reply answers this request ID, is
-// accepted and numbered, and names the payload's hash, the envelope's key
-// and the request's person. A repeat passes it like a first acceptance:
-// the node's part must be idempotent.
+// accepted and numbered, answers a request stamped 0.5 or later, and names
+// the payload's hash, the envelope's key and the request's person. A repeat
+// passes it like a first acceptance: the node's part must be idempotent.
 func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
@@ -369,6 +370,11 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 	switch {
 	case sent == nil || sent.AdminSigned == nil:
 		return nil, errors.New("authz: the request sent is not admin-signed")
+	case !AnswersRepeat(sent.Contract):
+		// A collector answers a request stamped before 0.5 as 0.4 did;
+		// admin on such a reply is a misbehaving collector's, and the
+		// node does not act on it (A1 on #184).
+		return nil, fmt.Errorf("authz: the request sent is stamped %q, which gets no admin acceptance", sent.Contract)
 	case !r.Accepted():
 		return nil, errors.New("authz: the reply does not accept the request")
 	case r.RequestID != sent.RequestID:
@@ -389,22 +395,24 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 }
 
 // Validate checks the 0.5 fields against the reply's own stamp and status.
-// A reply stamped before 0.5 carries neither repeat nor admin, because no
-// collector of that minor wrote them; a refused reply carries neither; a
-// repeat is an accepted reply that names what the collector verified; and
-// admin, when present, is well formed. A reader runs it after strict
-// decoding (collectorwire.DecodeReply).
+// A reply stamped before 0.5 carries neither repeat_of nor admin, because
+// no collector of that minor wrote them; a refused reply carries neither; a
+// repeat names what the collector verified and an earlier decision than its
+// own number; and admin, when present, is well formed. A reader runs it
+// after strict decoding (collectorwire.DecodeReply).
 func (r CollectorReply) Validate() error {
-	if r.Admin == nil && !r.Repeat {
+	if r.Admin == nil && r.RepeatOf == 0 {
 		return nil
 	}
 	switch {
 	case !AnswersRepeat(r.Contract):
-		return fmt.Errorf("authz: a reply stamped %q carries repeat or admin, which need 0.%d", r.Contract, nodeKindsSince)
+		return fmt.Errorf("authz: a reply stamped %q carries repeat_of or admin, which need 0.%d", r.Contract, nodeKindsSince)
 	case r.Status != ReplyAccepted || r.Refusal != nil:
-		return errors.New("authz: a refused reply carries repeat or admin")
+		return errors.New("authz: a refused reply carries repeat_of or admin")
 	case r.Admin == nil:
 		return errors.New("authz: a repeat names nothing the collector verified")
+	case r.RepeatOf >= r.CollectorSeq:
+		return fmt.Errorf("authz: repeat_of %d is not an earlier decision than %d", r.RepeatOf, r.CollectorSeq)
 	}
 	a := r.Admin
 	switch {

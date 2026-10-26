@@ -114,9 +114,10 @@
         }
       }
     },
-    "repeat": {
-      "type": "boolean",
-      "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector did nothing again and numbered no new decision, so collector_seq is the first decision's number. Only with admin. Never on a reply stamped before 0.5."
+    "repeat_of": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector_seq of that first decision, lower than this reply's own. The collector did nothing again. Only with admin. Never on a reply stamped before 0.5."
     },
     "admin": {
       "type": "object",
@@ -188,7 +189,7 @@
         "anyOf": [
           {
             "required": [
-              "repeat"
+              "repeat_of"
             ]
           },
           {
@@ -204,7 +205,7 @@
     {
       "if": {
         "required": [
-          "repeat"
+          "repeat_of"
         ]
       },
       "then": {
@@ -218,7 +219,7 @@
         "anyOf": [
           {
             "required": [
-              "repeat"
+              "repeat_of"
             ]
           },
           {

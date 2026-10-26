@@ -96,7 +96,7 @@ func TestAdminAcceptance(t *testing.T) {
 		t.Fatalf("%+v %v", a, err)
 	}
 	repeat := ok
-	repeat.Repeat = true
+	repeat.RepeatOf = 7
 	if _, err := repeat.AdminAcceptance(req); err != nil {
 		t.Fatalf("repeat: %v", err)
 	}
@@ -108,9 +108,27 @@ func TestAdminAcceptance(t *testing.T) {
 		"no collector_seq":   func(r *CollectorReply, _ **CollectorRequest) { r.CollectorSeq = 0 },
 		"another request ID": func(r *CollectorReply, _ **CollectorRequest) { r.RequestID = "req-other" },
 		"names nothing":      func(r *CollectorReply, _ **CollectorRequest) { r.Admin = nil },
-		"stamped 0.4":        func(r *CollectorReply, _ **CollectorRequest) { r.Contract = "otsec.authz/0.4" },
+		"reply stamped 0.4":  func(r *CollectorReply, _ **CollectorRequest) { r.Contract = "otsec.authz/0.4" },
 		"repeat without admin": func(r *CollectorReply, _ **CollectorRequest) {
-			r.Repeat, r.Admin = true, nil
+			r.RepeatOf, r.Admin = 7, nil
+		},
+		"repeat of itself":      func(r *CollectorReply, _ **CollectorRequest) { r.RepeatOf = r.CollectorSeq },
+		"repeat of a later one": func(r *CollectorReply, _ **CollectorRequest) { r.RepeatOf = r.CollectorSeq + 1 },
+		// A1 on #184: a collector that answers a 0.4 request with admin
+		// is misbehaving, and the node does not act on it.
+		"request stamped 0.4": func(_ *CollectorReply, sent **CollectorRequest) {
+			u := *req
+			u.Contract = "otsec.authz/0.4"
+			*sent = &u
+		},
+		"refusal with admin": func(r *CollectorReply, _ **CollectorRequest) {
+			r.Status, r.Refusal = ReplyRefused, AdminRefusal(AdminCheckReplay)
+		},
+		"refusal with repeat_of": func(r *CollectorReply, _ **CollectorRequest) {
+			r.Status, r.Refusal, r.RepeatOf = ReplyRefused, AdminRefusal(AdminCheckReplay), 7
+		},
+		"accepted status with a refusal and repeat_of": func(r *CollectorReply, _ **CollectorRequest) {
+			r.Refusal, r.RepeatOf = AdminRefusal(AdminCheckReplay), 7
 		},
 		"other signed bytes": func(_ *CollectorReply, sent **CollectorRequest) { *sent = other },
 		"another key": func(r *CollectorReply, _ **CollectorRequest) {
@@ -186,8 +204,12 @@ func TestReplyValidate(t *testing.T) {
 	}
 	for name, edit := range map[string]func(r *CollectorReply){
 		"admin at 0.4":         func(r *CollectorReply) { r.Contract = "otsec.authz/0.4" },
-		"repeat at 0.4":        func(r *CollectorReply) { r.Contract, r.Repeat = "otsec.authz/0.4", true },
-		"repeat without admin": func(r *CollectorReply) { r.Repeat, r.Admin = true, nil },
+		"repeat at 0.4":        func(r *CollectorReply) { r.Contract, r.RepeatOf = "otsec.authz/0.4", 7 },
+		"repeat without admin": func(r *CollectorReply) { r.RepeatOf, r.Admin = 7, nil },
+		"repeat of itself":     func(r *CollectorReply) { r.RepeatOf = r.CollectorSeq },
+		"repeat_of on a refusal": func(r *CollectorReply) {
+			r.Status, r.Refusal, r.RepeatOf, r.Admin = ReplyRefused, AdminRefusal(AdminCheckReplay), 7, nil
+		},
 		"admin on a refusal": func(r *CollectorReply) {
 			r.Status, r.Refusal = ReplyRefused, AdminRefusal(AdminCheckReplay)
 		},

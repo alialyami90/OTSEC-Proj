@@ -122,8 +122,8 @@ func TestDecodeReplyStrict(t *testing.T) {
 		`{"contract":"otsec.authz/0.1","request_id":"r1","status":"refused","ſtatus":"accepted","collector_seq":7}`,
 		`{"contract":"otsec.authz/0.1","request_id":"r1","STATUS":"accepted","collector_seq":7}`,
 		// C7 0.5 fields its stamp or status rules out.
-		`{"contract":"otsec.authz/0.4","request_id":"r1","status":"accepted","collector_seq":7,"repeat":true}`,
-		`{"contract":"otsec.authz/0.5","request_id":"r1","status":"accepted","collector_seq":7,"repeat":true}`,
+		`{"contract":"otsec.authz/0.4","request_id":"r1","status":"accepted","collector_seq":7,"repeat_of":3}`,
+		`{"contract":"otsec.authz/0.5","request_id":"r1","status":"accepted","collector_seq":7,"repeat_of":3}`,
 	} {
 		if _, err := DecodeReply([]byte(s)); err == nil {
 			t.Errorf("accepted %s", s)

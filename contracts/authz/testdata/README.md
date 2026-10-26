@@ -16,6 +16,8 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
 | `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
 | `requests/invalid/invalid__asset-clear-suspension-stamped-0.1.json` | An asset clear stamped 0.1, which does not have that kind. |
+| `requests/invalid/invalid__node-quarantine-clear-stamped-0.4.json` | The signed quarantine clear golden stamped 0.4, which does not have the node kinds. |
+| `requests/invalid/invalid__node-seq-reset-ack-unsigned.json` | A reset acknowledgement with no signature: the node kinds exist only signed, and have no body outside the payload. |
 | `requests/invalid/invalid__body-does-not-match-kind.json` | Kind `run` with a revoke body. |
 | `requests/invalid/invalid__engineering-purpose.json` | A credential whose purpose is not `collect-readonly`. |
 | `requests/invalid/invalid__params-missing.json` | A run with no `params` object; it must be present, even if empty. |
@@ -44,10 +46,12 @@ Files under `replies/valid/` decode strictly and pass `CollectorReply.Validate`;
 | File | What it shows |
 | --- | --- |
 | `replies/valid/admin-accepted.json` | An accepted admin-signed request: what the collector verified. |
-| `replies/valid/admin-accepted-repeat.json` | The repeat answer for the same bytes: `repeat` set and the first decision's `collector_seq`, not a new one. |
+| `replies/valid/admin-accepted-repeat.json` | The repeat answer for the same bytes: a new `collector_seq` of its own, and `repeat_of` naming the first decision. |
 | `replies/valid/accepted-0.4.json` | A 0.4 reply with neither field. |
 | `replies/valid/refused-replay.json` | Another payload under a spent nonce: `admin_unverified`, check `replay`. |
 | `replies/invalid/repeat-stamped-0.4.json` | A repeat on a reply stamped 0.4, which no 0.4 collector writes. |
+| `replies/invalid/repeat-of-a-later-decision.json` | `repeat_of` not below the reply's own `collector_seq`. JSON Schema cannot compare two fields; `Validate` must. |
+| `replies/invalid/repeat-of-on-a-refusal.json` | `repeat_of` on a refused reply. |
 | `replies/invalid/admin-stamped-0.4.json` | `admin` on a reply stamped 0.4. |
 | `replies/invalid/repeat-without-admin.json` | A repeat that names nothing the collector verified. |
 | `replies/invalid/admin-on-a-refusal.json` | `admin` on a refused reply. |

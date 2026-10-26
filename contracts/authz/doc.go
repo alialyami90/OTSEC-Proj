@@ -202,12 +202,12 @@
 // the payload's SHA-256 and the decision's collector_seq, in the same store
 // as the nonce, under the same bound (MaxAdminNonces), and for exactly as
 // long. The same nonce with byte-identical payload bytes, which must still
-// pass every check in VerifyAdminRequest, is accepted again with Repeat
-// set: the collector does nothing again and numbers no new decision, and
-// the reply's collector_seq is the first decision's. The node's C8 record
-// of the repeat answer carries that number, so a reply lost before the
-// node recorded it leaves no gap once the repeat is recorded; a node that
-// had recorded it does not send again. Any other payload with a spent nonce is
+// pass every check in VerifyAdminRequest, is accepted again with RepeatOf
+// naming the first decision's collector_seq, and the collector does
+// nothing again. The repeat reply takes its own collector_seq like any
+// other, so the node keeps one rule, that each reply is numbered above the
+// last one it saw (A1 on #184), and its C8 record of the repeat names
+// repeat_of. Any other payload with a spent nonce is
 // refused as a replay, as before, so the answer tells a sender nothing it
 // did not already hold: only a sender with the exact signed bytes gets it.
 // A request refused after its nonce was spent is not repeated: its resend

@@ -15,7 +15,7 @@ import (
 // admin-signed requests and the admin_unverified refusal (D2-11). 0.5
 // added the admin-signed node kinds node.quarantine_clear and
 // node.seq_reset_ack, and on an accepted admin-signed request the repeat
-// answer (repeat) and what the collector verified (admin) (P3-A3, #181).
+// answer (repeat_of) and what the collector verified (admin) (P3-A3, #181).
 const ContractID = "otsec.authz/0.5"
 
 // AcceptsContract reports whether a reader of this package can read a
