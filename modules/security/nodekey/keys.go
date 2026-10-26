@@ -13,7 +13,7 @@ import (
 	"regexp"
 )
 
-// Provider names where a tls-client entry's key lives.
+// Provider names where a tls-key entry's key lives.
 type Provider string
 
 const (

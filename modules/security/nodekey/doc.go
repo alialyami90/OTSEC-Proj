@@ -18,7 +18,7 @@
 // the node, and read by the node with the protected-file rule. Each entry
 // has a kind, a version and a state:
 //
-//   - tls-client: a key the node signs with, and the certificate an
+//   - tls-key: a key the node signs with, and the certificate an
 //     administrator had a CA issue for it. It is pending from the key's
 //     creation (Request) until its certificate is installed (Install), then
 //     active; the version it replaces is retired. The entry holds the key's
