@@ -139,22 +139,30 @@ class Interrupter:
         recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
         return sum(r["event"] == "session_open" for r in recs) > sum(r["event"] == "session_close" for r in recs)
 
-    def _last_run_age(self):
+    def _last_run_at(self):
+        """When the collector accepted its last run, to the second, as Unix
+        time; None before the first."""
         last = self.s.collector_asset().get("last_run_utc")
         if not last:
             return None
-        return time.time() - calendar.timegm(time.strptime(last[:19], "%Y-%m-%dT%H:%M:%S"))
+        return calendar.timegm(time.strptime(last[:19], "%Y-%m-%dT%H:%M:%S"))
 
     def _idle(self, collector=False):
-        """No session open now; for the collector also a run started under
-        40 s ago, so the collector's 60 s minimum interval keeps the next
-        one at least 20 s away."""
+        """No session open now. For the collector also: the last run it
+        accepted started under 40 s ago, so the collector's 60 s minimum
+        interval keeps the next one at least 20 s away; and that run's
+        session has opened and closed, so a run accepted but not yet
+        connected is not taken for idle (A5 on #147, seed 564077: a kill
+        then left the failed-auth floor running past the wind-down)."""
         if self._session_open():
             return False
-        if collector:
-            age = self._last_run_age()
-            return age is not None and age < 40
-        return True
+        if not collector:
+            return True
+        at = self._last_run_at()
+        if at is None or time.time() - at >= 40:
+            return False
+        recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
+        return any(r["event"] == "session_close" and r["t"] >= at for r in recs)
 
     def one(self):
         kind = self.rng.choice(["receiver", "node", "simulator", "collector"])
