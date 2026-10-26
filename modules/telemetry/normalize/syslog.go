@@ -68,9 +68,13 @@ const (
 	FlagFraming = "frame-invalid"
 )
 
-// rtacMaxValue bounds normalized.value for the RTAC message: the RTAC
-// limits a whole packet to 1024 bytes (S23 p. 636).
-const rtacMaxValue = 1024
+// rtacMaxMSG bounds the MSG read as an RTAC Logger message: the RTAC
+// limits a whole packet to 1024 bytes (S23 p. 636), so a longer MSG is not
+// one. Each part is kept as a field, the whole MSG as msg, and the tag and
+// message as the normalized subject and value, so without this bound one
+// frame's text would be stored up to four times and rendered three times
+// (A4 on #169).
+const rtacMaxMSG = 1024
 
 // SyslogInput is one received Syslog message and what the listener knows
 // about it.
@@ -655,9 +659,10 @@ const rtacPrefix = "RTAC Logger: "
 // Table 8.16 lists the Log Message and then the Logging Comment, when one is
 // set, after the tag; neither is delimited safely, so both stay in message,
 // and the split stops at five parts because they may hold ", ". It
-// reports false when the MSG does not have that shape.
+// reports false when the MSG does not have that shape or is longer than
+// rtacMaxMSG.
 func rtac(p *parsed, b []byte) bool {
-	if !bytes.HasPrefix(b, []byte(rtacPrefix)) || !utf8.Valid(b) {
+	if len(b) > rtacMaxMSG || !bytes.HasPrefix(b, []byte(rtacPrefix)) || !utf8.Valid(b) {
 		return false
 	}
 	parts := strings.SplitN(string(b[len(rtacPrefix):]), ", ", 5)
@@ -674,10 +679,7 @@ func rtac(p *parsed, b []byte) bool {
 	if slices.Contains(dt.Flags, "invalid-time") {
 		p.status = event.ParsePartial
 	}
-	p.subject, p.subjectType = parts[3], SubjectRTACTag
-	if len(parts[4]) <= rtacMaxValue {
-		p.value = parts[4]
-	}
+	p.subject, p.subjectType, p.value = parts[3], SubjectRTACTag, parts[4]
 	return true
 }
 
