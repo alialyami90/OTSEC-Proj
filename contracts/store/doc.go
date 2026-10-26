@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.1: how a site node keeps,
+// Package store is contract C5, otsec.store/0.2: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5. Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
@@ -19,7 +19,10 @@
 //     released before the store is first opened, a failed release stops
 //     startup, nothing else opens the store before recovery completes, and a
 //     store with no reserve left is opened only with enough free space, and
-//     then only to drain (StartupEnv, RunStartup).
+//     then only to drain (StartupEnv, RunStartup). Since 0.2, an open that
+//     failed only because the database was busy or locked (CodeOpenBusy) is
+//     retried by Resume without a restart; every other failure still needs
+//     one (Report.OpenBusy, P3-A5, docs/phase2/A5-p3-failed-open-retry.md).
 //   - Storage-full behaviour per stream class and the alarms the store
 //     raises (StreamClass, FullAction, Quota, Alarm).
 //   - Audit records: one audit stream per node, sealed into the C8 hash
@@ -44,4 +47,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.1"
+const Identifier = "otsec.store/0.2"

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	c5 "otsec.local/otsec/contracts/store"
 )
 
 // A database left by a killed writer needs WAL recovery, which the first
@@ -97,5 +101,67 @@ func copyFile(t *testing.T, from, to string) {
 	defer dst.Close()
 	if _, err := io.Copy(dst, src); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// C5 0.2: an open that another connection holds busy past busy_timeout is
+// CodeOpenBusy, which Resume retries, and it opens once that connection
+// lets go. A file that is not a database is not, so it is never retried.
+func TestOpenBusyIsTyped(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out busy_timeout")
+	}
+	dir := storeDir(t)
+	open1(t, dir, evidenceDB, nil).Close()
+	path := filepath.Join(dir, string(evidenceDB.ID)+".db")
+	// In WAL mode an exclusive-locking connection holds the file for as
+	// long as it is open once it has read, so every other open is busy.
+	holder, err := sql.Open("sqlite", fileURI(path, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder.SetMaxOpenConns(1)
+	ctx := context.Background()
+	for _, q := range []string{"PRAGMA locking_mode=EXCLUSIVE", "BEGIN IMMEDIATE", "SELECT count(*) FROM meta", "COMMIT"} {
+		if _, err := holder.ExecContext(ctx, q); err != nil {
+			holder.Close()
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	env, err := NewEnv(Options{Dir: dir, Node: testNode, Database: evidenceDB})
+	if err != nil {
+		holder.Close()
+		t.Fatal(err)
+	}
+	_, err = env.Open(ctx)
+	holder.Close()
+	if !errors.Is(err, &c5.Error{Code: c5.CodeOpenBusy}) {
+		t.Fatalf("open beside an exclusive holder: %v, want %s", err, c5.CodeOpenBusy)
+	}
+	st, err := env.Open(ctx)
+	if err != nil {
+		t.Fatalf("open once the holder let go: %v", err)
+	}
+	st.Close()
+
+	bad := storeDir(t)
+	if err := os.WriteFile(filepath.Join(bad, string(evidenceDB.ID)+".db"), bytes.Repeat([]byte("not a database "), 512), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	benv, err := NewEnv(Options{Dir: bad, Node: testNode, Database: evidenceDB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := benv.Open(ctx); err == nil || errors.Is(err, &c5.Error{Code: c5.CodeOpenBusy}) {
+		t.Fatalf("open of a file that is not a database: %v", err)
+	}
+}
+
+func TestBusyReadsTheCodeNotTheText(t *testing.T) {
+	if busy(errors.New("database is locked (5) (SQLITE_BUSY)")) {
+		t.Fatal("busy matched an error's text")
+	}
+	if busy(nil) {
+		t.Fatal("busy(nil)")
 	}
 }
