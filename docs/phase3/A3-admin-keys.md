@@ -77,6 +77,15 @@ A reinstalled collector has a new install key. Every signed request is bound to 
 | Revoke | A request signed before the revocation is refused after the restart (check `key`). |
 | Reinstall | A request signed for the old install key is refused (check `binding`). |
 | Replay | The same signed request, after a restart, is refused (check `replay`) (`TestAdminReplayRefused`). |
+| Clock put back | Spend a request, move the clock past its expiry, spend another (which drops the first nonce), then put the clock back inside the first request's window: it is refused (check `window`), after a restart too, and the collector raises the "clock is behind" alarm (`TestAdminClockBack`, A6 on #153). |
+
+## Replay protection and the collector's clock
+
+Replay protection rests on the collector's clock. A spent nonce is kept until its request expires, and a request is judged at the **admin clock**. That is the collector's clock, or `admin_clock_utc` in `state.json` when the clock is behind it. `admin_clock_utc` is the latest time a nonce was spent, and it never goes back.
+
+- **A clock put back,** for example by an unauthenticated time source, cannot reopen the window of a request whose nonce was dropped. That request had expired by the admin clock, and the admin clock still says so.
+- **While the clock is more than the 2-minute skew behind the admin clock,** every admin request raises an alarm that names how far behind it is.
+- **A clock set wrongly forward carries the admin clock with it.** Admin requests are then refused as expired until real time catches up, which fails closed. If that wait is unacceptable, the recovery is a reinstall of the collector state, with its own rules (A1, collector_seq reset). Keep the collector host on an authenticated time source where the site has one.
 
 ## Not covered
 

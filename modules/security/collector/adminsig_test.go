@@ -91,6 +91,7 @@ func (f *pipeFixture) restart(t *testing.T) *Pipeline {
 		NodeID: testNode, PolicyVersion: policyVersion, State: st, Creds: store,
 		Registers: NewRegisters(st, nil), Runner: f.runner,
 		AdminKeys: []authz.AdminKey{testAdminKey()}, Now: f.clock.now,
+		Alarm: func(err error) { f.alarmMu.Lock(); f.alarms = append(f.alarms, err); f.alarmMu.Unlock() },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,6 +413,11 @@ func TestAdminNoncesInState(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
+	bad := good
+	bad.AdminClockUTC = "yesterday"
+	if err := checkStateDoc(bad); err == nil {
+		t.Error("bad admin clock accepted")
+	}
 	if err := checkStateDoc(good); err != nil {
 		t.Fatal(err)
 	}
@@ -422,4 +428,65 @@ func (s *State) anyNonce() string {
 		return n
 	}
 	panic(fmt.Sprint("no nonce in ", s.path))
+}
+
+// TestAdminClockBack (A6 on #153): once a nonce is dropped, putting the
+// clock back into its request's window does not make the request good
+// again, across a restart too, and the collector raises an alarm while
+// the clock is behind its last admin decision.
+func TestAdminClockBack(t *testing.T) {
+	f := newPipeline(t)
+	ctx := context.Background()
+	start := f.clock.now()
+	install := installRequest(t, f, pipeRef(1), canary)
+	if reply, _ := f.pipe.Handle(ctx, install); !reply.Accepted() {
+		t.Fatalf("install: %+v", reply)
+	}
+	// The clock jumps forward past the request's expiry and a later
+	// request is decided, which drops the first nonce.
+	f.clock.t = start.Add(time.Hour)
+	if reply, _ := f.pipe.Handle(ctx, installRequest(t, f, pipeRef(2), otherSecret)); !reply.Accepted() {
+		t.Fatalf("install 2: %+v", reply)
+	}
+	if n := len(f.reopenState(t).doc.AdminNonces); n != 1 {
+		t.Fatalf("%d nonces kept, want 1", n)
+	}
+	// The clock comes back inside the first request's window.
+	f.clock.t = start.Add(time.Minute)
+	alarms := len(f.alarmList())
+	for name, p := range map[string]*Pipeline{"same run": f.pipe, "after restart": f.restart(t)} {
+		reply, _ := p.Handle(ctx, install)
+		wantAdminRefusal(t, name, reply, authz.AdminCheckWindow)
+	}
+	behind := 0
+	for _, a := range f.alarmList()[alarms:] {
+		if strings.Contains(a.Error(), "behind the last admin decision") {
+			behind++
+		}
+	}
+	if behind != 2 {
+		t.Fatalf("%d clock alarms, want 2: %v", behind, f.alarmList()[alarms:])
+	}
+	// The state refuses it by itself too.
+	if err := f.reopenState(t).SpendAdminNonce(newAdminNonce(t), start.Add(10*time.Minute)); err == nil {
+		t.Fatal("a nonce expiring before the admin clock was spent")
+	}
+	// A request the administrator signs now, by a clock that is right, is
+	// judged at the admin clock and accepted while the collector's clock is
+	// behind.
+	f.clock.t = start.Add(time.Hour)
+	fresh := installRequest(t, f, pipeRef(3), canary)
+	f.clock.t = start.Add(time.Minute)
+	if reply, _ := f.pipe.Handle(ctx, fresh); !reply.Accepted() {
+		t.Fatalf("a fresh request while the clock is behind: %+v", reply)
+	}
+	// A clock within the skew raises no alarm.
+	f.clock.t = start.Add(time.Hour - time.Minute)
+	alarms = len(f.alarmList())
+	f.pipe.Handle(ctx, installRequest(t, f, pipeRef(4), otherSecret))
+	for _, a := range f.alarmList()[alarms:] {
+		if strings.Contains(a.Error(), "behind the last admin decision") {
+			t.Fatalf("alarm inside the skew: %v", a)
+		}
+	}
 }

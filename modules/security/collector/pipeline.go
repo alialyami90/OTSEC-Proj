@@ -262,7 +262,14 @@ func isCredentialKind(k authz.RequestKind) bool {
 // look.
 func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (*authz.AdminRequest, error) {
 	bind := authz.AdminBinding{NodeID: p.cfg.NodeID, InstallKeyID: p.cfg.Creds.InstallKey().KeyID}
-	admin, err := authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, p.cfg.Now())
+	// Judged at the state's admin clock, which never goes back, so a
+	// clock put back cannot reopen a spent request's window (A6 on #153).
+	at, behind := p.cfg.State.AdminClock()
+	if behind > authz.MaxAdminClockSkew {
+		p.cfg.Alarm(fmt.Errorf("collector: the clock is %s behind the last admin decision; %s request %s is judged at %s",
+			behind.Round(time.Second), req.Kind, req.RequestID, at.UTC().Format(time.RFC3339)))
+	}
+	admin, err := authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, at)
 	if err == nil {
 		err = p.cfg.State.SpendAdminNonce(admin.Nonce, admin.Expires())
 	}
