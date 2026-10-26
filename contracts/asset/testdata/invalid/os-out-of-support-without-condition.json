@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.asset/0.1",
+  "schema": "otsec.asset/0.2",
   "asset_id": "9a0c6e42-1f7b-4d38-a5c9-3e8b2d1f6a07",
   "node_id": "site-a-node1",
   "attributes": [

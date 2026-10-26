@@ -111,6 +111,7 @@
           },
           "host": "127.0.0.1",
           "id": "port1-telnet",
+          "path": "direct",
           "port": 2323,
           "target": "simulated",
           "transport": "telnet"
@@ -132,7 +133,7 @@
         "id": "sel-751-ascii",
         "version": "0.1"
       },
-      "schema": "otsec.asset/0.1"
+      "schema": "otsec.asset/0.2"
     }
   ],
   "targets": [],
@@ -149,5 +150,5 @@
   "collector_pipe": "\\\\.\\pipe\\otsec-collector",
   "collector_public_dir": "PUBLICDIR",
   "policy_version": 3,
-  "register_version": 3
+  "register_version": 4
 }

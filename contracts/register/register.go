@@ -9,8 +9,14 @@ import (
 	"otsec.local/otsec/contracts/internal/strictjson"
 )
 
-// ContractID is the identifier every register package carries.
-const ContractID = "otsec.register/0.1"
+// ContractID is the identifier this reader writes. A package carries it or
+// an earlier minor in Readable; a later minor is invalid here, because the
+// reader is strict (an unknown field is refused, never ignored).
+const ContractID = "otsec.register/0.2"
+
+// Readable lists the package contracts this reader decodes. A 0.1 package
+// reads as before; only 0.2 may carry context.
+var Readable = []string{"otsec.register/0.1", ContractID}
 
 // Classification of a register entry. The list an entry sits in fixes which
 // value it may carry: operations are read-only, session lines are
@@ -74,12 +80,15 @@ type Package struct {
 	// Warnings are posture checks that do not refuse: the collector reads
 	// them and reports each by ID, then collects (ADR-0005 MAXACC ruling,
 	// C3-2).
-	Warnings       []PostureWarning `json:"warnings,omitempty"`
-	Operations     []Operation      `json:"operations"`
-	SessionControl []SessionLine    `json:"session_control"`
-	Denied         []DenyRule       `json:"denied"`
-	Firmware       Firmware         `json:"firmware"`
-	Notes          []string         `json:"notes,omitempty"`
+	Warnings []PostureWarning `json:"warnings,omitempty"`
+	// Context lists settings an operation needs to be read correctly (DATE_F
+	// for the SER's dates). Added in 0.2 (D3-2).
+	Context        []ContextRead `json:"context,omitempty"`
+	Operations     []Operation   `json:"operations"`
+	SessionControl []SessionLine `json:"session_control"`
+	Denied         []DenyRule    `json:"denied"`
+	Firmware       Firmware      `json:"firmware"`
+	Notes          []string      `json:"notes,omitempty"`
 }
 
 // Source is a document the entries cite.
@@ -187,6 +196,37 @@ type PostureWarning struct {
 	Reason  string  `json:"reason"`
 }
 
+// ContextRead is a device setting that the operations in For need to be read
+// correctly, read with ReadBy before them in the same session (D3-2). It
+// refuses nothing by itself and changes no line. It permits ReadBy's line in
+// a session that runs an operation in For, which an operation outside For
+// does not get. The read is a line like any other: it counts against the
+// invocation's line and rate limits and is kept in the raw capture. A value
+// outside Values, or a reply that does not name the setting, leaves the
+// operation's output unreadable, never read with a guessed value.
+type ContextRead struct {
+	ID      string   `json:"id"`
+	Setting string   `json:"setting"` // e.g. "DATE_F"
+	ReadBy  string   `json:"read_by"` // an Operation ID
+	For     []string `json:"for"`     // Operation IDs
+	Values  []string `json:"values"`  // the values the consumer understands
+	Reason  string   `json:"reason"`
+}
+
+// ContextFor returns the context reads an operation needs, in package order.
+func (p *Package) ContextFor(op string) []ContextRead {
+	var out []ContextRead
+	for _, c := range p.Context {
+		for _, f := range c.For {
+			if f == op {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // Raised reports whether a value read from the device raises the warning. A
 // value that is not a decimal number, against a Max, raises it: a reading
 // the collector cannot interpret is reported, not passed. A setting missing
@@ -262,7 +302,9 @@ type Envelope struct {
 // SigningDomain is prefixed to the payload before signing and verifying, so a
 // register signature can never be valid for any other kind of signed message
 // (A3 review C3-A3-1). C7 builds the signing input from it
-// (authz.RegisterSigningInput).
+// (authz.RegisterSigningInput). It is a fixed tag, not the package's version:
+// it stays as it is in every minor, and the payload names its own contract
+// inside the signed bytes.
 const SigningDomain = "otsec.register/0.1 package\n"
 
 // Decode parses and validates a package strictly: unknown fields, duplicate
@@ -294,8 +336,14 @@ var (
 // Validate checks every rule in the package's documentation. The first
 // failure is returned.
 func (p *Package) Validate() error {
-	if p.Contract != ContractID {
-		return fmt.Errorf("register: contract %q, want %q", p.Contract, ContractID)
+	minor := -1
+	for i, c := range Readable {
+		if p.Contract == c {
+			minor = i + 1
+		}
+	}
+	if minor < 0 {
+		return fmt.Errorf("register: contract %q, want one of %q", p.Contract, Readable)
 	}
 	if !familyRe.MatchString(p.Family) {
 		return fmt.Errorf("register: family %q is not a product family ID", p.Family)
@@ -427,6 +475,14 @@ func (p *Package) Validate() error {
 			return fmt.Errorf("register: warning %s is read by %q, which is not an operation", w.ID, w.ReadBy)
 		}
 	}
+	if len(p.Context) != 0 && minor < 2 {
+		return fmt.Errorf("register: context is new in 0.2, so a %s package cannot carry it", p.Contract)
+	}
+	for _, c := range p.Context {
+		if err := p.checkContext(c, claim); err != nil {
+			return err
+		}
+	}
 	if err := p.validateFirmware(sources, ids); err != nil {
 		return err
 	}
@@ -487,6 +543,53 @@ func (p *Package) checkSetting(c SettingCheck, ids map[string]bool) error {
 		return fmt.Errorf("register: setting check %s is read by %q, which is not an operation", c.ID, c.ReadBy)
 	}
 	return nil
+}
+
+// checkContext applies A1's D3-2 conditions: read_by is an operation of this
+// package that runs in operate, at an access level no higher than that of
+// any operation in for, and it is not itself in for.
+func (p *Package) checkContext(c ContextRead, claim func(string) error) error {
+	if err := claim(c.ID); err != nil {
+		return err
+	}
+	if !settingRe.MatchString(c.Setting) || c.Reason == "" || len(c.For) == 0 || len(c.Values) == 0 {
+		return fmt.Errorf("register: context %s needs a setting, for, values and a reason", c.ID)
+	}
+	seen := map[string]bool{}
+	for _, v := range c.Values {
+		if !tokenRe.MatchString(v) || seen[v] {
+			return fmt.Errorf("register: context %s value %q is not [A-Z0-9]+ or is repeated", c.ID, v)
+		}
+		seen[v] = true
+	}
+	by := p.operation(c.ReadBy)
+	if by == nil || !by.InPhase(PhaseOperate) {
+		return fmt.Errorf("register: context %s is read by %q, which is not an operation run in operate", c.ID, c.ReadBy)
+	}
+	needs := map[string]bool{}
+	for _, f := range c.For {
+		o := p.operation(f)
+		if o == nil || needs[f] || f == c.ReadBy {
+			return fmt.Errorf("register: context %s is for %q, which is not another operation or is repeated", c.ID, f)
+		}
+		needs[f] = true
+		if !levelAtMost(by.AccessLevel, o.AccessLevel) {
+			return fmt.Errorf("register: context %s is read at access level %s, above %s's level %s", c.ID, by.AccessLevel, f, o.AccessLevel)
+		}
+	}
+	return nil
+}
+
+// levelAtMost reports whether access level a is no higher than b. Levels are
+// compared as numbers; a level that is not a number is compared only for
+// equality, so an order the format does not know is never assumed.
+func levelAtMost(a, b string) bool {
+	x, errA := strconv.ParseUint(a, 10, 8)
+	y, errB := strconv.ParseUint(b, 10, 8)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x <= y
 }
 
 func (p *Package) validateFirmware(sources, ids map[string]bool) error {

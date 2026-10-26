@@ -1,5 +1,5 @@
 // Package register is contract C3, the approved command register format
-// otsec.register/0.1 (A1 owns the format, A2 the content).
+// otsec.register/0.2 (A1 owns the format, A2 the content).
 //
 // A register package lists, for one device family, every line the collector
 // may send and the conditions under which it may send them. It serves risk 1
@@ -30,8 +30,28 @@
 //     conditions refuse a firmware branch (EHTTP := N), and warnings are
 //     reported by ID without refusing (MAXACC, FTPACC, HTTPACC above 1,
 //     C3-2).
+//   - Context reads (0.2, D3-2) name a setting an operation needs to be
+//     read correctly, read with another operation of the package in the
+//     same session: DATE_F, read with SHO G, for SER. A context read refuses
+//     nothing and adds no line; it lets the collector send its read_by line
+//     only in a run of an operation in for (adapter CheckLines). read_by
+//     runs in operate at an access level no higher than any operation in
+//     for. Its line counts against the run's line and rate limits and is
+//     kept in the raw capture like any other.
 //   - The firmware allowlist for the family ships in the same package, so it
 //     is covered by the same signature and anti-rollback floor (C-A2-2).
+//
+// # Versions
+//
+//   - 0.1: the Phase 1 format.
+//   - 0.2 adds context. This reader decodes 0.1 and 0.2 packages; a 0.1
+//     package with context is invalid. A later minor is invalid here, because
+//     the reader is strict, so a node that has not been upgraded refuses a
+//     0.2 package and keeps the floor it has (fail closed). The envelope's
+//     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),
+//     and the signed payload names its own contract. SigningDomain stays
+//     "otsec.register/0.1 package\n" in every minor, so a signature made over
+//     a 0.1 package is unchanged.
 //
 // Readers are strict: unknown fields, unknown parameter kinds and unknown
 // classifications make the package invalid. A package that fails validation

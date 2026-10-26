@@ -16,7 +16,9 @@ const TickInterval = 60 * time.Second
 
 // Run runs a node until ctx ends: C5 startup of every database, one
 // forwarder per target (NewForwarding, which stops the node on a bad TLS
-// reference), the scheduler through the collector at cfg's pipe, and
+// reference), one Syslog listener per configured listener (NewListening,
+// which stops the node on a bad TLS reference or an address it cannot
+// bind), the scheduler through the collector at cfg's pipe, and
 // Tick every TickInterval and Forwarding.Check every CheckInterval. oslog receives every alarm line (the Event Log under the
 // SCM, stderr otherwise). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
@@ -31,10 +33,22 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if err != nil {
 		return err
 	}
+	ls, err := NewListening(rt)
+	if err != nil {
+		return err
+	}
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
 	if err != nil {
 		return err
 	}
+	if err := ls.Listen(); err != nil {
+		return err
+	}
+	listened := make(chan struct{})
+	go func() {
+		defer close(listened)
+		ls.Run(ctx)
+	}()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -60,6 +74,10 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 				return
 			case <-t.C:
 				fw.Check(ctx)
+				if len(cfg.Listeners) > 0 {
+					ls.Publish()
+					st.Write(string(cfg.NodeID))
+				}
 			}
 		}
 	}()
@@ -72,6 +90,8 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	<-done
 	<-checked
 	<-forwarded
+	<-listened
+	ls.Publish()
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}

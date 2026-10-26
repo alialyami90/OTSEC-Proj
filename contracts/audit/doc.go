@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.2: the audit record every module
+// Package audit is contract C8, otsec.audit/0.3: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -85,6 +85,34 @@
 // VerifyCollectorSeqFrom takes and returns a SeqState, and VerifySuspensions
 // the open set. A record stamped 0.1 cannot carry any of these actions or
 // their fields.
+//
+// # Quarantine export and clear (0.3)
+//
+// Two node-written actions for the administrator's export and clear of an
+// asset's quarantine stream (P3-A5, A1 D3-1). Both have actor type node, a
+// target asset, and a quarantine object: the SHA-256 of the manifest the
+// node read, and first_seq..last_seq with the number of items it lists.
+// Every stored seq in that range is listed and nothing else, so the range
+// names exactly the verified set, and a clear removes only seqs in it.
+//
+//   - quarantine.exported (info): the node checked every listed item's
+//     event and capture hashes against its own stream. It records what the
+//     node checked, not that the export was kept anywhere, which the node
+//     cannot see.
+//   - quarantine.cleared: an administrator's clear-quarantine.json named a
+//     manifest the chain holds a quarantine.exported record for. Outcome
+//     succeeded means every item was re-checked and the clear is recorded
+//     before anything is removed (audit before act); the removal is resumed
+//     from this record, never from the file. Outcome info with reason
+//     already_cleared means the chain already held a clear of that manifest
+//     and the file changed nothing. It carries clear_sha256, the hash of the
+//     file applied, and requested_by, the principal the file names. The
+//     file is not signed, so requested_by is what it says, not who wrote
+//     it, and the actor stays the node, as on asset.suspension_clear, until
+//     a signed admin request (C7 0.4) replaces the file.
+//
+// A record stamped 0.2 or earlier cannot carry these actions or the
+// quarantine object.
 //
 // # What it leaves out
 //
