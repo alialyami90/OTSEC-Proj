@@ -19,6 +19,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	cnode "otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/modules/security/nodekey"
 )
 
 // ConfigSchema identifies the node configuration format. It is A5's file
@@ -58,9 +59,18 @@ type Config struct {
 	// register it was not commissioned with.
 	PolicyVersion   uint64 `json:"policy_version"`
 	RegisterVersion uint64 `json:"register_version"`
-	// TLSDir holds the files the targets' TLS references name (a Phase 2
-	// interim, lab only; see "TLS references" in the README). Required when
-	// a target names a reference.
+	// KeyRegister is the node key register, register.json (nodekey,
+	// credential design section 9; see "Node keys" in the README). With it,
+	// every TLS reference is a nodekey_ reference resolved from it.
+	KeyRegister string `json:"key_register,omitempty"`
+	// LabTLSFiles is the lab flag for private keys in files: the D2-12
+	// files in tls_dir, or, with key_register, the lab-files provider's
+	// keys in tls_dir. Without it tls_dir is refused.
+	LabTLSFiles bool `json:"lab_tls_files,omitempty"`
+	// TLSDir holds the files the TLS references name when there is no key
+	// register (D2-12, lab only; see "TLS references" in the README), or
+	// the lab-files provider's keys when there is one. It needs
+	// lab_tls_files.
 	TLSDir string `json:"tls_dir,omitempty"`
 	// AdminDir is where an administrator leaves the Phase 2 interim admin
 	// files, such as clear-suspension.json (see "Suspensions" in the
@@ -75,6 +85,8 @@ type Config struct {
 
 	assets  []asset.Asset
 	targets []*syslog.Target
+	// keys is the loaded key register (nodeKeys).
+	keys *keyStore
 }
 
 // StoreConfig is where the store lives and how much each class may use.
@@ -264,11 +276,8 @@ func (c *Config) check() error {
 				if ref == "" && field == "sender_ca_ref" {
 					continue
 				}
-				if !tlsRefPattern.MatchString(ref) || windowsDeviceName(ref) {
-					fail("%s.tls.%s %q is not a reference (%s, and not a Windows device name such as con)", p, field, ref, tlsRefPattern)
-				}
-				if c.TLSDir == "" {
-					fail("%s.tls.%s is set, so tls_dir is required", p, field)
+				if err := c.checkTLSRef(ref); err != nil {
+					fail("%s.tls.%s %v", p, field, err)
 				}
 			}
 		}
@@ -324,16 +333,22 @@ func (c *Config) check() error {
 			if ref == "" {
 				continue
 			}
-			if !tlsRefPattern.MatchString(ref) || windowsDeviceName(ref) {
-				fail("targets[%d].tls.%s %q is not a reference (%s, and not a Windows device name such as con)", i, field, ref, tlsRefPattern)
-			}
-			if c.TLSDir == "" {
-				fail("targets[%d].tls.%s is set, so tls_dir is required", i, field)
+			if err := c.checkTLSRef(ref); err != nil {
+				fail("targets[%d].tls.%s %v", i, field, err)
 			}
 		}
 	}
 	if c.TLSDir != "" && !filepath.IsAbs(c.TLSDir) {
 		fail("tls_dir %q is not an absolute path", c.TLSDir)
+	}
+	switch {
+	case c.TLSDir != "" && !c.LabTLSFiles:
+		fail("tls_dir is set without lab_tls_files: a private key in a file is lab only (D2-12; section 9 keys are in key_register)")
+	case c.LabTLSFiles && c.TLSDir == "":
+		fail("lab_tls_files is set, so tls_dir is required")
+	}
+	if c.KeyRegister != "" && !filepath.IsAbs(c.KeyRegister) {
+		fail("key_register %q is not an absolute path", c.KeyRegister)
 	}
 	if c.AdminDir != "" && !filepath.IsAbs(c.AdminDir) {
 		fail("admin_dir %q is not an absolute path", c.AdminDir)
@@ -465,4 +480,23 @@ func (c *Config) Asset(id string) (asset.Asset, bool) {
 		}
 	}
 	return asset.Asset{}, false
+}
+
+// checkTLSRef checks one TLS reference against the resolver the
+// configuration names: a nodekey_ reference with key_register, otherwise a
+// D2-12 file name in tls_dir. The error reads after the field's name.
+func (c *Config) checkTLSRef(ref string) error {
+	if c.KeyRegister != "" {
+		if !nodekey.RefPattern.MatchString(ref) {
+			return fmt.Errorf("%q is not a node key reference (%s); with key_register every TLS reference is one", ref, nodekey.RefPattern)
+		}
+		return nil
+	}
+	if !tlsRefPattern.MatchString(ref) || windowsDeviceName(ref) {
+		return fmt.Errorf("%q is not a reference (%s, and not a Windows device name such as con)", ref, tlsRefPattern)
+	}
+	if c.TLSDir == "" {
+		return errors.New("is set, so key_register, or tls_dir with lab_tls_files, is required")
+	}
+	return nil
 }

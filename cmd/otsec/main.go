@@ -449,6 +449,13 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintln(w, line)
 		}
 	}
+	for _, k := range st.NodeKeys {
+		verb := "EXPIRES"
+		if !time.Now().Before(k.NotAfter) {
+			verb = "EXPIRED"
+		}
+		fmt.Fprintf(w, "NODE KEY CERTIFICATE %s %s (%s) at %s: install a new version in the key register\n", verb, safe(k.Ref), safe(k.Kind), k.NotAfter.Format(time.RFC3339))
+	}
 	for _, id := range node.SortedListeners(st.Listeners) {
 		ls := st.Listeners[id]
 		state := "open"

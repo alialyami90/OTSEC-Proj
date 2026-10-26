@@ -39,6 +39,7 @@ type Status struct {
 	assets      map[string]AssetResult
 	runsHeld    string
 	listeners   map[string]ListenerStatus
+	nodeKeys    []NodeKeyExpiry
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -93,6 +94,9 @@ type StatusFile struct {
 	Assets map[string]AssetResult `json:"assets,omitempty"`
 	// Listeners is each Syslog listener's state (listening.go).
 	Listeners map[string]ListenerStatus `json:"listeners,omitempty"`
+	// NodeKeys are the key register's active entries whose certificate
+	// expires within NodeKeyWarning, or has expired (nodekeys.go).
+	NodeKeys []NodeKeyExpiry `json:"node_keys_expiring,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -245,6 +249,13 @@ func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Unlock()
 }
 
+// SetNodeKeys records the node key register's expiring entries.
+func (s *Status) SetNodeKeys(k []NodeKeyExpiry) {
+	s.mu.Lock()
+	s.nodeKeys = k
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -316,6 +327,7 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if len(s.listeners) > 0 {
 		f.Listeners = maps.Clone(s.listeners)
 	}
+	f.NodeKeys = slices.Clone(s.nodeKeys)
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
 		for n, ts := range s.targets {

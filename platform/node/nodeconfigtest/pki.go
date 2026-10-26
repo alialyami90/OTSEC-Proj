@@ -101,6 +101,33 @@ func (p *PKI) Issue(name string, usage x509.ExtKeyUsage) (tls.Certificate, error
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: k}, nil
 }
 
+// Sign signs a certificate request as the central CA signs a node key's
+// (nodekey.Register.Request): the request's key and common name, with the
+// name as a SAN as Issue gives it, for usage, valid until notAfter.
+func (p *PKI) Sign(csrDER []byte, usage x509.ExtKeyUsage, notAfter time.Time) ([]byte, error) {
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return nil, err
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, err
+	}
+	serial.Add(serial, big.NewInt(1))
+	name := csr.Subject.CommonName
+	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: name},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: notAfter,
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
+	if ip := net.ParseIP(name); ip != nil {
+		tmpl.IPAddresses = []net.IP{ip}
+	} else {
+		tmpl.DNSNames = []string{name}
+	}
+	return x509.CreateCertificate(rand.Reader, tmpl, p.ca, csr.PublicKey, p.caKey)
+}
+
+// CA is the test CA's certificate, DER.
+func (p *PKI) CA() []byte { return slices.Clone(p.ca.Raw) }
+
 // WriteListenerCredential issues a server certificate for host and writes
 // it and its key into c.TLSDir as <ref>.crt and <ref>.key, the files a TLS
 // listener's credential_ref names.
