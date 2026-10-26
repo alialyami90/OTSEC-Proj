@@ -322,10 +322,14 @@ var (
 )
 
 var (
-	hexSHA256     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	recordKind    = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`)
-	warningCode   = regexp.MustCompile(`^warn\.[a-z0-9_]+$`)
-	settingName   = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,15}$`)
+	hexSHA256   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	recordKind  = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`)
+	warningCode = regexp.MustCompile(`^warn\.[a-z0-9_]+$`)
+	settingName = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_]{0,15}$`) // a leading digit: S22 Table 4.84 names 51SAT
+	// settingValue: printable ASCII with no space at either end, so the
+	// value survives a JSON round trip byte for byte and the span check
+	// holds for every consumer (A4 on #164).
+	settingValue  = regexp.MustCompile(`^[!-~](?:[ -~]*[!-~])?$`)
 	adapterIDText = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 )
 
@@ -427,8 +431,8 @@ func (r Result) Validate() error {
 	seen := map[string]bool{}
 	for i, st := range r.Settings {
 		p := fmt.Sprintf("settings[%d]", i)
-		if !settingName.MatchString(st.Name) || st.Value == "" {
-			c.fail("%s: needs a setting name and a value", p)
+		if !settingName.MatchString(st.Name) || !settingValue.MatchString(st.Value) {
+			c.fail("%s: needs a setting name and a value of printable ASCII", p)
 		}
 		if seen[st.Name] {
 			c.fail("%s: %s is reported twice", p, st.Name)

@@ -25,6 +25,12 @@ import (
 //     posture warning or a firmware condition with, or a context setting
 //     for the invocation's operation (C3 0.2, D3-2). Nothing else, even when
 //     it is read-only: a context read for another operation is refused.
+//   - Each reported setting (0.5) is one a context read for the invocation's
+//     operation names, and its span lies in the reply to that read's line:
+//     the bytes received after it was sent and before the next send. So a
+//     DATE_F can only come from the SHO G reply, never from a SER row that
+//     happens to hold "MDY" (A4 on #164). Validate checks that the span
+//     selects the value; this checks where the value came from.
 func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 	m, err := register.NewMatcher(p)
 	if err != nil {
@@ -62,7 +68,10 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 		return fmt.Errorf("adapter: lines: the segments do not cover the transcript")
 	}
 	ss, _ := sends(r.Transcript)
-	for _, x := range ss {
+	// replyTo[i] is the operation whose line send i was, when it was an
+	// operate line the register knows; its reply runs to the next send.
+	replyTo := make([]string, len(ss))
+	for i, x := range ss {
 		at := fmt.Sprintf("transcript.segments[%d]", x.seg)
 		if x.cred || (x.phase == PhaseProbe && isWake(x.b)) {
 			continue
@@ -80,6 +89,7 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 		if x.phase != PhaseOperate || v != register.VerdictOperation {
 			continue
 		}
+		replyTo[i] = id
 		if !reads[id] {
 			fail("%s: %q is operation %s, which this invocation does not run or need", at, line, id)
 		}
@@ -87,10 +97,44 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 			fail("%s: %q is not the invocation's line %q", at, line, own)
 		}
 	}
+	ctx := p.ContextFor(inv.OperationID)
+	for i, st := range r.Settings {
+		from := map[string]bool{}
+		for _, c := range ctx {
+			if c.Setting == st.Name {
+				from[c.ReadBy] = true
+			}
+		}
+		if len(from) == 0 {
+			fail("settings[%d]: %s is not a context read of %s in this package", i, st.Name, inv.OperationID)
+			continue
+		}
+		if !from[r.replyHolding(ss, replyTo, st.Span)] {
+			fail("settings[%d]: %s does not lie in the reply to the line that reads it", i, st.Name)
+		}
+	}
 	if len(errs) > 0 {
 		return fmt.Errorf("adapter: lines: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// replyHolding returns the operation whose reply holds sp: the bytes from
+// the end of its send to the start of the next send, or to the end of the
+// transcript. It returns "" when no single such reply holds sp.
+func (r Result) replyHolding(ss []send, replyTo []string, sp Span) string {
+	t := r.Transcript
+	for i, x := range ss {
+		sg := t.Segments[x.seg]
+		start, end := sg.Offset+sg.Length, int64(len(t.Data))
+		if i+1 < len(ss) {
+			end = t.Segments[ss[i+1].seg].Offset
+		}
+		if sp.Offset >= start && sp.Length > 0 && sp.Offset+sp.Length <= end {
+			return replyTo[i]
+		}
+	}
+	return ""
 }
 
 // oneLine returns b without its one line end, when b is one line.

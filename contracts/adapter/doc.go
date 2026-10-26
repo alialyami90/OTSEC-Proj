@@ -106,7 +106,10 @@
 //     and a level 0 operation never carries a credential (C7-A2-5).
 //   - Records, observations and settings point into received bytes only,
 //     never into a redaction. A setting's span selects exactly its value,
-//     and a setting is reported at most once.
+//     which is printable ASCII with no space at either end, and a setting
+//     is reported at most once. CheckLines also checks where a setting came
+//     from: a context read for the operation names it, and its span lies in
+//     the reply to that read's line (A4 on #164).
 //   - error.detail is the collector's own words: at most 256 bytes of
 //     printable ASCII, never device text.
 //   - An unknown error code reads as failed.unknown, a failure. A code
