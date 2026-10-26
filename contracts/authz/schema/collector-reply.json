@@ -114,10 +114,9 @@
         }
       }
     },
-    "repeat_of": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector_seq of that first decision, which is lower than this reply's. The collector did nothing again. Never sent in reply to a request stamped before 0.5."
+    "repeat": {
+      "type": "boolean",
+      "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector did nothing again and numbered no new decision, so collector_seq is the first decision's number. Only with admin. Never on a reply stamped before 0.5."
     },
     "admin": {
       "type": "object",
@@ -189,7 +188,7 @@
         "anyOf": [
           {
             "required": [
-              "repeat_of"
+              "repeat"
             ]
           },
           {
@@ -198,6 +197,51 @@
             ]
           }
         ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "repeat"
+        ]
+      },
+      "then": {
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "repeat"
+            ]
+          },
+          {
+            "required": [
+              "admin"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "not": {
+              "enum": [
+                "otsec.authz/0.0",
+                "otsec.authz/0.1",
+                "otsec.authz/0.2",
+                "otsec.authz/0.3",
+                "otsec.authz/0.4"
+              ]
+            }
+          }
+        }
       }
     }
   ]

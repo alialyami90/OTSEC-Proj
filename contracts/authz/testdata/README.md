@@ -36,3 +36,18 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/invalid/unknown_field__raw-line-in-run.json` | A raw `line` inside the run body. |
 | `requests/invalid/unknown_field__secret-in-credential-ref.json` | A `secret` field inside a credential reference. |
 | `requests/against-register/credential_mismatch__level-2ac.json` | A credential installed for access level `2AC`. It decodes, but no auth-phase session line in the SEL-751 register reaches it and no read-only operation needs it (C7-A6-1). |
+
+## Replies (0.5)
+
+Files under `replies/valid/` decode strictly and pass `CollectorReply.Validate`; files under `replies/invalid/` decode and fail it (`TestGoldenReplies`). The `admin` object names the test key, nonce and payload of `admin-signed-node-quarantine-clear.json`.
+
+| File | What it shows |
+| --- | --- |
+| `replies/valid/admin-accepted.json` | An accepted admin-signed request: what the collector verified. |
+| `replies/valid/admin-accepted-repeat.json` | The repeat answer for the same bytes: `repeat` set and the first decision's `collector_seq`, not a new one. |
+| `replies/valid/accepted-0.4.json` | A 0.4 reply with neither field. |
+| `replies/valid/refused-replay.json` | Another payload under a spent nonce: `admin_unverified`, check `replay`. |
+| `replies/invalid/repeat-stamped-0.4.json` | A repeat on a reply stamped 0.4, which no 0.4 collector writes. |
+| `replies/invalid/admin-stamped-0.4.json` | `admin` on a reply stamped 0.4. |
+| `replies/invalid/repeat-without-admin.json` | A repeat that names nothing the collector verified. |
+| `replies/invalid/admin-on-a-refusal.json` | `admin` on a refused reply. |

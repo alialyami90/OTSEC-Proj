@@ -315,12 +315,12 @@ type CollectorReply struct {
 	// CollectorSeq numbers this decision among every event the collector
 	// reports (C7-A5-2). See the package documentation, "Collector sequence".
 	CollectorSeq uint64 `json:"collector_seq"`
-	// RepeatOf (since 0.5) is set on an accepted reply to admin-signed
-	// bytes the collector had already accepted: the collector_seq of that
-	// first decision. The collector did nothing again; this reply has its
-	// own collector_seq like any other. See the package documentation,
-	// "The node kinds and the repeat answer".
-	RepeatOf uint64 `json:"repeat_of,omitempty"`
+	// Repeat (since 0.5) is set on an accepted reply to admin-signed bytes
+	// the collector had already accepted: the collector did nothing again,
+	// numbered no new decision, and CollectorSeq is the first decision's
+	// number. See the package documentation, "The node kinds and the
+	// repeat answer".
+	Repeat bool `json:"repeat,omitempty"`
 	// Admin (since 0.5) is set on every accepted reply to an admin-signed
 	// request stamped 0.5 or later, and on no other reply: what the
 	// collector verified.
@@ -359,9 +359,13 @@ func AnswersRepeat(contract string) bool {
 // sent, and returns what the collector verified. The node acts on its own
 // part of an admin request (a node kind, or its side of an asset clear)
 // only when this returns no error: the reply answers this request ID, is
-// accepted and numbered, names the payload's hash, the envelope's key and
-// the request's person, and a repeat names an earlier decision.
+// accepted and numbered, and names the payload's hash, the envelope's key
+// and the request's person. A repeat passes it like a first acceptance:
+// the node's part must be idempotent.
 func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
 	switch {
 	case sent == nil || sent.AdminSigned == nil:
 		return nil, errors.New("authz: the request sent is not admin-signed")
@@ -371,8 +375,6 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 		return nil, errors.New("authz: the reply answers another request")
 	case r.Admin == nil:
 		return nil, errors.New("authz: the acceptance names nothing the collector verified")
-	case r.RepeatOf >= r.CollectorSeq:
-		return nil, fmt.Errorf("authz: repeat_of %d is not an earlier decision than %d", r.RepeatOf, r.CollectorSeq)
 	}
 	a := r.Admin
 	switch {
@@ -382,10 +384,40 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 		return nil, errors.New("authz: the acceptance names another admin key")
 	case a.Principal != sent.OnBehalfOf:
 		return nil, errors.New("authz: the acceptance names another person")
-	case !adminNoncePattern.MatchString(a.Nonce):
-		return nil, errors.New("authz: the acceptance's nonce is malformed")
 	}
 	return a, nil
+}
+
+// Validate checks the 0.5 fields against the reply's own stamp and status.
+// A reply stamped before 0.5 carries neither repeat nor admin, because no
+// collector of that minor wrote them; a refused reply carries neither; a
+// repeat is an accepted reply that names what the collector verified; and
+// admin, when present, is well formed. A reader runs it after strict
+// decoding (collectorwire.DecodeReply).
+func (r CollectorReply) Validate() error {
+	if r.Admin == nil && !r.Repeat {
+		return nil
+	}
+	switch {
+	case !AnswersRepeat(r.Contract):
+		return fmt.Errorf("authz: a reply stamped %q carries repeat or admin, which need 0.%d", r.Contract, nodeKindsSince)
+	case r.Status != ReplyAccepted || r.Refusal != nil:
+		return errors.New("authz: a refused reply carries repeat or admin")
+	case r.Admin == nil:
+		return errors.New("authz: a repeat names nothing the collector verified")
+	}
+	a := r.Admin
+	switch {
+	case !adminKeyIDPattern.MatchString(a.AdminKeyID):
+		return errors.New("authz: admin.admin_key_id is malformed")
+	case a.Principal.Type != PrincipalHuman || a.Principal.Validate() != nil:
+		return errors.New("authz: admin.principal is not a person")
+	case !adminNoncePattern.MatchString(a.Nonce):
+		return errors.New("authz: admin.nonce is malformed")
+	case !sha256HexPattern.MatchString(a.PayloadSHA256):
+		return errors.New("authz: admin.payload_sha256 is not 64 lowercase hex digits")
+	}
+	return nil
 }
 
 // Accepted reports whether the reply accepts the request. Anything malformed

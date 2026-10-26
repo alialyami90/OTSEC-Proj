@@ -199,11 +199,15 @@
 // and the node sends the same file again. Up to 0.4 that resend is refused
 // as a replay, so a node part never ran. From 0.5 the collector keeps, for
 // each nonce it spent on an accepted request and until that nonce expires,
-// the payload's SHA-256 and the decision's collector_seq. The same nonce
-// with byte-identical payload bytes, which must still pass every check in
-// VerifyAdminRequest, is accepted again with RepeatOf naming the first
-// decision, and the collector does nothing again; the reply takes its own
-// collector_seq like any other. Any other payload with a spent nonce is
+// the payload's SHA-256 and the decision's collector_seq, in the same store
+// as the nonce, under the same bound (MaxAdminNonces), and for exactly as
+// long. The same nonce with byte-identical payload bytes, which must still
+// pass every check in VerifyAdminRequest, is accepted again with Repeat
+// set: the collector does nothing again and numbers no new decision, and
+// the reply's collector_seq is the first decision's. The node's C8 record
+// of the repeat answer carries that number, so a reply lost before the
+// node recorded it leaves no gap once the repeat is recorded; a node that
+// had recorded it does not send again. Any other payload with a spent nonce is
 // refused as a replay, as before, so the answer tells a sender nothing it
 // did not already hold: only a sender with the exact signed bytes gets it.
 // A request refused after its nonce was spent is not repeated: its resend
@@ -244,7 +248,8 @@
 // replied, and no suspension field. A request stamped before 0.4 gets
 // principal_not_permitted in place of admin_unverified. AdminSigned needs
 // 0.4. The node kinds need 0.5, and so do the repeat answer and
-// CollectorReply.Admin. The admin payload's format stays
+// CollectorReply.Admin, and a reply stamped before 0.5 that carries either
+// is invalid (CollectorReply.Validate). The admin payload's format stays
 // otsec.authz.admin-request/0.4, and the signing prefix names
 // otsec.authz/0.4, so a 0.4 request verifies unchanged; a 0.4 reader
 // refuses a node body in the payload as a payload error. The labels bound into the sealing (the seal AAD and the HKDF

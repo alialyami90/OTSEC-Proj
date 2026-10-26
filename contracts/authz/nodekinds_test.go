@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"otsec.local/otsec/contracts/internal/strictjson"
 )
 
 // The node kinds need 0.5, and are sent admin-signed only: there is no body
@@ -94,7 +96,7 @@ func TestAdminAcceptance(t *testing.T) {
 		t.Fatalf("%+v %v", a, err)
 	}
 	repeat := ok
-	repeat.RepeatOf = 7
+	repeat.Repeat = true
 	if _, err := repeat.AdminAcceptance(req); err != nil {
 		t.Fatalf("repeat: %v", err)
 	}
@@ -103,12 +105,14 @@ func TestAdminAcceptance(t *testing.T) {
 		"refused": func(r *CollectorReply, _ **CollectorRequest) {
 			r.Status, r.Refusal = ReplyRefused, AdminRefusal(AdminCheckReplay)
 		},
-		"no collector_seq":      func(r *CollectorReply, _ **CollectorRequest) { r.CollectorSeq = 0 },
-		"another request ID":    func(r *CollectorReply, _ **CollectorRequest) { r.RequestID = "req-other" },
-		"names nothing":         func(r *CollectorReply, _ **CollectorRequest) { r.Admin = nil },
-		"repeat of itself":      func(r *CollectorReply, _ **CollectorRequest) { r.RepeatOf = r.CollectorSeq },
-		"repeat of a later one": func(r *CollectorReply, _ **CollectorRequest) { r.RepeatOf = r.CollectorSeq + 1 },
-		"other signed bytes":    func(_ *CollectorReply, sent **CollectorRequest) { *sent = other },
+		"no collector_seq":   func(r *CollectorReply, _ **CollectorRequest) { r.CollectorSeq = 0 },
+		"another request ID": func(r *CollectorReply, _ **CollectorRequest) { r.RequestID = "req-other" },
+		"names nothing":      func(r *CollectorReply, _ **CollectorRequest) { r.Admin = nil },
+		"stamped 0.4":        func(r *CollectorReply, _ **CollectorRequest) { r.Contract = "otsec.authz/0.4" },
+		"repeat without admin": func(r *CollectorReply, _ **CollectorRequest) {
+			r.Repeat, r.Admin = true, nil
+		},
+		"other signed bytes": func(_ *CollectorReply, sent **CollectorRequest) { *sent = other },
 		"another key": func(r *CollectorReply, _ **CollectorRequest) {
 			a := *r.Admin
 			a.AdminKeyID = "ed25519-0000000000000000"
@@ -141,25 +145,66 @@ func TestAdminAcceptance(t *testing.T) {
 	}
 }
 
-// A reply with the 0.5 fields round-trips through the strict decoder, and
-// a 0.4 reply decodes with neither.
-func TestReplyFields(t *testing.T) {
-	_, r := testAcceptance(t)
-	r.RepeatOf = 7
-	b, err := json.Marshal(r)
-	if err != nil {
+// The reply fixtures: each file under testdata/replies/valid decodes
+// strictly and validates; each under invalid/ decodes and fails Validate,
+// with what its name says (A1 on #184: repeat and admin at 0.4 refused).
+func TestGoldenReplies(t *testing.T) {
+	for _, dir := range []string{"valid", "invalid"} {
+		files, err := os.ReadDir("testdata/replies/" + dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(files) == 0 {
+			t.Fatalf("no %s replies", dir)
+		}
+		for _, f := range files {
+			t.Run(dir+"/"+f.Name(), func(t *testing.T) {
+				raw, err := os.ReadFile("testdata/replies/" + dir + "/" + f.Name())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var r CollectorReply
+				if err := strictjson.Decode(raw, &r); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				if err := r.Validate(); (err == nil) != (dir == "valid") {
+					t.Fatalf("Validate: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestReplyValidate(t *testing.T) {
+	_, ok := testAcceptance(t)
+	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(b, []byte(`"repeat_of":7`)) || !bytes.Contains(b, []byte(`"payload_sha256":"`)) {
-		t.Fatalf("%s", b)
+	plain := CollectorReply{Contract: "otsec.authz/0.4", RequestID: "req-1", Status: ReplyAccepted, CollectorSeq: 3}
+	if err := plain.Validate(); err != nil {
+		t.Fatalf("a 0.4 reply with neither field: %v", err)
 	}
-	var back CollectorReply
-	if err := json.Unmarshal(b, &back); err != nil || back.Admin == nil || back.RepeatOf != 7 {
-		t.Fatalf("%+v %v", back, err)
-	}
-	old, _ := json.Marshal(CollectorReply{Contract: "otsec.authz/0.4", RequestID: "req-1", Status: ReplyAccepted, CollectorSeq: 3})
-	if bytes.Contains(old, []byte("repeat_of")) || bytes.Contains(old, []byte(`"admin"`)) {
-		t.Fatalf("%s", old)
+	for name, edit := range map[string]func(r *CollectorReply){
+		"admin at 0.4":         func(r *CollectorReply) { r.Contract = "otsec.authz/0.4" },
+		"repeat at 0.4":        func(r *CollectorReply) { r.Contract, r.Repeat = "otsec.authz/0.4", true },
+		"repeat without admin": func(r *CollectorReply) { r.Repeat, r.Admin = true, nil },
+		"admin on a refusal": func(r *CollectorReply) {
+			r.Status, r.Refusal = ReplyRefused, AdminRefusal(AdminCheckReplay)
+		},
+		"key ID malformed":       func(r *CollectorReply) { a := *r.Admin; a.AdminKeyID = "rsa-1"; r.Admin = &a },
+		"principal not a person": func(r *CollectorReply) { a := *r.Admin; a.Principal.Type = PrincipalNode; r.Admin = &a },
+		"nonce malformed":        func(r *CollectorReply) { a := *r.Admin; a.Nonce = "x"; r.Admin = &a },
+		"payload hash upper": func(r *CollectorReply) {
+			a := *r.Admin
+			a.PayloadSHA256 = strings.ToUpper(a.PayloadSHA256)
+			r.Admin = &a
+		},
+	} {
+		r := ok
+		edit(&r)
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s: valid", name)
+		}
 	}
 }
 
