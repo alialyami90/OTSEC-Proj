@@ -399,7 +399,7 @@ func (r *Register) Request(keys Keys, ref string, subject pkix.Name, by string, 
 	csr, entry, err := pendingEntry(signer, keys.Provider(), ref, version, subject, by, now)
 	if rk, ok := keys.(restricter); ok && err == nil {
 		// The request is signed: the creator gives up its use of the key.
-		err = rk.Restrict(name)
+		err = rk.Restrict(signer)
 	}
 	if err == nil {
 		next := *r

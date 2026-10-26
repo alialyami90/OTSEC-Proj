@@ -3,6 +3,7 @@ package nodekey
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -537,5 +538,51 @@ func TestOneExpiredAnchorRefusesTheSet(t *testing.T) {
 	}
 	if pool, _, err := r.TrustAnchors(anchorsRef, now.Add(20*24*time.Hour)); err == nil || pool != nil {
 		t.Fatal("a set with an expired certificate resolved")
+	}
+}
+
+// restrictingKeys records what Request hands to Restrict.
+type restrictingKeys struct {
+	LabFiles
+	created, restricted crypto.Signer
+	fail                bool
+}
+
+func (k *restrictingKeys) Create(name string) (crypto.Signer, error) {
+	s, err := k.LabFiles.Create(name)
+	k.created = s
+	return s, err
+}
+
+func (k *restrictingKeys) Restrict(s crypto.Signer) error {
+	k.restricted = s
+	if k.fail {
+		return errors.New("restrict refused")
+	}
+	return nil
+}
+
+// TestRequestRestricts: Request restricts the key it created, through the
+// signer Create returned, after the request is signed; if that fails the
+// key is deleted and the register is unchanged.
+func TestRequestRestricts(t *testing.T) {
+	keys := &restrictingKeys{LabFiles: LabFiles{Dir: t.TempDir()}}
+	r := NewRegister(testNode)
+	if _, err := r.Request(keys, clientRef, pkix.Name{CommonName: testNode}, admin, now); err != nil {
+		t.Fatal(err)
+	}
+	if keys.restricted == nil || keys.restricted != keys.created {
+		t.Fatal("Request did not restrict the key it created")
+	}
+	keys = &restrictingKeys{LabFiles: LabFiles{Dir: t.TempDir()}, fail: true}
+	r = NewRegister(testNode)
+	if _, err := r.Request(keys, clientRef, pkix.Name{CommonName: testNode}, admin, now); err == nil {
+		t.Fatal("a failed restrict was accepted")
+	}
+	if len(r.Entries) != 0 {
+		t.Fatalf("register changed: %+v", r.Entries)
+	}
+	if _, err := keys.Open(KeyName(clientRef, 1)); !errors.Is(err, ErrNoKey) {
+		t.Fatalf("the key was kept: %v", err)
 	}
 }

@@ -164,19 +164,22 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 }
 
 // Restrict sets the DACL the key keeps once its request is signed: the
-// creator no longer has use of it.
-func (c CNG) Restrict(name string) error {
+// creator no longer has use of it. It needs the signer Create returned: a
+// handle opened later by name has only the rights the creator's DACL
+// grants, which do not include changing it (CI, #157).
+func (c CNG) Restrict(created crypto.Signer) error {
+	s, ok := created.(*cngSigner)
+	if !ok {
+		return errors.New("nodekey: restrict: not a key this provider created")
+	}
 	sddl, err := c.sddl("")
 	if err != nil {
 		return err
 	}
-	key, err := c.openKey(name)
-	if err != nil {
-		return err
-	}
-	defer free(key)
-	if err := setDACL(key, sddl); err != nil {
-		return fmt.Errorf("nodekey: restrict %s: %w", name, err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := setDACL(s.key, sddl); err != nil {
+		return fmt.Errorf("nodekey: restrict: %w", err)
 	}
 	return nil
 }
@@ -271,6 +274,25 @@ func (s *cngSigner) Sign(_ io.Reader, digest []byte, _ crypto.SignerOpts) ([]byt
 		return nil, fmt.Errorf("nodekey: sign: %d bytes", n)
 	}
 	return asn1.Marshal(struct{ R, S *big.Int }{new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])})
+}
+
+// deleteCreated deletes a key through the handle Create returned, which
+// keeps its rights after Restrict (tests: cleanup).
+func deleteCreated(created crypto.Signer) error {
+	s, ok := created.(*cngSigner)
+	if !ok {
+		return errors.New("not a CNG key")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.key == 0 {
+		return nil
+	}
+	err := call(procDeleteKey, s.key, ncryptSilentFlag)
+	if err == nil {
+		s.key = 0 // NCryptDeleteKey frees the handle
+	}
+	return err
 }
 
 // dacl returns the key's DACL as SDDL (tests).
