@@ -10,7 +10,7 @@ ADR-0008 decision 4 asks three questions before the configuration rung for the S
 | --- | --- | --- |
 | The relay is an FTP server on Ethernet Port 1 only. It allows two FTP sessions at a time and refuses a third. | S22 p. 7.15 (File Transfer Protocol (FTP) and MMS File Transfer); p. 7.87 (FTP: "Ethernet only") | `documented-untested` |
 | The login user name is the Port 1 setting `FTPUSER`. The password is **the password of the access level `FTPACC` names**, so with `FTPACC := 1` it is the Level 1 password, the same one the Telnet collector sends after `ACC`. "FTP does not encrypt passwords before sending them to the server." | S22 p. 7.15 (Access Control) | `documented-untested` |
-| `FTPACC` takes the values 1, 2 and C. **The factory default is 2.** `EFTPSERV` (enable FTP) defaults to Y, `FTPUSER` to `FTPUSER`, `FTPIDLE` to 5 min (range 5–255), and the default password pair is FTPUSER / TAIL. | S22 Table 4.104, sheet 2, p. 4.250; p. 7.15 | `documented-untested` |
+| `FTPACC` takes the values 1, 2 and C. **The factory default is 2.** `EFTPSERV` (enable FTP) defaults to Y, `FTPUSER` to `FTPUSER`, `FTPIDLE` to 5 min (range 5–255), and the factory default password pair (S22 p. 4.250) applies. | S22 Table 4.104, sheet 2, p. 4.250; p. 7.15 | `documented-untested` |
 | An FTP session left open blocks later connections until `FTPIDLE` expires. | S22 p. 7.16 (Using FTP and MMS) | `documented-untested` |
 | The FTP tree has `/` (CFG.TXT, CFG.XML, ERR.TXT, SET_61850.CID), `/SETTINGS` (FTP only), `/REPORTS`, `/EVENTS` and, on touchscreen models, `/HMI`. | S22 Table 7.80, p. 7.87 | `documented-untested` |
 | `/REPORTS` is labelled **read-only**. It holds SER.TXT and CSER.TXT (the `SER` and `CSER` responses), plus BRE, HIS, CHI, LDP and CLDP. "Each time you request a report, the relay stores its corresponding command response in the designated text file", so SER.TXT is the `SER` report as the command prints it. | S22 Table 7.82 and the paragraph before it, p. 7.89 | `documented-untested` |
@@ -31,7 +31,7 @@ ADR-0008 decision 4 asks three questions before the configuration rung for the S
 - **The test must not change the relay (A3 on #183).**
   - Read SET_G.TXT first, then STOR exactly those bytes back, so a write that succeeds changes no setting.
   - Record SALARM and the SER before and after the attempt.
-  - Use a lab credential set for the test, never the factory FTPUSER / TAIL pair (D2-11).
+  - Use a lab credential set for the test, never the factory default password pair (S22 p. 4.250; D2-11).
   - Read `/REPORTS/SER.TXT` twice and compare the two reads (below).
   - Write down every step before the session. The owner's authorization covers that written procedure.
 - **FTP adds no confidentiality over Telnet** and adds a second cleartext path for the same Level 1 password (p. 7.15). It does not lift ADR-0005's plaintext acknowledgement. It also adds a session that blocks others for `FTPIDLE` if not closed, the same failure mode as `TIDLE` (D18).
