@@ -49,9 +49,16 @@ func TestTLSMutual(t *testing.T) {
 	if got := msgs(t, es); !slices.Equal(got, []string{m1, m2, m1}) {
 		t.Fatalf("stored %q", got)
 	}
+	// C4 0.2: each event names the certificate that spoke, and the asset
+	// is still bound by address with confidence configured, no higher.
+	leaf := sha(p.client.Certificate[0])
 	for _, e := range es {
 		if e.Source.OriginAuth != event.AuthTLSMutual || e.Source.Asset == nil || e.Source.Asset.ID != assetA || e.Source.EvidenceClass != asset.Simulated {
 			t.Errorf("source %+v", e.Source)
+		}
+		if e.Schema != event.Identifier || e.Source.Sender.TLSLeafSHA256 != leaf ||
+			e.Source.Asset.Binding != (event.Binding{Method: event.BindSenderAddress, Confidence: event.ConfidenceConfigured}) {
+			t.Errorf("schema %s sender %+v binding %+v", e.Schema, e.Source.Sender, e.Source.Asset.Binding)
 		}
 		if e.Collection.ParseStatus != event.ParseOK || e.ID.Stream != testStream {
 			t.Errorf("collection %+v id %+v", e.Collection, e.ID)
@@ -740,4 +747,76 @@ func TestTLSOptionalClient(t *testing.T) {
 	if !slices.Equal(auths, []event.OriginAuth{event.AuthTLSMutual, event.AuthTLSServerOnly}) {
 		t.Errorf("origin_auth %v", auths)
 	}
+}
+
+// TestTLSOldVersionRefused (A6's suite caught it first): a sender that
+// offers nothing above TLS 1.1 is refused at the handshake by ServerTLS's
+// minimum, and nothing is stored.
+func TestTLSOldVersionRefused(t *testing.T) {
+	p := newPKI(t, "a4-ca")
+	cfg, err := ServerTLS(&p.server, p.roots, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newRig(t, asset.SyslogTLS, func(c *Config) { c.TLS = cfg })
+	for _, v := range []uint16{tls.VersionTLS10, tls.VersionTLS11} {
+		sc := sender(p.roots, nil)
+		sc.MinVersion, sc.MaxVersion = v, v
+		c, err := tls.Dial("tcp", g.addr, sc)
+		if err == nil {
+			c.Write(octet(m1))
+			c.Close()
+			t.Errorf("TLS version %#x accepted", v)
+		}
+	}
+	g.wait("refused", func() bool { return g.r.Status().Refused["tls"] == 2 })
+	if n := g.store.count(); n != 0 {
+		t.Errorf("%d stored", n)
+	}
+}
+
+// TestRecordHashUntrimmed (A6's suite caught it first): leading and
+// trailing spaces, tabs, a CR before the LF and NUL bytes are part of the
+// message. They are stored, and hashed, exactly as sent, on every framing.
+func TestRecordHashUntrimmed(t *testing.T) {
+	raw := []string{
+		"  <34>Oct 11 22:14:15 h app: leading spaces",
+		"<34>Oct 11 22:14:15 h app: trailing spaces and tab \t ",
+		"<34>Oct 11 22:14:15 h app: CR before LF\r",
+		"<34>Oct 11 22:14:15 h app: NUL\x00 inside",
+	}
+	check := func(name string, g *rig) {
+		g.wait(name, func() bool { return g.store.count() == len(raw) })
+		es := g.store.events(t)
+		if got := msgs(t, es); !slices.Equal(got, raw) {
+			t.Errorf("%s: stored %q", name, got)
+		}
+		for i, e := range es {
+			if e.Native.RecordSHA256 != sha([]byte(raw[i])) || e.Native.RecordLength != int64(len(raw[i])) {
+				t.Errorf("%s: event %d hash %s length %d", name, i, e.Native.RecordSHA256, e.Native.RecordLength)
+			}
+		}
+	}
+	g := newRig(t, asset.SyslogTCP, nil)
+	c := g.dial(addrA)
+	c.Write(octet(raw...))
+	c.Close()
+	check("octet-counted", g)
+
+	g = newRig(t, asset.SyslogTCP, nil)
+	c = g.dial(addrA)
+	for _, m := range raw {
+		c.Write([]byte(m + "\n"))
+	}
+	c.Close()
+	check("LF-framed", g)
+
+	g = newRig(t, asset.SyslogUDP, nil)
+	u := g.udp(addrA)
+	for _, m := range raw {
+		u.Write([]byte(m))
+		time.Sleep(time.Millisecond)
+	}
+	u.Close()
+	check("datagram", g)
 }

@@ -420,6 +420,7 @@ type msg struct {
 	frame
 	from netip.Addr
 	auth event.OriginAuth
+	cert []byte // a tls-mutual sender's verified certificate (DER)
 	rcv  event.Received
 }
 
@@ -428,7 +429,7 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 	src, known := r.cfg.Senders[m.from]
 	in := normalize.SyslogInput{
 		Node: r.cfg.Node, Stream: r.cfg.Stream, Message: m.msg, Sender: m.from.String(),
-		Auth: m.auth, Received: m.rcv, Flags: m.flags, Dialect: normalize.DialectRFC,
+		Auth: m.auth, SenderCert: m.cert, Received: m.rcv, Flags: m.flags, Dialect: normalize.DialectRFC,
 		EvidenceClass: r.cfg.Target,
 	}
 	if known {
