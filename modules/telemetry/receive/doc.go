@@ -10,8 +10,10 @@
 //     certificate (ServerTLS). With a CA set for senders, a sender that
 //     presents a certificate must chain to it, and a listener may require
 //     one; such a sender's events say tls-mutual, the others
-//     tls-server-only. The certificate is not tied to an asset yet (C1
-//     pinned-key), so attribution is by address in every case.
+//     tls-server-only. A tls-mutual event names the verified certificate
+//     by its SHA-256 (C4 0.2 sender.tls_leaf_sha256). The certificate is
+//     not tied to an asset yet (C1 pinned-key), so attribution is by
+//     address in every case, and the fingerprint never raises it.
 //   - syslog-tcp (RFC 6587) and syslog-udp (RFC 5426) are plaintext: New
 //     refuses them unless Config.Plaintext is set: plaintext is enabled per
 //     listener by the operator, TLS being the default (D3-5). Their events
