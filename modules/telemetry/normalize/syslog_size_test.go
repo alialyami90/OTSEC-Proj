@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -103,9 +104,11 @@ func TestSyslogSizeBounds(t *testing.T) {
 	t.Logf("largest stored %d (bound %d), largest rendered %d (bound %d)", maxStored, storedBound, maxRendered, renderedBound)
 }
 
-// A MSG over rtacMaxMSG is not read as an RTAC Logger message: it is
-// partial, with the whole MSG as msg and the host as its subject, and no
-// RTAC part is copied into a field or the normalized subject or value.
+// A MSG over rtacMaxMSG is not read as an RTAC Logger message (S23 p. 636:
+// the RTAC limits a whole packet to 1024 bytes): it is partial, with the
+// whole MSG as msg and the host as its subject, no RTAC part is copied into
+// a field or the normalized subject or value, and its bytes and hashes are
+// kept like any other frame's.
 func TestSyslogRTACOverlong(t *testing.T) {
 	head := "<190>Mar 21 2015 12:10:08 SEL-3530-xxxxxx "
 	body := "RTAC Logger: 2015-03-21 12:09:58.593, Informational, Security, SystemTags. X, "
@@ -119,6 +122,11 @@ func TestSyslogRTACOverlong(t *testing.T) {
 		}
 		if n > rtacMaxMSG && (f["msg"] != msg || e.Normalized.Subject != "SEL-3530-xxxxxx" || e.Normalized.Value != "" || e.DeviceTime != nil) {
 			t.Errorf("overlong MSG: fields %v, normalized %+v, device time %+v", len(f), e.Normalized, e.DeviceTime)
+		}
+		// Partial, never dropped: the frame's bytes and hashes are kept (R1.4).
+		frame := []byte(head + msg)
+		if nv := e.Native; nv == nil || !bytes.Equal(nv.Bytes, frame) || nv.RecordSHA256 != sha256hex(frame) || nv.RecordLength != int64(len(frame)) || nv.Evidence.SHA256 != sha256hex(frame) {
+			t.Errorf("MSG of %d bytes: native bytes or hashes not kept", n)
 		}
 	}
 }
