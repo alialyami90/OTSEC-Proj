@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.register/0.1",
-  "title": "otsec.register/0.1 command register package (C3)",
-  "description": "Structural schema only. Cross-field rules (unique IDs, citations naming a listed source, templates using exactly their declared parameters, no approved line matching a deny rule, every known firmware branch having a rule, preconditions read by an operation) are enforced by Package.Validate in contracts/register.",
+  "$id": "otsec.register/0.2",
+  "title": "otsec.register/0.2 command register package (C3)",
+  "description": "Structural schema only. Cross-field rules (unique IDs, citations naming a listed source, templates using exactly their declared parameters, no approved line matching a deny rule, every known firmware branch having a rule, preconditions read by an operation, context only in 0.2 and read at no higher a level than the operations it is for) are enforced by Package.Validate in contracts/register.",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract", "family", "revision", "issued", "owner", "sources", "preconditions", "operations", "session_control", "denied", "firmware"],
   "properties": {
-    "contract": {"const": "otsec.register/0.1"},
+    "contract": {"enum": ["otsec.register/0.1", "otsec.register/0.2"]},
     "family": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
     "revision": {"type": "integer", "minimum": 1},
     "issued": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
@@ -15,6 +15,7 @@
     "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}},
     "preconditions": {"type": "array", "items": {"$ref": "#/$defs/settingCheck"}},
     "warnings": {"type": "array", "items": {"$ref": "#/$defs/postureWarning"}},
+    "context": {"type": "array", "items": {"$ref": "#/$defs/contextRead"}},
     "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/operation"}},
     "session_control": {"type": "array", "items": {"$ref": "#/$defs/sessionLine"}},
     "denied": {"type": "array", "items": {"$ref": "#/$defs/denyRule"}},
@@ -112,6 +113,18 @@
         "reason": {"type": "string", "minLength": 1}
       }
     },
+    "contextRead": {
+      "description": "Added in 0.2 (D3-2): a setting read with read_by in a session that runs an operation in for, so that operation's output can be read (DATE_F for SER).",
+      "type": "object", "additionalProperties": false, "required": ["id", "setting", "read_by", "for", "values", "reason"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "setting": {"type": "string", "pattern": "^[A-Z0-9_]+$"},
+        "read_by": {"$ref": "#/$defs/id"},
+        "for": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "values": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z0-9]+$"}},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
     "settingCheck": {
       "type": "object", "additionalProperties": false, "required": ["id", "setting", "equals", "read_by", "reason"],
       "properties": {
@@ -149,10 +162,10 @@
       }
     },
     "envelope": {
-      "description": "Signed package. The signature is over the bytes of \"otsec.register/0.1 package\\n\" followed by payload (SigningDomain, A3 C3-A3-1). Verification rules are C7's.",
+      "description": "Signed package. The signature is over the bytes of \"otsec.register/0.1 package\\n\" followed by payload (SigningDomain, A3 C3-A3-1); that tag is fixed and does not follow the minor. The envelope carries the reader's own contract, 0.2; its payload may be a 0.1 or 0.2 package. Verification rules are C7's.",
       "type": "object", "additionalProperties": false, "required": ["contract", "algorithm", "key_id", "payload", "signature"],
       "properties": {
-        "contract": {"const": "otsec.register/0.1"},
+        "contract": {"const": "otsec.register/0.2"},
         "algorithm": {"enum": ["ed25519"]},
         "key_id": {"type": "string", "minLength": 1},
         "payload": {"type": "string", "contentEncoding": "base64"},

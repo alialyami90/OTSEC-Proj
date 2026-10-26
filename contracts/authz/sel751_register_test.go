@@ -99,7 +99,7 @@ func TestSEL751SecretsThatReadAsCommands(t *testing.T) {
 // rollback. Signed with the test release key only.
 func TestSEL751Rev3SupersedesRev2(t *testing.T) {
 	rev2, _ := readSEL751Content(t, "sel-751-rev2.json")
-	rev3, _ := readSEL751Content(t, "sel-751.json")
+	rev3, _ := readSEL751Content(t, "sel-751-rev3.json")
 	rel := newSigner(t, "release-2026-1", 1)
 	anchors := []TrustAnchor{{KeyID: rel.id, PublicKey: rel.pub, Status: KeyActive}}
 
@@ -127,5 +127,30 @@ func TestSEL751Rev3SupersedesRev2(t *testing.T) {
 	}
 	if _, _, err := VerifyRegisterPackage(rel.seal(other), anchors, floors); !errors.Is(err, ErrRegisterRejected) {
 		t.Fatalf("other bytes as revision 3: %v", err)
+	}
+}
+
+// TestSEL751Rev4SupersedesRev3: revision 4, the first package in format
+// otsec.register/0.2 (context reads, D3-2), activates over the floor revision
+// 3 left, and revision 3, a 0.1 package, is then a rollback. The signing
+// domain is unchanged, so a 0.1 package's signature input is what it was.
+func TestSEL751Rev4SupersedesRev3(t *testing.T) {
+	rev3, _ := readSEL751Content(t, "sel-751-rev3.json")
+	rev4, pkg4 := readSEL751Content(t, "sel-751.json")
+	if pkg4.Revision != 4 || pkg4.Contract != "otsec.register/0.2" || len(pkg4.Context) == 0 {
+		t.Fatalf("sel-751.json is revision %d, %s, %d context reads", pkg4.Revision, pkg4.Contract, len(pkg4.Context))
+	}
+	rel := newSigner(t, "release-2026-1", 1)
+	anchors := []TrustAnchor{{KeyID: rel.id, PublicKey: rel.pub, Status: KeyActive}}
+	_, floor3, err := VerifyRegisterPackage(rel.seal(rev3), anchors, map[string]FamilyFloor{})
+	if err != nil || floor3.Revision != 3 {
+		t.Fatalf("revision 3: %v %+v", err, floor3)
+	}
+	pkg, floor4, err := VerifyRegisterPackage(rel.seal(rev4), anchors, map[string]FamilyFloor{"sel-751": floor3})
+	if err != nil || pkg.Revision != 4 || floor4.PayloadSHA256 != sha256.Sum256(rev4) {
+		t.Fatalf("revision 4 over the revision 3 floor: %v %+v", err, floor4)
+	}
+	if _, _, err := VerifyRegisterPackage(rel.seal(rev3), anchors, map[string]FamilyFloor{"sel-751": floor4}); !errors.Is(err, ErrRegisterRejected) {
+		t.Fatalf("revision 3 after revision 4: %v", err)
 	}
 }
