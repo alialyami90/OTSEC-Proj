@@ -24,7 +24,7 @@ An administrator's signing client writes each request as its own file, `admin-re
 ```
 
 - `<name>` matches `[a-z0-9-]{1,64}`. The client uses the nonce, so names do not collide.
-- The node reads the files under the protected-file rule (`protect.ReadFileFor`, `AdminReaders`), so only an administrator's file is read. Each file is capped at `MaxAdminPayload` plus 1 KiB of envelope, decoded strictly, and read in name order. At most 16 are read per tick.
+- The node reads the files under the protected-file rule (`protect.ReadFileFor`, `AdminReaders`), so only an administrator's file is read. Each file is capped at `MaxAdminPayload` base64-encoded (the envelope's form) plus 1 KiB for the rest, decoded strictly, and read in name order. At most 16 are read per tick.
 - The node cannot delete or rename a file, because `admin_dir` is read-only to it. It records each file it has relayed by the SHA-256 of the file's bytes (below), and an administrator removes files when convenient. A file that has been relayed is never sent again, so an old file left in place changes nothing.
 - The existing names (`clear-suspension.json` and the others) keep their 0.1 unsigned form during the transition (see "Transition"). Signed requests use only the new file kind.
 
@@ -40,7 +40,7 @@ For each unrelayed file, before any run of the tick:
    A3's admin-keys procedure asks for the key ID and nonce on the record.
 2. **Send** a `CollectorRequest`: `{contract, kind, request_id: "admin-" + first 16 hex digits of the file hash, on_behalf_of: the payload's principal, policy_version, admin_signed: the envelope as read}`. `VerifyAdminRequest` refuses any other `on_behalf_of` with check `binding` (A3, B1). The node does not set the body: under 0.4 the body is only in the payload.
 3. **Record the reply** as for a run. An acceptance names `collector_seq`. A refusal names `admin_unverified` and its check.
-4. **Mark it relayed.** `adminrelay.json` in the store directory holds the file hashes that got a decision (accepted or refused). It is written atomically after the reply record commits. On a restart the chain is the authority: a file whose hash has a reply record is relayed. So a crash between the reply record and the checkpoint resends nothing.
+4. **Mark it relayed.** The suspension checkpoint in the store directory (`suspensions.json`, field `admin_relayed`) holds the request IDs that got a decision (accepted or refused). It is folded from the audit stream with the suspensions, so one `through_seq` covers both, and written atomically after the reply record commits. On a restart the chain is the authority: a file whose hash has a reply record is relayed. So a crash between the reply record and the checkpoint resends nothing.
 
 A transport failure or a lost reply leaves the file unrelayed, and the next tick sends it again. The request expires after at most 15 minutes, so retries end on their own.
 
