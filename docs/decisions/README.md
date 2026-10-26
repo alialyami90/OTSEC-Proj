@@ -17,3 +17,4 @@ Use [ADR-0000-template.md](ADR-0000-template.md).
 | [0005](ADR-0005-first-slice-scenario-and-transport.md) | First vertical slice scenario and downstream transport | accepted |
 | [0006](ADR-0006-device-coverage-and-vendor-strategy.md) | Device coverage scope and vendor strategy (SEL first) | accepted |
 | [0007](ADR-0007-windows-site-node.md) | Windows site node on SEL-3355-2 | proposed |
+| [0008](ADR-0008-monitoring-goals-and-collection-method-order.md) | Monitoring goals and the collection-method order (owner clarification) | accepted |

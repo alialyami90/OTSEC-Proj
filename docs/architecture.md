@@ -72,6 +72,16 @@ Owner scope change, 2026-10-23 ([ADR-0006](decisions/ADR-0006-device-coverage-an
 
 Every active read path in the last column is an adapter: registered operations, read-only classification with citations, per-device approval, and the same enforcement layers as the relay adapter. A device class is "supported" only per SEL family and only at the evidence class `docs/verification.md` requires.
 
+## Monitoring goals and the collection-method order (owner, 2026-10-26)
+
+[ADR-0008](decisions/ADR-0008-monitoring-goals-and-collection-method-order.md) records the owner's clarification of what the product must do and in which order it reaches a device:
+
+- **Configuration monitoring** keeps an approved baseline per device; a retrieved configuration that differs from it without a prior approval record is an alarm (R3.6).
+- **Event monitoring** learns a per-device behaviour baseline over an observation period and alarms on departures (R4.8).
+- **Vulnerability applicability** matches collected identity against a versioned, offline-updated advisory set (R9); the IDS feeds it with passively observed exposure (R6.7).
+- **Asset monitoring and management** is its own module, `modules/asset/` (A2 for device-facing reads and inventory logic; persistence and the operator interface through C1 and C5 with A5), with SNMPv3 as the primary read path (R1.8).
+- **Method order per family**, recorded in the capability matrix: events by received Syslog, then a file fetch over a secure transfer (FTP only where nothing better exists), then command-line parsing; configuration by the same transfer order, then command-line parsing (R3.7, R4.9). The SEL-751 has no Syslog and no SNMP; its FTP rung is eligible only on the evidence ADR-0008 names, so the Phase 2 Telnet adapter remains its path meanwhile.
+
 ## Runtime shape
 
 Decided in [ADR-0002](decisions/ADR-0002-runtime-shape.md): one Go binary (ADR-0003) running as `site`, `central`, or `all-in-one`; modules as packages behind `contracts/`; separate OS processes only for the IED collector (sole holder of device credentials and of the route to the IED network) and, later, Zeek. No broker, no orchestrator. Persistence and delivery in [ADR-0004](decisions/ADR-0004-local-persistence-and-delivery.md): SQLite WAL per data-owning module, commit before acknowledgement, at-least-once with `(node_id, stream, seq)`, required vs best-effort forwarding targets.

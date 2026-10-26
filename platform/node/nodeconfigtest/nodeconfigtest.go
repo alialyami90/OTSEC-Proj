@@ -159,7 +159,7 @@ func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config
 		}
 	}
 	c.Assets = append(c.Assets, map[string]any{
-		"schema":   "otsec.asset/0.1",
+		"schema":   "otsec.asset/0.2",
 		"asset_id": assetID,
 		"node_id":  c.NodeID,
 		"attributes": []any{
@@ -170,7 +170,7 @@ func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config
 			declared("serial_number", "SIM0000000000001"),
 		},
 		"endpoints": []any{map[string]any{
-			"id": "port1-telnet", "transport": "telnet", "host": host, "port": port, "target": "simulated",
+			"id": "port1-telnet", "transport": "telnet", "host": host, "port": port, "target": "simulated", "path": "direct",
 			"downstream_security": map[string]any{
 				"level": "plaintext-unauthenticated",
 				"acknowledgement": map[string]any{

@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "otsec.authz/0.4/admin-request",
+  "title": "Admin-signed request payload (C7 0.4, D2-11). Strict. Decoded only after the signature verifies. Every field is signed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "kind",
+    "principal",
+    "admin_key_id",
+    "node_id",
+    "install_key_id",
+    "nonce",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "format": {
+      "const": "otsec.authz.admin-request/0.4"
+    },
+    "kind": {
+      "enum": [
+        "credential.install",
+        "credential.revoke",
+        "credential.clear_suspension",
+        "asset.clear_suspension"
+      ],
+      "description": "Must equal the request's kind."
+    },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "human",
+            "schedule",
+            "node",
+            "system"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$"
+        }
+      },
+      "description": "A person; must equal on_behalf_of and the principal the key is pinned for."
+    },
+    "admin_key_id": {
+      "type": "string",
+      "pattern": "^ed25519-[0-9a-f]{16}$",
+      "description": "Must equal admin_signed.key_id."
+    },
+    "node_id": {
+      "type": "string",
+      "description": "Must equal the collector's node ID (C7 node ID rule)."
+    },
+    "install_key_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+      "description": "Must equal the collector's current install key ID."
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22}$",
+      "description": "16 random bytes, base64url without padding. Single use: the collector spends it durably before any decision."
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC. At most 2 minutes ahead of the collector's clock."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC. After issued_at and the collector's clock, and at most 15 minutes after either."
+    },
+    "credential_install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "sealed"
+      ],
+      "properties": {
+        "ref": {
+          "$ref": "otsec.authz/0.4/credential-ref"
+        },
+        "sealed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alg",
+            "recipient_key_id",
+            "ephemeral_public_key",
+            "nonce",
+            "ciphertext"
+          ],
+          "properties": {
+            "alg": {
+              "const": "x25519-hkdf-sha256-aes256gcm"
+            },
+            "recipient_key_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+            },
+            "ephemeral_public_key": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 44,
+              "maxLength": 44
+            },
+            "nonce": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 16,
+              "maxLength": 16
+            },
+            "ciphertext": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "minLength": 24,
+              "maxLength": 108
+            }
+          }
+        }
+      }
+    },
+    "credential_revoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "reason"
+      ],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "reason": {
+          "enum": [
+            "rotated",
+            "compromised",
+            "asset-decommissioned",
+            "operator"
+          ]
+        }
+      }
+    },
+    "credential_clear_suspension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref_id",
+        "version"
+      ],
+      "properties": {
+        "ref_id": {
+          "type": "string",
+          "pattern": "^cred_[a-z0-9]{8,40}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "asset_clear_suspension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "ref"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "The C2 invocation ID whose outcome suspended the asset. The collector clears only when this, the administrator's clear-suspension.json and its own record of the suspension all match."
+        }
+      },
+      "description": "Since 0.2 (D2-15). Sent by the node, on its own behalf, after it recorded its own asset.suspension_clear."
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.install"
+        }
+      },
+      "required": [
+        "credential_install"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.revoke"
+        }
+      },
+      "required": [
+        "credential_revoke"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "credential.clear_suspension"
+        }
+      },
+      "required": [
+        "credential_clear_suspension"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "asset.clear_suspension"
+        }
+      },
+      "required": [
+        "asset_clear_suspension"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

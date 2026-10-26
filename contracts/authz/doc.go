@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.3: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.4: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -22,7 +22,8 @@
 //     enrolled asset. It cannot carry a command line, a register change, limits
 //     or a secret. Credential install, revoke and clear-suspension, and
 //     (since 0.2) asset.clear_suspension, are the only other kinds, and none
-//     of them causes device I/O.
+//     of them causes device I/O. From 0.4 an administrator signs them
+//     (AdminSigned); see "Admin-signed requests".
 //   - Register package verification (VerifyRegisterPackage): Ed25519 only,
 //     release keys from the node's trust anchors, a signed statement that binds
 //     the payload digest and package version, and an anti-rollback floor. Any
@@ -141,6 +142,45 @@
 //     failed audit store, no request is sent, so collection that uses a
 //     credential stops; passive Syslog intake does not.
 //
+// # Admin-signed requests
+//
+// From 0.4 (D2-11) the collector accepts credential.install,
+// credential.revoke and credential.clear_suspension only as admin-signed
+// requests, and asset.clear_suspension as one once the node relays the
+// administrator's signed file (A1, Phase 3). Up to 0.3 the node built these
+// requests and asserted the person itself, so a compromised node could seal
+// any guess and install it, and the reuse rule's secret_rejected told it
+// whether the guess equalled a stored secret: an equality oracle, however
+// the refusal was worded.
+//
+// The request carries AdminSigned in place of its body. The payload
+// (AdminRequest) holds the body and binds the person, the admin key, the
+// node, the collector's install key, a single-use nonce and a validity
+// window of at most MaxAdminLifetime. The signature is Ed25519 over
+// AdminSigningInput: a prefix naming the contract and the operation,
+// then the payload's exact bytes, so a signature for one operation never
+// verifies for another, nor as a register package, and no canonical JSON
+// is needed. The signature covers the sealed secret, so a node cannot put
+// its own guess under a genuine signature.
+//
+// VerifyAdminRequest runs the checks in a fixed order (envelope, key,
+// signature, payload, binding, window) and decodes the payload only after
+// the signature verifies. The collector then spends the nonce durably
+// before any other decision, so a signed request is good for one decision,
+// even across a restart, and only then applies the install budget, the
+// store and the reuse rule. Every failure, the collector's replay and
+// capacity checks included, is refused with admin_unverified, the check's
+// name (Refusal.Check) and a fixed detail naming only the check
+// (AdminRefusal): no reply to an unsigned or mis-bound request depends on
+// any stored secret. The node's C8 record of the reply names the check
+// (A1). Admin keys are pinned in the
+// collector's own configuration out of band; one key speaks for one
+// person, and its ID is derived from it (AdminKeyID).
+//
+// What stays possible: the node can drop or delay a request, and an
+// administrator can still learn equality through the reuse rule, at the
+// install budget's rate; the administrator could install any secret anyway.
+//
 // # Collector sequence
 //
 // The collector numbers every event it reports to the node: each reply to a
@@ -168,7 +208,9 @@
 // needs 0.2. Replies are decoded strictly too, so the collector answers a
 // request in its own minor (Refusal.ForRequest): a request stamped before
 // 0.3 gets asset_not_enrolled for a suspended asset, as 0.2 collectors
-// replied, and no suspension field. The labels bound into the sealing (the seal AAD and the HKDF
+// replied, and no suspension field. A request stamped before 0.4 gets
+// principal_not_permitted in place of admin_unverified. AdminSigned needs
+// 0.4. The labels bound into the sealing (the seal AAD and the HKDF
 // info, both "otsec.authz/0.1 ...") are fixed byte strings, not the
 // contract version, and do not change with it.
 //
