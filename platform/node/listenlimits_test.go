@@ -53,7 +53,7 @@ func TestListenerSizings(t *testing.T) {
 			if sz.UnknownBytes != tc.per || sz.UnknownBound != tc.bound || sz.Class != tc.class || sz.OutageHours != tc.hours {
 				t.Fatalf("%+v, want %d an hour, bound %d, class %s, %d h", sz, tc.per, tc.bound, tc.class, tc.hours)
 			}
-			if sz.UnknownBound > sz.Quota/UnknownQuotaShare || sz.limits().UnknownBytes != tc.per {
+			if sz.UnknownBound > sz.Quota/UnknownQuotaShare || sz.limits().UnknownBytes != tc.per || sz.limits().UnknownWindow != time.Hour {
 				t.Fatalf("bound %d over a quarter of %d, or limits %+v", sz.UnknownBound, sz.Quota, sz.limits())
 			}
 		})
