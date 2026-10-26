@@ -35,6 +35,7 @@ type Status struct {
 	collClears  map[string]string
 	collector   *CollectorStatus
 	assets      map[string]AssetResult
+	runsHeld    string
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -61,6 +62,11 @@ type StatusFile struct {
 	Alarms  []StatusAlarm             `json:"alarms"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
+	// RunsHeld is the alarm code that stops every run on the node, level
+	// 0 included, while it holds; empty when none does. The alarms list is
+	// a history, so this is the one place that says whether such a hold is
+	// still current (A3 on #147).
+	RunsHeld string `json:"runs_held,omitempty"`
 	// Targets is each forwarding target's state, from its forwarder.
 	Targets map[string]TargetStatus `json:"targets,omitempty"`
 	// Suspensions are the assets the node will not collect from until an
@@ -186,6 +192,13 @@ func (s *Status) RaiseTarget(target, code, detail string) {
 	s.add(StatusAlarm{Target: target, Code: code, At: s.now().UTC(), Detail: detail})
 }
 
+// SetRunsHeld records the node-wide hold, or "" when there is none.
+func (s *Status) SetRunsHeld(code string) {
+	s.mu.Lock()
+	s.runsHeld = code
+	s.mu.Unlock()
+}
+
 // SetSuspensions records the node's current asset suspensions.
 func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Lock()
@@ -252,6 +265,7 @@ func (s *Status) Snapshot(node string) StatusFile {
 	defer s.mu.Unlock()
 	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
 	f.Collecting = len(s.modes) > 0
+	f.RunsHeld = s.runsHeld
 	for db, m := range s.modes {
 		f.Modes[db] = m
 		if !m.AcceptsEvents() {

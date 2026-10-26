@@ -81,6 +81,9 @@ func TestBusyOpenRetriedAtTick(t *testing.T) {
 	if n := openFailed(); n != 1 {
 		t.Fatalf("%d open-failed alarms for audit at start, want 1", n)
 	}
+	if h := st.Snapshot("x").RunsHeld; h != AlarmSuspensionsUnknown {
+		t.Fatalf("runs held %q at start, want %s", h, AlarmSuspensionsUnknown)
+	}
 
 	releaseEvidence()
 	r.Tick(bg) // evidence opens; audit is busy again
@@ -116,6 +119,11 @@ func TestBusyOpenRetriedAtTick(t *testing.T) {
 	if !slices.ContainsFunc(st.Snapshot("x").Alarms, func(a StatusAlarm) bool { return a.Code == AlarmSuspensionsRebuilt }) {
 		t.Fatal("no asset-suspensions-rebuilt in status")
 	}
+	// The unknown-suspensions alarm stays in the history, but status no
+	// longer shows it as current (A3 on #147).
+	if h := st.Snapshot("x").RunsHeld; h != "" {
+		t.Fatalf("runs still held %q after the rebuild", h)
+	}
 }
 
 // A rebuild that fails once the audit database opens keeps every run
@@ -148,5 +156,8 @@ func TestBusyOpenRetryKeepsUnknownSuspensionsHeld(t *testing.T) {
 	}
 	if why := s.Halted(relayID); why != AlarmSuspensionsUnknown {
 		t.Fatalf("halted: %q", why)
+	}
+	if h := s.rt.opt.Status.Snapshot("x").RunsHeld; h != AlarmSuspensionsUnknown {
+		t.Fatalf("runs held %q, want %s", h, AlarmSuspensionsUnknown)
 	}
 }

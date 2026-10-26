@@ -113,9 +113,10 @@ A database whose open failed at start only because another connection held it bu
 
 - **Alarm once.** A retry that is busy again changes nothing. The alarm the first failure raised still stands, and no new one is raised.
 - **No state lock while waiting.** A failed database has no open store, so the retry, which can wait out the busy timeout (about 10 s for a held file), runs without the state lock. Readers of the other databases do not wait for it.
+- **A held file stalls the tick.** The retries run inside `Tick`, one database after another, so while another process holds the file each tick waits out the busy timeout before it reaches pruning and the other databases' resumes (A3 on #147). At the 60 s `TickInterval` that is accepted. If the interval is ever shortened, the retry needs a backoff.
 - **Audited.** A retry that opens the database is a `store.mode_change` from `failed`, in the audit stream and as a health event, like any other mode change.
 - **Nothing runs until the scheduler has caught up.** At start, the scheduler could not load the suspensions without the audit database, nor read a quarantine stream without the evidence database. Every run therefore went through the node-wide hold or the asset's halt. Before each run, the scheduler retries what it could not do (`reload.go`):
-  - It loads the suspensions as at start, from the checkpoint and the audit stream, and only then ends the `asset-suspensions-unknown` hold, raising `asset-suspensions-rebuilt`. A load that fails for another reason keeps every run held.
+  - It loads the suspensions as at start, from the checkpoint and the audit stream, and only then ends the `asset-suspensions-unknown` hold, raising `asset-suspensions-rebuilt`. A load that fails for another reason keeps every run held. The status file's `runs_held` names the node-wide hold while it is current, and `otsec health` prints it as `RUNS HELD`. The alarms list is a history, so the unknown-suspensions alarm stays in it after the rebuild.
   - It reads the halted asset's quarantine stream again. The asset runs again only if no unauthorized-line quarantine is there.
 
 ## Suspensions (D2-15)

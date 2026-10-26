@@ -122,7 +122,17 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 			}
 		}
 	}
+	s.publishHold()
 	return s, nil
+}
+
+// publishHold records the node-wide hold in status, so health shows
+// whether it is still current.
+func (s *Scheduler) publishHold() {
+	s.mu.Lock()
+	h := s.node
+	s.mu.Unlock()
+	s.rt.opt.Status.SetRunsHeld(h)
 }
 
 // durableHalt reports whether the asset's quarantine stream holds an
@@ -263,6 +273,7 @@ type Report struct {
 // decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 	rep := s.runOnce(ctx, i)
+	s.publishHold()
 	if rep.Sent {
 		// The run's records are in the audit stream now. Fold them, so that
 		// status shows the collector's numbering after this run, not only
