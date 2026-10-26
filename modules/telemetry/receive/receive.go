@@ -83,6 +83,25 @@ type Config struct {
 	// Received is the node clock's reading as a C4 receive time.
 	Received func() event.Received
 	Limits   Limits
+	// UnknownSpent is what unknown senders stored on this listener's
+	// stream in the Limits.UnknownWindow before this start, counted by the
+	// node from that stream (A3's conditions on D3-3):
+	//   - the measure the budget spends: the sum of len(event) over the
+	//     committed records that carry asset-unresolved;
+	//   - by received time, a record stamped after now counting as inside
+	//     the window, so a clock set back cannot hand out a fresh budget.
+	// The budget starts at Limits.UnknownBytes less this, so a restart
+	// never refills it: across any number of restarts, unknown senders store
+	// at most UnknownBytes × (1 + T / UnknownWindow) in a time T. 0 starts
+	// it full, as before. A value below 0 or above UnknownBytes starts it
+	// empty.
+	//
+	// The bound holds only if the count is right. A node that cannot read
+	// the stream, or whose count fails, passes UnknownBytes and raises a
+	// health alarm: the budget starts empty, which fails closed. A stream
+	// that reads but is missing records (lost or truncated) under-counts,
+	// which fails open toward the budget starting full.
+	UnknownSpent int64
 }
 
 // Limits bound what one listener accepts. Zero values take the defaults.
@@ -317,7 +336,7 @@ func New(cfg Config) (*Receiver, error) {
 	r := &Receiver{
 		cfg: cfg, lim: lim, limit: newLimiter(lim), tlsCfg: cfg.TLS,
 		perSrc: map[netip.Addr]int{}, unknown: map[netip.Addr]bool{}, reported: map[string]int64{},
-		budget: bucket{tokens: float64(lim.UnknownBytes)},
+		budget: startBudget(lim.UnknownBytes, cfg.UnknownSpent),
 		st:     Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
 	return r, nil
@@ -488,6 +507,17 @@ func (r *Receiver) records(ctx context.Context, ms []msg) ([]store.Record, []msg
 		r.alarmBudget(ctx)
 	}
 	return recs, kept
+}
+
+// startBudget is the unknown senders' budget at start: size less what they
+// stored in the window before (Config.UnknownSpent), refilling from now.
+// Spent below 0 or above size starts it empty.
+func startBudget(size, spent int64) bucket {
+	b := bucket{last: time.Now()}
+	if spent >= 0 && spent <= size {
+		b.tokens = float64(size - spent)
+	}
+	return b
 }
 
 // spend takes n bytes from the unknown senders' budget and reports whether
