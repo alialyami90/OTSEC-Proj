@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -239,7 +240,11 @@ func TestHealthShowsListeners(t *testing.T) {
 	st.SetListeners(map[string]node.ListenerStatus{
 		"lab-udp": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Plaintext: true, Open: true, Received: 7, Stored: 5, LastMessage: at,
 			Dropped: map[string]int64{"store": 1, "rate-limit": 1}, UnknownSenders: 2, UnknownOverflow: true},
-		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached"},
+		"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514", Held: true, Refused: map[string]int64{"tls": 3}, LastErr: "store: quota reached",
+			Unknown:      &node.UnknownShare{HourlyBytes: 671088, BoundBytes: 16777200, QuotaBytes: 67108864, OutageHours: 24, StoredBytes: 20582},
+			CertNotAfter: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)},
+		"lab-tls2": {Transport: "syslog-tls", Address: "127.0.0.1:6515", CertNotAfter: time.Now().Add(10 * 24 * time.Hour).UTC().Truncate(time.Second)},
+		"lab-tls3": {Transport: "syslog-tls", Address: "127.0.0.1:6516", CertNotAfter: time.Date(2100, 1, 2, 3, 4, 5, 0, time.UTC)},
 	})
 	st.Write("site-a-node1")
 	out, errs, code := otsec(t, "health", "-config", path)
@@ -255,6 +260,10 @@ func TestHealthShowsListeners(t *testing.T) {
 		"  HELD: the store is not taking this listener's messages; senders are not read meanwhile",
 		"  connections refused: tls 3",
 		"  last error: store: quota reached",
+		"  unknown senders stored 20582 bytes since start; budget 671088 bytes an hour; with this class's other listeners at most 16777200 bytes, 24% of the 67108864-byte quota, over a 24 h outage (HR-11)",
+		"  CERTIFICATE EXPIRED at 2020-01-02T03:04:05Z: senders that check it refuse it",
+		"listener lab-tls2 (syslog-tls 127.0.0.1:6515): NOT OPEN, 0 received, 0 stored, last message never in this process\n  CERTIFICATE EXPIRES at ",
+		"listener lab-tls3 (syslog-tls 127.0.0.1:6516): NOT OPEN, 0 received, 0 stored, last message never in this process\n  certificate valid until 2100-01-02T03:04:05Z",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("health lacks %q:\n%s", want, out)
@@ -299,6 +308,62 @@ func TestHealthShowsAssetResults(t *testing.T) {
 	} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("health: %d %s\nwant %q in\n%s", code, errs, want, out)
+		}
+	}
+}
+
+// quarantine export writes the asset's quarantine to a new directory
+// without changing the store, refuses a directory that exists, and says
+// when it could not copy the manifest for the node.
+func TestQuarantineExportCommand(t *testing.T) {
+	path, cfg := ranNode(t)
+	before := snapshot(t, cfg.Store.Dir)
+	dir := filepath.Join(t.TempDir(), "export")
+	out, errs, code := otsec(t, "quarantine", "export", "-config", path, relayID, dir)
+	if code != 1 || !strings.Contains(errs, "the export is complete in "+dir) || !strings.Contains(errs, "no admin_dir") {
+		t.Fatalf("export without admin_dir: %d %q %q", code, out, errs)
+	}
+	var m node.QuarantineManifest
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil || json.Unmarshal(b, &m) != nil || len(m.Items) != 2 || m.AssetID != relayID {
+		t.Fatalf("manifest: %v %+v", err, m)
+	}
+	after := snapshot(t, cfg.Store.Dir)
+	for name, b := range before {
+		if !bytes.Equal(after[name], b) {
+			t.Errorf("%s changed under the export", name)
+		}
+	}
+	if _, errs, code := otsec(t, "quarantine", "export", "-config", path, relayID, dir); code != 1 || !strings.Contains(errs, "exists") {
+		t.Fatalf("export into an existing directory: %d %s", code, errs)
+	}
+	for _, args := range [][]string{{"quarantine"}, {"quarantine", "import", "-config", path, relayID, dir}, {"quarantine", "export", "-config", path, relayID}} {
+		if _, _, code := otsec(t, args...); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+}
+
+// health shows each recorded export still to clear, and a clear whose
+// removal is not done.
+func TestHealthShowsQuarantine(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetQuarantine([]node.QuarantineStatus{
+		{AssetID: relayID, ManifestSHA256: strings.Repeat("a", 64), FirstSeq: 1, LastSeq: 18, Items: 18},
+		{AssetID: relayID, ManifestSHA256: strings.Repeat("b", 64), FirstSeq: 19, LastSeq: 40, Items: 22, Clearing: true},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"QUARANTINE EXPORTED, NOT CLEARED " + relayID + ": manifest " + strings.Repeat("a", 64) + ", seqs 1 to 18 (18 items); clear-quarantine.json naming it removes them",
+		"QUARANTINE CLEAR INCOMPLETE " + relayID + ": manifest " + strings.Repeat("b", 64) + ", seqs 19 to 40; removing 16 per tick, and runs of this asset are held until it is done",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
 		}
 	}
 }

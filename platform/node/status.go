@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ type Status struct {
 	// suspensions are the scheduler's current asset suspensions.
 	suspensions map[string]asset.Suspension
 	collClears  map[string]string
+	quarantine  []QuarantineStatus
 	collector   *CollectorStatus
 	assets      map[string]AssetResult
 	runsHeld    string
@@ -78,6 +80,10 @@ type StatusFile struct {
 	// (assetclear.go). The asset's runs are held until it does, and
 	// clear-suspension.json must stay in place until then.
 	CollectorClears map[string]string `json:"collector_clears,omitempty"`
+	// Quarantine lists the recorded quarantine exports whose range still
+	// holds records: not cleared, or cleared with removal not done
+	// (quarantine.go).
+	Quarantine []QuarantineStatus `json:"quarantine,omitempty"`
 	// Collector is the collector's install keys as the audit stream gives
 	// them (seqreset.go): the trusted key and, after a reinstall, the new
 	// one beside it, for the administrator's fingerprint check.
@@ -224,6 +230,14 @@ func (s *Status) SetCollectorClears(m map[string]string) {
 	s.mu.Unlock()
 }
 
+// SetQuarantine records the quarantine exports still to clear or being
+// cleared.
+func (s *Status) SetQuarantine(q []QuarantineStatus) {
+	s.mu.Lock()
+	s.quarantine = q
+	s.mu.Unlock()
+}
+
 // SetCollector records the collector's keys and numbering.
 func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Lock()
@@ -285,6 +299,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	sort.SliceStable(f.Alarms, func(i, j int) bool { return f.Alarms[i].At.Before(f.Alarms[j].At) })
 	if len(s.suspensions) > 0 {
 		f.Suspensions = maps.Clone(s.suspensions)
+	}
+	if len(s.quarantine) > 0 {
+		f.Quarantine = slices.Clone(s.quarantine)
 	}
 	if len(s.collClears) > 0 {
 		f.CollectorClears = maps.Clone(s.collClears)

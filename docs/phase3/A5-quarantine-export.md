@@ -1,6 +1,6 @@
 # Quarantine export and clear: design (P3-A5)
 
-Status: agreed (2026-10-26). A3 agreed to the authorization model with conditions A3-1 to A3-5, then to the hand-off and the resume rule with further conditions, all marked below. A1 approved C5's `Discard` in its bounded form (D3-1, #151) and the resume conditions (a) to (c). A3 adds the two C8 actions. The node and CLI code follows in its own PR.
+Status: agreed (2026-10-26). A3 agreed to the authorization model with conditions A3-1 to A3-5, then to the hand-off and the resume rule with further conditions, all marked below. A1 approved C5's `Discard` in its bounded form (D3-1, #151) and the resume conditions (a) to (c). A3 adds the two C8 actions. The node and CLI code is `platform/node/quarantine.go` and `otsec quarantine export`.
 
 ## Problem
 

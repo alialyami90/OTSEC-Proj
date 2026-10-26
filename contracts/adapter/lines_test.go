@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -159,6 +160,46 @@ func TestCheckLinesContext(t *testing.T) {
 	}
 }
 
+// A setting comes from the reply to the context read that names it (A4 on
+// #164): a span that selects the same bytes elsewhere in the transcript, or
+// a setting no context read names, is refused, though Validate passes both.
+func TestCheckLinesSettingProvenance(t *testing.T) {
+	p, inv := sel751Package(t), validInvocation(t)
+	base := loadResult(t, "ok-with-settings")
+	if err := base.CheckLines(p, inv); err != nil {
+		t.Fatalf("ok-with-settings: %v", err)
+	}
+	d := base.Transcript.Data
+	at := func(needle string, after int) Span {
+		i := bytes.Index(d[after:], []byte(needle))
+		if i < 0 {
+			t.Fatalf("no %q", needle)
+		}
+		return Span{Offset: int64(after + i), Length: int64(len(needle))}
+	}
+	ser := base.Transcript.Segments[sentSegment(t, base, PhaseOperate, "SER")]
+	for n, c := range map[string]struct {
+		st   Setting
+		want string
+	}{
+		// IN101 is in a SER row, so the value matches its bytes but not
+		// the reply to SHO G.
+		"from the SER reply": {Setting{Name: "DATE_F", Value: "IN101", Span: at("IN101", int(ser.Offset))}, "does not lie in the reply"},
+		// PHROT is a setting the SHO G reply prints, but no context read
+		// names it.
+		"another setting": {Setting{Name: "PHROT", Value: "ABC", Span: at("ABC", 0)}, "not a context read"},
+	} {
+		r := base
+		r.Settings = []Setting{c.st}
+		if err := r.Validate(); err != nil {
+			t.Fatalf("%s: Validate: %v", n, err)
+		}
+		if err := r.CheckLines(p, inv); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", n, err, c.want)
+		}
+	}
+}
+
 // A prompt counts only at the start of a line (A3 change 4, A6 change 1).
 func TestPromptOf(t *testing.T) {
 	for rx, want := range map[string]string{
@@ -240,5 +281,22 @@ func TestResultCheckAgainst(t *testing.T) {
 		if err := r2.CheckAgainst(i2, a); err == nil {
 			t.Errorf("%s: accepted", n)
 		}
+	}
+}
+
+// A setting's value is printable ASCII with no space at either end, so it
+// survives a JSON round trip byte for byte (A4 on #164): a span that takes
+// in the CR after DATE_F's value selects its bytes, and is still refused.
+func TestSettingValuePrintable(t *testing.T) {
+	r := loadResult(t, "ok-with-settings")
+	st := r.Settings[0]
+	st.Span.Length++
+	st.Value = string(r.Transcript.Data[st.Span.Offset : st.Span.Offset+st.Span.Length])
+	if st.Value != "MDY\r" {
+		t.Fatalf("value %q", st.Value)
+	}
+	r.Settings = []Setting{st}
+	if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "printable ASCII") {
+		t.Errorf("Validate: %v", err)
 	}
 }

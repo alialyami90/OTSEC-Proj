@@ -53,6 +53,13 @@ const (
 	RefusedSessionBusy           Code = "refused.session_busy"               // another session to the device is open (D9)
 	RefusedRateLimited           Code = "refused.rate_limited"               // min_interval_ms not yet elapsed
 	FailedConnect                Code = "failed.connect"                     // TCP or serial open failed after the allowed retries
+	// RefusedEndpointPath (0.5): the C1 endpoint's path is not direct, so
+	// no session is opened (asset.Endpoint.CheckPath). No path (a C1 0.1
+	// record), a port server, and a path the reader does not know are
+	// refused alike: a port server's timeouts in front of the device have
+	// no evidence yet (D2-16, H-13). Nothing is sent, so it suspends
+	// nothing; an administrator setting the path clears it.
+	RefusedEndpointPath Code = "refused.endpoint_path"
 
 	// Connected, before authentication.
 	RefusedSessionElevated Code = "refused.session_elevated" // first prompt already "=>" or "=>>": a session left open (S22 p. 7.16, D18); nothing sent
@@ -128,6 +135,7 @@ var codes = map[Code]codeInfo{
 	RefusedSessionBusy:             {StageBeforeConnect, 1, "", ""},
 	RefusedRateLimited:             {StageBeforeConnect, 1, "", ""},
 	FailedConnect:                  {StageBeforeConnect, 1, "", ""},
+	RefusedEndpointPath:            {StageBeforeConnect, 5, "", ""},
 	RefusedSessionElevated:         {StageBeforeAuth, 1, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
 	RefusedSessionPendingPassword:  {StageBeforeAuth, 1, "", ""}, // as elevated: TIDLE clears it
 	RefusedInvocationMismatch:      {StageBeforeConnect, 1, "", ""},

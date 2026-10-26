@@ -2,11 +2,16 @@ package node
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
@@ -19,6 +24,34 @@ import (
 // runs. Nothing more is received on it until the node restarts.
 const AlarmListenerStopped = "syslog-listener-stopped"
 
+// AlarmListenerCertExpiring: a syslog-tls listener's certificate expires
+// within ListenerCertWarning, or has expired. The listener keeps presenting
+// it until the node restarts with a new one, and senders that check it
+// refuse it once it has expired (A4 on #154).
+const AlarmListenerCertExpiring = "syslog-listener-certificate-expiring"
+
+// ListenerCertWarning is how long before a listener certificate's NotAfter
+// AlarmListenerCertExpiring is raised.
+const ListenerCertWarning = 30 * 24 * time.Hour
+
+// AlarmTargetSmallForListeners: the node has listeners and a target's
+// max_message_octets is below RecommendedTargetOctets, so a received
+// message whose text does not fit is forwarded with its hash and length
+// only (C6, forward.text-omitted). Raised at every start.
+const AlarmTargetSmallForListeners = "target-small-for-listeners"
+
+// RecommendedTargetOctets fits a forwarded event holding a received
+// message of streamMaxMessage bytes: its text and the subject and value a
+// dialect takes from it (RTAC: up to renderedFieldMax bytes each), escaped
+// or carried as base64, take at most twice their length, and the rest of
+// the header and structured data less than 2048 octets (A4 on #169: an
+// 8147-byte RTAC frame renders at 21161 octets).
+const RecommendedTargetOctets = 2*(streamMaxMessage+2*renderedFieldMax) + 2048
+
+// renderedFieldMax is the longest subj or val C6 renders from a received
+// message's dialect fields.
+const renderedFieldMax = 1024
+
 // Listening runs the node's Syslog listeners (P3-A4): one receive.Receiver
 // per configured listener, committing to the listener's stream in the
 // syslog database through a view that looks the open database up on every
@@ -29,15 +62,33 @@ type Listening struct {
 	receivers []*receive.Receiver
 	bound     map[string]net.Addr
 	plaintext map[string]bool
+	sizing    map[string]ListenerSizing
+	// unknown counts the record bytes stored from unknown senders since
+	// start, per listener (liveLog).
+	unknown map[string]*atomic.Int64
+	// notAfter is a syslog-tls listener's certificate expiry; expiry is
+	// the alarm already raised for it ("expiring" or "expired").
+	notAfter map[string]time.Time
+	expiry   map[string]string
 }
 
 // NewListening checks every listener of the runtime's configuration and
 // binds nothing. A syslog-tls listener's references are resolved first
 // (Config.ListenerTLS), so a missing or bad file stops the node; nothing
 // falls back to plaintext. The sender table comes from the C1 assets'
-// inbound endpoints (receive.SendersFor).
+// inbound endpoints (receive.SendersFor), and each listener's unknown
+// budget from its class quota (Config.ListenerSizings).
 func NewListening(rt *Runtime) (*Listening, error) {
-	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{}}
+	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{},
+		unknown: map[string]*atomic.Int64{}, notAfter: map[string]time.Time{}, expiry: map[string]string{}}
+	if len(rt.cfg.Listeners) == 0 {
+		return ls, nil
+	}
+	sizing, err := rt.cfg.ListenerSizings()
+	if err != nil {
+		return nil, err
+	}
+	ls.sizing = sizing
 	for _, l := range rt.cfg.Listeners {
 		ap, err := netip.ParseAddrPort(l.Address)
 		if err != nil {
@@ -48,19 +99,26 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			return nil, fmt.Errorf("listener %s: %w", l.ID, err)
 		}
 		stream := ListenerStream(l.ID)
+		unknown := new(atomic.Int64)
 		cfg := receive.Config{
 			Node: rt.cfg.NodeID, ID: l.ID, Stream: stream,
 			Transport: l.Transport, Address: l.Address, Target: l.Target,
 			Plaintext: l.Plaintext,
 			Senders:   senders,
-			Log:       liveLog{rt, stream},
+			Log:       liveLog{rt, stream, unknown},
 			Health:    healthSink{rt},
 			Received:  rt.received,
+			Limits:    sizing[l.ID].limits(),
 		}
 		if l.Transport == asset.SyslogTLS {
 			if cfg.TLS, err = rt.cfg.ListenerTLS(l); err != nil {
 				return nil, err
 			}
+			leaf, err := leafOf(cfg.TLS.Certificates)
+			if err != nil {
+				return nil, fmt.Errorf("listener %s: credential: %w", l.ID, err)
+			}
+			ls.notAfter[l.ID] = leaf.NotAfter
 		}
 		r, err := receive.New(cfg)
 		if err != nil {
@@ -68,8 +126,20 @@ func NewListening(rt *Runtime) (*Listening, error) {
 		}
 		ls.receivers = append(ls.receivers, r)
 		ls.plaintext[l.ID] = l.Plaintext
+		ls.unknown[l.ID] = unknown
 	}
 	return ls, nil
+}
+
+// leafOf is the listener certificate of a server TLS configuration.
+func leafOf(certs []tls.Certificate) (*x509.Certificate, error) {
+	if len(certs) == 0 || len(certs[0].Certificate) == 0 {
+		return nil, fmt.Errorf("no certificate")
+	}
+	if certs[0].Leaf != nil {
+		return certs[0].Leaf, nil
+	}
+	return x509.ParseCertificate(certs[0].Certificate[0])
 }
 
 // Listen binds every listener. If one cannot bind, those already bound are
@@ -91,7 +161,58 @@ func (ls *Listening) Listen() error {
 				fmt.Sprintf("listener %s receives %s on %s in plaintext: no sender authentication or integrity (D3-5)", s.ID, s.Transport, ls.bound[s.ID]))
 		}
 	}
+	ls.checkTargets()
 	return nil
+}
+
+// checkTargets raises AlarmTargetSmallForListeners for each target too
+// small to carry a received message's text whole. It is a warning: such a
+// message is still forwarded, with its hash and length (C6).
+func (ls *Listening) checkTargets() {
+	if len(ls.receivers) == 0 {
+		return
+	}
+	for _, t := range ls.rt.cfg.targets {
+		if t.MaxMessageOctets < RecommendedTargetOctets {
+			ls.rt.opt.Status.RaiseTarget(t.Name, AlarmTargetSmallForListeners,
+				fmt.Sprintf("max_message_octets is %d; a received message whose text does not fit is forwarded with its hash and length only (forward.text-omitted). %d octets carries any received message of up to %d bytes whole",
+					t.MaxMessageOctets, RecommendedTargetOctets, streamMaxMessage))
+		}
+	}
+}
+
+// checkExpiry raises AlarmListenerCertExpiring once when a listener's
+// certificate comes within ListenerCertWarning of expiry, and again once
+// it has expired.
+func (ls *Listening) checkExpiry(id string, now time.Time) {
+	na, ok := ls.notAfter[id]
+	if !ok {
+		return
+	}
+	state, detail := "", ""
+	switch {
+	case !now.Before(na):
+		state = "expired"
+		detail = fmt.Sprintf("the listener certificate expired at %s; senders that check it refuse it. Replace %s.crt and .key and restart the node", na.UTC().Format(time.RFC3339), ls.credRef(id))
+	case na.Sub(now) <= ListenerCertWarning:
+		state = "expiring"
+		detail = fmt.Sprintf("the listener certificate expires at %s; replace %s.crt and .key and restart the node before then", na.UTC().Format(time.RFC3339), ls.credRef(id))
+	}
+	if state == "" || ls.expiry[id] == state {
+		return
+	}
+	ls.expiry[id] = state
+	ls.rt.opt.Status.RaiseTarget("listener "+id, AlarmListenerCertExpiring, detail)
+}
+
+// credRef is listener id's credential reference.
+func (ls *Listening) credRef(id string) string {
+	for _, l := range ls.rt.cfg.Listeners {
+		if l.ID == id && l.TLS != nil {
+			return l.TLS.CredentialRef
+		}
+	}
+	return "the credential"
 }
 
 // ReasonPlaintextListener is the reason_code of the node.posture_change
@@ -130,16 +251,30 @@ func (ls *Listening) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-// Publish records every listener's state in status.
+// Publish records every listener's state in status, and raises
+// AlarmListenerCertExpiring when a certificate is near or past expiry.
+// It is called from one goroutine at a time.
 func (ls *Listening) Publish() {
 	if len(ls.receivers) == 0 {
 		return
 	}
+	now := ls.rt.opt.Now()
 	m := make(map[string]ListenerStatus, len(ls.receivers))
 	for _, r := range ls.receivers {
+		id := r.Status().ID
 		s := listenerStatus(r.Status())
-		s.Plaintext = ls.plaintext[r.Status().ID]
-		m[r.Status().ID] = s
+		s.Plaintext = ls.plaintext[id]
+		sz := ls.sizing[id]
+		s.Unknown = &UnknownShare{
+			HourlyBytes: sz.UnknownBytes, BoundBytes: sz.UnknownBound,
+			QuotaBytes: sz.Quota, OutageHours: sz.OutageHours,
+			StoredBytes: ls.unknown[id].Load(),
+		}
+		if na, ok := ls.notAfter[id]; ok {
+			s.CertNotAfter = na.UTC()
+			ls.checkExpiry(id, now)
+		}
+		m[id] = s
 	}
 	ls.rt.opt.Status.SetListeners(m)
 }
@@ -168,6 +303,22 @@ type ListenerStatus struct {
 	UnknownOverflow    bool             `json:"unknown_overflow,omitempty"`
 	Held               bool             `json:"held,omitempty"`
 	LastErr            string           `json:"last_error,omitempty"`
+	// Unknown is the unknown senders' storage: their budget and bound
+	// (ListenerSizings) and what they stored since start (HR-11, D3-3).
+	Unknown *UnknownShare `json:"unknown,omitempty"`
+	// CertNotAfter is a syslog-tls listener's certificate expiry.
+	CertNotAfter time.Time `json:"certificate_not_after,omitzero"`
+}
+
+// UnknownShare is a listener's unknown-sender storage. BoundBytes is what
+// the unknown senders of every listener of its class together may store
+// over OutageHours, at most a quarter of QuotaBytes, the class quota.
+type UnknownShare struct {
+	HourlyBytes int64 `json:"hourly_bytes"`
+	BoundBytes  int64 `json:"bound_bytes"`
+	QuotaBytes  int64 `json:"quota_bytes"`
+	OutageHours int64 `json:"outage_hours"`
+	StoredBytes int64 `json:"stored_bytes"`
 }
 
 func listenerStatus(s receive.Status) ListenerStatus {
@@ -212,6 +363,9 @@ func SortedListeners(m map[string]ListenerStatus) []string {
 type liveLog struct {
 	rt     *Runtime
 	stream c5.StreamID
+	// unknown counts the event bytes stored from unknown senders: records
+	// that carry asset-unresolved, which receive's unknown budget counts.
+	unknown *atomic.Int64
 }
 
 func (l liveLog) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
@@ -222,5 +376,26 @@ func (l liveLog) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receip
 	if !mode.AcceptsEvents() {
 		return nil, fmt.Errorf("node: the database of %s is in mode %s, which accepts no events", l.stream, mode)
 	}
-	return log.AppendBatch(ctx, recs)
+	rs, err := log.AppendBatch(ctx, recs)
+	if err == nil && l.unknown != nil {
+		var n int64
+		for _, rec := range recs {
+			if unresolved(rec.Event) {
+				n += int64(len(rec.Event))
+			}
+		}
+		l.unknown.Add(n)
+	}
+	return rs, err
+}
+
+// unresolved reports whether a C4 event carries asset-unresolved.
+func unresolved(ev []byte) bool {
+	var e struct {
+		Flags []string `json:"flags"`
+	}
+	if json.Unmarshal(ev, &e) != nil {
+		return false
+	}
+	return slices.Contains(e.Flags, "asset-unresolved")
 }
