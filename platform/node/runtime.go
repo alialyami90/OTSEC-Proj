@@ -44,6 +44,14 @@ type Runtime struct {
 	pending []queued        // store alarms raised during a commit, for Tick
 	raised  map[string]bool // conditions whose alarm is raised (prune.go)
 	pruneMu sync.Mutex      // serializes Prune
+	// deferred holds the node records audit could not commit because the
+	// audit database had not opened, its open at start being only busy (C5
+	// 0.2). The retry in Tick that opens it commits them first, in order
+	// and with their own times, so a restart is never missing from the
+	// chain (A6 on #147). At most MaxDeferredAudit are kept; dropped
+	// counts the rest, and one record names how many.
+	deferred []c5.Record
+	dropped  int
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
@@ -270,6 +278,9 @@ func (r *Runtime) Tick(ctx context.Context) {
 		}
 		now := d.report
 		r.state.Unlock()
+		if d.spec.ID == AuditDB && prev.OpenBusy() {
+			r.commitDeferred(ctx)
+		}
 		if mc, ok := c5.ModeChangeOf(prev, now, r.opt.Now()); ok {
 			r.modeChanged(ctx, d, mc)
 		}
@@ -414,12 +425,27 @@ func (r *Runtime) healthEventRecord(stream c5.StreamID, h event.Health) (c5.Reco
 	return c5.Record{Stream: stream, Class: class, Event: b}, nil
 }
 
+// MaxDeferredAudit bounds the node records kept while the audit database's
+// open is busy. A start writes one per database and service.start, so a
+// node needs far fewer.
+const MaxDeferredAudit = 64
+
+// AlarmAuditNotRecorded: a node record could not be committed because the
+// audit database does not accept records. While its open is only busy the
+// record is kept and committed when a retry opens it; the alarm says which.
+const AlarmAuditNotRecorded = "audit-not-recorded"
+
 // audit commits a node-written C8 record. A failure goes to status: the
 // audit store may be what failed.
 func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.Outcome, reason, detail string) {
-	_, log, mode := r.view(r.find(AuditDB))
+	d := r.find(AuditDB)
+	_, log, mode := r.view(d)
 	if log == nil || !mode.AcceptsEvents() {
-		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmAuditFull, At: r.opt.Now(), Detail: fmt.Sprintf("%s not recorded: audit database %s", action, r.Mode(AuditDB))})
+		why := fmt.Sprintf("%s not recorded: audit database %s", action, r.Mode(AuditDB))
+		if log == nil && r.openBusy(d) {
+			why += "; " + r.deferAudit(action, outcome, reason, detail)
+		}
+		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: why})
 		return
 	}
 	rec, err := r.AuditRecord(action, outcome, reason, detail)
@@ -428,6 +454,64 @@ func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.
 	}
 	if err != nil {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})
+	}
+}
+
+// openBusy reports whether d failed at an open that was only busy, which
+// Tick retries.
+func (r *Runtime) openBusy(d *database) bool {
+	if d == nil {
+		return false
+	}
+	r.state.RLock()
+	defer r.state.RUnlock()
+	return d.report.OpenBusy()
+}
+
+// deferAudit keeps a record for commitDeferred, timed now, and says what
+// became of it.
+func (r *Runtime) deferAudit(action audit.Action, outcome audit.Outcome, reason, detail string) string {
+	rec, err := r.AuditRecord(action, outcome, reason, detail)
+	if err != nil {
+		return "not kept: " + err.Error()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.deferred) >= MaxDeferredAudit {
+		r.dropped++
+		return fmt.Sprintf("not kept: %d records already wait for the audit database", MaxDeferredAudit)
+	}
+	r.deferred = append(r.deferred, rec)
+	return "kept, to be recorded when a retry opens the audit database"
+}
+
+// commitDeferred commits the records kept while the audit database's open
+// was busy, once a retry has opened it, before the retry's
+// store.mode_change. Each keeps the time it was made at. A new chain gets
+// its audit.chain_start first, as recordStart would have written.
+func (r *Runtime) commitDeferred(ctx context.Context) {
+	r.mu.Lock()
+	q, dropped := r.deferred, r.dropped
+	r.deferred, r.dropped = nil, 0
+	r.mu.Unlock()
+	db, log, mode := r.view(r.find(AuditDB))
+	if log == nil || !mode.AcceptsEvents() {
+		if len(q) > 0 || dropped > 0 {
+			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: fmt.Sprintf("%d kept records not recorded: audit database %s", len(q)+dropped, mode)})
+		}
+		return
+	}
+	if n, err := db.LastCommitted(ctx, AuditStream); err == nil && n == 0 {
+		r.audit(ctx, audit.ActionAuditChainStart, audit.OutcomeInfo, "", "audit chain started for node "+string(r.cfg.NodeID))
+	}
+	for _, rec := range q {
+		if _, err := log.Append(ctx, rec); err != nil {
+			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: "kept record: " + err.Error()})
+		}
+	}
+	if dropped > 0 {
+		r.audit(ctx, audit.ActionStorageAlarm, audit.OutcomeInfo, "audit_not_recorded",
+			fmt.Sprintf("%d node records were not recorded while the audit database's open was busy; status holds their alarms", dropped))
 	}
 }
 

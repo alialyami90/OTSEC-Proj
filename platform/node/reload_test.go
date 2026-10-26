@@ -3,14 +3,19 @@ package node
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 
 	"otsec.local/otsec/contracts/audit"
+	"otsec.local/otsec/contracts/authz"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/security/collectorclient"
 )
 
 // holdDB opens database id of the store in dir with an exclusive-locking
@@ -111,6 +116,36 @@ func TestBusyOpenRetriedAtTick(t *testing.T) {
 	}) {
 		t.Fatal("no store.mode_change for the audit database's recovery")
 	}
+	// What the second start could not record is in the chain, in order and
+	// before the recovery: its service.start and every first mode (A6 on
+	// #147), and the evidence database's recovery while audit was busy.
+	at := func(action audit.Action, detail string) int {
+		return slices.IndexFunc(recs, func(rec *audit.Record) bool {
+			return rec.Action == action && strings.HasPrefix(rec.Detail, detail)
+		})
+	}
+	recovered := at(audit.ActionStoreModeChange, "database audit: failed to collecting")
+	firstAuditFailed := at(audit.ActionStoreModeChange, "database audit: none to failed;")
+	evidenceRecovered := at(audit.ActionStoreModeChange, "database evidence: failed to collecting")
+	var starts []int
+	for i, rec := range recs {
+		if rec.Action == audit.ActionServiceStart {
+			starts = append(starts, i)
+		}
+	}
+	if len(starts) != 2 || firstAuditFailed < starts[0] || !(firstAuditFailed < starts[1] && starts[1] < evidenceRecovered && evidenceRecovered < recovered) {
+		t.Fatalf("restart records out of the chain or out of order: starts %v, audit none to failed %d, evidence recovered %d, audit recovered %d", starts, firstAuditFailed, evidenceRecovered, recovered)
+	}
+	for i := starts[1]; i < recovered; i++ {
+		if recs[i].Time.UTC > recs[i+1].Time.UTC {
+			t.Fatalf("record %d (%s) is timed %s, after the next one at %s", i, recs[i].Action, recs[i].Time.UTC, recs[i+1].Time.UTC)
+		}
+	}
+	if !slices.ContainsFunc(st.Snapshot("x").Alarms, func(a StatusAlarm) bool {
+		return a.Code == AlarmAuditNotRecorded && strings.Contains(a.Detail, "kept, to be recorded")
+	}) {
+		t.Fatalf("no %s alarm for a kept record", AlarmAuditNotRecorded)
+	}
 	// The suspension recorded before the restart is rebuilt and enforced,
 	// so the run is held for it, not for unknown suspensions or a halt.
 	if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmAssetSuspended || col.n() != 0 {
@@ -159,5 +194,108 @@ func TestBusyOpenRetryKeepsUnknownSuspensionsHeld(t *testing.T) {
 	}
 	if h := s.rt.opt.Status.Snapshot("x").RunsHeld; h != AlarmSuspensionsUnknown {
 		t.Fatalf("runs held %q, want %s", h, AlarmSuspensionsUnknown)
+	}
+}
+
+// The halt the busy-open retry reads again (D2-15, A6 on #147): with the
+// evidence database busy at start every asset is held as halted, because
+// its quarantine cannot be read. Once a retry opens it, an asset whose
+// quarantine holds an unauthorized-line record stays halted, and one whose
+// quarantine holds only another kind runs again.
+func TestBusyEvidenceRetryKeepsUnauthorizedHalt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out busy_timeout")
+	}
+	for _, unauthorized := range []bool{true, false} {
+		t.Run(map[bool]string{true: "unauthorized line", false: "other quarantine"}[unauthorized], func(t *testing.T) {
+			c, dir := schedConfig(t, nil)
+			r, _, _ := start(t, c, dir)
+			reason := "result: does not decode"
+			err := fmt.Errorf("%w: %w: %s", collectorclient.ErrOutcomeUnknown, collectorclient.ErrOutcomeQuarantined, reason)
+			if unauthorized {
+				reason = "result: line 7 is not permitted for sel.ser.read_all"
+				err = fmt.Errorf("%w: %w: %w: %s", collectorclient.ErrOutcomeUnknown, collectorclient.ErrOutcomeQuarantined, collectorclient.ErrUnauthorizedLine, reason)
+			}
+			frame := []byte(`{"wire":"otsec.collectorwire/0.1","invocation_id":"` + okInvocation + `","result":{},"audit":[]}`)
+			f := &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+				return collectorclient.Response{Reply: accepted(req, 1), Quarantine: &collectorclient.Quarantine{Raw: frame, Reason: reason, UnauthorizedLine: unauthorized}}, err
+			}}
+			if rep := newScheduler(t, r, f).RunOnce(bg, 0); rep.Outcome != "quarantined" {
+				t.Fatalf("first run: %+v", rep)
+			}
+			r.Close()
+
+			release := holdDB(t, c.Store.Dir, EvidenceDB)
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			f.answer = func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+				return collectorclient.Response{}, errors.New("collector not reachable")
+			}
+			s := newScheduler(t, r, f)
+			if s.Halted(relayID) == "" {
+				t.Fatal("not held as halted with its quarantine unreadable")
+			}
+			release()
+			r.Tick(bg)
+			if m := r.Mode(EvidenceDB); m != c5.ModeCollecting {
+				t.Fatalf("evidence after a retry: %s", m)
+			}
+			s.RunOnce(bg, 0)
+			if !unauthorized {
+				if s.Halted(relayID) != "" || f.n() != 2 {
+					t.Fatalf("other quarantine: halted %q, %d requests, want a run", s.Halted(relayID), f.n())
+				}
+				return
+			}
+			if s.Halted(relayID) == "" || f.n() != 1 {
+				t.Fatalf("unauthorized line: halted %q, %d requests, want no run", s.Halted(relayID), f.n())
+			}
+			if !slices.ContainsFunc(st.Snapshot("x").Alarms, func(a StatusAlarm) bool {
+				return a.Code == AlarmCollectionDisabled && a.Asset == relayID && strings.Contains(a.Detail, "does not permit")
+			}) {
+				t.Fatalf("no %s for the unauthorized line after the retry", AlarmCollectionDisabled)
+			}
+		})
+	}
+}
+
+// Records kept while the audit database is busy are bounded: past
+// MaxDeferredAudit each is dropped, and once a retry opens the database
+// one storage.alarm record says how many were (A6 on #147).
+func TestBusyAuditKeptRecordsBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out busy_timeout")
+	}
+	c, dir := schedConfig(t, nil)
+	r, _, _ := start(t, c, dir)
+	r.Close()
+	release := holdDB(t, c.Store.Dir, AuditDB)
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	kept := len(r.deferred)
+	for i := 0; i < MaxDeferredAudit; i++ {
+		r.audit(bg, audit.ActionPolicyApply, audit.OutcomeInfo, "", fmt.Sprintf("test record %d", i))
+	}
+	dropped := kept
+	release()
+	r.Tick(bg)
+	recs := auditRecords(t, r)
+	var tests int
+	for _, rec := range recs {
+		if rec.Action == audit.ActionPolicyApply && strings.HasPrefix(rec.Detail, "test record ") {
+			tests++
+		}
+	}
+	if tests != MaxDeferredAudit-kept {
+		t.Fatalf("%d test records committed, want %d", tests, MaxDeferredAudit-kept)
+	}
+	want := fmt.Sprintf("%d node records were not recorded", dropped)
+	if !slices.ContainsFunc(recs, func(rec *audit.Record) bool {
+		return rec.Action == audit.ActionStorageAlarm && strings.HasPrefix(rec.Detail, want)
+	}) {
+		t.Fatalf("no storage.alarm saying %q", want)
+	}
+	if len(r.deferred) != 0 || r.dropped != 0 {
+		t.Fatalf("still kept: %d, dropped %d", len(r.deferred), r.dropped)
 	}
 }
