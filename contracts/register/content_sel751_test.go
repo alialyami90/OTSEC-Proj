@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -187,11 +188,74 @@ func loadRev2(t *testing.T) *Package {
 	return p
 }
 
+// rev3 is revision 3, the last otsec.register/0.1 package, written by
+// build_sel751.py on the way to revision 4.
+func loadRev3(t *testing.T) *Package {
+	t.Helper()
+	data, err := os.ReadFile("testdata/sel-751-rev3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Decode(data)
+	if err != nil || p.Revision != 3 || p.Contract != "otsec.register/0.1" {
+		t.Fatalf("revision 3: %v", err)
+	}
+	return p
+}
+
+// TestContentRev4: revision 4 is revision 3 in format 0.2 plus the DATE_F
+// context read for SER (D3-2) and SHO G's corrected DATE_F citation (S22
+// Table 4.84, not Table 4.90). Every line, deny rule, condition and firmware
+// entry is unchanged, so the deny corpus result cannot move.
+func TestContentRev4(t *testing.T) {
+	old, p := loadRev3(t), loadContent(t)
+	if p.Revision != 4 || p.Contract != ContractID || p.Issued != "2026-10-26" {
+		t.Fatalf("revision %d, %s, issued %s", p.Revision, p.Contract, p.Issued)
+	}
+	want := []ContextRead{{ID: "ctx.date_f", Setting: "DATE_F", ReadBy: "sel.settings.show_global",
+		For: []string{"sel.ser.read_all"}, Values: []string{"MDY", "YMD", "DMY"}}}
+	got := slices.Clone(p.Context)
+	for i := range got {
+		if got[i].Reason == "" {
+			t.Errorf("%s has no reason", got[i].ID)
+		}
+		got[i].Reason = ""
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("context %+v, want %+v", got, want)
+	}
+	cites := map[string][]string{}
+	for _, o := range p.Operations {
+		for _, c := range o.Citations {
+			cites[o.ID] = append(cites[o.ID], c.Ref)
+		}
+	}
+	g := cites["sel.settings.show_global"]
+	if len(g) != 3 || g[1] != "Table 4.90 p.4.230 (UTC_OFF, DST_BEGM..DST_ENDH)" || !strings.HasPrefix(g[2], "Table 4.84 p.4.225 (DATE_F") {
+		t.Errorf("SHO G citations %q", g)
+	}
+	// Everything else is revision 3 as it was.
+	q := *p
+	q.Contract, q.Revision, q.Issued, q.Context, q.Notes = old.Contract, old.Revision, old.Issued, nil, p.Notes[1:]
+	q.Operations = slices.Clone(p.Operations)
+	for i := range q.Operations {
+		if q.Operations[i].ID == "sel.settings.show_global" {
+			q.Operations[i].Citations = old.Operations[i].Citations
+		}
+	}
+	if !reflect.DeepEqual(&q, old) {
+		t.Error("revision 4 changes more than its contract, revision, date, context, notes and SHO G's citation")
+	}
+	if !strings.HasPrefix(p.Notes[0], "Revision 4 by A2") {
+		t.Errorf("first note %q", p.Notes[0])
+	}
+}
+
 // TestContentDenyRulesOnlyGrow: revision 3 keeps every revision 2 deny rule,
 // in the same order, with its classification, access level and citations.
 // Only the listed rules gain Spanish forms, and only the listed rules are new.
 func TestContentDenyRulesOnlyGrow(t *testing.T) {
-	old, p := loadRev2(t), loadContent(t)
+	old, p := loadRev2(t), loadRev3(t)
 	if p.Revision != 3 {
 		t.Fatalf("revision %d, want 3", p.Revision)
 	}

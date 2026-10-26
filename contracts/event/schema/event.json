@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/contracts/event/0.1/event.json",
-  "title": "otsec.event/0.1",
+  "$id": "https://otsec.local/contracts/event/0.2/event.json",
+  "title": "otsec.event/0.2",
   "description": "C4 event. Rules that need more than one field (precision against resolution, UTC equals wall clock minus offset, hashes against bytes, span inside evidence, category needs a mapping, origin-dependent fields) are enforced by event.Validate in Go; this schema states structure only. Not strict: readers ignore unknown fields.",
   "type": "object",
   "required": ["schema", "id", "origin", "kind", "source", "received"],
@@ -34,7 +34,8 @@
           "required": ["address"],
           "properties": {
             "address": {"type": "string", "minLength": 1},
-            "asset_id": {"type": "string"}
+            "asset_id": {"type": "string"},
+            "tls_leaf_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "0.2: SHA-256 of the DER certificate a tls-mutual sender presented. Required with tls-mutual from 0.2, forbidden otherwise (Go rule). Never raises binding confidence."}
           }
         },
         "origin_auth": {"enum": ["none", "tls-server-only", "tls-mutual", "session", "platform"]},

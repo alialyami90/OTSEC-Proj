@@ -22,8 +22,9 @@ import (
 //     0 operations, the auth line is ACC, and the close line is QUI.
 //   - An operate line is the invocation's operation, rendered with its
 //     parameters, or an operation the register reads a precondition, a
-//     posture warning or a firmware condition with. Nothing else, even when
-//     it is read-only.
+//     posture warning or a firmware condition with, or a context setting
+//     for the invocation's operation (C3 0.2, D3-2). Nothing else, even when
+//     it is read-only: a context read for another operation is refused.
 func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 	m, err := register.NewMatcher(p)
 	if err != nil {
@@ -53,6 +54,9 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 		for _, s := range b.Conditions {
 			reads[s.ReadBy] = true
 		}
+	}
+	for _, c := range p.ContextFor(inv.OperationID) {
+		reads[c.ReadBy] = true
 	}
 	if !r.coversExactly() {
 		return fmt.Errorf("adapter: lines: the segments do not cover the transcript")

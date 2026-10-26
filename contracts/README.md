@@ -12,8 +12,8 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | --- | --- | --- | --- | --- |
 | C1 | `contracts/asset` | `otsec.asset/0.2` | A2 | Merged (#32). 0.2: `Endpoint.path` (`direct`, `port-server`); only `direct` gets a session, and a 0.1 record's endpoints are refused until an administrator sets the path (D2-16, `docs/phase3/A2-c1-path.md`). |
 | C2 | `contracts/adapter` | `otsec.adapter/0.4` | A2 | Merged (#51). 0.2: `failed.unexpected_password_prompt` and the probe QUI exemption (D2-14). 0.3: `failed.identity_unreadable`, which suspends nothing (A6 on #118, D2-17). 0.4: the unanswered language probe, reported as `failed.timeout` or `failed.transport_closed` (A6, V-S12). |
-| C3 | `contracts/register` | `otsec.register/0.1` | A1 (format), A2 (content) | Merged (#27, #32); SEL-751 content rev 3. |
-| C4 | `contracts/event` | `otsec.event/0.1` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). |
+| C3 | `contracts/register` | `otsec.register/0.2` | A1 (format), A2 (content) | Merged (#27, #32); 0.2 adds context reads (D3-2); SEL-751 content rev 4. |
+| C4 | `contracts/event` | `otsec.event/0.2` | A4 | Merged (#29, #42, #59: `evidence_class`, D1-23). 0.2: `source.sender.tls_leaf_sha256`, the certificate a `tls-mutual` sender presented; binding confidence unchanged (A3 on #150, A1). |
 | C5 | `contracts/store` | `otsec.store/0.3` | A5 | Merged (#33). 0.2: `open-busy`, the one open failure `Resume` retries without a restart (P3-A5). 0.3: `Discarder`, bounded removal of named events from a quarantine stream (D3-1). |
 | C6 | `contracts/syslog` | `otsec.syslog/0.2` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). |
 | C7 | `contracts/authz` | `otsec.authz/0.4` | A3 | 0.1 merged (#38). 0.2 adds `asset.clear_suspension` and `suspension_mismatch` (D2-15, A1). 0.3 adds `asset_suspended` and the held suspension it names, which the node adopts (A6 on #120). 0.4 adds admin-signed requests (`admin_signed`, `VerifyAdminRequest`) and the `admin_unverified` refusal (D2-11, P3-A3). |

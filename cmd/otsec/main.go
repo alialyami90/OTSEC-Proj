@@ -402,6 +402,43 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintln(w, line)
 		}
 	}
+	for _, id := range node.SortedListeners(st.Listeners) {
+		ls := st.Listeners[id]
+		state := "open"
+		if !ls.Open {
+			state = "NOT OPEN"
+		}
+		last := "never in this process"
+		if !ls.LastMessage.IsZero() {
+			last = ls.LastMessage.Format(time.RFC3339)
+		}
+		fmt.Fprintf(w, "listener %s (%s %s): %s, %d received, %d stored, last message %s\n", safe(id), ls.Transport, safe(ls.Address), state, ls.Received, ls.Stored, last)
+		if ls.Plaintext {
+			fmt.Fprintln(w, "  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)")
+		}
+		if ls.Held {
+			fmt.Fprintln(w, "  HELD: the store is not taking this listener's messages; senders are not read meanwhile")
+		}
+		if len(ls.Dropped) > 0 {
+			fmt.Fprintf(w, "  DROPPED: %s\n", counts(ls.Dropped))
+		}
+		if len(ls.Refused) > 0 {
+			fmt.Fprintf(w, "  connections refused: %s\n", counts(ls.Refused))
+		}
+		if ls.Truncated > 0 || ls.Misframed > 0 || ls.Discarded > 0 {
+			fmt.Fprintf(w, "  stored truncated %d, misframed %d; %d bytes past the size limit not stored\n", ls.Truncated, ls.Misframed, ls.Discarded)
+		}
+		if ls.UnknownSenders > 0 {
+			more := ""
+			if ls.UnknownOverflow {
+				more = " and more not tracked"
+			}
+			fmt.Fprintf(w, "  UNKNOWN SENDERS: %d%s; their messages are kept with no asset\n", ls.UnknownSenders, more)
+		}
+		if ls.LastErr != "" {
+			fmt.Fprintf(w, "  last error: %s\n", safe(ls.LastErr))
+		}
+	}
 	if len(st.Alarms) == 0 {
 		fmt.Fprintln(w, "alarms: none")
 		return nil
@@ -419,6 +456,20 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.At.Format(time.RFC3339), src, a.Code, safe(a.Detail))
 	}
 	return tw.Flush()
+}
+
+// counts renders reason counts in reason order: "rate-limit 3, store 1".
+func counts(m map[string]int64) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s %d", safe(k), m[k])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func sortedDBs(m map[c5.DatabaseID]c5.Mode) []c5.DatabaseID {
