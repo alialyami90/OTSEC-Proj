@@ -586,6 +586,21 @@ class Slice:
                     f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"])
         return out.stdout
 
+    def environ(self, name):
+        """The process's environment as the OS has it (V-S11), or None where
+        another process's environment is not readable (Windows)."""
+        if os.name == "nt":
+            return None
+        with open(f"/proc/{self.procs[name].pid}/environ", "rb") as f:
+            return f.read()
+
+    def image(self, name):
+        """The path the process runs from: the installed copy in service
+        mode, the built binary otherwise."""
+        if self.service and name in SERVICES:
+            return self.service.node_exe if name == "node" else self.service.collector_exe
+        return self.exe("otsec" if name == "node" else "otsec-collector")
+
     def health(self):
         out = subprocess.run([self.exe("otsec"), "health", "-config", self.layout["node_config"]],
                              capture_output=True, text=True)

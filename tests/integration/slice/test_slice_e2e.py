@@ -21,8 +21,9 @@ What is checked, against ground truth that is not the product's own:
   - every line the simulator received is a read-only register line, one
     session at a time, one password per session, QUI last (check.py;
     V-S7, V-S13);
-  - the test password appears in no file, log, receiver record or process
-    argument of the platform (V-S11).
+  - the test password appears in no file, log, receiver record, process
+    argument or (on Linux, where it is readable) process environment of the
+    platform (V-S11).
 
 Evidence class: simulated. The simulator answers from manual examples
 (documented-example), not from a device; nothing here is hardware
@@ -70,6 +71,7 @@ def run(tmp_path_factory):
         # As the OS has them while both run: /proc on Linux, Win32_Process
         # on Windows (processes or installed services).
         s.cmdlines = {name: s.cmdline(name) for name in ("node", "collector")}
+        s.environs = {name: s.environ(name) for name in ("node", "collector")}
         yield s
     finally:
         s.stop()
@@ -135,13 +137,21 @@ def test_the_password_is_nowhere(run):
                 # A file the run locked read-only for its owner is still
                 # readable; anything else unreadable is a gap in the check.
                 hits.append("unreadable: " + os.path.relpath(p, run.root))
-    for name, exe in (("node", "otsec"), ("collector", "otsec-collector")):
-        cmd = run.cmdlines.get(name) or ""
-        # A command line that was not read would pass vacuously: it must
-        # name its own binary.
-        assert os.path.basename(run.exe(exe)).lower() in cmd.lower(), f"{name} command line not read: {cmd!r}"
+    for name in ("node", "collector"):
+        cmd = (run.cmdlines.get(name) or "").strip()
+        # A command line that was not read, or was read from the other
+        # process, would pass vacuously: it must start with this process's
+        # own image path (quoted on Windows when the path has spaces).
+        image, head = run.image(name).lower(), cmd.lstrip('"').lower()
+        # The image path, then the end, a space or the closing quote: the
+        # node's "otsec" is a prefix of "otsec-collector".
+        assert head.startswith(image) and head[len(image):][:1] in ("", " ", '"'), \
+            f"{name} command line not read: {cmd!r}, want {run.image(name)!r} first"
         if CANARY in cmd:
             hits.append(f"{name} arguments")
+        env = run.environs.get(name)
+        if env is not None and canary in env:
+            hits.append(f"{name} environment")
     # The simulator's log records the in-band password as an auth event,
     # never its bytes (sim.py); it is the device's side, checked here too.
     with open(run.sim_log, "rb") as f:
