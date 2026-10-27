@@ -379,6 +379,22 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintf(w, "QUARANTINE EXPORTED, NOT CLEARED %s: manifest %s, seqs %d to %d (%d items); %s naming it removes them\n", safe(q.AssetID), q.ManifestSHA256, q.FirstSeq, q.LastSeq, q.Items, node.ClearQuarantineFileName)
 		}
 	}
+	for _, a := range st.AdminRequests {
+		switch a.State {
+		case "accepted":
+			fmt.Fprintf(w, "admin request %s (%s): accepted by the collector, collector_seq %d; the file may be removed\n", safe(a.File), safe(a.Kind), a.CollectorSeq)
+		case "refused":
+			fmt.Fprintf(w, "ADMIN REQUEST REFUSED %s (%s): %s, collector_seq %d; it is not sent again, sign a new request\n", safe(a.File), safe(a.Kind), safe(a.Detail), a.CollectorSeq)
+		case "unread":
+			fmt.Fprintf(w, "ADMIN REQUEST UNREAD %s: %s\n", safe(a.File), safe(a.Detail))
+		default:
+			line := fmt.Sprintf("ADMIN REQUEST WAITING %s (%s): not yet decided by the collector", safe(a.File), safe(a.Kind))
+			if a.Detail != "" {
+				line += "; " + safe(a.Detail)
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
 	if c := st.Collector; c != nil {
 		fmt.Fprintf(w, "collector install key: trusted %s, collector_seq high %d\n", safe(keyOrNone(c.TrustedKey)), c.High)
 		if c.OpenResetKey != "" {
@@ -483,8 +499,8 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintf(w, "  UNKNOWN SENDERS: %d%s; their messages are kept with no asset\n", ls.UnknownSenders, more)
 		}
 		if u := ls.Unknown; u != nil {
-			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
-				u.StoredBytes, u.HourlyBytes, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
+			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour, started %d bytes spent by the hour before start; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
+				u.StoredBytes, u.HourlyBytes, u.SpentAtStart, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
 		}
 		if na := ls.CertNotAfter; !na.IsZero() {
 			switch left := time.Until(na); {

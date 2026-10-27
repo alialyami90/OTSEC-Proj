@@ -41,7 +41,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CANARY, CHECK, REGISTER, Slice
+from slicerun import CANARY, CHECK, REGISTER, SERVICE, Slice
 
 RUNS = 2
 # The first run starts 60 s after the node, the second at least 60 s after
@@ -52,7 +52,7 @@ RUN_TIMEOUT = 75.0 * RUNS + 30.0
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-e2e")))
     s.build()
     try:

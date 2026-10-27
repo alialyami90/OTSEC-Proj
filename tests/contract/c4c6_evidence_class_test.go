@@ -57,7 +57,7 @@ func TestD123EvidenceClassDecode(t *testing.T) {
 	later := rep(rep(rtac, `"otsec.event/0.1"`, `"otsec.event/0.9"`), string(sim), `"evidence_class": "lab-replay"`)
 	e, err := event.Decode(later)
 	if err != nil {
-		t.Errorf("0.2 with an unknown evidence_class refused; D1-23 reads it as simulated: %v", err)
+		t.Errorf("a later minor with an unknown evidence_class refused; D1-23 reads it as simulated: %v", err)
 	} else if !e.Source.Simulated() {
 		t.Errorf("0.2 unknown evidence_class reads as device-observed")
 	}

@@ -44,7 +44,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 # A FID the asset's record does not allow: the build date differs.
 OTHER_FID = harness.ALLOWED_FID[:-1] + ("1" if harness.ALLOWED_FID[-1] != "1" else "2")
@@ -55,13 +55,13 @@ SUSPENDED = re.compile(r"^SUSPENDED (\S+): (\S+) since \S+; cleared only by an a
 
 
 def _sessions(log):
-    return sum(1 for r in harness.read_log(log) if r["event"] == "session_close") if os.path.exists(log) else 0
+    return sum(1 for r in harness.read_log(log, live=True) if r["event"] == "session_close") if os.path.exists(log) else 0
 
 
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-identity")))
     s.build()
     diag = lambda: f"health:\n{s.health()}\nnode:\n{s.text('node')}\ncollector:\n{s.text('collector')}"

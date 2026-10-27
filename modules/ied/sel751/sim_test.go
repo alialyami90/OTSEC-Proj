@@ -2,6 +2,7 @@ package sel751
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"strings"
@@ -19,6 +20,11 @@ import (
 //	OTSEC_SEL751_SIM_SERIAL   the serial its SER report prints, declared
 //	OTSEC_SEL751_SIM_OP       sel.ser.read_all (default) or sel.id
 //	OTSEC_SEL751_SIM_EXPECT   the expected error code, or "ok" (default)
+//	OTSEC_SEL751_SIM_RESULT   a file to write the C2 result to, as JSON, for
+//	                          an independent reconcile (A6's slice suite);
+//	                          the invocation and the asset as declared are
+//	                          written beside it, with .inv.json and
+//	                          .asset.json appended, for the normalizer
 //
 // The simulator answers from manual examples, so a pass is simulated
 // evidence only (CLAUDE.md section 3).
@@ -53,6 +59,23 @@ func TestSimulator(t *testing.T) {
 	t.Logf("result:\n%s", jsonOf(t, got))
 	t.Logf("transcript:\n%s", strings.ReplaceAll(string(got.Transcript.Data), "\r\n", "\\r\\n\n"))
 	t.Logf("floor calls: %v", fl.calls)
+	if p := os.Getenv("OTSEC_SEL751_SIM_RESULT"); p != "" {
+		b, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for suffix, v := range map[string]any{".inv.json": f.inv, ".asset.json": f.asset} {
+			if b, err = json.Marshal(v); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p+suffix, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	check(t, f, got)
 	want := os.Getenv("OTSEC_SEL751_SIM_EXPECT")
 	code := "ok"

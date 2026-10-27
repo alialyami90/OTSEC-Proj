@@ -83,6 +83,30 @@ type Config struct {
 	// Received is the node clock's reading as a C4 receive time.
 	Received func() event.Received
 	Limits   Limits
+	// UnknownSpent is what unknown senders stored on this listener's
+	// stream in the Limits.UnknownWindow before this start, counted by the
+	// node from that stream (A3's conditions on D3-3):
+	//   - the sum of len(event) over the committed records that carry
+	//     asset-unresolved, each event as stored. The budget charges a
+	//     record at least that: its length with the widest seq the store
+	//     can write into it (seqSlack), so what is stored never exceeds what
+	//     was charged;
+	//   - by received time, a record stamped after now counting as inside
+	//     the window, so a clock set back cannot hand out a fresh budget.
+	//     The budget is charged as each message is read, just after it is
+	//     stamped, so received time is the time it was charged.
+	// The budget starts at Limits.UnknownBytes less this, so a restart
+	// never refills it: across any number of restarts, unknown senders store
+	// at most UnknownBytes × (1 + T / UnknownWindow) in a time T. 0 starts
+	// it full, as before. A value below 0 or above UnknownBytes starts it
+	// empty.
+	//
+	// The bound holds only if the count is right. A node that cannot read
+	// the stream, or whose count fails, passes UnknownBytes and raises a
+	// health alarm: the budget starts empty, which fails closed. A stream
+	// that reads but is missing records (lost or truncated) under-counts,
+	// which fails open toward the budget starting full.
+	UnknownSpent int64
 }
 
 // Limits bound what one listener accepts. Zero values take the defaults.
@@ -257,8 +281,10 @@ type Receiver struct {
 	st       Status
 	held     int
 	perSrc   map[netip.Addr]int
-	budget   bucket    // unknown senders' record bytes
-	budgetAt time.Time // when HealthUnknownBudget was last raised
+	budget   bucket           // unknown senders' record bytes
+	budgetAt time.Time        // when HealthUnknownBudget was last raised
+	over     chan struct{}    // a read path dropped a message past the budget (serveAlarms)
+	now      func() time.Time // the budget's clock
 	unknown  map[netip.Addr]bool
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
@@ -317,8 +343,9 @@ func New(cfg Config) (*Receiver, error) {
 	r := &Receiver{
 		cfg: cfg, lim: lim, limit: newLimiter(lim), tlsCfg: cfg.TLS,
 		perSrc: map[netip.Addr]int{}, unknown: map[netip.Addr]bool{}, reported: map[string]int64{},
-		budget: bucket{tokens: float64(lim.UnknownBytes)},
-		st:     Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
+		budget: startBudget(lim.UnknownBytes, cfg.UnknownSpent, time.Now()),
+		over:   make(chan struct{}, 1), now: time.Now,
+		st: Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
 	return r, nil
 }
@@ -376,6 +403,7 @@ func (r *Receiver) Serve(ctx context.Context) error {
 	stop := context.AfterFunc(ctx, func() { time.AfterFunc(r.lim.Grace, cancel) })
 	defer stop()
 	defer cancel()
+	defer r.serveAlarms(cctx)()
 	if r.pc != nil {
 		return r.serveDatagrams(ctx, cctx)
 	}
@@ -422,6 +450,7 @@ type msg struct {
 	auth event.OriginAuth
 	cert []byte // a tls-mutual sender's verified certificate (DER)
 	rcv  event.Received
+	rec  *store.Record // an unknown sender's record, built and paid for as read (payUnknown)
 }
 
 // record builds msg's C5 record.
@@ -454,27 +483,25 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 }
 
 // records builds the records of a batch, one by one, and returns them with
-// the messages they hold. Two kinds of message are left out, dropped and
-// counted:
-//
-//   - one whose record cannot be built. That is a fault in this package,
-//     never in the bytes (normalize.Syslog takes any bytes), and it costs
-//     only that message, not the batch;
-//   - an unknown sender's message past the unknown budget, so unattributed
-//     traffic never takes the storage configured devices' events need.
-func (r *Receiver) records(ctx context.Context, ms []msg) ([]store.Record, []msg) {
+// the messages they hold. A known sender's record is built here; an unknown
+// sender's was built as it was read (payUnknown). A message whose record cannot
+// be built is left out, dropped and counted as store. That is a fault in
+// this package, never in the bytes (normalize.Syslog takes any bytes), and
+// it costs only that message, not the batch.
+func (r *Receiver) records(ms []msg) ([]store.Record, []msg) {
 	recs := make([]store.Record, 0, len(ms))
 	kept := ms[:0:0]
-	var faults, over int64
+	var faults int64
 	for _, m := range ms {
+		if m.rec != nil {
+			recs = append(recs, *m.rec)
+			kept = append(kept, m)
+			continue
+		}
 		rec, err := r.record(m)
 		if err != nil {
 			faults++
 			r.update(func(s *Status) { s.LastErr = "record from " + m.from.String() + ": " + err.Error() })
-			continue
-		}
-		if _, known := r.cfg.Senders[m.from]; !known && !r.spend(len(rec.Event)) {
-			over++
 			continue
 		}
 		recs = append(recs, rec)
@@ -483,11 +510,83 @@ func (r *Receiver) records(ctx context.Context, ms []msg) ([]store.Record, []msg
 	if faults > 0 {
 		r.drop(DropStore, faults)
 	}
-	if over > 0 {
-		r.drop(DropUnknownBudget, over)
-		r.alarmBudget(ctx)
-	}
 	return recs, kept
+}
+
+// payUnknown builds an unknown sender's record and spends the unknown budget
+// for it as it is read, and reports whether m is to be queued. One past the
+// budget is dropped and counted as unknown-budget, so unattributed traffic
+// never takes the storage, or the queue room, configured devices' events
+// need. Spending as read is what makes Config.UnknownSpent exact: the node
+// counts by received time, which the reader stamps just before this. Spent
+// in the writer instead, a record read before the window and spent inside
+// it fell out of the count, and a restart over-granted it (#178, A6 on
+// Windows). A record spent and then not stored (a datagram batch the store
+// refuses, a stream frame unstored at stop) stays spent, which errs toward
+// a smaller budget. payUnknown does no I/O: the alarm is raised by serveAlarms.
+func (r *Receiver) payUnknown(m *msg) bool {
+	rec, err := r.record(*m)
+	if err != nil {
+		r.update(func(s *Status) {
+			s.LastErr = "record from " + m.from.String() + ": " + err.Error()
+			s.Dropped[DropStore]++
+		})
+		return false
+	}
+	if !r.spend(len(rec.Event) + seqSlack) {
+		r.drop(DropUnknownBudget, 1)
+		select {
+		case r.over <- struct{}{}:
+		default:
+		}
+		return false
+	}
+	m.rec = &rec
+	return true
+}
+
+// serveAlarms raises HealthUnknownBudget for the read paths, which signal
+// r.over, so a reader never waits on the health sink. The function it
+// returns raises a pending alarm and stops it; Serve calls that after its
+// readers and writers have stopped.
+func (r *Receiver) serveAlarms(cctx context.Context) func() {
+	end, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-r.over:
+				r.alarmBudget(cctx)
+			case <-end:
+				select {
+				case <-r.over:
+					r.alarmBudget(cctx)
+				default:
+				}
+				return
+			}
+		}
+	}()
+	return func() {
+		close(end)
+		<-done
+	}
+}
+
+// seqSlack is how much longer a stored event can be than the record the
+// receiver built: the store replaces id.seq 0 with the assigned seq, at
+// most the 19 digits of the largest int64.
+const seqSlack = len("9223372036854775807") - len("0")
+
+// startBudget is the unknown senders' budget at start: size less what they
+// stored in the window before (Config.UnknownSpent), refilling from now.
+// Spent below 0 or above size starts it empty.
+func startBudget(size, spent int64, now time.Time) bucket {
+	b := bucket{last: now}
+	if spent >= 0 && spent <= size {
+		b.tokens = float64(size - spent)
+	}
+	return b
 }
 
 // spend takes n bytes from the unknown senders' budget and reports whether
@@ -496,7 +595,7 @@ func (r *Receiver) spend(n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	size := float64(r.lim.UnknownBytes)
-	r.budget.refill(time.Now(), size/r.lim.UnknownWindow.Seconds(), size)
+	r.budget.refill(r.now(), size/r.lim.UnknownWindow.Seconds(), size)
 	if r.budget.tokens < float64(n) {
 		return false
 	}

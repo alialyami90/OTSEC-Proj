@@ -178,7 +178,7 @@ def test_tls_refuses_unknown_client(tmp_path, tls, who):
         except (OSError, ConnectionError):
             r = None
         assert r is None, who
-        harness.wait_for(lambda: any(x["event"] == "session_close" for x in harness.read_log(log)), 5)
+        harness.wait_for(lambda: any(x["event"] == "session_close" for x in harness.read_log(log, live=True)), 5)
         assert not syslogs(log), who
         if which in ("wrongname", "san_shadow"):
             # These pass the chain check; the name check is what stops them.
