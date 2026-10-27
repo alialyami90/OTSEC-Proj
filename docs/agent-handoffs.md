@@ -858,7 +858,7 @@ Taken here, as ADR-0008 requires, on A2's FTP assessment (#183): **the SEL-751 s
 
 ### Task P4-A6: Verification for items 1 and 2, and the carried checks
 - Owner agent: A6.
-- Deliverable: the `SHO` forms in the simulator, from the manual and independently of A2, with a change injector; GT-INJ series for configuration changes and event departures, committed before the products' tests first run; the acceptance tests in each brief above; and the carried checks: the full DMY and YMD slice reconcile, a Windows end-to-end check of the admin relay and `config\admin`'s ACLs on the hosted runner; the unknown-restart leg on Windows; and a scan of the services' process command lines for the canary password.
+- Deliverable: the `SHO` forms in the simulator, from the manual and independently of A2, with a change injector; GT-INJ series for configuration changes and event departures, committed before the products' tests first run; the acceptance tests in each brief above; and the carried checks: the DMY and YMD slice reconcile on the real binaries (the adapter-through-normalizer step passes since #211), a Windows end-to-end check of the admin relay and `config\admin`'s ACLs on the hosted runner; the unknown-restart leg on Windows; and a scan of the services' process command lines for the canary password.
 - Acceptance tests: each check fails on a deliberately broken build (mutation).
 - Explicit exclusions: no hardware without the owner's authorization.
 

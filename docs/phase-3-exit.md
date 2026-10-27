@@ -52,7 +52,7 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 | **Received Syslog** end to end | **Pass**, `simulated`. `test_slice_syslog_receive_e2e.py` and `tests/integration/syslogreceive/`: raw bytes stored and hash-matched; hostile framing never crashes, hangs or loses an earlier message; a flood from one source does not displace another; a wrong TLS anchor is refused; an unknown sender is kept and alarmed. The unknown budget holds across SIGKILL restarts on the real binaries (`test_slice_unknown_restart_e2e.py`, #199). |
 | **C7 admin-signed requests** (D2-11) | **Pass.** 24 of 24 mutants killed on the contract (#146); replay after a restart and after a clock step is refused (#153); the C7 0.5 repeat answer: 23 of 23 mutants killed (#184). The node relay (#189): A6's independent end-to-end check, 18 of 18 against main, with the collector's own decision log as the oracle. |
 | **C1 path and the collector's path check** | **Pass.** 10 of 10 and 2 of 2 mutants killed. A `port-server` or path-less endpoint gets no session. |
-| **`DATE_F`** | **Pass**, `simulated`. 10 of 10 `dateOrder` mutants killed under D3-11. Ambiguous dates (day 12 or less) read correctly in MDY, DMY and YMD in A6's ad hoc check. The slice's stored events no longer carry `date-format-assumed:MDY` (0 of 8). **Not run:** the full slice reconcile against a simulator set to DMY and YMD (A2 and A6). |
+| **`DATE_F`** | **Pass**, `simulated`. 10 of 10 `dateOrder` mutants killed under D3-11. Ambiguous dates (day 12 or less) read correctly in MDY, DMY and YMD in A6's ad hoc check. The slice's stored events no longer carry `date-format-assumed:MDY` (0 of 8). In MDY, YMD and DMY, the adapter's result through the normalizer gives each figure row as one event dated 2007-02-28, with no `date-format-assumed` flag (#211, A6 8 of 8 mutants). **Not run:** the slice reconcile in DMY and YMD on the real binaries (store, forwarder, receiver). |
 | **Quarantine export and clear; busy-open retry** | **Pass.** 8 of 8 mutants killed on the clear (#163); 15 of 17 on the retry contract (the 2 survivors fail closed); the busy-open slice runs in `integration-long`. |
 | **Node key store** (§9) | **Pass on the hosted Windows runner**, Software KSP only: D3-7's claims (a) to (c). The TPM provider is untested (T-2). Not yet used by the node (#176). |
 | **Pipe identity under the SCM** (D3-9) | **Pass on the hosted Windows runner**: two virtual-account services; the wrong-SID node is refused; only the two query rights are granted. |
@@ -92,7 +92,7 @@ Already made in Phase 3: the owner swapped the portable Go to 1.26.10 themselves
 
 - **No end-to-end Windows check of the admin relay or of `config\admin`'s ACLs.** The relay suite needs SIGSTOP and POSIX modes and is skipped on Windows; only the C7 contract tests run there. This is owed.
 - **Signed `clear-*` files** (relay PR 2 of #181) are not built, so the clear-suspension and clear-quarantine files are still unsigned administrator files under D2-15's folder rule.
-- **The full DMY and YMD slice reconcile** has not run (A2 and A6).
+- **The DMY and YMD slice reconcile on the real binaries** has not run. The adapter-through-normalizer step passes in all three orders (#211).
 - **Not run, carried from Phase 2:** V-S7's 24-hour soak, (c) and (d); V-S6's link cut in the middle of a SER read; V-S9's file-system exhaustion; V-S15's hostile framing end to end on the SER path; V-S18 and V-S20.
 
 ## Unverified assumptions
