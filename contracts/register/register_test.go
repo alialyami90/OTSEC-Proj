@@ -548,7 +548,7 @@ func TestWarnings(t *testing.T) {
 // edits A2's SEL-751 content, revision 4, which reads DATE_F with SHO G for
 // SER.
 func TestContext(t *testing.T) {
-	data, err := os.ReadFile(content)
+	data, err := os.ReadFile(contentRev4)
 	if err != nil {
 		t.Fatal(err)
 	}

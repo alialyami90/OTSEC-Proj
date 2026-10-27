@@ -20,7 +20,7 @@ const testRun = "sel.test.read_shows"
 // SHO G and SER, and the run testRun, then applies f.
 func v3(t *testing.T, f func(m map[string]any)) []byte {
 	t.Helper()
-	data, err := os.ReadFile(content)
+	data, err := os.ReadFile(contentRev4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestRunNeedsOnePointThree(t *testing.T) {
 	if _, err := Decode(v3(t, func(m map[string]any) { delete(m, "runs") })); err != nil {
 		t.Errorf("0.3 with limits and no run: %v", err)
 	}
-	for _, id := range []string{"sel-751-phase0.json", "sel-751-rev2.json", "sel-751-rev3.json", "sel-751.json"} {
+	for _, id := range []string{"sel-751-phase0.json", "sel-751-rev2.json", "sel-751-rev3.json", "sel-751-rev4.json"} {
 		data, err := os.ReadFile("testdata/" + id)
 		if err != nil {
 			t.Fatal(err)

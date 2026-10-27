@@ -13,6 +13,10 @@ import (
 // testdata/build_sel751.py from the Phase 0 package and S22 Appendix A.
 const content = "testdata/sel-751.json"
 
+// contentRev4 is revision 4 as it was signed, pinned: the last package in
+// format 0.2, and the one the C2 goldens and the SER tests are written for.
+const contentRev4 = "testdata/sel-751-rev4.json"
+
 func loadContent(t *testing.T) *Package {
 	t.Helper()
 	data, err := os.ReadFile(content)
@@ -123,17 +127,35 @@ func TestContentDecidesLikePhase0(t *testing.T) {
 }
 
 // TestContentAllowlistUnchanged: the lines the collector may send are the
-// Phase 0 ones, and every line Phase 0 refuses is still refused. Deny rules
-// only grow (TestContentDenyRulesOnlyGrow).
+// Phase 0 ones plus revision 5's SHO forms (TestContentRev5), and every other
+// line Phase 0 refuses is still refused. Deny rules only grow
+// (TestContentDenyRulesOnlyGrow).
 func TestContentAllowlistUnchanged(t *testing.T) {
 	old, p := load(t), loadContent(t)
-	strip := func(o Operation) Operation { o.Citations, o.Notes = nil, ""; return o }
-	if len(old.Operations) != len(p.Operations) {
-		t.Fatalf("%d operations, want %d", len(p.Operations), len(old.Operations))
+	strip := func(o Operation) Operation { o.Citations, o.Notes, o.Limits = nil, "", nil; return o }
+	if len(p.Operations) < len(old.Operations) {
+		t.Fatalf("%d operations, want at least %d", len(p.Operations), len(old.Operations))
 	}
 	for i := range old.Operations {
 		if !reflect.DeepEqual(strip(old.Operations[i]), strip(p.Operations[i])) {
 			t.Errorf("operation %s changed", old.Operations[i].ID)
+		}
+	}
+	// Revision 5 approves exactly the lines of its run. The deny corpus
+	// (B6's) was written before and lists some of them; every other line it
+	// holds, including each such form with an argument, stays refused.
+	approvedLater := map[string]bool{}
+	for _, r := range p.Runs {
+		m, err := NewMatcher(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines, err := m.RenderRun(r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lines {
+			approvedLater[l] = true
 		}
 	}
 	if !reflect.DeepEqual(old.SessionControl, p.SessionControl) {
@@ -162,6 +184,9 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, l := range corpus(t, "sel-deny-corpus.txt") {
+		if approvedLater[l] {
+			continue
+		}
 		if v, id := m.Match(l); v == VerdictOperation || v == VerdictSessionControl {
 			t.Errorf("deny corpus %q classified %s (%s)", l, v, id)
 		}
@@ -203,12 +228,25 @@ func loadRev3(t *testing.T) *Package {
 	return p
 }
 
+func loadRev4(t *testing.T) *Package {
+	t.Helper()
+	data, err := os.ReadFile(contentRev4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := Decode(data)
+	if err != nil {
+		t.Fatalf("revision 4: %v", err)
+	}
+	return p
+}
+
 // TestContentRev4: revision 4 is revision 3 in format 0.2 plus the DATE_F
 // context read for SER (D3-2) and SHO G's corrected DATE_F citation (S22
 // Table 4.84, not Table 4.90). Every line, deny rule, condition and firmware
 // entry is unchanged, so the deny corpus result cannot move.
 func TestContentRev4(t *testing.T) {
-	old, p := loadRev3(t), loadContent(t)
+	old, p := loadRev3(t), loadRev4(t)
 	if p.Revision != 4 || p.Contract != "otsec.register/0.2" || p.Issued != "2026-10-26" {
 		t.Fatalf("revision %d, %s, issued %s", p.Revision, p.Contract, p.Issued)
 	}
@@ -394,8 +432,18 @@ var commandForms = []struct {
 	{"SER 1 10", "en es", "6", other},
 	{"SER C", "en", "6", changes}, {"SER R", "en es", "6", changes}, {"SER D", "en es", "6", changes},
 	{"SER B", "es", "6", other},
-	{"SHO 1", "en", "6", other}, {"SHO G", "en", "6", approved}, {"SHO P 1", "en", "6", approved},
-	{"SHO P 2", "en", "6", other}, {"SHO R", "en", "6", other},
+	// Revision 5 approves the 24 forms of Table 7.67 without a setting name.
+	{"SHO 1", "en", "6", approved}, {"SHO 4", "en", "6", approved}, {"SHO G", "en", "6", approved},
+	{"SHO L 1", "en", "6", approved}, {"SHO L 4", "en", "6", approved},
+	{"SHO P 1", "en", "6", approved}, {"SHO P 2", "en", "6", approved}, {"SHO P F", "en", "6", approved},
+	{"SHO R", "en", "6", approved}, {"SHO F", "en", "6", approved}, {"SHO M", "en", "6", approved},
+	{"SHO I", "en", "6", approved}, {"SHO E 3", "en", "6", approved}, {"SHO DNP 3", "en", "6", approved},
+	// The "s" argument names a setting to jump to; a bare SHO P shows the
+	// active port; neither is approved.
+	{"SHO 1 CTR", "en", "6", other}, {"SHO L 1 SV1", "en", "6", other}, {"SHO G DATE_F", "en", "6", other},
+	{"SHO P", "en", "6", other}, {"SHO P 1 LANG", "en", "6", other}, {"SHO R SER1", "en", "6", other},
+	{"SHO", "en", "6", other}, {"SHO 5", "en", "6", other}, {"SHO P 5", "en", "6", other},
+	{"SHO E 4", "en", "6", other}, {"SHO DNP 4", "en", "6", other}, {"SHO E", "en", "6", other},
 	{"MOS 1", "es", "6", other}, {"MOS G", "es", "6", other}, {"MOS P 1", "es", "6", other},
 	{"STA", "en", "6", other}, {"STA S", "en", "6", changes}, {"EST", "es", "6", other}, {"EST S", "es", "6", changes},
 	{"SUM", "en es", "6", other}, {"SUM 1", "en es", "6", other}, {"SUM HIF 1", "en es", "6", other},
@@ -495,6 +543,7 @@ func TestContentApprovedLinesPermitted(t *testing.T) {
 	}{
 		{PhaseProbe, "QUI"}, {PhaseProbe, "ID"}, {PhaseAuth, "ACC"},
 		{PhaseOperate, "ID"}, {PhaseOperate, "SHO P 1"}, {PhaseOperate, "SHO G"}, {PhaseOperate, "SER"},
+		{PhaseOperate, "SHO 1"}, {PhaseOperate, "SHO L 4"}, {PhaseOperate, "SHO DNP 3"},
 		{PhaseClose, "QUI"},
 	} {
 		if _, id, err := m.Permit(c.ph, c.line); err != nil {
@@ -508,5 +557,100 @@ func TestContentApprovedLinesPermitted(t *testing.T) {
 	// no rule may deny it either.
 	if id := m.denied(""); id != "" {
 		t.Errorf("the empty wake line matches deny rule %s", id)
+	}
+}
+
+// rev5Limits is revision 5's counted reply bound for each form
+// (docs/phase4/B2-register-rev5.md, count_settings.py): the settings of the
+// class on S22's settings sheets at 22 + 64 bytes each, 22 + 384 for an
+// equation, and 4,096 for headings, rounded up to a KiB. The numbers are
+// bounds on assumptions (documented-untested), not measurements.
+var rev5Limits = []struct {
+	line  string
+	bound int64
+}{
+	{"SHO P 1", 24576}, {"SHO G", 101376},
+	{"SHO 1", 103424}, {"SHO 2", 103424}, {"SHO 3", 103424}, {"SHO 4", 103424},
+	{"SHO L 1", 355328}, {"SHO L 2", 355328}, {"SHO L 3", 355328}, {"SHO L 4", 355328},
+	{"SHO P F", 7168}, {"SHO P 2", 9216}, {"SHO P 3", 9216}, {"SHO P 4", 9216},
+	{"SHO R", 13312}, {"SHO F", 30720}, {"SHO M", 10240}, {"SHO I", 13312},
+	{"SHO E 1", 16384}, {"SHO E 2", 16384}, {"SHO E 3", 16384},
+	{"SHO DNP 1", 17408}, {"SHO DNP 2", 17408}, {"SHO DNP 3", 17408},
+}
+
+// TestContentRev5: revision 5 is revision 4 in format 0.3 plus the 24 SHO
+// forms and the run that reads them (P4-A2, D4-13). Every earlier line, deny
+// rule, precondition, warning, context read and firmware entry is unchanged.
+func TestContentRev5(t *testing.T) {
+	old, p := loadRev4(t), loadContent(t)
+	if p.Revision != 5 || p.Contract != "otsec.register/0.3" || p.Issued != "2026-10-27" {
+		t.Fatalf("revision %d, %s, issued %s", p.Revision, p.Contract, p.Issued)
+	}
+	m, err := NewMatcher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The run: SHO P 1 and SHO G lead, then the other 22 forms in order, each
+	// with the counted reply bound and 10 s.
+	if len(p.Runs) != 1 || p.Runs[0].ID != "sel.config.read_all" {
+		t.Fatalf("runs %+v", p.Runs)
+	}
+	r := p.Runs[0]
+	lines, err := m.RenderRun(r.ID)
+	if err != nil || len(lines) != len(rev5Limits) {
+		t.Fatalf("RenderRun: %d lines, %v", len(lines), err)
+	}
+	for i, want := range rev5Limits {
+		if lines[i] != want.line {
+			t.Errorf("step %d is %q, want %q", i+1, lines[i], want.line)
+		}
+		_, id := m.Match(lines[i])
+		l, ok := m.Limits(id)
+		if !ok || l.MaxReplyBytes != want.bound || l.TimeoutMS != 10_000 {
+			t.Errorf("%s: limits %+v, %v, want %d bytes in 10 s", lines[i], l, ok, want.bound)
+		}
+		if o, _ := m.Operation(id); o.Classification != ReadOnly || o.AccessLevel != "1" || len(o.Params) != 0 ||
+			o.Evidence.Class != DocumentedUntested || len(o.Citations) == 0 || o.Citations[0].Source != "S22" {
+			t.Errorf("%s: %+v", id, o)
+		}
+	}
+	if r.MaxTotalBytes != 512<<10 || r.DeadlineMS != 300_000 || r.Evidence.Class != DocumentedUntested {
+		t.Errorf("run %+v", r)
+	}
+	// Only the steps have limits, and each form once (no two IDs share a line).
+	seen := map[string]bool{}
+	for _, o := range p.Operations {
+		if o.Limits != nil && !slices.Contains(lines, o.Line) {
+			t.Errorf("%s has limits but is no step", o.ID)
+		}
+		if seen[o.Line] {
+			t.Errorf("line %q twice", o.Line)
+		}
+		seen[o.Line] = true
+	}
+	// Everything else is revision 4 as it was.
+	q := *p
+	q.Contract, q.Revision, q.Issued, q.Runs, q.Notes = old.Contract, old.Revision, old.Issued, nil, p.Notes[1:]
+	q.Operations = slices.Clone(p.Operations[:len(old.Operations)])
+	for i := range q.Operations {
+		q.Operations[i].Limits = nil
+	}
+	if !reflect.DeepEqual(&q, old) {
+		t.Error("revision 5 changes more than its contract, revision, date, notes, the new operations, their limits and the run")
+	}
+	if !strings.HasPrefix(p.Notes[0], "Revision 5 by B2") || !strings.Contains(p.Notes[0], "touchscreen") {
+		t.Errorf("first note %q", p.Notes[0])
+	}
+	// Nothing the run does not send is newly approved: the operations of
+	// revision 5 are revision 4's four and the 22 forms.
+	if len(p.Operations) != len(old.Operations)+len(rev5Limits)-2 {
+		t.Errorf("%d operations", len(p.Operations))
+	}
+	// The "s" forms and a bare SHO P stay refused, and so does every form
+	// the table does not list.
+	for _, l := range []string{"SHO 1 CTR", "SHO L 2 SV1", "SHO G UTC_OFF", "SHO P", "SHO P 1 LANG", "SHO 5", "SHO L 5", "SHO P 5", "SHO E 4", "SHO DNP 0", "SHO T", "SHO  1", "sho 1", "SHO 1 "} {
+		if v, id := m.Match(l); v == VerdictOperation || v == VerdictSessionControl {
+			t.Errorf("%q classified %s (%s)", l, v, id)
+		}
 	}
 }
