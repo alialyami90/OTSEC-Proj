@@ -518,3 +518,86 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 		})
 	}
 }
+
+const ser c5.StreamID = "relay1/ser"
+
+// serEvent is a pending C4 event of about size bytes for the SER stream.
+func serEvent(n, size int) []byte {
+	head := fmt.Sprintf(`{"schema":"otsec.event/0.1","id":{"node_id":%q,"stream":%q,"seq":0},`+
+		`"origin":"platform","kind":"telemetry-health","source":{"origin_auth":"platform"},`+
+		`"received":{"utc":"2026-10-24T12:00:00.000001Z","resolution_ns":1000,"clock":{"sync":"synchronized","source":"ntp"}},`+
+		`"health":{"type":"store.test","details":{"n":"%d","pad":"`, node, ser, n)
+	pad := max(size-len(head)-4, 1)
+	return fmt.Appendf(nil, `%s%s"}}}`, head, hex.EncodeToString(make([]byte, pad))[:pad])
+}
+
+// One SER read commits as one AppendBatch: many events, one capture they
+// share and the device cursor. Per-row index entries make this the commit
+// shape with the most WAL per payload byte, so the rule is measured on it
+// too, up to the evidence database's 11 MiB cap (B5's #278): the read
+// shapes #278 measures, many small rows, and a read that fills the cap.
+// The cursor is the largest #278 allows (2048 × 71 bytes) and is not
+// counted in the payload, as the node does not count it either.
+//
+// events is a WITHOUT ROWID table, so an event over about 1 KB keeps that
+// much in its leaf cell and spills the rest to overflow pages of its own:
+// each such row costs at least one 4 KiB page however little spills. Rows
+// of 1 to 4 KB therefore write about 4.8 KB of WAL each, and this test
+// fails against the 0.4 rule until the rule or the schema accounts for it
+// (simulated, local Linux, 2026-10-27).
+func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
+	ctx := context.Background()
+	const capBytes = 11 << 20
+	for _, c := range []struct {
+		name                string
+		rows, event, perRow int
+	}{
+		{"2048 small rows", 2048, 300, 70},
+		{"2048 rows just over a leaf cell", 2048, 1100, 70},
+		{"2048 shortest rows", 2048, 1900, 70},
+		{"1024 long-element rows", 1024, 5800, 200},
+		{"2048 rows of 500 bytes", 2048, 3700, 500},
+		{"a read that fills the cap", 2048, 5300, 300},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := c5.Database{
+				ID:      "evidence",
+				Writer:  "ied",
+				Streams: []c5.StreamSpec{{ID: ser, Class: c5.ClassAdapterEvidence}},
+				Classes: []c5.StreamClass{c5.ClassAdapterEvidence},
+				Quotas:  []c5.Quota{{Class: c5.ClassAdapterEvidence, Bytes: 256 << 20, WarnFraction: 0.8, MaxRecordBytes: capBytes}},
+			}
+			dir := newDir(t)
+			db := open(t, dir, d)
+			l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: capBytes}, map[c5.StreamID]c5.Seq{ser: 0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := l.Append(ctx, c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(0, 400)}); err != nil {
+				t.Fatal(err)
+			}
+			compactAll(t, db)
+			rng := rand.New(rand.NewSource(int64(c.rows*c.event + c.perRow)))
+			raw := make([]byte, c.rows*c.perRow/2)
+			rng.Read(raw)
+			cp := capture(hex.EncodeToString(raw))
+			cursor := make([]byte, 2048*71)
+			rng.Read(cursor)
+			recs := make([]c5.Record, c.rows)
+			payload := int64(len(cp.Bytes))
+			for i := range recs {
+				recs[i] = c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(i+1, c.event), Capture: &cp}
+				payload += int64(len(recs[i].Event))
+			}
+			recs[len(recs)-1].SourceCursor = cursor
+			if payload > capBytes {
+				t.Fatalf("read of %d bytes over the cap %d", payload, capBytes)
+			}
+			withinRule(t, payload, measureWAL(t, dir, func() {
+				if _, err := l.AppendBatch(ctx, recs); err != nil {
+					t.Fatal(err)
+				}
+			}))
+		})
+	}
+}
