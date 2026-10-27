@@ -16,7 +16,7 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | File | What it shows |
 | --- | --- |
 | `transcripts/read-1.json` | A config.read session: the probe, `ID`, `ACC` with the credential redacted, all 24 SHO forms of S22 Table 7.67, then `QUI`. Ports 2 to 4, Modbus, IEC 60870-5-103, EtherNet/IP and DNP maps 2 and 3 answer `Invalid Command`. |
-| `transcripts/read-2.json` | The same configuration printed differently: a header with another time before the settings of `SHO 1` and of `SHO 2`, `SHO 3` one setting per line with `TR` wrapped, `CTRN` before `CTR` in `SHO 4`, and `ER` wrapped at other columns in `SHO R`. |
+| `transcripts/read-2.json` | ASSUMED layouts, not documented for `SHO`: the same configuration printed differently: a header with another time before the settings of `SHO 1` and of `SHO 2`, `SHO 3` one setting per line with `TR` wrapped, `CTRN` before `CTR` in `SHO 4`, and `ER` wrapped at other columns in `SHO R`. |
 | `transcripts/read-3.json` | Read 1 with four changes: 50P1P changed from 10.00 to 9.50, LL removed from group 1, Port 2 present, and DNP map 1 answering `Invalid Command`. |
 
 ## Valid

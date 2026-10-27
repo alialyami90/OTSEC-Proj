@@ -100,7 +100,7 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
 
 | P4-A2 test | Where it is checked |
 | --- | --- |
-| The same configuration read twice, with a different time and page break, gives an empty difference | `TestSameConfigurationOtherBytesIsNoChange`. Reads 1 and 2 differ in the header's time, columns, order and wrapping. A header repeated after a setting line now fails the read (decision 4), so a page break that repeats it is H-13. |
+| The same configuration read twice, with a different time and page break, gives an empty difference | `TestSameConfigurationOtherBytesIsNoChange`. Reads 1 and 2 differ in the header's time, columns, order and wrapping. A header repeated after a setting line fails the read (decision 4). B1 narrows this test in D4-9 to "a different time and any documented non-semantic difference", because no documented `SHO` reply shows a page break or a repeated header. Read 2's layouts are marked ASSUMED, and the repeated header is on the widened H-13. |
 | A single injected change names exactly that setting | The contract half is `TestCompareGoldens` (read 3). The end-to-end half is B6's GT-INJ series against the simulator, written independently. |
 | An unparseable reply is kept and fails the read | Decisions 1 and 7. `TestTokenizeRule`'s failing cases and `TestCheckAgainstCatches`. The adapter half comes with C2 0.6. |
 | Mutation of the non-semantic rule is caught | `TestTokenizeRule` pins each clause. `TestCheckAgainstCatches` covers a dropped, misread, swapped or cut setting, and a heading read as a continuation. B6's independent contract tests go in `tests/contract/`. |

@@ -17,6 +17,16 @@ front-panel settings from Table 4.111. Port 1 is C2's SHO P 1 reply. Groups
 2 to 4 and logic groups 2 to 4 repeat group 1 under their own heading,
 because S22 prints only one group. These layouts are documented-untested.
 
+ASSUMED, not documented: read 2's other layouts. The header printed before
+the settings of SHO 1 and SHO 2, one setting per line, another order and
+another wrap are what the rule must treat as the same configuration; S22
+prints none of them for SHO. Figure 7.43 (pp. 7.78 and 7.79) prints its SHO
+reply with no header at all: it starts at "Group 1", runs across a page of
+the manual with nothing repeated, and ends at "=>". S22 documents no paging
+for SHO. So no golden repeats the header inside one reply, and read 2's
+header before the settings is itself assumed. Whether a relay prints or
+repeats one is on the widened H-13.
+
 This file tokenizes the replies with its own reading of the rule in
 doc.go, so the Go tests check two implementations against each other.
 """
@@ -152,8 +162,8 @@ def replies(read):
         "eip.1": ABSENT, "eip.2": ABSENT, "eip.3": ABSENT, "dnp.1": DNP_1, "dnp.2": ABSENT, "dnp.3": ABSENT,
     }
     if read == 2:
-        # The same configuration: a header with another time before the
-        # settings of SHO 1 and SHO 2, SHO 3 one setting per line with TR
+        # ASSUMED layouts (see the docstring). The same configuration: a
+        # header with another time before the settings of SHO 1 and SHO 2, SHO 3 one setting per line with TR
         # wrapped, CTRN before CTR in SHO 4, and ER wrapped at other columns.
         # A header after the first setting line is no header (doc.go), so
         # none is printed there.
