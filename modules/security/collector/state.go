@@ -711,10 +711,73 @@ func (s *State) write(next stateDoc) error {
 		err = replaceFile(s.path, b)
 	}
 	if err != nil {
-		s.broken = fmt.Errorf("%w: write %s: %v", ErrStateUnavailable, s.path, err)
+		s.broken = fmt.Errorf("%w: write %s: %w", ErrStateUnavailable, s.path, err)
 		return s.broken
 	}
 	s.doc = next
+	return nil
+}
+
+// FloorAfterBreak sets asset's failed-auth floor from now when the state has
+// broken during a session that reached Level 1 and ended without QUI. It is
+// the one write a broken state still makes. Without it the floor on disk
+// runs from the ACC that BeginAuth recorded, because the break came before
+// the floor was moved to the session's end, and after a restart it could
+// expire up to one session length before the relay's Level 1 does (A3 on
+// #221, D4-3).
+//
+// It does not trust the memory a failed write left behind: that write may
+// have reached the file (a flush that failed after the rename), so the file
+// is read again, checked as OpenState checks it, and refused if it is behind
+// what this process handed out. Only asset's floor changes in it, so no
+// sequence number, nonce or suspension is moved, and the state stays
+// broken: this returns nil only when the floor is on disk, and the manual
+// restart is still needed. Any failure leaves things as they were, and the
+// caller raises it.
+func (s *State) FloorAfterBreak(asset string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken == nil {
+		return errors.New("collector: the state is not broken; use BeginAuth")
+	}
+	b, err := readBounded(s.path, MaxStateBytes)
+	if err != nil {
+		return fmt.Errorf("collector: re-read %s to set a floor: %w", s.path, err)
+	}
+	var disk stateDoc
+	if err := collectorwire.DecodeStrict(b, &disk); err != nil {
+		return fmt.Errorf("collector: re-read %s to set a floor: %w", s.path, err)
+	}
+	if disk.Format != StateFormat || disk.Assets == nil {
+		return fmt.Errorf("collector: re-read %s to set a floor: format %q", s.path, disk.Format)
+	}
+	if err := checkStateDoc(disk); err != nil {
+		return fmt.Errorf("collector: re-read %s to set a floor: %w", s.path, err)
+	}
+	if disk.CollectorSeq < s.doc.CollectorSeq {
+		return fmt.Errorf("collector: %s holds sequence %d, behind the %d this process handed out; not writing over it", s.path, disk.CollectorSeq, s.doc.CollectorSeq)
+	}
+	assets := make(map[string]assetState, len(disk.Assets)+1)
+	for k, v := range disk.Assets {
+		assets[k] = v
+	}
+	a := assets[asset]
+	a.UnconfirmedAuthUTC, a.LevelOpen = s.now().UTC().Format(time.RFC3339Nano), false
+	assets[asset] = a
+	disk.Assets = assets
+	nb, err := marshalState(disk)
+	if err == nil && len(nb) > MaxStateBytes {
+		err = fmt.Errorf("state would be %d bytes, limit %d", len(nb), MaxStateBytes)
+	}
+	if err == nil {
+		err = checkStateDoc(disk)
+	}
+	if err == nil {
+		err = replaceFile(s.path, nb)
+	}
+	if err != nil {
+		return fmt.Errorf("collector: set floor for %s after a broken state: %w", asset, err)
+	}
 	return nil
 }
 
