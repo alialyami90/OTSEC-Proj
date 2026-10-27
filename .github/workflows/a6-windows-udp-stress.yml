@@ -1,0 +1,92 @@
+# B6 check for a toolchain move (D3-10, D4-7): the Windows UDP stress test.
+# It repeats A6's temporary #199 run, which found a memory corruption in the
+# UDP receive path on Go 1.26.0 (2 crashes in 42 runs) and none on 1.26.10
+# (0 in 41); docs/phase-3-exit.md has the record. a6-* workflows are B6's
+# (handoffs/B6-handoff.md).
+#
+# Three legs side by side on windows-latest, each running the compiled
+# tests/integration/syslogreceive binary's TestUnknown* again and again:
+# the current toolchain (1.26.10, the control), the candidate (1.27.3), and
+# the candidate under -race (which also turns on checkptr). For a leg, the
+# module's go line is set to the leg's version first, as a toolchain PR
+# sets it. A run counts as a crash when its output has a panic, a fatal
+# error or a race report, and as a failure when it exits non-zero without
+# one. Either fails the leg. No secrets, no services, no accounts.
+name: a6-windows-udp-stress
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "how long each leg runs the tests"
+        default: "40"
+  pull_request:
+    paths:
+      - .github/workflows/a6-windows-udp-stress.yml
+permissions:
+  contents: read
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go: "1.26.10"
+            flags: ""
+          - go: "1.27.3"
+            flags: ""
+          - go: "1.27.3"
+            flags: "-race"
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: the leg's toolchain and go line
+        shell: bash
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go mod edit -go=${{ matrix.go }}
+          go version | tee "$RUNNER_TEMP/go-version.txt"
+          grep -q "go${{ matrix.go }} " "$RUNNER_TEMP/go-version.txt"
+          grep '^go ' go.mod
+      - name: build the test binary once
+        shell: bash
+        env:
+          GOTOOLCHAIN: local
+          CGO_ENABLED: ${{ matrix.flags == '-race' && '1' || '0' }}
+        run: go test ${{ matrix.flags }} -c -o "$RUNNER_TEMP/syslogreceive.test.exe" ./tests/integration/syslogreceive/
+      - name: stress
+        shell: bash
+        working-directory: tests/integration/syslogreceive
+        env:
+          MINUTES: ${{ inputs.minutes || '40' }}
+        run: |
+          end=$(( $(date +%s) + 60 * MINUTES ))
+          runs=0; crashes=0; fails=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            runs=$((runs + 1))
+            out="$RUNNER_TEMP/run-$runs.txt"
+            set +e
+            "$RUNNER_TEMP/syslogreceive.test.exe" -test.run 'TestUnknown' -test.v -test.count=1 -test.timeout=25m > "$out" 2>&1
+            rc=$?
+            set -e
+            if grep -qE '^(panic:|fatal error:|WARNING: DATA RACE|fatal: morestack)' "$out"; then
+              crashes=$((crashes + 1))
+              echo "::group::run $runs crashed (exit $rc)"; cat "$out"; echo "::endgroup::"
+            elif [ "$rc" -ne 0 ]; then
+              fails=$((fails + 1))
+              echo "::group::run $runs failed (exit $rc)"; tail -80 "$out"; echo "::endgroup::"
+            elif ! grep -q '^--- PASS: TestUnknown' "$out"; then
+              # A run that tested nothing is not a clean run.
+              fails=$((fails + 1))
+              echo "::group::run $runs ran no TestUnknown test"; tail -40 "$out"; echo "::endgroup::"
+            else
+              echo "run $runs ok ($(grep -c '^--- PASS' "$out") tests passed)"
+            fi
+          done
+          echo "go ${{ matrix.go }} ${{ matrix.flags }}: $runs runs, $crashes crashed or raced, $fails failed without a crash" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$crashes" -eq 0 && test "$fails" -eq 0
