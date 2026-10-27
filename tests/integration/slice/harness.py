@@ -94,9 +94,19 @@ def start_receiver(log, tls=None, extra=(), permitted_peer=None):
     return Proc(argv + list(extra))
 
 
-def read_log(path):
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(l) for l in f if l.strip()]
+def read_log(path, live=False):
+    """The JSON records of a log, one per line. live: the writer may still
+    be running, so a last line without its newline is still being written
+    and is left for the next read (#209's integration job 122275033049: a
+    read right after a kill caught half of the simulator's record of the
+    close). Every complete line must parse either way, and a read after the
+    writer has stopped (live=False) parses the last line too, so a
+    truncated record fails the read rather than being dropped."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if live:
+        data = data[:data.rfind(b"\n") + 1]
+    return [json.loads(l) for l in data.decode("utf-8").split("\n") if l.strip()]
 
 
 def wait_for(pred, timeout=10.0, step=0.05):

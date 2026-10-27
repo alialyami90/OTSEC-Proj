@@ -111,15 +111,19 @@ def _relp_lines(s):
 
 def _syslog_by_line(s):
     """[(line number, message bytes)] for every syslog frame the receiver
-    acknowledged, in order."""
+    acknowledged, in order. Read live while the receiver runs: a last line
+    without its newline is still being written (harness.read_log)."""
     out = []
-    with open(s.relp_log, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if not line.strip():
-                continue
-            r = json.loads(line)
-            if r.get("event") == "syslog":
-                out.append((i, base64.b64decode(r["b64"])))
+    with open(s.relp_log, "rb") as f:
+        data = f.read()
+    if s.running("receiver"):
+        data = data[:data.rfind(b"\n") + 1]
+    for i, line in enumerate(data.decode("utf-8").split("\n")):
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("event") == "syslog":
+            out.append((i, base64.b64decode(r["b64"])))
     return out
 
 
@@ -137,7 +141,7 @@ class Interrupter:
         self.breaks = []  # receiver log line count when a receiver or node was killed
 
     def _session_open(self):
-        recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
+        recs = harness.read_log(self.s.sim_log, live=True) if os.path.exists(self.s.sim_log) else []
         return sum(r["event"] == "session_open" for r in recs) > sum(r["event"] == "session_close" for r in recs)
 
     def _last_run_at(self):
@@ -167,7 +171,7 @@ class Interrupter:
         at = self._last_run_at()
         if at is None or time.time() - at >= 40:
             return False
-        recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
+        recs = harness.read_log(self.s.sim_log, live=True) if os.path.exists(self.s.sim_log) else []
         if not any(r["event"] == "session_close" and r["t"] >= at for r in recs):
             return False
         st = self.s.collector_asset()
