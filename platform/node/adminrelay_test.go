@@ -496,23 +496,52 @@ func TestRelayRecordFits(t *testing.T) {
 }
 
 // Run relays at start and between runs, without waiting for a run.
+//
+// The start's relay commits the collector's install_key record and the
+// request's own record, each under Run's context, before it sends. A
+// fixed 300 ms context ended inside those commits on a loaded Windows
+// runner, so nothing was sent (#206). The test waits for the request
+// instead, up to a second before the first tick, so a request seen is the
+// start's relay. The schedule's first run is due MinIntervalSeconds after
+// start, so no run may begin in that time either: a run the start let
+// through follows its relay at once, and the test keeps Run going for
+// runGrace after the relay to see it.
 func TestRunRelaysBetweenRuns(t *testing.T) {
+	const runGrace = 2 * time.Second
 	c, dir, nc := suspendConfig(t)
-	r, _, _ := start(t, c, dir)
+	r, st, _ := start(t, c, dir)
 	defer r.Close()
 	col := newAdminCollector()
 	s := newScheduler(t, r, col)
 	writeAdminFile(t, nc, "admin-request-run.json", authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
-	ctx, cancel := context.WithTimeout(bg, 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
-	if err := s.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	began := time.Now()
+	tick := began.Add(RelayEverySeconds*time.Second - time.Second)
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	for len(col.requests()) == 0 && time.Now().Before(tick) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	relayed := time.Since(began)
+	if until := time.Now().Add(runGrace); until.Before(tick) {
+		tick = until
+	}
+	time.Sleep(time.Until(tick))
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	col.mu.Lock()
 	defer col.mu.Unlock()
 	if len(col.sent) != 1 || col.runs != 0 {
-		t.Fatalf("%d relayed, %d runs", len(col.sent), col.runs)
+		var alarms []string
+		for _, a := range st.Snapshot("x").Alarms {
+			alarms = append(alarms, a.Code+": "+a.Detail)
+		}
+		t.Fatalf("%d relayed, %d runs, in %v of Run; alarms %q", len(col.sent), col.runs, relayed, alarms)
 	}
+	t.Logf("the start's relay reached the collector %v into Run", relayed)
 }
 
 // Through the real client and the collector's strict decoder: a relayed
