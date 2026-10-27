@@ -65,18 +65,33 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 		t.Fatalf("read %d Go files from %s; is the root right?", len(files), root)
 	}
 
+	directive := func(fn *ast.FuncDecl) bool {
+		if fn.Doc == nil {
+			return false
+		}
+		for _, c := range fn.Doc.List {
+			if strings.TrimSpace(c.Text) == "//go:uintptrescapes" {
+				return true
+			}
+		}
+		return false
+	}
 	// The package-level functions that carry the directive, by directory.
+	// Any method named Call is allowed below (x/sys's LazyProc.Call and
+	// Proc.Call), so a method named Call in this module must carry the
+	// directive too, or a wrapper of #199's shape would pass (A3).
 	escapes := map[string]bool{}
 	for _, p := range files {
 		for _, decl := range p.f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Doc == nil {
+			if !ok {
 				continue
 			}
-			for _, c := range fn.Doc.List {
-				if strings.TrimSpace(c.Text) == "//go:uintptrescapes" {
-					escapes[p.dir+"."+fn.Name.Name] = true
-				}
+			switch {
+			case fn.Recv == nil && directive(fn):
+				escapes[p.dir+"."+fn.Name.Name] = true
+			case fn.Recv != nil && fn.Name.Name == "Call" && !directive(fn):
+				t.Errorf("%s: method Call without go:uintptrescapes; the rule allows every method named Call", fset.Position(fn.Pos()))
 			}
 		}
 	}
@@ -94,6 +109,10 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 			}
 		}
 		return false
+	}
+	isIdent := func(e ast.Expr, name string) bool {
+		id, ok := e.(*ast.Ident)
+		return ok && id.Name == name
 	}
 	isConv := func(e ast.Expr, pkg, name string) (ast.Expr, bool) {
 		c, ok := e.(*ast.CallExpr)
@@ -113,8 +132,51 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 		return nil, false
 	}
 
+	isPointerType := func(e ast.Expr) bool {
+		x, ok := e.(*ast.SelectorExpr)
+		return ok && x.Sel.Name == "Pointer" && isIdent(x.X, "unsafe")
+	}
+	// pointerNames is, by name, every variable a file declares as an
+	// unsafe.Pointer or sets from unsafe.Pointer(...): uintptr(v) of one
+	// of them is the same conversion, written in two steps (A3). A name is
+	// matched across the whole file, so a shadowed name is checked too.
+	pointerNames := func(f *ast.File) map[string]bool {
+		names := map[string]bool{}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.AssignStmt:
+				for i, r := range x.Rhs {
+					if _, ok := isConv(r, "unsafe", "Pointer"); ok && i < len(x.Lhs) {
+						if id, ok := x.Lhs[i].(*ast.Ident); ok {
+							names[id.Name] = true
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				for i, id := range x.Names {
+					conv := false
+					if i < len(x.Values) {
+						_, conv = isConv(x.Values[i], "unsafe", "Pointer")
+					}
+					if conv || (x.Type != nil && isPointerType(x.Type)) {
+						names[id.Name] = true
+					}
+				}
+			case *ast.Field:
+				if isPointerType(x.Type) {
+					for _, id := range x.Names {
+						names[id.Name] = true
+					}
+				}
+			}
+			return true
+		})
+		return names
+	}
+
 	checked := 0
 	for _, p := range files {
+		ptrs := pointerNames(p.f)
 		var stack []ast.Node
 		ast.Inspect(p.f, func(n ast.Node) bool {
 			if n == nil {
@@ -130,7 +192,8 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 			if !ok {
 				return true
 			}
-			if _, ok := isConv(inner, "unsafe", "Pointer"); !ok {
+			_, conv := isConv(inner, "unsafe", "Pointer")
+			if id, ok := inner.(*ast.Ident); !conv && !(ok && ptrs[id.Name]) {
 				return true
 			}
 			checked++
@@ -143,7 +206,7 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 					}
 				}
 			}
-			t.Errorf("%s: uintptr(unsafe.Pointer(...)) outside the argument list of a go:uintptrescapes call; convert it in the call expression", fset.Position(e.Pos()))
+			t.Errorf("%s: a pointer converted to uintptr outside the argument list of a go:uintptrescapes call; convert it in the call expression", fset.Position(e.Pos()))
 			return true
 		})
 	}
