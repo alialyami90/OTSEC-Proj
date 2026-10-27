@@ -85,20 +85,25 @@ func TestReplaceHeldWithoutShareDeleteFails(t *testing.T) {
 	checkBytes(t, path+".tmp", "new")
 }
 
-// A reader that lets go within the budget only delays the replace.
+// A reader that lets go within the budget only delays the replace. The
+// reader closes when the first retry starts, not after a wall-clock sleep,
+// so the test holds however the runner schedules it (B6 on #257).
 func TestReplaceHeldThenReleased(t *testing.T) {
 	path := writeOld(t)
 	h := openShared(t, path, windows.FILE_SHARE_READ)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		time.Sleep(renameBudget / 4)
-		windows.CloseHandle(h)
-	}()
-	err := ReplaceFile(path, []byte("new"), 0o600)
-	<-done
-	if err != nil {
+	retries := 0
+	renameRetryHook = func() {
+		if retries++; retries == 1 {
+			windows.CloseHandle(h)
+		}
+	}
+	defer func() { renameRetryHook = nil }()
+	if err := ReplaceFile(path, []byte("new"), 0o600); err != nil {
 		t.Fatalf("replace after the reader let go: %v", err)
+	}
+	if retries == 0 {
+		windows.CloseHandle(h)
+		t.Fatal("the held reader did not hold the replace off: no retry")
 	}
 	checkBytes(t, path, "new")
 }

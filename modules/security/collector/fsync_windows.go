@@ -44,10 +44,14 @@ var (
 	// setRenameInfo is the rename call; a test replaces it to stand in for
 	// a volume that refuses POSIX semantics.
 	setRenameInfo = windows.SetFileInformationByHandle
-	// renameFallbacks counts renames that took MoveFileEx, and
-	// fallbackLogged makes the first one log.
+	// renameFallbacks counts rename attempts that took MoveFileEx (a held
+	// target retried counts each attempt), and fallbackLogged makes the
+	// first one log.
 	renameFallbacks atomic.Int64
 	fallbackLogged  atomic.Bool
+	// renameRetryHook, when set by a test, runs before each retry of a
+	// rename another process holds off.
+	renameRetryHook func()
 )
 
 // renameDurable replaces to with from and returns once the rename is on
@@ -63,11 +67,15 @@ func renameDurable(from, to string) error {
 	deadline := time.Now().Add(renameBudget)
 	for {
 		err := renameOnce(from, to)
-		if err == nil || !heldOpen(err) || !time.Now().Before(deadline) {
+		var flushed errFlushAfterRename
+		if err == nil || !heldOpen(err) || errors.As(err, &flushed) || !time.Now().Before(deadline) {
 			if err != nil {
 				return fmt.Errorf("rename %s over %s: %w", filepath.Base(from), to, err)
 			}
 			return nil
+		}
+		if renameRetryHook != nil {
+			renameRetryHook()
 		}
 		time.Sleep(renameWait)
 	}
@@ -101,6 +109,14 @@ type errRenameUnsupported struct{ err error }
 
 func (e errRenameUnsupported) Error() string { return "POSIX rename unsupported: " + e.err.Error() }
 func (e errRenameUnsupported) Unwrap() error { return e.err }
+
+// errFlushAfterRename is a flush that failed after the rename took effect:
+// to already holds the new bytes and from is gone, so it is returned as it
+// is, never retried (a retry would report from as missing).
+type errFlushAfterRename struct{ err error }
+
+func (e errFlushAfterRename) Error() string { return "renamed, but not flushed: " + e.err.Error() }
+func (e errFlushAfterRename) Unwrap() error { return e.err }
 
 func renamePOSIX(from, to string) error {
 	abs, err := filepath.Abs(to)
@@ -138,7 +154,10 @@ func renamePOSIX(from, to string) error {
 		return err
 	}
 	// The handle now names to: flush its data and metadata.
-	return windows.FlushFileBuffers(h)
+	if err := windows.FlushFileBuffers(h); err != nil {
+		return errFlushAfterRename{err}
+	}
+	return nil
 }
 
 // unsupportedCall reports the errors a volume or filter gives for a call

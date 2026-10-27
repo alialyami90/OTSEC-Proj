@@ -70,21 +70,28 @@ func TestReplaceSurvivesKillAtEachStep(t *testing.T) {
 	}
 }
 
-// A state write that takes longer than the rename's retry budget, at
-// every write of a run (BeginAuth, OpenLevel at "=>", NextSeq, EndAuth),
-// leaves a Level 1 run's result and records unchanged: the adapter arms each
-// step's timeout at its send, so the wait costs only the run's DeadlineMS
-// (A3 on #221, question 4).
+// A state write that takes longer than a step's timeout, at every write of
+// a run (BeginAuth before ACC, OpenLevel at "=>", NextSeq, EndAuth), leaves
+// a Level 1 run's result and records unchanged: the adapter arms each
+// step's timeout at its send, after the write, so a slow write costs only
+// the run's DeadlineMS (A3 on #221, question 4). The step timeout here is
+// below the delay, so arming before a write would fail the run (B6 on
+// #257); the delay is also above the rename's 500 ms retry budget on
+// Windows.
 func TestSlowStateWriteStaysInsideTheRun(t *testing.T) {
-	const slow = 600 * time.Millisecond // more than the 500 ms rename budget on Windows
+	// The step timeout stays above the adapter's 1 s wake wait, which the
+	// golden's silent connect needs.
+	const slow = 1500 * time.Millisecond
+	limits := DefaultLimits
+	limits.StepTimeoutMS = 1200
+	f, l := hostedFixture(t, func(c *PipelineConfig, _ *pipeFixture) { c.Limits = limits })
+	want := goldenResult(t, "ok")
 	replaceHook = func(step string) {
 		if step == stepWritten {
 			time.Sleep(slow)
 		}
 	}
 	defer func() { replaceHook = nil }()
-	f, l := hostedFixture(t)
-	want := goldenResult(t, "ok")
 	start := time.Now()
 	_, res, recs, _ := hostedRun(t, f, l, hostedReq("sel.ser.read_all", pipeCred), replayTurns(want), false)
 	took := time.Since(start)
@@ -100,10 +107,13 @@ func TestSlowStateWriteStaysInsideTheRun(t *testing.T) {
 	if err := f.state.CheckFloor(testAsset); err != nil {
 		t.Fatalf("floor after QUI: %v", err)
 	}
-	if limit := time.Duration(DefaultLimits.DeadlineMS) * time.Millisecond; took >= limit {
+	if took < 2*slow {
+		t.Fatalf("the run took %s: the state writes were not delayed", took)
+	}
+	if limit := time.Duration(limits.DeadlineMS) * time.Millisecond; took >= limit {
 		t.Fatalf("the run took %s, beyond its deadline %s", took, limit)
 	}
-	t.Logf("run with every state write delayed %s took %s", slow, took)
+	t.Logf("run with every state write delayed %s and a %d ms step timeout took %s", slow, limits.StepTimeoutMS, took)
 }
 
 // ReplaceFile replaces the file whole each time and leaves no temporary
