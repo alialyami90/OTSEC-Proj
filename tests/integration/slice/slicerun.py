@@ -481,7 +481,9 @@ class Slice:
         self.sim_password = sim_password
         self.relp_log = os.path.join(self.d, "relp.jsonl")
         sim = self.start_simulator(fid, framed=framed)
-        self.relp_port = harness.free_port()
+        # Held until stop(), so that the receiver can bind it now and again
+        # after a test kills it, and nothing else on the runner takes it.
+        self.relp_port, self.relp_hold = harness.reserve_port()
         if SERVICE:
             _MACHINE.acquire()
             self.holds_machine = True
@@ -586,6 +588,31 @@ class Slice:
                     f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"])
         return out.stdout
 
+    def environ(self, name):
+        """The process's environment as the OS has it (V-S11), or None where
+        it cannot be read: on Windows, and on Linux for a process that made
+        itself non-dumpable (the collector sets PR_SET_DUMPABLE 0,
+        cmd/otsec-collector/harden_linux.go), whose /proc files then belong
+        to root. Any other refusal is an error, never a clean scan."""
+        if os.name == "nt":
+            return None
+        path = f"/proc/{self.procs[name].pid}/environ"
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except PermissionError:
+            # A non-dumpable process's /proc files belong to root.
+            if os.getuid() == 0 or os.stat(path).st_uid != 0:
+                raise
+            return None
+
+    def image(self, name):
+        """The path the process runs from: the installed copy in service
+        mode, the built binary otherwise."""
+        if self.service and name in SERVICES:
+            return self.service.node_exe if name == "node" else self.service.collector_exe
+        return self.exe("otsec" if name == "node" else "otsec-collector")
+
     def health(self):
         out = subprocess.run([self.exe("otsec"), "health", "-config", self.layout["node_config"]],
                              capture_output=True, text=True)
@@ -676,6 +703,9 @@ class Slice:
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait(10)
+        if getattr(self, "relp_hold", None):
+            self.relp_hold.close()
+            self.relp_hold = None
         # The administrators' folder is 0550; let the temporary directory go.
         d = getattr(self, "layout", {}).get("admin_dir")
         if d and os.path.isdir(d) and not self.service:
