@@ -176,7 +176,7 @@ func TestRegisterEnvelopeStamps(t *testing.T) {
 			}
 		}
 	}
-	for _, c := range []string{"", "otsec.register/0.3", "otsec.register/1.0", "otsec.register/0.2 ", "otsec.authz/0.4"} {
+	for _, c := range []string{"", "otsec.register/0.4", "otsec.register/1.0", "otsec.register/0.2 ", "otsec.authz/0.4"} {
 		if _, _, err := VerifyRegisterPackage(stamped(rev4, c), anchors, map[string]FamilyFloor{}); !errors.Is(err, ErrRegisterRejected) {
 			t.Errorf("stamped %q: %v", c, err)
 		}
