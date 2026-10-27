@@ -269,7 +269,6 @@ func (s Snapshot) Validate() error {
 	if len(s.Sections) != len(rule.Classes) {
 		c.fail("rule %s has %d classes and a snapshot holds every one, in order; this one has %d sections", rule.ID, len(rule.Classes), len(s.Sections))
 	}
-	var prevEnd int64
 	for i, sec := range s.Sections {
 		p := fmt.Sprintf("sections[%d]", i)
 		if i < len(rule.Classes) {
@@ -293,10 +292,16 @@ func (s Snapshot) Validate() error {
 		sp := sec.Span
 		if sp.Offset < 0 || sp.Length <= 0 || sp.Offset+sp.Length > e.Length {
 			c.fail("%s.span lies outside the transcript", p)
-		} else if sp.Offset < prevEnd {
-			c.fail("%s.span overlaps or precedes the section before it; sections are read in order", p)
+		} else {
+			// Sections are in the rule's order, which need not be the order
+			// they were read in: a run sends the gate reads first (C3 0.3,
+			// D4-13). So spans are compared in pairs, not by position.
+			for j := 0; j < i; j++ {
+				if o := s.Sections[j].Span; sp.Offset < o.Offset+o.Length && o.Offset < sp.Offset+sp.Length && o.Length > 0 {
+					c.fail("%s.span overlaps sections[%d]; each section is its own reply", p, j)
+				}
+			}
 		}
-		prevEnd = sp.Offset + sp.Length
 		if sec.State == Absent && len(sec.Settings) > 0 {
 			c.fail("%s: an absent section has no settings", p)
 		}

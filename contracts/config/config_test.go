@@ -36,7 +36,7 @@ var invalidWant = map[string]string{
 	"snapshot-wrong-kind":                  `kind "config.baseline" is not "config.snapshot"`,
 	"snapshot-without-register-version":    "register_version is required",
 	"snapshot-target-documented":           "target must be",
-	"snapshot-sections-overlap":            "overlaps or precedes the section before it",
+	"snapshot-sections-overlap":            "each section is its own reply",
 	"difference-changed-equal-values":      "changed with equal values",
 	"difference-added-with-from":           "added carries to only",
 	"difference-out-of-order":              "changes are in class order",

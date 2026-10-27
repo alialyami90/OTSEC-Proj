@@ -50,7 +50,7 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | `invalid/snapshot-wrong-kind.json` | A snapshot's kind is `config.snapshot`. |
 | `invalid/snapshot-without-register-version.json` | The register package that permitted the lines is required. |
 | `invalid/snapshot-target-documented.json` | The target is `device-observed` or `simulated`, as in C2. |
-| `invalid/snapshot-sections-overlap.json` | Sections are read in order, so their spans never overlap. |
+| `invalid/snapshot-sections-overlap.json` | Each section is its own reply, so their spans never overlap (in any order: a run reads the gate classes first). |
 | `invalid/difference-changed-equal-values.json` | A changed setting has two different values. |
 | `invalid/difference-added-with-from.json` | An added setting has no `from` value. |
 | `invalid/difference-out-of-order.json` | Changes follow the rule's class order, then names in byte order. |
