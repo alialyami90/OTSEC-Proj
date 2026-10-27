@@ -1,0 +1,58 @@
+# B6 check for #230: how long each FlushFileBuffers takes while a store test
+# runs on the hosted Windows runner. It tells a single stalled flush from many
+# slow ones, which the Go job's timeout dump cannot. B1 approved it on
+# 2026-10-27; a6-* workflows are B6's (handoffs/B6-handoff.md).
+#
+# Runs the compiled platform/store test binary under an ETW
+# Microsoft-Windows-Kernel-File trace (tests/integration/flushlat/). The
+# runner's admin account only starts the trace. No secrets, no services, no
+# accounts. Results are hosted-runner evidence, printed to the job log and
+# uploaded as an artifact.
+name: a6-windows-flush-latency
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "go test -run pattern in platform/store"
+        default: "^TestDiscardStepWALBound$"
+      runs:
+        description: "how many traced runs"
+        default: "5"
+  pull_request:
+    paths:
+      - .github/workflows/a6-windows-flush-latency.yml
+      - tests/integration/flushlat/**
+permissions:
+  contents: read
+jobs:
+  flushlat:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Analyser self-test
+        shell: pwsh
+        run: python -I -m unittest discover -s tests/integration/flushlat -p "test_*.py" -v
+      - name: Build the store test binary
+        shell: pwsh
+        run: go test -c -o "$env:RUNNER_TEMP\store.test.exe" ./platform/store
+      - name: Traced runs
+        shell: pwsh
+        env:
+          RUN: ${{ inputs.run || '^TestDiscardStepWALBound$' }}
+          RUNS: ${{ inputs.runs || '5' }}
+        run: ./tests/integration/flushlat/run_flushlat.ps1 -TestExe "$env:RUNNER_TEMP\store.test.exe" -TestDir platform/store -Run $env:RUN -Runs ([int]$env:RUNS) -Python (Get-Command python).Source -Out "$env:RUNNER_TEMP\flushlat"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: a6-windows-flush-latency
+          path: |
+            ${{ runner.temp }}/flushlat/*.json
+            ${{ runner.temp }}/flushlat/*.txt
