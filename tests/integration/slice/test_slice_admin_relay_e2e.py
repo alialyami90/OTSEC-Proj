@@ -296,6 +296,8 @@ def got(tmp_path_factory):
             s.procs["collector"].send_signal(signal.SIGCONT)
         s.stop()
     out["decisions"] = decisions(s)
+    with open(os.path.join(s.layout["collector_data"], "collector", "state", "state.json"), encoding="utf-8") as f:
+        out["held"] = json.load(f).get("admin_decisions", {})
     out["audit"] = [r for r in audit(s) if r["action"] == "collector.request" and
                     str(r.get("correlation_id", "")).startswith("admin-")]
     print(json.dumps({k: v for k, v in out.items() if k != "audit"}, indent=1, default=str))
@@ -445,6 +447,18 @@ def test_the_collector_never_accepts_a_request_twice(got):
     # not a second acceptance.
     accepted = [d["request_id"] for d in got["decisions"] if d["status"] == "accepted" and repeat_of(d) == 0]
     assert len(accepted) == len(set(accepted)), got["decisions"]
+
+
+def test_the_log_holds_every_decision_the_collector_kept(got):
+    """A second oracle for the first (A5 on #195): each acceptance the
+    collector's state keeps for a repeat is a first acceptance in its log
+    under the same collector_seq, so a log the parser cannot read fails
+    here instead of passing with nothing seen."""
+    assert len(got["held"]) >= 2, got["held"]  # the rotation and the revoke; i1 too while its nonce is held
+    logged = {int(d["collector_seq"]) for d in got["decisions"] if d["status"] in ("accepted", "unwritten")
+              and repeat_of(d) == 0}
+    for nonce, d in got["held"].items():
+        assert d["collector_seq"] in logged, (nonce, d, sorted(logged))
 
 
 def test_every_decision_follows_its_record_and_matches_the_collector(got):

@@ -511,6 +511,9 @@ func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad 
 	if !strings.HasPrefix(name, "admin-request-") {
 		name = "admin-request-" + name + ".json"
 	}
+	if filepath.Base(name) != name {
+		return fmt.Errorf("-name %q: a file name in admin_dir, not a path", name) // A3 on #195
+	}
 	d := a.l.AdminDir
 	if err := os.Chmod(d, 0o750); err != nil {
 		return err
