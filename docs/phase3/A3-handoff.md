@@ -75,3 +75,51 @@ The brief is "Task P3-A3" in `docs/agent-handoffs.md`. Every result below is `si
 
 - #146, #153, #155, #159, #160 and #162 are merged by A1 on the reviews recorded on each PR.
 - #157 is merged with A5's API review, A1's integration review and A6's three claims passing on the hosted runner.
+
+## Update, 2026-10-27
+
+Everything below was also `simulated`, or ran on the GitHub-hosted Windows runner. Nothing ran against a device or on the owner's PC.
+
+### Completed since 2026-10-26
+
+- **#180 (D3-9).** The collector's `Listen` now grants the node's SID `PROCESS_QUERY_LIMITED_INFORMATION` on its process and `TOKEN_QUERY` on its token, before it creates the pipe. Under the SCM, the node's virtual account could not otherwise check its server, so every dial failed closed (A5's dry run, run 40397915060). If the grant fails, the collector does not start. #193 carries A5's notes on it.
+- **C7 0.5 (#184, contract; #186, collector).**
+  - Two new admin-signed node kinds: `node.quarantine_clear` and `node.seq_reset_ack`.
+  - The repeat answer (`RepeatOf`): byte-identical signed bytes the collector already accepted are accepted again, and the reply names the first decision.
+  - `CollectorReply.Admin`: on an accepted admin-signed request, the reply carries what the collector verified.
+- **C8 0.4 (#187).** A `collector.request` record now carries an admin group (key ID, human principal, nonce, payload SHA-256). It is claimed on the node's record before the node sends, and verified on the allowed record. With `repeat_of`, `VerifyCollectorSeq` counts the repeat as accounting for the lost first decision. The target asset ID is checked with C1's `asset.ValidAssetID`, which closes the C8 test I owed above.
+- **#190.** `CredStore.InstallKey` now reads under the store's lock. Before the fix, `-race` flagged it under concurrent installs.
+- **#201, NCrypt buffers.**
+  - The bug: `call` passed stack buffers to NCrypt as `uintptr`. Without `//go:uintptrescapes`, a goroutine stack that grows inside the call can move, and NCrypt then writes to the old copy (one observation on #199's Windows job: "not an ECDSA P-256 public key").
+  - The fix: `call` carries the directive, and every conversion is written in the call's arguments.
+  - `TestCNGPointersEscape` reads the compiler's escape report for the Windows build and fails if any buffer stays on the stack. It is red without the fix and green with it, on any OS.
+  - `TestCNGStackMoves` is a smoke test only: it passed on the runner without the fix as well.
+  - A6's rule in `tests/security/uintptr_args_test.go` (#199) now guards the whole module. I reviewed it, and its two holes were closed at b934a3f and confirmed by my mutants.
+- **#205, held `state.json`.** A Windows-only test holds `state.json` open without `FILE_SHARE_DELETE`. It shows the collector fails closed:
+  - the rename is the step that fails, and the new doc stays in `.tmp`;
+  - `ErrStateUnavailable` holds until a restart;
+  - `collector_seq` does not advance;
+  - `state.json` keeps its bytes;
+  - the next start resumes from the old doc.
+- **Reviews**, each recorded on its PR: #195, #196, #197, #198, #199, #200 (with the standing toolchain rule, now D3-10) and #207.
+
+### Limitations and risks added
+
+- **Windows replace of the collector's state files.** A5's race check (svcdry8, run 40464065233, 3000 replaces per cell):
+
+  | Reader | `MoveFileEx` replaces failed | POSIX-semantics rename failed |
+  | --- | --- | --- |
+  | Plain reader (no share-delete) | 2085 | 1652 |
+  | Share-delete reader | 1556 | 0 |
+
+  A failed replace breaks the state, so the collector refuses every run with `collector_state_unavailable` until it restarts. That fails closed and is observable (the node raises `collection-refused`, and #205 pins the behaviour). But one badly timed antivirus, backup or indexer open stops collection. The same applies to the credential store, which shares `replaceFile`.
+- **Floor from ACC.** If `OpenLevel`'s write fails and the run then ends without `QUI`, the floor on disk runs from ACC rather than from the end of the session. After a restart it can expire up to one session length before the relay's Level 1 does. The sticky break and the manual restart cover that window in practice.
+
+### Phase 4 item (A3, agreed with A1, A5 and A6)
+
+1. Replace `state.json` and the credential store with `SetFileInformationByHandle(FileRenameInfoEx)` and `FILE_RENAME_FLAG_POSIX_SEMANTICS | REPLACE_IF_EXISTS`.
+2. Fall back to `MoveFileEx` where the API or the file system does not support it. The minimum Windows build is to be confirmed from Microsoft's documentation and detected at run time, not assumed.
+3. Retry briefly, up to about 500 ms, on `ERROR_SHARING_VIOLATION` and `ERROR_ACCESS_DENIED`, and log each retry episode. Then fail closed as today. A persistent holder still breaks the state.
+4. Wrap the OS error with `%w` in `State.write` and in the credential store.
+5. Show durability with a crash test, since `FileRenameInfoEx` has no write-through flag.
+6. Keep the floor from the end of the session when `OpenLevel`'s write fails.
