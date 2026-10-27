@@ -616,8 +616,10 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 		// floor again so no session lands on it (no TIDLE reconnect).
 		err := p.cfg.State.BeginAuth(asset)
 		if errors.Is(err, ErrStateUnavailable) {
-			// The state broke during this session. The floor on disk runs
-			// from ACC; move it to the session's end (D4-3).
+			// The state broke during this session: the run began only
+			// after CheckFloor passed, and FloorAfterBreak needs a broken
+			// state. The floor on disk runs from ACC; move it to the
+			// session's end (D4-3).
 			err = p.cfg.State.FloorAfterBreak(asset)
 		}
 		if err != nil {

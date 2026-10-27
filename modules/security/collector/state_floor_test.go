@@ -267,3 +267,49 @@ func TestFloorAfterBreakKeepsALaterStamp(t *testing.T) {
 		t.Fatalf("floor stamp %s after a clock put back, want the later %s", got, later.UTC().Format(time.RFC3339Nano))
 	}
 }
+
+// A failed write that reached the file: the hook does the rename itself at
+// stepWritten, so renameDurable then fails with the new bytes in place and
+// the disk is one sequence ahead of memory. FloorAfterBreak must build on
+// the disk, or the sequence goes back. This is the state a flush failing
+// after the rename leaves behind (B6 on #272, who wrote this test).
+func TestFloorAfterBreakKeepsAWriteThatReachedTheFile(t *testing.T) {
+	path, s, c := newState(t)
+	for i := 0; i < 3; i++ {
+		if _, err := s.NextSeq(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.OpenLevel(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	replaceHook = func(step string) {
+		if step == stepWritten {
+			replaceHook = nil
+			if err := os.Rename(path+".tmp", path); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	defer func() { replaceHook = nil }()
+	if _, err := s.NextSeq(); err == nil {
+		t.Fatal("NextSeq succeeded although its rename failed")
+	}
+	if got := s.LastSeq(); got != 3 {
+		t.Fatalf("memory holds %d, want 3", got)
+	}
+	c.t = c.t.Add(time.Minute)
+	if err := s.FloorAfterBreak(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s2.LastSeq(); got != 4 {
+		t.Fatalf("collector_seq %d after FloorAfterBreak, want the 4 the failed write left on disk", got)
+	}
+	if a := s2.doc.Assets[testAsset]; a.LevelOpen || a.UnconfirmedAuthUTC != c.t.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("asset state %+v, want a floor from %s and no open level", a, c.t.UTC().Format(time.RFC3339Nano))
+	}
+}
