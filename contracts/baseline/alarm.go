@@ -79,8 +79,11 @@ type Alarm struct {
 	AtUTC string `json:"at_utc"`
 	// Events are the IDs of the first MaxEventIDs events that broke the
 	// baseline, in order, including breaks held since the last alarm for
-	// the same rule and key; EventsTotal counts them all. Absence alone may
-	// have none.
+	// the same rule and key; EventsTotal counts them all. An alarm lists only
+	// events received up to its raise: for repeats, the RepeatsN + 1 in the
+	// window the breaking event closed; for rate, the bucket's events up to
+	// and including the one that passed the bound. Absence alone may have
+	// none.
 	Events      []event.EventID `json:"events,omitempty"`
 	EventsTotal int64           `json:"events_total"`
 	// NotCounted are the first MaxEventIDs possible duplicates of the type
