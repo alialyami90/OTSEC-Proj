@@ -75,7 +75,7 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 
 | Gate item (`docs/agent-handoffs.md`, "Phase 3 exit gate") | State |
 | --- | --- |
-| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Met, with conditions** (A6, #208). On 2026-10-27 the owner ran the slice in service mode in his own elevated session on Windows 11 Pro 10.0.26200, at `main` `27fdea4870c4c5dfc1f6b03958823479376c26fa`, with Go 1.26.10. Result: 159 passed, 0 failed, 0 errors, and the 27 stated skips (7 rsyslog leg, 18 admin relay, 2 unknown restart), in 53 min 22 s. The owner's independent leftovers check printed `nothing left behind`, and a read-only query afterwards agreed. The log was carried over byte-exact: its SHA-256 matches the PC's. The same suite had passed on the hosted Windows runner (run 40464065233, at `ccb94b2`) with the same counts. Earlier hosted runs found two harness faults (a read after teardown, and a read of `state.json` during the collector's replace), both fixed in the harness; the second also exposed the product risk under "Open risks". The conditions are the items this run does not cover: the admin relay end to end and `admin_dir`'s ACLs on Windows, the unknown-restart leg on Windows, a canary scan of process command lines, and an elevated read of the harness's SCM logs. Evidence class: a desktop, not the site image or LTSC 2021, and a simulated device on loopback. |
+| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Met, with conditions** (A6, #208). On 2026-10-27 the owner ran the slice in service mode in their own elevated session on Windows 11 Pro 10.0.26200, at `main` `27fdea4870c4c5dfc1f6b03958823479376c26fa`, with Go 1.26.10. Result: 159 passed, 0 failed, 0 errors, and the 27 stated skips (7 rsyslog leg, 18 admin relay, 2 unknown restart), in 53 min 22 s. The owner's independent leftovers check printed `nothing left behind`, and a read-only query afterwards agreed. The log was carried over byte-exact: its SHA-256 matches the PC's. The same suite had passed on the hosted Windows runner (run 40464065233, at `ccb94b2`) with the same counts. Earlier hosted runs found two harness faults (a read after teardown, and a read of `state.json` during the collector's replace), both fixed in the harness; the second also exposed the product risk under "Open risks". The conditions are the items this run does not cover: the admin relay end to end and `admin_dir`'s ACLs on Windows, the unknown-restart leg on Windows, a canary scan of process command lines, and an elevated read of the harness's SCM logs. Evidence class: a desktop, not the site image or LTSC 2021, and a simulated device on loopback. |
 | C7 0.4, the C1 path field, the `DATE_F` read and the key store merged with reviewers' records, and A6's negative tests pass in CI | **Met, with one condition.** The key store is merged and tested, but the node does not read its TLS keys from it yet (#176); the D2-12 file resolver stays behind its lab flag until then. |
 | The quarantine export and clear, and the failed-open retry, merged and tested | **Met.** |
 | V-S8 passes end to end, and received Syslog passes A6's tests end to end on the real binaries | **Met**, `simulated`. |
@@ -84,7 +84,7 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 
 ## Owner decisions needed
 
-Already made in Phase 3: the owner swapped the portable Go to 1.26.10 himself, allowed pytest and asyncssh in a venv inside OTSEC, and ran gate item 1 in his own elevated session.
+Already made in Phase 3: the owner swapped the portable Go to 1.26.10 themselves, allowed pytest and asyncssh in a venv inside OTSEC, and ran gate item 1 in their own elevated session.
 
 1. **Accept Phase 3**, with the conditions listed here, and confirm the Phase 4 order (ADR-0008).
 
@@ -163,8 +163,8 @@ D3-1 to D3-11 are in `docs/phase3/A1-decisions.md`. These matter most for later 
 
 ## Next coordinated tasks
 
-1. **Gate item 1**: the owner's run on the PC (A5 and A6, the owner present).
-2. **After the gate**: #176 (key store in the node), #177, and relay PR 2 of #181 (signed `clear-*`, N1/N3).
+1. **After the gate**: #176 (key store in the node), #177, and relay PR 2 of #181 (signed `clear-*`, N1/N3).
+2. **Gate item 1's owed items** (A5 and A6): the admin relay end to end and `admin_dir`'s ACLs on Windows, the unknown-restart leg on Windows, and a canary scan of process command lines. These can run on the hosted Windows runner; none needs the owner's PC. The PC run's SCM logs stay in `pc-out` on the owner's PC; reading them needs the owner's elevated window, and the hosted runs already print theirs.
 3. **Phase 4**, briefed in `docs/agent-handoffs.md` in ADR-0008's order: configuration retrieval, baseline and prior approval; the event-behaviour baseline; vulnerability applicability with SNMPv3 identity; IDS; secure engineering access; the central role. The hygiene items from Phase 3 (HR-11's absolute bound, `govulncheck` in CI, `runtime.Version()` in status, a configurable UDP receive buffer, a sound faster unknown count) go into the first briefs they touch.
 
 ## Owner sign-off
