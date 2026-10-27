@@ -391,7 +391,9 @@ func (r *Receiver) Close() error {
 
 // Serve receives until ctx ends, then closes the listener, lets queued
 // messages commit for up to Limits.Grace, and returns nil. Listen must have
-// succeeded.
+// succeeded. Grace bounds when the writers give up, not when Serve returns:
+// a batch the store has already queued is still waited for, so Serve can
+// return later by the commits queued on the stream when Grace ended.
 func (r *Receiver) Serve(ctx context.Context) error {
 	if r.ln == nil && r.pc == nil {
 		return fmt.Errorf("receive: listener %s: not bound", r.cfg.ID)
