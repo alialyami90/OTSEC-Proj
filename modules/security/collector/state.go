@@ -722,32 +722,6 @@ func (s *State) write(next stateDoc) error {
 // state always gives the same bytes.
 func marshalState(d stateDoc) ([]byte, error) { return json.Marshal(d) }
 
-// replaceFile writes b to a temporary file beside path, flushes it, renames
-// it over path and flushes the directory, so path holds either the old or
-// the new bytes after a crash, never a mix.
-func replaceFile(path string, b []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := renameDurable(tmp, path); err != nil {
-		return err
-	}
-	return syncDir(filepath.Dir(path))
-}
-
 func readBounded(path string, max int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
