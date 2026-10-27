@@ -142,3 +142,91 @@ Date: 2026-10-27.
 - **H-13.** B6 widens H-13, or adds a separate hardware item, to cover `SHO G`, each register revision 5 form and absent-option replies, and port-server `T_OUT` (B2's ack, #226 and #231). It stays prepared only and is not run.
 - **Snapshot bytes.** A C9 snapshot holds each settings section's transcript span and SHA-256, with no second copy of the bytes. B2 and B5 agree how long transcripts are retained before C5 0.4 is drafted.
 - **SEL-751 rung.** The SEL-751 stays on rung 3 (`SHO` over Telnet), as the brief's ADR-0008 decision 4 states. Q3 needs the owner's authorization and an out-of-service lab relay.
+
+## D4-9: rulings for the first Phase 4 contract batch (C5 0.4, C9 0.1, C7 0.6, C8 0.5, C10 0.1)
+
+Date: 2026-10-27. Sources: the review threads on #246, #247, #250 and #254; B6's contract tests (#249, #253, #256); B6's GT-INJ series (#251).
+
+**C5 0.4 (#246, B5).**
+1. `GroupOptions.MaxCommitBytes` caps one commit, at 1 MiB for event databases. A single record larger than the cap commits alone.
+2. The recovery reserve is per database, not per volume: `2 × WALBoundBytes + 1.1 × C + 64 KiB`, where C is the database's commit cap. This replaces P4-A5's "a per-snapshot byte cap well below the 1 MiB recovery reserve".
+3. B4's receive path splits a stream or datagram batch at the cap. The parts commit in order, and a connection is held until every part has committed. A crash between parts leaves the earlier parts stored. C6 is unchanged, and the receivers acknowledge nobody. When RELP receive is built, it acknowledges only after commit.
+4. One SER read commits atomically (capture, events and outcome together), so the adapter-evidence database's cap is the derived bound of one read, not a measured size. The bound follows from C2's 1 MiB `MaxResponseBytes`, the row ceiling the code enforces (`MaxReadRowsCeiling`, 2048) and the largest legal C4 event. A store test computes it and fails if a change to C2, C4 or the register raises it above the cap. The reserve follows from the formula, a few MiB more than the cap for that database. A row-length cap in the SER grammar was rejected, because it would turn a long legitimate row into a failed read. A commit over a cap is refused whole: nothing is stored, the read fails with an alarm and its capture goes to quarantine.
+5. B6 owes a small-cap test and a storekill leg at a full reserve. Until that leg runs, the reserve formula is `desk`.
+
+**C9 0.1 (#247, B2).**
+1. The configuration record cap is a provisional 1 MiB, replaced by register revision 5's counted caps when they exist.
+2. Three fail-open paths found in review are closed, and none is recorded as a limitation:
+   - each section is bound to the command that read it;
+   - a section's span must be the whole reply, from STX through ETX and the prompt;
+   - a `:=` line is never a header, and a header after a setting line fails the read.
+3. Read 2's repeated header is marked ASSUMED. H-13 adds "does `SHO` repeat its header".
+4. `difference_digest` is an identity. Late approval is keyed on the asset and the baseline, not on the difference digest. There is no settings-only digest in 0.1.
+
+**C10 0.1 (#254, B4).** These amend D4-4 where they differ.
+1. The Syslog event-type key is facility, severity and the digit-replaced template, with `pri-absent` for an unparsable PRI. MSGID, `app_name` and the tag are not part of the key. This drops MSGID from `docs/verification.md`'s earlier key. It is a new ruling, made for security: a sender chooses its MSGID, so a compromised sender could hide a new kind of message under a known MSGID (#254, `contracts/baseline/key.go`). Two messages that share a MSGID stay two types.
+2. There is one rate bound per type: a factor times the most events in any one clock-hour bucket of the observation period.
+3. A refused approval approves nothing, so the change it named alarms.
+4. The parameters stay proposed in GT-INJ until C10 fixes them. B6 regenerates the schedules before any product test runs against them.
+5. Every stored SER row is keyed: a row that was read, by its template; a row with no bytes, by its record hash.
+6. The detector's clock can be injected.
+7. **Catch-up rows (amends D4-4 item 2).** Every type-only row C10 defines (first-read rows, rows of the first read after a recorded V-S12 failure, and rows aligned `gap-before`) counts toward the type set and the new-type rule only. MaxPerWindow learning and the repeats, rate and time rules skip it. The repeats rule uses received time. **Limit:** repeats that happen while the node cannot read the device are not detected by the repeats rule. The outage itself stays observable (V-S12, `gap-before`), and a new type inside the catch-up still alarms. A device-time repeats rule may come in a later C10 minor, once a device's offset is known.
+
+**C7 0.6 and C8 0.5 (#250, B3).**
+1. `AdminChecks` runs binding, then authority, then window, then replay. A refused approval does not spend its nonce (D4-2).
+2. HR-14: an admin client computes `baseline_digest` itself, over the stored bytes it decodes for display, and never takes it from the node (C7 0.6 `doc.go`).
+
+**Brief amendments.**
+- P4-A2's acceptance reads "the same configuration read twice, with a different time and any documented non-semantic difference, gives an empty difference".
+- P4-A5's per-snapshot cap is item 1 of C9 and item 2 of C5 above.
+
+## D4-10: Windows CI time and the `govulncheck` red-run policy (#230, #258)
+
+Date: 2026-10-27. This follows D4-5, now that B5 has posted per-test times (#230, 19:13Z).
+
+1. **Store fixture (#252).** `TestDiscardStepWALBound`'s fixture is built in 16 commits with autocheckpoint off. The measured WAL step is unchanged (370832 bytes). On Windows, `platform/store` took 61 s on #252's job, against 328 to 511 s before.
+2. **Package timeout.** The Windows `go test ./...` step runs with `-timeout 12m`. The `go` job's limit is 30 minutes on Windows and stays 15 on Linux. `-timeout` starts per test binary, so the job limit has to come late enough that a slow package's goroutine dump is kept (B6 on #252). A green run takes exactly as long as before.
+3. **Node fixtures (#264)** are required, not optional. There is no package split, `-p` change or further limit change without a new decision.
+4. **`govulncheck.yml`** is a required check. A red run caused by a newly published advisory is handled as follows:
+   - B3 triages it the same day, with an issue.
+   - B1 writes the `go.mod` or toolchain bump, and B3 and B6 review it.
+   - Nothing is suppressed.
+   - When no fixed version exists, accepting the risk is a security-policy decision for the owner.
+
+   GitHub notifies only the last committer about a red scheduled run, so whoever opens a code PR after a Monday checks that week's scheduled run on `main`.
+
+## D4-11: an expired TLS certificate stops only its own link (HR-13, #265)
+
+Date: 2026-10-27. Source: B5's brief on #265.
+
+1. A certificate that is otherwise good, but outside its validity period, stops only its own listener or forwarding target, with an alarm. The node and its other links keep running.
+2. Every other TLS file fault still stops the node at start, and nothing falls back to another credential, plain TLS or the system roots.
+3. Targets get the same 30-day expiry warning as listeners.
+4. At each 10 s check, the node re-checks the period of every link it held back, using the certificate it already loaded, and starts the link once the period is valid. A running link is never stopped at expiry.
+5. B5 states how expired trust anchors behave, and tests it.
+6. Alarm names and status fields stay out of C6 and C8 enumerations. Any change to those enumerations comes to B1 first.
+7. A test shows a required target held back past its quota, with every alarm in order and no silent prune.
+8. B4 provides the `ErrCertificatePeriod` sentinel in `receive` and `forward`. B3, B6 and B4 review.
+
+## D4-12: the owner's PC runs are paused (owner, 2026-10-27)
+
+Date: 2026-10-27. Source: the owner's answer on the B1 thread, choosing "Pause PC runs for now" over two other options, swapping the portable Go for 1.27.3 and `GOTOOLCHAIN=auto`.
+
+1. Nothing runs on the owner's PC, neither the second Windows run nor the fallback. Its portable Go is 1.26.x, so it can no longer build `main`, which needs 1.27.3 (D4-7).
+2. GitHub Actions is the only test path. D2-13 as amended by D4-3 is unchanged, and the `go (windows-latest)` job is the Windows evidence.
+3. If GitHub Actions is unavailable, PRs wait. Nothing moves to the PC and nothing merges on local runs alone.
+4. Only the owner resumes PC runs, and they plan to on 2026-10-28, while they are present. They choose how the PC gets Go 1.27.3, and B1 asks before using it again. The PC is never a self-hosted runner.
+
+## D4-13: register revision 5, C3 0.3 and the configuration record cap (#276)
+
+Date: 2026-10-27. Source: B2's design note, `docs/phase4/B2-register-rev5.md` (#276), and B1's rulings on #276.
+
+1. **C3 0.3** adds an optional `operations[].limits` (`max_reply_bytes`, `timeout_ms`) and `runs[]`, an ordered, named list of read-only, literal, Level 1 steps sent in one session.
+   - A run fails as a whole: on a failed step the adapter sends `QUI`, keeps every byte read, and reports the read failed. No partial snapshot is presented as complete.
+   - `max_total_bytes` is at most C2's 1 MiB session ceiling, and `deadline_ms` at most its 600 s. A step's `max_reply_bytes` is at most its run's total. A package that breaks any of these fails validation.
+   - `Matcher.Permit` still checks each line, and `CheckLines` requires exactly the run's lines.
+   - A state-changing or Level 2 step in a run is invalid in 0.3.
+2. **Caps.** The read's total cap T is 512 KiB. The configuration record cap is 1.5 MiB, which replaces C9's provisional 1 MiB (D4-9, C9 item 1).
+   - The cap is a derived bound (`2 × T + 363,442` bytes), and a test enforces it, as for the SER cap.
+   - The configuration database's commit cap is 1.5 MiB, and its reserve follows the C5 0.4 formula. The 64- and 384-byte value assumptions are `documented-untested`.
+3. **Touchscreen HMI settings** (`SET_HMI.zds`, `CDP.zds`) are files, and P4-A2 excludes file transfer. They are not baselined, and this is recorded as an exception in the capabilities and in C9's limitations. Whether touchscreen models are in scope is an open question for the owner.
