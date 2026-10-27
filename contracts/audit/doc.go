@@ -184,15 +184,21 @@
 // approval covers a difference only if the collector numbered its acceptance
 // below its decision on the read that first found the difference, in the
 // same collector epoch (ApprovalCovers). The window must also overlap the
-// time the change happened in, between unchanged_at and the detection. A
-// node writes one config.change_detected per difference from a baseline,
-// so an approval accepted after a difference was found never covers it.
-// Ending that alarm takes a signed baseline acknowledgement, which is
-// recorded too. VerifyConfig checks all of this over the chain:
+// time the change happened in, between unchanged_at and the detection. The
+// node writes config.change_detected when a read finds a configuration
+// state it has not recorded against the baseline, not on every read. Once a
+// difference was recorded unapproved, a later detection against the same
+// baseline may be approved only if the configuration was seen equal to the
+// baseline after that alarm (its unchanged_at), so an approval accepted after
+// a change was found never silences it. Ending that alarm takes a signed
+// baseline acknowledgement, which is recorded too, or a return to the
+// baseline. VerifyConfig checks all of this over the chain:
 //   - each approval and acknowledgement follows a real acceptance of its kind
 //     by its actor for the same signed bytes;
 //   - each detection names a real read of its asset;
-//   - every approval_seq names an approval that covers the detection.
+//   - every approval_seq names an approval that covers the detection;
+//   - no approved detection follows an unapproved one against the same
+//     baseline without the configuration returning to it in between.
 //
 // A node that forges records can still forge all of them, as for any
 // collector event (VerifyCollectorSeq). What it cannot do is silence an

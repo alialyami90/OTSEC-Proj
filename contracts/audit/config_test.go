@@ -61,6 +61,18 @@ func configChain() []*Record {
 	return []*Record{&accept, &approved, &read, &detected}
 }
 
+// earlyAlarm is an earlier read (decision 8) of the same asset and the
+// unapproved difference it found at 15:00:05, before configChain's approval.
+func earlyAlarm(recs []*Record) []*Record {
+	read, alarm := *recs[2], *recs[3]
+	readTarget, cfg := *read.Target, *alarm.Config
+	read.Target, read.Seq, read.CollectorSeq, read.Time, read.CorrelationID = &readTarget, 18, 8, at("2026-10-26T15:00:00Z"), "req-20261026-0005"
+	alarm.Config, alarm.Seq, alarm.Time = &cfg, 19, at("2026-10-26T15:00:05Z")
+	alarm.Outcome, alarm.ReasonCode = OutcomeWarning, ReasonUnapprovedChange
+	cfg.ReadSeq, cfg.ApprovalSeq, cfg.UnchangedAt = 8, 0, "2026-10-26T14:00:00Z"
+	return []*Record{&read, &alarm}
+}
+
 func cloneChain(recs []*Record) []*Record {
 	out := make([]*Record, len(recs))
 	for i, r := range recs {
@@ -278,14 +290,17 @@ func TestVerifyConfig(t *testing.T) {
 			recs[1].Config.WindowStart, recs[1].Config.WindowEnd = "2026-10-26T19:00:00Z", "2026-10-26T20:00:00Z"
 			return recs
 		},
-		// A1 and A3 on #209: an approval accepted after the read that first
-		// found a difference never covers it, even on a later read.
-		"late approval for a difference already found": func(recs []*Record) []*Record {
-			first := *recs[3]
-			cfg := *first.Config
-			first.Config, first.Outcome, first.ReasonCode, cfg.ApprovalSeq = &cfg, OutcomeWarning, ReasonUnapprovedChange, 0
-			first.Seq = 19
-			return []*Record{recs[2], &first, recs[0], recs[1], recs[3]}
+		// An approval accepted after a change was found unapproved never
+		// silences it, though a later read records it again (P4-A3, V-M2).
+		"late approval for a change already found": func(recs []*Record) []*Record {
+			early := earlyAlarm(recs)
+			recs[3].Config.UnchangedAt = "2026-10-26T14:00:00Z"
+			return append(early, recs...)
+		},
+		"late approval, unchanged at the alarm itself": func(recs []*Record) []*Record {
+			early := earlyAlarm(recs)
+			recs[3].Config.UnchangedAt = "2026-10-26T15:00:05Z"
+			return append(early, recs...)
 		},
 	}
 	for name, mut := range cases {
@@ -301,6 +316,12 @@ func TestVerifyConfig(t *testing.T) {
 	recs[2].CollectorSeq, recs[3].Config.ReadSeq = 13, 13
 	if err := VerifyConfig(recs); err != nil {
 		t.Fatalf("repeat answer: %v", err)
+	}
+	// After the alarm the configuration was seen equal to the baseline
+	// again (unchanged_at after it), so a new change may be approved.
+	recs = cloneChain(configChain())
+	if err := VerifyConfig(append(earlyAlarm(recs), recs...)); err != nil {
+		t.Fatalf("approved change after a return to the baseline: %v", err)
 	}
 	// An unapproved difference needs nothing but its read.
 	recs = cloneChain(configChain())

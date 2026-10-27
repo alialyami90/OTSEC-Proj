@@ -246,10 +246,13 @@ func ApprovalCovers(approval, detected *Record) error {
 //   - a config.change_detected with approval_seq names a succeeded
 //     config.change_approved earlier in the same epoch that covers it
 //     (ApprovalCovers);
-//   - a difference is recorded once per baseline: a second
-//     config.change_detected for the same asset, baseline and difference is
-//     refused, so a later approval cannot cover a difference already found
-//     unapproved. Ending that alarm takes a baseline acknowledgement.
+//   - once a difference from a baseline was recorded unapproved, a later
+//     detection against the same baseline may be approved only if its
+//     unchanged_at is after that alarm: the configuration was seen equal to
+//     the baseline again in between. An approval accepted after the alarm
+//     therefore never silences the change that raised it; ending that alarm
+//     takes a baseline acknowledgement (which moves the baseline) or a
+//     return to the baseline.
 //
 // A collector.seq_reset starts a new epoch: numbers from before it name
 // nothing after it, so an approval does not survive a collector reinstall.
@@ -260,12 +263,12 @@ func VerifyConfig(recs []*Record) error {
 		epoch int
 		seq   uint64
 	}
-	type diff struct{ asset, baseline, difference string }
+	type baseline struct{ asset, digest string }
 	epoch := 0
 	accepted := map[num]*Record{} // allowed admin collector.request records, by decision
 	runs := map[num]*Record{}     // allowed collector.request records of runs
 	approvals := map[num]*Record{}
-	seen := map[diff]bool{}
+	alarmed := map[baseline]time.Time{} // the latest unapproved detection against each baseline
 	for _, r := range recs {
 		switch {
 		case r.Action == ActionCollectorSeqReset:
@@ -304,13 +307,17 @@ func VerifyConfig(recs []*Record) error {
 			if run := runs[num{epoch, c.ReadSeq}]; run == nil || run.Target.AssetID != r.Target.AssetID {
 				return broken("record %d names read decision %d, which is not an earlier run on asset %s in its epoch", r.Seq, c.ReadSeq, r.Target.AssetID)
 			}
-			k := diff{r.Target.AssetID, c.BaselineDigest, c.DifferenceDigest}
-			if seen[k] {
-				return broken("record %d records difference %s from baseline %s again", r.Seq, c.DifferenceDigest, c.BaselineDigest)
-			}
-			seen[k] = true
+			k := baseline{r.Target.AssetID, c.BaselineDigest}
 			if c.ApprovalSeq == 0 {
+				found, _ := parseConfigTime(r.Time.UTC)
+				alarmed[k] = found
 				continue
+			}
+			if at, ok := alarmed[k]; ok {
+				unchanged, _ := parseConfigTime(c.UnchangedAt)
+				if !unchanged.After(at) {
+					return broken("record %d is approved, but the configuration was not seen equal to baseline %s since the unapproved difference at %s", r.Seq, c.BaselineDigest, at.Format(time.RFC3339Nano))
+				}
 			}
 			a := approvals[num{epoch, c.ApprovalSeq}]
 			if a == nil {

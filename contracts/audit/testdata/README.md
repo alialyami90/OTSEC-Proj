@@ -57,4 +57,4 @@ The asset ID and the read's invocation ID are invented.
 | `invalid/config-approval-window-over-24h.json` | A window longer than C7's 24-hour cap. The schema cannot compare two times, so this one passes the schema and fails `Validate`. |
 | `invalid/config-approval-seq-not-before-read.json` | `approval_seq` must be below `read_seq`. The schema cannot compare two fields, so this one passes the schema and fails `Validate`. |
 
-The chain rules (an approval names a real acceptance of its kind, a detection names a real read, a covering approval came first and in the same collector epoch, and one detection per difference) are in `TestVerifyConfig`, because they span records.
+The chain rules (an approval names a real acceptance of its kind, a detection names a real read, a covering approval came first and in the same collector epoch, and no approval silences a change already found unapproved unless the configuration returned to the baseline in between) are in `TestVerifyConfig`, because they span records.
