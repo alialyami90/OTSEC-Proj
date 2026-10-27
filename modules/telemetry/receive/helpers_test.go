@@ -159,7 +159,7 @@ func newRig(t *testing.T, transport asset.Transport, mut func(*Config)) *rig {
 		class = store.ClassSyslogDatagram
 	}
 	log, err := store.NewLog(mc, testNode, map[store.StreamID]store.StreamClass{testStream: class},
-		store.GroupOptions{MaxEvents: 100, MaxWait: 5 * time.Millisecond, MaxCommitRecords: store.MaxBatch}, nil)
+		store.GroupOptions{MaxEvents: 100, MaxWait: 5 * time.Millisecond}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
