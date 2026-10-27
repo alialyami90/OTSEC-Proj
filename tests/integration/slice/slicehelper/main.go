@@ -5,7 +5,7 @@
 // (D2-3). Every value it writes is a test value (D2-5), and every endpoint
 // is a loopback simulator (D2-10).
 //
-//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S]
+//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S] [-programdata DIR]
 //	slicehelper install-credential -root DIR      (secret from OTSEC_SLICE_SECRET)
 //
 // setup writes the node configuration through A5's nodeconfigtest (D2-6),
@@ -14,6 +14,15 @@
 // the fresh-state floor (A3 #106) has elapsed: the run stands for a
 // collector commissioned earlier, which is the state a site is in. It
 // prints a JSON object with the paths the suite needs.
+//
+// With -programdata, setup writes the inputs of the Windows installer
+// instead (P3-A5/A6, OTSEC_SLICE_SERVICE=1 in slicerun.py): node.json
+// naming the installed layout under that %ProgramData% (platform/winsvc),
+// the TLS reference files in a staging folder for the suite to copy into
+// the installed tls_dir, and the collector configuration, whose
+// ipc.node_peer is the otsec-node service. It creates nothing under
+// %ProgramData% and no collector store: the installer creates the folders
+// and the installed collector its own stores, under its own account.
 //
 // install-credential is the administrator's step: it reads the
 // collector's published install key, seals the secret to it, signs the
@@ -41,6 +50,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -48,10 +58,12 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collector"
+	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/modules/security/seal"
 	"otsec.local/otsec/platform/node"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
+	"otsec.local/otsec/platform/winsvc"
 )
 
 const (
@@ -68,6 +80,9 @@ const (
 	// test_relp_receiver.py; the node may use a required target only with
 	// such a check on record.
 	durableAckRef = "tests/integration/slice/test_relp_receiver.py"
+	// collectorPipe is the installed collector's pipe, as A6's installer
+	// check names it (tests/safety/windows_installer/node.template.json).
+	collectorPipe = `\\.\pipe\otsec-collector`
 )
 
 // Layout is what setup prints and install-credential reads back.
@@ -87,6 +102,16 @@ type Layout struct {
 	FID           string `json:"fid"`
 	Serial        string `json:"serial"`
 	CredentialRef string `json:"credential_ref"`
+	// NodePeer is the node's identity, which the collector requires of
+	// the other end of its socket or pipe (ipc.node_peer): this account's
+	// uid, or the otsec-node service SID in the installed layout.
+	NodePeer string `json:"node_peer"`
+	// The installed layout only (-programdata): the installer's inputs,
+	// the staged TLS files, and where they go.
+	NodeConfigSource string `json:"node_config_source,omitempty"`
+	CollectorConfig  string `json:"collector_config,omitempty"`
+	TLSStage         string `json:"tls_stage,omitempty"`
+	TLSDir           string `json:"tls_dir,omitempty"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
 	// Syslog listeners (#154), when -syslog-udp or -syslog-tls is set: the
@@ -101,8 +126,13 @@ type Layout struct {
 
 // leaveAdminFile writes an administrator's file into admin_dir as one
 // would on Linux, where the rule is the mode: the directory opened for the
-// write and closed again (0550), and the file read-only (0440).
+// write and closed again (0550), and the file read-only (0440). On Windows
+// the rule is the DACL, which the file inherits from the installed
+// config\admin, with an elevated account's owner, Administrators.
 func leaveAdminFile(dir, name string, b []byte) error {
+	if runtime.GOOS == "windows" {
+		return os.WriteFile(filepath.Join(dir, name), b, 0o600)
+	}
 	if err := os.Chmod(dir, 0o750); err != nil {
 		return err
 	}
@@ -130,6 +160,7 @@ func main() {
 	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
 	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
+	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
 	kind := fs.String("kind", "install", "admin-file: install or revoke")
 	name := fs.String("name", "", "admin-file: the file's name, or the <name> in admin-request-<name>.json")
 	expires := fs.Duration("expires", 10*time.Minute, "admin-file: the request's lifetime from now (negative: already expired)")
@@ -141,7 +172,7 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData)
 	case "install-credential":
 		err = installCredential(*root)
 	case "admin-file":
@@ -155,39 +186,32 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
 	l := Layout{Root: root, NodeID: nodeID, AssetID: assetID, FID: simFID, Serial: simSerial,
 		CredentialRef: nodeconfigtest.TestCredentialRef}
-	l.CollectorData = filepath.Join(root, "data")
-	coll := filepath.Join(l.CollectorData, "collector")
-	l.PublicDir = filepath.Join(coll, "public")
-	// The administrators' folder both services read clear-suspension.json
-	// from (D2-15, #119): on Linux the rule is the mode, 0550, so the test
-	// opens it only to leave a file there, as an administrator would.
-	l.AdminDir = filepath.Join(l.CollectorData, "config", "admin")
-	runDir := filepath.Join(root, "run")
-	l.Socket = filepath.Join(runDir, "collector.sock")
-	l.StoreDir = filepath.Join(root, "node", "store")
-	for _, d := range []string{filepath.Join(coll, "state"), filepath.Join(coll, "credentials"), l.PublicDir, runDir, filepath.Dir(l.StoreDir)} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+	installed := programData != ""
+	var coll string
+	if installed {
+		if err := installedLayout(&l, programData); err != nil {
 			return err
 		}
-	}
-	if err := os.MkdirAll(l.AdminDir, 0o750); err != nil {
-		return err
-	}
-	if err := os.Chmod(l.AdminDir, 0o550); err != nil {
-		return err
-	}
-	if err := store.CreateDir(l.StoreDir, ""); err != nil {
-		return err
+	} else {
+		var err error
+		if coll, err = processLayout(&l); err != nil {
+			return err
+		}
 	}
 
 	// The node: one simulated SEL-751 and one required RELP/TLS target.
 	nc := nodeconfigtest.New(nodeID, l.StoreDir)
+	if installed {
+		// Written to the staging folder; the suite copies the files into
+		// the installed tls_dir, where they inherit its DACL.
+		nc.TLSDir = l.TLSStage
+	}
 	nc.CollectorPipe = l.Socket
 	nc.CollectorPublicDir = l.PublicDir
 	nc.AdminDir = l.AdminDir
@@ -209,15 +233,23 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err != nil {
 		return err
 	}
+	// In the installed layout the listener's credential is staged with
+	// the rest, and reaches config\tls the same way.
 	if err := listeners(nc, pki, &l, syslogUDP, syslogTLS); err != nil {
 		return err
 	}
-	if err := nc.LockTLS(); err != nil {
-		return err
-	}
-	l.NodeConfig = filepath.Join(root, "node", "node.json")
-	if err := nc.Write(l.NodeConfig); err != nil {
-		return err
+	if installed {
+		nc.TLSDir = l.TLSDir
+		if err := nc.Write(l.NodeConfigSource); err != nil {
+			return err
+		}
+	} else {
+		if err := nc.LockTLS(); err != nil {
+			return err
+		}
+		if err := nc.Write(l.NodeConfig); err != nil {
+			return err
+		}
 	}
 	// The receiver's server certificate, from the same test CA.
 	l.ServerCert, l.ServerKey, l.CA = filepath.Join(root, "relp-server.crt"), filepath.Join(root, "relp-server.key"), filepath.Join(root, "relp-ca.pem")
@@ -225,7 +257,7 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err != nil {
 		return err
 	}
-	caPEM, err := os.ReadFile(filepath.Join(nc.TLSDir, anchorRef+".pem"))
+	caPEM, err := os.ReadFile(filepath.Join(stageOr(l.TLSStage, nc.TLSDir), anchorRef+".pem"))
 	if err != nil {
 		return err
 	}
@@ -265,31 +297,39 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err := os.WriteFile(l.AdminKey, []byte(base64.StdEncoding.EncodeToString(adminPriv.Seed())), 0o600); err != nil {
 		return err
 	}
-	cfg := map[string]any{
-		"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
-		"ipc":           map[string]any{"address": l.Socket, "node_peer": strconv.Itoa(os.Getuid())},
-		"assets":        []any{nc.Assets[0]},
-		"profiles":      []any{json.RawMessage(profile)},
-		"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
-		"registers":     []any{env},
-		"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
-			"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
+	collectorConfig := func(peer string) ([]byte, error) {
+		return json.MarshalIndent(map[string]any{
+			"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
+			"ipc":           map[string]any{"address": l.Socket, "node_peer": peer},
+			"assets":        []any{nc.Assets[0]},
+			"profiles":      []any{json.RawMessage(profile)},
+			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
+			"registers":     []any{env},
+			"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
+				"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
+		}, "", "  ")
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := collectorConfig(l.NodePeer)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(coll, "collector.json"), b, 0o600); err != nil {
-		return err
-	}
-	// Both stores, created an hour ago: no first-start marker is needed,
-	// and the fresh-state floor has passed.
-	aged := time.Now().Add(-time.Hour)
-	if err := collector.InitState(filepath.Join(coll, "state", "state.json"), aged); err != nil {
-		return err
-	}
-	if err := collector.InitCredStore(filepath.Join(coll, "credentials", "credentials.json"), nodeID, func() time.Time { return aged }); err != nil {
-		return err
+	if installed {
+		if err := os.WriteFile(l.CollectorConfig, b, 0o600); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(coll, "collector.json"), b, 0o600); err != nil {
+			return err
+		}
+		// Both stores, created an hour ago: no first-start marker is
+		// needed, and the fresh-state floor has passed.
+		aged := time.Now().Add(-time.Hour)
+		if err := collector.InitState(filepath.Join(coll, "state", "state.json"), aged); err != nil {
+			return err
+		}
+		if err := collector.InitCredStore(filepath.Join(coll, "credentials", "credentials.json"), nodeID, func() time.Time { return aged }); err != nil {
+			return err
+		}
 	}
 
 	out, err := json.MarshalIndent(l, "", "  ")
@@ -301,6 +341,64 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	fmt.Println(string(out))
 	return nil
+}
+
+// processLayout lays the run out under its root for processes the suite
+// spawns, and returns the collector's folder.
+func processLayout(l *Layout) (string, error) {
+	l.CollectorData = filepath.Join(l.Root, "data")
+	coll := filepath.Join(l.CollectorData, "collector")
+	l.PublicDir = filepath.Join(coll, "public")
+	// The administrators' folder both services read clear-suspension.json
+	// from (D2-15, #119): on Linux the rule is the mode, 0550, so the test
+	// opens it only to leave a file there, as an administrator would.
+	l.AdminDir = filepath.Join(l.CollectorData, "config", "admin")
+	runDir := filepath.Join(l.Root, "run")
+	l.Socket = filepath.Join(runDir, "collector.sock")
+	l.StoreDir = filepath.Join(l.Root, "node", "store")
+	l.NodeConfig = filepath.Join(l.Root, "node", "node.json")
+	l.NodePeer = strconv.Itoa(os.Getuid())
+	for _, d := range []string{filepath.Join(coll, "state"), filepath.Join(coll, "credentials"), l.PublicDir, runDir, filepath.Dir(l.StoreDir)} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return "", err
+		}
+	}
+	if err := os.MkdirAll(l.AdminDir, 0o750); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(l.AdminDir, 0o550); err != nil {
+		return "", err
+	}
+	return coll, store.CreateDir(l.StoreDir, "")
+}
+
+// installedLayout names the installer's layout under programData
+// (platform/winsvc) and the run's staging files under the root.
+func installedLayout(l *Layout, programData string) error {
+	if !filepath.IsAbs(programData) {
+		return fmt.Errorf("-programdata %q is not an absolute path", programData)
+	}
+	l.CollectorData = winsvc.DataDir(programData)
+	l.PublicDir = winsvc.PublicDir(programData)
+	l.AdminDir = winsvc.AdminDir(programData)
+	l.StoreDir = winsvc.StoreDir(programData)
+	l.TLSDir = winsvc.TLSDir(programData)
+	l.NodeConfig = winsvc.ConfigPath(programData)
+	l.Socket = collectorPipe
+	l.NodePeer = collectorwire.ServiceSID(collectorwire.NodeService)
+	inputs := filepath.Join(l.Root, "install")
+	l.NodeConfigSource = filepath.Join(inputs, "node.json")
+	l.CollectorConfig = filepath.Join(inputs, "collector.json")
+	l.TLSStage = filepath.Join(inputs, "tls")
+	return os.MkdirAll(inputs, 0o700)
+}
+
+// stageOr is the staging folder when there is one, else dir.
+func stageOr(stage, dir string) string {
+	if stage != "" {
+		return stage
+	}
+	return dir
 }
 
 // setSerial replaces the declared serial_number, which AddSEL751 writes as

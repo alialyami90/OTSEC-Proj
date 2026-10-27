@@ -34,7 +34,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 SCHEDULE = 60  # slicehelper's default SER interval, seconds
 TICK = 60      # platform/node TickInterval
@@ -66,7 +66,7 @@ def _audit_rows(path):
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-busy-open")))
     s.build()
     out = {}
@@ -98,7 +98,8 @@ def got(tmp_path_factory):
         if holder is not None:
             holder.close()
         s.stop()
-    out["audit"] = _audit_rows(audit)
+    # After stop(), in service mode, the store is the teardown's copy.
+    out["audit"] = _audit_rows(os.path.join(s.layout["store_dir"], "audit.db"))
     out["sim_logs"] = list(s.sim_logs)
     print(json.dumps({k: v for k, v in out.items() if k != "audit"}, indent=1, default=str))
     return out

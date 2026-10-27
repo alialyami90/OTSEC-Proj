@@ -44,7 +44,7 @@ import pytest
 import harness
 from conftest import need
 from reconcile import first, parse_rfc5424
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 DEVICE, STRANGER = "127.0.0.2", "127.0.0.3"
 
@@ -192,7 +192,7 @@ def _native(ps):
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     d = str(tmp_path_factory.mktemp("slice-syslog"))
     s = Slice(d)
     s.build()
