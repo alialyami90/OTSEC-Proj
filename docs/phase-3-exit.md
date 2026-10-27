@@ -109,7 +109,7 @@ Everything in the Phase 2 list still stands. Phase 3 adds:
 
 D3-1 to D3-11 are in `docs/phase3/A1-decisions.md`. These matter most for later phases:
 
-- **D3-3 and HR-11:** before any `device-observed` Syslog listener, unknown-sender storage needs an absolute bound (its own C5 stream and quota), not only the per-window budget.
+- **HR-11 (A3's unknown-sender condition):** before any `device-observed` Syslog listener, unknown-sender storage needs an absolute bound (its own C5 stream and quota), not only the per-window budget.
 - **D3-5 (owner decision):** plaintext Syslog receive is allowed, enabled per listener. TLS is the default; a plaintext listener is shown in health, and plaintext never raises binding confidence (HR-12).
 - **D3-7:** a node key's boundary is non-export plus every account other than Administrators and the service.
 - **D3-8:** a collector run's relayed audit records follow its decision record in the chain.

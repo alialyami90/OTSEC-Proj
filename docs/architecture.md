@@ -1,6 +1,23 @@
 # Architecture
 
-Owner: A1. Status: **Phase 0 exit gate passed with conditions (2026-10-23).** Decisions are recorded in ADR-0002 to ADR-0007 under [decisions/](decisions/). Phase 0 evidence is merged to `main` (`docs/phase0/`, experiments under `modules/`, `platform/`, `tests/`), indexed in [agent-handoffs.md](agent-handoffs.md); every result in Phase 0 is `documented-untested` or `simulated`.
+Owner: A1 (B1 from the 2026-10-27 team handoff). Decisions are recorded in ADR-0002 to ADR-0008 under [decisions/](decisions/), and phase rulings in `docs/phase{1,2,3}/A1-decisions.md`.
+
+Status as of 2026-10-27:
+
+- **Phases 0 to 2** passed their gates with conditions.
+- **Phase 3** passed with conditions, pending the owner's acceptance ([phase-3-exit.md](phase-3-exit.md)).
+- **Phase 4** is drafted and held.
+
+The runtime described under "Runtime shape" is built for the site role only. Its pieces are:
+
+- the node and the collector as separate binaries;
+- C7 IPC between them, over a named pipe on Windows and a Unix socket on Linux;
+- the SQLite store;
+- the forwarder;
+- Syslog receive;
+- the admin relay.
+
+The central role, the passive sensor, configuration monitoring and engineering access are not built. Every result is `desk` or `simulated`. The sections below from "Phase 0 answers" onward are the Phase 0 record and are kept as written.
 
 ## System boundary
 
