@@ -246,3 +246,18 @@ func TestConfigExamplesHaveNotes(t *testing.T) {
 		}
 	}
 }
+
+// The run's invocation is the one the collector builds for the C1 relay
+// example: the profile names the run, and the limits sit within its session
+// limits.
+func TestConfigInvocationCheckAgainst(t *testing.T) {
+	a, p := c1Example(t)
+	if err := configInvocation(t).CheckAgainst(a, p); err != nil {
+		t.Fatalf("C1 relay example refused: %v", err)
+	}
+	other := configInvocation(t)
+	other.OperationID = "sel.config.read_other"
+	if got := codeOf(other.CheckAgainst(a, p)); got != RefusedNotInvocable {
+		t.Errorf("a run the profile does not name: %s", got)
+	}
+}

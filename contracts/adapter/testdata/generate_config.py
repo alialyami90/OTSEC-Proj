@@ -180,7 +180,9 @@ def invocation():
         inv = json.load(f)
     inv["schema"] = SCHEMA_0_6
     inv["operation_id"] = RUN
-    inv["expected_identity"] = [e for e in inv["expected_identity"] if e["name"] == "firmware_id"]
+    # expected_identity is the asset's whole binding, as for every invocation
+    # (CheckAgainst). A run has no SER header, so it reads no serial_number and
+    # its identity block holds the firmware_id item only, as for any SHO read.
     # Limits.ForRun: the run's total and deadline, the longest step timeout.
     inv["limits"].update(step_timeout_ms=10000, deadline_ms=300000, max_response_bytes=524288)
     return inv

@@ -12,6 +12,10 @@
     {
       "name": "firmware_id",
       "value": "SEL-751-R501-V0-Z104101-D20260910"
+    },
+    {
+      "name": "serial_number",
+      "value": "SIM0000000000001"
     }
   ],
   "limits": {
