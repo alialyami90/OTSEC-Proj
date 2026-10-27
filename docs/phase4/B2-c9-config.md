@@ -121,3 +121,14 @@ These wait until C9 is approved:
 
 1. **Register revision 5.** The 24 exact forms at Level 1, each with a timeout and a counted byte cap, and the read's total time. The deny corpus, updated by B6, covers every `s` form and every bare `SHO P`.
 2. **C2 0.6 `config.read`** in `sel751`. It follows the `ser.read` session rules, with a parser and a fuzz target per class, and goldens from S22's figures and tables. B6's simulator forms are not read until those goldens are fixed.
+
+## What changed when the read was built (P4-A2)
+
+Building the C2 0.6 read found three things in C9 0.1 and one choice to confirm. B1 is asked to accept the first two as part of the C2 0.6 contract change.
+
+1. **Section spans are checked in pairs, not by position.** C9 0.1 required each section's span to follow the one before it in the rule's order. A run must send its gate reads first (C3 0.3: `SHO P 1` for LANG, then `SHO G`), and the rule lists `global` and `port.1` in the middle, so a real read's spans are not in the rule's order. `Snapshot.Validate` now refuses overlapping spans in any order; `CheckAgainst` already ties each section to its own reply, so no check was lost. The invalid example `snapshot-sections-overlap.json` still fails, with a new message.
+2. **`config.FromResult`** builds a snapshot from an ok run result: one record per step in the run's order, sections in the rule's order, the settings the adapter's parser read, the SHA-256 of each span. It refuses a result that is not ok, not of the invocation, short of a record, or holds an unparsed or non-configuration record. It does not tokenize: `CheckAgainst` makes the adapter's parser and the contract's agree, and a test shows a parser that drops, changes, swaps or splits a setting is refused.
+3. **An unreadable section is `partial.parse_errors`, not `failed`.** B1's ruling says a run fails as a whole with the read reported failed. The adapter stops the run at the first section the rule cannot read (a name printed twice, a line that does not tokenize), sends QUI, keeps the bytes and the records so far, and marks the last record `parse_ok` false. That is C2's existing meaning of a parse error. `FromResult` refuses it, so no snapshot is made and the baseline is not touched, which is the same outcome as `failed`. If B1 wants the code `failed.device_error` instead, it is one line in `section`.
+4. **A form every SEL-751 has that answers `Invalid Command` is `failed.device_error`.** Only the eleven forms C9 marks `MayBeAbsent` can be an absent section.
+
+The adapter keeps its own table of forms (`cfgForms`) and does not import the contract it is checked against; `TestCfgFormsAreTheRule` makes the two agree.
