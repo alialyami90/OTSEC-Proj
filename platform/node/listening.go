@@ -64,8 +64,11 @@ type Listening struct {
 	plaintext map[string]bool
 	sizing    map[string]ListenerSizing
 	// unknown counts the record bytes stored from unknown senders since
-	// start, per listener (liveLog).
+	// start, per listener (liveLog); spent is what they stored in the
+	// window before start, as counted from the stream (unknownSpent), or
+	// the whole budget when it could not be counted.
 	unknown map[string]*atomic.Int64
+	spent   map[string]int64
 	// notAfter is a syslog-tls listener's certificate expiry; expiry is
 	// the alarm already raised for it ("expiring" or "expired").
 	notAfter map[string]time.Time
@@ -77,10 +80,13 @@ type Listening struct {
 // (Config.ListenerTLS), so a missing or bad file stops the node; nothing
 // falls back to plaintext. The sender table comes from the C1 assets'
 // inbound endpoints (receive.SendersFor), and each listener's unknown
-// budget from its class quota (Config.ListenerSizings).
+// budget from its class quota (Config.ListenerSizings), less what unknown
+// senders stored on its stream in the window before this start, so a
+// restart does not refill it (D3-3). If that cannot be counted, the
+// budget starts empty and AlarmUnknownSpentUncounted is raised.
 func NewListening(rt *Runtime) (*Listening, error) {
 	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{},
-		unknown: map[string]*atomic.Int64{}, notAfter: map[string]time.Time{}, expiry: map[string]string{}}
+		unknown: map[string]*atomic.Int64{}, spent: map[string]int64{}, notAfter: map[string]time.Time{}, expiry: map[string]string{}}
 	if len(rt.cfg.Listeners) == 0 {
 		return ls, nil
 	}
@@ -110,6 +116,15 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			Received:  rt.received,
 			Limits:    sizing[l.ID].limits(),
 		}
+		spent, err := unknownSpent(context.Background(), rt.Store(stream), stream, cfg.Limits.UnknownWindow, rt.opt.Now())
+		if err != nil {
+			// receive starts a budget empty at UnknownBytes.
+			spent = cfg.Limits.UnknownBytes
+			rt.opt.Status.Raise("", AlarmUnknownSpentUncounted, fmt.Sprintf(
+				"listener %s: what unknown senders stored in the last %s could not be counted (%v), so their budget starts empty and their messages are dropped until it refills at %d bytes an hour. Known senders are not affected",
+				l.ID, cfg.Limits.UnknownWindow, err, cfg.Limits.UnknownBytes))
+		}
+		cfg.UnknownSpent = spent
 		if l.Transport == asset.SyslogTLS {
 			if cfg.TLS, err = rt.cfg.ListenerTLS(l); err != nil {
 				return nil, err
@@ -127,6 +142,7 @@ func NewListening(rt *Runtime) (*Listening, error) {
 		ls.receivers = append(ls.receivers, r)
 		ls.plaintext[l.ID] = l.Plaintext
 		ls.unknown[l.ID] = unknown
+		ls.spent[l.ID] = spent
 	}
 	return ls, nil
 }
@@ -268,7 +284,7 @@ func (ls *Listening) Publish() {
 		s.Unknown = &UnknownShare{
 			HourlyBytes: sz.UnknownBytes, BoundBytes: sz.UnknownBound,
 			QuotaBytes: sz.Quota, OutageHours: sz.OutageHours,
-			StoredBytes: ls.unknown[id].Load(),
+			StoredBytes: ls.unknown[id].Load(), SpentAtStart: ls.spent[id],
 		}
 		if na, ok := ls.notAfter[id]; ok {
 			s.CertNotAfter = na.UTC()
@@ -319,6 +335,10 @@ type UnknownShare struct {
 	QuotaBytes  int64 `json:"quota_bytes"`
 	OutageHours int64 `json:"outage_hours"`
 	StoredBytes int64 `json:"stored_bytes"`
+	// SpentAtStart is what the budget started spent by: what unknown
+	// senders stored in the hour before start, or HourlyBytes when that
+	// could not be counted (AlarmUnknownSpentUncounted).
+	SpentAtStart int64 `json:"spent_at_start_bytes"`
 }
 
 func listenerStatus(s receive.Status) ListenerStatus {
