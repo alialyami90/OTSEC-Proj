@@ -36,18 +36,26 @@ const (
 	MaxUnknownBytes = 1 << 20
 	// ReceivedRecordFactor and ReceivedRecordOverhead bound the stored
 	// event of any frame a listener accepts: at most ReceivedRecordBound
-	// (factor × MaxMessage + overhead) bytes. It is a bound over the
-	// listener's MaxMessage, not per frame: a small frame can store at far
-	// more than factor × its own size, since a dialect's fields copy its
-	// text (a 1024-byte RTAC frame of '<' stores as 19985 bytes, A6 on
-	// #174). Measured on 8192-byte frames (simulated): 1.44× for random
-	// bytes, 2.5× for ASCII text, 3.5× for quotes and 7.48× for control
-	// characters or '<', which the JSON encoder escapes to six bytes in
-	// the normalized message. The node's listeners use MaxMessage 8192,
-	// where the worst frame measured stores at 61201 of 69632 bytes; at
-	// receive's minimum of 2048 the margin is small, 19985 of 20480 in
-	// A6's measurement (TestReceivedRecordBound pins both). A
-	// configurable MaxMessage would need a larger overhead first.
+	// (factor × max(MaxMessage, ReceivedRecordFloor) + overhead) bytes. It
+	// is a bound over the listener's MaxMessage, not per frame: a small
+	// frame can store at far more than factor × its own size, since a
+	// dialect's fields copy its text. Measured on 8192-byte frames
+	// (simulated): 1.44× for random bytes, 2.5× for ASCII text, 3.5× for
+	// quotes and 7.48× for control characters or '<', which the JSON
+	// encoder escapes to six bytes in the normalized message.
+	//
+	// The worst cases measured (TestReceivedRecordBound, simulated, with
+	// a verified sender certificate, an asset ID, the longest IPv6 form,
+	// and the longest node ID and stream):
+	//   - MaxMessage 8192, the node's value: 63205 of 69632 bytes, an RFC
+	//     5424 frame whose 255-byte hostname and the rest are '<' (B6 on
+	//     #182);
+	//   - an RTAC Logger frame at its 1024-byte limit, read as RTAC at
+	//     any MaxMessage: 20781 bytes, a minimal header and the rest '<'
+	//     in the event time, tag or message, each stored three times
+	//     (B6 on #182). That is over 8 × 2048 + 4 KiB, so a MaxMessage
+	//     below ReceivedRecordFloor takes the floor's bound.
+	ReceivedRecordFloor    = 4096
 	ReceivedRecordFactor   = 8
 	ReceivedRecordOverhead = 4 << 10
 )
@@ -62,7 +70,7 @@ const (
 // ReceivedRecordBound is the largest stored event of a frame a listener
 // with this MaxMessage accepts.
 func ReceivedRecordBound(maxMessage int64) int64 {
-	return ReceivedRecordFactor*maxMessage + ReceivedRecordOverhead
+	return ReceivedRecordFactor*max(maxMessage, ReceivedRecordFloor) + ReceivedRecordOverhead
 }
 
 // HeldBatchBytes is the largest stream batch a listener may hold for the

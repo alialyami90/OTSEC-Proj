@@ -287,18 +287,25 @@ func TestTargetSmallForListeners(t *testing.T) {
 }
 
 // The stored event of any frame a listener accepts stays within
-// ReceivedRecordBound of its MaxMessage, at the node's 8192 and at
-// receive's minimum of 2048, where small frames come nearest (A6 on
-// #174): hostile fills in each dialect's longest fields, the RTAC Logger's
-// tag at its 1024-byte packet limit, and the truncated flag a listener
-// adds. A4's normalize TestSyslogSizeBounds covers more shapes at 8192.
+// ReceivedRecordBound of its MaxMessage, at the node's 8192, at
+// ReceivedRecordFloor and at receive's minimum of 2048, where small frames
+// come nearest (A6 on #174, B6 on #182): hostile fills in each dialect's
+// longest fields, the RTAC Logger's parts at its 1024-byte packet limit,
+// a 255-byte RFC 5424 hostname, every optional field at its longest, and
+// the truncated flag a listener adds. A4's normalize TestSyslogSizeBounds
+// covers more shapes at 8192.
 func TestReceivedRecordBound(t *testing.T) {
 	const (
 		h3164 = "<13>Oct 26 12:00:00 host app: "
 		h5424 = "<13>1 2026-10-26T12:00:00Z host app - - "
 		hRTAC = "<190>Mar 21 2015 12:10:08 SEL-3530-xxxxxx RTAC Logger: 2015-03-21 12:09:58.593, I, S, "
+		// The shortest RTAC header (B6 on #182): each frame byte past it
+		// goes into a part stored three times.
+		hRTACMin = "<0>Mar 21 12:10:08 h RTAC Logger: "
 	)
-	for _, maxMessage := range []int64{2048, streamMaxMessage} {
+	// The longest node ID and stream the contracts allow.
+	longNode, longStream := strings.Repeat("n", 63), "syslog/"+strings.Repeat("l", 121)
+	for _, maxMessage := range []int64{2048, 4096, streamMaxMessage} {
 		cut := func(s string) []byte { return []byte(s[:min(len(s), int(maxMessage))]) }
 		bound := ReceivedRecordBound(maxMessage)
 		var worst int
@@ -310,6 +317,14 @@ func TestReceivedRecordBound(t *testing.T) {
 				cut(h5424 + `[x@1 a="` + fill[:int(maxMessage)-len(h5424)-12] + `"]`),
 				cut(fill),
 				cut(hRTAC + strings.Repeat(c, 1024-len(hRTAC)-3) + ", m"),
+				// The RTAC frame at its 1024-byte limit with its fill in
+				// the event time, the tag or the message.
+				cut(hRTACMin + strings.Repeat(c, 1024-len(hRTACMin)-12) + ", x, x, x, x"),
+				cut(hRTACMin + "x, x, x, " + strings.Repeat(c, 1024-len(hRTACMin)-12) + ", x"),
+				cut(hRTACMin + "x, x, x, x, " + strings.Repeat(c, 1024-len(hRTACMin)-12)),
+				// An RFC 5424 hostname at its 255 bytes, which is printed
+				// as the hostname and the subject (B6 on #182).
+				cut("<13>1 2026-10-26T12:00:00Z " + strings.Repeat(c, 255) + " - - - - " + fill),
 			}
 			for _, frame := range frames {
 				for _, d := range normalize.Dialects {
@@ -321,6 +336,10 @@ func TestReceivedRecordBound(t *testing.T) {
 						// known asset and its binding, the longest IPv6 text form,
 						// and a nanosecond received time.
 						{Node: "site-a-node1", Stream: "syslog/a-listener-with-a-long-id", Sender: "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255",
+							Auth: event.AuthTLSMutual, SenderCert: bytes.Repeat([]byte{0x30}, 64), AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+							Received: event.Received{UTC: "2026-10-26T15:00:00.123456789Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized}}},
+						// The same with the longest node ID and stream.
+						{Node: event.NodeID(longNode), Stream: event.Stream(longStream), Sender: "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255",
 							Auth: event.AuthTLSMutual, SenderCert: bytes.Repeat([]byte{0x30}, 64), AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
 							Received: event.Received{UTC: "2026-10-26T15:00:00.123456789Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized}}},
 					} {
