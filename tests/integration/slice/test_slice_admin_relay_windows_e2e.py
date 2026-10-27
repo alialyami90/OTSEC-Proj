@@ -145,9 +145,35 @@ def icacls(path, *args):
 
 
 def sddl(path):
-    """The object's owner and DACL as SDDL, read with Get-Acl."""
-    return run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                f"(Get-Acl -LiteralPath '{path}').Sddl"]).strip()
+    """The object's owner and DACL as SDDL, read with GetNamedSecurityInfoW.
+    Not Get-Acl: Windows PowerShell started from the runner's pwsh inherits
+    pwsh's PSModulePath and cannot load Microsoft.PowerShell.Security (run
+    40581770237)."""
+    from ctypes import wintypes
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    adv.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+                                          ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                          ctypes.POINTER(ctypes.c_void_p)]
+    adv.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    adv.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR), ctypes.c_void_p]
+    k32.LocalFree.argtypes = [ctypes.c_void_p]
+    info = 0x1 | 0x4  # OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+    sd = ctypes.c_void_p()
+    err = adv.GetNamedSecurityInfoW(str(path), 1, info, None, None, None, None, ctypes.byref(sd))  # SE_FILE_OBJECT
+    if err:
+        raise ctypes.WinError(err)
+    try:
+        text = wintypes.LPWSTR()
+        if not adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, info, ctypes.byref(text), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return text.value
+        finally:
+            k32.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+    finally:
+        k32.LocalFree(sd)
 
 
 SDDL = re.compile(r"^O:(?P<owner>[^:]+?)(?:G:[^:]+?)?D:(?P<flags>[A-Z]*)(?P<aces>(?:\([^)]*\))*)")
