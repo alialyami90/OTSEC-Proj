@@ -161,9 +161,14 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err != nil {
 		return err
 	}
+	// Nothing reads the file before the rename, so its writes need no flush
+	// of their own: synchronous=OFF here, and one flush of the whole file
+	// before the rename below. This replaces about ten flushes per new
+	// database (#230). synchronous is per connection; every later open sets
+	// FULL again, and load checks it.
 	// auto_vacuum must be set before the first table (E-A5-3 case 3), and
 	// journal_mode=WAL is persistent. Both are set only here, on a new file.
-	for _, q := range []string{"PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
+	for _, q := range []string{"PRAGMA synchronous=OFF", "PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
 		if _, err := d.conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return fmt.Errorf("create %s: %s: %w", tmp, q, err)
@@ -176,11 +181,34 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("create %s: close: %w", tmp, err)
 	}
+	if err := flushCreated(tmp); err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
 	d.point("create:rename")
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	return syncDir(opt.Dir)
+}
+
+// flushCreated flushes a closed new database to disk. The close checkpointed
+// its WAL into it and removed the -wal file; one that is still there holds
+// committed pages the rename would leave behind, so it is refused.
+func flushCreated(tmp string) error {
+	if _, err := os.Lstat(tmp + "-wal"); err == nil {
+		return errors.New("WAL left after close")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // connect opens path on one connection with the per-connection settings.
