@@ -13,8 +13,8 @@ As of 2026-10-27 (details in [docs/phase-3-exit.md](docs/phase-3-exit.md)):
 | Phase 0 (evidence) | Passed with conditions, 2026-10-23 |
 | Phase 1 (contracts C1 to C8) | Passed with conditions, 2026-10-24 |
 | Phase 2 (the simulated SEL-751 SER-to-Syslog slice) | Passed with conditions; the owner accepted it 2026-10-26 |
-| Phase 3 (a hardened slice and the first monitoring rungs) | Passed with conditions, 2026-10-27, **not yet accepted by the owner** |
-| Phase 4 | Briefs drafted in [docs/agent-handoffs.md](docs/agent-handoffs.md), held until the owner accepts Phase 3 |
+| Phase 3 (a hardened slice and the first monitoring rungs) | Passed with conditions; the owner accepted it 2026-10-27 |
+| Phase 4 (configuration baselines, the event-behaviour baseline, carry-over) | Issued 2026-10-27; briefs in [docs/agent-handoffs.md](docs/agent-handoffs.md), decisions in [docs/phase4/B1-decisions.md](docs/phase4/B1-decisions.md) |
 
 There are two Go binaries. `cmd/otsec` is the site node. `cmd/otsec-collector` is the privileged collector, which alone holds device credentials and opens device sessions.
 
@@ -57,6 +57,6 @@ The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisi
 - [docs/threat-model.md](docs/threat-model.md): trust boundaries, assets, attack paths, mitigations.
 - [docs/device-capabilities.md](docs/device-capabilities.md): per-IED capability matrix with evidence classification.
 - [docs/verification.md](docs/verification.md): verification matrix, acceptance criteria, and independent findings.
-- [docs/agent-handoffs.md](docs/agent-handoffs.md): task briefs for every phase (Phase 4 drafted), handoffs, and the roadmap.
+- [docs/agent-handoffs.md](docs/agent-handoffs.md): task briefs for every phase (Phase 4 issued), handoffs, and the roadmap.
 - [handoffs/](handoffs/): the A-to-B team handoff.
 - [docs/decisions/](docs/decisions/): Architecture Decision Records.
