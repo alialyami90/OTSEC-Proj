@@ -62,3 +62,17 @@ Date: 2026-10-26. A6 found that relayed collector records (`device.session.open`
 
 Chain order is commit order. C8 promises order by `seq` and the hash chain, never time order across records. **Ruling: no reorder.** The batch stays as it is, and C8's doc says so. A6 adds a check, keyed per collector request: the info and decision records carry the request ID, and the relayed records carry the invocation ID of the run that decision allowed. For each request, the info record comes before the decision in `seq`, and the decision comes before the relayed records. In time, the info record is at or before every relayed record, and those are at or before the decision (`test_slice_busy_open_e2e.py`). This holds because the node and its collector share a host clock, as D2-1 places them. A collector on another host would need a clock-offset rule first.
 
+
+## D3-9: the collector grants its node two query rights; the node keeps checking the server's token (#180)
+
+Date: 2026-10-26. When the node and the collector run as installed services, each under its own virtual account, every `collectorwire.Dial` failed closed. `checkServer` needs `PROCESS_QUERY_LIMITED_INFORMATION` on the pipe server's process and `TOKEN_QUERY` on its token, and the default DACLs of a service process and its token grant only SYSTEM and the account itself. A5's service-mode dry run found it ([run 40397915060](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40397915060)). **Ruling: accepted as A3 proposed.**
+
+- At startup, before the pipe exists, the collector's `Listen` merges two allow entries for the configured peer (the node's service SID): `PROCESS_QUERY_LIMITED_INFORMATION` on its own process DACL and `TOKEN_QUERY` on its own token's DACL. Nothing else is granted, and every existing entry stays.
+- If either grant fails, `Listen` returns an error and the collector does not start.
+- W-1's check is unchanged. The server's token must hold the collector's service SID (or the configured `ep.Peer`) as user or enabled group. A process that took the pipe name without that SID, or without having made the grants, is refused.
+- What the node gains is the collector's image name, its start and exit times and exit code, and the token's user, groups and privileges. None of these is secret. The node cannot read the collector's memory, duplicate its handles or use its token.
+- The token's DACL is not `TokenDefaultDacl`. Objects the collector creates later, such as its store files and pipes, are not opened to the node by this.
+
+**Rejected:** matching `GetNamedPipeServerProcessId` to the SCM's process ID for `otsec-collector`. It trusts a process ID instead of the token, which leaves a PID-reuse window, and it needs the service DACL to grant the node `SERVICE_QUERY_STATUS`.
+
+Evidence: `TestListenGrantsPeerQuery`. A6's independent two-service test passed claims (a) to (d) on the hosted runner (`tests/security/collectorwire_services_windows_test.go`, landing in A6's next PR). A5's service-mode dry run 4 ([run 40405064964](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40405064964)) installed both services, and the node checked the collector. Evidence class: hosted Windows runner, simulated devices, not the owner's PC. Small follow-ups (A5's notes on #180): a comment that a partial grant on failure is intended, a test for a repeated `Listen`, and a comment on the token DACL versus `TokenDefaultDacl`.

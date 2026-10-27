@@ -27,6 +27,14 @@ import (
 // in order, so every stranger datagram before it has been spent or
 // dropped by then). Nothing is forwarded or pruned here, which is an
 // outage.
+//
+// The floor (that the budget, not the rig, held the flood) is taken from
+// the flood the listener actually saw: the bucket starts full and holds
+// at most UnknownBytes, so the time before the flood adds nothing, and a
+// saturating flood that ran for F stores about UnknownBytes x (1 + F/window). Measuring it from
+// before startQuota failed on a slow Windows runner, where fewer windows
+// were left for the flood (#192, job 121931466677: 984524 of 1572864
+// stored, 1011 dropped).
 
 var ipStranger = netip.MustParseAddr("127.0.0.3")
 
@@ -68,9 +76,11 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	known := dialFrom(t, ipA, "udp", g.addr)
 	msg := []byte("<13>" + strings.Repeat("unknown sender a6 ", 200))
 	markers := 0
-	// flood sends until end, then returns T: the clock from start until a
-	// marker sent after the flood is stored.
+	// flood sends until end and sets F to how long it sent, then returns T:
+	// the clock from start until a marker sent after the flood is stored.
+	var F time.Duration
 	flood := func(end time.Time) time.Duration {
+		began := time.Now()
 		for i := 0; time.Now().Before(end); i++ {
 			c.Write(msg)
 			if i%20 == 0 {
@@ -78,6 +88,7 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 			}
 			time.Sleep(2 * time.Millisecond)
 		}
+		F = time.Since(began)
 		markers++
 		mark := fmt.Sprintf("<13>a6 marker %d", markers)
 		for wait := time.Now().Add(20 * time.Second); time.Now().Before(wait); {
@@ -109,33 +120,38 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	// listener's start, so the store holds at most a quarter of the quota
 	// from the stranger, at most UnknownBytes x (1 + T/window) for the T
 	// measured, and the budget, not the rig, is what held it there (most
-	// of the bound is used and messages were dropped).
+	// of what the budget allowed over the flood was used, and messages
+	// were dropped).
 	T := flood(start.Add(hours * window))
 	inside, rows := unknownBytes()
 	used := g.classBytes()
 	st := g.r.Status()
-	t.Logf("within %d windows: T %v; stranger %d bytes in %d rows; class %d; bound at T %d; planned bound %d; quarter %d; dropped %v",
-		hours, T, inside, rows, used, bound(T), sz["a6-udp"].UnknownBound, quota/4, st.Dropped)
+	floor := bound(F) * 7 / 10
+	t.Logf("within %d windows: T %v, flood %v; stranger %d bytes in %d rows; class %d; bound at T %d; floor %d; planned bound %d; quarter %d; dropped %v",
+		hours, T, F, inside, rows, used, bound(T), floor, sz["a6-udp"].UnknownBound, quota/4, st.Dropped)
 	if inside > bound(T) {
 		t.Errorf("unknown senders stored %d bytes over T = %v, past UnknownBytes x (1 + T/window) = %d", inside, T, bound(T))
 	}
 	if inside > quota/4 {
 		t.Errorf("unknown senders stored %d bytes within the planned outage, over a quarter of the quota (%d)", inside, quota/4)
 	}
-	if inside < sz["a6-udp"].UnknownBound*7/10 || st.Dropped[receive.DropUnknownBudget] == 0 {
-		t.Errorf("the budget did not limit the flood: stored %d of a bound of %d, dropped %v", inside, sz["a6-udp"].UnknownBound, st.Dropped)
+	if inside < floor || st.Dropped[receive.DropUnknownBudget] == 0 {
+		t.Errorf("the budget did not limit the flood: stored %d, under 70%% of the %d it allows over a %v flood, dropped %v", inside, bound(F), F, st.Dropped)
 	}
 
 	// Past the planned outage the budget keeps refilling: this is the
-	// documented limit of option (b), not a bound.
-	T = flood(start.Add(3 * hours * window))
+	// documented limit of option (b), not a bound. The second flood runs
+	// for 2 x hours windows from now, not to a time fixed from start, so
+	// a slow start cannot shorten it: with the first flood's share that
+	// is past a quarter of the quota.
+	T = flood(time.Now().Add(2 * hours * window))
 	after, _ := unknownBytes()
-	t.Logf("after %d windows: T %v; stranger %d bytes; bound at T %d; class %d", 3*hours, T, after, bound(T), g.classBytes())
+	t.Logf("after %d more windows: T %v, flood %v; stranger %d bytes; bound at T %d; class %d", 2*hours, T, F, after, bound(T), g.classBytes())
 	if after > bound(T) {
 		t.Errorf("unknown senders stored %d bytes over T = %v, past UnknownBytes x (1 + T/window) = %d", after, T, bound(T))
 	}
 	if after <= quota/4 {
-		t.Errorf("unknown senders stored %d bytes after three times the planned outage; the documented limit says the share keeps growing past %d", after, quota/4)
+		t.Errorf("unknown senders stored %d bytes after three times the planned outage or more; the documented limit says the share keeps growing past %d", after, quota/4)
 	}
 	// Known senders were stored throughout.
 	n := 0
