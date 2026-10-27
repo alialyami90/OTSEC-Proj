@@ -1,0 +1,434 @@
+{
+  "data": "DQoNCj1RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNy8yMDI2ICBUaW1lOiAwOToyMDowMA0KRkVFREVSIFJFTEFZICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz1JRA0KSUQNCgIiRklEPVNFTC03NTEtUjUwMS1WMC1aMTA0MTAxLUQyMDI2MDkxMCIsIjAwMDAiDQoiQ0lEPUU3NTQiLCIwMDAwIg0KAz1BQ0MNCkFDQw0KUGFzc3dvcmQ6ID8gW1JFREFDVEVEXQ0KAg0KDQpTRUwtNzUxICAgICAgICAgIERhdGU6IDEwLzI3LzIwMjYgIFRpbWU6IDA5OjIwOjAwDQpGRUVERVIgUkVMQVkgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQpMZXZlbCAxDQoDPT5TSE8gMQ0KU0hPIDENCgINClNFTC03NTEgICAgICAgICAgRGF0ZTogMTAvMjcvMjAyNiAgVGltZTogMDk6MzE6MDcuMjUwDQpGRUVERVIgUkVMQVkgICAgIFRpbWUgU291cmNlOiBJbnRlcm5hbA0KDQpHcm91cCAxDQpSZWxheSBTZXR0aW5ncw0KDQpJRCBTZXR0aW5ncw0KUklEICAgICAgOj0gU0VMLTc1MQ0KVElEICAgICAgOj0gRkVFREVSIFJFTEFZDQoNCg0KQ29uZmlnIFNldHRpbmdzDQpDVFIgICAgICA6PSAxMjAgICAgICAgICAgICBDVFJOICAgICA6PSAxMjAgICAgIFBUUiAgICAgICA6PSAxODAuMDANCkxFQV9TX1IgOj0gMTgwLjAwICAgICAgICAgIExFQV9TX1NDIDo9IDQuODAgICAgREVMVEFfWSAgIDo9IERFTFRBDQpWU0NPTk4gICA6PSBWUyAgICAgICAgICAgICBTSU5HTEVWIDo9IE4gICAgICAgIFZOT00gICAgICA6PSAxMjAuMDANCg0KTGluZSBQYXJhbWV0ZXIgU2V0dGluZ3MNCloxTUFHICAgIDo9IDIuMTQgICAgICAgICAgIFoxQU5HICAgIDo9IDY4Ljg2ICAgWjBNQUcgICAgIDo9IDYuMzgNClowQU5HICAgIDo9IDcyLjQ3ICAgICAgICAgIFowU01BRyAgIDo9IDAuMzYgICAgWjBTQU5HICAgIDo9IDg0LjYxDQpMTCAgICAgICA6PSA0Ljg0DQoNCkZhdWx0IExvY2F0b3INCkVGTE9DICAgIDo9IE4NCg0KTWF4IFBoIE92ZXJjdXJyDQo1MFAxUCAgICA6PSAxMC4wMCAgICAgICAgICAgIDUwUDFEICAgIDo9IDAuMDANCjUwUDFUQyAgIDo9IDENCg0KVHJpcC9DbG9zZSBMb2dpYw0KVERVUkQgICAgOj0gMC41ICAgICAgICAgICBDRkQgICAgICA6PSAxLjANClRSICAgICAgIDo9IE9SRUQ1MFQgT1IgT1JFRDUxVCBPUiBPUkVEODFUIE9SIFJFTVRSSVAgT1IgT0MgT1IgU1YwNFQNClJFTVRSSVAgOj0gMA0KVUxUUklQICAgOj0gTk9UICggNTFQMVAgT1IgNTFHMVAgT1IgNTFOMVAgT1IgNTJBICkNCjUyQSAgICAgIDo9IDANCjUyQiAgICAgIDo9IE5PVCA1MkENCkNMICAgICAgIDo9IFNWMDNUIEFORCBMVDAyIE9SIENDDQpVTENMICAgICA6PSAwDQoNCgM9PlNITyAyDQpTSE8gMg0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNy8yMDI2ICBUaW1lOiAwOTozMTowOC4wMDANCkZFRURFUiBSRUxBWSAgICAgVGltZSBTb3VyY2U6IEludGVybmFsDQoNCkdyb3VwIDINClJlbGF5IFNldHRpbmdzDQoNCklEIFNldHRpbmdzDQpSSUQgICAgICA6PSBTRUwtNzUxDQpUSUQgICAgICA6PSBGRUVERVIgUkVMQVkNCg0KDQpDb25maWcgU2V0dGluZ3MNCkNUUiAgICAgIDo9IDEyMCAgICAgICAgICAgIENUUk4gICAgIDo9IDEyMCAgICAgUFRSICAgICAgIDo9IDE4MC4wMA0KTEVBX1NfUiA6PSAxODAuMDAgICAgICAgICAgTEVBX1NfU0MgOj0gNC44MCAgICBERUxUQV9ZICAgOj0gREVMVEENClZTQ09OTiAgIDo9IFZTICAgICAgICAgICAgIFNJTkdMRVYgOj0gTiAgICAgICAgVk5PTSAgICAgIDo9IDEyMC4wMA0KDQpMaW5lIFBhcmFtZXRlciBTZXR0aW5ncw0KWjFNQUcgICAgOj0gMi4xNCAgICAgICAgICAgWjFBTkcgICAgOj0gNjguODYgICBaME1BRyAgICAgOj0gNi4zOA0KWjBBTkcgICAgOj0gNzIuNDcgICAgICAgICAgWjBTTUFHICAgOj0gMC4zNiAgICBaMFNBTkcgICAgOj0gODQuNjENCkxMICAgICAgIDo9IDQuODQNCg0KRmF1bHQgTG9jYXRvcg0KRUZMT0MgICAgOj0gTg0KDQpNYXggUGggT3ZlcmN1cnINCjUwUDFQICAgIDo9IDEwLjAwICAgICAgICAgICAgNTBQMUQgICAgOj0gMC4wMA0KNTBQMVRDICAgOj0gMQ0KDQpUcmlwL0Nsb3NlIExvZ2ljDQpURFVSRCAgICA6PSAwLjUgICAgICAgICAgIENGRCAgICAgIDo9IDEuMA0KVFIgICAgICAgOj0gT1JFRDUwVCBPUiBPUkVENTFUIE9SIE9SRUQ4MVQgT1IgUkVNVFJJUCBPUiBPQyBPUiBTVjA0VA0KUkVNVFJJUCA6PSAwDQpVTFRSSVAgICA6PSBOT1QgKCA1MVAxUCBPUiA1MUcxUCBPUiA1MU4xUCBPUiA1MkEgKQ0KNTJBICAgICAgOj0gMA0KNTJCICAgICAgOj0gTk9UIDUyQQ0KQ0wgICAgICAgOj0gU1YwM1QgQU5EIExUMDIgT1IgQ0MNClVMQ0wgICAgIDo9IDANCg0KAz0+U0hPIDMNClNITyAzDQoCDQpHcm91cCAzDQpSZWxheSBTZXR0aW5ncw0KDQpJRCBTZXR0aW5ncw0KUklEICAgICAgOj0gU0VMLTc1MQ0KVElEICAgICAgOj0gRkVFREVSIFJFTEFZDQoNCg0KQ29uZmlnIFNldHRpbmdzDQpDVFIgOj0gMTIwDQpDVFJOIDo9IDEyMA0KUFRSIDo9IDE4MC4wMA0KTEVBX1NfUiA6PSAxODAuMDANCkxFQV9TX1NDIDo9IDQuODANCkRFTFRBX1kgOj0gREVMVEENClZTQ09OTiA6PSBWUw0KU0lOR0xFViA6PSBODQpWTk9NIDo9IDEyMC4wMA0KDQpMaW5lIFBhcmFtZXRlciBTZXR0aW5ncw0KWjFNQUcgICAgOj0gMi4xNCAgICAgICAgICAgWjFBTkcgICAgOj0gNjguODYgICBaME1BRyAgICAgOj0gNi4zOA0KWjBBTkcgICAgOj0gNzIuNDcgICAgICAgICAgWjBTTUFHICAgOj0gMC4zNiAgICBaMFNBTkcgICAgOj0gODQuNjENCkxMICAgICAgIDo9IDQuODQNCg0KRmF1bHQgTG9jYXRvcg0KRUZMT0MgICAgOj0gTg0KDQpNYXggUGggT3ZlcmN1cnINCjUwUDFQICAgIDo9IDEwLjAwICAgICAgICAgICAgNTBQMUQgICAgOj0gMC4wMA0KNTBQMVRDICAgOj0gMQ0KDQpUcmlwL0Nsb3NlIExvZ2ljDQpURFVSRCAgICA6PSAwLjUgICAgICAgICAgIENGRCAgICAgIDo9IDEuMA0KVFIgICAgICAgOj0gT1JFRDUwVCBPUiBPUkVENTFUIE9SIE9SRUQ4MVQNCiAgICAgICAgICAgIE9SIFJFTVRSSVAgT1IgT0MgT1IgU1YwNFQNClJFTVRSSVAgOj0gMA0KVUxUUklQICAgOj0gTk9UICggNTFQMVAgT1IgNTFHMVAgT1IgNTFOMVAgT1IgNTJBICkNCjUyQSAgICAgIDo9IDANCjUyQiAgICAgIDo9IE5PVCA1MkENCkNMICAgICAgIDo9IFNWMDNUIEFORCBMVDAyIE9SIENDDQpVTENMICAgICA6PSAwDQoNCgM9PlNITyA0DQpTSE8gNA0KAg0KR3JvdXAgNA0KUmVsYXkgU2V0dGluZ3MNCg0KSUQgU2V0dGluZ3MNClJJRCAgICAgIDo9IFNFTC03NTENClRJRCAgICAgIDo9IEZFRURFUiBSRUxBWQ0KDQoNCkNvbmZpZyBTZXR0aW5ncw0KQ1RSTiAgICAgOj0gMTIwICAgICAgICAgICAgQ1RSICAgICAgOj0gMTIwICAgICBQVFIgICAgICAgOj0gMTgwLjAwDQpMRUFfU19SIDo9IDE4MC4wMCAgICAgICAgICBMRUFfU19TQyA6PSA0LjgwICAgIERFTFRBX1kgICA6PSBERUxUQQ0KVlNDT05OICAgOj0gVlMgICAgICAgICAgICAgU0lOR0xFViA6PSBOICAgICAgICBWTk9NICAgICAgOj0gMTIwLjAwDQoNCkxpbmUgUGFyYW1ldGVyIFNldHRpbmdzDQpaMU1BRyAgICA6PSAyLjE0ICAgICAgICAgICBaMUFORyAgICA6PSA2OC44NiAgIFowTUFHICAgICA6PSA2LjM4DQpaMEFORyAgICA6PSA3Mi40NyAgICAgICAgICBaMFNNQUcgICA6PSAwLjM2ICAgIFowU0FORyAgICA6PSA4NC42MQ0KTEwgICAgICAgOj0gNC44NA0KDQpGYXVsdCBMb2NhdG9yDQpFRkxPQyAgICA6PSBODQoNCk1heCBQaCBPdmVyY3Vycg0KNTBQMVAgICAgOj0gMTAuMDAgICAgICAgICAgICA1MFAxRCAgICA6PSAwLjAwDQo1MFAxVEMgICA6PSAxDQoNClRyaXAvQ2xvc2UgTG9naWMNClREVVJEICAgIDo9IDAuNSAgICAgICAgICAgQ0ZEICAgICAgOj0gMS4wDQpUUiAgICAgICA6PSBPUkVENTBUIE9SIE9SRUQ1MVQgT1IgT1JFRDgxVCBPUiBSRU1UUklQIE9SIE9DIE9SIFNWMDRUDQpSRU1UUklQIDo9IDANClVMVFJJUCAgIDo9IE5PVCAoIDUxUDFQIE9SIDUxRzFQIE9SIDUxTjFQIE9SIDUyQSApDQo1MkEgICAgICA6PSAwDQo1MkIgICAgICA6PSBOT1QgNTJBDQpDTCAgICAgICA6PSBTVjAzVCBBTkQgTFQwMiBPUiBDQw0KVUxDTCAgICAgOj0gMA0KDQoDPT5TSE8gTCAxDQpTSE8gTCAxDQoCDQpMYXRjaCBCaXRzIEVxbnMNClNFVDAxICAgIDo9IFBCMDENClJTVDAxICAgIDo9IFBCMDINClNFVDAyICAgIDo9IFBCMDMNClJTVDAyICAgIDo9IFBCMDQNCg0KAz0+U0hPIEwgMg0KU0hPIEwgMg0KAg0KTGF0Y2ggQml0cyBFcW5zDQpTRVQwMSAgICA6PSBQQjAxDQpSU1QwMSAgICA6PSBQQjAyDQpTRVQwMiAgICA6PSBQQjAzDQpSU1QwMiAgICA6PSBQQjA0DQoNCgM9PlNITyBMIDMNClNITyBMIDMNCgINCkxhdGNoIEJpdHMgRXFucw0KU0VUMDEgICAgOj0gUEIwMQ0KUlNUMDEgICAgOj0gUEIwMg0KU0VUMDIgICAgOj0gUEIwMw0KUlNUMDIgICAgOj0gUEIwNA0KDQoDPT5TSE8gTCA0DQpTSE8gTCA0DQoCDQpMYXRjaCBCaXRzIEVxbnMNClNFVDAxICAgIDo9IFBCMDENClJTVDAxICAgIDo9IFBCMDINClNFVDAyICAgIDo9IFBCMDMNClJTVDAyICAgIDo9IFBCMDQNCg0KAz0+U0hPIEcNClNITyBHDQoCDQpHbG9iYWwgU2V0dGluZ3MNCg0KUEhST1QgICAgOj0gQUJDICAgICBGTk9NICAgIDo9IDYwICAgICAgREFURV9GIDo9IE1EWQ0KRkFVTFQgICAgOj0gNTBHMVAgT1IgNTBOMVAgT1IgNTFQMVAgT1IgNTFRUCBPUiA1MFExUCBPUiBUUklQDQpJUklHQyAgICA6PSBOT05FICAgIFVUQ19PRkYgOj0gMC4wMCAgICAgICAgICBEU1RfQkVHTTo9IE9GRg0KDQpJRUMgNjE4NTAgTW9kZS9CZWhhdmlvciBDb25maWd1cmF0aW9uDQpTQzg1MEJNICAgIDo9IExUMDINClNDODUwVE0gICAgOj0gTFQwMQ0KDQoDPT5TSE8gUCBGDQpTSE8gUCBGDQoCDQpQb3J0IEYNCkVQT1JUICAgIDo9IFkgICAgICAgICAgICAgIFBST1RPICAgIDo9IFNFTCAgICAgTUFYQUNDICAgOj0gMg0KU1BFRUQgICAgOj0gOTYwMCAgICAgICAgICAgQklUUyAgICAgOj0gOCAgICAgICBQQVJJVFkgICA6PSBODQpTVE9QICAgICA6PSAxICAgICAgICAgICAgICBUX09VVCAgICA6PSA1ICAgICAgIFJUU0NUUyAgIDo9IE4NCkxBTkcgICAgIDo9IEVOR0xJU0ggICAgICAgIEFVVE8gICAgIDo9IE4gICAgICAgU0xBVkVJRCAgOj0gMQ0KDQoDPT5TSE8gUCAxDQpTSE8gUCAxDQoCDQpQb3J0IDENCg0KTUFYQUNDICA6PSAyDQpGQVNUT1AgIDo9IE4NCkxBTkcgICAgOj0gRU5HTElTSA0KRUhUVFAgICA6PSBODQpGVFBBQ0MgIDo9IDENCkhUVFBBQ0MgOj0gMQ0KVElETEUgICA6PSAxNQ0KDQoDPT5TSE8gUCAyDQpTSE8gUCAyDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gUCAzDQpTSE8gUCAzDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gUCA0DQpTSE8gUCA0DQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gUg0KU0hPIFINCgINClNFUiBDaGF0dGVyIENyaXRlcmlhDQpFU0VSREVMICA6PSBOICAgICAgICAgICAgICBTUkRMQ05UICA6PSA1ICAgICAgU1JETFRJTSAgOj0gMS4wDQoNCkV2ZW50IFJlcG9ydCBTZXR0aW5ncw0KRVIgICAgICAgOj0gUl9UUklHIDUxUDFQIE9SIFJfVFJJRyA1MUcxUA0KICBPUiBSX1RSSUcgNTBQMVAgT1IgUl9UUklHIDUwRzFQDQogIE9SIFJfVFJJRyA1MU4xUCBPUiBSX1RSSUcgQ0YNCkxFUiAgICAgIDo9IDE1ICAgICAgICAgICAgIFBSRSAgICAgIDo9IDUNCg0KAz0+U0hPIEYNClNITyBGDQoCDQpGcm9udCBQYW5lbCBTZXR0aW5ncw0KRlBfVE8gICAgOj0gMTUgICAgICAgICAgICAgRlBfQ09OVCAgOj0gMTAgICAgIEZQX0FVVE8gIDo9IE9WRVJSSURFDQpSU1RMRUQgICA6PSBZICAgICAgICAgICAgICBNQVhBQ0MgICA6PSAyDQoNCgM9PlNITyBNDQpTSE8gTQ0KAkludmFsaWQgQ29tbWFuZA0KAz0+U0hPIEkNClNITyBJDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gRSAxDQpTSE8gRSAxDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gRSAyDQpTSE8gRSAyDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gRSAzDQpTSE8gRSAzDQoCSW52YWxpZCBDb21tYW5kDQoDPT5TSE8gRE5QIDENClNITyBETlAgMQ0KAg0KRE5QIE1hcCAxIFNldHRpbmdzDQoNCkJpbmFyeSBJbnB1dCBNYXANCkJJXzAwICAgIDo9IEVOQUJMRUQNCkJJXzAxICAgIDo9IFRSSVBfTEVEDQpCSV8wMiAgICA6PSBUTEVEXzAxDQpCSV8wMyAgICA6PSBUTEVEXzAyDQoNCkJpbmFyeSBPdXRwdXQgTWFwDQpCT18wMCAgICA6PSBSQjAxDQpCT18wMSAgICA6PSBSQjAyDQpCT18wMiAgICA6PSBSQjAzDQoNCkFuYWxvZyBJbnB1dCBNYXANCkFJXzAwICAgIDo9IElBX01BRw0KQUlfMDEgICAgOj0gSUJfTUFHDQpBSV8wMiAgICA6PSBJQ19NQUcNCg0KAz0+U0hPIEROUCAyDQpTSE8gRE5QIDINCgJJbnZhbGlkIENvbW1hbmQNCgM9PlNITyBETlAgMw0KU0hPIEROUCAzDQoCSW52YWxpZCBDb21tYW5kDQoDPT5RVUkNClFVSQ0KAg0KU0VMLTc1MSAgICAgICAgICBEYXRlOiAxMC8yNy8yMDI2ICBUaW1lOiAwOToyMDowMA0KRkVFREVSIFJFTEFZICAgICBUaW1lIFNvdXJjZTogSW50ZXJuYWwNCg0KAz0=",
+  "sha256": "3f5cf7d2f02da09b750213d7cf13a57afbf66eb1293e1e3bdf88a9c8ef3bc9b8",
+  "segments": [
+    {
+      "offset": 0,
+      "length": 2,
+      "dir": "tx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.0Z"
+    },
+    {
+      "offset": 2,
+      "length": 3,
+      "dir": "rx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.1Z"
+    },
+    {
+      "offset": 5,
+      "length": 5,
+      "dir": "tx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.2Z"
+    },
+    {
+      "offset": 10,
+      "length": 103,
+      "dir": "rx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.3Z"
+    },
+    {
+      "offset": 113,
+      "length": 4,
+      "dir": "tx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.4Z"
+    },
+    {
+      "offset": 117,
+      "length": 74,
+      "dir": "rx",
+      "phase": "probe",
+      "at": "2026-10-27T09:20:00.5Z"
+    },
+    {
+      "offset": 191,
+      "length": 5,
+      "dir": "tx",
+      "phase": "auth",
+      "at": "2026-10-27T09:20:00.6Z"
+    },
+    {
+      "offset": 196,
+      "length": 17,
+      "dir": "rx",
+      "phase": "auth",
+      "at": "2026-10-27T09:20:00.7Z"
+    },
+    {
+      "offset": 213,
+      "length": 12,
+      "dir": "tx",
+      "phase": "auth",
+      "at": "2026-10-27T09:20:00.8Z"
+    },
+    {
+      "offset": 225,
+      "length": 110,
+      "dir": "rx",
+      "phase": "auth",
+      "at": "2026-10-27T09:20:00.9Z"
+    },
+    {
+      "offset": 335,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.0Z"
+    },
+    {
+      "offset": 342,
+      "length": 997,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.1Z"
+    },
+    {
+      "offset": 1339,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.2Z"
+    },
+    {
+      "offset": 1346,
+      "length": 997,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.3Z"
+    },
+    {
+      "offset": 2343,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.4Z"
+    },
+    {
+      "offset": 2350,
+      "length": 849,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.5Z"
+    },
+    {
+      "offset": 3199,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.6Z"
+    },
+    {
+      "offset": 3206,
+      "length": 900,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.7Z"
+    },
+    {
+      "offset": 4106,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.8Z"
+    },
+    {
+      "offset": 4115,
+      "length": 106,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:01.9Z"
+    },
+    {
+      "offset": 4221,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.0Z"
+    },
+    {
+      "offset": 4230,
+      "length": 106,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.1Z"
+    },
+    {
+      "offset": 4336,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.2Z"
+    },
+    {
+      "offset": 4345,
+      "length": 106,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.3Z"
+    },
+    {
+      "offset": 4451,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.4Z"
+    },
+    {
+      "offset": 4460,
+      "length": 106,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.5Z"
+    },
+    {
+      "offset": 4566,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.6Z"
+    },
+    {
+      "offset": 4573,
+      "length": 292,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.7Z"
+    },
+    {
+      "offset": 4865,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.8Z"
+    },
+    {
+      "offset": 4874,
+      "length": 273,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:02.9Z"
+    },
+    {
+      "offset": 5147,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.0Z"
+    },
+    {
+      "offset": 5156,
+      "length": 132,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.1Z"
+    },
+    {
+      "offset": 5288,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.2Z"
+    },
+    {
+      "offset": 5297,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.3Z"
+    },
+    {
+      "offset": 5327,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.4Z"
+    },
+    {
+      "offset": 5336,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.5Z"
+    },
+    {
+      "offset": 5366,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.6Z"
+    },
+    {
+      "offset": 5375,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.7Z"
+    },
+    {
+      "offset": 5405,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.8Z"
+    },
+    {
+      "offset": 5412,
+      "length": 276,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:03.9Z"
+    },
+    {
+      "offset": 5688,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.0Z"
+    },
+    {
+      "offset": 5695,
+      "length": 147,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.1Z"
+    },
+    {
+      "offset": 5842,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.2Z"
+    },
+    {
+      "offset": 5849,
+      "length": 28,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.3Z"
+    },
+    {
+      "offset": 5877,
+      "length": 7,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.4Z"
+    },
+    {
+      "offset": 5884,
+      "length": 28,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.5Z"
+    },
+    {
+      "offset": 5912,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.6Z"
+    },
+    {
+      "offset": 5921,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.7Z"
+    },
+    {
+      "offset": 5951,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.8Z"
+    },
+    {
+      "offset": 5960,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:04.9Z"
+    },
+    {
+      "offset": 5990,
+      "length": 9,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.0Z"
+    },
+    {
+      "offset": 5999,
+      "length": 30,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.1Z"
+    },
+    {
+      "offset": 6029,
+      "length": 11,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.2Z"
+    },
+    {
+      "offset": 6040,
+      "length": 299,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.3Z"
+    },
+    {
+      "offset": 6339,
+      "length": 11,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.4Z"
+    },
+    {
+      "offset": 6350,
+      "length": 32,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.5Z"
+    },
+    {
+      "offset": 6382,
+      "length": 11,
+      "dir": "tx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.6Z"
+    },
+    {
+      "offset": 6393,
+      "length": 32,
+      "dir": "rx",
+      "phase": "operate",
+      "at": "2026-10-27T09:20:05.7Z"
+    },
+    {
+      "offset": 6425,
+      "length": 5,
+      "dir": "tx",
+      "phase": "close",
+      "at": "2026-10-27T09:20:05.8Z"
+    },
+    {
+      "offset": 6430,
+      "length": 103,
+      "dir": "rx",
+      "phase": "close",
+      "at": "2026-10-27T09:20:05.9Z"
+    }
+  ],
+  "redactions": [
+    {
+      "offset": 213,
+      "length": 10,
+      "reason": "credential",
+      "component": "transport"
+    }
+  ]
+}
