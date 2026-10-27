@@ -18,19 +18,20 @@ anything.
     %ProgramFiles%\OTSEC, the W-3 firewall rule, the WER value, either
     event source), so everything it removes at teardown is something it
     created.
-  - The credential: the collector's pipe admits one peer. The collector
-    is installed first with ipc.node_peer naming this account, so
-    install-credential reaches it as the administrator; the collector is
-    then stopped, the installed collector.json is rewritten in place (it
-    keeps its owner and DACL) with the otsec-node service SID, and both
-    services start. No node path relays credential.install yet, so this
-    is the only way an administrator installs a credential on Windows.
+  - The credential goes the product's way, as in process mode: with both
+    services running, install-credential leaves the administrator's
+    signed credential.install in the installed config\admin, and the
+    otsec-node service relays it to the collector over the pipe (P3-A5,
+    #181). The collector is installed with ipc.node_peer naming the
+    otsec-node service only.
   - The fresh-state floor: the installed collector creates its own stores
     at its first start (the provision marker), so its 31-minute failed-
-    auth floor (A3 #106) starts then. While it is stopped, the run moves
-    created_utc in its state.json an hour back, in place, which stands
-    for a collector commissioned earlier, as process mode's stores
-    created an hour in the past do.
+    auth floor (A3 #106) starts then. The run stops it after that first
+    start and moves created_utc in its state.json an hour back, in place,
+    which stands for a collector commissioned earlier, as process mode's
+    stores created an hour in the past do. This is a harness step, not a
+    product path, and the fresh-state floor itself is not exercised on
+    the installed services here.
   - Teardown, always, also when a test fails or start() stops halfway:
     stop both services through the SCM, copy each service's Application
     log events and %ProgramData%\OTSEC into the run's directory (so the
@@ -217,9 +218,22 @@ class Installed:
         found += [f"event source {s}" for s in SERVICES.values() if self._key_exists(EVENT_SOURCES + "\\" + s)]
         return found
 
+    def cleanup_commands(self):
+        """What an administrator runs, elevated, to remove by hand what a
+        failed teardown left. Each command is safe when its part is gone."""
+        lines = ["To remove what is left, run these in an elevated PowerShell:"]
+        lines += [f"  sc.exe stop {s}; sc.exe delete {s}" for s in SERVICES.values()]
+        lines += [f"  Remove-Item -Recurse -Force '{p}'" for p in (self.data, self.pf)]
+        lines.append(f"  netsh advfirewall firewall delete rule name=\"{FIREWALL_RULE}\"")
+        lines.append(f"  Remove-ItemProperty -Path 'HKLM:\\{WER_KEY}' -Name '{WER_VALUE}'")
+        if not self.wer_key_existed:
+            lines.append(f"  Remove-Item -Path 'HKLM:\\{WER_KEY}'  # only if empty: this run created it")
+        lines += [f"  Remove-Item -Path 'HKLM:\\{EVENT_SOURCES}\\{s}'" for s in SERVICES.values()]
+        return "\n".join(lines)
+
     def install(self, layout):
-        """otsec install with the collector configuration that admits this
-        account on the pipe."""
+        """otsec install, with the collector configuration that admits the
+        otsec-node service on the pipe."""
         self.installed = True  # from here on, teardown removes what exists
         os.mkdir(self.pf)
         shutil.copyfile(self.src[0], self.node_exe)
@@ -304,16 +318,6 @@ class Installed:
             os.fsync(f.fileno())
         self.note("state.json created_utc moved back an hour: " + doc["created_utc"])
 
-    def rewrite(self, path, src):
-        """Replaces path's content with src's, in place: owner and DACL stay."""
-        with open(src, "rb") as f:
-            b = f.read()
-        with open(path, "r+b") as f:
-            f.write(b)
-            f.truncate()
-            f.flush()
-            os.fsync(f.fileno())
-
     def teardown(self, logs, keep):
         r"""Stops, records, uninstalls and removes; then the leftovers check,
         which raises AssertionError naming what is left. logs: name to the
@@ -366,7 +370,8 @@ class Installed:
         self.installed = False
         self.note("teardown: " + ("left behind: " + "; ".join(left) if left else "nothing left behind"))
         if left or errs:
-            raise AssertionError("service-mode teardown: " + "; ".join(errs + ["left behind: " + x for x in left]))
+            raise AssertionError("service-mode teardown: " + "; ".join(errs + ["left behind: " + x for x in left])
+                                 + "\n" + self.cleanup_commands())
 
 
 class Slice:
@@ -450,8 +455,7 @@ class Slice:
             self.holds_machine = True
             self.service = Installed(self.d, self.exe("otsec"), self.exe("otsec-collector"))
             atexit.register(self._teardown)
-            sid = _run(["whoami", "/user", "/fo", "csv", "/nh"]).stdout.strip().split(",")[-1].strip('"')
-            setup_extra = (*setup_extra, "-programdata", self.service.program_data, "-node-peer", sid)
+            setup_extra = (*setup_extra, "-programdata", self.service.program_data)
         out = subprocess.run([self.exe("slicehelper"), "setup", "-root", self.root, "-sim-port", str(sim.port),
                               "-relp-port", str(self.relp_port), "-repo", harness.REPO, *setup_extra],
                              check=True, capture_output=True)
@@ -464,14 +468,20 @@ class Slice:
         key = os.path.join(self.layout["public_dir"], "install-key.json")
         assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
             "the collector did not publish its install key and socket:\n" + self.text("collector")
-        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
-        subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
-                       check=True, capture_output=True, env=env)
         self.spawn("node", [self.exe("otsec"), "node", "-config", self.layout["node_config"]])
+        # The administrator's signed credential.install goes through the
+        # node, which relays it within 15 s, well before its first run
+        # (60 s after start); install-credential waits for the decision.
+        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
+        out = subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
+                             capture_output=True, env=env)
+        assert out.returncode == 0, "credential.install was not relayed: " + out.stderr.decode(errors="replace") + \
+            "\n" + self.text("node")
 
     def _start_services(self):
-        """start() in service mode: install, the credential, then both
-        services (see the module docstring)."""
+        """start() in service mode: install, the collector's first start and
+        its aged state, both services, then the credential through the node
+        (see the module docstring)."""
         inst, l = self.service, self.layout
         logs = ServiceLogs(inst)
         logs.update(self.logs)
@@ -485,14 +495,15 @@ class Slice:
         pipe = os.path.basename(l["socket"]).lower()
         assert harness.wait_for(lambda: os.path.exists(key) and pipe in (n.lower() for n in os.listdir("\\\\.\\pipe\\")), 30), \
             "the collector service did not publish its install key and pipe:\n" + inst.events("collector")
-        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
-        subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
-                       check=True, capture_output=True, env=env)
         inst.stop("collector")
         inst.age_state(os.path.join(l["collector_data"], "collector", "state", "state.json"))
-        inst.rewrite(l["collector_config_path"], l["collector_config_final"])
         inst.start("collector")
         inst.start("node")
+        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
+        out = subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
+                             capture_output=True, env=env)
+        assert out.returncode == 0, "credential.install was not relayed: " + out.stderr.decode(errors="replace") + \
+            "\n" + inst.events("node")
 
     def _teardown(self):
         if self.service:
@@ -595,7 +606,7 @@ class Slice:
         failed = None
         try:
             self._teardown()
-        except AssertionError as e:
+        except Exception as e:  # the processes below are stopped either way
             failed = e
         finally:
             if getattr(self, "holds_machine", False):

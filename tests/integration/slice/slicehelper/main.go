@@ -19,30 +19,29 @@
 // instead (P3-A5/A6, OTSEC_SLICE_SERVICE=1 in slicerun.py): node.json
 // naming the installed layout under that %ProgramData% (platform/winsvc),
 // the TLS reference files in a staging folder for the suite to copy into
-// the installed tls_dir, and two collector configurations, which differ
-// only in ipc.node_peer. The first names -node-peer, the account running
-// the suite, because install-credential is sent from that account and the
-// collector's pipe admits one peer; the second names the otsec-node
-// service. It creates nothing under %ProgramData% and no collector store:
-// the installer creates the folders and the installed collector its own
-// stores, under its own account.
+// the installed tls_dir, and the collector configuration, whose
+// ipc.node_peer is the otsec-node service. It creates nothing under
+// %ProgramData% and no collector store: the installer creates the folders
+// and the installed collector its own stores, under its own account.
 //
-// install-credential is the administrator's step that the node relays in
-// production: it reads the collector's published install key, seals the
-// secret to it, signs the request with the administrator's key (C7 0.4,
-// D2-11) and sends credential.install over the collector socket as a
-// human principal. The secret comes from the environment, never argv
-// (V-S11). The administrator's key is a test key setup makes for the run
-// and pins in collector.json; its seed stays under the run's root, outside
-// the collector's data, as the private key stays with the administrator.
+// install-credential is the administrator's step: it reads the
+// collector's published install key, seals the secret to it, signs the
+// credential.install with the administrator's key (C7 0.4, D2-11) and
+// leaves it in admin_dir as an admin-request file, which the running node
+// relays to the collector (P3-A5, #181). It then waits for node status to
+// show the collector's decision. The secret comes from the environment,
+// never argv (V-S11). The administrator's key is a test key setup makes
+// for the run and pins in collector.json; its seed stays under the run's
+// root, outside the collector's data, as the private key stays with the
+// administrator.
 package main
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -50,6 +49,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -57,9 +57,9 @@ import (
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collector"
-	"otsec.local/otsec/modules/security/collectorclient"
 	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/modules/security/seal"
+	"otsec.local/otsec/platform/node"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
 	"otsec.local/otsec/platform/winsvc"
@@ -101,18 +101,16 @@ type Layout struct {
 	FID           string `json:"fid"`
 	Serial        string `json:"serial"`
 	CredentialRef string `json:"credential_ref"`
-	// CollectorPeer is the collector's identity, which install-credential
-	// requires of the end of the socket or pipe: this account's uid, or
-	// the otsec-collector service SID in the installed layout.
-	CollectorPeer string `json:"collector_peer"`
+	// NodePeer is the node's identity, which the collector requires of
+	// the other end of its socket or pipe (ipc.node_peer): this account's
+	// uid, or the otsec-node service SID in the installed layout.
+	NodePeer string `json:"node_peer"`
 	// The installed layout only (-programdata): the installer's inputs,
 	// the staged TLS files, and where they go.
-	NodeConfigSource     string `json:"node_config_source,omitempty"`
-	CollectorConfig      string `json:"collector_config,omitempty"`
-	CollectorConfigFinal string `json:"collector_config_final,omitempty"`
-	CollectorConfigPath  string `json:"collector_config_path,omitempty"`
-	TLSStage             string `json:"tls_stage,omitempty"`
-	TLSDir               string `json:"tls_dir,omitempty"`
+	NodeConfigSource string `json:"node_config_source,omitempty"`
+	CollectorConfig  string `json:"collector_config,omitempty"`
+	TLSStage         string `json:"tls_stage,omitempty"`
+	TLSDir           string `json:"tls_dir,omitempty"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
 	// Syslog listeners (#154), when -syslog-udp or -syslog-tls is set: the
@@ -123,6 +121,25 @@ type Layout struct {
 	SyslogTLS    string `json:"syslog_tls,omitempty"`
 	SenderCert   string `json:"sender_cert,omitempty"`
 	SenderKey    string `json:"sender_key,omitempty"`
+}
+
+// leaveAdminFile writes an administrator's file into admin_dir as one
+// would on Linux, where the rule is the mode: the directory opened for the
+// write and closed again (0550), and the file read-only (0440). On Windows
+// the rule is the DACL, which the file inherits from the installed
+// config\admin, with an elevated account's owner, Administrators.
+func leaveAdminFile(dir, name string, b []byte) error {
+	if runtime.GOOS == "windows" {
+		return os.WriteFile(filepath.Join(dir, name), b, 0o600)
+	}
+	if err := os.Chmod(dir, 0o750); err != nil {
+		return err
+	}
+	err := os.WriteFile(filepath.Join(dir, name), b, 0o440)
+	if cerr := os.Chmod(dir, 0o550); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // adminPrincipal is the person the test administrator's key speaks for.
@@ -143,16 +160,11 @@ func main() {
 	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
-	nodePeer := fs.String("node-peer", "", "setup with -programdata: the SID of the account that sends install-credential")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		if (*programData == "") != (*nodePeer == "") {
-			err = errors.New("-programdata and -node-peer are given together or not at all")
-			break
-		}
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *nodePeer)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData)
 	case "install-credential":
 		err = installCredential(*root)
 	default:
@@ -164,7 +176,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, nodePeer string) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -181,7 +193,6 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 		if coll, err = processLayout(&l); err != nil {
 			return err
 		}
-		nodePeer = l.CollectorPeer
 	}
 
 	// The node: one simulated SEL-751 and one required RELP/TLS target.
@@ -288,19 +299,13 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 				"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
 		}, "", "  ")
 	}
-	b, err := collectorConfig(nodePeer)
+	b, err := collectorConfig(l.NodePeer)
 	if err != nil {
 		return err
 	}
 	if installed {
-		final, err := collectorConfig(collectorwire.ServiceSID(collectorwire.NodeService))
-		if err != nil {
+		if err := os.WriteFile(l.CollectorConfig, b, 0o600); err != nil {
 			return err
-		}
-		for path, b := range map[string][]byte{l.CollectorConfig: b, l.CollectorConfigFinal: final} {
-			if err := os.WriteFile(path, b, 0o600); err != nil {
-				return err
-			}
 		}
 	} else {
 		if err := os.WriteFile(filepath.Join(coll, "collector.json"), b, 0o600); err != nil {
@@ -342,7 +347,7 @@ func processLayout(l *Layout) (string, error) {
 	l.Socket = filepath.Join(runDir, "collector.sock")
 	l.StoreDir = filepath.Join(l.Root, "node", "store")
 	l.NodeConfig = filepath.Join(l.Root, "node", "node.json")
-	l.CollectorPeer = strconv.Itoa(os.Getuid())
+	l.NodePeer = strconv.Itoa(os.Getuid())
 	for _, d := range []string{filepath.Join(coll, "state"), filepath.Join(coll, "credentials"), l.PublicDir, runDir, filepath.Dir(l.StoreDir)} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return "", err
@@ -369,13 +374,11 @@ func installedLayout(l *Layout, programData string) error {
 	l.StoreDir = winsvc.StoreDir(programData)
 	l.TLSDir = winsvc.TLSDir(programData)
 	l.NodeConfig = winsvc.ConfigPath(programData)
-	l.CollectorConfigPath = winsvc.CollectorConfigPath(programData)
 	l.Socket = collectorPipe
-	l.CollectorPeer = collectorwire.ServiceSID(collectorwire.CollectorService)
+	l.NodePeer = collectorwire.ServiceSID(collectorwire.NodeService)
 	inputs := filepath.Join(l.Root, "install")
 	l.NodeConfigSource = filepath.Join(inputs, "node.json")
-	l.CollectorConfig = filepath.Join(inputs, "collector-install.json")
-	l.CollectorConfigFinal = filepath.Join(inputs, "collector.json")
+	l.CollectorConfig = filepath.Join(inputs, "collector.json")
 	l.TLSStage = filepath.Join(inputs, "tls")
 	return os.MkdirAll(inputs, 0o700)
 }
@@ -451,9 +454,6 @@ func installCredential(root string) error {
 	if err != nil {
 		return err
 	}
-	client := collectorclient.New(collectorwire.Endpoint{Address: l.Socket, Peer: l.CollectorPeer})
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
 	nonce := make([]byte, authz.AdminNonceLen)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
@@ -471,15 +471,37 @@ func installCredential(root string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := client.Do(ctx, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindCredentialInstall,
-		RequestID: "a6-slice-install", OnBehalfOf: admin, PolicyVersion: 3, AdminSigned: signed})
+	file, err := json.Marshal(map[string]any{"schema": node.AdminRequestFileSchema, "kind": authz.KindCredentialInstall, "signed": signed})
 	if err != nil {
 		return err
 	}
-	if !resp.Reply.Accepted() {
-		return fmt.Errorf("credential.install refused: %+v", resp.Reply.Refusal)
+	name := "admin-request-install-" + hex.EncodeToString(nonce) + ".json"
+	if err := leaveAdminFile(l.AdminDir, name, file); err != nil {
+		return err
 	}
-	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(resp.Reply.CollectorSeq, 10) + `}`)
+	// The node relays it within node.RelayEverySeconds; the collector's
+	// decision shows in node status.
+	var decided node.AdminRequestStatus
+	deadline := time.Now().Add(4 * node.RelayEverySeconds * time.Second)
+	for decided.State == "" || decided.State == "waiting" {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the node did not relay %s within %s (status: %+v)", name, 4*node.RelayEverySeconds*time.Second, decided)
+		}
+		time.Sleep(250 * time.Millisecond)
+		st, err := node.ReadStatus(filepath.Join(l.StoreDir, node.StatusFileName))
+		if err != nil {
+			continue // the node has not written status yet
+		}
+		for _, a := range st.AdminRequests {
+			if a.File == name {
+				decided = a
+			}
+		}
+	}
+	if decided.State != "accepted" {
+		return fmt.Errorf("credential.install %s: %s (%s)", name, decided.State, decided.Detail)
+	}
+	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(decided.CollectorSeq, 10) + `}`)
 	return nil
 }
 

@@ -79,6 +79,9 @@ type Scheduler struct {
 	results   map[string]AssetResult      // asset ID: its last sent run (results.go)
 	quar      map[string]*quarantineEntry // manifest SHA-256: a recorded export (quarantine.go)
 	quarDone  map[string]bool             // manifest SHA-256: its range stores nothing now
+	relayed   map[string]relayEntry       // request ID: the collector's decision on a relayed admin request (adminrelay.go)
+	// adminShown is the admin-request files as status last showed them.
+	adminShown []AdminRequestStatus
 	// reloadSusp: the suspensions were not loaded because the audit
 	// database was not open; reload loads them once it is (P3-A5).
 	reloadSusp bool
@@ -95,7 +98,7 @@ type Scheduler struct {
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
-		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}}
+		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -183,28 +186,39 @@ func newRequestID() string {
 // polls a device faster than the minimum interval. A run that falls behind
 // is not repeated to catch up. However the schedule is written, a device
 // gets at least MinIntervalSeconds between the end of one session and the
-// start of the next (plan).
+// start of the next (plan). Between runs, and before each, it relays the
+// administrator's signed requests every RelayEverySeconds (adminrelay.go).
 func (s *Scheduler) Run(ctx context.Context) error {
-	sched := s.rt.cfg.Schedule
-	if len(sched) == 0 {
-		<-ctx.Done()
-		return ctx.Err()
+	var p *plan
+	if sched := s.rt.cfg.Schedule; len(sched) > 0 {
+		p = newPlan(sched, s.now())
 	}
-	p := newPlan(sched, s.now())
+	s.relayAdmin(ctx)
 	for {
-		i, at := p.due()
-		if d := at.Sub(s.now()); d > 0 {
-			t := time.NewTimer(d)
+		wait, run := RelayEverySeconds*time.Second, -1
+		if p != nil {
+			if i, at := p.due(); at.Sub(s.now()) <= wait {
+				wait, run = at.Sub(s.now()), i
+			}
+		}
+		if wait > 0 {
+			t := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
 				t.Stop()
 				return ctx.Err()
 			case <-t.C:
 			}
+		} else if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.relayAdmin(ctx)
+		if run < 0 {
+			continue
 		}
 		began := s.now()
-		s.RunOnce(ctx, i)
-		p.done(i, began, s.now())
+		s.RunOnce(ctx, run)
+		p.done(run, began, s.now())
 	}
 }
 

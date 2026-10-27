@@ -103,6 +103,10 @@ type suspensionsFile struct {
 	// by manifest hash, with what the chain holds about its clear
 	// (quarantine.go).
 	Quarantine map[string]quarantineEntry `json:"quarantine,omitempty"`
+	// AdminRelayed is every relayed admin request the collector decided
+	// through ThroughSeq whose file was still in admin_dir, by request ID
+	// (adminrelay.go).
+	AdminRelayed map[string]relayEntry `json:"admin_relayed,omitempty"`
 }
 
 type pendingSuspension struct {
@@ -174,17 +178,21 @@ func (s *Scheduler) loadSuspensions(ctx context.Context) error {
 	for h, e := range f.Quarantine {
 		quar[h] = &e
 	}
+	relayed := f.AdminRelayed
+	if relayed == nil {
+		relayed = map[string]relayEntry{}
+	}
 	s.mu.Lock()
-	s.susp, s.through, s.unaudited, s.cs, s.collClear, s.quar = m, uint64(through), pending, f.Collector, cc, quar
+	s.susp, s.through, s.unaudited, s.cs, s.collClear, s.quar, s.relayed = m, uint64(through), pending, f.Collector, cc, quar, relayed
 	s.mu.Unlock()
 	if err := s.fold(ctx, false); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	snapshot, pending, through2, cs, cc, q := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs, maps.Clone(s.collClear), s.quarSnapshot()
+	snapshot, pending, through2, cs, cc, q, ar := maps.Clone(s.susp), slices.Clone(s.unaudited), s.through, s.cs, maps.Clone(s.collClear), s.quarSnapshot(), maps.Clone(s.relayed)
 	s.fileStale = true
 	s.mu.Unlock()
-	if err := writeCheckpoint(s.suspensionsPath(), through2, snapshot, pending, cs, cc, q); err != nil {
+	if err := writeCheckpoint(s.suspensionsPath(), through2, snapshot, pending, cs, cc, q, ar); err != nil {
 		// The audit stream holds every suspension; settle writes the
 		// checkpoint later.
 		s.rt.opt.Status.Raise("", AlarmSuspensionNotDurable, "suspension checkpoint not written; the next start reads the audit stream again: "+err.Error())
@@ -410,9 +418,9 @@ func (s *Scheduler) settleLocked(ctx context.Context) {
 	s.mu.Unlock()
 	if stale {
 		s.mu.Lock()
-		snapshot, pending, cs, cc, q := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs, maps.Clone(s.collClear), s.quarSnapshot()
+		snapshot, pending, cs, cc, q, ar := maps.Clone(s.susp), slices.Clone(s.unaudited), s.cs, maps.Clone(s.collClear), s.quarSnapshot(), maps.Clone(s.relayed)
 		s.mu.Unlock()
-		if fileErr = writeCheckpoint(s.suspensionsPath(), through, snapshot, pending, cs, cc, q); fileErr == nil {
+		if fileErr = writeCheckpoint(s.suspensionsPath(), through, snapshot, pending, cs, cc, q, ar); fileErr == nil {
 			s.mu.Lock()
 			s.fileStale = s.through != through
 			s.mu.Unlock()
@@ -490,6 +498,7 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 			if err == nil {
 				accepted = applyCollectorClear(s.collClear, rec)
 				applyQuarantine(s.quar, rec)
+				applyRelay(s.relayed, rec)
 			}
 			if err == nil {
 				if rec.Action == audit.ActionAssetSuspend {
@@ -717,9 +726,10 @@ func readSuspensions(path string) (suspensionsFile, error) {
 	return f, nil
 }
 
-// writeSuspensions writes a checkpoint that holds no quarantine exports.
+// writeSuspensions writes a checkpoint that holds no quarantine exports and
+// no relayed admin requests.
 func writeSuspensions(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string) error {
-	return writeCheckpoint(path, through, m, pending, cs, cc, nil)
+	return writeCheckpoint(path, through, m, pending, cs, cc, nil, nil)
 }
 
 // quarSnapshot copies the recorded exports for the checkpoint. The caller
@@ -736,8 +746,8 @@ func (s *Scheduler) quarSnapshot() map[string]quarantineEntry {
 
 // writeCheckpoint writes the checkpoint as the status file is written:
 // a temporary file, flushed, then renamed.
-func writeCheckpoint(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string, q map[string]quarantineEntry) error {
-	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc, Quarantine: q}
+func writeCheckpoint(path string, through uint64, m map[string]asset.Suspension, pending []unaudited, cs collectorState, cc map[string]string, q map[string]quarantineEntry, ar map[string]relayEntry) error {
+	f := suspensionsFile{Schema: suspensionsSchema, ThroughSeq: through, Suspensions: m, Collector: cs, CollectorClears: cc, Quarantine: q, AdminRelayed: ar}
 	for _, u := range pending {
 		f.Unaudited = append(f.Unaudited, pendingSuspension{AssetID: u.assetID, Ref: u.sp.Ref, Code: u.code, Adopted: u.adopted})
 	}
