@@ -163,7 +163,19 @@ type Limits struct {
 	// MaxQueueBytes bounds the bytes of datagrams waiting for the store
 	// (default 8 MiB); a datagram past it is dropped as queue-full.
 	MaxQueueBytes int64
+	// ReadBuffer is the socket receive buffer (SO_RCVBUF) a UDP listener
+	// asks the OS for, in bytes: 0 leaves the OS default, otherwise
+	// 4 KiB to 256 MiB. A datagram that arrives while the buffer is full is
+	// lost before the read and counted by no one here, only by the OS
+	// (Linux RcvbufErrors, Windows netstat -s). The OS may grant less, or,
+	// on Linux, twice the request up to net.core.rmem_max; Status.ReadBuffer
+	// is what it granted. Streams take no ReadBuffer: TCP flow control
+	// stops a sender instead of losing its data.
+	ReadBuffer int
 }
+
+// Read buffer bounds (Limits.ReadBuffer).
+const minReadBuffer, maxReadBuffer = 4 << 10, 256 << 20
 
 func (l Limits) withDefaults(udp bool) Limits {
 	def := func(v *int, d int) {
@@ -232,6 +244,8 @@ func (l Limits) validate() error {
 		return errors.New("durations must be positive")
 	case l.UnknownIdleTimeout > l.IdleTimeout:
 		return errors.New("the unknown-sender idle timeout is above the idle timeout")
+	case l.ReadBuffer != 0 && (l.ReadBuffer < minReadBuffer || l.ReadBuffer > maxReadBuffer):
+		return fmt.Errorf("read buffer %d not 0 or in [%d, %d]", l.ReadBuffer, minReadBuffer, maxReadBuffer)
 	}
 	return nil
 }
@@ -268,6 +282,12 @@ type Status struct {
 	// (refuse-new: no more is read from that connection meanwhile).
 	Held    bool
 	LastErr string
+	// ReadBuffer is the UDP socket receive buffer the OS granted, in bytes,
+	// read back after Listen: the OS default when Limits.ReadBuffer is 0.
+	// It is 0 for a stream listener, before Listen, or where the OS does
+	// not report it (ReadBufferErr says why).
+	ReadBuffer    int
+	ReadBufferErr string
 }
 
 // Receiver is one Syslog listener.
@@ -312,7 +332,13 @@ func New(cfg Config) (*Receiver, error) {
 		if cfg.TLS == nil {
 			return bad("syslog-tls needs a TLS configuration (ServerTLS)")
 		}
+		if lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 	case asset.SyslogTCP, asset.SyslogUDP:
+		if cfg.Transport == asset.SyslogTCP && lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 		if !cfg.Plaintext {
 			return bad("%s is plaintext; it runs only when the operator enables plaintext for this listener", cfg.Transport)
 		}
@@ -357,6 +383,20 @@ func (r *Receiver) Listen() (net.Addr, error) {
 		if err != nil {
 			return nil, fmt.Errorf("receive: listener %s: %w", r.cfg.ID, err)
 		}
+		uc := pc.(*net.UDPConn)
+		if n := r.lim.ReadBuffer; n != 0 {
+			if err := uc.SetReadBuffer(n); err != nil {
+				pc.Close()
+				return nil, fmt.Errorf("receive: listener %s: read buffer %d: %w", r.cfg.ID, n, err)
+			}
+		}
+		granted, err := readBuffer(uc)
+		r.update(func(s *Status) {
+			s.ReadBuffer, s.ReadBufferErr = granted, ""
+			if err != nil {
+				s.ReadBufferErr = err.Error()
+			}
+		})
 		r.pc = pc
 		return pc.LocalAddr(), nil
 	}
