@@ -175,6 +175,41 @@ func TestHashIsOverExactBytes(t *testing.T) {
 	_ = rb
 }
 
+// The golden's stored form has a pinned hash (B3 on #254), so a change to
+// Encode's bytes (field order, escaping, indentation) is seen here: C7's
+// node.baseline_ack and a re-learn's previous name this hash. The value was
+// computed twice, by Go and by Python's compact JSON in the golden's key
+// order, and agrees with B3's own run.
+func TestGoldenHashIsPinned(t *testing.T) {
+	const (
+		size = 1795
+		want = "sha256:6b8b3781bc6a4d9985373516b56286fb1798c4184d1a401bcd15bd51670e9319"
+	)
+	raw, err := os.ReadFile(filepath.Join("testdata", "valid", "baseline-synthetic.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := Encode(b, MaxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != size || Hash(stored) != want {
+		t.Errorf("Hash(Encode(Decode(golden))) = %s over %d bytes, want %s over %d", Hash(stored), len(stored), want, size)
+	}
+	// Encode is stable: the stored bytes decode and encode to themselves.
+	again, err := Decode(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := Encode(again, MaxBytes); !bytes.Equal(e, stored) {
+		t.Error("Encode(Decode(stored)) differs from stored")
+	}
+}
+
 func TestDecodeIsStrictForThisMinor(t *testing.T) {
 	a, _ := json.Marshal(valid())
 	for name, b := range map[string][]byte{
