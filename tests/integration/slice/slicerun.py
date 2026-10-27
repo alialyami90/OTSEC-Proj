@@ -555,7 +555,12 @@ class Slice:
         """v, a layout value, moved from the installed %ProgramData%\\OTSEC
         to its copy at keep."""
         data = os.path.normcase(os.path.normpath(self.service.data))
-        if not isinstance(v, str) or not os.path.normcase(os.path.normpath(v)).startswith(data + os.sep):
+        if not isinstance(v, str):
+            return v
+        p = os.path.normcase(os.path.normpath(v))
+        if p == data:  # collector_data is the root itself
+            return keep
+        if not p.startswith(data + os.sep):
             return v
         return os.path.join(keep, os.path.relpath(v, self.service.data))
 
