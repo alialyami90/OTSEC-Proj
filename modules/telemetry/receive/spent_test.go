@@ -27,7 +27,7 @@ func TestStartBudget(t *testing.T) {
 		{math.MinInt64, 0},
 		{math.MaxInt64, 0},
 	} {
-		b := startBudget(size, tc.spent)
+		b := startBudget(size, tc.spent, time.Now())
 		if b.tokens != tc.want || b.last.IsZero() {
 			t.Errorf("spent %d: %+v, want %v tokens refilling from now", tc.spent, b, tc.want)
 		}

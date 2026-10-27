@@ -169,14 +169,17 @@ func (r *Receiver) serveConn(ctx, cctx context.Context, c net.Conn, from netip.A
 		}
 		if fr != nil {
 			r.update(func(s *Status) { s.Received++ })
-			select {
-			case q <- msg{frame: *fr, from: from, auth: auth, cert: cert, rcv: r.cfg.Received()}:
-			case <-cctx.Done():
-				// The grace after stopping has ended with the writer still
-				// held by the store: the frame is read but cannot be
-				// stored. RFC 5425 has no acknowledgement to withhold.
-				r.update(func(s *Status) { s.LastErr = "stopped with a frame unstored from " + from.String() })
-				return
+			m := msg{frame: *fr, from: from, auth: auth, cert: cert, rcv: r.cfg.Received()}
+			if known || r.payUnknown(&m) {
+				select {
+				case q <- m:
+				case <-cctx.Done():
+					// The grace after stopping has ended with the writer still
+					// held by the store: the frame is read but cannot be
+					// stored. RFC 5425 has no acknowledgement to withhold.
+					r.update(func(s *Status) { s.LastErr = "stopped with a frame unstored from " + from.String() })
+					return
+				}
 			}
 		}
 		if err != nil {
@@ -223,10 +226,10 @@ func (r *Receiver) write(cctx context.Context, q <-chan msg) {
 }
 
 // commit stores a stream batch, waiting while the store refuses it. It
-// returns false when cctx ends first. The records are built once, so a
-// held batch spends the unknown budget once.
+// returns false when cctx ends first. An unknown sender's frames were paid
+// for as read (payUnknown), so a held batch spends the unknown budget once.
 func (r *Receiver) commit(cctx context.Context, batch []msg) bool {
-	recs, kept := r.records(cctx, batch)
+	recs, kept := r.records(batch)
 	if len(recs) == 0 {
 		return true
 	}
