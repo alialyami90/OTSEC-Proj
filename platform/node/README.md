@@ -79,6 +79,19 @@ Health events share the evidence database. This is so a capture carried by a hea
 
 `Config.Consumers` gives every target one C5 consumer per event stream, plus `audit` when the target sets `audit` (C6 `syslog.Consumers`). No target consumes a `quarantine/` stream. A C5 stream with no consumer is never pruned, so a quarantine stays on the node until an operator deals with it.
 
+## Commit cap and recovery reserve per database (C5 0.4, D4-9)
+
+Each database has a commit cap (`GroupOptions.MaxCommitBytes`) and a recovery reserve of `2 × WALBoundBytes + 1.1 × (its largest commit) + 64 KiB` (`c5.RecoveryReserveFor`). Both are per database, and the node releases and re-creates one reserve at a time.
+
+| Database | Commit cap | Recovery reserve (WAL bound 512 KiB) |
+| --- | --- | --- |
+| `evidence` | 11 MiB (`SERCommitBytes`) | 13,801,881 bytes (13.16 MiB) |
+| `syslog`, `audit` | 1 MiB (c5 default) | 2,267,545 bytes (2.16 MiB) |
+
+The evidence cap is derived, not measured. One SER read commits atomically, so the cap is `commitcap.go`'s bound on a read: C2's 1 MiB capture, 4.34 encoded bytes for each row byte, 2048 rows (`MaxReadRowsCeiling`) of at most 2560 fixed bytes, and 64 KiB of health events, 10.4 MiB, rounded up to a MiB. `serbound_test.go` measures the constants through the real normalizer and fails if the bound rises above the cap or the cap exceeds it by a MiB. A quarantine (a whole outcome frame of up to 8 MiB, its reason and two events) fits the same cap. The schedule's `operation` is at most 64 bytes, because it is in every event of a read.
+
+A read over the cap is refused whole by the Log (`record-too-large`), nothing is stored as events, its bytes go to quarantine, and the node raises `collection-result-refused`. The bound holds for rows the SEL-751 adapter parses (`serRowRE`); a result that marked a row with characters JSON escapes as parsed would be larger and fails the same way.
+
 ## The scheduler
 
 `Scheduler` runs the schedule one entry at a time, so the node never holds more than one device session (AP-13, SC-9). The first run of each entry waits 60 s after start, so a node in a restart loop never polls faster than the minimum interval. A late run is not repeated to catch up. However the schedule is written, an asset gets at least 60 s between the end of one session and the start of the next, so two entries for one asset, or a run longer than its interval, never poll a device faster than the minimum (A6 review of #92).
