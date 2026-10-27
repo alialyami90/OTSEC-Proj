@@ -261,6 +261,29 @@ def free_port():
     return port
 
 
+def reserve_port():
+    """(port, holder): a loopback TCP port and the socket that holds it,
+    bound with SO_REUSEADDR and never listening. While it is held, no
+    ephemeral bind and no outgoing connection on this host is given the
+    port, yet a server that binds it with SO_REUSEADDR (asyncio's default
+    on POSIX) still can, as often as it is restarted; a connection to it
+    while no server listens is refused as before. free_port's port is free
+    only until another process takes it: slices started side by side lost
+    the receiver's port that way (#237). On Windows SO_REUSEADDR would let
+    a bind take the port from its holder, so the port is released at once
+    and holder is None, as free_port."""
+    import socket
+    s = socket.socket()
+    if os.name != "nt":
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    if os.name == "nt":
+        s.close()
+        return port, None
+    return port, s
+
+
 class Rsyslog:
     """rsyslogd in the foreground with RSYSLOG_CONF. imrelp cannot pick its
     own port, so the harness picks a free one and waits until it accepts."""

@@ -35,11 +35,27 @@ const (
 	MinUnknownBytes = 256 << 10
 	MaxUnknownBytes = 1 << 20
 	// ReceivedRecordFactor and ReceivedRecordOverhead bound the stored
-	// event of one received frame: at most factor × frame + overhead
-	// bytes. Measured on 8192-byte frames (simulated): 1.44× for random
-	// bytes, 2.5× for ASCII text, 3.5× for quotes and 7.48× for control
-	// characters or '<', which the JSON encoder escapes to six bytes in
-	// the normalized message.
+	// event of any frame a listener accepts: at most ReceivedRecordBound
+	// (factor × max(MaxMessage, ReceivedRecordFloor) + overhead) bytes. It
+	// is a bound over the listener's MaxMessage, not per frame: a small
+	// frame can store at far more than factor × its own size, since a
+	// dialect's fields copy its text. Measured on 8192-byte frames
+	// (simulated): 1.44× for random bytes, 2.5× for ASCII text, 3.5× for
+	// quotes and 7.48× for control characters or '<', which the JSON
+	// encoder escapes to six bytes in the normalized message.
+	//
+	// The worst cases measured (TestReceivedRecordBound, simulated, with
+	// a verified sender certificate, an asset ID, the longest IPv6 form,
+	// and the longest node ID and stream):
+	//   - MaxMessage 8192, the node's value: 63205 of 69632 bytes, an RFC
+	//     5424 frame whose 255-byte hostname and the rest are '<' (B6 on
+	//     #182);
+	//   - an RTAC Logger frame at its 1024-byte limit, read as RTAC at
+	//     any MaxMessage: 20781 bytes, a minimal header and the rest '<'
+	//     in the event time, tag or message, each stored three times
+	//     (B6 on #182). That is over 8 × 2048 + 4 KiB, so a MaxMessage
+	//     below ReceivedRecordFloor takes the floor's bound.
+	ReceivedRecordFloor    = 4096
 	ReceivedRecordFactor   = 8
 	ReceivedRecordOverhead = 4 << 10
 )
@@ -51,8 +67,14 @@ const (
 	streamQueue      = 64
 )
 
+// ReceivedRecordBound is the largest stored event of a frame a listener
+// with this MaxMessage accepts.
+func ReceivedRecordBound(maxMessage int64) int64 {
+	return ReceivedRecordFactor*max(maxMessage, ReceivedRecordFloor) + ReceivedRecordOverhead
+}
+
 // HeldBatchBytes is the largest stream batch a listener may hold for the
-// store: Queue frames of MaxMessage, each at its record bound.
+// store: Queue frames, each at its record bound.
 const HeldBatchBytes = streamQueue * (ReceivedRecordFactor*streamMaxMessage + ReceivedRecordOverhead)
 
 // listenerClass is the C5 class a listener's stream takes (Layout).
