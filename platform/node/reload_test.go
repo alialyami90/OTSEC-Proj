@@ -318,8 +318,12 @@ func TestKeptRecordsCommitBeforeOthers(t *testing.T) {
 	defer r.Close()
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	// The writer says when it has made its first record of each kind, so
+	// the test waits on that and not on a sleep (B6 on #262).
+	sawKept, sawLive := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
+		var kept, live bool
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -332,12 +336,29 @@ func TestKeptRecordsCommitBeforeOthers(t *testing.T) {
 				label = "live"
 			}
 			r.audit(bg, audit.ActionPolicyApply, audit.OutcomeInfo, "", fmt.Sprintf("%s %d", label, i))
+			switch {
+			case label == "kept" && !kept:
+				kept = true
+				close(sawKept)
+			case label == "live" && !live:
+				live = true
+				close(sawLive)
+			}
 		}
 	}()
-	time.Sleep(10 * time.Millisecond) // some records are kept
+	wait := func(ch chan struct{}, what string) {
+		select {
+		case <-ch:
+		case <-time.After(time.Minute):
+			close(stop)
+			<-done
+			t.Fatalf("no %s record after a minute", what)
+		}
+	}
+	wait(sawKept, "kept")
 	release()
 	r.Tick(bg)
-	time.Sleep(50 * time.Millisecond)
+	wait(sawLive, "live")
 	close(stop)
 	<-done
 	recs := auditRecords(t, r)
