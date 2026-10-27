@@ -393,10 +393,10 @@ func TestRelayLostReplyIsAReplay(t *testing.T) {
 	}
 	alarm := false
 	for _, a := range st.Snapshot("x").Alarms {
-		alarm = alarm || (a.Code == AlarmAdminRequestRefused && strings.Contains(a.Detail, "earlier send"))
+		alarm = alarm || (a.Code == AlarmAdminRequestRefused && strings.Contains(a.Detail, "may already have been applied"))
 	}
 	if !alarm {
-		t.Fatal("the replay alarm does not say an earlier send may have been decided")
+		t.Fatal("the replay alarm does not say the request may already have been applied")
 	}
 }
 
@@ -535,5 +535,32 @@ func TestRelayOverTheWire(t *testing.T) {
 	s.relayAdmin(bg)
 	if recs := relayRecords(t, s, b); len(recs) != 2 || recs[1].Outcome != audit.OutcomeAllowed {
 		t.Fatalf("records %+v", recs)
+	}
+}
+
+// An expired request is refused with check window, and the alarm says it
+// may already have been applied, as for a replay: a file put back after
+// its decision, resent after expiry, must not be re-signed blindly (A3 on
+// #189).
+func TestRelayExpiredSaysCheckFirst(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	s := newScheduler(t, r, newAdminCollector())
+	b := writeAdminFile(t, nc, "admin-request-expired.json", authz.KindCredentialRevoke,
+		signAdmin(t, authz.KindCredentialRevoke, func(p *authz.AdminRequest) {
+			then := time.Now().UTC().Add(-20 * time.Minute).Truncate(time.Second)
+			p.IssuedAt, p.ExpiresAt = then.Format(time.RFC3339), then.Add(10*time.Minute).Format(time.RFC3339)
+		}))
+	s.relayAdmin(bg)
+	if recs := relayRecords(t, s, b); len(recs) != 2 || !strings.Contains(recs[1].Detail, "check window") {
+		t.Fatalf("records %+v", recs)
+	}
+	alarm := false
+	for _, a := range st.Snapshot("x").Alarms {
+		alarm = alarm || (a.Code == AlarmAdminRequestRefused && strings.Contains(a.Detail, "may already have been applied"))
+	}
+	if !alarm {
+		t.Fatal("the window alarm does not say the request may already have been applied")
 	}
 }

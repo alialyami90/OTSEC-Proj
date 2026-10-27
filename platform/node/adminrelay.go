@@ -350,12 +350,17 @@ func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) {
 	s.clearQuietPrefix(AlarmAdminRequestNoDecision + " " + f.id + " ")
 	if outcome == audit.OutcomeDenied {
 		code, check := refusalOf(reply)
-		why := ""
-		if check == authz.AdminCheckReplay {
-			why = "; an earlier send may have been decided before its reply was lost (the collector's log has it)"
+		next := "sign a new request"
+		if check == authz.AdminCheckReplay || check == authz.AdminCheckWindow {
+			// An earlier send of the same bytes may have been accepted:
+			// its reply was lost, or the file was put back after it was
+			// decided. Signing again would then act twice, which for a
+			// clear_suspension clears whatever is open now (A3 on #189).
+			next = "it may already have been applied by an earlier send whose decision this node did not record. " +
+				"Check the credential's state and the collector's log for that decision before signing again"
 		}
 		s.raiseOnceKey(AlarmAdminRequestRefused+" "+f.id, "", AlarmAdminRequestRefused,
-			fmt.Sprintf("the collector refused %s in %s: %s, check %s%s. It is not sent again; sign a new request", f.kind, f.name, code, check, why))
+			fmt.Sprintf("the collector refused %s in %s: %s, check %s. It is not sent again; %s", f.kind, f.name, code, check, next))
 	}
 }
 
