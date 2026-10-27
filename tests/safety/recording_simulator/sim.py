@@ -160,10 +160,13 @@ class Reply:
     secret: the line was consumed as a password; the session records an auth
     event instead of the line. effects: device state changes the line caused,
     recorded as device_effect events (each a short text with its citation).
+    notes: what the profile showed, recorded as profile events (for example
+    the settings a SHO reply printed); not effects, and not violations.
     """
 
-    def __init__(self, out=b"", secret=False, accepted=None, effects=()):
+    def __init__(self, out=b"", secret=False, accepted=None, effects=(), notes=()):
         self.out, self.secret, self.accepted, self.effects = out, secret, accepted, list(effects)
+        self.notes = list(notes)
 
 
 class PlaceholderResponder:
@@ -238,6 +241,8 @@ class Session:
                 self.rec.write("line", session=self.id, term=term,
                                before_prompt=before_prompt, **_raw(line))
             self._effects(reply.effects)
+            for note in getattr(reply, "notes", ()):
+                self.rec.write("profile", session=self.id, **note)
             self._write(reply.out)
             self.ready = self.queue.empty()
             self.queue.task_done()
@@ -410,6 +415,11 @@ def main():
     ap.add_argument("--profile-tidle", type=float, default=900.0, help="sel-751-doc: TIDLE in seconds")
     ap.add_argument("--profile-date-f", choices=("MDY", "YMD", "DMY"), default="MDY",
                     help="sel-751-doc: Global setting DATE_F; SHO G shows it and every date prints in its order")
+    ap.add_argument("--profile-settings", help="sel-751-doc: settings overrides file, re-read at every SHO (change injector)")
+    ap.add_argument("--profile-sho-layout", choices=("figure", "one-per-line"), default="figure",
+                    help="sel-751-doc: SHO layout; one-per-line is SYNTHESIZED (see profile_sel751)")
+    ap.add_argument("--profile-sho-fault", choices=("none", "hang", "duplicate"), default="none",
+                    help="sel-751-doc: SYNTHESIZED SHO n fault (see profile_sel751)")
     ap.add_argument("--max-sessions", type=int, help="tcp only: refuse connections beyond this count")
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
@@ -433,6 +443,8 @@ def main():
             password=(args.profile_password or "").encode("latin-1") or None,
             fid=args.profile_fid.encode("latin-1") if args.profile_fid else None,
             stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay, date_f=args.profile_date_f,
+            settings_file=args.profile_settings, sho_layout=args.profile_sho_layout,
+            sho_fault=None if args.profile_sho_fault == "none" else args.profile_sho_fault,
             growth=profile_sel751.SerGrowth(args.profile_ser_state,
                                             1 if args.profile_ser == "script" else args.profile_ser_grow)
             if args.profile_ser in ("grow", "script") else None)

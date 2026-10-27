@@ -40,6 +40,35 @@ Documented (p. = manual page):
     R300-V3 and R202-V1, D20210104); triggers undocumented (A2 D27)
   Port 1 LANG := SPANISH: ASCII commands display in Spanish (p. 1.6); in the
     Command Summary, QUIT is SAL, SHO is MOS, and `SER D o R` clears the SER
+  SHO n (Level 1) shows the relay settings of Group n, n = 1 to 4, and n
+    defaults to the active group (Table 7.67 p. 7.77; Table 6.2 p. 6.4); the
+    reply is Figure 7.43 (p. 7.78-7.79), section headings and NAME := value
+    cells as printed, a SELOGIC equation on a line of its own, values with
+    spaces unquoted (TID := FEEDER RELAY)
+
+SHO settings and the change injector (B6, P4-B6). Every SHO reply the
+profile models (SHO n, SHO G, SHO P 1) is rendered from a settings model: the
+printed settings, then the constructor's overrides, then the overrides in
+the settings file (switch settings_file, re-read at every SHO line, so a
+test changes a setting between two reads without a restart). The file is
+JSON, {"<class>": {"<NAME>": "<value>" or null}}, class "1" to "4", "G" or
+"P1"; null removes a setting, a name the class does not print is added.
+Each such reply is noted in the recording as a "profile" event holding the
+class and every setting as the reply printed it, so a test reads what the
+device showed from the device's side, not from a parser. A changed value
+takes the place of the old one in the printed layout; ASSUMED (not stated
+in the manual): the cells after a removed one move left into its place, a
+value too long for its column pushes the next cell two spaces after it, an
+added setting is printed on its own line at the end of the class, and the
+DATE_F an injected G override sets is the one every date then prints in.
+
+SYNTHESIZED SHO cases, not documented: sho_layout="one-per-line" prints
+every cell on a line of its own, the same settings in another layout (for
+the rule that a layout difference is not a setting difference, R3.3);
+sho_fault="hang" sends a group reply up to its Phase TOC section and then
+nothing more for that line (no prompt); sho_fault="duplicate" prints
+50P1P a second time with another value, so the reply names one setting
+twice and cannot be read as one configuration.
 
 SYNTHESIZED, not documented (ser="grow", for V-S4 and V-S6): each SER read
 adds rows after Figure 10.16's newest, in the figure's layout, and renumbers
@@ -91,10 +120,16 @@ response text of clear commands is a placeholder; the layout of SHO P 1
 output (no figure in the manual shows it) follows the SHO example on p. 7.78
 and the SEL-400 `SHO P 5` example; with LANG := SPANISH the English names of
 commands that have a different Spanish name are rejected with the English
-error text.
+error text; the active group is Group 1 (SHO with no n shows it); Groups 2
+to 4 print Figure 7.43 with their own number; where the figure's two pages
+join, one blank line; the SHO forms Table 7.67 lists that are not modelled
+here (SHO L n, SHO P n other than 1, SHO R, SHO F, SHO I, SHO M, SHO E m,
+SHO DNP m) and an n outside the table's range get the placeholder, as does
+SHO n s.
 """
 
 import datetime
+import json
 import os
 import re
 import time
@@ -147,6 +182,64 @@ KNOWN_VERBS = {
     "89C", "89O", "TES", "BRE", "INI", "LOG",
 }
 LEVEL2_VERBS = {"SET", "CON", "PUL", "OPE", "CLO", "PAS", "COP", "GRO", "R_S", "L_D", "CAL", "89C", "89O", "TES"}
+
+
+# A NAME := value cell: the name is upper-case letters, digits and "_"
+# (Figure 7.43), and the value runs to the next cell or the end of the line.
+_CELL = re.compile(r"(?:^|(?<=\s))([A-Z0-9_]+)\s*:= ?")
+
+
+class Printed:
+    """A settings class as SHO prints it: rows that are text (a heading or a
+    blank line) or cells, each cell [name, prefix, value, column], where the
+    prefix is the cell's text before its value ("TID      := ")."""
+
+    def __init__(self, text):
+        self.rows = []
+        for line in text.split("\n"):
+            found = list(_CELL.finditer(line))
+            if not found:
+                self.rows.append(line)
+                continue
+            cells = []
+            for i, m in enumerate(found):
+                end = found[i + 1].start() if i + 1 < len(found) else len(line)
+                cells.append([m.group(1), m.group(0), line[m.end():end].rstrip(), m.start()])
+            self.rows.append(cells)
+
+    def settings(self):
+        return {c[0]: c[2] for row in self.rows if isinstance(row, list) for c in row}
+
+    def render(self, overrides=None, layout="figure"):
+        """The class's lines with overrides applied (see the module
+        documentation for the ASSUMED layout of a change)."""
+        overrides = dict(overrides or {})
+        out = []
+        for row in self.rows:
+            if not isinstance(row, list):
+                out.append(row)
+                continue
+            slots = [c[3] for c in row]
+            cells = []
+            for name, prefix, value, _ in row:
+                if name in overrides:
+                    value = overrides.pop(name)
+                    if value is None:
+                        continue
+                cells.append(prefix + value)
+            if layout == "one-per-line":
+                out.extend(cells)
+                continue
+            line = ""
+            for slot, cell in zip(slots, cells):
+                line = line.ljust(slot) if len(line) < slot or not line else line + "  "
+                line += cell
+            if line:
+                out.append(line)
+        added = [f"{n:<8} := {v}" for n, v in overrides.items() if v is not None]
+        while added and out and not out[-1].strip():
+            out.pop()
+        return out + added
 
 
 def _load(name):
@@ -329,10 +422,15 @@ class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
                  fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None,
-                 date_f="MDY"):
+                 date_f="MDY", settings_file=None, sho_layout="figure", sho_fault=None):
         if date_f not in DATE_FORMATS:
             raise ValueError(f"date_f {date_f!r}: want one of {DATE_FORMATS}")
+        if sho_layout not in ("figure", "one-per-line") or sho_fault not in (None, "hang", "duplicate"):
+            raise ValueError(f"sho_layout {sho_layout!r}, sho_fault {sho_fault!r}")
         self.date_f = date_f
+        self.settings_file, self.sho_layout, self.sho_fault = settings_file, sho_layout, sho_fault
+        with open(os.path.join(DOC, "sho-group-fig-7-43.txt"), encoding="utf-8") as f:
+            self.group = Printed(f.read().rstrip("\n"))
         self.password = password          # None models "Level 1 password disabled"
         # p. 7.28: "The relay transmits all messages in the following format:
         # <STX><MESSAGE LINE 1><CRLF> ... <LAST MESSAGE LINE><CRLF><ETX>".
@@ -376,7 +474,48 @@ class SEL751DocResponder:
             else:
                 self.port1[name] = value
 
+    def _injected(self, cls):
+        """The settings file's overrides for class cls ({} with no file)."""
+        if not self.settings_file or not os.path.exists(self.settings_file):
+            return {}
+        with open(self.settings_file, encoding="utf-8") as f:
+            return json.load(f).get(cls, {})
+
+    def _port1_now(self):
+        port1 = dict(self.port1)
+        for name, value in self._injected("P1").items():
+            if value is None:
+                port1.pop(name, None)
+            else:
+                port1[name] = value
+        return port1
+
+    def _global_now(self):
+        """The General Global Settings in order, with the injected overrides;
+        an injected DATE_F becomes the date order from this reply on."""
+        names = [(n, self.date_f if v is None else v) for n, v in GLOBAL_GENERAL]
+        inj = self._injected("G")
+        if inj.get("DATE_F") in DATE_FORMATS:
+            self.date_f = inj["DATE_F"]
+        out = [(n, inj.get(n, v)) for n, v in names if not (n in inj and inj[n] is None)]
+        return out + [(n, v) for n, v in inj.items() if v is not None and n not in dict(names)]
+
+    def _show_group(self, n):
+        """SHO n: Figure 7.43 for Group n, with the class's overrides."""
+        lines = self.group.render(self._injected(str(n)), self.sho_layout)
+        lines[lines.index("Group 1")] = f"Group {n}"
+        if self.sho_fault == "duplicate":
+            at = next(i for i, l in enumerate(lines) if l.startswith("50P1P "))
+            lines.insert(at + 1, "50P1P    := 2.50")
+        printed = Printed("\n".join(lines))
+        out = CRLF + CRLF.join(l.encode() for l in lines) + CRLF
+        note = {"what": "settings", "class": str(n), "settings": printed.settings()}
+        if self.sho_fault == "duplicate":
+            note["duplicate"] = "50P1P"
+        return out, note
+
     def _show_port1(self):
+        self.last_note = {"what": "settings", "class": "P1", "settings": self._port1_now()}
         out, cells = [b"Port 1"], []
 
         def flush():
@@ -384,7 +523,7 @@ class SEL751DocResponder:
                        for i in range(0, len(cells), 3))
             cells.clear()
 
-        for name, value in self.port1.items():
+        for name, value in self._port1_now().items():
             if name in PORT1_SECTIONS:
                 flush()
                 out += [b"", PORT1_SECTIONS[name].encode(), b""]
@@ -397,12 +536,14 @@ class SEL751DocResponder:
     def _show_global(self, start=None):
         """SHO G [s]: the General Global Settings, from s if given (None if
         s is not one of them)."""
-        names = [n for n, _ in GLOBAL_GENERAL]
+        settings = self._global_now()
+        names = [n for n, _ in settings]
         if start is not None and start not in names:
             return None
+        self.last_note = {"what": "settings", "class": "G", "settings": dict(settings)}
         out, cells = [b"Global Settings", b"", b"General Global Settings"], []
-        for name, value in GLOBAL_GENERAL[names.index(start) if start else 0:]:
-            cell = f"{name:<8} := {self.date_f if value is None else value}".encode()
+        for name, value in settings[names.index(start) if start else 0:]:
+            cell = f"{name:<8} := {value}".encode()
             if len(cell) > 25:
                 # A SELOGIC equation takes its own line (Figure 10.3).
                 if cells:
@@ -528,10 +669,23 @@ class SEL751DocResponder:
             return Reply(CRLF + b"Reset Metering Quantities (Y,N)?",
                          effects=["metering reset requested; relay asks for Y/N confirmation (p. 7.68)"])
         if text == "SHO P 1":
-            return Reply(self._show_port1() + self._prompt())
+            return Reply(self._show_port1() + self._prompt(), notes=[self.last_note])
         if text == "SHO G" or text.startswith("SHO G "):
             out = self._show_global(text[6:].strip() or None)
-            return Reply(out + self._prompt() if out else CRLF + UNMODELLED + self._prompt())
+            return (Reply(out + self._prompt(), notes=[self.last_note]) if out
+                    else Reply(CRLF + UNMODELLED + self._prompt()))
+        # SHO, or its long form SHOW; any other word starting SHO is not
+        # this command (B3 on #248) and falls through as unmodelled.
+        group = re.fullmatch(r"SHOW?(?:\s+([1-4]))?", text)
+        if group:
+            out, note = self._show_group(int(group.group(1) or 1))
+            if self.sho_fault == "hang":
+                # Cut inside the reply: the rest and the prompt never come.
+                cut = out[len(CRLF):out.index(b"Phase TOC")]
+                reply = Reply((b"\x02" if self.stx_etx else CRLF) + cut, notes=[dict(note, hang=True)])
+                reply.unframed = True
+                return reply
+            return Reply(out + self._prompt(), notes=[note])
         if text == "SER":
             if self.ser is not None and self.growth is not None:
                 self.ser = grown_ser(self.growth.read())
