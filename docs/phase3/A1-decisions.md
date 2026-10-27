@@ -99,3 +99,13 @@ Which field went bad: going by the frame addresses and `event.Event`'s field off
 **What is not proven:** the panic happened once. The match between `1<<36` and a 16-byte address length is circumstantial. A6's Windows stress test (1.26.0, 1.26.10, and 1.26.0 with `-race`, 20 minutes each) is the evidence for this decision. If 1.26.0 never crashes there either, the bump still stands on its security fixes, and the crash stays open in the exit report as unexplained.
 
 **Owner's PC:** with `GOTOOLCHAIN=auto`, the portable Go 1.26.0 on ALI's PC would download 1.26.10 the first time it builds. That download needs ALI's answer before the next run on that PC. Whichever way ALI chooses, the default `GOSUMDB` stays on. Otherwise ALI installs the official archive after checking its SHA-256 against go.dev/dl.
+
+## D3-11: a C2 0.5 SER result with no DATE_F keeps the pre-0.5 date rule (#203)
+
+Date: 2026-10-27. A2's review of #203 found that `sel751` stamps every result C2 0.5. Under a register package with no context read for `sel.ser.read_all` (revision 3), its results carry parsed rows and no settings. Under my earlier plan ruling (a parsed row without a usable DATE_F is `ErrResult`), every SER read on a revision-3 site would go to quarantine. **Ruling:** for C2 0.5 and later:
+
+1. If DATE_F is MDY, DMY or YMD, it is used. A caller order that disagrees is `ErrInput`.
+2. If DATE_F is present with any other value and a row is parsed, the result is `ErrResult`. This is defence only: the adapter refuses such a package before connecting.
+3. If DATE_F is absent, the pre-0.5 rule applies: the caller's order if one was given, otherwise MDY with `date-format-assumed:MDY`.
+
+**Rejected:** refusing SER in the adapter under a package without the DATE_F read. A revision-3 site would stop collecting until revision 4 was activated, and the relay's finite SER buffer could overwrite native records in the meantime. Option 3 keeps the bytes and the parsed rows, and it states the assumption on each event.
