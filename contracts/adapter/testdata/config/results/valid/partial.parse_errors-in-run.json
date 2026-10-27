@@ -359,7 +359,7 @@
   },
   "error": {
     "code": "partial.parse_errors",
-    "detail": "a section prints a name twice; the read is not a snapshot"
+    "detail": "the reply to SHO F is not a settings section; the read stops there"
   },
   "observations": [
     {

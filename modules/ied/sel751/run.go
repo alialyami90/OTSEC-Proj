@@ -21,7 +21,7 @@ import (
 // EP-4).
 const (
 	AdapterID = "sel-751-ascii"
-	Version   = "0.2.0" // 0.2.0: the C1 path rule, DATE_F from SHO G, TIDLE after ok or partial (P3-A2)
+	Version   = "0.3.0" // 0.3.0: the configuration read, a register run (P4-A2); 0.2.0: the C1 path rule, DATE_F from SHO G, TIDLE after ok or partial (P3-A2)
 )
 
 // Timing the manual does not give, chosen here until a capture shows the
@@ -47,15 +47,41 @@ type hooks struct {
 	egress          func(ph adapter.Phase, line string) error
 }
 
-// ops are the register operations this build can run and read.
+// ops are the register operations and runs this build can invoke.
 var ops = map[string]bool{
 	"sel.id": true, "sel.ser.read_all": true, "sel.settings.show_global": true, "sel.settings.show_port1": true,
+	opConfig: true,
 }
 
 const (
-	opID  = "sel.id"
-	opSER = "sel.ser.read_all"
+	opID     = "sel.id"
+	opSER    = "sel.ser.read_all"
+	opConfig = "sel.config.read_all" // the configuration read: a register run (C3 0.3, D4-13)
 )
+
+// cfgForms are the steps this build can read in a configuration run: the SHO
+// forms of C9's rule sel-751-sho/1 (S22 Table 7.67 p. 7.77), by the register's
+// operation ID, and whether the relay may answer that the form is not
+// available (a port or protocol not ordered). It is C9's MayBeAbsent, kept
+// here because the adapter does not import the contract it is checked
+// against; TestCfgFormsAreTheRule makes them agree.
+var cfgForms = map[string]bool{
+	"sel.settings.show_port1": false, "sel.settings.show_global": false,
+	"sel.settings.show_group_1": false, "sel.settings.show_group_2": false,
+	"sel.settings.show_group_3": false, "sel.settings.show_group_4": false,
+	"sel.settings.show_logic_1": false, "sel.settings.show_logic_2": false,
+	"sel.settings.show_logic_3": false, "sel.settings.show_logic_4": false,
+	"sel.settings.show_port_f": false, "sel.settings.show_report": false, "sel.settings.show_front_panel": false,
+	"sel.settings.show_port_2": true, "sel.settings.show_port_3": true, "sel.settings.show_port_4": true,
+	"sel.settings.show_modbus": true, "sel.settings.show_iec103": true,
+	"sel.settings.show_eip_1": true, "sel.settings.show_eip_2": true, "sel.settings.show_eip_3": true,
+	"sel.settings.show_dnp_1": true, "sel.settings.show_dnp_2": true, "sel.settings.show_dnp_3": true,
+}
+
+// cfgNotAvailable is the reply that says a form does not exist on this relay
+// (C9 decision 6; S22 p. 7.31 "Invalid Command"; the exact reply for an
+// unordered option is documented-untested, H-13).
+const cfgNotAvailable = "Invalid Command"
 
 // serEmpty is the SER reply when the relay holds no records (S22 p. 7.75,
 // "No Data Available"; the exact text is A6's transcription, H-13).
@@ -135,6 +161,12 @@ type session struct {
 	m        *register.Matcher
 	rule     *register.BranchRule
 	op       *register.Operation
+	cfgRun   *register.Run // the invocation's run (C3 0.3), when it names one; op is then nil
+	steps    []string      // the run's operations, in order
+	stepLine []string      // their lines
+	opName   string        // the operation or run
+	opLevel  string        // its access level (a run's is its highest step's)
+	replyCap int64         // the register's max_reply_bytes for the step in flight, 0 for none
 	expected map[string]string
 	allowed  map[string]bool // operate lines: the operation, the reads the register's checks name, its context reads
 	ctxReads []register.ContextRead
@@ -243,7 +275,14 @@ func (s *session) check() adapter.Code {
 		s.detail = "this adapter build has no reader for the operation"
 		return adapter.RefusedNotInvocable
 	}
-	s.op, _ = m.Operation(s.inv.OperationID)
+	if run, ok := m.Run(s.inv.OperationID); ok {
+		if code := s.checkRun(run); code != "" {
+			return code
+		}
+	} else {
+		s.op, _ = m.Operation(s.inv.OperationID)
+		s.opName, s.opLevel = s.op.ID, s.op.AccessLevel
+	}
 	s.expected = map[string]string{}
 	for _, e := range s.inv.Expected {
 		if e.Name != attrFID && e.Name != attrSerial {
@@ -276,7 +315,7 @@ func (s *session) check() adapter.Code {
 			return adapter.FailedInternal
 		}
 	}
-	elevated := s.op.AccessLevel != register.ProbeAccessLevel
+	elevated := s.opLevel != register.ProbeAccessLevel
 	switch {
 	case elevated && s.cfg.Secret == nil:
 		return adapter.RefusedCredentialUnavailable
@@ -296,12 +335,56 @@ func (s *session) check() adapter.Code {
 		}
 		s.allowed[line] = true
 	}
+	if s.cfgRun != nil {
+		for _, l := range s.stepLine {
+			s.allowed[l] = true
+		}
+		return ""
+	}
 	own, err := m.Render(s.inv.OperationID, s.inv.Params)
 	if err != nil {
 		return adapter.RefusedInvalidParams
 	}
 	s.allowed[own] = true
 	return ""
+}
+
+// checkRun readies a configuration run (C3 0.3, D4-13): every step must be a
+// form this build reads, and the whole run must render, since one step that
+// does not makes the run not invocable. A run is Level 1 throughout (the
+// register's rule), takes no parameters (ValidateWith), and sends its gate
+// reads as its first steps, so the register's checks are applied to them as
+// steps and not read a second time.
+func (s *session) checkRun(run *register.Run) adapter.Code {
+	if s.inv.OperationID != opConfig {
+		s.detail = "this adapter build has no reader for the run"
+		return adapter.RefusedNotInvocable
+	}
+	lines, err := s.m.RenderRun(run.ID)
+	if err != nil {
+		s.detail = "a step of the run does not render"
+		return adapter.RefusedNotInvocable
+	}
+	for _, id := range run.Steps {
+		if _, ok := cfgForms[id]; !ok {
+			s.detail = "a step of the run has no reader in this adapter build"
+			return adapter.RefusedNotInvocable
+		}
+	}
+	s.cfgRun, s.steps, s.stepLine = run, run.Steps, lines
+	s.opName, s.opLevel = run.ID, "1"
+	return ""
+}
+
+// limits are the invocation's limits, held to the run's own when it names a
+// run: the tighter of each decides (adapter.Limits.ForRun, D4-13).
+func (s *session) limits() adapter.Limits {
+	l := s.inv.Limits
+	if s.cfgRun != nil {
+		l.DeadlineMS = min(l.DeadlineMS, s.cfgRun.DeadlineMS)
+		l.MaxResponseBytes = min(l.MaxResponseBytes, s.cfgRun.MaxTotalBytes)
+	}
+	return l
 }
 
 func coded(err error, fallback adapter.Code) adapter.Code {
@@ -320,7 +403,8 @@ func coded(err error, fallback adapter.Code) adapter.Code {
 // it passes egress, counts against the step timeout, the deadline and
 // max_response_bytes, and is kept in the transcript (D3-2).
 func (s *session) reads() []string {
-	if s.op.AccessLevel == register.ProbeAccessLevel {
+	if s.opLevel == register.ProbeAccessLevel || s.cfgRun != nil {
+		// A run's gate reads are its first steps, read once, as steps.
 		return nil
 	}
 	var out []string
@@ -361,7 +445,7 @@ func (s *session) connect() adapter.Code {
 		s.detail = "the endpoint is not a Telnet endpoint with a host and port"
 		return adapter.RefusedInvocationMismatch
 	}
-	l := s.inv.Limits
+	l := s.limits()
 	s.deadline = s.wallStart.Add(time.Duration(l.DeadlineMS) * time.Millisecond)
 	if d, ok := s.ctx.Deadline(); ok && d.Before(s.deadline) {
 		s.deadline = d
@@ -494,7 +578,7 @@ func (s *session) dialogue() adapter.Code {
 	if code := s.identifyID(); code != "" {
 		return code
 	}
-	if s.op.ID == opID {
+	if s.opName == opID {
 		return ""
 	}
 
@@ -505,6 +589,9 @@ func (s *session) dialogue() adapter.Code {
 		if code := s.read(id); code != "" {
 			return code
 		}
+	}
+	if s.cfgRun != nil {
+		return s.operateRun()
 	}
 	return s.operate()
 }
@@ -650,6 +737,12 @@ func (s *session) read(id string) adapter.Code {
 	if code := s.expect(promptLevel1); code != "" {
 		return code
 	}
+	return s.checkReply(id)
+}
+
+// checkReply applies every check the register serves with the read of id to
+// the reply just received.
+func (s *session) checkReply(id string) adapter.Code {
 	off, rx := s.lastReply()
 	msg, err := frame(rx, off)
 	var set map[string]setting
@@ -789,6 +882,83 @@ func (s *session) english(id string, set map[string]setting) bool {
 		}
 	}
 	return false
+}
+
+// operateRun runs a configuration run (C2 0.6, C3 0.3, D4-13): its steps in
+// order, in the one session the dialogue has opened, each with its own
+// register limits inside the invocation's. The run fails as a whole. On a
+// step that fails, the code is that step's and nothing more is sent but QUI
+// (quitAfter decides, as for a single operation): an unexpected prompt, a
+// drop to Level 0 (the relay's TIDLE may be shorter than the run, so Level 1
+// is never assumed to last), a timeout, a reply over its limit or the run's
+// total, the deadline, or a reply that is not a settings section. The
+// register's checks (the language precondition, posture warnings, firmware
+// branch conditions) are applied to the steps that serve them, which come
+// first (C3 0.3 validation), so a gate that refuses stops the run before any
+// later form is sent.
+func (s *session) operateRun() adapter.Code {
+	base := s.step
+	defer func() { s.step, s.replyCap = base, 0 }()
+	for i, id := range s.steps {
+		lim, ok := s.m.Limits(id)
+		if !ok {
+			s.detail = "a step of the run has no limits"
+			return adapter.FailedInternal
+		}
+		s.step = min(base, time.Duration(lim.TimeoutMS)*time.Millisecond)
+		s.replyCap = lim.MaxReplyBytes
+		if code := s.send(adapter.PhaseOperate, s.stepLine[i]); code != "" {
+			return code
+		}
+		if code := s.expect(promptLevel1); code != "" {
+			return code
+		}
+		if code := s.checkReply(id); code != "" {
+			return code
+		}
+		if code := s.section(id, s.stepLine[i]); code != "" {
+			return code
+		}
+	}
+	return ""
+}
+
+// section keeps the reply to one step as a configuration record: the whole
+// message text as its span, and the settings the adapter reads from it by the
+// rule sel-751-sho/1 (parseSection). A form that may be absent and answers
+// that it is not available is an absent record. Any other reply that is not
+// a settings section fails the run: the bytes are kept and the record says
+// parse_ok false (partial.parse_errors), and a form that every relay has and
+// answers "not available" is a device error, never an absent section.
+func (s *session) section(id, line string) adapter.Code {
+	off, rx := s.lastReply()
+	msg, err := frame(rx, off)
+	if err != nil || len(msg.text) == 0 {
+		s.detail = fmt.Sprintf("the reply to %s has no single framed message", line)
+		return adapter.FailedDeviceError
+	}
+	span := adapter.Span{Offset: msg.off, Length: int64(len(msg.text))}
+	if string(bytes.Trim(msg.text, " \r\n")) == cfgNotAvailable {
+		if !cfgForms[id] {
+			s.detail = fmt.Sprintf("%s answered that it is not available, which a SEL-751 may not", line)
+			return adapter.FailedDeviceError
+		}
+		s.records = append(s.records, adapter.Record{Kind: adapter.RecordConfigAbsent, Span: span, ParseOK: true})
+		return ""
+	}
+	rec := adapter.Record{Kind: adapter.RecordConfigSection, Span: span}
+	set, err := parseSection(msg)
+	if err != nil || len(set) == 0 {
+		s.records = append(s.records, rec)
+		s.detail = fmt.Sprintf("the reply to %s is not a settings section; the read stops there", line)
+		return adapter.PartialParseErrors
+	}
+	rec.ParseOK = true
+	for _, st := range set {
+		rec.Fields = append(rec.Fields, adapter.Field{Name: st.name, Value: st.value})
+	}
+	s.records = append(s.records, rec)
+	return ""
 }
 
 // operate runs the invocation's operation and reads its reply.
@@ -1020,6 +1190,9 @@ func (s *session) await(silentBy time.Time, closing bool) (string, error) {
 			return "", endErr
 		}
 		room := s.budget - s.total
+		if s.replyCap > 0 {
+			room = min(room, s.replyCap-int64(len(s.reply)))
+		}
 		if room <= 0 {
 			return "", errTooLarge
 		}

@@ -160,7 +160,7 @@ def read(upto=None, absent=ABSENT, bad=None, error_at=None, drop_at=None, timeou
         return run_result(s, "ok", None, items, obs, warnings, records)
     if code == "partial.parse_errors":
         return run_result(s, "partial", code, items, obs, warnings, records,
-                          "a section prints a name twice; the read is not a snapshot")
+                          "the reply to %s is not a settings section; the read stops there" % bad)
     # A failed run keeps its bytes and reports no records and no observations.
     return run_result(s, "failed", code, items, [], warnings, [])
 
