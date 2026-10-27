@@ -124,7 +124,8 @@ func NewListening(rt *Runtime) (*Listening, error) {
 				"listener %s: what unknown senders stored in the last %s could not be counted (%v), so their budget starts empty and their messages are dropped until it refills at %d bytes an hour. Known senders are not affected",
 				l.ID, cfg.Limits.UnknownWindow, err, cfg.Limits.UnknownBytes))
 		}
-		cfg.UnknownSpent = spent
+		cfg.UnknownSpent = 0 // B6 MUTANT: a restart refills the budget (pre-#198)
+		_ = spent
 		if l.Transport == asset.SyslogTLS {
 			if cfg.TLS, err = rt.cfg.ListenerTLS(l); err != nil {
 				return nil, err
