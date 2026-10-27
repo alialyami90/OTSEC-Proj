@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -27,13 +26,7 @@ func TestOpenBesideReaderAfterKill(t *testing.T) {
 		t.Skip("starts a child process")
 	}
 	killed := storeDir(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashChild$")
-	cmd.Env = append(os.Environ(), "OTSEC_CRASH_DIR="+killed, "OTSEC_CRASH_POINT=commit:done", "OTSEC_CRASH_NTH=40")
-	out, err := cmd.Output()
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != crashExit {
-		t.Fatalf("child did not stop: %v\n%s", err, out)
-	}
+	runCrashChild(t, killed, "commit:done", 40)
 	path := filepath.Join(killed, string(evidenceDB.ID)+".db")
 	if fi, err := os.Stat(path + "-wal"); err != nil || fi.Size() == 0 {
 		t.Fatalf("no WAL left by the killed writer: %v", err)
