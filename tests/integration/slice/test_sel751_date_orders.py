@@ -1,12 +1,14 @@
-"""The SEL-751 adapter against the recording simulator in each DATE_F order
-(A2, P3-A2; for A6's review, D2-13).
+"""The SEL-751 adapter against the recording simulator in each DATE_F order,
+and its result through the normalizer (A2, P3-A2; for A6's review, D2-13).
 
 For MDY, YMD and DMY the simulator (A6's #166, --profile-date-f) prints every
 date in that order, and the adapter (sel751.Run, through its TestSimulator
 entry point) reads SHO G before SER and reports DATE_F. The result is then
 reconciled here against ground truth that is not the adapter's: A6's
 transcription of S22 Figure 10.16 (reconcile.native_rows), whose rows are
-dated 02/28/2007 in MDY.
+dated 02/28/2007 in MDY. The same result, with the invocation and asset it
+answered, is then passed through normalize.Normalize with no date order
+given (datefnorm, D3-11), so the order can come only from DATE_F.
 
 Checked, for each order:
   - the run is ok, DATE_F is reported as the order, and its span selects
@@ -17,12 +19,15 @@ Checked, for each order:
     as 2007-02-28 in that order and as no other date, and its #, TIME,
     ELEMENT and STATE the figure's;
   - every line the simulator received is a read-only register line
-    (check.py).
+    (check.py);
+  - the normalizer makes one event per figure row, in order, with parse
+    status ok, the row's bytes as native bytes, the date and time as
+    printed as device_time.native, a wall clock of 2007-02-28 at the
+    figure's time, and no date-format-assumed flag.
 
-Not checked here: the normalizer and the forwarder. A4's normalizer takes
-the order from DATE_F in its follow-up to C2 0.5; until then a YMD or DMY
-row would not reach the upstream collector as a dated event, so the full
-slice reconcile in YMD and DMY waits on it.
+Not covered here: the store, the forwarder, and the real binaries end to
+end. The full slice reconcile in YMD and DMY on the real binaries (node,
+collector, receiver) is not run by this test.
 
 Evidence class: simulated. The simulator answers from manual examples and
 an ASSUMED SHO G layout; nothing here is hardware evidence.
@@ -63,7 +68,15 @@ def run_adapter(tmp, order):
     finally:
         sim.stop()
     with open(out, encoding="utf-8") as f:
-        return json.load(f), log
+        res = json.load(f)
+    events = os.path.join(tmp, f"events-{order}.json")
+    env = dict(os.environ, OTSEC_DATEF_RESULT=out, OTSEC_DATEF_EVENTS=events)
+    p = subprocess.run(["go", "test", "-count=1", "-run", "^TestNormalizeSimResult$",
+                        "./tests/integration/slice/datefnorm/"],
+                       cwd=harness.REPO, env=env, capture_output=True, text=True, timeout=300)
+    assert p.returncode == 0, p.stdout + p.stderr
+    with open(events, encoding="utf-8") as f:
+        return res, log, json.load(f)
 
 
 @pytest.fixture(scope="module")
@@ -81,7 +94,7 @@ def operate_lines(res):
 
 @pytest.mark.parametrize("order", list(LAYOUTS))
 def test_rows_reconcile_in_each_order(runs, order):
-    res, _ = runs[order]
+    res, _, _ = runs[order]
     data = base64.b64decode(res["transcript"]["data"])
     assert res["status"] == "ok", res.get("error")
     assert operate_lines(res) == ["SHO P 1", "SHO G", "SER"]
@@ -114,7 +127,7 @@ def test_rows_reconcile_in_each_order(runs, order):
 
 @pytest.mark.parametrize("order", list(LAYOUTS))
 def test_simulator_received_only_read_only_lines(runs, order):
-    _, log = runs[order]
+    _, log, _ = runs[order]
     out = subprocess.run([sys.executable, CHECK, "--log", log, "--register", REGISTER],
                          capture_output=True, text=True)
     report = json.loads(out.stdout)
@@ -122,3 +135,20 @@ def test_simulator_received_only_read_only_lines(runs, order):
     assert report["violations"] == [] and report["peak_concurrent_sessions"] == 1, report
     sent = [r["text"] for r in harness.read_log(log) if r.get("event") == "line"]
     assert "SHO G" in sent and sent.index("SHO G") < sent.index("SER"), sent
+
+
+@pytest.mark.parametrize("order", list(LAYOUTS))
+def test_events_carry_the_figure_dates_in_each_order(runs, order):
+    _, _, events = runs[order]
+    printed = FIGURE_DATE.strftime(LAYOUTS[order])
+    rows = reconcile.native_rows()
+    assert len(events) == len(rows), [e.get("native", {}).get("bytes") for e in events]
+    for e, row in zip(events, rows):
+        want = row.replace(b"02/28/2007", printed.encode())
+        assert base64.b64decode(e["native"]["bytes"]) == want, e
+        assert e["collection"]["parse_status"] == "ok", e
+        dt = e["device_time"]
+        tm = row.decode().split()[2]
+        assert dt["native"] == f"{printed} {tm}", dt
+        assert dt["wall_clock"] == f"{FIGURE_DATE.isoformat()}T{tm}", dt
+        assert not [f for f in dt.get("flags", []) if f.startswith("date-format-assumed")], dt

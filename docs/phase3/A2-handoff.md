@@ -49,7 +49,7 @@ The brief is "Task P3-A2" in `docs/agent-handoffs.md`. Every result below is `si
 ## Limitations
 
 - **The `SHO G` layout is documented-untested.** S22 prints no `SHO G` reply, and p. 7.31 states the date order for command responses, not for SER rows. The adapter and A6's simulator both come from the same manual, so agreement between them is not hardware evidence.
-- **The full slice reconcile in YMD and DMY waits on A4.** A4's normalizer still assumes MDY until it reads `DATE_F` (A4's follow-up, on top of #175). Until then the brief's acceptance test "a DMY profile no longer produces the MDY assumption flag" is not met. In the meantime YMD and DMY rows fail safe (invalid-time, partial), but a DMY date whose day is 12 or less comes out as a wrong valid date flagged `assumed` (A4 on #175).
+- **The full slice reconcile in YMD and DMY on the real binaries is not run.** A4's normalizer reads `DATE_F` since #203 (with D3-11 for a result without it). `test_sel751_date_orders.py` now carries each order's adapter result through `normalize.Normalize`: 8 events per order, dated 2007-02-28, with no `date-format-assumed` flag. So the brief's "a DMY profile no longer produces the MDY assumption flag" is met at that level. The store, the forwarder and the real binaries in YMD and DMY are not covered.
 - **The port-server floor rule stays refused** until `T_OUT` evidence exists (H-13). There is no checksum enforcement (V-S19 (d)), and no FTP or SNMP code.
 - **Firmware is not tied to any FID** for the SEL-751 (`docs/device-capabilities.md`).
 
@@ -61,7 +61,8 @@ The brief is "Task P3-A2" in `docs/agent-handoffs.md`. Every result below is `si
 
 ## Dependencies
 
-- **A4:** the normalizer takes the order from `Result.Settings` `DATE_F` and drops the MDY assumption flag when it is present. After that, A6 runs the full slice reconcile in YMD and DMY.
+- **A4:** done in #203 (D3-11).
+- **A6:** if the exit report needs it, the real-binaries slice run in YMD and DMY (`test_slice_e2e.py` with the simulator's `--profile-date-f`).
 - **A6:** spot-check ten cells of #183. Record the P3-A2 acceptance results in `docs/verification.md`.
 - **A3:** read the FTP assessment against D7 and D8 (#183).
 - **A1:** the Phase 4 configuration rung for the SEL-751 is decided on the FTP assessment (ADR-0008 order, item 1). The hardware test it names needs the owner's authorization and an out-of-service lab relay.
