@@ -1,0 +1,42 @@
+# Dry run of the slice's Windows service mode (P3-A5/A6) on the hosted
+# runner, which is elevated. Not for main: this branch only.
+name: slice-service-dryrun
+on:
+  push:
+    branches: [claude/project-thread-xni3ff-svcdry3]
+permissions:
+  contents: read
+jobs:
+  service:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      OTSEC_SLICE_SERVICE: "1"
+      OTSEC_SLICE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
+      - run: openssl version
+      - name: slice against the installed services
+        run: python -m pytest -v -rs --basetemp="$env:RUNNER_TEMP\slice" tests/integration/slice
+      - name: run logs
+        if: always()
+        run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\slice" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
+      - name: independent leftovers check
+        if: always()
+        run: |
+          $left = @()
+          foreach ($s in 'otsec-node','otsec-collector') { if (Get-Service -Name $s -ErrorAction SilentlyContinue) { $left += "service $s" } }
+          foreach ($p in "$env:ProgramData\OTSEC", "$env:ProgramFiles\OTSEC") { if (Test-Path -LiteralPath $p) { $left += $p } }
+          if (Get-NetFirewallRule -DisplayName 'otsec-node: no outbound Telnet (W-3)' -ErrorAction SilentlyContinue) { $left += 'firewall rule' }
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications'
+          if ((Test-Path $k) -and ((Get-Item $k).GetValueNames() -contains 'otsec-collector.exe')) { $left += 'WER value' }
+          foreach ($s in 'otsec-node','otsec-collector') { if ([Diagnostics.EventLog]::SourceExists($s)) { $left += "event source $s" } }
+          if ($left.Count) { "left behind: $($left -join '; ')"; exit 1 } else { 'nothing left behind' }
