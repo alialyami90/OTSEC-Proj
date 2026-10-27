@@ -93,6 +93,21 @@ The evidence byte cap is derived, not measured. One SER read commits atomically,
 
 A read over a cap is refused whole by the Log (`record-too-large`), nothing is stored as events, its bytes go to quarantine, and the node raises `collection-result-refused`. The bound holds for rows the SEL-751 adapter parses (`serRowRE`); a result that marked a row with characters JSON escapes as parsed would be larger and fails the same way.
 
+## Store layout changes (C5 0.5, D4-14)
+
+Format 2 of a database (`meta.format` `otsec.platform-store/2`) keeps `events` in a rowid table with a unique `(stream, seq)` index. Format 1 used a `WITHOUT ROWID` table, whose events over about 1 KB each took an overflow page of their own: a commit wrote up to 3.3 times the WAL the reserve rule allows, and the file grew up to 4.5 times the bytes the quota counts.
+
+A database of format 1 is **refused at start**: the node does not open, change, migrate or delete it. Startup stops with the `store-settings-invalid` alarm and an error that names the way out, and the node reports that database as failed. To start on the new layout:
+
+1. Stop the node.
+2. Copy the store directory aside. Keep the copy as the evidence it holds.
+3. If events in it are not yet forwarded upstream and you need them, start the old node build against the copy until its targets have confirmed them.
+4. Remove the database files (`*.db`, `*.db-wal`, `*.db-shm`) and the reserve files from the store directory, and start the node. It creates format 2 databases.
+
+There is no migration. It would need free space equal to the database and a copy of every event, and all data written so far is simulated lab data.
+
+**Sizing the volume (D4-14).** The file of a database grows by at most `DiskBytesPerQuotaByte` (2.5) bytes for each byte its class quotas count. A volume therefore needs the sum of the class quotas × 2.5, plus each database's recovery and last-resort reserves (the table above). No figure for a volume may come from the raw sum of the quotas.
+
 ## The scheduler
 
 `Scheduler` runs the schedule one entry at a time, so the node never holds more than one device session (AP-13, SC-9). The first run of each entry waits 60 s after start, so a node in a restart loop never polls faster than the minimum interval. A late run is not repeated to catch up. However the schedule is written, an asset gets at least 60 s between the end of one session and the start of the next, so two entries for one asset, or a run longer than its interval, never poll a device faster than the minimum (A6 review of #92).

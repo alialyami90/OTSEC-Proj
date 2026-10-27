@@ -16,7 +16,24 @@ import (
 
 // Format is the schema identifier kept in every database's meta table.
 // A database with another format is refused, never migrated, in Phase 2.
-const Format = "otsec.platform-store/1"
+// Format 2 (C5 0.5, D4-14) has a rowid events table: the first format's
+// WITHOUT ROWID table spilled every event over about 1 KB to an overflow
+// page of its own, so a commit wrote up to 3.3 times the WAL the reserve
+// rule allows and the file grew up to 4.5 times the bytes the quota counts.
+const Format = "otsec.platform-store/2"
+
+// legacyFormat is the first format. It is refused with legacyRefusal.
+const legacyFormat = "otsec.platform-store/1"
+
+// legacyRefusal is why a database of the first format is not opened, and
+// the way out. It is never changed, rewritten or deleted by the node.
+func legacyRefusal(path string) error {
+	return invalid("store %s was created by an earlier layout (format %s, events WITHOUT ROWID); "+
+		"the recovery reserve is not sized for it (C5 0.5, D4-14), so it is not opened, changed or deleted. "+
+		"To start on this layout: stop the node, copy the store directory aside, let any events you need "+
+		"forward upstream first (or keep the copy), remove the database files, and start the node (platform/node README, \"Store layout changes\")",
+		path, legacyFormat)
+}
 
 // DB is one open database. It implements contracts/store.Committer and
 // contracts/store.RecoveryStore.
@@ -59,14 +76,15 @@ CREATE TABLE streams (
 	anchor_hash   TEXT
 ) WITHOUT ROWID;
 CREATE TABLE events (
+	id            INTEGER PRIMARY KEY,
 	stream        TEXT NOT NULL,
 	seq           INTEGER NOT NULL,
 	event         BLOB NOT NULL,
 	capture       TEXT,
 	source_cursor BLOB,
-	committed_at  INTEGER NOT NULL,
-	PRIMARY KEY (stream, seq)
-) WITHOUT ROWID;
+	committed_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX events_key ON events (stream, seq);
 CREATE INDEX events_by_time ON events (stream, committed_at, seq);
 CREATE INDEX events_by_capture ON events (capture) WHERE capture IS NOT NULL;
 CREATE TABLE captures (
@@ -388,6 +406,9 @@ func (d *DB) CheckSettings(ctx context.Context) error {
 		meta[k] = v
 	}
 	rows.Close()
+	if meta["format"] == legacyFormat {
+		return legacyRefusal(d.path)
+	}
 	for k, v := range map[string]string{"format": Format, "node_id": string(d.opt.Node), "database": string(d.opt.Database.ID)} {
 		if meta[k] != v {
 			return invalid("store %s is %q, want %q", k, meta[k], v)
