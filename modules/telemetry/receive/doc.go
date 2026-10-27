@@ -65,7 +65,11 @@
 //     sender's stream message is never dropped. The bucket starts at
 //     UnknownBytes less Config.UnknownSpent, what the node counts as
 //     already stored in the window before this start, so a restart does
-//     not refill it.
+//     not refill it. An unknown sender's message is paid for as it is read,
+//     just after its received time is stamped, so the node's count by
+//     received time is exact, and a message past the budget is dropped
+//     before it takes queue room. The reader does no I/O for it: the alarm
+//     is raised off the read path.
 //   - Storage full follows the C5 class. syslog-stream (TCP, TLS) is
 //     refuse-new: a refused batch is held and retried, the connection is not
 //     read meanwhile (Status.Held), and nothing read is dropped while the
