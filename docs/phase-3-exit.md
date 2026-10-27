@@ -1,6 +1,6 @@
 # Phase 3 exit report
 
-Owner: A1. Date: 2026-10-27. Status: **the gate passed with conditions (A1, 2026-10-27), pending the owner's acceptance.** Gate item 1, the slice against the installed services on the owner's PC, ran on 2026-10-27 and A6 recorded it as met with conditions (#208).
+Owner: A1. Date: 2026-10-27. Status: **the gate passed with conditions (A1, 2026-10-27), and the owner accepted it on 2026-10-27 (D4-1).** Gate item 1, the slice against the installed services on the owner's PC, ran on 2026-10-27 and A6 recorded it as met with conditions (#208).
 
 This report closes Phase 3: hardening the simulated SEL-751 slice so that a `device-observed` endpoint can later be allowed, and starting the owner's monitoring goals (ADR-0008) at their first rung. It follows the milestone format in `CLAUDE.md` §9 and mirrors `docs/phase-2-exit.md`. No device was contacted. Every result is `desk` (Go and Python tests on a CI runner or A1's container), `simulated` (the real binaries against A6's recording simulator), or from the GitHub-hosted Windows runner where that is stated. No result is `hardware-verified` (B-01). H-01 to H-15 are written and were not run, as the owner directed.
 
@@ -169,4 +169,4 @@ D3-1 to D3-11 are in `docs/phase3/A1-decisions.md`. These matter most for later 
 
 ## Owner sign-off
 
-Not yet given.
+Given on 2026-10-27 at 18:26Z. The owner wrote "Start phase 4 and all work." in reply to B1's question about what they wanted checked first, and asked for no further check. The conditions above carry into Phase 4 as the carried checks and the carry-over items (D4-1).
