@@ -41,6 +41,8 @@ type Status struct {
 	listeners   map[string]ListenerStatus
 	nodeKeys    []NodeKeyExpiry
 	adminReqs   []AdminRequestStatus
+	labTLS      bool
+	labTLSRefs  []string
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -101,6 +103,11 @@ type StatusFile struct {
 	// AdminRequests is each admin-request file in admin_dir and the
 	// collector's decision on it, if any (adminrelay.go).
 	AdminRequests []AdminRequestStatus `json:"admin_requests,omitempty"`
+	// LabTLSFiles is true when lab_tls_files is set, and LabTLSFileRefs
+	// names the references whose private key is read from a file
+	// (nodekeys.go, B3 on #176).
+	LabTLSFiles    bool     `json:"lab_tls_files,omitempty"`
+	LabTLSFileRefs []string `json:"lab_tls_file_refs,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -267,6 +274,14 @@ func (s *Status) SetNodeKeys(k []NodeKeyExpiry) {
 	s.mu.Unlock()
 }
 
+// SetLabTLSFiles records that lab_tls_files is set, and the references
+// whose private key is read from a file.
+func (s *Status) SetLabTLSFiles(refs []string) {
+	s.mu.Lock()
+	s.labTLS, s.labTLSRefs = true, slices.Clone(refs)
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -339,6 +354,7 @@ func (s *Status) Snapshot(node string) StatusFile {
 		f.Listeners = maps.Clone(s.listeners)
 	}
 	f.NodeKeys = slices.Clone(s.nodeKeys)
+	f.LabTLSFiles, f.LabTLSFileRefs = s.labTLS, slices.Clone(s.labTLSRefs)
 	if len(s.adminReqs) > 0 {
 		f.AdminRequests = slices.Clone(s.adminReqs)
 	}

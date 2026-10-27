@@ -337,3 +337,60 @@ func TestNodeKeyExpiry(t *testing.T) {
 		t.Fatalf("expired: %q", a)
 	}
 }
+
+// postureRecords are the node.posture_change records with reason.
+func postureRecords(t *testing.T, r *Runtime, reason string) []string {
+	t.Helper()
+	var out []string
+	for _, rec := range auditRecords(t, r) {
+		if rec.Action == audit.ActionNodePostureChange && rec.ReasonCode == reason {
+			out = append(out, rec.Detail)
+		}
+	}
+	return out
+}
+
+// A node with lab_tls_files says so at every start, in the audit chain and
+// in status, naming the references whose private key is in a file, as a
+// plaintext listener does (B3 on #176). Without the flag it says nothing.
+func TestLabTLSFilesPosture(t *testing.T) {
+	nc, _, _, dir := keyConfig(t, "", time.Now().Add(24*time.Hour))
+	lockTLS(t, nc)
+	for run := 1; run <= 2; run++ {
+		r, st, _ := start(t, parse(t, nc), dir)
+		if _, err := NewForwarding(r); err != nil {
+			t.Fatal(err)
+		}
+		r.RecordLabTLSFiles(bg)
+		got := postureRecords(t, r, ReasonLabTLSFiles)
+		if len(got) != run || !strings.HasSuffix(got[run-1], "from files: "+nodeconfigtest.ClientKeyRef) {
+			t.Fatalf("start %d: records %q", run, got)
+		}
+		if s := st.Snapshot("x"); !s.LabTLSFiles || !slices.Equal(s.LabTLSFileRefs, []string{nodeconfigtest.ClientKeyRef}) {
+			t.Fatalf("start %d: status %v %q", run, s.LabTLSFiles, s.LabTLSFileRefs)
+		}
+		r.Close()
+	}
+
+	// Without a register, every private key is a tls_dir file.
+	fc, _, fdir := forwardConfig(t, 1, nil)
+	lockTLS(t, fc)
+	r, st, _ := start(t, parse(t, fc), fdir)
+	if _, err := NewForwarding(r); err != nil {
+		t.Fatal(err)
+	}
+	r.RecordLabTLSFiles(bg)
+	ref := fc.Targets[0]["tls"].(map[string]any)["client_credential_ref"].(string)
+	if s := st.Snapshot("x"); !slices.Equal(s.LabTLSFileRefs, []string{ref}) || len(postureRecords(t, r, ReasonLabTLSFiles)) != 1 {
+		t.Fatalf("tls_dir files: %q", s.LabTLSFileRefs)
+	}
+	r.Close()
+
+	nc, dir = listenConfig(t, func(nc *nodeconfigtest.Config) { nc.LabTLSFiles, nc.TLSDir = false, "" })
+	r, st, _ = start(t, parse(t, nc), dir)
+	defer r.Close()
+	r.RecordLabTLSFiles(bg)
+	if got := postureRecords(t, r, ReasonLabTLSFiles); len(got) != 0 || st.Snapshot("x").LabTLSFiles {
+		t.Fatalf("without the flag: %q", got)
+	}
+}

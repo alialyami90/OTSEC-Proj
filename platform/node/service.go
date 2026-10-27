@@ -42,6 +42,7 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	// record its new entries (section 9).
 	keysLeft := rt.RecordNodeKeys(ctx)
 	rt.CheckNodeKeys()
+	rt.RecordLabTLSFiles(ctx)
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
 	if err != nil {
 		return err

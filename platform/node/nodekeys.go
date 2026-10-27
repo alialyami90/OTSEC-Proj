@@ -11,7 +11,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/audit"
@@ -341,4 +343,60 @@ func (r *Runtime) CheckNodeKeys() {
 		}
 	}
 	r.opt.Status.SetNodeKeys(out)
+}
+
+// ReasonLabTLSFiles is the reason_code of the node.posture_change record
+// a node with lab_tls_files gets at every start (B3 on #176): its TLS
+// private keys may be read from files, which is lab only (D2-12), and is
+// as visible as a plaintext listener (D3-5).
+const ReasonLabTLSFiles = "lab_tls_files"
+
+// labKeyRefs is the TLS references whose private key this configuration
+// reads from a file: every one when there is no key_register, otherwise
+// those whose active register entry is in the lab-files provider. It is
+// called after the references have resolved at start.
+func (c *Config) labKeyRefs() []string {
+	var refs []string
+	for _, t := range c.targets {
+		if t.TLS != nil && t.TLS.ClientCredentialRef != "" {
+			refs = append(refs, t.TLS.ClientCredentialRef)
+		}
+	}
+	for _, l := range c.Listeners {
+		if l.TLS != nil && l.TLS.CredentialRef != "" {
+			refs = append(refs, l.TLS.CredentialRef)
+		}
+	}
+	if c.KeyRegister != "" {
+		refs = slices.DeleteFunc(refs, func(ref string) bool {
+			if c.keys == nil {
+				return true
+			}
+			p, err := c.keys.providerOf(ref)
+			return err != nil || p != nodekey.ProviderLabFiles
+		})
+	}
+	slices.Sort(refs)
+	return slices.Compact(refs)
+}
+
+// RecordLabTLSFiles writes the lab_tls_files posture record and marks
+// status, at every start with the flag set, once every reference has
+// resolved.
+func (r *Runtime) RecordLabTLSFiles(ctx context.Context) {
+	if !r.cfg.LabTLSFiles {
+		return
+	}
+	refs := r.cfg.labKeyRefs()
+	r.opt.Status.SetLabTLSFiles(refs)
+	from := "no reference of this configuration uses one yet"
+	if len(refs) > 0 {
+		from = "from files: " + strings.Join(refs, ", ")
+		if len(from) > 300 {
+			// C8 detail is at most 512 bytes; status lists them all.
+			from = from[:300] + fmt.Sprintf("... (%d references; see node status)", len(refs))
+		}
+	}
+	r.audit(ctx, audit.ActionNodePostureChange, audit.OutcomeInfo, ReasonLabTLSFiles,
+		"lab_tls_files is set: TLS private keys may be read from files in tls_dir, not a key store (lab only, D2-12); "+from)
 }

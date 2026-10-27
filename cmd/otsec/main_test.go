@@ -232,6 +232,20 @@ func TestHealthShowsNodeKeys(t *testing.T) {
 	}
 }
 
+// health prints the lab_tls_files posture with the references whose key is
+// in a file (B3 on #176).
+func TestHealthShowsLabTLSFiles(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetLabTLSFiles([]string{"nodekey_client01"})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "LAB TLS KEYS IN FILES: lab_tls_files is set, so TLS private keys may be read from files in tls_dir, not a key store (lab nodes only, D2-12); from files: nodekey_client01"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
 // health says when a node-wide hold is current, and says nothing once it
 // has ended, though its alarm stays in the history (A3 on #147).
 func TestHealthShowsRunsHeld(t *testing.T) {

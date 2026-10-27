@@ -472,6 +472,13 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		}
 		fmt.Fprintf(w, "NODE KEY CERTIFICATE %s %s (%s) at %s: install a new version in the key register\n", verb, safe(k.Ref), safe(k.Kind), k.NotAfter.Format(time.RFC3339))
 	}
+	if st.LabTLSFiles {
+		refs := "no reference of this configuration uses one yet"
+		if len(st.LabTLSFileRefs) > 0 {
+			refs = "from files: " + safe(strings.Join(st.LabTLSFileRefs, ", "))
+		}
+		fmt.Fprintf(w, "LAB TLS KEYS IN FILES: lab_tls_files is set, so TLS private keys may be read from files in tls_dir, not a key store (lab nodes only, D2-12); %s\n", refs)
+	}
 	for _, id := range node.SortedListeners(st.Listeners) {
 		ls := st.Listeners[id]
 		state := "open"
