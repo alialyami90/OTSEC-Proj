@@ -363,3 +363,83 @@ func TestC10B6SyslogKeyLeavesOutWhatASenderChooses(t *testing.T) {
 		t.Errorf("no PRI: %+v", k)
 	}
 }
+
+// TestC10B6CatchUpCountsForNewTypeOnly: D4-9 (B1 on #254, amending D4-4
+// item 2): a type-only row, first-read included, counts toward the
+// new-type rule alone, so a first read's backlog cannot lift MaxPerWindow
+// and switch the repeats rule off, and a catch-up read after an outage
+// cannot raise repeats, rate or time.
+func TestC10B6CatchUpCountsForNewTypeOnly(t *testing.T) {
+	rules := []baseline.Rule{baseline.RuleNewType, baseline.RuleRepeats, baseline.RuleRate, baseline.RuleTime, baseline.RuleAbsence}
+	for _, u := range []baseline.Use{baseline.UseFull, baseline.UseTypeOnly, baseline.UseNone} {
+		for _, r := range rules {
+			want := u == baseline.UseFull || (u == baseline.UseTypeOnly && r == baseline.RuleNewType)
+			if got := u.Applies(r); got != want {
+				t.Errorf("%s toward %s: %v, want %v", u, r, got, want)
+			}
+		}
+	}
+	// Every catch-up class is type-only (Classify), so all of them reach
+	// new-type alone.
+	for _, a := range []event.Alignment{event.AlignFirstRead, event.AlignGapBefore} {
+		r := c10Row("sha256:"+strings.Repeat("d", 64), false)
+		r.Collection.Alignment = a
+		if _, _, use, _ := baseline.Classify(r, false); use.Applies(baseline.RuleRepeats) || !use.Applies(baseline.RuleNewType) {
+			t.Errorf("%s: %s", a, use)
+		}
+	}
+}
+
+// c10Baseline is a recorded baseline: one type seen 200 times in full,
+// and one seen only in a first read's backlog, six rows at one instant.
+func c10Baseline(t *testing.T, backlogWindow int64) *baseline.Baseline {
+	t.Helper()
+	var p baseline.Params
+	if err := json.Unmarshal(c10Load(t, "events.json").Params, &p); err != nil {
+		t.Fatal(err)
+	}
+	full := baseline.Type{Key: baseline.Key{Source: baseline.SourceSER, Element: "IN101", State: "Asserted"}, Text: "IN101 Asserted",
+		Count: 200, Full: 200, MaxPerWindow: 1, MaxPerBucket: 2, FirstUTC: "2026-11-02T06:05:00Z", LastUTC: "2026-11-15T20:35:00Z"}
+	for h := 6; h < 16; h++ {
+		full.HoursUTC[h] = 20
+	}
+	backlog := baseline.Type{Key: baseline.Key{Source: baseline.SourceSER, Element: "52A", State: "Asserted"}, Text: "52A Asserted",
+		Count: 6, Full: 0, MaxPerWindow: backlogWindow, FirstUTC: "2026-11-02T00:00:01Z", LastUTC: "2026-11-02T00:00:01Z"}
+	types := []baseline.Type{full, backlog}
+	if types[0].Key.String() > types[1].Key.String() {
+		types[0], types[1] = types[1], types[0]
+	}
+	return &baseline.Baseline{
+		Schema: baseline.Identifier, NodeID: "site-a-node1", AssetID: c10Asset, Version: 1,
+		Learner: baseline.Learner{Name: "b6-hand", Version: "0.1"}, Params: p,
+		Period:      baseline.Period{StartUTC: "2026-11-02T00:00:00Z", EndUTC: "2026-11-16T00:00:00Z", CollectedS: 14 * 86400},
+		Counts:      baseline.Counts{Events: 206, Full: 200, TypeOnly: 6},
+		Types:       types,
+		RecordedUTC: "2026-11-16T00:00:01Z",
+	}
+}
+
+// TestC10B6BacklogLeavesNoWindow: a type seen only in catch-up has
+// max_per_window 0; the old reading (6, its backlog at one instant) is
+// refused. The record is stored and hashed as encoded (D4-4 item 5).
+func TestC10B6BacklogLeavesNoWindow(t *testing.T) {
+	b := c10Baseline(t, 0)
+	enc, err := baseline.Encode(b, 0)
+	if err != nil {
+		t.Fatalf("a baseline with a catch-up-only type: %v", err)
+	}
+	sum := sha256.Sum256(enc)
+	if h := baseline.Hash(enc); h != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Errorf("Hash %s", h)
+	}
+	back, err := baseline.Decode(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := baseline.Encode(back, 0); err != nil || !bytes.Equal(again, enc) {
+		t.Errorf("decode and encode again changed the stored bytes (%v)", err)
+	}
+	if err := c10Baseline(t, 6).Validate(); err == nil || !strings.Contains(err.Error(), "max_per_window") {
+		t.Errorf("a backlog counted in max_per_window was accepted (%v)", err)
+	}
+}
