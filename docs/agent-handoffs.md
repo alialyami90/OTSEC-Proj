@@ -785,3 +785,101 @@ Phase 3 hardens the slice so that a `device-observed` endpoint can later be allo
 - V-S8 passes end to end, and received Syslog passes A6's tests end to end on the real binaries.
 - The capability matrix states the rung each SEL family reaches, with citations, and `docs/verification.md` has criteria for every requirement ADR-0008 added.
 - No safety or security objection is open, and `docs/phase-3-exit.md` records what remains `simulated`.
+
+## Phase 4 task briefs (draft, 2026-10-27; issued when the owner accepts the Phase 3 exit)
+
+Phase 4 starts the owner's monitoring goals in ADR-0008's order. Only the first two expansions are briefed in full here, because they share the store and the audit chain and their contracts must be agreed together (CLAUDE.md §5.4). Items 3 to 6 are outlined with their dependencies; each gets a full brief, contracts first, when the one before it passes its gate. The carry-over and hygiene tasks run beside them. Nothing in Phase 4 contacts a device: every endpoint stays on the simulator (D2-4, D2-10), and H-01 to H-15 and Q3 stay prepared only until the owner authorizes a lab relay.
+
+### Common rules for every Phase 4 brief
+
+- The Phase 3 common rules stand: no device, owned paths only, the dependency list, evidence class on every test, small PRs, a handoff at the end.
+- **Testing (D2-13):** a PR merges when its reviewers accept it and every CI job is green on its head. When the head's CI predates newer `main`, the Windows leg runs against the merged result before merge (Phase 3 lesson).
+- **Toolchain (D3-10):** the latest patch of a supported Go minor; bumps are their own PR, reviewed by A3 and A6, never auto-merged.
+- **Contracts:** each change bumps the minor, keeps a reader for the previous version, and has A6's contract tests before merge. A new contract is proposed by its owner and approved by A1 after every consumer reviews it.
+- **A6's criteria are fixed first.** V-M1 to V-M8 in `docs/verification.md` are the bar. A brief may not lower a threshold after its test has run.
+
+### Decision for the SEL-751 configuration rung (ADR-0008 decision 4)
+
+Taken here, as ADR-0008 requires, on A2's FTP assessment (#183): **the SEL-751 stays on rung 3, command-line `SHO` over the Telnet path, for configuration as for events.** Rung 2 (FTP) needs hardware test Q3 to show that a Level 1 FTP login cannot write, and A3's D7 and D8 objection stands until then. Q3 needs the owner's authorization and an out-of-service lab relay. If Q3 shows a read-only Level 1 login, a later brief adds the FTP rung for the SEL-751 under V-M3's read-only bound, and the `SHO` path becomes its fallback. A family the matrix marks rung 2 with a documented read-only Level 1 (for example the one at `docs/device-capabilities.md` line 117) is not built in Phase 4: it has no simulator profile and no register yet.
+
+### Task P4-A2: Configuration retrieval for the SEL-751 (R3.1, R3.3, R3.5, R3.7)
+- Objective and rationale: a configuration baseline needs a complete, repeatable read of the settings an engineer can change, with the native bytes kept, and a difference that ignores what is not a setting.
+- Owner agent: A2. A6 reviews device safety and correctness; A3 reviews the register additions; A5 reviews the result's size and storage.
+- Required inputs and dependencies: S22 (the `SHO` forms and their access levels, Table 7.67 and the settings tables in Section 4); C2 0.5, C3 0.2 and register revision 4; the `SHO G` and `SHO P 1` parsers; the deny corpus.
+- Files or modules the agent may modify: `contracts/adapter/` (C2, with A1's approval), `contracts/register/` content (C3, signed), a new `contracts/config/` (C9, with A1's approval), `modules/ied/sel751/`, `tests/fixtures/ied/`, `docs/device-capabilities.md`, `docs/phase4/A2-*.md`.
+- Expected interfaces:
+  - **C9 `otsec.config/0.1`** (new, A2 drafts, A1 approves after A5, A3 and A6 review): a configuration snapshot (asset, retrieval time, the session's evidence ID, one section per settings class with its native bytes and SHA-256, and the parsed settings as name and value exactly as printed); a semantic difference between two snapshots (each changed, added or removed setting with both values); and the per-family rule that decides what is not a setting (headers, the relay's date and time, checksums, paging), stated in the contract and tested.
+  - **C2 0.6**: a `config.read` operation whose result is a C9 snapshot. It reuses the session rules of `ser.read` (one session, at most one password, Level 1 only, `QUI` last, the failed-auth floor).
+  - **Register revision 5**: each `SHO` form needed, at Level 1, each with its timeout and byte cap. No `SET`, `FIL WRITE` or Level 2 entry.
+- Deliverable: the operation, the parsers with a fuzz target each, goldens transcribed from the manual's settings figures and tables, and the C9 difference with its non-semantic rules.
+- Acceptance tests (A6 independent): every `SHO` line the collector sends is in the register and passes the deny corpus (V-S7); the same configuration read twice, with a different time and page break, gives an empty difference; each single-setting change A6 injects in the simulator gives a difference naming exactly that setting; a reply that cannot be parsed is kept with its bytes and fails the read (never a partial snapshot presented as complete); mutation of the non-semantic rule is caught.
+- Explicit exclusions: no FTP code; no write or restore of settings (brief §1.3); no family other than the SEL-751.
+- Uncertainty or safety risks: the `SHO` layouts are `documented-untested`; every assumption stays in the goldens. Each extra `SHO` line adds session time at Level 1, so the read's total time and the poll interval are stated in the register and checked against H-04 when hardware exists.
+
+### Task P4-A3: Change approvals (R3.4, R3.6)
+- Objective and rationale: the owner's rule is that a configuration stays unchanged unless a change was approved in advance. "In advance" must be provable from the audit chain, and an approval must come from a person, not from a compromised node.
+- Owner agent: A3. A5 implements the node side; A6 writes the tests to V-M2.
+- Required inputs and dependencies: C7 0.5's admin-signed node kinds and C8 0.4; D2-11 and D2-15; V-M2.
+- Files or modules the agent may modify: `contracts/authz/` (C7), `contracts/audit/` (C8), `modules/security/`, `docs/phase4/A3-*.md`.
+- Expected interfaces: **C7 0.6** adds the admin-signed node kind `node.change_approval` (asset, window start and end, reason, approver, nonce); **C8 0.5** adds `config.change_approved`, `config.change_detected` (with the C9 difference's hash and whether an approval matched) and `config.baseline_acknowledged`. Order in the chain decides "prior", never a time written in the approval (V-M2).
+- Deliverable: the two contract changes with their tests; the verifier rules for an approval (signature, approver role, window not already ended, asset known).
+- Acceptance tests (A6 independent): V-M2's seven cases, each binary; a replayed or re-signed approval for another asset is refused; editing or deleting an approval is caught by chain verification.
+- Explicit exclusions: no approval through the node's own IPC; no approval entered in a UI; no link to an external ticketing system.
+- Uncertainty or safety risks: an approval that is too broad (a long window, every asset) would silence real changes. The verifier caps the window (A3 proposes the cap) and the alarm text shows which approval silenced it.
+
+### Task P4-A5: Configuration baselines in the node (R3.2, R3.4, R3.6)
+- Objective and rationale: the node schedules configuration reads, keeps every snapshot, holds one acknowledged baseline per asset, and alarms on an unapproved difference.
+- Owner agent: A5. A3 reviews the trust boundary; A6 reviews reliability.
+- Required inputs and dependencies: C9 and C2 0.6 (P4-A2), C7 0.6 and C8 0.5 (P4-A3), C5 0.3.
+- Files or modules the agent may modify: `contracts/store/` (C5, with A1's approval), `platform/`, `cmd/otsec/`, `docs/phase4/A5-*.md`.
+- Expected interfaces: **C5 0.4**: a configuration stream class for snapshots with its own quota (never pruned while it holds the baseline or an unacknowledged difference); the schedule (a configuration read at most once per hour per asset by default, never in the same session as a SER read unless the register allows both); the first snapshot becomes the baseline only when an administrator acknowledges it (the same rule A1 set for R4.8); `otsec health` and `otsec config <asset>` show the baseline, the last read and any open difference.
+- Deliverable: the schedule, the store class, the baseline and approval handling, the alarm, and their tests.
+- Acceptance tests (A6 independent): V-M2 end to end on the real binaries with A6's GT-INJ change series; a snapshot is never lost across a SIGKILL at each commit point; the configuration class at quota stops configuration reads with a warning first and never displaces events.
+- Explicit exclusions: no restore, no push, no automatic re-baseline.
+- Uncertainty or safety risks: a configuration read holds Level 1 longer than a SER read; the failed-auth floor and the one-session rule apply unchanged.
+
+### Task P4-A4: The event-behaviour baseline (R4.8)
+- Objective and rationale: the owner's second goal. A per-asset baseline of Syslog and SER events, learnt over an observation period, with explainable alarms on departures.
+- Owner agent: A4. A5 stores the baseline; A6 tests to V-M4; A2 reviews the event-type key for SER.
+- Required inputs and dependencies: C4 0.2, the received Syslog and SER paths, V-M4 and "R4.8 observation period and measures" in `docs/verification.md`, which fix the event-type key, the clock, the period, the five departure rules and the measures.
+- Files or modules the agent may modify: `modules/detection/` (new package for event baselines), a new `contracts/baseline/` (C10, with A1's approval), `tests/fixtures/network/`, `docs/phase4/A4-*.md`.
+- Expected interfaces: **C10 `otsec.baseline/0.1`**: the baseline record (asset, period, coverage, each event type with its counts, hours and any period found), and the departure alarm (rule, parameters, baseline value, observation, the IDs of the events that broke it). Deterministic rules only; no machine learning.
+- Deliverable: the learner, the five rules, the alarm, and the measures report.
+- Acceptance tests (A6 independent): V-M4 in full, on GT-INJ series with a held-out benign series.
+- Explicit exclusions: no machine learning; no network baseline (that is IDS, item 4).
+- Uncertainty or safety risks: a synthetic false-positive rate says nothing about a real device; the real rate needs site data.
+- **Timing.** C10 is drafted beside C9 so the two share their store design; A4's implementation follows P4-A5's C5 0.4.
+
+### Task P4-A6: Verification for items 1 and 2, and the carried checks
+- Owner agent: A6.
+- Deliverable: the `SHO` forms in the simulator, from the manual and independently of A2, with a change injector; GT-INJ series for configuration changes and event departures, committed before the products' tests first run; the acceptance tests in each brief above; and the carried checks: the full DMY and YMD slice reconcile, and a Windows end-to-end check of the admin relay and `config\admin`'s ACLs on the hosted runner.
+- Acceptance tests: each check fails on a deliberately broken build (mutation).
+- Explicit exclusions: no hardware without the owner's authorization.
+
+### Carry-over and hygiene (beside items 1 and 2)
+
+- **A5:** #176 (the node reads its TLS keys from the key store; D2-12 closes), #177, and relay PR 2 of #181 (signed `clear-*`; N1/N3, N18, N21, N24, N27, N9; a deadline in `collectorclient.Do`). `runtime.Version()` in `otsec health`.
+- **A4 with A5: HR-11's absolute bound.** A separate C5 stream and quota for unknown senders, with a health alarm when it is reached, and A6's test that fills it across an outage while a known device still stores. It gates the first `device-observed` listener. Also a configurable UDP receive buffer that logs the size granted, and a sound faster unknown count (the store keeps the stream's latest received time, or a running total saved with commits).
+- **A3:** a pinned `govulncheck` job in CI on every PR and weekly (A1 authorizes the `ci.yml` change); the C8 asset-ID-pattern test case.
+
+### Items 3 to 6 (outlines; full briefs later)
+
+3. **Vulnerability applicability with the asset module (R9, R1.8).** A2 owns `modules/asset/` with an SNMPv3 read-only adapter under the register rules; A3 owns the signed offline advisory-set format; A6 builds GT-MIB and GT-ADV. Depends on item 1's identity and settings reads. The first SNMPv3 family needs its own simulator profile.
+4. **IDS (R6).** A4, starting from the Phase 0 Zeek and Suricata evaluation and GT-PCAP. Neither stock engine decodes IEC 61850 MMS, GOOSE, SV or IEC 60870-5-104, so the brief starts by choosing the protocols the first sensor must decode, from the owner's sites.
+5. **Secure engineering access (R2).** A3, from the Phase 0 Q1 comparison (protocol proxying against controlled remote workstations).
+6. **The central role (R8).** A5, with V-S18.
+
+### Order
+
+1. A2 drafts C9 and A4 drafts C10 at once; A3 drafts C7 0.6 and C8 0.5. A1 approves the four together after every consumer reviews them.
+2. A6 writes the simulator's `SHO` forms and the GT-INJ series at the same time, before any product test runs.
+3. A2's `config.read`, A3's verifier and A5's C5 0.4 follow in parallel; A4's learner follows C5 0.4.
+4. The carry-over tasks run beside them; HR-11's bound before any `device-observed` listener, D2-11's and D2-12's closures before any `device-observed` endpoint.
+
+### Phase 4 first exit gate (items 1 and 2; A1 decides)
+
+- V-M2, V-M3 (for the SEL-751) and V-M4 pass on the real binaries, `simulated`.
+- C9, C10, C2 0.6, C5 0.4, C7 0.6 and C8 0.5 are merged with their reviewers' records and A6's contract tests.
+- V-S7 still passes with the new register lines, and the deny corpus covers every `SHO` form added.
+- #176 and relay PR 2 are merged; HR-11's absolute bound is merged or recorded as the open condition before any `device-observed` listener.
+- No safety or security objection is open.
