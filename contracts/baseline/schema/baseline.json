@@ -113,7 +113,7 @@
         "max_types": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 65536
+          "maximum": 4096
         },
         "alarm_hold_s": {
           "type": "integer",

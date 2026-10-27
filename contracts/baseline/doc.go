@@ -51,7 +51,11 @@
 //     period ends: the asset, the period and its coverage, the parameters,
 //     and every type learnt with its counts, hours, window and bucket maxima
 //     and any period found. A re-learn is a new record with Version + 1 that
-//     names the record it replaces in Previous.
+//     names the record it replaces in Previous. It is stored compact
+//     (Encode) in C5 0.4's configuration class, and is at most MaxBytes:
+//     past max_types, or past what fits, the types with the lowest count
+//     are left out and counted in types_overflow, and are new types once
+//     the baseline is active.
 //   - The baseline hash (Hash, D4-4 item 5): SHA-256 over the stored
 //     record's exact bytes, with no canonical JSON. C7 0.6 node.baseline_ack
 //     names it; C9 uses the same rule for configuration baselines.

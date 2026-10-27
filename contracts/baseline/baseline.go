@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -28,7 +29,16 @@ const (
 
 // MaxTypesCeiling is the most types any baseline may hold. Params.MaxTypes
 // is at or below it.
-const MaxTypesCeiling = 65536
+const MaxTypesCeiling = 4096
+
+// MaxBytes is the most bytes a stored baseline may take: the default
+// MaxRecordBytes of C5 0.4's configuration class, which stores it. A type
+// takes about 270 to 630 bytes encoded compact (desk measurement), so a
+// baseline is bounded by bytes before it reaches MaxTypesCeiling. A learner
+// fits the baseline to MaxBytes, or to the node's configured cap if lower,
+// leaving out the types with the lowest Count; Encode refuses one that does
+// not fit.
+const MaxBytes = 512 << 10
 
 // MaxAlarmsPerHoldCeiling bounds Params.MaxAlarmsPerHold. It is
 // provisional: B5 sizes the platform class quota against it and may lower
@@ -101,8 +111,9 @@ type Params struct {
 	PeriodicTolerancePct   int64 `json:"periodic_tolerance_pct"`
 	// TimeClock is the clock of Type.HoursUTC and of the time rule.
 	TimeClock Clock `json:"time_clock"`
-	// MaxTypes bounds Types. Types past it are counted in
-	// Counts.TypesOverflow and are new types once the baseline is active.
+	// MaxTypes bounds Types. Types past it, or past what fits in MaxBytes,
+	// are counted in Counts.TypesOverflow and are new types once the
+	// baseline is active.
 	MaxTypes int64 `json:"max_types"`
 	// Alarm bounds, so a departure storm cannot fill the platform class.
 	// An alarm for one (asset, rule, key) is raised at most once per
@@ -147,8 +158,9 @@ type Counts struct {
 	TypeOnly   int64 `json:"type_only"`
 	Unkeyed    int64 `json:"unkeyed"`
 	NotCounted int64 `json:"not_counted"` // possible duplicates suppressed (PossibleDuplicates)
-	// TypesOverflow is the number of types seen past Params.MaxTypes; their
-	// events are in Full and TypeOnly but in no Type.
+	// TypesOverflow is the number of types left out, past Params.MaxTypes
+	// or past MaxBytes; their events are in Full and TypeOnly but in no Type.
+	// A learner keeps the types with the highest Count, ties by key.
 	TypesOverflow int64 `json:"types_overflow"`
 }
 
@@ -399,8 +411,10 @@ func (b *Baseline) checkTypes(c *checker, start, end time.Time) {
 	if int64(len(b.Types)) > b.Params.MaxTypes && b.Params.MaxTypes > 0 {
 		c.fail(CodeRange, "types", "%d types, above params.max_types %d", len(b.Types), b.Params.MaxTypes)
 	}
-	if b.Counts.TypesOverflow > 0 && int64(len(b.Types)) != b.Params.MaxTypes {
-		c.fail(CodeConflict, "counts.types_overflow", "types overflowed, so types holds exactly params.max_types")
+	// With TypesOverflow set, Types holds max_types or fewer: a learner
+	// stops at max_types or at MaxBytes, whichever comes first.
+	if b.Counts.TypesOverflow > 0 && len(b.Types) == 0 {
+		c.fail(CodeConflict, "counts.types_overflow", "types overflowed, so at least one type was kept")
 	}
 	var count, full int64
 	prev := ""
@@ -463,12 +477,36 @@ func (t *Type) check(c *checker, f string, p *Params, start, end time.Time) {
 	}
 }
 
+// Encode validates b and encodes it compact, as it is stored: the bytes
+// Hash is taken over. It refuses an encoding above limit (MaxBytes when
+// limit is 0 or above it) with CodeRange, so the learner must leave out
+// more types.
+func Encode(b *Baseline, limit int) ([]byte, error) {
+	if err := b.Validate(); err != nil {
+		return nil, err
+	}
+	out, err := json.Marshal(b)
+	if err != nil {
+		return nil, &Error{Code: CodeForm, Field: "baseline", Detail: err.Error()}
+	}
+	if limit <= 0 || limit > MaxBytes {
+		limit = MaxBytes
+	}
+	if len(out) > limit {
+		return nil, &Error{Code: CodeRange, Field: "baseline", Detail: fmt.Sprintf("%d bytes encoded, above %d", len(out), limit)}
+	}
+	return out, nil
+}
+
 // Decode reads one stored baseline record so every reader reads it the same
 // way, then validates it. A record stamped with this minor or an earlier one
 // is read strictly (exact field names, no duplicates, nothing after the
 // object); a later 0.x minor's added fields are ignored, as
 // contracts/README.md requires of every reader.
 func Decode(b []byte) (*Baseline, error) {
+	if len(b) > MaxBytes {
+		return nil, &Error{Code: CodeRange, Field: "baseline", Detail: fmt.Sprintf("%d bytes, above %d", len(b), MaxBytes)}
+	}
 	var r Baseline
 	if err := strictjson.Forward(b, &r); err != nil {
 		return nil, &Error{Code: CodeDecode, Field: "baseline", Detail: err.Error()}
