@@ -12,10 +12,13 @@ starts the node first). Then, in order:
     checkpoint), and then with no checkpoint: nothing is sent again;
   - the collector is stopped (SIGSTOP) while a new install is relayed, the
     node is killed waiting for the reply, and the collector continues, so
-    the reply is lost: the resend is refused as a replay, the node says an
-    earlier send may have been decided, and the collector accepted once;
+    the reply is lost. Twice: an install the collector refuses (version 1
+    again), whose resend is refused as a replay and the node says it may
+    already have been applied; and a rotation to version 2 it accepts,
+    whose resend gets the repeat answer naming the first decision (C7 0.5,
+    #186), so the node records it accepted and nothing is installed again;
   - a decided file is removed and, once the node has forgotten it, put
-    back: it is refused, and the collector still accepted it once;
+    back: it gets the repeat answer, and nothing is installed again;
   - 16 files the node cannot read hold the 16 places a tick reads, so a
     signed revoke named after them is not read until they are removed;
     then it is relayed and accepted;
@@ -76,14 +79,22 @@ def installs(s):
         return len(json.load(f).get("installs", []))
 
 
+def credential_versions(s):
+    """The collector's stored versions of each credential reference and
+    their state, from its credential store; nothing secret is read."""
+    path = os.path.join(s.layout["collector_data"], "collector", "credentials", "credentials.json")
+    with open(path, encoding="utf-8") as f:
+        return [(e["ref"]["id"], e["ref"]["version"], e["status"]["state"]) for e in json.load(f).get("entries", [])]
+
+
 def decided(s, rid):
     return [d for d in decisions(s) if d.get("request_id") == rid]
 
 
-def admin_file(s, name, kind="install", expires="10m", tamper=False, mode=0o440, bad=""):
+def admin_file(s, name, kind="install", expires="10m", tamper=False, mode=0o440, bad="", version=1):
     env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
     argv = [s.exe("slicehelper"), "admin-file", "-root", s.root, "-kind", kind, "-name", name,
-            "-expires", expires, "-mode", str(mode)]
+            "-expires", expires, "-mode", str(mode), "-version", str(version)]
     if tamper:
         argv.append("-tamper")
     if bad:
@@ -191,26 +202,33 @@ def got(tmp_path_factory):
 
         # 4. The reply is lost: the collector is stopped while the node
         # waits for it, the node is killed, and the collector goes on.
-        coll = s.procs["collector"]
-        installs_before = installs(s)
-        coll.send_signal(signal.SIGSTOP)
-        stopped = True
-        i2 = admin_file(s, "a6-install-2")
-        out["i2"] = i2
-        out["steps"]["lost"] = {"info_seen": harness.wait_for(
-            lambda: any(r["action"] == "collector.request" and r.get("correlation_id") == i2["request_id"]
-                        and r["outcome"] == "info" for r in audit(s)), 3 * RELAY, step=0.5)}
-        time.sleep(2)
-        s.kill("node")
-        coll.send_signal(signal.SIGCONT)
-        stopped = False
-        time.sleep(3)
-        out["steps"]["lost"]["while_down"] = decided(s, i2["request_id"])
-        s.respawn("node")
-        harness.wait_for(lambda: (shown(s, i2["file"]) or {}).get("state") in ("accepted", "refused"), 3 * RELAY)
-        time.sleep(RELAY + 3)
-        out["steps"]["lost"].update(decided=decided(s, i2["request_id"]), shown=shown(s, i2["file"]),
-                                    health=s.health(), installs=installs(s) - installs_before)
+        # First an install it refuses (version 1 is held), then the
+        # rotation to version 2, which it accepts.
+        def lose_reply(name, version):
+            nonlocal stopped
+            coll = s.procs["collector"]
+            before = installs(s)
+            coll.send_signal(signal.SIGSTOP)
+            stopped = True
+            f = admin_file(s, name, version=version)
+            st = {"info_seen": harness.wait_for(
+                lambda: any(r["action"] == "collector.request" and r.get("correlation_id") == f["request_id"]
+                            and r["outcome"] == "info" for r in audit(s)), 3 * RELAY, step=0.5)}
+            time.sleep(2)
+            s.kill("node")
+            coll.send_signal(signal.SIGCONT)
+            stopped = False
+            time.sleep(3)
+            st["while_down"] = decided(s, f["request_id"])
+            s.respawn("node")
+            harness.wait_for(lambda: (shown(s, f["file"]) or {}).get("state") in ("accepted", "refused"), 3 * RELAY)
+            time.sleep(RELAY + 3)
+            st.update(decided=decided(s, f["request_id"]), shown=shown(s, f["file"]),
+                      health=s.health(), installs=installs(s) - before, versions=credential_versions(s))
+            return f, st
+
+        out["i2r"], out["steps"]["lost_refused"] = lose_reply("a6-install-2-again", 1)
+        out["i2"], out["steps"]["lost"] = lose_reply("a6-install-2", 2)
         runs = len(s.runs_reported())
         out["steps"]["lost"]["run_after"] = harness.wait_for(lambda: len(s.runs_reported()) > runs, 150, step=1.0)
         out["steps"]["lost"]["run_health"] = s.health()
@@ -225,10 +243,12 @@ def got(tmp_path_factory):
             with open(os.path.join(d, i1["file"]), "wb") as f:
                 f.write(i1_bytes)
             os.chmod(os.path.join(d, i1["file"]), 0o440)
+        installs_before = installs(s)
         in_admin_dir(s, put_back)
         harness.wait_for(lambda: len(decided(s, i1["request_id"])) >= 2, 3 * RELAY)
         time.sleep(RELAY + 3)
-        out["steps"]["forget"].update(decided=decided(s, i1["request_id"]), shown=shown(s, i1["file"]))
+        out["steps"]["forget"].update(decided=decided(s, i1["request_id"]), shown=shown(s, i1["file"]),
+                                      installs=installs(s) - installs_before, versions=credential_versions(s))
 
         # 6. Sixteen unreadable files ahead of a signed revoke.
         def junk(d):
@@ -329,21 +349,51 @@ def test_an_old_or_missing_checkpoint_sends_nothing_again(got, step):
         assert got["t"]["request_id"] in st["relayed"] and got["e"]["request_id"] in st["relayed"], st
 
 
-def test_a_lost_reply_is_a_replay_and_the_collector_accepted_once(got):
-    st = got["steps"]["lost"]
+def repeat_of(d):
+    return int(d.get("repeat_of") or 0)
+
+
+def test_a_lost_refusal_is_a_replay_and_the_node_says_it_may_have_applied(got):
+    st = got["steps"]["lost_refused"]
+    f = got["i2r"]["file"]
     assert st["info_seen"], "the node did not record the request before the collector was stopped"
     statuses = [d["status"] for d in st["decided"]]
-    # The collector installed it once, whatever the node learnt.
+    # The install budget is taken before the version is checked.
     assert st["installs"] == 1, st
     if st["while_down"]:
-        # The collector decided the orphaned request and could not reply:
-        # the resend is a replay, and the node says so.
+        # The collector refused the orphaned request (version 1 is held)
+        # and could not reply; it kept no decision to repeat, so the
+        # resend is a replay, and the node says what that may mean.
         assert [d["status"] for d in st["while_down"]] == ["unwritten"], st
         assert statuses == ["unwritten", "refused"] and st["decided"][1]["refusal"] == "admin_unverified", st
         assert st["shown"]["state"] == "refused", st
-        assert f"in {got['i2']['file']}: admin_unverified, check replay; an earlier send may have been decided" in st["health"], st["health"]
+        assert (f"in {f}: admin_unverified, check replay. It is not sent again; "
+                "it may already have been applied") in st["health"], st["health"]
     else:
-        assert statuses == ["accepted"] and st["shown"]["state"] == "accepted", st
+        assert statuses == ["refused"] and st["shown"]["state"] == "refused", st
+    assert ("cred_7f3k2m9q4x", 2, "active") not in st["versions"], st
+
+
+def test_a_lost_acceptance_is_repeated_and_installed_once(got):
+    st = got["steps"]["lost"]
+    f = got["i2"]["file"]
+    assert st["info_seen"], "the node did not record the request before the collector was stopped"
+    statuses = [d["status"] for d in st["decided"]]
+    assert st["installs"] == 1, st
+    if st["while_down"]:
+        # The collector accepted the orphaned rotation and could not reply.
+        # The resend is the same signed bytes inside their window: the
+        # collector answers with the first decision and runs nothing.
+        assert [d["status"] for d in st["while_down"]] == ["unwritten"], st
+        assert statuses == ["unwritten", "accepted"], st
+        first, again = st["decided"]
+        assert repeat_of(again) == int(first["collector_seq"]) and int(again["collector_seq"]) > repeat_of(again), st
+    else:
+        assert statuses == ["accepted"] and repeat_of(st["decided"][0]) == 0, st
+    assert st["shown"]["state"] == "accepted", st
+    assert f"in {f}:" not in st["health"], st["health"]
+    assert [v for v in st["versions"] if v[0] == "cred_7f3k2m9q4x"] == [
+        ("cred_7f3k2m9q4x", 1, "revoked"), ("cred_7f3k2m9q4x", 2, "active")], st
 
 
 def test_runs_go_on_after_the_relay(got):
@@ -353,12 +403,19 @@ def test_runs_go_on_after_the_relay(got):
 
 
 def test_a_file_put_back_changes_nothing(got):
+    # i1's nonce is still held, so the put-back file is the same signed
+    # bytes inside their window: the repeat answer, and nothing runs. Run
+    # again, version 1 would be refused, since version 2 is now held.
     st = got["steps"]["forget"]
     assert st["shown_gone"] is None, st
-    statuses = [d["status"] for d in st["decided"]]
-    assert statuses[0] == "accepted" and statuses.count("accepted") == 1, st
-    assert statuses[1:] == ["refused"], st
-    assert st["shown"]["state"] == "refused", st
+    first, *rest = st["decided"]
+    assert first["status"] == "accepted" and repeat_of(first) == 0, st
+    assert [d["status"] for d in rest] == ["accepted"], st
+    assert repeat_of(rest[0]) == int(first["collector_seq"]), st
+    assert st["installs"] == 0, st
+    assert [v for v in st["versions"] if v[0] == "cred_7f3k2m9q4x"] == [
+        ("cred_7f3k2m9q4x", 1, "revoked"), ("cred_7f3k2m9q4x", 2, "active")], st
+    assert st["shown"]["state"] == "accepted", st
 
 
 def test_sixteen_places_then_the_revoke(got):
@@ -384,7 +441,9 @@ def test_nothing_is_read_from_an_admin_dir_that_can_be_written(got):
 
 
 def test_the_collector_never_accepts_a_request_twice(got):
-    accepted = [d["request_id"] for d in got["decisions"] if d["status"] == "accepted"]
+    # A repeat answer names the first acceptance and runs nothing; it is
+    # not a second acceptance.
+    accepted = [d["request_id"] for d in got["decisions"] if d["status"] == "accepted" and repeat_of(d) == 0]
     assert len(accepted) == len(set(accepted)), got["decisions"]
 
 

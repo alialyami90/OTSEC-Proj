@@ -136,6 +136,7 @@ func main() {
 	tamper := fs.Bool("tamper", false, "admin-file: change one payload byte after signing")
 	mode := fs.Uint("mode", 0o440, "admin-file: the file's mode")
 	bad := fs.String("bad", "", "admin-file: a claim to malform and sign anyway: nonce (21 characters) or key (the envelope's key ID)")
+	version := fs.Uint("version", 1, "admin-file: an install's credential version (2 rotates the first)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
@@ -144,7 +145,7 @@ func main() {
 	case "install-credential":
 		err = installCredential(*root)
 	case "admin-file":
-		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode))
+		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode), uint32(*version))
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
@@ -360,9 +361,9 @@ func loadAdmin(root string) (*adminContext, error) {
 
 // sign makes a signed request of kind, issued now and expiring after
 // expires (negative: already expired), with a fresh nonce. An install
-// seals OTSEC_SLICE_SECRET to the install key; a revoke names the run's
-// credential reference.
-func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration) (*authz.AdminSigned, []byte, error) {
+// seals OTSEC_SLICE_SECRET to the install key as the reference's version;
+// a revoke names the run's credential reference.
+func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, version uint32) (*authz.AdminSigned, []byte, error) {
 	admin := adminPrincipal
 	nonce := make([]byte, authz.AdminNonceLen)
 	if _, err := rand.Read(nonce); err != nil {
@@ -389,7 +390,7 @@ func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration) (*aut
 			ID: a.l.CredentialRef, AssetID: a.l.AssetID, NodeID: a.l.NodeID, EndpointID: "port1-telnet",
 			Transport: authz.TransportTelnet, Purpose: authz.PurposeCollectReadOnly, AccessLevel: "1",
 			DownstreamSecurity: authz.DownstreamPlaintext, PlaintextScope: authz.PlaintextLabOnly,
-			Version: 1, CreatedBy: admin, CreatedAt: now.Format(time.RFC3339),
+			Version: version, CreatedBy: admin, CreatedAt: now.Format(time.RFC3339),
 		}
 		// The fingerprint is pinned from the published file here; in
 		// production the administrator compares it with the commissioning
@@ -416,7 +417,7 @@ func installCredential(root string) error {
 	l := a.l
 	// Under the 15-minute maximum less the 2-minute skew allowance, so a
 	// collector clock a little ahead still accepts it (A1 on #146).
-	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute)
+	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute, 1)
 	if err != nil {
 		return err
 	}
@@ -458,16 +459,17 @@ func installCredential(root string) error {
 // at once (A6, #189): kind install or revoke, expiring after expires
 // (negative: already expired), with one payload byte changed after
 // signing when tamper is set, written with mode (0440 is the rule; a
-// wider mode is a file the node must not read). It prints the file's name,
+// wider mode is a file the node must not read); an install names
+// credential version. It prints the file's name,
 // its request ID as the node derives it from the bytes (admin- and 16 hex
 // digits of their SHA-256) and the nonce.
-func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode) error {
+func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode, version uint32) error {
 	a, err := loadAdmin(root)
 	if err != nil {
 		return err
 	}
 	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke}[kind]
-	signed, _, err := a.sign(k, expires)
+	signed, _, err := a.sign(k, expires, version)
 	if err != nil {
 		return err
 	}
