@@ -421,10 +421,11 @@ func walPath(t *testing.T, dir string) string {
 
 // The WAL one commit writes stays under CommitWALBytes of its payload, on
 // the real store with its own schema, indexes and settings: one
-// configuration record per commit, from MinRecordBytes to 1 MiB.
+// configuration record per commit, from MinRecordBytes to 1.5 MiB, the
+// configuration cap D4-13 sets.
 func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 	ctx := context.Background()
-	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20} {
+	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20, 1536 << 10} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			d := database(size)
 			dir := newDir(t)
