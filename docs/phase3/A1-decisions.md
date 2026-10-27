@@ -109,3 +109,27 @@ Date: 2026-10-27. A2's review of #203 found that `sel751` stamps every result C2
 3. If DATE_F is absent, the pre-0.5 rule applies: the caller's order if one was given, otherwise MDY with `date-format-assumed:MDY`.
 
 **Rejected:** refusing SER in the adapter under a package without the DATE_F read. A revision-3 site would stop collecting until revision 4 was activated, and the relay's finite SER buffer could overwrite native records in the meantime. Option 3 keeps the bytes and the parsed rows, and it states the assumption on each event.
+
+## D3-12: the A-team hands over to the B-team with the roles unchanged (owner)
+
+Date: 2026-10-27. The owner asked for agents A1 to A6 to be replaced by fresh agents B1 to B6. Each B agent has the same role, responsibilities, tools and instructions as its A agent; only the name changes.
+
+The handoff is in `handoffs/`:
+
+- `HANDOFF-SUMMARY.md`, written by A1;
+- one `B{n}-handoff.md` per agent, written by the matching A agent;
+- one `B{n}-ack.md` per agent, written by each B agent.
+
+**Ruling.** Older records keep the A names, because they record who did what. In them, A*n* reads as the role that B*n* now holds. No ownership changes in the handoff. A role change, if one is wanted later, is proposed in a handoff note and decided separately.
+
+Phase 3 stays pending the owner's acceptance, so the Phase 4 briefs stay drafts. Every standing rule carries over unchanged: D2-4, D2-5, D2-10, D2-11, D2-13 and D3-10, and the owner's rules for their PC.
+
+Cutover happens only when every ack is confirmed with no open questions. At cutover A1 to A6 retire and B1 leads.
+
+**Numbering note (found by A4 while writing its handoff).** The label "D3-3" names two different things:
+
+- this file's D3-3, the `quarantine.cleared` ruling;
+- A3's unknown-sender condition, HR-11, as cited in `docs/threat-model.md`, D3-5 above, `A4-syslog-receive.md`, `A3-handoff.md` and `A5-handoff.md`.
+
+The records stay as written. From now on, cite HR-11 for the unknown-sender condition, and use D3-3 only for `quarantine.cleared`. The exit report now cites HR-11.
+

@@ -44,6 +44,24 @@ A1 issues a brief before assigning significant work.
 | Shared contracts | A1 and all affected agent owners |
 | Integrated release | A6 independent verification and A1 integration review |
 
+## Roadmap and tracker (updated 2026-10-27)
+
+On 2026-10-27 the owner handed agents A1 to A6 over to B1 to B6. The roles are unchanged ([handoffs/HANDOFF-SUMMARY.md](../handoffs/HANDOFF-SUMMARY.md)). The briefs below keep the A names; read A*n* as B*n*.
+
+| Item | State | Where |
+| --- | --- | --- |
+| Phase 0 to Phase 2 | Done. The owner accepted Phase 2 on 2026-10-26. | `docs/phase-0-exit.md` to `docs/phase-2-exit.md` |
+| Phase 3 | Done; the gate passed with conditions on 2026-10-27. **Waiting on the owner's acceptance.** | `docs/phase-3-exit.md` |
+| Gate item 1's owed checks: the admin relay and `config\admin` ACLs on Windows, the unknown-restart leg on Windows, the canary scan of command lines | Not started. They can run on the hosted Windows runner. | A5, A6 |
+| #176 (the node reads its TLS keys from the key store) | Open, deferred until after the gate | A5 |
+| #177 (bounded crash children) | Open, deferred until after the gate | A5 |
+| #181 (signed files and relay design) | Open, deferred until after the gate | A5 |
+| #182 (refused-identity detail) | Open, deferred until after the gate | A5 |
+| Relay PR 2 of #181 | Not started | A5 |
+| Go 1.27.3 (D3-10 rule) | Not started; Phase 4 hygiene | A1, with A3 and A6 |
+| Phase 4 items 1 and 2 (configuration baselines, event-behaviour baseline) and their carry-over | Drafted below. **Held** until the owner accepts Phase 3. | P4-A2 to P4-A6 |
+| Phase 4 items 3 to 6 (vulnerability applicability, IDS, engineering access, central role) | Outlined below | One brief at a time, each after the previous item's gate |
+
 ## Open task briefs
 
 Issued by A1 on 2026-10-23 for Phase 0. Common rules for every Phase 0 brief:
