@@ -481,7 +481,9 @@ class Slice:
         self.sim_password = sim_password
         self.relp_log = os.path.join(self.d, "relp.jsonl")
         sim = self.start_simulator(fid, framed=framed)
-        self.relp_port = harness.free_port()
+        # Held until stop(), so that the receiver can bind it now and again
+        # after a test kills it, and nothing else on the runner takes it.
+        self.relp_port, self.relp_hold = harness.reserve_port()
         if SERVICE:
             _MACHINE.acquire()
             self.holds_machine = True
@@ -676,6 +678,9 @@ class Slice:
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait(10)
+        if getattr(self, "relp_hold", None):
+            self.relp_hold.close()
+            self.relp_hold = None
         # The administrators' folder is 0550; let the temporary directory go.
         d = getattr(self, "layout", {}).get("admin_dir")
         if d and os.path.isdir(d) and not self.service:
