@@ -25,7 +25,7 @@ This report closes Phase 3: hardening the simulated SEL-751 slice so that a `dev
 | V-M1 to V-M8 criteria; the `SHO G` simulator switch; V-S8 end to end; independent tests for every Phase 3 PR; property-based waits for slow runners; the relay end-to-end check; the unknown-budget restart check on the real binaries; the `uintptr` AST rule | A6 | #142, #144, #158, #166, #172, #188, #191, #194, #195, #199 | A1, and the owners of what each test covers |
 | ADR-0008, Phase 3 briefs, D3-1 to D3-11, HR-11 and HR-12, Go 1.26.10 | A1 (A3 for the threat model) | #143, #148, #161, #162, #165, #168, #171, #192, #200 | A3, A6 and affected owners |
 
-#179 (A5, the harness's Windows service mode, which gate item 1 runs on) merged as `ccb94b2`. **Not merged at this draft:** #204 (A5's handoff) and #206 (A6's gate table). Open A5 PRs deferred until after the gate, because none is on the gate path: #176 (the node reading its TLS keys from the key store), #177, #181 (the signed-files design, whose PR 1 became #189) and #182 (the refused-identity detail and the record-bound comment). Relay PR 2 of #181 (signed `clear-*` files and A5's N1/N3 items) is not started.
+#179 (A5, the harness's Windows service mode, which gate item 1 runs on) merged as `ccb94b2`. A5's handoff (#204) and A6's gate table (#206) are merged. Open A5 PRs deferred until after the gate, because none is on the gate path: #176 (the node reading its TLS keys from the key store), #177, #181 (the signed-files design, whose PR 1 became #189) and #182 (the refused-identity detail and the record-bound comment). Relay PR 2 of #181 (signed `clear-*` files and A5's N1/N3 items) is not started.
 
 Contract versions on `main`:
 
@@ -95,7 +95,6 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 - **Signed `clear-*` files** (relay PR 2 of #181) are not built, so the clear-suspension and clear-quarantine files are still unsigned administrator files under D2-15's folder rule.
 - **The full DMY and YMD slice reconcile** has not run (A2 and A6).
 - **Not run, carried from Phase 2:** V-S7's 24-hour soak, (c) and (d); V-S6's link cut in the middle of a SER read; V-S9's file-system exhaustion; V-S15's hostile framing end to end on the SER path; V-S18 and V-S20.
-- **A5's Phase 3 handoff** is open as #204.
 
 ## Unverified assumptions
 
