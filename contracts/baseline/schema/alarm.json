@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otsec.local/contracts/baseline/0.1/alarm.json",
+  "title": "otsec.baseline/0.1 departure alarm",
+  "description": "C10 departure alarm, as the Go type Alarm. On the wire it travels as a C4 telemetry-health event of type baseline.departure (Alarm.Health): related holds events, and every other field is a detail (param.<name> per parameter; not_counted as space-separated event IDs). Rules across fields (the rule's exact parameters, device clock only for the time rule, events required except for absence) are enforced by Alarm.Validate in Go.",
+  "type": "object",
+  "required": [
+    "schema",
+    "asset_id",
+    "baseline",
+    "baseline_version",
+    "rule",
+    "key",
+    "key_text",
+    "params",
+    "baseline_value",
+    "observation",
+    "clock",
+    "at_utc",
+    "events_total",
+    "not_counted_total"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "pattern": "^otsec\\.baseline/0\\.(0|[1-9][0-9]{0,3})$"
+    },
+    "asset_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "baseline": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "baseline_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rule": {
+      "enum": [
+        "new-type",
+        "repeats",
+        "rate",
+        "time",
+        "absence"
+      ]
+    },
+    "key": {
+      "$ref": "baseline.json#/$defs/key"
+    },
+    "key_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "params": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,62}$"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          }
+        }
+      }
+    },
+    "baseline_value": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "clock": {
+      "enum": [
+        "received",
+        "device"
+      ]
+    },
+    "at_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event_id"
+      },
+      "maxItems": 32
+    },
+    "not_counted": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event_id"
+      },
+      "maxItems": 32
+    },
+    "events_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "not_counted_total": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "event_id": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "stream",
+        "seq"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "stream": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
