@@ -20,9 +20,12 @@ because S22 prints only one group. These layouts are documented-untested.
 ASSUMED, not documented: read 2's other layouts. The header printed before
 the settings of SHO 1 and SHO 2, one setting per line, another order and
 another wrap are what the rule must treat as the same configuration; S22
-prints none of them for SHO. No S22 page this draws on shows SHO repeating
-the header inside one reply, so no golden does; whether a relay does is on
-the widened H-13.
+prints none of them for SHO. Figure 7.43 (pp. 7.78 and 7.79) prints its SHO
+reply with no header at all: it starts at "Group 1", runs across a page of
+the manual with nothing repeated, and ends at "=>". S22 documents no paging
+for SHO. So no golden repeats the header inside one reply, and read 2's
+header before the settings is itself assumed. Whether a relay prints or
+repeats one is on the widened H-13.
 
 This file tokenizes the replies with its own reading of the rule in
 doc.go, so the Go tests check two implementations against each other.
