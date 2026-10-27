@@ -1,0 +1,135 @@
+{
+  "schema": "otsec.config/0.1",
+  "kind": "config.difference",
+  "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+  "rule": "sel-751-sho/1",
+  "target": "simulated",
+  "from": {
+    "snapshot_digest": "sha256:df02865d95ef41c4488076925ee76517fb5a90ee9f2c580d53576362d33b5bee",
+    "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
+    "retrieved_at": "2026-10-27T09:10:06.0Z"
+  },
+  "to": {
+    "snapshot_digest": "sha256:e70c4b378aed71ea4cf80b3925621e292818aa84e67eb5c45c4d4d1d8e12c459",
+    "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a53",
+    "retrieved_at": "2026-10-27T09:30:06.0Z"
+  },
+  "changes": [
+    {
+      "class": "group.1",
+      "kind": "changed",
+      "name": "50P1P",
+      "from": "10.00",
+      "to": "9.50",
+      "sensitive": false
+    },
+    {
+      "class": "group.1",
+      "kind": "removed",
+      "name": "LL",
+      "from": "4.84",
+      "sensitive": false
+    },
+    {
+      "class": "port.2",
+      "kind": "section-appeared",
+      "sensitive": false
+    },
+    {
+      "class": "port.2",
+      "kind": "added",
+      "name": "EPORT",
+      "to": "Y",
+      "sensitive": false
+    },
+    {
+      "class": "port.2",
+      "kind": "added",
+      "name": "MAXACC",
+      "to": "1",
+      "sensitive": false
+    },
+    {
+      "class": "port.2",
+      "kind": "added",
+      "name": "PROTO",
+      "to": "SEL",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "section-disappeared",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "AI_00",
+      "from": "IA_MAG",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "AI_01",
+      "from": "IB_MAG",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "AI_02",
+      "from": "IC_MAG",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BI_00",
+      "from": "ENABLED",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BI_01",
+      "from": "TRIP_LED",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BI_02",
+      "from": "TLED_01",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BI_03",
+      "from": "TLED_02",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BO_00",
+      "from": "RB01",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BO_01",
+      "from": "RB02",
+      "sensitive": false
+    },
+    {
+      "class": "dnp.1",
+      "kind": "removed",
+      "name": "BO_02",
+      "from": "RB03",
+      "sensitive": false
+    }
+  ]
+}

@@ -99,8 +99,16 @@ type RecoveryStore interface {
 type StartupPolicy struct {
 	Streams   []StreamSpec
 	Consumers []Consumer
-	// RecoveryReserveBytes: at least twice the WAL bound.
+	// RecoveryReserveBytes: at least twice the WAL bound. Since 0.4, when
+	// LargestCommitBytes is set, at least RecoveryReserveFor(WALBoundBytes,
+	// LargestCommitBytes).
 	RecoveryReserveBytes int64
+	// WALBoundBytes and LargestCommitBytes (0.4) are the store's WAL bound
+	// for small commits and the database's largest commit
+	// (LargestCommit). A caller that sets neither keeps the 0.3 check;
+	// setting one requires the other.
+	WALBoundBytes      int64
+	LargestCommitBytes int64
 	// LastResortReserveBytes: at least OpenHeadroomBytes.
 	LastResortReserveBytes int64
 	// OpenHeadroomBytes is the free space the volume must have before the
@@ -135,6 +143,11 @@ func (p StartupPolicy) Validate() error {
 		return errf(CodeInvalid, nil, "recovery reserve %d below open headroom %d", p.RecoveryReserveBytes, p.OpenHeadroomBytes)
 	case p.RecoveryReserveBytes <= 0:
 		return errf(CodeInvalid, nil, "recovery reserve must be positive")
+	case (p.WALBoundBytes > 0) != (p.LargestCommitBytes > 0):
+		return errf(CodeInvalid, nil, "WAL bound %d and largest commit %d: set both or neither", p.WALBoundBytes, p.LargestCommitBytes)
+	case p.LargestCommitBytes > 0 && p.RecoveryReserveBytes < RecoveryReserveFor(p.WALBoundBytes, p.LargestCommitBytes):
+		return errf(CodeInvalid, nil, "recovery reserve %d below %d, for a WAL bound of %d and a largest commit of %d", p.RecoveryReserveBytes,
+			RecoveryReserveFor(p.WALBoundBytes, p.LargestCommitBytes), p.WALBoundBytes, p.LargestCommitBytes)
 	case p.PruneStepEvents < 1 || p.PruneStepEvents > 1000:
 		return errf(CodeInvalid, nil, "prune step %d not in [1, 1000]", p.PruneStepEvents)
 	case p.CompactStepPages < 1 || p.CompactStepPages > 1024:

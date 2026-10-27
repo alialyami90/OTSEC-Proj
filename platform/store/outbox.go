@@ -253,10 +253,24 @@ func (d *DB) PruneStep(ctx context.Context, b c5.Boundary, max int) (int, error)
 	if err != nil {
 		return 0, err
 	}
+	held := false
+	if class == c5.ClassConfiguration {
+		if held, err = d.hasHolds(ctx); err != nil {
+			return 0, err
+		}
+	}
 	n := 0
 	err = d.tx(ctx, "prune", func() error {
-		rows, err := d.conn.QueryContext(ctx, `SELECT seq, event, capture, source_cursor FROM events
-			WHERE stream = ? AND seq <= ? ORDER BY seq LIMIT ?`, string(stream), int64(b.Through()), max)
+		// Held records stay (C5 0.4); later unheld seqs are pruned in order
+		// around them.
+		q := `SELECT seq, event, capture, source_cursor FROM events
+			WHERE stream = ? AND seq <= ? ORDER BY seq LIMIT ?`
+		if held {
+			q = `SELECT seq, event, capture, source_cursor FROM events e
+			WHERE stream = ? AND seq <= ? AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.stream = e.stream AND h.seq = e.seq)
+			ORDER BY seq LIMIT ?`
+		}
+		rows, err := d.conn.QueryContext(ctx, q, string(stream), int64(b.Through()), max)
 		if err != nil {
 			return err
 		}
@@ -287,7 +301,12 @@ func (d *DB) PruneStep(ctx context.Context, b c5.Boundary, max int) (int, error)
 		if n == 0 {
 			return nil
 		}
-		if _, err := d.conn.ExecContext(ctx, `DELETE FROM events WHERE stream = ? AND seq <= ?`, string(stream), lastSeq); err != nil {
+		del := `DELETE FROM events WHERE stream = ? AND seq <= ?`
+		if held {
+			del = `DELETE FROM events WHERE stream = ? AND seq <= ?
+				AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.stream = events.stream AND h.seq = events.seq)`
+		}
+		if _, err := d.conn.ExecContext(ctx, del, string(stream), lastSeq); err != nil {
 			return err
 		}
 		if err := d.addClassBytes(ctx, class, -freed); err != nil {
