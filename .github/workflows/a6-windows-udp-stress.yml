@@ -39,6 +39,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
+      - name: the job's start, for the guard on new runs
+        shell: bash
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -64,13 +67,17 @@ jobs:
         working-directory: tests/integration/syslogreceive
         env:
           MINUTES: ${{ inputs.minutes || '40' }}
-        # A run may take up to its 10 m timeout, so the last one ends by
-        # MINUTES + 10, inside the job's 75 with setup and the build: the
-        # summary line is always written (B3 on #245). MINUTES is checked
-        # before any arithmetic reads it.
+        # No run starts with fewer than 12 minutes of the job's 75 left: a
+        # run may take up to its 10 m timeout, so the last one ends, and the
+        # summary line is written, inside the job however long setup and the
+        # build took (B3 on #245). MINUTES is checked before any arithmetic
+        # reads it.
         run: |
           [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && [ "$MINUTES" -le 55 ] || { echo "minutes must be 1 to 55, not '$MINUTES'"; exit 1; }
+          [[ "$JOB_START" =~ ^[0-9]+$ ]] || { echo "no job start recorded"; exit 1; }
           end=$(( $(date +%s) + 60 * MINUTES ))
+          last_start=$(( JOB_START + 60 * (75 - 12) ))
+          [ "$end" -le "$last_start" ] || { end=$last_start; echo "new runs stop at minute 63 of the job, before the $MINUTES minutes asked"; }
           runs=0; crashes=0; fails=0
           while [ "$(date +%s)" -lt "$end" ]; do
             runs=$((runs + 1))
