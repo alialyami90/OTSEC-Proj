@@ -97,7 +97,7 @@ They're recorded in the linked docs. Don't reopen them without new evidence.
 - **D2-13:** CI is the main test path. No CNG machine keys or test accounts are created on the owner's PC, so Windows CNG tests run only on the hosted runner.
 - **D2-15:** the `config\admin` folder rule. Clear files stay unsigned until relay PR 2.
 - **D2-16 and D2-20:** the failed-auth floor runs from ACC and is held until `QUI`. A port-server path is refused.
-- **D3-3:** unknown-sender storage. The absolute bound is open as HR-11.
+- **HR-11** (`docs/threat-model.md`): the bound on unknown-sender storage. The absolute bound is still open. Cite it as HR-11, not D3-3: in `docs/phase3/A1-decisions.md`, D3-3 is `quarantine.cleared` (see the numbering note in #217).
 - **D3-5:** plaintext Syslog receive is allowed per listener (HR-12).
 - **D3-7:** a node key is non-exportable; SYSTEM, Administrators and the node service may use it.
 - **D3-9:** the collector grants its node two query rights (#180), and Dial still checks the server token.
@@ -138,7 +138,7 @@ They're recorded in the linked docs. Don't reopen them without new evidence.
 - **Merging and pushing.**
   - Force-push is denied, so use new commits or merge `main` in; never rebase a pushed branch.
   - Branches are `claude/project-thread-<id>-<topic>`.
-  - B1 merges. On GitHub, PRs show "closed", not "merged", because A1 lands them on `main` with a `(#N)` suffix. Check `git log origin/main`, not the PR flag.
+  - B1 squash-merges each PR through GitHub, so it shows as merged, and `main` gets one commit with a `(#N)` suffix.
   - When a PR's CI predates newer `main`, merge `main` in and let the Windows job run again before asking for the merge.
 - **Reviews:** COMMENT reviews only, never APPROVE, at the full 40-character head SHA, ending with the Claude Code attribution footer. Prove a finding with a mutant where you can. Every review A3 did is recorded on its PR.
 - **Evidence:** never claim hardware or production compatibility. Label `simulated` or "hosted runner". If a check passed on a different tree from the one under review, say so.
