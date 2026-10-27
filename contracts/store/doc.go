@@ -1,5 +1,5 @@
-// Package store is contract C5, otsec.store/0.3: how a site node keeps,
-// acknowledges, recovers and prunes events. It is owned by A5. Reviewers are
+// Package store is contract C5, otsec.store/0.4: how a site node keeps,
+// acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
 //
@@ -28,6 +28,14 @@
 //     one (Report.OpenBusy, P3-A5, docs/phase2/A5-p3-failed-open-retry.md).
 //   - Storage-full behaviour per stream class and the alarms the store
 //     raises (StreamClass, FullAction, Quota, Alarm).
+//   - Since 0.4 (P4-A5, docs/phase4/B5-c5-0.4-proposal.md): the
+//     configuration class, alone in its database, for C9 and C10 documents
+//     with a per-record cap and an injected DocumentValidator; held records,
+//     which pruning skips (Holder, Record.Holds, HoldReason); the
+//     syslog-unknown class, HR-11's absolute bound on what unknown senders
+//     store; and a commit cap, so the recovery reserve covers the largest
+//     commit (GroupOptions.MaxCommitBytes, LargestCommit,
+//     RecoveryReserveFor, D4-9).
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -50,4 +58,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.3"
+const Identifier = "otsec.store/0.4"
