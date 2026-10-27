@@ -99,10 +99,15 @@ class Slice:
         key = os.path.join(self.layout["public_dir"], "install-key.json")
         assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
             "the collector did not publish its install key and socket:\n" + self.text("collector")
-        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
-        subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
-                       check=True, capture_output=True, env=env)
         self.spawn("node", [self.exe("otsec"), "node", "-config", self.layout["node_config"]])
+        # The administrator's signed credential.install goes through the
+        # node, which relays it within 15 s, well before its first run
+        # (60 s after start); install-credential waits for the decision.
+        env = dict(os.environ, OTSEC_SLICE_SECRET=CANARY)
+        out = subprocess.run([self.exe("slicehelper"), "install-credential", "-root", self.root],
+                             capture_output=True, env=env)
+        assert out.returncode == 0, "credential.install was not relayed: " + out.stderr.decode(errors="replace") + \
+            "\n" + self.text("node")
 
     def start_simulator(self, fid, port=0, framed=True):
         """A simulator answering with fid, on port (0: one the OS chooses),
