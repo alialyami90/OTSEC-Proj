@@ -407,9 +407,9 @@ func TestHoldsSurviveAReopen(t *testing.T) {
 	check(t, ctx, db, m, "pruned after the reopen")
 }
 
-// walSize is the database's -wal file size. A second connection holds a
-// read transaction from before the commit, so no checkpoint can reset the
-// WAL under the measurement.
+// walPath is the database file; its -wal is measured next to it. A test
+// pins the WAL with a read transaction from a second connection, so no
+// checkpoint resets it under the measurement.
 func walPath(t *testing.T, dir string) string {
 	t.Helper()
 	m, _ := filepath.Glob(filepath.Join(dir, "*.db"))
@@ -447,7 +447,7 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pin, err := sql.Open("sqlite", "file:"+url.PathEscape(file)+"?mode=ro")
+			pin, err := sql.Open("sqlite", "file:"+(&url.URL{Path: file}).EscapedPath()+"?mode=ro")
 			if err != nil {
 				t.Fatal(err)
 			}
