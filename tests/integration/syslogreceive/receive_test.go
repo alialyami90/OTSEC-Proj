@@ -153,7 +153,8 @@ func TestStoredBytesAreTheSendersBytes(t *testing.T) {
 			t.Errorf("message %d: id %+v", i, s.ID)
 		}
 	}
-	if st := g.r.Status(); st.Received != int64(len(sent)) || st.Stored != int64(len(sent)) {
+	want := int64(len(sent))
+	if st := g.waitStatus(func(st receive.Status) bool { return st.Stored >= want }, 20*time.Second); st.Received != want || st.Stored != want {
 		t.Errorf("status received %d stored %d, want %d", st.Received, st.Stored, len(sent))
 	}
 }
@@ -289,30 +290,55 @@ func TestHostileFraming(t *testing.T) {
 }
 
 // TestDatagramFloodIsCountedAndIsolated: A floods UDP far past its rate; B
-// sends inside its rate and loses nothing; A's drops are counted and
-// reported.
+// sends inside its rate; every datagram the listener read is stored or
+// counted as dropped, and A's drops are counted and reported. A datagram
+// the OS dropped before the listener read it (its socket buffer full while
+// the read loop is starved of CPU, as on a slow Windows runner) is not
+// read, so it is neither stored nor counted: that is UDP's stated limit
+// (A4), and the only place it shows is Received falling short of what was
+// sent. So B may be short by at most the datagrams never read; a datagram
+// of B's that was read and then lost fails (#187, job 121917868556: B 14
+// of 15 stored, with nothing to tell which).
 func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 	g := start(t, asset.SyslogUDP, nil, receive.Limits{Rate: 20, Burst: 20, ReportEvery: 500 * time.Millisecond})
 	a, b := dialFrom(t, ipA, "udp", g.addr), dialFrom(t, ipB, "udp", g.addr)
+	const floodN, quietN = 2000, 15
 	var wg sync.WaitGroup
 	wg.Add(1)
 	began := time.Now()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 2000; i++ {
+		for i := 0; i < floodN; i++ {
 			fmt.Fprintf(a, "<13>flood %d", i)
 			if i%50 == 0 {
 				time.Sleep(20 * time.Millisecond)
 			}
 		}
 	}()
-	for i := 0; i < 15; i++ {
+	for i := 0; i < quietN; i++ {
 		fmt.Fprintf(b, "<13>quiet %d", i)
 		time.Sleep(80 * time.Millisecond)
 	}
 	wg.Wait()
 	elapsed := time.Since(began)
+	// Every datagram read is stored or counted as dropped, once the writer
+	// has caught up.
+	accounted := func(st receive.Status) bool {
+		return st.Received == st.Stored+sumMap(st.Dropped)+st.Empty
+	}
 	time.Sleep(time.Second)
+	st := g.waitStatus(accounted, 30*time.Second)
+	if !accounted(st) {
+		t.Errorf("read %d datagrams, but %d stored, %d dropped %v and %d empty", st.Received, st.Stored, sumMap(st.Dropped), st.Dropped, st.Empty)
+	}
+	sent := int64(floodN + quietN)
+	if st.Received > sent {
+		t.Fatalf("read %d datagrams, %d sent", st.Received, sent)
+	}
+	notRead := sent - st.Received
+	if notRead > 0 {
+		t.Logf("%d of %d datagrams were never read: lost before the listener, where it cannot count them (UDP)", notRead, sent)
+	}
 	var fromA, fromB []stored
 	for _, s := range g.events() {
 		switch s.Asset.ID {
@@ -322,16 +348,25 @@ func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 			fromB = append(fromB, s)
 		}
 	}
-	if len(fromB) != 15 {
-		t.Errorf("B: %d of 15 stored", len(fromB))
-	}
-	for i, s := range fromB {
+	// B's stored datagrams are B's, each once, in the order sent.
+	next := 0
+	for _, s := range fromB {
+		var i int
+		if _, err := fmt.Sscanf(string(s.Bytes), "<13>quiet %d", &i); err != nil || i < next || i >= quietN {
+			t.Errorf("B: stored %q out of order or not sent (next %d)", s.Bytes, next)
+			continue
+		}
 		checkBytes(t, i, s, fmt.Appendf(nil, "<13>quiet %d", i))
+		next = i + 1
+	}
+	if missing := int64(quietN - len(fromB)); missing > notRead {
+		t.Errorf("B: %d of %d stored; %d missing, but only %d datagrams were never read, so the listener lost one it read", len(fromB), quietN, missing, notRead)
+	} else if missing > 0 {
+		t.Logf("B: %d of %d stored; the %d missing are within the %d never read", len(fromB), quietN, missing, notRead)
 	}
 	if limit := 20 + int(20*elapsed.Seconds()) + 20; len(fromA) > limit {
 		t.Errorf("A: %d stored in %s, over its rate (at most %d)", len(fromA), elapsed, limit)
 	}
-	st := g.r.Status()
 	if st.Dropped[receive.DropRateLimit] == 0 {
 		t.Errorf("no rate-limit drops counted: %+v", st.Dropped)
 	}
@@ -350,70 +385,96 @@ func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 	}
 }
 
-// TestStreamFloodIsSlowedNotDropped: A writes 400 messages over TCP at five
-// times its rate; B's messages on another connection are stored promptly;
-// every one of A's is stored in order, and nothing is dropped. "Promptly"
-// is against this store: B's lag behind A's flood may exceed its lag with
-// no flood (measured first, on the same rig) by at most 2 s, so a slow
-// store on a busy runner is not taken for A holding B back (#187, job
-// 121862674585: 3.8 s on a runner whose store tests took 368 s).
+// TestStreamFloodIsSlowedNotDropped: A writes 200 messages over TCP at ten
+// times its rate; every one of A's is stored in order, A is slowed to its
+// rate, and nothing is dropped. B, on another connection, keeps its own
+// bucket: none of its messages waits for a token while A's flood holds
+// A's bucket empty. That is read from when the listener read each of B's
+// frames (received.utc), which the reader takes after its token wait and
+// before the store, so a slow store cannot move it: B's 10 frames fit in
+// its burst, so with its own bucket they are read back to back, and with
+// a bucket shared with A each one waits for a token, the nine after the
+// first at least 1/Rate apart. The wall-clock lag of B behind A's flood
+// was the property before; it flaked on slow stores (#187, jobs
+// 121862674585 and 121924487638: 3.8 s and 4.2 s) and did not catch a
+// shared bucket (376 ms), so it stays only as a generous liveness bound.
 func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
-	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: 50, Burst: 50})
+	const rate, floodN, quietN = 20, 200, 10
+	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: rate, Burst: rate})
 	b := dialFrom(t, ipB, "tcp", g.addr)
-	quiet := func(prefix string) (lag time.Duration) {
+	// quiet sends B's 10 messages in one write and returns how long they
+	// took to be stored and how far apart the listener read the first and
+	// the last.
+	quiet := func(prefix string) (lag, span time.Duration) {
 		sent := time.Now()
-		for i := 0; i < 10; i++ {
-			fmt.Fprintf(b, "<13>%s %d\n", prefix, i)
+		var w bytes.Buffer
+		for i := 0; i < quietN; i++ {
+			fmt.Fprintf(&w, "<13>%s %d\n", prefix, i)
 		}
-		for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-			n := 0
+		if _, err := b.Write(w.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+		for end := time.Now().Add(60 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+			var got []stored
 			for _, s := range g.events() {
 				if s.Asset.ID == assetB && strings.HasPrefix(string(s.Bytes), "<13>"+prefix+" ") {
-					n++
+					got = append(got, s)
 				}
 			}
-			if n == 10 {
-				return time.Since(sent)
+			if len(got) == quietN {
+				return time.Since(sent), got[quietN-1].Received.Sub(got[0].Received)
 			}
 		}
-		return 0
+		return 0, 0
 	}
-	alone := quiet("alone")
+	alone, aloneSpan := quiet("alone")
 	if alone == 0 {
-		t.Fatal("B's 10 messages with no flood were not stored in 30 s")
+		t.Fatal("B's 10 messages with no flood were not stored in 60 s")
 	}
 	a := dialFrom(t, ipA, "tcp", g.addr)
 	w := bufio.NewWriter(a)
-	for i := 0; i < 400; i++ {
+	for i := 0; i < floodN; i++ {
 		fmt.Fprintf(w, "<13>flood %03d\n", i)
 	}
-	began := time.Now()
 	go w.Flush()
-	time.Sleep(500 * time.Millisecond)
-	lagB := quiet("quiet")
-	t.Logf("B's 10 messages: %s with no flood, %s behind A's flood", alone, lagB)
-	if lagB == 0 || lagB > alone+2*time.Second {
-		t.Errorf("B's 10 messages took %s behind A's flood, %s with none", lagB, alone)
+	// A's burst is spent within this, and B's bucket has refilled.
+	time.Sleep(time.Second)
+	lagB, span := quiet("quiet")
+	t.Logf("B's 10 messages: stored %s after sending and read within %s with no flood; %s and %s behind A's flood",
+		alone, aloneSpan, lagB, span)
+	// B's own bucket: read back to back. A shared bucket spaces the nine
+	// after the first at least 1/Rate apart (450 ms here); half that is
+	// the line, far above a reader that never waited.
+	if shared := 9 * time.Second / rate; lagB == 0 || span >= shared/2 {
+		t.Errorf("B's 10 frames were read over %s behind A's flood (%s with none): B waited for tokens, as if it shared A's bucket (a shared bucket takes at least %s)",
+			span, aloneSpan, shared)
 	}
-	ev := g.waitN(420, 20*time.Second)
+	if limit := 3*alone + 5*time.Second; lagB > limit {
+		t.Errorf("B's 10 messages took %s to be stored behind A's flood, past the liveness bound %s (3 x %s with none, + 5 s)", lagB, limit, alone)
+	}
+	ev := g.waitN(floodN+2*quietN, 20*time.Second)
 	var fromA []stored
 	for _, s := range ev {
 		if s.Asset.ID == assetA {
 			fromA = append(fromA, s)
 		}
 	}
-	if len(fromA) != 400 {
-		t.Fatalf("A: %d of 400 stored", len(fromA))
+	if len(fromA) != floodN {
+		t.Fatalf("A: %d of %d stored", len(fromA), floodN)
 	}
-	// 400 at 50 a second with a burst of 50 is at least 7 s: A was slowed.
-	if took := time.Since(began); took < 6*time.Second {
-		t.Errorf("A's 400 messages were stored in %s, faster than its rate", took)
+	// 200 at 20 a second with a burst of 20 is at least 9 s: A was slowed.
+	// Read off the listener's own times, so a slow store cannot hide it.
+	if took := fromA[floodN-1].Received.Sub(fromA[0].Received); took < 8*time.Second {
+		t.Errorf("A's %d messages were read within %s, faster than its rate", floodN, took)
 	}
 	for i, s := range fromA {
 		checkBytes(t, i, s, fmt.Appendf(nil, "<13>flood %03d", i))
 	}
-	if st := g.r.Status(); len(st.Dropped) != 0 && sumMap(st.Dropped) != 0 {
-		t.Errorf("stream messages dropped: %+v", st.Dropped)
+	// A stream is slowed, never dropped: every message read is stored.
+	want := int64(floodN + 2*quietN)
+	st := g.waitStatus(func(st receive.Status) bool { return st.Stored >= want }, 20*time.Second)
+	if st.Received != want || st.Stored != want || sumMap(st.Dropped) != 0 {
+		t.Errorf("received %d, stored %d, dropped %v; want %d, %d and none", st.Received, st.Stored, st.Dropped, want, want)
 	}
 }
 
