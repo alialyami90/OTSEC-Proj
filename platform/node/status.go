@@ -39,6 +39,7 @@ type Status struct {
 	assets      map[string]AssetResult
 	runsHeld    string
 	listeners   map[string]ListenerStatus
+	adminReqs   []AdminRequestStatus
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -93,6 +94,9 @@ type StatusFile struct {
 	Assets map[string]AssetResult `json:"assets,omitempty"`
 	// Listeners is each Syslog listener's state (listening.go).
 	Listeners map[string]ListenerStatus `json:"listeners,omitempty"`
+	// AdminRequests is each admin-request file in admin_dir and the
+	// collector's decision on it, if any (adminrelay.go).
+	AdminRequests []AdminRequestStatus `json:"admin_requests,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -215,6 +219,13 @@ func (s *Status) SetListeners(m map[string]ListenerStatus) {
 	s.mu.Unlock()
 }
 
+// SetAdminRequests records the admin-request files and their decisions.
+func (s *Status) SetAdminRequests(r []AdminRequestStatus) {
+	s.mu.Lock()
+	s.adminReqs = slices.Clone(r)
+	s.mu.Unlock()
+}
+
 // SetSuspensions records the node's current asset suspensions.
 func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Lock()
@@ -315,6 +326,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	}
 	if len(s.listeners) > 0 {
 		f.Listeners = maps.Clone(s.listeners)
+	}
+	if len(s.adminReqs) > 0 {
+		f.AdminRequests = slices.Clone(s.adminReqs)
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}

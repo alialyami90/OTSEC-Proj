@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.3: the audit record every module
+// Package audit is contract C8, otsec.audit/0.4: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -121,6 +121,38 @@
 //
 // A record stamped 0.2 or earlier cannot carry these actions or the
 // quarantine object.
+//
+// # Admin-signed requests: claimed, verified and the repeat (0.4)
+//
+// A collector.request record about an admin-signed request (C7 0.4 and
+// later) names the request by an Admin group: the signing key ID, the
+// human principal, the nonce, and the SHA-256 of the signed payload bytes.
+// Never the payload, the sealed secret or the signature.
+//
+//   - claimed is on the node's info record, written before it sends. It is
+//     what the envelope and payload say, and nothing has checked it yet: a
+//     forged file claims whatever it likes.
+//   - verified is on the allowed record: C7 CollectorReply.Admin, what the
+//     collector checked against its pinned keys. The record's actor is the
+//     verified person (type human, the same ID), so it names one person. A reader that wants to
+//     know who authorised an action reads verified, never claimed. A
+//     claimed group whose request was then refused stays in the chain as
+//     evidence of the attempt.
+//   - repeat_of is on an allowed record whose reply was the C7 0.5 repeat
+//     answer, with verified. The repeat has its own collector_seq, and
+//     repeat_of names the first decision on the same signed bytes, which
+//     did nothing again. VerifyCollectorSeq counts repeat_of as accounting
+//     for that first decision: when the first reply was lost, the repeat
+//     is the record of it. A window report can therefore show a gap younger
+//     than the admin request window (15 minutes) that a later repeat
+//     covers; see VerifyCollectorSeqFrom.
+//
+// A record stamped 0.3 or earlier cannot carry these fields, and they are
+// on collector.request only: claimed with outcome info, verified and
+// repeat_of with outcome allowed, repeat_of below the record's own
+// collector_seq. A 0.3 reader ignores the fields (readers are not strict),
+// but its VerifyCollectorSeq reports a first decision that only a repeat
+// accounts for as a gap: the safe side.
 //
 // # What it leaves out
 //

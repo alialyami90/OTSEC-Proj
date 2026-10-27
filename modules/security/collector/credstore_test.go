@@ -824,3 +824,36 @@ func FuzzOpenCredStore(f *testing.F) {
 }
 
 func isWindows() bool { return runtime.GOOS == "windows" }
+
+// TestInstallKeyWhileWriting: InstallKey is read while the store is being
+// written, as the pipeline's admin binding reads it beside a concurrent
+// decision. go test -race fails here without the lock (A6 on #186).
+func TestInstallKeyWhileWriting(t *testing.T) {
+	f := newPipeline(t)
+	f.installCanary(t)
+	want := f.store.InstallKey()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 20; i++ {
+			if _, _, err := f.store.Suspend(pipeCred, 1, authz.SuspendOperator); err != nil {
+				t.Error(err)
+				return
+			}
+			if _, err := f.store.ClearSuspension(authz.CredentialClearSuspBody{RefID: pipeCred, Version: 1}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		if got := f.store.InstallKey(); got.KeyID != want.KeyID {
+			t.Fatalf("install key %s, want %s", got.KeyID, want.KeyID)
+		}
+	}
+}

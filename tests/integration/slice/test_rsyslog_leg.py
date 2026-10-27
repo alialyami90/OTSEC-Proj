@@ -1,11 +1,20 @@
 """The Linux leg's upstream collector, rsyslog with imrelp over TLS, works
 with the configuration the integration job uses (A6, D2-3)."""
 
+import os
+
 import pytest
 
 import harness
 from conftest import need
 from relp_client import Client
+
+# A platform exemption, not a missing tool: rsyslog does not run on Windows,
+# so OTSEC_SLICE_REQUIRED=1 must not fail this leg there (A1 on #179). On
+# Linux a missing rsyslogd or imrelp still fails a required run.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Linux-only leg: needs rsyslogd with imrelp; it runs in CI's Linux integration job")
 
 MSG = b'<133>1 2026-10-24T12:00:05.123456Z site-a6 otsec - SER [otsec@32473 eid="a:b:1" evc="simulated"] ser'
 

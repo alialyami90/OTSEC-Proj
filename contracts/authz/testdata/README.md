@@ -10,11 +10,14 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/valid/credential-revoke.json` | An admin revokes a credential after rotation. |
 | `requests/valid/credential-clear-suspension.json` | An admin clears a suspension on the exact version they reviewed. |
 | `requests/valid/asset-clear-suspension.json` | 0.2: the node asks the collector to clear its suspension of one asset, naming the invocation that suspended it. The collector still reads the administrator's file itself before it clears. |
-| `requests/valid/admin-signed-credential-install.json` | 0.4: the same install, signed by a test admin key (seed: SHA-256 of `otsec test admin key 1`, test only, D2-5). The body travels only inside the signed payload. `TestAdminSignedGolden` rebuilds it byte for byte and verifies it. |
+| `requests/valid/admin-signed-credential-install.json` | 0.4: the same install, stamped 0.4, signed by a test admin key (seed: SHA-256 of `otsec test admin key 1`, test only, D2-5). The body travels only inside the signed payload. `TestAdminSignedGolden` rebuilds it byte for byte and verifies it. |
+| `requests/valid/admin-signed-node-quarantine-clear.json` | 0.5: an administrator's signed clear of one quarantine the node holds, with the same test key and nonce. The body names the asset and the manifest's SHA-256 (of `otsec test quarantine manifest`, not a real manifest). `TestNodeQuarantineClearGolden` rebuilds and verifies it. |
 | `requests/invalid/bad_params__line-break-in-param.json` | A parameter value carrying CR LF and a second command. |
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
 | `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
 | `requests/invalid/invalid__asset-clear-suspension-stamped-0.1.json` | An asset clear stamped 0.1, which does not have that kind. |
+| `requests/invalid/invalid__node-quarantine-clear-stamped-0.4.json` | The signed quarantine clear golden stamped 0.4, which does not have the node kinds. |
+| `requests/invalid/invalid__node-seq-reset-ack-unsigned.json` | A reset acknowledgement with no signature: the node kinds exist only signed, and have no body outside the payload. |
 | `requests/invalid/invalid__body-does-not-match-kind.json` | Kind `run` with a revoke body. |
 | `requests/invalid/invalid__engineering-purpose.json` | A credential whose purpose is not `collect-readonly`. |
 | `requests/invalid/invalid__params-missing.json` | A run with no `params` object; it must be present, even if empty. |
@@ -35,3 +38,20 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/invalid/unknown_field__raw-line-in-run.json` | A raw `line` inside the run body. |
 | `requests/invalid/unknown_field__secret-in-credential-ref.json` | A `secret` field inside a credential reference. |
 | `requests/against-register/credential_mismatch__level-2ac.json` | A credential installed for access level `2AC`. It decodes, but no auth-phase session line in the SEL-751 register reaches it and no read-only operation needs it (C7-A6-1). |
+
+## Replies (0.5)
+
+Files under `replies/valid/` decode strictly and pass `CollectorReply.Validate`; files under `replies/invalid/` decode and fail it (`TestGoldenReplies`). The `admin` object names the test key, nonce and payload of `admin-signed-node-quarantine-clear.json`.
+
+| File | What it shows |
+| --- | --- |
+| `replies/valid/admin-accepted.json` | An accepted admin-signed request: what the collector verified. |
+| `replies/valid/admin-accepted-repeat.json` | The repeat answer for the same bytes: a new `collector_seq` of its own, and `repeat_of` naming the first decision. |
+| `replies/valid/accepted-0.4.json` | A 0.4 reply with neither field. |
+| `replies/valid/refused-replay.json` | Another payload under a spent nonce: `admin_unverified`, check `replay`. |
+| `replies/invalid/repeat-stamped-0.4.json` | A repeat on a reply stamped 0.4, which no 0.4 collector writes. |
+| `replies/invalid/repeat-of-a-later-decision.json` | `repeat_of` not below the reply's own `collector_seq`. JSON Schema cannot compare two fields; `Validate` must. |
+| `replies/invalid/repeat-of-on-a-refusal.json` | `repeat_of` on a refused reply. |
+| `replies/invalid/admin-stamped-0.4.json` | `admin` on a reply stamped 0.4. |
+| `replies/invalid/repeat-without-admin.json` | A repeat that names nothing the collector verified. |
+| `replies/invalid/admin-on-a-refusal.json` | `admin` on a refused reply. |
