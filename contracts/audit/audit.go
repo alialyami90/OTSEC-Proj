@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.4"
+const ContractID = "otsec.audit/0.5"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -90,7 +90,7 @@ type Actor struct {
 	AuthMethod string              `json:"auth_method,omitempty"`
 }
 
-// Action is the closed set of audited actions in 0.2. A reader that meets an
+// Action is the closed set of audited actions. A reader that meets an
 // action it does not know keeps the record (the chain covers it) and shows it
 // as ActionUnrecognized.
 type Action string
@@ -152,6 +152,7 @@ func init() {
 		ActionStoreModeChange, ActionNodePostureChange, ActionNodeMigrationDate, ActionAssetCollectorAssign,
 		ActionCollectorInstallKey, ActionCollectorSeqReset, ActionCollectorSeqResetAck, ActionAssetSuspend, ActionAssetSuspensionClear,
 		ActionQuarantineExported, ActionQuarantineCleared,
+		ActionConfigChangeApproved, ActionConfigChangeDetected, ActionConfigBaselineAcknowledge,
 	} {
 		actions[a] = true
 	}
@@ -162,6 +163,7 @@ func init() {
 var actionSince = map[Action]int{
 	ActionCollectorInstallKey: 2, ActionCollectorSeqReset: 2, ActionCollectorSeqResetAck: 2, ActionAssetSuspend: 2, ActionAssetSuspensionClear: 2,
 	ActionQuarantineExported: 3, ActionQuarantineCleared: 3,
+	ActionConfigChangeApproved: configSince, ActionConfigChangeDetected: configSince, ActionConfigBaselineAcknowledge: configSince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -254,6 +256,9 @@ type Record struct {
 	Claimed  *Admin `json:"claimed,omitempty"`
 	Verified *Admin `json:"verified,omitempty"`
 	RepeatOf uint64 `json:"repeat_of,omitempty"`
+
+	// Config is on the configuration actions only (0.5): config.go.
+	Config *Config `json:"config,omitempty"`
 }
 
 // Admin names one admin-signed request (C7 AdminAccepted): the signing
@@ -265,9 +270,21 @@ type Admin struct {
 	Principal     string `json:"principal"` // a human principal ID
 	Nonce         string `json:"nonce"`
 	PayloadSHA256 string `json:"payload_sha256"`
+	// Kind is the request's C7 kind (0.5): on claimed, what the payload
+	// says; on verified, the kind the collector verified. VerifyConfig
+	// needs it on the acceptance a configuration record follows.
+	Kind authz.RequestKind `json:"kind,omitempty"`
 }
 
-func (a *Admin) validate() error {
+func (a *Admin) validate(minor int) error {
+	if a.Kind != "" {
+		if minor < configSince {
+			return fmt.Errorf("kind is new in 0.%d", configSince)
+		}
+		if err := authz.ValidateAdminKinds([]authz.RequestKind{a.Kind}); err != nil {
+			return err
+		}
+	}
 	switch {
 	case !adminKeyIDPattern.MatchString(a.AdminKeyID):
 		return fmt.Errorf("admin_key_id %q", a.AdminKeyID)
@@ -411,6 +428,9 @@ func (r *Record) Validate() error {
 		return err
 	}
 	if err := r.validateAdmin(got.Minor); err != nil {
+		return err
+	}
+	if err := r.validateConfig(got.Minor); err != nil {
 		return err
 	}
 	switch r.Outcome {
@@ -575,7 +595,7 @@ func (r *Record) validateAdmin(minor int) error {
 		if r.Outcome != OutcomeInfo {
 			return errors.New("audit: claimed is on the node's info record of the request it sent")
 		}
-		if err := r.Claimed.validate(); err != nil {
+		if err := r.Claimed.validate(minor); err != nil {
 			return fmt.Errorf("audit: claimed: %w", err)
 		}
 	}
@@ -583,7 +603,7 @@ func (r *Record) validateAdmin(minor int) error {
 		return errors.New("audit: verified and repeat_of are on the record of an accepted reply")
 	}
 	if r.Verified != nil {
-		if err := r.Verified.validate(); err != nil {
+		if err := r.Verified.validate(minor); err != nil {
 			return fmt.Errorf("audit: verified: %w", err)
 		}
 		// A reader takes who authorised the action from verified, so the

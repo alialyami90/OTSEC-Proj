@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.5: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.6: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -167,18 +167,17 @@
 // its own guess under a genuine signature.
 //
 // VerifyAdminRequest runs the checks in a fixed order (envelope, key,
-// signature, payload, binding, window) and decodes the payload only after
-// the signature verifies. The collector then spends the nonce durably
-// before any other decision, so a signed request is good for one decision,
-// even across a restart, and only then applies the install budget, the
-// store and the reuse rule. Every failure, the collector's replay and
+// signature, payload, binding, authority, window) and decodes the payload
+// only after the signature verifies. The collector then spends the nonce
+// durably before any other decision, so a signed request is good for one
+// decision, even across a restart, and only then applies the install budget,
+// the store and the reuse rule. Every failure, the collector's replay and
 // capacity checks included, is refused with admin_unverified, the check's
 // name (Refusal.Check) and a fixed detail naming only the check
 // (AdminRefusal): no reply to an unsigned or mis-bound request depends on
-// any stored secret. The node's C8 record of the reply names the check
-// (A1). Admin keys are pinned in the
-// collector's own configuration out of band; one key speaks for one
-// person, and its ID is derived from it (AdminKeyID).
+// any stored secret. The node's C8 record of the reply names the check (A1).
+// Admin keys are pinned in the collector's own configuration out of band;
+// one key speaks for one person, and its ID is derived from it (AdminKeyID).
 //
 // What stays possible: the node can drop or delay a request, and an
 // administrator can still learn equality through the reuse rule, at the
@@ -218,6 +217,56 @@
 // again: each node kind, and the collector's side of an asset clear, is
 // idempotent.
 //
+// # Change approvals and baseline acknowledgements (0.6)
+//
+// Two more admin-signed node kinds serve configuration monitoring (P4-A3,
+// D4-2). node.change_approval approves, in advance, a change to one asset's
+// configuration against the baseline it names (NodeChangeApprovalBody: the
+// asset, baseline_digest, the window's start and end, and a reason).
+// node.baseline_ack acknowledges one baseline, configuration or event, as
+// the asset's baseline (NodeBaselineAckBody). The approver is the
+// envelope's signed principal, and the nonce and expiry are the payload's
+// own, so neither body repeats them. Like the 0.5 kinds, the collector
+// verifies, spends the nonce, numbers the decision and changes nothing of
+// its own; the node acts only on an accepted reply (AdminAcceptance) and
+// writes the C8 0.5 records.
+//
+// Authority. From 0.6 a pinned admin key may carry a list of the kinds it
+// may sign (AdminKey.Kinds, checked at load by ValidateAdminKinds). A key
+// pinned without a list keeps exactly the 0.5 kinds (DefaultAdminKinds), so
+// no installed key can approve a change or acknowledge a baseline until an
+// administrator lists those kinds for it (docs/phase4/B3-c7-0.6-c8-0.5.md).
+// The check runs after signature and binding, so only an authenticated
+// signer learns that its key may not sign the kind, and before the window
+// and the collector's replay check, so a refused approval does not spend
+// its nonce. The refusal is admin_unverified with check authority; the
+// decision still takes a collector_seq and the node records it denied
+// (V-M2). A request stamped before 0.6 cannot carry the new kinds, and its
+// authority refusal reads as key (Refusal.ForRequest).
+//
+// The window. An approval's window is at most MaxApprovalWindow (24 hours)
+// long, ends after it starts, and is canonical RFC 3339 UTC (payload). At
+// the collector's clock it may not have ended, and may not start more than
+// MaxApprovalLead (7 days) ahead (window). DefaultApprovalWindow (4 hours)
+// is what an admin client offers; the collector never fills one in.
+//
+// Order, not time. Whether an approval came before a change is decided
+// from collector_seq, never from the window: a difference counts as
+// approved only if the collector numbered the approval below its decision on
+// the read that first found the difference (C8 ApprovalCovers). An
+// approved change never moves the baseline: only node.baseline_ack does,
+// and the node adopts it only when the bytes it holds hash to
+// baseline_digest. The collector checks the digest's form only.
+//
+// The asset. After spending the nonce, the collector refuses an approval or
+// acknowledgement for an asset it does not collect from with
+// asset_not_enrolled, so a node cannot use one to probe for assets: the
+// answer comes only after a valid signature by a key allowed the kind.
+//
+// Not covered: the approver and the person who changed the relay may be
+// the same. Nothing observes who changed a relay until engineering access
+// (R2) exists, so this stays a limitation that R2 can close.
+//
 // # Collector sequence
 //
 // The collector numbers every event it reports to the node: each reply to a
@@ -249,7 +298,9 @@
 // principal_not_permitted in place of admin_unverified. AdminSigned needs
 // 0.4. The node kinds need 0.5, and so do the repeat answer and
 // CollectorReply.Admin, and a reply stamped before 0.5 that carries either
-// is invalid (CollectorReply.Validate). The admin payload's format stays
+// is invalid (CollectorReply.Validate). node.change_approval,
+// node.baseline_ack and AdminKey.Kinds need 0.6, and a request stamped
+// before 0.6 gets key in place of authority. The admin payload's format stays
 // otsec.authz.admin-request/0.4, and the signing prefix names
 // otsec.authz/0.4, so a 0.4 request verifies unchanged; a 0.4 reader
 // refuses a node body in the payload as a payload error. The labels bound into the sealing (the seal AAD and the HKDF
@@ -278,5 +329,6 @@
 //
 // R2 (separation of monitoring and engineering privilege), R5.7 (no
 // unrestricted CLI), TB3, TB4, AP-1, AP-3, AP-4, AP-7, AP-13, AP-14, AP-15,
-// AP-23, AP-27, HR-1, HR-5, HR-8, SC-2, SC-5, SC-6, SC-18, and V-S11.
+// AP-23, AP-27, HR-1, HR-5, HR-8, SC-2, SC-5, SC-6, SC-18, V-S11, and, from
+// 0.6, R3.4, R3.6 and V-M2.
 package authz

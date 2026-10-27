@@ -621,9 +621,9 @@ func validateBody(kind RequestKind, by Principal, b requestBodies) error {
 		}
 	case kind == KindNodeSeqResetAck && b.NodeSeqResetAck != nil:
 	case kind == KindNodeChangeApproval && b.NodeChangeApproval != nil:
-		return b.NodeChangeApproval.validate()
+		return b.NodeChangeApproval.Validate()
 	case kind == KindNodeBaselineAck && b.NodeBaselineAck != nil:
-		return b.NodeBaselineAck.validate()
+		return b.NodeBaselineAck.Validate()
 	default:
 		return refuse(RefuseInvalid, "body does not match kind %q", kind)
 	}

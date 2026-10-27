@@ -104,7 +104,9 @@ type NodeBaselineAckBody struct {
 	BaselineDigest string       `json:"baseline_digest"`
 }
 
-func (b *NodeChangeApprovalBody) validate() error {
+// Validate checks the body as the collector does (payload). C8 checks the
+// copy a config.change_approved record carries with the same rule.
+func (b *NodeChangeApprovalBody) Validate() error {
 	switch {
 	case !assetIDPattern.MatchString(b.AssetID):
 		return refuse(RefuseInvalid, "asset_id")
@@ -131,7 +133,8 @@ func (b *NodeChangeApprovalBody) validate() error {
 	return nil
 }
 
-func (b *NodeBaselineAckBody) validate() error {
+// Validate checks the body as the collector does (payload).
+func (b *NodeBaselineAckBody) Validate() error {
 	switch {
 	case !assetIDPattern.MatchString(b.AssetID):
 		return refuse(RefuseInvalid, "asset_id")

@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.4: the audit record every module
+// Package audit is contract C8, otsec.audit/0.5: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -154,6 +154,61 @@
 // but its VerifyCollectorSeq reports a first decision that only a repeat
 // accounts for as a gap: the safe side.
 //
+// # Configuration approvals, acknowledgements and differences (0.5)
+//
+// Three actions record configuration monitoring (P4-A3, V-M2). The node
+// writes all three, each with a target asset, a correlation_id and a Config
+// group holding exactly that action's fields (config.go):
+//
+//   - config.change_approved follows the collector's acceptance of a C7 0.6
+//     node.change_approval. Its actor is the verified person. It copies the
+//     body (baseline_digest, the window and the reason, checked by C7's own
+//     rule) and names the acceptance by decision_seq and payload_sha256. It
+//     is succeeded, or denied when the node refuses to act on it.
+//   - config.baseline_acknowledged follows a node.baseline_ack in the same
+//     way, with the baseline's kind (configuration or event). It is denied
+//     when the node holds no baseline of that asset and kind whose stored
+//     bytes hash to baseline_digest.
+//   - config.change_detected is the node's own record of a read whose
+//     snapshot differs from the baseline: the snapshot, the C9 difference,
+//     the decision on the read that first found it (read_seq), and
+//     unchanged_at, the latest time the configuration was seen equal to the
+//     baseline. It is warning unapproved_change, which is the alarm, or info
+//     approved_change with approval_seq naming the approval that covers it.
+//
+// The digests are C9's and C10's "sha256:<hex>" over a document's stored
+// bytes. Admin gains kind in 0.5: the request's C7 kind, which the node
+// fills on claimed and verified.
+//
+// "In advance" is decided by order, never by a time the approval states. An
+// approval covers a difference only if the collector numbered its acceptance
+// below its decision on the read that first found the difference, in the
+// same collector epoch (ApprovalCovers). The window must also overlap the
+// time the change happened in, between unchanged_at and the detection. A
+// node writes one config.change_detected per difference from a baseline,
+// so an approval accepted after a difference was found never covers it.
+// Ending that alarm takes a signed baseline acknowledgement, which is
+// recorded too. VerifyConfig checks all of this over the chain:
+//   - each approval and acknowledgement follows a real acceptance of its kind
+//     by its actor for the same signed bytes;
+//   - each detection names a real read of its asset;
+//   - every approval_seq names an approval that covers the detection.
+//
+// A node that forges records can still forge all of them, as for any
+// collector event (VerifyCollectorSeq). What it cannot do is silence an
+// alarm by citing an acceptance the collector numbered later, or one of
+// another kind or person, without VerifyConfig failing.
+//
+// Not covered: the approver and the person who changed the relay may be
+// the same. Nothing observes who changed a relay until engineering access
+// (R2) exists, so this stays a limitation that R2 can close (D4-2). An
+// approval covers any change from its baseline in its window, not named
+// settings. The reason says what was meant, and the alarm text shows which
+// approval silenced a difference.
+//
+// A record stamped 0.4 or earlier cannot carry these actions, Config or
+// Admin.kind.
+//
 // # What it leaves out
 //
 //   - Secrets, full configurations and raw device output. Values that need
@@ -218,6 +273,6 @@
 //
 // # Requirements and threat-model entries served
 //
-// R2.4 (session auditing), R4.4, AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8
-// and V-S11.
+// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4,
+// AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8, V-S11 and V-M2.
 package audit
