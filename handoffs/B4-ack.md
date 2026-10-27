@@ -1,0 +1,51 @@
+# B4 acknowledgement: Telemetry, Event Processing and IDS
+
+From B4, 2026-10-27, at `main` `8b4c9b2`. I read [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), then [B4-handoff.md](B4-handoff.md), then the key files it lists. I checked every function and constant the handoff names against the code. Each one exists where the handoff says, apart from the one gap in Q6. I also ran `go test ./modules/telemetry/... ./contracts/event/... ./contracts/syslog/...` on Linux with Go 1.26.10, and every package passed. That run is `desk` evidence only.
+
+## My understanding of my scope
+
+- **I own** `modules/telemetry/` (`receive/`, `normalize/`, `forward/`, `experiments/`), `modules/detection/` (empty today), `tests/fixtures/network/`, and the A4 design notes (`docs/phase2/A4-*.md`, `docs/phase3/A4-syslog-receive.md`, and `docs/phase4/B4-*.md` once Phase 4 opens).
+- **As author, I own C4** (`contracts/event`, `otsec.event/0.2`) **and C6** (`contracts/syslog`, `otsec.syslog/0.3`), plus C10 (`contracts/baseline`) in Phase 4. A change to any of them is a shared-contract change. It needs a written proposal, review by every consumer, and B1's approval.
+- **I do not touch** `platform/` or `cmd/otsec/` (B5), `modules/ied/` (B2), `modules/access/`, `modules/security/` or `cmd/otsec-collector/` (B3), B6's test directories, or any other contract. `platform/node/listening.go`, `listenlimits.go` and `unknownspent.go` are B5's code. I read them, but I do not edit them.
+- **I review** B2's protocol-adjacent work (the SER output format and C2), B5's listener wiring and any store change that affects telemetry (including C5 0.4's unknown class and faster count), and B6's tests on the receive and normalize paths. B6 reviews my work, and so does B2 for protocol interpretation.
+- **Phase 4 is held.** Phase 3 is not owner-accepted, so I start no C10 draft and no `modules/detection/` code. Until B1 opens Phase 4, I only do reviews and fixes to merged A4 code and notes.
+- **Safety rules, unchanged.** I contact no device. Every endpoint stays on the simulator, on loopback. I use test credentials only. Every result carries its evidence class, and today that class is `desk` or `simulated`. Code PRs follow D2-13: CI is the main test path, every job must be green on the head, a failing commit gets at most one re-run, and I never push an empty commit. Each code PR also shows a mutation check.
+
+## My first three actions
+
+1. **Fix the stale line in my own design note**, once this ack has merged, as a docs-only PR. In `docs/phase3/A4-syslog-receive.md`, "Known limits" says the node passes `UnknownSpent` 0 until A5's node half lands. That half landed in #198: `platform/node/listening.go` sets `cfg.UnknownSpent` from `unknownSpent` in `unknownspent.go`. The note will say that, and it will name the `syslog-unknown-budget-uncounted` fail-closed start. This is a fix to merged A4 material, so it is in scope before Phase 4.
+2. **Stand by to review**, before Phase 4, any B5 or B6 PR that touches the receive or normalize paths, including B6's Windows unknown-restart leg (gate item 1). I review against #196's rule: a message is charged at read and counted by received time.
+3. **When B1 opens Phase 4**, I read P4-A4, V-M4 and "R4.8 observation period and measures" again. Then I agree the C5 0.4 scope with B5 *before* B5 drafts it (handoff, Next steps, item 2), and I draft C10 `otsec.baseline/0.1` beside B2's C9 in one PR. That draft must settle Q1 to Q5 below.
+
+## Questions and gaps
+
+For A4, unless marked for B1.
+
+1. **The clock rule disagrees between two documents.** P4-A4's "Expected interfaces" says rate and time-of-day rules run on `received.utc`, *with device time only as evidence in the alarm*. "R4.8 observation period and measures" and the B4 handoff instead let the time-of-day rule use device time when the offset is known (V-S3). I plan to write C10 to the verification text, because B1 may change that text only by amending it: received time by default, device time for time-of-day only when the offset is known, and the alarm names its clock. Is that right? **For B1:** should the brief's wording be aligned?
+2. **SER backlog on received time.** A SER read stamps every row with the read's receive time. A first read can return the whole relay buffer, and the first read after a V-S12 outage returns everything since the last good read. On `received.utc`, such a batch looks like a rate spike at one hour. It can inflate the learnt per-bucket maximum, and after an outage it can raise false rate and time alarms. My proposal: rows aligned `first-read` count toward the type set but not toward the rate and hour learning. After a collection gap, rate and time rules skip the catch-up rows, and the new-type and repeats rules still apply to them. Would A4 and B6 accept that, or is a different rule intended? V-M4's false-positive bound of 0 makes this matter.
+3. **The Syslog event-type key, as C4 actually carries it.** C4 has no facility or severity fields. The key must derive both from the `pri` field (`pri / 8`, `pri % 8`). The message ID is the RFC 5424 `msgid` field, and RFC 3164, SEL-2488, SEL-2730M and RTAC messages have none. For those, I take the template from the `msg` field with every digit run replaced. For an RTAC message, `msg` holds the whole RTAC Logger MSG, including its event time, so the digit rule makes the time stamp constant. What key does a message with no parseable PRI get? I propose a fixed `pri-absent` key, with the template. Should the key also include `app_name` or the tag, so that two applications on one device with the same template stay apart? The verification text leaves it out, so I would leave it out unless A4 or B6 objects. B2 reviews the SER key: the element name and its state as printed, which is C4's `normalized.subject` and `normalized.value`.
+4. **`possible-duplicate`: how far back the check looks.** A4's rule counts a `possible-duplicate` SER row only when no event already counted for the asset has the same alignment key. Over what horizon does the check look: the previous read, the repeats window W, or the whole baseline history? I propose the previous read plus the current read, because `Align` only marks rows in the overlap between consecutive reads. B6's handoff states the expected behaviour as "a redelivered `possible-duplicate` event should not trip the Repeats rule, unless C10 states otherwise". The rule above is consistent with that.
+5. **Acknowledging the event baseline.** P4-A3 gives `node.baseline_ack` a baseline kind (configuration or event) and the hash of the acknowledged baseline. So C10 must define a canonical encoding and hash of its baseline record that C7 0.6 can reference. Neither P4-A4 nor the B4 handoff says so. I will put it in the C10 draft and ask B3 to review it beside C7 0.6. Please confirm nothing else is already agreed here.
+6. **A gap in the handoff's key files.** The "Key files" table says the node counts `UnknownSpent` in `listening.go` (`NewListening`, `unresolved`). `unresolved` is the live counter in `liveLog.AppendBatch`. The start-time count, which is the slow scan that C5 0.4's faster count replaces, is `unknownSpent` in `platform/node/unknownspent.go` (#198). B5's handoff already lists that file. No change to B4-handoff.md is needed if A4 agrees; this ack records it.
+
+No overlap found with B2, B3, B5 or B6. B5's handoff names B4 as the reviewer of the unknown class and the faster count, and B6's names B4 as the reviewer of V-M4's protocol interpretation. Both match my handoff.
+
+## A4's answers (2026-10-27, on #229)
+
+A4 answered all six questions in [this comment](https://github.com/alialyami90/OTSEC-Proj/pull/229#issuecomment-6449536170). The C10 draft will follow these answers.
+
+1. **Clock: agreed.** The brief's own sentence defers to the clock rule in `verification.md`. SER and RTAC offsets are unknown today, so in practice every rule runs on received time.
+2. **SER backlog: accepted, with three refinements.**
+   - A read counts as catch-up when it is the first successful read after a recorded V-S12 failure. Device time does not decide it.
+   - Rows aligned `gap-before` are treated like catch-up rows.
+   - All rows of one read share one `received.utc`, so a normal poll also looks like a burst. The SER rate bucket is therefore at least the collection interval, or the rate rule counts per read.
+3. **Syslog key: agreed**, including `pri-absent` and keeping `app_name` and the tag out of the key. One consequence to settle: the digit rule merges RTAC tags that differ only by a number. There are two ways to handle it:
+   - keep the tag verbatim in a dialect rule, which needs B1 to amend "R4.8 observation period and measures";
+   - state the merge as a limit in C10.
+
+   **For B1:** I will draft C10 with the merge stated as a limit, unless you prefer the amendment.
+4. **`possible-duplicate`: the previous read only, matched one to one.** k identical rows in the previous read suppress at most k rows. A row is never compared within the current read, because that would undercount genuine repeats.
+5. **Baseline hash: nothing was agreed before.** C10 will follow C7's exact-bytes precedent: SHA-256 over the stored record's exact bytes, with no canonical JSON. B3 reviews it beside C7 0.6.
+6. **Agreed.** The missing `unknownspent.go` entry stays recorded in this ack. I fix the stale "Known limits" line in a follow-up PR (first action 1).
+
+The only question still open is the one in item 3, and it is for B1.

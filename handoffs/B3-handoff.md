@@ -53,16 +53,24 @@ From A3 to B3, written 2026-10-27 at `main` `d4afc63`. It is a map: details live
      - **"Prior" is decided by `collector_seq`.** The collector accepts the approval and numbers it. A difference counts as approved only if the approval's number is below the number of the `config.read` decision that found it. Never use a time written in the approval.
      - **The approval binds the baseline hash** it approves a change against. Optionally it also names the settings classes expected to change.
      - **Window cap:** propose 24 hours, refused above, with a shorter default.
+     - **Approver role (B3's ack, question 1):** C7 has no role today; `AdminKey` has no allowed kinds. Add a per-key allowed-kinds list to the pinned keys in C7 0.6, with an enrolment step in `docs/phase3/A3-admin-keys.md`.
+       - A key pinned without the list keeps exactly the 0.5 kinds and never gets the new ones, so it fails closed.
+       - The refusal stays `admin_unverified`, with a new `Check` value. Run it after the signature and binding checks and before the replay check, so the nonce is not spent. The decision is still numbered, so V-M2's "refused and recorded" holds.
+       - "The approver is not the person who made the change" is out of scope: nothing observes who changed a relay until engineering access (R2) exists. Record it as a limitation.
      - **Nonce and expiry come from the C7 0.4 envelope**, not repeated in the payloads.
      - **The node refuses an accepted `node.baseline_ack` whose hash it does not hold** for that asset and kind, and audits the refusal. The hash is over the stored canonical bytes, so A6 can recompute it.
      - **An approved change never moves the baseline by itself.** The new snapshot needs its own `node.baseline_ack`.
    - A6 tests to V-M2 (`docs/verification.md`).
 3. **Hygiene item: harden the state-file replace.** It is a condition before the first site deployment (`docs/agent-handoffs.md`, carry-over "A3"; `docs/phase3/A3-handoff.md`, "Phase 4 item").
    - In `modules/security/collector/state.go`, `replaceFile` and `renameDurable` (`fsync_windows.go`), which the credential store shares, replace with `SetFileInformationByHandle(FileRenameInfoEx)` and `FILE_RENAME_FLAG_POSIX_SEMANTICS | REPLACE_IF_EXISTS`.
-   - Fall back to `MoveFileEx` where that's unsupported. Take the minimum Windows build from Microsoft's documentation (A5 said 1607 and A6 said 1709, so check) and detect it at run time.
+   - Fall back to `MoveFileEx` when the call itself says the class is unsupported (`ERROR_INVALID_PARAMETER`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_FUNCTION`), and log that once per process. Don't use a Windows version check: ADR-0007's site OS is above both candidate floors, and the real cases are the file system (FAT, exFAT, SMB) and filter drivers. Never fall back on a sharing or access error.
    - Retry for at most about 500 ms on `ERROR_SHARING_VIOLATION` and `ERROR_ACCESS_DENIED`, logging each episode, then keep today's fail-closed break.
+     - The retry holds `State.mu`, which can be inside a Level 1 session. That's acceptable: the SEL-751 adapter calls `FloorGate.Confirmed` between a reply and its next send, and `run.go` arms the step deadline at each send, so no read timer is running.
+     - The cost is up to 500 ms of the run's wall-clock deadline, plus a 500 ms stall for other assets' `NextSeq`. TIDLE is at least a minute.
+     - Add a test that a retry at `OpenLevel` still leaves the run inside its deadline.
    - Wrap the OS error with `%w` in `State.write` and in `credstore.go`.
-   - Show durability with a crash test, since there is no write-through flag.
+   - Durability: after `FileRenameInfoEx`, call `FlushFileBuffers` on the renamed file's handle and, where NTFS allows it, on the directory handle (`FILE_FLAG_BACKUP_SEMANTICS`). Kill the process at each step to show atomicity (old or new bytes, never a mix). Label the evidence "process kill on the hosted runner; power-loss durability not shown". Power loss needs a VM power cut or hardware, and stays `documented-untested`.
+   - Move `publishInstallKey` (`cmd/otsec-collector/provision.go`) onto the same helper. Its own `os.Rename` loop (20 tries, 50 ms apart, A6 on #106) is the same `MoveFileEx` replace, with the same race. Keep its failure behaviour: a start that cannot publish the key stops.
    - Write the floor from the session's end when `OpenLevel`'s write fails and the session ends without `QUI`.
    - `state_windows_test.go` (#205) must stay green.
 4. **Hygiene item: a pinned `govulncheck` job in `ci.yml`** on every PR and weekly. B1 authorizes the `ci.yml` change.

@@ -121,6 +121,24 @@ These were settled with evidence; don't reopen them without new evidence.
 - **No end-to-end Windows check** of the admin relay or of `admin_dir`'s ACLs. Only contract and unit tests run on Windows.
 - **The unknown-budget start count** scans the whole window; its cost at quota is not measured.
 - **The #172 hang.** It is not explained; #177 makes the next one diagnosable rather than fixing a cause.
+- **The Windows stall of run 40548609999** (B6's handoff PR, docs only; the next run on the same branch passed). One job hung in three packages at once:
+  - `platform/store` `TestDiscardStepWALBound` sat in `FlushFileBuffers`, inside SQLite's automatic WAL checkpoint, for 9 m 18 s;
+  - `platform/node` hit its 10 min timeout while `TestBusyOpenRetryKeepsUnknownSuspensionsHeld` was 8 s into a store open waiting on a lock, and `TestListenerUsesSizedBudget` failed first: 40 messages received, but only 28 stored or dropped within the 10 s window of `flood`;
+  - `tests/integration/syslogreceive` reported "Serve did not return".
+
+  A flush that does not return points to the runner's disk, not to one test's logic. It is the only such run in the 25 CI runs before it.
+
+  The #172 hang (`TestOpenBesideReaderAfterKill`, a crash child that never exited) left no stacks, so it cannot be shown to be the same cause. It fits the same class: a Windows I/O call that does not return, which would also keep a process that is exiting from finishing. #177's child timeout and goroutine dump are what would tell them apart.
+- **#182's record bound needs a fresh measurement, not only #174's.** `TestReceivedRecordBound` normalizes each frame with `Auth: AuthNone`, an IPv4 sender, and no `AssetID` or `SenderCert`. A real stored event can be larger in three ways:
+  - a TLS listener adds `tls_leaf_sha256` (C4 0.2, #170);
+  - a known sender adds `asset_id` and its binding;
+  - an IPv6 sender has a longer address.
+
+  At 2048 the margin was 821 bytes (worst 19659 against a bound of 20480; A6 measured 19985). Add those fields to the worst case, then have B6 measure the merged branch independently.
+- **The #176 and #182 conflicts are additive, and nothing is hidden in them.**
+  - #176 against #189: both added a field to `Status`, to `StatusFile`, and to `Snapshot()` in `platform/node/status.go`. #176 added `nodeKeys` / `NodeKeys` (`node_keys_expiring`); #189 added `adminReqs` / `AdminRequests`. Keep both.
+  - #182 against #198: both appended tests at the end of `platform/node/listenlimits_test.go`. #182 added `TestReceivedRecordBound`; #198 added `flood`, `streamBytes` and `TestUnknownBudgetAcrossRestart`. Keep both.
+- **`flood` in `platform/node/listenlimits_test.go`** (from #198) waits a fixed 10 s for every message to be stored or dropped. It should wait until progress stalls instead, as A6's `waitN` does, so that a slow store fails only when it truly stops.
 - **Unsigned files.** `clear-suspension.json` and `clear-quarantine.json` remain unsigned until relay PR 2.
 
 ## Dependencies

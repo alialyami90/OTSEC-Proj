@@ -58,7 +58,7 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 
 ## Limitations
 
-- **The owner's PC run (gate item 1) has not happened.** #179 is merged; the run needs the owner's choice of how the PC gets Go 1.26.10 (`GOTOOLCHAIN=auto` would download a toolchain), and the owner present for UAC.
+- **The owner's PC run (gate item 1)** had not happened when this handoff was written. It ran later on 2026-10-27 at `main` `27fdea4` and was recorded as met with conditions (#208; `docs/phase-3-exit.md`).
 - **The fresh-state floor is not exercised on installed services.** `age_state` moves the installed collector's `created_utc` back an hour so the run stands for an earlier commissioning. Collector unit tests and V-S13 cover the floor.
 - **No end-to-end Windows check of the admin relay or of `admin_dir`'s ACLs** (A6's recorded gap). Only C7's contract tests and the node's unit tests run in the Windows Go job.
 - **The node does not read its TLS keys from the key register yet** (#176, open). The D2-12 files stay behind the lab flag until then.
@@ -78,8 +78,8 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 
 ## Dependencies
 
-- **A1:** the owner's session for the PC run, the only gate step left. #179 is merged (ccb94b2).
-- **A6:** the PC run and its record in `docs/verification.md` (V-S6 and V-S9 Windows rows).
+- **A1:** the owner's session for the PC run, the only gate step left. #179 is merged (ccb94b2). Done: the run passed on 2026-10-27 (#208).
+- **A6:** the PC run and its record in `docs/verification.md` (V-S6 and V-S9 Windows rows). Done in #208.
 - **After the gate (A5):**
   - #176, the node reading the key register;
   - #177, bounded crash children in the store tests;

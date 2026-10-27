@@ -54,6 +54,5 @@ A contract package imports only the standard library and other contract packages
 1. The owner drafts the contract on its own branch, in its package only, and opens a PR against `main`.
 2. Each listed reviewer records an outcome in `docs/phase1/reviews/<contract>-<reviewer>.md`: accepted, accepted with changes (each change numbered), or rejected with the reason. Security or safety objections cannot be outvoted (CLAUDE.md 5.7).
 3. A1 merges when every reviewer has accepted, the owner's tests and A6's contract tests pass, and no other contract defines the same concept differently.
-   - **Where tests run (owner rule, 2026-10-24; D1-26):** the project owner's local PC first, through Remote Control, using the same steps as `.github/workflows/ci.yml`. GitHub Actions is used only when the PC is offline or a step cannot run there.
-   - The owner's PC runs Windows. The Linux leg comes from a Linux container run of the same steps, or from Actions when that is available.
-   - Each result is posted on the PR with where it ran (owner PC, container, or Actions) and the commit it tested.
+   - **Where tests run (D2-13, which replaced D1-26):** GitHub Actions is the main test path. A PR merges when every job in `.github/workflows/ci.yml` is green on its head. A PR that changes only Markdown skips CI (D3-13).
+   - The owner's PC is the second Windows run, and the fallback when Actions is unavailable or a run needs a real installation. A PC result names the commit and is posted on the PR.

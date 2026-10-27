@@ -59,7 +59,13 @@ Items 3 to 6 (vulnerability applicability with SNMPv3 identity, IDS, secure engi
 | **B5** | Platform and distributed systems | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`; C5 | [B5-handoff.md](B5-handoff.md) |
 | **B6** | Independent verification and OT safety | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`, `.github/workflows/a6-*.yml` | [B6-handoff.md](B6-handoff.md) |
 
-The package-level table is in [D2-1](../docs/phase2/A1-decisions.md) and the import rules beside it. Each agent may also write its own `docs/phase{n}/B{n}-*.md` findings files. B1 creates `docs/phase4/` when Phase 4 is issued.
+The package-level table is in [D2-1](../docs/phase2/A1-decisions.md) and the import rules beside it. Each agent may also write its own `docs/phase{n}/B{n}-*.md` findings files. Every new file uses the B name: Phase 4 decisions go in `docs/phase4/B1-decisions.md`, numbered D4-n, and older files keep their A names as records. Where a B handoff says `docs/phase4/A{n}-*.md`, read `B{n}`. B1 creates `docs/phase4/` when Phase 4 is issued.
+
+Ownership settled in B1's ack (#220):
+
+- B3 owns `docs/threat-model.md`, and B2 owns `docs/device-capabilities.md`. B1 reviews both.
+- B5 owns `.github/workflows/a5-windows-experiments.yml`, with changes authorized by B1 as for `ci.yml`.
+- B1 owns `contracts/internal/strictjson`, `contracts/node` (maintained by B4), `.gitattributes` and `.gitignore`.
 
 ## Cross-agent dependencies
 
@@ -94,9 +100,9 @@ These come from the owner. They hold in every phase until the owner changes them
 - **No contact with operational equipment or any real device.** Collecting from a real device needs the owner's separate authorization. So does a first contact with a relay whose firmware ID is unknown. H-01 to H-15 and Q3 are written only and are never run. Every endpoint stays on the simulator, on loopback (D2-4, D2-10).
 - **Never fabricate evidence**: no invented device outputs, results, commit SHAs or test counts. Label every result with its evidence class.
 - **Credentials are test values only** (D2-5). No vendor-default or real-device password may appear in any fixture or doc (D2-11). The repository is public, so keep secrets, real device data and internal hostnames out of it.
-- **Testing (D2-13).** GitHub Actions is the main test path; `ci.yml` has ten jobs. A PR merges when its reviewers accept it and every job is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
+- **Testing (D2-13).** GitHub Actions is the main test path; `ci.yml` has ten jobs. A PR merges when its reviewers accept it and every job is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. A PR that changes only Markdown skips CI and merges on review (D3-13). Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
 - **The owner's PC.**
-  - Use it first when a run needs Windows and the owner is available. Use GitHub when the PC is offline or the run is not possible there.
+  - The GitHub-hosted runner comes first (D2-13). The owner's PC is the second Windows run, and the fallback when Actions is unavailable or a run needs a real installation. This replaces the earlier PC-first rule (D1-26) and the PC wording in `B5-handoff.md` (B1's ack, #220).
   - Install nothing on it beyond what the owner approved: portable Go inside the OTSEC folder, and a venv inside OTSEC with `pytest` and `asyncssh`. That means no installer, no admin rights requested, no system settings, no permanent PATH changes, and no pip installs outside the venv.
   - A run that creates services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
   - The PC is never a self-hosted runner and never holds machine keys.

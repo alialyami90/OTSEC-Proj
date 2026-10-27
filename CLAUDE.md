@@ -31,7 +31,7 @@ Commands, from the repository root (the root Go module is `otsec.local/otsec`; `
 - Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
 - Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
 - Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
-- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in ten jobs: Go on Linux and Windows, pytest, `integration`, and six `integration-long` legs. It is the main test path (D2-13): a PR merges when its reviewers accept it and every job is green on its head. The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
+- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in ten jobs: Go on Linux and Windows, pytest, `integration`, and six `integration-long` legs. It is the main test path (D2-13): a PR merges when its reviewers accept it and every job is green on its head. A PR that changes only Markdown files (other than test-data READMEs) skips CI and merges on review (D3-13). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
 Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
 
