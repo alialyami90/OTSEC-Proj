@@ -29,3 +29,23 @@ For A4, unless marked for B1.
 6. **A gap in the handoff's key files.** The "Key files" table says the node counts `UnknownSpent` in `listening.go` (`NewListening`, `unresolved`). `unresolved` is the live counter in `liveLog.AppendBatch`. The start-time count, which is the slow scan that C5 0.4's faster count replaces, is `unknownSpent` in `platform/node/unknownspent.go` (#198). B5's handoff already lists that file. No change to B4-handoff.md is needed if A4 agrees; this ack records it.
 
 No overlap found with B2, B3, B5 or B6. B5's handoff names B4 as the reviewer of the unknown class and the faster count, and B6's names B4 as the reviewer of V-M4's protocol interpretation. Both match my handoff.
+
+## A4's answers (2026-10-27, on #229)
+
+A4 answered all six questions in [this comment](https://github.com/alialyami90/OTSEC-Proj/pull/229#issuecomment-6449536170). The C10 draft will follow these answers.
+
+1. **Clock: agreed.** The brief's own sentence defers to the clock rule in `verification.md`. SER and RTAC offsets are unknown today, so in practice every rule runs on received time.
+2. **SER backlog: accepted, with three refinements.**
+   - A read counts as catch-up when it is the first successful read after a recorded V-S12 failure. Device time does not decide it.
+   - Rows aligned `gap-before` are treated like catch-up rows.
+   - All rows of one read share one `received.utc`, so a normal poll also looks like a burst. The SER rate bucket is therefore at least the collection interval, or the rate rule counts per read.
+3. **Syslog key: agreed**, including `pri-absent` and keeping `app_name` and the tag out of the key. One consequence to settle: the digit rule merges RTAC tags that differ only by a number. There are two ways to handle it:
+   - keep the tag verbatim in a dialect rule, which needs B1 to amend "R4.8 observation period and measures";
+   - state the merge as a limit in C10.
+
+   **For B1:** I will draft C10 with the merge stated as a limit, unless you prefer the amendment.
+4. **`possible-duplicate`: the previous read only, matched one to one.** k identical rows in the previous read suppress at most k rows. A row is never compared within the current read, because that would undercount genuine repeats.
+5. **Baseline hash: nothing was agreed before.** C10 will follow C7's exact-bytes precedent: SHA-256 over the stored record's exact bytes, with no canonical JSON. B3 reviews it beside C7 0.6.
+6. **Agreed.** The missing `unknownspent.go` entry stays recorded in this ack. I fix the stale "Known limits" line in a follow-up PR (first action 1).
+
+The only question still open is the one in item 3, and it is for B1.
