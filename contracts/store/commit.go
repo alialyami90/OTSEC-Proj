@@ -447,9 +447,11 @@ func (l *Log) Append(ctx context.Context, rec Record) (Receipt, error) {
 		return nil, errf(CodeLogStopped, l.stopped, "log stopped")
 	}
 	g := l.pending[rec.Stream]
-	if g != nil && g.bytes+size > l.opt.CommitBytes() {
+	if g != nil && (g.bytes+size > l.opt.CommitBytes() || len(g.recs) >= l.opt.MaxEvents) {
 		// The group commits before this record would take it past the
-		// commit cap.
+		// commit cap, or past MaxEvents: a full group is flushed by the
+		// Append that filled it after it lets go of l.mu, and an Append
+		// arriving in that gap must not join it (0.5, B6 on #281).
 		delete(l.pending, rec.Stream)
 		g.timer.Stop()
 		go l.run(g)

@@ -156,7 +156,7 @@ func open(t *testing.T, quota int64) (*c5.Log, string) {
 		t.Fatal("not a platform store")
 	}
 	l, err := c5.NewLog(sdb, node, map[c5.StreamID]c5.StreamClass{sStream: c5.ClassSyslogStream, sDgram: c5.ClassSyslogDatagram},
-		c5.GroupOptions{MaxEvents: 64, MaxWait: 5 * time.Millisecond}, nil)
+		c5.GroupOptions{MaxEvents: 64, MaxWait: 5 * time.Millisecond, MaxCommitRecords: c5.MaxBatch}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
