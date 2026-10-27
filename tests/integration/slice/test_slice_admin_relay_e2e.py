@@ -50,6 +50,16 @@ import harness
 from conftest import need
 from slicerun import CANARY, Slice
 
+# A platform exemption, not a missing tool, so OTSEC_SLICE_REQUIRED=1 does
+# not fail it on Windows (A5's service-mode run svcdry6, #179): the checks
+# stop the collector with SIGSTOP and set admin_dir's POSIX modes, neither
+# of which Windows has. The Windows relay is covered only by C7's contract
+# tests in the Go job; an end-to-end Windows check of admin_dir's ACLs and
+# the relay is still owed (A6).
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Linux-only: needs SIGSTOP and POSIX file modes; it runs in CI's Linux integration-long job")
+
 RELAY = 15      # platform/node RelayEverySeconds
 SETTLE = RELAY + 8  # the relay at start and one tick after it
 
@@ -155,8 +165,6 @@ def restart_node(s, before=None):
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    # SIGSTOP and POSIX modes: the relay's Windows path is #179's service run.
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-admin-relay")))
     s.build()
     out = {"steps": {}}

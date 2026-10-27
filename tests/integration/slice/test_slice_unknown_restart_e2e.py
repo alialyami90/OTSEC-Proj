@@ -39,6 +39,15 @@ import harness
 from conftest import need
 from slicerun import Slice
 
+# A platform exemption, so OTSEC_SLICE_REQUIRED=1 does not fail it on
+# Windows (as for the admin relay leg, svcdry6 on #179). It has not been run
+# on Windows: it binds 127.0.0.2 and 127.0.0.3 and kills the node
+# mid-flood, and neither has been tried there. The restart count itself
+# (#198's unknownSpent tests) runs in CI's Windows Go job.
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Linux-only leg, not yet run on Windows; it runs in CI's Linux integration-long job")
+
 DEVICE, STRANGER = "127.0.0.2", "127.0.0.3"
 AHEAD = 10050   # known records ahead of the unknown ones: past one store read
 STREAM = "syslog/a6-udp"
@@ -168,7 +177,6 @@ def _restart(s):
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-unknown-restart")))
     s.build()
     udp = harness.free_port()
