@@ -38,10 +38,9 @@ type Key struct {
 	// PRIAbsent.
 	Facility string `json:"facility,omitempty"`
 	Severity string `json:"severity,omitempty"`
-	// MsgID is the RFC 5424 MSGID, when the message has one ("-" is none).
-	// Template is set otherwise: "sha256:" and the hex SHA-256 of the
-	// template. Exactly one of the two is set on a Syslog key.
-	MsgID    string `json:"msgid,omitempty"`
+	// Template is set for Syslog: "sha256:" and the hex SHA-256 of the
+	// template (TemplateOf). The RFC 5424 MSGID is not part of the key
+	// (D4-4 item 4), so two messages sharing a MSGID stay apart.
 	Template string `json:"template,omitempty"`
 }
 
@@ -53,9 +52,6 @@ func (k Key) String() string {
 	case SourceSER:
 		return join("ser", k.Element, k.State)
 	case SourceSyslog:
-		if k.MsgID != "" {
-			return join("syslog", k.Facility, k.Severity, "msgid", k.MsgID)
-		}
 		return join("syslog", k.Facility, k.Severity, "template", k.Template)
 	}
 	return join(string(k.Source))
@@ -84,8 +80,6 @@ func ParseKey(s string) (Key, error) {
 	switch {
 	case len(parts) == 3 && parts[0] == "ser":
 		k = Key{Source: SourceSER, Element: parts[1], State: parts[2]}
-	case len(parts) == 5 && parts[0] == "syslog" && parts[3] == "msgid":
-		k = Key{Source: SourceSyslog, Facility: parts[1], Severity: parts[2], MsgID: parts[4]}
 	case len(parts) == 5 && parts[0] == "syslog" && parts[3] == "template":
 		k = Key{Source: SourceSyslog, Facility: parts[1], Severity: parts[2], Template: parts[4]}
 	default:
@@ -127,7 +121,7 @@ func (k Key) Validate() error {
 		if k.Element == "" || k.State == "" {
 			return fmt.Errorf("baseline: a SER key has an element and a state")
 		}
-		if k.Facility != "" || k.Severity != "" || k.MsgID != "" || k.Template != "" {
+		if k.Facility != "" || k.Severity != "" || k.Template != "" {
 			return fmt.Errorf("baseline: a SER key has only an element and a state")
 		}
 		if !utf8.ValidString(k.Element) || !utf8.ValidString(k.State) {
@@ -143,13 +137,7 @@ func (k Key) Validate() error {
 		if k.Facility != PRIAbsent && (!decimalIn(k.Facility, 23) || !decimalIn(k.Severity, 7)) {
 			return fmt.Errorf("baseline: facility %q and severity %q are not RFC 5424 values", k.Facility, k.Severity)
 		}
-		if (k.MsgID == "") == (k.Template == "") {
-			return fmt.Errorf("baseline: a Syslog key has a msgid or a template, not both")
-		}
-		if k.MsgID != "" && !msgID(k.MsgID) {
-			return fmt.Errorf("baseline: msgid %q is not an RFC 5424 MSGID", k.MsgID)
-		}
-		if k.Template != "" && !sha256Ref.MatchString(k.Template) {
+		if !sha256Ref.MatchString(k.Template) {
 			return fmt.Errorf("baseline: template %q is not sha256:<hex>", k.Template)
 		}
 	default:
@@ -162,19 +150,6 @@ func (k Key) Validate() error {
 func decimalIn(s string, max int) bool {
 	n, err := strconv.Atoi(s)
 	return err == nil && n >= 0 && n <= max && strconv.Itoa(n) == s
-}
-
-// msgID is RFC 5424's MSGID: 1 to 32 PRINTUSASCII, and not the NILVALUE.
-func msgID(s string) bool {
-	if len(s) == 0 || len(s) > 32 || s == "-" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < 33 || s[i] > 126 {
-			return false
-		}
-	}
-	return true
 }
 
 // TemplateOf is a message's template: every maximal run of ASCII digits
@@ -215,8 +190,8 @@ func sha256Of(b []byte) string {
 }
 
 // KeyOf reads the Syslog fields by the names the otsec-syslog parser
-// writes (modules/telemetry/normalize, SyslogParser 0.1): "pri", "msgid"
-// and "msg". C4 leaves field names open, so a change to those names in the
+// writes (modules/telemetry/normalize, SyslogParser 0.1): "pri" and
+// "msg". C4 leaves field names open, so a change to those names in the
 // parser is a change to this contract.
 //
 // KeyOf is the type of a device event, with Text, the readable form shown
@@ -243,7 +218,7 @@ func KeyOf(e *event.Event) (k Key, text string, ok bool) {
 
 func syslogKey(e *event.Event) (Key, string, bool) {
 	k := Key{Source: SourceSyslog, Facility: PRIAbsent, Severity: PRIAbsent}
-	var msg, id string
+	var msg string
 	var hasMsg bool
 	if e.Native != nil {
 		for _, f := range e.Native.Fields {
@@ -252,8 +227,6 @@ func syslogKey(e *event.Event) (Key, string, bool) {
 				if n, err := strconv.Atoi(f.Value); err == nil && n >= 0 && n <= 191 && strconv.Itoa(n) == f.Value {
 					k.Facility, k.Severity = strconv.Itoa(n/8), strconv.Itoa(n%8)
 				}
-			case "msgid":
-				id = f.Value
 			case "msg":
 				msg, hasMsg = f.Value, true
 			}
@@ -265,10 +238,6 @@ func syslogKey(e *event.Event) (Key, string, bool) {
 			// template.
 			msg = string(e.Native.Bytes)
 		}
-	}
-	if k.Facility != PRIAbsent && msgID(id) {
-		k.MsgID = id
-		return k, id, true
 	}
 	t := TemplateOf(msg)
 	k.Template = sha256Of([]byte(t))

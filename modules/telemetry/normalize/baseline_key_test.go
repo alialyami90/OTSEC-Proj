@@ -10,7 +10,7 @@ import (
 )
 
 // TestSyslogGoldensKeyAsC10Says ties C10's Syslog key to this parser's field
-// names: KeyOf reads "pri", "msgid" and "msg" as Syslog writes them, so a
+// names: KeyOf reads "pri" and "msg" as Syslog writes them, so a
 // rename here breaks this test before it breaks a baseline. The goldens
 // are documented examples, not device captures.
 func TestSyslogGoldensKeyAsC10Says(t *testing.T) {
@@ -42,7 +42,7 @@ func TestSyslogGoldensKeyAsC10Says(t *testing.T) {
 		if use != baseline.UseFull || why != baseline.ExcludedNone {
 			t.Errorf("%s: %s %q", c.file, use, why)
 		}
-		if k.Source != baseline.SourceSyslog || k.Facility != c.facility || k.Severity != c.severity || k.MsgID != "" {
+		if k.Source != baseline.SourceSyslog || k.Facility != c.facility || k.Severity != c.severity {
 			t.Errorf("%s: key %+v", c.file, k)
 		}
 		if text != c.text {

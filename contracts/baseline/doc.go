@@ -13,14 +13,15 @@
 //   - The event-type key (KeyOf). For SER, the element name and its state as
 //     printed: C4 normalized.subject and normalized.value, so 51P1P Asserted
 //     and 51P1P Deasserted are two types. For Syslog, the facility and the
-//     severity from the C4 "pri" field, and the RFC 5424 MSGID when the
-//     message has one; otherwise the message template, the C4 "msg" field
-//     with every run of ASCII digits replaced by "#". The field names are
+//     severity from the C4 "pri" field, and the message template: the C4
+//     "msg" field with every run of ASCII digits replaced by "#". The field names are
 //     the otsec-syslog parser's; without a "msg" field the whole record is
 //     the message. A message whose PRI cannot be read has facility and
 //     severity "pri-absent". The template's identity is its SHA-256, so a
 //     long message costs a fixed size; Text keeps its first TextMax bytes
-//     for the alarm. APP-NAME and the tag are not part of the key.
+//     for the alarm. APP-NAME, the tag and the RFC 5424 MSGID are not part
+//     of the key (D4-4 item 4): a sender that reuses one MSGID for
+//     different messages still gets one type per template.
 //   - Which events a baseline counts (Classify). Platform events, events of
 //     kinds other than ser and syslog, and events flagged asset-unresolved
 //     belong to no asset's baseline (A6's invariant). The node counts

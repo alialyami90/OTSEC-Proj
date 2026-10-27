@@ -70,12 +70,24 @@ func TestSERKeyIsElementAndState(t *testing.T) {
 func TestSyslogKeyFromPRI(t *testing.T) {
 	// <38> is facility 4 (auth), severity 6 (informational).
 	k, text := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "ID47", "msg", "user 5 logged on"))
-	if k.Facility != "4" || k.Severity != "6" || k.MsgID != "ID47" || k.Template != "" || text != "ID47" {
+	if k.Facility != "4" || k.Severity != "6" || k.Template != sha256Of([]byte("user # logged on")) || text != "user # logged on" {
 		t.Errorf("RFC 5424 with MSGID: %+v %q", k, text)
 	}
-	nil5424, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "-", "msg", "user 5 logged on"))
-	if nil5424.MsgID != "" || nil5424.Template == "" {
-		t.Errorf("MSGID \"-\" is none, so the template keys it: %+v", nil5424)
+}
+
+// TestMSGIDIsNotInTheKey: D4-4 item 4 keys Syslog on facility, severity and
+// the template only. A sender that reuses one MSGID for different messages
+// gets one type per template, and a MSGID alone never splits a type.
+func TestMSGIDIsNotInTheKey(t *testing.T) {
+	a, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "LOG", "msg", "user 5 logged on"))
+	b, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "LOG", "msg", "port 502 opened"))
+	if a == b {
+		t.Errorf("two messages sharing MSGID LOG merged: %v", a)
+	}
+	c, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "ID47", "msg", "user 7 logged on"))
+	d, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "-", "msg", "user 9 logged on"))
+	if a != c || a != d {
+		t.Errorf("one template split by MSGID: %v %v %v", a, c, d)
 	}
 }
 
@@ -147,7 +159,6 @@ func TestKeyStringRoundTrips(t *testing.T) {
 	keys := []Key{
 		{Source: SourceSER, Element: "A|B%", State: "Asserted"},
 		{Source: SourceSER, Element: "51P1P", State: "Deasserted"},
-		{Source: SourceSyslog, Facility: "4", Severity: "6", MsgID: "ID|47"},
 		{Source: SourceSyslog, Facility: PRIAbsent, Severity: PRIAbsent, Template: "sha256:" + strings.Repeat("0", 64)},
 	}
 	for _, k := range keys {
@@ -156,8 +167,9 @@ func TestKeyStringRoundTrips(t *testing.T) {
 			t.Errorf("%q: %+v %v", k.String(), got, err)
 		}
 	}
-	for _, bad := range []string{"", "ser|x", "ser|a|b|c", "syslog|4|6|msgid|-", "syslog|4|9|msgid|x", "syslog|04|6|msgid|x",
-		"syslog|pri-absent|6|msgid|x", "ser|a%2|b", "ser|a%7c|b", "other|a|b"} {
+	for _, bad := range []string{"", "ser|x", "ser|a|b|c", "syslog|4|6|msgid|ID47", "syslog|4|6|template|x",
+		"syslog|4|9|template|sha256:" + strings.Repeat("0", 64), "syslog|04|6|template|sha256:" + strings.Repeat("0", 64),
+		"syslog|pri-absent|6|template|sha256:" + strings.Repeat("0", 64), "syslog|4|6", "ser|a%2|b", "ser|a%7c|b", "other|a|b"} {
 		if _, err := ParseKey(bad); err == nil {
 			t.Errorf("ParseKey(%q) accepted", bad)
 		}

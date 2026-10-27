@@ -240,7 +240,7 @@
       "required": [
         "source"
       ],
-      "description": "SER: element and state. Syslog: facility and severity (decimal, or both pri-absent), and exactly one of msgid and template.",
+      "description": "SER: element and state. Syslog: facility and severity (decimal, or both pri-absent), and the template.",
       "properties": {
         "source": {
           "enum": [
@@ -263,10 +263,6 @@
         "severity": {
           "type": "string",
           "pattern": "^(pri-absent|[0-7])$"
-        },
-        "msgid": {
-          "type": "string",
-          "pattern": "^[!-~]{1,32}$"
         },
         "template": {
           "$ref": "#/$defs/sha256_ref"
