@@ -330,6 +330,18 @@ func checkServer(h windows.Handle, want *windows.SID) error {
 // duplicates a handle or uses the token: they show the image name, times
 // and exit code, and the token's user, groups and privileges, none of
 // which is secret.
+//
+// The token grant changes the token object's own DACL, the one checked
+// when another account opens the token. It is not the token's default DACL
+// (TokenDefaultDacl), which the process gives to objects it creates later,
+// so no later object of this process is opened to peer (A5 on #180).
+//
+// The grants are merged (SetEntriesInAcl, GRANT_ACCESS), so a second
+// Listen in the same process leaves one entry per object, not two. If the
+// token grant fails after the process grant, the process entry stays: that
+// is intended. It gives peer only the query right above, Listen fails so
+// the collector does not start, and the next start merges into the same
+// entry (A5 on #180).
 func grantPeerQuery(peer *windows.SID) error {
 	if err := grantAccess(windows.CurrentProcess(), peer, windows.PROCESS_QUERY_LIMITED_INFORMATION); err != nil {
 		return fmt.Errorf("collectorwire: grant the peer query on this process: %w", err)
