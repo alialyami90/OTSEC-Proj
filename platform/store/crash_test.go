@@ -38,7 +38,7 @@ var (
 		"prune:begin", "prune:commit", "prune:done",
 	}
 	startPoints = []string{
-		"create:begin", "create:commit", "create:done", "create:rename",
+		"create:begin", "create:commit", "create:done", "create:closed", "create:rename", "create:renamed",
 		"streams:begin", "streams:commit", "streams:done",
 	}
 )
