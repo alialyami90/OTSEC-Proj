@@ -368,7 +368,9 @@ func TestUnknownBudgetAcrossRestart(t *testing.T) {
 
 // A received time after now counts as inside the window, so a clock set
 // back does not hand out a fresh budget; one before the window does not
-// count.
+// count. A known sender's records never count (A3 on #198). A received
+// time that does not parse would count as inside, but C4 refuses such an
+// event at commit, so no stored record has one.
 func TestUnknownSpentWindow(t *testing.T) {
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
@@ -377,8 +379,17 @@ func TestUnknownSpentWindow(t *testing.T) {
 	r, st, _ := start(t, parse(t, nc), dir)
 	defer r.Close()
 	ls := serve(t, r)
-	flood(t, ls, st, "lab-tcp", 3)
+	got := flood(t, ls, st, "lab-tcp", 3)
 	stored := streamBytes(t, r, stream)
+	// The asset sends from 127.0.0.1: its records are stored beside the
+	// unknown sender's and are not counted.
+	if _, err := dialFrom(t, "tcp", "127.0.0.1", ls.Addr("lab-tcp")).Write([]byte("<13>Oct 26 12:00:00 relay1 known " + strings.Repeat("y", 4000) + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	waitStored(t, ls, st, "lab-tcp", got.Stored+1)
+	if streamBytes(t, r, stream) <= stored {
+		t.Fatal("the known sender's message was not stored")
+	}
 	now := r.opt.Now()
 	for name, tc := range map[string]struct {
 		now  time.Time
