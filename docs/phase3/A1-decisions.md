@@ -76,3 +76,20 @@ Date: 2026-10-26. When the node and the collector run as installed services, eac
 **Rejected:** matching `GetNamedPipeServerProcessId` to the SCM's process ID for `otsec-collector`. It trusts a process ID instead of the token, which leaves a PID-reuse window, and it needs the service DACL to grant the node `SERVICE_QUERY_STATUS`.
 
 Evidence: `TestListenGrantsPeerQuery`. A6's independent two-service test passed claims (a) to (d) on the hosted runner (`tests/security/collectorwire_services_windows_test.go`, landing in A6's next PR). A5's service-mode dry run 4 ([run 40405064964](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40405064964)) installed both services, and the node checked the collector. Evidence class: hosted Windows runner, simulated devices, not the owner's PC. Small follow-ups (A5's notes on #180): a comment that a partial grant on failure is intended, a test for a repeated `Listen`, and a comment on the token DACL versus `TokenDefaultDacl`.
+
+## D3-10: build with Go 1.26.10, not 1.26.0 (#179's Windows panic)
+
+Date: 2026-10-27. Status: **proposed**. It is accepted when A6's stress counts are in and A3 and A6 have reviewed. On [#179's Windows job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40443162073/job/121988031206) (merge `0e9d6b0`, Go 1.26.0), `tests/integration/syslogreceive` panicked inside `json.Marshal`, called from `receive.record` on the UDP read path (`payUnknown`, `serveDatagrams`).
+
+Which field went bad: going by the frame addresses and `event.Event`'s field offsets, it was `Received.Clock.Source`. That string is empty in this path and no code writes it, yet its length word held `1<<36`, with a nil data pointer.
+
+- `1<<36` is the 32-bit value 16 sitting in the upper half of a zero word. 16 is `sizeof(sockaddr_in)`, the address length that `WSARecvFrom` returns for an IPv4 sender.
+- Go 1.26.2 fixed golang/go#78041 (behind #77975). On Windows, `internal/poll` kept `recvfrom`'s address-length out-parameter on the goroutine stack while an overlapped receive was still running, so the kernel could write it into memory after the stack had moved.
+- A4 found nothing on the receive path that could write the field: `normalize.Syslog` copies `Received` verbatim, no `msg` or `Event` is shared between goroutines, and `modules/telemetry` has no `unsafe`.
+- A5 found no corruption fix in modernc sqlite v1.61.0, memory v1.12.1 or libc after v1.79.0.
+
+**Ruling (proposed):** the root module's `go` line moves to `1.26.10`, the latest patch release, which CI picks up through `go-version-file`. The release also carries the stdlib security fixes after 1.26.0 (crypto/tls, crypto/x509, net/http and others), which the product uses. The receiver is a product path: a node built with 1.26.0 that receives UDP Syslog on Windows can corrupt memory. Phase 4 adds a standing rule: build with the latest Go patch release.
+
+**What is not proven:** the panic happened once. The match between `1<<36` and a 16-byte address length is circumstantial. A6's Windows stress test (1.26.0, 1.26.10, and 1.26.0 with `-race`, 20 minutes each) is the evidence for this decision. If 1.26.0 never crashes there either, the bump still stands on its security fixes, and the crash stays open in the exit report as unexplained.
+
+**Owner's PC:** with `GOTOOLCHAIN=auto`, the portable Go 1.26.0 on ALI's PC would download 1.26.10 the first time it builds. That download needs ALI's answer before the next run on that PC.
