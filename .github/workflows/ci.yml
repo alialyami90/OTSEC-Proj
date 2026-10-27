@@ -49,7 +49,10 @@ jobs:
       - name: collector pipe between two services (A6)
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
-      - run: go test ./...
+      # -timeout applies to each package's test binary. On Windows it is
+      # 12m, under the 15-minute job limit, so a slow or hung package dumps
+      # its goroutine stacks before GitHub cancels the job (B1, #230).
+      - run: go test ${{ runner.os == 'Windows' && '-timeout 12m' || '' }} ./...
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15
