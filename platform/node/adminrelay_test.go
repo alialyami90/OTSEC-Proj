@@ -47,6 +47,8 @@ type adminCollector struct {
 	// edit, when set, changes each reply to an admin-signed request
 	// before it is returned.
 	edit func(*authz.CollectorReply)
+	// held is the time hangCollector held admin-signed requests.
+	held time.Duration
 }
 
 func newAdminCollector() *adminCollector { return &adminCollector{spent: map[string]bool{}} }
@@ -799,7 +801,11 @@ func (h hangCollector) Do(ctx context.Context, req *authz.CollectorRequest) (col
 	h.mu.Lock()
 	h.sent = append(h.sent, req)
 	h.mu.Unlock()
+	began := time.Now()
 	<-ctx.Done()
+	h.mu.Lock()
+	h.held += time.Since(began)
+	h.mu.Unlock()
 	return collectorclient.Response{}, ctx.Err()
 }
 
@@ -852,11 +858,20 @@ func TestRelayStopsAtFirstUnanswered(t *testing.T) {
 	}
 	began := time.Now()
 	s.relayAdmin(bg)
-	if d := time.Since(began); d >= 2*RelayTimeout {
-		t.Fatalf("one tick took %s, over one RelayTimeout (%s)", d, RelayTimeout)
-	}
+	tick := time.Since(began)
 	if n := len(col.requests()); n != 1 {
 		t.Fatalf("%d requests sent in the tick, want 1", n)
+	}
+	// The bound is on the time the collector held the tick, not on the
+	// tick: the rest is the node's own audit commits and status writes,
+	// which take longer than a RelayTimeout on a Windows runner (A1 on
+	// #197). One request held for one RelayTimeout is what is claimed.
+	col.mu.Lock()
+	held := col.held
+	col.mu.Unlock()
+	t.Logf("tick %s: held by the collector %s, the node's own work %s", tick, held, tick-held)
+	if held < RelayTimeout || held >= 2*RelayTimeout {
+		t.Fatalf("the collector held the tick for %s, want one RelayTimeout (%s)", held, RelayTimeout)
 	}
 	got := adminShown(st)
 	if len(got) != 3 {
