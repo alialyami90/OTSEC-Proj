@@ -49,4 +49,15 @@ No ownership overlap or gap found against the agent map in `HANDOFF-SUMMARY.md`.
 - **7. Resolved.** The `replaceFile` change and `govulncheck` may start after cutover, as normal PRs under D2-13, because they close Phase 3 risks rather than add new scope. One hold: B1 does not merge the `replaceFile` change until it has asked the owner what they want checked before accepting Phase 3, in case they want a re-run on the current collector. Until cutover I prepare locally.
 - **8. Resolved.** The weekly run goes in a separate workflow, `.github/workflows/govulncheck.yml`. It triggers on `pull_request`, with the same Markdown path filter as #219, and on a weekly schedule. B1 owns and authorizes it, as with `ci.yml`; B3 writes it, with the `govulncheck` version pinned and B6's review per D3-10. `ci.yml` stays at ten jobs. B1 amends the merge rule to "every job in `ci.yml` and `govulncheck.yml`" in a D4 decision, and updates `CLAUDE.md` and the summary in the same PR.
 
-Questions 1 (the rest of it) to 5 wait on A3.
+**From A3, 2026-10-27** ([comment on #221](https://github.com/alialyami90/OTSEC-Proj/pull/221#issuecomment-6449445899); the handoff fixes are in #224):
+
+- **1. Resolved.** C7 0.6 adds a per-key allowed-kinds list, plus an enrolment step in `A3-admin-keys.md`.
+  - A key pinned without the list keeps exactly the 0.5 kinds and never gets `node.change_approval` or `node.baseline_ack`, so existing installs fail closed.
+  - The refusal stays `admin_unverified`, with a new `Check` value. It runs after `signature` and `binding` and before `replay`, so a refused approval does not spend its nonce. The decision still gets a `collector_seq`, and the node writes the denied record.
+  - "The approver is not the person who made the change" is out of scope for Phase 4, because nothing observes who changed a relay until engineering access (R2) exists. I record it as a limitation that R2 can close.
+- **2. Resolved.** Version detection was never agreed. The fallback to `MoveFileEx` is driven by the error and taken only on `ERROR_INVALID_PARAMETER`, `ERROR_NOT_SUPPORTED` or `ERROR_INVALID_FUNCTION`, logged once per process. It is never taken on a sharing or access error: those go to the retry, then the break. A test shows that a sharing violation does not take the fallback path.
+- **3. Resolved.** `FlushFileBuffers` on the renamed handle, and on the directory handle (`FILE_FLAG_BACKUP_SEMANTICS`) where NTFS allows it. Process-kill tests at each step. The evidence label stays "process kill on the hosted runner; power-loss durability not shown", and power loss stays `documented-untested`.
+- **4. Resolved.** `sel751/run.go` calls `Floor.Confirmed` between `await` and the next `send`, and the step deadline is armed at each send. So the retry costs only the run's wall-clock deadline (`DeadlineMS`), plus up to 500 ms that other assets' `NextSeq` waits on `State.mu`. TIDLE is at least a minute. A test shows that a retry at `OpenLevel` leaves the run inside its deadline; a shorter budget on that path is allowed if a register's deadline turns out tight.
+- **5. Resolved.** `publishInstallKey` moves onto the same helper and keeps its failure behaviour: if a start cannot publish the key, the collector does not start.
+
+No question is open.
