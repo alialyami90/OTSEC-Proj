@@ -180,12 +180,12 @@ func TestCNGRightsProbe(t *testing.T) {
 	}
 }
 
-// atDepth runs f below d frames of 256 bytes each, so f's calls start at a
-// different stack offset for each d.
+// atDepth runs f below d small frames, so f's calls start at a different
+// stack offset for each d, a few words apart.
 //
 //go:noinline
 func atDepth(d int, f func()) byte {
-	var pad [256]byte
+	var pad [16]byte
 	pad[d%len(pad)] = byte(d)
 	if d > 0 {
 		return atDepth(d-1, f) + pad[(d*7)%len(pad)]
@@ -195,8 +195,11 @@ func atDepth(d int, f func()) byte {
 }
 
 // TestCNGStackMoves calls NCrypt from fresh goroutines at every stack
-// depth up to 128 frames, so for some depths the stack grows inside call
-// and moves. An out-parameter or buffer left on the old stack is then
+// depth up to 2048 small frames, so for some depths the stack grows inside
+// call and moves. Steps of a few words are what find it: the same harness
+// around clock_gettime on Linux, through a wrapper without
+// go:uintptrescapes, failed at 12 of 2048 depths with 16-byte padding and
+// at none with 256-byte padding (a step wider than the call's frames). An out-parameter or buffer left on the old stack is then
 // written by NCrypt where Go no longer reads it: the public key reads as
 // short ("not an ECDSA P-256 public key", #199's Windows job), a signature
 // fails to verify, or a DACL read sees no descriptor. call's
@@ -212,9 +215,9 @@ func TestCNGStackMoves(t *testing.T) {
 	}
 	defer free(key)
 	want := s.Public().(*ecdsa.PublicKey)
-	errs := make(chan error, 3*4*128) // room for every check to fail
-	for round := range 4 {
-		for d := range 128 {
+	errs := make(chan error, 3*2*2048) // room for every check to fail
+	for round := range 2 {
+		for d := range 2048 {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
