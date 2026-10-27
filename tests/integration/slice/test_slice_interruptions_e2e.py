@@ -23,10 +23,11 @@ delay puts them. Also:
     before its minimum interval allows the next, and started again 0.5 to
     5 s later.
 
-The simulator and the collector are not killed mid-session. A session cut
-between the password and "=>" sets the 31-minute floor by design (D2-16),
-which is too long to wait for here; a collector killed after "=>" leaves
-no floor at all, which A6 raised with A3 separately.
+The simulator and the collector are not killed mid-session, nor the
+collector while its state still holds the floor. A session cut between
+the password and QUI sets the TIDLE + 1 min floor by design (D2-16,
+D2-20), which is too long to wait for here; test_slice_floor_e2e checks
+that floor after a kill inside the level.
 
 Then the interruptions stop, two clean runs pass, and the node's health
 must show every stream confirmed. What is checked, against ground truth
@@ -69,7 +70,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CANARY, CHECK, REGISTER, Slice
+from slicerun import CANARY, CHECK, REGISTER, SERVICE, Slice
 
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
 import profile_sel751  # noqa: E402
@@ -110,15 +111,19 @@ def _relp_lines(s):
 
 def _syslog_by_line(s):
     """[(line number, message bytes)] for every syslog frame the receiver
-    acknowledged, in order."""
+    acknowledged, in order. Read live while the receiver runs: a last line
+    without its newline is still being written (harness.read_log)."""
     out = []
-    with open(s.relp_log, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if not line.strip():
-                continue
-            r = json.loads(line)
-            if r.get("event") == "syslog":
-                out.append((i, base64.b64decode(r["b64"])))
+    with open(s.relp_log, "rb") as f:
+        data = f.read()
+    if s.running("receiver"):
+        data = data[:data.rfind(b"\n") + 1]
+    for i, line in enumerate(data.decode("utf-8").split("\n")):
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("event") == "syslog":
+            out.append((i, base64.b64decode(r["b64"])))
     return out
 
 
@@ -136,7 +141,7 @@ class Interrupter:
         self.breaks = []  # receiver log line count when a receiver or node was killed
 
     def _session_open(self):
-        recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
+        recs = harness.read_log(self.s.sim_log, live=True) if os.path.exists(self.s.sim_log) else []
         return sum(r["event"] == "session_open" for r in recs) > sum(r["event"] == "session_close" for r in recs)
 
     def _last_run_at(self):
@@ -153,7 +158,12 @@ class Interrupter:
         interval keeps the next one at least 20 s away; and that run's
         session has opened and closed, so a run accepted but not yet
         connected is not taken for idle (A5 on #147, seed 564077: a kill
-        then left the failed-auth floor running past the wind-down)."""
+        then left the failed-auth floor running past the wind-down); and
+        then the collector's own state holds no floor. The collector clears
+        level_open once the run has returned, about 10 ms after the
+        simulator records QUI and the close; a kill in that window leaves
+        the TIDLE + 1 min floor, the safe side (D2-16; seed 48628 on #183).
+        test_slice_floor_e2e pins the floor after a kill inside the level."""
         if self._session_open():
             return False
         if not collector:
@@ -161,8 +171,11 @@ class Interrupter:
         at = self._last_run_at()
         if at is None or time.time() - at >= 40:
             return False
-        recs = harness.read_log(self.s.sim_log) if os.path.exists(self.s.sim_log) else []
-        return any(r["event"] == "session_close" and r["t"] >= at for r in recs)
+        recs = harness.read_log(self.s.sim_log, live=True) if os.path.exists(self.s.sim_log) else []
+        if not any(r["event"] == "session_close" and r["t"] >= at for r in recs):
+            return False
+        st = self.s.collector_asset()
+        return not st.get("level_open") and not st.get("unconfirmed_auth_utc")
 
     def one(self):
         kind = self.rng.choice(["receiver", "node", "simulator", "collector"])
@@ -206,7 +219,7 @@ class Interrupter:
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     d = str(tmp_path_factory.mktemp("slice-interruptions"))
     s = Slice(d)
     s.build()

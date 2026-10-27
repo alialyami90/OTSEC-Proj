@@ -9,6 +9,7 @@ import (
 	"io"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -82,4 +83,112 @@ func TestAcceptAfterClientWentAway(t *testing.T) {
 	if a := <-done; a.err != nil || string(a.b) != "ok" {
 		t.Fatalf("Accept after a client went away: %q %v", a.b, a.err)
 	}
+}
+
+// Listen grants the peer PROCESS_QUERY_LIMITED_INFORMATION on this process
+// and TOKEN_QUERY on its token, exactly those, in one entry each however
+// often it is called, and keeps every other entry.
+// Without them a node under another virtual account cannot check the
+// collector, and every dial fails closed (A5's service-mode dry run).
+func TestListenGrantsPeerQuery(t *testing.T) {
+	b := make([]byte, 8)
+	rand.Read(b)
+	peer := ServiceSID("otsec-test-" + hex.EncodeToString(b))
+	sid, err := windows.StringToSid(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.READ_CONTROL, &tok); err != nil {
+		t.Fatal(err)
+	}
+	defer tok.Close()
+	objects := []struct {
+		name string
+		h    windows.Handle
+		want windows.ACCESS_MASK
+	}{
+		{"process", windows.CurrentProcess(), windows.PROCESS_QUERY_LIMITED_INFORMATION},
+		{"token", windows.Handle(tok), windows.TOKEN_QUERY},
+	}
+	before := make([][]allowEntry, len(objects))
+	for i, o := range objects {
+		before[i] = allowEntries(t, o.h)
+		for _, e := range before[i] {
+			if e.sid.Equals(sid) {
+				t.Fatalf("%s: the new SID already has an entry", o.name)
+			}
+		}
+	}
+
+	// Twice, as a restarted listener in the same process would: the grant
+	// merges into one entry per object (A5 on #180).
+	for range 2 {
+		ln, err := Listen(Endpoint{Address: testAddress(t), Peer: peer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln.Close()
+	}
+
+	for i, o := range objects {
+		after := allowEntries(t, o.h)
+		var got []windows.ACCESS_MASK
+		var rest []allowEntry
+		for _, e := range after {
+			if e.sid.Equals(sid) {
+				got = append(got, e.mask)
+			} else {
+				rest = append(rest, e)
+			}
+		}
+		if len(got) != 1 || got[0] != o.want {
+			t.Errorf("%s: peer entries %#x, want exactly one of %#x", o.name, got, o.want)
+		}
+		if len(rest) != len(before[i]) {
+			t.Errorf("%s: %d other entries after Listen, %d before", o.name, len(rest), len(before[i]))
+			continue
+		}
+		for j := range rest {
+			if !rest[j].sid.Equals(before[i][j].sid) || rest[j].mask != before[i][j].mask {
+				t.Errorf("%s: entry %d changed from %s %#x to %s %#x", o.name, j,
+					before[i][j].sid, before[i][j].mask, rest[j].sid, rest[j].mask)
+			}
+		}
+	}
+}
+
+type allowEntry struct {
+	sid  *windows.SID
+	mask windows.ACCESS_MASK
+}
+
+// allowEntries lists the allow entries of h's DACL, in order.
+func allowEntries(t *testing.T, h windows.Handle) []allowEntry {
+	t.Helper()
+	sd, err := windows.GetSecurityInfo(h, windows.SE_KERNEL_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil || dacl == nil {
+		t.Fatalf("DACL: %v", err)
+	}
+	var out []allowEntry
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			continue
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		c, err := sid.Copy()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, allowEntry{c, ace.Mask})
+	}
+	return out
 }

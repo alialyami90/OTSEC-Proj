@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.4/admin-request",
-  "title": "Admin-signed request payload (C7 0.4, D2-11). Strict. Decoded only after the signature verifies. Every field is signed.",
+  "$id": "otsec.authz/0.5/admin-request",
+  "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5). Strict. Decoded only after the signature verifies. Every field is signed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,7 +24,9 @@
         "credential.install",
         "credential.revoke",
         "credential.clear_suspension",
-        "asset.clear_suspension"
+        "asset.clear_suspension",
+        "node.quarantine_clear",
+        "node.seq_reset_ack"
       ],
       "description": "Must equal the request's kind."
     },
@@ -89,7 +91,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.4/credential-ref"
+          "$ref": "otsec.authz/0.5/credential-ref"
         },
         "sealed": {
           "type": "object",
@@ -191,6 +193,33 @@
         }
       },
       "description": "Since 0.2 (D2-15). Sent by the node, on its own behalf, after it recorded its own asset.suspension_clear."
+    },
+    "node_quarantine_clear": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "manifest_sha256"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The SHA-256 of the quarantine manifest the administrator reviewed (D3-1)."
+        }
+      },
+      "description": "Since 0.5. An administrator's clear of one quarantine the node holds. The collector checks it and changes nothing of its own; the node clears only after the collector accepts."
+    },
+    "node_seq_reset_ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0,
+      "description": "Since 0.5. Acknowledges a collector_seq reset. Empty: the install key acknowledged is install_key_id, which the collector refuses unless it is its current key."
     }
   },
   "oneOf": [
@@ -218,6 +247,16 @@
           {
             "required": [
               "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
             ]
           }
         ]
@@ -248,6 +287,16 @@
             "required": [
               "asset_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
           }
         ]
       }
@@ -277,6 +326,16 @@
             "required": [
               "asset_clear_suspension"
             ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
           }
         ]
       }
@@ -305,6 +364,94 @@
           {
             "required": [
               "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.quarantine_clear"
+        }
+      },
+      "required": [
+        "node_quarantine_clear"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.seq_reset_ack"
+        }
+      },
+      "required": [
+        "node_seq_reset_ack"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
             ]
           }
         ]

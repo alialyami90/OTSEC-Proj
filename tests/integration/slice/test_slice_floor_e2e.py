@@ -29,7 +29,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 FIRST_RUN = 100.0
 
@@ -37,7 +37,7 @@ FIRST_RUN = 100.0
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     s = Slice(str(tmp_path_factory.mktemp("slice-floor")))
     s.build()
     try:

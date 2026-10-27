@@ -62,7 +62,14 @@
 //     most Limits.UnknownBytes of records per Limits.UnknownWindow (a token
 //     bucket); a message past it is dropped and counted as unknown-budget,
 //     and syslog.unknown-budget is raised at most once per window. A known
-//     sender's stream message is never dropped.
+//     sender's stream message is never dropped. The bucket starts at
+//     UnknownBytes less Config.UnknownSpent, what the node counts as
+//     already stored in the window before this start, so a restart does
+//     not refill it. An unknown sender's message is paid for as it is read,
+//     just after its received time is stamped, so the node's count by
+//     received time is exact, and a message past the budget is dropped
+//     before it takes queue room. The reader does no I/O for it: the alarm
+//     is raised off the read path.
 //   - Storage full follows the C5 class. syslog-stream (TCP, TLS) is
 //     refuse-new: a refused batch is held and retried, the connection is not
 //     read meanwhile (Status.Held), and nothing read is dropped while the
@@ -99,7 +106,8 @@
 //     pinned keys (C1 binding address-only).
 //   - The unknown budget bounds unattributed storage per window, not in
 //     all: over an upstream outage of T it can store up to UnknownBytes x
-//     (1 + T/UnknownWindow). The node should size it from the class quota
+//     (1 + T/UnknownWindow), restarts included when the node passes
+//     Config.UnknownSpent. The node should size it from the class quota
 //     and the outage it must ride out. A separate C5 stream and quota for
 //     unknown senders would bound it absolutely; it is not built.
 package receive

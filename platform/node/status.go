@@ -40,6 +40,7 @@ type Status struct {
 	runsHeld    string
 	listeners   map[string]ListenerStatus
 	nodeKeys    []NodeKeyExpiry
+	adminReqs   []AdminRequestStatus
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -97,6 +98,9 @@ type StatusFile struct {
 	// NodeKeys are the key register's active entries whose certificate
 	// expires within NodeKeyWarning, or has expired (nodekeys.go).
 	NodeKeys []NodeKeyExpiry `json:"node_keys_expiring,omitempty"`
+	// AdminRequests is each admin-request file in admin_dir and the
+	// collector's decision on it, if any (adminrelay.go).
+	AdminRequests []AdminRequestStatus `json:"admin_requests,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -219,6 +223,13 @@ func (s *Status) SetListeners(m map[string]ListenerStatus) {
 	s.mu.Unlock()
 }
 
+// SetAdminRequests records the admin-request files and their decisions.
+func (s *Status) SetAdminRequests(r []AdminRequestStatus) {
+	s.mu.Lock()
+	s.adminReqs = slices.Clone(r)
+	s.mu.Unlock()
+}
+
 // SetSuspensions records the node's current asset suspensions.
 func (s *Status) SetSuspensions(m map[string]asset.Suspension) {
 	s.mu.Lock()
@@ -328,6 +339,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 		f.Listeners = maps.Clone(s.listeners)
 	}
 	f.NodeKeys = slices.Clone(s.nodeKeys)
+	if len(s.adminReqs) > 0 {
+		f.AdminRequests = slices.Clone(s.adminReqs)
+	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
 		for n, ts := range s.targets {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 // EP-4).
 const (
 	AdapterID = "sel-751-ascii"
-	Version   = "0.1.0"
+	Version   = "0.2.0" // 0.2.0: the C1 path rule, DATE_F from SHO G, TIDLE after ok or partial (P3-A2)
 )
 
 // Timing the manual does not give, chosen here until a capture shows the
@@ -51,7 +52,10 @@ var ops = map[string]bool{
 	"sel.id": true, "sel.ser.read_all": true, "sel.settings.show_global": true, "sel.settings.show_port1": true,
 }
 
-const opID = "sel.id"
+const (
+	opID  = "sel.id"
+	opSER = "sel.ser.read_all"
+)
 
 // serEmpty is the SER reply when the relay holds no records (S22 p. 7.75,
 // "No Data Available"; the exact text is A6's transcription, H-13).
@@ -90,14 +94,16 @@ var (
 //     confirms it (C-19). "=>" straight after ACC is AP-23: no secret, QUI.
 //  5. Operate: the reads the register's checks name (SHO P 1: LANG :=
 //     ENGLISH, posture warnings, firmware branch conditions), then the
-//     invocation's operation.
+//     register's context reads for the operation (SHO G: DATE_F, before
+//     SER; C3 0.2, D3-2), then the invocation's operation.
 //  6. Close: QUI when the session reached Level 1 and a level prompt makes
 //     it safe, then the TCP close.
 //
 // Every line goes through telnet.Conn.Send, whose egress check passes it
 // only if it is the line this step means to send, the register permits it
 // in the current phase, and, in the operate phase, it is the invocation's
-// operation or a read a register check names (C3, L4).
+// operation, a read a register check names, or a context read for the
+// operation (C3, L4).
 func Run(ctx context.Context, inv adapter.Invocation, cfg Config) adapter.Result {
 	s := &session{ctx: ctx, inv: inv, cfg: cfg, level: -1}
 	s.now = cfg.Now
@@ -110,6 +116,7 @@ func Run(ctx context.Context, inv adapter.Invocation, cfg Config) adapter.Result
 	}
 	s.started, s.wallStart = s.now(), time.Now()
 	code := s.run()
+	s.reportTIDLE(code)
 	return s.result(code)
 }
 
@@ -129,7 +136,8 @@ type session struct {
 	rule     *register.BranchRule
 	op       *register.Operation
 	expected map[string]string
-	allowed  map[string]bool // operate lines: the operation and the reads the register's checks name
+	allowed  map[string]bool // operate lines: the operation, the reads the register's checks name, its context reads
+	ctxReads []register.ContextRead
 	target   asset.EvidenceClass
 	regVer   uint64
 
@@ -164,7 +172,9 @@ type session struct {
 	records          []adapter.Record
 	mismatch         string // the attribute that differed
 	detail           string
-	tidleReported    bool // Config.TIDLE was called (at most once per run)
+	settings         []adapter.Setting
+	dateF            string        // DATE_F as read, when it is one of the register's values
+	tidle            time.Duration // TIDLE from an English SHO P 1, reported after the run
 	// after names what the awaited reply answers, for a failed step's
 	// detail: "connecting", "the wake", a register line, or "the password".
 	// Never device text (C2 error.detail).
@@ -220,6 +230,15 @@ func (s *session) check() adapter.Code {
 	if err := s.inv.CheckAgainst(s.cfg.Asset, s.cfg.Profile); err != nil {
 		return coded(err, adapter.RefusedInvocationMismatch)
 	}
+	for _, ep := range s.cfg.Asset.Endpoints {
+		if ep.ID == s.inv.EndpointID && ep.CheckPath() != nil {
+			// Only a direct path's TIDLE bounds the failed-auth floor; a port
+			// server, no path and a path this build does not know get no
+			// session (D2-16, H-13; C1 0.2).
+			s.detail = "the endpoint's path is not direct; no session is opened"
+			return adapter.RefusedEndpointPath
+		}
+	}
 	if !ops[s.inv.OperationID] {
 		s.detail = "this adapter build has no reader for the operation"
 		return adapter.RefusedNotInvocable
@@ -243,6 +262,17 @@ func (s *session) check() adapter.Code {
 	for _, c := range p.Preconditions {
 		if c.Setting != "LANG" {
 			s.detail = "a register precondition has no C2 code in this adapter build"
+			return adapter.FailedInternal
+		}
+	}
+	s.ctxReads = p.ContextFor(s.inv.OperationID)
+	for _, c := range s.ctxReads {
+		known := c.Setting == settingDateF && s.inv.OperationID == opSER
+		for _, v := range c.Values {
+			known = known && dateLayouts[v] != ""
+		}
+		if !known {
+			s.detail = "a register context read has no reader in this adapter build"
 			return adapter.FailedInternal
 		}
 	}
@@ -283,8 +313,12 @@ func coded(err error, fallback adapter.Code) adapter.Code {
 }
 
 // reads lists, in order, the operations the register's checks are read
-// with: preconditions, the firmware branch's conditions, posture warnings.
-// They run at Level 1, before the invocation's operation.
+// with: preconditions, the firmware branch's conditions, posture warnings;
+// then the context reads for the invocation's operation (C3 0.2). They run
+// at Level 1, before the invocation's operation, so the language
+// precondition is always read first (D16). Each is a line like any other:
+// it passes egress, counts against the step timeout, the deadline and
+// max_response_bytes, and is kept in the transcript (D3-2).
 func (s *session) reads() []string {
 	if s.op.AccessLevel == register.ProbeAccessLevel {
 		return nil
@@ -308,6 +342,9 @@ func (s *session) reads() []string {
 	}
 	for _, w := range p.Warnings {
 		add(w.ReadBy)
+	}
+	for _, c := range s.ctxReads {
+		add(c.ReadBy)
 	}
 	return out
 }
@@ -372,7 +409,7 @@ func (s *session) egress(line []byte) error {
 		return fmt.Errorf("register: %v (%s)", err, id)
 	}
 	if s.phase == adapter.PhaseOperate && !s.allowed[l] {
-		return errors.New("not the invocation's operation or a read a register check names")
+		return errors.New("not the invocation's operation or a read the register names for it")
 	}
 	if s.h.egress != nil {
 		return s.h.egress(s.phase, l)
@@ -619,6 +656,13 @@ func (s *session) read(id string) adapter.Code {
 	if err == nil {
 		set, err = parseSettings(msg)
 	}
+	if err != nil && !s.checks(id) {
+		// Only context reads use this reply. One that does not parse leaves
+		// their settings unknown, which refuses nothing: the operation's
+		// parser reports what it cannot read (an unknown DATE_F leaves every
+		// SER row unparsed; D3-2).
+		return ""
+	}
 	p := s.cfg.Register
 	for _, c := range p.Preconditions {
 		if c.ReadBy != id {
@@ -633,7 +677,7 @@ func (s *session) read(id string) adapter.Code {
 		s.detail = "the settings reply does not parse"
 		return adapter.FailedDeviceError
 	}
-	s.reportTIDLE(set)
+	s.noteTIDLE(id, set)
 	whole := adapter.Span{Offset: msg.off, Length: int64(len(msg.text))}
 	for _, w := range p.Warnings {
 		if w.ReadBy != id {
@@ -655,14 +699,59 @@ func (s *session) read(id string) adapter.Code {
 			return adapter.RefusedFirmwareCondition
 		}
 	}
+	s.readContext(id, set)
 	return ""
 }
 
-// reportTIDLE hands the port's Telnet time-out to the collector, once, when
-// the same reply shows LANG := ENGLISH, the register's language precondition,
-// and TIDLE is 1 to 30 minutes, digits only (S22 Table 4.104).
-func (s *session) reportTIDLE(set map[string]setting) {
-	if s.cfg.TIDLE == nil || s.tidleReported || !s.english(set) {
+// checks reports whether a precondition, posture warning or firmware branch
+// condition is read with id.
+func (s *session) checks(id string) bool {
+	p := s.cfg.Register
+	for _, c := range p.Preconditions {
+		if c.ReadBy == id {
+			return true
+		}
+	}
+	for _, w := range p.Warnings {
+		if w.ReadBy == id {
+			return true
+		}
+	}
+	for _, c := range s.rule.Conditions {
+		if c.ReadBy == id {
+			return true
+		}
+	}
+	return false
+}
+
+// readContext keeps the settings the context reads served by id name, as
+// printed, for the result (C2 0.5). DATE_F counts as the rows' order only
+// when it is one of the register's values; any other value is still
+// reported, and leaves the order unknown.
+func (s *session) readContext(id string, set map[string]setting) {
+	for _, c := range s.ctxReads {
+		if c.ReadBy != id {
+			continue
+		}
+		v, ok := set[c.Setting]
+		if !ok || slices.ContainsFunc(s.settings, func(st adapter.Setting) bool { return st.Name == c.Setting }) {
+			continue
+		}
+		s.settings = append(s.settings, adapter.Setting{Name: c.Setting, Value: v.value, Span: v.valueSpan})
+		if c.Setting == settingDateF && slices.Contains(c.Values, v.value) {
+			s.dateF = v.value
+		}
+	}
+}
+
+// noteTIDLE keeps the port's Telnet time-out from the reply to the read
+// that serves the register's language precondition (SHO P 1), when it shows
+// LANG := ENGLISH and TIDLE is 1 to 30 minutes, digits only (S22 Table
+// 4.104). No other reply's TIDLE is taken, even when that one's is out of
+// range (A6 on #175): a context read such as SHO G is not the port's.
+func (s *session) noteTIDLE(id string, set map[string]setting) {
+	if s.tidle != 0 || !s.english(id, set) {
 		return
 	}
 	v, ok := set["TIDLE"]
@@ -673,15 +762,28 @@ func (s *session) reportTIDLE(set map[string]setting) {
 	if n < 1 || n > 30 {
 		return
 	}
-	s.tidleReported = true
-	s.cfg.TIDLE(time.Duration(n) * time.Minute)
+	s.tidle = time.Duration(n) * time.Minute
 }
 
-// english reports whether these settings show LANG := ENGLISH and the
-// register makes that a precondition (ADR-0005).
-func (s *session) english(set map[string]setting) bool {
+// reportTIDLE hands the kept TIDLE to the collector once the run is over,
+// and only after an ok or partial run (P3-A2): a session that failed may
+// have left the port in a state TIDLE does not describe. Run reaches a port
+// only on a direct path (check), whose TIDLE it is (D2-16).
+func (s *session) reportTIDLE(code adapter.Code) {
+	if s.cfg.TIDLE == nil || s.tidle == 0 {
+		return
+	}
+	if code == "" || code.Status() == adapter.StatusPartial {
+		s.cfg.TIDLE(s.tidle)
+	}
+}
+
+// english reports whether these settings, read with id, show LANG :=
+// ENGLISH and the register makes that a precondition read with id
+// (ADR-0005).
+func (s *session) english(id string, set map[string]setting) bool {
 	for _, c := range s.cfg.Register.Preconditions {
-		if c.Setting == "LANG" && c.Equals == "ENGLISH" {
+		if c.Setting == "LANG" && c.Equals == "ENGLISH" && c.ReadBy == id {
 			v, ok := set["LANG"]
 			return ok && v.value == "ENGLISH"
 		}
@@ -709,7 +811,7 @@ func (s *session) operate() adapter.Code {
 		s.detail = "the reply has no single framed message"
 		return adapter.FailedDeviceError
 	}
-	if s.inv.OperationID != "sel.ser.read_all" {
+	if s.inv.OperationID != opSER {
 		return ""
 	}
 	if string(bytes.TrimSpace(msg.text)) == serEmpty {
@@ -747,13 +849,23 @@ func (s *session) operate() adapter.Code {
 	}
 	ctxSpan := rep.context
 	code := adapter.Code("")
+	// With a DATE_F context read in the register, a row is parsed only if
+	// its date is a calendar date in the order DATE_F names. An order not
+	// read, or not one of the register's values, leaves every row unparsed,
+	// its bytes kept (D3-2: a parse error, never a skip or a guess).
+	ordered, misfit := len(s.ctxReads) > 0, 0
 	for _, r := range rep.rows {
-		rec := adapter.Record{Kind: "sel.ser.row", Span: r.span, ParseOK: r.ok}
+		ok := r.ok
+		if ok && ordered && !dateFits(s.dateF, r.fields[1]) {
+			ok = false
+			misfit++
+		}
+		rec := adapter.Record{Kind: "sel.ser.row", Span: r.span, ParseOK: ok}
 		if ctxSpan.Length > 0 {
 			sp := ctxSpan
 			rec.ContextSpan = &sp
 		}
-		if r.ok {
+		if ok {
 			for i, name := range adapter.RecordFields["sel.ser.row"] {
 				rec.Fields = append(rec.Fields, adapter.Field{Name: name, Value: r.fields[i]})
 			}
@@ -761,6 +873,13 @@ func (s *session) operate() adapter.Code {
 			code = adapter.PartialParseErrors
 		}
 		s.records = append(s.records, rec)
+	}
+	switch {
+	case misfit == 0:
+	case s.dateF == "":
+		s.detail = "DATE_F was not read as one of the register's values; no row's date is parsed"
+	default:
+		s.detail = fmt.Sprintf("%d rows have a date that does not fit DATE_F %s", misfit, s.dateF)
 	}
 	return code
 }
@@ -978,9 +1097,9 @@ func (s *session) lastReply() (int64, []byte) {
 
 // result builds the C2 result. Observations go to C1 only from a session
 // that completed (ok or partial), or, for an identity mismatch, the value
-// that differed, as the evidence for the suspension. Posture warnings are
-// reported whenever SHO P 1 showed an English port. Records only with ok or
-// partial.parse_errors.
+// that differed, as the evidence for the suspension. Settings only from a
+// session that completed. Posture warnings are reported whenever SHO P 1
+// showed an English port. Records only with ok or partial.parse_errors.
 func (s *session) result(code adapter.Code) adapter.Result {
 	r := adapter.Result{
 		Schema:          adapter.Contract,
@@ -1022,6 +1141,7 @@ func (s *session) result(code adapter.Code) adapter.Result {
 		obs(attrFID, s.fid)
 		obs(attrCID, s.cid)
 		obs(attrSerial, s.serial)
+		r.Settings = s.settings
 	case s.mismatch == attrFID:
 		obs(attrFID, s.fid)
 	case s.mismatch == attrSerial:

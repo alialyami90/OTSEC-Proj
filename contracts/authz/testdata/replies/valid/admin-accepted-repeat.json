@@ -1,0 +1,16 @@
+{
+  "contract": "otsec.authz/0.5",
+  "request_id": "req-20261026-0001",
+  "status": "accepted",
+  "collector_seq": 15,
+  "repeat_of": 9,
+  "admin": {
+    "admin_key_id": "ed25519-183d5080d1a2ef2b",
+    "principal": {
+      "type": "human",
+      "id": "alice@site-a"
+    },
+    "nonce": "AAECAwQFBgcICQoLDA0ODw",
+    "payload_sha256": "59ed0a55e15f6c37b1de99ba1a7bf8bbb9606b7d104079abe2ea83320155a99b"
+  }
+}

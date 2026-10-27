@@ -50,7 +50,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import CANARY, CHECK, REGISTER, Slice
+from slicerun import CANARY, CHECK, REGISTER, SERVICE, Slice
 
 FIRST_RUN = 100.0
 # One schedule interval, the 15 s step timeout, and the time to report.
@@ -164,7 +164,7 @@ def _check(logs):
 @pytest.fixture(scope="module")
 def cases(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     base = str(tmp_path_factory.mktemp("slice-failures"))
     first = Slice(os.path.join(base, "build"))
     first.build()

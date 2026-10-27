@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.4/collector-reply",
+  "$id": "otsec.authz/0.5/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -113,6 +113,54 @@
           "description": "Since 0.4, with admin_unverified only: the check the admin-signed request failed. Never sent in reply to a request stamped before 0.4."
         }
       }
+    },
+    "repeat_of": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector_seq of that first decision, lower than this reply's own. The collector did nothing again. Only with admin. Never on a reply stamped before 0.5."
+    },
+    "admin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "admin_key_id",
+        "principal",
+        "nonce",
+        "payload_sha256"
+      ],
+      "properties": {
+        "admin_key_id": {
+          "type": "string",
+          "pattern": "^ed25519-[0-9a-f]{16}$"
+        },
+        "principal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "const": "human"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$"
+            }
+          }
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$"
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the signed payload bytes as sent: the node acts only on an acceptance of the bytes it sent."
+        }
+      },
+      "description": "Since 0.5, on every accepted reply to an admin-signed request stamped 0.5 or later, and on no other reply: what the collector verified."
     }
   },
   "oneOf": [
@@ -136,7 +184,66 @@
       },
       "required": [
         "refusal"
-      ]
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "repeat_of"
+            ]
+          },
+          {
+            "required": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "repeat_of"
+        ]
+      },
+      "then": {
+        "required": [
+          "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "repeat_of"
+            ]
+          },
+          {
+            "required": [
+              "admin"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "not": {
+              "enum": [
+                "otsec.authz/0.0",
+                "otsec.authz/0.1",
+                "otsec.authz/0.2",
+                "otsec.authz/0.3",
+                "otsec.authz/0.4"
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }
