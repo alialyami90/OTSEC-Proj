@@ -149,19 +149,7 @@ func TestListenerUsesSizedBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	var got ListenerStatus
-	for {
-		ls.Publish()
-		got = st.Snapshot("x").Listeners["lab-tcp"]
-		if got.Stored+got.Dropped["unknown-budget"] >= sent {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("listener status: %+v", got)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	got := waitHandled(t, ls, st, "lab-tcp", sent)
 	if got.Dropped["unknown-budget"] == 0 || got.Stored == 0 {
 		t.Fatalf("stored %d, dropped %v: the sized budget was not applied", got.Stored, got.Dropped)
 	}
@@ -294,15 +282,38 @@ func flood(t *testing.T, ls *Listening, st *Status, id string, n int64) Listener
 			t.Fatal(err)
 		}
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	return waitHandled(t, ls, st, id, before.Stored+before.Dropped["unknown-budget"]+n)
+}
+
+// Bounds for waitHandled. A slow store (#230: a Windows runner whose
+// flushes take seconds) only slows the count, so the wait fails when the
+// count stops moving for handledStall, or at handledCap however it moves,
+// never at a fixed time after the last write.
+const (
+	handledStall = 30 * time.Second
+	handledCap   = 2 * time.Minute
+)
+
+// waitHandled waits until listener id's stored plus unknown-budget dropped
+// count reaches want, and returns its status then.
+func waitHandled(t *testing.T, ls *Listening, st *Status, id string, want int64) ListenerStatus {
+	t.Helper()
+	start := time.Now()
+	last, moved := int64(-1), start
 	for {
 		ls.Publish()
 		got := st.Snapshot("x").Listeners[id]
-		if got.Stored+got.Dropped["unknown-budget"] >= before.Stored+before.Dropped["unknown-budget"]+n {
+		n := got.Stored + got.Dropped["unknown-budget"]
+		if n >= want {
 			return got
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("listener status: %+v", got)
+		now := time.Now()
+		if n != last {
+			last, moved = n, now
+		}
+		if now.Sub(moved) > handledStall || now.Sub(start) > handledCap {
+			t.Fatalf("after %v (%v without progress), %d of %d handled; listener status: %+v",
+				now.Sub(start).Round(time.Millisecond), now.Sub(moved).Round(time.Millisecond), n, want, got)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
