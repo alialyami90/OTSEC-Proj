@@ -6,10 +6,10 @@ You replace A2. You remember nothing of A2's work, so this file states the curre
 
 **You own:**
 - IED interoperability and adapters, as the brief describes (`CLAUDE.md` §4, A2), for SEL devices only until the owner declares SEL coverage complete (ADR-0006).
-- `modules/ied/` (today one adapter, `modules/ied/sel751/`).
+- `modules/ied/`: the SEL-751 adapter `modules/ied/sel751/`, and `modules/ied/telnet/`, the minimal RFC 854 client that refuses every option (D2-1).
 - `tests/fixtures/ied/`.
 - `docs/device-capabilities.md`.
-- Your own design notes: `docs/phase3/A2-*.md`, and in Phase 4 `docs/phase4/A2-*.md`.
+- Your own design notes: A2's are `docs/phase3/A2-*.md`; yours go in `docs/phase4/B2-*.md`, the summary's convention.
 
 **Shared contracts you draft but A1 approves:**
 - C1 asset (`contracts/asset/`);
@@ -58,19 +58,23 @@ Evidence class for everything above: `simulated` or `documented-untested`. Nothi
    3. **Layout.** The parsers follow the three-settings-per-line layout, where a name can sit one space from `:=` (`SINGLEV := N`).
    4. **Sensitivity.** `SHO P 1` is sensitive configuration (addresses, router, `FTPUSER`; Table 4.104), but no class prints a password.
    5. **Session load.** Configuration and SER reads scheduled back to back are checked against `TIDLE` and the two-session Telnet limit, with P4-A5's quiet interval.
-3. **Draft C9 `otsec.config/0.1`**, the configuration snapshot, the difference, and the non-semantic rule, as `docs/phase4/A2-c9-config.md` plus `contracts/config/` with schema, Go types and contract tests.
+3. **Draft C9 `otsec.config/0.1`**, the configuration snapshot, the difference, and the non-semantic rule, as `docs/phase4/B2-c9-config.md` plus `contracts/config/` with schema, Go types and contract tests.
    - A1 approves it together with A4's C10, A3's C7 0.6 and A3's C8 0.5, after A5, A3 and A6 review.
    - Settle the continuation-line rule for wrapped SELOGIC values (Table 4.84 prints `FAULT := ... OR` wrapped).
-   - The snapshot should reference C2 transcript spans, not copy bytes twice.
+   - The snapshot should reference C2 transcript spans, not copy bytes twice. Each section holds its span in the session's transcript (by evidence ID) and the SHA-256 of those bytes; the bytes themselves live only in the transcript. This is what P4-A2's "native bytes and SHA-256" means.
+   - **Not yet agreed with A5 (now B5).** It only works if the store never prunes a transcript while a snapshot that points into it is the baseline or holds an unacknowledged difference. Settle that with B5 before C5 0.4 is drafted: either the configuration stream's quota pins those transcripts, or the configuration stream stores them itself.
 4. **Register revision 5.** Use only exact `SHO` forms:
    - `SHO 1` to `SHO 4`, `SHO L 1` to `SHO L 4`, `SHO G`, `SHO P 1`, `SHO R`, `SHO F`, `SHO M` (Table 7.67 p. 7.77, all Level 1);
+   - **also, on B2's ack (#226):** `SHO P F`, `SHO P 2`, `SHO P 3`, `SHO P 4`, `SHO I`, `SHO E 1` to `SHO E 3` and `SHO DNP 1` to `SHO DNP 3`, all Level 1 in the same table. A2's first list left them out with no recorded reason, which was a gap: other ports' settings and the protocol maps are settings an engineer can change (R3.1). Port F is standard; Ports 1 to 4 are ordering options (Table 7.1 p. 7.1), and the map forms depend on the protocol option;
+   - a relay answers `Invalid Command` to a command that is "not available" (S22 p. 7.31). Whether an absent port or protocol gives exactly that reply is `documented-untested`. C9 should record such a section as absent, with its reply bytes kept, never as a parse failure or an empty section, and a section that changes between absent and present is itself a difference. Any other unparseable reply still fails the read;
+   - each added form adds Level 1 session time (the session-load risk below), so state the read's total time in the register;
    - no trailing setting-name `s`, and an explicit port;
    - a timeout and byte cap on each;
    - a deny-corpus entry for every `s` form and every bare `SHO P`.
 
    Rebuild with `contracts/register/testdata/build_sel751.py`, which needs the S22 text; see Gotchas.
 5. **C2 0.6 `config.read`** in `sel751`, reusing the SER session rules: one session, at most one password, Level 1, `QUI` last, and the failed-auth floor. Add a parser and a fuzz target per settings class, and goldens transcribed from the manual's figures.
-6. Write `docs/phase4/A2-handoff.md` at the end of the phase.
+6. Write `docs/phase4/B2-handoff.md` at the end of the phase.
 
 ## Key files
 
@@ -90,17 +94,18 @@ Read these in order.
    - `parse_settings.go` (`settingRE`, `valueSpan`);
    - `parse_ser.go` (`dateLayouts`, `dateFits`);
    - the tests, with `run_test.go`'s `load` and `TestReplayGoldens` as the harness.
+   - `modules/ied/telnet/`: the client `sel751` dials through. It answers every option negotiation with a refusal, `Send` takes exactly one line, and `SendSecret` is the credential slot (A6 on #75).
 7. `contracts/adapter/doc.go` (the C2 version history and the consumer notes) and `contracts/adapter/testdata/generate.py` plus its README (every C2 golden is generated).
 8. `contracts/register/testdata/sel-751.json` (revision 4), with `content_sel751_test.go` and the deny corpus.
 9. `docs/phase3/A1-decisions.md` (D3-1 to D3-11) and `docs/phase2/A1-decisions.md` (D2-1 to D2-20).
-10. `docs/verification.md`: V-S7 (register lines only), V-S16 (posture warnings), V-M3 (configuration read-only bound), H-13 (the hardware capture that `SHO G`, `SHO P 1` and `QUI` layouts wait on).
+10. `docs/verification.md`: V-S7 (register lines only), V-S16 (posture warnings), V-M3 (configuration read-only bound), H-13 (the hardware capture of the `QUI` reply, a `SHO P 1` reply and the framing). H-13 does not yet cover `SHO G`, the revision 5 forms or `T_OUT`; see Open questions.
 
 ## Decisions made
 
 Don't revisit these without new evidence.
 
 - **Exact register lines only** (D1, D3). A Level 1 SEL ASCII login is not read-only: `SER C` and `SER R` clear the SER at Level 1. So the register allows exact lines, and every other argument form is denied.
-- **Only a `direct` path gets a session** (D2-16). A port server, no path, or an unknown path is refused before any dial (`refused.endpoint_path`), because only the direct path's `TIDLE` bounds the floor. The port-server floor rule waits on `T_OUT` evidence (H-13).
+- **Only a `direct` path gets a session** (D2-16). A port server, no path, or an unknown path is refused before any dial (`refused.endpoint_path`), because only the direct path's `TIDLE` bounds the floor. The port-server floor rule waits on `T_OUT` evidence, which no hardware item names yet (see Open questions).
 - **`DATE_F` is read in the same session, from `SHO G`, through a register context read** (D2-20, D3-2):
   - an unknown, missing or misfit order leaves every SER row unparsed, with its bytes kept: a parse error, never a skip or a guess;
   - a `SHO G` reply that does not parse refuses nothing;
@@ -115,11 +120,12 @@ Don't revisit these without new evidence.
 
 ## Open questions / risks
 
-- **Assumed layouts:** `SHO G`, `SHO P 1` and the `QUI` reply are `documented-untested`, because S22 prints none of them. The simulator (A6) and the adapter come from the same manual, so agreement between them is not hardware evidence. H-13 is the capture that settles it.
+- **Assumed layouts:** `SHO G`, `SHO P 1` and the `QUI` reply are `documented-untested`, because S22 prints none of them. The simulator (A6) and the adapter come from the same manual, so agreement between them is not hardware evidence.
+- **The hardware items do not cover everything A2 said they did.** H-13 captures only the `QUI` reply, a `SHO P 1` reply and the framing. A2's Phase 3 notes also cited H-13 for the `SHO G` layout and for port-server `T_OUT`; neither is in it. B6 owns `docs/verification.md`: ask B6 to widen H-13 to capture `SHO G` and each revision 5 form (including the reply for an absent port or protocol), and to add a separate item for `T_OUT` through a port server to a serial port, which needs a different lab setup.
 - **Firmware is not tied to any FID** for the SEL-751 (`docs/device-capabilities.md`).
 - **FTP:** a Level 1 FTP credential's write power is unknown (Q3). The S32 note that `SER.TXT` may clear on retrieval has no SEL-751 counterpart in S22.
 - **The Port 1 web server:** its Event Reports page clears and triggers events at an access level the manual does not state (S22 p. 3.4). It is excluded from every rung.
-- **Session load:** a configuration read is about ten `SHO` lines at Level 1. Scheduling it next to a SER read runs into `TIDLE` and the two-session Telnet limit (P4-A2, P4-A5).
+- **Session load:** a configuration read is about ten `SHO` lines at Level 1, or about twenty-two with every form in Table 7.67. Scheduling it next to a SER read runs into `TIDLE` and the two-session Telnet limit (P4-A2, P4-A5).
 - **Not run:** the DMY and YMD slice on the real binaries (P4-A6).
 
 ## Dependencies
@@ -147,7 +153,7 @@ Don't revisit these without new evidence.
   - no internal hostnames;
   - no real device data;
   - no vendor-default password either: name it by citation ("the factory default password pair, S22 p. 4.250"; A1 on #183). Goldens use only the manual's factory values.
-- **The manual is not in the repository.** S22 is the owner's PDF (`OTSEC\Manuals\SEL\751_IM_20260910.pdf`). Extract it with `pdftotext -layout` into your scratchpad, and point `OTSEC_SEL751_TEXT` at the text for the environment-gated tests and `build_sel751.py`. Run any Python that reads it with `python -I`.
+- **The manual is not in the repository.** S22 is the owner's PDF (`OTSEC\Manuals\SEL\751_IM_20260910.pdf`). The project's shared folder holds A2's extraction, `phase0/manuals-SEL/text/751_IM_20260910.txt` (`pdftotext -layout`, SHA-256 `d540ec0e…6f9811`); every A2 artifact used that text, and the SEL-751 documented-example fixtures were also checked against a second extraction without `-layout` (their `SOURCE.md`). Copy it into your scratchpad, and point `OTSEC_SEL751_TEXT` at the text for the environment-gated tests and `build_sel751.py`. Run any Python that reads it with `python -I`.
 - **C2 goldens are generated.** Edit `contracts/adapter/testdata/generate.py` and regenerate; never hand-edit the JSON. A1 checks that `generate.py` reproduces the goldens byte for byte.
 - **Adding a context read changes other owners' tests:**
   - collector tests need the new register revision activated through `Registers.Activate` (A3's `runner_sel751_test.go`);
