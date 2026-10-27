@@ -1,6 +1,6 @@
 # Phase 3 exit report
 
-Owner: A1. Date: 2026-10-27. Status: **draft. The gate is not decided: gate item 1, the slice against the installed services on the owner's PC, has not run.**
+Owner: A1. Date: 2026-10-27. Status: **the gate passed with conditions (A1, 2026-10-27), pending the owner's acceptance.** Gate item 1, the slice against the installed services on the owner's PC, ran on 2026-10-27 and A6 recorded it as met with conditions (#208).
 
 This report closes Phase 3: hardening the simulated SEL-751 slice so that a `device-observed` endpoint can later be allowed, and starting the owner's monitoring goals (ADR-0008) at their first rung. It follows the milestone format in `CLAUDE.md` §9 and mirrors `docs/phase-2-exit.md`. No device was contacted. Every result is `desk` (Go and Python tests on a CI runner or A1's container), `simulated` (the real binaries against A6's recording simulator), or from the GitHub-hosted Windows runner where that is stated. No result is `hardware-verified` (B-01). H-01 to H-15 are written and were not run, as the owner directed.
 
@@ -68,14 +68,14 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 ### Where tests ran
 
 - **CI** is the main test path (D2-13). It now has **ten jobs**: Go on Linux and Windows, pytest, `integration`, and six `integration-long` legs (including `busy_open`, `admin_relay` and `unknown_restart`). Every Phase 3 PR merged with every job green on its head, checked by A1 at each merge, with one exception: #197 merged on CI from a base older than three later merges, and main's Windows job went red until #202 (see "Lessons").
-- **The owner's PC** was not used in Phase 3. The installed-services run (gate item 1) is the one planned use.
+- **The owner's PC** was used once in Phase 3, for gate item 1, in the owner's own elevated PowerShell with the owner present. The OS was Windows 11 Pro 10.0.26200, with portable Go 1.26.10 and a Python 3.13.6 venv inside the owner's OTSEC folder, at `main` `27fdea4`. Preparation ran read-only through a session on the PC. Nothing was installed system-wide, and the run removed every service, folder, firewall rule, WER value and event source it created.
 - **A1's container (Linux).** Before merges where CI predated main, A1 ran `go vet` (Linux and `GOOS=windows`), `gofmt`, the affected package tests with `-race`, and the affected end-to-end suites on the PR merged with `main`.
 
 ## Exit-gate items
 
 | Gate item (`docs/agent-handoffs.md`, "Phase 3 exit gate") | State |
 | --- | --- |
-| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Not met.** The harness's service mode (#179, merged as `ccb94b2`) has run on the hosted Windows runner, elevated, against the real installer and services. A6 passed it on run 40464065233: 159 passed, 0 failed, the 27 stated Windows skips, and nothing left behind. Earlier runs found two harness faults (a read after teardown, and a read of `state.json` during the collector's replace), both fixed in the harness; the second also exposed the product risk under "Open risks". The owner's run needs the owner's choice of how the PC gets Go 1.26.10, and the owner's own elevated session. |
+| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Met, with conditions** (A6, #208). On 2026-10-27 the owner ran the slice in service mode in his own elevated session on Windows 11 Pro 10.0.26200, at `main` `27fdea4870c4c5dfc1f6b03958823479376c26fa`, with Go 1.26.10. Result: 159 passed, 0 failed, 0 errors, and the 27 stated skips (7 rsyslog leg, 18 admin relay, 2 unknown restart), in 53 min 22 s. The owner's independent leftovers check printed `nothing left behind`, and a read-only query afterwards agreed. The log was carried over byte-exact: its SHA-256 matches the PC's. The same suite had passed on the hosted Windows runner (run 40464065233, at `ccb94b2`) with the same counts. Earlier hosted runs found two harness faults (a read after teardown, and a read of `state.json` during the collector's replace), both fixed in the harness; the second also exposed the product risk under "Open risks". The conditions are the items this run does not cover: the admin relay end to end and `admin_dir`'s ACLs on Windows, the unknown-restart leg on Windows, a canary scan of process command lines, and an elevated read of the harness's SCM logs. Evidence class: a desktop, not the site image or LTSC 2021, and a simulated device on loopback. |
 | C7 0.4, the C1 path field, the `DATE_F` read and the key store merged with reviewers' records, and A6's negative tests pass in CI | **Met, with one condition.** The key store is merged and tested, but the node does not read its TLS keys from it yet (#176); the D2-12 file resolver stays behind its lab flag until then. |
 | The quarantine export and clear, and the failed-open retry, merged and tested | **Met.** |
 | V-S8 passes end to end, and received Syslog passes A6's tests end to end on the real binaries | **Met**, `simulated`. |
@@ -84,13 +84,12 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 
 ## Owner decisions needed
 
-1. **How the PC gets Go 1.26.10** (the decision card in the thread). A1 recommends replacing the portable Go folder inside OTSEC with the official 1.26.10 archive, checked against its published SHA-256.
-2. **A session for the installed-services run** (gate item 1), in the owner's own elevated shell, with the owner present.
-3. **Accept Phase 3**, with the conditions listed here, and confirm the Phase 4 order (ADR-0008).
+Already made in Phase 3: the owner swapped the portable Go to 1.26.10 himself, allowed pytest and asyncssh in a venv inside OTSEC, and ran gate item 1 in his own elevated session.
+
+1. **Accept Phase 3**, with the conditions listed here, and confirm the Phase 4 order (ADR-0008).
 
 ## Failed or incomplete
 
-- **Gate item 1** (above).
 - **No end-to-end Windows check of the admin relay or of `config\admin`'s ACLs.** The relay suite needs SIGSTOP and POSIX modes and is skipped on Windows; only the C7 contract tests run there. This is owed.
 - **Signed `clear-*` files** (relay PR 2 of #181) are not built, so the clear-suspension and clear-quarantine files are still unsigned administrator files under D2-15's folder rule.
 - **The full DMY and YMD slice reconcile** has not run (A2 and A6).
