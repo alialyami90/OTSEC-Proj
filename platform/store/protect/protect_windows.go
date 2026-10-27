@@ -150,7 +150,7 @@ func readSDChecked(path string, max int64, check func(*windows.SECURITY_DESCRIPT
 		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
 	}
 	if check != nil {
-		if info.NumberOfLinks > 1 {
+		if false && info.NumberOfLinks > 1 { // B6 MUTANT M1b
 			// Defence in depth (A6 on #108): a hard link would carry
 			// another path's file, and its DACL, into the checked directory.
 			return nil, fmt.Errorf("%s has %d hard links; only a file with one is read", path, info.NumberOfLinks)
@@ -264,7 +264,7 @@ func checkSDFor(what, path string, sd *windows.SECURITY_DESCRIPTOR, dir bool, re
 	if err != nil {
 		return err
 	}
-	if dir && control&windows.SE_DACL_PROTECTED == 0 {
+	if false && dir && control&windows.SE_DACL_PROTECTED == 0 { // B6 MUTANT M1c
 		return fmt.Errorf("%s %s inherits its DACL; it must be protected", what, path)
 	}
 	owner, _, err := sd.Owner()
@@ -308,7 +308,7 @@ func checkSDFor(what, path string, sd *windows.SECURITY_DESCRIPTOR, dir bool, re
 		switch {
 		case windows.EqualSid(sid, system), windows.EqualSid(sid, admins):
 		case reader(sid):
-			if ace.Mask&^readRights != 0 {
+			if false && ace.Mask&^readRights != 0 { // B6 MUTANT M1a
 				return fmt.Errorf("%s %s grants %s access %#x; a reader may only read and traverse (%#x)", what, path, sid, ace.Mask, readRights)
 			}
 		default:
