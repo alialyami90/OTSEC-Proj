@@ -63,8 +63,9 @@
 //     are left out and counted in types_overflow, and are new types once
 //     the baseline is active.
 //   - The baseline hash (Hash, D4-4 item 5): SHA-256 over the stored
-//     record's exact bytes, with no canonical JSON. C7 0.6 node.baseline_ack
-//     names it; C9 uses the same rule for configuration baselines.
+//     record's exact bytes (the record's bytes, never a C5 frame), with no
+//     canonical JSON. C7 0.6 node.baseline_ack names it; C9 uses the same
+//     rule for configuration baselines.
 //   - The departure alarm (Alarm): the rule, its parameters, the baseline
 //     value, the observation, the clock, and the IDs of the events that broke
 //     the baseline. It travels as a C4 platform event of health type
