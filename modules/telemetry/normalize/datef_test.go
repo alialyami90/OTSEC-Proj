@@ -44,6 +44,38 @@ func TestDateFRead(t *testing.T) {
 	}
 }
 
+// A C2 0.5 result with no DATE_F setting is read as before 0.5 (D3-11, A2
+// on #203): an adapter under a register without the DATE_F read stamps 0.5
+// and reports none. Without a caller's order, MDY is assumed and flagged;
+// with one, that order is used and nothing is flagged.
+func TestDateFAbsentReadAsBefore(t *testing.T) {
+	inv, a := c2Fixtures(t)
+	res := c2Result(t, "ok.json")
+	res.Settings = nil
+	for _, caller := range []string{"", "MDY"} {
+		in := testInput(nil)
+		in.DateOrder = caller
+		out, err := Normalize(res, inv, a, in)
+		if err != nil {
+			t.Fatalf("caller %q: %v", caller, err)
+		}
+		var walls []string
+		for _, e := range out.Events {
+			dt := e.DeviceTime
+			if e.Collection.ParseStatus != event.ParseOK || dt == nil {
+				t.Fatalf("caller %q: %s %+v", caller, e.Collection.ParseStatus, dt)
+			}
+			if assumed := slices.Contains(dt.Flags, "date-format-assumed:MDY"); assumed != (caller == "") {
+				t.Errorf("caller %q: flags %v", caller, dt.Flags)
+			}
+			walls = append(walls, dt.WallClock)
+		}
+		if want := []string{"2026-10-24T09:10:01.004", "2026-10-24T09:10:01.251"}; !slices.Equal(walls, want) {
+			t.Errorf("caller %q: wall clocks %v, want %v", caller, walls, want)
+		}
+	}
+}
+
 // When the adapter could not use DATE_F (missing, unknown, or a row that
 // does not fit it), every row comes unparsed: each becomes a parse-failed
 // event with its bytes, and nothing is read in an assumed order.
@@ -75,9 +107,7 @@ func TestDateFUnusableRowsKept(t *testing.T) {
 func TestDateFRefused(t *testing.T) {
 	inv, a := c2Fixtures(t)
 	ymd := c2Result(t, "ok-date-ymd.json")
-	noSetting := ymd
-	noSetting.Settings = nil
-	unparsed := c2Result(t, "partial.parse_errors-date-f-missing.json")
+	unknown := c2Result(t, "partial.parse_errors-date-f-unknown.json")
 	for _, c := range []struct {
 		name   string
 		res    adapter.Result
@@ -85,8 +115,7 @@ func TestDateFRefused(t *testing.T) {
 		want   error
 	}{
 		{"caller disagrees with DATE_F", ymd, "MDY", ErrInput},
-		{"parsed rows without DATE_F", noSetting, "", ErrResult},
-		{"caller order for a 0.5 result without DATE_F", unparsed, "YMD", ErrInput},
+		{"caller order beside an unknown DATE_F", unknown, "YMD", ErrInput},
 	} {
 		in := testInput(nil)
 		in.DateOrder = c.caller
@@ -98,8 +127,8 @@ func TestDateFRefused(t *testing.T) {
 }
 
 // dateOrder on its own, including a DATE_F this package does not know with
-// a parsed row, which a valid golden cannot carry, and results before 0.5,
-// where the caller's order stands.
+// a parsed row, which a valid golden cannot carry, and results before 0.5
+// or without DATE_F, where the caller's order stands (D3-11).
 func TestDateOrder(t *testing.T) {
 	setting := func(v string) []adapter.Setting { return []adapter.Setting{{Name: "DATE_F", Value: v}} }
 	parsed := []adapter.Record{{Kind: SERKind, ParseOK: true}}
@@ -120,10 +149,12 @@ func TestDateOrder(t *testing.T) {
 		{"0.5, caller disagrees", "otsec.adapter/0.5", setting("YMD"), parsed, "DMY", "", ErrInput},
 		{"0.5, unknown DATE_F, parsed row", "otsec.adapter/0.5", setting("MYD"), parsed, "", "", ErrResult},
 		{"0.5, lowercase DATE_F, parsed row", "otsec.adapter/0.5", setting("ymd"), parsed, "", "", ErrResult},
-		{"0.5, no DATE_F, parsed row", "otsec.adapter/0.5", nil, parsed, "", "", ErrResult},
+		{"0.5, no DATE_F, parsed row", "otsec.adapter/0.5", nil, parsed, "", "", nil},
+		{"0.5, no DATE_F, parsed row, caller's order", "otsec.adapter/0.5", nil, parsed, "DMY", "DMY", nil},
+		{"0.5, unknown DATE_F, caller's order", "otsec.adapter/0.5", setting("MYD"), unparsed, "MDY", "", ErrInput},
 		{"0.5, unknown DATE_F, no parsed row", "otsec.adapter/0.5", setting("MYD"), unparsed, "", "", nil},
 		{"0.5, no DATE_F, no rows", "otsec.adapter/0.5", nil, nil, "", "", nil},
-		{"0.5, caller order without DATE_F", "otsec.adapter/0.5", nil, unparsed, "MDY", "", ErrInput},
+		{"0.5, caller order without DATE_F", "otsec.adapter/0.5", nil, unparsed, "MDY", "MDY", nil},
 		{"0.9, DATE_F", "otsec.adapter/0.9", setting("DMY"), parsed, "", "DMY", nil},
 	} {
 		got, err := dateOrder(adapter.Result{Schema: c.schema, Settings: c.settings, Records: c.records}, c.caller)
