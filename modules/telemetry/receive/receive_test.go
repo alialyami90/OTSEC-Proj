@@ -133,13 +133,22 @@ func TestTLSServerOnly(t *testing.T) {
 func TestServerTLSRefusesCertificate(t *testing.T) {
 	p := newPKI(t, "a4-ca")
 	now := time.Now()
-	for name, cert := range map[string]tls.Certificate{
-		"client-only usage": p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, now.Add(-time.Hour), now.Add(time.Hour)),
-		"expired":           p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, now.Add(-2*time.Hour), now.Add(-time.Hour)),
-		"not yet valid":     p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, now.Add(time.Hour), now.Add(2*time.Hour)),
+	// Only a refusal for the validity period wraps ErrCertificatePeriod.
+	for name, c := range map[string]struct {
+		cert   tls.Certificate
+		period bool
+	}{
+		"client-only usage": {p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, now.Add(-time.Hour), now.Add(time.Hour)), false},
+		"expired":           {p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, now.Add(-2*time.Hour), now.Add(-time.Hour)), true},
+		"not yet valid":     {p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, now.Add(time.Hour), now.Add(2*time.Hour)), true},
 	} {
-		if _, err := ServerTLS(&cert, p.roots, false); err == nil {
+		_, err := ServerTLS(&c.cert, p.roots, false)
+		if err == nil {
 			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if !errors.Is(err, ErrConfig) || errors.Is(err, ErrCertificatePeriod) != c.period {
+			t.Errorf("%s: %v (ErrConfig %v, ErrCertificatePeriod %v)", name, err, errors.Is(err, ErrConfig), errors.Is(err, ErrCertificatePeriod))
 		}
 	}
 	if _, err := ServerTLS(&p.server, nil, true); err == nil {

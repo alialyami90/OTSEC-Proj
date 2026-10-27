@@ -67,7 +67,7 @@ func ClientTLS(t *syslog.Target, roots *x509.CertPool, client *tls.Certificate) 
 			return nil, fmt.Errorf("%w: target %s: the node's client certificate is not for client authentication", ErrConfig, t.Name)
 		}
 		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-			return nil, fmt.Errorf("%w: target %s: the node's client certificate is valid from %s to %s", ErrConfig, t.Name, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
+			return nil, fmt.Errorf("%w: %w: target %s: the node's client certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, t.Name, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
 		if d := t.DurableAck; d != nil && !slices.Contains(certNames(leaf), d.PermittedPeer) {
 			return nil, fmt.Errorf("%w: target %s: the collector permits %q, and the node's client certificate names %q", ErrConfig, t.Name, d.PermittedPeer, certNames(leaf))

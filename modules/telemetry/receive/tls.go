@@ -40,7 +40,7 @@ func ServerTLS(cert *tls.Certificate, clients *x509.CertPool, requireClient bool
 		return nil, fmt.Errorf("%w: the listener certificate is not for server authentication", ErrConfig)
 	}
 	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-		return nil, fmt.Errorf("%w: the listener certificate is valid from %s to %s", ErrConfig, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
+		return nil, fmt.Errorf("%w: %w: the listener certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
 	}
 	if requireClient && clients == nil {
 		return nil, fmt.Errorf("%w: client certificates required, but no CA set verifies them", ErrConfig)

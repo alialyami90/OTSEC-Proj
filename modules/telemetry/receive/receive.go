@@ -45,6 +45,11 @@ const (
 // listener refuses.
 var ErrConfig = errors.New("receive: invalid configuration")
 
+// ErrCertificatePeriod is returned by ServerTLS, wrapped with ErrConfig,
+// for a listener certificate outside its validity period, so the node can
+// tell an expired or not-yet-valid certificate from other refusals.
+var ErrCertificatePeriod = errors.New("receive: certificate outside its validity period")
+
 // Appender commits records and returns their receipts. *store.Log is one;
 // the node hands over a wrapper for the listener's database that fails
 // while the database is not open.
