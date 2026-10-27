@@ -30,6 +30,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -117,7 +118,7 @@ var adminPrincipal = authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential ...")
+		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file ...")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -129,6 +130,13 @@ func main() {
 	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
 	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
+	kind := fs.String("kind", "install", "admin-file: install or revoke")
+	name := fs.String("name", "", "admin-file: the file's name, or the <name> in admin-request-<name>.json")
+	expires := fs.Duration("expires", 10*time.Minute, "admin-file: the request's lifetime from now (negative: already expired)")
+	tamper := fs.Bool("tamper", false, "admin-file: change one payload byte after signing")
+	mode := fs.Uint("mode", 0o440, "admin-file: the file's mode")
+	bad := fs.String("bad", "", "admin-file: a claim to malform and sign anyway: nonce (21 characters) or key (the envelope's key ID)")
+	version := fs.Uint("version", 1, "admin-file: an install's credential version (2 rotates the first)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
@@ -136,6 +144,8 @@ func main() {
 		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS)
 	case "install-credential":
 		err = installCredential(*root)
+	case "admin-file":
+		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode), uint32(*version))
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
@@ -308,68 +318,106 @@ func setSerial(a map[string]any, serial string) {
 	}
 }
 
-func installCredential(root string) error {
-	secret := []byte(os.Getenv("OTSEC_SLICE_SECRET"))
-	if len(secret) == 0 {
-		return errors.New("OTSEC_SLICE_SECRET is not set")
-	}
-	b, err := os.ReadFile(filepath.Join(root, "layout.json"))
-	if err != nil {
-		return err
-	}
-	var l Layout
-	if err := json.Unmarshal(b, &l); err != nil {
-		return err
-	}
-	var key struct {
+// adminContext is what an administrator's client reads before signing:
+// the run's layout, the collector's published install key and the test
+// administrator's key.
+type adminContext struct {
+	l   Layout
+	key struct {
 		KeyID       string `json:"key_id"`
 		PublicKey   string `json:"public_key"`
 		Fingerprint string `json:"fingerprint"`
 	}
-	kb, err := os.ReadFile(filepath.Join(l.PublicDir, "install-key.json"))
+	priv ed25519.PrivateKey
+}
+
+func loadAdmin(root string) (*adminContext, error) {
+	b, err := os.ReadFile(filepath.Join(root, "layout.json"))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := json.Unmarshal(kb, &key); err != nil {
-		return err
+	a := &adminContext{}
+	if err := json.Unmarshal(b, &a.l); err != nil {
+		return nil, err
 	}
-	admin := adminPrincipal
-	seed, err := os.ReadFile(l.AdminKey)
+	kb, err := os.ReadFile(filepath.Join(a.l.PublicDir, "install-key.json"))
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if err := json.Unmarshal(kb, &a.key); err != nil {
+		return nil, err
+	}
+	seed, err := os.ReadFile(a.l.AdminKey)
+	if err != nil {
+		return nil, err
 	}
 	rawSeed, err := base64.StdEncoding.Strict().DecodeString(string(seed))
 	if err != nil || len(rawSeed) != ed25519.SeedSize {
-		return errors.New("the admin test key is not a base64 Ed25519 seed")
+		return nil, errors.New("the admin test key is not a base64 Ed25519 seed")
 	}
-	adminPriv := ed25519.NewKeyFromSeed(rawSeed)
-	ref := authz.CredentialRef{
-		ID: l.CredentialRef, AssetID: l.AssetID, NodeID: l.NodeID, EndpointID: "port1-telnet",
-		Transport: authz.TransportTelnet, Purpose: authz.PurposeCollectReadOnly, AccessLevel: "1",
-		DownstreamSecurity: authz.DownstreamPlaintext, PlaintextScope: authz.PlaintextLabOnly,
-		Version: 1, CreatedBy: admin, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	a.priv = ed25519.NewKeyFromSeed(rawSeed)
+	return a, nil
+}
+
+// sign makes a signed request of kind, issued now and expiring after
+// expires (negative: already expired), with a fresh nonce. An install
+// seals OTSEC_SLICE_SECRET to the install key as the reference's version;
+// a revoke names the run's credential reference.
+func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, version uint32) (*authz.AdminSigned, []byte, error) {
+	admin := adminPrincipal
+	nonce := make([]byte, authz.AdminNonceLen)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, nil, err
 	}
-	// The fingerprint is pinned from the published file here; in
-	// production the administrator compares it with the commissioning
-	// record first (T-12).
-	sealed, err := seal.Seal(seal.InstallKey{KeyID: key.KeyID, PublicKey: key.PublicKey}, key.Fingerprint, ref, secret, nil)
+	now := time.Now().UTC()
+	issued := now
+	if expires < 0 {
+		issued = now.Add(expires - time.Minute)
+	}
+	p := authz.AdminRequest{
+		Format: authz.AdminRequestFormat, Kind: kind, Principal: admin,
+		AdminKeyID: authz.AdminKeyID(a.priv.Public().(ed25519.PublicKey)), NodeID: a.l.NodeID, InstallKeyID: a.key.KeyID,
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce), IssuedAt: issued.Format(time.RFC3339),
+		ExpiresAt: now.Add(expires).Format(time.RFC3339),
+	}
+	switch kind {
+	case authz.KindCredentialInstall:
+		secret := []byte(os.Getenv("OTSEC_SLICE_SECRET"))
+		if len(secret) == 0 {
+			return nil, nil, errors.New("OTSEC_SLICE_SECRET is not set")
+		}
+		ref := authz.CredentialRef{
+			ID: a.l.CredentialRef, AssetID: a.l.AssetID, NodeID: a.l.NodeID, EndpointID: "port1-telnet",
+			Transport: authz.TransportTelnet, Purpose: authz.PurposeCollectReadOnly, AccessLevel: "1",
+			DownstreamSecurity: authz.DownstreamPlaintext, PlaintextScope: authz.PlaintextLabOnly,
+			Version: version, CreatedBy: admin, CreatedAt: now.Format(time.RFC3339),
+		}
+		// The fingerprint is pinned from the published file here; in
+		// production the administrator compares it with the commissioning
+		// record first (T-12).
+		sealed, err := seal.Seal(seal.InstallKey{KeyID: a.key.KeyID, PublicKey: a.key.PublicKey}, a.key.Fingerprint, ref, secret, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		p.CredentialInstall = &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}
+	case authz.KindCredentialRevoke:
+		p.CredentialRevoke = &authz.CredentialRevokeBody{RefID: a.l.CredentialRef, Reason: authz.RevokeRotated}
+	default:
+		return nil, nil, fmt.Errorf("kind %q: only install and revoke", kind)
+	}
+	signed, err := authz.SignAdminRequest(a.priv, p)
+	return signed, nonce, err
+}
+
+func installCredential(root string) error {
+	a, err := loadAdmin(root)
 	if err != nil {
 		return err
 	}
-	nonce := make([]byte, authz.AdminNonceLen)
-	if _, err := rand.Read(nonce); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	signed, err := authz.SignAdminRequest(adminPriv, authz.AdminRequest{
-		Format: authz.AdminRequestFormat, Kind: authz.KindCredentialInstall, Principal: admin,
-		AdminKeyID: authz.AdminKeyID(adminPriv.Public().(ed25519.PublicKey)), NodeID: l.NodeID, InstallKeyID: key.KeyID,
-		Nonce: base64.RawURLEncoding.EncodeToString(nonce), IssuedAt: now.Format(time.RFC3339),
-		// Under the 15-minute maximum less the 2-minute skew allowance, so
-		// a collector clock a little ahead still accepts it (A1 on #146).
-		ExpiresAt:         now.Add(10 * time.Minute).Format(time.RFC3339),
-		CredentialInstall: &authz.CredentialInstallBody{Ref: ref, Sealed: sealed},
-	})
+	l := a.l
+	// Under the 15-minute maximum less the 2-minute skew allowance, so a
+	// collector clock a little ahead still accepts it (A1 on #146).
+	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute, 1)
 	if err != nil {
 		return err
 	}
@@ -394,9 +442,9 @@ func installCredential(root string) error {
 		if err != nil {
 			continue // the node has not written status yet
 		}
-		for _, a := range st.AdminRequests {
-			if a.File == name {
-				decided = a
+		for _, r := range st.AdminRequests {
+			if r.File == name {
+				decided = r
 			}
 		}
 	}
@@ -404,6 +452,85 @@ func installCredential(root string) error {
 		return fmt.Errorf("credential.install %s: %s (%s)", name, decided.State, decided.Detail)
 	}
 	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(decided.CollectorSeq, 10) + `}`)
+	return nil
+}
+
+// adminFile leaves one signed admin-request file in admin_dir and returns
+// at once (A6, #189): kind install or revoke, expiring after expires
+// (negative: already expired), with one payload byte changed after
+// signing when tamper is set, written with mode (0440 is the rule; a
+// wider mode is a file the node must not read); an install names
+// credential version. It prints the file's name,
+// its request ID as the node derives it from the bytes (admin- and 16 hex
+// digits of their SHA-256) and the nonce.
+func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode, version uint32) error {
+	a, err := loadAdmin(root)
+	if err != nil {
+		return err
+	}
+	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke}[kind]
+	signed, _, err := a.sign(k, expires, version)
+	if err != nil {
+		return err
+	}
+	var p struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.Unmarshal(signed.Payload, &p); err != nil {
+		return err
+	}
+	switch bad {
+	case "":
+	case "nonce":
+		// One character short, and signed again: a valid signature over a
+		// payload whose nonce claim the node must not record.
+		short := p.Nonce[:len(p.Nonce)-1]
+		signed.Payload = []byte(strings.Replace(string(signed.Payload), `"`+p.Nonce+`"`, `"`+short+`"`, 1))
+		signed.Signature = ed25519.Sign(a.priv, authz.AdminSigningInput(k, signed.Payload))
+		p.Nonce = short
+	case "key":
+		signed.KeyID = "ed25519-NOT-A-KEY-ID" // outside the signed bytes
+	default:
+		return fmt.Errorf("-bad %q: nonce or key", bad)
+	}
+	if tamper {
+		// The nonce's first character: the payload stays valid JSON with
+		// the same claims' shapes, so only the signature can refuse it.
+		i := strings.Index(string(signed.Payload), p.Nonce)
+		if p.Nonce[0] == 'A' {
+			signed.Payload[i] = 'B'
+		} else {
+			signed.Payload[i] = 'A'
+		}
+		p.Nonce = string(signed.Payload[i : i+len(p.Nonce)])
+	}
+	file, err := json.Marshal(map[string]any{"schema": node.AdminRequestFileSchema, "kind": k, "signed": signed})
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(name, "admin-request-") {
+		name = "admin-request-" + name + ".json"
+	}
+	if filepath.Base(name) != name {
+		return fmt.Errorf("-name %q: a file name in admin_dir, not a path", name) // A3 on #195
+	}
+	d := a.l.AdminDir
+	if err := os.Chmod(d, 0o750); err != nil {
+		return err
+	}
+	err = os.WriteFile(filepath.Join(d, name), file, mode)
+	if err == nil {
+		err = os.Chmod(filepath.Join(d, name), mode) // past the umask
+	}
+	if cerr := os.Chmod(d, 0o550); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(file)
+	out, _ := json.Marshal(map[string]string{"file": name, "request_id": "admin-" + hex.EncodeToString(sum[:8]), "nonce": p.Nonce})
+	fmt.Println(string(out))
 	return nil
 }
 
