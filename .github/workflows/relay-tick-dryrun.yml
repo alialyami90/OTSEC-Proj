@@ -1,0 +1,19 @@
+# Dry run only (not for main): the relay stall tests on the hosted Windows
+# runner with -v, so the logged split of each tick is in the log.
+name: relay-tick-dryrun
+on:
+  push:
+    branches: [claude/project-thread-xni3ff-relaytickdry]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -count=5 -v -run "TestRelayStopsAtFirstUnanswered|TestRelayTimeout" ./platform/node
