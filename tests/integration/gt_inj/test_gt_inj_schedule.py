@@ -110,12 +110,12 @@ def test_config_injection_reaches_the_simulator(cfg, tmp_path):
 
 
 def test_events_observation_period(ev):
-    p = g.PARAMS["observation"]
+    p = g.PARAMS
     end = seconds(ev["period"]["end"])
     for asset, first in ev["period"]["first_event"].items():
-        n = sum(1 for e in ev["events"] if e["asset"] == asset and seconds(first) <= e["t"] < seconds(first) + p["min_days"] * g.DAY)
+        n = sum(1 for e in ev["events"] if e["asset"] == asset and seconds(first) <= e["t"] < seconds(first) + p["min_duration_s"])
         assert n >= p["min_events"], asset
-        assert seconds(first) + p["min_days"] * g.DAY <= end
+        assert seconds(first) + p["min_duration_s"] <= end
     assert seconds(ev["period"]["baseline_ack"]) > end
 
 
@@ -169,7 +169,7 @@ def test_heldout_raises_nothing(ev):
         e["t"] = seconds(e["received_utc"])
     start = min(e["t"] for e in ho["events"])
     assert start > seconds(ev["period"]["baseline_ack"])
-    assert ho["seed"] != ev["seed"] and len({e["t"] // g.DAY for e in ho["events"]}) >= g.PARAMS["observation"]["min_days"]
+    assert ho["seed"] != ev["seed"] and len({e["t"] // g.DAY for e in ho["events"]}) >= g.OBS_DAYS
     assert _alarms(ev, ho["events"], start - start % g.DAY, max(e["t"] for e in ho["events"]) + 1) == []
 
 
@@ -186,3 +186,36 @@ def test_events_syslog_key_is_the_template(ev):
     (ctl,) = ev["controls"]
     assert len(ctl["events"]) == 3 and all(by_id[i]["msgid"] not in known_ids for i in ctl["events"])
     assert not any(set(a["events"]) & set(ctl["events"]) for a in ev["expected_alarms"])
+
+
+def test_events_expected_alarms_are_hold_free(ev):
+    """C10's alarm bounds change nothing here: no two expected alarms of one
+    (asset, rule, type) fall within alarm_hold_s, and no asset has more
+    than max_alarms_per_hold in any alarm_hold_s, so a product that holds
+    alarms as C10 says must raise every expected alarm."""
+    hold, most = g.PARAMS["alarm_hold_s"], g.PARAMS["max_alarms_per_hold"]
+    at = lambda a: seconds(a["at"])
+    by = collections.defaultdict(list)
+    for a in ev["expected_alarms"]:
+        by[(a["asset"], a["rule"], json.dumps(a["type"]))].append(at(a))
+    for k, ts in by.items():
+        ts.sort()
+        assert all(b - a >= hold for a, b in zip(ts, ts[1:])), k
+    for asset in {a["asset"] for a in ev["expected_alarms"]}:
+        ts = sorted(at(a) for a in ev["expected_alarms"] if a["asset"] == asset)
+        assert all(sum(1 for u in ts if t <= u < t + hold) <= most for t in ts), asset
+
+
+def test_events_rate_alarms_list_up_to_the_break(ev):
+    """C10: a rate alarm lists the bucket's events up to and including the
+    one that passed the bound, so bound + 1 of them, the last at the
+    alarm's time."""
+    base = g.baseline([e for e in ev["events"] if e["t"] < seconds(ev["period"]["end"])])
+    by_id = {e["id"]: e for e in ev["events"]}
+    for a in ev["expected_alarms"]:
+        if a["rule"] != "rate":
+            continue
+        b = base[(a["asset"], tuple(a["type"]))]
+        bound = max(-(-g.PARAMS["rate_factor_pct"] * b["most_per_bucket"] // 100), g.PARAMS["rate_min"])
+        assert len(a["events"]) == bound + 1, a
+        assert by_id[a["events"][-1]]["t"] == seconds(a["at"]), a

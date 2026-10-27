@@ -4,10 +4,8 @@
  "seed": 202610272,
  "evidence": "synthetic (simulated)",
  "params": {
-  "observation": {
-   "min_days": 14,
-   "min_events": 200
-  },
+  "min_duration_s": 1209600,
+  "min_events": 200,
   "repeats_n": 5,
   "repeats_window_s": 600,
   "rate_bucket_s": 3600,
@@ -15,7 +13,11 @@
   "rate_min": 2,
   "periodic_min_occurrences": 11,
   "periodic_spread_pct": 10,
-  "absence_tolerance_pct": 50
+  "absence_tolerance_pct": 50,
+  "time_clock": "received",
+  "max_types": 4096,
+  "alarm_hold_s": 3600,
+  "max_alarms_per_hold": 8
  },
  "type_key": "SER: element and state; Syslog: facility, severity and the text with each digit run made # (D4-4 item 4; msgid is not in the key)",
  "clock": "received_utc, the platform's receive time",
@@ -426,7 +428,7 @@
     6,
     "Heartbeat sequence #"
    ],
-   "at": "2026-11-19T15:30:10.000Z",
+   "at": "2026-11-19T15:30:11.000Z",
    "events": []
   },
   {
@@ -522,7 +524,7 @@
     6,
     "Heartbeat sequence #"
    ],
-   "at": "2026-11-22T09:30:30.000Z",
+   "at": "2026-11-22T09:30:31.000Z",
    "events": []
   },
   {
@@ -557,7 +559,7 @@
     6,
     "Heartbeat sequence #"
    ],
-   "at": "2026-11-23T15:30:25.000Z",
+   "at": "2026-11-23T15:30:26.000Z",
    "events": []
   },
   {

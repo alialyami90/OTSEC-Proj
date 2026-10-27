@@ -23,7 +23,11 @@ The heartbeat is the only periodic type. It falls at `:00:00` plus 0 to 30 s.
 
 ## Readings, as B1 ruled them (D4-9)
 
-- **Rule 3 (rate):** one bound per type: `rate_factor_pct` of the most the baseline saw in any one clock-hour bucket, never below `rate_min`. There is no bound per hour of day, because the hour of day is rule 4's.
+- **Rule 3 (rate):** one bound per type: `rate_factor_pct` of the most the baseline saw in any one clock-hour bucket, rounded up, never below `rate_min` (C10 `RateBound`). There is no bound per hour of day, because the hour of day is rule 4's. A rate alarm lists the bucket's events up to and including the one that passed the bound (C10).
+- **Rule 5 (absence):** the tolerance is `absence_tolerance_pct` of the interval, rounded up (C10 `Tolerance`), and the spread test is in integers: `|gap - median| x 100 <= median x periodic_spread_pct`.
+- **Repeats window (B6's reading, open on #254):** "within `repeats_window_s`" is taken as the events of `(t - repeats_window_s, t]` in whole seconds; C10 does not yet say whether the window is open or closed at its ends.
+- **Absence boundary (B6's reading, open on #254):** an occurrence exactly at interval + tolerance after the last one is in time; the alarm is raised at that instant only when nothing came by then.
+- **Alarm bounds (C10):** one alarm per (asset, rule, type) per `alarm_hold_s` and at most `max_alarms_per_hold` per asset per hold. No expected alarm meets either bound, so they do not change the expectations (`test_events_expected_alarms_are_hold_free`).
 - **V-M2 non-approver:** an approval refused for any reason covers nothing, so the change alarms.
 - **V-M2 window ended:** C8 0.5 covers a change when the approval's window overlaps the time between the last read that found the baseline (`Rm`) and the read that found the change (`R1`). The schedule therefore has a read `Rm` after the window ends and before the change.
 - **Repeats and rate injections:** each replaces that type's benign events in that hour, so it breaks only its own rule.
@@ -31,4 +35,4 @@ The heartbeat is the only periodic type. It falls at `:00:00` plus 0 to 30 s.
 
 ## When the parameters change
 
-The parameters are proposed until C10 and the P4-A4 brief fix them. When that happens, set `PARAMS` and run `python3 -I tests/integration/gt_inj/generate.py`, then commit the new files before any product test has run against them. A regenerated schedule after a product test has run is a new GT-INJ series, and it is recorded as such.
+`PARAMS` carries C10's parameter names (`contracts/baseline` `Params`, #254) at the learner defaults B4 adopted, so `events.json`'s `params` decodes strictly into `baseline.Params` (`tests/contract`). If C10 or the P4-A4 brief changes them, set `PARAMS` and run `python3 -I tests/integration/gt_inj/generate.py`, then commit the new files before any product test has run against them. A regenerated schedule after a product test has run is a new GT-INJ series, and it is recorded as such.

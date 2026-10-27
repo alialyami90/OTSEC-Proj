@@ -148,23 +148,40 @@ def config_series():
 # V-M4: event-behaviour departures
 # ---------------------------------------------------------------------------
 
-# Proposed until C10 fixes them (see the module text). The names are C10's
-# learner parameters as B4 gave them on #251, which B4 adopted as defaults.
+# C10's learner parameters (contracts/baseline Params, #254), by its JSON
+# names, at the defaults B4 adopted from this proposal: events.json's
+# "params" decodes strictly into baseline.Params (tests/contract).
 PARAMS = {
-    "observation": {"min_days": 14, "min_events": 200},
+    # The observation period: both minima (C10 DefaultMinDuration and
+    # DefaultMinEvents).
+    "min_duration_s": 14 * 86400, "min_events": 200,
     # Rule 2: more than repeats_n of a type within repeats_window_s, when the
-    # baseline's most in any such window was below repeats_n.
+    # baseline's most in any such window was below repeats_n. B6's reading of
+    # "within": the events of (t - repeats_window_s, t], in whole seconds.
     "repeats_n": 5, "repeats_window_s": 600,
-    # Rule 3 (B1, D4-9): one bound per type, rate_factor_pct of the most the
-    # baseline saw in any clock-hour bucket (buckets from the Unix epoch on
-    # received time), and never below rate_min. Hour of day is rule 4's.
+    # Rule 3 (B1, D4-9): one bound per type, the larger of rate_min and
+    # rate_factor_pct of the most the baseline saw in any bucket, rounded up
+    # (C10 RateBound); buckets of rate_bucket_s from the Unix epoch on
+    # received time. Hour of day is rule 4's.
     "rate_bucket_s": 3600, "rate_factor_pct": 300, "rate_min": 2,
     # Rule 5: a type is periodic with at least periodic_min_occurrences and
-    # every gap within periodic_spread_pct of the interval, the upper middle
-    # of the sorted gaps; it is absent when not seen within the interval
-    # plus absence_tolerance_pct of it.
+    # every gap g within periodic_spread_pct of the median m, the upper
+    # middle of the sorted gaps (|g - m| x 100 <= m x pct, in integers); it
+    # is absent when not seen within m + absence_tolerance_pct of m, rounded
+    # up (C10 Tolerance).
     "periodic_min_occurrences": 11, "periodic_spread_pct": 10, "absence_tolerance_pct": 50,
+    "time_clock": "received", "max_types": 4096,
+    # Alarm bounds (C10): one alarm per (asset, rule, type) per alarm_hold_s,
+    # at most max_alarms_per_hold per asset per hold. The expected alarms
+    # below never meet either (test_events_expected_alarms_are_hold_free).
+    "alarm_hold_s": 3600, "max_alarms_per_hold": 8,
 }
+OBS_DAYS = PARAMS["min_duration_s"] // 86400
+
+
+def ceil_div(a, b):
+    return -(-a // b)
+
 
 START = dt.datetime(2026, 11, 2, tzinfo=dt.timezone.utc)
 DAY = 86400
@@ -273,8 +290,7 @@ def baseline(events):
         interval = None
         if len(ts) >= p["periodic_min_occurrences"]:
             med = gaps[len(gaps) // 2]
-            spread = p["periodic_spread_pct"] / 100
-            if all(abs(g - med) <= spread * med for g in gaps):
+            if all(abs(g - med) * 100 <= med * p["periodic_spread_pct"] for g in gaps):
                 interval = med
         out[k] = {"hours": sorted({(t % DAY) // 3600 for t in ts}), "most_per_bucket": max(buckets.values()),
                   "most_per_window": most_w, "interval": interval, "last": ts[-1]}
@@ -313,14 +329,14 @@ def evaluate(base, events, start, end):
                 else:
                     open_run = False
         # 3. rate: one alarm per bucket over the bound, at the event that
-        # passed it.
-        bound = max(p["rate_factor_pct"] * b["most_per_bucket"] // 100, p["rate_min"])
+        # passed it, listing the bucket's events up to that one (C10).
+        bound = max(ceil_div(p["rate_factor_pct"] * b["most_per_bucket"], 100), p["rate_min"])
         buckets = {}
         for e in es:
             buckets.setdefault(e["t"] // p["rate_bucket_s"], []).append(e)
         for bk, xs in sorted(buckets.items()):
             if len(xs) > bound:
-                alarms.append(dict(rule="rate", asset=asset, type=name, at=xs[bound]["t"], events=[x["id"] for x in xs]))
+                alarms.append(dict(rule="rate", asset=asset, type=name, at=xs[bound]["t"], events=[x["id"] for x in xs[:bound + 1]]))
         # 4. time: each event at an hour the baseline never saw the type in.
         for e in es:
             if (e["t"] % DAY) // 3600 not in b["hours"]:
@@ -330,7 +346,7 @@ def evaluate(base, events, start, end):
     for k, b in base.items():
         if not b["interval"]:
             continue
-        limit = b["interval"] * (100 + p["absence_tolerance_pct"]) // 100
+        limit = b["interval"] + ceil_div(b["interval"] * p["absence_tolerance_pct"], 100)
         ts = [b["last"]] + [e["t"] for e in by.get(k, [])]
         ts.append(end)
         for a, c in zip(ts, ts[1:]):
@@ -348,7 +364,7 @@ def number(events, prefix):
 
 def event_series():
     rng = random.Random(EVENTS_SEED)
-    obs_days = PARAMS["observation"]["min_days"]
+    obs_days = OBS_DAYS
     keys = [(a, k) for a, ts in ASSETS.items() for k in ts]
     # A peak day for each type inside the observation period, so the
     # baseline sees the densest the generator ever makes (B6's construction:
@@ -363,7 +379,7 @@ def event_series():
     period_end = max(first.values()) + obs_days * DAY
     for a in ASSETS:
         n = sum(1 for e in events if e["asset"] == a and e["t"] < first[a] + obs_days * DAY)
-        assert n >= PARAMS["observation"]["min_events"], (a, n)
+        assert n >= PARAMS["min_events"], (a, n)
     ack = period_end + 3600
 
     departures = []
@@ -492,7 +508,7 @@ def event_series():
 
 def heldout_series(start_day):
     rng = random.Random(HELDOUT_SEED)
-    obs_days = PARAMS["observation"]["min_days"]
+    obs_days = OBS_DAYS
     events = []
     for day in range(start_day, start_day + obs_days):
         events += benign_day(rng, day)
@@ -505,7 +521,7 @@ def main():
     ev = event_series()
     # The held-out series starts where the test period starts, so it can be
     # replayed after the acknowledgement in place of the injected one.
-    start_day = PARAMS["observation"]["min_days"] + 1
+    start_day = OBS_DAYS + 1
     ho = heldout_series(start_day)
     # Check it against the baseline the injected series learnt.
     ev_full = json.loads(json.dumps(ev))
@@ -513,7 +529,7 @@ def main():
         e["t"] = int((dt.datetime.strptime(e["received_utc"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
     period_end = int((dt.datetime.strptime(ev["period"]["end"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
     base = baseline([e for e in ev_full["events"] if e["t"] < period_end])
-    end = (start_day + PARAMS["observation"]["min_days"]) * DAY
+    end = (start_day + OBS_DAYS) * DAY
     # The heartbeat before the held-out series is the observation period's
     # last; nothing between them is removed.
     ho_alarms = evaluate(base, ho, start_day * DAY, end)
