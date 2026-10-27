@@ -44,13 +44,15 @@ func TestNormalizeC2Read(t *testing.T) {
 			t.Errorf("event %d: evidence class %q", i, e.Source.EvidenceClass)
 		case e.Collection.Alignment != event.AlignFirstRead || e.Collection.InvocationID != res.InvocationID:
 			t.Errorf("event %d: collection %+v", i, e.Collection)
-		case e.Received.UTC != res.Transcript.ReceivedAt(rec.Span) || e.Received.UTC != "2026-10-24T09:15:01.3Z":
+		case e.Received.UTC != res.Transcript.ReceivedAt(rec.Span) || e.Received.UTC != "2026-10-24T09:15:01.5Z":
 			t.Errorf("event %d: received %s", i, e.Received.UTC)
 		case e.Native.Evidence.SHA256 != res.Transcript.SHA256 || e.Native.Evidence.Ref != store.EvidenceRef(res.Transcript.SHA256):
 			t.Errorf("event %d: evidence %+v", i, e.Native.Evidence)
 		case string(e.Native.Bytes) != string(res.Transcript.Data[rec.Span.Offset:rec.Span.Offset+rec.Span.Length]):
 			t.Errorf("event %d: native bytes %q", i, e.Native.Bytes)
-		case e.DeviceTime.Quality.TimeSource != "Internal" || !slices.Contains(e.DeviceTime.Flags, "date-format-assumed:MDY"):
+		case e.DeviceTime.Quality.TimeSource != "Internal" || slices.Contains(e.DeviceTime.Flags, "date-format-assumed:MDY"):
+			// ok.json is C2 0.5 with DATE_F MDY read in the session, so
+			// the order is the relay's, not assumed.
 			t.Errorf("event %d: device time %+v", i, e.DeviceTime)
 		}
 		for j, f := range rec.Fields {

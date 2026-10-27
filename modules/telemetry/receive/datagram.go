@@ -63,6 +63,17 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 			continue
 		}
 		m := msg{frame: frame{msg: append([]byte(nil), buf[:n]...)}, from: from, auth: event.AuthNone, rcv: r.cfg.Received()}
+		if !known {
+			// Spent as read (payUnknown), and only with room to queue it: this
+			// loop is the queue's only sender.
+			if len(q) == cap(q) {
+				r.drop(DropQueueFull, 1)
+				continue
+			}
+			if !r.payUnknown(&m) {
+				continue
+			}
+		}
 		select {
 		case q <- m:
 			r.queued.Add(int64(n))
@@ -100,7 +111,7 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 		for _, m := range batch {
 			n += int64(len(m.msg))
 		}
-		recs, kept := r.records(cctx, batch)
+		recs, kept := r.records(batch)
 		if len(recs) == 0 {
 			r.queued.Add(-n)
 			continue

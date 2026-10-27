@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.4/collector-request",
+  "$id": "otsec.authz/0.5/collector-request",
   "title": "Collector request (C7). Strict: unknown fields, duplicate keys and trailing data are rejected. Only 'run' can lead to device I/O.",
   "type": "object",
   "additionalProperties": false,
@@ -15,7 +15,7 @@
     "contract": {
       "type": "string",
       "pattern": "^otsec\\.authz/0\\.(0|[1-9][0-9]*)$",
-      "description": "Any minor of major 0 is read (contracts/README.md). asset.clear_suspension needs 0.2 or later; admin_signed needs 0.4 or later."
+      "description": "Any minor of major 0 is read (contracts/README.md). asset.clear_suspension needs 0.2 or later; admin_signed needs 0.4 or later; node.quarantine_clear and node.seq_reset_ack need 0.5 or later and are only ever admin-signed."
     },
     "kind": {
       "enum": [
@@ -23,7 +23,9 @@
         "credential.install",
         "credential.revoke",
         "credential.clear_suspension",
-        "asset.clear_suspension"
+        "asset.clear_suspension",
+        "node.quarantine_clear",
+        "node.seq_reset_ack"
       ]
     },
     "request_id": {
@@ -109,7 +111,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.4/credential-ref"
+          "$ref": "otsec.authz/0.5/credential-ref"
         },
         "sealed": {
           "type": "object",
@@ -221,7 +223,7 @@
         "payload",
         "signature"
       ],
-      "description": "Since 0.4 (D2-11). An administrator's signed request, in place of its body, which exists only inside the payload (otsec.authz/0.4/admin-request). The signature is Ed25519 over the bytes 'otsec.authz/0.4 admin-request <kind>' and a line feed, followed by the payload. The collector refuses an unsigned admin request, and every failed check, with admin_unverified.",
+      "description": "Since 0.4 (D2-11). An administrator's signed request, in place of its body, which exists only inside the payload (otsec.authz/0.5/admin-request, whose format is still otsec.authz.admin-request/0.4). The signature is Ed25519 over the bytes 'otsec.authz/0.4 admin-request <kind>' and a line feed, followed by the payload. The collector refuses an unsigned admin request, and every failed check, with admin_unverified.",
       "properties": {
         "key_id": {
           "type": "string",
@@ -500,6 +502,66 @@
             "credential.revoke",
             "credential.clear_suspension",
             "asset.clear_suspension"
+          ]
+        },
+        "on_behalf_of": {
+          "properties": {
+            "type": {
+              "const": "human"
+            }
+          }
+        }
+      },
+      "required": [
+        "admin_signed"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "run"
+            ]
+          },
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "contract": {
+          "not": {
+            "enum": [
+              "otsec.authz/0.0",
+              "otsec.authz/0.1",
+              "otsec.authz/0.2",
+              "otsec.authz/0.3",
+              "otsec.authz/0.4"
+            ]
+          }
+        },
+        "kind": {
+          "enum": [
+            "node.quarantine_clear",
+            "node.seq_reset_ack"
           ]
         },
         "on_behalf_of": {

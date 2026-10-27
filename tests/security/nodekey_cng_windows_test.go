@@ -83,9 +83,14 @@ func a6status(r uintptr) string {
 	return fmt.Sprintf("0x%08X", uint32(r))
 }
 
-func a6utf16(s string) uintptr {
+// a6utf16 returns a pointer, not a uintptr: the conversion to uintptr is
+// made in the Call expression itself, where Call's go:uintptrescapes keeps
+// the string alive for the call. A uintptr returned from here would leave
+// the buffer unreferenced, free to be collected during the call (A1, from
+// A5's look at #199's job 121993733971).
+func a6utf16(s string) *uint16 {
 	p, _ := windows.UTF16PtrFromString(s)
-	return uintptr(unsafe.Pointer(p))
+	return p
 }
 
 // keyProbe is what one account could do with one key. An empty string is
@@ -103,11 +108,11 @@ type keyProbe struct {
 
 func a6openKey(name string) (uintptr, string) {
 	var prov, key uintptr
-	if r, _, _ := a6OpenProv.Call(uintptr(unsafe.Pointer(&prov)), a6utf16("Microsoft Software Key Storage Provider"), 0); r != 0 {
+	if r, _, _ := a6OpenProv.Call(uintptr(unsafe.Pointer(&prov)), uintptr(unsafe.Pointer(a6utf16("Microsoft Software Key Storage Provider"))), 0); r != 0 {
 		return 0, "provider " + a6status(r)
 	}
 	defer a6FreeObject.Call(prov)
-	r, _, _ := a6OpenKey.Call(prov, uintptr(unsafe.Pointer(&key)), a6utf16(name), 0, a6MachineKey|a6Silent)
+	r, _, _ := a6OpenKey.Call(prov, uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(a6utf16(name))), 0, a6MachineKey|a6Silent)
 	if r != 0 {
 		return 0, a6status(r)
 	}
@@ -117,7 +122,7 @@ func a6openKey(name string) (uintptr, string) {
 func a6export(key uintptr, blob string) string {
 	buf := make([]byte, 16384)
 	var n uint32
-	r, _, _ := a6ExportKey.Call(key, 0, a6utf16(blob), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+	r, _, _ := a6ExportKey.Call(key, 0, uintptr(unsafe.Pointer(a6utf16(blob))), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
 		uintptr(unsafe.Pointer(&n)), a6Silent)
 	if r == 0 {
 		return ""
@@ -169,7 +174,7 @@ func probe(name string, digest []byte) keyProbe {
 	// Try to turn export on, persisted and for this handle only.
 	for label, flags := range map[string]uintptr{"persist": a6Persist | a6Silent, "handle": a6Silent} {
 		v := uint32(a6AllowExport)
-		r, _, _ := a6SetProp.Call(key, a6utf16("Export Policy"), uintptr(unsafe.Pointer(&v)), 4, flags)
+		r, _, _ := a6SetProp.Call(key, uintptr(unsafe.Pointer(a6utf16("Export Policy"))), uintptr(unsafe.Pointer(&v)), 4, flags)
 		p.SetPolicy[label] = a6status(r)
 	}
 	for _, b := range a6PrivateBlobs {

@@ -261,15 +261,18 @@ func TestAdminRefusalsComeFirst(t *testing.T) {
 // TestAdminReplayRefused (A6): a signed request is good for one decision,
 // across a restart, and a request a later check refused has still spent
 // its nonce.
+//
+// The requests are stamped 0.4, which has no repeat answer: a resend of
+// an accepted request is refused too. TestAdminRepeat covers 0.5.
 func TestAdminReplayRefused(t *testing.T) {
 	f := newPipeline(t)
 	ctx := context.Background()
-	rejected := installRequest(t, f, pipeRef(1), []byte("ACC")) // the register refuses this secret
+	rejected := stamped(installRequest(t, f, pipeRef(1), []byte("ACC")), "otsec.authz/0.4") // the register refuses this secret
 	if reply, _ := f.pipe.Handle(ctx, rejected); refusalOf(reply) != authz.RefuseSecretRejected {
 		t.Fatalf("ACC: %+v", reply)
 	}
-	install := installRequest(t, f, pipeRef(1), canary)
-	if reply, _ := f.pipe.Handle(ctx, install); !reply.Accepted() {
+	install := stamped(installRequest(t, f, pipeRef(1), canary), "otsec.authz/0.4")
+	if reply, _ := f.pipe.Handle(ctx, install); !reply.Accepted() || reply.Admin != nil {
 		t.Fatalf("install: %+v", reply)
 	}
 	taken := f.installsTaken(t)

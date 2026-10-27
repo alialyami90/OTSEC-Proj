@@ -3,6 +3,7 @@ package sel751
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/adapter"
 )
@@ -133,6 +134,9 @@ func FuzzParseSettings(f *testing.F) {
 			if s.name != name || !bytes.HasPrefix(b, []byte(name)) || !bytes.HasSuffix(b, []byte(s.value)) || s.value == "" {
 				t.Fatalf("setting %q = %q, span bytes %q", name, s.value, b)
 			}
+			if v := inside(t, m, s.valueSpan); string(v) != s.value {
+				t.Fatalf("setting %q = %q, value span bytes %q", name, s.value, v)
+			}
 			for i := s.span.Offset - m.off; i < s.span.Offset-m.off+s.span.Length; i++ {
 				covered[i] = true
 			}
@@ -147,6 +151,30 @@ func FuzzParseSettings(f *testing.F) {
 					t.Fatalf("line %q: byte %d (%q) is in no setting", l.b, i, c)
 				}
 			}
+		}
+	})
+}
+
+// FuzzDateFits: a date fits a DATE_F order only if it is exactly that
+// order's layout of one calendar date, so formatting the date it parses to
+// gives back the same bytes, and an order the build does not know fits
+// nothing (D3-2).
+func FuzzDateFits(f *testing.F) {
+	for _, c := range [][2]string{{"MDY", "10/24/2026"}, {"DMY", "24/10/2026"}, {"YMD", "2026/10/24"},
+		{"DMY", "10/24/2026"}, {"MDY", "02/30/2026"}, {"MYD", "10/24/2026"}, {"MDY", "1/2/2026"}, {"YMD", "+026/10/24"}} {
+		f.Add(c[0], c[1])
+	}
+	f.Fuzz(func(t *testing.T, order, date string) {
+		if !dateFits(order, date) {
+			return
+		}
+		layout, ok := dateLayouts[order]
+		if !ok {
+			t.Fatalf("order %q is not one this build knows, yet %q fits", order, date)
+		}
+		d, err := time.Parse(layout, date)
+		if err != nil || d.Format(layout) != date {
+			t.Fatalf("%s %q fits but reads back as %q (%v)", order, date, d.Format(layout), err)
 		}
 	})
 }

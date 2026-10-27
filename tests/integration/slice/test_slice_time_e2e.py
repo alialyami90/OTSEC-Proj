@@ -36,7 +36,7 @@ import pytest
 import harness
 import reconcile
 from conftest import need
-from slicerun import CHECK, REGISTER, Slice
+from slicerun import CHECK, REGISTER, SERVICE, Slice
 
 import sys
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "safety", "recording_simulator"))
@@ -82,7 +82,7 @@ def _check(logs):
 @pytest.fixture(scope="module")
 def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
-    need(os.name != "nt", "the Windows leg of the end-to-end run is the PC run (D1-26)")
+    need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     base = str(tmp_path_factory.mktemp("slice-time"))
     first = Slice(os.path.join(base, "build"))
     first.build()

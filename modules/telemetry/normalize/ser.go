@@ -15,6 +15,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/version"
 )
 
 // Parser is C4 collection.parser on every SER event. Its version changes
@@ -53,9 +54,13 @@ type Input struct {
 	// Stream, as DecodeState returns it: nil before the first read, empty
 	// after a read that found no rows.
 	Prev []string
-	// DateOrder is the relay's DATE_F, "MDY", "DMY" or "YMD", when it was
-	// read in the same session or recorded by an operator. Empty means
-	// unknown: MDY is assumed and every event says so.
+	// DateOrder is the relay's DATE_F, "MDY", "DMY" or "YMD", for a result
+	// without a DATE_F setting (C2 0.4 or earlier, or a 0.5 adapter under a
+	// register without the DATE_F read, D3-11): recorded by an operator, or
+	// empty for unknown, and then MDY is assumed and every event says so.
+	// When the result carries the DATE_F setting the adapter read in the
+	// same session (D2-20), that is the order; DateOrder must then be empty
+	// or equal to it.
 	DateOrder string
 	// Offset is the relay clock's offset from UTC, "+HH:MM" or "-HH:MM",
 	// with the basis it came from. Empty means unknown, and no UTC is stated.
@@ -106,6 +111,11 @@ func Normalize(res adapter.Result, inv adapter.Invocation, a asset.Asset, in Inp
 	if err := in.check(); err != nil {
 		return nil, err
 	}
+	order, err := dateOrder(res, in.DateOrder)
+	if err != nil {
+		return nil, err
+	}
+	in.DateOrder = order
 	rd := &read{
 		in:        in,
 		assetID:   a.AssetID,
@@ -132,6 +142,49 @@ func Normalize(res adapter.Result, inv adapter.Invocation, a asset.Asset, in Inp
 	}
 	return rd.normalize()
 }
+
+// dateOrder is the date order the SER rows of res are read in. A result of
+// C2 0.5 or later that carries a DATE_F setting states it, and only that is
+// used: a caller's order that disagrees is refused, and so is a parsed row
+// beside a DATE_F this package does not know, because the adapter must
+// leave such rows unparsed (their bytes are then kept as parse-failed
+// events). A caller's order is a defect in the input (ErrInput); a parsed
+// row beside an unknown DATE_F is a defect in the result (ErrResult, A1 on
+// the DATE_F plan, which had said ErrInput). A refused result is kept by
+// the caller as quarantine, with its bytes, and alarmed (R1.4). A result
+// with no DATE_F setting, of any minor, is read as before 0.5: the caller's
+// order stands, and without one MDY is assumed and flagged. C2 0.5 makes
+// Settings optional, and an adapter under a register without the DATE_F
+// read stamps 0.5 and reports none (A2 on #203).
+func dateOrder(res adapter.Result, caller string) (string, error) {
+	id, err := version.Parse(res.Schema)
+	if err != nil {
+		return "", fmt.Errorf("%w: schema %q: %v", ErrResult, res.Schema, err)
+	}
+	if id.Minor < 5 {
+		return caller, nil
+	}
+	s, ok := res.Setting(dateSetting)
+	if !ok {
+		return caller, nil
+	}
+	parsed := slices.ContainsFunc(res.Records, func(r adapter.Record) bool { return r.ParseOK })
+	switch {
+	case dateOrders[s.Value] != nil && caller != "" && caller != s.Value:
+		return "", fmt.Errorf("%w: date order %q given, but the relay's DATE_F is %q", ErrInput, caller, s.Value)
+	case dateOrders[s.Value] != nil:
+		return s.Value, nil
+	case caller != "":
+		return "", fmt.Errorf("%w: date order %q given, but the relay's DATE_F is %q, not MDY, DMY or YMD", ErrInput, caller, s.Value)
+	case parsed:
+		return "", fmt.Errorf("%w: a parsed SER row, but the relay's DATE_F is %q, not MDY, DMY or YMD", ErrResult, s.Value)
+	}
+	// No row to read: the order is not needed, and none is assumed.
+	return "", nil
+}
+
+// dateSetting is the SEL setting that orders printed dates (S22 p. 7.31).
+const dateSetting = "DATE_F"
 
 func (in Input) check() error {
 	switch {
