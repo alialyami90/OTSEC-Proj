@@ -419,13 +419,74 @@ func walPath(t *testing.T, dir string) string {
 	return m[0]
 }
 
+// measureWAL runs commit while a second connection holds a read
+// transaction on the database file, so no checkpoint can reset the WAL
+// under the measurement, and returns how much the -wal file grew.
+func measureWAL(t *testing.T, dir string, commit func()) int64 {
+	t.Helper()
+	ctx := context.Background()
+	file := walPath(t, dir)
+	before, err := os.Stat(file + "-wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, err := sql.Open("sqlite", "file:"+(&url.URL{Path: file}).EscapedPath()+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pin.Close()
+	tx, err := pin.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	commit()
+	after, err := os.Stat(file + "-wal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return after.Size() - before.Size()
+}
+
+// withinRule fails unless one commit of payload bytes grew the WAL by more
+// than its payload (else the pin did not hold and nothing was measured) and
+// by no more than CommitWALBytes(payload).
+func withinRule(t *testing.T, payload, grew int64) {
+	t.Helper()
+	rule := c5.CommitWALBytes(payload)
+	t.Logf("payload %d bytes: the WAL grew %d bytes (%.3f × payload + %d), rule %d", payload, grew,
+		float64(grew)/float64(payload), grew-payload, rule)
+	if grew <= payload {
+		t.Fatalf("the WAL grew %d bytes for a %d-byte payload: the pin did not hold it, so this measured nothing", grew, payload)
+	}
+	if grew > rule {
+		t.Fatalf("one commit of %d payload bytes wrote %d WAL bytes, over CommitWALBytes %d", payload, grew, rule)
+	}
+}
+
+// compactAll runs compaction to its end, so the commit measured starts on a
+// settled file.
+func compactAll(t *testing.T, db *store.DB) {
+	t.Helper()
+	for more := true; more; {
+		var err error
+		if more, err = db.CompactStep(context.Background(), 1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // The WAL one commit writes stays under CommitWALBytes of its payload, on
 // the real store with its own schema, indexes and settings: one
-// configuration record per commit, from MinRecordBytes to 1.5 MiB, the
-// configuration cap D4-13 sets.
+// configuration record per commit, from MinRecordBytes to 11 MiB, the
+// largest cap any database uses (the evidence database's, D4-9).
 func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 	ctx := context.Background()
-	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20, 1536 << 10} {
+	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20, 1536 << 10, 4 << 20, 11 << 20} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
 			d := database(size)
 			dir := newDir(t)
@@ -438,30 +499,7 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if _, err := l.Append(ctx, c5.Record{Stream: cfg, Class: c5.ClassConfiguration, Event: []byte(`{"doc":0}`)}); err != nil {
 				t.Fatal(err)
 			}
-			for more := true; more; {
-				if more, err = db.CompactStep(ctx, 1000); err != nil {
-					t.Fatal(err)
-				}
-			}
-			file := walPath(t, dir)
-			before, err := os.Stat(file + "-wal")
-			if err != nil {
-				t.Fatal(err)
-			}
-			pin, err := sql.Open("sqlite", "file:"+(&url.URL{Path: file}).EscapedPath()+"?mode=ro")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer pin.Close()
-			tx, err := pin.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
-			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&n); err != nil {
-				t.Fatal(err)
-			}
+			compactAll(t, db)
 			// Random bytes, as a transcript compresses nothing in SQLite anyway.
 			rng := rand.New(rand.NewSource(size))
 			raw := make([]byte, size/2)
@@ -472,22 +510,11 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if r.Bytes() > size {
 				t.Fatalf("record %d bytes over its cap %d", r.Bytes(), size)
 			}
-			if _, err := l.Append(ctx, r); err != nil {
-				t.Fatal(err)
-			}
-			after, err := os.Stat(file + "-wal")
-			if err != nil {
-				t.Fatal(err)
-			}
-			grew, rule := after.Size()-before.Size(), c5.CommitWALBytes(r.Bytes())
-			t.Logf("payload %d bytes: the WAL grew %d bytes (%.3f × payload + %d), rule %d", r.Bytes(), grew,
-				float64(grew)/float64(r.Bytes()), grew-r.Bytes(), rule)
-			if grew <= r.Bytes() {
-				t.Fatalf("the WAL grew %d bytes for a %d-byte payload: the pin did not hold it, so this measured nothing", grew, r.Bytes())
-			}
-			if grew > rule {
-				t.Fatalf("one commit of %d payload bytes wrote %d WAL bytes, over CommitWALBytes %d", r.Bytes(), grew, rule)
-			}
+			withinRule(t, r.Bytes(), measureWAL(t, dir, func() {
+				if _, err := l.Append(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}))
 		})
 	}
 }
