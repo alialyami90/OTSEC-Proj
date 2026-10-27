@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.5/admin-request",
-  "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5). Strict. Decoded only after the signature verifies. Every field is signed.",
+  "$id": "otsec.authz/0.6/admin-request",
+  "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5; configuration bodies since 0.6). Strict. Decoded only after the signature verifies. Every field is signed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -26,7 +26,9 @@
         "credential.clear_suspension",
         "asset.clear_suspension",
         "node.quarantine_clear",
-        "node.seq_reset_ack"
+        "node.seq_reset_ack",
+        "node.change_approval",
+        "node.baseline_ack"
       ],
       "description": "Must equal the request's kind."
     },
@@ -91,7 +93,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.5/credential-ref"
+          "$ref": "otsec.authz/0.6/credential-ref"
         },
         "sealed": {
           "type": "object",
@@ -220,6 +222,73 @@
       "additionalProperties": false,
       "maxProperties": 0,
       "description": "Since 0.5. Acknowledges a collector_seq reset. Empty: the install key acknowledged is install_key_id, which the collector refuses unless it is its current key."
+    },
+    "node_change_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "baseline_digest",
+        "window_start",
+        "window_end",
+        "reason"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "baseline_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The configuration baseline the change is approved against: sha256: and the SHA-256 of the acknowledged C9 snapshot's exact stored bytes (D4-4 item 5)."
+        },
+        "window_start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339, UTC, canonical form."
+        },
+        "window_end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339, UTC, canonical form. After window_start, at most 24 hours after it (MaxApprovalWindow), and not yet passed when the collector verifies the request."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Printable UTF-8, at most 256 bytes (MaxApprovalReason), no control character."
+        }
+      },
+      "description": "Since 0.6 (P4-A3, D4-2). Approves a change to one asset's configuration in advance. The approver, nonce and expiry are the envelope's. A change counts as approved only if the collector's collector_seq for this approval is below that of the read that found it; the window bounds when the change may happen."
+    },
+    "node_baseline_ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "kind",
+        "baseline_digest"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "TODO(C1): C1 asset ID"
+        },
+        "kind": {
+          "enum": [
+            "configuration",
+            "event"
+          ]
+        },
+        "baseline_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256: and the SHA-256 of the baseline record's exact stored bytes (C9 snapshot or C10 baseline, D4-4 item 5). The node adopts it only if it holds a baseline of that asset and kind with that hash."
+        }
+      },
+      "description": "Since 0.6 (P4-A3). Acknowledges one baseline as the asset's baseline of its kind. Only an acknowledgement moves a baseline."
     }
   },
   "oneOf": [
@@ -257,6 +326,16 @@
           {
             "required": [
               "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
             ]
           }
         ]
@@ -297,6 +376,16 @@
             "required": [
               "node_seq_reset_ack"
             ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
           }
         ]
       }
@@ -335,6 +424,16 @@
           {
             "required": [
               "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
             ]
           }
         ]
@@ -375,6 +474,16 @@
             "required": [
               "node_seq_reset_ack"
             ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
           }
         ]
       }
@@ -414,6 +523,16 @@
             "required": [
               "node_seq_reset_ack"
             ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
           }
         ]
       }
@@ -452,6 +571,114 @@
           {
             "required": [
               "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.change_approval"
+        }
+      },
+      "required": [
+        "node_change_approval"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.baseline_ack"
+        }
+      },
+      "required": [
+        "node_baseline_ack"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
             ]
           }
         ]

@@ -146,10 +146,18 @@ func TestDiscardStepWALBound(t *testing.T) {
 	ctx := context.Background()
 	db := open1(t, storeDir(t), withQuota(quarantineDB, c5.ClassAdapterEvidence, 1<<30), nil)
 	l := testLog(t, db)
+	// The fixture is built in 16 commits of about 550 KiB (under C5 0.4's
+	// MaxCommitBytes) with checkpoints off: on the hosted Windows runner
+	// each flush is slow, and 80 commits with a checkpoint every 64 pages
+	// took 274 to 438 s (#230). The step measured below starts from a
+	// truncated WAL either way.
+	if _, err := db.conn.ExecContext(ctx, "PRAGMA wal_autocheckpoint=0"); err != nil {
+		t.Fatal(err)
+	}
 	const n = 8000
-	for i := 0; i < n; i += 100 {
+	for i := 0; i < n; i += 500 {
 		var rs []c5.Record
-		for j := i; j < i+100; j++ {
+		for j := i; j < i+500; j++ {
 			r := rec(qStream, c5.ClassAdapterEvidence, j)
 			c := capture(fmt.Sprintf("%01024d", j))
 			r.Capture = &c
@@ -159,10 +167,8 @@ func TestDiscardStepWALBound(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, q := range []string{"PRAGMA wal_autocheckpoint=0", "PRAGMA wal_checkpoint(TRUNCATE)"} {
-		if _, err := db.conn.ExecContext(ctx, q); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := db.conn.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		t.Fatal(err)
 	}
 	seqs := make([]c5.Seq, c5.DiscardStepEvents)
 	for i := range seqs {
