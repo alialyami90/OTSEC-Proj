@@ -81,6 +81,13 @@ func (r Record) Bytes() int64 {
 // writer injects it, so C5 imports neither C9 nor C10.
 type DocumentValidator func(document []byte, capture *Capture) error
 
+// MaxHoldsPerRecord (0.5) bounds Record.Holds. A held difference holds its
+// two snapshots and itself, so 16 is generous; each hold is one small row,
+// and the WAL of a configuration record with this many holds was measured
+// at 4,120 bytes (one page) more than without (B5, #281, simulated), inside
+// the fixed term of CommitWALBytes.
+const MaxHoldsPerRecord = 16
+
 // Validate checks a record before it is queued.
 func (r Record) Validate() error {
 	if !r.Stream.Valid() {
@@ -91,6 +98,9 @@ func (r Record) Validate() error {
 	}
 	if len(r.Event) == 0 {
 		return errf(CodeInvalid, nil, "record for %s has no event bytes", r.Stream)
+	}
+	if len(r.Holds) > MaxHoldsPerRecord {
+		return errf(CodeInvalid, nil, "record for %s takes %d holds, at most %d", r.Stream, len(r.Holds), MaxHoldsPerRecord)
 	}
 	for _, h := range r.Holds {
 		if err := h.Reason.Validate(); err != nil {

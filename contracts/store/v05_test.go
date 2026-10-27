@@ -117,3 +117,21 @@ func TestDiskBytesPerQuotaByte(t *testing.T) {
 		t.Errorf("DiskBytesPerQuotaByte %v leaves under 20%% margin over %v", DiskBytesPerQuotaByte, measuredWorst)
 	}
 }
+
+// A record takes at most MaxHoldsPerRecord holds, so a configuration commit's
+// rows stay inside the fixed WAL term.
+func TestHoldsPerRecordBound(t *testing.T) {
+	holds := func(n int) []Hold {
+		out := make([]Hold, n)
+		for i := range out {
+			out[i] = Hold{Seq: Seq(i + 1), Reason: HoldReason{Code: HoldBaseline, Ref: Key{NodeID: "n1", Stream: "audit", Seq: 7}}}
+		}
+		return out
+	}
+	if err := configRec(10, holds(MaxHoldsPerRecord)...).Validate(); err != nil {
+		t.Fatalf("at the bound: %v", err)
+	}
+	if err := configRec(10, holds(MaxHoldsPerRecord+1)...).Validate(); !isCode(err, CodeInvalid) {
+		t.Fatalf("over the bound: %v", err)
+	}
+}
