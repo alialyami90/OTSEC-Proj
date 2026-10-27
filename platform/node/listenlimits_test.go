@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -312,21 +313,31 @@ func TestReceivedRecordBound(t *testing.T) {
 			}
 			for _, frame := range frames {
 				for _, d := range normalize.Dialects {
-					e, err := normalize.Syslog(normalize.SyslogInput{Node: "site-a-node1", Stream: "syslog/l0", Message: frame,
-						Sender: "127.0.0.1", Auth: event.AuthNone, EvidenceClass: asset.Simulated, Dialect: d,
-						Flags:    []string{normalize.FlagTruncated},
-						Received: event.Received{UTC: "2026-10-26T15:00:00.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}})
-					if err != nil {
-						t.Fatalf("%d-byte frame %q, %s: %v", len(frame), frame[:16], d, err)
+					for _, in := range []normalize.SyslogInput{
+						{Node: "site-a-node1", Stream: "syslog/l0", Sender: "127.0.0.1", Auth: event.AuthNone,
+							Received: event.Received{UTC: "2026-10-26T15:00:00.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}},
+						// Every optional field at its longest (A5 on #223): a
+						// verified sender certificate (sender.tls_leaf_sha256), a
+						// known asset and its binding, the longest IPv6 text form,
+						// and a nanosecond received time.
+						{Node: "site-a-node1", Stream: "syslog/a-listener-with-a-long-id", Sender: "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255",
+							Auth: event.AuthTLSMutual, SenderCert: bytes.Repeat([]byte{0x30}, 64), AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+							Received: event.Received{UTC: "2026-10-26T15:00:00.123456789Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized}}},
+					} {
+						in.Message, in.EvidenceClass, in.Dialect, in.Flags = frame, asset.Simulated, d, []string{normalize.FlagTruncated}
+						e, err := normalize.Syslog(in)
+						if err != nil {
+							t.Fatalf("%d-byte frame %q, %s, sender %s: %v", len(frame), frame[:16], d, in.Sender, err)
+						}
+						b, err := json.Marshal(e)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if int64(len(b)) > bound {
+							t.Errorf("MaxMessage %d: %d-byte frame %q (%s, sender %s) stores as %d bytes, bound %d", maxMessage, len(frame), frame[:16], d, in.Sender, len(b), bound)
+						}
+						worst = max(worst, len(b))
 					}
-					b, err := json.Marshal(e)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if int64(len(b)) > bound {
-						t.Errorf("MaxMessage %d: %d-byte frame %q (%s) stores as %d bytes, bound %d", maxMessage, len(frame), frame[:16], d, len(b), bound)
-					}
-					worst = max(worst, len(b))
 				}
 			}
 		}
