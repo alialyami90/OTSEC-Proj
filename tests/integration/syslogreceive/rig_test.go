@@ -68,6 +68,9 @@ type stored struct {
 	OriginAuth string
 	Class      string
 	ID         event.EventID
+	// Received is when the listener read the message (received.utc), taken
+	// as each frame is read, before the store.
+	Received time.Time
 }
 
 func (s stored) has(flag string) bool {
@@ -243,8 +246,9 @@ func (g *rig) events() []stored {
 			g.t.Fatal(err)
 		}
 		var e struct {
-			ID     event.EventID `json:"id"`
-			Source struct {
+			ID       event.EventID  `json:"id"`
+			Received event.Received `json:"received"`
+			Source   struct {
 				Asset *struct {
 					ID      string `json:"id"`
 					Binding struct {
@@ -279,6 +283,7 @@ func (g *rig) events() []stored {
 		s.ID, s.Bytes, s.Record, s.Length = e.ID, e.Native.Bytes, e.Native.Record, e.Native.Length
 		s.EvSHA, s.EvLen, s.Flags, s.Asset = e.Native.Evidence.SHA256, e.Native.Evidence.Length, e.Flags, e.Source.Asset
 		s.OriginAuth, s.Class = e.Source.OriginAuth, e.Source.Class
+		s.Received, _ = time.Parse(time.RFC3339Nano, e.Received.UTC)
 		if e.Source.Sender != nil {
 			s.Sender, s.Leaf = e.Source.Sender.Address, e.Source.Sender.Leaf
 		}
@@ -306,6 +311,23 @@ func (g *rig) waitN(n int, d time.Duration) []stored {
 		}
 		if len(ev) >= n || time.Since(moved) > d || time.Now().After(limit) {
 			return ev
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// waitStatus polls the receiver's status until ok holds or d passes, and
+// returns the last status read. Stored and the store's drop counts move
+// only after AppendBatch returns, so they can lag the events a reader
+// already sees in the database (#187, job 121917868556: stored 256 of 301
+// straight after waitN on a slow Windows runner).
+func (g *rig) waitStatus(ok func(receive.Status) bool, d time.Duration) receive.Status {
+	g.t.Helper()
+	limit := time.Now().Add(d)
+	for {
+		st := g.r.Status()
+		if ok(st) || time.Now().After(limit) {
+			return st
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

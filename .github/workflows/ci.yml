@@ -39,6 +39,9 @@ jobs:
       - name: nodekey claims (A6)
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6NodeKey -v ./tests/security
+      - name: collector pipe between two services (A6)
+        if: runner.os == 'Windows' && !cancelled()
+        run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
       - run: go test ./...
   python:
     runs-on: ubuntu-latest
