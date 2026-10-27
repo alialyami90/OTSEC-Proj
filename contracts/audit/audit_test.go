@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
 )
@@ -274,8 +276,8 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 	}
 	// An unknown, harmless field from a later minor is kept; the same field
 	// on a record of this minor is refused (C8-A6-2).
-	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.4"`, 1)
-	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_4":1,"outcome"`, 1))); err != nil {
+	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.5"`, 1)
+	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_5":1,"outcome"`, 1))); err != nil {
 		t.Fatalf("unknown field in a later minor: %v", err)
 	}
 	if _, err := ParseRecord([]byte(strings.Replace(string(ok), `"outcome"`, `"api_token":"x","outcome"`, 1))); !errors.Is(err, ErrRecordRejected) {
@@ -429,12 +431,27 @@ func TestSchemaPatterns(t *testing.T) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ schema, code string }{
-		{s.Properties.NodeID.Pattern, nodeIDPattern.String()},
-		{s.Properties.Target.Properties.AssetID.Pattern, assetIDPattern.String()},
+	if got, want := s.Properties.NodeID.Pattern, nodeIDPattern.String(); got != want {
+		t.Errorf("schema node_id pattern %q, code %q", got, want)
+	}
+	// The record checks a target asset ID with C1's asset.ValidAssetID;
+	// the schema's copy must agree with it.
+	schemaAsset := regexp.MustCompile(s.Properties.Target.Properties.AssetID.Pattern)
+	for _, id := range []string{
+		"2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", // valid, version 4
+		"2b7d4e10-8c3f-8a5b-9e21-7c4f0d6a8b13", // version 8
+		"2B7D4E10-8C3F-4A5B-9E21-7C4F0D6A8B13", // upper case
+		"2b7d4e10-8c3f-0a5b-9e21-7c4f0d6a8b13", // version 0
+		"2b7d4e10-8c3f-9a5b-9e21-7c4f0d6a8b13", // version 9
+		"2b7d4e10-8c3f-4a5b-cе21-7c4f0d6a8b13", // a non-ASCII letter
+		"2b7d4e10-8c3f-4a5b-c021-7c4f0d6a8b13", // variant c
+		"2b7d4e108c3f4a5b9e217c4f0d6a8b13",     // no hyphens
+		"{2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13}",
+		"2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13\n",
+		"",
 	} {
-		if c.schema != c.code {
-			t.Errorf("schema pattern %q, code %q", c.schema, c.code)
+		if schemaAsset.MatchString(id) != asset.ValidAssetID(id) {
+			t.Errorf("asset id %q: schema %v, C1 %v", id, schemaAsset.MatchString(id), asset.ValidAssetID(id))
 		}
 	}
 }
