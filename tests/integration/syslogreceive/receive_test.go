@@ -584,22 +584,60 @@ func TestTLSOptionalSenderCertificate(t *testing.T) {
 // stored unresolved with the listener's class, alarmed once per address
 // with the stored event as the related ID, and past MaxUnknown one summary
 // is raised; a known sender's events are untouched.
+//
+// UDP promises no delivery, even on loopback, so the counts are the
+// receiver's own (#262, job 122460526290: 21 of 25 stored on a loaded
+// Windows runner, and nothing then said where the four went). A datagram
+// the receiver has not read is sent again; every datagram it read must be
+// stored, none dropped with these limits, and each of the 25 stored.
 func TestUnknownSendersAreKeptAndAlarmedOnce(t *testing.T) {
 	g := start(t, asset.SyslogUDP, nil, receive.Limits{MaxUnknown: 2})
 	unknown := []netip.Addr{netip.MustParseAddr("127.0.0.3"), netip.MustParseAddr("127.0.0.4"), netip.MustParseAddr("127.0.0.5"), netip.MustParseAddr("127.0.0.6")}
-	want := 0
+	want, read, again := 0, int64(0), 0
 	for _, from := range append(unknown, ipA) {
 		c := dialFrom(t, from, "udp", g.addr)
 		for i := 0; i < 5; i++ {
-			fmt.Fprintf(c, "<13>from %s %d", from, i)
+			for try := 0; ; try++ {
+				if try == 5 {
+					t.Fatalf("the receiver read none of 5 sends of datagram %d from %s: %+v", i, from, g.r.Status())
+				}
+				if _, err := fmt.Fprintf(c, "<13>from %s %d", from, i); err != nil {
+					t.Fatalf("send %d from %s: %v", i, from, err)
+				}
+				if st := g.waitStatus(func(s receive.Status) bool { return s.Received > read }, 2*time.Second); st.Received > read {
+					read = st.Received
+					break
+				}
+				again++
+			}
 			want++
-			time.Sleep(3 * time.Millisecond)
 		}
-		g.waitN(want, 5*time.Second)
 	}
+	st := g.waitStatus(func(s receive.Status) bool { return s.Received == s.Stored+sumMap(s.Dropped)+s.Empty }, 10*time.Second)
 	ev := g.events()
-	if len(ev) != want {
-		t.Fatalf("%d stored, %d sent", len(ev), want)
+	perSender := map[string]int{}
+	for _, s := range ev {
+		perSender[s.Sender]++
+	}
+	t.Logf("%d datagrams, %d sent again; receiver read %d, stored %d, dropped %v, empty %d, last error %q; stored by sender %v",
+		want, again, st.Received, st.Stored, st.Dropped, st.Empty, st.LastErr, perSender)
+	if sumMap(st.Dropped) != 0 || st.Empty != 0 || st.Received != st.Stored || int64(len(ev)) != st.Stored {
+		t.Fatalf("the receiver lost datagrams it read: read %d, stored %d (%d in the database), dropped %v, empty %d, last error %q",
+			st.Received, st.Stored, len(ev), st.Dropped, st.Empty, st.LastErr)
+	}
+	texts := map[string]bool{}
+	for _, s := range ev {
+		texts[string(s.Bytes)] = true
+	}
+	for _, from := range append(unknown, ipA) {
+		for i := 0; i < 5; i++ {
+			if m := fmt.Sprintf("<13>from %s %d", from, i); !texts[m] {
+				t.Errorf("%q was never stored", m)
+			}
+		}
+	}
+	if len(ev) < want || len(ev) > want+again {
+		t.Fatalf("%d stored, %d datagrams, %d sent again", len(ev), want, again)
 	}
 	byID := map[string]stored{}
 	for _, s := range ev {
