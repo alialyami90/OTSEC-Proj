@@ -506,9 +506,24 @@ class Slice:
             "\n" + inst.events("node")
 
     def _teardown(self):
-        if self.service:
-            self.service.teardown({n: self.logs[n] for n in SERVICES if n in self.logs},
-                                  os.path.join(self.root, "installed"))
+        if not self.service:
+            return
+        keep = os.path.join(self.root, "installed")
+        try:
+            self.service.teardown({n: self.logs[n] for n in SERVICES if n in self.logs}, keep)
+        finally:
+            # The installed layout is gone; what a test reads after stop()
+            # (the stores, status.json) is in the copy teardown made of it.
+            if os.path.isdir(keep) and hasattr(self, "layout"):
+                self.layout = {k: self._kept(v, keep) for k, v in self.layout.items()}
+
+    def _kept(self, v, keep):
+        """v, a layout value, moved from the installed %ProgramData%\\OTSEC
+        to its copy at keep."""
+        data = os.path.normcase(os.path.normpath(self.service.data))
+        if not isinstance(v, str) or not os.path.normcase(os.path.normpath(v)).startswith(data + os.sep):
+            return v
+        return os.path.join(keep, os.path.relpath(v, self.service.data))
 
     def start_simulator(self, fid, port=0, framed=True):
         """A simulator answering with fid, on port (0: one the OS chooses),

@@ -98,7 +98,8 @@ def got(tmp_path_factory):
         if holder is not None:
             holder.close()
         s.stop()
-    out["audit"] = _audit_rows(audit)
+    # After stop(), in service mode, the store is the teardown's copy.
+    out["audit"] = _audit_rows(os.path.join(s.layout["store_dir"], "audit.db"))
     out["sim_logs"] = list(s.sim_logs)
     print(json.dumps({k: v for k, v in out.items() if k != "audit"}, indent=1, default=str))
     return out
