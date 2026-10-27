@@ -26,7 +26,7 @@ jobs:
       - run: openssl version
       - name: slice against the installed services
         run: |
-          python -m pytest -v -rs --basetemp="$env:RUNNER_TEMP\slice" tests/integration/slice | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest.txt"
+          python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\slice" tests/integration/slice | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest.txt"
           exit $LASTEXITCODE
       - name: run logs
         if: always()
