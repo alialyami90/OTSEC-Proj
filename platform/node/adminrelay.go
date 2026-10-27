@@ -297,6 +297,14 @@ func readAdminFile(path string) (*adminFile, string) {
 	return f, ""
 }
 
+// RelayTimeout bounds one relayed request's exchange with the collector.
+// The relay runs in the scheduler's loop, so a collector that takes the
+// connection and never answers would otherwise hold the relay and every
+// run behind it (A6 on #189). A request cut off is left undecided and sent
+// again; if the collector did decide it, the resend is refused as a
+// replay, and the refusal says the request may already have been applied.
+var RelayTimeout = 30 * time.Second
+
 // relayOne sends one file's request: recorded first, then sent, then the
 // decision recorded, as for a run (D1-11). A request with no decision is
 // left undecided and sent again next tick.
@@ -315,7 +323,9 @@ func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) {
 	var reply authz.CollectorReply
 	var doErr error
 	if err := c5.AuditBeforeAct(ctx, s.rt.Log(AuditStream), sent, func(c5.Receipt) error {
-		r, err := s.c.Do(ctx, req)
+		dctx, cancel := context.WithTimeout(ctx, RelayTimeout)
+		defer cancel()
+		r, err := s.c.Do(dctx, req)
 		reply, doErr = r.Reply, err
 		return nil
 	}); err != nil {
