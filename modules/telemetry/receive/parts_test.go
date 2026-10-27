@@ -70,17 +70,23 @@ func (l *tapLog) calls() (sizes []int64, counts []int, failed []int) {
 	return append([]int64(nil), l.sizes...), append([]int(nil), l.counts...), append([]int(nil), l.failed...)
 }
 
-// splitRig is a rig whose store.Log caps a commit at logCap, behind a tap.
-// cfgCap is Config.MaxCommitBytes.
-func splitRig(t *testing.T, transport asset.Transport, logCap, cfgCap int64, tap *tapLog, mut func(*Config)) *rig {
+// bytesCap is a group whose commit is capped at n bytes and, as the rigs'
+// default, 100 records.
+func bytesCap(n int64) store.GroupOptions {
+	return store.GroupOptions{MaxEvents: 100, MaxWait: 5 * time.Millisecond, MaxCommitBytes: n}
+}
+
+// splitRig is a rig whose store.Log is built with opt, behind a tap. cfgCap
+// and cfgN are Config.MaxCommitBytes and MaxCommitRecords: the node sets
+// them from the options it builds its Log with, so tests do the same.
+func splitRig(t *testing.T, transport asset.Transport, opt store.GroupOptions, cfgCap int64, cfgN int, tap *tapLog, mut func(*Config)) *rig {
 	t.Helper()
 	mc := &memCommitter{}
 	class := store.ClassSyslogStream
 	if transport == asset.SyslogUDP {
 		class = store.ClassSyslogDatagram
 	}
-	log, err := store.NewLog(mc, testNode, map[store.StreamID]store.StreamClass{testStream: class},
-		store.GroupOptions{MaxEvents: 100, MaxWait: 5 * time.Millisecond, MaxCommitBytes: logCap}, nil)
+	log, err := store.NewLog(mc, testNode, map[store.StreamID]store.StreamClass{testStream: class}, opt, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +94,7 @@ func splitRig(t *testing.T, transport asset.Transport, logCap, cfgCap int64, tap
 	g := newRig(t, transport, func(c *Config) {
 		c.Log = tap
 		c.MaxCommitBytes = cfgCap
+		c.MaxCommitRecords = cfgN
 		if mut != nil {
 			mut(c)
 		}
@@ -114,7 +121,7 @@ func bigMsgs(n, size int) []string {
 func TestBatchSplitsAtCommitCap(t *testing.T) {
 	const logCap = store.MinRecordBytes
 	tap := &tapLog{gate: make(chan struct{})}
-	g := splitRig(t, asset.SyslogTCP, logCap, logCap, tap, nil)
+	g := splitRig(t, asset.SyslogTCP, bytesCap(logCap), logCap, 100, tap, nil)
 	sent := bigMsgs(40, 6000)
 	c := g.dial(addrA)
 	defer c.Close()
@@ -153,7 +160,7 @@ func TestBatchSplitsAtCommitCap(t *testing.T) {
 func TestHeldPartDoesNotResendEarlierParts(t *testing.T) {
 	const logCap = store.MinRecordBytes
 	tap := &tapLog{gate: make(chan struct{}), failFrom: 3, hold: true}
-	g := splitRig(t, asset.SyslogTCP, logCap, logCap, tap, nil)
+	g := splitRig(t, asset.SyslogTCP, bytesCap(logCap), logCap, 100, tap, nil)
 	sent := bigMsgs(40, 6000)
 	c := g.dial(addrA)
 	defer c.Close()
@@ -188,7 +195,7 @@ func TestHeldPartDoesNotResendEarlierParts(t *testing.T) {
 func TestDatagramPartRefusedIsDroppedAndCounted(t *testing.T) {
 	const logCap = store.MinRecordBytes
 	tap := &tapLog{gate: make(chan struct{}), failFrom: 3, once: true}
-	g := splitRig(t, asset.SyslogUDP, logCap, logCap, tap, nil)
+	g := splitRig(t, asset.SyslogUDP, bytesCap(logCap), logCap, 100, tap, nil)
 	sent := bigMsgs(40, 6000)
 	c := g.udp(addrA)
 	defer c.Close()
@@ -222,7 +229,7 @@ func TestDatagramPartRefusedIsDroppedAndCounted(t *testing.T) {
 func TestLowerLogCapIsLearnt(t *testing.T) {
 	const logCap = store.MinRecordBytes
 	tap := &tapLog{gate: make(chan struct{})}
-	g := splitRig(t, asset.SyslogTCP, logCap, 0, tap, nil)
+	g := splitRig(t, asset.SyslogTCP, bytesCap(logCap), 0, 0, tap, nil)
 	sent := bigMsgs(40, 6000)
 	c := g.dial(addrA)
 	defer c.Close()
@@ -250,7 +257,7 @@ func TestLowerLogCapIsLearnt(t *testing.T) {
 func TestRecordOverCommitCapIsCountedNotHeld(t *testing.T) {
 	const logCap = store.MinRecordBytes
 	tap := &tapLog{}
-	g := splitRig(t, asset.SyslogTCP, logCap, logCap, tap, func(c *Config) { c.Limits.MaxMessage = 65536 })
+	g := splitRig(t, asset.SyslogTCP, bytesCap(logCap), logCap, 100, tap, func(c *Config) { c.Limits.MaxMessage = 65536 })
 	huge := "<13>Oct 11 22:14:15 host app: huge " + strings.Repeat("x", 60000)
 	after := "<13>Oct 11 22:14:16 host app: after"
 	c := g.dial(addrA)
@@ -266,11 +273,128 @@ func TestRecordOverCommitCapIsCountedNotHeld(t *testing.T) {
 	}
 }
 
-func TestNewRefusesCommitCapBelowMinimum(t *testing.T) {
+func TestNewRefusesCommitCaps(t *testing.T) {
 	for _, n := range []int64{-1, 1, store.MinRecordBytes - 1} {
-		_, err := New(Config{MaxCommitBytes: n})
-		if !errors.Is(err, ErrConfig) {
+		if _, err := New(Config{MaxCommitBytes: n}); !errors.Is(err, ErrConfig) {
 			t.Errorf("MaxCommitBytes %d: %v", n, err)
 		}
+	}
+	for _, n := range []int{-1, store.MaxBatch + 1} {
+		if _, err := New(Config{MaxCommitRecords: n}); !errors.Is(err, ErrConfig) {
+			t.Errorf("MaxCommitRecords %d: %v", n, err)
+		}
+	}
+}
+
+// recs returns n records with events of the given sizes (the last size
+// repeats).
+func recsOf(sizes ...int) []store.Record {
+	out := make([]store.Record, len(sizes))
+	for i, n := range sizes {
+		out[i] = store.Record{Event: make([]byte, n)}
+	}
+	return out
+}
+
+// TestPartEndAtBothCaps: the boundary of each cap, exactly: a part holds as
+// many records as fit the byte cap and the record cap, whichever is
+// reached first, and cap+1 of either starts another part. A record over the
+// byte cap is a part of its own.
+func TestPartEndAtBothCaps(t *testing.T) {
+	r := &Receiver{}
+	for _, c := range []struct {
+		name    string
+		bytes   int64
+		records int64
+		recs    []store.Record
+		want    []int // the sizes of the parts, in records
+	}{
+		{"bytes: exactly the cap", 100, 1000, recsOf(40, 40, 20), []int{3}},
+		{"bytes: cap+1", 100, 1000, recsOf(40, 40, 21), []int{2, 1}},
+		{"bytes: a record alone over the cap", 100, 1000, recsOf(10, 150, 10), []int{1, 1, 1}},
+		{"records: exactly the cap", 1 << 30, 4, recsOf(1, 1, 1, 1), []int{4}},
+		{"records: cap+1", 1 << 30, 4, recsOf(1, 1, 1, 1, 1), []int{4, 1}},
+		{"records: twice the cap+1", 1 << 30, 4, recsOf(1, 1, 1, 1, 1, 1, 1, 1, 1), []int{4, 4, 1}},
+		{"bytes reached first", 10, 4, recsOf(5, 5, 5, 5, 5), []int{2, 2, 1}},
+		{"records reached first", 1000, 2, recsOf(5, 5, 5, 5, 5), []int{2, 2, 1}},
+	} {
+		r.commitAt.Store(c.bytes)
+		r.commitN.Store(c.records)
+		var got []int
+		for lo := 0; lo < len(c.recs); {
+			hi := r.partEnd(c.recs, lo)
+			if hi <= lo {
+				t.Fatalf("%s: no progress at %d", c.name, lo)
+			}
+			got = append(got, hi-lo)
+			lo = hi
+		}
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%s: parts %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestRecordCapPlusOneDatagramsAllStored: with the Log refusing a batch of
+// more records than its record cap (C5 0.5), a queue that hands the writer
+// cap+1 datagrams, and then more, loses none: every part is within the cap,
+// the Log refuses nothing, and every datagram read is stored. The caps come
+// from the group options, as the node sets them.
+func TestRecordCapPlusOneDatagramsAllStored(t *testing.T) {
+	opt := store.GroupOptions{MaxEvents: 4, MaxWait: 5 * time.Millisecond, MaxCommitRecords: 8}
+	for _, tr := range []asset.Transport{asset.SyslogUDP, asset.SyslogTCP} {
+		t.Run(string(tr), func(t *testing.T) {
+			tap := &tapLog{gate: make(chan struct{})}
+			g := splitRig(t, tr, opt, store.DefaultMaxCommitBytes, opt.CommitRecords(), tap, nil)
+			// One more than the cap, behind the call the gate holds, then
+			// two caps and one more.
+			const n = 1 + 9 + 17
+			sent := bigMsgs(n, 100)
+			var send func(string)
+			if tr == asset.SyslogUDP {
+				c := g.udp(addrA)
+				defer c.Close()
+				send = func(m string) { c.Write([]byte(m)) }
+			} else {
+				c := g.dial(addrA)
+				defer c.Close()
+				send = func(m string) { c.Write(octet(m)) }
+			}
+			for _, m := range sent {
+				send(m)
+			}
+			// The kernel may drop a datagram; the reader's count is the
+			// denominator, and a stream loses none.
+			g.wait("read", func() bool { return g.r.Status().Received >= 20 })
+			time.Sleep(200 * time.Millisecond)
+			read := g.r.Status().Received
+			if tr == asset.SyslogTCP && read != n {
+				t.Fatalf("read %d of %d", read, n)
+			}
+			close(tap.gate)
+			g.wait("all stored", func() bool { return g.r.Status().Stored == read })
+			_, counts, failed := tap.calls()
+			over := 0
+			for _, c := range counts {
+				if c > opt.CommitRecords() {
+					over++
+				}
+			}
+			if over != 0 || len(failed) != 0 {
+				t.Errorf("calls of %v records against a cap of %d", counts, opt.CommitRecords())
+			}
+			multi := 0
+			for _, c := range counts {
+				if c == opt.CommitRecords() {
+					multi++
+				}
+			}
+			if multi < 2 {
+				t.Errorf("calls %v: the queued datagrams were not carried in full parts", counts)
+			}
+			if st := g.r.Status(); st.LastErr != "" && !strings.Contains(st.LastErr, "EOF") || st.Dropped[DropStore] != 0 || int64(g.store.count()) != read {
+				t.Errorf("status %+v, store holds %d of %d read", st, g.store.count(), read)
+			}
+		})
 	}
 }

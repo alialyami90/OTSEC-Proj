@@ -77,6 +77,12 @@
 //     like a datagram over its rate or past the queue, is dropped and
 //     counted, and the counts are reported as intake.drop-counted every
 //     Limits.ReportEvery and when the listener stops.
+//   - A batch commits in parts, in order, each within Config.MaxCommitBytes
+//     and MaxCommitRecords (C5 0.4, 0.5). A part that committed is not sent
+//     again: a stream part the store refuses is held and tried alone, a
+//     datagram part is dropped and counted, and a crash between parts
+//     leaves a sender's resend with duplicates, never a loss. See
+//     commitParts.
 //   - A message whose record cannot be built is a fault in this package.
 //     It is dropped and counted as store, alone: the rest of its batch is
 //     stored.

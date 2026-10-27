@@ -84,13 +84,17 @@ type Config struct {
 	// Received is the node clock's reading as a C4 receive time.
 	Received func() event.Received
 	Limits   Limits
-	// MaxCommitBytes is the commit cap of the database behind Log
-	// (store.GroupOptions.CommitBytes): a batch is split before it passes
-	// it, as C5 0.4 requires, and the parts commit in order (see
-	// commitParts). 0 means store.DefaultMaxCommitBytes; otherwise at least
-	// store.MinRecordBytes. A Log with a lower cap is learnt from its
-	// refusal and the cap is lowered to fit.
-	MaxCommitBytes int64
+	// MaxCommitBytes and MaxCommitRecords are the commit caps of the
+	// database behind Log (store.GroupOptions.CommitBytes and
+	// CommitRecords): a batch is split before it passes either, as C5 0.4
+	// and 0.5 require, and the parts commit in order (see commitParts). The
+	// node sets them from the options it built the Log with. 0 means
+	// store.DefaultMaxCommitBytes and store.DefaultGroup.MaxEvents;
+	// otherwise at least store.MinRecordBytes, and 1 to store.MaxBatch. A
+	// Log with lower caps is learnt from its refusal, and the caps are
+	// lowered to fit.
+	MaxCommitBytes   int64
+	MaxCommitRecords int
 	// UnknownSpent is what unknown senders stored on this listener's
 	// stream in the Limits.UnknownWindow before this start, counted by the
 	// node from that stream (A3's conditions on D3-3):
@@ -297,7 +301,8 @@ type Receiver struct {
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
 	queued   atomic.Int64 // datagram bytes waiting for the store
-	commitAt atomic.Int64 // the largest batch tried: Config.MaxCommitBytes, lowered by a Log that refuses it
+	commitAt atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
+	commitN  atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
 
 	ln net.Listener
 	pc net.PacketConn
@@ -347,6 +352,9 @@ func New(cfg Config) (*Receiver, error) {
 	if cfg.MaxCommitBytes != 0 && cfg.MaxCommitBytes < store.MinRecordBytes {
 		return bad("max commit bytes %d below %d", cfg.MaxCommitBytes, store.MinRecordBytes)
 	}
+	if cfg.MaxCommitRecords < 0 || cfg.MaxCommitRecords > store.MaxBatch {
+		return bad("max commit records %d not in [1, %d]", cfg.MaxCommitRecords, store.MaxBatch)
+	}
 	for a, s := range cfg.Senders {
 		if a != a.Unmap() || s.AssetID == "" || (s.Target != asset.DeviceObserved && s.Target != asset.Simulated) {
 			return bad("sender %s: %+v", a, s)
@@ -360,6 +368,7 @@ func New(cfg Config) (*Receiver, error) {
 		st: Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
 	r.commitAt.Store(cmp.Or(cfg.MaxCommitBytes, store.DefaultMaxCommitBytes))
+	r.commitN.Store(int64(cmp.Or(cfg.MaxCommitRecords, store.DefaultGroup.MaxEvents)))
 	return r, nil
 }
 

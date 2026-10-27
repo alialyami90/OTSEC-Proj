@@ -8,14 +8,15 @@ import (
 )
 
 // partEnd returns where the part of recs that starts at lo ends: the most
-// records whose events fit the commit cap, and at least one, because a
-// record over the cap commits alone when its class allows it. The receiver
-// attaches no captures, so a record's size is its event's.
+// records that fit both commit caps, the bytes of their events and their
+// number, and at least one, because a record over the byte cap commits alone
+// when its class allows it. The receiver attaches no captures, so a
+// record's size is its event's.
 func (r *Receiver) partEnd(recs []store.Record, lo int) int {
-	limit := r.commitAt.Load()
+	limit, most := r.commitAt.Load(), int(r.commitN.Load())
 	var size int64
 	hi := lo
-	for hi < len(recs) {
+	for hi < len(recs) && hi-lo < most {
 		n := int64(len(recs[hi].Event))
 		if hi > lo && size+n > limit {
 			break
@@ -49,9 +50,9 @@ func partBytes(recs []store.Record) int64 {
 // a sender before this returns, so an acknowledgement, where a transport
 // has one, covers the whole batch only once every part has committed.
 //
-// A part of several records that the Log refuses as too large means its cap
-// is below Config.MaxCommitBytes: the cap is halved to fit and the part
-// split again. A single record the Log refuses as too large can never
+// A part of several records that the Log refuses as too large means one of
+// its caps is below Config.MaxCommitBytes or MaxCommitRecords: both are
+// halved from the size of the refused part and the part is split again. A single record the Log refuses as too large can never
 // commit, so holding it would stop the stream; it is dropped and counted as
 // store, with the reason in Status.LastErr.
 func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []msg, hold bool) bool {
@@ -75,6 +76,7 @@ func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []
 		if errors.Is(err, &store.Error{Code: store.CodeRecordTooLarge}) {
 			if hi-lo > 1 {
 				r.commitAt.Store(max(partBytes(recs[lo:hi])/2, 1))
+				r.commitN.Store(int64(max((hi-lo)/2, 1)))
 				continue
 			}
 			r.drop(DropStore, 1)
