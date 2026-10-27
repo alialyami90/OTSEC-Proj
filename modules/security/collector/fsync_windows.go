@@ -62,23 +62,45 @@ var (
 // drivers), it falls back to MoveFileEx with MOVEFILE_WRITE_THROUGH, and
 // logs that once per process; it never falls back by Windows version, and
 // never on a sharing or access error. Those are retried for up to
-// renameBudget and then returned.
+// renameBudget and then returned. A rename that needed a retry logs one
+// line when it ends, whether it then succeeded or not, so a reader that
+// holds the file off on every write shows before the budget runs out.
 func renameDurable(from, to string) error {
-	deadline := time.Now().Add(renameBudget)
-	for {
+	start := time.Now()
+	deadline := start.Add(renameBudget)
+	var held error
+	for tries := 1; ; tries++ {
 		err := renameOnce(from, to)
 		var flushed errFlushAfterRename
 		if err == nil || !heldOpen(err) || errors.As(err, &flushed) || !time.Now().Before(deadline) {
+			if held != nil {
+				logRetryEpisode(to, held, err, tries, time.Since(start))
+			}
 			if err != nil {
 				return fmt.Errorf("rename %s over %s: %w", filepath.Base(from), to, err)
 			}
 			return nil
 		}
+		held = err
 		if renameRetryHook != nil {
 			renameRetryHook()
 		}
 		time.Sleep(renameWait)
 	}
+}
+
+// retryEpisodeMsg is the one line a held-off rename logs.
+const retryEpisodeMsg = "collector: a rename was held off by another process"
+
+// logRetryEpisode logs a rename that another process held off: the error
+// that held it, how it ended, the attempts, and the time taken.
+func logRetryEpisode(path string, held, final error, tries int, took time.Duration) {
+	args := []any{"path", path, "held_by", held.Error(), "attempts", tries,
+		"elapsed_ms", took.Milliseconds(), "succeeded", final == nil}
+	if final != nil {
+		args = append(args, "error", final.Error())
+	}
+	slog.Warn(retryEpisodeMsg, args...)
 }
 
 func renameOnce(from, to string) error {
