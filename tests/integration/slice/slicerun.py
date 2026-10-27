@@ -124,6 +124,38 @@ def _run(argv, **kw):
     return subprocess.run(argv, capture_output=True, text=True, errors="replace", **kw)
 
 
+def read_live(path, timeout=5.0):
+    """The bytes of a file a running service replaces by rename (the
+    collector's state.json). On Windows, Python's open does not share
+    delete, so a read held while the collector renames its new state over
+    the file would make the collector's write fail; and an open that lands
+    while the old file is delete-pending is refused with access denied
+    (svcdry7, run 40456445874). So the file is opened sharing read, write
+    and delete, and an access-denied or sharing-violation open is tried
+    again for up to timeout seconds; the last refusal is raised."""
+    if os.name != "nt":
+        with open(path, "rb") as f:
+            return f.read()
+    import msvcrt
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    GENERIC_READ, SHARE_ALL, OPEN_EXISTING = 0x80000000, 0x7, 3
+    deadline = time.monotonic() + timeout
+    while True:
+        h = k32.CreateFileW(path, GENERIC_READ, SHARE_ALL, None, OPEN_EXISTING, 0, None)
+        if h is not None and h != wintypes.HANDLE(-1).value:
+            break
+        err = ctypes.get_last_error()
+        if err not in (5, 32) or time.monotonic() >= deadline:  # ACCESS_DENIED, SHARING_VIOLATION
+            raise OSError(err, ctypes.FormatError(err), path)
+        time.sleep(0.05)
+    with os.fdopen(msvcrt.open_osfhandle(h, os.O_RDONLY), "rb") as f:
+        return f.read()
+
+
 class ServiceProc:
     """What process mode keeps in procs for a spawned node or collector,
     for an installed service: pid and poll() as Popen has them."""
@@ -562,8 +594,7 @@ class Slice:
     def collector_asset(self):
         """The collector's own state for the asset (A3 #106, #117)."""
         path = os.path.join(self.layout["collector_data"], "collector", "state", "state.json")
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)["assets"].get(self.layout["asset_id"], {})
+        return json.loads(read_live(path))["assets"].get(self.layout["asset_id"], {})
 
     def write_clear(self, asset_id, ref):
         """What the administrator does: leave clear-suspension.json in the
