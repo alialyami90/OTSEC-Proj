@@ -146,14 +146,17 @@ def test_the_restart_reaches_the_chain(got):
     first_up = idx(lambda r: r["action"] == "store.mode_change" and r["detail"].startswith("database audit: none to collecting"))
     audit_failed = idx(lambda r: r["action"] == "store.mode_change" and r["detail"].startswith("database audit: none to failed"))
     evidence_up = idx(lambda r: r["action"] == "store.mode_change" and r["detail"].startswith("database evidence: none to "))
-    assert len(first_up) == 1 and len(audit_failed) == 1 and len(evidence_up) == 2, show
-    # The second start's three records sit together just before the recovery,
+    posture = idx(lambda r: r["action"] == "node.posture_change" and (r.get("detail") or "").startswith("lab_tls_files is set"))
+    assert len(first_up) == 1 and len(audit_failed) == 1 and len(evidence_up) == 2 and len(posture) == 2, show
+    # Each start states its lab TLS posture (#176) right after service.start.
+    assert posture == [starts[0] + 1, starts[1] + 1], show
+    # The second start's four records sit together just before the recovery,
     # after everything the first process wrote.
-    restart = sorted([starts[1], audit_failed[0], evidence_up[1]])
-    assert restart == list(range(rec - 3, rec)), show
-    assert restart[0] > max(starts[0], first_up[0], evidence_up[0]), show
+    restart = sorted([starts[1], posture[1], audit_failed[0], evidence_up[1]])
+    assert restart == list(range(rec - 4, rec)), show
+    assert restart[0] > max(starts[0], posture[0], first_up[0], evidence_up[0]), show
     # In the same order as the first start wrote its own.
-    first = sorted([starts[0], first_up[0], evidence_up[0]])
+    first = sorted([starts[0], posture[0], first_up[0], evidence_up[0]])
     kind = lambda i: (rows[i]["action"], rows[i].get("detail", "").split(":")[0])
     assert [kind(i) for i in restart] == [kind(i) for i in first], show
     for i in restart:
