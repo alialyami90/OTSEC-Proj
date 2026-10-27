@@ -1,6 +1,6 @@
 # Signed administrator files and the node's relay: design (P3-A5)
 
-Status: agreed (2026-10-26). A1 approved the relay design and adopted A3's review on #181. A3's two blockers are folded in below: B1, the principal on the request, and B2, the repeat answer. The two new C7 kinds are approved in principle for 0.5 and A3 drafts them. The transition is (a) with A1's conditions. A2 accepted the fields. Owner: A5. Reviewers: A3 (trust boundaries, C7), A1 (contract approval), A2 (request fields), A6 (tests). It covers the two items A1 assigned to A5's signed clear-* task:
+Status: agreed (2026-10-26); A3's four "should fix" items recorded below (B5, 2026-10-27). A1 approved the relay design and adopted A3's review on #181. A3's two blockers are folded in below: B1, the principal on the request, and B2, the repeat answer. The two new C7 kinds are approved in principle for 0.5 and A3 drafts them. The transition is (a) with A1's conditions. A2 accepted the fields. Owner: A5. Reviewers: A3 (trust boundaries, C7), A1 (contract approval), A2 (request fields), A6 (tests). It covers the two items A1 assigned to A5's signed clear-* task:
 
 1. **The node's relay of signed admin requests,** `credential.install` included. Today no node path relays one on either platform (A3 on #179). On Windows, an administrator can install a credential on an installed collector only by temporarily pointing `ipc.node_peer` at their own account.
 2. **The administrator's files become signed requests,** so the audit actor is the person, not the node (D3-3). The files are `clear-suspension.json`, `clear-quarantine.json` and `seq-reset-ack.json`.
@@ -103,6 +103,24 @@ PR 2 adds:
 - the actor on the node's clear is the signed principal;
 - a clear does not release a run before the floor and the interval;
 - a lost reply's resend gets the repeat answer, and the node does its part once.
+
+## A3's "should fix" items: where each stands (B5, 2026-10-27)
+
+A3's review of #181 listed four "should fix" items. PR 1 (#189) built two of them, and `main` already enforces part of a third. Relay PR 2 adds the rest, each with a test.
+
+1. **Act on the bytes that were sent.**
+   - *Built in #189.* `readAdminFile` reads each file once under the protected-file rule, hashes those bytes, derives the request ID from that hash, and sends the envelope decoded from the same bytes.
+   - *PR 2.* After an acceptance, the node takes its action (the asset clear, the quarantine clear, the reset acknowledgement) only from the payload in the envelope it sent, decoded strictly. It never reads the file a second time. Test: the file is replaced between the send and the acceptance, and the node acts on the original payload.
+2. **Take the kind from the payload.**
+   - *Built in #189.* A file whose envelope `kind` differs from its payload's `kind` is refused as `admin-request-unread` ("signed kind is not the file's kind") and never sent.
+   - *PR 2.* After an acceptance, the node branches on the payload's kind, never the file's.
+3. **Match the reply to the request.**
+   - *Built.* `collectorclient` refuses a reply whose `request_id` is not the one sent (`ErrProtocol`).
+   - *Built.* The audit fold (`applyCollector` in `seqreset.go`) marks any `collector_seq` at or below the last one it saw as a restored collector, which holds every run. That rule applies to relay replies as to runs. A C7 0.5 repeat answer takes its own `collector_seq` and names the original in `repeat_of`, so a repeat does not trip it.
+   - *PR 2.* The node acts only after the reply record has folded without that hold. Test: a relayed acceptance whose `collector_seq` is at or below the high mark is recorded and acted on by nothing.
+4. **Show an expired request as its own state.**
+   - *PR 2.* When the collector refuses with check `window`, the file's state is `expired`, and `otsec health` prints `ADMIN REQUEST EXPIRED <file> (<kind>): sign a new request`. Every other refusal stays `refused`.
+   - The state comes from the collector's numbered refusal, never from the payload's claimed `expires_at`, because A3's Q1 limit 2 keeps the unverified claims out of every health state. Test: a request signed with a window that has passed shows as expired, not refused.
 
 ## Answers from review
 
