@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: "how long each leg runs the tests"
+        description: "how long each leg starts new runs, 1 to 55 minutes"
         default: "40"
   pull_request:
     paths:
@@ -64,14 +64,19 @@ jobs:
         working-directory: tests/integration/syslogreceive
         env:
           MINUTES: ${{ inputs.minutes || '40' }}
+        # A run may take up to its 10 m timeout, so the last one ends by
+        # MINUTES + 10, inside the job's 75 with setup and the build: the
+        # summary line is always written (B3 on #245). MINUTES is checked
+        # before any arithmetic reads it.
         run: |
+          [[ "$MINUTES" =~ ^[1-9][0-9]?$ ]] && [ "$MINUTES" -le 55 ] || { echo "minutes must be 1 to 55, not '$MINUTES'"; exit 1; }
           end=$(( $(date +%s) + 60 * MINUTES ))
           runs=0; crashes=0; fails=0
           while [ "$(date +%s)" -lt "$end" ]; do
             runs=$((runs + 1))
             out="$RUNNER_TEMP/run-$runs.txt"
             set +e
-            "$RUNNER_TEMP/syslogreceive.test.exe" -test.run 'TestUnknown' -test.v -test.count=1 -test.timeout=25m > "$out" 2>&1
+            "$RUNNER_TEMP/syslogreceive.test.exe" -test.run 'TestUnknown' -test.v -test.count=1 -test.timeout=10m > "$out" 2>&1
             rc=$?
             set -e
             if grep -qE '^(panic:|fatal error:|WARNING: DATA RACE|fatal: morestack)' "$out"; then
