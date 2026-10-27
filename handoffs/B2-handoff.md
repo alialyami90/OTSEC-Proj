@@ -160,5 +160,5 @@ Don't revisit these without new evidence.
   - `OTSEC_SEL751_SIM_RESULT` writes the result, invocation and asset for reconciles.
 - **The `TIDLE` bug.** A per-read side effect, `noteTIDLE` on every parsed read, picked up a value from a context read. Any new read must say which checks it serves; `checks(id)` and `english(id, set)` are the pattern.
 - **Error codes.** `failed.*` and `refused.*` codes carry a stage, and `refused.*` before connect means an empty transcript. Use `Code.Stage()` in tests.
-- **CI.** It runs Go on Linux and Windows, Python, `integration` and three `integration-long` jobs. A PR merges when its reviewers accept and every job is green (D2-13); A1 merges. When a job fails in a file you did not touch (slice timing), A1 or A6 usually knows. Check before re-running.
+- **CI.** It runs ten jobs: Go on Linux and Windows, Python, `integration`, and six `integration-long` jobs, one per long slice file (`.github/workflows/ci.yml`). A PR merges when its reviewers accept and every job is green (D2-13); A1 merges. When a job fails in a file you did not touch (slice timing), A1 or A6 usually knows. Check before re-running.
 - **Messages between threads** are capped project-wide (about 60 an hour). Batch them.
