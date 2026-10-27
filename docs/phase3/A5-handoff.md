@@ -30,10 +30,11 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
   - At start the node counts the asset-unresolved bytes the listener stream holds inside the trailing window, by received time, and passes them as `receive.Config.UnknownSpent`.
   - If it cannot count, the budget starts empty and `syslog-unknown-budget-uncounted` is raised (fail closed).
   - Status shows `spent_at_start_bytes`.
-- **The slice's Windows service mode** (#179, gate item 1; open at this handoff).
+- **The slice's Windows service mode** (#179, merged as ccb94b2; gate item 1).
   - `OTSEC_SLICE_SERVICE=1` in an elevated shell runs the slice against `otsec-node` and `otsec-collector`, installed by the real installer and driven through the SCM.
   - The credential goes through the product's relay.
   - Teardown always uninstalls and fails the run on anything left behind.
+  - The harness reads the running collector's `state.json` with `read_live`, which shares delete and retries a refused open for up to 5 s (below).
 - **Reviews**: #195 (A6's relay end-to-end check) and #199 (the restart check's status fields and restart path).
 
 ## Evidence
@@ -43,7 +44,8 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 - **Service mode on the hosted Windows runner.** Each run was elevated, against the real installer, on a branch not meant for merge. The runs are listed on #179:
   - 40425877683: `e2e`, `identity` and `failures` gave 40 passed.
   - 40445047367, the whole slice directory: 159 passed and 7 skipped (the rsyslog leg). The 18 errors were the admin-relay leg's `need()`, which A6 has since made a platform skip (#199). Every service-mode test passed, and nothing was left behind in any run.
-  - 40442872450: one transient `PermissionError` opening `state.json` in the harness-only `age_state` step. The step now retries for 30 s and notes each refusal.
+  - 40442872450 and 40456445874: the interruptions file errored with `PermissionError` on `state.json`. The cause was the harness's `collector_asset()` reading the file while the running collector replaced it by rename. On Windows, an open that lands while the old file is delete-pending is refused. The fix is `read_live`, which opens sharing read, write and delete and retries a refused open for up to 5 s. An earlier `age_state` retry rested on a misread of the first run and was reverted.
+  - **40464065233**, on a slice tree identical to #179's merged head: **159 passed, 27 skipped, 0 failed, 0 errors**, and nothing was left behind. Each skip is one of the three Linux-only legs: rsyslog, admin relay and unknown restart. A6 checked them line by line (PASS on #179).
 - **The relay stall test on Windows** (#202, run 40446879018, five runs). The collector held each tick for 300.3 to 300.6 ms against a 300 ms `RelayTimeout`, with one request per tick. The node's own work took 27 to 36 ms. The 614 and 662 ms ticks that failed on main were that work slowed down by the rest of `go test ./...` running beside it, not a second wait.
 
 ## Interfaces
@@ -56,7 +58,7 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 
 ## Limitations
 
-- **The owner's PC run (gate item 1) has not happened.** It needs #179 merged, the owner's choice of how the PC gets Go 1.26.10 (`GOTOOLCHAIN=auto` would download a toolchain), and the owner present for UAC.
+- **The owner's PC run (gate item 1) has not happened.** #179 is merged; the run needs the owner's choice of how the PC gets Go 1.26.10 (`GOTOOLCHAIN=auto` would download a toolchain), and the owner present for UAC.
 - **The fresh-state floor is not exercised on installed services.** `age_state` moves the installed collector's `created_utc` back an hour so the run stands for an earlier commissioning. Collector unit tests and V-S13 cover the floor.
 - **No end-to-end Windows check of the admin relay or of `admin_dir`'s ACLs** (A6's recorded gap). Only C7's contract tests and the node's unit tests run in the Windows Go job.
 - **The node does not read its TLS keys from the key register yet** (#176, open). The D2-12 files stay behind the lab flag until then.
@@ -67,11 +69,16 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 
 - **HR-11 stays open.** The budget now holds across restarts, but a forward wall-clock step followed by a restart still refills it.
 - **The relay is an authority path.** The node carries signed requests but verifies nothing. Every refusal and every repeat answer comes from the collector (C7 0.5). A file the node could write is never read.
+- **The collector's state write on Windows.** `renameDurable` replaces `state.json` with `MoveFileEx`, which fails while any other process holds the file open. A race check on the hosted runner (run 40464065233, 3000 replaces per case) measured it:
+  - beside a reader that shares delete, 1556 of 3000 replaces failed with `MoveFileEx`, and 0 of 3000 with a POSIX rename (`FileRenameInfoEx`);
+  - beside a plain reader, 2085 failed with `MoveFileEx` and 1652 with the POSIX rename.
+
+  The failure is closed: the state is marked broken, and the collector refuses with `state_unavailable` until a restart (A3, #205). An antivirus scan at the wrong moment can therefore stop collection. A3's Phase 4 item is `FileRenameInfoEx` with POSIX semantics, plus a bounded retry for readers that do not share delete.
 - **A harness-only state edit.** `age_state` writes the collector's own state file. It lives only in `slicerun.py`, and no product code does this.
 
 ## Dependencies
 
-- **A1:** merge #179 when its CI and the service-mode run are green and A6 confirms. Then the owner's session for the PC run.
+- **A1:** the owner's session for the PC run, the only gate step left. #179 is merged (ccb94b2).
 - **A6:** the PC run and its record in `docs/verification.md` (V-S6 and V-S9 Windows rows).
 - **After the gate (A5):**
   - #176, the node reading the key register;
@@ -90,4 +97,4 @@ The briefs are "Task P3-A5" and "Task P3-A5/A6" in `docs/agent-handoffs.md`, plu
 ## Reviewer(s) and outcome
 
 - #145, #147, #151, #152, #154, #163, #169, #189, #197, #198 and #202 were merged by A1 on the reviews recorded on each PR (A3 for trust boundaries, A6 independent, A4 on the listener wiring).
-- #179 is open, waiting on its service-mode run on the merged head and A6's confirmation.
+- #179 was merged by A1 as ccb94b2, with A6's PASS at 40e15b7, CI 10/10, and the full service-mode run above.
