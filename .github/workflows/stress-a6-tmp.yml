@@ -1,0 +1,66 @@
+# TEMPORARY (A6, for A1): a Windows stress run of the unknown-budget tests
+# on two Go versions, to see whether the nil-pointer panic inside
+# json.Marshal in job 121988031206 (#179, Go 1.26.0) reproduces, and
+# whether a later 1.26 release changes that; and 1.26.0 under -race, which
+# also turns on checkptr (A4). Not for merge: this file is
+# removed from the branch once the counts are in.
+name: stress-a6-tmp
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unknown-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go: "1.26.0"
+            flags: ""
+          - go: "1.26.10"
+            flags: ""
+          - go: "1.26.0"
+            flags: "-race"
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - run: go version
+      - name: build the test binary once
+        shell: bash
+        env:
+          CGO_ENABLED: ${{ matrix.flags == '-race' && '1' || '0' }}
+        run: go test ${{ matrix.flags }} -c -o "$RUNNER_TEMP/syslogreceive.test.exe" ./tests/integration/syslogreceive/
+      # Runs the binary again and again for 20 minutes. Each run is one
+      # -count=1 pass of TestUnknown*; a run counts as a crash when its
+      # output has "panic:", "fatal error:" or a race report, and as a failure otherwise
+      # when it exits non-zero. The crash outputs are printed in full.
+      - name: stress for 20 minutes
+        shell: bash
+        working-directory: tests/integration/syslogreceive
+        run: |
+          end=$(( $(date +%s) + 1200 ))
+          runs=0; crashes=0; fails=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            runs=$((runs + 1))
+            out="$RUNNER_TEMP/run-$runs.txt"
+            set +e
+            "$RUNNER_TEMP/syslogreceive.test.exe" -test.run 'TestUnknown' -test.count=1 -test.timeout=25m > "$out" 2>&1
+            rc=$?
+            set -e
+            if grep -qE '^(panic:|fatal error:|WARNING: DATA RACE|fatal: morestack)' "$out"; then
+              crashes=$((crashes + 1))
+              echo "::group::run $runs crashed (exit $rc)"; cat "$out"; echo "::endgroup::"
+            elif [ "$rc" -ne 0 ]; then
+              fails=$((fails + 1))
+              echo "::group::run $runs failed (exit $rc)"; tail -60 "$out"; echo "::endgroup::"
+            else
+              echo "run $runs ok"
+            fi
+          done
+          echo "go ${{ matrix.go }} ${{ matrix.flags }}: $runs runs, $crashes crashed or raced, $fails failed without a crash" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$crashes" -eq 0
