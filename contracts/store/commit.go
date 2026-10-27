@@ -46,6 +46,11 @@ type Record struct {
 	// For class audit, Event is instead a pending C8 record (C8's
 	// ValidatePending accepts it). The store seals it with SealAudit in the
 	// commit transaction and keeps the sealed bytes exactly (C5-A3-1).
+	//
+	// For class configuration (0.4), Event is a typed document (a C9
+	// snapshot or difference, or a C10 baseline) that the store's injected
+	// DocumentValidator accepts. The store keeps its bytes exactly, with no
+	// seq written in, so a digest over the stored bytes is stable.
 	Event []byte
 	// Capture is the native capture the record came from, if any. Records
 	// of one read share one Capture; the store writes it once.
@@ -54,7 +59,27 @@ type Record struct {
 	// (for example the last SER row read). It is committed in the same
 	// transaction, so a device cursor never runs ahead of the stored events.
 	SourceCursor []byte
+	// Holds (0.4, configuration class only) commit in the same transaction
+	// as the record, so no prune step can fall between a snapshot with an
+	// unapproved difference and its hold (B3 on #246). Each names this
+	// record (empty Stream, Seq 0) or an earlier one of the same database.
+	Holds []Hold
 }
+
+// Bytes is what the record adds to a commit: its event and its capture.
+func (r Record) Bytes() int64 {
+	n := int64(len(r.Event))
+	if r.Capture != nil {
+		n += int64(len(r.Capture.Bytes))
+	}
+	return n
+}
+
+// DocumentValidator checks a configuration-class record before it is
+// stored (0.4). It sees the capture as well as the document, so a C9
+// snapshot can be bound to the transcript it names (B2 on #246). The
+// writer injects it, so C5 imports neither C9 nor C10.
+type DocumentValidator func(document []byte, capture *Capture) error
 
 // Validate checks a record before it is queued.
 func (r Record) Validate() error {
@@ -66,6 +91,14 @@ func (r Record) Validate() error {
 	}
 	if len(r.Event) == 0 {
 		return errf(CodeInvalid, nil, "record for %s has no event bytes", r.Stream)
+	}
+	for _, h := range r.Holds {
+		if err := h.Reason.Validate(); err != nil {
+			return err
+		}
+		if h.Stream != "" && !h.Stream.Valid() {
+			return errf(CodeInvalid, nil, "hold names stream %q, not a valid stream token", h.Stream)
+		}
 	}
 	if r.Capture != nil {
 		return r.Capture.Validate()
@@ -104,8 +137,9 @@ type Committer interface {
 	// audit it seals the records with SealAudit inside the transaction.
 	//
 	// It may refuse a batch, having written nothing, with an *Error whose
-	// Code is CodeQuotaReached (the class is at quota and its action refuses)
-	// or CodeInvalid (for example a pending audit record SealAudit rejects).
+	// Code is CodeQuotaReached (the class is at quota and its action refuses),
+	// CodeInvalid (for example a pending audit record SealAudit rejects),
+	// or, from 0.4, CodeRecordTooLarge or CodeNotHoldable.
 	// The Log fails that batch's appends with the error and keeps running.
 	// Any other error means the durability of the batch is unknown, and the
 	// Log stops.
@@ -142,11 +176,21 @@ type GroupOptions struct {
 	// MaxWait is the longest a record waits for others before its group
 	// commits. It bounds the latency group commit adds.
 	MaxWait time.Duration
+	// MaxCommitBytes (0.4, D4-9) bounds one commit's payload, events plus
+	// captures: a group commits before a record would take it past this.
+	// It bounds groups, not single records: a record over it commits alone
+	// if its class's MaxRecordBytes allows it. 0 means
+	// DefaultMaxCommitBytes. The recovery reserve is sized from it
+	// (RecoveryReserveFor).
+	MaxCommitBytes int64
 }
 
 // DefaultGroup is the proposed default (A5, not yet measured on site
 // hardware): 100 events or 100 ms, whichever comes first.
 var DefaultGroup = GroupOptions{MaxEvents: 100, MaxWait: 100 * time.Millisecond}
+
+// DefaultMaxCommitBytes is the commit cap of an event database (D4-9).
+const DefaultMaxCommitBytes = 1 << 20
 
 // Validate checks group options. One event per commit is not allowed.
 func (o GroupOptions) Validate() error {
@@ -156,7 +200,48 @@ func (o GroupOptions) Validate() error {
 	if o.MaxWait <= 0 || o.MaxWait > time.Second {
 		return errf(CodeInvalid, nil, "group MaxWait %s not in (0, 1s]", o.MaxWait)
 	}
+	if o.MaxCommitBytes != 0 && o.MaxCommitBytes < MinRecordBytes {
+		return errf(CodeInvalid, nil, "group MaxCommitBytes %d below %d", o.MaxCommitBytes, MinRecordBytes)
+	}
 	return nil
+}
+
+// CommitBytes is the effective MaxCommitBytes.
+func (o GroupOptions) CommitBytes() int64 {
+	if o.MaxCommitBytes == 0 {
+		return DefaultMaxCommitBytes
+	}
+	return o.MaxCommitBytes
+}
+
+// LargestCommit is the most payload one commit of database d can carry
+// under opt: the commit cap, or a single record at the largest class cap
+// if that is larger. The recovery reserve covers it (RecoveryReserveFor).
+func LargestCommit(d Database, opt GroupOptions) int64 {
+	n := opt.CommitBytes()
+	for _, q := range d.Quotas {
+		n = max(n, q.MaxRecordBytes)
+	}
+	return n
+}
+
+// CommitWALBytes is the WAL one commit of payload bytes may write, a fixed
+// cost plus about the payload: 1.1 × payload + 64 KiB. Measured on one
+// record after a TRUNCATE checkpoint with 4 KiB pages, 128 KiB to 768 KiB
+// (B5, modernc SQLite; B6, SQLite through Python, another schema): a fixed
+// 21 to 34 KB plus 1.0 to 1.03 × the payload (simulated, #246). A ratio
+// alone fails at small caps, so the rule is payload plus a constant.
+func CommitWALBytes(payload int64) int64 { return payload + payload/10 + 64<<10 }
+
+// RecoveryReserveFor is the smallest recovery reserve of a database whose
+// WAL holds at most walBound between checkpoints when every commit is
+// small, and whose largest commit carries largestCommit payload bytes
+// (0.4). A store found full at start may hold un-checkpointed frames:
+// checkpointing them can extend the database by up to walBound plus the
+// largest commit's WAL, and recovery's own small commits (prune and
+// compaction steps) need up to walBound more.
+func RecoveryReserveFor(walBound, largestCommit int64) int64 {
+	return 2*walBound + CommitWALBytes(largestCommit)
 }
 
 // Log is the only way to append to a store. It groups records per stream,
@@ -170,6 +255,7 @@ type Log struct {
 	opt     GroupOptions
 	node    NodeID
 	classes map[StreamID]StreamClass
+	caps    map[StreamClass]int64 // Quota.MaxRecordBytes, where set
 
 	mu      sync.Mutex
 	pending map[StreamID]*group
@@ -181,6 +267,7 @@ type Log struct {
 type group struct {
 	stream StreamID
 	recs   []Record
+	bytes  int64
 	timer  *time.Timer
 	prev   chan struct{} // the previous group of this stream; commit waits for it
 	done   chan struct{}
@@ -196,6 +283,30 @@ type group struct {
 // read at startup (absent: unknown, and the first commit sets it); it lets
 // the Log reject a Commit that leaves a gap or overlaps.
 func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt GroupOptions, last map[StreamID]Seq) (*Log, error) {
+	return newLog(c, node, classes, opt, last, nil)
+}
+
+// NewLogFor returns a Log over c for database d's streams (0.4). Unlike
+// NewLog it takes each class's MaxRecordBytes from d's quotas, so it is
+// the constructor for a database with a configuration class.
+func NewLogFor(c Committer, node NodeID, d Database, opt GroupOptions, last map[StreamID]Seq) (*Log, error) {
+	classes := map[StreamID]StreamClass{}
+	for _, s := range d.Streams {
+		classes[s.ID] = s.Class
+	}
+	caps := map[StreamClass]int64{}
+	for _, q := range d.Quotas {
+		if err := q.Validate(); err != nil {
+			return nil, err
+		}
+		if q.MaxRecordBytes > 0 {
+			caps[q.Class] = q.MaxRecordBytes
+		}
+	}
+	return newLog(c, node, classes, opt, last, caps)
+}
+
+func newLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt GroupOptions, last map[StreamID]Seq, caps map[StreamClass]int64) (*Log, error) {
 	if err := opt.Validate(); err != nil {
 		return nil, err
 	}
@@ -205,7 +316,7 @@ func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt Grou
 	if len(classes) == 0 {
 		return nil, errf(CodeInvalid, nil, "log has no streams")
 	}
-	l := &Log{c: c, opt: opt, node: node, classes: map[StreamID]StreamClass{}, pending: map[StreamID]*group{}, tail: map[StreamID]chan struct{}{}, last: map[StreamID]Seq{}}
+	l := &Log{c: c, opt: opt, node: node, classes: map[StreamID]StreamClass{}, caps: map[StreamClass]int64{}, pending: map[StreamID]*group{}, tail: map[StreamID]chan struct{}{}, last: map[StreamID]Seq{}}
 	audit := 0
 	for s, class := range classes {
 		if !s.Valid() {
@@ -213,6 +324,10 @@ func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt Grou
 		}
 		if _, err := ActionFor(class); err != nil {
 			return nil, err
+		}
+		if class == ClassConfiguration && caps[class] == 0 {
+			// Its record cap is in its quota (0.4).
+			return nil, errf(CodeInvalid, nil, "stream %s is configuration, with no record cap: use NewLogFor with its database", s)
 		}
 		l.classes[s] = class
 		if class == ClassAudit {
@@ -227,6 +342,9 @@ func NewLog(c Committer, node NodeID, classes map[StreamID]StreamClass, opt Grou
 	for s, q := range last {
 		l.last[s] = q
 	}
+	for class, n := range caps {
+		l.caps[class] = n
+	}
 	return l, nil
 }
 
@@ -238,12 +356,30 @@ func (l *Log) Append(ctx context.Context, rec Record) (Receipt, error) {
 	if err := l.check(rec); err != nil {
 		return nil, err
 	}
+	size := rec.Bytes()
+	if rec.Class == ClassConfiguration || size > l.opt.CommitBytes() {
+		// A configuration record, or one over the commit cap that its
+		// class's cap allows, commits alone (0.4, D4-9).
+		g, err := l.enqueue(rec.Stream, []Record{rec})
+		if err != nil {
+			return nil, err
+		}
+		return l.wait(ctx, g, 0)
+	}
 	l.mu.Lock()
 	if l.stopped != nil {
 		l.mu.Unlock()
 		return nil, errf(CodeLogStopped, l.stopped, "log stopped")
 	}
 	g := l.pending[rec.Stream]
+	if g != nil && g.bytes+size > l.opt.CommitBytes() {
+		// The group commits before this record would take it past the
+		// commit cap.
+		delete(l.pending, rec.Stream)
+		g.timer.Stop()
+		go l.run(g)
+		g = nil
+	}
 	if g == nil {
 		g = &group{stream: rec.Stream, prev: l.tail[rec.Stream], done: make(chan struct{})}
 		l.pending[rec.Stream] = g
@@ -252,11 +388,18 @@ func (l *Log) Append(ctx context.Context, rec Record) (Receipt, error) {
 	}
 	i := len(g.recs)
 	g.recs = append(g.recs, rec)
+	g.bytes += size
 	full := len(g.recs) >= l.opt.MaxEvents
 	l.mu.Unlock()
 	if full {
 		l.flush(g)
 	}
+	return l.wait(ctx, g, i)
+}
+
+// wait returns the Receipt of g's record i once g has committed, or
+// ctx.Err() if ctx ends first.
+func (l *Log) wait(ctx context.Context, g *group, i int) (Receipt, error) {
 	select {
 	case <-g.done:
 		if g.err != nil {
@@ -277,10 +420,17 @@ const MaxBatch = 10000
 // as one SER read: the whole read, its capture and its device cursor commit
 // together or not at all. ctx is checked before the batch is queued; once
 // queued, the call returns only when the commit has returned.
+//
+// Since 0.4 a batch of more than one record must fit MaxCommitBytes, a
+// capture shared by several records counting once, or it is refused with
+// CodeRecordTooLarge and nothing is queued: the producer splits it. A
+// configuration batch holds one record.
 func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error) {
 	if len(recs) == 0 || len(recs) > MaxBatch {
 		return nil, errf(CodeInvalid, nil, "batch of %d records, want 1 to %d", len(recs), MaxBatch)
 	}
+	var size int64
+	captures := map[string]bool{}
 	for _, r := range recs {
 		if err := l.check(r); err != nil {
 			return nil, err
@@ -288,11 +438,41 @@ func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error)
 		if r.Stream != recs[0].Stream {
 			return nil, errf(CodeInvalid, nil, "batch mixes streams %s and %s", recs[0].Stream, r.Stream)
 		}
+		size += int64(len(r.Event))
+		if r.Capture != nil && !captures[r.Capture.SHA256] {
+			captures[r.Capture.SHA256] = true
+			size += int64(len(r.Capture.Bytes))
+		}
+	}
+	if len(recs) > 1 {
+		if recs[0].Class == ClassConfiguration {
+			return nil, errf(CodeInvalid, nil, "configuration batch of %d records: one record per commit", len(recs))
+		}
+		if size > l.opt.CommitBytes() {
+			return nil, errf(CodeRecordTooLarge, nil, "batch of %d records, %d bytes, over the commit cap %d", len(recs), size, l.opt.CommitBytes())
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	stream := recs[0].Stream
+	g, err := l.enqueue(recs[0].Stream, recs)
+	if err != nil {
+		return nil, err
+	}
+	<-g.done
+	if g.err != nil {
+		return nil, g.err
+	}
+	out := make([]Receipt, len(recs))
+	for i := range recs {
+		out[i] = receipt{key: g.keys[i], at: g.at}
+	}
+	return out, nil
+}
+
+// enqueue queues recs as a group of their own, after any group of the
+// stream already waiting, which it commits first, and starts its commit.
+func (l *Log) enqueue(stream StreamID, recs []Record) (*group, error) {
 	l.mu.Lock()
 	if l.stopped != nil {
 		l.mu.Unlock()
@@ -309,15 +489,8 @@ func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error)
 	if waiting != nil {
 		go l.run(waiting)
 	}
-	l.run(g)
-	if g.err != nil {
-		return nil, g.err
-	}
-	out := make([]Receipt, len(recs))
-	for i := range recs {
-		out[i] = receipt{key: g.keys[i], at: g.at}
-	}
-	return out, nil
+	go l.run(g)
+	return g, nil
 }
 
 // flush commits g once, whichever of the timer and a full group gets here
@@ -396,6 +569,14 @@ func (l *Log) check(rec Record) error {
 	if rec.Class != c {
 		return errf(CodeInvalid, nil, "record of class %s for stream %s, which is %s", rec.Class, rec.Stream, c)
 	}
+	if len(rec.Holds) > 0 && c != ClassConfiguration {
+		return errf(CodeNotHoldable, nil, "record of class %s for stream %s takes holds; only configuration records may", c, rec.Stream)
+	}
+	if limit, ok := l.caps[c]; ok && rec.Bytes() > limit {
+		return errf(CodeRecordTooLarge, nil, "record of %d bytes for stream %s, over the %s cap %d", rec.Bytes(), rec.Stream, c, limit)
+	} else if !ok && rec.Bytes() > l.opt.CommitBytes() {
+		return errf(CodeRecordTooLarge, nil, "record of %d bytes for stream %s, over the commit cap %d", rec.Bytes(), rec.Stream, l.opt.CommitBytes())
+	}
 	return nil
 }
 
@@ -409,7 +590,12 @@ func (l *Log) ClassOf(stream StreamID) (StreamClass, bool) {
 // refused reports whether a CommitBatch error is a refusal that wrote
 // nothing.
 func refused(err error) bool {
-	return errors.Is(err, &Error{Code: CodeQuotaReached}) || errors.Is(err, &Error{Code: CodeInvalid})
+	for _, c := range []Code{CodeQuotaReached, CodeInvalid, CodeRecordTooLarge, CodeNotHoldable} {
+		if errors.Is(err, &Error{Code: c}) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stopped reports the error that stopped the Log, or nil.

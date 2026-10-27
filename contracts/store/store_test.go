@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 3 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 4 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -28,8 +28,10 @@ func goodLayout() Layout {
 	q := func(c StreamClass) Quota { return Quota{Class: c, Bytes: 1 << 30, WarnFraction: 0.8} }
 	return Layout{Databases: []Database{
 		{ID: "evidence", Writer: "ied", Streams: []StreamSpec{{"relay1/ser", ClassAdapterEvidence}}, Classes: []StreamClass{ClassAdapterEvidence}, Quotas: []Quota{q(ClassAdapterEvidence)}},
-		{ID: "syslog", Writer: "telemetry", Streams: []StreamSpec{{"udp514/2488", ClassSyslogDatagram}}, Classes: []StreamClass{ClassSyslogDatagram, ClassSyslogStream}, Quotas: []Quota{q(ClassSyslogDatagram), q(ClassSyslogStream)}},
+		{ID: "syslog", Writer: "telemetry", Streams: []StreamSpec{{"udp514/2488", ClassSyslogDatagram}, {"syslog-unknown/udp514", ClassSyslogUnknown}}, Classes: []StreamClass{ClassSyslogDatagram, ClassSyslogStream, ClassSyslogUnknown}, Quotas: []Quota{q(ClassSyslogDatagram), q(ClassSyslogStream), q(ClassSyslogUnknown)}},
 		{ID: "audit", Writer: "security", Streams: []StreamSpec{{"audit", ClassAudit}}, Classes: []StreamClass{ClassAudit}, Quotas: []Quota{q(ClassAudit)}},
+		{ID: "config", Writer: "ied", Streams: []StreamSpec{{"config/relay1", ClassConfiguration}}, Classes: []StreamClass{ClassConfiguration},
+			Quotas: []Quota{{Class: ClassConfiguration, Bytes: 64 << 20, WarnFraction: 0.8, MaxRecordBytes: 512 << 10}}},
 	}}
 }
 
@@ -45,16 +47,28 @@ func TestLayout(t *testing.T) {
 		},
 		"audit mixed": func(l *Layout) {
 			l.Databases[2].Classes = append(l.Databases[2].Classes, ClassPlatform)
-			l.Databases[2].Quotas = append(l.Databases[2].Quotas, Quota{ClassPlatform, 1, 0.5})
+			l.Databases[2].Quotas = append(l.Databases[2].Quotas, Quota{Class: ClassPlatform, Bytes: 1, WarnFraction: 0.5})
 		},
 		"class without quota": func(l *Layout) { l.Databases[1].Quotas = l.Databases[1].Quotas[:1] },
-		"quota for absent":    func(l *Layout) { l.Databases[0].Quotas = append(l.Databases[0].Quotas, Quota{ClassAudit, 1, 0.5}) },
-		"bad warn fraction":   func(l *Layout) { l.Databases[0].Quotas[0].WarnFraction = 1 },
-		"unknown class":       func(l *Layout) { l.Databases[0].Classes[0] = "video" },
+		"quota for absent": func(l *Layout) {
+			l.Databases[0].Quotas = append(l.Databases[0].Quotas, Quota{Class: ClassAudit, Bytes: 1, WarnFraction: 0.5})
+		},
+		"bad warn fraction": func(l *Layout) { l.Databases[0].Quotas[0].WarnFraction = 1 },
+		"unknown class":     func(l *Layout) { l.Databases[0].Classes[0] = "video" },
 		"two audit streams": func(l *Layout) {
 			l.Databases[2].Streams = append(l.Databases[2].Streams, StreamSpec{"audit2", ClassAudit})
 		},
-		"no audit stream": func(l *Layout) { l.Databases = l.Databases[:2] },
+		"no audit stream": func(l *Layout) { l.Databases = append(l.Databases[:2], l.Databases[3]) },
+		// 0.4: configuration sits alone, and its quota carries a record
+		// cap of at least MinRecordBytes and at most the quota.
+		"configuration mixed": func(l *Layout) {
+			l.Databases[3].Classes = append(l.Databases[3].Classes, ClassPlatform)
+			l.Databases[3].Quotas = append(l.Databases[3].Quotas, Quota{Class: ClassPlatform, Bytes: 1, WarnFraction: 0.5})
+		},
+		"configuration without cap": func(l *Layout) { l.Databases[3].Quotas[0].MaxRecordBytes = 0 },
+		"cap below minimum":         func(l *Layout) { l.Databases[3].Quotas[0].MaxRecordBytes = MinRecordBytes - 1 },
+		"cap above quota":           func(l *Layout) { l.Databases[3].Quotas[0].MaxRecordBytes = 64<<20 + 1 },
+		"event cap below minimum":   func(l *Layout) { l.Databases[0].Quotas[0].MaxRecordBytes = 1 },
 		"stream class not held": func(l *Layout) {
 			l.Databases[0].Streams = append(l.Databases[0].Streams, StreamSpec{"relay2/ser", ClassAudit})
 		},
@@ -74,6 +88,8 @@ func TestFullActions(t *testing.T) {
 		ClassSyslogDatagram:  DropAndCount,
 		ClassAudit:           FailClosed,
 		ClassPlatform:        RefuseNew,
+		ClassConfiguration:   StopCollecting,
+		ClassSyslogUnknown:   DropAndCount,
 	}
 	for _, c := range Classes {
 		got, err := ActionFor(c)
@@ -90,7 +106,7 @@ func TestGroupOptionsRequireGrouping(t *testing.T) {
 	if err := DefaultGroup.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, o := range []GroupOptions{{1, time.Millisecond}, {0, time.Millisecond}, {100, 0}, {100, 2 * time.Second}} {
+	for _, o := range []GroupOptions{{MaxEvents: 1, MaxWait: time.Millisecond}, {MaxEvents: 0, MaxWait: time.Millisecond}, {MaxEvents: 100}, {MaxEvents: 100, MaxWait: 2 * time.Second}, {MaxEvents: 100, MaxWait: time.Millisecond, MaxCommitBytes: MinRecordBytes - 1}} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("%+v accepted", o)
 		}
@@ -593,6 +609,19 @@ func TestStartupPolicyValidate(t *testing.T) {
 		"prune target 1":        func(p *StartupPolicy) { p.PruneTarget = 1 },
 		"bad consumer":          func(p *StartupPolicy) { p.Consumers[0].Delivery = "" },
 		"zero compaction step":  func(p *StartupPolicy) { p.CompactStepPages = 0 },
+		// 0.4: the reserve covers the largest commit, down to the
+		// smallest cap.
+		"reserve below the largest commit": func(p *StartupPolicy) {
+			p.WALBoundBytes, p.LargestCommitBytes = 512<<10, 512<<10
+			p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10) - 1
+		},
+		"reserve below the smallest cap": func(p *StartupPolicy) {
+			p.WALBoundBytes, p.LargestCommitBytes = 512<<10, MinRecordBytes
+			p.RecoveryReserveBytes = 2 * 512 << 10 // the 0.3 rule alone
+		},
+		"largest commit without a WAL bound": func(p *StartupPolicy) {
+			p.LargestCommitBytes, p.RecoveryReserveBytes = MinRecordBytes, 64<<20
+		},
 	} {
 		p := policy()
 		mutate(&p)
@@ -601,6 +630,16 @@ func TestStartupPolicyValidate(t *testing.T) {
 		if r.Mode != ModeFailed || len(f.calls) != 0 {
 			t.Errorf("%s: mode %s calls %v", name, r.Mode, f.calls)
 		}
+	}
+}
+
+// A reserve at the 0.4 rule is accepted.
+func TestStartupPolicyReserveRule(t *testing.T) {
+	p := policy()
+	p.WALBoundBytes, p.LargestCommitBytes = 512<<10, 512<<10
+	p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10)
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 
