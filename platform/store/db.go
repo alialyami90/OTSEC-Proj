@@ -181,6 +181,7 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("create %s: close: %w", tmp, err)
 	}
+	d.point("create:closed")
 	if err := flushCreated(tmp); err != nil {
 		return fmt.Errorf("create %s: %w", tmp, err)
 	}
@@ -188,6 +189,7 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
+	d.point("create:renamed")
 	return syncDir(opt.Dir)
 }
 
