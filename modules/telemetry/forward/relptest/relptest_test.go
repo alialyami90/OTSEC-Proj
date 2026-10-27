@@ -9,8 +9,8 @@ import (
 func TestParseCommand(t *testing.T) {
 	good := map[string]Command{
 		"1 open 30 relp_version=0\ncommands=syslog\n": {1, "open", []byte("relp_version=0\ncommands=syslog")},
-		"2 syslog 3 abc\n":                            {2, "syslog", []byte("abc")},
-		"999999999 close 0\n":                         {999999999, "close", nil},
+		"2 syslog 3 abc\n":    {2, "syslog", []byte("abc")},
+		"999999999 close 0\n": {999999999, "close", nil},
 	}
 	for in, want := range good {
 		c, n, err := ParseCommand([]byte(in + "next"))
