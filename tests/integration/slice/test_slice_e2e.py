@@ -67,12 +67,9 @@ def run(tmp_path_factory):
                       f"{RUN_TIMEOUT:.0f}s\nnode:\n{s.text('node')}\ncollector:\n{s.text('collector')}")
         for name in ("node", "collector"):
             assert s.procs[name].poll() is None, f"{name} exited:\n{s.text(name)}"
-        s.cmdlines = {}
-        for name in ("node", "collector"):
-            path = f"/proc/{s.procs[name].pid}/cmdline"
-            if os.path.exists(path):
-                with open(path, "rb") as f:
-                    s.cmdlines[name] = f.read()
+        # As the OS has them while both run: /proc on Linux, Win32_Process
+        # on Windows (processes or installed services).
+        s.cmdlines = {name: s.cmdline(name) for name in ("node", "collector")}
         yield s
     finally:
         s.stop()
@@ -138,8 +135,12 @@ def test_the_password_is_nowhere(run):
                 # A file the run locked read-only for its owner is still
                 # readable; anything else unreadable is a gap in the check.
                 hits.append("unreadable: " + os.path.relpath(p, run.root))
-    for name, cmd in run.cmdlines.items():
-        if canary in cmd:
+    for name, exe in (("node", "otsec"), ("collector", "otsec-collector")):
+        cmd = run.cmdlines.get(name) or ""
+        # A command line that was not read would pass vacuously: it must
+        # name its own binary.
+        assert os.path.basename(run.exe(exe)).lower() in cmd.lower(), f"{name} command line not read: {cmd!r}"
+        if CANARY in cmd:
             hits.append(f"{name} arguments")
     # The simulator's log records the in-band password as an auth event,
     # never its bytes (sim.py); it is the device's side, checked here too.
