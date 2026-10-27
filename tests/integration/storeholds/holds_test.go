@@ -452,19 +452,19 @@ func measureWAL(t *testing.T, dir string, commit func()) int64 {
 	return after.Size() - before.Size()
 }
 
-// withinRule fails unless one commit of payload bytes grew the WAL by more
-// than its payload (else the pin did not hold and nothing was measured) and
-// by no more than CommitWALBytes(payload).
-func withinRule(t *testing.T, payload, grew int64) {
+// withinRule fails unless one commit of payload bytes in records rows grew
+// the WAL by more than its payload (else the pin did not hold and nothing
+// was measured) and by no more than CommitWALBytes(payload, records).
+func withinRule(t *testing.T, payload, records, grew int64) {
 	t.Helper()
-	rule := c5.CommitWALBytes(payload)
-	t.Logf("payload %d bytes: the WAL grew %d bytes (%.3f × payload + %d), rule %d", payload, grew,
-		float64(grew)/float64(payload), grew-payload, rule)
+	rule := c5.CommitWALBytes(payload, records)
+	t.Logf("payload %d bytes in %d records: the WAL grew %d bytes (%.3f × payload; %d a record over 1.1 × payload + 64 KiB), rule %d",
+		payload, records, grew, float64(grew)/float64(payload), (grew-payload-payload/10-64<<10)/records, rule)
 	if grew <= payload {
 		t.Fatalf("the WAL grew %d bytes for a %d-byte payload: the pin did not hold it, so this measured nothing", grew, payload)
 	}
 	if grew > rule {
-		t.Fatalf("one commit of %d payload bytes wrote %d WAL bytes, over CommitWALBytes %d", payload, grew, rule)
+		t.Fatalf("one commit of %d payload bytes in %d records wrote %d WAL bytes, over CommitWALBytes %d", payload, records, grew, rule)
 	}
 }
 
@@ -510,7 +510,7 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if r.Bytes() > size {
 				t.Fatalf("record %d bytes over its cap %d", r.Bytes(), size)
 			}
-			withinRule(t, r.Bytes(), measureWAL(t, dir, func() {
+			withinRule(t, r.Bytes(), 1, measureWAL(t, dir, func() {
 				if _, err := l.Append(ctx, r); err != nil {
 					t.Fatal(err)
 				}
@@ -539,12 +539,10 @@ func serEvent(n, size int) []byte {
 // The cursor is the largest #278 allows (2048 × 71 bytes) and is not
 // counted in the payload, as the node does not count it either.
 //
-// events is a WITHOUT ROWID table, so an event over about 1 KB keeps that
-// much in its leaf cell and spills the rest to overflow pages of its own:
-// each such row costs at least one 4 KiB page however little spills. Rows
-// of 1 to 4 KB therefore write about 4.8 KB of WAL each, and this test
-// fails against the 0.4 rule until the rule or the schema accounts for it
-// (simulated, local Linux, 2026-10-27).
+// Against C5 0.4's rule this failed on every shape: events was a WITHOUT
+// ROWID table, so each event over about 1 KB spilled to an overflow page of
+// its own (#280, D4-14). The shapes and the property are unchanged since;
+// only the rule they are checked against is C5 0.5's.
 func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
 	ctx := context.Background()
 	const capBytes = 11 << 20
@@ -569,7 +567,7 @@ func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
 			}
 			dir := newDir(t)
 			db := open(t, dir, d)
-			l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: capBytes}, map[c5.StreamID]c5.Seq{ser: 0})
+			l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: capBytes, MaxCommitRecords: 2048}, map[c5.StreamID]c5.Seq{ser: 0})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -593,7 +591,7 @@ func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
 			if payload > capBytes {
 				t.Fatalf("read of %d bytes over the cap %d", payload, capBytes)
 			}
-			withinRule(t, payload, measureWAL(t, dir, func() {
+			withinRule(t, payload, int64(c.rows), measureWAL(t, dir, func() {
 				if _, err := l.AppendBatch(ctx, recs); err != nil {
 					t.Fatal(err)
 				}
@@ -602,14 +600,31 @@ func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
 	}
 }
 
-// fileFactor bounds how much the database file may grow, once
-// checkpointed, per byte a quota counts, so that a quota is a bound on disk
-// (D4-9 C5 item 6). It is B6's proposal; the fix states its own factor and
-// B6 reviews any change to this constant. The bound is on what ClassBytes
-// counts, so a fix may meet it by storing less per row or by counting each
-// row's overhead: no layout tried keeps a 417-byte event under 1.5 ×
-// (simulated, local Linux, 2026-10-27).
-const fileFactor = 1.25
+// evidenceDB is an evidence database whose commits may carry up to 2048
+// records and 11 MiB, the evidence caps (D4-9, D4-14).
+func evidenceDB(t *testing.T) (*store.DB, *c5.Log, string) {
+	t.Helper()
+	d := c5.Database{
+		ID:      "evidence",
+		Writer:  "ied",
+		Streams: []c5.StreamSpec{{ID: ser, Class: c5.ClassAdapterEvidence}},
+		Classes: []c5.StreamClass{c5.ClassAdapterEvidence},
+		Quotas:  []c5.Quota{{Class: c5.ClassAdapterEvidence, Bytes: 1 << 30, WarnFraction: 0.9, MaxRecordBytes: evidenceCap}},
+	}
+	dir := newDir(t)
+	db := open(t, dir, d)
+	l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: evidenceCap, MaxCommitRecords: 2048}, map[c5.StreamID]c5.Seq{ser: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append(context.Background(), c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(0, 400)}); err != nil {
+		t.Fatal(err)
+	}
+	compactAll(t, db)
+	return db, l, dir
+}
+
+const evidenceCap = 11 << 20
 
 // checkpoint runs a TRUNCATE checkpoint from a second connection and fails
 // unless it completed.
@@ -629,83 +644,132 @@ func checkpoint(t *testing.T, file string) {
 	}
 }
 
-// Event sizes from 100 B to 64 KiB, 256 B apart to 16 KiB and 2 KiB apart
-// after, so every overflow step is crossed whatever the page layout: one
-// commit of up to 128 events of each size, sharing one capture, without a
-// cursor, so only the layout is measured. Each commit must stay within
-// CommitWALBytes, and once checkpointed the file must grow by no more than
-// fileFactor × the bytes the quota counts (D4-9 C5 item 6's sweep and pin).
-func TestEventSizeSweep(t *testing.T) {
+// commitAndMeasure commits recs as one AppendBatch on a fresh evidence
+// database and checks both of D4-14's properties: the WAL the commit wrote
+// is within CommitWALBytes, and once checkpointed the file grew by no more
+// than DiskBytesPerQuotaByte × what the quota counted.
+func commitAndMeasure(t *testing.T, recs []c5.Record) {
+	t.Helper()
 	ctx := context.Background()
-	const capBytes = 11 << 20
-	d := c5.Database{
-		ID:      "evidence",
-		Writer:  "ied",
-		Streams: []c5.StreamSpec{{ID: ser, Class: c5.ClassAdapterEvidence}},
-		Classes: []c5.StreamClass{c5.ClassAdapterEvidence},
-		Quotas:  []c5.Quota{{Class: c5.ClassAdapterEvidence, Bytes: 1 << 30, WarnFraction: 0.9, MaxRecordBytes: capBytes}},
+	db, l, dir := evidenceDB(t)
+	file := walPath(t, dir)
+	payload, seen := int64(0), map[string]bool{}
+	for _, r := range recs {
+		payload += int64(len(r.Event))
+		if r.Capture != nil && !seen[r.Capture.SHA256] {
+			seen[r.Capture.SHA256] = true
+			payload += int64(len(r.Capture.Bytes))
+		}
 	}
-	dir := newDir(t)
-	db := open(t, dir, d)
-	l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: capBytes}, map[c5.StreamID]c5.Seq{ser: 0})
+	checkpoint(t, file)
+	before, err := os.Stat(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Append(ctx, c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(0, 400)}); err != nil {
+	counted, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	if err != nil {
 		t.Fatal(err)
 	}
-	compactAll(t, db)
-	file := walPath(t, dir)
-	var sizes []int
-	for s := 256; s <= 16<<10; s += 256 {
+	grew := measureWAL(t, dir, func() {
+		if _, err := l.AppendBatch(ctx, recs); err != nil {
+			t.Fatal(err)
+		}
+	})
+	checkpoint(t, file)
+	after, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileGrew, quota := after.Size()-before.Size(), now-counted
+	t.Logf("file grew %d for %d quota bytes (%.2f ×)", fileGrew, quota, float64(fileGrew)/float64(quota))
+	if float64(fileGrew) > c5.DiskBytesPerQuotaByte*float64(quota) {
+		t.Errorf("the file grew %d bytes for %d bytes the quota counts, over DiskBytesPerQuotaByte %.2f", fileGrew, quota, c5.DiskBytesPerQuotaByte)
+	}
+	withinRule(t, payload, int64(len(recs)), grew)
+}
+
+// sweepSizes is 100 B, then step bytes apart to 16 KiB and 8 × step apart
+// to 64 KiB. At 256 B every overflow and page-sharing step is crossed.
+func sweepSizes(step int) []int {
+	sizes := []int{100}
+	for s := step; s <= 16<<10; s += step {
 		sizes = append(sizes, s)
 	}
-	for s := 18 << 10; s <= 64<<10; s += 2 << 10 {
+	for s := 16<<10 + 8*step; s <= 64<<10; s += 8 * step {
 		sizes = append(sizes, s)
 	}
-	n := 1
-	for _, size := range append([]int{100}, sizes...) {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			rows := min(128, (2<<20)/size)
-			raw := make([]byte, rows*35)
-			rand.New(rand.NewSource(int64(size))).Read(raw)
-			cp := capture(hex.EncodeToString(raw))
-			recs := make([]c5.Record, rows)
-			payload := int64(len(cp.Bytes))
-			for i := range recs {
-				recs[i] = c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(n, size), Capture: &cp}
-				payload += int64(len(recs[i].Event))
-				n++
-			}
-			checkpoint(t, file)
-			st, err := os.Stat(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			counted, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
-			if err != nil {
-				t.Fatal(err)
-			}
-			grew := measureWAL(t, dir, func() {
-				if _, err := l.AppendBatch(ctx, recs); err != nil {
-					t.Fatal(err)
-				}
+	return sizes
+}
+
+// serRead is rows events of size bytes sharing one capture of about 70
+// bytes a row, numbered from 1.
+func serRead(rows, size int) []c5.Record {
+	raw := make([]byte, rows*35)
+	rand.New(rand.NewSource(int64(rows * size))).Read(raw)
+	cp := capture(hex.EncodeToString(raw))
+	recs := make([]c5.Record, rows)
+	for i := range recs {
+		recs[i] = c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(i+1, size), Capture: &cp}
+	}
+	return recs
+}
+
+// D4-14 item 6: event sizes from 100 B to 64 KiB at 1 record a commit, at
+// 128, and at 2048 or as many as fit the 11 MiB evidence cap, each commit on
+// a fresh database. Every commit must stay within CommitWALBytes, and the
+// checkpointed file within DiskBytesPerQuotaByte of the quota bytes. The
+// 2048-record sweep steps 512 B, to keep the Windows job's time: each of
+// its commits writes up to 11 MiB, and TestPageEdgeSweep walks the edges.
+func TestEventSizeSweep(t *testing.T) {
+	for _, rows := range []int{1, 128, 2048} {
+		step := 256
+		if rows == 2048 {
+			step = 512
+		}
+		for _, size := range sweepSizes(step) {
+			n := max(1, min(rows, evidenceCap/(size+70)))
+			t.Run(fmt.Sprintf("%d/%d", rows, size), func(t *testing.T) {
+				commitAndMeasure(t, serRead(n, size))
 			})
-			checkpoint(t, file)
-			after, err := os.Stat(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			now, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fileGrew, quota := after.Size()-st.Size(), now-counted
-			t.Logf("%d events of %d bytes: file grew %d for %d quota bytes (%.2f ×)", rows, size, fileGrew, quota, float64(fileGrew)/float64(quota))
-			if float64(fileGrew) > fileFactor*float64(quota) {
-				t.Errorf("the file grew %d bytes for %d bytes the quota counts, over %.2f ×", fileGrew, quota, fileFactor)
-			}
-			withinRule(t, payload, grew)
-		})
+		}
+	}
+}
+
+// The sweep's steps are 256 B apart, so they can miss the size where a row
+// wastes most: an event just too big to share its leaf page. This walks
+// 8 B steps across that edge, and across the edges where three and four
+// events stop sharing a page, at 128 records a commit.
+func TestPageEdgeSweep(t *testing.T) {
+	for _, edge := range [][2]int{{1200, 1500}, {1850, 2150}, {3950, 4200}} {
+		for size := edge[0]; size <= edge[1]; size += 8 {
+			t.Run(fmt.Sprint(size), func(t *testing.T) {
+				commitAndMeasure(t, serRead(128, size))
+			})
+		}
+	}
+}
+
+// The rule is checked per record, so it must also hold when each record
+// brings its own capture, as one datagram or one pushed file would (C5's
+// Capture). captures is still a WITHOUT ROWID table: a capture over about
+// 1 KB spills to overflow pages of its own.
+func TestCaptureEachSweep(t *testing.T) {
+	for _, rows := range []int{128, 1024} {
+		for _, size := range []int{100, 512, 1024, 1100, 1536, 2048, 3072, 4096, 4200, 6144, 8192} {
+			t.Run(fmt.Sprintf("%d/%d", rows, size), func(t *testing.T) {
+				recs := make([]c5.Record, rows)
+				for i := range recs {
+					raw := make([]byte, size/2+1)
+					rand.New(rand.NewSource(int64(i*size + rows))).Read(raw)
+					cp := capture(hex.EncodeToString(raw)[:size])
+					recs[i] = c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(i+1, 600), Capture: &cp}
+				}
+				commitAndMeasure(t, recs)
+			})
+		}
 	}
 }
