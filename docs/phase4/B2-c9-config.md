@@ -69,15 +69,25 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
 9. **An unknown rule ID is refused.** A new family, or a changed rule, gets a new rule ID in a later minor. `sel-751-sho/1` is never edited.
 10. **The C2 operation ID** for the read will be `sel.config.read_all`, one operation for the whole read, as `sel.ser.read_all` is. Register revision 5 fixes it.
 
-## Storage, agreed with B5 for C5 0.4
+## Storage, agreed with B5 for C5 0.4 (#246 at 3756969)
 
-- A `config.read` session's transcript is one C5 capture. The snapshot is the record's event, and the transcript is its capture.
-- The two commit together and are pruned together. Pinning a snapshot (the active baseline, or one with an unacknowledged difference) pins its capture.
-- The per-snapshot cap (transcript plus snapshot) is a parameter, with a provisional default of 512 KiB.
-- The store volume's recovery reserve follows from the cap: at least 2 × (WAL bound + 1.25 × the largest record cap), about 2.3 MiB at 512 KiB (B5, #246). B5 measured the WAL at 1.05 to 1.13 times the record bytes.
-- A read over the cap fails into quarantine with its bytes kept.
-- **Size estimate, not yet a count.** A full 24-form read holds an estimated 5,000 to 8,000 printed settings, about 150 to 250 KB of transcript, and a snapshot of about the same size.
-  - Register revision 5 will state a counted byte cap for each `SHO` line, taken from S22's settings sheets. The cap and the reserve then follow from that sum.
+- **Where it is stored.** A `config.read` session's transcript is one C5 capture. The snapshot is the record's event, stored compact and byte for byte, so that `Digest` stays stable. The record is in the configuration class, on the asset's stream `config/<asset-id>`, in a database with no event class.
+- **Differences are stored there too.** A C9 difference is stored in the same class, with no capture, so that C8 0.5's `difference_digest` can be checked later against the stored bytes.
+- **The validator sees the event and the capture.** It refuses a snapshot whose `transcript.sha256` and `transcript.length` are not the record's capture. Before the append, the node runs `DecodeSnapshot` and `CheckAgainst` on the transcript.
+- **One record per commit.** The snapshot and its capture commit together and are pruned together.
+- **Holds.** A hold is taken with its record (`Record.Holds`), and its reason is coded: `HoldReason{Code, Ref}` gives the code (`baseline` or `unapproved-difference`) and names the C8 record behind it. The node holds:
+  - the acknowledged baseline;
+  - every snapshot whose difference is not yet approved or acknowledged, with that difference.
+
+  A held difference holds both of its snapshots, and a held record keeps its capture. The node releases a hold only after the C8 record that ends it has committed.
+- **The record cap** (transcript plus snapshot) is `Quota.MaxRecordBytes`, a parameter.
+  - **Default: 1 MiB, provisional** (B1 on #247). B5 measured the golden snapshot, encoded compact, at 11,715 bytes for a 6,397-byte transcript: about 5.3 KB fixed plus 34.5 bytes per setting. So a fully configured relay can pass 512 KiB.
+  - A read over the cap fails into quarantine, with its bytes kept.
+  - The C2 session ceiling `MaxResponseBytes` (1 MiB received) bounds the transcript the same way.
+- **The recovery reserve is per database:** `RecoveryReserveBytes ≥ 2 × WALBoundBytes + W(C)`, with `W(C) = 1.1 × C + 64 KiB`. B5 and B6 measured the WAL as a fixed 21 to 34 KB plus about 1.0 times the payload, on two engines. For the configuration database, C is `MaxRecordBytes`. The figure is `desk` until B6's storekill leg exists (D4-9).
+- **The size is an estimate, not yet a count.** A full 24-form read is estimated at 5,000 to 8,000 printed settings, about 150 to 250 KB of transcript, and a compact snapshot of similar size.
+  - Register revision 5 will state a counted byte cap for each `SHO` line, from S22's settings sheets.
+  - The record cap and the reserve then follow from that sum.
 
 ## Against P4-A2's acceptance tests
 
