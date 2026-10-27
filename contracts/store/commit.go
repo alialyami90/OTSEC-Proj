@@ -137,8 +137,9 @@ type Committer interface {
 	// audit it seals the records with SealAudit inside the transaction.
 	//
 	// It may refuse a batch, having written nothing, with an *Error whose
-	// Code is CodeQuotaReached (the class is at quota and its action refuses)
-	// or CodeInvalid (for example a pending audit record SealAudit rejects).
+	// Code is CodeQuotaReached (the class is at quota and its action refuses),
+	// CodeInvalid (for example a pending audit record SealAudit rejects),
+	// or, from 0.4, CodeRecordTooLarge or CodeNotHoldable.
 	// The Log fails that batch's appends with the error and keeps running.
 	// Any other error means the durability of the batch is unknown, and the
 	// Log stops.
@@ -589,7 +590,12 @@ func (l *Log) ClassOf(stream StreamID) (StreamClass, bool) {
 // refused reports whether a CommitBatch error is a refusal that wrote
 // nothing.
 func refused(err error) bool {
-	return errors.Is(err, &Error{Code: CodeQuotaReached}) || errors.Is(err, &Error{Code: CodeInvalid})
+	for _, c := range []Code{CodeQuotaReached, CodeInvalid, CodeRecordTooLarge, CodeNotHoldable} {
+		if errors.Is(err, &Error{Code: c}) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stopped reports the error that stopped the Log, or nil.
