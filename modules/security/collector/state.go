@@ -762,7 +762,14 @@ func (s *State) FloorAfterBreak(asset string) error {
 		assets[k] = v
 	}
 	a := assets[asset]
-	a.UnconfirmedAuthUTC, a.LevelOpen = s.now().UTC().Format(time.RFC3339Nano), false
+	// BeginAuth stamps the clock as it reads. Here a clock put back must not
+	// shorten a floor the file already holds, so a later stamp stays (B5 on
+	// #272).
+	now := s.now().UTC()
+	if old, perr := time.Parse(time.RFC3339Nano, a.UnconfirmedAuthUTC); perr != nil || old.Before(now) {
+		a.UnconfirmedAuthUTC = now.Format(time.RFC3339Nano)
+	}
+	a.LevelOpen = false
 	assets[asset] = a
 	disk.Assets = assets
 	nb, err := marshalState(disk)

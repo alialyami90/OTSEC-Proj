@@ -242,3 +242,28 @@ func TestPipelineSetsTheFloorAtTheSessionEndAfterABreak(t *testing.T) {
 		t.Fatalf("floor on disk %+v: want a floor from the session's end (not before %s) and no open level", a, brokeAt.UTC().Format(time.RFC3339Nano))
 	}
 }
+
+// A clock put back does not shorten the floor the file holds: the later
+// stamp stays (B5 on #272).
+func TestFloorAfterBreakKeepsALaterStamp(t *testing.T) {
+	path, s, c := newState(t)
+	c.t = c.t.Add(time.Hour)
+	later := c.t
+	if err := s.BeginAuth(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	undo := breakWrites(t, path)
+	s.OpenLevel(testAsset)
+	undo()
+	c.t = later.Add(-30 * time.Minute)
+	if err := s.FloorAfterBreak(testAsset); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := OpenState(path, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s2.doc.Assets[testAsset].UnconfirmedAuthUTC; got != later.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("floor stamp %s after a clock put back, want the later %s", got, later.UTC().Format(time.RFC3339Nano))
+	}
+}
