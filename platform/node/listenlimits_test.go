@@ -433,3 +433,47 @@ func TestUnknownSpentUncountedFailsClosed(t *testing.T) {
 		t.Fatal("uncounted alarm not raised")
 	}
 }
+
+// The count reads the stream a page at a time to its end: unknown records
+// behind more than a page of known ones, and spread over several pages,
+// are all counted (A6 on #198).
+func TestUnknownSpentPages(t *testing.T) {
+	defer func(n int) { unknownSpentPage = n }(unknownSpentPage)
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+	})
+	stream := ListenerStream("lab-tcp")
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls := serve(t, r)
+	known := dialFrom(t, "tcp", "127.0.0.1", ls.Addr("lab-tcp"))
+	for i := range 5 {
+		if _, err := fmt.Fprintf(known, "<13>Oct 26 12:00:00 relay1 known %d\n", i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitStored(t, ls, st, "lab-tcp", 5)
+	before := streamBytes(t, r, stream)
+	flood(t, ls, st, "lab-tcp", 3)
+	want := streamBytes(t, r, stream) - before
+	for _, page := range []int{1, 2, 4, 5, 6} {
+		unknownSpentPage = page
+		type result struct {
+			n   int64
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			n, err := unknownSpent(bg, r.Store(stream), stream, time.Hour, r.opt.Now())
+			done <- result{n, err}
+		}()
+		select {
+		case got := <-done:
+			if got.err != nil || got.n != want {
+				t.Errorf("page %d: %d %v, want %d", page, got.n, got.err, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("page %d: the count did not end", page)
+		}
+	}
+}

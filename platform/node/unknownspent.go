@@ -31,6 +31,10 @@ const AlarmUnknownSpentUncounted = "syslog-unknown-budget-uncounted"
 // a few bytes more than the receiver spent on it; that errs toward an
 // emptier budget. If the stream cannot be read, unknownSpent returns the
 // error and the caller starts the budget empty.
+// unknownSpentPage is how many records unknownSpent reads at a time; a
+// test sets it small to cross page boundaries.
+var unknownSpentPage = store.MaxRead
+
 func unknownSpent(ctx context.Context, db *store.DB, stream c5.StreamID, window time.Duration, now time.Time) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("the database of %s is not open", stream)
@@ -39,7 +43,7 @@ func unknownSpent(ctx context.Context, db *store.DB, stream c5.StreamID, window 
 	var spent int64
 	var after c5.Seq
 	for {
-		got, err := db.Read(ctx, stream, after, store.MaxRead)
+		got, err := db.Read(ctx, stream, after, unknownSpentPage)
 		if err != nil {
 			return 0, err
 		}
@@ -66,7 +70,7 @@ func unknownSpent(ctx context.Context, db *store.DB, stream c5.StreamID, window 
 			}
 			spent += int64(len(s.Event))
 		}
-		if len(got) < store.MaxRead {
+		if len(got) < unknownSpentPage {
 			return spent, nil
 		}
 	}
