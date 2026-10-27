@@ -221,15 +221,30 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		// the nonce come before anything else is decided: before the
 		// install budget, the store and the reuse rule, so no reply to an
 		// unsigned or mis-bound request depends on a stored secret.
-		var admin *authz.AdminRequest
-		admin, r = p.verifyAdmin(req)
-		if r == nil {
+		admin, repeatOf, r := p.verifyAdmin(req, seq)
+		if r == nil && repeatOf == 0 {
 			r = p.decideAdmin(req, admin)
+			if r == nil {
+				p.recordAdmin(req, admin, seq)
+			}
 		}
 		if r != nil {
 			return refused(req.RequestID, seq, asRefusal(r).ForRequest(req.Contract)), nil
 		}
-		return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, CollectorSeq: seq}, nil
+		reply := authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, CollectorSeq: seq}
+		if authz.AnswersRepeat(req.Contract) {
+			// What the collector verified, so the node acts on its own
+			// part only for this request (C7 0.5). A repeat takes its own
+			// number and names the first decision; it ran nothing.
+			reply.RepeatOf = repeatOf
+			reply.Admin = &authz.AdminAccepted{
+				AdminKeyID:    req.AdminSigned.KeyID,
+				Principal:     admin.Principal,
+				Nonce:         admin.Nonce,
+				PayloadSHA256: authz.AdminPayloadSHA256(req.AdminSigned),
+			}
+		}
+		return reply, nil
 	}
 	switch {
 	case req.Kind == authz.KindRun && req.Run != nil:
@@ -260,7 +275,18 @@ func isCredentialKind(k authz.RequestKind) bool {
 // raises an alarm with the reason, which never holds the payload: a
 // request the node invented, altered or replayed is worth an operator's
 // look.
-func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (*authz.AdminRequest, error) {
+//
+// A request stamped 0.5 or later whose exact payload was accepted while
+// its nonce is still held is a repeat: repeatOf is the first decision's
+// collector_seq, the nonce is not spent again, and the caller runs nothing
+// (C7 0.5). The request has passed every check first, so a repeat is only
+// ever the bytes the administrator signed, inside their window.
+//
+// seq is this decision's number. Two sends of the same bytes can overlap:
+// the one numbered first can find the decision the other recorded, under a
+// higher number. A repeat names an earlier decision, so that is refused as
+// a replay, the answer the second send got before 0.5 (A6 F1 on #186).
+func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest, seq uint64) (admin *authz.AdminRequest, repeatOf uint64, err error) {
 	bind := authz.AdminBinding{NodeID: p.cfg.NodeID, InstallKeyID: p.cfg.Creds.InstallKey().KeyID}
 	// Judged at the state's admin clock, which never goes back, so a
 	// clock put back cannot reopen a spent request's window (A6 on #153).
@@ -269,19 +295,41 @@ func (p *Pipeline) verifyAdmin(req *authz.CollectorRequest) (*authz.AdminRequest
 		p.cfg.Alarm(fmt.Errorf("collector: the clock is %s behind the last admin decision; %s request %s is judged at %s",
 			behind.Round(time.Second), req.Kind, req.RequestID, at.UTC().Format(time.RFC3339)))
 	}
-	admin, err := authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, at)
+	admin, err = authz.VerifyAdminRequest(req, p.cfg.AdminKeys, bind, at)
+	if err == nil && authz.AnswersRepeat(req.Contract) {
+		if first, ok := p.cfg.State.AdminRepeat(admin.Nonce, authz.AdminPayloadSHA256(req.AdminSigned)); ok {
+			if first < seq {
+				return admin, first, nil
+			}
+			err = &authz.AdminRejected{Check: authz.AdminCheckReplay,
+				Reason: fmt.Sprintf("decided as collector_seq %d, after this decision %d", first, seq)}
+		}
+	}
 	if err == nil {
 		err = p.cfg.State.SpendAdminNonce(admin.Nonce, admin.Expires())
 	}
 	var rej *authz.AdminRejected
 	switch {
 	case err == nil:
-		return admin, nil
+		return admin, 0, nil
 	case errors.As(err, &rej):
 		p.cfg.Alarm(fmt.Errorf("collector: %s request %s refused: %w", req.Kind, req.RequestID, err))
-		return nil, rej.Refusal()
+		return nil, 0, rej.Refusal()
 	default:
-		return nil, err // the state could not record the nonce
+		return nil, 0, err // the state could not record the nonce
+	}
+}
+
+// recordAdmin keeps an accepted request stamped 0.5 or later for the
+// repeat answer. The decision has already acted, so a failure to record
+// is an alarm, not a refusal: the reply says what happened, and a resend
+// is then refused as a replay, never repeated.
+func (p *Pipeline) recordAdmin(req *authz.CollectorRequest, admin *authz.AdminRequest, seq uint64) {
+	if !authz.AnswersRepeat(req.Contract) {
+		return
+	}
+	if err := p.cfg.State.RecordAdminDecision(admin.Nonce, authz.AdminPayloadSHA256(req.AdminSigned), seq); err != nil {
+		p.cfg.Alarm(fmt.Errorf("collector: %s request %s was accepted as collector_seq %d but not kept for a repeat: %w", req.Kind, req.RequestID, seq, err))
 	}
 }
 
@@ -304,6 +352,11 @@ func (p *Pipeline) decideAdmin(req *authz.CollectorRequest, a *authz.AdminReques
 			return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: a.AssetClearSusp.AssetID}
 		}
 		return p.cfg.State.ClearAssetSuspension(a.AssetClearSusp.AssetID, a.AssetClearSusp.Ref)
+	case a.NodeQuarantineClear != nil, a.NodeSeqResetAck != nil:
+		// The node's own action, which it takes only on the reply's
+		// AdminAcceptance. The collector's part is the checks and the
+		// spent nonce, and the decision in the node's audit chain.
+		return nil
 	}
 	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"} // VerifyAdminRequest refuses this first
 }

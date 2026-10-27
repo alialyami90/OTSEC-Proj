@@ -50,6 +50,7 @@ var (
 // adminKinds are the request kinds an administrator signs.
 var adminKinds = map[RequestKind]bool{
 	KindCredentialInstall: true, KindCredentialRevoke: true, KindCredentialClearSusp: true, KindAssetClearSusp: true,
+	KindNodeQuarantineClear: true, KindNodeSeqResetAck: true,
 }
 
 // AdminSigned is the envelope of an admin-signed request (0.4). The
@@ -87,6 +88,11 @@ type AdminRequest struct {
 	CredentialRevoke    *CredentialRevokeBody    `json:"credential_revoke,omitempty"`
 	CredentialClearSusp *CredentialClearSuspBody `json:"credential_clear_suspension,omitempty"`
 	AssetClearSusp      *AssetClearSuspBody      `json:"asset_clear_suspension,omitempty"`
+	// The node kinds' bodies (since 0.5). The payload's format stays 0.4:
+	// a 0.4 reader decodes the payload strictly and refuses either field
+	// as a payload error, as it refuses the kind.
+	NodeQuarantineClear *NodeQuarantineClearBody `json:"node_quarantine_clear,omitempty"`
+	NodeSeqResetAck     *NodeSeqResetAckBody     `json:"node_seq_reset_ack,omitempty"`
 }
 
 // Expires is the request's parsed expiry; it is valid on a request
@@ -323,7 +329,8 @@ func (p *AdminRequest) validate() error {
 		}
 	}
 	set := 0
-	for _, present := range []bool{p.CredentialInstall != nil, p.CredentialRevoke != nil, p.CredentialClearSusp != nil, p.AssetClearSusp != nil} {
+	for _, present := range []bool{p.CredentialInstall != nil, p.CredentialRevoke != nil, p.CredentialClearSusp != nil, p.AssetClearSusp != nil,
+		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil} {
 		if present {
 			set++
 		}
@@ -333,5 +340,6 @@ func (p *AdminRequest) validate() error {
 	}
 	return validateBody(p.Kind, p.Principal, requestBodies{
 		CredentialInstall: p.CredentialInstall, CredentialRevoke: p.CredentialRevoke,
-		CredentialClearSusp: p.CredentialClearSusp, AssetClearSusp: p.AssetClearSusp})
+		CredentialClearSusp: p.CredentialClearSusp, AssetClearSusp: p.AssetClearSusp,
+		NodeQuarantineClear: p.NodeQuarantineClear, NodeSeqResetAck: p.NodeSeqResetAck})
 }

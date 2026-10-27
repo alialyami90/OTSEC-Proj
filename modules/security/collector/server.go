@@ -231,7 +231,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 		return
 	}
 	s.log().Info("collector: request decided", "request_id", reply.RequestID, "status", reply.Status,
-		"collector_seq", reply.CollectorSeq, "refusal", refusalCode(reply))
+		"collector_seq", reply.CollectorSeq, "repeat_of", reply.RepeatOf, "refusal", refusalCode(reply))
 	if work == nil {
 		linger(c)
 		return

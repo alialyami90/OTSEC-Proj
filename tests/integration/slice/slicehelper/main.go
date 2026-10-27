@@ -115,6 +115,14 @@ type Layout struct {
 	TLSDir               string `json:"tls_dir,omitempty"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
+	// Syslog listeners (#154), when -syslog-udp or -syslog-tls is set: the
+	// asset sends from SyslogSender; the TLS sender proves SenderCert,
+	// issued by CA.
+	SyslogSender string `json:"syslog_sender,omitempty"`
+	SyslogUDP    string `json:"syslog_udp,omitempty"`
+	SyslogTLS    string `json:"syslog_tls,omitempty"`
+	SenderCert   string `json:"sender_cert,omitempty"`
+	SenderKey    string `json:"sender_key,omitempty"`
 }
 
 // adminPrincipal is the person the test administrator's key speaks for.
@@ -132,6 +140,8 @@ func main() {
 	every := fs.Int("every", 60, "setup: the SER schedule interval, seconds")
 	repo := fs.String("repo", ".", "setup: the repository root, for the fixtures")
 	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
+	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
+	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
 	nodePeer := fs.String("node-peer", "", "setup with -programdata: the SID of the account that sends install-credential")
 	fs.Parse(os.Args[2:])
@@ -142,7 +152,7 @@ func main() {
 			err = errors.New("-programdata and -node-peer are given together or not at all")
 			break
 		}
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *programData, *nodePeer)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *nodePeer)
 	case "install-credential":
 		err = installCredential(*root)
 	default:
@@ -154,7 +164,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas, programData, nodePeer string) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, nodePeer string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -200,6 +210,11 @@ func setup(root, repo string, simPort, relpPort, every int, quotas, programData,
 	nc.AddRELPTarget("upstream", "127.0.0.1", relpPort, anchorRef, clientRef, durableAckRef, false)
 	pki, err := nc.WritePKI("127.0.0.1", anchorRef, clientRef)
 	if err != nil {
+		return err
+	}
+	// In the installed layout the listener's credential is staged with
+	// the rest, and reaches config\tls the same way.
+	if err := listeners(nc, pki, &l, syslogUDP, syslogTLS); err != nil {
 		return err
 	}
 	if installed {
@@ -466,4 +481,46 @@ func installCredential(root string) error {
 	}
 	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(resp.Reply.CollectorSeq, 10) + `}`)
 	return nil
+}
+
+// syslogSender is the asset's address as the node's listeners see it.
+const syslogSender = "127.0.0.2"
+
+// listeners adds the Syslog listeners asked for (#154): the asset sends
+// from syslogSender on each; the TLS listener's certificate and the
+// sender's are issued by the run's test CA, which is also the sender CA set.
+func listeners(nc *nodeconfigtest.Config, pki *nodeconfigtest.PKI, l *Layout, udp, tlsPort int) error {
+	if udp == 0 && tlsPort == 0 {
+		return nil
+	}
+	l.SyslogSender = syslogSender
+	if udp != 0 {
+		l.SyslogUDP = fmt.Sprintf("127.0.0.1:%d", udp)
+		nc.AddListener("a6-udp", "syslog-udp", l.SyslogUDP)
+		nc.AddSyslogSender(assetID, "syslog-udp-a6", "syslog-udp", syslogSender, 0)
+	}
+	if tlsPort == 0 {
+		return nil
+	}
+	l.SyslogTLS = fmt.Sprintf("127.0.0.1:%d", tlsPort)
+	nc.AddListener("a6-tls", "syslog-tls", l.SyslogTLS)
+	t := nc.Listeners[len(nc.Listeners)-1].TLS
+	t.SenderCARef, t.RequireSenderCert = anchorRef, true
+	nc.AddSyslogSender(assetID, "syslog-tls-a6", "syslog-tls", syslogSender, 0)
+	if _, err := nc.WriteListenerCredential(pki, t.CredentialRef, "127.0.0.1"); err != nil {
+		return err
+	}
+	cert, err := pki.Issue("a6-syslog-sender", x509.ExtKeyUsageClientAuth)
+	if err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		return err
+	}
+	l.SenderCert, l.SenderKey = filepath.Join(l.Root, "syslog-sender.crt"), filepath.Join(l.Root, "syslog-sender.key")
+	if err := os.WriteFile(l.SenderCert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(l.SenderKey, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600)
 }
