@@ -31,8 +31,9 @@ const (
 // is at or below it.
 const MaxTypesCeiling = 4096
 
-// MaxBytes is the most bytes a stored baseline may take: the default
-// MaxRecordBytes of C5 0.4's configuration class, which stores it. A type
+// MaxBytes is C10's own cap on a stored baseline. It is set at or below
+// the MaxRecordBytes of C5 0.4's configuration class, which stores the
+// record, so a baseline that fits is never refused there. A type
 // takes about 270 to 630 bytes encoded compact (desk measurement), so a
 // baseline is bounded by bytes before it reaches MaxTypesCeiling. A learner
 // fits the baseline to MaxBytes, or to the node's configured cap if lower,
@@ -158,11 +159,11 @@ type Gap struct {
 // Counts is the baseline's coverage of the asset's events in the period.
 type Counts struct {
 	// Events is every device event of the asset stored in the period:
-	// Full + TypeOnly + Unkeyed + NotCounted.
+	// Full + TypeOnly + NotCounted. Every stored SER and Syslog event has a
+	// key (KeyOf), so none is left out.
 	Events     int64 `json:"events"`
 	Full       int64 `json:"full"`
 	TypeOnly   int64 `json:"type_only"`
-	Unkeyed    int64 `json:"unkeyed"`
 	NotCounted int64 `json:"not_counted"` // possible duplicates suppressed (PossibleDuplicates)
 	// TypesOverflow is the number of types left out, past Params.MaxTypes
 	// or past MaxBytes; their events are in Full and TypeOnly but in no Type.
@@ -397,13 +398,13 @@ func (b *Baseline) checkCounts(c *checker) {
 	for _, f := range []struct {
 		name string
 		v    int64
-	}{{"events", n.Events}, {"full", n.Full}, {"type_only", n.TypeOnly}, {"unkeyed", n.Unkeyed}, {"not_counted", n.NotCounted}, {"types_overflow", n.TypesOverflow}} {
+	}{{"events", n.Events}, {"full", n.Full}, {"type_only", n.TypeOnly}, {"not_counted", n.NotCounted}, {"types_overflow", n.TypesOverflow}} {
 		if f.v < 0 {
 			c.fail(CodeRange, "counts."+f.name, "negative")
 		}
 	}
-	if n.Events != n.Full+n.TypeOnly+n.Unkeyed+n.NotCounted {
-		c.fail(CodeConflict, "counts.events", "%d is not full + type_only + unkeyed + not_counted", n.Events)
+	if n.Events != n.Full+n.TypeOnly+n.NotCounted {
+		c.fail(CodeConflict, "counts.events", "%d is not full + type_only + not_counted", n.Events)
 	}
 	if n.Events < b.Params.MinEvents {
 		c.fail(CodeConflict, "counts.events", "%d is below params.min_events %d: the period had not ended", n.Events, b.Params.MinEvents)

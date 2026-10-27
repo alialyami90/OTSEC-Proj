@@ -30,27 +30,42 @@ const TextMax = 128
 // are equal; String is its canonical text form.
 type Key struct {
 	Source Source `json:"source"`
-	// Element and State are set for SER: the element name and its state as
-	// printed (C4 normalized.subject and normalized.value).
+	// Element and State are set for a SER row the parser read: the element
+	// name and its state as printed (C4 normalized.subject and
+	// normalized.value).
 	Element string `json:"element,omitempty"`
 	State   string `json:"state,omitempty"`
+	// Record is set for a SER row with no normalized form whose native
+	// bytes are not on the event: "sha256:" and its C4 record_sha256. It is
+	// the last fallback, so no stored SER row is ever without a key; such a
+	// row is its own type, so after activation it always alarms as new.
 	// Facility and Severity are set for Syslog: decimal, from PRI, or both
 	// PRIAbsent.
 	Facility string `json:"facility,omitempty"`
 	Severity string `json:"severity,omitempty"`
-	// Template is set for Syslog: "sha256:" and the hex SHA-256 of the
-	// template (TemplateOf). The RFC 5424 MSGID is not part of the key
+	Record   string `json:"record,omitempty"`
+	// Template is set for Syslog, and for a SER row with no normalized
+	// form (a relay message such as "Relay Settings Changed", S22 p. 10.39):
+	// "sha256:" and the hex SHA-256 of the template (TemplateOf) of the
+	// message, or of the row's native bytes. The RFC 5424 MSGID is not part of the key
 	// (D4-9): a sender chooses it, so a compromised sender could hide a new
 	// kind of message under a known MSGID. Two messages sharing one stay apart.
 	Template string `json:"template,omitempty"`
 }
 
-// String is the key's canonical form, for example "ser|51P1P|Asserted" or
+// String is the key's canonical form, for example "ser|51P1P|Asserted",
+// "ser|raw|template|sha256:…", "ser|raw|record|sha256:…" or
 // "syslog|4|6|template|sha256:…". Each part has '%' and '|' percent-escaped,
 // so the form is unambiguous and ParseKey reverses it.
 func (k Key) String() string {
 	switch k.Source {
 	case SourceSER:
+		switch {
+		case k.Template != "":
+			return join("ser", "raw", "template", k.Template)
+		case k.Record != "":
+			return join("ser", "raw", "record", k.Record)
+		}
 		return join("ser", k.Element, k.State)
 	case SourceSyslog:
 		return join("syslog", k.Facility, k.Severity, "template", k.Template)
@@ -81,6 +96,10 @@ func ParseKey(s string) (Key, error) {
 	switch {
 	case len(parts) == 3 && parts[0] == "ser":
 		k = Key{Source: SourceSER, Element: parts[1], State: parts[2]}
+	case len(parts) == 4 && parts[0] == "ser" && parts[1] == "raw" && parts[2] == "template":
+		k = Key{Source: SourceSER, Template: parts[3]}
+	case len(parts) == 4 && parts[0] == "ser" && parts[1] == "raw" && parts[2] == "record":
+		k = Key{Source: SourceSER, Record: parts[3]}
 	case len(parts) == 5 && parts[0] == "syslog" && parts[3] == "template":
 		k = Key{Source: SourceSyslog, Facility: parts[1], Severity: parts[2], Template: parts[4]}
 	default:
@@ -119,18 +138,32 @@ func unescape(p string) (string, error) {
 func (k Key) Validate() error {
 	switch k.Source {
 	case SourceSER:
-		if k.Element == "" || k.State == "" {
-			return fmt.Errorf("baseline: a SER key has an element and a state")
+		if k.Facility != "" || k.Severity != "" {
+			return fmt.Errorf("baseline: a SER key has no facility or severity")
 		}
-		if k.Facility != "" || k.Severity != "" || k.Template != "" {
-			return fmt.Errorf("baseline: a SER key has only an element and a state")
-		}
-		if !utf8.ValidString(k.Element) || !utf8.ValidString(k.State) {
-			return fmt.Errorf("baseline: a SER key is UTF-8")
+		named, tmpl, rec := k.Element != "" || k.State != "", k.Template != "", k.Record != ""
+		switch {
+		case named && !tmpl && !rec:
+			if k.Element == "" || k.State == "" {
+				return fmt.Errorf("baseline: a SER key has an element and a state")
+			}
+			if !utf8.ValidString(k.Element) || !utf8.ValidString(k.State) {
+				return fmt.Errorf("baseline: a SER key is UTF-8")
+			}
+		case tmpl && !named && !rec:
+			if !sha256Ref.MatchString(k.Template) {
+				return fmt.Errorf("baseline: template %q is not sha256:<hex>", k.Template)
+			}
+		case rec && !named && !tmpl:
+			if !sha256Ref.MatchString(k.Record) {
+				return fmt.Errorf("baseline: record %q is not sha256:<hex>", k.Record)
+			}
+		default:
+			return fmt.Errorf("baseline: a SER key has an element and a state, a template, or a record, and only one")
 		}
 	case SourceSyslog:
-		if k.Element != "" || k.State != "" {
-			return fmt.Errorf("baseline: a Syslog key has no element or state")
+		if k.Element != "" || k.State != "" || k.Record != "" {
+			return fmt.Errorf("baseline: a Syslog key has no element, state or record")
 		}
 		if (k.Facility == PRIAbsent) != (k.Severity == PRIAbsent) {
 			return fmt.Errorf("baseline: facility and severity are both %s or neither", PRIAbsent)
@@ -196,21 +229,33 @@ func sha256Of(b []byte) string {
 // parser is a change to this contract.
 //
 // KeyOf is the type of a device event, with Text, the readable form shown
-// in an alarm (for a template, its first TextMax bytes). ok is false when
-// the event has no key: not a SER or Syslog device event, or a SER row
-// with no normalized form. KeyOf does not look at flags; Classify does.
+// in an alarm (for a template, its first TextMax bytes). Every SER and
+// Syslog device event has a key, so none is left out of learning or
+// alarms. A SER row the parser read is keyed on its element and state; one
+// it did not (a relay message, a row of another layout) on the template of
+// its native bytes; and one whose bytes are not on the event on its
+// record_sha256, which makes it a type of its own. A caller that holds the
+// bytes in the evidence store should put them on the event first, so the
+// template applies. ok is false only when the event is not a SER or Syslog
+// device event. KeyOf does not look at flags; Classify does.
 func KeyOf(e *event.Event) (k Key, text string, ok bool) {
 	if e == nil || e.Origin != event.OriginDevice {
 		return Key{}, "", false
 	}
 	switch e.Kind {
 	case event.KindSER:
-		n := e.Normalized
-		if n == nil || n.Subject == "" || n.Value == "" {
-			return Key{}, "", false
+		if n := e.Normalized; n != nil && n.Subject != "" && n.Value != "" {
+			return Key{Source: SourceSER, Element: n.Subject, State: n.Value}, textOf(n.Subject + " " + n.Value), true
 		}
-		k = Key{Source: SourceSER, Element: n.Subject, State: n.Value}
-		return k, textOf(n.Subject + " " + n.Value), true
+		if e.Native != nil && e.Native.Bytes != nil {
+			t := TemplateOf(strings.TrimSpace(string(e.Native.Bytes)))
+			return Key{Source: SourceSER, Template: sha256Of([]byte(t))}, textOf(t), true
+		}
+		if e.Native == nil || !sha256Ref.MatchString("sha256:"+e.Native.RecordSHA256) {
+			return Key{}, "", false // not a valid C4 event: C4 requires record_sha256
+		}
+		k = Key{Source: SourceSER, Record: "sha256:" + e.Native.RecordSHA256}
+		return k, textOf("SER row " + k.Record), true
 	case event.KindSyslog:
 		return syslogKey(e)
 	}

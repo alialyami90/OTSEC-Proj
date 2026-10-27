@@ -28,7 +28,7 @@ const (
 	ExcludedPlatform   Exclusion = "platform"         // a platform event
 	ExcludedUnresolved Exclusion = "asset-unresolved" // site-level total only
 	ExcludedKind       Exclusion = "kind"             // a kind other than ser and syslog
-	ExcludedUnkeyed    Exclusion = "unkeyed"          // a SER row with no normalized form
+	ExcludedInvalid    Exclusion = "invalid"          // not a valid C4 event (no native record_sha256); the store refuses one
 )
 
 // Classify says how the baseline of the event's asset counts e, and under
@@ -49,7 +49,7 @@ func Classify(e *event.Event, afterFailure bool) (k Key, text string, use Use, w
 	}
 	k, text, ok := KeyOf(e)
 	if !ok {
-		return Key{}, "", UseNone, ExcludedUnkeyed
+		return Key{}, "", UseNone, ExcludedInvalid
 	}
 	if e.Kind == event.KindSER && (afterFailure || catchUp(e)) {
 		return k, text, UseTypeOnly, ExcludedNone

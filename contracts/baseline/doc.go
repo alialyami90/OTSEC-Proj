@@ -26,9 +26,11 @@
 //     kinds other than ser and syslog, and events flagged asset-unresolved
 //     belong to no asset's baseline (A6's invariant). The node counts
 //     asset-unresolved events in a site-level total only, so a stranger flood
-//     stays visible without entering any asset's normal. A SER row with no
-//     normalized form is unkeyed: it is counted in the baseline's coverage,
-//     and its parse failure is already a V-S12 health event.
+//     stays visible without entering any asset's normal. Every other SER and
+//     Syslog event has a key (KeyOf), so no stored row is left out of
+//     learning or alarms: a SER row the parser could not read, such as the
+//     relay's own "Relay Settings Changed" (S22 p. 10.39), is keyed on the
+//     template of its native bytes (B2 and B1 on #254).
 //   - Catch-up (D4-4 item 2). Every row of one SER read shares one
 //     received.utc, so a read that returns many old rows at once is not a
 //     burst. Rows aligned first-read or gap-before, and every row of the

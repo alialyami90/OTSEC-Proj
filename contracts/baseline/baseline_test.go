@@ -33,7 +33,7 @@ func valid() *Baseline {
 			CollectedS: 14 * 86400,
 			Gaps:       []Gap{{FromUTC: "2026-11-03T10:00:00Z", ToUTC: "2026-11-03T12:00:00Z", Reason: "failed.timeout"}},
 		},
-		Counts: Counts{Events: 260, Full: 250, TypeOnly: 5, Unkeyed: 3, NotCounted: 2},
+		Counts: Counts{Events: 257, Full: 250, TypeOnly: 5, NotCounted: 2},
 		Types: []Type{
 			{Key: Key{Source: SourceSER, Element: "51P1P", State: "Asserted"}, Text: "51P1P Asserted",
 				Count: 10, Full: 5, HoursUTC: hours(14, 5), MaxPerWindow: 2, MaxPerBucket: 2,
@@ -89,7 +89,7 @@ func TestBaselineRules(t *testing.T) {
 		{"type outside period", func(b *Baseline) { b.Types[1].FirstUTC = "2026-10-31T00:00:00Z" }, CodeOrder},
 		{"text bound", func(b *Baseline) { b.Types[0].Text = strings.Repeat("x", TextMax+1) }, CodeForm},
 		{"max per bucket over full", func(b *Baseline) { b.Types[0].MaxPerBucket = 6 }, CodeRange},
-		{"types nil", func(b *Baseline) { b.Types = nil; b.Counts = Counts{Events: 260, Unkeyed: 258, NotCounted: 2} }, CodeMissing},
+		{"types nil", func(b *Baseline) { b.Types = nil; b.Counts = Counts{Events: 2, NotCounted: 2} }, CodeMissing},
 		{"recorded before end", func(b *Baseline) { b.RecordedUTC = "2026-11-15T01:00:00Z" }, CodeOrder},
 	}
 	for _, tc := range cases {
@@ -208,7 +208,9 @@ func TestClassify(t *testing.T) {
 		{"ser gap before", serRow("51P1P", "Asserted", event.AlignGapBefore, "gap-before"), false, UseTypeOnly, ExcludedNone},
 		{"ser after failure", serRow("51P1P", "Asserted", event.AlignOK), true, UseTypeOnly, ExcludedNone},
 		{"ser possible duplicate", serRow("51P1P", "Asserted", event.AlignPossibleDuplicate, "possible-duplicate"), false, UseFull, ExcludedNone},
-		{"ser unkeyed", serRow("", "", event.AlignOK), false, UseNone, ExcludedUnkeyed},
+		{"ser unparsed is keyed", relayRow("2    10/24/2026 09:10:01.004   Relay Settings Changed", event.AlignOK), false, UseFull, ExcludedNone},
+		{"ser unparsed catch-up", relayRow("2    10/24/2026 09:10:01.004   Relay Settings Changed", event.AlignFirstRead), false, UseTypeOnly, ExcludedNone},
+		{"ser no record hash", serRow("", "", event.AlignOK), false, UseNone, ExcludedInvalid},
 		{"syslog", syslogMsg("pri", "13", "msg", "x"), false, UseFull, ExcludedNone},
 		{"syslog after failure is live", syslogMsg("pri", "13", "msg", "x"), true, UseFull, ExcludedNone},
 		{"asset unresolved", unresolved, false, UseNone, ExcludedUnresolved},

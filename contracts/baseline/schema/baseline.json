@@ -181,7 +181,6 @@
         "events",
         "full",
         "type_only",
-        "unkeyed",
         "not_counted",
         "types_overflow"
       ],
@@ -195,10 +194,6 @@
           "minimum": 0
         },
         "type_only": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "unkeyed": {
           "type": "integer",
           "minimum": 0
         },
@@ -246,7 +241,7 @@
       "required": [
         "source"
       ],
-      "description": "SER: element and state. Syslog: facility and severity (decimal, or both pri-absent), and the template.",
+      "description": "SER: element and state, or for a row with no normalized form the template of its native bytes, or without bytes its record (sha256 of record_sha256): exactly one. Syslog: facility and severity (decimal, or both pri-absent), and the template.",
       "properties": {
         "source": {
           "enum": [
@@ -271,6 +266,9 @@
           "pattern": "^(pri-absent|[0-7])$"
         },
         "template": {
+          "$ref": "#/$defs/sha256_ref"
+        },
+        "record": {
           "$ref": "#/$defs/sha256_ref"
         }
       }

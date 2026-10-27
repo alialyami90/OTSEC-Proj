@@ -1,6 +1,8 @@
 package baseline
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +25,70 @@ func serRow(subject, value string, align event.Alignment, flags ...string) *even
 		e.Normalized = &event.Normalized{Subject: subject, SubjectType: "relay-word-bit", Value: value, Category: event.Unmapped}
 	}
 	return e
+}
+
+// relayRow is a SER row the parser did not read, carrying its native bytes,
+// as the SER normalizer stores one (parse_status failed).
+func relayRow(line string, align event.Alignment) *event.Event {
+	e := serRow("", "", align)
+	e.Collection.ParseStatus = event.ParseFailed
+	sum := sha256.Sum256([]byte(line))
+	e.Native.Bytes, e.Native.RecordSHA256, e.Native.RecordLength = []byte(line), hex.EncodeToString(sum[:]), int64(len(line))
+	return e
+}
+
+// TestUnparsedSERRowIsKeyed: a SER row the parser cannot read still has a
+// type, so the relay's own "Relay Settings Changed" (S22 p. 10.39), the
+// signal for the change P4-A2 watches, alarms as a new type (B2, B1 on
+// #254). The row layout is the experiment parser's reading of p. 10.39,
+// flagged layout-unconfirmed there; the template does not depend on it.
+func TestUnparsedSERRowIsKeyed(t *testing.T) {
+	changed, text := mustKey(t, relayRow("2    10/24/2026 09:10:01.004   Relay Settings Changed\r\n", event.AlignOK))
+	if changed.Source != SourceSER || changed.Template == "" || changed.Element != "" || changed.Record != "" {
+		t.Fatalf("key %+v", changed)
+	}
+	if text != "#    #/#/# #:#:#.#   Relay Settings Changed" {
+		t.Errorf("text %q", text)
+	}
+	// The same message on a later read, renumbered and at another time, is
+	// the same type; another message is another.
+	again, _ := mustKey(t, relayRow("7    10/25/2026 18:00:59.120   Relay Settings Changed", event.AlignOK))
+	powered, _ := mustKey(t, relayRow("1    10/24/2026 09:00:00.000   Relay Powered Up", event.AlignOK))
+	if again != changed || powered == changed {
+		t.Errorf("changed %v, again %v, powered %v", changed, again, powered)
+	}
+	// A parsed row never shares a key with an unparsed one.
+	parsed, _ := mustKey(t, serRow("Relay", "Settings Changed", event.AlignOK))
+	if parsed == changed {
+		t.Error("parsed and unparsed rows share a key")
+	}
+	// Without its bytes on the event the row keys on its record hash: a
+	// type of its own, which alarms as new once active, never left out.
+	bare := relayRow("2    10/24/2026 09:10:01.004   Relay Settings Changed", event.AlignOK)
+	bare.Native.Bytes = nil
+	rec, _ := mustKey(t, bare)
+	if rec.Record != "sha256:"+bare.Native.RecordSHA256 || rec.Template != "" {
+		t.Errorf("no bytes: %+v", rec)
+	}
+}
+
+// TestSERKeyFormsAreExclusive: a SER key is one of its three forms.
+func TestSERKeyFormsAreExclusive(t *testing.T) {
+	h := "sha256:" + strings.Repeat("a", 64)
+	for _, k := range []Key{
+		{Source: SourceSER, Element: "51P1P", State: "Asserted", Template: h},
+		{Source: SourceSER, Element: "51P1P", State: "Asserted", Record: h},
+		{Source: SourceSER, Template: h, Record: h},
+		{Source: SourceSER, Element: "51P1P"},
+		{Source: SourceSER},
+		{Source: SourceSER, Template: "sha256:x"},
+		{Source: SourceSER, Record: "x"},
+		{Source: SourceSyslog, Facility: "4", Severity: "6", Template: h, Record: h},
+	} {
+		if err := k.Validate(); err == nil {
+			t.Errorf("%+v accepted", k)
+		}
+	}
 }
 
 func syslogMsg(fields ...string) *event.Event {
@@ -159,6 +225,9 @@ func TestKeyStringRoundTrips(t *testing.T) {
 	keys := []Key{
 		{Source: SourceSER, Element: "A|B%", State: "Asserted"},
 		{Source: SourceSER, Element: "51P1P", State: "Deasserted"},
+		{Source: SourceSER, Template: "sha256:" + strings.Repeat("a", 64)},
+		{Source: SourceSER, Record: "sha256:" + strings.Repeat("b", 64)},
+		{Source: SourceSER, Element: "raw", State: "template"},
 		{Source: SourceSyslog, Facility: PRIAbsent, Severity: PRIAbsent, Template: "sha256:" + strings.Repeat("0", 64)},
 	}
 	for _, k := range keys {
@@ -167,7 +236,7 @@ func TestKeyStringRoundTrips(t *testing.T) {
 			t.Errorf("%q: %+v %v", k.String(), got, err)
 		}
 	}
-	for _, bad := range []string{"", "ser|x", "ser|a|b|c", "syslog|4|6|msgid|ID47", "syslog|4|6|template|x",
+	for _, bad := range []string{"", "ser|x", "ser|a|b|c", "syslog|4|6|msgid|ID47", "ser|raw|template|x", "ser|raw|other|sha256:" + strings.Repeat("0", 64), "syslog|4|6|template|x",
 		"syslog|4|9|template|sha256:" + strings.Repeat("0", 64), "syslog|04|6|template|sha256:" + strings.Repeat("0", 64),
 		"syslog|pri-absent|6|template|sha256:" + strings.Repeat("0", 64), "syslog|4|6", "ser|a%2|b", "ser|a%7c|b", "other|a|b"} {
 		if _, err := ParseKey(bad); err == nil {
