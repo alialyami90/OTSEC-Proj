@@ -98,7 +98,9 @@ type Params struct {
 	MinEvents    int64 `json:"min_events"`
 	// Repeats: an alarm when one type occurs more than RepeatsN times within
 	// RepeatsWindowS and the baseline's MaxPerWindow for it is below
-	// RepeatsN.
+	// RepeatsN. The window of an occurrence at t holds the occurrences in
+	// (t - RepeatsWindowS, t]: two exactly RepeatsWindowS apart are in
+	// different windows (B6 on #254).
 	RepeatsN       int64 `json:"repeats_n"`
 	RepeatsWindowS int64 `json:"repeats_window_s"`
 	// Rate: buckets of RateBucketS from the Unix epoch, on received time.
@@ -114,8 +116,10 @@ type Params struct {
 	// consecutive occurrences lies within PeriodicSpreadPct of the median
 	// gap (|gap - median| × 100 ≤ median × PeriodicSpreadPct). The median
 	// is the upper middle of the sorted gaps, gaps[len/2], and is the
-	// type's IntervalS. Its absence alarm comes once the type is missing
-	// past IntervalS + Tolerance(IntervalS, AbsenceTolerancePct). Learning
+	// type's IntervalS. With last its latest occurrence and deadline last +
+	// IntervalS + Tolerance(IntervalS, AbsenceTolerancePct), an occurrence
+	// in (last, deadline] is in time; if none comes, the absence alarm is
+	// raised at deadline (B6 on #254). Learning
 	// a period wants a tight spread; tolerating jitter wants a looser bound,
 	// so the two are separate (B6's GT-INJ, #251).
 	PeriodicMinOccurrences int64 `json:"periodic_min_occurrences"`
