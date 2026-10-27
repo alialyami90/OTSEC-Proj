@@ -120,7 +120,7 @@ def test_events_observation_period(ev):
 
 
 def test_events_three_departures_of_each_kind(ev):
-    after = [d for d in ev["departures"] if not d.get("before_ack")]
+    after = [d for d in ev["departures"] if not d.get("before_ack") and not d.get("catch_up")]
     assert collections.Counter(d["kind"] for d in after) == {k: 3 for k in ("new", "repeats", "rate", "time", "absence")}
     ack = seconds(ev["period"]["baseline_ack"])
     for d in after:
@@ -183,7 +183,7 @@ def test_events_syslog_key_is_the_template(ev):
     news = [d for d in ev["departures"] if d["kind"] == "new" and d["asset"] == "gt-inj-syslog"]
     by_id = {e["id"]: e for e in ev["events"]}
     assert any(by_id[d["events"][0]]["msgid"] in known_ids for d in news)
-    (ctl,) = ev["controls"]
+    (ctl,) = [c for c in ev["controls"] if "msgid" in c["what"]]
     assert len(ctl["events"]) == 3 and all(by_id[i]["msgid"] not in known_ids for i in ctl["events"])
     assert not any(set(a["events"]) & set(ctl["events"]) for a in ev["expected_alarms"])
 
@@ -219,3 +219,43 @@ def test_events_rate_alarms_list_up_to_the_break(ev):
         bound = max(-(-g.PARAMS["rate_factor_pct"] * b["most_per_bucket"] // 100), g.PARAMS["rate_min"])
         assert len(a["events"]) == bound + 1, a
         assert by_id[a["events"][-1]]["t"] == seconds(a["at"]), a
+
+
+def test_events_catch_up_rows_are_type_only(ev):
+    """D4-4 item 2 as D4-9 amends it: SER rows aligned first-read or
+    gap-before count toward the new-type rule only. The first read is the
+    SER stream's earliest, in the observation period; the gap-before read
+    is after the acknowledgement; neither raises anything, and the new type
+    read in the gap-before backlog still alarms."""
+    al = collections.Counter(e.get("alignment") for e in ev["events"])
+    assert set(al) == {None, *g.CATCH_UP}, al
+    assert all(e["asset"] == "gt-inj-ser" for e in ev["events"] if e.get("alignment"))
+    ser = [e for e in ev["events"] if e["asset"] == "gt-inj-ser"]
+    t0 = min(e["t"] for e in ser)
+    first = [e for e in ser if e.get("alignment") == "first-read"]
+    assert {e["t"] for e in first} == {t0} and [e for e in ser if e["t"] == t0] == first
+    assert t0 == seconds(ev["period"]["first_event"]["gt-inj-ser"]) < seconds(ev["period"]["end"])
+    ack = seconds(ev["period"]["baseline_ack"])
+    gap = [e for e in ser if e.get("alignment") == "gap-before"]
+    assert len({e["t"] for e in gap}) == 1 and gap[0]["t"] > ack
+    by_id = {e["id"]: e for e in ev["events"]}
+    for c in ev["controls"]:
+        if "alignment" in c:
+            assert c["events"] and all(by_id[i].get("alignment") == c["alignment"] for i in c["events"]), c["what"]
+        assert c["expect_rules"] == [] and not any(set(a["events"]) & set(c["events"]) for a in ev["expected_alarms"])
+    (cu,) = [d for d in ev["departures"] if d.get("catch_up")]
+    assert cu["catch_up"] == "gap-before" and cu["kind"] == "new" and cu["expect_rules"] == ["new"]
+    assert by_id[cu["events"][0]]["t"] == gap[0]["t"]
+    assert any(a["rule"] == "new" and a["events"] == cu["events"] for a in ev["expected_alarms"])
+
+
+def test_events_catch_up_is_not_vacuous(ev):
+    """Taken as full, the first-read backlog would hide a repeats or rate
+    departure on gt-inj-ser, and the gap-before backlog would raise
+    repeats, rate and time: so a product that ignores the alignment fails
+    these schedules."""
+    end, ack, test_end = (seconds(ev["period"][k]) for k in ("end", "baseline_ack", "test_end"))
+    lost, extra = g.catch_up_counterfactual(ev["events"], end, ack, test_end, ev["departures"])
+    assert {d["kind"] for d in lost} & {"repeats", "rate"} and all(d["asset"] == "gt-inj-ser" for d in lost), lost
+    (gap,) = [c for c in ev["controls"] if c.get("alignment") == "gap-before"]
+    assert {a["rule"] for a in extra if set(a["events"]) & set(gap["events"])} == {"repeats", "rate", "time"}, extra

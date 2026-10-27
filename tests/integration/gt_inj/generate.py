@@ -216,6 +216,15 @@ NEW_TYPES = {"gt-inj-ser": [("TRIP", "Asserted"), ("51P1T", "Asserted"), ("OUT10
                                (16, 3, "CFGWRITE", "Settings written to group {n}"),
                                (16, 2, "PWRUP", "Power up {n}")]}
 ASSETS = {"gt-inj-ser": SER_TYPES, "gt-inj-syslog": SYSLOG_TYPES}
+# Catch-up (D4-4 item 2 as D4-9 amends it, C10 Use): a SER row aligned
+# first-read or gap-before may have waited in the device's buffer, so it is
+# type-only. It enters the type set and counts toward the new-type rule
+# only, and no other rule learns from it or fires on it. Rows without
+# "alignment" are aligned "ok", so they are full.
+CATCH_UP = ("first-read", "gap-before")
+# The new type read in the gap-before backlog: a catch-up row still raises
+# the new-type rule.
+CATCH_UP_NEW = ("81D1T", "Asserted")
 SLOTS = (5 * 60, 35 * 60)
 P_COUNT = (0.72, 0.22, 0.06)  # per type, hour and day: 0, 1 or 2 events
 
@@ -239,6 +248,11 @@ def make_event(asset, key, t, msgid=None):
                  msg=key[3].format(n=(t // 3600) % 9 + 1))
     e["t"] = t
     return e
+
+
+def full(e):
+    """Whether every rule learns from e and fires on it (C10 UseFull)."""
+    return e.get("alignment") not in CATCH_UP
 
 
 def tkey(asset, key):
@@ -273,12 +287,17 @@ def benign_day(rng, day, peak=frozenset()):
 def baseline(events):
     """B6's reading of what the baseline learns, per type: the hours seen,
     the most in one clock-hour bucket, the most in any w_s window, and the
-    interval of a periodic type."""
+    interval of a periodic type, from full events only. A type seen only
+    in catch-up rows is known and has nothing else learned."""
     p = PARAMS
     by = {}
+    known = set()
     for e in events:
-        by.setdefault((e["asset"], key_of(e)), []).append(e["t"])
-    out = {}
+        known.add((e["asset"], key_of(e)))
+        if full(e):
+            by.setdefault((e["asset"], key_of(e)), []).append(e["t"])
+    out = {k: {"hours": [], "most_per_bucket": 0, "most_per_window": 0, "interval": None, "last": None}
+           for k in known - by.keys()}
     for k, ts in by.items():
         ts.sort()
         buckets = {}
@@ -312,6 +331,10 @@ def evaluate(base, events, start, end):
         name = list(key)
         if b is None:
             alarms.append(dict(rule="new", asset=asset, type=name, at=es[0]["t"], events=[es[0]["id"]]))
+            continue
+        # Rules 2 to 5 fire on full events only.
+        es = [e for e in es if full(e)]
+        if not es:
             continue
         ts = [e["t"] for e in es]
         # 2. repeats: one alarm per run of events that each close a window
@@ -347,13 +370,31 @@ def evaluate(base, events, start, end):
         if not b["interval"]:
             continue
         limit = b["interval"] + ceil_div(b["interval"] * p["absence_tolerance_pct"], 100)
-        ts = [b["last"]] + [e["t"] for e in by.get(k, [])]
+        ts = [b["last"]] + [e["t"] for e in by.get(k, []) if full(e)]
         ts.append(end)
         for a, c in zip(ts, ts[1:]):
             if c - a > limit and a + limit >= start:
                 alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=a + limit, events=[]))
     alarms.sort(key=lambda a: (a["at"], a["rule"], a["asset"]))
     return alarms
+
+
+def catch_up_counterfactual(events, period_end, ack, end, departures):
+    """What the catch-up rows would change if every rule took them: the
+    departures after the acknowledgement whose own kind no longer alarms
+    when the observation period is learned with every row full, and the
+    alarms that appear when the test period is evaluated with every row
+    full."""
+    as_full = lambda evs: [{k: v for k, v in e.items() if k != "alignment"} for e in evs]
+    obs = [e for e in events if e["t"] < period_end]
+    test = [e for e in events if e["t"] >= ack]
+    base = baseline(obs)
+    with_obs = evaluate(baseline(as_full(obs)), test, ack, end)
+    lost = [d for d in departures if not d.get("before_ack") and d["kind"] != "absence"
+            and not any(a["rule"] == d["kind"] and set(a["events"]) & set(d["events"]) for a in with_obs)]
+    now = evaluate(base, test, ack, end)
+    extra = [a for a in evaluate(base, as_full(test), ack, end) if a not in now]
+    return lost, extra
 
 
 def number(events, prefix):
@@ -375,6 +416,17 @@ def event_series():
     events = []
     for day in range(obs_days + 1 + TEST_DAYS):
         events += benign_day(rng, day, frozenset(peaks.get(day, ())))
+    # Catch-up, first read: the SER stream's first read, a minute before its
+    # first benign row, returns a backlog of repeats_n + 1 rows of every SER
+    # type at one received time. Learned as full it would lift every type's
+    # most-per-window to the repeats bound and its most-per-bucket over it,
+    # and the repeats and rate departures on gt-inj-ser would raise nothing.
+    ser0 = min(e["t"] for e in events if e["asset"] == "gt-inj-ser") - 60
+    for key in SER_TYPES:
+        for _ in range(PARAMS["repeats_n"] + 1):
+            e = make_event("gt-inj-ser", key, ser0)
+            e["alignment"] = e["control"] = "first-read"
+            events.append(e)
     first = {a: min(e["t"] for e in events if e["asset"] == a) for a in ASSETS}
     period_end = max(first.values()) + obs_days * DAY
     for a in ASSETS:
@@ -389,6 +441,8 @@ def event_series():
         evs = [make_event(asset, key, t) for t in ts]
         for e in evs:
             e["injected"] = f"dep-{len(departures) + 1:02d}"
+            if "catch_up" in extra:
+                e["alignment"] = extra["catch_up"]
         events.extend(evs)
         departures.append(dict(id=f"dep-{len(departures) + 1:02d}", kind=kind, asset=asset, type=list(key_of(make_event(asset, key, 0))),
                                at=ts[0] if ts else extra["gap_from"], **extra))
@@ -433,16 +487,36 @@ def event_series():
             # factor x 2 + 1 in the hour, spaced so no w_s window holds n.
             k = PARAMS["rate_factor_pct"] * 2 // 100 + 1
             inject(kind, asset, key, [base_t + 120 + i * (3480 // k) for i in range(k)])
+    # Catch-up, gap-before: on the fourth test day at 23:40, an hour no SER
+    # type was ever seen in, one read returns twice the rate factor plus one
+    # rows of a known type (over the repeats bound and over that type's
+    # rate bound) and one row of a new type, all aligned gap-before. Only
+    # the new type alarms.
+    cu_t = test0 + 3 * DAY + 23 * 3600 + 40 * 60
+    for _ in range(PARAMS["rate_factor_pct"] * 2 // 100 + 1):
+        e = make_event("gt-inj-ser", ("SALARM", "Asserted"), cu_t)
+        e["alignment"] = e["control"] = "gap-before"
+        events.append(e)
+    inject("new", "gt-inj-ser", CATCH_UP_NEW, [cu_t], catch_up="gap-before")
     events = [e for e in events if "injected" in e or (e["asset"], key_of(e), e["t"] // 3600) not in remove]
     # Controls: three benign LOGIN events in the test period sent with
     # another msgid. Their key is unchanged, so they must raise nothing.
     logins = [e for e in events if e["t"] >= test0 and "injected" not in e and e.get("msgid") == "LOGIN"
               and key_of(e) == key_of(make_event("gt-inj-syslog", list(SYSLOG_TYPES)[0], 0))]
     for e in rng.sample(logins, 3):
-        e["msgid"], e["control"] = "LOGIN-B", True
+        e["msgid"], e["control"] = "LOGIN-B", "msgid"
     number(events, "ev")
+    ids = lambda tag: [e["id"] for e in events if e.get("control") == tag]
     controls = [dict(what="a known Syslog text under another msgid is not a new type (D4-4 item 4)",
-                     events=[e["id"] for e in events if e.get("control")], expect_rules=[])]
+                     events=ids("msgid"), expect_rules=[]),
+                dict(what="a first-read backlog in the observation period, repeats_n + 1 rows of every SER type at one "
+                          "received time: type-only (D4-9), so the baseline learns the types and nothing else from it, "
+                          "and the repeats and rate departures on gt-inj-ser still alarm",
+                     alignment="first-read", events=ids("first-read"), expect_rules=[]),
+                dict(what="a gap-before backlog after the acknowledgement, more than the repeats and rate bounds of a "
+                          "known type at an hour it was never seen in: type-only (D4-9), so it raises no repeats, rate or "
+                          "time alarm; the new type read with it still alarms (its departure has catch_up)",
+                     alignment="gap-before", events=ids("gap-before"), expect_rules=[])]
     by_dep = {}
     for e in events:
         if "injected" in e:
@@ -476,7 +550,13 @@ def event_series():
                                                       for d in departures))]
     assert not benign, benign
     assert any(a["rule"] == "new" for a in pre), pre
-    assert not any(set(a["events"]) & set(controls[0]["events"]) for a in alarms)
+    for c in controls:
+        assert not any(set(a["events"]) & set(c["events"]) for a in alarms + pre), c["what"]
+    # The catch-up cases are not met vacuously: learned or evaluated as full,
+    # each would change the alarms.
+    lost, extra = catch_up_counterfactual(events, period_end, ack, end, departures)
+    assert {d["kind"] for d in lost} >= {"repeats"} or {d["kind"] for d in lost} >= {"rate"}, lost
+    assert {a["rule"] for a in extra if set(a["events"]) & set(controls[2]["events"])} == {"repeats", "rate", "time"}, extra
     for e in events:
         e.pop("t")
         e.pop("injected", None)
