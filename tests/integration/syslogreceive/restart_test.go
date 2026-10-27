@@ -177,10 +177,11 @@ const markerDrops = 20
 //     counted stored is not in the store: a real loss, which fails; and
 //     markerDrops sends in a row each read alone and dropped, while the
 //     receiver held nothing, are the receiver dropping A's marker itself,
-//     which fails with the reason; a marker the store refused (reason
-//     store, LastErr "store: ...") fails at once as a store failure, not
-//     the receiver's: a failed commit stops the C5 log, so no later send
-//     could be stored;
+//     which fails with the reason; a marker the store refused or failed
+//     (reason store, LastErr "store: ...") fails at once as a store
+//     failure, not the receiver's: in this rig neither a refusal nor a
+//     failure is expected, and a failed commit stops the C5 log, so no
+//     later send could be stored (B5 on #255);
 //   - messages held while the writer waits on an empty queue were lost
 //     without a count, which fails;
 //   - settled with nothing read for markerUnread while markers are sent:
@@ -249,7 +250,8 @@ func (g *rig) awaitMarker(known net.Conn, mark string, rows0 int64, st0 receive.
 			alone := sent > 0 && st.Received-last.Received == 1 && dropped(st)-dropped(last) == 1 && st.Stored == last.Stored
 			switch {
 			case alone && st.Dropped[receive.DropStore] > last.Dropped[receive.DropStore] && strings.HasPrefix(st.LastErr, "store: "):
-				g.t.Fatalf("marker %q: the store refused it (%s): a store failure, not a drop the receiver made", mark, st.LastErr)
+				g.t.Fatalf("marker %q: the store refused or failed it (log stopped: %v; %s): a store failure, not a drop the receiver made",
+					mark, strings.Contains(st.LastErr, string(c5.CodeLogStopped)), st.LastErr)
 			case alone:
 				dropRounds++
 			default:
