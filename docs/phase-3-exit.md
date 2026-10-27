@@ -25,7 +25,7 @@ This report closes Phase 3: hardening the simulated SEL-751 slice so that a `dev
 | V-M1 to V-M8 criteria; the `SHO G` simulator switch; V-S8 end to end; independent tests for every Phase 3 PR; property-based waits for slow runners; the relay end-to-end check; the unknown-budget restart check on the real binaries; the `uintptr` AST rule | A6 | #142, #144, #158, #166, #172, #188, #191, #194, #195, #199 | A1, and the owners of what each test covers |
 | ADR-0008, Phase 3 briefs, D3-1 to D3-11, HR-11 and HR-12, Go 1.26.10 | A1 (A3 for the threat model) | #143, #148, #161, #162, #165, #168, #171, #192, #200 | A3, A6 and affected owners |
 
-**Not merged at this draft:** #179 (A5, the harness's Windows service mode, which gate item 1 runs on). Deferred until after the gate, on A5's recommendation, because neither is on the gate path: #176 (the node reading its TLS keys from the key store) and #177. Relay PR 2 of #181 (signed `clear-*` files and A5's N1/N3 items) is not started.
+**Not merged at this draft:** #179 (A5, the harness's Windows service mode, which gate item 1 runs on) and #204 (A5's handoff). Open A5 PRs deferred until after the gate, because none is on the gate path: #176 (the node reading its TLS keys from the key store), #177, #181 (the signed-files design, whose PR 1 became #189) and #182 (the refused-identity detail and the record-bound comment). Relay PR 2 of #181 (signed `clear-*` files and A5's N1/N3 items) is not started.
 
 Contract versions on `main`:
 
@@ -75,7 +75,7 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 
 | Gate item (`docs/agent-handoffs.md`, "Phase 3 exit gate") | State |
 | --- | --- |
-| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Not met.** The harness's service mode (#179) has run on the hosted Windows runner, elevated, against the real installer: the service-mode files passed with nothing left behind (runs listed on #179). The owner's run needs #179 merged, the owner's choice of how the PC gets Go 1.26.10, and the owner's own elevated session. |
+| The slice passes against the installed Windows services on the owner's PC from one commit on `main` | **Not met.** The harness's service mode (#179) has run on the hosted Windows runner, elevated, against the real installer: in run svcdry6 every service-mode test passed with nothing left behind; its other errors came from the admin-relay leg's platform check, which #199 fixed. The rerun on #179's merged head (f0d6e31, Go 1.26.10) is svcdry7. The owner's run needs #179 merged, the owner's choice of how the PC gets Go 1.26.10, and the owner's own elevated session. |
 | C7 0.4, the C1 path field, the `DATE_F` read and the key store merged with reviewers' records, and A6's negative tests pass in CI | **Met, with one condition.** The key store is merged and tested, but the node does not read its TLS keys from it yet (#176); the D2-12 file resolver stays behind its lab flag until then. |
 | The quarantine export and clear, and the failed-open retry, merged and tested | **Met.** |
 | V-S8 passes end to end, and received Syslog passes A6's tests end to end on the real binaries | **Met**, `simulated`. |
@@ -95,7 +95,7 @@ A6's "Phase 3 status" table in `docs/verification.md` and `docs/phase3/A6-handof
 - **Signed `clear-*` files** (relay PR 2 of #181) are not built, so the clear-suspension and clear-quarantine files are still unsigned administrator files under D2-15's folder rule.
 - **The full DMY and YMD slice reconcile** has not run (A2 and A6).
 - **Not run, carried from Phase 2:** V-S7's 24-hour soak, (c) and (d); V-S6's link cut in the middle of a SER read; V-S9's file-system exhaustion; V-S15's hostile framing end to end on the SER path; V-S18 and V-S20.
-- **A5's Phase 3 handoff** is owed.
+- **A5's Phase 3 handoff** is open as #204.
 
 ## Unverified assumptions
 
