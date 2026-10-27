@@ -715,3 +715,13 @@ func TestPlanSpacesSessionsPerAsset(t *testing.T) {
 		}
 	}
 }
+
+// A refused peer's alarm keeps the node's own reason and says "refused"
+// once (A3 on #182).
+func TestNoDecisionDetailPeerRefused(t *testing.T) {
+	err := fmt.Errorf("%w: %v", collectorwire.ErrPeerRefused, "pipe server runs as S-1-5-80-1, want S-1-5-80-2")
+	got := noDecisionDetail(fmt.Errorf("collectorclient: %w", err))
+	if want := "the collector's identity was refused: pipe server runs as S-1-5-80-1, want S-1-5-80-2"; got != want {
+		t.Errorf("detail %q, want %q", got, want)
+	}
+}
