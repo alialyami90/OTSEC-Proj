@@ -126,7 +126,7 @@ These were settled with evidence; don't reopen them without new evidence.
   - `platform/node` hit its 10 min timeout while `TestBusyOpenRetryKeepsUnknownSuspensionsHeld` was 8 s into a store open waiting on a lock, and `TestListenerUsesSizedBudget` failed first: 40 messages received, but only 28 stored or dropped within the 10 s window of `flood`;
   - `tests/integration/syslogreceive` reported "Serve did not return".
 
-  A flush that does not return points to the runner's disk, not to one test's logic. It is the only such run in the 25 CI runs before it.
+  A flush that does not return points to the runner's disk, not to one test's logic. It was not the only one: job 122347974504 (run 40549190723, #214, at the same time) timed out `platform/node` with `TestBadSuspensionRecordHoldsEverything` in `FlushFileBuffers` during a store open. Both jobs ran while about ten handoff runs started together. #230 tracks both, with B6's reading (`platform/node` normally uses 53 to 76 percent of the 600 s budget) and B5's items.
 
   The #172 hang (`TestOpenBesideReaderAfterKill`, a crash child that never exited) left no stacks, so it cannot be shown to be the same cause. It fits the same class: a Windows I/O call that does not return, which would also keep a process that is exiting from finishing. #177's child timeout and goroutine dump are what would tell them apart.
 - **#182's record bound needs a fresh measurement, not only #174's.** `TestReceivedRecordBound` normalizes each frame with `Auth: AuthNone`, an IPv4 sender, and no `AssetID` or `SenderCert`. A real stored event can be larger in three ways:
