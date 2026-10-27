@@ -30,7 +30,7 @@ On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6. The roles and sc
 
 | Path | Purpose | Owner |
 | --- | --- | --- |
-| `docs/` | Requirements, architecture, threat model, device capabilities, verification, handoffs, decision records | A1 (shared); A6 owns `docs/verification.md` |
+| `docs/` | Requirements, architecture, threat model, device capabilities, verification, handoffs, decision records | A1 (shared); A6 owns `docs/verification.md`, A3 `docs/threat-model.md`, A2 `docs/device-capabilities.md` (A1 reviews both) |
 | `handoffs/` | The A-to-B team handoff: the summary, one handoff and one acknowledgement per agent | A1 (summary); each agent its own files |
 | `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | A1 (each contract drafted by its owner) |
 | `cmd/otsec/` | The site node binary (composition root) | A5 |
@@ -43,7 +43,8 @@ On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6. The roles and sc
 | `tests/fixtures/ied/` | Sanitized real device outputs | A2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | A4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | A6 |
-| `go.mod`, `.github/workflows/ci.yml` | Dependencies and CI (ten jobs, the main test path, D2-13) | A1 (`a6-*.yml` workflows: A6) |
+| `go.mod`, `.github/workflows/ci.yml` | Dependencies and CI (ten jobs, the main test path, D2-13; Markdown-only PRs skip it, D3-13) | A1 (`a6-*.yml` workflows: A6; `a5-windows-experiments.yml`: A5, changes authorized by A1) |
+| `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | A1 (`contracts/node` maintained by A4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). Agents modify only their owned paths unless explicitly authorized. Shared contracts change only through A1 with a documented proposal and review by affected owners.
 

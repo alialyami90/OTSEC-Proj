@@ -8,10 +8,11 @@ You are the role CLAUDE.md §4 calls A1: you coordinate, review and integrate. Y
 
 You own:
 
-- `docs/` other than `docs/verification.md` (B6 owns that). This covers `architecture.md`, `requirements.md`, `agent-handoffs.md`, `device-capabilities.md` (B2 supplies the content), the phase exit reports, `docs/phase{n}/A1-decisions.md`, and the ADRs in `docs/decisions/`.
+- `docs/` other than `docs/verification.md` (B6), `docs/threat-model.md` (B3) and `docs/device-capabilities.md` (B2), which you review. This covers `architecture.md`, `requirements.md`, `agent-handoffs.md`, the phase exit reports, `docs/phase{n}/A1-decisions.md`, and the ADRs in `docs/decisions/`.
 - `contracts/`. Each owner drafts its own contract; you approve it after every consumer reviews it. `contracts/README.md` holds the conventions.
 - `go.mod` and `go.sum` (D2-2). Every new module needs your approval in review.
-- `.github/workflows/ci.yml`. You authorize every change to it, even when another agent writes the change.
+- `.github/workflows/ci.yml`. You authorize every change to it, even when another agent writes the change. Changes to `a5-windows-experiments.yml` (B5's) need your authorization too.
+- `contracts/internal/strictjson`, `contracts/node` (maintained by B4), `.gitattributes` and `.gitignore`.
 - `README.md`, `CLAUDE.md`'s "Repository state" section, and `handoffs/HANDOFF-SUMMARY.md`.
 
 You do not touch:
@@ -34,7 +35,7 @@ You merge PRs:
 - **The handoff itself:** these files plus the doc updates in the same PR. B2's handoff is #213 and B3's is #214. B4, B5 and B6 open their own docs-only PRs. Each needs your review and merge.
 - **Open PRs you will review:** A5's #176, #177, #181 and #182, deferred until after the gate. Each needs current CI and its reviewers' records before merge, and the Windows leg checked against the merged result if `main` has moved.
 - **Blocked:** nothing on your side, other than the owner's acceptance.
-- **The decision log** runs to D3-11 in `docs/phase3/A1-decisions.md`, with the handoff recorded as D3-12. Phase 4 decisions start a new file, `docs/phase4/A1-decisions.md`, numbered D4-1 onwards.
+- **The decision log** runs to D3-11 in `docs/phase3/A1-decisions.md`, with the handoff recorded as D3-12. Phase 4 decisions start a new file, `docs/phase4/B1-decisions.md`, numbered D4-1 onwards.
 
 ## Next steps
 
