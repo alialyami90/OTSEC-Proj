@@ -133,8 +133,17 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	// runner the listener reads datagrams the OS held after the flood ends,
 	// past the planned span, and the budget has refilled by then (#179,
 	// job 121963456949: 1711491 bytes in T 5.15 s, under the 1744237 that
-	// T allows).
-	T := flood(planned)
+	// T allows). The flood runs for at least one window: a runner that
+	// takes the whole planned span to start the listener otherwise floods
+	// for 0 s and the floor has nothing to measure (#199, stress run on Go
+	// 1.26.0: T 5.53 s, flood 0s, stranger 0 bytes). Flooding past the
+	// planned end does not weaken the checks: inPlan counts only what was
+	// received by then, and the bound is taken at the T measured.
+	end := planned
+	if least := time.Now().Add(window); end.Before(least) {
+		end = least
+	}
+	T := flood(end)
 	inside, inPlan, rows := unknownBytes()
 	used := g.classBytes()
 	st := g.r.Status()
