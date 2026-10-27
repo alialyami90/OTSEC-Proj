@@ -86,7 +86,8 @@ func TestAcceptAfterClientWentAway(t *testing.T) {
 }
 
 // Listen grants the peer PROCESS_QUERY_LIMITED_INFORMATION on this process
-// and TOKEN_QUERY on its token, exactly those, and keeps every other entry.
+// and TOKEN_QUERY on its token, exactly those, in one entry each however
+// often it is called, and keeps every other entry.
 // Without them a node under another virtual account cannot check the
 // collector, and every dial fails closed (A5's service-mode dry run).
 func TestListenGrantsPeerQuery(t *testing.T) {
@@ -120,11 +121,15 @@ func TestListenGrantsPeerQuery(t *testing.T) {
 		}
 	}
 
-	ln, err := Listen(Endpoint{Address: testAddress(t), Peer: peer})
-	if err != nil {
-		t.Fatal(err)
+	// Twice, as a restarted listener in the same process would: the grant
+	// merges into one entry per object (A5 on #180).
+	for range 2 {
+		ln, err := Listen(Endpoint{Address: testAddress(t), Peer: peer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ln.Close()
 	}
-	ln.Close()
 
 	for i, o := range objects {
 		after := allowEntries(t, o.h)
