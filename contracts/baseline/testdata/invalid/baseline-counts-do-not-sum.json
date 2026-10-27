@@ -21,7 +21,7 @@
     "time_clock": "received",
     "max_types": 4096,
     "alarm_hold_s": 3600,
-    "max_alarms_per_hold": 16
+    "max_alarms_per_hold": 8
   },
   "period": {
     "start_utc": "2026-11-01T00:00:00Z",

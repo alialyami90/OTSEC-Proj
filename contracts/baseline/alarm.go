@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -23,6 +24,17 @@ const HealthAlarmsHeld = "baseline.alarms-held"
 // MaxEventIDs is the most event IDs an alarm lists in Events, and in
 // NotCounted; EventsTotal and NotCountedTotal give the full counts.
 const MaxEventIDs = 32
+
+// ExplainMax bounds BaselineValue and Observation, in bytes. MaxAlarmBytes
+// bounds an alarm's Health body encoded as JSON: the worst alarm Validate
+// accepts (63-character node IDs, 128-character streams, the largest seqs,
+// both lists full, every text at its bound and HTML-escaped) encodes to
+// 20,586 bytes (TestWorstAlarmFits), so the platform class can be sized
+// against a fixed number (B5 on #254).
+const (
+	ExplainMax    = 256
+	MaxAlarmBytes = 24 << 10
+)
 
 // Rule is a departure rule from "R4.8 observation period and measures".
 // Closed.
@@ -131,6 +143,9 @@ func (a *Alarm) Validate() error {
 	if a.BaselineValue == "" || a.Observation == "" {
 		c.fail(CodeMissing, "baseline_value/observation", "an alarm explains itself")
 	}
+	if len(a.BaselineValue) > ExplainMax || len(a.Observation) > ExplainMax {
+		c.fail(CodeRange, "baseline_value/observation", "at most %d bytes each", ExplainMax)
+	}
 	switch {
 	case a.Clock == ClockDevice && a.Rule != RuleTime:
 		c.fail(CodeConflict, "clock", "only the time rule may use device time")
@@ -196,7 +211,11 @@ func (a *Alarm) Health() (event.Health, error) {
 		}
 		d["not_counted"] = strings.Join(s, " ")
 	}
-	return event.Health{Type: HealthDeparture, Related: slices.Clone(a.Events), Details: d}, nil
+	h := event.Health{Type: HealthDeparture, Related: slices.Clone(a.Events), Details: d}
+	if b, err := json.Marshal(h); err != nil || len(b) > MaxAlarmBytes {
+		return event.Health{}, &Error{Code: CodeRange, Field: "alarm", Detail: fmt.Sprintf("health body %d bytes, above %d", len(b), MaxAlarmBytes)}
+	}
+	return h, nil
 }
 
 // AlarmFromHealth reads an alarm back from a C4 health event body and

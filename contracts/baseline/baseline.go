@@ -41,10 +41,15 @@ const MaxTypesCeiling = 4096
 // not fit.
 const MaxBytes = 512 << 10
 
-// MaxAlarmsPerHoldCeiling bounds Params.MaxAlarmsPerHold. It is
-// provisional: B5 sizes the platform class quota against it and may lower
-// or confirm it before 0.1 merges.
-const MaxAlarmsPerHoldCeiling = 16
+// MaxAlarmsPerHoldCeiling bounds Params.MaxAlarmsPerHold, and
+// MinAlarmHoldS is the shortest Params.AlarmHoldS. The platform class
+// refuses new events when full, so a departure storm must not fill it: per
+// asset an hour holds at most (8 + 1 held) × MaxAlarmBytes (B5 on #254).
+// Eight is still more than the five rules.
+const (
+	MaxAlarmsPerHoldCeiling = 8
+	MinAlarmHoldS           = 3600
+)
 
 // Clock is the clock a time rule used. Closed.
 type Clock string
@@ -346,6 +351,9 @@ func (p *Params) check(c *checker) {
 	}
 	if p.AbsenceTolerancePct < 0 || p.AbsenceTolerancePct > 100 {
 		c.fail(CodeRange, "params.absence_tolerance_pct", "%d is outside 0 to 100", p.AbsenceTolerancePct)
+	}
+	if p.AlarmHoldS != 0 && p.AlarmHoldS < MinAlarmHoldS {
+		c.fail(CodeRange, "params.alarm_hold_s", "%d is below %d", p.AlarmHoldS, MinAlarmHoldS)
 	}
 	if p.MaxAlarmsPerHold > MaxAlarmsPerHoldCeiling {
 		c.fail(CodeRange, "params.max_alarms_per_hold", "%d is above %d", p.MaxAlarmsPerHold, MaxAlarmsPerHoldCeiling)

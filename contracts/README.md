@@ -18,6 +18,7 @@ One Go package per contract, in the root module `otsec.local/otsec`:
 | C6 | `contracts/syslog` | `otsec.syslog/0.3` | A4 | Merged (#42, #59: `evc`; #81: D2-9 peer check by name and durable-write acknowledgement). 0.3 adds `tlsleaf`, the C4 0.2 sender fingerprint (Phase 3, A1). |
 | C7 | `contracts/authz` | `otsec.authz/0.5` | A3 | 0.1 merged (#38). 0.2 adds `asset.clear_suspension` and `suspension_mismatch` (D2-15, A1). 0.3 adds `asset_suspended` and the held suspension it names, which the node adopts (A6 on #120). 0.4 adds admin-signed requests (`admin_signed`, `VerifyAdminRequest`) and the `admin_unverified` refusal (D2-11, P3-A3). 0.5 adds the admin-signed node kinds `node.quarantine_clear` and `node.seq_reset_ack`, and on an accepted admin-signed request `repeat_of` and `admin` (P3-A3, A5's #181). |
 | C8 | `contracts/audit` | `otsec.audit/0.4` | A3 | 0.1 merged (#38); 0.2 adds the node-state actions (D2-15); 0.3 adds quarantine.exported and quarantine.cleared (P3-A5, D3-1); 0.4 adds the claimed and verified admin groups and repeat_of on collector.request (C7 0.5). |
+| C10 | `contracts/baseline` | `otsec.baseline/0.1` | B4 | Proposed (P4-A4, 2026-10-27): the R4.8 event-behaviour baseline of one asset (the event-type key, which events count, the record and its hash, D4-4 and D4-9), and the departure alarm as a C4 platform health event; approved with C9, C7 0.6 and C8 0.5 (`docs/phase4/B4-c10.md`). |
 | — | `contracts/version` | identifier parsing and the compatibility rule | A1 | Merged (#26). |
 | — | `contracts/node` | node ID and stream token, shared by C1 and C4 (D1-1) | A1 (maintained by A4) | Merged (#29). |
 
@@ -27,7 +28,7 @@ Each package contains:
 
 - `doc.go`: what the contract covers, what it deliberately leaves out, and the requirements, threat-model entries and V-S criteria it serves.
 - Go types for the contract, and a `Validate` function for every type that crosses a process or network boundary.
-- `schema/*.json` (JSON Schema 2020-12) for every message that crosses a process or network boundary: collector IPC (C2, C7), events (C4), the Syslog payload (C6) and audit records (C8). In-process interfaces (C5) are Go interfaces only.
+- `schema/*.json` (JSON Schema 2020-12) for every message that crosses a process or network boundary: collector IPC (C2, C7), events (C4), the Syslog payload (C6), audit records (C8) and event baselines and departure alarms (C10). In-process interfaces (C5) are Go interfaces only.
 - `testdata/`: valid and invalid golden examples, each with a one-line note on what it shows. Device-derived examples carry provenance per [tests/fixtures/README.md](../tests/fixtures/README.md) and are never presented as device captures.
 - `*_test.go`: the owner's tests. A6 writes independent contract tests under `tests/contract/`, which may import these packages but not the owner's test helpers.
 

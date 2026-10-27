@@ -150,6 +150,9 @@ func (k Key) Validate() error {
 			if !utf8.ValidString(k.Element) || !utf8.ValidString(k.State) {
 				return fmt.Errorf("baseline: a SER key is UTF-8")
 			}
+			if len(k.Element) > TextMax || len(k.State) > TextMax {
+				return fmt.Errorf("baseline: a SER element and state are at most %d bytes each", TextMax)
+			}
 		case tmpl && !named && !rec:
 			if !sha256Ref.MatchString(k.Template) {
 				return fmt.Errorf("baseline: template %q is not sha256:<hex>", k.Template)
@@ -244,7 +247,9 @@ func KeyOf(e *event.Event) (k Key, text string, ok bool) {
 	}
 	switch e.Kind {
 	case event.KindSER:
-		if n := e.Normalized; n != nil && n.Subject != "" && n.Value != "" {
+		// An element or state too long to key on is keyed like an unread
+		// row, so a key stays bounded.
+		if n := e.Normalized; n != nil && n.Subject != "" && n.Value != "" && len(n.Subject) <= TextMax && len(n.Value) <= TextMax {
 			return Key{Source: SourceSER, Element: n.Subject, State: n.Value}, textOf(n.Subject + " " + n.Value), true
 		}
 		if e.Native != nil && e.Native.Bytes != nil {

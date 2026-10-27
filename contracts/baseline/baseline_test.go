@@ -26,7 +26,7 @@ func valid() *Baseline {
 			RateBucketS: 3600, RateFactorPct: 200, RateMin: 2,
 			PeriodicMinOccurrences: 6, PeriodicSpreadPct: 10, AbsenceTolerancePct: 10,
 			TimeClock: ClockReceived, MaxTypes: 4096,
-			AlarmHoldS: 3600, MaxAlarmsPerHold: 16,
+			AlarmHoldS: 3600, MaxAlarmsPerHold: 8,
 		},
 		Period: Period{
 			StartUTC: "2026-11-01T00:00:00Z", EndUTC: "2026-11-15T02:00:00Z",
@@ -69,6 +69,8 @@ func TestBaselineRules(t *testing.T) {
 		{"relearn names previous", func(b *Baseline) { b.Version = 2 }, CodeForm},
 		{"rate factor under 100", func(b *Baseline) { b.Params.RateFactorPct = 99 }, CodeRange},
 		{"no alarm hold", func(b *Baseline) { b.Params.AlarmHoldS = 0 }, CodeRange},
+		{"alarm hold under an hour", func(b *Baseline) { b.Params.AlarmHoldS = MinAlarmHoldS - 1 }, CodeRange},
+		{"alarms per hold over the ceiling", func(b *Baseline) { b.Params.MaxAlarmsPerHold = MaxAlarmsPerHoldCeiling + 1 }, CodeRange},
 		{"clock", func(b *Baseline) { b.Params.TimeClock = "wall" }, CodeForm},
 		{"collected is period less gaps", func(b *Baseline) { b.Period.CollectedS++ }, CodeConflict},
 		{"gap outside period", func(b *Baseline) { b.Period.Gaps[0].ToUTC = "2026-11-16T00:00:00Z" }, CodeOrder},

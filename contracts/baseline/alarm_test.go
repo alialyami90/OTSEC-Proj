@@ -1,6 +1,7 @@
 package baseline
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -47,6 +48,8 @@ func TestAlarmRules(t *testing.T) {
 		{"param decimal", func(a *Alarm) { a.Params[0].Value = "five" }, CodeForm},
 		{"device clock only for time", func(a *Alarm) { a.Clock = ClockDevice }, CodeConflict},
 		{"explains itself", func(a *Alarm) { a.Observation = "" }, CodeMissing},
+		{"baseline value bounded", func(a *Alarm) { a.BaselineValue = strings.Repeat("x", ExplainMax+1) }, CodeRange},
+		{"observation bounded", func(a *Alarm) { a.Observation = strings.Repeat("x", ExplainMax+1) }, CodeRange},
 		{"names the events", func(a *Alarm) { a.Events, a.EventsTotal = nil, 0 }, CodeMissing},
 		{"at most MaxEventIDs", func(a *Alarm) { a.Events, a.EventsTotal = many, int64(len(many)) }, CodeRange},
 		{"total counts the list", func(a *Alarm) { a.EventsTotal = 5 }, CodeConflict},
@@ -121,5 +124,42 @@ func TestAlarmTravelsAsC4Health(t *testing.T) {
 	bad.Rule = "storm"
 	if _, err := bad.Health(); err == nil {
 		t.Error("an invalid alarm is not encoded")
+	}
+}
+
+// TestWorstAlarmFits: the largest alarm Validate accepts encodes under
+// MaxAlarmBytes, so B5 can size the platform class against it.
+func TestWorstAlarmFits(t *testing.T) {
+	node := event.NodeID(strings.Repeat("a", 63))
+	stream := event.Stream(strings.Repeat("b", 128))
+	ids := make([]event.EventID, MaxEventIDs)
+	for i := range ids {
+		ids[i] = event.EventID{NodeID: node, Stream: stream, Seq: ^uint64(0) - uint64(i)}
+	}
+	a := validAlarm()
+	a.Events, a.EventsTotal = ids, 1<<62
+	a.NotCounted, a.NotCountedTotal = ids, 1<<62
+	// '<' is HTML-escaped to six bytes, the most any byte grows.
+	a.KeyText = strings.Repeat("<", TextMax)
+	a.BaselineValue = strings.Repeat("<", ExplainMax)
+	a.Observation = strings.Repeat("<", ExplainMax)
+	a.Key = Key{Source: SourceSER, Element: strings.Repeat("<", TextMax), State: strings.Repeat("<", TextMax)}
+	h, err := a.Health()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(h)
+	if len(b) > MaxAlarmBytes {
+		t.Fatalf("%d bytes, above %d", len(b), MaxAlarmBytes)
+	}
+	t.Logf("worst alarm %d bytes, cap %d", len(b), MaxAlarmBytes)
+	a.Observation += "<"
+	if _, err := a.Health(); err == nil {
+		t.Error("an observation past ExplainMax encoded")
+	}
+	a.Observation = "x"
+	a.Key.Element += "<"
+	if _, err := a.Health(); err == nil {
+		t.Error("an element past TextMax encoded")
 	}
 }
