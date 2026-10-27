@@ -601,3 +601,111 @@ func TestOneSERReadsWALIsWithinTheRule(t *testing.T) {
 		})
 	}
 }
+
+// fileFactor bounds how much the database file may grow, once
+// checkpointed, per byte a quota counts, so that a quota is a bound on disk
+// (D4-9 C5 item 6). It is B6's proposal; the fix states its own factor and
+// B6 reviews any change to this constant. The bound is on what ClassBytes
+// counts, so a fix may meet it by storing less per row or by counting each
+// row's overhead: no layout tried keeps a 417-byte event under 1.5 ×
+// (simulated, local Linux, 2026-10-27).
+const fileFactor = 1.25
+
+// checkpoint runs a TRUNCATE checkpoint from a second connection and fails
+// unless it completed.
+func checkpoint(t *testing.T, file string) {
+	t.Helper()
+	c, err := sql.Open("sqlite", "file:"+(&url.URL{Path: file}).EscapedPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var busy, logPages, done int
+	if err := c.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logPages, &done); err != nil {
+		t.Fatal(err)
+	}
+	if busy != 0 {
+		t.Fatalf("checkpoint busy: %d of %d frames", done, logPages)
+	}
+}
+
+// Event sizes from 100 B to 64 KiB, 256 B apart to 16 KiB and 2 KiB apart
+// after, so every overflow step is crossed whatever the page layout: one
+// commit of up to 128 events of each size, sharing one capture, without a
+// cursor, so only the layout is measured. Each commit must stay within
+// CommitWALBytes, and once checkpointed the file must grow by no more than
+// fileFactor × the bytes the quota counts (D4-9 C5 item 6's sweep and pin).
+func TestEventSizeSweep(t *testing.T) {
+	ctx := context.Background()
+	const capBytes = 11 << 20
+	d := c5.Database{
+		ID:      "evidence",
+		Writer:  "ied",
+		Streams: []c5.StreamSpec{{ID: ser, Class: c5.ClassAdapterEvidence}},
+		Classes: []c5.StreamClass{c5.ClassAdapterEvidence},
+		Quotas:  []c5.Quota{{Class: c5.ClassAdapterEvidence, Bytes: 1 << 30, WarnFraction: 0.9, MaxRecordBytes: capBytes}},
+	}
+	dir := newDir(t)
+	db := open(t, dir, d)
+	l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond, MaxCommitBytes: capBytes}, map[c5.StreamID]c5.Seq{ser: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append(ctx, c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(0, 400)}); err != nil {
+		t.Fatal(err)
+	}
+	compactAll(t, db)
+	file := walPath(t, dir)
+	var sizes []int
+	for s := 256; s <= 16<<10; s += 256 {
+		sizes = append(sizes, s)
+	}
+	for s := 18 << 10; s <= 64<<10; s += 2 << 10 {
+		sizes = append(sizes, s)
+	}
+	n := 1
+	for _, size := range append([]int{100}, sizes...) {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			rows := min(128, (2<<20)/size)
+			raw := make([]byte, rows*35)
+			rand.New(rand.NewSource(int64(size))).Read(raw)
+			cp := capture(hex.EncodeToString(raw))
+			recs := make([]c5.Record, rows)
+			payload := int64(len(cp.Bytes))
+			for i := range recs {
+				recs[i] = c5.Record{Stream: ser, Class: c5.ClassAdapterEvidence, Event: serEvent(n, size), Capture: &cp}
+				payload += int64(len(recs[i].Event))
+				n++
+			}
+			checkpoint(t, file)
+			st, err := os.Stat(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			counted, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grew := measureWAL(t, dir, func() {
+				if _, err := l.AppendBatch(ctx, recs); err != nil {
+					t.Fatal(err)
+				}
+			})
+			checkpoint(t, file)
+			after, err := os.Stat(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fileGrew, quota := after.Size()-st.Size(), now-counted
+			t.Logf("%d events of %d bytes: file grew %d for %d quota bytes (%.2f ×)", rows, size, fileGrew, quota, float64(fileGrew)/float64(quota))
+			if float64(fileGrew) > fileFactor*float64(quota) {
+				t.Errorf("the file grew %d bytes for %d bytes the quota counts, over %.2f ×", fileGrew, quota, fileFactor)
+			}
+			withinRule(t, payload, grew)
+		})
+	}
+}
