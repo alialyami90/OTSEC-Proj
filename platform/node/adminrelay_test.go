@@ -47,6 +47,10 @@ type adminCollector struct {
 	// edit, when set, changes each reply to an admin-signed request
 	// before it is returned.
 	edit func(*authz.CollectorReply)
+	// held is the time hangCollector held admin-signed requests, and
+	// left the time each had until its deadline when it arrived.
+	held time.Duration
+	left []time.Duration
 }
 
 func newAdminCollector() *adminCollector { return &adminCollector{spent: map[string]bool{}} }
@@ -799,7 +803,17 @@ func (h hangCollector) Do(ctx context.Context, req *authz.CollectorRequest) (col
 	h.mu.Lock()
 	h.sent = append(h.sent, req)
 	h.mu.Unlock()
+	began := time.Now()
+	dl, ok := ctx.Deadline()
+	left := time.Duration(-1)
+	if ok {
+		left = dl.Sub(began)
+	}
 	<-ctx.Done()
+	h.mu.Lock()
+	h.held += time.Since(began)
+	h.left = append(h.left, left)
+	h.mu.Unlock()
 	return collectorclient.Response{}, ctx.Err()
 }
 
@@ -852,11 +866,28 @@ func TestRelayStopsAtFirstUnanswered(t *testing.T) {
 	}
 	began := time.Now()
 	s.relayAdmin(bg)
-	if d := time.Since(began); d >= 2*RelayTimeout {
-		t.Fatalf("one tick took %s, over one RelayTimeout (%s)", d, RelayTimeout)
-	}
+	tick := time.Since(began)
 	if n := len(col.requests()); n != 1 {
 		t.Fatalf("%d requests sent in the tick, want 1", n)
+	}
+	// The bound is on the time the collector held the tick, not on the
+	// tick: the rest is the node's own audit commits and status writes,
+	// about 30 ms alone on a Windows runner but over a RelayTimeout while
+	// the rest of go test ./... runs beside it (A1 on #197). One request
+	// held for one RelayTimeout is what is claimed: it came with a
+	// deadline at most RelayTimeout away, and was held until it. The
+	// deadline left is the lower bound, not RelayTimeout itself, which a
+	// busy machine shortens by the time between setting the deadline and
+	// the request's arrival (A6 on #202).
+	col.mu.Lock()
+	held, left := col.held, col.left[0]
+	col.mu.Unlock()
+	t.Logf("tick %s: held by the collector %s of %s left, the node's own work %s", tick, held, left, tick-held)
+	if left <= 0 || left > RelayTimeout {
+		t.Fatalf("the request arrived with %s to its deadline, want (0, %s]", left, RelayTimeout)
+	}
+	if held < left || held >= 2*RelayTimeout {
+		t.Fatalf("the collector held the tick for %s, want from its deadline (%s) to under two RelayTimeouts (%s)", held, left, 2*RelayTimeout)
 	}
 	got := adminShown(st)
 	if len(got) != 3 {
