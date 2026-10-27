@@ -517,11 +517,14 @@ func TestTLSRefusesTheWrongAnchor(t *testing.T) {
 	old.MinVersion, old.MaxVersion = tls.VersionTLS10, tls.VersionTLS11
 	try("TLS 1.1", old)
 	try("server certificate as a sender certificate", clientTLS(srvCA.pool, cliCA.leaf(t, "wrong usage", x509.ExtKeyUsageServerAuth)))
+	// The refusals are counted when the listener's handshake ends, which
+	// on a slow runner can be after the client's side has returned.
+	st := g.waitStatus(func(st receive.Status) bool { return st.Refused["tls"] >= 4 }, 20*time.Second)
 	time.Sleep(500 * time.Millisecond)
 	if ev := g.events(); len(ev) != 0 {
 		t.Fatalf("%d messages stored from refused senders: %q", len(ev), ev[0].Bytes)
 	}
-	if st := g.r.Status(); st.Refused["tls"] < 4 {
+	if st.Refused["tls"] < 4 {
 		t.Errorf("refused %+v, want at least 4 tls", st.Refused)
 	}
 	c, err := dialTLS(t, ipA, g.addr, clientTLS(srvCA.pool, good))
@@ -702,8 +705,11 @@ func TestStoreFullOnTheRealStore(t *testing.T) {
 			g := startQuota(t, 256<<10, tr, nil, receive.Limits{Rate: 10000, Burst: 10000, Retry: 100 * time.Millisecond})
 			c := dialFrom(t, ipA, map[asset.Transport]string{asset.SyslogTCP: "tcp", asset.SyslogUDP: "udp"}[tr], g.addr)
 			line := "<13>" + strings.Repeat("q", 1000)
+			// 600 KiB of frames, or 2000 datagrams (some may be lost before
+			// the listener on a slow runner), against a 256 KiB quota.
+			n := map[asset.Transport]int{asset.SyslogTCP: 600, asset.SyslogUDP: 2000}[tr]
 			go func() {
-				for i := 0; i < 600; i++ {
+				for i := 0; i < n; i++ {
 					if tr == asset.SyslogTCP {
 						c.SetWriteDeadline(time.Now().Add(3 * time.Second))
 						if _, err := fmt.Fprintf(c, "%s\n", line); err != nil {
@@ -715,11 +721,20 @@ func TestStoreFullOnTheRealStore(t *testing.T) {
 					}
 				}
 			}()
-			time.Sleep(4 * time.Second)
+			// Wait for the quota's effect, not a fixed time: a slow store
+			// can take more than a few seconds to fill 256 KiB.
+			atQuota := func(st receive.Status) bool {
+				if tr == asset.SyslogTCP {
+					return st.Held
+				}
+				return st.Dropped[receive.DropStore] > 0
+			}
+			g.waitStatus(atQuota, 60*time.Second)
+			time.Sleep(500 * time.Millisecond)
 			st := g.r.Status()
 			ev := g.events()
 			t.Logf("%s: received %d, stored %d (%d in the file), held %v, dropped %+v, last error %q", tr, st.Received, st.Stored, len(ev), st.Held, st.Dropped, st.LastErr)
-			if len(ev) == 0 || len(ev) >= 600 {
+			if len(ev) == 0 || len(ev) >= n {
 				t.Fatalf("%d stored: the quota was not reached", len(ev))
 			}
 			if err := g.log.Stopped(); err != nil {
@@ -756,8 +771,11 @@ func TestUnknownSendersCannotDisplaceDevices(t *testing.T) {
 		c := dialFrom(t, netip.AddrFrom4([4]byte{127, 0, 0, byte(i)}), "tcp", g.addr)
 		open = append(open, c)
 	}
-	time.Sleep(300 * time.Millisecond)
-	if st := g.r.Status(); st.UnknownConnections != 1 || st.Refused["unknown-limit"] != 3 {
+	// Accepting can lag the dials on a slow runner: wait for all four to
+	// be decided, then check the split.
+	if st := g.waitStatus(func(st receive.Status) bool {
+		return int64(st.UnknownConnections)+st.Refused["unknown-limit"] >= 4
+	}, 20*time.Second); st.UnknownConnections != 1 || st.Refused["unknown-limit"] != 3 {
 		t.Fatalf("unknown connections %d, refused %+v", st.UnknownConnections, st.Refused)
 	}
 	// The admitted unknown sender spends the budget and more.
