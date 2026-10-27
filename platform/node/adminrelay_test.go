@@ -864,8 +864,9 @@ func TestRelayStopsAtFirstUnanswered(t *testing.T) {
 	}
 	// The bound is on the time the collector held the tick, not on the
 	// tick: the rest is the node's own audit commits and status writes,
-	// which take longer than a RelayTimeout on a Windows runner (A1 on
-	// #197). One request held for one RelayTimeout is what is claimed.
+	// about 30 ms alone on a Windows runner but over a RelayTimeout while
+	// the rest of go test ./... runs beside it (A1 on #197). One request
+	// held for one RelayTimeout is what is claimed.
 	col.mu.Lock()
 	held := col.held
 	col.mu.Unlock()
