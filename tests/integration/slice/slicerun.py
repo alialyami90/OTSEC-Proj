@@ -621,9 +621,16 @@ class Slice:
         with open(self.logs[name], "rb") as f:
             return f.read().decode("utf-8", "replace")
 
+    def running(self, name):
+        p = self.procs.get(name)
+        return p is not None and p.poll() is None
+
     def sim_records(self):
-        """Every simulator's records, in the order the simulators ran."""
-        return [r for log in self.sim_logs if os.path.exists(log) for r in harness.read_log(log)]
+        """Every simulator's records, in the order the simulators ran. The
+        current simulator's log is read live while it runs."""
+        live = self.running("simulator")
+        return [r for log in self.sim_logs if os.path.exists(log)
+                for r in harness.read_log(log, live=live and log == self.sim_log)]
 
     def sessions_closed(self):
         return sum(1 for r in self.sim_records() if r["event"] == "session_close")
@@ -631,7 +638,8 @@ class Slice:
     def received(self):
         if not os.path.exists(self.relp_log):
             return []
-        return [base64.b64decode(r["b64"]) for r in harness.read_log(self.relp_log) if r.get("event") == "syslog"]
+        return [base64.b64decode(r["b64"]) for r in harness.read_log(self.relp_log, live=self.running("receiver"))
+                if r.get("event") == "syslog"]
 
     def runs_reported(self):
         """The node's collection.run health reports the receiver got, as

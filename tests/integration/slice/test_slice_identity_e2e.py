@@ -55,7 +55,7 @@ SUSPENDED = re.compile(r"^SUSPENDED (\S+): (\S+) since \S+; cleared only by an a
 
 
 def _sessions(log):
-    return sum(1 for r in harness.read_log(log) if r["event"] == "session_close") if os.path.exists(log) else 0
+    return sum(1 for r in harness.read_log(log, live=True) if r["event"] == "session_close") if os.path.exists(log) else 0
 
 
 @pytest.fixture(scope="module")
