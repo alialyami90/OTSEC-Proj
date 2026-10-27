@@ -811,6 +811,12 @@ Taken here, as ADR-0008 requires, on A2's FTP assessment (#183): **the SEL-751 s
   - **C9 `otsec.config/0.1`** (new, A2 drafts, A1 approves after A5, A3 and A6 review): a configuration snapshot (asset, retrieval time, the session's evidence ID, one section per settings class with its native bytes and SHA-256, and the parsed settings as name and value exactly as printed); a semantic difference between two snapshots (each changed, added or removed setting with both values); and the per-family rule that decides what is not a setting (headers, the relay's date and time, checksums, paging), stated in the contract and tested.
   - **C2 0.6**: a `config.read` operation whose result is a C9 snapshot. It reuses the session rules of `ser.read` (one session, at most one password, Level 1 only, `QUI` last, the failed-auth floor).
   - **Register revision 5**: each `SHO` form needed, at Level 1, each with its timeout and byte cap. No `SET`, `FIL WRITE` or Level 2 entry.
+  - From A2's review of S22 (Table 7.67, p. 7.78):
+    - the register holds only exact `SHO` forms, with no trailing `s` (setting-name) form and an explicit port where the form takes one;
+    - C9 states a continuation-line rule for SELOGIC values that wrap;
+    - the parsers follow the documented three-settings-per-line layout;
+    - `SHO P 1` is classed sensitive, although no settings class prints a password;
+    - configuration and SER reads are scheduled back to back against `TIDLE` and the relay's two-session limit (with P4-A5's quiet interval).
 - Deliverable: the operation, the parsers with a fuzz target each, goldens transcribed from the manual's settings figures and tables, and the C9 difference with its non-semantic rules.
 - Acceptance tests (A6 independent): every `SHO` line the collector sends is in the register and passes the deny corpus (V-S7); the same configuration read twice, with a different time and page break, gives an empty difference; each single-setting change A6 injects in the simulator gives a difference naming exactly that setting; a reply that cannot be parsed is kept with its bytes and fails the read (never a partial snapshot presented as complete); mutation of the non-semantic rule is caught.
 - Explicit exclusions: no FTP code; no write or restore of settings (brief §1.3); no family other than the SEL-751.
