@@ -140,7 +140,9 @@
 //     bytes, and a failed run reports no record (CheckLines holds the lines
 //     to the run's steps, once each and in order). Limits.ForRun gives an
 //     invocation the run's limits; each step is also held to its own
-//     register limits. Earlier results read unchanged.
+//     register limits. A reply the rule cannot read ends the run with the new
+//     failed.config_unparsable (QUI, bytes kept, no record, no snapshot); SER
+//     keeps partial.parse_errors. Earlier results read unchanged.
 //
 // # For the consumers of a result
 //

@@ -1,4 +1,4 @@
-# C9 `otsec.config/0.1`: configuration snapshot and difference (P4-A2, B2)
+# C9 `otsec.config/0.1` (0.2 since the read was built): configuration snapshot and difference (P4-A2, B2)
 
 Date: 2026-10-27.
 
@@ -124,11 +124,11 @@ These wait until C9 is approved:
 
 ## What changed when the read was built (P4-A2)
 
-Building the C2 0.6 read found three things in C9 0.1 and one choice to confirm. B1 is asked to accept the first two as part of the C2 0.6 contract change.
+Building the C2 0.6 read found two things in C9 0.1. B1 ruled on both on #279 and the C2 0.6 PR carries them.
 
-1. **Section spans are checked in pairs, not by position.** C9 0.1 required each section's span to follow the one before it in the rule's order. A run must send its gate reads first (C3 0.3: `SHO P 1` for LANG, then `SHO G`), and the rule lists `global` and `port.1` in the middle, so a real read's spans are not in the rule's order. `Snapshot.Validate` now refuses overlapping spans in any order; `CheckAgainst` already ties each section to its own reply, so no check was lost. The invalid example `snapshot-sections-overlap.json` still fails, with a new message.
-2. **`config.FromResult`** builds a snapshot from an ok run result: one record per step in the run's order, sections in the rule's order, the settings the adapter's parser read, the SHA-256 of each span. It refuses a result that is not ok, not of the invocation, short of a record, or holds an unparsed or non-configuration record. It does not tokenize: `CheckAgainst` makes the adapter's parser and the contract's agree, and a test shows a parser that drops, changes, swaps or splits a setting is refused.
-3. **An unreadable section is `partial.parse_errors`, not `failed`.** B1's ruling says a run fails as a whole with the read reported failed. The adapter stops the run at the first section the rule cannot read (a name printed twice, a line that does not tokenize), sends QUI, keeps the bytes and the records so far, and marks the last record `parse_ok` false. That is C2's existing meaning of a parse error. `FromResult` refuses it, so no snapshot is made and the baseline is not touched, which is the same outcome as `failed`. If B1 wants the code `failed.device_error` instead, it is one line in `section`.
+1. **C9 0.2: sections are in the run's order.** C9 0.1 required each section's span to follow the one before it, in the rule's order, which was the order of S22 Table 7.67. A run must send its gate reads first (C3 0.3: `SHO P 1` for LANG, then `SHO G`), so a real read's spans were not in the rule's order. B1 ruled to keep the strict ordering and use the run's step order. Rule `sel-751-sho/1` is retired and `sel-751-sho/2` lists the classes in the run's order; the tokenization is the same. No snapshot under `/1` was ever stored, since every example was simulated. The difference lists changes in the same order.
+2. **An unreadable section fails the read: `failed.config_unparsable`** (C2 0.6, B1's ruling). The adapter stops the run at the first reply the rule cannot read (a name printed twice, a line that does not tokenize, no framed message), sends QUI, keeps the bytes and reports no record, so no snapshot is made. SER keeps `partial.parse_errors`.
+3. **`config.FromResult`** builds a snapshot from an ok run result: one record per step in the run's order, which is the rule's order, the settings the adapter's parser read, the SHA-256 of each span. It refuses a result that is not ok, not of the invocation, or short of a record. It does not tokenize: `CheckAgainst` makes the adapter's parser and the contract's agree, and a test shows a parser that drops, changes, swaps or splits a setting is refused.
 4. **A form every SEL-751 has that answers `Invalid Command` is `failed.device_error`.** Only the eleven forms C9 marks `MayBeAbsent` can be an absent section.
 
 The adapter keeps its own table of forms (`cfgForms`) and does not import the contract it is checked against; `TestCfgFormsAreTheRule` makes the two agree.

@@ -102,6 +102,13 @@ const (
 	FailedInternal         Code = "failed.internal"           // a collector fault
 	FailedUnknown          Code = "failed.unknown"            // fallback for codes this reader does not know
 
+	// FailedConfigUnparsable (0.6): a reply in a configuration run is not a
+	// settings section the rule can read (a name printed twice, a line that
+	// does not tokenize, no framed message). The run fails as a whole: QUI is
+	// sent, the bytes are kept, no record is reported and no snapshot is
+	// made (D4-13). A single read keeps partial.parse_errors.
+	FailedConfigUnparsable Code = "failed.config_unparsable"
+
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
 	// PartialReadRowsExceeded: the read has more rows than the profile's
 	// max_read_rows (D1-12). The bytes are kept and nothing from the read is
@@ -150,6 +157,7 @@ var codes = map[Code]codeInfo{
 	FailedIdentityMismatchLate:     {StageAfterAuth, 1, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
 	FailedAccessLevelDropped:       {StageAfterAuth, 1, "", ""},
 	FailedDeviceError:              {StageAfterAuth, 1, "", ""},
+	FailedConfigUnparsable:         {StageAfterAuth, 6, "", ""},
 	FailedUnexpectedPasswordPrompt: {StageAfterAuth, 2, asset.SuspendUnexpectedLevel, ""},
 	FailedTimeout:                  {StageAny, 1, "", ""},
 	FailedTransportClosed:          {StageAny, 1, "", ""},

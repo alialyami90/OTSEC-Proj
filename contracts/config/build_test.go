@@ -70,15 +70,17 @@ func TestFromResultChecksAgainstTranscript(t *testing.T) {
 	if absent != 10 {
 		t.Errorf("%d absent sections, want 10", absent)
 	}
-	port1 := s.Sections[10]
+	port1 := s.Sections[0]
 	if port1.Class != "port.1" || !port1.Sensitive || len(port1.Settings) != 7 {
 		t.Errorf("port.1 section: %+v", port1)
 	}
-	if s.Sections[0].Span.Offset < port1.Span.Offset {
-		t.Error("group.1 was read before port.1, but the run reads the gate first")
+	for i := 1; i < len(s.Sections); i++ {
+		if s.Sections[i].Span.Offset < s.Sections[i-1].Span.Offset+s.Sections[i-1].Span.Length {
+			t.Errorf("section %d (%s) was not read after section %d: the rule's order is the run's", i, s.Sections[i].Class, i-1)
+		}
 	}
 	// The wrapped value joins by one space (rule).
-	for _, st := range s.Sections[0].Settings {
+	for _, st := range s.Sections[2].Settings {
 		if st.Name == "S1C" && st.Value != "IN101 AND NOT IN102" {
 			t.Errorf("wrapped value %q", st.Value)
 		}
@@ -110,7 +112,7 @@ func TestFromResultRefuses(t *testing.T) {
 		"not a config rec": {RuleSEL751SHO.ID, inv, wrongKind, "not a configuration record"},
 		"not a run":        {RuleSEL751SHO.ID, func() adapter.Invocation { i := inv; i.OperationID = "sel.ser.read_all"; return i }(), ok, "is not of invocation"},
 	}
-	for _, n := range []string{"partial.parse_errors-in-run", "failed.timeout-in-run"} {
+	for _, n := range []string{"failed.config_unparsable", "failed.timeout-in-run"} {
 		_, _, r := runFixture(t, n)
 		cases[n] = struct {
 			rule string

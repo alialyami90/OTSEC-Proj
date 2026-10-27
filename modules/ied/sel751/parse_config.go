@@ -7,7 +7,7 @@ import (
 )
 
 // A configuration setting as a SHO form prints it: the name and the value,
-// verbatim. parseSection reads them by the rule sel-751-sho/1, which C9
+// verbatim. parseSection reads them by the rule sel-751-sho/2, which C9
 // (contracts/config/doc.go) states line by line. The contract has its own
 // reader of the same rule, CheckAgainst, and the node runs both: the two
 // are written apart, so an error in one shows as a disagreement.

@@ -60,7 +60,7 @@ const (
 )
 
 // cfgForms are the steps this build can read in a configuration run: the SHO
-// forms of C9's rule sel-751-sho/1 (S22 Table 7.67 p. 7.77), by the register's
+// forms of C9's rule sel-751-sho/2 (S22 Table 7.67 p. 7.77), by the register's
 // operation ID, and whether the relay may answer that the form is not
 // available (a port or protocol not ordered). It is C9's MayBeAbsent, kept
 // here because the adapter does not import the contract it is checked
@@ -925,17 +925,18 @@ func (s *session) operateRun() adapter.Code {
 
 // section keeps the reply to one step as a configuration record: the whole
 // message text as its span, and the settings the adapter reads from it by the
-// rule sel-751-sho/1 (parseSection). A form that may be absent and answers
+// rule sel-751-sho/2 (parseSection). A form that may be absent and answers
 // that it is not available is an absent record. Any other reply that is not
-// a settings section fails the run: the bytes are kept and the record says
-// parse_ok false (partial.parse_errors), and a form that every relay has and
-// answers "not available" is a device error, never an absent section.
+// a settings section fails the run as a whole (failed.config_unparsable, B1's
+// ruling on #279): QUI, the bytes kept, no record and no snapshot. A form that
+// every relay has and answers "not available" is a device error, never an
+// absent section.
 func (s *session) section(id, line string) adapter.Code {
 	off, rx := s.lastReply()
 	msg, err := frame(rx, off)
 	if err != nil || len(msg.text) == 0 {
 		s.detail = fmt.Sprintf("the reply to %s has no single framed message", line)
-		return adapter.FailedDeviceError
+		return adapter.FailedConfigUnparsable
 	}
 	span := adapter.Span{Offset: msg.off, Length: int64(len(msg.text))}
 	if string(bytes.Trim(msg.text, " \r\n")) == cfgNotAvailable {
@@ -946,14 +947,12 @@ func (s *session) section(id, line string) adapter.Code {
 		s.records = append(s.records, adapter.Record{Kind: adapter.RecordConfigAbsent, Span: span, ParseOK: true})
 		return ""
 	}
-	rec := adapter.Record{Kind: adapter.RecordConfigSection, Span: span}
+	rec := adapter.Record{Kind: adapter.RecordConfigSection, Span: span, ParseOK: true}
 	set, err := parseSection(msg)
 	if err != nil || len(set) == 0 {
-		s.records = append(s.records, rec)
 		s.detail = fmt.Sprintf("the reply to %s is not a settings section; the read stops there", line)
-		return adapter.PartialParseErrors
+		return adapter.FailedConfigUnparsable
 	}
-	rec.ParseOK = true
 	for _, st := range set {
 		rec.Fields = append(rec.Fields, adapter.Field{Name: st.name, Value: st.value})
 	}

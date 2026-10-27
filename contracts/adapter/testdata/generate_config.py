@@ -142,8 +142,7 @@ def read(upto=None, absent=ABSENT, bad=None, error_at=None, drop_at=None, timeou
             text, fields = body(cmd)
             text = text.replace("S%sD := N" % tag(cmd), "S%sA := 11" % tag(cmd))  # a name printed twice
             span, _, _ = section(s, cmd, text, [])
-            records.append(rec(span, None, ok=False))
-            code = "partial.parse_errors"
+            code = "failed.config_unparsable"
             break
         span, fields, _ = section(s, cmd)
         records.append(rec(span, fields))
@@ -158,8 +157,8 @@ def read(upto=None, absent=ABSENT, bad=None, error_at=None, drop_at=None, timeou
            {"name": "sel.cid", "value": g.CID, "span": s.span(g.CID, s.id_start)}]
     if ok:
         return run_result(s, "ok", None, items, obs, warnings, records)
-    if code == "partial.parse_errors":
-        return run_result(s, "partial", code, items, obs, warnings, records,
+    if code == "failed.config_unparsable":
+        return run_result(s, "failed", code, items, [], warnings, [],
                           "the reply to %s is not a settings section; the read stops there" % bad)
     # A failed run keeps its bytes and reports no records and no observations.
     return run_result(s, "failed", code, items, [], warnings, [])
@@ -171,7 +170,7 @@ def results():
     out["failed.response_too_large-in-run"] = read(big_at="SHO 3")
     out["failed.access_level_dropped-in-run"] = read(drop_at="SHO L 1")
     out["failed.device_error-required-class-absent"] = read(error_at="SHO 2")
-    out["partial.parse_errors-in-run"] = read(bad="SHO F")
+    out["failed.config_unparsable"] = read(bad="SHO F")
     return out
 
 

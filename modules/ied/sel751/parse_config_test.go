@@ -23,7 +23,7 @@ func pairs(ss []cfgSetting) []string {
 	return out
 }
 
-// TestParseSectionRule is the rule sel-751-sho/1 (contracts/config/doc.go)
+// TestParseSectionRule is the rule sel-751-sho/2 (contracts/config/doc.go)
 // line by line.
 func TestParseSectionRule(t *testing.T) {
 	for name, c := range map[string]struct {

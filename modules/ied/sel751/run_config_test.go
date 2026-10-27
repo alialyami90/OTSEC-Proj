@@ -91,7 +91,7 @@ var configReplays = []struct {
 	{golden: "ok", tidle: true},
 	{golden: "ok-all-present", tidle: true},
 	{golden: "ok-with-echo", tidle: true},
-	{golden: "partial.parse_errors-in-run", tidle: true},
+	{golden: "failed.config_unparsable"},
 	{golden: "failed.device_error-required-class-absent"},
 	{golden: "failed.access_level_dropped-in-run"},
 	{golden: "failed.timeout-in-run", limits: func(l *adapter.Limits, _ []step) { l.StepTimeoutMS = 300 }},
@@ -322,14 +322,10 @@ func TestCfgFormsAreTheRule(t *testing.T) {
 			t.Errorf("step %s is not in cfgForms", id)
 			continue
 		}
-		var class *config.Class
-		for j := range config.RuleSEL751SHO.Classes {
-			if config.RuleSEL751SHO.Classes[j].Command == lines[i] {
-				class = &config.RuleSEL751SHO.Classes[j]
-			}
-		}
-		if class == nil {
-			t.Errorf("%s (%q) is not a class of the rule", id, lines[i])
+		// C9 0.2: the rule lists the classes in the run's order.
+		class := &config.RuleSEL751SHO.Classes[i]
+		if class.Command != lines[i] {
+			t.Errorf("step %d is %q, the rule's class %d is %q", i+1, lines[i], i+1, class.Command)
 		} else if class.MayBeAbsent != mayBeAbsent {
 			t.Errorf("%s: may be absent %v here, %v in the rule", id, mayBeAbsent, class.MayBeAbsent)
 		}

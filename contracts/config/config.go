@@ -15,9 +15,9 @@ import (
 )
 
 // Contract is this package's identifier.
-const Contract = "otsec.config/0.1"
+const Contract = "otsec.config/0.2"
 
-var self = version.ID{Name: "config", Major: 0, Minor: 1}
+var self = version.ID{Name: "config", Major: 0, Minor: 2}
 
 // Kinds of document. A document's kind says which of the two it is, so one
 // reader can tell them apart.
@@ -46,7 +46,7 @@ type Snapshot struct {
 	Target asset.EvidenceClass `json:"target"`
 	// RetrievedAt is the C2 result's ended_at, RFC 3339 UTC.
 	RetrievedAt string `json:"retrieved_at"`
-	// Rule names the rule that tokenized the replies, e.g. "sel-751-sho/1".
+	// Rule names the rule that tokenized the replies, e.g. "sel-751-sho/2".
 	Rule string `json:"rule"`
 	// Transcript is the session's transcript as C5 stores it.
 	Transcript Evidence `json:"transcript"`
@@ -135,11 +135,21 @@ type Class struct {
 // the relay through it and reads SHO P 1 for LANG (ADR-0005). Which
 // classes can really be absent, and whether an absent one answers exactly
 // "Invalid Command" (S22 p. 7.31), is documented-untested.
+//
+// The classes are in the order the register's run sel.config.read_all sends
+// their commands (C3 0.3, revision 5): the gate reads first (Port 1 for LANG,
+// then Global), then the rest. A snapshot holds its sections in this order,
+// which is the order they were read in, so each section's span comes after
+// the one before it (0.2, B1's ruling on #279). Rule sel-751-sho/1, which
+// listed them in the order of S22 Table 7.67, is retired, not edited: no
+// snapshot under it was ever stored, since every example was simulated.
 var RuleSEL751SHO = Rule{
-	ID:           "sel-751-sho/1",
+	ID:           "sel-751-sho/2",
 	Family:       "sel-751",
 	NotAvailable: "Invalid Command",
 	Classes: []Class{
+		{ID: "port.1", Command: "SHO P 1", Sensitive: true, Source: "S22 Table 7.67; Table 4.104"},
+		{ID: "global", Command: "SHO G", Source: "S22 Table 7.67; Tables 4.84 to 4.102"},
 		{ID: "group.1", Command: "SHO 1", Source: "S22 Table 7.67; Figure 7.43"},
 		{ID: "group.2", Command: "SHO 2", Source: "S22 Table 7.67"},
 		{ID: "group.3", Command: "SHO 3", Source: "S22 Table 7.67"},
@@ -148,9 +158,7 @@ var RuleSEL751SHO = Rule{
 		{ID: "logic.2", Command: "SHO L 2", Source: "S22 Table 7.67"},
 		{ID: "logic.3", Command: "SHO L 3", Source: "S22 Table 7.67"},
 		{ID: "logic.4", Command: "SHO L 4", Source: "S22 Table 7.67"},
-		{ID: "global", Command: "SHO G", Source: "S22 Table 7.67; Tables 4.84 to 4.102"},
 		{ID: "port.f", Command: "SHO P F", Sensitive: true, Source: "S22 Table 7.67"},
-		{ID: "port.1", Command: "SHO P 1", Sensitive: true, Source: "S22 Table 7.67; Table 4.104"},
 		{ID: "port.2", Command: "SHO P 2", MayBeAbsent: true, Sensitive: true, Source: "S22 Table 7.67; Table 7.1"},
 		{ID: "port.3", Command: "SHO P 3", MayBeAbsent: true, Sensitive: true, Source: "S22 Table 7.67; Table 7.1"},
 		{ID: "port.4", Command: "SHO P 4", MayBeAbsent: true, Sensitive: true, Source: "S22 Table 7.67; Table 7.1"},
@@ -269,6 +277,7 @@ func (s Snapshot) Validate() error {
 	if len(s.Sections) != len(rule.Classes) {
 		c.fail("rule %s has %d classes and a snapshot holds every one, in order; this one has %d sections", rule.ID, len(rule.Classes), len(s.Sections))
 	}
+	var prevEnd int64
 	for i, sec := range s.Sections {
 		p := fmt.Sprintf("sections[%d]", i)
 		if i < len(rule.Classes) {
@@ -292,16 +301,10 @@ func (s Snapshot) Validate() error {
 		sp := sec.Span
 		if sp.Offset < 0 || sp.Length <= 0 || sp.Offset+sp.Length > e.Length {
 			c.fail("%s.span lies outside the transcript", p)
-		} else {
-			// Sections are in the rule's order, which need not be the order
-			// they were read in: a run sends the gate reads first (C3 0.3,
-			// D4-13). So spans are compared in pairs, not by position.
-			for j := 0; j < i; j++ {
-				if o := s.Sections[j].Span; sp.Offset < o.Offset+o.Length && o.Offset < sp.Offset+sp.Length && o.Length > 0 {
-					c.fail("%s.span overlaps sections[%d]; each section is its own reply", p, j)
-				}
-			}
+		} else if sp.Offset < prevEnd {
+			c.fail("%s.span comes before the end of the section before it; sections are in the order the run read them, and never overlap", p)
 		}
+		prevEnd = sp.Offset + sp.Length
 		if sec.State == Absent && len(sec.Settings) > 0 {
 			c.fail("%s: an absent section has no settings", p)
 		}

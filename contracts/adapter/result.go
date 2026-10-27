@@ -305,7 +305,7 @@ var RecordFields = map[string][]string{
 //   - RecordConfigSection is the reply to one settings command: its span is
 //     the reply's message text, and its fields are the settings the adapter
 //     read from it, one field per setting, in printed order, the name and the
-//     value exactly as printed (C9 rule sel-751-sho/1). A section the
+//     value exactly as printed (C9 rule sel-751-sho/2). A section the
 //     adapter could not read has parse_ok false and no fields.
 //   - RecordConfigAbsent is the reply that says the command is not available
 //     ("Invalid Command", C9 decision 6): the span is that reply's text, and

@@ -123,6 +123,10 @@ func name(f string) string { return strings.TrimSuffix(filepath.Base(f), ".json"
 func loadResult(t *testing.T, n string) Result {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "results", "valid", n+".json"))
+	if os.IsNotExist(err) {
+		// A code of a configuration run has its example with the run's.
+		b, err = os.ReadFile(filepath.Join("testdata", "config", "results", "valid", n+".json"))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

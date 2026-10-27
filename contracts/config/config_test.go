@@ -21,26 +21,26 @@ import (
 // for an unrelated reason.
 var invalidWant = map[string]string{
 	"snapshot-missing-class":               "has 24 classes and a snapshot holds every one",
-	"snapshot-classes-out-of-order":        "holds group.1 (\"SHO 1\") here, not group.2",
+	"snapshot-classes-out-of-order":        "holds port.1 (\"SHO P 1\") here, not global",
 	"snapshot-required-class-absent":       "group.1 cannot be absent",
 	"snapshot-absent-with-settings":        "an absent section has no settings",
 	"snapshot-present-without-settings":    "a present section holds at least one setting",
 	"snapshot-port-not-sensitive":          "sensitive is true for port.1",
-	"snapshot-unknown-rule":                `rule "sel-751-sho/2" is not a rule`,
+	"snapshot-unknown-rule":                `rule "sel-751-sho/3" is not a rule`,
 	"snapshot-setting-twice":               "SET01 is printed twice in one section",
 	"snapshot-value-two-spaces":            "no two spaces together",
 	"snapshot-value-holds-assign":          "no :=",
 	"snapshot-ref-not-transcript":          `ref "sha256:" + sha256`,
-	"snapshot-other-major":                 "not readable as otsec.config/0.1",
+	"snapshot-other-major":                 "not readable as otsec.config/0.2",
 	"snapshot-unknown-field-in-own-minor":  `key "zz_new" is not a field name`,
 	"snapshot-wrong-kind":                  `kind "config.baseline" is not "config.snapshot"`,
 	"snapshot-without-register-version":    "register_version is required",
 	"snapshot-target-documented":           "target must be",
-	"snapshot-sections-overlap":            "each section is its own reply",
+	"snapshot-sections-overlap":            "comes before the end of the section before it",
 	"difference-changed-equal-values":      "changed with equal values",
 	"difference-added-with-from":           "added carries to only",
 	"difference-out-of-order":              "changes are in class order",
-	"difference-required-section-appeared": "group.1 cannot be absent under rule sel-751-sho/1, so it cannot appear",
+	"difference-required-section-appeared": "group.1 cannot be absent under rule sel-751-sho/2, so it cannot appear",
 	"difference-without-changes":           "changes is required",
 	"difference-digest-without-prefix":     `from needs a snapshot_digest "sha256:<hex>"`,
 	"difference-sensitive-unmarked":        "sensitive is true for port.2",
@@ -291,7 +291,7 @@ func TestCheckAgainstCatches(t *testing.T) {
 		"a setting dropped": {func(s *Snapshot) {
 			g := section(s, "group.1")
 			g.Settings = append(g.Settings[:3:3], g.Settings[4:]...)
-		}, "not what rule sel-751-sho/1 reads"},
+		}, "not what rule sel-751-sho/2 reads"},
 		"a value misread": {func(s *Snapshot) { setting(section(s, "group.1"), "50P1P").Value = "10.0" }, "not what rule"},
 		"a name misread":  {func(s *Snapshot) { setting(section(s, "group.1"), "CTRN").Name = "CTRM" }, "not what rule"},
 		"two settings swapped": {func(s *Snapshot) {
@@ -487,9 +487,10 @@ func FuzzTokenize(f *testing.F) {
 
 // The rule holds exactly the SHO forms of S22 Table 7.67 (p. 7.77), each
 // without the setting-name parameter and with an explicit port or map (#231).
+// The rule is S22 Table 7.67 in the order the run sends it (0.2).
 func TestRuleIsTable767(t *testing.T) {
-	want := []string{"SHO 1", "SHO 2", "SHO 3", "SHO 4", "SHO L 1", "SHO L 2", "SHO L 3", "SHO L 4", "SHO G",
-		"SHO P F", "SHO P 1", "SHO P 2", "SHO P 3", "SHO P 4", "SHO R", "SHO F", "SHO M", "SHO I",
+	want := []string{"SHO P 1", "SHO G", "SHO 1", "SHO 2", "SHO 3", "SHO 4", "SHO L 1", "SHO L 2", "SHO L 3", "SHO L 4",
+		"SHO P F", "SHO P 2", "SHO P 3", "SHO P 4", "SHO R", "SHO F", "SHO M", "SHO I",
 		"SHO E 1", "SHO E 2", "SHO E 3", "SHO DNP 1", "SHO DNP 2", "SHO DNP 3"}
 	var got []string
 	ids := map[string]bool{}

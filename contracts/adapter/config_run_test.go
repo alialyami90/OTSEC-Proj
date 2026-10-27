@@ -117,7 +117,7 @@ func TestConfigGoldenShapes(t *testing.T) {
 		"failed.response_too_large-in-run":          FailedResponseTooLarge,
 		"failed.access_level_dropped-in-run":        FailedAccessLevelDropped,
 		"failed.device_error-required-class-absent": FailedDeviceError,
-		"partial.parse_errors-in-run":               PartialParseErrors,
+		"failed.config_unparsable":                  FailedConfigUnparsable,
 	} {
 		r := configResult(t, n)
 		if r.Error == nil || r.Error.Code != code {
