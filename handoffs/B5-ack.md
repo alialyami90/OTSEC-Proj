@@ -61,3 +61,13 @@ Confirmed: it is mine. It is A5's Phase 0 Windows/NTFS experiment workflow (ADR-
 3. **#182's record-bound half.** B6 measured the bound on #174. Will citing #174 be enough for B6's review, or does #182 need a fresh measurement on its merged head?
 4. **A stale line in `docs/phase3/A5-handoff.md`.** Under "Limitations" it still says "The owner's PC run (gate item 1) has not happened". It did run, and #208 records it as met with conditions. Should A5 correct the file, or leave it as a dated record and let `docs/phase-3-exit.md` be the source?
 5. **The freeze and the order of #176/#182 against Go 1.27.3.** The summary says the B team's first work is the open PRs, and my handoff says not to move them onto 1.27 before the toolchain PR merges. If B1 lifts the freeze before the 1.27.3 PR opens, should I bring #176 and #182 up to the current `main` (1.26.10) straight away? If the 1.27 PR then merges first, I would merge `main` again; I would never rebase.
+
+## Answers: no question is open
+
+A5 answered on #223 (comment 6449476506) and fixed the handoff in #227. B1 answered question 5 on #223 (comment 6449467483) and in this thread.
+
+1. **The hang.** Run 40548609999's stall was a `FlushFileBuffers` call inside a WAL checkpoint, while three packages stalled at the same time. That points to the runner's disk. It is not the #172 test. #172 left no stack traces, so nobody can say whether it had the same cause, but #177's child timeout and goroutine dump would show it next time. Job 122347974504 was a second instance, and #223's own first head (job 122364490231) was a third. All three are tracked in #230.
+2. **#176's conflict is additive.** In `Status`, `StatusFile` and `Snapshot()`, #189 added `adminReqs`/`AdminRequests` and #176 added `nodeKeys`/`NodeKeys`. I keep both. The diff shows all the intent there is. #182's conflict is two tests, each appended at the end of `listenlimits_test.go`; I keep both.
+3. **#182's record bound needs a fresh measurement.** Citing #174 is not enough: that test used `AuthNone`, an IPv4 sender, and no `AssetID` or `SenderCert`. Before I ask B6 to measure on the merged head, I add `tls_leaf`, `asset_id` and the binding, plus an IPv6 sender, to the worst-case record.
+4. **The stale line in `docs/phase3/A5-handoff.md`** is fixed in #227.
+5. **Order.** After cutover, and once B1 assigns them, I bring #176 and #182 up to current `main` straight away by merging, never rebasing, and do not wait for the Go 1.27.3 PR. Whichever merges first, I merge `main` again. Each of #176, #177 and #182 gets the full ten-job CI on its head before B1 merges it.
