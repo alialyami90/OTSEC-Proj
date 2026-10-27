@@ -106,34 +106,46 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	bound := func(T time.Duration) int64 {
 		return per + int64(float64(per)*T.Seconds()/window.Seconds())
 	}
-	unknownBytes := func() (n int64, rows int) {
+	// unknownBytes is what the stranger stored: in all, and of that what was
+	// received (received.utc, when the listener read and paid for it) by
+	// the planned outage's end.
+	planned := start.Add(hours * window)
+	unknownBytes := func() (n, inPlan int64, rows int) {
 		for _, s := range g.events() {
 			if s.Sender == ipStranger.String() {
 				n += int64(len(s.Raw))
 				rows++
+				if !s.Received.After(planned) {
+					inPlan += int64(len(s.Raw))
+				}
 			}
 		}
-		return n, rows
+		return n, inPlan, rows
 	}
 
 	// Within the planned outage: the flood ends hours windows after the
-	// listener's start, so the store holds at most a quarter of the quota
-	// from the stranger, at most UnknownBytes x (1 + T/window) for the T
-	// measured, and the budget, not the rig, is what held it there (most
-	// of what the budget allowed over the flood was used, and messages
-	// were dropped).
-	T := flood(start.Add(hours * window))
-	inside, rows := unknownBytes()
+	// listener's start. What the stranger stored by received time within
+	// that span is at most the planned bound and a quarter of the quota; all
+	// it stored is at most UnknownBytes x (1 + T/window) for the T measured;
+	// and the budget, not the rig, is what held it there (most of what the
+	// budget allowed over the flood was used, and messages were dropped).
+	// The quarter is checked on the planned span, not on all T: on a slow
+	// runner the listener reads datagrams the OS held after the flood ends,
+	// past the planned span, and the budget has refilled by then (#179,
+	// job 121963456949: 1711491 bytes in T 5.15 s, under the 1744237 that
+	// T allows).
+	T := flood(planned)
+	inside, inPlan, rows := unknownBytes()
 	used := g.classBytes()
 	st := g.r.Status()
 	floor := bound(F) * 7 / 10
-	t.Logf("within %d windows: T %v, flood %v; stranger %d bytes in %d rows; class %d; bound at T %d; floor %d; planned bound %d; quarter %d; dropped %v",
-		hours, T, F, inside, rows, used, bound(T), floor, sz["a6-udp"].UnknownBound, quota/4, st.Dropped)
+	t.Logf("within %d windows: T %v, flood %v; stranger %d bytes in %d rows, %d received by the planned end; class %d; bound at T %d; floor %d; planned bound %d; quarter %d; dropped %v",
+		hours, T, F, inside, rows, inPlan, used, bound(T), floor, sz["a6-udp"].UnknownBound, quota/4, st.Dropped)
 	if inside > bound(T) {
 		t.Errorf("unknown senders stored %d bytes over T = %v, past UnknownBytes x (1 + T/window) = %d", inside, T, bound(T))
 	}
-	if inside > quota/4 {
-		t.Errorf("unknown senders stored %d bytes within the planned outage, over a quarter of the quota (%d)", inside, quota/4)
+	if inPlan > sz["a6-udp"].UnknownBound || inPlan > quota/4 {
+		t.Errorf("unknown senders stored %d bytes received within the planned outage, past the planned bound %d or a quarter of the quota (%d)", inPlan, sz["a6-udp"].UnknownBound, quota/4)
 	}
 	if inside < floor || st.Dropped[receive.DropUnknownBudget] == 0 {
 		t.Errorf("the budget did not limit the flood: stored %d, under 70%% of the %d it allows over a %v flood, dropped %v", inside, bound(F), F, st.Dropped)
@@ -145,7 +157,7 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	// a slow start cannot shorten it: with the first flood's share that
 	// is past a quarter of the quota.
 	T = flood(time.Now().Add(2 * hours * window))
-	after, _ := unknownBytes()
+	after, _, _ := unknownBytes()
 	t.Logf("after %d more windows: T %v, flood %v; stranger %d bytes; bound at T %d; class %d", 2*hours, T, F, after, bound(T), g.classBytes())
 	if after > bound(T) {
 		t.Errorf("unknown senders stored %d bytes over T = %v, past UnknownBytes x (1 + T/window) = %d", after, T, bound(T))

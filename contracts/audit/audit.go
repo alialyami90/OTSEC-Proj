@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.3"
+const ContractID = "otsec.audit/0.4"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -29,15 +29,16 @@ const MaxRecordBytes = 16 << 10
 
 var (
 	nodeIDPattern = regexp.MustCompile(node.IDPattern) // D1-1
-	// TODO(C1): use asset.ValidAssetID once contracts/asset merges; this is
-	// C1's rule, a lowercase UUID (C8-A4-2).
-	assetIDPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	digestPattern   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	hashPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	idPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
-	codePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
-	clockWordRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)     // an open clock source word
-	operationIDPat  = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`) // TODO(C3): exported pattern
+	digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	// adminKeyIDPattern and adminNoncePattern are C7's (authz.AdminKeyID,
+	// AdminRequest.Nonce), copied as the schema states them.
+	adminKeyIDPattern = regexp.MustCompile(`^ed25519-[0-9a-f]{16}$`)
+	adminNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+	hashPattern       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	idPattern         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+	codePattern       = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
+	clockWordRegexp   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)     // an open clock source word
+	operationIDPat    = regexp.MustCompile(`^[a-z0-9]+(\.[a-z0-9_]+)+$`) // TODO(C3): exported pattern
 	// TODO(C2): C2's code syntax, status then name, e.g. failed.auth_rejected.
 	c2CodePattern = regexp.MustCompile(`^(ok|refused|failed|partial)\.[a-z][a-z0-9_]{0,63}$`)
 )
@@ -241,7 +242,45 @@ type Record struct {
 	// Quarantine is on quarantine.exported and quarantine.cleared only
 	// (0.3). The stream is quarantine/<target.asset_id>.
 	Quarantine *Quarantine `json:"quarantine,omitempty"`
+
+	// Claimed, Verified and RepeatOf (0.4) are on collector.request records
+	// of an admin-signed request (C7 0.4 and later). Claimed is on the
+	// node's info record, written before it sends: what the envelope and
+	// payload say, which nothing has checked yet. Verified is on the
+	// allowed record: CollectorReply.Admin, what the collector checked.
+	// RepeatOf is on an allowed record whose reply was the repeat answer
+	// (C7 0.5): the collector_seq of the first decision on the same signed
+	// bytes, which ran nothing again.
+	Claimed  *Admin `json:"claimed,omitempty"`
+	Verified *Admin `json:"verified,omitempty"`
+	RepeatOf uint64 `json:"repeat_of,omitempty"`
 }
+
+// Admin names one admin-signed request (C7 AdminAccepted): the signing
+// key, the person it speaks for, the nonce and the SHA-256 of the signed
+// payload bytes, lowercase hex. It never holds the payload or the
+// signature.
+type Admin struct {
+	AdminKeyID    string `json:"admin_key_id"`
+	Principal     string `json:"principal"` // a human principal ID
+	Nonce         string `json:"nonce"`
+	PayloadSHA256 string `json:"payload_sha256"`
+}
+
+func (a *Admin) validate() error {
+	switch {
+	case !adminKeyIDPattern.MatchString(a.AdminKeyID):
+		return fmt.Errorf("admin_key_id %q", a.AdminKeyID)
+	case !adminNoncePattern.MatchString(a.Nonce):
+		return errors.New("nonce is not 22 base64url characters")
+	case !hashPattern.MatchString(a.PayloadSHA256):
+		return errors.New("payload_sha256 is not 64 lowercase hex digits")
+	}
+	return (authz.Principal{Type: authz.PrincipalHuman, ID: a.Principal}).Validate()
+}
+
+// adminSince is the minor that added Claimed, Verified and RepeatOf.
+const adminSince = 4
 
 // Quarantine names one verified export of an asset's quarantine stream
 // (P3-A5): the manifest the node checked, and the range of the stream it
@@ -371,6 +410,9 @@ func (r *Record) Validate() error {
 	if err := r.validateNodeState(); err != nil {
 		return err
 	}
+	if err := r.validateAdmin(got.Minor); err != nil {
+		return err
+	}
 	switch r.Outcome {
 	case OutcomeAllowed, OutcomeSucceeded, OutcomeInfo:
 		if r.ReasonCode != "" && !codePattern.MatchString(r.ReasonCode) {
@@ -425,7 +467,7 @@ func (r *Record) Validate() error {
 		return errors.New("audit: credential.use names the credential reference and version")
 	}
 	if t := r.Target; t != nil {
-		if t.AssetID != "" && !assetIDPattern.MatchString(t.AssetID) {
+		if t.AssetID != "" && !asset.ValidAssetID(t.AssetID) {
 			return fmt.Errorf("audit: asset id %q", t.AssetID)
 		}
 		if t.Transport != "" && t.Transport.Plaintext() && t.DownstreamSecurity != authz.DownstreamPlaintext {
@@ -491,7 +533,7 @@ func (r *Record) validateNodeState() error {
 			return fmt.Errorf("audit: %s needs previous_high", r.Action)
 		}
 	case susp:
-		if r.Target == nil || !assetIDPattern.MatchString(r.Target.AssetID) || r.Suspension == nil || !knownSuspension(r.Suspension.Reason) {
+		if r.Target == nil || !asset.ValidAssetID(r.Target.AssetID) || r.Suspension == nil || !knownSuspension(r.Suspension.Reason) {
 			return fmt.Errorf("audit: %s needs a target asset and a C1 suspension reason", r.Action)
 		}
 		// The ref is the C2 invocation ID, or an operator's C7 principal ID.
@@ -514,6 +556,49 @@ func (r *Record) validateNodeState() error {
 	return nil
 }
 
+// validateAdmin checks the 0.4 admin fields: claimed only on a
+// collector.request info record, verified and repeat_of only on an allowed
+// one, with the verified person as its actor, repeat_of only with verified
+// and below the record's own collector_seq (the repeat has its own number),
+// and none on a record stamped 0.3 or earlier.
+func (r *Record) validateAdmin(minor int) error {
+	if r.Claimed == nil && r.Verified == nil && r.RepeatOf == 0 {
+		return nil
+	}
+	if minor < adminSince {
+		return fmt.Errorf("audit: claimed, verified and repeat_of are new in 0.%d, so a 0.%d record cannot carry them", adminSince, minor)
+	}
+	if r.Action != ActionCollectorRequest {
+		return fmt.Errorf("audit: claimed, verified and repeat_of belong on %s, not %s", ActionCollectorRequest, r.Action)
+	}
+	if r.Claimed != nil {
+		if r.Outcome != OutcomeInfo {
+			return errors.New("audit: claimed is on the node's info record of the request it sent")
+		}
+		if err := r.Claimed.validate(); err != nil {
+			return fmt.Errorf("audit: claimed: %w", err)
+		}
+	}
+	if (r.Verified != nil || r.RepeatOf != 0) && r.Outcome != OutcomeAllowed {
+		return errors.New("audit: verified and repeat_of are on the record of an accepted reply")
+	}
+	if r.Verified != nil {
+		if err := r.Verified.validate(); err != nil {
+			return fmt.Errorf("audit: verified: %w", err)
+		}
+		// A reader takes who authorised the action from verified, so the
+		// record names one person: the actor is the verified person (A1 on
+		// #187).
+		if r.Actor.Type != authz.PrincipalHuman || r.Actor.ID != r.Verified.Principal {
+			return errors.New("audit: the actor of a record with verified is the verified person")
+		}
+	}
+	if r.RepeatOf != 0 && (r.Verified == nil || r.RepeatOf >= r.CollectorSeq) {
+		return errors.New("audit: repeat_of needs verified and names a decision before the record's own collector_seq")
+	}
+	return nil
+}
+
 // validateQuarantine checks the 0.3 quarantine actions. Both are written by
 // the node, about one asset, with the verified range. quarantine.exported
 // is info. quarantine.cleared is succeeded when the clear passed every
@@ -526,7 +611,7 @@ func (r *Record) validateQuarantine() error {
 	if r.Actor.Type != authz.PrincipalNode {
 		return fmt.Errorf("audit: %s is written by the node (actor type node)", r.Action)
 	}
-	if r.Target == nil || !assetIDPattern.MatchString(r.Target.AssetID) {
+	if r.Target == nil || !asset.ValidAssetID(r.Target.AssetID) {
 		return fmt.Errorf("audit: %s needs a target asset", r.Action)
 	}
 	if q == nil || !hashPattern.MatchString(q.ManifestSHA256) {

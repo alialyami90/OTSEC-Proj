@@ -16,9 +16,10 @@ import (
 // UnknownBytes × (1 + T) in their class quota, which known devices share.
 // The node sizes UnknownBytes so that every listener of a class together
 // can take at most a quarter of that quota over the planned outage, and
-// refuses a quota too small for that. Each node start refills the budget,
-// so a node restarted R times in the outage can store UnknownBytes × R more
-// from unknown senders. A received stream batch commits all
+// refuses a quota too small for that. A node start does not refill the
+// budget: the node counts what unknown senders stored in the hour before
+// and passes it to the listener (unknownSpent, receive.Config.UnknownSpent).
+// A received stream batch commits all
 // or nothing, so the quota must also hold one whole batch beside the
 // unknown share, or a large batch is held for good.
 const (

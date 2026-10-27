@@ -499,8 +499,8 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintf(w, "  UNKNOWN SENDERS: %d%s; their messages are kept with no asset\n", ls.UnknownSenders, more)
 		}
 		if u := ls.Unknown; u != nil {
-			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
-				u.StoredBytes, u.HourlyBytes, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
+			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour, started %d bytes spent by the hour before start; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
+				u.StoredBytes, u.HourlyBytes, u.SpentAtStart, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
 		}
 		if na := ls.CertNotAfter; !na.IsZero() {
 			switch left := time.Until(na); {
