@@ -256,18 +256,21 @@ func (d *DB) load(ctx context.Context) error {
 			return invalid("stream %s is stored as %s and configured as %s; a stream has one class for life", s.ID, have, s.Class)
 		}
 	}
-	if len(add) == 0 {
-		return nil
-	}
-	return d.tx(ctx, "streams", func() error {
-		for _, s := range add {
-			if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
-				return err
+	if len(add) > 0 {
+		err := d.tx(ctx, "streams", func() error {
+			for _, s := range add {
+				if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
+					return err
+				}
+				d.streams[s.ID] = s.Class
 			}
-			d.streams[s.ID] = s.Class
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return d.ensureHolds(ctx)
 }
 
 // tx runs f in one BEGIN IMMEDIATE transaction on the connection. The
