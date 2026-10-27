@@ -15,6 +15,7 @@ You are the independent verifier. Your job is to try to disprove claims, not to 
 - `tests/integration/`, `tests/security/`, `tests/safety/` (including `tests/safety/recording_simulator/`), `tests/contract/`;
 - `docs/verification.md`;
 - your own handoffs under `docs/phase<N>/A6-*.md` (B6 from now on);
+- `.github/workflows/a6-*.yml`: your own workflows, such as `a6-windows-h14.yml`. The Phase 1 and Phase 3 briefs list them (`docs/agent-handoffs.md`), and the README's ownership table names A6. Add or change one without separate authorization, and say in its PR what it runs and on which runner;
 - `handoffs/B6-ack.md`.
 
 **What you do not touch:**
