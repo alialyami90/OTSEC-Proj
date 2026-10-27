@@ -179,3 +179,77 @@ func TestCNGRightsProbe(t *testing.T) {
 		}
 	}
 }
+
+// atDepth runs f below d small frames, so f's calls start at a different
+// stack offset for each d, a few words apart.
+//
+//go:noinline
+func atDepth(d int, f func()) byte {
+	var pad [16]byte
+	pad[d%len(pad)] = byte(d)
+	if d > 0 {
+		return atDepth(d-1, f) + pad[(d*7)%len(pad)]
+	}
+	f()
+	return pad[0]
+}
+
+// TestCNGStackMoves calls NCrypt from fresh goroutines at every stack
+// depth up to 2048 small frames, so for some depths the stack grows inside
+// call and moves. Steps of a few words are what find it: the same harness
+// around clock_gettime on Linux, through a wrapper without
+// go:uintptrescapes, failed at 12 of 2048 depths with 16-byte padding and
+// at none with 256-byte padding (a step wider than the call's frames). An out-parameter or buffer left on the old stack is then
+// written by NCrypt where Go no longer reads it: the public key reads as
+// short ("not an ECDSA P-256 public key", #199's Windows job), a signature
+// fails to verify, or a DACL read sees no descriptor. call's
+// go:uintptrescapes moves every pointer it is passed to the heap.
+//
+// It is a smoke test, not the proof: on the hosted runner it passed
+// without the fix, at both strides tried (#201's first two runs), so the
+// window is narrower there than on Linux. TestCNGPointersEscape is the
+// deterministic check.
+func TestCNGStackMoves(t *testing.T) {
+	needElevated(t)
+	keys := CNG{}
+	name := cngKeyName("stack")
+	s := created(t, keys, name)
+	key, err := keys.openKey(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer free(key)
+	want := s.Public().(*ecdsa.PublicKey)
+	errs := make(chan error, 3*2*2048) // room for every check to fail
+	for round := range 2 {
+		for d := range 2048 {
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				atDepth(d, func() {
+					digest := sha256.Sum256([]byte(fmt.Sprintf("otsec nodekey stack %d %d", round, d)))
+					if pub, err := publicKey(key); err != nil || !pub.Equal(want) {
+						errs <- fmt.Errorf("depth %d: public key: %v", d, err)
+					}
+					if sig, err := s.Sign(rand.Reader, digest[:], nil); err != nil || !ecdsa.VerifyASN1(want, digest[:], sig) {
+						errs <- fmt.Errorf("depth %d: sign: %v", d, err)
+					}
+					if _, err := keys.securityDescriptor(name); err != nil {
+						errs <- fmt.Errorf("depth %d: DACL read: %v", d, err)
+					}
+				})
+			}()
+			<-done
+		}
+	}
+	close(errs)
+	n := 0
+	for err := range errs {
+		if n++; n <= 10 {
+			t.Error(err)
+		}
+	}
+	if n > 10 {
+		t.Errorf("and %d more", n-10)
+	}
+}

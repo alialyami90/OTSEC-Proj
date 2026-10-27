@@ -52,6 +52,17 @@ type cngStatus uintptr
 
 func (s cngStatus) Error() string { return fmt.Sprintf("CNG status 0x%08X", uint32(s)) }
 
+// call calls an NCrypt function and maps a nonzero status to cngStatus.
+// Its arguments carry pointers as uintptr, so it has go:uintptrescapes,
+// as LazyProc.Call has: a pointer converted to uintptr in the argument
+// list of a call to call is moved to the heap and kept alive until call
+// returns. Without it, a buffer or out-parameter on the goroutine stack
+// moves when the stack grows inside LazyProc.Call, and NCrypt writes into
+// the old stack (#199's Windows job: "not an ECDSA P-256 public key";
+// the same class as golang/go#78041). Every pointer passed must therefore
+// be converted inside the call expression, never earlier.
+//
+//go:uintptrescapes
 func call(p *windows.LazyProc, args ...uintptr) error {
 	r, _, _ := p.Call(args...)
 	if uint32(r) != 0 {
@@ -60,9 +71,13 @@ func call(p *windows.LazyProc, args ...uintptr) error {
 	return nil
 }
 
-func utf16(s string) uintptr {
+// utf16 is s as a NUL-terminated UTF-16 string for NCrypt, or nil if s
+// holds a NUL (no name or property here does). It returns the pointer, not
+// a uintptr, so the caller converts it in call's argument list and the
+// buffer stays alive through the call.
+func utf16(s string) *uint16 {
 	p, _ := windows.UTF16PtrFromString(s)
-	return uintptr(unsafe.Pointer(p))
+	return p
 }
 
 func (c CNG) open() (uintptr, error) {
@@ -71,7 +86,7 @@ func (c CNG) open() (uintptr, error) {
 		name = providerPlatform
 	}
 	var h uintptr
-	if err := call(procOpenStorageProvider, uintptr(unsafe.Pointer(&h)), utf16(name), 0); err != nil {
+	if err := call(procOpenStorageProvider, uintptr(unsafe.Pointer(&h)), uintptr(unsafe.Pointer(utf16(name))), 0); err != nil {
 		return 0, fmt.Errorf("nodekey: open %s: %w", name, err)
 	}
 	return h, nil
@@ -103,7 +118,7 @@ func setDACL(key uintptr, sddl string) error {
 	if err != nil {
 		return err
 	}
-	return call(procSetProperty, key, utf16(securityDescrProperty), uintptr(unsafe.Pointer(sd)), uintptr(sd.Length()),
+	return call(procSetProperty, key, uintptr(unsafe.Pointer(utf16(securityDescrProperty))), uintptr(unsafe.Pointer(sd)), uintptr(sd.Length()),
 		uintptr(daclSecurityInfo|protectedDACLInfo))
 }
 
@@ -128,7 +143,7 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 	}
 	defer free(prov)
 	var key uintptr
-	if err := call(procCreatePersistedKey, prov, uintptr(unsafe.Pointer(&key)), utf16(ecdsaP256Algorithm), utf16(name), 0,
+	if err := call(procCreatePersistedKey, prov, uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(utf16(ecdsaP256Algorithm))), uintptr(unsafe.Pointer(utf16(name))), 0,
 		ncryptMachineKeyFlag|ncryptSilentFlag); err != nil {
 		if s, ok := err.(cngStatus); ok && s == nteExists {
 			return nil, fmt.Errorf("nodekey: create %s: the key exists", name)
@@ -140,7 +155,7 @@ func (c CNG) Create(name string) (crypto.Signer, error) {
 		return nil, fmt.Errorf("nodekey: create %s: %w", name, err)
 	}
 	policy := uint32(0) // no export of any kind
-	if err := call(procSetProperty, key, utf16(exportPolicyProperty), uintptr(unsafe.Pointer(&policy)), 4,
+	if err := call(procSetProperty, key, uintptr(unsafe.Pointer(utf16(exportPolicyProperty))), uintptr(unsafe.Pointer(&policy)), 4,
 		ncryptPersistFlag|ncryptSilentFlag); err != nil {
 		return fail(err)
 	}
@@ -187,7 +202,7 @@ func (c CNG) openKey(name string) (uintptr, error) {
 	}
 	defer free(prov)
 	var key uintptr
-	if err := call(procOpenKey, prov, uintptr(unsafe.Pointer(&key)), utf16(name), 0, ncryptMachineKeyFlag|ncryptSilentFlag); err != nil {
+	if err := call(procOpenKey, prov, uintptr(unsafe.Pointer(&key)), uintptr(unsafe.Pointer(utf16(name))), 0, ncryptMachineKeyFlag|ncryptSilentFlag); err != nil {
 		if s, ok := err.(cngStatus); ok && s == nteBadKeyset {
 			return 0, fmt.Errorf("%w: %s", ErrNoKey, name)
 		}
@@ -228,7 +243,7 @@ func (c CNG) Delete(name string) error {
 func publicKey(key uintptr) (*ecdsa.PublicKey, error) {
 	buf := make([]byte, 8+64)
 	var n uint32
-	if err := call(procExportKey, key, 0, utf16(eccPublicBlob), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+	if err := call(procExportKey, key, 0, uintptr(unsafe.Pointer(utf16(eccPublicBlob))), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
 		uintptr(unsafe.Pointer(&n)), 0); err != nil {
 		return nil, err
 	}
@@ -277,12 +292,12 @@ func (c CNG) securityDescriptor(name string) (*windows.SECURITY_DESCRIPTOR, erro
 	}
 	defer free(key)
 	var n uint32
-	call(procGetProperty, key, utf16(securityDescrProperty), 0, 0, uintptr(unsafe.Pointer(&n)), uintptr(daclSecurityInfo))
+	call(procGetProperty, key, uintptr(unsafe.Pointer(utf16(securityDescrProperty))), 0, 0, uintptr(unsafe.Pointer(&n)), uintptr(daclSecurityInfo))
 	if n == 0 {
 		return nil, errors.New("no security descriptor")
 	}
 	buf := make([]byte, n)
-	if err := call(procGetProperty, key, utf16(securityDescrProperty), uintptr(unsafe.Pointer(&buf[0])), uintptr(n),
+	if err := call(procGetProperty, key, uintptr(unsafe.Pointer(utf16(securityDescrProperty))), uintptr(unsafe.Pointer(&buf[0])), uintptr(n),
 		uintptr(unsafe.Pointer(&n)), uintptr(daclSecurityInfo)); err != nil {
 		return nil, err
 	}
@@ -339,7 +354,7 @@ func (c CNG) exportPrivate(name string) error {
 	buf := make([]byte, 4096)
 	var n uint32
 	for _, blob := range []string{"ECCPRIVATEBLOB", "PKCS8_PRIVATEKEY"} {
-		if err := call(procExportKey, key, 0, utf16(blob), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+		if err := call(procExportKey, key, 0, uintptr(unsafe.Pointer(utf16(blob))), 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
 			uintptr(unsafe.Pointer(&n)), ncryptSilentFlag); err == nil {
 			return fmt.Errorf("%s exported", blob)
 		}
