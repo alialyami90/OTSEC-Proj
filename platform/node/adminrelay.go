@@ -316,8 +316,9 @@ func readAdminFile(path string) (*adminFile, string) {
 // The relay runs in the scheduler's loop, so a collector that takes the
 // connection and never answers would otherwise hold the relay and every
 // run behind it (A6 on #189). A request cut off is left undecided and sent
-// again; if the collector did decide it, the resend is refused as a
-// replay, and the refusal says the request may already have been applied.
+// again; if the collector did decide it, the resend gets its repeat
+// answer (C7 0.5) when it was accepted, or a replay refusal, which says
+// the request may already have been applied, when it was refused.
 var RelayTimeout = 30 * time.Second
 
 // relayOne sends one file's request: recorded first, then sent, then the

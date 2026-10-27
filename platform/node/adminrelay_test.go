@@ -718,19 +718,24 @@ func TestRelayFileCapBoundary(t *testing.T) {
 	defer r.Close()
 	col := newAdminCollector()
 	s := newScheduler(t, r, col)
-	for i := 0; i < MaxAdminRequestFiles; i++ {
-		writeAdminFile(t, nc, fmt.Sprintf("admin-request-cap-%02d.json", i), authz.KindCredentialRevoke, signNonce(t, i))
+	// The design's fileCap, as a literal: a change to the constant fails here.
+	const fileCap = 16
+	if MaxAdminRequestFiles != fileCap {
+		t.Fatalf("MaxAdminRequestFiles is %d, the design says %d", MaxAdminRequestFiles, fileCap)
+	}
+	for i := 0; i < fileCap; i++ {
+		writeAdminFile(t, nc, fmt.Sprintf("admin-request-fileCap-%02d.json", i), authz.KindCredentialRevoke, signNonce(t, i))
 	}
 	s.relayAdmin(bg)
-	if n := len(col.requests()); n != MaxAdminRequestFiles || countAlarms(st, AlarmAdminRequestUnread) != 0 {
-		t.Fatalf("%d files: %d requests, %d unread alarms", MaxAdminRequestFiles, n, countAlarms(st, AlarmAdminRequestUnread))
+	if n := len(col.requests()); n != fileCap || countAlarms(st, AlarmAdminRequestUnread) != 0 {
+		t.Fatalf("%d files: %d requests, %d unread alarms", fileCap, n, countAlarms(st, AlarmAdminRequestUnread))
 	}
-	writeAdminFile(t, nc, "admin-request-cap-zz.json", authz.KindCredentialRevoke, signNonce(t, MaxAdminRequestFiles))
+	writeAdminFile(t, nc, "admin-request-fileCap-zz.json", authz.KindCredentialRevoke, signNonce(t, fileCap))
 	s.relayAdmin(bg)
-	if n := len(col.requests()); n != MaxAdminRequestFiles {
-		t.Fatalf("the file past the cap was sent: %d requests", n)
+	if n := len(col.requests()); n != fileCap {
+		t.Fatalf("the file past the fileCap was sent: %d requests", n)
 	}
-	if d := adminAlarm(st, AlarmAdminRequestUnread); !strings.Contains(d, fmt.Sprintf("holds %d", MaxAdminRequestFiles+1)) {
+	if d := adminAlarm(st, AlarmAdminRequestUnread); !strings.Contains(d, fmt.Sprintf("holds %d", fileCap+1)) {
 		t.Fatalf("unread alarm %q", d)
 	}
 }
