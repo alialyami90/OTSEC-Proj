@@ -1,0 +1,33 @@
+# Dry run only (not for main): the start's relay on the hosted Windows
+# runner, quiet and beside other packages' tests, with -v so each
+# latency and each alarm is in the log.
+name: relay-start-dryrun
+on:
+  push:
+    branches: [claude/project-thread-xni3ff-relaystartdry]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -c -o node.test.exe ./platform/node
+      - name: quiet
+        run: ./node.test.exe -test.count=20 -test.v -test.run 'TestRunRelaysBetweenRuns$' | grep -E "relay reached|FAIL|adminrelay_test|^ok|^PASS"
+      - name: loaded
+        run: |
+          go test -count=1 ./platform/store ./modules/security/collector ./tests/integration/syslogreceive > load.log 2>&1 &
+          sleep 20
+          DIAG_MS=300 ./node.test.exe -test.count=40 -test.v -test.run 'TestZZRelayStartDiag$' | grep -E "zz_diag|FAIL" || true
+          ./node.test.exe -test.count=20 -test.v -test.run 'TestRunRelaysBetweenRuns$' | grep -E "relay reached|FAIL|adminrelay_test|^ok|^PASS"
+          wait
+          tail -5 load.log
