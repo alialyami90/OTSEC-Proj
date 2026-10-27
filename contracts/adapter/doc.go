@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.5: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.6: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -131,6 +131,16 @@
 //     results read unchanged; they carry no settings, so a consumer reads
 //     every setting as unknown (for DATE_F, the normalizer keeps its MDY
 //     assumption and its flag).
+//   - 0.6 (P4-A2, D4-13): the configuration read. A register run (C3 0.3)
+//     is invocable under its own ID, with no parameters, and the result's
+//     records are one sel.config.section or sel.config.absent per step, in
+//     the run's order (RecordConfigSection, RecordConfigAbsent). The run is
+//     one session with one ACC: it fails as a whole on the first step that
+//     fails, the adapter sends QUI (unless the level dropped) and keeps the
+//     bytes, and a failed run reports no record (CheckLines holds the lines
+//     to the run's steps, once each and in order). Limits.ForRun gives an
+//     invocation the run's limits; each step is also held to its own
+//     register limits. Earlier results read unchanged.
 //
 // # For the consumers of a result
 //
