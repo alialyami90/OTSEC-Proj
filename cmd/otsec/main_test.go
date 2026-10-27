@@ -212,6 +212,18 @@ func TestHealthShowsSuspensions(t *testing.T) {
 	}
 }
 
+// health shows the Go toolchain the node was built with (D3-10).
+func TestHealthShowsGoVersion(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "node built with " + runtime.Version() + "\n"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
 // health says when a node-wide hold is current, and says nothing once it
 // has ended, though its alarm stays in the history (A3 on #147).
 func TestHealthShowsRunsHeld(t *testing.T) {
