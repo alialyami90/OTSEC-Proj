@@ -75,8 +75,8 @@ func TestSyslogKeyFromPRI(t *testing.T) {
 	}
 }
 
-// TestMSGIDIsNotInTheKey: D4-4 item 4 keys Syslog on facility, severity and
-// the template only. A sender that reuses one MSGID for different messages
+// TestMSGIDIsNotInTheKey: D4-9 keys Syslog on facility, severity and the
+// template only. A sender that reuses one MSGID for different messages
 // gets one type per template, and a MSGID alone never splits a type.
 func TestMSGIDIsNotInTheKey(t *testing.T) {
 	a, _ := mustKey(t, syslogMsg("pri", "38", "version", "1", "msgid", "LOG", "msg", "user 5 logged on"))

@@ -40,7 +40,8 @@ type Key struct {
 	Severity string `json:"severity,omitempty"`
 	// Template is set for Syslog: "sha256:" and the hex SHA-256 of the
 	// template (TemplateOf). The RFC 5424 MSGID is not part of the key
-	// (D4-4 item 4), so two messages sharing a MSGID stay apart.
+	// (D4-9): a sender chooses it, so a compromised sender could hide a new
+	// kind of message under a known MSGID. Two messages sharing one stay apart.
 	Template string `json:"template,omitempty"`
 }
 

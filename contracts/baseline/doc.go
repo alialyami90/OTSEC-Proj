@@ -20,8 +20,8 @@
 //     severity "pri-absent". The template's identity is its SHA-256, so a
 //     long message costs a fixed size; Text keeps its first TextMax bytes
 //     for the alarm. APP-NAME, the tag and the RFC 5424 MSGID are not part
-//     of the key (D4-4 item 4): a sender that reuses one MSGID for
-//     different messages still gets one type per template.
+//     of the key (D4-4 item 4, D4-9): a sender chooses its MSGID, so a
+//     known one cannot hide a new kind of message.
 //   - Which events a baseline counts (Classify). Platform events, events of
 //     kinds other than ser and syslog, and events flagged asset-unresolved
 //     belong to no asset's baseline (A6's invariant). The node counts
