@@ -29,7 +29,9 @@ type Layout struct {
 //   - every class a database holds has exactly one quota there;
 //   - audit is never in a database with any other class, so a full audit
 //     store cannot stop evidence collection and an evidence flood cannot
-//     stop audit.
+//     stop audit;
+//   - configuration (0.4) is never in a database with any other class,
+//     for the same reason, and because its records may be held.
 func (l Layout) Validate() error {
 	dbs := map[DatabaseID]bool{}
 	streams := map[StreamID]DatabaseID{}
@@ -66,6 +68,9 @@ func (l Layout) Validate() error {
 		}
 		if classes[ClassAudit] && len(classes) > 1 {
 			return errf(CodeInvalid, nil, "database %s mixes audit with other classes", d.ID)
+		}
+		if classes[ClassConfiguration] && len(classes) > 1 {
+			return errf(CodeInvalid, nil, "database %s mixes configuration with other classes", d.ID)
 		}
 		for _, s := range d.Streams {
 			if !classes[s.Class] {
