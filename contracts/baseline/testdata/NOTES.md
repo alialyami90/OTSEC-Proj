@@ -6,7 +6,7 @@ All of these are **synthetic**. The test helpers `valid()` and `validAlarm()` in
 
 | File | What it shows |
 | --- | --- |
-| `baseline-synthetic.json` | A first baseline (version 1, no `previous`) over 14 days, with one 2 h `failed.timeout` gap that extended the period, so `collected_s` is the period less the gap. Two SER types and one Syslog template type. `counts.events` is `full` + `type_only` + `unkeyed` + `not_counted`. Each type's `hours_utc` sums to its `full`. The Syslog type is periodic: its tolerance is `Tolerance(5040, 10)` = 504 s. |
+| `baseline-synthetic.json` | A first baseline (version 1, no `previous`) over 14 days, with one 2 h `failed.timeout` gap that extended the period, so `collected_s` is the period less the gap. Two SER types and one Syslog template type. `counts.events` is `full` + `type_only` + `unkeyed` + `not_counted`. Each type's `hours_utc` sums to its `full`. The Syslog type is periodic: its tolerance is `Tolerance(5040, absence_tolerance_pct 10)` = 504 s. |
 | `alarm-repeats.json` | A repeats alarm: the rule's two parameters in order, the baseline's `max_per_window`, the observation, the received clock, six breaking events with `events_total` 6, and one possible duplicate that was not counted. |
 
 ## Invalid

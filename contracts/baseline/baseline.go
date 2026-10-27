@@ -105,10 +105,16 @@ type Params struct {
 	RateMin       int64 `json:"rate_min"`
 	// Absence: a type is periodic when it occurred at least
 	// PeriodicMinOccurrences times with full use and every gap between
-	// consecutive occurrences lies within PeriodicTolerancePct of the
-	// median gap.
+	// consecutive occurrences lies within PeriodicSpreadPct of the median
+	// gap (|gap - median| × 100 ≤ median × PeriodicSpreadPct). The median
+	// is the upper middle of the sorted gaps, gaps[len/2], and is the
+	// type's IntervalS. Its absence alarm comes once the type is missing
+	// past IntervalS + Tolerance(IntervalS, AbsenceTolerancePct). Learning
+	// a period wants a tight spread; tolerating jitter wants a looser bound,
+	// so the two are separate (B6's GT-INJ, #251).
 	PeriodicMinOccurrences int64 `json:"periodic_min_occurrences"`
-	PeriodicTolerancePct   int64 `json:"periodic_tolerance_pct"`
+	PeriodicSpreadPct      int64 `json:"periodic_spread_pct"`
+	AbsenceTolerancePct    int64 `json:"absence_tolerance_pct"`
 	// TimeClock is the clock of Type.HoursUTC and of the time rule.
 	TimeClock Clock `json:"time_clock"`
 	// MaxTypes bounds Types. Types past it, or past what fits in MaxBytes,
@@ -334,8 +340,11 @@ func (p *Params) check(c *checker) {
 	if p.PeriodicMinOccurrences < 3 {
 		c.fail(CodeRange, "params.periodic_min_occurrences", "%d is below 3: two occurrences give one gap and no median to test", p.PeriodicMinOccurrences)
 	}
-	if p.PeriodicTolerancePct < 0 || p.PeriodicTolerancePct > 100 {
-		c.fail(CodeRange, "params.periodic_tolerance_pct", "%d is outside 0 to 100", p.PeriodicTolerancePct)
+	if p.PeriodicSpreadPct < 0 || p.PeriodicSpreadPct > 100 {
+		c.fail(CodeRange, "params.periodic_spread_pct", "%d is outside 0 to 100", p.PeriodicSpreadPct)
+	}
+	if p.AbsenceTolerancePct < 0 || p.AbsenceTolerancePct > 100 {
+		c.fail(CodeRange, "params.absence_tolerance_pct", "%d is outside 0 to 100", p.AbsenceTolerancePct)
 	}
 	if p.MaxAlarmsPerHold > MaxAlarmsPerHoldCeiling {
 		c.fail(CodeRange, "params.max_alarms_per_hold", "%d is above %d", p.MaxAlarmsPerHold, MaxAlarmsPerHoldCeiling)
@@ -463,8 +472,8 @@ func (t *Type) check(c *checker, f string, p *Params, start, end time.Time) {
 		c.fail(CodeRange, f+".max_per_bucket", "%d is outside 1 to full %d (0 only when full is 0)", t.MaxPerBucket, t.Full)
 	}
 	if pd := t.Periodic; pd != nil {
-		if pd.IntervalS < 1 || pd.ToleranceS != Tolerance(pd.IntervalS, p.PeriodicTolerancePct) {
-			c.fail(CodeRange, f+".periodic", "interval %d s and tolerance %d s: interval >= 1, and tolerance is Tolerance(interval, periodic_tolerance_pct) = %d", pd.IntervalS, pd.ToleranceS, Tolerance(pd.IntervalS, p.PeriodicTolerancePct))
+		if pd.IntervalS < 1 || pd.ToleranceS != Tolerance(pd.IntervalS, p.AbsenceTolerancePct) {
+			c.fail(CodeRange, f+".periodic", "interval %d s and tolerance %d s: interval >= 1, and tolerance is Tolerance(interval, absence_tolerance_pct) = %d", pd.IntervalS, pd.ToleranceS, Tolerance(pd.IntervalS, p.AbsenceTolerancePct))
 		}
 		if t.Full < p.PeriodicMinOccurrences {
 			c.fail(CodeConflict, f+".periodic", "found periodic on %d full occurrences, below params.periodic_min_occurrences %d", t.Full, p.PeriodicMinOccurrences)
