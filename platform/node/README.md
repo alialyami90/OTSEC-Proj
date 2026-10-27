@@ -86,7 +86,7 @@ Each database has a commit cap in bytes (`GroupOptions.MaxCommitBytes`) and in r
 | Database | Commit cap | Records | Recovery reserve (WAL bound 512 KiB) |
 | --- | --- | --- | --- |
 | `evidence` | 11 MiB (`SERCommitBytes`) | 2048 | 20,093,337 bytes (19.16 MiB) |
-| `syslog` | 1 MiB (c5 default) | 1024 | 5,413,274 bytes (5.16 MiB) |
+| `syslog` | 1 MiB (c5 default) | 1024 | 5,413,273 bytes (5.16 MiB) |
 | `audit` | 1 MiB (c5 default) | 128 | 2,660,761 bytes (2.54 MiB) |
 
 The evidence byte cap is derived, not measured. One SER read commits atomically, so the cap is `commitcap.go`'s bound on a read: C2's 1 MiB capture, 4.34 encoded bytes for each row byte, 2048 rows (`MaxReadRowsCeiling`) of at most 2560 fixed bytes, and 64 KiB of health events, 10.4 MiB, rounded up to a MiB. `serbound_test.go` measures the constants through the real normalizer and fails if the bound rises above the cap or the cap exceeds it by a MiB. A quarantine (a whole outcome frame of up to 8 MiB, its reason and two events) fits the same cap. The schedule's `operation` is at most 64 bytes, because it is in every event of a read.
