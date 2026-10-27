@@ -27,8 +27,15 @@
 //     only by spaces, so a field the bytes do not contain never reaches C4.
 //   - Device time with native precision. device_time.native is DATE, one
 //     space and TIME as printed (C4). The resolution is the step of the
-//     printed fraction. The date order is the relay's DATE_F when the caller
-//     knows it; otherwise MDY is assumed and the event carries
+//     printed fraction. The date order is the relay's DATE_F. When a C2 0.5
+//     result carries the DATE_F setting the adapter read in the same session
+//     (D2-20), only that is used: a caller's order that disagrees, or a
+//     parsed row beside a DATE_F not MDY, DMY or YMD, refuses the result,
+//     which the caller keeps as quarantine. An adapter that cannot use DATE_F
+//     leaves the rows unparsed, and they become parse-failed events with
+//     their bytes. A result with no DATE_F setting (before 0.5, or a 0.5
+//     adapter under a register without the DATE_F read, D3-11) takes the
+//     caller's order; without one, MDY is assumed and the event carries
 //     date-format-assumed:MDY. The offset is unknown unless the caller knows
 //     it, and then UTC is stated. A date or time that cannot be decoded keeps
 //     the native text with invalid-time and parse_status partial.
