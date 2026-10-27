@@ -95,7 +95,7 @@ func c5vRef() store.HoldReason {
 }
 
 func TestC5v04Identifier(t *testing.T) {
-	if store.Identifier != "otsec.store/0.4" {
+	if store.Identifier != "otsec.store/0.5" {
 		t.Errorf("identifier %q", store.Identifier)
 	}
 }
@@ -462,14 +462,14 @@ func TestC5v04CommitWALCoversMeasured(t *testing.T) {
 		// fixed about 34 KB plus 1.0 × payload, the shape of the rows above
 		store.MinRecordBytes: 34<<10 + store.MinRecordBytes,
 	} {
-		if w := store.CommitWALBytes(payload); w < measured {
+		if w := store.CommitWALBytes(payload, 1); w < measured {
 			t.Errorf("payload %d: rule %d below measured %d", payload, w, measured)
 		}
 	}
-	if w := store.CommitWALBytes(1 << 20); w != 1<<20+(1<<20)/10+64<<10 {
+	if w := store.CommitWALBytes(1<<20, 1); w != 1<<20+(1<<20)/10+64<<10+store.RowWALBytes {
 		t.Errorf("CommitWALBytes(1 MiB) = %d, the text says 1.1 × C + 64 KiB", w)
 	}
-	if r := store.RecoveryReserveFor(512<<10, 1<<20); r != 2*(512<<10)+store.CommitWALBytes(1<<20) {
+	if r := store.RecoveryReserveFor(512<<10, 1<<20, 1); r != 2*(512<<10)+store.CommitWALBytes(1<<20, 1) {
 		t.Errorf("RecoveryReserveFor = %d, the text says 2 × WAL bound + W(C)", r)
 	}
 }
@@ -485,9 +485,9 @@ func TestC5v04StartupReserve(t *testing.T) {
 	}
 	const wal = 512 << 10
 	for _, largest := range []int64{store.MinRecordBytes, 512 << 10, 1 << 20, 10 << 20} {
-		need := store.RecoveryReserveFor(wal, largest)
+		need := store.RecoveryReserveFor(wal, largest, 1)
 		p := base
-		p.WALBoundBytes, p.LargestCommitBytes = wal, largest
+		p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = wal, largest, 1
 		p.RecoveryReserveBytes = need
 		if err := p.Validate(); err != nil {
 			t.Errorf("largest %d at exactly the rule's %d: %v", largest, need, err)
@@ -506,7 +506,7 @@ func TestC5v04StartupReserve(t *testing.T) {
 	if err := p.Validate(); !c5vIs(err, store.CodeInvalid) {
 		t.Errorf("a WAL bound with no largest commit: %v", err)
 	}
-	p.WALBoundBytes, p.LargestCommitBytes = 0, 1<<20
+	p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = 0, 1<<20, 1
 	if err := p.Validate(); !c5vIs(err, store.CodeInvalid) {
 		t.Errorf("a largest commit with no WAL bound: %v", err)
 	}
