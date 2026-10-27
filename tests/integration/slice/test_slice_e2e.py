@@ -21,8 +21,11 @@ What is checked, against ground truth that is not the product's own:
   - every line the simulator received is a read-only register line, one
     session at a time, one password per session, QUI last (check.py;
     V-S7, V-S13);
-  - the test password appears in no file, log, receiver record or process
-    argument of the platform (V-S11).
+  - the test password appears in no file, log, receiver record, process
+    argument or process environment of the platform (V-S11). An
+    environment is read on Linux only, and not the collector's: it is
+    non-dumpable, so /proc keeps it from the harness. Each environment not
+    read is reported as a warning, never counted as clean.
 
 Evidence class: simulated. The simulator answers from manual examples
 (documented-example), not from a device; nothing here is hardware
@@ -35,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import time
+import warnings
 
 import pytest
 
@@ -67,12 +71,10 @@ def run(tmp_path_factory):
                       f"{RUN_TIMEOUT:.0f}s\nnode:\n{s.text('node')}\ncollector:\n{s.text('collector')}")
         for name in ("node", "collector"):
             assert s.procs[name].poll() is None, f"{name} exited:\n{s.text(name)}"
-        s.cmdlines = {}
-        for name in ("node", "collector"):
-            path = f"/proc/{s.procs[name].pid}/cmdline"
-            if os.path.exists(path):
-                with open(path, "rb") as f:
-                    s.cmdlines[name] = f.read()
+        # As the OS has them while both run: /proc on Linux, Win32_Process
+        # on Windows (processes or installed services).
+        s.cmdlines = {name: s.cmdline(name) for name in ("node", "collector")}
+        s.environs = {name: s.environ(name) for name in ("node", "collector")}
         yield s
     finally:
         s.stop()
@@ -138,12 +140,33 @@ def test_the_password_is_nowhere(run):
                 # A file the run locked read-only for its owner is still
                 # readable; anything else unreadable is a gap in the check.
                 hits.append("unreadable: " + os.path.relpath(p, run.root))
-    for name, cmd in run.cmdlines.items():
-        if canary in cmd:
+    not_read = []
+    for name in ("node", "collector"):
+        cmd = (run.cmdlines.get(name) or "").strip()
+        # A command line that was not read, or was read from the other
+        # process, would pass vacuously: it must start with this process's
+        # own image path (quoted on Windows when the path has spaces).
+        image, head = run.image(name).lower(), cmd.lstrip('"').lower()
+        # The image path, then the end, a space or the closing quote: the
+        # node's "otsec" is a prefix of "otsec-collector".
+        assert head.startswith(image) and head[len(image):][:1] in ("", " ", '"'), \
+            f"{name} command line not read: {cmd!r}, want {run.image(name)!r} first"
+        if CANARY in cmd:
             hits.append(f"{name} arguments")
+        env = run.environs.get(name)
+        if env is None:
+            # Not read: a limit, never a clean result (V-S11). On Linux only
+            # the non-dumpable collector may be unreadable; the node is not.
+            assert os.name == "nt" or name == "collector", f"{name} environment not read"
+            not_read.append(name)
+        elif canary in env:
+            hits.append(f"{name} environment")
     # The simulator's log records the in-band password as an auth event,
     # never its bytes (sim.py); it is the device's side, checked here too.
     with open(run.sim_log, "rb") as f:
         if canary in f.read():
             hits.append("simulator log")
     assert hits == [], hits
+    if not_read:
+        warnings.warn(f"V-S11: the process environment of {not_read} was not read, so it was not scanned "
+                      "(Windows, or the non-dumpable collector on Linux)")
