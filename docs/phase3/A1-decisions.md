@@ -133,3 +133,15 @@ Cutover happens only when every ack is confirmed with no open questions. At cuto
 
 The records stay as written. From now on, cite HR-11 for the unknown-sender condition, and use D3-3 only for `quarantine.cleared`. The exit report now cites HR-11.
 
+## D3-13: a pull request that changes only Markdown skips CI (owner)
+
+Date: 2026-10-27. The owner asked why docs-only PRs ran CI. The answer was that `ci.yml` ran on every pull request, with no path filter, so a handoff file waited 15 to 20 minutes for all ten jobs.
+
+**The owner's decision:**
+- Markdown-only PRs skip CI.
+- The handoff PRs that were still running CI (#213, #214 and #218) are merged without waiting.
+
+**Ruling.** `ci.yml`'s `pull_request` trigger now runs only when the PR changes a file that is not Markdown. Changes under any `testdata/` directory still trigger it, because tests read two test-data READMEs (`contracts/asset/testdata/README.md` and `contracts/adapter/testdata/README.md`). Every push to `main` still runs the full suite, so a Markdown merge is still tested on `main`.
+
+D2-13 otherwise stands. A PR that changes code, tests, data or workflows merges only when every job is green on its head.
+

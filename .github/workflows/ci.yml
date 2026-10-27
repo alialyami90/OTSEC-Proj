@@ -6,7 +6,14 @@ name: ci
 on:
   push:
     branches: [main]
+  # A pull request that changes only Markdown skips CI (owner, 2026-10-27).
+  # Test-data READMEs are read by tests, so they still trigger it. Every push
+  # to main runs in full.
   pull_request:
+    paths:
+      - '**'
+      - '!**.md'
+      - '**/testdata/**'
 permissions:
   contents: read
 jobs:
