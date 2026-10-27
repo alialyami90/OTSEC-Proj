@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Phase 0 passed its exit gate with conditions on 2026-10-23. Phase 1 (contracts C1 to C8) passed with conditions on 2026-10-24. Phase 2 (the simulated SEL-751 SER-to-Syslog slice) passed with conditions on 2026-10-25, and the owner accepted it on 2026-10-26. On 2026-10-26 the owner also clarified the monitoring goals and the order of collection methods (ADR-0008; requirements R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9).
 
-Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`). The owner has **not** accepted it yet. The Phase 4 briefs in `docs/agent-handoffs.md` are drafts, held until the owner accepts.
+Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`.
 
 The product code is two Go binaries:
 

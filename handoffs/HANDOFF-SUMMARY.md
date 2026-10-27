@@ -13,8 +13,8 @@ The project is a modular OT cybersecurity platform for substations, written in G
 | 0: evidence and assumptions | Passed with conditions, 2026-10-23 | [architecture.md, Phase 0 exit gate](../docs/architecture.md#phase-0-exit-gate) |
 | 1: contracts C1 to C8 | Passed with conditions, 2026-10-24 | [phase-1-exit.md](../docs/phase-1-exit.md) |
 | 2: the simulated SEL-751 SER-to-Syslog slice | Passed with conditions, 2026-10-25; the owner accepted it 2026-10-26 | [phase-2-exit.md](../docs/phase-2-exit.md) |
-| 3: a hardened slice and the first monitoring rungs | **The gate passed with conditions (A1, 2026-10-27). The owner has not accepted it.** On the acceptance card the owner chose "Not yet". | [phase-3-exit.md](../docs/phase-3-exit.md) |
-| 4: configuration baselines, the event-behaviour baseline, then later items | **Held.** Briefs are drafted and are issued only after the owner accepts Phase 3. | [agent-handoffs.md, Phase 4 task briefs](../docs/agent-handoffs.md#phase-4-task-briefs-draft-2026-10-27-issued-when-the-owner-accepts-the-phase-3-exit) |
+| 3: a hardened slice and the first monitoring rungs | The gate passed with conditions (A1, 2026-10-27). **The owner accepted it on 2026-10-27** (D4-1). | [phase-3-exit.md](../docs/phase-3-exit.md) |
+| 4: configuration baselines, the event-behaviour baseline, then later items | **Issued 2026-10-27** (D4-1). | [agent-handoffs.md, Phase 4 task briefs](../docs/agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27); [B1-decisions.md](../docs/phase4/B1-decisions.md) |
 
 What works today, on `main` at the time of writing (`d4afc63`): two binaries. `cmd/otsec` is the site node: the store, the forwarder, Syslog receive, health and the admin relay. `cmd/otsec-collector` is the privileged collector: credentials, the register and the SEL-751 adapter over Telnet. They talk over the C7 named pipe or socket. Together they collect `ID` and `SER` from A6's simulated SEL-751, receive device Syslog, store the raw bytes and normalized events, and forward them over RELP/TLS or RFC 5425/6587/5426. Contracts C1 to C8 are at the versions in the Phase 3 exit report's table.
 
@@ -22,7 +22,7 @@ The evidence ceiling is `simulated`. No device has ever been contacted. No capab
 
 ### What the owner still owes, and what is open
 
-- **Phase 3 acceptance.** The owner's answer is "Not yet". B1 asks the owner once what they want checked or changed before accepting, and does not issue Phase 4 briefs until the owner accepts.
+- **Phase 3 acceptance.** Given on 2026-10-27 (D4-1); Phase 4 is issued.
 - **Gate item 1's owed checks**, which can run on the GitHub-hosted Windows runner:
   - the admin relay end to end, and `config\admin`'s ACLs, on Windows;
   - the unknown-restart leg on Windows;

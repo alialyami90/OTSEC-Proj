@@ -216,15 +216,29 @@ func (g *rig) close() {
 	}
 	g.stop()
 	g.stop = nil
+	start := time.Now()
 	select {
 	case err := <-g.done:
 		if err != nil {
 			g.t.Errorf("Serve: %v", err)
 		}
-	case <-time.After(15 * time.Second):
-		g.t.Error("Serve did not return")
+		return
+	case <-time.After(serveReturn):
+	}
+	// Late is still a failure. Keep waiting, up to serveLate, so the
+	// failure says whether Serve returned at all: a commit stuck after
+	// Grace and a slow store look the same at serveReturn.
+	select {
+	case err := <-g.done:
+		g.t.Errorf("Serve did not return within %v; it returned after %v (err %v)", serveReturn, time.Since(start).Round(time.Millisecond), err)
+	case <-time.After(serveLate - serveReturn):
+		g.t.Errorf("Serve did not return within %v, nor by %v", serveReturn, serveLate)
 	}
 }
+
+// serveReturn is the default Limits.Grace (5 s) plus 10 s for the commit in
+// flight. serveLate only bounds how long a failing close keeps measuring.
+const serveReturn, serveLate = 15 * time.Second, 120 * time.Second
 
 // events reads every event of the listener's stream, in seq order.
 func (g *rig) events() []stored {
