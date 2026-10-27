@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -307,12 +310,25 @@ func TestCheckAgainstCatches(t *testing.T) {
 			g := section(s, "global")
 			g.Span.Offset--
 			g.Span.Length++
-		}, "STX or ETX"},
+		}, "does not start right after the echo"},
 		"a span over the command sent": {func(s *Snapshot) {
 			g := section(s, "global")
 			g.Span.Offset -= 12
 			g.Span.Length += 12
-		}, "not received in the operate phase"},
+		}, "covers bytes that were sent"},
+		"a span that ends early": {func(s *Snapshot) {
+			g := section(s, "group.1")
+			g.Span.Length -= 40
+		}, "not followed by ETX and the prompt"},
+		"a span that starts late": {func(s *Snapshot) {
+			g := section(s, "group.1")
+			g.Span.Offset += 2
+			g.Span.Length -= 2
+		}, "does not start right after the echo"},
+		"a span that reaches into the next reply": {func(s *Snapshot) {
+			g := section(s, "logic.1")
+			g.Span.Length += 12
+		}, "covers bytes that were sent"},
 		"an absent section that answered settings": {func(s *Snapshot) {
 			g := section(s, "dnp.1")
 			g.State, g.Settings = Absent, nil
@@ -326,6 +342,54 @@ func TestCheckAgainstCatches(t *testing.T) {
 		s, _ := snapshot(t, "1")
 		c.mutate(&s)
 		err := s.CheckAgainst(tr)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error does not mention %q:\n%v", name, c.want, err)
+		}
+	}
+
+	// The session itself changed, with the snapshot naming the new bytes.
+	sessions := map[string]struct {
+		edit func([]byte) []byte
+		want string
+	}{
+		"SHO 1 sent again where SHO 2 belongs": {func(b []byte) []byte {
+			// Group 2's settings are then what the relay printed for Group 1:
+			// the section is bound to SHO 2, so it fails.
+			return bytes.Replace(b, []byte("SHO 2\r\n"), []byte("SHO 1\r\n"), 2)
+		}, `not "SHO 2"`},
+		"an echo of another command": {func(b []byte) []byte {
+			i := bytes.Index(b, []byte("SHO 2\r\n"))
+			j := i + bytes.Index(b[i+1:], []byte("SHO 2\r\n")) + 1
+			return append(append(append([]byte{}, b[:j]...), "SHO 1\r\n"...), b[j+7:]...)
+		}, `does not start right after the echo of "SHO 2"`},
+		"no ETX after a reply": {func(b []byte) []byte {
+			i := bytes.Index(b, []byte("SHO G\r\n\x02"))
+			j := i + bytes.IndexByte(b[i:], 0x03)
+			b = append([]byte{}, b...)
+			b[j] = ' '
+			return b
+		}, "not followed by ETX and the prompt"},
+		"no prompt after a reply": {func(b []byte) []byte {
+			i := bytes.Index(b, []byte("SHO G\r\n\x02"))
+			j := i + bytes.IndexByte(b[i:], 0x03)
+			b = append([]byte{}, b...)
+			b[j+1], b[j+2] = ' ', ' '
+			return b
+		}, "not followed by ETX and the prompt"},
+	}
+	for name, c := range sessions {
+		s, _ := snapshot(t, "1")
+		bad := tr
+		bad.Data = c.edit(tr.Data)
+		if len(bad.Data) != len(tr.Data) || bytes.Equal(bad.Data, tr.Data) {
+			t.Fatalf("%s: the edit must change bytes in place", name)
+		}
+		sum := sha256.Sum256(bad.Data)
+		bad.SHA256 = hex.EncodeToString(sum[:])
+		s.Transcript.SHA256, s.Transcript.Ref = bad.SHA256, "sha256:"+bad.SHA256
+		err := s.CheckAgainst(bad)
 		if err == nil {
 			t.Errorf("%s: accepted", name)
 		} else if !strings.Contains(err.Error(), c.want) {
@@ -357,10 +421,18 @@ func TestTokenizeRule(t *testing.T) {
 			[]st{{"X", "1"}, {"ER", "A OR B"}}, ""},
 		{"a heading after a blank line is not a continuation", "TID := FEEDER\r\n\r\nConfig Settings\r\nCTR := 120\r\n",
 			[]st{{"TID", "FEEDER"}, {"CTR", "120"}}, ""},
-		{"a header right after a setting is not a continuation",
+		{"a header before the first setting line is not semantic",
+			"\r\nSEL-751          Date: 10/27/2026  Time: 09:31:08.000\r\nFEEDER RELAY     Time Source: Internal\r\n\r\nRID := SEL-751\r\n",
+			[]st{{"RID", "SEL-751"}}, ""},
+		{"a header right after a setting line fails",
 			"LL := 4.84\r\nSEL-751          Date: 10/27/2026  Time: 09:31:08.000\r\nFEEDER RELAY     Time Source: Internal\r\nEFLOC := N\r\n",
-			[]st{{"LL", "4.84"}, {"EFLOC", "N"}}, ""},
-		{"a header in any date order", "A := 1\r\nX  Date: 2026/10/27  Time: 09:31:08\r\n", []st{{"A", "1"}}, ""},
+			nil, "two spaces"},
+		{"a header-shaped heading after a blank line is a heading", "A := 1\r\n\r\nX Date: 2026/10/27 Time: 09:31:08\r\nB := 2\r\n",
+			[]st{{"A", "1"}, {"B", "2"}}, ""},
+		{"header text in a value is the value", "TID      := Time Source: GPS\r\n", []st{{"TID", "Time Source: GPS"}}, ""},
+		{"header text in a value keeps the line's other settings",
+			"RID      := X Date: 10/27/2026 Time: 09:31          TID      := Time Source: GPS\r\n",
+			[]st{{"RID", "X Date: 10/27/2026 Time: 09:31"}, {"TID", "Time Source: GPS"}}, ""},
 		{"LF and CR line ends", "A := 1\nB := 2\rC := 3", []st{{"A", "1"}, {"B", "2"}, {"C", "3"}}, ""},
 		{"headings and blank lines only around settings", "\r\nGroup 1\r\nRelay Settings\r\n\r\nID Settings\r\nRID := SEL-751\r\n\r\n",
 			[]st{{"RID", "SEL-751"}}, ""},

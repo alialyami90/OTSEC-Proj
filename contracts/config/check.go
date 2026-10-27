@@ -15,17 +15,23 @@ import (
 // read it. It confirms four things:
 //
 //   - the transcript is the one the snapshot names;
-//   - each section's bytes are received operate-phase bytes, unredacted and
-//     unframed, with the SHA-256 the section states;
+//   - each section is the whole reply to its own command (doc.go): the last
+//     line sent before it is the section's command, and the bytes received
+//     after that line are the command's echo, STX, the section's bytes, ETX
+//     and the prompt, up to the next line sent or the end of the session.
+//     They are received operate-phase bytes, unredacted, with the SHA-256
+//     the section states;
 //   - an absent section's reply is the rule's "not available" text;
 //   - a present section's settings are exactly what the rule reads from its
 //     bytes (doc.go): the same names and values, in the same order.
 //
 // The node runs it on every snapshot before storing it, as it runs C2's
 // CheckLines on every result. So an adapter parser that drops, merges or
-// splits a setting fails closed instead of producing a wrong baseline. The
-// rule's tokenizer here is the contract's statement of the rule. The adapter
-// has its own parser, and this check makes the two agree.
+// splits a setting fails closed instead of producing a wrong baseline, and
+// so does an adapter that cuts a reply short or files one command's reply
+// under another's class. The rule's tokenizer here is the contract's
+// statement of the rule. The adapter has its own parser, and this check
+// makes the two agree.
 func (s Snapshot) CheckAgainst(t adapter.Transcript) error {
 	if err := s.Validate(); err != nil {
 		return err
@@ -36,13 +42,24 @@ func (s Snapshot) CheckAgainst(t adapter.Transcript) error {
 		c.fail("the transcript is not the one the snapshot names (sha256 %s, %d bytes)", s.Transcript.SHA256, s.Transcript.Length)
 		return c.err("snapshot")
 	}
+	if !coversInOrder(t) {
+		c.fail("the transcript's segments do not cover its bytes exactly and in order")
+		return c.err("snapshot")
+	}
 	rule := Rules[s.Rule]
+	replied := map[int]string{} // the sent segment each section answers
 	for i, sec := range s.Sections {
 		p := fmt.Sprintf("sections[%d] (%s)", i, sec.Class)
 		sp := sec.Span
-		if !c.replySpan(p, sp, t) {
+		k, ok := c.wholeReply(p, sec, t)
+		if !ok {
 			continue
 		}
+		if other, dup := replied[k]; dup {
+			c.fail("%s: shares one reply with %s", p, other)
+			continue
+		}
+		replied[k] = sec.Class
 		text := t.Data[sp.Offset : sp.Offset+sp.Length]
 		if sum := sha256.Sum256(text); hex.EncodeToString(sum[:]) != sec.SHA256 {
 			c.fail("%s: sha256 does not match the section's bytes", p)
@@ -70,52 +87,104 @@ func (s Snapshot) CheckAgainst(t adapter.Transcript) error {
 	return c.err("snapshot")
 }
 
-// replySpan checks that a section's span is received operate-phase bytes,
-// touches no redaction and holds no framing byte.
-func (c *check) replySpan(p string, sp adapter.Span, t adapter.Transcript) bool {
+// wholeReply checks that a section's span is the whole of the reply to its
+// own command, and returns the index of the segment that sent the command.
+//
+// The last segment sent before the span must be exactly the section's
+// command and CR LF, in the operate phase. Everything from the end of that
+// segment to the next segment sent (or the end of the session) must be
+// received in the operate phase and touch no redaction. In those bytes, the
+// echo of the command and CR LF, then STX, come right before the span, and
+// ETX comes right after it, followed by the "=>" prompt: optionally after one
+// line end, and with nothing else but trailing spaces. So a span that starts
+// or ends inside the reply, a reply with no ETX or no prompt, and a reply to
+// another command all fail.
+func (c *check) wholeReply(p string, sec Section, t adapter.Transcript) (int, bool) {
+	sp := sec.Span
 	if sp.Offset < 0 || sp.Length <= 0 || sp.Offset+sp.Length > int64(len(t.Data)) {
 		c.fail("%s: span lies outside the transcript", p)
-		return false
+		return 0, false
 	}
-	covered := int64(0)
-	for _, sg := range t.Segments {
-		lo, hi := max(sp.Offset, sg.Offset), min(sp.Offset+sp.Length, sg.Offset+sg.Length)
-		if lo >= hi {
+	end := sp.Offset + sp.Length
+	k := -1
+	next := int64(len(t.Data))
+	for i, sg := range t.Segments {
+		if sg.Dir != adapter.Sent {
 			continue
 		}
-		if sg.Dir != adapter.Received || sg.Phase != adapter.PhaseOperate {
-			c.fail("%s: span covers bytes that are not received in the operate phase", p)
-			return false
+		switch {
+		case sg.Offset+sg.Length <= sp.Offset:
+			k = i
+		case sg.Offset >= end:
+			next = min(next, sg.Offset)
+		default:
+			c.fail("%s: span covers bytes that were sent", p)
+			return 0, false
 		}
-		covered += hi - lo
 	}
-	if covered != sp.Length {
-		c.fail("%s: span is not covered by the transcript's segments", p)
-		return false
+	if k < 0 {
+		c.fail("%s: no line was sent before the span", p)
+		return 0, false
+	}
+	cmd := t.Segments[k]
+	from := cmd.Offset + cmd.Length
+	if cmd.Phase != adapter.PhaseOperate || string(t.Data[cmd.Offset:from]) != sec.Command+"\r\n" {
+		c.fail("%s: the last line sent before the span is not %q; a section is the reply to its own command", p, sec.Command)
+		return 0, false
+	}
+	for _, sg := range t.Segments {
+		if sg.Offset < next && from < sg.Offset+sg.Length && (sg.Dir != adapter.Received || sg.Phase != adapter.PhaseOperate) {
+			c.fail("%s: the reply holds bytes that are not received in the operate phase", p)
+			return 0, false
+		}
 	}
 	for _, rd := range t.Redactions {
-		if sp.Offset < rd.Offset+rd.Length && rd.Offset < sp.Offset+sp.Length {
-			c.fail("%s: span overlaps a redaction", p)
-			return false
+		if from < rd.Offset+rd.Length && rd.Offset < next {
+			c.fail("%s: the reply overlaps a redaction", p)
+			return 0, false
 		}
 	}
-	if bytes.ContainsAny(t.Data[sp.Offset:sp.Offset+sp.Length], "\x02\x03") {
-		c.fail("%s: span includes an STX or ETX framing byte; a section is the message text inside them", p)
-		return false
+	if string(t.Data[from:sp.Offset]) != sec.Command+"\r\n\x02" {
+		c.fail("%s: the span does not start right after the echo of %q and STX; a section is the whole reply", p, sec.Command)
+		return 0, false
 	}
-	return true
+	if bytes.ContainsAny(t.Data[sp.Offset:end], "\x02\x03") {
+		c.fail("%s: span includes an STX or ETX framing byte; a section is the message text inside them", p)
+		return 0, false
+	}
+	if !replyEnd.Match(t.Data[end:next]) {
+		c.fail("%s: the span is not followed by ETX and the prompt; a section is the whole reply, and a reply that does not end is no section", p)
+		return 0, false
+	}
+	return k, true
+}
+
+// coversInOrder reports whether the segments cover the transcript exactly,
+// in order.
+func coversInOrder(t adapter.Transcript) bool {
+	var next int64
+	for _, sg := range t.Segments {
+		if sg.Offset != next || sg.Length <= 0 {
+			return false
+		}
+		next += sg.Length
+	}
+	return next == int64(len(t.Data))
 }
 
 var (
-	// header is the command-response header of S22 p. 7.31: "Date: <d>
-	// Time: <t>" on the RID line and "Time Source: <s>" on the TID line.
-	header   = regexp.MustCompile(`Date: \S+ +Time: \S+|Time Source: \S+`)
+	// replyEnd is what follows a section's span: ETX, at most one line end,
+	// the Level 1 prompt, and trailing spaces (S22 p. 7.28). Where the relay
+	// puts the prompt relative to ETX is H-13.
+	replyEnd = regexp.MustCompile(`^\x03(?:\r\n|\n|\r)?=> *$`)
 	nameAt   = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_]*`)
 	assignAt = regexp.MustCompile(`^ *:= *`)
 )
 
 // tokenize reads a present section's settings by the rule in doc.go. It
-// fails on any line it cannot place, rather than skip it.
+// fails on any line it cannot place, rather than skip it. It has no header
+// case: a header is not semantic before the first setting line, as a
+// heading is, and after the first setting line no line is a header.
 func tokenize(text []byte) ([]Setting, error) {
 	const (
 		other = iota
@@ -141,8 +210,6 @@ func tokenize(text []byte) ([]Setting, error) {
 		trimmed := strings.Trim(line, " ")
 		switch {
 		case trimmed == "":
-			prev = other
-		case header.MatchString(line):
 			prev = other
 		case strings.Contains(line, ":="):
 			sets, err := settingsOf(line)

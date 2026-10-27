@@ -152,14 +152,13 @@ def replies(read):
         "eip.1": ABSENT, "eip.2": ABSENT, "eip.3": ABSENT, "dnp.1": DNP_1, "dnp.2": ABSENT, "dnp.3": ABSENT,
     }
     if read == 2:
-        # The same configuration: a header with another time on SHO 1, a
-        # header printed again right after a setting line in SHO 2 (a page
-        # break), SHO 3 one setting per line with TR wrapped, CTRN before CTR
-        # in SHO 4, and ER wrapped at other columns.
+        # The same configuration: a header with another time before the
+        # settings of SHO 1 and SHO 2, SHO 3 one setting per line with TR
+        # wrapped, CTRN before CTR in SHO 4, and ER wrapped at other columns.
+        # A header after the first setting line is no header (doc.go), so
+        # none is printed there.
         r["group.1"] = header("09:31:07.250") + [""] + group_body(1)
-        g2 = group_body(2)
-        i = g2.index("LL       := 4.84") + 1
-        r["group.2"] = g2[:i] + header("09:31:08.000") + g2[i:]
+        r["group.2"] = header("09:31:08.000") + [""] + group_body(2)
         r["group.3"] = group_body(3, layout="one-per-line")
         r["group.4"] = group_body(4, layout="swapped")
         r["report"] = report("b")
@@ -228,7 +227,6 @@ class Session:
                 "segments": self.segments, "redactions": self.redactions}
 
 
-HEADER = re.compile(r"Date: \S+ +Time: \S+|Time Source: \S+")
 SETTING = re.compile(r"([A-Z0-9][A-Z0-9_]*) *:= *")
 
 
@@ -236,7 +234,7 @@ def tokenize(text):
     """B2's Python reading of the rule in doc.go."""
     out, prev = [], "other"
     for line in re.split(r"\r\n|\n|\r", text):
-        if line.strip(" ") == "" or HEADER.search(line):
+        if line.strip(" ") == "":
             prev = "other"
         elif ":=" in line:
             i = len(line) - len(line.lstrip(" "))
@@ -254,7 +252,9 @@ def tokenize(text):
                 i = len(line) - len(rest)
             prev = "setting"
         elif prev == "setting":
-            out[-1]["value"] += " " + line.strip(" ")
+            piece = line.strip(" ")
+            assert "  " not in piece, line
+            out[-1]["value"] += " " + piece
         else:
             prev = "other"
     names = [s["name"] for s in out]

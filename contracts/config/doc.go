@@ -45,16 +45,20 @@
 // S22 Figure 7.43 (p. 7.78 to 7.79), Figure D.3 and the examples on
 // p. G.29. It is documented-untested: no relay has been read.
 //
-// A section's bytes are the reply's message text: what the relay sent after
-// it echoed the command line and before the next prompt, without the STX and
-// ETX that frame it (S22 p. 7.28). Lines end in CR LF, LF or CR. Each line
-// is exactly one of these:
+// A section is the whole reply to its own command (S22 p. 7.28). The last
+// line sent before it is exactly the section's command and CR LF. The relay's
+// bytes after that line are the echo of the command and CR LF, then STX,
+// then the section's bytes, then ETX, then the Level 1 prompt "=>" (at most
+// one line end between ETX and the prompt, and only trailing spaces after
+// it), and then the next line sent or the end of the session. A span that
+// starts or ends inside the reply, a reply that has no ETX or no prompt, and
+// a reply to another command are not a section, and the read fails. The echo
+// and the prompt's place after ETX are H-13.
+//
+// A section's bytes are thus the reply's message text, without the frame.
+// Lines end in CR LF, LF or CR. Each line is exactly one of these:
 //
 //   - **Blank**: only spaces.
-//   - **Header**: holds "Date: <d> Time: <t>" or "Time Source: <s>", the
-//     command-response header of S22 p. 7.31. A header is never a setting
-//     and never a continuation, wherever it falls, so a header printed again
-//     mid-reply (a page break) changes nothing.
 //   - **Setting line**: holds ":=". It carries one or more settings. Each
 //     setting is a name ([A-Z0-9][A-Z0-9_]*, which may start with a digit,
 //     as in 51SAT, S22 Table 4.84), zero or more spaces, ":=", zero or more
@@ -64,7 +68,7 @@
 //     hold single spaces (TID := FEEDER RELAY; a SELOGIC equation), and a
 //     name may sit zero or one space from ":=" (LEA_S_R := 180.00,
 //     DST_BEGM:= OFF).
-//   - **Continuation**: holds no ":=", is not blank or a header, and directly
+//   - **Continuation**: holds no ":=", is not blank, and directly
 //     follows a setting line or another continuation, with no blank line
 //     between. It continues the value of the last setting on the line
 //     before, and its text without leading and trailing spaces is the next
@@ -76,18 +80,31 @@
 //     "DNP Map 1 Settings". Every documented heading follows a blank line or
 //     starts the reply, which is what separates it from a continuation.
 //
-// Only settings are semantic. Headings, headers, blank lines, the column a
-// setting is printed at, how a value wraps, the order of settings within a
+// The command-response header of S22 p. 7.31 (Table 7.16: the RID line with
+// "Date: <d> Time: <t>" and the TID line with "Time Source: <s>") is not a
+// line type of its own. A reply prints it before its first setting line,
+// where it is read as headings are. After the first setting line no line is
+// a header, and a line holding ":=" is never one. So header text inside a
+// value ("TID := Time Source: GPS") is that value, and the other settings on
+// its line are read as usual. A header printed right after a setting line
+// is a continuation: the read fails when its padding holds two spaces, and
+// otherwise the text joins the value and shows as a change. It is never
+// dropped. Whether a relay ever repeats the header mid-reply is H-13; if
+// it does, a new rule ID covers it.
+//
+// Only settings are semantic. Headings, the header, blank lines, the column
+// a setting is printed at, how a value wraps, the order of settings within a
 // section, and the bytes of the frame are not. So two reads of an unchanged
-// relay give an empty Difference even when the time differs, a header is
-// printed again, or a value wraps at another column. The section hashes
+// relay give an empty Difference even when the time in the header differs,
+// or a value wraps at another column. The section hashes
 // differ in that case, which is why the Difference compares settings and
 // not hashes.
 //
-// Four things fail the read rather than produce a snapshot. The adapter
+// Five things fail the read rather than produce a snapshot. The adapter
 // keeps their bytes, as C2 requires, and reports a C2 failure, never a
 // snapshot that claims to be complete:
 //
+//   - a section that is not the whole reply to its own command;
 //   - a reply with any other layout, or a present reply with no setting;
 //   - a setting with an empty value, a value that holds ":=", or a
 //     continuation that holds two spaces together;

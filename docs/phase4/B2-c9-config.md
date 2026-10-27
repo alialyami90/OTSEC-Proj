@@ -43,13 +43,19 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
    - The section span and its SHA-256 are the evidence.
    - Per-setting spans would add nothing, because `CheckAgainst` re-derives every setting from the section bytes. Dropping them keeps the snapshot about the size of the transcript, which B5's per-snapshot cap needs.
    - A section's bytes are the reply's message text: after the echoed command line and before the prompt, without the STX and ETX frame.
+   - **A section is the whole reply to its own command** (B1's ruling on #249, from B6's findings 1 and 2 and B3's review). The last line sent before the span is exactly the class's command and CR LF. The bytes received after it are the echo and CR LF, then STX, the span, ETX, and the `=>` prompt, up to the next line sent. A span that starts late or ends early, a reply with no ETX or no prompt, a reply to another command, and two sections sharing one reply all fail the read. So a partial reply is never a complete section.
 3. **The continuation rule for wrapped values.**
-   - A line counts as a continuation of the last setting on the line before when it has no `:=`, is not blank, is not a header, and follows a setting line or another continuation directly.
+   - A line counts as a continuation of the last setting on the line before when it has no `:=`, is not blank, and follows a setting line or another continuation directly.
    - Its trimmed text is joined to the value with one space. So a value rewrapped at another column gives the same value.
    - The rule separates a continuation from a heading by the blank line that precedes every heading S22 prints: Figure 7.43, Figure D.3 and the p. G.29 examples.
    - S22 prints no wrapped `SHO` reply. The settings sheet's wrapped `FAULT` (Table 4.84) and `ER` (Table 4.125) are table layout. So this rule is an assumption until a capture exists. B6's widened H-13 (D4-8) is that capture.
-4. **The command-response header is never a setting and never a continuation.** It matches `Date: … Time: …` or `Time Source: …` (S22 p. 7.31), wherever it falls, so a header printed again mid-reply changes nothing. This is how a page break or a new time gives an empty difference.
-5. **What is not semantic:** headings, headers, blank lines, columns, wrapping, the order of settings within a class, and the frame. So the difference compares settings by name, and never compares hashes.
+4. **The command-response header counts only before the first setting line** (B1's ruling on #249, from B6's finding 3 and B3's review).
+   - There, the header (S22 p. 7.31, Table 7.16) is read as headings are: not semantic. So a new time gives an empty difference.
+   - After the first setting line no line is a header, and a line holding `:=` is never one. So header text in a free-text value (`TID := Time Source: GPS`) is that value, and the other settings on its line are still read.
+   - A header printed right after a setting line is a continuation. It fails the read when its padding holds two spaces, and otherwise it shows as a change. It is never dropped.
+   - Whether a relay repeats the header mid-reply, at a page break, is H-13. If it does, a new rule ID covers it.
+   - The first draft matched the header anywhere, before the `:=` case. B6 showed that a free-text value holding header text then removed its whole line from the snapshot.
+5. **What is not semantic:** headings, the header, blank lines, columns, wrapping, the order of settings within a class, and the frame. So the difference compares settings by name, and never compares hashes.
 6. **Absent classes** (#231).
    - Ports 2 to 4, Modbus, IEC 60870-5-103, EtherNet/IP maps 1 to 3 and DNP maps 1 to 3 may be absent. A relay answers `Invalid Command` to a command that is not available (S22 p. 7.31).
    - Groups, logic, Global, Port F, Port 1, Report and Front Panel may not be absent. Port 1 is in that list because the Telnet session reaches the relay through it, and it reads `SHO P 1` for `LANG`.
@@ -57,6 +63,7 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
    - A class that changes between absent and present is a change, and its settings are listed as added or removed.
    - Whether an absent port or protocol answers exactly `Invalid Command` is `documented-untested`.
 7. **Some replies fail the read:**
+   - a section that is not the whole reply to its own command (decision 2);
    - a layout the rule cannot place;
    - a present reply with no setting;
    - an empty value;
@@ -69,21 +76,31 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
 9. **An unknown rule ID is refused.** A new family, or a changed rule, gets a new rule ID in a later minor. `sel-751-sho/1` is never edited.
 10. **The C2 operation ID** for the read will be `sel.config.read_all`, one operation for the whole read, as `sel.ser.read_all` is. Register revision 5 fixes it.
 
-## Storage, agreed with B5 for C5 0.4
+## Storage, agreed with B5 for C5 0.4 (#246 at 3756969)
 
-- A `config.read` session's transcript is one C5 capture. The snapshot is the record's event, and the transcript is its capture.
-- The two commit together and are pruned together. Pinning a snapshot (the active baseline, or one with an unacknowledged difference) pins its capture.
-- The per-snapshot cap (transcript plus snapshot) is a parameter, with a provisional default of 512 KiB.
-- The store volume's recovery reserve follows from the cap: at least 2 × (WAL bound + 1.25 × the largest record cap), about 2.3 MiB at 512 KiB (B5, #246). B5 measured the WAL at 1.05 to 1.13 times the record bytes.
-- A read over the cap fails into quarantine with its bytes kept.
-- **Size estimate, not yet a count.** A full 24-form read holds an estimated 5,000 to 8,000 printed settings, about 150 to 250 KB of transcript, and a snapshot of about the same size.
-  - Register revision 5 will state a counted byte cap for each `SHO` line, taken from S22's settings sheets. The cap and the reserve then follow from that sum.
+- **Where it is stored.** A `config.read` session's transcript is one C5 capture. The snapshot is the record's event, stored compact and byte for byte, so that `Digest` stays stable. The record is in the configuration class, on the asset's stream `config/<asset-id>`, in a database with no event class.
+- **Differences are stored there too.** A C9 difference is stored in the same class, with no capture, so that C8 0.5's `difference_digest` can be checked later against the stored bytes.
+- **The validator sees the event and the capture.** It refuses a snapshot whose `transcript.sha256` and `transcript.length` are not the record's capture. Before the append, the node runs `DecodeSnapshot` and `CheckAgainst` on the transcript.
+- **One record per commit.** The snapshot and its capture commit together and are pruned together.
+- **Holds.** A hold is taken with its record (`Record.Holds`), and its reason is coded: `HoldReason{Code, Ref}` gives the code (`baseline` or `unapproved-difference`) and names the C8 record behind it. The node holds:
+  - the acknowledged baseline;
+  - every snapshot whose difference is not yet approved or acknowledged, with that difference.
+
+  A held difference holds both of its snapshots, and a held record keeps its capture. The node releases a hold only after the C8 record that ends it has committed.
+- **The record cap** (transcript plus snapshot) is `Quota.MaxRecordBytes`, a parameter.
+  - **Default: 1 MiB, provisional** (B1 on #247). B5 measured the golden snapshot, encoded compact, at 11,715 bytes for a 6,397-byte transcript: about 5.3 KB fixed plus 34.5 bytes per setting. So a fully configured relay can pass 512 KiB.
+  - A read over the cap fails into quarantine, with its bytes kept.
+  - The C2 session ceiling `MaxResponseBytes` (1 MiB received) bounds the transcript the same way.
+- **The recovery reserve is per database:** `RecoveryReserveBytes ≥ 2 × WALBoundBytes + W(C)`, with `W(C) = 1.1 × C + 64 KiB`. B5 and B6 measured the WAL as a fixed 21 to 34 KB plus about 1.0 times the payload, on two engines. For the configuration database, C is `MaxRecordBytes`. The figure is `desk` until B6's storekill leg exists (D4-9).
+- **The size is an estimate, not yet a count.** A full 24-form read is estimated at 5,000 to 8,000 printed settings, about 150 to 250 KB of transcript, and a compact snapshot of similar size.
+  - Register revision 5 will state a counted byte cap for each `SHO` line, from S22's settings sheets.
+  - The record cap and the reserve then follow from that sum.
 
 ## Against P4-A2's acceptance tests
 
 | P4-A2 test | Where it is checked |
 | --- | --- |
-| The same configuration read twice, with a different time and page break, gives an empty difference | `TestSameConfigurationOtherBytesIsNoChange`. Reads 1 and 2 differ in header time, a mid-reply header, columns, order and wrapping. |
+| The same configuration read twice, with a different time and page break, gives an empty difference | `TestSameConfigurationOtherBytesIsNoChange`. Reads 1 and 2 differ in the header's time, columns, order and wrapping. A header repeated after a setting line now fails the read (decision 4), so a page break that repeats it is H-13. |
 | A single injected change names exactly that setting | The contract half is `TestCompareGoldens` (read 3). The end-to-end half is B6's GT-INJ series against the simulator, written independently. |
 | An unparseable reply is kept and fails the read | Decisions 1 and 7. `TestTokenizeRule`'s failing cases and `TestCheckAgainstCatches`. The adapter half comes with C2 0.6. |
 | Mutation of the non-semantic rule is caught | `TestTokenizeRule` pins each clause. `TestCheckAgainstCatches` covers a dropped, misread, swapped or cut setting, and a heading read as a continuation. B6's independent contract tests go in `tests/contract/`. |
@@ -95,6 +112,7 @@ Each golden is generated by `testdata/generate.py`. It has its own Python readin
 
 - **The layouts are `documented-untested`.** The adapter and B6's simulator both come from S22, so agreement between them is not hardware evidence. The H-13 widening (D4-8) is the capture that settles it.
 - **Free text breaks the read.** A free-text value with two spaces together, such as Event Messenger text (`MPTX01` to `MPTX32` in Global) or a `TID`, would end at those two spaces, and the rest of the line would not tokenize. The read then fails closed, which is an availability risk at a site that uses such text. How the relay prints a free-text value with two spaces is unknown: it may quote it or not allow it.
+- **A heading with no blank line before it** (B6's note on #247). Right after a setting line, it is read as a continuation and joins the value. That is consistent between reads, so it gives no false change, but it is an assumption: every documented heading follows a blank line. It goes on the H-13 capture list with the long SELOGIC wrap.
 - **An empty value fails the read.** Whether a relay prints `NAME :=` with nothing after it is unknown; the settings sheets leave SELOGIC blanks for the engineer to fill in.
 - **The difference has no meaning attached.** It names settings and values as printed. It does not rank how dangerous a change is.
 - **Session load.** A 24-form read holds Level 1 longer than a SER read. The read's total time and the poll interval go in register revision 5, checked against `TIDLE` and the two-session limit with P4-A5's quiet interval.

@@ -16,7 +16,7 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | File | What it shows |
 | --- | --- |
 | `transcripts/read-1.json` | A config.read session: the probe, `ID`, `ACC` with the credential redacted, all 24 SHO forms of S22 Table 7.67, then `QUI`. Ports 2 to 4, Modbus, IEC 60870-5-103, EtherNet/IP and DNP maps 2 and 3 answer `Invalid Command`. |
-| `transcripts/read-2.json` | The same configuration printed differently: a header with another time before `SHO 1`, the header printed again right after a setting line in `SHO 2`, `SHO 3` one setting per line with `TR` wrapped, `CTRN` before `CTR` in `SHO 4`, and `ER` wrapped at other columns in `SHO R`. |
+| `transcripts/read-2.json` | The same configuration printed differently: a header with another time before the settings of `SHO 1` and of `SHO 2`, `SHO 3` one setting per line with `TR` wrapped, `CTRN` before `CTR` in `SHO 4`, and `ER` wrapped at other columns in `SHO R`. |
 | `transcripts/read-3.json` | Read 1 with four changes: 50P1P changed from 10.00 to 9.50, LL removed from group 1, Port 2 present, and DNP map 1 answering `Invalid Command`. |
 
 ## Valid
@@ -26,7 +26,7 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | `valid/snapshot-read-1.json` | The snapshot of read 1. Each section has its span and SHA-256 in the transcript; port sections are marked sensitive, and absent sections carry no settings. |
 | `valid/snapshot-read-2.json` | The snapshot of read 2: the same settings as read 1, with different section hashes. |
 | `valid/snapshot-read-3.json` | The snapshot of read 3. |
-| `valid/difference-1-2.json` | Read 1 to read 2: no changes. Time, headers, columns, order and wrapping are not semantic (P4-A2's acceptance case). |
+| `valid/difference-1-2.json` | Read 1 to read 2: no changes. The header's time, columns, order and wrapping are not semantic (P4-A2's acceptance case). |
 | `valid/difference-1-3.json` | Read 1 to read 3: one changed, one removed, Port 2 appeared with its settings added, and DNP map 1 disappeared with its settings removed. |
 | `valid/later-minor-snapshot.json` | A 0.2 snapshot with a field 0.1 does not know: a 0.1 reader accepts it and ignores the field. |
 
