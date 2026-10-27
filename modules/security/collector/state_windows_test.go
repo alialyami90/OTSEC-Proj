@@ -4,6 +4,7 @@ package collector
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -53,11 +54,25 @@ func TestHeldStateFileBreaksState(t *testing.T) {
 		t.Fatalf("state.json changed by a failed rename:\n%s\n%s", before, after)
 	}
 
+	// The rename was the step that failed: the new doc was written and
+	// flushed to the .tmp beside state.json, with the floor BeginAuth set.
+	tmp, err := os.ReadFile(path + ".tmp")
+	if err != nil {
+		t.Fatalf("no .tmp left by the failed rename: %v", err)
+	}
+	if bytes.Equal(tmp, before) {
+		t.Fatal(".tmp holds the old doc: the write before the rename did not run")
+	}
+	var doc stateDoc
+	if err := json.Unmarshal(tmp, &doc); err != nil {
+		t.Fatalf(".tmp: %v", err)
+	}
+	if doc.Assets[testAsset].UnconfirmedAuthUTC == "" {
+		t.Fatalf(".tmp has no floor for the asset: %s", tmp)
+	}
+
 	// The next start reads the old doc, with the stale .tmp still beside
 	// it: no floor was recorded, and numbering resumes after 1.
-	if _, err := os.Stat(path + ".tmp"); err != nil {
-		t.Logf("no stale .tmp: %v", err)
-	}
 	s2, err := OpenState(path, c.now)
 	if err != nil {
 		t.Fatal(err)
@@ -67,5 +82,8 @@ func TestHeldStateFileBreaksState(t *testing.T) {
 	}
 	if got, err := s2.NextSeq(); err != nil || got != 2 {
 		t.Fatalf("NextSeq after the restart: %d, %v, want 2", got, err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale .tmp after the next write: %v", err)
 	}
 }
