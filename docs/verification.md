@@ -245,16 +245,42 @@ So the Windows evidence for the gate is the units plus the elevated PC run at c4
 
 ### Phase 3 status (A6, 2026-10-27)
 
-This is A6's status against each Phase 3 exit gate item (`docs/agent-handoffs.md`) at main 0177137 (first written 2026-10-26 at 4fa6a56). Verdicts, mutant counts and runs are on each PR and in `docs/phase3/A6-handoff.md`. Evidence class: `simulated`, or the GitHub-hosted Windows runner where stated. Nothing is hardware-verified.
+This is A6's status against each Phase 3 exit gate item (`docs/agent-handoffs.md`) at main 27fdea4 (first written 2026-10-26 at 4fa6a56). Verdicts, mutant counts and runs are on each PR and in `docs/phase3/A6-handoff.md`. Evidence class: `simulated`, or the GitHub-hosted Windows runner where stated. Nothing is hardware-verified.
 
 | Gate item | A6 status | Shown by | Open, and what it waits on |
 | --- | --- | --- | --- |
-| The slice against the installed Windows services on the owner's PC, from one commit on `main` | **not run** | None yet on the owner's PC. On the hosted runner (elevated, Windows Server 2025): the pipe rights (#180, A6's two-service test via #185), and #179's service mode at 40e15b7, merged as ccb94b2 (svcdry8, run 40464065233: 159 passed, 27 stated Windows skips, nothing left behind; A6 PASS) | The owner's run, once the owner chooses how the PC gets Go 1.26.10. The admin relay, the unknown-restart leg and the rsyslog leg skip on Windows, so the PC run does not cover them |
+| The slice against the installed Windows services on the owner's PC, from one commit on `main` | **met, with conditions** (2026-10-27) | P3-W1 on the owner's PC at main 27fdea4: 159 passed, 27 skipped (each a stated Windows platform skip), 0 failed, 0 errors under `OTSEC_SLICE_REQUIRED=1`, nothing left behind (see below). Before it, on the hosted runner: the pipe rights (#180, #185) and #179's service mode (svcdry8, run 40464065233, the same counts) | A6's own read of `pytest.txt` (the counts here are A1's read-back on the PC). Not covered on Windows: the admin relay end to end and `admin_dir`'s ACLs, the unknown-restart leg, the rsyslog leg (Linux only), and a scan of process command lines for the canary |
 | C7 0.4, the C1 path field, the `DATE_F` read and the key store merged, with A6's negative tests passing in CI | met | C7 0.4: #146, #153 (FAIL on a clock replay, PASS after the high-water mark), `tests/security/admin_nonce_test.go`, `tests/contract/c7_admin_test.go`. C1 path: #149, #160, `tests/contract/c1_path_test.go`, `tests/security/collector_path_test.go`. `DATE_F`: #175 (FAIL on TIDLE from `SHO G`, PASS at 581c38a), `tests/integration/sel751datef/`. Key store: #157, `tests/security/nodekey_cng_windows_test.go` on the hosted runner | The key store is not wired into the node yet (#176). The TPM provider is untested (T-2) |
 | Quarantine export and clear, and the failed-open retry, merged and tested | met | Export and clear: #155, #163, `tests/integration/quarantine/`, `tests/contract/c8_quarantine_test.go`. Retry: #145, #147 (both conditions met), `tests/contract/c5_open_retry_test.go`, `tests/integration/storeopen/`, `test_slice_busy_open_e2e.py` in `integration-long`. Discard: #151, `tests/integration/storediscard/` | — |
 | V-S8 end to end, and received Syslog passing A6's tests end to end on the real binaries | met | V-S8: `test_slice_evidence_e2e.py` (see V-S8 above). Received Syslog: #150, #154, #167, #170, #174, `tests/integration/syslogreceive/`, `test_slice_syslog_receive_e2e.py`, `tests/security/syslog_frame_bounds_test.go` | The unknown budget across restarts is merged and checked: #178 and #196 (receive's count, paid at read time), #198 (the node passes it at start), and A6's end-to-end check on the real binaries, `test_slice_unknown_restart_e2e.py` in `integration-long` (#199). HR-11 stays open: a forward wall-clock step followed by a restart still refills the budget |
 | The capability matrix states each SEL family's rung with citations; criteria for every ADR-0008 requirement | criteria met; rungs spot-checked | V-M1 to V-M8 below (#144). #183 (merged): 12 of 12 cells A6 checked match their citations | — |
 | No safety or security objection open, and `docs/phase-3-exit.md` records what remains `simulated` | none open from A6 | Both A6 FAILs (#153, #175) were fixed and re-checked. Windows memory safety: Go 1.26.0 crashed 2 of 42 stress runs of the UDP receive tests and 1.26.10 0 of 41 (#199's temporary stress job; suggestive, not proof), so the build moved to 1.26.10 (D3-10, #200). The nodekey NCrypt buffers are kept alive and off the stack through each call (#201), and `tests/security/uintptr_args_test.go` fails any pointer converted to `uintptr` outside a `go:uintptrescapes` call (#199). A held `state.json` fails the collector closed on Windows (#205, A6 PASS) | Observations, not objections: the forward clock step across a restart (HR-11); beside a reader that shares delete, the collector's `MoveFileEx` replace of `state.json` failed 1556 of 3000 times, against 0 of 3000 with a POSIX-semantics rename (svcdry8's race check, run 40464065233), and a failed replace fails the collector closed (A3's Phase 4 item); the collector clears its floor about 10 ms after `QUI` (`state.go` comment, A3). Owed: an end-to-end Windows check of the admin relay and of `admin_dir`'s ACLs; only C7's contract tests run on Windows. `docs/phase-3-exit.md` is A1's |
+
+#### P3-W1 on the owner's PC (2026-10-27)
+
+- **Run:** by the owner, in his own elevated PowerShell, with the owner present. It followed A6's run sheet as adapted by A1 (everything in the owner's OTSEC folder: the clone, a Python venv, the Go caches and the output). The record is A1's read-only read-back from `pc-out\pytest.txt` on the PC (`/mnt/project-files/phase3/P3-W1-pc-run-result.md`). A6 has not read `pytest.txt` itself yet.
+- **Build:**
+  - `HEAD` was `27fdea4870c4c5dfc1f6b03958823479376c26fa` on main, and `git status --short` was empty. The slice tree there is unchanged since #179's 40e15b7.
+  - Go 1.26.10, portable, first on PATH, with `GOTOOLCHAIN=local`.
+  - Python 3.13.6 in a venv, with pytest 9.1.1 and asyncssh 2.24.1.
+  - Windows 10.0.26200 (Windows 11 Pro), desktop, elevated.
+- **Result:**
+  - `collected 186 items`, then `159 passed, 27 skipped in 3202.35s (0:53:22)`.
+  - No line with FAILED or ERROR.
+  - The 27 skips are exactly the stated platform skips: 7 in `test_rsyslog_leg.py`, 18 in `test_slice_admin_relay_e2e.py`, 2 in `test_slice_unknown_restart_e2e.py`.
+  - Both `test_the_password_is_nowhere` tests passed, and so did every `test_only_read_only_lines_reached_*` test.
+- **Nothing left behind:**
+  - The run sheet's independent check (step 10) printed `nothing left behind`.
+  - A later read-only query found no service, no `%ProgramData%\OTSEC` and no `%ProgramFiles%\OTSEC`.
+- **A6's verdict: met, with conditions.** Two of the sheet's checks were met by other evidence than the sheet named. A6 accepts both, for the reasons below.
+  - **No `teardown: nothing left behind` line in `pytest.txt`.** The sheet was wrong to expect one. `ServiceMode.note()` writes that line to the SCM log under `--basetemp`, not to stdout (`slicerun.py` 227 and 403 at 27fdea4). The svcdry8 line A6 had in mind came from that workflow's step that prints the logs. Teardown raises `AssertionError` on any leftover or removal error (`slicerun.py` 404 to 406), and pytest reports that as an error. With 0 errors, every teardown passed its own leftovers check. Step 10 and the later query check the same thing independently.
+  - **No `go version` line in `pytest.txt`.** The tee starts at pytest. Even so, `go.mod` at 27fdea4 says `go 1.26.10`, and with `GOTOOLCHAIN=local` an older Go refuses to build the module rather than switching toolchains. So the harness's builds, which every passed test depends on, ran on Go 1.26.10 or later. The only Go on that PATH was the portable 1.26.10.
+- **Conditions and owed items:**
+  - A6's own read of `pytest.txt` (asked of A1). The verdict stands on A1's read-back until then.
+  - The SCM logs under `pc-out\slice` were not read; they need an elevated read.
+  - Not covered on Windows: the admin relay end to end and `admin_dir`'s ACLs, the unknown-restart leg, and the rsyslog leg (Linux only).
+  - The canary is not scanned for in process command lines.
+- **Evidence class:** Windows 11 desktop, elevated, installed services, simulated SEL-751 on loopback. It is not the site image, not LTSC 2021, and no device was involved.
 
 ### Device simulator plan
 
