@@ -860,7 +860,7 @@ Taken here, as ADR-0008 requires, on A2's FTP assessment (#183): **the SEL-751 s
 
 - **A5:** #176 (the node reads its TLS keys from the key store; D2-12 closes), #177, and relay PR 2 of #181 (signed `clear-*`; N1/N3, N18, N21, N24, N27, N9; a deadline in `collectorclient.Do`). `runtime.Version()` in `otsec health`.
 - **A4 with A5: HR-11's absolute bound.** A separate C5 stream and quota for unknown senders, with a health alarm when it is reached, and A6's test that fills it across an outage while a known device still stores. It gates the first `device-observed` listener. Also a configurable UDP receive buffer that logs the size granted, and a sound faster unknown count (the store keeps the stream's latest received time, or a running total saved with commits).
-- **A3:** a pinned `govulncheck` job in CI on every PR and weekly (A1 authorizes the `ci.yml` change); the C8 asset-ID-pattern test case; a bounded retry on `ERROR_SHARING_VIOLATION` and `ACCESS_DENIED` in the collector's `replaceFile` before its state breaks, with the floor written from the session's end when a write fails after `ACC`.
+- **A3:** a pinned `govulncheck` job in CI on every PR and weekly (A1 authorizes the `ci.yml` change); the C8 asset-ID-pattern test case; a POSIX-semantics rename (`FileRenameInfoEx`) in the collector's `replaceFile`, keeping the fail-closed break as the fallback, because `MoveFileEx` failed 1556 of 3000 replaces beside a reader that shared delete (A5's race check), with the floor written from the session's end when a write fails after `ACC`.
 
 ### Items 3 to 6 (outlines; full briefs later)
 
