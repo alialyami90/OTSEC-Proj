@@ -588,11 +588,21 @@ class Slice:
 
     def environ(self, name):
         """The process's environment as the OS has it (V-S11), or None where
-        another process's environment is not readable (Windows)."""
+        it cannot be read: on Windows, and on Linux for a process that made
+        itself non-dumpable (the collector sets PR_SET_DUMPABLE 0,
+        cmd/otsec-collector/harden_linux.go), whose /proc files then belong
+        to root. Any other refusal is an error, never a clean scan."""
         if os.name == "nt":
             return None
-        with open(f"/proc/{self.procs[name].pid}/environ", "rb") as f:
-            return f.read()
+        path = f"/proc/{self.procs[name].pid}/environ"
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except PermissionError:
+            # A non-dumpable process's /proc files belong to root.
+            if os.getuid() == 0 or os.stat(path).st_uid != 0:
+                raise
+            return None
 
     def image(self, name):
         """The path the process runs from: the installed copy in service
