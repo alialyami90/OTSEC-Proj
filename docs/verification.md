@@ -303,7 +303,7 @@ A6, 2026-10-26, written before any of these requirements is implemented (P3-A6, 
 
 New ground-truth sources, in addition to GT-DOC, GT-EX, GT-HAND, GT-REC and GT-RX above:
 
-- **GT-INJ:** a labelled schedule written by A6 from a fixed seed before the implementation exists: an event series or a configuration-change series, each injected departure or change listed with its time, kind and the alarm it must raise. The schedule is committed before the test first runs against the product. Synthetic, so it supports `simulated` claims only.
+- **GT-INJ:** a labelled schedule written by A6 from a fixed seed before the implementation exists: an event series or a configuration-change series, each injected departure or change listed with its time, kind and the alarm it must raise. The schedule is committed before the test first runs against the product. Synthetic, so it supports `simulated` claims only. B6's schedules for V-M2 and V-M4 are in [tests/integration/gt_inj/](../tests/integration/gt_inj/README.md) (2026-10-27).
 - **GT-PCAP:** a capture whose labels (address, port, protocol, version, direction) A6 wrote with an independent decoder (tshark or Zeek), never with the product. A public or lab capture, with a `SOURCE.md`.
 - **GT-MIB:** a recording SNMP agent that A6 builds from the vendor MIB and manual: the values it serves, and a log of every PDU it received (the SNMP counterpart of GT-REC).
 - **GT-ADV:** a hand-built applicability truth table: asset identities and their evidence sources, crossed with test advisories, each cell the class it must get. Test advisories are marked `test-only` and never enter a shipped advisory set (R9 constraint, P10).
