@@ -385,70 +385,96 @@ func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 	}
 }
 
-// TestStreamFloodIsSlowedNotDropped: A writes 400 messages over TCP at five
-// times its rate; B's messages on another connection are stored promptly;
-// every one of A's is stored in order, and nothing is dropped. "Promptly"
-// is against this store: B's lag behind A's flood may exceed its lag with
-// no flood (measured first, on the same rig) by at most 2 s, so a slow
-// store on a busy runner is not taken for A holding B back (#187, job
-// 121862674585: 3.8 s on a runner whose store tests took 368 s).
+// TestStreamFloodIsSlowedNotDropped: A writes 200 messages over TCP at ten
+// times its rate; every one of A's is stored in order, A is slowed to its
+// rate, and nothing is dropped. B, on another connection, keeps its own
+// bucket: none of its messages waits for a token while A's flood holds
+// A's bucket empty. That is read from when the listener read each of B's
+// frames (received.utc), which the reader takes after its token wait and
+// before the store, so a slow store cannot move it: B's 10 frames fit in
+// its burst, so with its own bucket they are read back to back, and with
+// a bucket shared with A each one waits for a token, the nine after the
+// first at least 1/Rate apart. The wall-clock lag of B behind A's flood
+// was the property before; it flaked on slow stores (#187, jobs
+// 121862674585 and 121924487638: 3.8 s and 4.2 s) and did not catch a
+// shared bucket (376 ms), so it stays only as a generous liveness bound.
 func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
-	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: 50, Burst: 50})
+	const rate, floodN, quietN = 20, 200, 10
+	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: rate, Burst: rate})
 	b := dialFrom(t, ipB, "tcp", g.addr)
-	quiet := func(prefix string) (lag time.Duration) {
+	// quiet sends B's 10 messages in one write and returns how long they
+	// took to be stored and how far apart the listener read the first and
+	// the last.
+	quiet := func(prefix string) (lag, span time.Duration) {
 		sent := time.Now()
-		for i := 0; i < 10; i++ {
-			fmt.Fprintf(b, "<13>%s %d\n", prefix, i)
+		var w bytes.Buffer
+		for i := 0; i < quietN; i++ {
+			fmt.Fprintf(&w, "<13>%s %d\n", prefix, i)
 		}
-		for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-			n := 0
+		if _, err := b.Write(w.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+		for end := time.Now().Add(60 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+			var got []stored
 			for _, s := range g.events() {
 				if s.Asset.ID == assetB && strings.HasPrefix(string(s.Bytes), "<13>"+prefix+" ") {
-					n++
+					got = append(got, s)
 				}
 			}
-			if n == 10 {
-				return time.Since(sent)
+			if len(got) == quietN {
+				return time.Since(sent), got[quietN-1].Received.Sub(got[0].Received)
 			}
 		}
-		return 0
+		return 0, 0
 	}
-	alone := quiet("alone")
+	alone, aloneSpan := quiet("alone")
 	if alone == 0 {
-		t.Fatal("B's 10 messages with no flood were not stored in 30 s")
+		t.Fatal("B's 10 messages with no flood were not stored in 60 s")
 	}
 	a := dialFrom(t, ipA, "tcp", g.addr)
 	w := bufio.NewWriter(a)
-	for i := 0; i < 400; i++ {
+	for i := 0; i < floodN; i++ {
 		fmt.Fprintf(w, "<13>flood %03d\n", i)
 	}
-	began := time.Now()
 	go w.Flush()
-	time.Sleep(500 * time.Millisecond)
-	lagB := quiet("quiet")
-	t.Logf("B's 10 messages: %s with no flood, %s behind A's flood", alone, lagB)
-	if lagB == 0 || lagB > alone+2*time.Second {
-		t.Errorf("B's 10 messages took %s behind A's flood, %s with none", lagB, alone)
+	// A's burst is spent within this, and B's bucket has refilled.
+	time.Sleep(time.Second)
+	lagB, span := quiet("quiet")
+	t.Logf("B's 10 messages: stored %s after sending and read within %s with no flood; %s and %s behind A's flood",
+		alone, aloneSpan, lagB, span)
+	// B's own bucket: read back to back. A shared bucket spaces the nine
+	// after the first at least 1/Rate apart (450 ms here); half that is
+	// the line, far above a reader that never waited.
+	if shared := 9 * time.Second / rate; lagB == 0 || span >= shared/2 {
+		t.Errorf("B's 10 frames were read over %s behind A's flood (%s with none): B waited for tokens, as if it shared A's bucket (a shared bucket takes at least %s)",
+			span, aloneSpan, shared)
 	}
-	ev := g.waitN(420, 20*time.Second)
+	if limit := 3*alone + 5*time.Second; lagB > limit {
+		t.Errorf("B's 10 messages took %s to be stored behind A's flood, past the liveness bound %s (3 x %s with none, + 5 s)", lagB, limit, alone)
+	}
+	ev := g.waitN(floodN+2*quietN, 20*time.Second)
 	var fromA []stored
 	for _, s := range ev {
 		if s.Asset.ID == assetA {
 			fromA = append(fromA, s)
 		}
 	}
-	if len(fromA) != 400 {
-		t.Fatalf("A: %d of 400 stored", len(fromA))
+	if len(fromA) != floodN {
+		t.Fatalf("A: %d of %d stored", len(fromA), floodN)
 	}
-	// 400 at 50 a second with a burst of 50 is at least 7 s: A was slowed.
-	if took := time.Since(began); took < 6*time.Second {
-		t.Errorf("A's 400 messages were stored in %s, faster than its rate", took)
+	// 200 at 20 a second with a burst of 20 is at least 9 s: A was slowed.
+	// Read off the listener's own times, so a slow store cannot hide it.
+	if took := fromA[floodN-1].Received.Sub(fromA[0].Received); took < 8*time.Second {
+		t.Errorf("A's %d messages were read within %s, faster than its rate", floodN, took)
 	}
 	for i, s := range fromA {
 		checkBytes(t, i, s, fmt.Appendf(nil, "<13>flood %03d", i))
 	}
-	if st := g.r.Status(); len(st.Dropped) != 0 && sumMap(st.Dropped) != 0 {
-		t.Errorf("stream messages dropped: %+v", st.Dropped)
+	// A stream is slowed, never dropped: every message read is stored.
+	want := int64(floodN + 2*quietN)
+	st := g.waitStatus(func(st receive.Status) bool { return st.Stored >= want }, 20*time.Second)
+	if st.Received != want || st.Stored != want || sumMap(st.Dropped) != 0 {
+		t.Errorf("received %d, stored %d, dropped %v; want %d, %d and none", st.Received, st.Stored, st.Dropped, want, want)
 	}
 }
 
