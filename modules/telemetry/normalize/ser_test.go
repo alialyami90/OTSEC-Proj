@@ -50,7 +50,9 @@ func TestNormalizeC2Read(t *testing.T) {
 			t.Errorf("event %d: evidence %+v", i, e.Native.Evidence)
 		case string(e.Native.Bytes) != string(res.Transcript.Data[rec.Span.Offset:rec.Span.Offset+rec.Span.Length]):
 			t.Errorf("event %d: native bytes %q", i, e.Native.Bytes)
-		case e.DeviceTime.Quality.TimeSource != "Internal" || !slices.Contains(e.DeviceTime.Flags, "date-format-assumed:MDY"):
+		case e.DeviceTime.Quality.TimeSource != "Internal" || slices.Contains(e.DeviceTime.Flags, "date-format-assumed:MDY"):
+			// ok.json is C2 0.5 with DATE_F MDY read in the session, so
+			// the order is the relay's, not assumed.
 			t.Errorf("event %d: device time %+v", i, e.DeviceTime)
 		}
 		for j, f := range rec.Fields {
