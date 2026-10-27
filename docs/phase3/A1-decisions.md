@@ -79,7 +79,7 @@ Evidence: `TestListenGrantsPeerQuery`. A6's independent two-service test passed 
 
 ## D3-10: build with Go 1.26.10, not 1.26.0 (#179's Windows panic)
 
-Date: 2026-10-27. Status: **proposed**. It is accepted when A6's stress counts are in and A3 and A6 have reviewed. On [#179's Windows job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40443162073/job/121988031206) (merge `0e9d6b0`, Go 1.26.0), `tests/integration/syslogreceive` panicked inside `json.Marshal`, called from `receive.record` on the UDP read path (`payUnknown`, `serveDatagrams`).
+Date: 2026-10-27. Status: **accepted**. A3 passed it for security and A6 on content (#200). On [#179's Windows job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40443162073/job/121988031206) (merge `0e9d6b0`, Go 1.26.0), `tests/integration/syslogreceive` panicked inside `json.Marshal`, called from `receive.record` on the UDP read path (`payUnknown`, `serveDatagrams`).
 
 Which field went bad: going by the frame addresses and `event.Event`'s field offsets, it was `Received.Clock.Source`. That string is empty in this path and no code writes it, yet its length word held `1<<36`, with a nil data pointer.
 
@@ -88,7 +88,7 @@ Which field went bad: going by the frame addresses and `event.Event`'s field off
 - A4 found nothing on the receive path that could write the field: `normalize.Syslog` copies `Received` verbatim, no `msg` or `Event` is shared between goroutines, and `modules/telemetry` has no `unsafe`.
 - A5 found no corruption fix in modernc sqlite v1.61.0, memory v1.12.1 or libc after v1.79.0.
 
-**Ruling (proposed):** the root module's `go` line moves to `1.26.10`, the latest patch release, which CI picks up through `go-version-file`. The release also carries the stdlib security fixes after 1.26.0 (crypto/tls, crypto/x509, net/http and others), which the product uses. The receiver is a product path: a node built with 1.26.0 that receives UDP Syslog on Windows can corrupt memory. `platform/experiments/phase0/go.mod` stays at 1.26.0. It is a Phase 0 experiment that CI does not build and that is never shipped, so it is not an exception to this rule.
+**Ruling:** the root module's `go` line moves to `1.26.10`, the latest patch release, which CI picks up through `go-version-file`. The release also carries the stdlib security fixes after 1.26.0 (crypto/tls, crypto/x509, net/http and others), which the product uses. The receiver is a product path: a node built with 1.26.0 that receives UDP Syslog on Windows can corrupt memory. `platform/experiments/phase0/go.mod` stays at 1.26.0. It is a Phase 0 experiment that CI does not build and that is never shipped, so it is not an exception to this rule.
 
 **Standing rule (A3's review, adopted for Phase 4):**
 1. Product binaries are built with the latest patch release of a supported Go minor (one of the two newest), and a move to the next minor is planned before ours leaves support.
@@ -96,7 +96,7 @@ Which field went bad: going by the frame addresses and `event.Event`'s field off
 3. A toolchain or dependency bump is a normal PR, reviewed by A3 and A6, with no auto-merge.
 4. Optional: the node and the collector report `runtime.Version()` in their status.
 
-**What is not proven:** the panic happened once. The match between `1<<36` and a 16-byte address length is circumstantial. A6's Windows stress test (1.26.0, 1.26.10, and 1.26.0 with `-race`, 20 minutes each) is the evidence for this decision. If 1.26.0 never crashes there either, the bump still stands on its security fixes, and the crash stays open in the exit report as unexplained.
+**Evidence and its limit:** A6's Windows stress test on #199 ran two sets of `TestUnknown*`. Go 1.26.0 crashed 2 of 42 runs. Both crashes were "JSON decoder out of sync - data changing underfoot?" in `event.Decode` under `store.assignSeq` on `writeDatagrams`, the UDP path again. Go 1.26.10 crashed 0 of 41. Go 1.26.0 with `-race` crashed 0 of 23 and reported no race. 0 of 41 is suggestive only: at the 1.26.0 rate, p≈0.13, and about 62 clean runs would rule it out at 95%. So the root cause stays **inferred**, not proven. The bump stands on its security fixes either way, and the exit report carries the crash as resolved-by-inference.
 
 **Owner's PC:** with `GOTOOLCHAIN=auto`, the portable Go 1.26.0 on ALI's PC would download 1.26.10 the first time it builds. That download needs ALI's answer before the next run on that PC. Whichever way ALI chooses, the default `GOSUMDB` stays on. Otherwise ALI installs the official archive after checking its SHA-256 against go.dev/dl.
 
