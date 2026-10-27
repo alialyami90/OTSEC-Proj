@@ -1,6 +1,6 @@
 module otsec.local/otsec
 
-go 1.26.0
+go 1.26.10
 
 require (
 	golang.org/x/sys v0.49.0
