@@ -88,8 +88,14 @@ Which field went bad: going by the frame addresses and `event.Event`'s field off
 - A4 found nothing on the receive path that could write the field: `normalize.Syslog` copies `Received` verbatim, no `msg` or `Event` is shared between goroutines, and `modules/telemetry` has no `unsafe`.
 - A5 found no corruption fix in modernc sqlite v1.61.0, memory v1.12.1 or libc after v1.79.0.
 
-**Ruling (proposed):** the root module's `go` line moves to `1.26.10`, the latest patch release, which CI picks up through `go-version-file`. The release also carries the stdlib security fixes after 1.26.0 (crypto/tls, crypto/x509, net/http and others), which the product uses. The receiver is a product path: a node built with 1.26.0 that receives UDP Syslog on Windows can corrupt memory. Phase 4 adds a standing rule: build with the latest Go patch release.
+**Ruling (proposed):** the root module's `go` line moves to `1.26.10`, the latest patch release, which CI picks up through `go-version-file`. The release also carries the stdlib security fixes after 1.26.0 (crypto/tls, crypto/x509, net/http and others), which the product uses. The receiver is a product path: a node built with 1.26.0 that receives UDP Syslog on Windows can corrupt memory. `platform/experiments/phase0/go.mod` stays at 1.26.0. It is a Phase 0 experiment that CI does not build and that is never shipped, so it is not an exception to this rule.
+
+**Standing rule (A3's review, adopted for Phase 4):**
+1. Product binaries are built with the latest patch release of a supported Go minor (one of the two newest), and a move to the next minor is planned before ours leaves support.
+2. A CI job runs a pinned `govulncheck ./...` on every PR and weekly, and fails when a vulnerability is reachable.
+3. A toolchain or dependency bump is a normal PR, reviewed by A3 and A6, with no auto-merge.
+4. Optional: the node and the collector report `runtime.Version()` in their status.
 
 **What is not proven:** the panic happened once. The match between `1<<36` and a 16-byte address length is circumstantial. A6's Windows stress test (1.26.0, 1.26.10, and 1.26.0 with `-race`, 20 minutes each) is the evidence for this decision. If 1.26.0 never crashes there either, the bump still stands on its security fixes, and the crash stays open in the exit report as unexplained.
 
-**Owner's PC:** with `GOTOOLCHAIN=auto`, the portable Go 1.26.0 on ALI's PC would download 1.26.10 the first time it builds. That download needs ALI's answer before the next run on that PC.
+**Owner's PC:** with `GOTOOLCHAIN=auto`, the portable Go 1.26.0 on ALI's PC would download 1.26.10 the first time it builds. That download needs ALI's answer before the next run on that PC. Whichever way ALI chooses, the default `GOSUMDB` stays on. Otherwise ALI installs the official archive after checking its SHA-256 against go.dev/dl.
