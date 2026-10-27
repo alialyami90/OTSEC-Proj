@@ -49,6 +49,8 @@ type c10GTEvent struct {
 	Severity int    `json:"severity"`
 	MsgID    string `json:"msgid"`
 	Msg      string `json:"msg"`
+	// Alignment is set on GT-INJ's catch-up SER rows only; absent is "ok".
+	Alignment string `json:"alignment"`
 }
 
 func c10Load(t *testing.T, name string) c10Series {
@@ -109,10 +111,14 @@ func c10Event(t *testing.T, e c10GTEvent) *event.Event {
 	}
 	row := fmt.Sprintf("1    11/02/2026 09:00:00.000   %s %s", e.Element, e.State)
 	sum := sha256.Sum256([]byte(row))
+	align := event.AlignOK
+	if e.Alignment != "" {
+		align = event.Alignment(e.Alignment)
+	}
 	return &event.Event{
 		Origin: event.OriginDevice, Kind: event.KindSER, Received: rcv,
 		Source:     event.Source{Asset: &event.AssetRef{ID: c10Asset}},
-		Collection: &event.Collection{Method: event.MethodAdapterPoll, Alignment: event.AlignOK, ParseStatus: event.ParseOK},
+		Collection: &event.Collection{Method: event.MethodAdapterPoll, Alignment: align, ParseStatus: event.ParseOK},
 		Native:     &event.Native{Bytes: []byte(row), RecordSHA256: hex.EncodeToString(sum[:]), RecordLength: int64(len(row))},
 		Normalized: &event.Normalized{Subject: e.Element, SubjectType: "relay-word-bit", Value: e.State, Category: event.Unmapped},
 	}
@@ -155,14 +161,26 @@ func TestC10B6GTINJParamsAreC10Params(t *testing.T) {
 // built them on one type. That covers D4-9 both ways: the three controls
 // (a known text under another msgid) share their known type, and the new
 // type that reuses a known msgid with a new text is a type of its own.
+// GT-INJ's catch-up rows (first-read, gap-before) are type-only under C10,
+// as GT-INJ's expectations take them (D4-9), and every other row is full.
 func TestC10B6GTINJKeysPartitionAlike(t *testing.T) {
+	catchUp := 0
 	for _, name := range []string{"events.json", "events-heldout.json"} {
 		c10ToGT, gtToC10 := map[string]string{}, map[string]string{}
 		for _, e := range c10Load(t, name).Events {
 			ev := c10Event(t, e)
 			k, text, use, why := baseline.Classify(ev, false)
-			if use != baseline.UseFull || why != baseline.ExcludedNone {
-				t.Fatalf("%s %s: %s %q", name, e.ID, use, why)
+			want := baseline.UseFull
+			switch e.Alignment {
+			case "first-read", "gap-before":
+				want = baseline.UseTypeOnly
+				catchUp++
+			case "":
+			default:
+				t.Fatalf("%s %s: alignment %q", name, e.ID, e.Alignment)
+			}
+			if use != want || why != baseline.ExcludedNone {
+				t.Fatalf("%s %s: %s %q, want %s", name, e.ID, use, why, want)
 			}
 			gt, c := c10GTKey(e), k.String()
 			if e.Source == "syslog" {
@@ -184,6 +202,9 @@ func TestC10B6GTINJKeysPartitionAlike(t *testing.T) {
 		if len(c10ToGT) < 10 {
 			t.Errorf("%s: only %d types", name, len(c10ToGT))
 		}
+	}
+	if catchUp == 0 {
+		t.Error("GT-INJ has no catch-up rows")
 	}
 }
 
