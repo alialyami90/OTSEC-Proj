@@ -37,7 +37,7 @@ You are the independent verifier. Your job is to try to disprove claims, not to 
 - My last reviews were #211 (A2, PASS, 8 of 8 mutants killed) and #209, the exit report, which I accepted.
 
 **Phase 3 passed its gate with conditions.** It is **not yet accepted by the owner** (`docs/phase-3-exit.md`, "Owner sign-off: Not yet given").
-- **P4-A6 is held until the owner accepts.** That is your Phase 4 brief (`docs/agent-handoffs.md`, "Task P4-A6").
+- **P4-A6's Phase 4 items are held until the owner accepts.** That is your Phase 4 brief (`docs/agent-handoffs.md`, "Task P4-A6"). Its carried checks (the P3-W1 owed items and the DMY and YMD reconcile) do not wait on acceptance; B1 releases them.
 - The Phase 4 briefs are drafts, issued only on that acceptance.
 
 **Gate item 1 (P3-W1, the slice on the owner's PC)** is met with conditions. The record is `docs/verification.md`, "Phase 3 status" and "P3-W1 on the owner's PC (2026-10-27)".
@@ -67,8 +67,8 @@ The DMY and YMD reconcile passes from the adapter through the normalizer (#211).
 
 ## Next steps
 
-1. **First action:** read `handoffs/HANDOFF-SUMMARY.md`, this file and the key files below, then write `handoffs/B6-ack.md`. Ask B1 whether the owner has accepted Phase 3. Until the owner has, start no P4-A6 work.
-2. **When Phase 3 is accepted,** do the carried checks first. They are in the P4-A6 brief, and all of them can run on the hosted Windows runner, not the owner's PC:
+1. **First action:** read `handoffs/HANDOFF-SUMMARY.md`, this file and the key files below, then write `handoffs/B6-ack.md`. Ask B1 whether the owner has accepted Phase 3. Until the owner has, start none of P4-A6's Phase 4 items (step 3).
+2. **When B1 releases them, do the carried checks first.** They do not wait on Phase 3 acceptance (`docs/phase-3-exit.md`, "Next coordinated tasks" item 2). They are in the P4-A6 brief, and all of them can run on the hosted Windows runner, not the owner's PC:
    1. **The canary scan:**
       - call `Slice.cmdline()` for the node and the collector while they run, in service mode too, and assert that the canary never appears;
       - mutate by putting the password on a command line, and show that the test catches it.
@@ -77,7 +77,7 @@ The DMY and YMD reconcile passes from the adapter through the normalizer (#211).
       - this needs a Windows stand-in for SIGSTOP (for example, suspending the node service's process) and an ACL check in place of POSIX modes;
       - agree the design with B5 (the harness's service mode is B5's) before writing it.
    4. **The DMY and YMD slice on the real binaries:** `test_slice_e2e.py` with the simulator's `--profile-date-f`.
-3. **Phase 4 items 1 and 2, as P4-A6 lists them:**
+3. **Phase 4 items 1 and 2, as P4-A6 lists them, held until the owner accepts Phase 3:**
    1. Write the simulator's `SHO` forms from S22 Table 7.67 and the Section 4 settings tables, independently of B2's parsers, with a change injector.
    2. Commit the GT-INJ series for configuration changes and event departures **before** any product test runs on them.
    3. Write the contract tests for C9, C10, C2 0.6, C5 0.4, C7 0.6 and C8 0.5.
