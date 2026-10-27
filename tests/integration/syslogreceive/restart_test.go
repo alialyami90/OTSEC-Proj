@@ -2,10 +2,12 @@ package syslogreceive
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -55,15 +57,44 @@ func serveOn(t *testing.T, log *c5.Log, path string, lim receive.Limits, spent i
 
 // unknownRecord is one stored record from an unknown sender.
 type unknownRecord struct {
-	at    time.Time
-	bytes int64
+	at        time.Time // received.utc
+	committed time.Time // the store's committed_at, a diagnostic only
+	bytes     int64
+}
+
+// committedAt reads the store's commit time of each of the stream's events.
+func (g *rig) committedAt() map[int64]time.Time {
+	g.t.Helper()
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: g.db}).EscapedPath()+"?_pragma=query_only(1)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT seq, committed_at FROM events WHERE stream = ?", string(g.stream))
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var seq, ns int64
+		if err := rows.Scan(&seq, &ns); err != nil {
+			g.t.Fatal(err)
+		}
+		out[seq] = time.Unix(0, ns)
+	}
+	if err := rows.Err(); err != nil {
+		g.t.Fatal(err)
+	}
+	return out
 }
 
 // unknownRecords reads the stream's asset-unresolved records with their
-// received time and stored length.
+// received time, commit time and stored length.
 func (g *rig) unknownRecords() []unknownRecord {
 	g.t.Helper()
 	var out []unknownRecord
+	committed := g.committedAt()
 	for _, s := range g.events() {
 		var e struct {
 			Received struct {
@@ -80,7 +111,7 @@ func (g *rig) unknownRecords() []unknownRecord {
 		if err != nil {
 			g.t.Fatalf("seq %d: received %q: %v", s.Seq, e.Received.UTC, err)
 		}
-		out = append(out, unknownRecord{at, int64(len(s.Raw))})
+		out = append(out, unknownRecord{at, committed[s.Seq], int64(len(s.Raw))})
 	}
 	return out
 }
@@ -112,19 +143,49 @@ func (g *rig) floodUntil(end time.Time, mark string) {
 	}
 	for wait := time.Now().Add(20 * time.Second); time.Now().Before(wait); {
 		known.Write([]byte(mark))
-		for _, s := range g.events() {
-			if string(s.Bytes) == mark {
-				return
-			}
+		if g.hasMarker(mark) {
+			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	g.t.Fatalf("marker %q not stored", mark)
+}
+
+// hasMarker reports whether a stored event holds mark, without reading and
+// decoding every event on each poll: the rig's own reads must not take the
+// CPU the receiver needs on a slow runner. The marker's text appears
+// verbatim in the event's native bytes, and events() confirms it.
+func (g *rig) hasMarker(mark string) bool {
+	g.t.Helper()
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: g.db}).EscapedPath()+"?_pragma=query_only(1)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM events WHERE stream = ? AND instr(event, ?) > 0", string(g.stream), mark[len("<13>"):]).Scan(&n); err != nil {
+		g.t.Fatal(err)
+	}
+	if n == 0 {
+		return false
+	}
+	for _, s := range g.events() {
+		if string(s.Bytes) == mark {
+			return true
+		}
+	}
+	return false
 }
 
 type runSpan struct {
 	from, to time.Time // before New, after the marker is stored
 	stored   int64     // unknown bytes this run stored
+	// edge is a diagnostic: the unknown bytes that the count at this start
+	// left out by received time but that were committed inside its window
+	// (read before from-W, stored after it), and lag the largest
+	// committed-received gap among the records counted so far.
+	edge int64
+	lag  time.Duration
 }
 
 // restarts runs n listeners one after another on one store, each flooded
@@ -140,8 +201,16 @@ func restarts(t *testing.T, seed int64, n int, lim receive.Limits, spent func(no
 		time.Sleep(time.Duration(rnd.Int63n(int64(lim.UnknownWindow / 4))))
 		from := time.Now()
 		var recs []unknownRecord
+		var edge int64
+		var lag time.Duration
 		if i > 0 {
 			recs = (&rig{t: t, db: path, stream: sDgram}).unknownRecords()
+			for _, r := range recs {
+				if start := from.Add(-lim.UnknownWindow); !r.at.After(start) && r.committed.After(start) {
+					edge += r.bytes
+				}
+				lag = max(lag, r.committed.Sub(r.at))
+			}
 		}
 		g := serveOn(t, log, path, lim, spent(from, recs))
 		g.floodUntil(time.Now().Add(lim.UnknownWindow/10+time.Duration(rnd.Int63n(int64(lim.UnknownWindow/3)))), fmt.Sprintf("<13>a6 marker %d", i))
@@ -151,7 +220,7 @@ func restarts(t *testing.T, seed int64, n int, lim receive.Limits, spent func(no
 			all += r.bytes
 		}
 		g.close()
-		runs = append(runs, runSpan{from, to, all - before})
+		runs = append(runs, runSpan{from, to, all - before, edge, lag})
 		before = all
 	}
 	return runs
@@ -192,9 +261,19 @@ func TestUnknownSpentAcrossRestarts(t *testing.T) {
 			for _, r := range runs {
 				total += r.stored
 			}
+			var edges int64
+			var lag time.Duration
+			for _, r := range runs {
+				edges += r.edge
+				lag = max(lag, r.lag)
+			}
 			t.Logf("%d restarts: %d unknown bytes; worst span %s, %.0f bytes from the bound", len(runs), total, at, e)
+			// Diagnostic for the cause, not part of the claim: records read
+			// before a start's window and committed inside it are left out
+			// of a count by received time (A4, A3 on #178's handoff).
+			t.Logf("read-to-commit: largest lag %v; %d bytes read before a start's window and committed inside it, over all starts", lag, edges)
 			if e > 0 {
-				t.Errorf("unknown senders stored past UnknownBytes x (1 + T/window): %s, %.0f bytes over", at, e)
+				t.Errorf("unknown senders stored past UnknownBytes x (1 + T/window): %s, %.0f bytes over (%d bytes read before a start's window and committed inside it; largest lag %v)", at, e, edges, lag)
 			}
 			if runs[0].stored < per*8/10 {
 				t.Errorf("the first run stored %d of a budget of %d: the flood did not reach the budget, so the test cannot tell", runs[0].stored, per)
