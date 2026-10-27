@@ -56,14 +56,17 @@ def test_config_expectations_follow_the_case(cfg):
         a = c["approval"]
         if a is None:
             continue
-        change, r1 = cfg["timeline"]["change"], cfg["timeline"]["R1"]
-        in_window = a["window"][0] <= change <= a["window"][1]
-        prior = a["recorded"] < r1
-        valid = a["device"] == "self" and in_window and prior and a["approver"]
-        # The case's own definition, from the times: only "approved" is a
-        # valid prior approval; "backdated" claims a time before the change
-        # but was recorded after R1.
+        tl = cfg["timeline"]
+        change, rm, r1 = tl["change"], tl["Rm"], tl["R1"]
+        assert tl["R0"] < tl["baseline_ack"] < rm < change < r1
+        # C8 0.5's ApprovalCovers from the times: the window overlaps
+        # (Rm, R1), and the approval is in the chain before R1's decision.
+        covers = a["window"][0] < r1 and a["window"][1] > rm and a["recorded"] < r1
+        valid = a["device"] == "self" and covers and a["approver"]
+        # Only "approved" is a valid prior approval; "backdated" claims a
+        # time before the change but was recorded after R1.
         assert valid == (c["case"] == "approved"), c["id"]
+        assert a["window"][1] - a["window"][0] <= 24 * 3600
         if c["case"] == "backdated":
             assert a["claims"] < change < r1 < a["recorded"]
 
@@ -168,3 +171,18 @@ def test_heldout_raises_nothing(ev):
     assert start > seconds(ev["period"]["baseline_ack"])
     assert ho["seed"] != ev["seed"] and len({e["t"] // g.DAY for e in ho["events"]}) >= g.PARAMS["observation"]["min_days"]
     assert _alarms(ev, ho["events"], start - start % g.DAY, max(e["t"] for e in ho["events"]) + 1) == []
+
+
+def test_events_syslog_key_is_the_template(ev):
+    """D4-4 item 4: no two Syslog type definitions share a key, a new type
+    reuses a known msgid with a new text, and the controls (a known text
+    under another msgid) raise nothing."""
+    keys = [g.tkey("gt-inj-syslog", k) for k in list(g.SYSLOG_TYPES) + [g.PERIODIC] + g.NEW_TYPES["gt-inj-syslog"]]
+    assert len(set(keys)) == len(keys)
+    known_ids = {k[2] for k in g.SYSLOG_TYPES}
+    news = [d for d in ev["departures"] if d["kind"] == "new" and d["asset"] == "gt-inj-syslog"]
+    by_id = {e["id"]: e for e in ev["events"]}
+    assert any(by_id[d["events"][0]]["msgid"] in known_ids for d in news)
+    (ctl,) = ev["controls"]
+    assert len(ctl["events"]) == 3 and all(by_id[i]["msgid"] not in known_ids for i in ctl["events"])
+    assert not any(set(a["events"]) & set(ctl["events"]) for a in ev["expected_alarms"])

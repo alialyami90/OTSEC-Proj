@@ -8,18 +8,14 @@
    "min_days": 14,
    "min_events": 200
   },
-  "repeats": {
-   "n": 5,
-   "w_s": 600
-  },
-  "rate": {
-   "bucket_s": 3600,
-   "factor": 3
-  },
-  "absence": {
-   "tolerance": 0.5,
-   "periodic_spread": 0.1
-  }
+  "repeats_n": 5,
+  "repeats_window_s": 600,
+  "rate_bucket_s": 3600,
+  "rate_factor_pct": 300,
+  "rate_min": 2,
+  "periodic_min_occurrences": 11,
+  "periodic_spread_pct": 10,
+  "absence_tolerance_pct": 50
  },
  "replay": "after events.json's baseline_ack, in place of its test period",
  "pass": "departure alarms per asset-day at most 0 (proposed bound for synthetic series)",
@@ -32,6 +28,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00001"
   },
   {
@@ -41,6 +38,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00002"
   },
   {
@@ -50,6 +48,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00003"
   },
   {
@@ -59,6 +58,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00004"
   },
   {
@@ -76,6 +76,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00006"
   },
   {
@@ -93,6 +94,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00008"
   },
   {
@@ -102,6 +104,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00009"
   },
   {
@@ -111,6 +114,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00010"
   },
   {
@@ -120,6 +124,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00011"
   },
   {
@@ -129,6 +134,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00012"
   },
   {
@@ -138,6 +144,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00013"
   },
   {
@@ -155,6 +162,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00015"
   },
   {
@@ -188,6 +196,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00019"
   },
   {
@@ -197,6 +206,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00020"
   },
   {
@@ -230,6 +240,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00024"
   },
   {
@@ -247,6 +258,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00026"
   },
   {
@@ -264,6 +276,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00028"
   },
   {
@@ -273,6 +286,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00029"
   },
   {
@@ -290,6 +304,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00031"
   },
   {
@@ -307,6 +322,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00033"
   },
   {
@@ -316,6 +332,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00034"
   },
   {
@@ -325,6 +342,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00035"
   },
   {
@@ -342,6 +360,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00037"
   },
   {
@@ -359,6 +378,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00039"
   },
   {
@@ -408,6 +428,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00045"
   },
   {
@@ -417,6 +438,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00046"
   },
   {
@@ -458,6 +480,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00051"
   },
   {
@@ -467,6 +490,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00052"
   },
   {
@@ -476,6 +500,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 5",
    "id": "ho-00053"
   },
   {
@@ -485,6 +510,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00054"
   },
   {
@@ -510,6 +536,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00057"
   },
   {
@@ -519,6 +546,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00058"
   },
   {
@@ -536,6 +564,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00060"
   },
   {
@@ -561,6 +590,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00063"
   },
   {
@@ -570,6 +600,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00064"
   },
   {
@@ -579,6 +610,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00065"
   },
   {
@@ -596,6 +628,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00067"
   },
   {
@@ -605,6 +638,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00068"
   },
   {
@@ -614,6 +648,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00069"
   },
   {
@@ -647,6 +682,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00073"
   },
   {
@@ -656,6 +692,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00074"
   },
   {
@@ -673,6 +710,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00076"
   },
   {
@@ -714,6 +752,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00081"
   },
   {
@@ -731,6 +770,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00083"
   },
   {
@@ -740,6 +780,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00084"
   },
   {
@@ -749,6 +790,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00085"
   },
   {
@@ -758,6 +800,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00086"
   },
   {
@@ -767,6 +810,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00087"
   },
   {
@@ -776,6 +820,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00088"
   },
   {
@@ -785,6 +830,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00089"
   },
   {
@@ -794,6 +840,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00090"
   },
   {
@@ -803,6 +850,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00091"
   },
   {
@@ -812,6 +860,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00092"
   },
   {
@@ -829,6 +878,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00094"
   },
   {
@@ -854,6 +904,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00097"
   },
   {
@@ -863,6 +914,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00098"
   },
   {
@@ -880,6 +932,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00100"
   },
   {
@@ -889,6 +942,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00101"
   },
   {
@@ -898,6 +952,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 7",
    "id": "ho-00102"
   },
   {
@@ -915,6 +970,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 7",
    "id": "ho-00104"
   },
   {
@@ -924,6 +980,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 7",
    "id": "ho-00105"
   },
   {
@@ -933,6 +990,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00106"
   },
   {
@@ -942,6 +1000,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 8",
    "id": "ho-00107"
   },
   {
@@ -983,6 +1042,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00112"
   },
   {
@@ -1000,6 +1060,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00114"
   },
   {
@@ -1009,6 +1070,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00115"
   },
   {
@@ -1018,6 +1080,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00116"
   },
   {
@@ -1035,6 +1098,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00118"
   },
   {
@@ -1044,6 +1108,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00119"
   },
   {
@@ -1053,6 +1118,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00120"
   },
   {
@@ -1062,6 +1128,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00121"
   },
   {
@@ -1079,6 +1146,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00123"
   },
   {
@@ -1104,6 +1172,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00126"
   },
   {
@@ -1113,6 +1182,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00127"
   },
   {
@@ -1154,6 +1224,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00132"
   },
   {
@@ -1163,6 +1234,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00133"
   },
   {
@@ -1188,6 +1260,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 3",
    "id": "ho-00136"
   },
   {
@@ -1197,6 +1270,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00137"
   },
   {
@@ -1246,6 +1320,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00143"
   },
   {
@@ -1255,6 +1330,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00144"
   },
   {
@@ -1264,6 +1340,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00145"
   },
   {
@@ -1281,6 +1358,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 5",
    "id": "ho-00147"
   },
   {
@@ -1290,6 +1368,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00148"
   },
   {
@@ -1299,6 +1378,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00149"
   },
   {
@@ -1308,6 +1388,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00150"
   },
   {
@@ -1333,6 +1414,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00153"
   },
   {
@@ -1358,6 +1440,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00156"
   },
   {
@@ -1383,6 +1466,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00159"
   },
   {
@@ -1424,6 +1508,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00164"
   },
   {
@@ -1441,6 +1526,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00166"
   },
   {
@@ -1458,6 +1544,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00168"
   },
   {
@@ -1475,6 +1562,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00170"
   },
   {
@@ -1484,6 +1572,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00171"
   },
   {
@@ -1493,6 +1582,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00172"
   },
   {
@@ -1510,6 +1600,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00174"
   },
   {
@@ -1519,6 +1610,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00175"
   },
   {
@@ -1544,6 +1636,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00178"
   },
   {
@@ -1553,6 +1646,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00179"
   },
   {
@@ -1562,6 +1656,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00180"
   },
   {
@@ -1571,6 +1666,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00181"
   },
   {
@@ -1580,6 +1676,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00182"
   },
   {
@@ -1597,6 +1694,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00184"
   },
   {
@@ -1606,6 +1704,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00185"
   },
   {
@@ -1615,6 +1714,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00186"
   },
   {
@@ -1632,6 +1732,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00188"
   },
   {
@@ -1641,6 +1742,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00189"
   },
   {
@@ -1650,6 +1752,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00190"
   },
   {
@@ -1675,6 +1778,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00193"
   },
   {
@@ -1684,6 +1788,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00194"
   },
   {
@@ -1693,6 +1798,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00195"
   },
   {
@@ -1718,6 +1824,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00198"
   },
   {
@@ -1727,6 +1834,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 4",
    "id": "ho-00199"
   },
   {
@@ -1736,6 +1844,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00200"
   },
   {
@@ -1769,6 +1878,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 5",
    "id": "ho-00204"
   },
   {
@@ -1778,6 +1888,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00205"
   },
   {
@@ -1787,6 +1898,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00206"
   },
   {
@@ -1796,6 +1908,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00207"
   },
   {
@@ -1805,6 +1918,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00208"
   },
   {
@@ -1814,6 +1928,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00209"
   },
   {
@@ -1823,6 +1938,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00210"
   },
   {
@@ -1848,6 +1964,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00213"
   },
   {
@@ -1873,6 +1990,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00216"
   },
   {
@@ -1914,6 +2032,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00221"
   },
   {
@@ -1923,6 +2042,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00222"
   },
   {
@@ -1948,6 +2068,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00225"
   },
   {
@@ -1989,6 +2110,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00230"
   },
   {
@@ -1998,6 +2120,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00231"
   },
   {
@@ -2015,6 +2138,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00233"
   },
   {
@@ -2032,6 +2156,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00235"
   },
   {
@@ -2041,6 +2166,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 3",
    "id": "ho-00236"
   },
   {
@@ -2066,6 +2192,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00239"
   },
   {
@@ -2083,6 +2210,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 4",
    "id": "ho-00241"
   },
   {
@@ -2092,6 +2220,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00242"
   },
   {
@@ -2101,6 +2230,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00243"
   },
   {
@@ -2134,6 +2264,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00247"
   },
   {
@@ -2151,6 +2282,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00249"
   },
   {
@@ -2160,6 +2292,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00250"
   },
   {
@@ -2177,6 +2310,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00252"
   },
   {
@@ -2202,6 +2336,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00255"
   },
   {
@@ -2211,6 +2346,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00256"
   },
   {
@@ -2220,6 +2356,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00257"
   },
   {
@@ -2229,6 +2366,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00258"
   },
   {
@@ -2238,6 +2376,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00259"
   },
   {
@@ -2255,6 +2394,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00261"
   },
   {
@@ -2264,6 +2404,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00262"
   },
   {
@@ -2273,6 +2414,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00263"
   },
   {
@@ -2282,6 +2424,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00264"
   },
   {
@@ -2307,6 +2450,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00267"
   },
   {
@@ -2316,6 +2460,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00268"
   },
   {
@@ -2333,6 +2478,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00270"
   },
   {
@@ -2350,6 +2496,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 8",
    "id": "ho-00272"
   },
   {
@@ -2383,6 +2530,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00276"
   },
   {
@@ -2392,6 +2540,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00277"
   },
   {
@@ -2417,6 +2566,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00280"
   },
   {
@@ -2434,6 +2584,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00282"
   },
   {
@@ -2443,6 +2594,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00283"
   },
   {
@@ -2452,6 +2604,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00284"
   },
   {
@@ -2469,6 +2622,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00286"
   },
   {
@@ -2478,6 +2632,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00287"
   },
   {
@@ -2487,6 +2642,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00288"
   },
   {
@@ -2496,6 +2652,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00289"
   },
   {
@@ -2505,6 +2662,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00290"
   },
   {
@@ -2530,6 +2688,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00293"
   },
   {
@@ -2539,6 +2698,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00294"
   },
   {
@@ -2548,6 +2708,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00295"
   },
   {
@@ -2565,6 +2726,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 3",
    "id": "ho-00297"
   },
   {
@@ -2574,6 +2736,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 3",
    "id": "ho-00298"
   },
   {
@@ -2591,6 +2754,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00300"
   },
   {
@@ -2600,6 +2764,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00301"
   },
   {
@@ -2609,6 +2774,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00302"
   },
   {
@@ -2650,6 +2816,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00307"
   },
   {
@@ -2667,6 +2834,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00309"
   },
   {
@@ -2676,6 +2844,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00310"
   },
   {
@@ -2685,6 +2854,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00311"
   },
   {
@@ -2702,6 +2872,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00313"
   },
   {
@@ -2719,6 +2890,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00315"
   },
   {
@@ -2744,6 +2916,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 7",
    "id": "ho-00318"
   },
   {
@@ -2753,6 +2926,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00319"
   },
   {
@@ -2778,6 +2952,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00322"
   },
   {
@@ -2787,6 +2962,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00323"
   },
   {
@@ -2796,6 +2972,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00324"
   },
   {
@@ -2813,6 +2990,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00326"
   },
   {
@@ -2822,6 +3000,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00327"
   },
   {
@@ -2831,6 +3010,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00328"
   },
   {
@@ -2848,6 +3028,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 1",
    "id": "ho-00330"
   },
   {
@@ -2857,6 +3038,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00331"
   },
   {
@@ -2866,6 +3048,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00332"
   },
   {
@@ -2883,6 +3066,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00334"
   },
   {
@@ -2900,6 +3084,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00336"
   },
   {
@@ -2909,6 +3094,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00337"
   },
   {
@@ -2918,6 +3104,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00338"
   },
   {
@@ -2943,6 +3130,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00341"
   },
   {
@@ -2952,6 +3140,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00342"
   },
   {
@@ -2961,6 +3150,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00343"
   },
   {
@@ -2970,6 +3160,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00344"
   },
   {
@@ -2979,6 +3170,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00345"
   },
   {
@@ -2996,6 +3188,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00347"
   },
   {
@@ -3005,6 +3198,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00348"
   },
   {
@@ -3014,6 +3208,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00349"
   },
   {
@@ -3031,6 +3226,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00351"
   },
   {
@@ -3048,6 +3244,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00353"
   },
   {
@@ -3097,6 +3294,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00359"
   },
   {
@@ -3106,6 +3304,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 5",
    "id": "ho-00360"
   },
   {
@@ -3115,6 +3314,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 5",
    "id": "ho-00361"
   },
   {
@@ -3140,6 +3340,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00364"
   },
   {
@@ -3165,6 +3366,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00367"
   },
   {
@@ -3174,6 +3376,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00368"
   },
   {
@@ -3183,6 +3386,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00369"
   },
   {
@@ -3216,6 +3420,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 7",
    "id": "ho-00373"
   },
   {
@@ -3241,6 +3446,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00376"
   },
   {
@@ -3266,6 +3472,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00379"
   },
   {
@@ -3283,6 +3490,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00381"
   },
   {
@@ -3292,6 +3500,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00382"
   },
   {
@@ -3333,6 +3542,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00387"
   },
   {
@@ -3342,6 +3552,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00388"
   },
   {
@@ -3391,6 +3602,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 2",
    "id": "ho-00394"
   },
   {
@@ -3400,6 +3612,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00395"
   },
   {
@@ -3433,6 +3646,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00399"
   },
   {
@@ -3442,6 +3656,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00400"
   },
   {
@@ -3451,6 +3666,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00401"
   },
   {
@@ -3460,6 +3676,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00402"
   },
   {
@@ -3469,6 +3686,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00403"
   },
   {
@@ -3478,6 +3696,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00404"
   },
   {
@@ -3487,6 +3706,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00405"
   },
   {
@@ -3496,6 +3716,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00406"
   },
   {
@@ -3521,6 +3742,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00409"
   },
   {
@@ -3538,6 +3760,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00411"
   },
   {
@@ -3579,6 +3802,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00416"
   },
   {
@@ -3596,6 +3820,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00418"
   },
   {
@@ -3605,6 +3830,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00419"
   },
   {
@@ -3622,6 +3848,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00421"
   },
   {
@@ -3631,6 +3858,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00422"
   },
   {
@@ -3640,6 +3868,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00423"
   },
   {
@@ -3649,6 +3878,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00424"
   },
   {
@@ -3658,6 +3888,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00425"
   },
   {
@@ -3667,6 +3898,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00426"
   },
   {
@@ -3676,6 +3908,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 6 status enabled",
    "id": "ho-00427"
   },
   {
@@ -3693,6 +3926,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00429"
   },
   {
@@ -3702,6 +3936,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00430"
   },
   {
@@ -3711,6 +3946,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00431"
   },
   {
@@ -3720,6 +3956,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00432"
   },
   {
@@ -3729,6 +3966,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00433"
   },
   {
@@ -3746,6 +3984,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00435"
   },
   {
@@ -3771,6 +4010,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00438"
   },
   {
@@ -3780,6 +4020,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00439"
   },
   {
@@ -3805,6 +4046,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00442"
   },
   {
@@ -3822,6 +4064,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00444"
   },
   {
@@ -3831,6 +4074,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00445"
   },
   {
@@ -3864,6 +4108,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00449"
   },
   {
@@ -3881,6 +4126,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00451"
   },
   {
@@ -3890,6 +4136,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00452"
   },
   {
@@ -3907,6 +4154,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00454"
   },
   {
@@ -3932,6 +4180,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00457"
   },
   {
@@ -3941,6 +4190,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00458"
   },
   {
@@ -3950,6 +4200,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00459"
   },
   {
@@ -3967,6 +4218,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 7",
    "id": "ho-00461"
   },
   {
@@ -4000,6 +4252,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00465"
   },
   {
@@ -4009,6 +4262,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00466"
   },
   {
@@ -4018,6 +4272,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00467"
   },
   {
@@ -4059,6 +4314,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00472"
   },
   {
@@ -4068,6 +4324,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00473"
   },
   {
@@ -4093,6 +4350,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00476"
   },
   {
@@ -4102,6 +4360,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00477"
   },
   {
@@ -4111,6 +4370,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00478"
   },
   {
@@ -4128,6 +4388,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-00480"
   },
   {
@@ -4145,6 +4406,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00482"
   },
   {
@@ -4154,6 +4416,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00483"
   },
   {
@@ -4163,6 +4426,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00484"
   },
   {
@@ -4172,6 +4436,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 2",
    "id": "ho-00485"
   },
   {
@@ -4181,6 +4446,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00486"
   },
   {
@@ -4190,6 +4456,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00487"
   },
   {
@@ -4199,6 +4466,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00488"
   },
   {
@@ -4216,6 +4484,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 3",
    "id": "ho-00490"
   },
   {
@@ -4225,6 +4494,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 3",
    "id": "ho-00491"
   },
   {
@@ -4242,6 +4512,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00493"
   },
   {
@@ -4259,6 +4530,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00495"
   },
   {
@@ -4276,6 +4548,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 4",
    "id": "ho-00497"
   },
   {
@@ -4293,6 +4566,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00499"
   },
   {
@@ -4318,6 +4592,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00502"
   },
   {
@@ -4335,6 +4610,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00504"
   },
   {
@@ -4352,6 +4628,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00506"
   },
   {
@@ -4361,6 +4638,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00507"
   },
   {
@@ -4370,6 +4648,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00508"
   },
   {
@@ -4379,6 +4658,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00509"
   },
   {
@@ -4388,6 +4668,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00510"
   },
   {
@@ -4397,6 +4678,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00511"
   },
   {
@@ -4422,6 +4704,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00514"
   },
   {
@@ -4431,6 +4714,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00515"
   },
   {
@@ -4440,6 +4724,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00516"
   },
   {
@@ -4449,6 +4734,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00517"
   },
   {
@@ -4466,6 +4752,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00519"
   },
   {
@@ -4483,6 +4770,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00521"
   },
   {
@@ -4500,6 +4788,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00523"
   },
   {
@@ -4517,6 +4806,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00525"
   },
   {
@@ -4542,6 +4832,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00528"
   },
   {
@@ -4551,6 +4842,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00529"
   },
   {
@@ -4560,6 +4852,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00530"
   },
   {
@@ -4569,6 +4862,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00531"
   },
   {
@@ -4578,6 +4872,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00532"
   },
   {
@@ -4587,6 +4882,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00533"
   },
   {
@@ -4620,6 +4916,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00537"
   },
   {
@@ -4629,6 +4926,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00538"
   },
   {
@@ -4646,6 +4944,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00540"
   },
   {
@@ -4655,6 +4954,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00541"
   },
   {
@@ -4680,6 +4980,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 4",
    "id": "ho-00544"
   },
   {
@@ -4697,6 +4998,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00546"
   },
   {
@@ -4722,6 +5024,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00549"
   },
   {
@@ -4763,6 +5066,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00554"
   },
   {
@@ -4788,6 +5092,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00557"
   },
   {
@@ -4805,6 +5110,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00559"
   },
   {
@@ -4814,6 +5120,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 7",
    "id": "ho-00560"
   },
   {
@@ -4823,6 +5130,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00561"
   },
   {
@@ -4848,6 +5156,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00564"
   },
   {
@@ -4857,6 +5166,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00565"
   },
   {
@@ -4866,6 +5176,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00566"
   },
   {
@@ -4883,6 +5194,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00568"
   },
   {
@@ -4892,6 +5204,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00569"
   },
   {
@@ -4909,6 +5222,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00571"
   },
   {
@@ -4926,6 +5240,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00573"
   },
   {
@@ -4951,6 +5266,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00576"
   },
   {
@@ -4976,6 +5292,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00579"
   },
   {
@@ -4985,6 +5302,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00580"
   },
   {
@@ -5010,6 +5328,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00583"
   },
   {
@@ -5019,6 +5338,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00584"
   },
   {
@@ -5044,6 +5364,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00587"
   },
   {
@@ -5053,6 +5374,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00588"
   },
   {
@@ -5070,6 +5392,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00590"
   },
   {
@@ -5079,6 +5402,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00591"
   },
   {
@@ -5088,6 +5412,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00592"
   },
   {
@@ -5097,6 +5422,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00593"
   },
   {
@@ -5114,6 +5440,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00595"
   },
   {
@@ -5131,6 +5458,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00597"
   },
   {
@@ -5148,6 +5476,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00599"
   },
   {
@@ -5157,6 +5486,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00600"
   },
   {
@@ -5166,6 +5496,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00601"
   },
   {
@@ -5175,6 +5506,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00602"
   },
   {
@@ -5192,6 +5524,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00604"
   },
   {
@@ -5201,6 +5534,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00605"
   },
   {
@@ -5218,6 +5552,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00607"
   },
   {
@@ -5227,6 +5562,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00608"
   },
   {
@@ -5252,6 +5588,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00611"
   },
   {
@@ -5261,6 +5598,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00612"
   },
   {
@@ -5270,6 +5608,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00613"
   },
   {
@@ -5303,6 +5642,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00617"
   },
   {
@@ -5312,6 +5652,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00618"
   },
   {
@@ -5321,6 +5662,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00619"
   },
   {
@@ -5330,6 +5672,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00620"
   },
   {
@@ -5339,6 +5682,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 8",
    "id": "ho-00621"
   },
   {
@@ -5356,6 +5700,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00623"
   },
   {
@@ -5365,6 +5710,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00624"
   },
   {
@@ -5374,6 +5720,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00625"
   },
   {
@@ -5399,6 +5746,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-00628"
   },
   {
@@ -5408,6 +5756,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00629"
   },
   {
@@ -5425,6 +5774,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00631"
   },
   {
@@ -5442,6 +5792,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00633"
   },
   {
@@ -5451,6 +5802,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00634"
   },
   {
@@ -5484,6 +5836,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00638"
   },
   {
@@ -5501,6 +5854,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00640"
   },
   {
@@ -5510,6 +5864,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00641"
   },
   {
@@ -5551,6 +5906,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00646"
   },
   {
@@ -5576,6 +5932,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00649"
   },
   {
@@ -5585,6 +5942,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00650"
   },
   {
@@ -5602,6 +5960,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00652"
   },
   {
@@ -5619,6 +5978,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00654"
   },
   {
@@ -5644,6 +6004,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 6 status enabled",
    "id": "ho-00657"
   },
   {
@@ -5653,6 +6014,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00658"
   },
   {
@@ -5662,6 +6024,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00659"
   },
   {
@@ -5679,6 +6042,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00661"
   },
   {
@@ -5696,6 +6060,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00663"
   },
   {
@@ -5721,6 +6086,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00666"
   },
   {
@@ -5738,6 +6104,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00668"
   },
   {
@@ -5755,6 +6122,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00670"
   },
   {
@@ -5764,6 +6132,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00671"
   },
   {
@@ -5773,6 +6142,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00672"
   },
   {
@@ -5782,6 +6152,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00673"
   },
   {
@@ -5791,6 +6162,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00674"
   },
   {
@@ -5800,6 +6172,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00675"
   },
   {
@@ -5809,6 +6182,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00676"
   },
   {
@@ -5818,6 +6192,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00677"
   },
   {
@@ -5827,6 +6202,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00678"
   },
   {
@@ -5836,6 +6212,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00679"
   },
   {
@@ -5845,6 +6222,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00680"
   },
   {
@@ -5854,6 +6232,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00681"
   },
   {
@@ -5863,6 +6242,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00682"
   },
   {
@@ -5872,6 +6252,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00683"
   },
   {
@@ -5897,6 +6278,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00686"
   },
   {
@@ -5906,6 +6288,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00687"
   },
   {
@@ -5915,6 +6298,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00688"
   },
   {
@@ -5932,6 +6316,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00690"
   },
   {
@@ -5957,6 +6342,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00693"
   },
   {
@@ -5982,6 +6368,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00696"
   },
   {
@@ -5999,6 +6386,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00698"
   },
   {
@@ -6032,6 +6420,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00702"
   },
   {
@@ -6041,6 +6430,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00703"
   },
   {
@@ -6058,6 +6448,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00705"
   },
   {
@@ -6075,6 +6466,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00707"
   },
   {
@@ -6084,6 +6476,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00708"
   },
   {
@@ -6093,6 +6486,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00709"
   },
   {
@@ -6110,6 +6504,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00711"
   },
   {
@@ -6119,6 +6514,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00712"
   },
   {
@@ -6136,6 +6532,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00714"
   },
   {
@@ -6169,6 +6566,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00718"
   },
   {
@@ -6178,6 +6576,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00719"
   },
   {
@@ -6187,6 +6586,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00720"
   },
   {
@@ -6204,6 +6604,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00722"
   },
   {
@@ -6213,6 +6614,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00723"
   },
   {
@@ -6230,6 +6632,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00725"
   },
   {
@@ -6239,6 +6642,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 1",
    "id": "ho-00726"
   },
   {
@@ -6272,6 +6676,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00730"
   },
   {
@@ -6321,6 +6726,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00736"
   },
   {
@@ -6378,6 +6784,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00743"
   },
   {
@@ -6411,6 +6818,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00747"
   },
   {
@@ -6428,6 +6836,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00749"
   },
   {
@@ -6437,6 +6846,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00750"
   },
   {
@@ -6454,6 +6864,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00752"
   },
   {
@@ -6479,6 +6890,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00755"
   },
   {
@@ -6488,6 +6900,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00756"
   },
   {
@@ -6497,6 +6910,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00757"
   },
   {
@@ -6506,6 +6920,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00758"
   },
   {
@@ -6515,6 +6930,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00759"
   },
   {
@@ -6524,6 +6940,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00760"
   },
   {
@@ -6533,6 +6950,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00761"
   },
   {
@@ -6542,6 +6960,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00762"
   },
   {
@@ -6551,6 +6970,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00763"
   },
   {
@@ -6560,6 +6980,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00764"
   },
   {
@@ -6569,6 +6990,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00765"
   },
   {
@@ -6594,6 +7016,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00768"
   },
   {
@@ -6603,6 +7026,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00769"
   },
   {
@@ -6636,6 +7060,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00773"
   },
   {
@@ -6653,6 +7078,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00775"
   },
   {
@@ -6662,6 +7088,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00776"
   },
   {
@@ -6679,6 +7106,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00778"
   },
   {
@@ -6704,6 +7132,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00781"
   },
   {
@@ -6713,6 +7142,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00782"
   },
   {
@@ -6730,6 +7160,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00784"
   },
   {
@@ -6747,6 +7178,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00786"
   },
   {
@@ -6756,6 +7188,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00787"
   },
   {
@@ -6781,6 +7214,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00790"
   },
   {
@@ -6790,6 +7224,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00791"
   },
   {
@@ -6799,6 +7234,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-00792"
   },
   {
@@ -6816,6 +7252,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00794"
   },
   {
@@ -6849,6 +7286,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00798"
   },
   {
@@ -6858,6 +7296,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00799"
   },
   {
@@ -6883,6 +7322,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 3 status enabled",
    "id": "ho-00802"
   },
   {
@@ -6892,6 +7332,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00803"
   },
   {
@@ -6925,6 +7366,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00807"
   },
   {
@@ -6942,6 +7384,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00809"
   },
   {
@@ -6951,6 +7394,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00810"
   },
   {
@@ -6968,6 +7412,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00812"
   },
   {
@@ -6977,6 +7422,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 6",
    "id": "ho-00813"
   },
   {
@@ -6994,6 +7440,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00815"
   },
   {
@@ -7003,6 +7450,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00816"
   },
   {
@@ -7036,6 +7484,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00820"
   },
   {
@@ -7053,6 +7502,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00822"
   },
   {
@@ -7070,6 +7520,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00824"
   },
   {
@@ -7079,6 +7530,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00825"
   },
   {
@@ -7096,6 +7548,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 9 status enabled",
    "id": "ho-00827"
   },
   {
@@ -7105,6 +7558,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00828"
   },
   {
@@ -7114,6 +7568,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00829"
   },
   {
@@ -7123,6 +7578,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00830"
   },
   {
@@ -7164,6 +7620,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00835"
   },
   {
@@ -7173,6 +7630,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00836"
   },
   {
@@ -7182,6 +7640,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00837"
   },
   {
@@ -7191,6 +7650,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00838"
   },
   {
@@ -7200,6 +7660,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00839"
   },
   {
@@ -7209,6 +7670,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00840"
   },
   {
@@ -7218,6 +7680,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00841"
   },
   {
@@ -7227,6 +7690,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00842"
   },
   {
@@ -7236,6 +7700,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00843"
   },
   {
@@ -7245,6 +7710,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00844"
   },
   {
@@ -7254,6 +7720,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00845"
   },
   {
@@ -7263,6 +7730,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-00846"
   },
   {
@@ -7288,6 +7756,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00849"
   },
   {
@@ -7305,6 +7774,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00851"
   },
   {
@@ -7314,6 +7784,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 3 down",
    "id": "ho-00852"
   },
   {
@@ -7339,6 +7810,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00855"
   },
   {
@@ -7388,6 +7860,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00861"
   },
   {
@@ -7397,6 +7870,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00862"
   },
   {
@@ -7430,6 +7904,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00866"
   },
   {
@@ -7439,6 +7914,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00867"
   },
   {
@@ -7456,6 +7932,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00869"
   },
   {
@@ -7473,6 +7950,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00871"
   },
   {
@@ -7482,6 +7960,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00872"
   },
   {
@@ -7491,6 +7970,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00873"
   },
   {
@@ -7500,6 +7980,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 8",
    "id": "ho-00874"
   },
   {
@@ -7509,6 +7990,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00875"
   },
   {
@@ -7534,6 +8016,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 9",
    "id": "ho-00878"
   },
   {
@@ -7559,6 +8042,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00881"
   },
   {
@@ -7576,6 +8060,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 1",
    "id": "ho-00883"
   },
   {
@@ -7593,6 +8078,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00885"
   },
   {
@@ -7618,6 +8104,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-00888"
   },
   {
@@ -7627,6 +8114,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00889"
   },
   {
@@ -7644,6 +8132,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00891"
   },
   {
@@ -7693,6 +8182,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00897"
   },
   {
@@ -7710,6 +8200,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00899"
   },
   {
@@ -7735,6 +8226,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-00902"
   },
   {
@@ -7752,6 +8244,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00904"
   },
   {
@@ -7769,6 +8262,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00906"
   },
   {
@@ -7778,6 +8272,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-00907"
   },
   {
@@ -7795,6 +8290,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-00909"
   },
   {
@@ -7804,6 +8300,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-00910"
   },
   {
@@ -7813,6 +8310,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00911"
   },
   {
@@ -7830,6 +8328,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 6 status enabled",
    "id": "ho-00913"
   },
   {
@@ -7855,6 +8354,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00916"
   },
   {
@@ -7864,6 +8364,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00917"
   },
   {
@@ -7889,6 +8390,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00920"
   },
   {
@@ -7906,6 +8408,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 8 down",
    "id": "ho-00922"
   },
   {
@@ -7915,6 +8418,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00923"
   },
   {
@@ -7932,6 +8436,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-00925"
   },
   {
@@ -7949,6 +8454,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00927"
   },
   {
@@ -7974,6 +8480,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00930"
   },
   {
@@ -7983,6 +8490,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00931"
   },
   {
@@ -7992,6 +8500,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00932"
   },
   {
@@ -8001,6 +8510,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00933"
   },
   {
@@ -8010,6 +8520,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00934"
   },
   {
@@ -8019,6 +8530,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00935"
   },
   {
@@ -8028,6 +8540,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00936"
   },
   {
@@ -8045,6 +8558,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-00938"
   },
   {
@@ -8054,6 +8568,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00939"
   },
   {
@@ -8063,6 +8578,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-00940"
   },
   {
@@ -8072,6 +8588,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00941"
   },
   {
@@ -8081,6 +8598,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00942"
   },
   {
@@ -8130,6 +8648,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00948"
   },
   {
@@ -8139,6 +8658,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 2",
    "id": "ho-00949"
   },
   {
@@ -8180,6 +8700,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 2",
    "id": "ho-00954"
   },
   {
@@ -8189,6 +8710,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-00955"
   },
   {
@@ -8230,6 +8752,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-00960"
   },
   {
@@ -8247,6 +8770,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 4",
    "id": "ho-00962"
   },
   {
@@ -8256,6 +8780,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00963"
   },
   {
@@ -8281,6 +8806,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-00966"
   },
   {
@@ -8306,6 +8832,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-00969"
   },
   {
@@ -8323,6 +8850,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-00971"
   },
   {
@@ -8332,6 +8860,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 6 status enabled",
    "id": "ho-00972"
   },
   {
@@ -8341,6 +8870,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-00973"
   },
   {
@@ -8358,6 +8888,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-00975"
   },
   {
@@ -8375,6 +8906,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-00977"
   },
   {
@@ -8392,6 +8924,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-00979"
   },
   {
@@ -8409,6 +8942,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 7",
    "id": "ho-00981"
   },
   {
@@ -8442,6 +8976,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-00985"
   },
   {
@@ -8451,6 +8986,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-00986"
   },
   {
@@ -8508,6 +9044,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-00993"
   },
   {
@@ -8525,6 +9062,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-00995"
   },
   {
@@ -8542,6 +9080,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-00997"
   },
   {
@@ -8559,6 +9098,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-00999"
   },
   {
@@ -8592,6 +9132,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 2",
    "id": "ho-01003"
   },
   {
@@ -8601,6 +9142,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-01004"
   },
   {
@@ -8618,6 +9160,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01006"
   },
   {
@@ -8635,6 +9178,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01008"
   },
   {
@@ -8644,6 +9188,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 4",
    "id": "ho-01009"
   },
   {
@@ -8669,6 +9214,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-01012"
   },
   {
@@ -8678,6 +9224,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01013"
   },
   {
@@ -8687,6 +9234,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-01014"
   },
   {
@@ -8696,6 +9244,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 5 status enabled",
    "id": "ho-01015"
   },
   {
@@ -8713,6 +9262,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-01017"
   },
   {
@@ -8730,6 +9280,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01019"
   },
   {
@@ -8763,6 +9314,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01023"
   },
   {
@@ -8788,6 +9340,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01026"
   },
   {
@@ -8797,6 +9350,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01027"
   },
   {
@@ -8806,6 +9360,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01028"
   },
   {
@@ -8815,6 +9370,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01029"
   },
   {
@@ -8824,6 +9380,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-01030"
   },
   {
@@ -8833,6 +9390,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01031"
   },
   {
@@ -8850,6 +9408,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01033"
   },
   {
@@ -8859,6 +9418,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 4 down",
    "id": "ho-01034"
   },
   {
@@ -8884,6 +9444,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01037"
   },
   {
@@ -8901,6 +9462,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01039"
   },
   {
@@ -8918,6 +9480,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01041"
   },
   {
@@ -8935,6 +9498,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01043"
   },
   {
@@ -8952,6 +9516,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 8 status enabled",
    "id": "ho-01045"
   },
   {
@@ -8977,6 +9542,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01048"
   },
   {
@@ -9002,6 +9568,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01051"
   },
   {
@@ -9011,6 +9578,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 1",
    "id": "ho-01052"
   },
   {
@@ -9020,6 +9588,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-01053"
   },
   {
@@ -9037,6 +9606,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 1",
    "id": "ho-01055"
   },
   {
@@ -9046,6 +9616,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01056"
   },
   {
@@ -9063,6 +9634,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 2 status enabled",
    "id": "ho-01058"
   },
   {
@@ -9080,6 +9652,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01060"
   },
   {
@@ -9121,6 +9694,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01065"
   },
   {
@@ -9138,6 +9712,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-01067"
   },
   {
@@ -9163,6 +9738,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 4 status enabled",
    "id": "ho-01070"
   },
   {
@@ -9172,6 +9748,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01071"
   },
   {
@@ -9189,6 +9766,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01073"
   },
   {
@@ -9222,6 +9800,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 6 status enabled",
    "id": "ho-01077"
   },
   {
@@ -9247,6 +9826,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01080"
   },
   {
@@ -9280,6 +9860,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01084"
   },
   {
@@ -9313,6 +9894,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01088"
   },
   {
@@ -9330,6 +9912,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-01090"
   },
   {
@@ -9339,6 +9922,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01091"
   },
   {
@@ -9348,6 +9932,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 1",
    "id": "ho-01092"
   },
   {
@@ -9357,6 +9942,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01093"
   },
   {
@@ -9366,6 +9952,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-01094"
   },
   {
@@ -9391,6 +9978,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-01097"
   },
   {
@@ -9408,6 +9996,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01099"
   },
   {
@@ -9441,6 +10030,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01103"
   },
   {
@@ -9458,6 +10048,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01105"
   },
   {
@@ -9467,6 +10058,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01106"
   },
   {
@@ -9476,6 +10068,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01107"
   },
   {
@@ -9485,6 +10078,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01108"
   },
   {
@@ -9494,6 +10088,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01109"
   },
   {
@@ -9503,6 +10098,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 9 down",
    "id": "ho-01110"
   },
   {
@@ -9520,6 +10116,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01112"
   },
   {
@@ -9545,6 +10142,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 1 down",
    "id": "ho-01115"
   },
   {
@@ -9562,6 +10160,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01117"
   },
   {
@@ -9571,6 +10170,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01118"
   },
   {
@@ -9588,6 +10188,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01120"
   },
   {
@@ -9613,6 +10214,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01123"
   },
   {
@@ -9622,6 +10224,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-01124"
   },
   {
@@ -9647,6 +10250,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01127"
   },
   {
@@ -9656,6 +10260,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-01128"
   },
   {
@@ -9665,6 +10270,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 6",
    "id": "ho-01129"
   },
   {
@@ -9674,6 +10280,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01130"
   },
   {
@@ -9683,6 +10290,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 7 down",
    "id": "ho-01131"
   },
   {
@@ -9716,6 +10324,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01135"
   },
   {
@@ -9741,6 +10350,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01138"
   },
   {
@@ -9750,6 +10360,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-01139"
   },
   {
@@ -9759,6 +10370,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 9",
    "id": "ho-01140"
   },
   {
@@ -9768,6 +10380,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01141"
   },
   {
@@ -9793,6 +10406,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-01144"
   },
   {
@@ -9802,6 +10416,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-01145"
   },
   {
@@ -9811,6 +10426,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01146"
   },
   {
@@ -9828,6 +10444,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 2 down",
    "id": "ho-01148"
   },
   {
@@ -9845,6 +10462,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01150"
   },
   {
@@ -9862,6 +10480,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 4",
    "id": "ho-01152"
   },
   {
@@ -9887,6 +10506,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 5",
    "id": "ho-01155"
   },
   {
@@ -9896,6 +10516,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-01156"
   },
   {
@@ -9929,6 +10550,7 @@
    "facility": 4,
    "severity": 5,
    "msgid": "LOGOUT",
+   "msg": "Logout on port 5",
    "id": "ho-01160"
   },
   {
@@ -9962,6 +10584,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 5 down",
    "id": "ho-01164"
   },
   {
@@ -9971,6 +10594,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 6",
    "id": "ho-01165"
   },
   {
@@ -9996,6 +10620,7 @@
    "facility": 16,
    "severity": 4,
    "msgid": "LINKDOWN",
+   "msg": "Ethernet link 6 down",
    "id": "ho-01168"
   },
   {
@@ -10021,6 +10646,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 7",
    "id": "ho-01171"
   },
   {
@@ -10038,6 +10664,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-01173"
   },
   {
@@ -10055,6 +10682,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 7 status enabled",
    "id": "ho-01175"
   },
   {
@@ -10072,6 +10700,7 @@
    "facility": 4,
    "severity": 6,
    "msgid": "LOGIN",
+   "msg": "Level 1 login on port 7",
    "id": "ho-01177"
   },
   {
@@ -10089,6 +10718,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 8",
    "id": "ho-01179"
   },
   {
@@ -10122,6 +10752,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 9",
    "id": "ho-01183"
   },
   {
@@ -10163,6 +10794,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 1",
    "id": "ho-01188"
   },
   {
@@ -10172,6 +10804,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "PORTSTAT",
+   "msg": "Port 1 status enabled",
    "id": "ho-01189"
   },
   {
@@ -10181,6 +10814,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 2",
    "id": "ho-01190"
   },
   {
@@ -10190,6 +10824,7 @@
    "facility": 16,
    "severity": 6,
    "msgid": "HEARTBEAT",
+   "msg": "Heartbeat sequence 3",
    "id": "ho-01191"
   }
  ]

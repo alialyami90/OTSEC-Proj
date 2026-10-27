@@ -34,6 +34,7 @@ import datetime as dt
 import json
 import os
 import random
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,9 +55,13 @@ HELDOUT_SEED = 202610273
 # depends on what the node did with another (re-baselining after an
 # approved change is the node's design, P4-A5, and is not assumed here).
 # Times are seconds from the asset's start. R0 is the baseline read, which
-# the operator acknowledges; the change is made with the simulator's
-# injector (--profile-settings) before R1, the read that must see it.
-TIMELINE = {"R0": 0, "baseline_ack": 30, "change": 120, "R1": 180}
+# the operator acknowledges. Rm is a read that still finds the baseline, so
+# the platform knows the change came after it (C8 0.5's unchanged_at). The
+# change is made with the simulator's injector (--profile-settings) before
+# R1, the read that must see it. An approval covers the change when its
+# window overlaps (Rm, R1) and the collector accepted it before R1's
+# decision (C8 0.5 ApprovalCovers): a window that ended before Rm does not.
+TIMELINE = {"R0": 0, "baseline_ack": 30, "Rm": 105, "change": 120, "R1": 180}
 
 # The seven cases of V-M2, in its order. window is [start, end] in the
 # asset's seconds; recorded is when the approval enters the audit chain;
@@ -67,15 +72,14 @@ CASES = {
     "no-approval": dict(approval=None, alarm=True, linked=False, refused=False),
     "other-device": dict(approval=dict(device="other", window=[90, 600], recorded=60, claims=60, approver=True),
                          alarm=True, linked=False, refused=False),
+    # Ended at 100, before Rm found the configuration unchanged.
     "window-ended": dict(approval=dict(device="self", window=[50, 100], recorded=40, claims=40, approver=True),
                          alarm=True, linked=False, refused=False),
     # Recorded after R1 saw the change; its text claims an earlier time.
     # "Prior" is the audit chain's order, never the text (V-M2).
     "backdated": dict(approval=dict(device="self", window=[90, 600], recorded=240, claims=60, approver=True),
                       alarm=True, linked=False, refused=False),
-    # B6's reading: a refused approval approves nothing, so the change is
-    # unapproved and alarms. V-M2's "exactly for" list does not name this
-    # case; B1 to confirm (raised with the schedule).
+    # A refused approval approves nothing, so the change alarms (B1, D4-9).
     "non-approver": dict(approval=dict(device="self", window=[90, 600], recorded=60, claims=60, approver=False),
                          alarm=True, linked=False, refused=True),
     # R1 prints the same settings one per line (--profile-sho-layout
@@ -144,19 +148,22 @@ def config_series():
 # V-M4: event-behaviour departures
 # ---------------------------------------------------------------------------
 
-# Proposed until C10 / the P4-A4 brief fixes them (see the module text).
+# Proposed until C10 fixes them (see the module text). The names are C10's
+# learner parameters as B4 gave them on #251, which B4 adopted as defaults.
 PARAMS = {
     "observation": {"min_days": 14, "min_events": 200},
-    # Rule 2: more than n of a type within w_s seconds, when the baseline's
-    # most in any w_s was below n.
-    "repeats": {"n": 5, "w_s": 600},
-    # Rule 3, B6's reading: per type, the count in a clock-hour bucket (UTC)
-    # above factor x the most the baseline saw in any one bucket. Hour of
-    # day is rule 4's, so rule 3 does not also fire on an unseen hour.
-    "rate": {"bucket_s": 3600, "factor": 3},
-    # Rule 5: a periodic type (every gap within 10% of the median gap in the
-    # baseline) not seen within interval x (1 + tolerance) of its last.
-    "absence": {"tolerance": 0.5, "periodic_spread": 0.1},
+    # Rule 2: more than repeats_n of a type within repeats_window_s, when the
+    # baseline's most in any such window was below repeats_n.
+    "repeats_n": 5, "repeats_window_s": 600,
+    # Rule 3 (B1, D4-9): one bound per type, rate_factor_pct of the most the
+    # baseline saw in any clock-hour bucket (buckets from the Unix epoch on
+    # received time), and never below rate_min. Hour of day is rule 4's.
+    "rate_bucket_s": 3600, "rate_factor_pct": 300, "rate_min": 2,
+    # Rule 5: a type is periodic with at least periodic_min_occurrences and
+    # every gap within periodic_spread_pct of the interval, the upper middle
+    # of the sorted gaps; it is absent when not seen within the interval
+    # plus absence_tolerance_pct of it.
+    "periodic_min_occurrences": 11, "periodic_spread_pct": 10, "absence_tolerance_pct": 50,
 }
 
 START = dt.datetime(2026, 11, 2, tzinfo=dt.timezone.utc)
@@ -172,30 +179,58 @@ SER_TYPES = {
     ("SALARM", "Asserted"): range(1, 23), ("OUT101", "Asserted"): range(8, 17),
     ("LOP", "Asserted"): range(2, 22),
 }
+# A Syslog type is defined by (facility, severity, msgid, text). Its key is
+# facility, severity and the text with each digit run made "#" (D4-4 item
+# 4, B1's ruling on #251): the msgid is the sender's choice and is not in
+# the key. So a new text under a known msgid is a new type, and a known
+# text under another msgid is not.
 SYSLOG_TYPES = {
-    (4, 6, "LOGIN"): range(7, 19), (4, 5, "LOGOUT"): range(7, 19),
-    (16, 6, "PORTSTAT"): range(1, 23), (16, 4, "LINKDOWN"): range(2, 22),
+    (4, 6, "LOGIN", "Level 1 login on port {n}"): range(7, 19),
+    (4, 5, "LOGOUT", "Logout on port {n}"): range(7, 19),
+    (16, 6, "PORTSTAT", "Port {n} status enabled"): range(1, 23),
+    (16, 4, "LINKDOWN", "Ethernet link {n} down"): range(2, 22),
 }
-PERIODIC = (16, 6, "HEARTBEAT")  # every 3600 s at :00:00 + 0 to 30 s, on the syslog asset
+# Every 3600 s at :00:00 + 0 to 30 s, on the syslog asset.
+PERIODIC = (16, 6, "HEARTBEAT", "Heartbeat sequence {n}")
 NEW_TYPES = {"gt-inj-ser": [("TRIP", "Asserted"), ("51P1T", "Asserted"), ("OUT103", "Asserted"), ("50G1T", "Asserted")],
-             "gt-inj-syslog": [(4, 4, "ACCFAIL"), (16, 3, "CFGWRITE"), (4, 2, "LVL2"), (16, 2, "PWRUP")]}
+             # The first reuses the known msgid LOGIN with a new text.
+             "gt-inj-syslog": [(4, 6, "LOGIN", "Firmware upload started on port {n}"),
+                               (4, 4, "ACCFAIL", "Access denied for level 2 on port {n}"),
+                               (16, 3, "CFGWRITE", "Settings written to group {n}"),
+                               (16, 2, "PWRUP", "Power up {n}")]}
 ASSETS = {"gt-inj-ser": SER_TYPES, "gt-inj-syslog": SYSLOG_TYPES}
 SLOTS = (5 * 60, 35 * 60)
 P_COUNT = (0.72, 0.22, 0.06)  # per type, hour and day: 0, 1 or 2 events
 
 
+def template(msg):
+    return re.sub(r"[0-9]+", "#", msg)
+
+
 def key_of(e):
-    return (e["element"], e["state"]) if "element" in e else (e["facility"], e["severity"], e["msgid"])
+    return (e["element"], e["state"]) if "element" in e else (e["facility"], e["severity"], template(e["msg"]))
 
 
-def make_event(asset, key, t):
+def make_event(asset, key, t, msgid=None):
+    """An event of type definition key at t. A Syslog text's number varies
+    with t, so types never differ by their digits alone."""
     e = {"asset": asset, "received_utc": iso(t)}
     if asset == "gt-inj-ser":
         e.update(source="ser", element=key[0], state=key[1])
     else:
-        e.update(source="syslog", facility=key[0], severity=key[1], msgid=key[2])
+        e.update(source="syslog", facility=key[0], severity=key[1], msgid=msgid or key[2],
+                 msg=key[3].format(n=(t // 3600) % 9 + 1))
     e["t"] = t
     return e
+
+
+def tkey(asset, key):
+    """The type key of type definition key."""
+    return key_of(make_event(asset, key, 0))
+
+
+def seconds_of(t):
+    return t
 
 
 def iso(t):
@@ -231,14 +266,14 @@ def baseline(events):
         ts.sort()
         buckets = {}
         for t in ts:
-            buckets[t // p["rate"]["bucket_s"]] = buckets.get(t // p["rate"]["bucket_s"], 0) + 1
-        w = p["repeats"]["w_s"]
+            buckets[t // p["rate_bucket_s"]] = buckets.get(t // p["rate_bucket_s"], 0) + 1
+        w = p["repeats_window_s"]
         most_w = max(bisect.bisect_right(ts, t + w - 1) - i for i, t in enumerate(ts))
         gaps = sorted(b - a for a, b in zip(ts, ts[1:]))
         interval = None
-        if len(gaps) >= 10:
+        if len(ts) >= p["periodic_min_occurrences"]:
             med = gaps[len(gaps) // 2]
-            spread = p["absence"]["periodic_spread"]
+            spread = p["periodic_spread_pct"] / 100
             if all(abs(g - med) <= spread * med for g in gaps):
                 interval = med
         out[k] = {"hours": sorted({(t % DAY) // 3600 for t in ts}), "most_per_bucket": max(buckets.values()),
@@ -264,25 +299,25 @@ def evaluate(base, events, start, end):
             continue
         ts = [e["t"] for e in es]
         # 2. repeats: one alarm per run of events that each close a window
-        # holding more than n.
-        n, w = p["repeats"]["n"], p["repeats"]["w_s"]
+        # holding more than n, raised at the first of them and listing the
+        # events of the window it closed (C10, B4 on #251).
+        n, w = p["repeats_n"], p["repeats_window_s"]
         if b["most_per_window"] < n:
-            run = []
+            open_run = False
             for i, e in enumerate(es):
                 lo = bisect.bisect_left(ts, e["t"] - w + 1)
                 if i + 1 - lo > n:
-                    run.append(e)
-                elif run:
-                    alarms.append(dict(rule="repeats", asset=asset, type=name, at=run[0]["t"], events=[x["id"] for x in run]))
-                    run = []
-            if run:
-                alarms.append(dict(rule="repeats", asset=asset, type=name, at=run[0]["t"], events=[x["id"] for x in run]))
+                    if not open_run:
+                        alarms.append(dict(rule="repeats", asset=asset, type=name, at=e["t"], events=[x["id"] for x in es[lo:i + 1]]))
+                    open_run = True
+                else:
+                    open_run = False
         # 3. rate: one alarm per bucket over the bound, at the event that
         # passed it.
-        bound = p["rate"]["factor"] * b["most_per_bucket"]
+        bound = max(p["rate_factor_pct"] * b["most_per_bucket"] // 100, p["rate_min"])
         buckets = {}
         for e in es:
-            buckets.setdefault(e["t"] // p["rate"]["bucket_s"], []).append(e)
+            buckets.setdefault(e["t"] // p["rate_bucket_s"], []).append(e)
         for bk, xs in sorted(buckets.items()):
             if len(xs) > bound:
                 alarms.append(dict(rule="rate", asset=asset, type=name, at=xs[bound]["t"], events=[x["id"] for x in xs]))
@@ -295,7 +330,7 @@ def evaluate(base, events, start, end):
     for k, b in base.items():
         if not b["interval"]:
             continue
-        limit = b["interval"] * (1 + p["absence"]["tolerance"])
+        limit = b["interval"] * (100 + p["absence_tolerance_pct"]) // 100
         ts = [b["last"]] + [e["t"] for e in by.get(k, [])]
         ts.append(end)
         for a, c in zip(ts, ts[1:]):
@@ -339,7 +374,7 @@ def event_series():
         for e in evs:
             e["injected"] = f"dep-{len(departures) + 1:02d}"
         events.extend(evs)
-        departures.append(dict(id=f"dep-{len(departures) + 1:02d}", kind=kind, asset=asset, type=list(key),
+        departures.append(dict(id=f"dep-{len(departures) + 1:02d}", kind=kind, asset=asset, type=list(key_of(make_event(asset, key, 0))),
                                at=ts[0] if ts else extra["gap_from"], **extra))
 
     # Before the acknowledgement: a new type, which must raise nothing.
@@ -357,7 +392,7 @@ def event_series():
         day = base_t // DAY
         if kind == "absence":
             asset, key = "gt-inj-syslog", PERIODIC
-            gone = [e for e in events if e["asset"] == asset and key_of(e) == key
+            gone = [e for e in events if e["asset"] == asset and key_of(e) == tkey(asset, key)
                     and base_t <= e["t"] < base_t + 4 * 3600]
             for e in gone:
                 events.remove(e)
@@ -374,16 +409,24 @@ def event_series():
             inject(kind, asset, key, [base_t + 20 * 60])
             continue
         key = rng.choice([k for k, hs in ASSETS[asset].items() if (base_t % DAY) // 3600 in hs])
-        remove.add((asset, key, base_t // 3600))
+        remove.add((asset, tkey(asset, key), base_t // 3600))
         if kind == "repeats":
             # n + 1 within a minute, and no more than the rate bound in the hour.
-            inject(kind, asset, key, [base_t + 20 * 60 + 10 * i for i in range(PARAMS["repeats"]["n"] + 1)])
+            inject(kind, asset, key, [base_t + 20 * 60 + 10 * i for i in range(PARAMS["repeats_n"] + 1)])
         else:
             # factor x 2 + 1 in the hour, spaced so no w_s window holds n.
-            k = PARAMS["rate"]["factor"] * 2 + 1
+            k = PARAMS["rate_factor_pct"] * 2 // 100 + 1
             inject(kind, asset, key, [base_t + 120 + i * (3480 // k) for i in range(k)])
     events = [e for e in events if "injected" in e or (e["asset"], key_of(e), e["t"] // 3600) not in remove]
+    # Controls: three benign LOGIN events in the test period sent with
+    # another msgid. Their key is unchanged, so they must raise nothing.
+    logins = [e for e in events if e["t"] >= test0 and "injected" not in e and e.get("msgid") == "LOGIN"
+              and key_of(e) == key_of(make_event("gt-inj-syslog", list(SYSLOG_TYPES)[0], 0))]
+    for e in rng.sample(logins, 3):
+        e["msgid"], e["control"] = "LOGIN-B", True
     number(events, "ev")
+    controls = [dict(what="a known Syslog text under another msgid is not a new type (D4-4 item 4)",
+                     events=[e["id"] for e in events if e.get("control")], expect_rules=[])]
     by_dep = {}
     for e in events:
         if "injected" in e:
@@ -396,7 +439,9 @@ def event_series():
     for d in departures:
         d["events"] = by_dep.get(d["id"], [])
         if d["kind"] == "absence":
-            d["expect_rules"] = ["absence"]
+            lo = seconds_of(d["gap_from"])
+            d["expect_rules"] = sorted({a["rule"] for a in alarms if a["asset"] == d["asset"] and a["type"] == d["type"]
+                                        and a["rule"] == "absence" and lo <= a["at"] <= lo + 5 * 3600})
             continue
         if d.get("before_ack"):
             d["expect_rules"] = []
@@ -415,9 +460,11 @@ def event_series():
                                                       for d in departures))]
     assert not benign, benign
     assert any(a["rule"] == "new" for a in pre), pre
+    assert not any(set(a["events"]) & set(controls[0]["events"]) for a in alarms)
     for e in events:
         e.pop("t")
         e.pop("injected", None)
+        e.pop("control", None)
     for a in alarms:
         a["at"] = iso(a["at"])
     for d in departures:
@@ -427,7 +474,8 @@ def event_series():
     return {
         "schema": SCHEMA, "series": "events", "seed": EVENTS_SEED, "evidence": "synthetic (simulated)",
         "params": PARAMS,
-        "type_key": "SER: element and state; Syslog: facility, severity and msgid (docs/verification.md)",
+        "type_key": "SER: element and state; Syslog: facility, severity and the text with each digit run made # "
+                    "(D4-4 item 4; msgid is not in the key)",
         "clock": "received_utc, the platform's receive time",
         "period": {"first_event": {a: iso(t) for a, t in first.items()}, "end": iso(period_end),
                    "baseline_ack": iso(ack), "test_end": iso(end)},
@@ -436,6 +484,7 @@ def event_series():
                 "precision is alarms citing an injected departure over all departure alarms; "
                 "expected_alarms is B6's reading under params.",
         "departures": departures,
+        "controls": controls,
         "expected_alarms": alarms,
         "events": events,
     }

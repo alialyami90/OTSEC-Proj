@@ -7,7 +7,7 @@ These are labelled injection schedules for V-M2 (configuration changes, R3.6) an
 | File | What it holds |
 | --- | --- |
 | `config.json` | V-M2's seven cases, with three changes of each. Each change is on its own asset and its own simulator. It lists the setting changed (a Figure 7.43 group setting, injected with the simulator's `--profile-settings`), the approval the change gets (device, window, when it is recorded in the audit chain, the time its text claims, and whether the principal is an approver), and the outcome the change must have. |
-| `events.json` | Two assets, `gt-inj-ser` (SER element and state) and `gt-inj-syslog` (facility, severity and msgid), observed for 14 days. Then come the acknowledgement and a 7-day test period with three injected departures of each R4.8 kind: new type, repeats, rate, time and absence. One more new type comes before the acknowledgement and must raise nothing. Each departure lists its events, and the file lists the alarms B6's reading of the rules expects. |
+| `events.json` | Two assets, `gt-inj-ser` (keyed on SER element and state) and `gt-inj-syslog` (keyed on facility, severity and the message text with each digit run made `#`; the msgid is not in the key, D4-4 item 4), observed for 14 days. Then come the acknowledgement and a 7-day test period with three injected departures of each R4.8 kind: new type, repeats, rate, time and absence. One more new type comes before the acknowledgement and must raise nothing. One Syslog new type reuses a known msgid with a new text, and three controls send a known text under another msgid, which must raise nothing. Each departure lists its events, and the file lists the alarms B6's reading of the rules expects. |
 | `events-heldout.json` | 14 benign days from the same generator with another seed. They are replayed after the acknowledgement in place of the test period, and must raise no departure alarm. |
 | `generate.py` | Writes the three files. Its docstring states the parameters (`PARAMS`) and each reading B6 took where the verification text leaves a choice. |
 | `test_gt_inj_schedule.py` | Checks the schedules themselves, not the product. Each case appears three times with the expectation its definition gives. Each change is a real Figure 7.43 setting in the same printed form, and the simulator prints exactly that change. The expected alarms follow from the committed events. Every alarm is an injected departure. The departure before the acknowledgement would have alarmed. The held-out series raises nothing. |
@@ -21,13 +21,13 @@ Non-periodic events fall only on the slots `:05` and `:35` (plus 0 to 20 s), at 
 
 The heartbeat is the only periodic type. It falls at `:00:00` plus 0 to 30 s.
 
-## Readings B6 took
+## Readings, as B1 ruled them (D4-9)
 
-Each of these is open for B1 to confirm.
-
-- **Rule 3 (rate):** the bound is the factor times the most the baseline saw in any one clock-hour bucket. It is not a bound per hour of day, because the hour of day is rule 4's.
-- **V-M2 non-approver:** a refused approval approves nothing, so the change alarms. V-M2's "alarm exactly for" list does not name this case.
-- **Repeats and rate injections:** they replace that type's benign events in that hour, so that each injection breaks only its own rule.
+- **Rule 3 (rate):** one bound per type: `rate_factor_pct` of the most the baseline saw in any one clock-hour bucket, never below `rate_min`. There is no bound per hour of day, because the hour of day is rule 4's.
+- **V-M2 non-approver:** an approval refused for any reason covers nothing, so the change alarms.
+- **V-M2 window ended:** C8 0.5 covers a change when the approval's window overlaps the time between the last read that found the baseline (`Rm`) and the read that found the change (`R1`). The schedule therefore has a read `Rm` after the window ends and before the change.
+- **Repeats and rate injections:** each replaces that type's benign events in that hour, so it breaks only its own rule.
+- **Repeats alarm:** it lists the n + 1 events in the window that the breaking event closed (C10, B4 on #251).
 
 ## When the parameters change
 
