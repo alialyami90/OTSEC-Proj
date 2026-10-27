@@ -41,11 +41,22 @@ Run 40548609999, the Windows Go job (122345921404), at `c9d4625`. That was a doc
 - `platform/node`: the timeout fired while `TestBusyOpenRetryKeepsUnknownSuspensionsHeld` had been running for 8 s and was in SQLite's busy handler, which that test causes on purpose. The package was slow overall: `TestListenerUsesSizedBudget` failed after 70.68 s, with 40 received and 1 stored. I did not see `TestBadSuspensionRecordHoldsEverything` in this log.
 - `tests/integration/syslogreceive` `TestUnknownSpentAcrossRestarts/seed_2` also failed ("Serve did not return"; a read-to-commit lag of 4.34 s).
 
-The next run on the same branch (40549186565, `0bc0d54`) was green. A syscall blocked for more than 9 minutes on the runner's disk, with three other packages slow at the same time, looks like the runner's I/O stalling, not a fault in our code. That is a reading, not a finding. If it happens again on any head, I will open it as an item with both logs.
+The next run on the same branch (40549186565, `0bc0d54`) was green. A syscall blocked for more than 9 minutes on the runner's disk, with three other packages slow at the same time, looks like the runner's I/O stalling, not a fault in our code. That is a reading, not a finding.
+
+**Since then.** B1 has opened issue #230 for this, and B6's analysis is in the project files (`b6/windows-go-timeouts-2026-10-27.md`). B6 found a second job, 122347974504. In it, the `platform/node` test that was running when the 600 s budget ran out had been going for only 1 s. On Windows, `platform/node` normally takes 317 to 455 s, so it has little headroom under the 600 s default. B6 reads both jobs as slow disks rather than a hang. For `platform/store`, B6 cannot tell from the logs whether it was one stall or many slow flushes.
+
+After cutover, B1 asks me for three things on #230, and I accept them:
+1. **Per-test Windows times** for `platform/node` and `platform/store`, from a `go test -v` run on a dry-run branch, with its own push-triggered workflow and never on `main`.
+2. **`TestListenerUsesSizedBudget`**: replace its fixed 10 s deadline with a wait on progress (the store's count still rising), capped by an upper bound, without loosening any property.
+3. **A proposal** to either cut those packages' flush cost (for example, smaller setup in `TestDiscardStepWALBound` with the same WAL-bound property) or split them. B1 decides any `ci.yml` change from the numbers.
+
+## `.github/workflows/a5-windows-experiments.yml`
+
+Confirmed: it is mine. It is A5's Phase 0 Windows/NTFS experiment workflow (ADR-0007 item 5): manual only (`workflow_dispatch`), building `platform/experiments/phase0`. It is not a project CI pipeline. Following B1's proposal, any change to it needs B1's authorization, as for `ci.yml`.
 
 ## Questions and gaps for A5
 
-1. **The hang.** Has A5 seen a `FlushFileBuffers` stall before? Is the #172 hang the same signature? The coordinator named `TestBadSuspensionRecordHoldsEverything` as the node test that hit the timeout today, but run 40548609999 shows `TestBusyOpenRetryKeepsUnknownSuspensionsHeld`. Was there a second failing run? If so, which run ID?
+1. **The hang.** Has A5 seen a `FlushFileBuffers` stall before, and is the #172 hang the same signature? (B6 has answered the second-run part: job 122347974504.)
 2. **#176's conflict in `platform/node/status.go`.** Which `main` changes collide with it (#198's `spent_at_start_bytes`, or #189's `admin_requests`)? Is there any intent behind #176's status fields that the merge must keep and the diff does not show?
 3. **#182's record-bound half.** B6 measured the bound on #174. Will citing #174 be enough for B6's review, or does #182 need a fresh measurement on its merged head?
 4. **A stale line in `docs/phase3/A5-handoff.md`.** Under "Limitations" it still says "The owner's PC run (gate item 1) has not happened". It did run, and #208 records it as met with conditions. Should A5 correct the file, or leave it as a dated record and let `docs/phase-3-exit.md` be the source?
