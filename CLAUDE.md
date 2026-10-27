@@ -20,7 +20,7 @@ The code is organized as follows:
 - `platform/` holds the store, the node runtime and the Windows service support.
 - `tests/` holds the verification tests.
 
-Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.26.10). Python is used only for verification tooling.
+Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3, D4-7). Python is used only for verification tooling.
 
 **Team handoff (owner, 2026-10-27).** Agents A1 to A6 are replaced by B1 to B6 with the same roles. In this brief and in older records, A*n* means the role that B*n* now holds. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/B{n}-handoff.md`.
 
