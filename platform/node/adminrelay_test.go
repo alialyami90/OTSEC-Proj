@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
+	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/collectorclient"
 	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
@@ -42,6 +44,13 @@ type adminCollector struct {
 	runs   int
 	lose   bool
 	failed bool // no decision and no number: the pipe was not there
+	// edit, when set, changes each reply to an admin-signed request
+	// before it is returned.
+	edit func(*authz.CollectorReply)
+	// held is the time hangCollector held admin-signed requests, and
+	// left the time each had until its deadline when it arrived.
+	held time.Duration
+	left []time.Duration
 }
 
 func newAdminCollector() *adminCollector { return &adminCollector{spent: map[string]bool{}} }
@@ -76,6 +85,9 @@ func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (c
 	}
 	if c.lose {
 		return collectorclient.Response{}, errors.New("collectorclient: no reply: EOF")
+	}
+	if c.edit != nil {
+		c.edit(&reply)
 	}
 	return collectorclient.Response{Reply: reply}, nil
 }
@@ -562,5 +574,337 @@ func TestRelayExpiredSaysCheckFirst(t *testing.T) {
 	}
 	if !alarm {
 		t.Fatal("the window alarm does not say the request may already have been applied")
+	}
+}
+
+// adminAlarm is the detail of the one alarm with code, or "" if there is
+// not exactly one.
+func adminAlarm(st *Status, code string) string {
+	var out []string
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == code {
+			out = append(out, a.Detail)
+		}
+	}
+	if len(out) != 1 {
+		return ""
+	}
+	return out[0]
+}
+
+// signNonce signs a credential.revoke whose nonce is i: files that differ
+// only in it are different requests.
+func signNonce(t *testing.T, i int) *authz.AdminSigned {
+	return signAdmin(t, authz.KindCredentialRevoke, func(p *authz.AdminRequest) {
+		n := make([]byte, authz.AdminNonceLen)
+		copy(n, fmt.Sprintf("%d-%s", i, t.Name()))
+		p.Nonce = base64.RawURLEncoding.EncodeToString(n)
+	})
+}
+
+// Only a decided collector.request record for an admin request marks a
+// file decided: no other action, outcome or correlation ID does, so an
+// unrelated record never stops a file from being sent (A6 on #189, N1
+// and N3).
+func TestRelayFoldsOnlyItsDecisions(t *testing.T) {
+	const id = "admin-0123456789abcdef"
+	for name, rec := range map[string]*audit.Record{
+		"action":  {Action: audit.ActionPolicyApply, Outcome: audit.OutcomeAllowed, CorrelationID: id},
+		"outcome": {Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeInfo, CorrelationID: id},
+		"run":     {Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, CorrelationID: "run-0123456789abcdef"},
+	} {
+		m := map[string]relayEntry{}
+		if applyRelay(m, rec) || len(m) != 0 {
+			t.Errorf("%s: folded %+v", name, m)
+		}
+	}
+	m := map[string]relayEntry{}
+	if !applyRelay(m, &audit.Record{Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeDenied, CorrelationID: id,
+		ReasonCode: string(authz.RefuseAdminUnverified), CollectorSeq: 7}) || m[id].CollectorSeq != 7 || m[id].Outcome != audit.OutcomeDenied {
+		t.Fatalf("a denied admin request not folded: %+v", m)
+	}
+
+	// Through the scheduler: an unrelated record carrying the file's ID
+	// leaves it to be sent.
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, col)
+	b := writeAdminFile(t, nc, "admin-request-other.json", authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
+	sum := sha256.Sum256(b)
+	other, err := json.Marshal(audit.Record{Contract: audit.ContractID, NodeID: "site-a-node1", Time: s.rt.received(),
+		Actor:  audit.Actor{Type: authz.PrincipalNode, ID: "site-a-node1"},
+		Action: audit.ActionPolicyApply, Outcome: audit.OutcomeAllowed, PolicyVersion: c.PolicyVersion,
+		CorrelationID: adminRequestID(hex.EncodeToString(sum[:])), Detail: "not a decision of this request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := audit.ValidatePending(other); err != nil {
+		t.Fatal(err)
+	}
+	s.appendAudit(bg, "", []c5.Record{{Stream: AuditStream, Class: c5.ClassAudit, Event: other}})
+	s.settle(bg)
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != 1 {
+		t.Fatalf("%d requests: an unrelated record marked the file decided", n)
+	}
+}
+
+// A refusal the collector did not number is no decision: nothing is
+// recorded as decided, the no-decision alarm is raised, and the file is
+// sent again on the next tick (A6 on #189, N18).
+func TestRelayRefusalWithoutSeqRetried(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	col.edit = func(rep *authz.CollectorReply) {
+		rep.Status, rep.CollectorSeq = authz.ReplyRefused, 0
+		rep.Refusal = &authz.Refusal{Code: authz.RefuseStateUnavailable}
+	}
+	s := newScheduler(t, r, col)
+	b := writeAdminFile(t, nc, "admin-request-noseq.json", authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
+	s.relayAdmin(bg)
+	if d := adminAlarm(st, AlarmAdminRequestNoDecision); !strings.Contains(d, "without collector_seq") {
+		t.Fatalf("no-decision alarm %q", d)
+	}
+	if got := adminShown(st); len(got) != 1 || got[0].State != "waiting" {
+		t.Fatalf("status %+v", got)
+	}
+	if _, done := s.decided(relayRecords(t, s, b)[0].CorrelationID); done {
+		t.Fatal("recorded as decided")
+	}
+	// A collector that could not flush its state has not spent the nonce.
+	col.mu.Lock()
+	col.edit, col.spent = nil, map[string]bool{}
+	col.mu.Unlock()
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != 2 {
+		t.Fatalf("%d requests, want the refusal without a number and one more", n)
+	}
+	if recs := relayRecords(t, s, b); len(recs) != 3 || recs[2].Outcome != audit.OutcomeAllowed {
+		t.Fatalf("records %+v", recs)
+	}
+}
+
+// A refusal check the node does not know is shown as unknown, never as
+// the collector wrote it (A6 on #189, N21).
+func TestRelayUnknownCheckNotEchoed(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	const made = "made-up-check"
+	col.edit = func(rep *authz.CollectorReply) {
+		rep.Status = authz.ReplyRefused
+		rep.Refusal = &authz.Refusal{Code: authz.RefuseAdminUnverified, Check: made}
+	}
+	s := newScheduler(t, r, col)
+	b := writeAdminFile(t, nc, "admin-request-check.json", authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
+	s.relayAdmin(bg)
+	d := adminAlarm(st, AlarmAdminRequestRefused)
+	if !strings.Contains(d, "check unknown") || strings.Contains(d, made) {
+		t.Fatalf("refused alarm %q", d)
+	}
+	recs := relayRecords(t, s, b)
+	if len(recs) != 2 || recs[1].Outcome != audit.OutcomeDenied || !strings.Contains(recs[1].Detail, "check unknown") ||
+		strings.Contains(recs[1].Detail, made) {
+		t.Fatalf("records %+v", recs)
+	}
+}
+
+// Sixteen files are all read; a seventeenth is not, and says so (A6 on
+// #189, N24).
+func TestRelayFileCapBoundary(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, col)
+	// The design's cap, as a literal: a change to the constant fails here.
+	const fileCap = 16
+	if MaxAdminRequestFiles != fileCap {
+		t.Fatalf("MaxAdminRequestFiles is %d, the design says %d", MaxAdminRequestFiles, fileCap)
+	}
+	for i := 0; i < fileCap; i++ {
+		writeAdminFile(t, nc, fmt.Sprintf("admin-request-cap-%02d.json", i), authz.KindCredentialRevoke, signNonce(t, i))
+	}
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != fileCap || countAlarms(st, AlarmAdminRequestUnread) != 0 {
+		t.Fatalf("%d files: %d requests, %d unread alarms", fileCap, n, countAlarms(st, AlarmAdminRequestUnread))
+	}
+	writeAdminFile(t, nc, "admin-request-cap-zz.json", authz.KindCredentialRevoke, signNonce(t, fileCap))
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != fileCap {
+		t.Fatalf("the file past the fileCap was sent: %d requests", n)
+	}
+	if d := adminAlarm(st, AlarmAdminRequestUnread); !strings.Contains(d, fmt.Sprintf("holds %d", fileCap+1)) {
+		t.Fatalf("unread alarm %q", d)
+	}
+}
+
+// A signed payload over authz.MaxAdminPayload is refused at the node,
+// although the file is under its own cap: the collector would refuse it
+// too, and the node does not send it (A6 on #189, N27).
+func TestRelayPayloadCap(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, col)
+	env := signAdmin(t, authz.KindCredentialRevoke, nil)
+	// Valid JSON, padded with trailing spaces to one byte over the cap.
+	env.Payload = append(env.Payload, []byte(strings.Repeat(" ", authz.MaxAdminPayload+1-len(env.Payload)))...)
+	b := writeAdminFile(t, nc, "admin-request-big.json", authz.KindCredentialRevoke, env)
+	if int64(len(b)) > MaxAdminRequestFileBytes {
+		t.Fatalf("the file is %d bytes, over the file cap %d: not the boundary under test", len(b), MaxAdminRequestFileBytes)
+	}
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != 0 {
+		t.Fatalf("%d requests", n)
+	}
+	if got := adminShown(st); len(got) != 1 || got[0].State != "unread" || !strings.Contains(got[0].Detail, "bytes") {
+		t.Fatalf("status %+v", got)
+	}
+}
+
+// A misnamed file makes the scan incomplete, so a decided file renamed to
+// a name that is not read is not forgotten: renamed back, it is not sent
+// again (A6 on #189, N9).
+func TestRelayMisnamedKeepsDecided(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, col)
+	const name, misnamed = "admin-request-keep.json", "admin-request-Keep.json"
+	b := writeAdminFile(t, nc, name, authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
+	s.relayAdmin(bg)
+	removeAdminFile(t, nc, name)
+	writeAdminBytes(t, nc, misnamed, b)
+	s.relayAdmin(bg)
+	removeAdminFile(t, nc, misnamed)
+	writeAdminBytes(t, nc, name, b)
+	s.relayAdmin(bg)
+	if n := len(col.requests()); n != 1 {
+		t.Fatalf("%d requests: the decided file was forgotten during an incomplete scan", n)
+	}
+}
+
+// hangCollector takes every admin-signed request and never answers, until
+// the request's context ends.
+type hangCollector struct{ *adminCollector }
+
+func (h hangCollector) Do(ctx context.Context, req *authz.CollectorRequest) (collectorclient.Response, error) {
+	if req.Kind == authz.KindRun {
+		return h.adminCollector.Do(ctx, req)
+	}
+	h.mu.Lock()
+	h.sent = append(h.sent, req)
+	h.mu.Unlock()
+	began := time.Now()
+	dl, ok := ctx.Deadline()
+	left := time.Duration(-1)
+	if ok {
+		left = dl.Sub(began)
+	}
+	<-ctx.Done()
+	h.mu.Lock()
+	h.held += time.Since(began)
+	h.left = append(h.left, left)
+	h.mu.Unlock()
+	return collectorclient.Response{}, ctx.Err()
+}
+
+// A collector that never answers holds the relay for RelayTimeout and no
+// longer: the request is left undecided, the no-decision alarm is raised,
+// and it is sent again on the next tick (A6 on #189).
+func TestRelayTimeout(t *testing.T) {
+	defer func(d time.Duration) { RelayTimeout = d }(RelayTimeout)
+	RelayTimeout = 100 * time.Millisecond
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, hangCollector{col})
+	b := writeAdminFile(t, nc, "admin-request-hang.json", authz.KindCredentialRevoke, signAdmin(t, authz.KindCredentialRevoke, nil))
+	began := time.Now()
+	s.relayAdmin(bg)
+	if d := time.Since(began); d > 10*time.Second {
+		t.Fatalf("the relay was held %s", d)
+	}
+	if countAlarms(st, AlarmAdminRequestNoDecision) != 1 {
+		t.Fatal("no-decision alarm not raised")
+	}
+	if got := adminShown(st); len(got) != 1 || got[0].State != "waiting" {
+		t.Fatalf("status %+v", got)
+	}
+	s2 := newScheduler(t, r, col)
+	s2.relayAdmin(bg)
+	if n := len(col.requests()); n != 2 {
+		t.Fatalf("%d requests, want the cut-off one and one more", n)
+	}
+	if recs := relayRecords(t, s2, b); len(recs) != 3 || recs[2].Outcome != audit.OutcomeAllowed {
+		t.Fatalf("records %+v", recs)
+	}
+}
+
+// A collector that never answers holds one tick for one RelayTimeout, not
+// one per file: after the first unanswered request the rest wait for the
+// next tick, and status says why (A3 on #197).
+func TestRelayStopsAtFirstUnanswered(t *testing.T) {
+	defer func(d time.Duration) { RelayTimeout = d }(RelayTimeout)
+	RelayTimeout = 300 * time.Millisecond
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, hangCollector{col})
+	for i := range 3 {
+		writeAdminFile(t, nc, fmt.Sprintf("admin-request-stall-%d.json", i), authz.KindCredentialRevoke, signNonce(t, i))
+	}
+	began := time.Now()
+	s.relayAdmin(bg)
+	tick := time.Since(began)
+	if n := len(col.requests()); n != 1 {
+		t.Fatalf("%d requests sent in the tick, want 1", n)
+	}
+	// The bound is on the time the collector held the tick, not on the
+	// tick: the rest is the node's own audit commits and status writes,
+	// about 30 ms alone on a Windows runner but over a RelayTimeout while
+	// the rest of go test ./... runs beside it (A1 on #197). One request
+	// held for one RelayTimeout is what is claimed: it came with a
+	// deadline at most RelayTimeout away, and was held until it. The
+	// deadline left is the lower bound, not RelayTimeout itself, which a
+	// busy machine shortens by the time between setting the deadline and
+	// the request's arrival (A6 on #202).
+	col.mu.Lock()
+	held, left := col.held, col.left[0]
+	col.mu.Unlock()
+	t.Logf("tick %s: held by the collector %s of %s left, the node's own work %s", tick, held, left, tick-held)
+	if left <= 0 || left > RelayTimeout {
+		t.Fatalf("the request arrived with %s to its deadline, want (0, %s]", left, RelayTimeout)
+	}
+	if held < left || held >= 2*RelayTimeout {
+		t.Fatalf("the collector held the tick for %s, want from its deadline (%s) to under two RelayTimeouts (%s)", held, left, 2*RelayTimeout)
+	}
+	got := adminShown(st)
+	if len(got) != 3 {
+		t.Fatalf("status %+v", got)
+	}
+	for i, a := range got {
+		if a.State != "waiting" || (i > 0 && !strings.Contains(a.Detail, "did not answer admin-request-stall-0.json")) {
+			t.Fatalf("status %d: %+v", i, a)
+		}
+	}
+	if countAlarms(st, AlarmAdminRequestNoDecision) != 1 {
+		t.Fatal("no-decision alarm not raised once")
+	}
+	// The collector answers again: the next tick sends all three.
+	s2 := newScheduler(t, r, col)
+	s2.relayAdmin(bg)
+	if n := len(col.requests()); n != 4 {
+		t.Fatalf("%d requests after the collector answered, want 1 + 3", n)
 	}
 }
