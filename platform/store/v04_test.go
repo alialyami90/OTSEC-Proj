@@ -64,7 +64,7 @@ func configLog(t *testing.T, db *DB, d c5.Database) *c5.Log {
 		}
 		last[s] = n
 	}
-	l, err := c5.NewLogFor(db, testNode, d, c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}, last)
+	l, err := c5.NewLogFor(db, testNode, d, c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond, MaxCommitRecords: 1000}, last)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -314,10 +314,11 @@ func TestStartupPolicyReserveFollowsTheCommitCap(t *testing.T) {
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
-	want := map[c5.DatabaseID]int64{
-		EvidenceDB: SERCommitBytes,
-		SyslogDB:   c5.DefaultMaxCommitBytes,
-		AuditDB:    c5.DefaultMaxCommitBytes,
+	type commit struct{ bytes, rows int64 }
+	want := map[c5.DatabaseID]commit{
+		EvidenceDB: {SERCommitBytes, EvidenceBatchRecords},
+		SyslogDB:   {c5.DefaultMaxCommitBytes, SyslogBatchRecords},
+		AuditDB:    {c5.DefaultMaxCommitBytes, AuditBatchRecords},
 	}
 	for _, d := range r.dbs {
 		largest, ok := want[d.spec.ID]
@@ -325,10 +326,11 @@ func TestStartupPolicyReserveFollowsTheCommitCap(t *testing.T) {
 			continue
 		}
 		p := d.policy
-		if p.LargestCommitBytes != largest || p.WALBoundBytes != store.WALBoundBytes ||
-			p.RecoveryReserveBytes != c5.RecoveryReserveFor(store.WALBoundBytes, largest) {
-			t.Errorf("%s: largest commit %d, WAL bound %d, reserve %d", d.spec.ID, p.LargestCommitBytes, p.WALBoundBytes, p.RecoveryReserveBytes)
+		if p.LargestCommitBytes != largest.bytes || p.LargestCommitRecords != largest.rows || p.WALBoundBytes != store.WALBoundBytes ||
+			p.RecoveryReserveBytes != c5.RecoveryReserveFor(store.WALBoundBytes, largest.bytes, largest.rows) {
+			t.Errorf("%s: largest commit %d bytes in %d rows, WAL bound %d, reserve %d", d.spec.ID, p.LargestCommitBytes, p.LargestCommitRecords, p.WALBoundBytes, p.RecoveryReserveBytes)
 		}
+		t.Logf("%s: reserve %d bytes (%.2f MiB), simulated", d.spec.ID, p.RecoveryReserveBytes, float64(p.RecoveryReserveBytes)/(1<<20))
 		if err := p.Validate(); err != nil {
 			t.Errorf("%s: %v", d.spec.ID, err)
 		}

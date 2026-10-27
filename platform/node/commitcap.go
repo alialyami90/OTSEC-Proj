@@ -58,13 +58,38 @@ const SERReadBound = adapter.MaxResponseBytes + adapter.MaxResponseBytes*SERByte
 // rounded up to a MiB. serbound_test.go fails if the bound rises above it.
 const SERCommitBytes int64 = 11 << 20
 
+// The most records one AppendBatch of each database carries (C5 0.5, D4-14),
+// which sizes its recovery reserve (RowWALBytes a row):
+//   - evidence: one SER read, at most MaxReadRowsCeiling events;
+//   - syslog: a datagram listener's batch, at most its queue (receive's
+//     default of 1024); a stream listener's is 64;
+//   - audit: the kept records and the recovery of a busy open
+//     (MaxDeferredAudit, the chain start, the alarm and the mode change),
+//     or one collector run's records.
+const (
+	EvidenceBatchRecords = asset.MaxReadRowsCeiling
+	SyslogBatchRecords   = 1024
+	AuditBatchRecords    = 128
+)
+
 // groupFor is the group-commit options of database d: the node's options
-// with the database's commit cap. The evidence database's cap is the SER
-// bound; every other database keeps c5's default, 1 MiB, unless the caller
-// set one.
+// with the database's commit caps. The evidence database's byte cap is the
+// SER bound; every other database keeps c5's default, 1 MiB, unless the
+// caller set one. The record cap is the database's batch above, and never
+// below MaxEvents.
 func groupFor(d c5.Database, g c5.GroupOptions) c5.GroupOptions {
 	if g.MaxCommitBytes == 0 && d.ID == EvidenceDB {
 		g.MaxCommitBytes = SERCommitBytes
+	}
+	if g.MaxCommitRecords == 0 {
+		n := AuditBatchRecords
+		switch d.ID {
+		case EvidenceDB:
+			n = EvidenceBatchRecords
+		case SyslogDB:
+			n = SyslogBatchRecords
+		}
+		g.MaxCommitRecords = max(n, g.MaxEvents)
 	}
 	return g
 }

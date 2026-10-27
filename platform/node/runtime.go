@@ -126,15 +126,18 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 			}
 		}
 	}
-	largest := c5.LargestCommit(spec, groupFor(spec, r.opt.Group))
+	group := groupFor(spec, r.opt.Group)
+	largest, rows := c5.LargestCommit(spec, group), c5.LargestCommitRecords(spec, group)
 	d := &database{spec: spec, env: env, policy: c5.StartupPolicy{
 		Streams:   spec.Streams,
 		Consumers: mine,
-		// The reserve covers the database's largest commit (C5 0.4, D4-9):
-		// twice the WAL bound, and the WAL of one commit at the cap.
-		RecoveryReserveBytes:   c5.RecoveryReserveFor(store.WALBoundBytes, largest),
+		// The reserve covers the database's largest commit (C5 0.5, D4-9,
+		// D4-14): twice the WAL bound, and the WAL of one commit at the
+		// byte and record caps.
+		RecoveryReserveBytes:   c5.RecoveryReserveFor(store.WALBoundBytes, largest, rows),
 		WALBoundBytes:          store.WALBoundBytes,
 		LargestCommitBytes:     largest,
+		LargestCommitRecords:   rows,
 		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
 		OpenHeadroomBytes:      store.WALBoundBytes + c5.MinOpenHeadroom,
 		PruneStepEvents:        50,
