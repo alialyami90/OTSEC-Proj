@@ -194,8 +194,11 @@ func TestC9B6ReadingsAgree(t *testing.T) {
 	}
 }
 
-// Layout, a repeated header and another invocation are not changes
-// (doc.go: only settings are semantic).
+// Layout, a header before the settings and another invocation are not
+// changes (doc.go: only settings are semantic). A header printed after a
+// setting line is not skipped: it is that setting's continuation, and the
+// header's padding fails the read (B1's ruling on #247), so no snapshot
+// holds it, whichever settings an adapter reports.
 func TestC9B6LayoutIsNotAChange(t *testing.T) {
 	r := c9Replies(t)
 	a, _ := c9Build(t, c9Defaults(t), c9Inv1)
@@ -204,7 +207,6 @@ func TestC9B6LayoutIsNotAChange(t *testing.T) {
 	for name, text := range map[string]string{
 		"one setting per line":              r["group1-one-per-line"].Text,
 		"a header first":                    "\r\n" + c9Header + fig[2:],
-		"a header right after a setting":    fig[:at] + c9Header + fig[at:],
 		"a header in the one-per-line form": "\r\n" + c9Header + r["group1-one-per-line"].Text[2:],
 	} {
 		parts := c9Defaults(t)
@@ -222,6 +224,22 @@ func TestC9B6LayoutIsNotAChange(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		} else if len(d.Changes) != 0 {
 			t.Errorf("%s: %d changes, want none: %+v", name, len(d.Changes), d.Changes)
+		}
+	}
+	joined := r["group1"].settings()
+	for i := range joined {
+		if joined[i].Name == "LL" {
+			joined[i].Value += " " + strings.Join(strings.Fields(c9Header), " ")
+		}
+	}
+	for name, settings := range map[string][]config.Setting{
+		"the header skipped": r["group1"].settings(), "the header joined to LL": joined,
+	} {
+		parts := c9Defaults(t)
+		parts["group.1"] = c9Part{text: fig[:at] + c9Header + fig[at:], settings: settings}
+		b, tr := c9Build(t, parts, c9Inv2)
+		if err := b.CheckAgainst(tr); err == nil {
+			t.Errorf("a header right after a setting line, %s: accepted", name)
 		}
 	}
 }
