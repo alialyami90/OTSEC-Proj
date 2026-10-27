@@ -305,27 +305,8 @@ class Installed:
     def age_state(self, path):
         """Moves created_utc in the stopped collector's state.json an hour
         back, in place, so the file keeps the owner and DACL the collector
-        gave it (see the module docstring).
-
-        The SCM reports STOPPED when the service says so, which can be
-        before its process has closed every handle, and an antivirus scan
-        of the file the collector just renamed into place can hold it too:
-        Windows then refuses the open with a sharing violation, which
-        Python raises as PermissionError (svcdry5, run 40442872450). The
-        open is tried again for up to 30 s, each refusal noted; a refusal
-        that lasts is raised, since a DACL that keeps Administrators out
-        is a real failure."""
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                f = open(path, "r+b")
-                break
-            except PermissionError as e:
-                if time.monotonic() >= deadline:
-                    raise
-                self.note(f"age_state: open refused ({e}); trying again")
-                time.sleep(0.5)
-        with f:
+        gave it (see the module docstring)."""
+        with open(path, "r+b") as f:
             doc = json.loads(f.read())
             # RFC 3339 in UTC as Go writes it; the fraction is dropped.
             created = datetime.datetime.strptime(doc["created_utc"][:19], "%Y-%m-%dT%H:%M:%S")
