@@ -211,7 +211,10 @@ func ComputeBoundary(ctx context.Context, cs CursorStore, idx CommitIndex, consu
 // Pruner deletes confirmed events.
 type Pruner interface {
 	// PruneStep deletes, in one transaction committed at SyncFull, the
-	// oldest at most max events of b.Stream() with seq <= b.Through(). It
+	// oldest at most max events of b.Stream() with seq <= b.Through() that
+	// are not held (Holder, 0.4). The boundary may pass a held seq: the
+	// held record stays, still counts in its class's usage, and later
+	// unheld seqs are pruned in order around it. It
 	// deletes each event's native bytes and normalized form together, and
 	// returns how many it deleted (0 when nothing at or below the boundary
 	// is left). A capture no retained record refers to any more is deleted
