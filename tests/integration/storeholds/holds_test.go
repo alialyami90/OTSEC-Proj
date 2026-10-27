@@ -14,11 +14,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -771,5 +773,111 @@ func TestCaptureEachSweep(t *testing.T) {
 				commitAndMeasure(t, recs)
 			})
 		}
+	}
+}
+
+// fileSums is the SHA-256 of each of a database's three files, "absent"
+// for one that does not exist.
+func fileSums(t *testing.T, file string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, suf := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(file + suf)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			out[suf] = "absent"
+		case err != nil:
+			t.Fatal(err)
+		default:
+			s := sha256.Sum256(b)
+			out[suf] = fmt.Sprintf("%x (%d bytes)", s, len(b))
+		}
+	}
+	return out
+}
+
+// A store of the first format is refused at start and by the offline
+// reader, and the refusal writes nothing: the database, its -wal and its
+// -shm are byte-identical afterwards, also when the node stopped with
+// frames not yet checkpointed (D4-14 item 4, B1's ruling on #282). The
+// store is made by this build, with the first format's identifier and an
+// UPDATE left in the WAL, then copied while that writer is still open, as
+// a crash leaves it.
+func TestFirstFormatWithAHotWALIsLeftAlone(t *testing.T) {
+	ctx := context.Background()
+	d := database(c5.MinRecordBytes)
+	dir := newDir(t)
+	db := open(t, dir, d)
+	l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond}, map[c5.StreamID]c5.Seq{cfg: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append(ctx, c5.Record{Stream: cfg, Class: c5.ClassConfiguration, Event: []byte(`{"doc":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	file := walPath(t, dir)
+	db.Close()
+	raw, err := sql.Open("sqlite", "file:"+(&url.URL{Path: file}).EscapedPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	raw.SetMaxOpenConns(1)
+	for _, q := range []string{
+		`PRAGMA wal_autocheckpoint=0`,
+		`UPDATE meta SET value = 'otsec.platform-store/1' WHERE key = 'format'`,
+		`UPDATE streams SET last_at = last_at + 1`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	crash := newDir(t)
+	copied := filepath.Join(crash, filepath.Base(file))
+	for _, suf := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(file + suf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(copied+suf, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := fileSums(t, copied)
+	if before["-wal"] == "absent" || strings.HasSuffix(before["-wal"], "(0 bytes)") {
+		t.Fatalf("the copy has no frames in its WAL, so this measures nothing: %v", before)
+	}
+
+	if _, err := store.OpenReadOnly(ctx, crash, node, d.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
+		t.Errorf("the offline reader on the first format: %v", err)
+	}
+	if after := fileSums(t, copied); !maps.Equal(before, after) {
+		t.Errorf("the offline reader's refusal changed the files:\n before %v\n after  %v", before, after)
+	}
+
+	env, err := store.NewEnv(store.Options{Dir: crash, Node: node, Database: d, Documents: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c5.RunStartup(ctx, env, c5.StartupPolicy{
+		Streams:                d.Streams,
+		RecoveryReserveBytes:   2 * store.WALBoundBytes,
+		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
+		OpenHeadroomBytes:      store.WALBoundBytes + c5.MinOpenHeadroom,
+		PruneStepEvents:        50,
+		CompactStepPages:       32,
+		PruneTarget:            0.8,
+	})
+	if r.Unlock != nil {
+		defer r.Unlock()
+	}
+	if r.Store != nil {
+		r.Store.Close()
+	}
+	if r.Mode != c5.ModeFailed || r.Err == nil || !strings.Contains(r.Err.Error(), "earlier layout") {
+		t.Errorf("start on the first format: mode %s, %v", r.Mode, r.Err)
+	}
+	if after := fileSums(t, copied); !maps.Equal(before, after) {
+		t.Errorf("the refusal at start changed the files:\n before %v\n after  %v", before, after)
 	}
 }
