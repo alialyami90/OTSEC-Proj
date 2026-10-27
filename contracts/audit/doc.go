@@ -173,9 +173,10 @@
 //     kind, of another asset or node, or not the next in the asset's chain.
 //   - config.change_detected is the node's own record of a read whose
 //     snapshot differs from the baseline: the snapshot, the C9 difference,
-//     the decision on the read that found it (read_seq), and the latest
-//     snapshot before it equal to the baseline (unchanged_at, its C9
-//     retrieved_at, and unchanged_digest). It is warning unapproved_change,
+//     the decision on the read that found it (read_seq), and the asset's
+//     last run of that operation before it (unchanged_read_seq, and
+//     unchanged_at, that run's record time; or the epoch's collector reset
+//     when it has no earlier run). It is warning unapproved_change,
 //     which is the alarm, or info approved_change with approval_seq naming
 //     the approval that covers it.
 //   - config.baseline_restored is the node's record of the first read
@@ -201,6 +202,11 @@
 //   - each approval and acknowledgement follows a real acceptance of its kind
 //     by its actor for the same signed bytes;
 //   - each detection and restore names a real read of its asset;
+//   - each detection's unchanged_at is the time of the asset's last run
+//     before that read, a record already in the chain, so the node cannot
+//     choose how early the change happened;
+//   - each detection, restore and succeeded approval names the asset's
+//     configuration baseline that the last succeeded acknowledgement set;
 //   - every approval_seq names an approval that covers the detection;
 //   - no approved detection follows an unapproved one against the same
 //     baseline without a restore in between;

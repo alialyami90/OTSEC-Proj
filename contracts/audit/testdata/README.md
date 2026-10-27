@@ -48,15 +48,16 @@ The asset ID and the read's invocation ID are invented.
 | `valid/config-change-detected-approved.json` | A difference found by the read decided at 11 and covered by approval 10: info, `approved_change`. |
 | `valid/config-change-detected-unapproved.json` | The same difference with no covering approval: warning, `unapproved_change`. This record is the alarm. |
 | `valid/config-baseline-acknowledged.json` | An administrator acknowledges the new snapshot as the configuration baseline, replacing the test baseline (`previous_digest`). |
-| `valid/config-baseline-restored.json` | A read found the configuration equal to the baseline again after a difference. `snapshot_digest` is SHA-256 of "otsec test configuration equal snapshot", which is also the detections' `unchanged_digest`. |
+| `valid/config-baseline-restored.json` | A read found the configuration equal to the baseline again after a difference. `snapshot_digest` is SHA-256 of "otsec test configuration equal snapshot". |
 | `invalid/config-stamped-0.4.json`, `invalid/verified-kind-stamped-0.4.json` | The 0.5 fields on a record stamped 0.4. |
 | `invalid/config-approved-change-without-approval.json`, `invalid/config-unapproved-change-with-approval.json` | The outcome and `approval_seq` disagree. |
 | `invalid/config-change-detected-by-a-person.json`, `invalid/config-change-approved-by-the-node.json` | The wrong actor type. |
 | `invalid/config-approval-with-detection-fields.json`, `invalid/config-on-another-action.json` | A field on the wrong action. |
 | `invalid/config-ack-unknown-kind.json` | A baseline kind other than configuration or event. |
-| `invalid/config-change-detected-without-unchanged-digest.json`, `invalid/config-restore-with-difference.json`, `invalid/config-approval-with-previous.json` | A missing field, or a field on the wrong action. |
+| `invalid/config-restore-with-difference.json`, `invalid/config-approval-with-previous.json` | A missing field, or a field on the wrong action. |
 | `invalid/config-change-detected-with-collector-seq.json` | The node's own finding carries no `collector_seq`. |
 | `invalid/config-approval-window-over-24h.json` | A window longer than C7's 24-hour cap. The schema cannot compare two times, so this one passes the schema and fails `Validate`. |
 | `invalid/config-approval-seq-not-before-read.json` | `approval_seq` must be below `read_seq`. The schema cannot compare two fields, so this one passes the schema and fails `Validate`. |
+| `invalid/config-change-detected-unchanged-read-not-before-read.json` | `unchanged_read_seq` must be below `read_seq`. It also passes the schema and fails `Validate`. |
 
 The chain rules (an approval names a real acceptance of its kind, a detection names a real read, a covering approval came first and in the same collector epoch, no approval silences a change already found unapproved without a recorded restore in between, and each acknowledgement names the baseline it replaces) are in `TestVerifyConfig` and `TestBaselineSuccession`, because they span records.

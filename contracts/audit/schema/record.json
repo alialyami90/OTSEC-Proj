@@ -958,7 +958,7 @@
                 },
                 {
                   "required": [
-                    "unchanged_digest"
+                    "unchanged_read_seq"
                   ]
                 }
               ]
@@ -1043,7 +1043,7 @@
                 },
                 {
                   "required": [
-                    "unchanged_digest"
+                    "unchanged_read_seq"
                   ]
                 }
               ]
@@ -1077,8 +1077,7 @@
               "snapshot_digest",
               "difference_digest",
               "read_seq",
-              "unchanged_at",
-              "unchanged_digest"
+              "unchanged_at"
             ],
             "not": {
               "anyOf": [
@@ -1296,7 +1295,7 @@
                 },
                 {
                   "required": [
-                    "unchanged_digest"
+                    "unchanged_read_seq"
                   ]
                 },
                 {
@@ -1423,7 +1422,7 @@
         "unchanged_at": {
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
-          "description": "Node time of the latest read equal to the baseline before it (detected only)"
+          "description": "Record time of the asset's last run before the read, or of the epoch's collector reset when there is none (detected only)"
         },
         "approval_seq": {
           "type": "integer",
@@ -1435,10 +1434,10 @@
           "pattern": "^sha256:[0-9a-f]{64}$",
           "description": "The baseline of the same asset and kind this acknowledgement replaces; absent for the asset's first (acknowledged only)"
         },
-        "unchanged_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Digest of the latest snapshot before the detection equal to the baseline, the baseline itself when none (detected only)"
+        "unchanged_read_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "collector_seq of the asset's last run of the same operation before read_seq in the epoch; absent when there is none (detected only)"
         }
       }
     }

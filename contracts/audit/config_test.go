@@ -58,9 +58,32 @@ func configChain() []*Record {
 	detected.Actor, detected.Action, detected.Outcome, detected.ReasonCode = node, ActionConfigChangeDetected, OutcomeInfo, ReasonApprovedChange
 	detected.Target, detected.CorrelationID = &Target{AssetID: testAsset}, "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
 	detected.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testSnapshot, DifferenceDigest: testDifference,
-		ReadSeq: 11, UnchangedAt: "2026-10-26T17:00:04Z", UnchangedDigest: testEqual, ApprovalSeq: 10}
+		ReadSeq: 11, UnchangedAt: "2026-10-26T14:00:00Z", UnchangedReadSeq: 6, ApprovalSeq: 10}
 
 	return []*Record{&accept, &approved, &read, &detected}
+}
+
+// acked is what configChain's records stand on in a chain: the read of the
+// baseline (decision 6, at 14:00), the collector's acceptance of its
+// acknowledgement (decision 7), and the node's succeeded
+// config.baseline_acknowledged of testBaseline, then recs.
+func acked(recs []*Record) []*Record {
+	read := *configChain()[2]
+	readTarget := *read.Target
+	read.Target, read.Seq, read.CollectorSeq, read.Time, read.CorrelationID = &readTarget, 10, 6, at("2026-10-26T14:00:00Z"), "req-20261026-0003"
+	v := testAdmin()
+	v.Kind = authz.KindNodeBaselineAck
+	accept := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 11, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T14:10:00Z"),
+		Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed, CorrelationID: "req-20261026-0004", CollectorSeq: 7, Verified: v}
+	ack := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 12, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T14:10:01Z"),
+		Actor: adminActor, Action: ActionConfigBaselineAcknowledge, Outcome: OutcomeSucceeded, Target: &Target{AssetID: testAsset},
+		CorrelationID: "req-20261026-0004", Config: &Config{DecisionSeq: 7, PayloadSHA256: v.PayloadSHA256, Kind: authz.BaselineConfiguration, BaselineDigest: testBaseline}}
+	return append([]*Record{&read, accept, ack}, recs...)
+}
+
+// since sets the detection's unchanged read: decision seq, at utc.
+func since(d *Record, seq uint64, utc string) {
+	d.Config.UnchangedReadSeq, d.Config.UnchangedAt = seq, utc
 }
 
 // earlyAlarm is an earlier read (decision 8) of the same asset and the
@@ -71,7 +94,7 @@ func earlyAlarm(recs []*Record) []*Record {
 	read.Target, read.Seq, read.CollectorSeq, read.Time, read.CorrelationID = &readTarget, 18, 8, at("2026-10-26T15:00:00Z"), "req-20261026-0005"
 	alarm.Config, alarm.Seq, alarm.Time = &cfg, 19, at("2026-10-26T15:00:05Z")
 	alarm.Outcome, alarm.ReasonCode = OutcomeWarning, ReasonUnapprovedChange
-	cfg.ReadSeq, cfg.ApprovalSeq, cfg.UnchangedAt, cfg.UnchangedDigest = 8, 0, "2026-10-26T14:00:00Z", testBaseline
+	cfg.ReadSeq, cfg.ApprovalSeq, cfg.UnchangedAt, cfg.UnchangedReadSeq = 8, 0, "2026-10-26T14:00:00Z", 6
 	return []*Record{&read, &alarm}
 }
 
@@ -114,7 +137,7 @@ func TestConfigChainVerifies(t *testing.T) {
 			t.Fatalf("record %d (%s): %v", r.Seq, r.Action, err)
 		}
 	}
-	if err := VerifyConfig(recs); err != nil {
+	if err := VerifyConfig(acked(recs)); err != nil {
 		t.Fatal(err)
 	}
 	if err := ApprovalCovers(recs[1], recs[3]); err != nil {
@@ -176,11 +199,16 @@ func TestConfigFields(t *testing.T) {
 		"detection without read":              {3, func(r *Record) { r.Config.ReadSeq, r.Config.ApprovalSeq = 0, 0 }},
 		"detection approval after read":       {3, func(r *Record) { r.Config.ApprovalSeq = 11 }},
 		"detection without unchanged_at":      {3, func(r *Record) { r.Config.UnchangedAt = "" }},
-		"detection without unchanged_digest":  {3, func(r *Record) { r.Config.UnchangedDigest = "" }},
-		"detection of its unchanged snapshot": {3, func(r *Record) { r.Config.SnapshotDigest = testEqual }},
+		"detection unchanged at its own read": {3, func(r *Record) { r.Config.UnchangedReadSeq = 11 }},
+		"detection unchanged after its read":  {3, func(r *Record) { r.Config.UnchangedReadSeq = 12 }},
+		"approval with unchanged_read_seq":    {1, func(r *Record) { r.Config.UnchangedReadSeq = 6 }},
 		"restore with a difference": {3, func(r *Record) {
 			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeInfo, ""
-			r.Config.UnchangedAt, r.Config.UnchangedDigest, r.Config.ApprovalSeq = "", "", 0
+			r.Config.UnchangedAt, r.Config.ApprovalSeq = "", 0
+		}},
+		"restore with unchanged_read_seq": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeInfo, ""
+			r.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 11, UnchangedReadSeq: 6}
 		}},
 		"restore as warning": {3, func(r *Record) {
 			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeWarning, ReasonUnapprovedChange
@@ -214,6 +242,7 @@ func TestConfigFields(t *testing.T) {
 		"unapproved difference": {3, func(r *Record) {
 			r.Outcome, r.ReasonCode, r.Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
 		}},
+		"no earlier read in the epoch": {3, func(r *Record) { r.Config.UnchangedReadSeq = 0 }},
 		"approval refused by the node": {1, func(r *Record) { r.Outcome, r.ReasonCode = OutcomeDenied, "asset_not_collected" }},
 		"configuration baseline acknowledged": {1, func(r *Record) {
 			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, authz.BaselineConfiguration, "", "", ""
@@ -258,10 +287,10 @@ func TestApprovalCovers(t *testing.T) {
 			a.Config.WindowStart, a.Config.WindowEnd = "2026-10-26T18:00:04Z", "2026-10-26T22:00:00Z"
 		}, true},
 		"window ends at unchanged_at": {func(a, d *Record) {
-			a.Config.WindowStart, a.Config.WindowEnd = "2026-10-26T13:00:04Z", "2026-10-26T17:00:04Z"
+			a.Config.WindowStart, a.Config.WindowEnd = "2026-10-26T10:00:00Z", "2026-10-26T14:00:00Z"
 		}, false},
 		"window ends just after it": {func(a, d *Record) {
-			a.Config.WindowStart, a.Config.WindowEnd = "2026-10-26T13:00:05Z", "2026-10-26T17:00:05Z"
+			a.Config.WindowStart, a.Config.WindowEnd = "2026-10-26T10:00:01Z", "2026-10-26T14:00:01Z"
 		}, true},
 		"decided with the read":  {func(a, d *Record) { a.Config.DecisionSeq = 11 }, false},
 		"decided after the read": {func(a, d *Record) { a.Config.DecisionSeq = 12 }, false},
@@ -293,74 +322,88 @@ func TestVerifyConfig(t *testing.T) {
 	nodeActor := Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}
 	reset := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 30, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T17:30:00Z"),
 		Actor: nodeActor, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo, PreviousHigh: new(uint64), InstallKeyID: "collector-2"}
-	cases := map[string]func(recs []*Record) []*Record{
-		"no acceptance": func(recs []*Record) []*Record { return recs[1:] },
-		"acceptance after the approval": func(recs []*Record) []*Record {
-			return []*Record{recs[1], recs[0], recs[2], recs[3]}
-		},
-		"acceptance of another kind": func(recs []*Record) []*Record {
+	// Each case names the reason VerifyConfig must give, so a case refused
+	// for another reason fails.
+	cases := map[string]struct {
+		mut  func(recs []*Record) []*Record
+		want string
+	}{
+		"no acceptance":                 {func(recs []*Record) []*Record { return recs[1:] }, "no earlier acceptance"},
+		"acceptance after the approval": {func(recs []*Record) []*Record { return []*Record{recs[1], recs[0], recs[2], recs[3]} }, "no earlier acceptance"},
+		"acceptance of another kind": {func(recs []*Record) []*Record {
 			recs[0].Verified.Kind = authz.KindCredentialRevoke
 			return recs
-		},
-		"acceptance without a kind": func(recs []*Record) []*Record {
+		}, "follows an acceptance of"},
+		"acceptance without a kind": {func(recs []*Record) []*Record {
 			recs[0].Verified.Kind = ""
 			return recs
-		},
-		"acceptance of other bytes": func(recs []*Record) []*Record {
+		}, "follows an acceptance of"},
+		"acceptance of other bytes": {func(recs []*Record) []*Record {
 			recs[1].Config.PayloadSHA256 = strings.Repeat("ab", 32)
 			return recs
-		},
-		"approval by another person": func(recs []*Record) []*Record {
+		}, "does not match the acceptance"},
+		"approval by another person": {func(recs []*Record) []*Record {
 			recs[1].Actor = Actor{Type: authz.PrincipalHuman, ID: "bob@site-a", Role: authz.RoleAdmin}
 			return recs
-		},
-		"ack following an approval's acceptance": func(recs []*Record) []*Record {
+		}, "does not match the acceptance"},
+		"ack following an approval's acceptance": {func(recs []*Record) []*Record {
 			r := recs[1]
 			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, authz.BaselineConfiguration, "", "", ""
 			return recs
-		},
-		"a collector reset between approval and read": func(recs []*Record) []*Record {
+		}, "follows an acceptance of"},
+		"a collector reset between approval and read": {func(recs []*Record) []*Record {
+			since(recs[3], 0, "2026-10-26T17:30:00Z")
 			return []*Record{recs[0], recs[1], reset, recs[2], recs[3]}
-		},
-		"no read decision": func(recs []*Record) []*Record { return []*Record{recs[0], recs[1], recs[3]} },
-		"read of another asset": func(recs []*Record) []*Record {
+		}, "not an earlier succeeded approval in its epoch"},
+		"no read decision": {func(recs []*Record) []*Record { return []*Record{recs[0], recs[1], recs[3]} }, "not an earlier run"},
+		"read of another asset": {func(recs []*Record) []*Record {
 			recs[2].Target.AssetID = "3c8e5f21-9d4a-4b6c-8f32-8d5a1e7b9c24"
 			return recs
-		},
-		"approval refused by the node": func(recs []*Record) []*Record {
+		}, "not an earlier run"},
+		"approval refused by the node": {func(recs []*Record) []*Record {
 			recs[1].Outcome, recs[1].ReasonCode = OutcomeDenied, "asset_not_collected"
 			return recs
-		},
-		"approval_seq names no approval": func(recs []*Record) []*Record {
+		}, "not an earlier succeeded approval"},
+		"approval_seq names no approval": {func(recs []*Record) []*Record {
 			recs[3].Config.ApprovalSeq = 9
 			return recs
-		},
-		"approval that does not cover": func(recs []*Record) []*Record {
+		}, "not an earlier succeeded approval"},
+		"approval that does not cover": {func(recs []*Record) []*Record {
 			recs[1].Config.WindowStart, recs[1].Config.WindowEnd = "2026-10-26T19:00:00Z", "2026-10-26T20:00:00Z"
 			return recs
-		},
+		}, "does not cover"},
 		// An approval accepted after a change was found unapproved never
 		// silences it, though a later read records it again (P4-A3, V-M2).
-		"late approval for a change already found": func(recs []*Record) []*Record {
+		"late approval for a change already found": {func(recs []*Record) []*Record {
+			since(recs[3], 8, "2026-10-26T15:00:00Z")
 			return append(earlyAlarm(recs), recs...)
-		},
-		"a restore before the alarm": func(recs []*Record) []*Record {
-			return append(append(restore(recs), earlyAlarm(recs)...), recs...)
-		},
-		"a restore of another baseline": func(recs []*Record) []*Record {
+		}, "still open"},
+		"a restore before the alarm": {func(recs []*Record) []*Record {
+			// The restore's read is decision 8 and the alarm's 9.
+			back, alarm := restore(recs), earlyAlarm(recs)
+			back[0].CollectorSeq, back[1].Config.ReadSeq = 8, 8
+			alarm[0].CollectorSeq, alarm[1].Config.ReadSeq = 9, 9
+			since(alarm[1], 8, "2026-10-26T17:00:00Z")
+			alarm[0].Time, alarm[1].Time = at("2026-10-26T17:10:00Z"), at("2026-10-26T17:10:05Z")
+			since(recs[3], 9, "2026-10-26T17:10:00Z")
+			return append(append(back, alarm...), recs...)
+		}, "still open"},
+		"a restore of another baseline": {func(recs []*Record) []*Record {
 			back := restore(recs)
 			back[1].Config.BaselineDigest = testDifference
+			since(recs[3], 9, "2026-10-26T17:00:00Z")
 			return append(append(earlyAlarm(recs), back...), recs...)
-		},
-		"a restore naming no read": func(recs []*Record) []*Record {
+		}, "acknowledged configuration baseline"},
+		"a restore naming no read": {func(recs []*Record) []*Record {
 			back := restore(recs)
 			return append(append(earlyAlarm(recs), back[1]), recs...)
-		},
+		}, "not an earlier run"},
 	}
-	for name, mut := range cases {
-		recs := mut(cloneChain(configChain()))
-		if err := VerifyConfig(recs); !errors.Is(err, ErrChainBroken) {
-			t.Errorf("%s: got %v", name, err)
+	for name, c := range cases {
+		recs := acked(c.mut(cloneChain(configChain())))
+		err := VerifyConfig(recs)
+		if !errors.Is(err, ErrChainBroken) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", name, err, c.want)
 		}
 	}
 	// A repeat answer stands for the first decision when the first reply was
@@ -368,20 +411,164 @@ func TestVerifyConfig(t *testing.T) {
 	recs := cloneChain(configChain())
 	recs[0].RepeatOf, recs[0].CollectorSeq = 10, 12
 	recs[2].CollectorSeq, recs[3].Config.ReadSeq = 13, 13
-	if err := VerifyConfig(recs); err != nil {
+	if err := VerifyConfig(acked(recs)); err != nil {
 		t.Fatalf("repeat answer: %v", err)
 	}
 	// After the alarm the configuration was seen equal to the baseline
 	// again, and the node recorded it, so a new change may be approved.
 	recs = cloneChain(configChain())
-	if err := VerifyConfig(append(append(earlyAlarm(recs), restore(recs)...), recs...)); err != nil {
+	since(recs[3], 9, "2026-10-26T17:00:00Z")
+	if err := VerifyConfig(acked(append(append(earlyAlarm(recs), restore(recs)...), recs...))); err != nil {
 		t.Fatalf("approved change after a return to the baseline: %v", err)
 	}
-	// An unapproved difference needs nothing but its read.
+	// An unapproved difference needs nothing but its read and its baseline.
 	recs = cloneChain(configChain())
 	recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
-	if err := VerifyConfig(recs[2:]); err != nil {
+	if err := VerifyConfig(acked(recs[2:])); err != nil {
 		t.Fatalf("unapproved difference: %v", err)
+	}
+}
+
+// TestUnchangedRead: a detection's unchanged_at is the time of the asset's
+// last run of the same operation before its read, a record already in the
+// chain, so the node cannot move the start of the change earlier to bring
+// it inside an approval's window (B6 on #250, finding 1).
+func TestUnchangedRead(t *testing.T) {
+	// run is another run on the asset (decision 9 at 17:00) between the
+	// approval and configChain's read.
+	run := func(recs []*Record, op, asset string) []*Record {
+		r := *recs[2]
+		target := *r.Target
+		r.Target, r.Seq, r.CollectorSeq, r.Time, r.CorrelationID, r.OperationID = &target, 21, 9, at("2026-10-26T17:00:00Z"), "req-20261026-0006", op
+		r.Target.AssetID = asset
+		return []*Record{recs[0], recs[1], &r, recs[2], recs[3]}
+	}
+	const other = "3c8e5f21-9d4a-4b6c-8f32-8d5a1e7b9c24"
+	cases := map[string]struct {
+		mut  func(recs []*Record) []*Record
+		want string // "" accepts
+	}{
+		"the last run": {func(recs []*Record) []*Record {
+			since(recs[3], 9, "2026-10-26T17:00:00Z")
+			return run(recs, "sel.config.read_all", testAsset)
+		}, ""},
+		"an older run than the last": {func(recs []*Record) []*Record {
+			return run(recs, "sel.config.read_all", testAsset)
+		}, "last run before read 11 is 9"},
+		"the last run at a time it did not have": {func(recs []*Record) []*Record {
+			since(recs[3], 9, "2026-10-26T15:00:00Z")
+			return run(recs, "sel.config.read_all", testAsset)
+		}, "is not the time of record"},
+		"a time no run had": {func(recs []*Record) []*Record {
+			since(recs[3], 6, "2026-10-26T13:00:00Z")
+			return recs
+		}, "is not the time of record"},
+		"a run of another operation is not a read of the configuration": {func(recs []*Record) []*Record {
+			return run(recs, "sel.ser.read_all", testAsset)
+		}, ""},
+		"a run on another asset": {func(recs []*Record) []*Record {
+			return run(recs, "sel.config.read_all", other)
+		}, ""},
+		"no unchanged read while the epoch has one": {func(recs []*Record) []*Record {
+			since(recs[3], 0, "2026-10-26T14:00:00Z")
+			return recs
+		}, "last run before read 11 is 6"},
+		"an unchanged read of another epoch": {func(recs []*Record) []*Record {
+			reset := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 30, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T17:30:00Z"),
+				Actor: Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo,
+				PreviousHigh: new(uint64), InstallKeyID: "collector-2"}
+			recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
+			return []*Record{recs[0], recs[1], reset, recs[2], recs[3]}
+		}, "no earlier run on the asset is in its epoch"},
+		"the epoch's reset when it has no earlier run": {func(recs []*Record) []*Record {
+			reset := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 30, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T17:30:00Z"),
+				Actor: Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo,
+				PreviousHigh: new(uint64), InstallKeyID: "collector-2"}
+			recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
+			since(recs[3], 0, "2026-10-26T17:30:00Z")
+			return []*Record{recs[0], recs[1], reset, recs[2], recs[3]}
+		}, ""},
+	}
+	for name, c := range cases {
+		err := VerifyConfig(acked(c.mut(cloneChain(configChain()))))
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case c.want != "" && (!errors.Is(err, ErrChainBroken) || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: got %v, want %q", name, err, c.want)
+		}
+	}
+	// In the first epoch a detection with no earlier run has nothing to
+	// bound the change: recs must start before that run.
+	recs := cloneChain(configChain())
+	recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
+	since(recs[3], 0, "2026-10-26T14:00:00Z")
+	all := acked(recs)
+	if err := VerifyConfig(all[1:]); err == nil || !strings.Contains(err.Error(), "no collector reset") {
+		t.Errorf("no earlier run and no reset: %v", err)
+	}
+}
+
+// TestBaselineAcknowledged: detections, restores and approvals name the
+// configuration baseline a person last acknowledged for the asset (R4.8;
+// B6 on #250, finding 2).
+func TestBaselineAcknowledged(t *testing.T) {
+	unapproved := func(recs []*Record) []*Record {
+		recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
+		return recs[2:]
+	}
+	cases := map[string]struct {
+		build func() []*Record
+		want  string
+	}{
+		"no acknowledgement in recs": {func() []*Record { return configChain() }, "no earlier acknowledgement"},
+		"no acknowledgement, unapproved": {func() []*Record {
+			return unapproved(configChain())
+		}, "no earlier acknowledgement"},
+		"detection against another baseline": {func() []*Record {
+			recs := unapproved(cloneChain(configChain()))
+			recs[1].Config.BaselineDigest = testDifference
+			return acked(recs)
+		}, "acknowledged configuration baseline is " + testBaseline},
+		"approval of changes to another baseline": {func() []*Record {
+			recs := cloneChain(configChain())
+			recs[1].Config.BaselineDigest = testDifference
+			return acked(recs[:2])
+		}, "acknowledged configuration baseline is " + testBaseline},
+		"only an event baseline acknowledged": {func() []*Record {
+			all := acked(unapproved(cloneChain(configChain())))
+			all[2].Config.Kind = authz.BaselineEvent
+			return all
+		}, "no earlier acknowledgement"},
+		"the acknowledgement was refused": {func() []*Record {
+			all := acked(unapproved(cloneChain(configChain())))
+			all[2].Outcome, all[2].ReasonCode = OutcomeDenied, "baseline_not_held"
+			return all
+		}, "no earlier acknowledgement"},
+		"acknowledged after the detection": {func() []*Record {
+			all := acked(unapproved(cloneChain(configChain())))
+			return []*Record{all[0], all[3], all[4], all[1], all[2]}
+		}, "no earlier acknowledgement"},
+		"a restore of a baseline since replaced": {func() []*Record {
+			recs := cloneChain(configChain())
+			back := restore(recs)
+			all := acked(back)
+			v := testAdmin()
+			v.Kind, v.Nonce = authz.KindNodeBaselineAck, "AAECAwQFBgcICQoLDA0ODx"
+			accept := *all[1]
+			accept.Seq, accept.CollectorSeq, accept.Verified = 13, 8, v
+			ack := *all[2]
+			cfg := *ack.Config
+			cfg.DecisionSeq, cfg.PayloadSHA256, cfg.BaselineDigest, cfg.PreviousDigest = 8, v.PayloadSHA256, testSnapshot, testBaseline
+			ack.Seq, ack.Config = 14, &cfg
+			return []*Record{all[0], all[1], all[2], &accept, &ack, all[3], all[4]}
+		}, "acknowledged configuration baseline is " + testSnapshot},
+	}
+	for name, c := range cases {
+		err := VerifyConfig(c.build())
+		if !errors.Is(err, ErrChainBroken) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", name, err, c.want)
+		}
 	}
 }
 

@@ -46,8 +46,9 @@ const (
 //     baseline_digest, from the node.baseline_ack body, and previous_digest
 //     when the asset had a baseline of that kind before.
 //   - config.change_detected: baseline_digest, snapshot_digest,
-//     difference_digest, read_seq, unchanged_at, unchanged_digest, and
-//     approval_seq when an approval covers the difference.
+//     difference_digest, read_seq, unchanged_at, unchanged_read_seq (absent
+//     when no earlier read is in the epoch), and approval_seq when an
+//     approval covers the difference.
 //   - config.baseline_restored: baseline_digest, snapshot_digest and
 //     read_seq of the first read equal to the baseline after a recorded
 //     difference from it.
@@ -82,13 +83,18 @@ type Config struct {
 	// configuration read that first found the difference (its allowed
 	// collector.request record).
 	ReadSeq uint64 `json:"read_seq,omitempty"`
-	// UnchangedAt and UnchangedDigest name the latest snapshot before the
-	// detection whose settings equal the baseline's (the baseline itself
-	// when no later read was equal): its C9 retrieved_at, RFC 3339 UTC, and
-	// its digest. The change happened after it. The node holds that
-	// snapshot while the detection's difference is open (C5 0.4).
-	UnchangedAt     string `json:"unchanged_at,omitempty"`
-	UnchangedDigest string `json:"unchanged_digest,omitempty"`
+	// UnchangedReadSeq is the collector_seq of the asset's last run of the
+	// same operation before read_seq, in the same collector epoch, whatever
+	// that run found: the change being recorded was not yet seen then, so it
+	// happened after that run, or a failed run missed it. UnchangedAt is
+	// that run's record time (RFC 3339 UTC). When the epoch has no earlier
+	// run of the operation on the asset, UnchangedReadSeq is absent and
+	// UnchangedAt is the time of the collector.seq_reset that began the
+	// epoch. Both name a record already in the chain, so the node cannot
+	// choose the time the change happened after (B6 on #250); naming a later
+	// run than the last equal read only narrows what an approval covers.
+	UnchangedAt      string `json:"unchanged_at,omitempty"`
+	UnchangedReadSeq uint64 `json:"unchanged_read_seq,omitempty"`
 	// ApprovalSeq is the decision_seq of the config.change_approved record
 	// that covers the difference (ApprovalCovers). Absent when none does.
 	ApprovalSeq uint64 `json:"approval_seq,omitempty"`
@@ -142,7 +148,7 @@ func (r *Record) validateConfig(minor int) error {
 	}
 	if restored {
 		switch {
-		case c.DifferenceDigest != "" || c.UnchangedAt != "" || c.UnchangedDigest != "" || c.ApprovalSeq != 0:
+		case c.DifferenceDigest != "" || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 || c.ApprovalSeq != 0:
 			return errors.New("audit: config.baseline_restored has no difference, unchanged or approval fields")
 		case r.Outcome != OutcomeInfo || r.ReasonCode != "":
 			return errors.New("audit: config.baseline_restored has outcome info and no reason code")
@@ -150,12 +156,14 @@ func (r *Record) validateConfig(minor int) error {
 		return nil
 	}
 	switch {
-	case !digestPattern.MatchString(c.DifferenceDigest) || !digestPattern.MatchString(c.UnchangedDigest):
-		return errors.New("audit: config.change_detected needs difference_digest and unchanged_digest sha256:<hex>")
-	case c.SnapshotDigest == c.BaselineDigest || c.SnapshotDigest == c.UnchangedDigest:
-		return errors.New("audit: config.change_detected names its baseline or its unchanged snapshot as the new one")
+	case !digestPattern.MatchString(c.DifferenceDigest):
+		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>")
+	case c.SnapshotDigest == c.BaselineDigest:
+		return errors.New("audit: config.change_detected names its baseline as the new snapshot")
 	case c.ApprovalSeq >= c.ReadSeq:
 		return errors.New("audit: approval_seq names a decision before read_seq")
+	case c.UnchangedReadSeq >= c.ReadSeq:
+		return errors.New("audit: unchanged_read_seq names a decision before read_seq")
 	}
 	if _, err := parseConfigTime(c.UnchangedAt); err != nil {
 		return fmt.Errorf("audit: config.change_detected unchanged_at: %w", err)
@@ -181,7 +189,7 @@ func (r *Record) validateConfigDecision(approved bool) error {
 		return fmt.Errorf("audit: %s is succeeded, or denied when the node refuses to act on it", r.Action)
 	case c.DecisionSeq == 0 || !hashPattern.MatchString(c.PayloadSHA256):
 		return fmt.Errorf("audit: %s needs decision_seq and payload_sha256", r.Action)
-	case c.SnapshotDigest != "" || c.DifferenceDigest != "" || c.ReadSeq != 0 || c.UnchangedAt != "" || c.UnchangedDigest != "" || c.ApprovalSeq != 0:
+	case c.SnapshotDigest != "" || c.DifferenceDigest != "" || c.ReadSeq != 0 || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 || c.ApprovalSeq != 0:
 		return fmt.Errorf("audit: %s carries no detection fields", r.Action)
 	case approved && c.PreviousDigest != "":
 		return errors.New("audit: previous_digest belongs on config.baseline_acknowledged")
@@ -226,11 +234,15 @@ func parseConfigTime(s string) (time.Time, error) {
 //     reorder them. Both numbers must come from one collector epoch, which
 //     VerifyConfig checks;
 //   - its window overlaps the time in which the change happened: it starts
-//     before the detection and ends after unchanged_at.
+//     before the detection and ends after unchanged_at, the asset's last run
+//     before the read that found the change.
 //
 // An approval covers any difference from its baseline in that time, not
 // named settings: its reason says what was meant, and the alarm text shows
-// which approval silenced a difference.
+// which approval silenced a difference. The platform cannot place a change
+// more finely than between two reads, so a window that ended between them
+// covers a change made after it ended (B6 on #250); reading more often
+// narrows that.
 func ApprovalCovers(approval, detected *Record) error {
 	if approval.Action != ActionConfigChangeApproved || approval.Outcome != OutcomeSucceeded || approval.Config == nil {
 		return errors.New("audit: not a succeeded config.change_approved record")
@@ -275,6 +287,16 @@ func ApprovalCovers(approval, detected *Record) error {
 //   - each config.change_detected names the decision on its read
 //     (read_seq): an allowed collector.request record of a run on the same
 //     asset, earlier in the same epoch;
+//   - its unchanged_read_seq is the asset's last run of the same operation
+//     before read_seq in the epoch, and unchanged_at is that run's record
+//     time; or, with no such run, unchanged_read_seq is absent and
+//     unchanged_at is the time of the collector.seq_reset that began the
+//     epoch;
+//   - each config.change_detected, config.baseline_restored and succeeded
+//     config.change_approved names the asset's configuration baseline that
+//     the last succeeded configuration-kind config.baseline_acknowledged
+//     before it set, so a node cannot compare against, or approve changes
+//     to, a baseline no person acknowledged (R4.8; B6 on #250);
 //   - a config.change_detected with approval_seq names a succeeded
 //     config.change_approved earlier in the same epoch that covers it
 //     (ApprovalCovers);
@@ -295,16 +317,21 @@ func ApprovalCovers(approval, detected *Record) error {
 // A collector.seq_reset starts a new epoch: numbers from before it name
 // nothing after it, so an approval does not survive a collector reinstall.
 // recs must start at the chain's first record, or at a point before every
-// acceptance and read the records in it name.
+// acceptance and read the records in it name, before the acknowledgement of
+// each configuration baseline they name, and before the last run on each
+// asset ahead of each detection.
 func VerifyConfig(recs []*Record) error {
 	type num struct {
 		epoch int
 		seq   uint64
 	}
 	type baseline struct{ asset, digest string }
+	type opOf struct{ asset, op string }
 	epoch := 0
+	var reset *Record             // the collector.seq_reset that began this epoch
 	accepted := map[num]*Record{} // allowed admin collector.request records, by decision
 	runs := map[num]*Record{}     // allowed collector.request records of runs
+	byOp := map[opOf][]*Record{}  // this epoch's runs, in chain order
 	approvals := map[num]*Record{}
 	alarmed := map[baseline]bool{} // an unapproved difference with no restore after it
 	type kindOf struct {
@@ -316,6 +343,7 @@ func VerifyConfig(recs []*Record) error {
 		switch {
 		case r.Action == ActionCollectorSeqReset:
 			epoch++
+			reset, byOp = r, map[opOf][]*Record{}
 		case r.Action == ActionCollectorRequest && r.Outcome == OutcomeAllowed:
 			switch {
 			case r.Verified != nil && r.RepeatOf != 0:
@@ -326,6 +354,8 @@ func VerifyConfig(recs []*Record) error {
 				accepted[num{epoch, r.CollectorSeq}] = r
 			case r.OperationID != "" && r.Target != nil:
 				runs[num{epoch, r.CollectorSeq}] = r
+				k := opOf{r.Target.AssetID, r.OperationID}
+				byOp[k] = append(byOp[k], r)
 			}
 		case r.Action == ActionConfigChangeApproved || r.Action == ActionConfigBaselineAcknowledge:
 			c := r.Config
@@ -343,6 +373,9 @@ func VerifyConfig(recs []*Record) error {
 				return broken("record %d (%s) follows an acceptance of %q, not %s", r.Seq, r.Action, acc.Verified.Kind, want)
 			}
 			if r.Action == ActionConfigChangeApproved && r.Outcome == OutcomeSucceeded {
+				if err := acknowledged(r, active[kindOf{r.Target.AssetID, authz.BaselineConfiguration}]); err != nil {
+					return err
+				}
 				approvals[num{epoch, c.DecisionSeq}] = r
 			}
 			if r.Action == ActionConfigBaselineAcknowledge && r.Outcome == OutcomeSucceeded {
@@ -354,8 +387,17 @@ func VerifyConfig(recs []*Record) error {
 			}
 		case r.Action == ActionConfigChangeDetected || r.Action == ActionConfigBaselineRestored:
 			c := r.Config
-			if run := runs[num{epoch, c.ReadSeq}]; run == nil || run.Target.AssetID != r.Target.AssetID {
+			run := runs[num{epoch, c.ReadSeq}]
+			if run == nil || run.Target.AssetID != r.Target.AssetID {
 				return broken("record %d names read decision %d, which is not an earlier run on asset %s in its epoch", r.Seq, c.ReadSeq, r.Target.AssetID)
+			}
+			if err := acknowledged(r, active[kindOf{r.Target.AssetID, authz.BaselineConfiguration}]); err != nil {
+				return err
+			}
+			if r.Action == ActionConfigChangeDetected {
+				if err := unchangedRead(r, byOp[opOf{run.Target.AssetID, run.OperationID}], reset); err != nil {
+					return err
+				}
 			}
 			k := baseline{r.Target.AssetID, c.BaselineDigest}
 			switch {
@@ -376,6 +418,52 @@ func VerifyConfig(recs []*Record) error {
 				return broken("record %d: approval %d does not cover it: %v", r.Seq, c.ApprovalSeq, err)
 			}
 		}
+	}
+	return nil
+}
+
+// acknowledged checks that r names the asset's active configuration
+// baseline: the one the last succeeded configuration-kind acknowledgement
+// set ("" when recs holds none).
+func acknowledged(r *Record, active string) error {
+	switch {
+	case active == "":
+		return broken("record %d (%s) names baseline %s, but no earlier acknowledgement set a configuration baseline for asset %s", r.Seq, r.Action, r.Config.BaselineDigest, r.Target.AssetID)
+	case r.Config.BaselineDigest != active:
+		return broken("record %d (%s) names baseline %s, but the asset's acknowledged configuration baseline is %s", r.Seq, r.Action, r.Config.BaselineDigest, active)
+	}
+	return nil
+}
+
+// unchangedRead checks a detection's unchanged_read_seq and unchanged_at
+// against the runs of its operation on its asset in this epoch, in chain
+// order, and the collector.seq_reset that began the epoch (nil in the
+// first).
+func unchangedRead(r *Record, runs []*Record, reset *Record) error {
+	c := r.Config
+	var last *Record
+	for _, run := range runs {
+		if run.CollectorSeq < c.ReadSeq {
+			last = run
+		}
+	}
+	bound := last
+	switch {
+	case last != nil && c.UnchangedReadSeq != last.CollectorSeq:
+		return broken("record %d names unchanged read %d, but the asset's last run before read %d is %d", r.Seq, c.UnchangedReadSeq, c.ReadSeq, last.CollectorSeq)
+	case last == nil && c.UnchangedReadSeq != 0:
+		return broken("record %d names unchanged read %d, but no earlier run on the asset is in its epoch", r.Seq, c.UnchangedReadSeq)
+	case last == nil && reset == nil:
+		return broken("record %d names no unchanged read, but its epoch has no collector reset to bound the change", r.Seq)
+	case last == nil:
+		bound = reset
+	}
+	want, err := parseConfigTime(bound.Time.UTC)
+	if err != nil {
+		return broken("record %d: the record its unchanged_at names has no usable time: %v", r.Seq, err)
+	}
+	if got, err := parseConfigTime(c.UnchangedAt); err != nil || !got.Equal(want) {
+		return broken("record %d: unchanged_at %q is not the time of record %d (%s)", r.Seq, c.UnchangedAt, bound.Seq, bound.Time.UTC)
 	}
 	return nil
 }
