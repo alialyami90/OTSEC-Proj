@@ -10,13 +10,9 @@
 # Hosted Windows only, no secrets, read-only token. It runs by hand and on
 # pull requests that change this file or the slice tests. Evidence class:
 # simulated (a hosted Windows Server VM, a simulated device on loopback).
-name: a6-windows-slice
+name: a6-windows-slice (B6 mutant run, never merged)
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/a6-windows-slice.yml'
-      - 'tests/integration/slice/**'
 permissions:
   contents: read
 jobs:
@@ -39,15 +35,6 @@ jobs:
       - run: openssl version
       # One pytest per suite, so each installs and removes the services on
       # its own, and one suite's failure does not hide the other's result.
-      - name: e2e against the installed services (command-line canary scan)
-        run: |
-          python -m pytest -v -rfEs -W always --basetemp="$env:RUNNER_TEMP\e2e" tests/integration/slice/test_slice_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-e2e.txt"
-          exit $LASTEXITCODE
-      - name: unknown-restart against the installed services
-        if: ${{ !cancelled() }}
-        run: |
-          python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\unknown" tests/integration/slice/test_slice_unknown_restart_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-unknown.txt"
-          exit $LASTEXITCODE
       - name: admin relay and config\admin's ACLs against the installed services
         if: ${{ !cancelled() }}
         run: |

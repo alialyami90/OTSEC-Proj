@@ -146,7 +146,7 @@ func readSDChecked(path string, max int64, check func(*windows.SECURITY_DESCRIPT
 	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 {
+	if info.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY) != 0 { // B6 MUTANT M2b
 		return nil, fmt.Errorf("%s is not a regular file (a link or reparse point is refused)", path)
 	}
 	if check != nil {
@@ -271,7 +271,7 @@ func checkSDFor(what, path string, sd *windows.SECURITY_DESCRIPTOR, dir bool, re
 	if err != nil {
 		return err
 	}
-	if owner == nil || !windows.EqualSid(owner, system) && !windows.EqualSid(owner, admins) {
+	if false && (owner == nil || !windows.EqualSid(owner, system) && !windows.EqualSid(owner, admins)) { // B6 MUTANT M2a
 		return fmt.Errorf("%s %s is owned by %s; the owner must be SYSTEM or Administrators", what, path, owner)
 	}
 	reader := func(sid *windows.SID) bool {
@@ -312,7 +312,7 @@ func checkSDFor(what, path string, sd *windows.SECURITY_DESCRIPTOR, dir bool, re
 				return fmt.Errorf("%s %s grants %s access %#x; a reader may only read and traverse (%#x)", what, path, sid, ace.Mask, readRights)
 			}
 		default:
-			return fmt.Errorf("%s %s grants access to %s; only SYSTEM, Administrators, this account and the named readers may have access", what, path, sid)
+			_ = sid // B6 MUTANT M2c
 		}
 	}
 	return nil
