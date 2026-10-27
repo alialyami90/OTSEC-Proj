@@ -79,7 +79,9 @@ KV = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S*)')
 def decisions(s):
     """The collector's own decisions, in its order, from its events."""
     out = []
-    for m in DECIDED.finditer(s.text("collector")):
+    # The Event Log text read back ends each event's description with a NUL,
+    # which would stay on the last value (run 40585577043: "admin_unverified\x00").
+    for m in DECIDED.finditer(s.text("collector").replace("\x00", "")):
         kv = {k: (json.loads(v) if v.startswith('"') else v) for k, v in KV.findall(m.group(2))}
         if m.group(1) == "reply not written":
             kv["status"] = "unwritten"
