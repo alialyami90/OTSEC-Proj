@@ -830,3 +830,45 @@ func TestRelayTimeout(t *testing.T) {
 		t.Fatalf("records %+v", recs)
 	}
 }
+
+// A collector that never answers holds one tick for one RelayTimeout, not
+// one per file: after the first unanswered request the rest wait for the
+// next tick, and status says why (A3 on #197).
+func TestRelayStopsAtFirstUnanswered(t *testing.T) {
+	defer func(d time.Duration) { RelayTimeout = d }(RelayTimeout)
+	RelayTimeout = 300 * time.Millisecond
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, hangCollector{col})
+	for i := range 3 {
+		writeAdminFile(t, nc, fmt.Sprintf("admin-request-stall-%d.json", i), authz.KindCredentialRevoke, signNonce(t, i))
+	}
+	began := time.Now()
+	s.relayAdmin(bg)
+	if d := time.Since(began); d >= 2*RelayTimeout {
+		t.Fatalf("one tick took %s, over one RelayTimeout (%s)", d, RelayTimeout)
+	}
+	if n := len(col.requests()); n != 1 {
+		t.Fatalf("%d requests sent in the tick, want 1", n)
+	}
+	got := adminShown(st)
+	if len(got) != 3 {
+		t.Fatalf("status %+v", got)
+	}
+	for i, a := range got {
+		if a.State != "waiting" || (i > 0 && !strings.Contains(a.Detail, "did not answer admin-request-stall-0.json")) {
+			t.Fatalf("status %d: %+v", i, a)
+		}
+	}
+	if countAlarms(st, AlarmAdminRequestNoDecision) != 1 {
+		t.Fatal("no-decision alarm not raised once")
+	}
+	// The collector answers again: the next tick sends all three.
+	s2 := newScheduler(t, r, col)
+	s2.relayAdmin(bg)
+	if n := len(col.requests()); n != 4 {
+		t.Fatalf("%d requests after the collector answered, want 1 + 3", n)
+	}
+}

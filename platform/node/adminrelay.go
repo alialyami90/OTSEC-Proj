@@ -177,11 +177,26 @@ func (s *Scheduler) relayAdmin(ctx context.Context) {
 			todo = nil
 		}
 	}
-	for _, f := range todo {
+	for i, f := range todo {
 		// Decided since the scan, if collectorHold's fold found the
 		// decision in the stream (a crash before the checkpoint).
-		if _, done := s.decided(f.id); !done {
-			s.relayOne(ctx, f)
+		if _, done := s.decided(f.id); done {
+			continue
+		}
+		if !s.relayOne(ctx, f) {
+			// No answer: the rest wait for the next tick, so a collector
+			// that never answers holds the scheduler for one RelayTimeout
+			// a tick, not one per file (A3 on #197).
+			left := map[string]bool{}
+			for _, g := range todo[i+1:] {
+				left[g.id] = true
+			}
+			for j := range shown {
+				if left[shown[j].RequestID] {
+					shown[j].Detail = "not sent this tick: the collector did not answer " + f.name
+				}
+			}
+			break
 		}
 	}
 	for i := range shown {
@@ -307,8 +322,11 @@ var RelayTimeout = 30 * time.Second
 
 // relayOne sends one file's request: recorded first, then sent, then the
 // decision recorded, as for a run (D1-11). A request with no decision is
-// left undecided and sent again next tick.
-func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) {
+// left undecided and sent again next tick. It reports false when the
+// collector did not answer (no reply within RelayTimeout, or no
+// connection), so the caller sends nothing more this tick.
+func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) (answered bool) {
+	answered = true
 	req := &authz.CollectorRequest{Contract: authz.ContractID, Kind: f.kind, RequestID: f.id,
 		OnBehalfOf: f.claims.Principal, PolicyVersion: s.rt.cfg.PolicyVersion, AdminSigned: f.signed}
 	nodecide := func(why string) {
@@ -336,7 +354,7 @@ func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) {
 	switch {
 	case reply.Status == "":
 		nodecide(noDecisionDetail(doErr))
-		return
+		return false
 	case !reply.Accepted() && reply.CollectorSeq == 0:
 		// A refusal the collector did not number cannot be recorded as
 		// its decision (C7-A5-2): state_unavailable is one.
@@ -372,6 +390,7 @@ func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) {
 		s.raiseOnceKey(AlarmAdminRequestRefused+" "+f.id, "", AlarmAdminRequestRefused,
 			fmt.Sprintf("the collector refused %s in %s: %s, check %s. It is not sent again; %s", f.kind, f.name, code, check, next))
 	}
+	return
 }
 
 // refusalOf is a refused reply's code and admin check, each from its
