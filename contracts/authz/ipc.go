@@ -51,7 +51,8 @@ var (
 
 // kindSince is the minor that added a request kind; absent means 0.1. A
 // request stamped with an earlier minor cannot ask for it.
-var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince}
+var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince,
+	KindNodeChangeApproval: configKindsSince, KindNodeBaselineAck: configKindsSince}
 
 // nodeKindsSince is the minor that added the node kinds, the repeat answer
 // and CollectorReply.Admin.
@@ -168,7 +169,7 @@ const (
 	RefuseStateUnavailable   RefusalCode = "collector_state_unavailable" // collector state could not be read or flushed durably (C7-A5-3)
 	RefuseSuspensionMismatch RefusalCode = "suspension_mismatch"         // since 0.2: the asset is not suspended by ref, or the administrator's file is absent, refused or names another
 	RefuseAssetSuspended     RefusalCode = "asset_suspended"             // since 0.3: the collector holds the asset suspended; Refusal.Suspension names it
-	RefuseAdminUnverified    RefusalCode = "admin_unverified"            // since 0.4: an admin request is unsigned, or its signature, binding, window or nonce fails (VerifyAdminRequest)
+	RefuseAdminUnverified    RefusalCode = "admin_unverified"            // since 0.4: an admin request is unsigned, or its signature, binding, authority (0.6), window or nonce fails (VerifyAdminRequest)
 	RefuseUnknown            RefusalCode = "refused_unknown"             // fallback for unknown codes
 )
 
@@ -257,7 +258,10 @@ const assetSuspendedSince = 3
 //     suspension;
 //   - before 0.4, a reader does not know admin_unverified, so an unsigned
 //     admin request gets principal_not_permitted: its sender may not ask
-//     for it without an administrator's signature.
+//     for it without an administrator's signature;
+//   - before 0.6, a reader does not know the authority check, so a key
+//     that may not sign a kind is reported as check key: the pinned key
+//     is not usable for this request.
 func (r *Refusal) ForRequest(contract string) *Refusal {
 	if r == nil || (r.Code != RefuseAssetSuspended && r.Code != RefuseAdminUnverified && r.Suspension == nil) {
 		return r
@@ -273,6 +277,9 @@ func (r *Refusal) ForRequest(contract string) *Refusal {
 		if out.Code == RefuseAssetSuspended {
 			out.Code = RefuseAssetNotEnrolled
 		}
+	}
+	if minor < configKindsSince && out.Check == AdminCheckAuthority {
+		out.Check = AdminCheckKey
 	}
 	if minor < adminSignedSince {
 		out.Check = ""
@@ -567,6 +574,8 @@ type requestBodies struct {
 	AssetClearSusp      *AssetClearSuspBody
 	NodeQuarantineClear *NodeQuarantineClearBody // admin-signed only
 	NodeSeqResetAck     *NodeSeqResetAckBody     // admin-signed only
+	NodeChangeApproval  *NodeChangeApprovalBody  // admin-signed only
+	NodeBaselineAck     *NodeBaselineAckBody     // admin-signed only
 }
 
 // validateBody checks that the one body set matches kind and passes its
@@ -611,6 +620,10 @@ func validateBody(kind RequestKind, by Principal, b requestBodies) error {
 			return refuse(RefuseInvalid, "manifest_sha256")
 		}
 	case kind == KindNodeSeqResetAck && b.NodeSeqResetAck != nil:
+	case kind == KindNodeChangeApproval && b.NodeChangeApproval != nil:
+		return b.NodeChangeApproval.validate()
+	case kind == KindNodeBaselineAck && b.NodeBaselineAck != nil:
+		return b.NodeBaselineAck.validate()
 	default:
 		return refuse(RefuseInvalid, "body does not match kind %q", kind)
 	}
