@@ -152,7 +152,7 @@ func init() {
 		ActionStoreModeChange, ActionNodePostureChange, ActionNodeMigrationDate, ActionAssetCollectorAssign,
 		ActionCollectorInstallKey, ActionCollectorSeqReset, ActionCollectorSeqResetAck, ActionAssetSuspend, ActionAssetSuspensionClear,
 		ActionQuarantineExported, ActionQuarantineCleared,
-		ActionConfigChangeApproved, ActionConfigChangeDetected, ActionConfigBaselineAcknowledge,
+		ActionConfigChangeApproved, ActionConfigChangeDetected, ActionConfigBaselineAcknowledge, ActionConfigBaselineRestored,
 	} {
 		actions[a] = true
 	}
@@ -164,6 +164,7 @@ var actionSince = map[Action]int{
 	ActionCollectorInstallKey: 2, ActionCollectorSeqReset: 2, ActionCollectorSeqResetAck: 2, ActionAssetSuspend: 2, ActionAssetSuspensionClear: 2,
 	ActionQuarantineExported: 3, ActionQuarantineCleared: 3,
 	ActionConfigChangeApproved: configSince, ActionConfigChangeDetected: configSince, ActionConfigBaselineAcknowledge: configSince,
+	ActionConfigBaselineRestored: configSince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.

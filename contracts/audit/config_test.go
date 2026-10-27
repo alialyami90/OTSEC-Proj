@@ -2,6 +2,7 @@ package audit
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ const (
 	testBaseline   = "sha256:ee1d5cd04fcee7fd33c68453b7fb6a9ec1f7124bf9e88b03f1a4bb6640310e89"
 	testSnapshot   = "sha256:2b4627fd426546888575da7c26ef571798f2d583d0027e686f016ed6b1de60ef"
 	testDifference = "sha256:c5e3dc4f27577c98a210d2eed87dc6294382624e4ac9a02811831fb8a866beb6"
+	testEqual      = "sha256:82fa24899a1607be48de01641e58ec3add0b30db75eada80ec4da264b3d4c439"
 )
 
 func at(utc string) Time {
@@ -56,7 +58,7 @@ func configChain() []*Record {
 	detected.Actor, detected.Action, detected.Outcome, detected.ReasonCode = node, ActionConfigChangeDetected, OutcomeInfo, ReasonApprovedChange
 	detected.Target, detected.CorrelationID = &Target{AssetID: testAsset}, "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
 	detected.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testSnapshot, DifferenceDigest: testDifference,
-		ReadSeq: 11, UnchangedAt: "2026-10-26T17:00:04Z", ApprovalSeq: 10}
+		ReadSeq: 11, UnchangedAt: "2026-10-26T17:00:04Z", UnchangedDigest: testEqual, ApprovalSeq: 10}
 
 	return []*Record{&accept, &approved, &read, &detected}
 }
@@ -69,8 +71,19 @@ func earlyAlarm(recs []*Record) []*Record {
 	read.Target, read.Seq, read.CollectorSeq, read.Time, read.CorrelationID = &readTarget, 18, 8, at("2026-10-26T15:00:00Z"), "req-20261026-0005"
 	alarm.Config, alarm.Seq, alarm.Time = &cfg, 19, at("2026-10-26T15:00:05Z")
 	alarm.Outcome, alarm.ReasonCode = OutcomeWarning, ReasonUnapprovedChange
-	cfg.ReadSeq, cfg.ApprovalSeq, cfg.UnchangedAt = 8, 0, "2026-10-26T14:00:00Z"
+	cfg.ReadSeq, cfg.ApprovalSeq, cfg.UnchangedAt, cfg.UnchangedDigest = 8, 0, "2026-10-26T14:00:00Z", testBaseline
 	return []*Record{&read, &alarm}
+}
+
+// restore is a read (decision 9) at 17:00 that found the configuration
+// equal to the baseline again, and its config.baseline_restored record.
+func restore(recs []*Record) []*Record {
+	read, rec := *recs[2], *recs[3]
+	readTarget := *read.Target
+	read.Target, read.Seq, read.CollectorSeq, read.Time, read.CorrelationID = &readTarget, 20, 9, at("2026-10-26T17:00:00Z"), "req-20261026-0006"
+	rec.Seq, rec.Time, rec.Action, rec.Outcome, rec.ReasonCode = 21, at("2026-10-26T17:00:04Z"), ActionConfigBaselineRestored, OutcomeInfo, ""
+	rec.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 9}
+	return []*Record{&read, &rec}
 }
 
 func cloneChain(recs []*Record) []*Record {
@@ -144,15 +157,43 @@ func TestConfigFields(t *testing.T) {
 		"ack of an unknown kind": {1, func(r *Record) {
 			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, "settings", "", "", ""
 		}},
-		"detection by a person":            {3, func(r *Record) { r.Actor = adminActor }},
-		"detection with a window":          {3, func(r *Record) { r.Config.WindowStart = "2026-10-26T16:00:00Z" }},
-		"detection with a decision":        {3, func(r *Record) { r.Config.DecisionSeq = 10 }},
-		"detection without snapshot":       {3, func(r *Record) { r.Config.SnapshotDigest = "" }},
-		"detection without difference":     {3, func(r *Record) { r.Config.DifferenceDigest = "" }},
-		"detection of the baseline":        {3, func(r *Record) { r.Config.SnapshotDigest = testBaseline }},
-		"detection without read":           {3, func(r *Record) { r.Config.ReadSeq, r.Config.ApprovalSeq = 0, 0 }},
-		"detection approval after read":    {3, func(r *Record) { r.Config.ApprovalSeq = 11 }},
-		"detection without unchanged_at":   {3, func(r *Record) { r.Config.UnchangedAt = "" }},
+		"approval with previous_digest":  {1, func(r *Record) { r.Config.PreviousDigest = testSnapshot }},
+		"detection with previous_digest": {3, func(r *Record) { r.Config.PreviousDigest = testSnapshot }},
+		"ack replacing itself": {1, func(r *Record) {
+			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, authz.BaselineEvent, "", "", ""
+			r.Config.PreviousDigest = testBaseline
+		}},
+		"ack previous bare hex": {1, func(r *Record) {
+			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, authz.BaselineEvent, "", "", ""
+			r.Config.PreviousDigest = testSnapshot[7:]
+		}},
+		"detection by a person":               {3, func(r *Record) { r.Actor = adminActor }},
+		"detection with a window":             {3, func(r *Record) { r.Config.WindowStart = "2026-10-26T16:00:00Z" }},
+		"detection with a decision":           {3, func(r *Record) { r.Config.DecisionSeq = 10 }},
+		"detection without snapshot":          {3, func(r *Record) { r.Config.SnapshotDigest = "" }},
+		"detection without difference":        {3, func(r *Record) { r.Config.DifferenceDigest = "" }},
+		"detection of the baseline":           {3, func(r *Record) { r.Config.SnapshotDigest = testBaseline }},
+		"detection without read":              {3, func(r *Record) { r.Config.ReadSeq, r.Config.ApprovalSeq = 0, 0 }},
+		"detection approval after read":       {3, func(r *Record) { r.Config.ApprovalSeq = 11 }},
+		"detection without unchanged_at":      {3, func(r *Record) { r.Config.UnchangedAt = "" }},
+		"detection without unchanged_digest":  {3, func(r *Record) { r.Config.UnchangedDigest = "" }},
+		"detection of its unchanged snapshot": {3, func(r *Record) { r.Config.SnapshotDigest = testEqual }},
+		"restore with a difference": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeInfo, ""
+			r.Config.UnchangedAt, r.Config.UnchangedDigest, r.Config.ApprovalSeq = "", "", 0
+		}},
+		"restore as warning": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeWarning, ReasonUnapprovedChange
+			r.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 11}
+		}},
+		"restore by a person": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode, r.Actor = ActionConfigBaselineRestored, OutcomeInfo, "", adminActor
+			r.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 11}
+		}},
+		"restore stamped 0.4": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode, r.Contract = ActionConfigBaselineRestored, OutcomeInfo, "", "otsec.audit/0.4"
+			r.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 11}
+		}},
 		"detection unchanged_at local":     {3, func(r *Record) { r.Config.UnchangedAt = "2026-10-26T20:00:04+03:00" }},
 		"approved without approval_seq":    {3, func(r *Record) { r.Config.ApprovalSeq = 0 }},
 		"unapproved with approval_seq":     {3, func(r *Record) { r.Outcome, r.ReasonCode = OutcomeWarning, ReasonUnapprovedChange }},
@@ -180,6 +221,14 @@ func TestConfigFields(t *testing.T) {
 		"event baseline refused": {1, func(r *Record) {
 			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineAcknowledge, OutcomeDenied, "baseline_not_held"
 			r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = authz.BaselineEvent, "", "", ""
+		}},
+		"restore": {3, func(r *Record) {
+			r.Action, r.Outcome, r.ReasonCode = ActionConfigBaselineRestored, OutcomeInfo, ""
+			r.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 11}
+		}},
+		"ack replacing a baseline": {1, func(r *Record) {
+			r.Action, r.Config.Kind, r.Config.WindowStart, r.Config.WindowEnd, r.Config.Reason = ActionConfigBaselineAcknowledge, authz.BaselineConfiguration, "", "", ""
+			r.Config.PreviousDigest = testSnapshot
 		}},
 		"claimed kind on info": {0, func(r *Record) {
 			r.Outcome, r.CollectorSeq, r.Claimed, r.Verified = OutcomeInfo, 0, r.Verified, nil
@@ -293,14 +342,19 @@ func TestVerifyConfig(t *testing.T) {
 		// An approval accepted after a change was found unapproved never
 		// silences it, though a later read records it again (P4-A3, V-M2).
 		"late approval for a change already found": func(recs []*Record) []*Record {
-			early := earlyAlarm(recs)
-			recs[3].Config.UnchangedAt = "2026-10-26T14:00:00Z"
-			return append(early, recs...)
+			return append(earlyAlarm(recs), recs...)
 		},
-		"late approval, unchanged at the alarm itself": func(recs []*Record) []*Record {
-			early := earlyAlarm(recs)
-			recs[3].Config.UnchangedAt = "2026-10-26T15:00:05Z"
-			return append(early, recs...)
+		"a restore before the alarm": func(recs []*Record) []*Record {
+			return append(append(restore(recs), earlyAlarm(recs)...), recs...)
+		},
+		"a restore of another baseline": func(recs []*Record) []*Record {
+			back := restore(recs)
+			back[1].Config.BaselineDigest = testDifference
+			return append(append(earlyAlarm(recs), back...), recs...)
+		},
+		"a restore naming no read": func(recs []*Record) []*Record {
+			back := restore(recs)
+			return append(append(earlyAlarm(recs), back[1]), recs...)
 		},
 	}
 	for name, mut := range cases {
@@ -318,9 +372,9 @@ func TestVerifyConfig(t *testing.T) {
 		t.Fatalf("repeat answer: %v", err)
 	}
 	// After the alarm the configuration was seen equal to the baseline
-	// again (unchanged_at after it), so a new change may be approved.
+	// again, and the node recorded it, so a new change may be approved.
 	recs = cloneChain(configChain())
-	if err := VerifyConfig(append(earlyAlarm(recs), recs...)); err != nil {
+	if err := VerifyConfig(append(append(earlyAlarm(recs), restore(recs)...), recs...)); err != nil {
 		t.Fatalf("approved change after a return to the baseline: %v", err)
 	}
 	// An unapproved difference needs nothing but its read.
@@ -328,5 +382,78 @@ func TestVerifyConfig(t *testing.T) {
 	recs[3].Outcome, recs[3].ReasonCode, recs[3].Config.ApprovalSeq = OutcomeWarning, ReasonUnapprovedChange, 0
 	if err := VerifyConfig(recs[2:]); err != nil {
 		t.Fatalf("unapproved difference: %v", err)
+	}
+}
+
+// ackChain is two acknowledgements of asset baselines of one kind: the
+// first sets testBaseline (decision 30), the second replaces it with
+// testSnapshot (decision 31).
+func ackChain() []*Record {
+	var out []*Record
+	for i, d := range []struct {
+		seq            uint64
+		baseline, prev string
+	}{{30, testBaseline, ""}, {31, testSnapshot, testBaseline}} {
+		v := testAdmin()
+		v.Kind = authz.KindNodeBaselineAck
+		v.Nonce = fmt.Sprintf("AAECAwQFBgcICQoLDA0OD%d", i)
+		accept := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: uint64(40 + 2*i), PrevHash: strings.Repeat("6", 64),
+			Time: at("2026-10-26T19:00:00Z"), Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed,
+			CorrelationID: fmt.Sprintf("req-ack-%d", i), CollectorSeq: d.seq, Verified: v}
+		ack := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: uint64(41 + 2*i), PrevHash: strings.Repeat("6", 64),
+			Time: at("2026-10-26T19:00:01Z"), Actor: adminActor, Action: ActionConfigBaselineAcknowledge, Outcome: OutcomeSucceeded,
+			Target: &Target{AssetID: testAsset}, CorrelationID: fmt.Sprintf("req-ack-%d", i),
+			Config: &Config{DecisionSeq: d.seq, PayloadSHA256: v.PayloadSHA256, Kind: authz.BaselineEvent, BaselineDigest: d.baseline, PreviousDigest: d.prev}}
+		out = append(out, accept, ack)
+	}
+	return out
+}
+
+// TestBaselineSuccession: each acknowledgement names the baseline the last
+// one set (B4 on #250), so C8 alone shows each asset's succession.
+func TestBaselineSuccession(t *testing.T) {
+	recs := ackChain()
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifyConfig(recs); err != nil {
+		t.Fatal(err)
+	}
+	// A window that starts after the first acknowledgement cannot check
+	// the second's previous_digest, and accepts it.
+	if err := VerifyConfig(recs[2:]); err != nil {
+		t.Fatalf("window after the first: %v", err)
+	}
+	for name, mut := range map[string]func(recs []*Record){
+		"second names no previous": func(recs []*Record) { recs[3].Config.PreviousDigest = "" },
+		"second names another":     func(recs []*Record) { recs[3].Config.PreviousDigest = testDifference },
+		"a configuration ack first": func(recs []*Record) {
+			recs[1].Config.Kind = authz.BaselineConfiguration
+			recs[3].Config.PreviousDigest = ""
+		},
+	} {
+		recs := cloneChain(ackChain())
+		mut(recs)
+		err := VerifyConfig(recs)
+		if name == "a configuration ack first" {
+			// Another kind is another succession: the event ack is the first.
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrChainBroken) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	// A denied acknowledgement moves nothing.
+	recs = cloneChain(ackChain())
+	recs[1].Outcome, recs[1].ReasonCode = OutcomeDenied, "baseline_not_held"
+	recs[3].Config.PreviousDigest = ""
+	recs[3].Config.BaselineDigest = testSnapshot
+	if err := VerifyConfig(recs); err != nil {
+		t.Fatalf("after a denied acknowledgement: %v", err)
 	}
 }

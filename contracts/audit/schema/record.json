@@ -166,7 +166,8 @@
         "quarantine.cleared",
         "config.change_approved",
         "config.change_detected",
-        "config.baseline_acknowledged"
+        "config.baseline_acknowledged",
+        "config.baseline_restored"
       ]
     },
     "outcome": {
@@ -848,7 +849,8 @@
             "enum": [
               "config.change_approved",
               "config.baseline_acknowledged",
-              "config.change_detected"
+              "config.change_detected",
+              "config.baseline_restored"
             ]
           }
         },
@@ -948,6 +950,16 @@
                   "required": [
                     "approval_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "previous_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_digest"
+                  ]
                 }
               ]
             }
@@ -1028,6 +1040,11 @@
                   "required": [
                     "approval_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "unchanged_digest"
+                  ]
                 }
               ]
             }
@@ -1060,7 +1077,8 @@
               "snapshot_digest",
               "difference_digest",
               "read_seq",
-              "unchanged_at"
+              "unchanged_at",
+              "unchanged_digest"
             ],
             "not": {
               "anyOf": [
@@ -1092,6 +1110,11 @@
                 {
                   "required": [
                     "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "previous_digest"
                   ]
                 }
               ]
@@ -1190,6 +1213,102 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.baseline_restored"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reason_code"
+          ]
+        },
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "config": {
+            "required": [
+              "snapshot_digest",
+              "read_seq"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "previous_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_start"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "approval_seq"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -1245,7 +1364,7 @@
       "required": [
         "baseline_digest"
       ],
-      "description": "0.5: on config.change_approved, config.baseline_acknowledged and config.change_detected only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
+      "description": "0.5: on config.change_approved, config.baseline_acknowledged, config.change_detected and config.baseline_restored only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -1289,7 +1408,7 @@
         "snapshot_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "The snapshot the read produced (detected only)"
+          "description": "The snapshot the read produced (detected, restored)"
         },
         "difference_digest": {
           "type": "string",
@@ -1299,7 +1418,7 @@
         "read_seq": {
           "type": "integer",
           "minimum": 1,
-          "description": "collector_seq of the decision on the read that first found the difference (detected only)"
+          "description": "collector_seq of the decision on the read (detected, restored)"
         },
         "unchanged_at": {
           "type": "string",
@@ -1310,6 +1429,16 @@
           "type": "integer",
           "minimum": 1,
           "description": "decision_seq of the approval that covers the difference; absent when none does (detected only)"
+        },
+        "previous_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The baseline of the same asset and kind this acknowledgement replaces; absent for the asset's first (acknowledged only)"
+        },
+        "unchanged_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Digest of the latest snapshot before the detection equal to the baseline, the baseline itself when none (detected only)"
         }
       }
     }
