@@ -258,6 +258,16 @@
 // and the node adopts it only when the bytes it holds hash to
 // baseline_digest. The collector checks the digest's form only.
 //
+// The digest is the signer's own. An admin client that signs
+// node.baseline_ack (either kind: a C9 configuration snapshot or a C10
+// event baseline) or node.change_approval computes baseline_digest itself,
+// "sha256:" and the hex SHA-256 of the record's stored bytes (C9
+// config.Digest, C10 baseline.Hash), over the same bytes it decodes to show
+// the person, and never takes the digest from the node. A node that shows
+// one baseline and offers the digest of another cannot then get the other
+// acknowledged or approved (B3 and B1 on #254; docs/threat-model.md). The
+// bytes are the record's, never a C5 store frame around it.
+//
 // The asset. After spending the nonce, the collector refuses an approval or
 // acknowledgement for an asset it does not collect from with
 // asset_not_enrolled, so a node cannot use one to probe for assets: the

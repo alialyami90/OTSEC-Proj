@@ -156,8 +156,8 @@
 //
 // # Configuration approvals, acknowledgements and differences (0.5)
 //
-// Three actions record configuration monitoring (P4-A3, V-M2). The node
-// writes all three, each with a target asset, a correlation_id and a Config
+// Four actions record configuration monitoring (P4-A3, V-M2). The node
+// writes all four, each with a target asset, a correlation_id and a Config
 // group holding exactly that action's fields (config.go):
 //
 //   - config.change_approved follows the collector's acceptance of a C7 0.6
@@ -166,15 +166,21 @@
 //     rule) and names the acceptance by decision_seq and payload_sha256. It
 //     is succeeded, or denied when the node refuses to act on it.
 //   - config.baseline_acknowledged follows a node.baseline_ack in the same
-//     way, with the baseline's kind (configuration or event). It is denied
-//     when the node holds no baseline of that asset and kind whose stored
-//     bytes hash to baseline_digest.
+//     way, with the baseline's kind (configuration or event) and
+//     previous_digest, the baseline it replaces. It is denied when the node
+//     holds no baseline of that asset and kind whose stored bytes hash to
+//     baseline_digest, or (B4 on #250) when that record is of the other
+//     kind, of another asset or node, or not the next in the asset's chain.
 //   - config.change_detected is the node's own record of a read whose
 //     snapshot differs from the baseline: the snapshot, the C9 difference,
-//     the decision on the read that first found it (read_seq), and
-//     unchanged_at, the latest time the configuration was seen equal to the
-//     baseline. It is warning unapproved_change, which is the alarm, or info
-//     approved_change with approval_seq naming the approval that covers it.
+//     the decision on the read that found it (read_seq), and the asset's
+//     last run of that operation before it (unchanged_read_seq, and
+//     unchanged_at, that run's record time; or the epoch's collector reset
+//     when it has no earlier run). It is warning unapproved_change,
+//     which is the alarm, or info approved_change with approval_seq naming
+//     the approval that covers it.
+//   - config.baseline_restored is the node's record of the first read
+//     equal to the baseline after a recorded difference from it.
 //
 // The digests are C9's and C10's "sha256:<hex>" over a document's stored
 // bytes. Admin gains kind in 0.5: the request's C7 kind, which the node
@@ -187,18 +193,25 @@
 // time the change happened in, between unchanged_at and the detection. The
 // node writes config.change_detected when a read finds a configuration
 // state it has not recorded against the baseline, not on every read. Once a
-// difference was recorded unapproved, a later detection against the same
-// baseline may be approved only if the configuration was seen equal to the
-// baseline after that alarm (its unchanged_at), so an approval accepted after
-// a change was found never silences it. Ending that alarm takes a signed
-// baseline acknowledgement, which is recorded too, or a return to the
-// baseline. VerifyConfig checks all of this over the chain:
+// difference was recorded unapproved, no later detection against the same
+// baseline may be approved until a config.baseline_restored for it follows
+// the alarm, so an approval accepted after a change was found never
+// silences it. Ending that alarm takes a signed baseline acknowledgement or
+// a recorded return to the baseline. VerifyConfig checks all of this over
+// the chain:
 //   - each approval and acknowledgement follows a real acceptance of its kind
 //     by its actor for the same signed bytes;
-//   - each detection names a real read of its asset;
+//   - each detection and restore names a real read of its asset;
+//   - each detection's unchanged_at is the time of the asset's last run
+//     before that read, a record already in the chain, so the node cannot
+//     choose how early the change happened;
+//   - each detection, restore and succeeded approval names the asset's
+//     configuration baseline that the last succeeded acknowledgement set;
 //   - every approval_seq names an approval that covers the detection;
 //   - no approved detection follows an unapproved one against the same
-//     baseline without the configuration returning to it in between.
+//     baseline without a restore in between;
+//   - each succeeded acknowledgement names, as previous_digest, the
+//     baseline of its asset and kind the last one set.
 //
 // A node that forges records can still forge all of them, as for any
 // collector event (VerifyCollectorSeq). What it cannot do is silence an
