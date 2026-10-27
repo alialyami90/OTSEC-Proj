@@ -311,6 +311,23 @@ func (g *rig) waitN(n int, d time.Duration) []stored {
 	}
 }
 
+// waitStatus polls the receiver's status until ok holds or d passes, and
+// returns the last status read. Stored and the store's drop counts move
+// only after AppendBatch returns, so they can lag the events a reader
+// already sees in the database (#187, job 121917868556: stored 256 of 301
+// straight after waitN on a slow Windows runner).
+func (g *rig) waitStatus(ok func(receive.Status) bool, d time.Duration) receive.Status {
+	g.t.Helper()
+	limit := time.Now().Add(d)
+	for {
+		st := g.r.Status()
+		if ok(st) || time.Now().After(limit) {
+			return st
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func sum(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])

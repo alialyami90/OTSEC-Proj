@@ -153,7 +153,8 @@ func TestStoredBytesAreTheSendersBytes(t *testing.T) {
 			t.Errorf("message %d: id %+v", i, s.ID)
 		}
 	}
-	if st := g.r.Status(); st.Received != int64(len(sent)) || st.Stored != int64(len(sent)) {
+	want := int64(len(sent))
+	if st := g.waitStatus(func(st receive.Status) bool { return st.Stored >= want }, 20*time.Second); st.Received != want || st.Stored != want {
 		t.Errorf("status received %d stored %d, want %d", st.Received, st.Stored, len(sent))
 	}
 }
@@ -289,30 +290,55 @@ func TestHostileFraming(t *testing.T) {
 }
 
 // TestDatagramFloodIsCountedAndIsolated: A floods UDP far past its rate; B
-// sends inside its rate and loses nothing; A's drops are counted and
-// reported.
+// sends inside its rate; every datagram the listener read is stored or
+// counted as dropped, and A's drops are counted and reported. A datagram
+// the OS dropped before the listener read it (its socket buffer full while
+// the read loop is starved of CPU, as on a slow Windows runner) is not
+// read, so it is neither stored nor counted: that is UDP's stated limit
+// (A4), and the only place it shows is Received falling short of what was
+// sent. So B may be short by at most the datagrams never read; a datagram
+// of B's that was read and then lost fails (#187, job 121917868556: B 14
+// of 15 stored, with nothing to tell which).
 func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 	g := start(t, asset.SyslogUDP, nil, receive.Limits{Rate: 20, Burst: 20, ReportEvery: 500 * time.Millisecond})
 	a, b := dialFrom(t, ipA, "udp", g.addr), dialFrom(t, ipB, "udp", g.addr)
+	const floodN, quietN = 2000, 15
 	var wg sync.WaitGroup
 	wg.Add(1)
 	began := time.Now()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 2000; i++ {
+		for i := 0; i < floodN; i++ {
 			fmt.Fprintf(a, "<13>flood %d", i)
 			if i%50 == 0 {
 				time.Sleep(20 * time.Millisecond)
 			}
 		}
 	}()
-	for i := 0; i < 15; i++ {
+	for i := 0; i < quietN; i++ {
 		fmt.Fprintf(b, "<13>quiet %d", i)
 		time.Sleep(80 * time.Millisecond)
 	}
 	wg.Wait()
 	elapsed := time.Since(began)
+	// Every datagram read is stored or counted as dropped, once the writer
+	// has caught up.
+	accounted := func(st receive.Status) bool {
+		return st.Received == st.Stored+sumMap(st.Dropped)+st.Empty
+	}
 	time.Sleep(time.Second)
+	st := g.waitStatus(accounted, 30*time.Second)
+	if !accounted(st) {
+		t.Errorf("read %d datagrams, but %d stored, %d dropped %v and %d empty", st.Received, st.Stored, sumMap(st.Dropped), st.Dropped, st.Empty)
+	}
+	sent := int64(floodN + quietN)
+	if st.Received > sent {
+		t.Fatalf("read %d datagrams, %d sent", st.Received, sent)
+	}
+	notRead := sent - st.Received
+	if notRead > 0 {
+		t.Logf("%d of %d datagrams were never read: lost before the listener, where it cannot count them (UDP)", notRead, sent)
+	}
 	var fromA, fromB []stored
 	for _, s := range g.events() {
 		switch s.Asset.ID {
@@ -322,16 +348,25 @@ func TestDatagramFloodIsCountedAndIsolated(t *testing.T) {
 			fromB = append(fromB, s)
 		}
 	}
-	if len(fromB) != 15 {
-		t.Errorf("B: %d of 15 stored", len(fromB))
-	}
-	for i, s := range fromB {
+	// B's stored datagrams are B's, each once, in the order sent.
+	next := 0
+	for _, s := range fromB {
+		var i int
+		if _, err := fmt.Sscanf(string(s.Bytes), "<13>quiet %d", &i); err != nil || i < next || i >= quietN {
+			t.Errorf("B: stored %q out of order or not sent (next %d)", s.Bytes, next)
+			continue
+		}
 		checkBytes(t, i, s, fmt.Appendf(nil, "<13>quiet %d", i))
+		next = i + 1
+	}
+	if missing := int64(quietN - len(fromB)); missing > notRead {
+		t.Errorf("B: %d of %d stored; %d missing, but only %d datagrams were never read, so the listener lost one it read", len(fromB), quietN, missing, notRead)
+	} else if missing > 0 {
+		t.Logf("B: %d of %d stored; the %d missing are within the %d never read", len(fromB), quietN, missing, notRead)
 	}
 	if limit := 20 + int(20*elapsed.Seconds()) + 20; len(fromA) > limit {
 		t.Errorf("A: %d stored in %s, over its rate (at most %d)", len(fromA), elapsed, limit)
 	}
-	st := g.r.Status()
 	if st.Dropped[receive.DropRateLimit] == 0 {
 		t.Errorf("no rate-limit drops counted: %+v", st.Dropped)
 	}
