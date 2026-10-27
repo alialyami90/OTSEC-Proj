@@ -16,10 +16,11 @@ import (
 
 // Format is the schema identifier kept in every database's meta table.
 // A database with another format is refused, never migrated, in Phase 2.
-// Format 2 (C5 0.5, D4-14) has a rowid events table: the first format's
-// WITHOUT ROWID table spilled every event over about 1 KB to an overflow
-// page of its own, so a commit wrote up to 3.3 times the WAL the reserve
-// rule allows and the file grew up to 4.5 times the bytes the quota counts.
+// Format 2 (C5 0.5, D4-14) has rowid events and captures tables: the first
+// format's WITHOUT ROWID tables spilled every row over about 1 KB to an
+// overflow page of its own, so a commit wrote up to 3.3 times the WAL the
+// reserve rule allows and the file grew up to 4.5 times the bytes the quota
+// counts.
 const Format = "otsec.platform-store/2"
 
 // legacyFormat is the first format. It is refused with legacyRefusal.
@@ -28,11 +29,36 @@ const legacyFormat = "otsec.platform-store/1"
 // legacyRefusal is why a database of the first format is not opened, and
 // the way out. It is never changed, rewritten or deleted by the node.
 func legacyRefusal(path string) error {
-	return invalid("store %s was created by an earlier layout (format %s, events WITHOUT ROWID); "+
+	return invalid("store %s was created by an earlier layout (format %s, events and captures WITHOUT ROWID); "+
 		"the recovery reserve is not sized for it (C5 0.5, D4-14), so it is not opened, changed or deleted. "+
 		"To start on this layout: stop the node, copy the store directory aside, let any events you need "+
 		"forward upstream first (or keep the copy), remove the database files, and start the node (platform/node README, \"Store layout changes\")",
 		path, legacyFormat)
+}
+
+// refuseLegacy returns legacyRefusal when the database file at path is of
+// the first format, and nil otherwise, including when the file cannot be
+// read as a store: the open that follows reports that. It reads the main
+// file alone and immutable, so SQLite takes no lock, runs no WAL recovery
+// and creates or writes no -wal or -shm. An ordinary open folds a hot -wal
+// into the file and deletes it when the connection closes; a refused
+// database must be left byte for byte as it was found (B1 on #282). The
+// format row is written when the database is created and the main file is
+// flushed whole before the rename, so the -wal never holds a different one.
+func refuseLegacy(ctx context.Context, path string) error {
+	sdb, err := sql.Open("sqlite", fileURI(path, "mode=ro&immutable=1"))
+	if err != nil {
+		return nil
+	}
+	defer sdb.Close()
+	var format string
+	if err := sdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'format'`).Scan(&format); err != nil {
+		return nil
+	}
+	if format == legacyFormat {
+		return legacyRefusal(path)
+	}
+	return nil
 }
 
 // DB is one open database. It implements contracts/store.Committer and
@@ -88,10 +114,12 @@ CREATE UNIQUE INDEX events_key ON events (stream, seq);
 CREATE INDEX events_by_time ON events (stream, committed_at, seq);
 CREATE INDEX events_by_capture ON events (capture) WHERE capture IS NOT NULL;
 CREATE TABLE captures (
-	sha256 TEXT PRIMARY KEY,
+	id     INTEGER PRIMARY KEY,
+	sha256 TEXT NOT NULL,
 	class  TEXT NOT NULL,
 	bytes  BLOB NOT NULL
-) WITHOUT ROWID;
+);
+CREATE UNIQUE INDEX captures_key ON captures (sha256);
 CREATE TABLE cursors (
 	consumer TEXT NOT NULL,
 	stream   TEXT NOT NULL,
@@ -132,6 +160,8 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		if err := create(ctx, path, opt); err != nil {
 			return nil, err
 		}
+	} else if err := refuseLegacy(ctx, path); err != nil {
+		return nil, err
 	}
 	d, err := connect(ctx, path, opt)
 	if err != nil {

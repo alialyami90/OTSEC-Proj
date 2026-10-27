@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,13 +16,25 @@ import (
 
 // The events layout of C5 0.5 (D4-14). Evidence class: simulated, Linux.
 
-// events is a rowid table with a unique (stream, seq) index: the first
-// format's WITHOUT ROWID table spilled every event over about 1 KB to an
-// overflow page of its own.
+// events and captures are rowid tables with unique indexes on their keys:
+// the first format's WITHOUT ROWID tables spilled every row over about 1 KB
+// to an overflow page of its own (B1's ruling on #282 for captures).
 func TestEventsIsARowidTable(t *testing.T) {
 	dir := storeDir(t)
 	db := open1(t, dir, evidenceDB, nil)
 	var table, index string
+	for _, name := range []string{"captures", "captures_key"} {
+		var sqlText string
+		if err := db.conn.QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name = ?`, name).Scan(&sqlText); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.ToUpper(sqlText), "WITHOUT ROWID") {
+			t.Fatalf("%s is WITHOUT ROWID: %s", name, sqlText)
+		}
+		if name == "captures_key" && (!strings.Contains(sqlText, "UNIQUE") || !strings.Contains(sqlText, "(sha256)")) {
+			t.Fatalf("captures_key: %s", sqlText)
+		}
+	}
 	if err := db.conn.QueryRowContext(context.Background(), `SELECT sql FROM sqlite_master WHERE name = 'events'`).Scan(&table); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +84,7 @@ func legacyStore(t *testing.T) (dir, file string) {
 }
 
 // A database of the first format is refused at start with an error that
-// names the way out and the settings alarm, and the node does not open,
+// names the way out and the open-failed alarm, and the node does not open,
 // change or delete it (D4-14): the node comes up failed, not collecting.
 func TestLegacyLayoutIsRefusedAtStart(t *testing.T) {
 	dir, file := legacyStore(t)
@@ -84,7 +98,7 @@ func TestLegacyLayoutIsRefusedAtStart(t *testing.T) {
 	}
 	r := c5.RunStartup(bg, env, policy(evidenceDB))
 	defer unlock(r)
-	if r.Mode != c5.ModeFailed || len(r.Alarms) == 0 || r.Alarms[len(r.Alarms)-1].Code != c5.AlarmSettingsInvalid {
+	if r.Mode != c5.ModeFailed || len(r.Alarms) == 0 || r.Alarms[len(r.Alarms)-1].Code != c5.AlarmOpenFailed {
 		t.Fatalf("mode %s, alarms %v, err %v", r.Mode, r.Alarms, r.Err)
 	}
 	msg := fmt.Sprint(r.Err, " ", r.Alarms[len(r.Alarms)-1].Detail)
@@ -103,6 +117,89 @@ func TestLegacyLayoutIsRefusedAtStart(t *testing.T) {
 	// The offline reader refuses it the same way.
 	if _, err := OpenReadOnly(bg, dir, testNode, evidenceDB.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
 		t.Fatalf("OpenReadOnly on the old layout: %v", err)
+	}
+}
+
+// hashes returns the SHA-256 of the database file and its -wal and -shm, or
+// "absent" for a file that is not there, so a refusal that creates, changes
+// or deletes any of the three shows.
+func hashes(t *testing.T, file string) [3]string {
+	t.Helper()
+	var out [3]string
+	for i, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(file + suffix)
+		switch {
+		case os.IsNotExist(err):
+			out[i] = "absent"
+		case err != nil:
+			t.Fatal(err)
+		default:
+			sum := sha256.Sum256(b)
+			out[i] = hex.EncodeToString(sum[:]) + fmt.Sprintf(" (%d bytes)", len(b))
+		}
+	}
+	return out
+}
+
+// A refusal writes nothing, even when the old database was left with a hot
+// -wal by a crash: an ordinary open folds the -wal into the file and deletes
+// it. The database file and its -wal and -shm are the same bytes after the
+// node's start and after the offline reader's, and none is created (B1's
+// ruling on #282).
+func TestLegacyRefusalWritesNothingWithAHotWAL(t *testing.T) {
+	src, srcFile := legacyStore(t)
+	_ = src
+	// A connection that never checkpoints leaves committed pages in the -wal.
+	live, err := sql.Open("sqlite", srcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live.SetMaxOpenConns(1)
+	defer live.Close()
+	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA wal_autocheckpoint=0"} {
+		if _, err := live.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := live.Exec(`INSERT INTO cursors (consumer, stream, through) VALUES ('hot', 'relay1/ser', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	// The crashed node's files, copied while its connection is still open.
+	dir := storeDir(t)
+	file := filepath.Join(dir, filepath.Base(srcFile))
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(srcFile + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file+suffix, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fi, err := os.Stat(file + "-wal"); err != nil || fi.Size() == 0 {
+		t.Fatalf("the copy has no hot -wal: %v", err)
+	}
+	before := hashes(t, file)
+	env, err := NewEnv(Options{Dir: dir, Node: testNode, Database: evidenceDB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c5.RunStartup(bg, env, policy(evidenceDB))
+	unlock(r)
+	if r.Mode != c5.ModeFailed || !strings.Contains(fmt.Sprint(r.Err, r.Alarms), "earlier layout") {
+		t.Fatalf("mode %s, err %v, alarms %v", r.Mode, r.Err, r.Alarms)
+	}
+	if got := hashes(t, file); got != before {
+		t.Fatalf("the refusal changed the files:\nbefore %v\nafter  %v", before, got)
+	}
+	if _, err := OpenReadOnly(bg, dir, testNode, evidenceDB.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
+		t.Fatalf("OpenReadOnly on the old layout: %v", err)
+	}
+	if got := hashes(t, file); got != before {
+		t.Fatalf("the offline reader changed the files:\nbefore %v\nafter  %v", before, got)
 	}
 }
 
@@ -149,6 +246,56 @@ func TestFileGrowthStaysUnderTheDiskFactor(t *testing.T) {
 			}
 			grew, counted := size()-pagesBefore, after-before
 			t.Logf("%d events of %d bytes: pages grew %d for %d quota bytes (%.2f ×), simulated", rows, eventBytes, grew, counted, float64(grew)/float64(counted))
+			if float64(grew) > c5.DiskBytesPerQuotaByte*float64(counted) {
+				t.Fatalf("the file grew %d bytes for %d quota bytes, over %v ×", grew, counted, c5.DiskBytesPerQuotaByte)
+			}
+		})
+	}
+}
+
+// A commit in which every record has a capture of its own, of 1 to 1.5 KB
+// (C5 allows it though no producer does), meets the same bound on the file:
+// the captures table is a rowid table as events is (B6 on #282, where the
+// WITHOUT ROWID table wrote 3.9 KB of WAL a record and grew the file 3.48 ×).
+func TestFileGrowthWithACaptureEachStaysUnderTheDiskFactor(t *testing.T) {
+	db := open1(t, storeDir(t), withQuota(evidenceDB, c5.ClassAdapterEvidence, 1<<30), nil)
+	l := testLog(t, db)
+	ctx := context.Background()
+	n := 0
+	for _, capBytes := range []int{1000, 1200, 1500, 2000, 3000} {
+		t.Run(fmt.Sprint(capBytes), func(t *testing.T) {
+			before, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			used, _, err := db.Usage(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recs := make([]c5.Record, 128)
+			for i := range recs {
+				n++
+				cp := capture(fmt.Sprintf("%d %s", n, strings.Repeat("x", capBytes)))
+				recs[i] = c5.Record{Stream: "relay1/ser", Class: c5.ClassAdapterEvidence, Event: pending("relay1/ser", n), Capture: &cp}
+			}
+			if _, err := l.AppendBatch(ctx, recs); err != nil {
+				t.Fatal(err)
+			}
+			for more := true; more; {
+				if more, err = db.CompactStep(ctx, 1000); err != nil {
+					t.Fatal(err)
+				}
+			}
+			after, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			now, _, err := db.Usage(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grew, counted := now-used, after-before
+			t.Logf("128 records with a capture of %d bytes each: pages grew %d for %d quota bytes (%.2f ×), simulated", capBytes, grew, counted, float64(grew)/float64(counted))
 			if float64(grew) > c5.DiskBytesPerQuotaByte*float64(counted) {
 				t.Fatalf("the file grew %d bytes for %d quota bytes, over %v ×", grew, counted, c5.DiskBytesPerQuotaByte)
 			}
