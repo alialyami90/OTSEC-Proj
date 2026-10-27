@@ -10,6 +10,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
+	"otsec.local/otsec/platform/store"
 )
 
 // sizingConfig is a configuration with listeners of the given transports
@@ -278,5 +279,146 @@ func TestTargetSmallForListeners(t *testing.T) {
 	}
 	if got := raised(false); len(got) != 0 {
 		t.Fatalf("without listeners: %+v", got)
+	}
+}
+
+// flood sends n unknown-sender messages of about 8 KiB to listener id and
+// waits until each is stored or dropped; it returns the listener's status.
+func flood(t *testing.T, ls *Listening, st *Status, id string, n int64) ListenerStatus {
+	t.Helper()
+	line := "<13>Oct 26 12:00:00 stranger " + strings.Repeat("x", 8000) + "\n"
+	c := dialFrom(t, "tcp", "127.0.0.2", ls.Addr(id))
+	before := st.Snapshot("x").Listeners[id]
+	for range n {
+		if _, err := c.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ls.Publish()
+		got := st.Snapshot("x").Listeners[id]
+		if got.Stored+got.Dropped["unknown-budget"] >= before.Stored+before.Dropped["unknown-budget"]+n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("listener status: %+v", got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// streamBytes is the sum of len(event) over stream's stored events.
+func streamBytes(t *testing.T, r *Runtime, stream c5.StreamID) int64 {
+	t.Helper()
+	got, err := r.Store(stream).Read(bg, stream, 0, store.MaxRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	for _, s := range got {
+		n += int64(len(s.Event))
+	}
+	return n
+}
+
+// A restart does not refill the unknown budget (D3-3): the node counts what
+// unknown senders stored on the stream in the hour before the start and
+// passes it to the listener, so a flood after a restart gets only what is
+// left of the hour's budget, not a fresh one.
+func TestUnknownBudgetAcrossRestart(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+		nc.Store.Quotas["syslog-stream"] = MinUnknownBytes * 25 * UnknownQuotaShare
+	})
+	stream := ListenerStream("lab-tcp")
+	c := parse(t, nc)
+	r, st, _ := start(t, c, dir)
+	ls := serve(t, r)
+	// Each message is stored as an event of about 20 KiB: about half of
+	// the 256 KiB budget, all of it stored.
+	first := flood(t, ls, st, "lab-tcp", 6)
+	if first.Dropped["unknown-budget"] != 0 || first.Unknown.SpentAtStart != 0 {
+		t.Fatalf("first run: %+v %+v", first, first.Unknown)
+	}
+	spent := streamBytes(t, r, stream)
+	ls.close(ls.receivers)
+	r.Close()
+
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	ls = serve(t, r)
+	ls.Publish()
+	if got := st.Snapshot("x").Listeners["lab-tcp"].Unknown; got.SpentAtStart != spent {
+		t.Fatalf("started %d bytes spent, the stream holds %d", got.SpentAtStart, spent)
+	}
+	second := flood(t, ls, st, "lab-tcp", 40)
+	if second.Dropped["unknown-budget"] == 0 {
+		t.Fatalf("the restart refilled the budget: %+v", second)
+	}
+	// Only the remainder is stored, give or take the hour's refill over
+	// the test and the store's seq digits.
+	if left := MinUnknownBytes - spent; second.Unknown.StoredBytes > left+1024 || second.Stored == 0 {
+		t.Fatalf("after the restart unknown senders stored %d bytes, %d were left of the budget", second.Unknown.StoredBytes, left)
+	}
+	if countAlarms(st, AlarmUnknownSpentUncounted) != 0 {
+		t.Fatal("uncounted alarm raised")
+	}
+}
+
+// A received time after now counts as inside the window, so a clock set
+// back does not hand out a fresh budget; one before the window does not
+// count.
+func TestUnknownSpentWindow(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+	})
+	stream := ListenerStream("lab-tcp")
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls := serve(t, r)
+	flood(t, ls, st, "lab-tcp", 3)
+	stored := streamBytes(t, r, stream)
+	now := r.opt.Now()
+	for name, tc := range map[string]struct {
+		now  time.Time
+		want int64
+	}{
+		"now":             {now, stored},
+		"clock set back":  {now.Add(-24 * time.Hour), stored},
+		"an hour later":   {now.Add(time.Hour + time.Minute), 0},
+		"inside the hour": {now.Add(59 * time.Minute), stored},
+	} {
+		got, err := unknownSpent(bg, r.Store(stream), stream, time.Hour, tc.now)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: %d %v, want %d", name, got, err, tc.want)
+		}
+	}
+}
+
+// If the stream cannot be read at start, the budget starts empty (fail
+// closed), the node says why, and known senders are not affected.
+func TestUnknownSpentUncountedFailsClosed(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
+	})
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	stream := ListenerStream("lab-tcp")
+	if _, err := unknownSpent(bg, nil, stream, time.Hour, time.Now()); err == nil {
+		t.Fatal("no database, no error")
+	}
+	r.Store(stream).Close()
+	ls, err := NewListening(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls.Publish()
+	u := st.Snapshot("x").Listeners["lab-tcp"].Unknown
+	if u == nil || u.SpentAtStart != u.HourlyBytes || u.HourlyBytes == 0 {
+		t.Fatalf("budget not started empty: %+v", u)
+	}
+	if countAlarms(st, AlarmUnknownSpentUncounted) != 1 {
+		t.Fatal("uncounted alarm not raised")
 	}
 }
