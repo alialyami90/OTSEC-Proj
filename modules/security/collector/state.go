@@ -79,6 +79,11 @@ type stateDoc struct {
 	// AdminNonces are the nonces of admin-signed requests spent and not
 	// yet expired, each with its expires_at (C7 0.4, D2-11).
 	AdminNonces map[string]string `json:"admin_nonces,omitempty"`
+	// AdminDecisions are the accepted admin requests whose nonce is in
+	// AdminNonces, by nonce: what the repeat answer needs (C7 0.5). Each
+	// is dropped with its nonce, so it lives exactly as long and under the
+	// same bound (A1 on #184).
+	AdminDecisions map[string]adminDecision `json:"admin_decisions,omitempty"`
 	// AdminClockUTC is the latest clock reading at which an admin nonce
 	// was spent. Admin requests are judged, and nonces dropped, at no
 	// earlier time (AdminClock), so a clock put back cannot reopen the
@@ -92,6 +97,13 @@ type stateDoc struct {
 // admin requests at 256 per 15 minutes.
 const MaxAdminNonces = 256
 
+// adminDecision is one accepted admin request: the SHA-256 of its signed
+// payload bytes and the collector_seq of the decision.
+type adminDecision struct {
+	PayloadSHA256 string `json:"payload_sha256"`
+	CollectorSeq  uint64 `json:"collector_seq"`
+}
+
 // familyFloor is authz.FamilyFloor as stored.
 type familyFloor struct {
 	Revision      uint64 `json:"revision"`
@@ -103,7 +115,8 @@ type assetState struct {
 	// then confirmed the login, and the session has not since ended with
 	// QUI. Empty when no authentication is pending and no Level 1 is open.
 	UnconfirmedAuthUTC string `json:"unconfirmed_auth_utc,omitempty"`
-	// LevelOpen is set from "=>" until the session sends QUI (D2-16, A6).
+	// LevelOpen is set from "=>" until the session has closed after QUI
+	// (D2-16, A6).
 	// A process that dies in between leaves it set: the relay may keep
 	// Level 1 until TIDLE after the last line, which was no later than
 	// the death, so the next process counts the floor from when it opened
@@ -246,11 +259,25 @@ func checkStateDoc(doc stateDoc) error {
 			return fmt.Errorf("admin_nonces: %v", err)
 		}
 	}
+	for n, d := range doc.AdminDecisions {
+		if _, ok := doc.AdminNonces[n]; !ok {
+			return errors.New("admin_decisions: a decision whose nonce is not held")
+		}
+		if !sha256Hex.MatchString(d.PayloadSHA256) {
+			return errors.New("admin_decisions: payload_sha256 is not a lowercase SHA-256")
+		}
+		if d.CollectorSeq == 0 || d.CollectorSeq > doc.CollectorSeq {
+			return fmt.Errorf("admin_decisions: collector_seq %d is not a number handed out", d.CollectorSeq)
+		}
+	}
 	return nil
 }
 
 // adminNoncePattern is the C7 0.4 nonce's shape (authz.AdminRequest).
 var adminNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+
+// sha256Hex is a lowercase hex SHA-256, as AdminPayloadSHA256 writes it.
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // AdminClock is the time admin requests are judged at: the clock, or the
 // latest time a nonce was spent if the clock is behind it. behind is how
@@ -301,10 +328,14 @@ func (s *State) SpendAdminNonce(nonce string, expires time.Time) error {
 		return &authz.AdminRejected{Check: authz.AdminCheckReplay, Reason: "nonce already spent"}
 	}
 	kept := make(map[string]string, len(s.doc.AdminNonces)+1)
+	decisions := map[string]adminDecision{}
 	for n, ts := range s.doc.AdminNonces {
 		t, _ := time.Parse(time.RFC3339Nano, ts) // checked on open and on write
 		if t.After(now) {
 			kept[n] = ts
+			if d, ok := s.doc.AdminDecisions[n]; ok {
+				decisions[n] = d
+			}
 		}
 	}
 	if len(kept) >= MaxAdminNonces {
@@ -313,8 +344,52 @@ func (s *State) SpendAdminNonce(nonce string, expires time.Time) error {
 	kept[nonce] = expires.UTC().Format(time.RFC3339Nano)
 	next := s.doc
 	next.AdminNonces = kept
+	next.AdminDecisions = nil
+	if len(decisions) > 0 {
+		next.AdminDecisions = decisions
+	}
 	next.AdminClockUTC = now.UTC().Format(time.RFC3339Nano)
 	return s.write(next)
+}
+
+// RecordAdminDecision records that the request whose nonce was spent was
+// accepted as decision seq, with the SHA-256 of its signed payload, so the
+// same bytes get the repeat answer while the nonce is held (C7 0.5). It is
+// written after the decision has acted: a crash in between leaves a resend
+// refused as a replay, as before 0.5, never a repeat of an action that did
+// not happen.
+func (s *State) RecordAdminDecision(nonce, payloadSHA256 string, seq uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return s.broken
+	}
+	if _, ok := s.doc.AdminNonces[nonce]; !ok {
+		return errors.New("collector: an admin decision for a nonce not spent")
+	}
+	next := s.doc
+	next.AdminDecisions = make(map[string]adminDecision, len(s.doc.AdminDecisions)+1)
+	for n, d := range s.doc.AdminDecisions {
+		next.AdminDecisions[n] = d
+	}
+	next.AdminDecisions[nonce] = adminDecision{PayloadSHA256: payloadSHA256, CollectorSeq: seq}
+	return s.write(next)
+}
+
+// AdminRepeat returns the decision that accepted nonce, if its payload
+// had exactly the SHA-256 given and the nonce is still held. Anything else
+// is not a repeat, and the spent nonce makes it a replay.
+func (s *State) AdminRepeat(nonce, payloadSHA256 string) (seq uint64, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken != nil {
+		return 0, false
+	}
+	d, held := s.doc.AdminDecisions[nonce]
+	if !held || d.PayloadSHA256 != payloadSHA256 {
+		return 0, false
+	}
+	return d.CollectorSeq, true
 }
 
 // NextSeq hands out the next collector_seq number, written durably first. A

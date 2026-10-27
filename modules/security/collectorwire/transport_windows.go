@@ -17,10 +17,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Evidence class: this file compiles (GOOS=windows go vet) and has not yet
-// run on Windows. It runs on the owner's PC once Go is installed there
-// (D1-26); until then every statement below about Windows behaviour is
-// documented but untested.
+// Evidence class: the tests in this package run on the hosted Windows
+// runner in CI, all in one account. The check between the two installed
+// services, each under its own virtual account, runs only in the slice's
+// service mode (P3-A5/A6).
 
 const (
 	pipeBufferBytes = 64 << 10
@@ -46,6 +46,11 @@ var procImpersonateNamedPipeClient = windows.NewLazySystemDLL("advapi32.dll").Ne
 // identification level, holds ep.Peer. Any other client is disconnected
 // before a byte is read, and Accept returns an error wrapping
 // ErrPeerRefused.
+//
+// Before the pipe exists, Listen grants ep.Peer the two rights Dial needs to
+// check this process as the server (grantPeerQuery). If it cannot, Listen
+// fails: the collector does not start rather than serve a pipe its node
+// would refuse.
 func Listen(ep Endpoint) (net.Listener, error) {
 	if !strings.HasPrefix(strings.ToLower(ep.Address), `\\.\pipe\`) {
 		return nil, fmt.Errorf(`collectorwire: %q is not a local pipe name (\\.\pipe\...)`, ep.Address)
@@ -56,6 +61,9 @@ func Listen(ep Endpoint) (net.Listener, error) {
 	}
 	self, err := CurrentIdentity()
 	if err != nil {
+		return nil, err
+	}
+	if err := grantPeerQuery(peer); err != nil {
 		return nil, err
 	}
 	sd, err := windows.SecurityDescriptorFromString(fmt.Sprintf("D:P(A;;GA;;;SY)(A;;GA;;;%s)(A;;0x%08x;;;%s)", self, clientAccess, peer.String()))
@@ -259,10 +267,12 @@ func checkClient(h windows.Handle, want *windows.SID) error {
 // connection only if the server process's token holds ep.Peer. Nothing is
 // sent before the check.
 //
-// Open item for the PC run: a service process token's default DACL may not
-// grant another service TOKEN_QUERY. If it does not, Dial fails closed, and
-// the collector must grant the node's SID TOKEN_QUERY on its own token at
-// startup.
+// Under the SCM, one virtual service account cannot open another's process
+// or token: their DACLs grant SYSTEM and the account itself only (A5's
+// hosted-runner dry run of the installed services, where every check failed
+// closed). The collector's Listen therefore grants the node exactly the two
+// rights checkServer uses. A server that has not granted them is refused, as
+// is any server whose token does not hold ep.Peer.
 func Dial(ctx context.Context, ep Endpoint) (net.Conn, error) {
 	want, err := parseSID(ep.Peer)
 	if err != nil {
@@ -311,6 +321,59 @@ func checkServer(h windows.Handle, want *windows.SID) error {
 	}
 	defer tok.Close()
 	return tokenHolds(tok, want)
+}
+
+// grantPeerQuery adds peer to this process's DACL with
+// PROCESS_QUERY_LIMITED_INFORMATION and to its primary token's DACL with
+// TOKEN_QUERY, and nothing else, so that peer can do what checkServer does.
+// The existing entries are kept. Neither right reads process memory,
+// duplicates a handle or uses the token: they show the image name, times
+// and exit code, and the token's user, groups and privileges, none of
+// which is secret.
+func grantPeerQuery(peer *windows.SID) error {
+	if err := grantAccess(windows.CurrentProcess(), peer, windows.PROCESS_QUERY_LIMITED_INFORMATION); err != nil {
+		return fmt.Errorf("collectorwire: grant the peer query on this process: %w", err)
+	}
+	var tok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.READ_CONTROL|windows.WRITE_DAC, &tok); err != nil {
+		return fmt.Errorf("collectorwire: open this process's token to grant the peer query: %w", err)
+	}
+	defer tok.Close()
+	if err := grantAccess(windows.Handle(tok), peer, windows.TOKEN_QUERY); err != nil {
+		return fmt.Errorf("collectorwire: grant the peer query on this process's token: %w", err)
+	}
+	return nil
+}
+
+// grantAccess merges an allow entry for sid with mask into the DACL of the
+// kernel object h. An object with no DACL is refused rather than given one
+// holding only sid, which would shut out everyone else.
+func grantAccess(h windows.Handle, sid *windows.SID, mask windows.ACCESS_MASK) error {
+	sd, err := windows.GetSecurityInfo(h, windows.SE_KERNEL_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	if dacl == nil {
+		return errors.New("the object has a NULL DACL")
+	}
+	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
+		AccessPermissions: mask,
+		AccessMode:        windows.GRANT_ACCESS,
+		Inheritance:       windows.NO_INHERITANCE,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+			TrusteeValue: windows.TrusteeValueFromSID(sid),
+		},
+	}}, dacl)
+	if err != nil {
+		return err
+	}
+	return windows.SetSecurityInfo(h, windows.SE_KERNEL_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }
 
 // tokenHolds accepts a token whose user is want, or which carries want as

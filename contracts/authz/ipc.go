@@ -363,6 +363,7 @@ func AnswersRepeat(contract string) bool {
 // accepted and numbered, answers a request stamped 0.5 or later, and names
 // the payload's hash, the envelope's key and the request's person. A repeat
 // passes it like a first acceptance: the node's part must be idempotent.
+// The nonce must be the one in the payload sent.
 func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
@@ -390,6 +391,16 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 		return nil, errors.New("authz: the acceptance names another admin key")
 	case a.Principal != sent.OnBehalfOf:
 		return nil, errors.New("authz: the acceptance names another person")
+	}
+	// The nonce the node records as verified must be the one it signed
+	// over: the payload hash binds the bytes, not the reply's copy of the
+	// nonce (A6 on #184). The collector decoded these bytes strictly
+	// before accepting them, so this read sees the same nonce.
+	var p struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.Unmarshal(sent.AdminSigned.Payload, &p); err != nil || a.Nonce != p.Nonce {
+		return nil, errors.New("authz: the acceptance names another nonce")
 	}
 	return a, nil
 }
