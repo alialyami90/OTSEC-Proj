@@ -350,10 +350,10 @@ func New(cfg Config) (*Receiver, error) {
 		return bad("%v", err)
 	}
 	if cfg.MaxCommitBytes != 0 && cfg.MaxCommitBytes < store.MinRecordBytes {
-		return bad("max commit bytes %d below %d", cfg.MaxCommitBytes, store.MinRecordBytes)
+		return bad("max commit bytes %d is neither 0 (the default) nor at least %d", cfg.MaxCommitBytes, store.MinRecordBytes)
 	}
 	if cfg.MaxCommitRecords < 0 || cfg.MaxCommitRecords > store.MaxBatch {
-		return bad("max commit records %d not in [1, %d]", cfg.MaxCommitRecords, store.MaxBatch)
+		return bad("max commit records %d is neither 0 (the default) nor in [1, %d]", cfg.MaxCommitRecords, store.MaxBatch)
 	}
 	for a, s := range cfg.Senders {
 		if a != a.Unmap() || s.AssetID == "" || (s.Target != asset.DeviceObserved && s.Target != asset.Simulated) {

@@ -7,6 +7,13 @@ import (
 	"otsec.local/otsec/contracts/store"
 )
 
+// CommitCaps returns the most bytes and the most records the receiver puts
+// in one part now: Config.MaxCommitBytes and MaxCommitRecords, or their
+// defaults, lowered if the Log has refused a larger part (see commitParts).
+func (r *Receiver) CommitCaps() (bytes int64, records int) {
+	return r.commitAt.Load(), int(r.commitN.Load())
+}
+
 // partEnd returns where the part of recs that starts at lo ends: the most
 // records that fit both commit caps, the bytes of their events and their
 // number, and at least one, because a record over the byte cap commits alone

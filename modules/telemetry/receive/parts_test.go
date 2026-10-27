@@ -398,3 +398,31 @@ func TestRecordCapPlusOneDatagramsAllStored(t *testing.T) {
 		})
 	}
 }
+
+// TestCommitCapsAreReported: the caps the receiver works to are the ones it
+// was configured with, or the defaults for zero, so the node can check
+// that the Log's options reached it; and a Log that refuses lowers them.
+func TestCommitCapsAreReported(t *testing.T) {
+	mk := func(bytes int64, records int) *Receiver {
+		g := newRig(t, asset.SyslogTCP, func(c *Config) { c.MaxCommitBytes, c.MaxCommitRecords = bytes, records })
+		return g.r
+	}
+	if b, n := mk(0, 0).CommitCaps(); b != store.DefaultMaxCommitBytes || n != store.DefaultGroup.MaxEvents {
+		t.Errorf("defaults: %d bytes, %d records", b, n)
+	}
+	if b, n := mk(256<<10, 7).CommitCaps(); b != 256<<10 || n != 7 {
+		t.Errorf("configured: %d bytes, %d records", b, n)
+	}
+	tap := &tapLog{gate: make(chan struct{})}
+	g := splitRig(t, asset.SyslogTCP, bytesCap(store.MinRecordBytes), 0, 0, tap, nil)
+	sent := bigMsgs(40, 6000)
+	c := g.dial(addrA)
+	defer c.Close()
+	c.Write(octet(sent...))
+	g.wait("all read", func() bool { return g.r.Status().Received == int64(len(sent)) })
+	close(tap.gate)
+	g.wait("all stored", func() bool { return g.store.count() == len(sent) })
+	if b, n := g.r.CommitCaps(); b >= store.DefaultMaxCommitBytes || n >= store.DefaultGroup.MaxEvents {
+		t.Errorf("after a refusal: %d bytes, %d records", b, n)
+	}
+}
