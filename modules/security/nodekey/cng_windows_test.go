@@ -204,6 +204,11 @@ func atDepth(d int, f func()) byte {
 // short ("not an ECDSA P-256 public key", #199's Windows job), a signature
 // fails to verify, or a DACL read sees no descriptor. call's
 // go:uintptrescapes moves every pointer it is passed to the heap.
+//
+// It is a smoke test, not the proof: on the hosted runner it passed
+// without the fix, at both strides tried (#201's first two runs), so the
+// window is narrower there than on Linux. TestCNGPointersEscape is the
+// deterministic check.
 func TestCNGStackMoves(t *testing.T) {
 	needElevated(t)
 	keys := CNG{}
