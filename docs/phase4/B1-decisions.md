@@ -176,7 +176,7 @@ Date: 2026-10-27. Sources: the review threads on #246, #247, #250 and #254; B6's
 
 **C7 0.6 and C8 0.5 (#250, B3).**
 1. `AdminChecks` runs binding, then authority, then window, then replay. A refused approval does not spend its nonce (D4-2).
-2. HR-14: an admin client computes `baseline_digest` itself, over the stored bytes it decodes for display, and never takes it from the node (C7 0.6 `doc.go`).
+2. HR-14: for a baseline acknowledgement or a change approval, an admin client computes the digest itself, over the record's stored bytes that it decodes for display and never over a C5 frame, and never takes the digest from the node (C7 0.6 `doc.go`).
 
 **Brief amendments.**
 - P4-A2's acceptance reads "the same configuration read twice, with a different time and any documented non-semantic difference, gives an empty difference".
@@ -205,10 +205,13 @@ Date: 2026-10-27. Source: B5's brief on #265.
 2. Every other TLS file fault still stops the node at start, and nothing falls back to another credential, plain TLS or the system roots.
 3. Targets get the same 30-day expiry warning as listeners.
 4. At each 10 s check, the node re-checks the period of every link it held back, using the certificate it already loaded, and starts the link once the period is valid. A running link is never stopped at expiry.
-5. B5 states how expired trust anchors behave, and tests it.
+5. An expired trust anchor is never trusted. The link it would verify stays held back or refuses the peer, and it never accepts a peer unverified. B5 states this and pins it with a test.
 6. Alarm names and status fields stay out of C6 and C8 enumerations. Any change to those enumerations comes to B1 first.
 7. A test shows a required target held back past its quota, with every alarm in order and no silent prune.
 8. B4 provides the `ErrCertificatePeriod` sentinel in `receive` and `forward`. B3, B6 and B4 review.
+9. When a running link's certificate passes its end, the node raises an alarm that names the link, and it keeps raising it while the link runs (B3 on #277).
+10. A test shows that a held-back link opens no socket and sends no byte until its period is valid. This covers item 2's rule that a held-back link falls back to nothing.
+11. The node judges a period by the same clock it uses at start. A clock that is set back can start a held link, just as it can at start. B3 records this in HR-13 when the node side lands.
 
 ## D4-12: the owner's PC runs are paused (owner, 2026-10-27)
 
@@ -228,6 +231,10 @@ Date: 2026-10-27. Source: B2's design note, `docs/phase4/B2-register-rev5.md` (#
    - `max_total_bytes` is at most C2's 1 MiB session ceiling, and `deadline_ms` at most its 600 s. A step's `max_reply_bytes` is at most its run's total. A package that breaks any of these fails validation.
    - `Matcher.Permit` still checks each line, and `CheckLines` requires exactly the run's lines.
    - A state-changing or Level 2 step in a run is invalid in 0.3.
+   - One authentication per session (B3 on #277). If a step meets an unexpected prompt, or the session drops to Level 0, the run stops: it sends `QUI`, keeps what it read, fails as a whole, and never sends `ACC` a second time. A test drops the relay to Level 0 mid-run.
+   - A failed run sets the failed-auth floor and the suspension exactly as a failed single operation does, with the same codes. A confirmed login with no `QUI` sets the floor from the session's end.
+   - `runs[]` are covered by the register's signature, and a run is read only from a verified register. One invalid step fails validation of the whole package.
+   - The adapter does not assume that Level 1 outlasts `deadline_ms`. The relay's own timeouts can end the session first, and the first rule above covers that case.
 2. **Caps.** The read's total cap T is 512 KiB. The configuration record cap is 1.5 MiB, which replaces C9's provisional 1 MiB (D4-9, C9 item 1).
    - The cap is a derived bound (`2 × T + 363,442` bytes), and a test enforces it, as for the SER cap. B2 owns that test, which ships in the register revision 5 PR, because it reads the run's `max_total_bytes` and C9's constants.
    - The configuration database's commit cap is 1.5 MiB, and its reserve follows the C5 0.4 formula. The 64- and 384-byte value assumptions are `documented-untested`.
