@@ -100,7 +100,10 @@ type Params struct {
 	// RepeatsWindowS and the baseline's MaxPerWindow for it is below
 	// RepeatsN. The window of an occurrence at t holds the occurrences in
 	// (t - RepeatsWindowS, t]: two exactly RepeatsWindowS apart are in
-	// different windows (B6 on #254).
+	// different windows (B6 on #254). The rule runs on received time and
+	// skips type-only rows, as rate and time do (D4-9, amending D4-4 item
+	// 2): a read returns its rows at one received instant, so a first read
+	// or a backlog would otherwise look like a burst.
 	RepeatsN       int64 `json:"repeats_n"`
 	RepeatsWindowS int64 `json:"repeats_window_s"`
 	// Rate: buckets of RateBucketS from the Unix epoch, on received time.
@@ -190,8 +193,9 @@ type Type struct {
 	Full  int64 `json:"full"`
 	// HoursUTC counts the Full occurrences by UTC hour of TimeClock.
 	HoursUTC [24]int64 `json:"hours_utc"`
-	// MaxPerWindow is the most counted occurrences in any interval of
-	// Params.RepeatsWindowS.
+	// MaxPerWindow is the most Full occurrences in any window of
+	// Params.RepeatsWindowS (0 when Full is 0): catch-up rows share one
+	// received time, so they are left out (D4-9).
 	MaxPerWindow int64 `json:"max_per_window"`
 	// MaxPerBucket is the most Full occurrences in one rate bucket.
 	MaxPerBucket int64 `json:"max_per_bucket"`
@@ -478,8 +482,8 @@ func (t *Type) check(c *checker, f string, p *Params, start, end time.Time) {
 	if hours != t.Full {
 		c.fail(CodeConflict, f+".hours_utc", "sum %d, not full %d", hours, t.Full)
 	}
-	if t.MaxPerWindow < 1 || t.MaxPerWindow > t.Count {
-		c.fail(CodeRange, f+".max_per_window", "%d is outside 1 to count %d", t.MaxPerWindow, t.Count)
+	if t.MaxPerWindow < 0 || t.MaxPerWindow > t.Full || (t.Full > 0) != (t.MaxPerWindow > 0) {
+		c.fail(CodeRange, f+".max_per_window", "%d is outside 1 to full %d (0 only when full is 0)", t.MaxPerWindow, t.Full)
 	}
 	if t.MaxPerBucket < 0 || t.MaxPerBucket > t.Full || (t.Full > 0) != (t.MaxPerBucket > 0) {
 		c.fail(CodeRange, f+".max_per_bucket", "%d is outside 1 to full %d (0 only when full is 0)", t.MaxPerBucket, t.Full)

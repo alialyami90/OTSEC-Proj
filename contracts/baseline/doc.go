@@ -35,9 +35,12 @@
 //     received.utc, so a read that returns many old rows at once is not a
 //     burst. Rows aligned first-read or gap-before, and every row of the
 //     first successful read after a recorded V-S12 collection failure, are
-//     UseTypeOnly: they count toward the type set, the new-type rule and the
-//     repeats rule, never toward rate or hour learning, and the rate and
-//     time rules skip them.
+//     UseTypeOnly: they count toward the type set and the new-type rule
+//     only, never toward window, rate or hour learning, and the repeats,
+//     rate and time rules skip them (D4-9, amending D4-4 item 2, which had
+//     kept repeats: on received time a first read's buffer could switch
+//     repeats off for the busiest types, and a backlog after an outage
+//     raise false repeats, B6 on #254).
 //   - Repeats. A repeat, the same record_sha256 again, is an occurrence, not
 //     a duplicate to drop: the repeats rule needs it.
 //   - possible-duplicate rows (D4-4 item 3, PossibleDuplicates). A SER row
@@ -83,6 +86,12 @@
 //     RTAC tags such as "Breaker 1" and "Breaker 2" (D4-4 item 4). A dialect
 //     rule may follow in a later minor if B6's tests or a real capture show
 //     that the merge hides a distinction that matters.
+//   - A burst that happened during a collection outage, or before the
+//     first read, is not alarmed as repeats: those rows reach the node at
+//     one received instant and are type-only. They still count in the type
+//     set and the type's Count, and the outage is a V-S12 health event. A
+//     repeats rule on device time may come in a later minor once the
+//     device's offset is known (V-S3).
 //   - Hours are UTC hours of the received time, so a site's local working day
 //     shifts by an hour across daylight saving.
 //   - Every value learnt on a simulator or a synthetic series says nothing

@@ -12,13 +12,29 @@ type Use string
 const (
 	// UseNone: the event belongs to no asset's baseline.
 	UseNone Use = "none"
-	// UseTypeOnly: the type set, the new-type rule and the repeats rule, but
-	// not rate or hour learning, and the rate and time rules skip it
-	// (catch-up, D4-4 item 2).
+	// UseTypeOnly: the type set and the new-type rule only. It is not in
+	// rate, hour or window learning, and the repeats, rate and time rules
+	// skip it (catch-up, D4-4 item 2 as D4-9 amends it).
 	UseTypeOnly Use = "type-only"
 	// UseFull: every rule.
 	UseFull Use = "full"
 )
+
+// Applies says whether an event of this use counts toward rule r, both in
+// learning and once the baseline is active: a full event toward every rule,
+// a type-only one toward new-type only (D4-9), a none one toward none. Its
+// window, bucket, hour and period learning follow the same split: only
+// full events feed them.
+func (u Use) Applies(r Rule) bool {
+	switch u {
+	case UseFull:
+		_, ok := ruleParams[r]
+		return ok
+	case UseTypeOnly:
+		return r == RuleNewType
+	}
+	return false
+}
 
 // Exclusion says why an event has UseNone. Closed.
 type Exclusion string

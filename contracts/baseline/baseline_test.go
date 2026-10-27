@@ -56,6 +56,35 @@ func TestValidBaseline(t *testing.T) {
 	}
 }
 
+// TestUseApplies: type-only rows, first-read included, count toward
+// new-type alone (D4-9).
+func TestUseApplies(t *testing.T) {
+	for _, r := range []Rule{RuleNewType, RuleRepeats, RuleRate, RuleTime, RuleAbsence} {
+		if !UseFull.Applies(r) || UseNone.Applies(r) || UseTypeOnly.Applies(r) != (r == RuleNewType) {
+			t.Errorf("%s: full %v, type-only %v, none %v", r, UseFull.Applies(r), UseTypeOnly.Applies(r), UseNone.Applies(r))
+		}
+	}
+	if UseFull.Applies("storm") {
+		t.Error("an unknown rule applies")
+	}
+	if _, _, use, _ := Classify(serRow("51P1P", "Asserted", event.AlignFirstRead), false); use.Applies(RuleRepeats) {
+		t.Error("a first-read row reaches repeats")
+	}
+}
+
+// TestCatchUpOnlyType: a type seen only in catch-up rows has no window,
+// bucket or hours (D4-9).
+func TestCatchUpOnlyType(t *testing.T) {
+	b := valid()
+	tp := &b.Types[0]
+	b.Counts.Full -= tp.Full
+	b.Counts.TypeOnly += tp.Full
+	tp.Full, tp.HoursUTC, tp.MaxPerWindow, tp.MaxPerBucket = 0, [24]int64{}, 0, 0
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBaselineRules(t *testing.T) {
 	cases := []struct {
 		name string
@@ -69,6 +98,12 @@ func TestBaselineRules(t *testing.T) {
 		{"relearn names previous", func(b *Baseline) { b.Version = 2 }, CodeForm},
 		{"rate factor under 100", func(b *Baseline) { b.Params.RateFactorPct = 99 }, CodeRange},
 		{"no alarm hold", func(b *Baseline) { b.Params.AlarmHoldS = 0 }, CodeRange},
+		{"max_per_window counts full only", func(b *Baseline) { b.Types[0].MaxPerWindow = b.Types[0].Full + 1 }, CodeRange},
+		{"max_per_window zero with full", func(b *Baseline) { b.Types[0].MaxPerWindow = 0 }, CodeRange},
+		{"max_per_window from type-only rows", func(b *Baseline) {
+			// Type 0 has 5 type-only occurrences; claiming a window of 6 counts them.
+			b.Types[0].MaxPerWindow = 6
+		}, CodeRange},
 		{"alarm hold under an hour", func(b *Baseline) { b.Params.AlarmHoldS = MinAlarmHoldS - 1 }, CodeRange},
 		{"alarms per hold over the ceiling", func(b *Baseline) { b.Params.MaxAlarmsPerHold = MaxAlarmsPerHoldCeiling + 1 }, CodeRange},
 		{"clock", func(b *Baseline) { b.Params.TimeClock = "wall" }, CodeForm},
