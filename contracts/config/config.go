@@ -256,12 +256,18 @@ const (
 	// platform/node.ConfigRecordBytes is the same number; a test in
 	// bound_node_test.go fails if the two drift apart.
 	RecordCap = 3 << 19
-	// MaxTranscriptBytes is the longest transcript a configuration run keeps:
-	// the register run's max_total_bytes. A test holds it to the register.
+	// MaxTranscriptBytes is the register run's max_total_bytes, which bounds
+	// the bytes a configuration run receives, not its whole transcript. The
+	// transcript also holds every byte sent (the lines and the credential
+	// marker, a few hundred bytes) and up to the SEL-751 adapter's 4,096-byte
+	// allowance for the QUI reply, so an ok run's transcript can be about
+	// 5 KiB longer than this; RecordHeadroom covers that (C6 on #345). A test
+	// holds it to the register.
 	MaxTranscriptBytes = 512 << 10
-	// RecordHeadroom is what a record at both bounds leaves under RecordCap,
-	// for a source cursor and anything else Record.Bytes counts that the
-	// snapshot and the transcript do not (B1 on #345).
+	// RecordHeadroom is what a record at both bounds leaves under RecordCap:
+	// for the transcript's sent bytes and QUI allowance beyond
+	// MaxTranscriptBytes, a source cursor, and anything else Record.Bytes
+	// counts that the snapshot and the transcript do not (B1 on #345).
 	RecordHeadroom = 64 << 10
 	// MaxSettings bounds the settings of all sections together: S22's 8,734
 	// plus a quarter. A relay printing more is not read as a SEL-751.
