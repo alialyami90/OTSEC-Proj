@@ -5,7 +5,7 @@ B5, 2026-10-28; updated by C5 the same day to the rulings. Nothing here is measu
 ## Rulings
 
 - **State across a restart: option A** ([D4-26](B1-decisions.md) item 1). Snapshots from B4 (#344), written with the per-stream positions they reflect, then a required C5 consumer committed after the snapshot is durable. On restore each stream resumes from the later of the snapshot's position and the consumer's cursor. A snapshot that does not restore raises an alarm and starts an audited re-learn naming the replaced baseline; it is never a silent restart.
-- **Where the checkpoint lives** (B4's review of #343, option (b)). A record of the asset's own configuration stream `config/<asset>`, bounded by `ConfigRecordBytes` (1.5 MiB), with a new `ConfigDocuments` kind. The quota floor counts `EventCheckpointRecords` (2) records per event-baseline asset (#343). A learner too large to checkpoint (near the 4096-type ceiling with long names) is refused: the node keeps the last checkpoint and raises a health event. The node asks B4 (now C4) for the byte bound as a parameter of `Snapshot`.
+- **Where the checkpoint lives** (B4's review of #343, option (b); D4-30 in direction, C1 on #364). Records of the asset's own configuration stream `config/<asset>`, each bounded by `ConfigRecordBytes` (1.5 MiB), with a new `ConfigDocuments` kind: **one record per half**, the learner's and the detector's, each self-contained (its own snapshot and feeder state), because both halves together can reach about 2.05 MB during a re-learn. C10 0.2 lowers the ceilings (`max_types` 512, `repeats_n` 31) so that each half fits one record. `Snapshot(maxBytes)` (#364) takes the record's room and refuses early above it; the node then keeps the last checkpoint and raises a health event. The quota floor counts `EventCheckpointRecords` per event-baseline asset: 2 in #343, 4 from slice 1c (two halves, the last and room for the next), about 8 MiB per asset whose configuration is not read.
 - **`config.baseline_recorded` in C8 0.8** (D4-26 items 2 and 4, #346), event kind only. The node stores the baseline first and writes the record after; at start it folds the chain and writes any missing record. A baseline whose record is not yet in the chain is not awaiting acknowledgement and cannot be acknowledged.
 - **`correlation_id`** ([D4-29](B1-decisions.md), C1 on #346). On `config.baseline_recorded` it is the 64 hex digits of `baseline_digest`, without `sha256:`. The acknowledgement keeps its signed C7 request ID, and the two join on `baseline_digest`.
 - **Order.** The one below, which the B-to-C handoff set (`handoffs/HANDOFF-SUMMARY.md`, slices 1a to 1d): snapshots before the lifecycle. D4-26 item 3 had the lifecycle first with state in memory only; doing the snapshots first means no build of the lifecycle ever runs without its state kept. C1 to confirm on this PR.
@@ -55,7 +55,25 @@ I ask B4 for A, with an `Equal`-after-restore test: a learner or detector restor
 
 Slices 1 (#343) and 2 have no dependence on C4.
 
+## Slice 1c: the checkpoint
+
+This is how slice 1c will be built. It needs #364 (Snapshot and Restore), C10 0.2 (the lower ceilings), and #343 and #365.
+
+- **The document.** `otsec.eventcheckpoint/0.1`, with `half` set to `learner` or `detector`. It holds:
+  - the asset, and the baseline it belongs to (the learner's version and previous hash, or the detector's baseline hash);
+  - the watermark, and per stream the seq to restart after (every event at or before it was passed, or was not the asset's) and the seq read through;
+  - the previous SER read's alignment keys, the open gap (its start and reason), and the late count;
+  - the half's snapshot, as base64.
+
+  `ConfigDocuments` accepts it when it decodes strictly, its lists are within their caps, its snapshot is at most `MaxSnapshotBytes`, and it is in the bytes the node's encoder produces. The store keeps exactly the bytes it is given. The snapshot is opaque to the validator: its integrity is the snapshot's own SHA-256, which `Restore` checks.
+- **When.** At most every 15 minutes, only when that half has taken something since its last checkpoint, and at a clean stop. A checkpoint is one `AppendBatch` of the asset's one or two records. Where the configuration database's commit cap (c5's default, 1 MiB, in `groupFor`) is below two records, each half commits on its own, which is safe because each record is self-contained.
+- **The consumer.** A required C5 consumer, `node-eventbaseline`, on every stream the feeder reads. Its cursor on each stream is the lowest restart point of the observed assets, and the node saves it only after the checkpoint's commit has returned (the `node-suspensions` pattern). A crash between the two steps re-reads from the older cursor, and the restore skips what the checkpoint already covers. Because the consumer is required, a feeder that stops holds pruning of those streams. That is visible as the consumer's lag in health, and at the quota the store's stop rule (D4-19) applies.
+- **Restore at start.** For each observed asset, the newest checkpoint of each half in `config/<asset>` is restored. Each stream resumes after the half's restart point. A re-read event at or before the half's watermark and at or before its read-through seq was already passed, or already counted late, so it is skipped without being counted again.
+- **A half that does not restore** (any `ErrSnapshot`) raises an alarm and an audit record. A learner that does not restore starts an audited re-learn that names the replaced baseline (D4-26). A detector that does not restore is rebuilt from the acknowledged baseline, which is stored and hashed: the baseline is not lost, only the open windows and holds. The alarm says so.
+- **Retention.** A checkpoint superseded by a newer one of the same half and asset is no longer needed. Removing it needs a remover rule (D4-20 rule 3, C4's note on #343), which is C1's amendment. Until then the floor's "room for the next" means one superseded record of each half may stay, and quota pressure from more is visible.
+- **Tests.** Restart at every step of GT-INJ gives the transcript of a run that never stopped. A crash before and after the cursor commit loses or duplicates nothing. A corrupt, wrong-version or other-parameters snapshot raises the alarm and the stated recovery, never a silent restart. `ErrSnapshotTooLarge` keeps the last checkpoint and raises the health event.
+
 ## Questions still open
 
-- **C4:** the byte bound on `Snapshot` as a parameter (refusing above it with an error), and whether an oversize snapshot can be detected before it is fully built. Asked on #343 and again on 2026-10-28.
+- **C1:** the C5 contract text (`contracts/store`, class configuration) lists the documents the validator accepts as C9 and C10 documents. The checkpoint is a node document in the same class. Does that need a C5 minor, or only the `ConfigDocuments` comment? And the remover rule for superseded checkpoints (D4-20 amendment).
 - **C4:** exporting `baseline.Params.Validate()`, so the node drops its copy of the checks and the pin test.
