@@ -602,6 +602,7 @@ var (
 // status, once per Tick, and raises AlarmCommitSlow.
 func (r *Runtime) sampleCommits() {
 	now := r.opt.Now()
+	raised := false
 	for _, d := range r.dbs {
 		db, _, _ := r.view(d)
 		if db == nil {
@@ -624,8 +625,15 @@ func (r *Runtime) sampleCommits() {
 		}
 		r.mu.Unlock()
 		if due {
+			raised = true
 			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: AlarmCommitSlow, At: now,
 				Detail: fmt.Sprintf("a write transaction took %v (running now: %v); every writer to this database waits for it, so the disk may be slow, and a receiver's queue can fill", recent.Round(time.Millisecond), cs.Waiting.Round(time.Millisecond))})
 		}
+	}
+	if raised {
+		// The rest of Tick writes to the databases, which wait for the slow
+		// transaction, so the status file is written now rather than at the
+		// end of Tick (B6 on #311, strace-injected fsync delays).
+		r.opt.Status.Write(string(r.cfg.NodeID))
 	}
 }
