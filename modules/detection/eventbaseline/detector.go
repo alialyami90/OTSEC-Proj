@@ -439,7 +439,7 @@ func (d *Detector) raise(out *Output, now int64, r raise) {
 	obs := r.obs
 	if d.beyond > 0 {
 		note := fmt.Sprintf("; %d more held breaks beyond the cap of %d tracked new types are not listed", d.beyond, pairCap)
-		obs = clip(obs, baseline.ExplainMax-len(note)) + note
+		obs += note // every rule's observation is under 120 bytes, so the note fits ExplainMax whole
 		d.beyond = 0
 	}
 	a := &baseline.Alarm{

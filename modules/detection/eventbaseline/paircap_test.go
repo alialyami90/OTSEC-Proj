@@ -142,6 +142,9 @@ func TestPairCapFloodStaysBoundedAndCountsStayExact(t *testing.T) {
 			if err := a.Validate(); err != nil {
 				t.Fatalf("alarm %v: %v", a.Observation, err)
 			}
+			if beyond := beyondNote.FindString(a.Observation); len(a.Observation)-len(beyond) >= 120 {
+				t.Fatalf("an observation of %d bytes before the note: the note may not fit", len(a.Observation)-len(beyond)) // detector.go: raise
+			}
 			if m := beyondNote.FindStringSubmatch(a.Observation); m != nil {
 				c, _ := strconv.ParseInt(m[1], 10, 64)
 				stated += c
