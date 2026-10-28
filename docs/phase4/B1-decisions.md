@@ -297,3 +297,18 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
    - A committed part is never sent again. A stream part refused for any reason other than size is held and retried, as before. A datagram part refused that way is dropped and counted as store.
    - The refusal does not say which cap a part exceeded, so a part refused as too large halves only the record cap, never below one. The byte cap is never lowered. The caps only fall during the receiver's life.
    - A lone record the Log refuses as too large is dropped and counted as store, with `LastErr` set. This path is defensive: the frame limit keeps a message well under the record cap.
+4. **D4-14 as built (#281, #282, #283; B5).** These are the values on `main` at 49b9454. The provisional figures in D4-14 item 2 are replaced.
+   - `RowWALBytes` is 3 KiB per record. B6's sweep on the built layout found a worst case of 2,051 B, and the worst WAL was 0.905 of the rule.
+   - `DiskBytesPerQuotaByte` is 2.5. B6 measured a worst file growth of 2.24.
+   - `MaxHoldsPerRecord` is 16.
+   - Recovery reserves at a 512 KiB WAL bound:
+
+     | Database | Cap | Records | Reserve |
+     | --- | --- | --- | --- |
+     | evidence | 11 MiB | 2048 | 20,093,337 B |
+     | syslog | 1 MiB | 1024 | 5,413,273 B |
+     | audit | 1 MiB | 128 | 2,660,761 B |
+     | configuration | 1.5 MiB | 1 | 2,847,334 B |
+
+     The configuration database arrives with the next node PR.
+   - All figures are `simulated` and measured on Linux. The reserve formula stays `desk` until B6's storekill leg runs (D4-9, C5 item 5).
