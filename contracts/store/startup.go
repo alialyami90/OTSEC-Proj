@@ -68,6 +68,20 @@ type StartupEnv interface {
 	CreateReserve(ctx context.Context, r Reserve, bytes int64) error
 }
 
+// ClassUse is one class's payload bytes against its quota.
+type ClassUse struct {
+	Class StreamClass
+	Used  int64
+	Limit int64
+	// WarnAt is the quota's warning level in bytes (WarnFraction of Limit),
+	// 0 for none.
+	WarnAt int64
+	// Record is the largest record the class accepts (Quota.MaxRecordBytes),
+	// 1 where it has no cap of its own. A class with less than Record bytes
+	// of room refuses a record of that size.
+	Record int64
+}
+
 // RecoveryStore is an open store as startup recovery uses it. The node keeps
 // using it after startup.
 type RecoveryStore interface {
@@ -82,15 +96,16 @@ type RecoveryStore interface {
 	CheckSettings(ctx context.Context) error
 	// QuickCheck runs a structural check of the database.
 	QuickCheck(ctx context.Context) error
-	// Usage is the payload the database's class quotas count (the sum of its
-	// classes' bytes, as the runtime refusal counts them, D4-14) and its
-	// limit (the sum of its class quotas). It is not the pages: they run
-	// well over the payload (DiskBytesPerQuotaByte), and comparing them with
-	// a quota reported a refusal that was not happening (B6, #299). A delete
-	// lowers it at once, before compaction returns the free pages, so step 6
-	// stops at the target instead of pruning every confirmed event (A6
-	// review of C5, change 2).
-	Usage(ctx context.Context) (used, limit int64, err error)
+	// ClassUsage is, for each class of the database, the payload its quota
+	// counts (the class's bytes, as the runtime refusal counts them, D4-14)
+	// and its quota. It is not the pages: they run well over the payload
+	// (DiskBytesPerQuotaByte), and comparing them with a quota reported a
+	// refusal that was not happening (B6, #299). Each class is measured
+	// against its own quota, so a full class beside a light one is still
+	// full (B6 on #320). A delete lowers Used at once, before compaction
+	// returns the free pages, so step 6 stops at the target instead of
+	// pruning every confirmed event (A6 review of C5, change 2).
+	ClassUsage(ctx context.Context) ([]ClassUse, error)
 	// CompactStep returns up to pages free pages to the filesystem and
 	// checkpoints, in one step; more is false when no free pages are left.
 	CompactStep(ctx context.Context, pages int) (more bool, err error)
@@ -544,24 +559,34 @@ func ModeChangeOf(prev, next Report, at time.Time) (ModeChange, bool) {
 	return ModeChange{From: prev.Mode, To: next.Mode, At: at, Alarms: next.Alarms}, true
 }
 
-// prune runs prune passes, one step per stream per pass, while usage is
-// above the target and a pass still deletes something. The boundary is
-// recomputed from persisted cursors before every step.
+// prune runs prune passes, one step per stream per pass, while a class is
+// above the target and a pass still deletes something. Only the streams of a
+// class above the target are stepped. The boundary is recomputed from
+// persisted cursors before every step.
 func (s *startup) prune(ctx context.Context, st RecoveryStore) (int, error) {
 	total := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
 		}
-		used, limit, err := st.Usage(ctx)
+		uses, err := st.ClassUsage(ctx)
 		if err != nil {
 			return total, err
 		}
-		if float64(used) <= s.p.PruneTarget*float64(limit) {
+		over := map[StreamClass]bool{}
+		for _, u := range uses {
+			if float64(u.Used) > s.p.PruneTarget*float64(u.Limit) {
+				over[u.Class] = true
+			}
+		}
+		if len(over) == 0 {
 			return total, nil
 		}
 		pass := 0
 		for _, stream := range s.p.Streams {
+			if !over[stream.Class] {
+				continue
+			}
 			b, err := ComputeBoundary(ctx, st, st, s.p.Consumers, stream.ID, stream.Class, s.now)
 			if errors.Is(err, &Error{Code: CodeNoConsumers}) {
 				continue // nothing confirms this stream; none of it is prunable
@@ -582,17 +607,38 @@ func (s *startup) prune(ctx context.Context, st RecoveryStore) (int, error) {
 	}
 }
 
-// checkQuota raises the alarms of a store that pruning could not bring below
-// its limit: it starts, but the first commit will be refused (A6 review of
-// C5, change 4). Every required consumer whose persisted cursor holds a
-// stream back is named as stalled.
+// checkQuota raises the alarms of a store whose classes pruning could not
+// bring below their limits. A class with no room for its largest record
+// starts, but that record's commit will be refused (A6 review of C5, change 4); a class at its warning level
+// raises the warning the runtime would raise at its next commit, so a
+// restart does not hide it. Each alarm names its class, and every required
+// consumer whose persisted cursor holds one of the class's streams back is
+// named as stalled.
 func (s *startup) checkQuota(ctx context.Context, st RecoveryStore) {
-	used, limit, err := st.Usage(ctx)
-	if err != nil || used < limit {
+	uses, err := st.ClassUsage(ctx)
+	if err != nil {
 		return
 	}
-	s.alarm(AlarmQuotaReached, StepPrune, fmt.Sprintf("%d of %d bytes used after pruning; new events will be refused", used, limit))
+	for _, u := range uses {
+		switch {
+		case u.Used+max(u.Record, 1) > u.Limit:
+			s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmQuotaReached, At: s.now, Class: u.Class, Step: StepPrune,
+				Detail: fmt.Sprintf("class %s: %d of %d bytes used after pruning; a record of %d bytes will be refused", u.Class, u.Used, u.Limit, max(u.Record, 1))})
+			s.stalled(ctx, st, u.Class)
+		case u.WarnAt > 0 && u.Used >= u.WarnAt:
+			s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmQuotaWarning, At: s.now, Class: u.Class, Step: StepPrune,
+				Detail: fmt.Sprintf("class %s: %d of %d bytes used after pruning, at or above its warning level of %d", u.Class, u.Used, u.Limit, u.WarnAt)})
+		}
+	}
+}
+
+// stalled names, for the streams of class, each required consumer whose
+// persisted cursor holds the stream back.
+func (s *startup) stalled(ctx context.Context, st RecoveryStore, class StreamClass) {
 	for _, stream := range s.p.Streams {
+		if stream.Class != class {
+			continue
+		}
 		last, err := st.LastCommitted(ctx, stream.ID)
 		if err != nil {
 			continue
@@ -607,7 +653,7 @@ func (s *startup) checkQuota(ctx context.Context, st RecoveryStore) {
 		}
 		for _, c := range s.p.Consumers {
 			if c.Stream == stream.ID && c.Delivery == Required && at[c.ID] < last {
-				s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmRequiredStalled, At: s.now, Stream: stream.ID, Step: StepPrune,
+				s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmRequiredStalled, At: s.now, Class: class, Stream: stream.ID, Step: StepPrune,
 					Detail: fmt.Sprintf("consumer %s confirmed through %d of %d", c.ID, at[c.ID], last)})
 			}
 		}

@@ -50,12 +50,18 @@
 //     stay held as evidence. A
 //     reconcile that meets a hold code it does not know keeps that hold
 //     unchanged (no release, no new reason) and raises an alarm.
-//   - Startup measures a quota in class bytes (a defect fix in 0.6, B6's
-//     finding on #299). RecoveryStore.Usage is the payload the class quotas
-//     count, as the runtime refusal counts it, not the pages, which run well
-//     over it: a class at 75% of its quota raised store-quota-reached at
-//     every start. Pages are the store's PageBytes and stay bounded by
-//     DiskBytesPerQuotaByte.
+//   - Startup measures each class's quota in class bytes (a defect fix in
+//     0.6, B6's findings on #299 and #320). RecoveryStore.ClassUsage is, for
+//     each class, the payload its quota counts, as the runtime refusal counts
+//     it, against that class's own quota. It is not the pages, which run well
+//     over the payload (a class at 75% of its quota raised
+//     store-quota-reached at every start), and the classes are not summed (a
+//     full class beside a light one restarted silently). Pruning steps only
+//     the streams of a class above the target. A class with no room for its
+//     largest record raises store-quota-reached naming the class, and a
+//     class at its warning level raises store-quota-warning, as the runtime
+//     would at its next commit. Pages are the store's PageBytes and stay
+//     bounded by DiskBytesPerQuotaByte.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
