@@ -32,6 +32,45 @@ func notYet(d time.Duration) nodeconfigtest.Period {
 	return nodeconfigtest.Period{NotBefore: now.Add(d), NotAfter: now.Add(d + time.Hour)}
 }
 
+// notYetMargin is how long before its period begins a certificate is made
+// for the tests that watch a link released. Setup and the checks made while
+// the link is held must finish inside it: a Windows runner took longer
+// than the 3 s these tests first had (#290), and the certificate holds whole
+// seconds, so its NotBefore is cut down by up to one.
+const notYetMargin = 6 * time.Second
+
+// window is the stretch before a certificate's period begins, in which the
+// link it is for must be held. A check that fails after the period began
+// shows nothing about a held link, and says so.
+type window struct {
+	t     *testing.T
+	begin time.Time
+}
+
+func newWindow(t *testing.T, p nodeconfigtest.Period) window {
+	return window{t, p.NotBefore.Truncate(time.Second)}
+}
+
+func (w window) open() bool { return time.Now().Before(w.begin) }
+
+// require fails the test unless the window is still open.
+func (w window) require(what string) {
+	w.t.Helper()
+	if !w.open() {
+		w.t.Fatalf("%s: the certificate's period had already begun, so a held link cannot be checked; the setup took longer than %s", what, notYetMargin)
+	}
+}
+
+// fatalf reports a failed check made while the link should be held. If the
+// window closed meanwhile, the check says nothing, and the failure says that.
+func (w window) fatalf(format string, args ...any) {
+	w.t.Helper()
+	if !w.open() {
+		w.t.Fatalf("the certificate's period began during the checks, so this shows nothing: "+format, args...)
+	}
+	w.t.Fatalf(format, args...)
+}
+
 func statusAlarms(st *Status, code, target string) []StatusAlarm {
 	var out []StatusAlarm
 	for _, a := range st.Snapshot("x").Alarms {
@@ -117,7 +156,9 @@ func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
 // certificate it already loaded, and its events are delivered (items 4 and
 // 10).
 func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
-	nc, p, dir := forwardConfigValid(t, 1, nodeconfigtest.Validity{Client: notYet(3 * time.Second)}, nil)
+	period := notYet(notYetMargin)
+	w := newWindow(t, period)
+	nc, p, dir := forwardConfigValid(t, 1, nodeconfigtest.Validity{Client: period}, nil)
 	srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -133,16 +174,17 @@ func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	runForwarding(t, fw)
+	w.require("after the node started")
 	end := time.Now().Add(1500 * time.Millisecond)
-	for time.Now().Before(end) {
+	for time.Now().Before(end) && w.open() {
 		fw.Check(bg)
 		if srv.Conns() != 0 {
-			t.Fatal("a connection was made while the certificate was not yet valid")
+			w.fatalf("a connection was made while the certificate was not yet valid")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if got := st.Snapshot("x").Targets["central"].HeldBack; got != "not-yet-valid" {
-		t.Fatalf("held back %q", got)
+		w.fatalf("held back %q", got)
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for len(srv.Acked()) == 0 && time.Now().Before(deadline) {
@@ -330,7 +372,7 @@ func TestExpiredListenerCertHoldsOnlyItsListener(t *testing.T) {
 		starts bool
 	}{
 		{"expired", expired(), "expired", false},
-		{"not yet valid", notYet(3 * time.Second), "not-yet-valid", true},
+		{"not yet valid", notYet(notYetMargin), "not-yet-valid", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			addr := freeAddr(t)
@@ -350,25 +392,38 @@ func TestExpiredListenerCertHoldsOnlyItsListener(t *testing.T) {
 			lockTLS(t, nc)
 			r, st, _ := start(t, parse(t, nc), dir)
 			defer r.Close()
+			w := newWindow(t, tc.period)
+			// For a certificate not yet valid, what shows a held listener is
+			// checked before the period begins; an expired one stays expired.
+			fail := func(format string, args ...any) {
+				t.Helper()
+				if tc.starts {
+					w.fatalf(format, args...)
+				}
+				t.Fatalf(format, args...)
+			}
+			if tc.starts {
+				w.require("after the node started")
+			}
 			ls := serve(t, r) // NewListening and Listen succeed with a held listener
 			waitOpen(t, ls, st, "lab-udp")
 			if ls.Addr("lab-udp") == nil {
 				t.Fatal("the other listener was not bound")
 			}
 			if ls.Addr("lab-tls") != nil {
-				t.Fatal("the held listener was bound")
+				fail("the held listener was bound")
 			}
 			if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
 				c.Close()
-				t.Fatal("something accepted a connection on the held listener's address")
+				fail("something accepted a connection on the held listener's address")
 			}
 			got := st.Snapshot("x").Listeners
 			if got["lab-tls"].HeldBack != tc.state || got["lab-tls"].Open || got["lab-udp"].HeldBack != "" || !got["lab-udp"].Open {
-				t.Fatalf("status %+v", got)
+				fail("status %+v", got)
 			}
 			a := statusAlarms(st, AlarmListenerHeldBack, "listener lab-tls")
 			if len(a) != 1 || !strings.Contains(a[0].Detail, tc.state) || !strings.Contains(a[0].Detail, "test-listener.crt") {
-				t.Fatalf("held-back alarms %+v", a)
+				fail("held-back alarms %+v", a)
 			}
 			if len(statusAlarms(st, AlarmListenerHeldBack, "listener lab-udp")) != 0 {
 				t.Fatal("the other listener was held back")
@@ -614,12 +669,14 @@ func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
 // nothing serves or closes (B6 on #290).
 func TestHeldListenerIsNotBoundAfterRun(t *testing.T) {
 	addr := freeAddr(t)
+	period := notYet(notYetMargin)
+	w := newWindow(t, period)
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := nc.WriteListenerCredentialValid(p, "test-listener", "127.0.0.1", notYet(2*time.Second)); err != nil {
+		if _, err := nc.WriteListenerCredentialValid(p, "test-listener", "127.0.0.1", period); err != nil {
 			t.Fatal(err)
 		}
 		nc.AddListener("lab-tls", "syslog-tls", addr)
@@ -641,8 +698,10 @@ func TestHeldListenerIsNotBoundAfterRun(t *testing.T) {
 	go func() { defer close(done); ls.Run(ctx) }()
 	cancel()
 	<-done
+	// Run returned while the listener was held.
+	w.require("when Run returned")
 	// The period becomes valid only now.
-	time.Sleep(3 * time.Second)
+	time.Sleep(time.Until(w.begin) + 500*time.Millisecond)
 	ls.Publish()
 	if ls.Addr("lab-tls") != nil {
 		t.Fatal("the held listener was bound after Run returned")
