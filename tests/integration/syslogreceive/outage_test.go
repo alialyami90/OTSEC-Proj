@@ -80,6 +80,7 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	// the clock from start until a marker sent after the flood is stored.
 	var F time.Duration
 	flood := func(end time.Time) time.Duration {
+		rows0, st0 := g.rows(), g.r.Status()
 		began := time.Now()
 		for i := 0; time.Now().Before(end); i++ {
 			c.Write(msg)
@@ -91,17 +92,11 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 		F = time.Since(began)
 		markers++
 		mark := fmt.Sprintf("<13>a6 marker %d", markers)
-		for wait := time.Now().Add(20 * time.Second); time.Now().Before(wait); {
-			known.Write([]byte(mark)) // again each poll: a datagram may be lost
-			for _, s := range g.events() {
-				if string(s.Bytes) == mark {
-					return time.Since(start)
-				}
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		g.markerFatalf(mark, "marker %q not stored", mark)
-		return 0
+		// The wait is on the receiver's own accounting, as in the restart
+		// tests, not a deadline: a fixed 20 s failed while the store's
+		// commit sat in FlushFileBuffers (#294, job 122631846811).
+		g.awaitMarker(known, mark, rows0, st0)
+		return time.Since(start)
 	}
 	bound := func(T time.Duration) int64 {
 		return per + int64(float64(per)*T.Seconds()/window.Seconds())

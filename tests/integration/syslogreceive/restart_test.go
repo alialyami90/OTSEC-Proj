@@ -132,22 +132,29 @@ func spentIn(recs []unknownRecord, now time.Time, window time.Duration) (n int64
 	return n
 }
 
-// floodUntil sends from the stranger, and from known asset A now and then,
-// until end; then it waits until a marker from A, sent after the flood, is
-// stored, so every stranger datagram before it has been spent or dropped.
-func (g *rig) floodUntil(end time.Time, mark string) {
+// floodFor sends from the stranger, and from known asset A now and then,
+// for d from when the rig's own setup is done; then it waits until a
+// marker from A, sent after the flood, is stored, so every stranger
+// datagram before it has been spent or dropped. It returns how many
+// stranger datagrams it sent. The flood is timed after the setup, not to
+// an end fixed before it: on a runner whose disk syncs take seconds, the
+// setup's own store read can outlast a sub-second flood, which then sends
+// nothing (#294, job 122640646042: the first run stored 0 bytes and
+// dropped none).
+func (g *rig) floodFor(d time.Duration, mark string) (sent int) {
 	g.t.Helper()
 	c := dialFrom(g.t, ipStranger, "udp", g.addr)
 	known := dialFrom(g.t, ipA, "udp", g.addr)
 	rows0, st0 := g.rows(), g.r.Status()
-	for i := 0; time.Now().Before(end); i++ {
+	for end := time.Now().Add(d); sent == 0 || time.Now().Before(end); sent++ {
 		c.Write(strangerMsg)
-		if i%20 == 0 {
-			fmt.Fprintf(known, "<13>known %d", i)
+		if sent%20 == 0 {
+			fmt.Fprintf(known, "<13>known %d", sent)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
 	g.awaitMarker(known, mark, rows0, st0)
+	return sent
 }
 
 // markerUnread is how long the receiver may sit settled, with markers sent
@@ -552,6 +559,7 @@ type runSpan struct {
 	// committed-received gap among the records counted so far.
 	edge int64
 	lag  time.Duration
+	sent int // stranger datagrams sent, a diagnostic
 }
 
 // restarts runs n listeners one after another on one store, each flooded
@@ -579,14 +587,14 @@ func restarts(t *testing.T, seed int64, n int, lim receive.Limits, spent func(no
 			}
 		}
 		g := serveOn(t, log, path, lim, spent(from, recs))
-		g.floodUntil(time.Now().Add(lim.UnknownWindow/10+time.Duration(rnd.Int63n(int64(lim.UnknownWindow/3)))), fmt.Sprintf("<13>a6 marker %d", i))
+		sent := g.floodFor(lim.UnknownWindow/10+time.Duration(rnd.Int63n(int64(lim.UnknownWindow/3))), fmt.Sprintf("<13>a6 marker %d", i))
 		to := time.Now()
 		var all int64
 		for _, r := range g.unknownRecords() {
 			all += r.bytes
 		}
 		g.close()
-		runs = append(runs, runSpan{from, to, all - before, edge, lag})
+		runs = append(runs, runSpan{from, to, all - before, edge, lag, sent})
 		before = all
 	}
 	return runs
@@ -642,7 +650,7 @@ func TestUnknownSpentAcrossRestarts(t *testing.T) {
 				t.Errorf("unknown senders stored past UnknownBytes x (1 + T/window): %s, %.0f bytes over (%d bytes read before a start's window and committed inside it; largest lag %v)", at, e, edges, lag)
 			}
 			if runs[0].stored < per*8/10 {
-				t.Errorf("the first run stored %d of a budget of %d: the flood did not reach the budget, so the test cannot tell", runs[0].stored, per)
+				t.Errorf("the first run stored %d of a budget of %d from %d datagrams of %d bytes sent: the flood did not reach the budget, so the test cannot tell", runs[0].stored, per, runs[0].sent, len(strangerMsg))
 			}
 		})
 	}
@@ -665,7 +673,7 @@ func TestUnknownSpentOutOfRangeStartsEmpty(t *testing.T) {
 			t.Parallel()
 			log, path := open(t, 64<<20)
 			g := serveOn(t, log, path, lim, spent)
-			g.floodUntil(time.Now().Add(400*time.Millisecond), "<13>a6 marker")
+			g.floodFor(400*time.Millisecond, "<13>a6 marker")
 			recs := g.unknownRecords()
 			st := g.r.Status()
 			g.close()
