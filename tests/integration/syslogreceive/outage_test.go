@@ -100,7 +100,7 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		t.Fatalf("marker %q not stored", mark)
+		g.markerFatalf(mark, "marker %q not stored", mark)
 		return 0
 	}
 	bound := func(T time.Duration) int64 {
