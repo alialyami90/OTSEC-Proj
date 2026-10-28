@@ -1,6 +1,14 @@
 # The event-baseline feeder in the node (P4-A5, node PR 2c, R4.8)
 
-B5, 2026-10-28. A proposal for B1 and B4 to rule on, with what I will build while they do. Nothing here is measured yet; every result will be `simulated`.
+B5, 2026-10-28; updated by C5 the same day to the rulings. Nothing here is measured yet; every result will be `simulated`.
+
+## Rulings
+
+- **State across a restart: option A** ([D4-26](B1-decisions.md) item 1). Snapshots from B4 (#344), written with the per-stream positions they reflect, then a required C5 consumer committed after the snapshot is durable. On restore each stream resumes from the later of the snapshot's position and the consumer's cursor. A snapshot that does not restore raises an alarm and starts an audited re-learn naming the replaced baseline; it is never a silent restart.
+- **Where the checkpoint lives** (B4's review of #343, option (b)). A record of the asset's own configuration stream `config/<asset>`, bounded by `ConfigRecordBytes` (1.5 MiB), with a new `ConfigDocuments` kind. The quota floor counts `EventCheckpointRecords` (2) records per event-baseline asset (#343). A learner too large to checkpoint (near the 4096-type ceiling with long names) is refused: the node keeps the last checkpoint and raises a health event. The node asks B4 (now C4) for the byte bound as a parameter of `Snapshot`.
+- **`config.baseline_recorded` in C8 0.8** (D4-26 items 2 and 4, #346), event kind only. The node stores the baseline first and writes the record after; at start it folds the chain and writes any missing record. A baseline whose record is not yet in the chain is not awaiting acknowledgement and cannot be acknowledged.
+- **`correlation_id`** ([D4-29](B1-decisions.md), C1 on #346). On `config.baseline_recorded` it is the 64 hex digits of `baseline_digest`, without `sha256:`. The acknowledgement keeps its signed C7 request ID, and the two join on `baseline_digest`.
+- **Order.** The one below, which the B-to-C handoff set (`handoffs/HANDOFF-SUMMARY.md`, slices 1a to 1d): snapshots before the lifecycle. D4-26 item 3 had the lifecycle first with state in memory only; doing the snapshots first means no build of the lifecycle ever runs without its state kept. C1 to confirm on this PR.
 
 ## What is there, and what is missing
 
@@ -25,15 +33,16 @@ The learner holds up to 4096 types of counts, windows and gaps in memory. A rest
 
 I ask B4 for A, with an `Equal`-after-restore test: a learner or detector restored from a snapshot at any point gives byte-identical output to one that ran straight through.
 
-## Design, if A is ruled
+## Design
 
 - **Configuration.** A top-level node config array `event_baselines`: `{"asset_id": ..., "params": {...}}`, where `params` is a full `baseline.Params` (C10 has no defaults but the two minima, 14 days and 200 events; "never constants a learner may assume") validated with its own check. The node ships an example block with the values `modules/detection/eventbaseline` tests use, as a starting point, not as a default. An asset in it that no schedule entry or listener can feed is refused at load. The node's quota rules (D4-20) count one baseline record per observing asset.
 - **One reader per stream, not per asset.** A Syslog listener's stream carries several assets' events, so the feeder reads each stream once and hands each event to its asset's learner or detector by `source.asset`. An event whose asset is not observing is skipped. An `asset-unresolved` event goes to a site-level counter in status (C10), never to an asset.
 - **Received order.** The feeder reads batches from every stream of an asset, merges by `received.utc` (ties by stream, then seq), and passes an event only when it is no later than every stream's low watermark: the least received time of an unread record, or the stream's latest committed time when it has none. Ticks use that watermark and never the wall clock (#303, `TestDetectorTickIsAWatermark`).
 - **`AfterFailure`.** From the asset's health events in `platform/health`: a collection failure opens a gap `[first failure, next success)`, and the first successful SER read after it is `AfterFailure` for all its rows, and the learner is told with `Gap`. The gap's bounds come from the health events' received times.
 - **`NotCounted`.** The feeder keeps the previous SER read's alignment keys per asset in the snapshot, and applies `PossibleDuplicates` to each read's stored rows. A read is the rows that share one `received.utc` and one `collection.run_id`.
-- **Lifecycle, from the chain.** The state is derived from what C5 and C8 hold, as the holds are (`holds.go`): the newest C10 record in `config/<asset>` that no succeeded `config.baseline_acknowledged` of kind `event` names is "awaiting acknowledgement"; the acknowledged one is "active", with the time its acknowledgement entered the chain as `ActiveFrom`. verification.md says the recording is "hashed in the audit chain", and C8 0.6 has no record for it: the C5 record's own hash is the only chain-side evidence until one exists. I propose a C8 info action `config.baseline_recorded` (asset, kind, digest, version, previous) in C8 0.7, written in the same commit step as the C10 record; B3 and B1 decide. A lost snapshot is a re-learn, and the node says so (an alarm, and the re-learn record names the replaced hash in `Previous`).
+- **Lifecycle, from the chain.** The state is derived from what C5 and C8 hold, as the holds are (`holds.go`): the newest C10 record in `config/<asset>` that no succeeded `config.baseline_acknowledged` of kind `event` names is "awaiting acknowledgement"; the acknowledged one is "active", with the time its acknowledgement entered the chain as `ActiveFrom`. A C10 record counts only once its `config.baseline_recorded` (C8 0.8) is in the chain: the node stores the record, then writes the audit record, and at start repairs a missing one before it derives any state. A lost snapshot is a re-learn, and the node says so (an alarm, and the re-learn record names the replaced hash in `Previous`).
 - **`node.baseline_ack`, event kind.** On acceptance the node holds a baseline of that asset and kind whose stored bytes hash to `baseline_digest`; if not, it refuses and audits. The same gates as #339 apply (taint, key binding, verified payload), and it is a `nodeActKinds` kind with its own part. A configuration-kind acknowledgement is B3's run wiring PR; the two share the relay.
+- **Snapshot storage.** The learner and detector snapshots, the per-stream positions and the previous read's alignment keys go in one checkpoint record of `config/<asset>` (the Rulings above), written atomically before the `node-eventbaseline` consumer is committed on each stream.
 - **Alarms.** `Output.Alarms` become C4 health events through `Alarm.Health`, written to `platform/health` through the node's normal event path (so the C6 forwarder carries them), deduplicated across a restart by `(asset, baseline hash, rule, key, at_utc)` (the replay key in the package doc). The held notice becomes a `HealthAlarmsHeld` event.
 - **Bounds.** At most 4096 types per learner, a batch cap per tick, and the feeder runs between runs in the scheduler's goroutine with a time budget, so a flood of events cannot delay a collection run.
 
@@ -41,11 +50,12 @@ I ask B4 for A, with an `Equal`-after-restore test: a learner or detector restor
 
 1. Config and layout (`event_baselines`, the consumers, the quota count), with tests. No dependence on B4.
 2. The merge reader and its watermark, over C5, with tests that delay an Observe past a tick (#303).
-3. The lifecycle and `node.baseline_ack` (event), using the learner and detector as they are, with the learner state kept in memory only. Until B4's snapshot API lands, a restart restarts the period, and `otsec health` says so. This slice is not shippable alone, and I will not claim V-M4 on it.
-4. The snapshot, the consumers and the restart tests, when B4's API is in.
+3. The snapshot, the checkpoint record, the consumers and the restart tests (needs #344 and the byte bound): restart-at-every-step equivalence on GT-INJ, and a crash before and after the cursor commit.
+4. The lifecycle, `config.baseline_recorded` and `node.baseline_ack` (event) (needs #346 and #339's gates): a crash test with the baseline stored and no record, a refused acknowledgement of a digest that is not stored, and a refused acknowledgement of a baseline not yet recorded. V-M4 is claimed only on the real binaries, with C6, after this slice.
 
-## Questions
+Slices 1 (#343) and 2 have no dependence on C4.
 
-- **B1:** A (snapshots and a required consumer), or another way? Is the order above right?
-- **B4:** Can the snapshot API come first, as a small PR? What is the largest snapshot, with the 4096-type ceiling? It sets the checkpoint size, which I would bound in the layout.
-- **B1 and B3:** C8 0.6 has no record for "baseline recorded", which verification.md asks for ("recorded once, versioned and hashed in the audit chain"). Add `config.baseline_recorded` in C8 0.7, or accept the C5 record alone? Without it the node can still derive the state, but the chain would not show a recording that was never acknowledged.
+## Questions still open
+
+- **C4:** the byte bound on `Snapshot` as a parameter (refusing above it with an error), and whether an oversize snapshot can be detected before it is fully built. Asked on #343 and again on 2026-10-28.
+- **C4:** exporting `baseline.Params.Validate()`, so the node drops its copy of the checks and the pin test.
