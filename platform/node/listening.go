@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -69,16 +70,45 @@ type Listening struct {
 	// the whole budget when it could not be counted.
 	unknown map[string]*atomic.Int64
 	spent   map[string]int64
-	// notAfter is a syslog-tls listener's certificate expiry; expiry is
-	// the alarm already raised for it ("expiring" or "expired").
+	// notAfter is a syslog-tls listener's certificate expiry; watch decides
+	// when its alarm ("expiring" or "expired") is raised.
 	notAfter map[string]time.Time
-	expiry   map[string]string
+	watch    map[string]*certWatch
+
+	// held are the syslog-tls listeners whose certificate was outside its
+	// validity period at start (HR-13, D4-11). They have no receiver: no
+	// socket is bound and nothing is read until Publish finds the period
+	// valid. mu guards receivers, held and the Run state below, because
+	// Publish can add a receiver while Run is serving.
+	mu        sync.Mutex
+	held      []*heldListener
+	runCtx    context.Context
+	wg        sync.WaitGroup
+	runStop   bool
+	heldAtRun bool
+}
+
+// heldListener is a syslog-tls listener not started because its certificate
+// is outside its validity period. cfg lacks only the TLS configuration; the
+// certificate is the one loaded at start and is never read again.
+type heldListener struct {
+	l     Listener
+	cfg   receive.Config
+	creds *listenerCreds
+	state string
+	watch certWatch
+	// failed is the start error already raised, so a listener that cannot
+	// bind raises it once.
+	failed string
 }
 
 // NewListening checks every listener of the runtime's configuration and
 // binds nothing. A syslog-tls listener's references are resolved first
 // (Config.ListenerTLS), so a missing or bad file stops the node; nothing
-// falls back to plaintext. The sender table comes from the C1 assets'
+// falls back to plaintext. A certificate outside its validity period is the
+// one fault that does not stop the node (HR-13, D4-11): that listener is
+// held back with AlarmListenerHeldBack, binds nothing and reads nothing, and
+// Publish starts it once the period is valid. The sender table comes from the C1 assets'
 // inbound endpoints (receive.SendersFor), and each listener's unknown
 // budget from its class quota (Config.ListenerSizings), less what unknown
 // senders stored on its stream in the window before this start, so a
@@ -86,7 +116,7 @@ type Listening struct {
 // budget starts empty and AlarmUnknownSpentUncounted is raised.
 func NewListening(rt *Runtime) (*Listening, error) {
 	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{},
-		unknown: map[string]*atomic.Int64{}, spent: map[string]int64{}, notAfter: map[string]time.Time{}, expiry: map[string]string{}}
+		unknown: map[string]*atomic.Int64{}, spent: map[string]int64{}, notAfter: map[string]time.Time{}, watch: map[string]*certWatch{}}
 	if len(rt.cfg.Listeners) == 0 {
 		return ls, nil
 	}
@@ -131,15 +161,31 @@ func NewListening(rt *Runtime) (*Listening, error) {
 				l.ID, cfg.Limits.UnknownWindow, err, cfg.Limits.UnknownBytes))
 		}
 		cfg.UnknownSpent = spent
+		var held *heldListener
 		if l.Transport == asset.SyslogTLS {
-			if cfg.TLS, err = rt.cfg.ListenerTLS(l); err != nil {
+			creds, err := rt.cfg.loadListener(l)
+			if err != nil {
 				return nil, err
 			}
-			leaf, err := leafOf(cfg.TLS.Certificates)
-			if err != nil {
+			if _, ls.notAfter[l.ID], err = leafPeriod(creds.cert); err != nil {
 				return nil, fmt.Errorf("listener %s: credential: %w", l.ID, err)
 			}
-			ls.notAfter[l.ID] = leaf.NotAfter
+			switch cfg.TLS, err = serverTLS(l, creds); {
+			case err == nil:
+			case errors.Is(err, receive.ErrCertificatePeriod):
+				held = &heldListener{l: l, cfg: cfg, creds: creds}
+			default:
+				return nil, err
+			}
+		}
+		if held != nil {
+			ls.held = append(ls.held, held)
+			ls.plaintext[l.ID] = l.Plaintext
+			ls.unknown[l.ID] = unknown
+			ls.spent[l.ID] = spent
+			ls.heldAtRun = true
+			ls.alarmHeld(held, rt.opt.Now())
+			continue
 		}
 		r, err := receive.New(cfg)
 		if err != nil {
@@ -203,28 +249,89 @@ func (ls *Listening) checkTargets() {
 	}
 }
 
-// checkExpiry raises AlarmListenerCertExpiring once when a listener's
-// certificate comes within ListenerCertWarning of expiry, and again once
-// it has expired.
+// checkExpiry raises AlarmListenerCertExpiring when a listener's
+// certificate comes within CertWarning of expiry, again when it has expired,
+// and then every CertAlarmRepeat while the listener runs: a running
+// listener is never stopped at expiry (D4-11 items 4 and 9).
 func (ls *Listening) checkExpiry(id string, now time.Time) {
 	na, ok := ls.notAfter[id]
 	if !ok {
 		return
 	}
-	state, detail := "", ""
-	switch {
-	case !now.Before(na):
-		state = "expired"
-		detail = fmt.Sprintf("the listener certificate expired at %s; senders that check it refuse it. Replace %s.crt and .key and restart the node", na.UTC().Format(time.RFC3339), ls.credRef(id))
-	case na.Sub(now) <= ListenerCertWarning:
-		state = "expiring"
-		detail = fmt.Sprintf("the listener certificate expires at %s; replace %s.crt and .key and restart the node before then", na.UTC().Format(time.RFC3339), ls.credRef(id))
+	state := certState(na, now)
+	w := ls.watch[id]
+	if w == nil {
+		w = &certWatch{}
+		ls.watch[id] = w
 	}
-	if state == "" || ls.expiry[id] == state {
+	if !w.due(state, now) {
 		return
 	}
-	ls.expiry[id] = state
+	var detail string
+	if state == "expired" {
+		detail = fmt.Sprintf("the listener certificate expired at %s; the listener keeps running, and senders that check it refuse it. Replace %s.crt and .key and restart the node", na.UTC().Format(time.RFC3339), ls.credRef(id))
+	} else {
+		detail = fmt.Sprintf("the listener certificate expires at %s; replace %s.crt and .key and restart the node before then", na.UTC().Format(time.RFC3339), ls.credRef(id))
+	}
 	ls.rt.opt.Status.RaiseTarget("listener "+id, AlarmListenerCertExpiring, detail)
+}
+
+// alarmHeld raises AlarmListenerHeldBack for h when its state changes and
+// every CertAlarmRepeat while it lasts.
+func (ls *Listening) alarmHeld(h *heldListener, now time.Time) {
+	nb, na, _ := leafPeriod(h.creds.cert)
+	h.state = heldState(nb, na, time.Now())
+	if !h.watch.due(h.state, now) {
+		return
+	}
+	ls.rt.opt.Status.RaiseTarget("listener "+h.l.ID, AlarmListenerHeldBack, fmt.Sprintf(
+		"the listener certificate is %s: %s. The listener is not bound and receives nothing; the rest of the node runs. It starts when the period is valid; to replace the certificate, replace %s.crt and .key and restart the node",
+		h.state, periodDetail("it", nb, na), h.l.TLS.CredentialRef))
+}
+
+// release judges each held listener's loaded certificate again, by the same
+// clock as at start (D4-11 item 11), and starts the listener once the
+// period is valid: it binds, then serves if Run is serving. A listener that
+// cannot bind stays held and raises AlarmListenerStopped once for that
+// error. It is called from Publish.
+func (ls *Listening) release(now time.Time) {
+	ls.mu.Lock()
+	held := slices.Clone(ls.held)
+	ls.mu.Unlock()
+	for _, h := range held {
+		tlsCfg, err := serverTLS(h.l, h.creds)
+		if errors.Is(err, receive.ErrCertificatePeriod) {
+			ls.alarmHeld(h, now)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		cfg := h.cfg
+		cfg.TLS = tlsCfg
+		r, err := receive.New(cfg)
+		var a net.Addr
+		if err == nil {
+			if a, err = r.Listen(); err != nil {
+				r.Close()
+			}
+		}
+		if err != nil {
+			if h.failed != err.Error() {
+				h.failed = err.Error()
+				ls.rt.opt.Status.RaiseTarget("listener "+h.l.ID, AlarmListenerStopped, "the listener's certificate period is valid, but it could not start: "+err.Error()+"; it stays held back and is tried again")
+			}
+			continue
+		}
+		ls.mu.Lock()
+		ls.held = slices.DeleteFunc(ls.held, func(x *heldListener) bool { return x == h })
+		ls.receivers = append(ls.receivers, r)
+		ls.bound[h.l.ID] = a
+		if ls.runCtx != nil && !ls.runStop {
+			ls.serve(r)
+		}
+		ls.mu.Unlock()
+	}
 }
 
 // credRef is listener id's credential reference.
@@ -242,7 +349,11 @@ func (ls *Listening) credRef(id string) string {
 const ReasonPlaintextListener = "plaintext_listener"
 
 // Addr is the address listener id is bound to, or nil before Listen.
-func (ls *Listening) Addr(id string) net.Addr { return ls.bound[id] }
+func (ls *Listening) Addr(id string) net.Addr {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	return ls.bound[id]
+}
 
 // close releases bound listeners that will not serve.
 func (ls *Listening) close(rs []*receive.Receiver) {
@@ -254,35 +365,65 @@ func (ls *Listening) close(rs []*receive.Receiver) {
 // Run serves every listener until ctx ends, and returns once each has
 // committed what it read or its grace period has passed. A listener that
 // stops on its own raises AlarmListenerStopped; the others keep serving.
+// While a listener is held back (certificate period, D4-11) Run keeps
+// waiting for ctx, because Publish can still start it.
 func (ls *Listening) Run(ctx context.Context) {
-	var wg sync.WaitGroup
+	ls.mu.Lock()
+	ls.runCtx = ctx
 	for _, r := range ls.receivers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err := r.Serve(ctx)
-			if ctx.Err() == nil {
-				detail := "the listener stopped serving; nothing more is received on it until the node restarts"
-				if err != nil {
-					detail += ": " + err.Error()
-				}
-				ls.rt.opt.Status.RaiseTarget("listener "+r.Status().ID, AlarmListenerStopped, detail)
-			}
-		}()
+		ls.serve(r)
 	}
-	wg.Wait()
+	waitForCtx := ls.heldAtRun
+	ls.mu.Unlock()
+	if waitForCtx {
+		<-ctx.Done()
+	}
+	ls.mu.Lock()
+	ls.runStop = true
+	ls.mu.Unlock()
+	ls.wg.Wait()
+}
+
+// serve starts r's Serve in a goroutine counted by ls.wg. mu is held.
+func (ls *Listening) serve(r *receive.Receiver) {
+	ctx := ls.runCtx
+	ls.wg.Add(1)
+	go func() {
+		defer ls.wg.Done()
+		err := r.Serve(ctx)
+		if ctx.Err() == nil {
+			detail := "the listener stopped serving; nothing more is received on it until the node restarts"
+			if err != nil {
+				detail += ": " + err.Error()
+			}
+			ls.rt.opt.Status.RaiseTarget("listener "+r.Status().ID, AlarmListenerStopped, detail)
+		}
+	}()
 }
 
 // Publish records every listener's state in status, and raises
 // AlarmListenerCertExpiring when a certificate is near or past expiry.
 // It is called from one goroutine at a time.
 func (ls *Listening) Publish() {
-	if len(ls.receivers) == 0 {
+	now := ls.rt.opt.Now()
+	ls.release(now)
+	ls.mu.Lock()
+	receivers := slices.Clone(ls.receivers)
+	held := slices.Clone(ls.held)
+	ls.mu.Unlock()
+	if len(receivers) == 0 && len(held) == 0 {
 		return
 	}
-	now := ls.rt.opt.Now()
-	m := make(map[string]ListenerStatus, len(ls.receivers))
-	for _, r := range ls.receivers {
+	m := make(map[string]ListenerStatus, len(receivers)+len(held))
+	for _, h := range held {
+		id := h.l.ID
+		sz := ls.sizing[id]
+		m[id] = ListenerStatus{Transport: h.l.Transport, Address: h.l.Address, HeldBack: h.state,
+			Unknown: &UnknownShare{HourlyBytes: sz.UnknownBytes, BoundBytes: sz.UnknownBound,
+				QuotaBytes: sz.Quota, OutageHours: sz.OutageHours, SpentAtStart: ls.spent[id]},
+			CertNotAfter: ls.notAfter[id].UTC()}
+	}
+	for _, r := range receivers {
 		id := r.Status().ID
 		s := listenerStatus(r.Status())
 		s.Plaintext = ls.plaintext[id]
@@ -330,6 +471,10 @@ type ListenerStatus struct {
 	Unknown *UnknownShare `json:"unknown,omitempty"`
 	// CertNotAfter is a syslog-tls listener's certificate expiry.
 	CertNotAfter time.Time `json:"certificate_not_after,omitzero"`
+	// HeldBack is "expired" or "not-yet-valid" while the listener's
+	// certificate is outside its validity period: nothing is bound and
+	// nothing is received (HR-13, D4-11). Empty otherwise.
+	HeldBack string `json:"held_back,omitempty"`
 }
 
 // UnknownShare is a listener's unknown-sender storage. BoundBytes is what

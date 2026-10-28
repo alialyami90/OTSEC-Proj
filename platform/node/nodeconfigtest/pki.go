@@ -29,6 +29,24 @@ type PKI struct {
 	caKey  *ecdsa.PrivateKey
 }
 
+// Period is a test certificate's validity. A zero field takes the default:
+// valid from an hour ago, for a day.
+type Period struct{ NotBefore, NotAfter time.Time }
+
+func (p Period) fill() (nb, na time.Time) {
+	nb, na = p.NotBefore, p.NotAfter
+	if nb.IsZero() {
+		nb = time.Now().Add(-time.Hour)
+	}
+	if na.IsZero() {
+		na = time.Now().Add(24 * time.Hour)
+	}
+	return nb, na
+}
+
+// Validity sets the periods of the certificates WritePKIValid makes.
+type Validity struct{ CA, Server, Client Period }
+
 // WritePKI makes a test CA, a collector certificate for serverName (an IP
 // literal or a DNS name) and a client certificate whose CN and DNS name are
 // the node ID, and writes the files the node's TLS references name into
@@ -36,12 +54,19 @@ type PKI struct {
 //
 //	<trustAnchor>.pem, <clientCredential>.crt, <clientCredential>.key
 func (c *Config) WritePKI(serverName, trustAnchor, clientCredential string) (*PKI, error) {
+	return c.WritePKIValid(serverName, trustAnchor, clientCredential, Validity{})
+}
+
+// WritePKIValid is WritePKI with the validity periods of v, for tests of
+// certificates that are expired, not yet valid or about to end.
+func (c *Config) WritePKIValid(serverName, trustAnchor, clientCredential string, v Validity) (*PKI, error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+	caNB, caNA := v.CA.fill()
 	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "otsec-test-ca"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		NotBefore: caNB, NotAfter: caNA,
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &caKey.PublicKey, caKey)
 	if err != nil {
@@ -50,10 +75,10 @@ func (c *Config) WritePKI(serverName, trustAnchor, clientCredential string) (*PK
 	ca, _ := x509.ParseCertificate(der)
 	p := &PKI{Roots: x509.NewCertPool(), ca: ca, caKey: caKey}
 	p.Roots.AddCert(ca)
-	if p.Server, err = p.Issue(serverName, x509.ExtKeyUsageServerAuth); err != nil {
+	if p.Server, err = p.IssueValid(serverName, x509.ExtKeyUsageServerAuth, v.Server); err != nil {
 		return nil, err
 	}
-	if p.Client, err = p.Issue(c.NodeID, x509.ExtKeyUsageClientAuth); err != nil {
+	if p.Client, err = p.IssueValid(c.NodeID, x509.ExtKeyUsageClientAuth, v.Client); err != nil {
 		return nil, err
 	}
 	if err := store.CreateDir(c.TLSDir, ""); err != nil {
@@ -81,13 +106,19 @@ var serial = big.NewInt(100)
 // Issue signs a certificate named name (CN, and a SAN: an IP address for an
 // IP literal, a DNS name otherwise) for usage.
 func (p *PKI) Issue(name string, usage x509.ExtKeyUsage) (tls.Certificate, error) {
+	return p.IssueValid(name, usage, Period{})
+}
+
+// IssueValid is Issue with the validity period per.
+func (p *PKI) IssueValid(name string, usage x509.ExtKeyUsage, per Period) (tls.Certificate, error) {
+	nb, na := per.fill()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
 	serial.Add(serial, big.NewInt(1))
 	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: name},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		NotBefore: nb, NotAfter: na,
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
 	if ip := net.ParseIP(name); ip != nil {
 		tmpl.IPAddresses = []net.IP{ip}
@@ -105,7 +136,36 @@ func (p *PKI) Issue(name string, usage x509.ExtKeyUsage) (tls.Certificate, error
 // it and its key into c.TLSDir as <ref>.crt and <ref>.key, the files a TLS
 // listener's credential_ref names.
 func (c *Config) WriteListenerCredential(p *PKI, ref, host string) (tls.Certificate, error) {
-	cert, err := p.Issue(host, x509.ExtKeyUsageServerAuth)
+	return c.WriteListenerCredentialValid(p, ref, host, Period{})
+}
+
+// WriteListenerCredentialValid is WriteListenerCredential with the validity
+// period per.
+func (c *Config) WriteListenerCredentialValid(p *PKI, ref, host string, per Period) (tls.Certificate, error) {
+	cert, err := p.IssueValid(host, x509.ExtKeyUsageServerAuth, per)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	for name, b := range map[string][]byte{
+		ref + ".crt": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}),
+		ref + ".key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+	} {
+		if err := os.WriteFile(filepath.Join(c.TLSDir, name), b, 0o600); err != nil {
+			return tls.Certificate{}, err
+		}
+	}
+	return cert, nil
+}
+
+// WriteClientCredential issues another client certificate for the node,
+// with the validity period per, and writes it into c.TLSDir as <ref>.crt
+// and <ref>.key, for a second target.
+func (c *Config) WriteClientCredential(p *PKI, ref string, per Period) (tls.Certificate, error) {
+	cert, err := p.IssueValid(c.NodeID, x509.ExtKeyUsageClientAuth, per)
 	if err != nil {
 		return tls.Certificate{}, err
 	}
