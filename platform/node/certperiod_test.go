@@ -561,8 +561,15 @@ func TestExpiredSenderCAIsNeverTrusted(t *testing.T) {
 			t.Fatal("a sender certified by an expired CA was read from")
 		}
 	}
-	ls.Publish()
-	got := st.Snapshot("x").Listeners["lab-tls"]
+	// The listener counts the refusal when its own handshake returns, which
+	// can be after the sender saw the alert (Windows CI, #290).
+	var got ListenerStatus
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		ls.Publish()
+		if got = st.Snapshot("x").Listeners["lab-tls"]; got.Refused["tls"] >= 1 {
+			break
+		}
+	}
 	if got.Stored != 0 || got.Received != 0 || got.Refused["tls"] < 1 {
 		t.Fatalf("status %+v", got)
 	}
