@@ -2,6 +2,7 @@ package eventbaseline_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -251,25 +252,55 @@ func TestV_M4RecallPrecisionLatency(t *testing.T) {
 		}
 		at := ts(t, m.a.AtUTC)
 		if d.Kind == "absence" {
-			// AtUTC is the deadline; the Tick that raised it came after it.
-			if m.by != 0 || !m.at.After(at) {
-				t.Errorf("%s: absence alarm at %s raised by event %d at %s", d.ID, at, m.by, m.at)
+			// The deadline from the series, not from the alarm: the last
+			// occurrence before the gap + the baseline's interval and
+			// tolerance, the tolerance being the share the parameters give.
+			var lastOcc time.Time
+			for _, e := range s.Events {
+				if r := ts(t, e.Received); e.Asset == d.Asset && gtKey(e) == typeKey(d.Type) && r.Before(ts(t, d.GapFrom)) && r.After(lastOcc) {
+					lastOcc = r
+				}
 			}
-			note("absence", m.at.Sub(at))
-			if m.at.Sub(at) > tick {
-				t.Errorf("%s: the Tick that raised the absence alarm came %s after its deadline, past the cadence %s", d.ID, m.at.Sub(at), tick)
+			var per *baseline.Periodic
+			for i := range base[d.Asset].Baseline.Types {
+				if ty := &base[d.Asset].Baseline.Types[i]; ty.Periodic != nil && ty.Key == m.a.Key {
+					per = ty.Periodic
+				}
+			}
+			if lastOcc.IsZero() || per == nil {
+				t.Fatalf("%s: no occurrence before the gap, or the type is not periodic", d.ID)
+			}
+			if want := baseline.Tolerance(per.IntervalS, s.Params.AbsenceTolerancePct); per.ToleranceS != want {
+				t.Errorf("%s: the baseline's tolerance %d s is not %d%% of %d s (%d s)", d.ID, per.ToleranceS, s.Params.AbsenceTolerancePct, per.IntervalS, want)
+			}
+			deadline := lastOcc.Add(time.Duration(per.IntervalS+per.ToleranceS) * time.Second)
+			if !at.Equal(deadline) {
+				t.Errorf("%s: absence alarm at %s, the last occurrence %s + interval %d s + tolerance %d s is %s", d.ID, at, lastOcc, per.IntervalS, per.ToleranceS, deadline)
+			}
+			// Raised by the first Tick past the deadline.
+			if m.by != 0 || !m.at.After(deadline) {
+				t.Errorf("%s: absence alarm for %s raised by event %d at %s", d.ID, deadline, m.by, m.at)
+			}
+			note("absence", m.at.Sub(deadline))
+			if m.at.Sub(deadline) > tick {
+				t.Errorf("%s: the Tick that raised the absence alarm came %s after its deadline, past the cadence %s", d.ID, m.at.Sub(deadline), tick)
 			}
 			continue
 		}
-		breaking := m.a.Events[len(m.a.Events)-1]
-		if m.by != breaking.Seq {
-			t.Errorf("%s: %s alarm raised by event %d, not by the breaking event %d", d.ID, d.Kind, m.by, breaking.Seq)
-		}
+		// The breaking event from the series: the last event of the
+		// injected departure, not the last one the alarm cites.
+		breaking := seqOf(t, d.Events[len(d.Events)-1])
 		var rcv time.Time
 		for _, e := range s.Events {
-			if seqOf(t, e.ID) == breaking.Seq {
+			if seqOf(t, e.ID) == breaking {
 				rcv = ts(t, e.Received)
 			}
+		}
+		if rcv.IsZero() {
+			t.Fatalf("%s: event %d is not in the series", d.ID, breaking)
+		}
+		if m.by != breaking {
+			t.Errorf("%s: %s alarm raised by event %d, not by the breaking event %d", d.ID, d.Kind, m.by, breaking)
 		}
 		if !at.Equal(rcv) {
 			t.Errorf("%s: AtUTC %s is not the received time %s of the breaking event", d.ID, at, rcv)
@@ -334,8 +365,8 @@ func TestV_M4NoAlarmBeforeTheAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o, err := d.Tick(ack.Add(-time.Hour)); err == nil || len(o.Alarms) != 0 {
-		t.Errorf("a Tick before the acknowledgement: %d alarms, error %v", len(o.Alarms), err)
+	if o, err := d.Tick(ack.Add(-time.Hour)); !errors.Is(err, eventbaseline.ErrOrder) || len(o.Alarms) != 0 {
+		t.Errorf("a Tick before the acknowledgement: %d alarms, error %v, want none and ErrOrder", len(o.Alarms), err)
 	}
 }
 
