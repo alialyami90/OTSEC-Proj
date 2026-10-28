@@ -141,23 +141,6 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 			t.Errorf("operation %s changed", old.Operations[i].ID)
 		}
 	}
-	// Revision 5 approves exactly the lines of its run. The deny corpus
-	// (B6's) was written before and lists some of them; every other line it
-	// holds, including each such form with an argument, stays refused.
-	approvedLater := map[string]bool{}
-	for _, r := range p.Runs {
-		m, err := NewMatcher(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines, err := m.RenderRun(r.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, l := range lines {
-			approvedLater[l] = true
-		}
-	}
 	if !reflect.DeepEqual(old.SessionControl, p.SessionControl) {
 		t.Error("session_control changed")
 	}
@@ -184,9 +167,6 @@ func TestContentAllowlistUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, l := range corpus(t, "sel-deny-corpus.txt") {
-		if approvedLater[l] {
-			continue
-		}
 		if v, id := m.Match(l); v == VerdictOperation || v == VerdictSessionControl {
 			t.Errorf("deny corpus %q classified %s (%s)", l, v, id)
 		}
