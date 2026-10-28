@@ -401,6 +401,17 @@ func TestEmptyNewKeysBeforeOnePointThree(t *testing.T) {
 			t.Errorf("%s with neither key: %v", c, err)
 		}
 	}
+	// D4-16 is general: context is new in 0.2, so a 0.1 package refuses the
+	// key whatever its value, and a 0.2 package may carry it empty.
+	for n, v := range map[string]any{`"context": []`: []any{}, `"context": null`: nil} {
+		_, err := Decode(bare("otsec.register/0.1", func(m map[string]any) { m["context"] = v }))
+		if err == nil || !strings.Contains(err.Error(), "new in 0.2") {
+			t.Errorf("otsec.register/0.1 with %s: %v", n, err)
+		}
+		if _, err := Decode(bare("otsec.register/0.2", func(m map[string]any) { delete(m, "context"); m["context"] = v })); err != nil {
+			t.Errorf("otsec.register/0.2 with %s: %v", n, err)
+		}
+	}
 	// At 0.3 an empty runs list is a package with no runs.
 	if p, err := Decode(v3(t, func(m map[string]any) { m["runs"] = []any{} })); err != nil || len(p.Runs) != 0 {
 		t.Errorf("0.3 with runs []: %v", err)

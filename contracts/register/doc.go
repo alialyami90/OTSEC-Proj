@@ -60,11 +60,13 @@
 //   - 0.1: the Phase 1 format.
 //   - 0.2 adds context. A 0.1 package with context is invalid.
 //   - 0.3 adds limits and runs. This reader decodes 0.1, 0.2 and 0.3
-//     packages; a package before 0.3 with a limits or runs key is invalid,
-//     whatever the value: an empty list and null count, as a 0.2 reader
-//     refuses the key (D4-16). A later minor is invalid here, because the reader is strict, so a node that has
-//     not been upgraded refuses a 0.3 package and keeps the floor it has (fail
-//     closed). The envelope's
+//     packages. A later minor is invalid here, because the reader is strict,
+//     so a node that has not been upgraded refuses a 0.3 package and keeps the
+//     floor it has (fail closed).
+//   - A key introduced at a version is refused by its presence in any package
+//     below that version, whatever its value: an empty list and null count,
+//     as an older reader refuses the key (D4-16). That covers context before
+//     0.2 and runs and limits before 0.3. The envelope's
 //     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),
 //     and the signed payload names its own contract. SigningDomain stays
 //     "otsec.register/0.1 package\n" in every minor, so a signature made over
