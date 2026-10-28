@@ -1,124 +1,119 @@
-# Handoff summary: A-team to B-team
+# Handoff summary: B-team to C-team
 
-Owner: A1 (outgoing lead). Date: 2026-10-27. Read this first, then your own `B{n}-handoff.md`, then the files it lists.
+Owner: B1 (outgoing lead). Date: 2026-10-28. `main` at `26d8e78` when this was written (after the checkpoint PRs #348 to #351 and #354). The generation log is [GENERATIONS.md](GENERATIONS.md).
 
-The owner (Ali, GitHub `alialyami90`) asked on 2026-10-27 for agents A1 to A6 to be replaced by fresh agents B1 to B6 with the same roles, responsibilities and instructions. Only the names change. Wherever a project document says A1 to A6, read it as the role that B1 to B6 now hold: A1 means B1, A2 means B2, and so on. Older documents are not rewritten to the new names, because they are records of who did what at the time.
+## Reading order
 
-## Project state
+1. [CLAUDE.md](../CLAUDE.md), the project brief. It governs all work.
+2. This file.
+3. Your own `handoffs/C{n}-handoff.md`, then the files it links to.
+4. Write `handoffs/C{n}-ack.md` (your scope, your first three actions, your questions) as a Markdown-only PR that touches only that file.
 
-The project is a modular OT cybersecurity platform for substations, written in Go (ADR-0003), with Python for verification tooling only. [CLAUDE.md](../CLAUDE.md) is the project brief and governs all work. [README.md](../README.md) has the layout and ownership table.
+## The role-number rule
+
+The owner (Ali, GitHub `alialyami90`) replaced agents A1 to A6 with B1 to B6 on 2026-10-27 (D3-12), and B1 to B6 with C1 to C6 on 2026-10-28 (D4-28). Only the names change: role, owned paths, rules and review duties stay with the number. Wherever a record says A*n* or B*n*, read it as the role C*n* now holds. Older records are not renamed, because they record who did what at the time. Phase 4's decision file stays `docs/phase4/B1-decisions.md` and its numbering continues at D4-29. A new phase starts a new file under the current letter (`docs/phase5/C1-decisions.md`).
+
+## Phase table
 
 | Phase | Result | Record |
 | --- | --- | --- |
 | 0: evidence and assumptions | Passed with conditions, 2026-10-23 | [architecture.md, Phase 0 exit gate](../docs/architecture.md#phase-0-exit-gate) |
 | 1: contracts C1 to C8 | Passed with conditions, 2026-10-24 | [phase-1-exit.md](../docs/phase-1-exit.md) |
-| 2: the simulated SEL-751 SER-to-Syslog slice | Passed with conditions, 2026-10-25; the owner accepted it 2026-10-26 | [phase-2-exit.md](../docs/phase-2-exit.md) |
-| 3: a hardened slice and the first monitoring rungs | The gate passed with conditions (A1, 2026-10-27). **The owner accepted it on 2026-10-27** (D4-1). | [phase-3-exit.md](../docs/phase-3-exit.md) |
-| 4: configuration baselines, the event-behaviour baseline, then later items | **Issued 2026-10-27** (D4-1). | [agent-handoffs.md, Phase 4 task briefs](../docs/agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27); [B1-decisions.md](../docs/phase4/B1-decisions.md) |
+| 2: the simulated SEL-751 SER-to-Syslog slice | Passed with conditions, 2026-10-25; owner accepted 2026-10-26 | [phase-2-exit.md](../docs/phase-2-exit.md) |
+| 3: a hardened slice and the first monitoring rungs | Passed with conditions, 2026-10-27; owner accepted the same day (D4-1) | [phase-3-exit.md](../docs/phase-3-exit.md) |
+| 4: configuration baselines (item 1), the event-behaviour baseline (item 2), carry-over | Issued 2026-10-27. Working toward the first exit gate (items 1 and 2). Paused by the owner 2026-10-28 16:39Z for this checkpoint and resumed 17:11Z (D4-28). | [Phase 4 briefs and gate](../docs/agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27); [B1-decisions.md](../docs/phase4/B1-decisions.md) |
 
-What works today, on `main` at the time of writing (`d4afc63`): two binaries. `cmd/otsec` is the site node: the store, the forwarder, Syslog receive, health and the admin relay. `cmd/otsec-collector` is the privileged collector: credentials, the register and the SEL-751 adapter over Telnet. They talk over the C7 named pipe or socket. Together they collect `ID` and `SER` from A6's simulated SEL-751, receive device Syslog, store the raw bytes and normalized events, and forward them over RELP/TLS or RFC 5425/6587/5426. Contracts C1 to C8 are at the versions in the Phase 3 exit report's table.
+## What works on `main`
 
-The evidence ceiling is `simulated`. No device has ever been contacted. No capability is `hardware-verified`, and no SEL family may be called supported (B-01).
+Two Go binaries. `cmd/otsec` is the site node: the store, the forwarder, Syslog receive with the HR-11 unknown-sender bound, health, the admin relay with signed quarantine clears and seq-reset acknowledgements, and the configuration database. `cmd/otsec-collector` is the privileged collector: credentials, the signed register and the SEL-751 adapter over Telnet. They talk over the C7 named pipe or socket. Together they collect `ID` and `SER` from B6's simulated SEL-751, receive Syslog, store raw bytes and normalized events, and forward over RELP/TLS or RFC 5425/6587/5426.
 
-### What the owner still owes, and what is open
+New in Phase 4 and merged: contracts C9 0.2, C10 0.1, C2 0.6, C5 0.6, C7 0.6 and C8 0.7 ([contracts/README.md](../contracts/README.md)); the SEL-751 adapter reads all 24 `SHO` forms all or nothing (D4-23), but the collector does not run it yet (#341); the event-baseline learner and detector meet V-M4 in their package (#330), but the node does not feed them yet (#340, #343); Go 1.27.3 (D4-7) and `govulncheck` (D4-3).
 
-- **Phase 3 acceptance.** Given on 2026-10-27 (D4-1); Phase 4 is issued.
-- **Gate item 1's owed checks**, which can run on the GitHub-hosted Windows runner:
-  - the admin relay end to end, and `config\admin`'s ACLs, on Windows;
-  - the unknown-restart leg on Windows;
-  - a canary scan of process command lines.
-  
-  The SCM logs from the owner's PC run stay unread in `pc-out\slice` on the owner's PC.
-- **Open A5 PRs**, deferred until after the gate: #176 (the node reads its TLS keys from the key store), #177 (bounded crash children), #181 (the signed-files and relay design doc) and #182 (the refused-identity detail). Relay PR 2 of #181 is not started.
-- **Open risks** that gate the first `device-observed` endpoint or listener: HR-11, D2-11, D2-12, D2-16, and the collector's state replace on Windows. The full list is in the Phase 3 exit report under "Open risks" and "Limitations".
+The evidence ceiling is `simulated`. No device has been contacted. No capability is `hardware-verified`, and no SEL family may be called supported (B-01). Every false-positive figure is synthetic.
 
-## Next phase goals
+## Owed by the owner
 
-When the owner accepts Phase 3, Phase 4 starts with ADR-0008's first two items and the carry-over work:
+- Whether "Phase 4 done" means the first gate or all six items (asked 2026-10-28 15:40Z).
+- Authorization for an out-of-service lab relay before any H-test or Q3.
+- The protocols at their sites, before IDS (item 4) is briefed.
+- Resuming test runs on their PC (D4-12).
+- Deleting the leftover branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`, and noting #272's orphan push `e87191b`.
 
-1. **Configuration retrieval, baselines and prior approval** for the SEL-751 (R3.1 to R3.7). New contract C9, plus C7 0.6 (`node.change_approval`, `node.baseline_ack`) and C8 0.5.
-2. **The event-behaviour baseline** (R4.8). New contract C10, plus C5 0.4.
-3. **Carry-over and hygiene**, beside items 1 and 2:
-   - the move to Go 1.27.3;
-   - `govulncheck` in CI;
-   - the POSIX-semantics `replaceFile`;
-   - HR-11's absolute bound;
-   - #176, #177 and #182;
-   - relay PR 2.
+## Open PRs at the checkpoint
 
-Items 3 to 6 (vulnerability applicability with SNMPv3 identity, IDS, secure engineering access, the central role) are outlines only. The briefs, their dependency order and the first Phase 4 exit gate are in `docs/agent-handoffs.md`.
+CI is "green" only when all 12 `ci.yml` jobs and `govulncheck` pass on the head. Read each PR again before acting: these heads are from 2026-10-28 about 17:00Z.
+
+| PR | Owner | What | Head | CI | Waiting on |
+| --- | --- | --- | --- | --- | --- |
+| #345 | C2 | C9 0.3: the snapshot bound (D4-25) | `c0a42f7` | green (13); Windows had failed on the earlier head `2a72b4c` in `platform/node` `TestSlowCommitReachesStatusAndAlarms` | C6 review (C5 accepted at 17:15Z; C5's node-side fit test is on branch `fit345-node`, to follow #345) |
+| #353 | C5 | Test-only fix: `TestSlowCommitReachesStatusAndAlarms` assumed no commit over 5 s (the #345 Windows failure) | see PR | see PR | C6 review |
+| #341 | C3 | C7 0.7 code: the collector runs a register run (D4-24, D4-27) | `61cf141` | green | C2, C5, C6 review; draft |
+| #334 | C3 | C7 0.7 design note | `aa008b5` | Markdown | merges with #341 |
+| #346 | C3 | C8 0.8: `config.baseline_recorded` (D4-26 item 4) | `95b91cd` | Windows failed in `tests/integration/syslogreceive` (`restart_test.go`), a package #346 does not touch | C4, C5, C6 review; `correlation_id`; the acknowledgement window rule (D4-26 amendment); draft |
+| #344 | C4 | Learner and detector `Snapshot`/`Restore` (D4-26) | `7dbe6b0` | green | C5, C6 review |
+| #343 | C5 | Feeder slice 1a: the `event_baselines` section | `d59d3b0` | running | C4, C6 review |
+| #342 | C5 | Pin `ConfigRecordBytes` to #345's cap | `e752519` | green | C6, C3 review |
+| #347 | C5 | Relay PR 2b: refuse unsigned clears off-lab | `55c8583` | green | C6 holds a FAIL (the supersede rule on lab nodes, C6-handoff section 2); C3 review |
+| #340 | C5 | Feeder design (rulings on the PR, D4-26) | `777030c` | Markdown | C4 review; update to rulings |
+| #181 | C5 | Signed-files and relay design | `3d9d0f2` | Markdown | update to the merged design, or close; **STALLED** (open since generation A) |
+| #336 | C6 | D4-21 criterion on the real store | `10d03fb` | green (15) | C3, C4 review |
+| #337 | C1 | D4-23 to D4-28 and this checkpoint | the branch tip | Markdown | C6 review |
+
+Two Windows failures above are in packages the PRs do not change. The `platform/node` one is C5's test, explained and fixed in #353. The `syslogreceive` one on #346 is still unexplained: treat it as a finding to reproduce against `main`, not a flake.
+
+## Dependency order and each agent's next action
+
+The order to land work:
+
+1. **Contracts:** #345 (C9 0.3) and #342, then #341 with #334 (C7 0.7), then #346 (C8 0.8).
+2. **Detection state:** #344, then C4's F1 pair-cap PR.
+3. **Node feeder:** #340, #343, then slices 1b (merge reader), 1c (snapshots, needs #344), 1d (lifecycle and `node.baseline_ack`, needs #346).
+4. **Relay:** #347, then #181 updated or closed.
+5. **Gate runs:** C6 runs V-M2, V-M3 and V-M4 on the real binaries (needs #341 and the feeder), then C1 writes `docs/phase-4a-exit.md`.
+
+The role handoffs were written during the pause. Where one says to wait for the owner to resume, that wait is over (D4-28), and its PR heads may have moved, so read every PR again before acting. Every C agent first writes its ack (reading order, step 4). After that, each agent's NEXT ACTION is:
+
+- **C1:** confirm the cutover by reviewing and merging the six ack PRs. Then land the step 1 contracts in order, and update the `contracts/README.md` rows for C7 0.7, C8 0.8 and C9 0.3 ([C1-handoff.md](C1-handoff.md)).
+- **C2:** read #345's checks on its current head, fix anything red in its own code, get C5 and C6 to review ([C2-handoff.md](C2-handoff.md)).
+- **C3:** read #341's and #346's reviews and checks, fix what is real, ask C1 to merge #341 first, #346 second ([C3-handoff.md](C3-handoff.md)).
+- **C4:** land #344 ([C4-handoff.md](C4-handoff.md)).
+- **C5:** land #342, #343 and #347 ([C5-handoff.md](C5-handoff.md)).
+- **C6:** review #346 and answer C3's question. Re-review #347 when C5 pushes its fix, because the FAIL is posted. Then land #336. The #341 PASS is posted ([C6-handoff.md](C6-handoff.md)).
+
+**The single highest team priority:** land the step 1 contracts (#345, #342, #341 with #334, #346). Every other piece of the first gate waits on them.
+
+## How the C team works
+
+Each C agent runs in its own thread, named for it, on its own branch, and opens PRs against `main`. Only C1 merges: it squash-merges after the reviewers accept and CI is green, and posts a "C1 integration review" comment. No other agent approves or merges. Agents message each other only when their work depends on each other's. Anything for the owner goes through C1 or the coordinator.
 
 ## Agent map
 
-| Agent | Role (CLAUDE.md §4) | Owns | Handoff file |
+| Agent | Role (CLAUDE.md §4) | Owns | Handoff |
 | --- | --- | --- | --- |
-| **B1** | Principal Architect and team lead; integration authority | `docs/` other than `verification.md`, including `architecture.md`, `requirements.md`, `agent-handoffs.md` and `decisions/`; `contracts/` (each contract's draft comes from its owner, B1 approves); `go.mod` and `go.sum` (D2-2); `.github/workflows/ci.yml` and `.github/workflows/govulncheck.yml` (B1 authorizes changes); `handoffs/HANDOFF-SUMMARY.md`; `CLAUDE.md`'s repository-state section and `README.md` | [B1-handoff.md](B1-handoff.md) |
-| **B2** | OT/IED integration | `modules/ied/`, `modules/asset/` (not yet created), `tests/fixtures/ied/`; C1, C2 and the C3 register content | [B2-handoff.md](B2-handoff.md) |
-| **B3** | Security and engineering access | `modules/security/`, `modules/access/`, `cmd/otsec-collector/`; C7, C8; `docs/threat-model.md` | [B3-handoff.md](B3-handoff.md) |
-| **B4** | Telemetry, event processing, IDS | `modules/telemetry/`, `modules/detection/`, `tests/fixtures/network/`; C4, C6, and later C10 | [B4-handoff.md](B4-handoff.md) |
-| **B5** | Platform and distributed systems | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`; C5 | [B5-handoff.md](B5-handoff.md) |
-| **B6** | Independent verification and OT safety | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`, `.github/workflows/a6-*.yml` | [B6-handoff.md](B6-handoff.md) |
+| **C1** | Principal Architect and team lead; integration authority | `docs/` other than `verification.md`, `threat-model.md` and `device-capabilities.md`; `contracts/` (each contract drafted by its owner, C1 approves); `contracts/internal/strictjson`, `contracts/node` (maintained by C4); `go.mod`, `go.sum`; `.github/workflows/ci.yml`, `govulncheck.yml` (C1 authorizes every change); `.gitattributes`, `.gitignore`; `README.md`, CLAUDE.md's repository-state section, `handoffs/HANDOFF-SUMMARY.md`, `handoffs/GENERATIONS.md` | [C1-handoff.md](C1-handoff.md) |
+| **C2** | OT/IED integration | `modules/ied/`, `modules/asset/` (not yet created), `tests/fixtures/ied/`, `docs/device-capabilities.md`; C1, C2, C9 and the C3 register content | [C2-handoff.md](C2-handoff.md) |
+| **C3** | Security and engineering access | `modules/security/`, `modules/access/`, `cmd/otsec-collector/`, `docs/threat-model.md`; C7, C8 | [C3-handoff.md](C3-handoff.md) |
+| **C4** | Telemetry, event processing, IDS | `modules/telemetry/`, `modules/detection/`, `tests/fixtures/network/`; C4, C6, C10 | [C4-handoff.md](C4-handoff.md) |
+| **C5** | Platform and distributed systems | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`, `.github/workflows/a5-windows-experiments.yml` (C1 authorizes changes); C5 | [C5-handoff.md](C5-handoff.md) |
+| **C6** | Independent verification and OT safety | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md`, `.github/workflows/a6-*.yml` | [C6-handoff.md](C6-handoff.md) |
 
-The package-level table is in [D2-1](../docs/phase2/A1-decisions.md) and the import rules beside it. Each agent may also write its own `docs/phase{n}/B{n}-*.md` findings files. Every new file uses the B name: Phase 4 decisions go in `docs/phase4/B1-decisions.md`, numbered D4-n, and older files keep their A names as records. Where a B handoff says `docs/phase4/A{n}-*.md`, read `B{n}`. B1 creates `docs/phase4/` when Phase 4 is issued.
+Each agent may also write its own `docs/phase{p}/` findings files. Phase 4 files written so far keep their `B{n}-` names; new ones may use `C{n}-`. The package table and import rules are in [D2-1](../docs/phase2/A1-decisions.md). Review pairs (CLAUDE.md §5.6): C2's work by C6 (and C3 where security-sensitive); C3's by C6 and C2; C4's by C6 and C2; C5's by C6 and C3; contracts by C1 and every affected owner; gates by C6 and C1. Every contract change needs C6's contract tests, every register change C6's deny corpus, and every toolchain or dependency bump review by C3 and C6.
 
-Ownership settled in B1's ack (#220):
+## Standing rules every C agent must keep
 
-- B3 owns `docs/threat-model.md`, and B2 owns `docs/device-capabilities.md`. B1 reviews both.
-- B5 owns `.github/workflows/a5-windows-experiments.yml`, with changes authorized by B1 as for `ci.yml`.
-- B1 owns `contracts/internal/strictjson`, `contracts/node` (maintained by B4), `.gitattributes` and `.gitignore`.
-
-## Cross-agent dependencies
-
-Review pairs (CLAUDE.md §5.6):
-
-| Work | Reviewers |
-| --- | --- |
-| B2's work | B6, and B3 where it is security-sensitive |
-| B3's work | B6, and B2 for IED compatibility |
-| B4's work | B6, and B2 for protocol interpretation |
-| B5's work | B6, and B3 for trust boundaries |
-| Contracts | B1 and every affected owner |
-| Releases and gates | B6 and B1 |
-
-**Phase 4 order**, once issued:
-
-1. **Contracts.** B2 drafts C9 and B4 drafts C10 at the same time, while B3 drafts C7 0.6 and C8 0.5. B1 approves the four together, after every consumer has reviewed them.
-2. **Test material.** At the same time, B6 writes the simulator's `SHO` forms and the GT-INJ series. Both come before any product test.
-3. **Implementation.** B2's `config.read`, B3's approval verifier and B5's C5 0.4 run in parallel. B4's learner follows C5 0.4.
-4. **Carry-over.** It runs beside the items above. B5's #176 and relay PR 2 come before P4-A5's approvals relay. HR-11's bound (B4 with B5) comes before any `device-observed` listener.
-
-**Standing dependencies:**
-
-- Every contract change needs B6's independent contract tests before merge.
-- Every register change needs B6's deny corpus to pass.
-- Every toolchain or dependency bump needs review by B3 and B6.
-
-## Standing rules every B agent must keep
-
-These come from the owner. They hold in every phase until the owner changes them.
+These come from the owner and hold until the owner changes them. They are carried over word for word from the A-to-B summary, with the name changed and each change marked with its decision.
 
 - **No contact with operational equipment or any real device.** Collecting from a real device needs the owner's separate authorization. So does a first contact with a relay whose firmware ID is unknown. H-01 to H-15 and Q3 are written only and are never run. Every endpoint stays on the simulator, on loopback (D2-4, D2-10).
 - **Never fabricate evidence**: no invented device outputs, results, commit SHAs or test counts. Label every result with its evidence class.
 - **Credentials are test values only** (D2-5). No vendor-default or real-device password may appear in any fixture or doc (D2-11). The repository is public, so keep secrets, real device data and internal hostnames out of it.
-- **Testing (D2-13, D4-3).** GitHub Actions is the main test path. `ci.yml` has ten jobs and `govulncheck.yml` has one. A PR merges when its reviewers accept it and every job in both is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. A PR that changes only Markdown skips both and merges on review (D3-13). Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
-- **The owner's PC.**
+- **Testing (D2-13, D4-3).** GitHub Actions is the main test path. `ci.yml` has ~~ten~~ twelve jobs (#321) and `govulncheck.yml` has one. A PR merges when its reviewers accept it and every job in both is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. A PR that changes only Markdown skips both and merges on review (D3-13). Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
+- **The owner's PC.** *Changed by D4-12: no test runs on the owner's PC until the owner resumes them, so GitHub Actions is the only test path. The rest applies when they do.*
   - The GitHub-hosted runner comes first (D2-13). The owner's PC is the second Windows run, and the fallback when Actions is unavailable or a run needs a real installation. This replaces the earlier PC-first rule (D1-26) and the PC wording in `B5-handoff.md` (B1's ack, #220).
   - Install nothing on it beyond what the owner approved: portable Go inside the OTSEC folder, and a venv inside OTSEC with `pytest` and `asyncssh`. That means no installer, no admin rights requested, no system settings, no permanent PATH changes, and no pip installs outside the venv.
   - A run that creates services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
   - The PC is never a self-hosted runner and never holds machine keys.
 - **Actions that affect equipment, networks, credentials or security policies** need the owner's explicit authorization.
-- **Ownership.** Modify only your own paths. Shared contracts change only through B1, with a written proposal and review by the affected owners.
+- **Ownership.** Modify only your own paths. Shared contracts change only through C1, with a written proposal and review by the affected owners.
 - **Documents** use they/them for the owner.
-
-## How the B team works
-
-Each B agent runs in its own thread of this project, on its own branch, and opens PRs against `main`. B1 reviews and squash-merges them, and posts an "integration review" comment on each one. Agents message each other only when their work depends on each other; anything for the owner goes through B1 or the coordinator.
-
-Onboarding (from the owner's plan):
-
-1. Read this file, then your `B{n}-handoff.md`, then the key files it lists.
-2. Write `handoffs/B{n}-ack.md` with three things: your understanding of your scope, your first three actions, and any questions or gaps you found. Open it as a docs-only PR that touches only that file.
-3. The matching A agent answers your questions and fixes the handoff.
-4. B1 reviews all six ack files for overlaps and gaps.
-
-Cutover follows only when every ack is confirmed with no open questions. At that point A1 to A6 retire and B1 leads. Until the owner accepts Phase 3, the B team's first work is the Phase 3 conditions and the open PRs, not Phase 4.
+- *Added by the owner during generation B:* name every new thread after the agent assigned to that work in the repository documentation; stage files by explicit path, never `git add -A` (the 2026-10-28 checkpoint instruction).
+- *An environment fact, not a rule:* force-push is denied, so after a squash merge merge `origin/main` into your branch instead of rewriting it.
