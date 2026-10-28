@@ -212,6 +212,82 @@ func TestHealthShowsSuspensions(t *testing.T) {
 	}
 }
 
+// health shows each node key register entry near or past expiry.
+func TestHealthShowsNodeKeys(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetNodeKeys([]node.NodeKeyExpiry{
+		{Ref: "nodekey_client01", Kind: "tls-key", NotAfter: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)},
+		{Ref: "nodekey_anchors01", Kind: "trust-anchors", NotAfter: time.Date(2100, 1, 2, 3, 4, 5, 0, time.UTC)},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	for _, want := range []string{
+		"NODE KEY CERTIFICATE EXPIRED nodekey_client01 (tls-key) at 2020-01-02T03:04:05Z: install a new version in the key register",
+		"NODE KEY CERTIFICATE EXPIRES nodekey_anchors01 (trust-anchors) at 2100-01-02T03:04:05Z: install a new version in the key register",
+	} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Errorf("health: %d %s, lacks %q:\n%s", code, errs, want, out)
+		}
+	}
+}
+
+// health prints the lab_tls_files posture with the references whose key is
+// in a file (B3 on #176).
+func TestHealthShowsLabTLSFiles(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetLabTLSFiles([]string{"nodekey_client01"})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "LAB TLS KEYS IN FILES: lab_tls_files is set, so TLS private keys may be read from files in tls_dir, not a key store (lab nodes only, D2-12); from files: nodekey_client01"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
+// health shows the Go toolchain the node was built with (D3-10).
+func TestHealthShowsGoVersion(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "node built with " + runtime.Version() + "\n"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
+// A status file written by an older node has no go_version, and health
+// prints no "node built with" line for it (B6 on #244).
+func TestHealthWithoutGoVersionPrintsNoLine(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.Write("site-a-node1")
+	b, err := os.ReadFile(node.StatusPath(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["go_version"]; !ok {
+		t.Fatalf("the status file has no go_version to remove: %s", b)
+	}
+	delete(m, "go_version")
+	if b, err = json.Marshal(m); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(node.StatusPath(cfg), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 || strings.Contains(out, "node built with") {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
 // health says when a node-wide hold is current, and says nothing once it
 // has ended, though its alarm stays in the history (A3 on #147).
 func TestHealthShowsRunsHeld(t *testing.T) {

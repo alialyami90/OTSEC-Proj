@@ -43,6 +43,9 @@ func (c *Config) loadTarget(t *syslog.Target) (*targetCreds, error) {
 	if t.TLS == nil {
 		return nil, fmt.Errorf("target %s: no tls section", t.Name)
 	}
+	if c.KeyRegister != "" {
+		return c.keyLoadTarget(t)
+	}
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("target %s: tls_dir is not set", t.Name)
 	}
@@ -82,6 +85,9 @@ func (c *Config) loadTarget(t *syslog.Target) (*targetCreds, error) {
 // period is the one fault the node does not stop for (HR-13, D4-11):
 // NewForwarding holds that target back and the error wraps
 // forward.ErrCertificatePeriod.
+//
+// With key_register the references resolve from the node key register
+// instead (keyLoadTarget), under the same rule: nothing falls back.
 func (c *Config) TargetTLS(t *syslog.Target) (*tls.Config, error) {
 	creds, err := c.loadTarget(t)
 	if err != nil {
@@ -102,6 +108,9 @@ type listenerCreds struct {
 func (c *Config) loadListener(l Listener) (*listenerCreds, error) {
 	if l.TLS == nil {
 		return nil, fmt.Errorf("listener %s: no tls section", l.ID)
+	}
+	if c.KeyRegister != "" {
+		return c.keyLoadListener(l)
 	}
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("listener %s: tls_dir is not set", l.ID)

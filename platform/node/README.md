@@ -50,7 +50,9 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `collector_peer` | The identity the collector must hold | Linux: required, the collector's uid. Windows: empty means the `otsec-collector` service SID |
 | `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15), and signed `admin-request-*.json` files the node relays (P3-A5) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config\admin`, which the node and the collector both read and neither writes |
 | `collector_public_dir` | Where the collector publishes `install-key.json` (A3 #106); the node reads it before every request (D2-15) | absolute; required when anything is scheduled. The installer requires `OTSEC\collector\public` |
-| `tls_dir` | The directory holding the files the targets' and listeners' TLS references name (D2-12, lab only) | absolute; required when a target or listener names a reference. See "TLS references" |
+| `key_register` | The node key register, `register.json` (A3's `nodekey`, credential design section 9). With it, every TLS reference resolves from the register | absolute. Every TLS reference must then be a `nodekey_` reference. The installer requires `OTSEC\config\tls\register.json`. See "Node keys" |
+| `lab_tls_files` | The lab flag for private keys in files: the D2-12 files, or the register's `lab-files` keys | `tls_dir` needs it and it needs `tls_dir` |
+| `tls_dir` | Without `key_register`, the directory holding the files the TLS references name (D2-12, lab only). With it, the `lab-files` keys | absolute; needs `lab_tls_files`. A TLS reference needs `key_register`, or `tls_dir` with `lab_tls_files`. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
 
 A `schedule[]` entry is checked as follows:
@@ -223,9 +225,22 @@ A reinstall that loses the collector's stores starts its `collector_seq` again a
 - **A record the node would not have written** (a reset that keeps the trusted key, an acknowledgement of no open reset, a second trusted key) holds every asset, as a bad suspension record does.
 - **Interim.** The acknowledgement file is the Phase 2 interim; before any `device-observed` endpoint it becomes an admin-signed C7 0.2 request (D2-15).
 
+## Node keys (P3-A3, credential design section 9)
+
+With `key_register`, the node resolves every TLS reference from A3's node key register (`modules/security/nodekey`), and never from files:
+
+- **What resolves.** A target's `trust_anchor_ref` and a listener's `sender_ca_ref` are `trust-anchors` entries. A target's `client_credential_ref` and a listener's `credential_ref` are `tls-key` entries. Each must be a `nodekey_` reference (`nodekey.RefPattern`), checked at load. A reference resolves to its active version only, and an expired certificate is refused. A missing, pending or expired entry, or a key that is not the one the register names, stops the node. Nothing falls back to `tls_dir`.
+- **The register file** is read with the same rule as the D2-12 files (`protect.CheckDir` on its directory, `protect.ReadFile`), at most 1 MiB. `nodekey.Parse` then checks it strictly: it must be this node's register, and every fingerprint is recomputed. One bad entry refuses the whole register. It is read once, at start; a register change takes a restart.
+- **Where a key is used.** The private key never leaves its provider. On Windows that is CNG (`cng-software`, or `cng-platform` for the TPM), as `CNG{Users: [NT SERVICE\otsec-node]}`: a machine key with export off that the node service may use (D3-7). A `lab-files` key is a PKCS #8 file in `tls_dir`, and it is refused unless `lab_tls_files` is set.
+- **policy.apply.** For each register entry it has not recorded, the node writes C8 `policy.apply` (outcome `info`, reason `node_key_register`, actor the node). The detail names the reference, kind, version, state, fingerprint, and the administrator and time from the entry: `nodekey <ref> <kind> v<version> <state> sha256:<fingerprint> installed by <admin> at <time>`. An install, a rotation (the new version active, the old one retired) and a retirement are therefore each recorded once. What has been recorded is kept in the store directory as `nodekeys.json`, written only after the records commit. If that file is lost, every entry is recorded again; an entry is never left unrecorded. A record that cannot be committed raises `node-key-not-recorded`, and the node tries again at every 10 s check.
+- **Expiry.** At every check, status lists the active entries whose certificate expires within 30 days (`node_keys_expiring`). The node raises `node-key-certificate-expiring` once when an entry enters that window and once more when it has expired, and `otsec health` prints `NODE KEY CERTIFICATE EXPIRES` or `EXPIRED`. An expired entry is refused at the next start.
+- **`lab_tls_files` is never silent** (B3 on #176). At every start with the flag set, once every reference has resolved, the node writes C8 `node.posture_change` (outcome `info`, reason `lab_tls_files`) naming the references whose private key is read from a file: every `client_credential_ref` and `credential_ref` without `key_register`, or the register's `lab-files` entries with it. Status carries `lab_tls_files` and `lab_tls_file_refs`, and `otsec health` prints `LAB TLS KEYS IN FILES`. This is the same pattern as a plaintext listener (D3-5). D2-12's residual (a private key in a file) is closed only for nodes without the flag.
+- **Before the first `device-observed` endpoint.** The gate that refuses unsigned admin files on a configuration with any endpoint that is not lab or simulated (#181) also refuses `lab_tls_files`. The refusal comes with that gate.
+- **Not built yet.** There is no administrator tool that writes `register.json` (A3's handoff). Tests write it through `nodekey`'s API (`nodeconfigtest.WriteKeyRegister`).
+
 ## TLS references (D2-12, lab only)
 
-A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the node's client credential (`tls.client_credential_ref`). A TLS listener names its own credential and its senders' CA set (`tls.credential_ref`, `tls.sender_ca_ref`). In Phase 2 each reference names files in `tls_dir`:
+A C6 target names its collector's trust anchors (`tls.trust_anchor_ref`) and the node's client credential (`tls.client_credential_ref`). A TLS listener names its own credential and its senders' CA set (`tls.credential_ref`, `tls.sender_ca_ref`). Without `key_register`, and only with the lab flag `lab_tls_files`, each reference names files in `tls_dir`:
 
 | File | Holds |
 | --- | --- |
@@ -293,6 +308,10 @@ Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`
 - `forward-target-held-back` (HR-13, D4-11): the node's client certificate for the target is expired or not yet valid at start, so the forwarder is not run. Raised at start and again every `CertAlarmRepeat` (1 h) while the target is held back. It is not in C6 or C8.
 - `forward-certificate-expiring` (HR-13): the target's client certificate is within 30 days of its end (raised once), and has passed it (raised at expiry, then again every `CertAlarmRepeat` while the forwarder runs, which is never stopped at expiry).
 - `syslog-listener-held-back` (HR-13, listeners): the same for a `syslog-tls` listener's certificate; the listener is not bound. `syslog-listener-certificate-expiring` follows the same schedule as `forward-certificate-expiring`.
+
+## Toolchain in status (D3-10)
+
+The status file's `go_version` is the running node's `runtime.Version()`, and `otsec health` prints it as `node built with <version>`. An operator checks it against the latest patch of a supported Go minor. A status file written by an older node has no such field, and health prints no such line.
 
 ## Example
 

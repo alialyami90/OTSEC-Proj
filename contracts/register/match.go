@@ -137,6 +137,44 @@ func (m *Matcher) Render(id string, args map[string]string) (string, error) {
 	return line, nil
 }
 
+// RenderRun produces the lines of a run, in order, one per step. Each goes
+// through Render, so a step that no longer classifies as its own operation, or
+// matches a deny rule, fails the whole run and no line of it is returned. The
+// egress check stays per line: every line the transport sends must still pass
+// Permit, and a run adds no line the register does not already permit.
+func (m *Matcher) RenderRun(id string) ([]string, error) {
+	r := m.p.Run(id)
+	if r == nil {
+		return nil, fmt.Errorf("register: %q is not a run", id)
+	}
+	lines := make([]string, len(r.Steps))
+	for i, step := range r.Steps {
+		l, err := m.Render(step, nil)
+		if err != nil {
+			return nil, fmt.Errorf("register: run %s step %d: %w", id, i+1, err)
+		}
+		lines[i] = l
+	}
+	return lines, nil
+}
+
+// Run returns the run with this ID.
+func (m *Matcher) Run(id string) (*Run, bool) {
+	r := m.p.Run(id)
+	return r, r != nil
+}
+
+// Limits returns the limits of an operation's reply, and false when the
+// operation has none (a 0.1 or 0.2 package, or an operation that no run
+// uses).
+func (m *Matcher) Limits(id string) (Limits, bool) {
+	o := m.p.operation(id)
+	if o == nil || o.Limits == nil {
+		return Limits{}, false
+	}
+	return *o.Limits, true
+}
+
 // Operation returns the invocable operation with this ID. Session-control
 // lines and deny rules are never returned, so a C2 invocation cannot name
 // them (C-A2-1).
