@@ -156,7 +156,7 @@ def _forwarded(s):
         ps = p["sd"].get("otsec@32473", [])
         eid = first(ps, "eid") or ""
         node, stream, seq = eid.rsplit(":", 2) if eid.count(":") >= 2 else ("", "", "0")
-        if stream.startswith("syslog/a6-"):
+        if stream.startswith(("syslog/a6-", "syslog-unknown/a6-")):
             out.setdefault(stream, {})[int(seq)] = ps
     return {k: [v[q] for q in sorted(v)] for k, v in out.items()}
 
@@ -213,7 +213,7 @@ def got(tmp_path_factory):
         out["tls_sent"] = _send_tls(layout, wire, _client(layout))
         _send_udp(layout, DEVICE, UDP)
         _send_udp(layout, STRANGER, STRANGE)
-        want = {"syslog/a6-tls": len(msgs), "syslog/a6-udp": len(UDP) + len(STRANGE)}
+        want = {"syslog/a6-tls": len(msgs), "syslog/a6-udp": len(UDP), "syslog-unknown/a6-udp": len(STRANGE)}
         out["arrived"] = harness.wait_for(
             lambda: all(len(_forwarded(s).get(k, [])) >= n for k, n in want.items()) and _health(s, "syslog.unknown-source"),
             90, step=1.0)
@@ -283,7 +283,8 @@ def test_forwarded_tls_events_name_the_sender_certificate(got):
     the SHA-256 of the certificate the sender presented, the long one whose
     text was omitted included; UDP events carry none; v is 0.3."""
     want = _leaf_sha256(got["layout"]["sender_cert"])
-    tls, udp = got["fwd"].get("syslog/a6-tls", []), got["fwd"].get("syslog/a6-udp", [])
+    tls = got["fwd"].get("syslog/a6-tls", [])
+    udp = got["fwd"].get("syslog/a6-udp", []) + got["fwd"].get("syslog-unknown/a6-udp", [])
     assert tls and udp
     for ps in tls:
         assert [v for n, v in ps if n == "tlsleaf"] == [want], ps
@@ -306,7 +307,12 @@ def test_refused_senders_left_nothing(got):
 
 
 def test_udp_device_and_stranger(got):
-    fwd = got["fwd"].get("syslog/a6-udp", [])
+    """HR-11, C5 0.4: the device's datagrams are in the listener's stream and
+    the stranger's in the listener's syslog-unknown stream, never the other
+    way round."""
+    fwd = got["fwd"].get("syslog/a6-udp", []) + got["fwd"].get("syslog-unknown/a6-udp", [])
+    assert all(first(ps, "sender") == DEVICE for ps in got["fwd"].get("syslog/a6-udp", []))
+    assert all(first(ps, "sender") == STRANGER for ps in got["fwd"].get("syslog-unknown/a6-udp", []))
     by_sender = {}
     for ps in fwd:
         by_sender.setdefault(first(ps, "sender"), []).append(ps)
@@ -326,7 +332,7 @@ def test_udp_device_and_stranger(got):
 def test_one_unknown_source_alarm_for_the_stranger(got):
     alarms = got["unknown_alarms"]
     assert len(alarms) == 1, alarms
-    first_eid = first([p for p in got["fwd"]["syslog/a6-udp"] if first(p, "sender") == STRANGER][0], "eid")
+    first_eid = first([p for p in got["fwd"]["syslog-unknown/a6-udp"] if first(p, "sender") == STRANGER][0], "eid")
     assert first(alarms[0], "hrel") == first_eid, alarms[0]
     assert ("hd", f"sender={STRANGER}") in alarms[0], alarms[0]
 
