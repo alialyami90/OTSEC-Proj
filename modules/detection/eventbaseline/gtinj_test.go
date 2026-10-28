@@ -352,3 +352,42 @@ func TestGTINJSameInputSameAlarms(t *testing.T) {
 		t.Errorf("two runs raised different alarms")
 	}
 }
+
+// TestGTINJSilentHeartbeatAlarmsAtAckPlusLimit: with every heartbeat after the
+// acknowledgement removed, the syslog asset's heartbeat, which went silent
+// during the wait and never returns, alarms once, at exactly the
+// acknowledgement + interval + tolerance (D4-15; B6's case on #288).
+func TestGTINJSilentHeartbeatAlarmsAtAckPlusLimit(t *testing.T) {
+	s := load(t, "events.json")
+	base := learn(t, s, nil)
+	ack := ts(t, s.Period.Ack)
+	var evs []gtEvent
+	for _, e := range s.Events {
+		if !(e.Asset == "gt-inj-syslog" && strings.HasPrefix(e.Msg, "Heartbeat") && !ts(t, e.Received).Before(ack)) {
+			evs = append(evs, e)
+		}
+	}
+	var hb *baseline.Type
+	for i, ty := range base["gt-inj-syslog"].Baseline.Types {
+		if ty.Text == "Heartbeat sequence #" {
+			hb = &base["gt-inj-syslog"].Baseline.Types[i]
+		}
+	}
+	if hb == nil || hb.Periodic == nil {
+		t.Fatalf("the heartbeat is not periodic: %+v", hb)
+	}
+	last := ts(t, hb.LastUTC)
+	limit := time.Duration(hb.Periodic.IntervalS+hb.Periodic.ToleranceS) * time.Second
+	if !last.Add(limit).Before(ack) {
+		t.Fatalf("the case is vacuous: the heartbeat's own deadline %s is not before the acknowledgement", last.Add(limit))
+	}
+	var got []string
+	for _, r := range detect(t, base, ack, evs, ts(t, s.Period.TestEnd)) {
+		if r.rule == baseline.RuleAbsence && r.asset == "gt-inj-syslog" && strings.Contains(r.key, "Heartbeat") {
+			got = append(got, r.at)
+		}
+	}
+	if want := ack.Add(limit).UTC().Format(time.RFC3339Nano); len(got) != 1 || got[0] != want {
+		t.Errorf("heartbeat absence alarms %v, want exactly one at %s", got, want)
+	}
+}
