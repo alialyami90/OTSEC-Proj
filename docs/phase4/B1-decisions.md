@@ -544,6 +544,8 @@ Date: 2026-10-28. C1, on C4's ack question 1 (#357, comment 6476181758).
 ## D4-31: the C team takes over (owner and C1, 2026-10-28)
 
 - **Branches.** At 17:37Z the owner chose, on a decision card in the C1 thread, to let C3 push to B3's existing branches for #341, #334 and #346, so that their review history stays in place. Force-push is still denied, so a branch is updated by merging `origin/main` into it.
-- **Reviews.** B6 re-reviewed #347 at `714203e` (PASS on the code, comment 6475908745, recorded in `C6-handoff.md` by #359). Every other role 6 review in flight, #346 included, is C6's.
-- **HR-11.** HR-11's row (#352) does not close until C6 classifies `TestUnknownSpentAcrossRestarts/seed_1`, which failed on hosted Windows twice with a UDP marker lost without a count, and passed on each re-run. C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
+- **Reviews.** B6 re-reviewed #347 at `714203e` (PASS on the code, comment 6475908745, recorded in `C6-handoff.md` by #359). C5 has since pushed `fc31c79` for C3, so that commit needs a role 6 review. Every role 6 review from here, #346 and `fc31c79` included, is C6's.
+- **HR-11.** HR-11's row (#352) closes only when both conditions hold:
+  - C6 has classified `TestUnknownSpentAcrossRestarts/seed_1`, which failed once on hosted Windows, on #346's head `95b91cd`, with a UDP marker reported lost without a count, and passed on the re-run. C6's first reading of the log: the counts reconcile (180 = 74 stored + 106 dropped) and the marker is in the store, so the test's loss detector may have raised a false alarm. C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
+  - The row names D4-21's pass criterion as a gate before the first `device-observed` listener, with #336 as its evidence (C6, comment 6476212811 on #352).
 - **Cutover.** All six acks are on `main`: C1 #355, C2 #360, C3 #361, C4 #357, C5 #358 and C6 #356. Each question is answered on its PR. The C team holds the six roles from here, and the B threads can be resolved.
