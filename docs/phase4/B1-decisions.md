@@ -423,7 +423,7 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   - B6 re-runs F-017's lifted-limits case.
 - **What the cap guarantees (B6 on #317).**
   - If the known senders' datagrams during the stall fit in three quarters of the queue, a flood costs them nothing. B6's run of 600 known datagrams lost 0 with and without the flood, and 88 on main.
-  - If a stall is long enough to overflow the queue anyway, the flood costs the known senders at most the unknown quarter. With 1200 known datagrams, the run lost 176 without the flood, 432 with it (a difference of 256 = `Queue`/4), and 512 more on main.
+  - If a stall is long enough to overflow the queue anyway, the flood costs the known senders at most the unknown quarter. With 1200 known datagrams, the run lost 176 without the flood and 432 with it, a difference of 256 = `Queue`/4. On main the flood cost 512.
   - So the pass criterion is: known loss with the flood ≤ known loss without it + `Queue`/4, and no loss at all when the known datagrams fit in three quarters of the queue.
   - Equal loss in a long stall would need known datagrams to evict queued unknown ones. That adds an eviction path to the receiver for a case that is already F-016's disk stall, so it is not built.
   - B3 adds it to the HR-11 row's "still open before the first `device-observed` listener".
