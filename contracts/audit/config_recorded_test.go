@@ -15,10 +15,13 @@ var (
 	testEventV3 = "sha256:" + strings.Repeat("3", 64)
 )
 
-// recordedRec is the node's config.baseline_recorded on testAsset.
+// recordedRec is the node's config.baseline_recorded on testAsset. Its
+// correlation_id is the digest's hex digits (D4-29).
 func recordedRec(seq uint64, kind authz.BaselineKind, digest, previous string, version int) *Record {
-	return nodeRec(seq, "2026-10-26T14:00:00Z", ActionConfigBaselineRecorded, "",
+	r := nodeRec(seq, "2026-10-26T14:00:00Z", ActionConfigBaselineRecorded, "",
 		Config{Kind: kind, BaselineDigest: digest, PreviousDigest: previous, BaselineVersion: version})
+	r.CorrelationID = strings.TrimPrefix(digest, "sha256:")
+	return r
 }
 
 func TestBaselineRecordedFields(t *testing.T) {
@@ -39,6 +42,9 @@ func TestBaselineRecordedFields(t *testing.T) {
 		"without config":               func(r *Record) { r.Config = nil },
 		"without a target":             func(r *Record) { r.Target = nil },
 		"without a correlation id":     func(r *Record) { r.CorrelationID = "" },
+		"a request ID as correlation":  func(r *Record) { r.CorrelationID = "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" },
+		"another digest's correlation": func(r *Record) { r.CorrelationID = testEventV2[7:] },
+		"correlation with the prefix":  func(r *Record) { r.CorrelationID = testEventV1[:64] },
 		"without a kind":               func(r *Record) { r.Config.Kind = "" },
 		"of an unknown kind":           func(r *Record) { r.Config.Kind = "settings" },
 		"without a digest":             func(r *Record) { r.Config.BaselineDigest = "" },
@@ -146,7 +152,9 @@ func ack08(asset string, decision uint64, digest, prev string, outcome Outcome) 
 
 // B1 on #346: a succeeded event acknowledgement stamped 0.8 names a baseline
 // that a config.baseline_recorded of its asset recorded earlier and that no
-// later one has replaced.
+// later one has replaced. recs may start partway through the chain (the D4-26
+// amendment): with no recording of the asset before the acknowledgement, it
+// is refused only when recs holds the asset's version-1 recording.
 func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 	const other = "9c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
 	join := func(parts ...[]*Record) []*Record {
@@ -159,6 +167,7 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 	rec := func(r ...*Record) []*Record { return r }
 	v1 := recordedRec(1, authz.BaselineEvent, testEventV1, "", 1)
 	v2 := recordedRec(2, authz.BaselineEvent, testEventV2, testEventV1, 2)
+	v3 := recordedRec(3, authz.BaselineEvent, testEventV3, testEventV2, 3)
 	otherV1 := recordedRec(3, authz.BaselineEvent, testEventV1, "", 1)
 	otherV1.Target = &Target{AssetID: other}
 
@@ -170,6 +179,12 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 		"an acknowledgement stamped 0.7":       join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded)),
 		"a configuration acknowledgement":      join(ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)),
 		"each asset's own record":              join(rec(v1, otherV1), ack08(other, 30, testEventV1, "", OutcomeSucceeded), ack08(testAsset, 31, testEventV1, "", OutcomeSucceeded)),
+		// The window starts after the recording: nothing in recs shows the
+		// digest was not recorded.
+		"a window that starts after the recording":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a window with only another asset's first":          join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a re-learn after the acknowledgement, in a window": join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2)),
+		"a window that starts at a re-learn":                join(rec(v2), ack08(testAsset, 30, testEventV2, testEventV1, OutcomeSucceeded)),
 	}
 	for name, recs := range ok {
 		if err := VerifyConfig(recs); err != nil {
@@ -177,11 +192,14 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 		}
 	}
 	bad := map[string][]*Record{
-		"never recorded":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
 		"recorded after":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
 		"another digest":          join(rec(v1), ack08(testAsset, 30, testEventV2, "", OutcomeSucceeded)),
 		"recorded, then replaced": join(rec(v1, v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
-		"another asset's record":  join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"another asset's first":   join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		// The window starts after the first recording.
+		"replaced inside the window":        join(rec(v2, v3), ack08(testAsset, 30, testEventV2, testEventV1, OutcomeSucceeded)),
+		"replaced before the window":        join(rec(v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"not the window's latest recording": join(rec(v2), ack08(testAsset, 30, testEventV3, testEventV2, OutcomeSucceeded)),
 	}
 	for name, recs := range bad {
 		if err := VerifyConfig(recs); err == nil {
