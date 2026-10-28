@@ -482,10 +482,10 @@ func compactAll(t *testing.T, db *store.DB) {
 	}
 }
 
-// The WAL one commit writes stays under CommitWALBytes of its payload, on
-// the real store with its own schema, indexes and settings: one
-// configuration record per commit, from MinRecordBytes to 11 MiB, the
-// largest cap any database uses (the evidence database's, D4-9).
+// The WAL one commit writes stays under CommitWALBytes of its payload and
+// its one record, on the real store with its own schema, indexes and
+// settings: one configuration record per commit, from MinRecordBytes to
+// 11 MiB, the largest cap any database uses (the evidence database's, D4-9).
 func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 	ctx := context.Background()
 	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20, 1536 << 10, 4 << 20, 11 << 20} {
@@ -512,6 +512,7 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if r.Bytes() > size {
 				t.Fatalf("record %d bytes over its cap %d", r.Bytes(), size)
 			}
+			// One Append with no other writer: the commit holds this one record.
 			withinRule(t, r.Bytes(), 1, measureWAL(t, dir, func() {
 				if _, err := l.Append(ctx, r); err != nil {
 					t.Fatal(err)

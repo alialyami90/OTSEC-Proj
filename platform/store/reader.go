@@ -50,6 +50,9 @@ func OpenReadOnly(ctx context.Context, dir string, node cnode.ID, id c5.Database
 	if !ok {
 		return nil, fmt.Errorf("store: %s does not exist", path)
 	}
+	if err := refuseLegacy(ctx, path); err != nil {
+		return nil, err
+	}
 	sdb, err := sql.Open("sqlite", fileURI(path, "mode=ro"))
 	if err != nil {
 		return nil, err

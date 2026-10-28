@@ -86,7 +86,7 @@ Each database has a commit cap in bytes (`GroupOptions.MaxCommitBytes`) and in r
 | Database | Commit cap | Records | Recovery reserve (WAL bound 512 KiB) |
 | --- | --- | --- | --- |
 | `evidence` | 11 MiB (`SERCommitBytes`) | 2048 | 20,093,337 bytes (19.16 MiB) |
-| `syslog` | 1 MiB (c5 default) | 1024 | 5,413,274 bytes (5.16 MiB) |
+| `syslog` | 1 MiB (c5 default) | 1024 | 5,413,273 bytes (5.16 MiB) |
 | `audit` | 1 MiB (c5 default) | 128 | 2,660,761 bytes (2.54 MiB) |
 
 The evidence byte cap is derived, not measured. One SER read commits atomically, so the cap is `commitcap.go`'s bound on a read: C2's 1 MiB capture, 4.34 encoded bytes for each row byte, 2048 rows (`MaxReadRowsCeiling`) of at most 2560 fixed bytes, and 64 KiB of health events, 10.4 MiB, rounded up to a MiB. `serbound_test.go` measures the constants through the real normalizer and fails if the bound rises above the cap or the cap exceeds it by a MiB. A quarantine (a whole outcome frame of up to 8 MiB, its reason and two events) fits the same cap. The schedule's `operation` is at most 64 bytes, because it is in every event of a read.
@@ -95,9 +95,9 @@ A read over a cap is refused whole by the Log (`record-too-large`), nothing is s
 
 ## Store layout changes (C5 0.5, D4-14)
 
-Format 2 of a database (`meta.format` `otsec.platform-store/2`) keeps `events` in a rowid table with a unique `(stream, seq)` index. Format 1 used a `WITHOUT ROWID` table, whose events over about 1 KB each took an overflow page of their own: a commit wrote up to 3.3 times the WAL the reserve rule allows, and the file grew up to 4.5 times the bytes the quota counts.
+Format 2 of a database (`meta.format` `otsec.platform-store/2`) keeps `events` and `captures` in rowid tables with unique `(stream, seq)` and `sha256` indexes. Format 1 used `WITHOUT ROWID` tables, whose rows over about 1 KB each took an overflow page of their own: a commit wrote up to 3.3 times the WAL the reserve rule allows, and the file grew up to 4.5 times the bytes the quota counts.
 
-A database of format 1 is **refused at start**: the node does not open, change, migrate or delete it. Startup stops with the `store-settings-invalid` alarm and an error that names the way out, and the node reports that database as failed. To start on the new layout:
+A database of format 1 is **refused at start**: the node does not open, change, migrate or delete it. Before it opens any connection, the store reads the format row from the main file alone, immutable, so SQLite takes no lock, runs no WAL recovery and creates no `-wal` or `-shm`; a store left with a hot `-wal` by a crash is refused with the database file, `-wal` and `-shm` byte for byte as found (`TestLegacyRefusalWritesNothingWithAHotWAL`). Startup stops at its open step with the `store-open-failed` alarm and an error that names the way out, and the node reports that database as failed. (The first draft refused it at the settings step with `store-settings-invalid`; that step runs after an ordinary open, which folds a hot `-wal` into the file and deletes it.) To start on the new layout:
 
 1. Stop the node.
 2. Copy the store directory aside. Keep the copy as the evidence it holds.
