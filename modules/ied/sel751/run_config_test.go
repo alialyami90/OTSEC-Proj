@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -462,5 +463,105 @@ func TestConfigStepTimeoutIsTheRegisters(t *testing.T) {
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("took %v: the step ran to the invocation's timeout", d)
+	}
+}
+
+// denseSection prints about n bytes of the densest section C9's tokenizer
+// reads: unique one-to-three character names, a one-byte value each, eight to
+// a line. It maximizes the records per byte of transcript.
+func denseSection(n int) []byte {
+	const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	var out []byte
+	var line []string
+	flush := func() {
+		if len(line) > 0 {
+			out = append(out, strings.Join(line, "  ")+"\r\n"...)
+			line = nil
+		}
+	}
+	name := func(i int) string {
+		for l, base := 1, 0; ; l++ {
+			span := 1
+			for k := 0; k < l; k++ {
+				span *= len(digits)
+			}
+			if i < base+span {
+				b := make([]byte, l)
+				for k, v := l-1, i-base; k >= 0; k-- {
+					b[k] = digits[v%len(digits)]
+					v /= len(digits)
+				}
+				return string(b)
+			}
+			base += span
+		}
+	}
+	for i := 0; len(out) < n; i++ {
+		line = append(line, name(i)+":=1")
+		if len(line) == 8 {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+// The largest result a configuration run can produce is an ok run whose
+// transcript reaches the run's byte limit and whose sections are as dense as
+// the tokenizer allows. Its JSON must fit one RunOutcome frame (C7, B3's
+// MaxOutcomeBytes test); the measured size is logged, simulated evidence only.
+func TestConfigMaximalResultFrame(t *testing.T) {
+	f := loadConfig(t)
+	m := mustMatcher(t, f.reg)
+	run, _ := m.Run(opConfig)
+	steps := script(configGolden(t, "ok"))
+	var fixed int
+	var cut []int
+	for i, st := range steps {
+		fixed += len(st.reply)
+		if bytes.HasPrefix(st.expect, []byte("SHO ")) && string(st.expect) != "SHO P 1\r\n" && string(st.expect) != "SHO G\r\n" {
+			a := bytes.IndexByte(st.reply, 0x02)
+			b := bytes.LastIndexByte(st.reply, 0x03)
+			fixed -= b - a - 1
+			cut = append(cut, i)
+		}
+	}
+	if len(cut) != 22 {
+		t.Fatalf("%d replaceable steps", len(cut))
+	}
+	// Fill the sections in order, each up to its own reply limit, leaving the
+	// room the wake, the ID reply and the session lines take and a little for
+	// every section still to come.
+	caps := map[string]int64{}
+	for _, id := range run.Steps {
+		line, _ := m.Render(id, nil)
+		lim, _ := m.Limits(id)
+		caps[line+"\r\n"] = lim.MaxReplyBytes
+	}
+	left := int(run.MaxTotalBytes) - fixed - 4096
+	for n, i := range cut {
+		a := bytes.IndexByte(steps[i].reply, 0x02)
+		b := bytes.LastIndexByte(steps[i].reply, 0x03)
+		body := min(int(caps[string(steps[i].expect)])-1024, left-100*(len(cut)-n-1))
+		sec := denseSection(body)
+		left -= len(sec)
+		steps[i].reply = append(append(append([]byte(nil), steps[i].reply[:a+1]...), sec...), steps[i].reply[b:]...)
+	}
+	got, _, _ := play(t, f, steps, false, nil)
+	if got.Status != adapter.StatusOK || len(got.Records) != 24 {
+		t.Fatalf("status %s (%v), %d records", got.Status, got.Error, len(got.Records))
+	}
+	var fields int
+	for _, r := range got.Records {
+		fields += len(r.Fields)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("maximal ok run: transcript %d bytes of %d, %d settings, result JSON %d bytes (%.1f%% of the 8 MiB outcome frame)",
+		len(got.Transcript.Data), run.MaxTotalBytes, fields, len(b), 100*float64(len(b))/(8<<20))
+	if len(b) > 4<<20 {
+		t.Errorf("the largest result is %d bytes, more than half the 8 MiB outcome frame", len(b))
 	}
 }
