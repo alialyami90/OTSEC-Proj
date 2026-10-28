@@ -1,10 +1,11 @@
 # B6 (P4-B6, the carried checks): end-to-end slice suites against the
 # installed Windows services on the hosted runner, which is elevated. These
 # are gate item 1's owed items (docs/phase-3-exit.md): the canary scan of
-# the services' command lines (test_slice_e2e.py, #242) and the
-# unknown-restart leg. The run installs otsec-node and otsec-collector with
-# the real installer, drives them through the SCM, and removes everything
-# it created; the last step checks that independently.
+# the services' command lines (test_slice_e2e.py, #242), the
+# unknown-restart leg, and the admin relay end to end with config\admin's
+# ACLs (test_slice_admin_relay_windows_e2e.py). The run installs
+# otsec-node and otsec-collector with the real installer, drives them
+# through the SCM, and removes everything it created; the last step checks that independently.
 #
 # Hosted Windows only, no secrets, read-only token. It runs by hand and on
 # pull requests that change this file or the slice tests. Evidence class:
@@ -47,9 +48,14 @@ jobs:
         run: |
           python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\unknown" tests/integration/slice/test_slice_unknown_restart_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-unknown.txt"
           exit $LASTEXITCODE
+      - name: admin relay and config\admin's ACLs against the installed services
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\relay" tests/integration/slice/test_slice_admin_relay_windows_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-relay.txt"
+          exit $LASTEXITCODE
       - name: run logs
         if: always()
-        run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\e2e", "$env:RUNNER_TEMP\unknown" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'current' } | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
+        run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\e2e", "$env:RUNNER_TEMP\unknown", "$env:RUNNER_TEMP\relay" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'current' } | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
       - name: independent leftovers check
         if: always()
         run: |
@@ -64,7 +70,7 @@ jobs:
       - name: pytest summary (last, so it is in the log's tail)
         if: always()
         run: |
-          foreach ($f in "$env:RUNNER_TEMP\pytest-e2e.txt", "$env:RUNNER_TEMP\pytest-unknown.txt") {
+          foreach ($f in "$env:RUNNER_TEMP\pytest-e2e.txt", "$env:RUNNER_TEMP\pytest-unknown.txt", "$env:RUNNER_TEMP\pytest-relay.txt") {
             if (Test-Path $f) {
               "==== $f"
               Select-String -CaseSensitive -Path $f -Pattern '^(FAILED|ERROR|SKIPPED)|^E  |short test summary|passed|failed|V-S11' | ForEach-Object { $_.Line }

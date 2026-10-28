@@ -246,6 +246,48 @@ func TestHealthShowsLabTLSFiles(t *testing.T) {
 	}
 }
 
+// health shows the Go toolchain the node was built with (D3-10).
+func TestHealthShowsGoVersion(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	want := "node built with " + runtime.Version() + "\n"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
+// A status file written by an older node has no go_version, and health
+// prints no "node built with" line for it (B6 on #244).
+func TestHealthWithoutGoVersionPrintsNoLine(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.Write("site-a-node1")
+	b, err := os.ReadFile(node.StatusPath(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["go_version"]; !ok {
+		t.Fatalf("the status file has no go_version to remove: %s", b)
+	}
+	delete(m, "go_version")
+	if b, err = json.Marshal(m); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(node.StatusPath(cfg), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 || strings.Contains(out, "node built with") {
+		t.Fatalf("health: %d %s\n%s", code, errs, out)
+	}
+}
+
 // health says when a node-wide hold is current, and says nothing once it
 // has ended, though its alarm stays in the history (A3 on #147).
 func TestHealthShowsRunsHeld(t *testing.T) {

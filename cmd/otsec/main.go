@@ -336,6 +336,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(w, "node %s, status written %s\n", st.Node, st.Written.Format(time.RFC3339))
+	if st.GoVersion != "" {
+		fmt.Fprintf(w, "node built with %s\n", safe(st.GoVersion))
+	}
 	fmt.Fprintf(w, "collecting: %v\n", st.Collecting)
 	if st.RunsHeld != "" {
 		fmt.Fprintf(w, "RUNS HELD: %s; every run on this node is stopped while this line shows\n", safe(st.RunsHeld))
