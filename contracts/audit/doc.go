@@ -242,9 +242,10 @@
 //     that the chain shows and no earlier removal took: removed_count, the
 //     stream seqs removed_first_seq and removed_last_seq, removed_digest
 //     (RemovedReadsDigest over their snapshot digests in order) and
-//     kept_digest, the snapshot digest of a compared read that stays. The
-//     newest compared read always stays, so a removal can only take what
-//     another recorded read already shows.
+//     kept_digest, the snapshot digest of the newest compared read. The two
+//     newest compared reads of an asset always stay (D4-20), so a removal can
+//     only take what other recorded reads already show, and a person who
+//     views a read has at least one schedule interval before it goes.
 //
 // VerifyConfig adds to its checks:
 //   - a config.read_compared names a real read of its asset, compares
@@ -255,9 +256,9 @@
 //     ended;
 //   - a same_change read names the newest recorded change against the
 //     baseline, by its seq and its changes_digest;
-//   - a config.reads_removed takes fewer reads than are recorded and not yet
-//     removed, the oldest first, with a removed_digest that matches them and
-//     a kept_digest that names one of those that stay.
+//   - a config.reads_removed takes the oldest recorded reads that no earlier
+//     removal took, leaving at least the two newest, with a removed_digest
+//     that matches them and a kept_digest that is the newest's.
 //
 // Removal by seq range, never by time or space, is the store's rule (C5).
 // After a crash between the record and the removal, the node completes the

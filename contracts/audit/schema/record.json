@@ -1940,7 +1940,7 @@
         "changes_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "0.7: C9's digest of the difference's ordered changes, so that two reads show the same change exactly when it is equal (detected, required from 0.7; read_compared with reason same_change)"
+          "description": "0.7: C9 0.2 Difference.ChangesDigest: sha256 of the difference's changes array alone, in Compare's order; it names neither snapshot nor baseline, so \"the same change\" is this digest with the same baseline_digest (detected, required from 0.7; read_compared with reason same_change)"
         },
         "change_seq": {
           "type": "integer",
@@ -1950,7 +1950,7 @@
         "removed_count": {
           "type": "integer",
           "minimum": 1,
-          "description": "0.7: how many compared reads of the asset were removed from its configuration stream, the oldest recorded and not yet removed (reads_removed only)"
+          "description": "0.7: how many compared reads of the asset were removed from its configuration stream: the oldest recorded and not yet removed, leaving the two newest (reads_removed only)"
         },
         "removed_first_seq": {
           "type": "integer",
@@ -1970,7 +1970,7 @@
         "kept_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "0.7: snapshot digest of a recorded read that stays, the newest at the time (reads_removed only)"
+          "description": "0.7: snapshot digest of the newest compared read at the time, which stays with the one before it (reads_removed only)"
         }
       }
     }

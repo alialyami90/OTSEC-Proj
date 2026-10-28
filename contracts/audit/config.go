@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -44,6 +43,11 @@ const (
 	configSince      = 5
 	configReadsSince = 7
 )
+
+// keptReads is how many of an asset's newest compared reads a
+// config.reads_removed leaves (D4-20 rule 3, B6 on #319): a person who views
+// read N has at least one schedule interval before it is removed.
+const keptReads = 2
 
 // The reason codes of config.read_compared (info): the read showed no
 // difference from the baseline, or the same change as the asset's newest
@@ -128,9 +132,12 @@ type Config struct {
 	// ApprovalSeq is the decision_seq of the config.change_approved record
 	// that covers the difference (ApprovalCovers). Absent when none does.
 	ApprovalSeq uint64 `json:"approval_seq,omitempty"`
-	// ChangesDigest (0.7) is C9's digest of the difference's ordered
-	// changes, so that two reads show the same change exactly when their
-	// digests are equal, whatever snapshots they came from. On
+	// ChangesDigest (0.7) is C9's Difference.ChangesDigest (C9 0.2): "sha256:"
+	// and the SHA-256 of the difference's changes array alone, in the order
+	// Compare gives. It names neither snapshot nor the baseline, so two reads
+	// of a configuration that stays changed have one, and so do the same
+	// changes measured from another baseline: "the same change" is this digest
+	// together with the same baseline_digest. On
 	// config.change_detected (required from 0.7) and on config.read_compared
 	// with reason same_change.
 	ChangesDigest string `json:"changes_digest,omitempty"`
@@ -142,8 +149,9 @@ type Config struct {
 	// oldest of those the chain records as compared and not yet removed;
 	// RemovedFirstSeq and RemovedLastSeq are the stream seqs of the first
 	// and last of them, and RemovedDigest is RemovedReadsDigest of their
-	// snapshot digests in order. KeptDigest is the snapshot digest of a
-	// recorded read that stays, the newest at the time.
+	// snapshot digests in order. KeptDigest is the snapshot digest of the
+	// newest compared read at the time, which stays with the one before it
+	// (keptReads).
 	RemovedCount    int    `json:"removed_count,omitempty"`
 	RemovedFirstSeq uint64 `json:"removed_first_seq,omitempty"`
 	RemovedLastSeq  uint64 `json:"removed_last_seq,omitempty"`
@@ -467,8 +475,8 @@ func ApprovalCovers(approval, detected *Record) error {
 // open (a restore or a configuration acknowledgement ends it); and repeats a
 // change only by naming the newest one, by seq and changes_digest. Each
 // config.reads_removed takes the oldest compared reads of its asset that no
-// earlier removal took, fewer than are recorded (the newest stays), with the
-// removed_digest of those and a kept_digest that names one that stays.
+// earlier removal took, leaving the two newest recorded (keptReads), with the
+// removed_digest of those and the newest's digest as kept_digest.
 //
 // A collector.seq_reset starts a new epoch: numbers from before it name
 // nothing after it, so an approval does not survive a collector reinstall.
@@ -615,12 +623,12 @@ func VerifyConfig(recs []*Record) error {
 			p := pending[r.Target.AssetID]
 			c := r.Config
 			switch {
-			case c.RemovedCount >= len(p):
-				return broken("record %d removes %d reads of asset %s, but only %d compared reads are recorded and the newest stays", r.Seq, c.RemovedCount, r.Target.AssetID, len(p))
+			case c.RemovedCount+keptReads > len(p):
+				return broken("record %d removes %d reads of asset %s, but only %d compared reads are recorded and the %d newest stay", r.Seq, c.RemovedCount, r.Target.AssetID, len(p), keptReads)
 			case c.RemovedDigest != RemovedReadsDigest(p[:c.RemovedCount]):
 				return broken("record %d: removed_digest is not the digest of the %d oldest compared reads of asset %s", r.Seq, c.RemovedCount, r.Target.AssetID)
-			case !slices.Contains(p[c.RemovedCount:], c.KeptDigest):
-				return broken("record %d: kept_digest names no compared read that stays", r.Seq)
+			case c.KeptDigest != p[len(p)-1]:
+				return broken("record %d: kept_digest is not the newest compared read of asset %s", r.Seq, r.Target.AssetID)
 			}
 			pending[r.Target.AssetID] = p[c.RemovedCount:]
 		}

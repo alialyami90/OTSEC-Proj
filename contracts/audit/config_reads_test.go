@@ -14,6 +14,7 @@ import (
 var (
 	testReadA = "sha256:" + strings.Repeat("a", 64)
 	testReadB = "sha256:" + strings.Repeat("b", 64)
+	testReadC = "sha256:" + strings.Repeat("c", 64)
 )
 
 // runAt is a run of the configuration read on testAsset: the collector's
@@ -45,8 +46,9 @@ func comparedSameChange(seq, read uint64, utc, snapshot string) *Record {
 // readsChain is a valid chain of the 0.7 read records: the baseline
 // acknowledged (decisions 6 and 7), a read (8) that showed no difference, an
 // approval (10) and the read (11) that found the approved change (record 23),
-// two reads (12 and 13) that found the same change again, and the removal of
-// the oldest two of the three compared reads, which leaves the newest.
+// three reads (12, 13 and 14) that found the same change again, and the
+// removal of the oldest two of the four compared reads, which leaves the two
+// newest.
 func readsChain() []*Record {
 	chain := configChain()
 	since(chain[3], 8, "2026-10-26T15:00:00Z")
@@ -56,8 +58,9 @@ func readsChain() []*Record {
 	recs = append(recs,
 		runAt(24, 12, "2026-10-26T19:00:00Z"), comparedSameChange(25, 12, "2026-10-26T19:00:05Z", testReadA),
 		runAt(26, 13, "2026-10-26T19:30:00Z"), comparedSameChange(27, 13, "2026-10-26T19:30:05Z", testReadB),
-		nodeRec(28, "2026-10-26T20:00:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 2, RemovedFirstSeq: 41, RemovedLastSeq: 43,
-			RemovedDigest: RemovedReadsDigest([]string{testEqual, testReadA}), KeptDigest: testReadB}))
+		runAt(28, 14, "2026-10-26T19:45:00Z"), comparedSameChange(29, 14, "2026-10-26T19:45:05Z", testReadC),
+		nodeRec(30, "2026-10-26T20:00:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 2, RemovedFirstSeq: 41, RemovedLastSeq: 43,
+			RemovedDigest: RemovedReadsDigest([]string{testEqual, testReadA}), KeptDigest: testReadC}))
 	return recs
 }
 
@@ -87,22 +90,22 @@ func TestReadsChainVerifies(t *testing.T) {
 // open, and repeats a change only by naming the newest one and its digest.
 func TestReadCompared(t *testing.T) {
 	const other = "3c8e5f21-9d4a-4b6c-8f32-8d5a1e7b9c24"
-	// restored appends a run (decision 14) whose read was equal to the
+	// restored appends a run (decision 15) whose read was equal to the
 	// baseline again, and its config.baseline_restored record.
 	restored := func(recs []*Record) []*Record {
-		return append(recs, runAt(29, 14, "2026-10-26T20:30:00Z"),
-			nodeRec(30, "2026-10-26T20:30:05Z", ActionConfigBaselineRestored, "", Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 14}))
+		return append(recs, runAt(31, 15, "2026-10-26T20:30:00Z"),
+			nodeRec(32, "2026-10-26T20:30:05Z", ActionConfigBaselineRestored, "", Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 15}))
 	}
 	cases := map[string]struct {
 		mut  func(recs []*Record) []*Record
 		want string // "" accepts
 	}{
 		"no difference after a restore": {func(recs []*Record) []*Record {
-			return append(restored(recs), runAt(31, 15, "2026-10-26T21:00:00Z"), comparedNoDifference(32, 15, "2026-10-26T21:00:05Z"))
+			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z"))
 		}, ""},
 		"a second removal of what was compared since": {func(recs []*Record) []*Record {
-			recs = append(restored(recs), runAt(31, 15, "2026-10-26T21:00:00Z"), comparedNoDifference(32, 15, "2026-10-26T21:00:05Z"))
-			return append(recs, nodeRec(33, "2026-10-26T21:10:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 1, RemovedFirstSeq: 44, RemovedLastSeq: 44,
+			recs = append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z"))
+			return append(recs, nodeRec(35, "2026-10-26T21:10:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 1, RemovedFirstSeq: 44, RemovedLastSeq: 44,
 				RemovedDigest: RemovedReadsDigest([]string{testReadB}), KeptDigest: testEqual}))
 		}, ""},
 		"no difference while a recorded change is open": {func(recs []*Record) []*Record {
@@ -111,7 +114,7 @@ func TestReadCompared(t *testing.T) {
 			return recs
 		}, "recorded a change against it"},
 		"the same change after a restore": {func(recs []*Record) []*Record {
-			return append(restored(recs), runAt(31, 15, "2026-10-26T21:00:00Z"), comparedSameChange(32, 15, "2026-10-26T21:00:05Z", testReadA))
+			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedSameChange(34, 16, "2026-10-26T21:00:05Z", testReadA))
 		}, "not the newest recorded change"},
 		"the same change as an older record": {func(recs []*Record) []*Record {
 			bySeq(recs, 25).Config.ChangeSeq = 22
@@ -129,13 +132,13 @@ func TestReadCompared(t *testing.T) {
 		"a read with two results": {func(recs []*Record) []*Record {
 			r := *bySeq(recs, 25)
 			c := *r.Config
-			r.Seq, r.Config = 29, &c
+			r.Seq, r.Config = 40, &c
 			return append(recs, &r)
 		}, "second result"},
 		"a detection of a read already compared": {func(recs []*Record) []*Record {
 			d := *bySeq(recs, 23)
 			c := *d.Config
-			d.Seq, d.Config, d.Time = 29, &c, at("2026-10-26T19:40:00Z")
+			d.Seq, d.Config, d.Time = 40, &c, at("2026-10-26T19:40:00Z")
 			c.ReadSeq = 13
 			since(&d, 12, "2026-10-26T19:00:00Z")
 			return append(recs, &d)
@@ -152,37 +155,48 @@ func TestReadCompared(t *testing.T) {
 			bySeq(recs, 25).Config.BaselineDigest = testSnapshot
 			return recs
 		}, "acknowledged configuration baseline"},
-		"removing every compared read": {func(recs []*Record) []*Record {
-			bySeq(recs, 28).Config.RemovedCount = 3
+		"removing all but one compared read": {func(recs []*Record) []*Record {
+			c := bySeq(recs, 30).Config
+			c.RemovedCount, c.RemovedDigest = 3, RemovedReadsDigest([]string{testEqual, testReadA, testReadB})
 			return recs
-		}, "newest stays"},
+		}, "newest stay"},
+		"removing every compared read": {func(recs []*Record) []*Record {
+			c := bySeq(recs, 30).Config
+			c.RemovedCount, c.RemovedFirstSeq, c.RemovedLastSeq = 4, 41, 44
+			c.RemovedDigest = RemovedReadsDigest([]string{testEqual, testReadA, testReadB, testReadC})
+			return recs
+		}, "newest stay"},
 		"removing reads that are not the oldest": {func(recs []*Record) []*Record {
-			c := bySeq(recs, 28).Config
+			c := bySeq(recs, 30).Config
 			c.RemovedCount, c.RemovedDigest = 1, RemovedReadsDigest([]string{testReadA})
 			return recs
 		}, "removed_digest is not"},
 		"removing in another order": {func(recs []*Record) []*Record {
-			bySeq(recs, 28).Config.RemovedDigest = RemovedReadsDigest([]string{testReadA, testEqual})
+			bySeq(recs, 30).Config.RemovedDigest = RemovedReadsDigest([]string{testReadA, testEqual})
 			return recs
 		}, "removed_digest is not"},
 		"keeping a read that is gone": {func(recs []*Record) []*Record {
-			bySeq(recs, 28).Config.KeptDigest = testEqual
+			bySeq(recs, 30).Config.KeptDigest = testEqual
 			return recs
-		}, "kept_digest names no"},
+		}, "kept_digest is not the newest"},
+		"keeping the second newest read": {func(recs []*Record) []*Record {
+			bySeq(recs, 30).Config.KeptDigest = testReadB
+			return recs
+		}, "kept_digest is not the newest"},
 		"removing the same reads twice": {func(recs []*Record) []*Record {
-			r := *bySeq(recs, 28)
+			r := *bySeq(recs, 30)
 			c := *r.Config
-			r.Seq, r.Config = 29, &c
+			r.Seq, r.Config = 40, &c
 			return append(recs, &r)
-		}, "newest stays"},
+		}, "newest stay"},
 		"removing the reads of another asset": {func(recs []*Record) []*Record {
-			bySeq(recs, 28).Target.AssetID = other
+			bySeq(recs, 30).Target.AssetID = other
 			return recs
-		}, "newest stays"},
+		}, "newest stay"},
 		"removing before any read was compared": {func(recs []*Record) []*Record {
-			r := bySeq(recs, 28)
+			r := bySeq(recs, 30)
 			return append(recs[:3:3], r)
-		}, "newest stays"},
+		}, "newest stay"},
 	}
 	for name, c := range cases {
 		err := VerifyConfig(c.mut(cloneChain(readsChain())))
@@ -233,7 +247,7 @@ func TestReadCompareAcknowledgement(t *testing.T) {
 func TestReadRecordFields(t *testing.T) {
 	base := func() map[string]*Record {
 		chain := readsChain()
-		return map[string]*Record{"no_difference": bySeq(chain, 14), "same_change": bySeq(chain, 25), "removed": bySeq(chain, 28),
+		return map[string]*Record{"no_difference": bySeq(chain, 14), "same_change": bySeq(chain, 25), "removed": bySeq(chain, 30),
 			"detected": bySeq(chain, 23)}
 	}
 	bad := map[string]struct {
