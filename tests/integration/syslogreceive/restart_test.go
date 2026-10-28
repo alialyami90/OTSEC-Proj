@@ -143,10 +143,33 @@ func spentIn(recs []unknownRecord, now time.Time, window time.Duration) (n int64
 // dropped none).
 func (g *rig) floodFor(d time.Duration, mark string) (sent int) {
 	g.t.Helper()
+	var end time.Time
+	return g.flood(func(sent int) bool {
+		if sent == 0 {
+			end = time.Now().Add(d)
+		}
+		return sent == 0 || time.Now().Before(end)
+	}, mark)
+}
+
+// floodN is floodFor by count: n stranger datagrams, however long they
+// take to send. A case that needs a given number of bytes offered floods by
+// count, since a timed flood on a loaded runner sends fewer (#271,
+// full-suite job 122888480694: 56 records in 400 ms on hosted Windows,
+// short of a 512 KiB budget).
+func (g *rig) floodN(n int, mark string) (sent int) {
+	g.t.Helper()
+	return g.flood(func(sent int) bool { return sent < n }, mark)
+}
+
+// flood sends while more(sent) holds, then waits for the marker as
+// floodFor says.
+func (g *rig) flood(more func(sent int) bool, mark string) (sent int) {
+	g.t.Helper()
 	c := dialFrom(g.t, ipStranger, "udp", g.addr)
 	known := dialFrom(g.t, ipA, "udp", g.addr)
 	rows0, st0 := g.rows(), g.r.Status()
-	for end := time.Now().Add(d); sent == 0 || time.Now().Before(end); sent++ {
+	for ; more(sent); sent++ {
 		c.Write(strangerMsg)
 		if sent%20 == 0 {
 			fmt.Fprintf(known, "<13>known %d", sent)
@@ -699,7 +722,9 @@ func TestUnknownSpentOutOfRangeStartsEmpty(t *testing.T) {
 			t.Parallel()
 			log, path := open(t, 64<<20)
 			g := serveOn(t, log, path, lim, spent)
-			g.floodFor(400*time.Millisecond, "<13>a6 marker")
+			// Twice the budget offered, by count: spent 0 must use it up
+			// and drop the rest as unknown-budget.
+			g.floodN(2*per/len(strangerMsg)+1, "<13>a6 marker")
 			recs := g.unknownRecords()
 			st := g.r.Status()
 			g.close()
