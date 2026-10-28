@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.7/record",
+  "$id": "otsec.audit/0.8/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -169,7 +169,8 @@
         "config.baseline_acknowledged",
         "config.baseline_restored",
         "config.read_compared",
-        "config.reads_removed"
+        "config.reads_removed",
+        "config.baseline_recorded"
       ]
     },
     "outcome": {
@@ -854,7 +855,8 @@
               "config.change_detected",
               "config.baseline_restored",
               "config.read_compared",
-              "config.reads_removed"
+              "config.reads_removed",
+              "config.baseline_recorded"
             ]
           }
         },
@@ -1005,6 +1007,11 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
+                  ]
                 }
               ]
             }
@@ -1131,6 +1138,11 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
+                  ]
                 }
               ]
             }
@@ -1236,6 +1248,11 @@
                 {
                   "required": [
                     "snapshot_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
                   ]
                 }
               ]
@@ -1465,6 +1482,11 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
+                  ]
                 }
               ]
             }
@@ -1591,6 +1613,11 @@
                 {
                   "required": [
                     "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
                   ]
                 }
               ]
@@ -1759,9 +1786,210 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "baseline_version"
+                  ]
                 }
               ]
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.baseline_recorded"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reason_code"
+          ]
+        },
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "config": {
+            "required": [
+              "kind",
+              "baseline_digest"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_start"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "approval_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "event"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseline_version"
+              ],
+              "if": {
+                "required": [
+                  "previous_digest"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "baseline_version": {
+                    "minimum": 2
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "baseline_version": {
+                    "const": 1
+                  }
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "baseline_version"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.baseline_recorded"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([8-9]|[1-9][0-9]{1,3})$"
           }
         }
       }
@@ -1887,7 +2115,7 @@
     "config": {
       "type": "object",
       "additionalProperties": false,
-      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
+      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed; from 0.8 also config.baseline_recorded) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -1905,7 +2133,7 @@
             "configuration",
             "event"
           ],
-          "description": "The baseline's kind (acknowledged only)"
+          "description": "The baseline's kind (baseline_acknowledged and, from 0.8, baseline_recorded only)"
         },
         "baseline_digest": {
           "type": "string",
@@ -1956,7 +2184,7 @@
         "previous_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "The baseline of the same asset and kind this acknowledgement replaces; absent for the asset's first (acknowledged only)"
+          "description": "The baseline of the same asset and kind this acknowledgement replaces, or, on baseline_recorded (0.8), the baseline the recorded one replaces (C10 Previous); absent for the asset's first"
         },
         "unchanged_read_seq": {
           "type": "integer",
@@ -2005,6 +2233,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "0.7: seq of the stored record of the compared snapshot in the asset's configuration stream; it increases from one compared read of the asset to the next (read_compared only)"
+        },
+        "baseline_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.8: the recorded baseline's own version, C10 Baseline.Version: 1 for an asset's first and one more for each re-learn (baseline_recorded of kind event only; a configuration snapshot has none)"
         }
       }
     }
