@@ -16,7 +16,59 @@ import (
 
 // Format is the schema identifier kept in every database's meta table.
 // A database with another format is refused, never migrated, in Phase 2.
-const Format = "otsec.platform-store/1"
+// Format 2 (C5 0.5, D4-14) has rowid events and captures tables: the first
+// format's WITHOUT ROWID tables spilled every row over about 1 KB to an
+// overflow page of its own, so a commit wrote up to 3.3 times the WAL the
+// reserve rule allows and the file grew up to 4.5 times the bytes the quota
+// counts.
+const Format = "otsec.platform-store/2"
+
+// legacyFormat is the first format. It is refused with legacyRefusal.
+const legacyFormat = "otsec.platform-store/1"
+
+// legacyRefusal is why a database of the first format is not opened, and
+// the way out. It is never changed, rewritten or deleted by the node.
+func legacyRefusal(path string) error {
+	return invalid("store %s was created by an earlier layout (format %s, events and captures WITHOUT ROWID); "+
+		"the recovery reserve is not sized for it (C5 0.5, D4-14), so it is not opened, changed or deleted. "+
+		"To start on this layout: stop the node, copy the store directory aside, let any events you need "+
+		"forward upstream first (or keep the copy), remove the database files, and start the node (platform/node README, \"Store layout changes\")",
+		path, legacyFormat)
+}
+
+// refuseLegacy returns legacyRefusal when the database at path is of the
+// first format, and nil otherwise, including when the file cannot be read as
+// a store: the open that follows reports that. It must write neither the
+// database file nor its -wal. An ordinary open folds a hot -wal into the file
+// and deletes it when the connection closes, and a refused database must be
+// left as it was found (B1 on #282).
+//
+// A format row can be in the -wal, not yet in the main file (B6's #280), so
+// the main file alone is not enough once the -wal holds frames. Then the
+// check reads through the WAL with a read-only connection: it cannot
+// checkpoint or delete the -wal, and the most it writes is the -shm, which is
+// derived from the -wal and rebuilt when it is missing. With no -wal, or an
+// empty one, nothing is in it, and the main file is read alone and immutable,
+// so SQLite takes no lock and creates no -wal or -shm.
+func refuseLegacy(ctx context.Context, path string) error {
+	query := "mode=ro"
+	if st, err := os.Stat(path + "-wal"); err != nil || st.Size() == 0 {
+		query = "mode=ro&immutable=1"
+	}
+	sdb, err := sql.Open("sqlite", fileURI(path, query))
+	if err != nil {
+		return nil
+	}
+	defer sdb.Close()
+	var format string
+	if err := sdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'format'`).Scan(&format); err != nil {
+		return nil
+	}
+	if format == legacyFormat {
+		return legacyRefusal(path)
+	}
+	return nil
+}
 
 // DB is one open database. It implements contracts/store.Committer and
 // contracts/store.RecoveryStore.
@@ -59,21 +111,24 @@ CREATE TABLE streams (
 	anchor_hash   TEXT
 ) WITHOUT ROWID;
 CREATE TABLE events (
+	id            INTEGER PRIMARY KEY,
 	stream        TEXT NOT NULL,
 	seq           INTEGER NOT NULL,
 	event         BLOB NOT NULL,
 	capture       TEXT,
 	source_cursor BLOB,
-	committed_at  INTEGER NOT NULL,
-	PRIMARY KEY (stream, seq)
-) WITHOUT ROWID;
+	committed_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX events_key ON events (stream, seq);
 CREATE INDEX events_by_time ON events (stream, committed_at, seq);
 CREATE INDEX events_by_capture ON events (capture) WHERE capture IS NOT NULL;
 CREATE TABLE captures (
-	sha256 TEXT PRIMARY KEY,
+	id     INTEGER PRIMARY KEY,
+	sha256 TEXT NOT NULL,
 	class  TEXT NOT NULL,
 	bytes  BLOB NOT NULL
-) WITHOUT ROWID;
+);
+CREATE UNIQUE INDEX captures_key ON captures (sha256);
 CREATE TABLE cursors (
 	consumer TEXT NOT NULL,
 	stream   TEXT NOT NULL,
@@ -114,6 +169,8 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		if err := create(ctx, path, opt); err != nil {
 			return nil, err
 		}
+	} else if err := refuseLegacy(ctx, path); err != nil {
+		return nil, err
 	}
 	d, err := connect(ctx, path, opt)
 	if err != nil {
@@ -161,9 +218,14 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err != nil {
 		return err
 	}
+	// Nothing reads the file before the rename, so its writes need no flush
+	// of their own: synchronous=OFF here, and one flush of the whole file
+	// before the rename below. This replaces about ten flushes per new
+	// database (#230). synchronous is per connection; every later open sets
+	// FULL again, and load checks it.
 	// auto_vacuum must be set before the first table (E-A5-3 case 3), and
 	// journal_mode=WAL is persistent. Both are set only here, on a new file.
-	for _, q := range []string{"PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
+	for _, q := range []string{"PRAGMA synchronous=OFF", "PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
 		if _, err := d.conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return fmt.Errorf("create %s: %s: %w", tmp, q, err)
@@ -176,11 +238,36 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("create %s: close: %w", tmp, err)
 	}
+	d.point("create:closed")
+	if err := flushCreated(tmp); err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
 	d.point("create:rename")
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
+	d.point("create:renamed")
 	return syncDir(opt.Dir)
+}
+
+// flushCreated flushes a closed new database to disk. The close checkpointed
+// its WAL into it and removed the -wal file; one that is still there holds
+// committed pages the rename would leave behind, so it is refused.
+func flushCreated(tmp string) error {
+	if _, err := os.Lstat(tmp + "-wal"); err == nil {
+		return errors.New("WAL left after close")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // connect opens path on one connection with the per-connection settings.
@@ -256,18 +343,21 @@ func (d *DB) load(ctx context.Context) error {
 			return invalid("stream %s is stored as %s and configured as %s; a stream has one class for life", s.ID, have, s.Class)
 		}
 	}
-	if len(add) == 0 {
-		return nil
-	}
-	return d.tx(ctx, "streams", func() error {
-		for _, s := range add {
-			if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
-				return err
+	if len(add) > 0 {
+		err := d.tx(ctx, "streams", func() error {
+			for _, s := range add {
+				if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
+					return err
+				}
+				d.streams[s.ID] = s.Class
 			}
-			d.streams[s.ID] = s.Class
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return d.ensureHolds(ctx)
 }
 
 // tx runs f in one BEGIN IMMEDIATE transaction on the connection. The
@@ -355,6 +445,9 @@ func (d *DB) CheckSettings(ctx context.Context) error {
 		meta[k] = v
 	}
 	rows.Close()
+	if meta["format"] == legacyFormat {
+		return legacyRefusal(d.path)
+	}
 	for k, v := range map[string]string{"format": Format, "node_id": string(d.opt.Node), "database": string(d.opt.Database.ID)} {
 		if meta[k] != v {
 			return invalid("store %s is %q, want %q", k, meta[k], v)

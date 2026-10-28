@@ -22,7 +22,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 30 minutes on Windows, so a package that starts late in the go test
+    # step still reaches its own -timeout below (B1 and B6, #252).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -49,7 +51,11 @@ jobs:
       - name: collector pipe between two services (A6)
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
-      - run: go test ./...
+      # -timeout applies to each package's test binary from its own start,
+      # not to the step. On Windows it is 12m, so a slow or hung package
+      # dumps its goroutine stacks when it passes 12m; the 30-minute job
+      # limit leaves room for packages that start late (B1, #230 and #252).
+      - run: go test ${{ runner.os == 'Windows' && '-timeout 12m' || '' }} ./...
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15
