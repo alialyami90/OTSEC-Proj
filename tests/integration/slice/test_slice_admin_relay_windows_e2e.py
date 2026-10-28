@@ -51,6 +51,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -245,14 +246,46 @@ def _suspend(pid, resume=False):
         k32.CloseHandle(h)
 
 
+def written(s):
+    """The status file's written time, by the node's clock; None while it
+    cannot be read."""
+    try:
+        w = status(s)["written"]
+    except (OSError, ValueError, KeyError):
+        return None
+    head, _, frac = w.rstrip("Z").partition(".")
+    return datetime.fromisoformat(head + ("." + frac[:6] if frac else "")).replace(tzinfo=timezone.utc)
+
+
+def relayed_since(s, t0, done):
+    """Waits until the node has relayed at least once since t0 and on one
+    tick after: a status written after t0 whose admin files satisfy done,
+    then a status the node wrote RELAY + 3 s after that by its own clock.
+    It waits on the node's own state, not a fixed sleep (B5 on #266), and
+    fails if either is not seen in 6 relay periods."""
+    def first_relay():
+        try:
+            files = status(s).get("admin_requests", [])
+        except (OSError, ValueError):
+            return None
+        w = written(s)
+        return w if w and w > t0 and done(files) else None
+    first = harness.wait_for(first_relay, 6 * RELAY, step=1.0)
+    assert first, f"the node showed no relay since {t0}: {status(s).get('admin_requests')}"
+    tick = harness.wait_for(lambda: (written(s) or first) >= first + timedelta(seconds=RELAY + 3), 6 * RELAY, step=1.0)
+    assert tick, f"the node wrote no status {RELAY + 3} s after its relay at {first} (last written {written(s)})"
+
+
 def restart_node(s, before=None):
     """Kills the node (taskkill /F), runs before() while it is down, starts
-    it again through the SCM and lets it relay at start and on one tick."""
+    it again through the SCM and waits until it has relayed at start, with
+    every admin file decided, and on one tick after (relayed_since)."""
     s.kill("node")
     if before:
         before()
+    t0 = datetime.now(timezone.utc)
     s.respawn("node")
-    time.sleep(SETTLE)
+    relayed_since(s, t0, lambda files: files and all(a["state"] in ("accepted", "refused") for a in files))
 
 
 def settled(s, files):
@@ -337,8 +370,9 @@ def got(tmp_path_factory):
         target = os.path.join(s.service.data, "b6-link-target.json")
         os.replace(files["symlink"]["path"], target)
         os.symlink(target, files["symlink"]["path"])
+        t0 = datetime.now(timezone.utc)
         s.respawn("node")
-        time.sleep(SETTLE)
+        relayed_since(s, t0, lambda shown_now: {f["file"] for f in files.values()} <= {a["file"] for a in shown_now})
         out["files"] = {k: {kk: v[kk] for kk in ("file", "request_id", "sddl")} for k, v in files.items()}
         out["steps"]["acl"] = {k: {"decided": decided(s, f["request_id"]), "shown": shown(s, f["file"])}
                                for k, f in files.items()}
