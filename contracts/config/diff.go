@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"otsec.local/otsec/contracts/asset"
@@ -149,6 +150,29 @@ func DecodeDifference(b []byte) (Difference, error) {
 		return Difference{}, fmt.Errorf("config: difference: %w", err)
 	}
 	return d, d.Validate()
+}
+
+// SameChanges reports whether o is the same change as d: the same asset, rule
+// and target, measured from the same baseline snapshot, with equal Changes.
+// The two may differ in the snapshot they end at, its invocation and its
+// time. So a configuration that stays changed read after read compares as
+// one change, not a new one each time. Changes are in the rule's order, so
+// equal slices are the same set. Two empty differences are the same
+// (nothing changed in either), which callers that mean "a change" must rule
+// out first.
+func (d Difference) SameChanges(o Difference) bool {
+	return d.AssetID == o.AssetID && d.Rule == o.Rule && d.Target == o.Target &&
+		d.From.SnapshotDigest == o.From.SnapshotDigest && slices.EqualFunc(d.Changes, o.Changes, func(a, b Change) bool {
+		return a.Class == b.Class && a.Kind == b.Kind && a.Name == b.Name && a.Sensitive == b.Sensitive &&
+			equalValue(a.From, b.From) && equalValue(a.To, b.To)
+	})
+}
+
+func equalValue(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // Validate checks every rule that can be checked from the difference alone.

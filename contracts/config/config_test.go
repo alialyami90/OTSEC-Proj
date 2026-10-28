@@ -212,6 +212,62 @@ func TestSameConfigurationOtherBytesIsNoChange(t *testing.T) {
 	}
 }
 
+// SameChanges (D4-20): a change that stays is one change however many reads
+// show it. Another end snapshot of the same changes is the same; another
+// baseline, other changes, or another asset is not.
+func TestSameChanges(t *testing.T) {
+	s3, b3 := snapshot(t, "3")
+	_, b1 := snapshot(t, "1")
+	_, b2 := snapshot(t, "2")
+	d13, err := Compare(b1, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Read 3 again, later: other time and invocation, the same settings.
+	later := []byte(strings.NewReplacer(s3.RetrievedAt, "2026-10-25T09:00:00Z", s3.InvocationID, "8d1f4b2a-3c5e-4f60-9a7b-1c2d3e4f5a6b").Replace(string(b3)))
+	d13b, err := Compare(b1, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d13b.To.SnapshotDigest == d13.To.SnapshotDigest {
+		t.Fatal("the later read has the same digest, so the case tests nothing")
+	}
+	if len(d13.Changes) == 0 || !d13.SameChanges(d13b) || !d13b.SameChanges(d13) {
+		t.Errorf("the same changes at another time: %v", d13.SameChanges(d13b))
+	}
+	d12, err := Compare(b1, b2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d13.SameChanges(d12) || d12.SameChanges(d13) {
+		t.Error("a change and no change are the same")
+	}
+	if !d12.SameChanges(d12) {
+		t.Error("two differences with no change are not the same")
+	}
+	// The same changes from another baseline are another change.
+	d23, err := Compare(b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(d23.Changes, d13.Changes) || d23.SameChanges(d13) {
+		t.Errorf("another baseline: equal changes %v, same %v", reflect.DeepEqual(d23.Changes, d13.Changes), d23.SameChanges(d13))
+	}
+	// One value changed is another change; another asset is another change.
+	other := d13
+	other.Changes = append([]Change(nil), d13.Changes...)
+	to := "9"
+	other.Changes[0].To = &to
+	if d13.SameChanges(other) {
+		t.Error("a different value is the same change")
+	}
+	other = d13
+	other.AssetID += "x"
+	if d13.SameChanges(other) {
+		t.Error("another asset is the same change")
+	}
+}
+
 // Reversed, every change is its inverse.
 func TestCompareReversed(t *testing.T) {
 	_, b1 := snapshot(t, "1")
