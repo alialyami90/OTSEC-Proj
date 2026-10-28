@@ -27,9 +27,18 @@ const (
 // so lab_tls_files stays set. It returns the register so a test can
 // change it and write it again with WriteRegister.
 func (c *Config) WriteKeyRegister(p *PKI, listenerHost string, notAfter time.Time) (*nodekey.Register, error) {
+	return c.WriteKeyRegisterAt(p, listenerHost, notAfter, time.Now())
+}
+
+// WriteKeyRegisterAt is WriteKeyRegister with the entries installed at the
+// time at, which must fall inside the certificates' period: the register
+// refuses to install an expired certificate, so a register whose certificate
+// has expired by the time the node loads it is made by installing in the
+// past, as time would.
+func (c *Config) WriteKeyRegisterAt(p *PKI, listenerHost string, notAfter, at time.Time) (*nodekey.Register, error) {
 	reg := nodekey.NewRegister(c.NodeID)
 	keys := nodekey.LabFiles{Dir: c.TLSDir}
-	now := time.Now()
+	now := at
 	install := func(ref, name string, usage x509.ExtKeyUsage) error {
 		csr, err := reg.Request(keys, ref, pkix.Name{CommonName: name}, KeyAdmin, now)
 		if err != nil {
