@@ -40,8 +40,9 @@ func bigConfigSnapshot(t *testing.T, n int, v string) (config.Snapshot, c5.Captu
 // the real configuration database as the node lays a snapshot out: the
 // snapshot's compact bytes as the event, the transcript as the capture, and
 // no source cursor. Its size as C5 counts it (Record.Bytes) leaves at least
-// config.RecordHeadroom under ConfigRecordBytes (B1 on #345). One byte more
-// of snapshot is refused by C9, so by ConfigDocuments, and nothing is stored.
+// config.RecordHeadroom under ConfigRecordBytes (B1 on #345). The next
+// larger snapshot is refused by C9, so by ConfigDocuments, and nothing is
+// stored.
 func TestLargestConfigRecordIsStored(t *testing.T) {
 	lo, hi := 1, 400
 	for lo < hi {
@@ -73,9 +74,10 @@ func TestLargestConfigRecordIsStored(t *testing.T) {
 		t.Fatalf("the largest record is not stored: %v", err)
 	}
 
-	// Two more bytes of one value (the encoded snapshot grows by two) cannot
-	// be a snapshot C9 accepts, once the bound is passed.
-	over, ocap := bigConfigSnapshot(t, 3000, strings.Repeat("V", lo+400))
+	// One more byte in each value (the encoded snapshot grows by 3000) is
+	// past C9's bound. The record would still fit under the cap, so it is
+	// C9, through ConfigDocuments, that refuses it.
+	over, ocap := bigConfigSnapshot(t, 3000, strings.Repeat("V", lo+1))
 	odoc, err := over.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +85,12 @@ func TestLargestConfigRecordIsStored(t *testing.T) {
 	if err := over.Validate(); !errors.Is(err, config.ErrTooLarge) {
 		t.Fatalf("an over-bound snapshot validates: %v", err)
 	}
-	if _, err := log.Append(bg, c5.Record{Stream: ConfigStream(relayID), Class: c5.ClassConfiguration, Event: odoc, Capture: &ocap}); err == nil {
-		t.Fatal("an over-bound snapshot was stored")
+	orec := c5.Record{Stream: ConfigStream(relayID), Class: c5.ClassConfiguration, Event: odoc, Capture: &ocap}
+	if orec.Bytes() > ConfigRecordBytes {
+		t.Fatalf("the over-bound record is %d bytes, over the cap %d: the cap, not C9, would refuse it", orec.Bytes(), ConfigRecordBytes)
+	}
+	// The store keeps the validator's message, not its error chain.
+	if _, err := log.Append(bg, orec); err == nil || !strings.Contains(err.Error(), config.ErrTooLarge.Error()) {
+		t.Fatalf("an over-bound snapshot: %v", err)
 	}
 }
