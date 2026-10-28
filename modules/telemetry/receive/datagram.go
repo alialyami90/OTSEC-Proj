@@ -20,7 +20,10 @@ const maxDatagram = 65536
 // message (RFC 5426), kept whole. The sender cannot be slowed, so a
 // datagram over its sender's rate, one that finds the queue full, and a
 // batch the store refuses are dropped and counted (drop-and-count), and the
-// counts are reported as intake.drop-counted every Limits.ReportEvery.
+// counts are reported as intake.drop-counted every Limits.ReportEvery. Unknown
+// senders' datagrams share the queue with known senders' but may hold at most
+// a quarter of it, by places and by bytes (D4-21); one past that is dropped as
+// unknown-queue-full.
 func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 	q := make(chan msg, r.lim.Queue)
 	done := make(chan struct{})
@@ -66,6 +69,15 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 		if !known {
 			// Spent as read (payUnknown), and only with room to queue it: this
 			// loop is the queue's only sender.
+			// An unknown sender gets at most a quarter of the queue, by
+			// places and by bytes, however the rate limits are set (D4-21),
+			// so a flood of them behind a slow store cannot take what a
+			// known sender's datagrams need (HR-11). The check comes before
+			// payUnknown so a datagram dropped here spends no budget.
+			if r.unknownQueued.Load() >= int64(max(cap(q)/4, 1)) || r.unknownBytes.Load()+int64(n) > r.lim.MaxQueueBytes/4 {
+				r.drop(DropUnknownQueueFull, 1)
+				continue
+			}
 			if len(q) == cap(q) {
 				r.drop(DropQueueFull, 1)
 				continue
@@ -77,6 +89,10 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 		select {
 		case q <- m:
 			r.queued.Add(int64(n))
+			if m.rec != nil {
+				r.unknownQueued.Add(1)
+				r.unknownBytes.Add(int64(n))
+			}
 		default:
 			r.drop(DropQueueFull, 1)
 		}
@@ -93,8 +109,14 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 // is dropped and counted, never retried: the datagrams behind it would
 // otherwise be dropped instead.
 func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
+	taken := func(m msg) msg {
+		if m.rec != nil {
+			r.unknownQueued.Add(-1)
+		}
+		return m
+	}
 	for m := range q {
-		batch := []msg{m}
+		batch := []msg{taken(m)}
 	fill:
 		for len(batch) < store.MaxBatch {
 			select {
@@ -102,22 +124,27 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 				if !ok {
 					break fill
 				}
-				batch = append(batch, m)
+				batch = append(batch, taken(m))
 			default:
 				break fill
 			}
 		}
-		var n int64
+		var n, un int64
 		for _, m := range batch {
 			n += int64(len(m.msg))
+			if m.rec != nil {
+				un += int64(len(m.msg))
+			}
 		}
 		recs, kept := r.records(batch)
 		if len(recs) == 0 {
 			r.queued.Add(-n)
+			r.unknownBytes.Add(-un)
 			continue
 		}
 		r.commitSplit(cctx, recs, kept, false)
 		r.queued.Add(-n)
+		r.unknownBytes.Add(-un)
 	}
 }
 
