@@ -1,8 +1,9 @@
 # B6 diagnostic for #284: TestUnknownSpentAcrossRestarts lost a marker on
-# the hosted Windows runner once (298dfda, seed 1, run 2) and passed at
-# f526e92, so one run of the Go job rarely shows the failure. This job runs
-# that test alone, repeatedly, so a failure is likely to print the
-# listener's counters (restart_test.go, rig.why). a6-* workflows are B6's
+# the hosted Windows runner inside the full Go job (298dfda run 2, ec22a31
+# run 9) and passed 12 of 12 run alone (e6e11f3). This job runs that test
+# repeatedly while other store-heavy packages run beside it, as in the Go
+# job, so a failure is likely to print the listener's counters
+# (restart_test.go, rig.why). a6-* workflows are B6's
 # (handoffs/B6-handoff.md). No secrets, no services, no accounts; hosted
 # runner only. Results are simulated and printed to the job log.
 name: a6-windows-restart-marker
@@ -22,15 +23,29 @@ permissions:
 jobs:
   restart-marker:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - name: Run the restart test repeatedly
+      - name: Build the test binaries
+        run: go test -count 1 -run '^$' ./platform/... ./tests/...
+      - name: Run the restart test repeatedly, under load
         shell: pwsh
         env:
           COUNT: ${{ github.event.inputs.count || '12' }}
-        run: go test -timeout 40m -v -count $env:COUNT -run '^TestUnknownSpentAcrossRestarts$' ./tests/integration/syslogreceive/
+        run: |
+          # Load: the packages that ran beside it when it failed in the Go
+          # job, over and over until the restart test ends. Their results
+          # are not this job's.
+          $load = Start-Job -ScriptBlock {
+            Set-Location $using:PWD
+            while ($true) { go test -count 1 ./platform/node/ ./platform/store/ ./tests/integration/quarantine/ ./tests/integration/storeholds/ 2>&1 | Out-Null }
+          }
+          go test -timeout 40m -v -count $env:COUNT -run '^TestUnknownSpentAcrossRestarts$' ./tests/integration/syslogreceive/
+          $rc = $LASTEXITCODE
+          Stop-Job $load
+          Remove-Job -Force $load
+          exit $rc
