@@ -338,6 +338,7 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
 - **Question (B3, from B6's probe on #305).** C8's `VerifyConfig` keys an open unapproved-change alarm by asset and baseline digest, and only a `config.baseline_restored` clears it. So after acknowledging B and then A again (A to B to A), an alarm raised against A before the acknowledgement of B is open again, and an approved detection against A is refused. C8's own text says that ending the alarm "takes a baseline acknowledgement (which moves the baseline) or a return to the baseline, recorded", and B5's hold fold follows the text.
 - **Decision: the text stands, and `VerifyConfig` changes (C8 0.6).**
   - A succeeded configuration-kind `config.baseline_acknowledged` ends every open configuration alarm of its asset raised before it, whatever baseline they were raised against.
+  - An event-kind acknowledgement (a C10 baseline) or a denied acknowledgement ends no configuration alarm.
   - Re-acknowledging A starts A again from that acknowledgement. Alarms from before it do not come back.
   - Only an alarm raised after the latest acknowledgement blocks a later approval, until a restore or another acknowledgement.
   - Detection compares each read against the latest acknowledged baseline. So re-acknowledging A while the device is still at S does not go quiet: the next read of S differs from A and raises a new alarm, unless an approval covers it.
