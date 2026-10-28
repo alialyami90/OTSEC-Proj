@@ -149,3 +149,48 @@ func openUnlockable(t *testing.T, dir string) (*DB, func()) {
 	}
 	return db, r.Unlock
 }
+
+// BeginStats sees a wait: another connection holds BEGIN IMMEDIATE while a
+// commit waits on it. Waiting is seen during the wait, Count rises by one,
+// Max and Total reach at least half the hold, and Waiting is zero after
+// (B6 on #295).
+func TestBeginStatsSeesAWait(t *testing.T) {
+	const hold = 600 * time.Millisecond
+	dir := storeDir(t)
+	db := open1(t, dir, evidenceDB, nil)
+	l := testLog(t, db)
+	if _, err := l.Append(context.Background(), rec("syslog/relay1", c5.ClassSyslogStream, 0)); err != nil {
+		t.Fatal(err)
+	}
+	before := db.BeginStats()
+	other, err := sql.Open("sqlite", fileURI(filepath.Join(dir, "evidence.db"), "_pragma=busy_timeout(5000)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	c, err := other.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := l.Append(context.Background(), rec("syslog/relay1", c5.ClassSyslogStream, 1))
+		done <- err
+	}()
+	var waiting time.Duration
+	for end := time.Now().Add(hold); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		waiting = max(waiting, db.BeginStats().Waiting)
+	}
+	c.ExecContext(context.Background(), "ROLLBACK")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	after := db.BeginStats()
+	if after.Count != before.Count+1 || after.Max < hold/2 || after.Total-before.Total < hold/2 || waiting < hold/2 || after.Waiting != 0 {
+		t.Errorf("BeginStats missed a wait of %v: before %+v, after %+v, Waiting seen %v", hold, before, after, waiting)
+	}
+}
