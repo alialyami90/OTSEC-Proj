@@ -28,13 +28,10 @@ import (
 //     baseline for kind event), held as HoldBaseline, Ref that record;
 //   - each config.change_detected that no approval covered (warning
 //     unapproved_change), until a config.baseline_restored for its baseline
+//     or a succeeded acknowledgement of a configuration baseline (D4-18)
 //     ends it: the snapshot and the difference it names, held as
-//     HoldUnapprovedDifference, Ref that record. Like audit.VerifyConfig,
-//     the alarm belongs to its baseline and only the return ends it: an
-//     approval accepted after the alarm does not, and neither does an
-//     acknowledgement, which only makes the alarm not wanted while another
-//     baseline is the active one (a later acknowledgement of the first
-//     digest wants it again).
+//     HoldUnapprovedDifference, Ref that record. An approval accepted after
+//     the alarm does not end it (audit.VerifyConfig).
 //
 // A record is held for one reason. When one is wanted for two, the baseline
 // wins, as the acknowledgement that made it the baseline is the later word.
@@ -103,6 +100,9 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 			}
 			a := of(r)
 			a.baseline[c.Kind] = ackedBaseline{c.BaselineDigest, s.seq}
+			if c.Kind == authz.BaselineConfiguration {
+				a.open = nil // D4-18: an acknowledgement ends the earlier open alarms
+			}
 		case audit.ActionConfigChangeDetected:
 			if c.ApprovalSeq != 0 {
 				continue
@@ -136,15 +136,7 @@ func (a *assetHolds) wants() []wantHold {
 			add(wantHold{b.digest, c5.HoldBaseline, b.ref, fmt.Sprintf("the %s baseline acknowledged in audit record %d", k, b.ref)})
 		}
 	}
-	// An alarm is against a baseline, and only a return to that baseline
-	// ends it (audit.VerifyConfig); while another baseline is the active
-	// one it is not wanted, and it is wanted again if the baseline returns,
-	// by a later acknowledgement of the same digest as well.
-	cur := a.baseline[authz.BaselineConfiguration]
 	for _, o := range a.open {
-		if o.baseline != cur.digest {
-			continue
-		}
 		add(wantHold{o.snapshot, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d", o.ref)})
 		add(wantHold{o.difference, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d", o.ref)})
 	}

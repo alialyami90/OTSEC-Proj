@@ -89,15 +89,15 @@ func TestFoldHolds(t *testing.T) {
 		"a return to the baseline ends the alarm": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 0"}},
-		"a new baseline makes the alarm not wanted, and is the one held": {
+		"a new baseline ends the alarm and is the one held": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hSnap)},
 			[]string{"baseline " + hSnap[7:13] + " ref 2"}},
-		"a second acknowledgement of the same baseline keeps the alarm (B6 on #305)": {
+		"a second acknowledgement of the same baseline ends the alarm (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 2", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
-		"going to another baseline and back wants the alarm again (B6 on #305)": {
+			[]string{"baseline " + hBase[7:13] + " ref 2"}},
+		"going to another baseline and back leaves no alarm (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 3", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
+			[]string{"baseline " + hBase[7:13] + " ref 3"}},
 		"a return to the baseline ends it for good, even after a second acknowledgement": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase), ackRec(cfg, hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 3"}},
