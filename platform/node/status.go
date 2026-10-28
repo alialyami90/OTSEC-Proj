@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
@@ -62,11 +63,16 @@ type StatusAlarm struct {
 
 // StatusFile is the content of the status file.
 type StatusFile struct {
-	Schema  string                    `json:"schema"`
-	Node    string                    `json:"node_id"`
-	Written time.Time                 `json:"written"`
-	Modes   map[c5.DatabaseID]c5.Mode `json:"modes"`
-	Alarms  []StatusAlarm             `json:"alarms"`
+	Schema  string    `json:"schema"`
+	Node    string    `json:"node_id"`
+	Written time.Time `json:"written"`
+	// GoVersion is the Go toolchain the running node was built with
+	// (runtime.Version), so an operator can check it against the latest
+	// patch of a supported minor (D3-10). Empty in a file written by an
+	// older node.
+	GoVersion string                    `json:"go_version,omitempty"`
+	Modes     map[c5.DatabaseID]c5.Mode `json:"modes"`
+	Alarms    []StatusAlarm             `json:"alarms"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
 	// RunsHeld is the alarm code that stops every run on the node, level
@@ -324,7 +330,7 @@ func (s *Status) SetMode(db c5.DatabaseID, m c5.Mode) {
 func (s *Status) Snapshot(node string) StatusFile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
+	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), GoVersion: runtime.Version(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
 	f.Collecting = len(s.modes) > 0
 	f.RunsHeld = s.runsHeld
 	for db, m := range s.modes {

@@ -295,6 +295,10 @@ Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`
 - `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s, or has had no session open for 60 s even with nothing waiting (`Status.Open`). Waiting means past what the target confirmed (`StreamStatus.Confirmed`, A4 #103), not past the cursor, which stays behind while a report about the stream is owed. A held stream's events do not count as waiting. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
 - `forward-held`: a stream is held, with the forwarder's reason.
 
+## Toolchain in status (D3-10)
+
+The status file's `go_version` is the running node's `runtime.Version()`, and `otsec health` prints it as `node built with <version>`. An operator checks it against the latest patch of a supported Go minor. A status file written by an older node has no such field, and health prints no such line.
+
 ## Example
 
 `nodeconfigtest.New("site-a-node1", dir).AddSEL751(id, "127.0.0.1", 2323, 300).AddRELPTarget(...)` writes a file like this, with the asset abbreviated:
