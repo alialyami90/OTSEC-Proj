@@ -31,17 +31,19 @@ func TestRunStartsAndStops(t *testing.T) {
 	}()
 	var st StatusFile
 	var err error
-	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	began := time.Now()
+	for deadline := began.Add(5 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if st, err = ReadStatus(StatusPath(c)); err == nil && st.Collecting {
 			break
 		}
 	}
+	waited := time.Since(began)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 	if err != nil || !st.Collecting || st.Node != "site-a-node1" {
-		t.Fatalf("status %+v: %v", st, err)
+		t.Fatalf("after %s the last status read was %+v, read error: %v", waited.Round(time.Millisecond), st, err)
 	}
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -88,12 +90,15 @@ func TestRunStartsWithExpiredLinks(t *testing.T) {
 	// at once.
 	var (
 		st      StatusFile
+		last    StatusFile // the last status read, held or not, for a miss
+		lastErr error
 		runDone bool
 		runErr  error
 	)
-	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline) && !runDone; time.Sleep(20 * time.Millisecond) {
+	began := time.Now()
+	for deadline := began.Add(5 * time.Minute); time.Now().Before(deadline) && !runDone; time.Sleep(20 * time.Millisecond) {
 		s, err := ReadStatus(StatusPath(c))
-		if err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != "" {
+		if last, lastErr = s, err; err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != "" {
 			st = s
 			break
 		}
@@ -103,6 +108,7 @@ func TestRunStartsWithExpiredLinks(t *testing.T) {
 		default:
 		}
 	}
+	waited := time.Since(began)
 	cancel()
 	if !runDone {
 		runErr = <-done
@@ -111,7 +117,7 @@ func TestRunStartsWithExpiredLinks(t *testing.T) {
 		t.Fatal(runErr)
 	}
 	if !st.Collecting || st.Targets["central"].HeldBack != "expired" || st.Listeners["lab-tls"].HeldBack != "expired" {
-		t.Fatalf("status %+v", st)
+		t.Fatalf("after %s the last status read was %+v, read error: %v", waited.Round(time.Millisecond), last, lastErr)
 	}
 	var codes []string
 	for _, a := range st.Alarms {
