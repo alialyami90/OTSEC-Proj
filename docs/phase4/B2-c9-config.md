@@ -132,3 +132,12 @@ Building the C2 0.6 read changed four things in C9 0.1. B1 ruled on the first tw
 4. **A form every SEL-751 has that answers `Invalid Command` is `failed.device_error`.** Only the eleven forms C9 marks `MayBeAbsent` can be an absent section.
 
 The adapter keeps its own table of forms (`cfgForms`) and does not import the contract it is checked against; `TestCfgFormsAreTheRule` makes the two agree.
+
+## 0.3: a snapshot is bounded (D4-25)
+
+A configuration record is the snapshot plus the transcript it points into, and the configuration database's record cap is 1.5 MiB (D4-13). B5's bound assumed the count of S22's 8,734 settings, but nothing enforced it: a transcript at the run's byte limit packed with one-character settings makes 65,822 settings and a 2.3 MB record (measured on #338, simulated). C9 0.3 closes that:
+
+- **`MaxSettings` = 10,918** (S22's 8,734 plus a quarter) across all sections, and **`MaxSnapshotBytes` = 960 KiB** for `Snapshot.Encode` (compact JSON, no HTML escaping), derived as `RecordCap` (1.5 MiB) less `MaxTranscriptBytes` (the run's 512 KiB) less `RecordHeadroom` (64 KiB, B1 on #345, for what C5's `Record.Bytes` counts besides the event and the capture, such as a source cursor). A record at both bounds is 1,472 KiB. Tests hold `MaxTranscriptBytes` to the register's run and `RecordCap` to the node's `ConfigRecordBytes`. The byte bound is the backstop because a value can be long and JSON doubles a quote.
+- `Snapshot.Validate` refuses a snapshot over either, wrapping `ErrTooLarge`. `RecordsFit(records)` makes the same check before a snapshot exists, allowing `SnapshotFixedMax` (16 KiB) for everything but the settings; `TestRecordsFitImpliesValidate` shows a read it passes is a snapshot `Validate` passes.
+- The SEL-751 adapter calls `RecordsFit` after the last step: a read over a bound ends the run as `failed.config_unparsable` (QUI, bytes kept, no record, no snapshot). The adapter takes this one function from the contract; it still reads the replies with its own tokenizer.
+- The 25% margin is a proposal, not a measurement: no relay has been read. A real SEL-751 with more settings than S22 lists would fail its read, visibly, until the margin is revisited (H-13).
