@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/telemetry/forward"
 	"otsec.local/otsec/modules/telemetry/forward/relptest"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
@@ -582,5 +584,20 @@ func TestHeldRequiredTargetPastItsQuota(t *testing.T) {
 	}
 	if st.Snapshot("x").Targets["central"].HeldBack != "expired" {
 		t.Fatal("the target left the held-back state")
+	}
+}
+
+// A period fault does not hide another fault: an expired client certificate
+// whose name is not the target's permitted_peer still stops the node (item
+// 2), and so does one whose key does not match.
+func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
+	nc, _, dir := forwardConfigValid(t, 9, nodeconfigtest.Validity{Client: expired()}, func(nc *nodeconfigtest.Config) {
+		nc.Targets[0]["durable_ack"].(map[string]any)["permitted_peer"] = "site-b-node1"
+	})
+	lockTLS(t, nc)
+	r, _, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	if _, err := NewForwarding(r); err == nil || errors.Is(err, forward.ErrCertificatePeriod) {
+		t.Fatalf("an expired certificate with the wrong name: %v", err)
 	}
 }
