@@ -52,10 +52,11 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
       # -timeout applies to each package's test binary from its own start,
-      # not to the step. On Windows it is 12m, so a slow or hung package
-      # dumps its goroutine stacks when it passes 12m; the 30-minute job
-      # limit leaves room for packages that start late (B1, #230 and #252).
-      - run: go test ${{ runner.os == 'Windows' && '-timeout 12m' || '' }} ./...
+      # not to the step. On Windows it is 20m, so a slow or hung package
+      # dumps its goroutine stacks when it passes 20m; the 30-minute job
+      # limit leaves room for packages that start late (B1, #230, #252 and
+      # D4-22). A green platform/node over 12m is still a finding (D4-22).
+      - run: go test ${{ runner.os == 'Windows' && '-timeout 20m' || '' }} ./...
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15

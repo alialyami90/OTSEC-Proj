@@ -428,3 +428,25 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   - Equal loss in a long stall would need known datagrams to evict queued unknown ones. That adds an eviction path to the receiver for a case that is already F-016's disk stall, so it is not built.
   - B3 adds it to the HR-11 row's "still open before the first `device-observed` listener".
   - It is a gate before the first `device-observed` listener, and not before #316 merges.
+
+## D4-22: the Windows package timeout is 20 minutes, and `platform/node` gets a time budget (#324)
+
+- **What failed.** On #324 at 9a0b0a8 (job 122721753701), `platform/node` hit the Windows `-timeout 12m`. The goroutine that was running sat in `store.(*DB).Close`, inside a WAL checkpoint, in `FlushFileBuffers` (F-016).
+- **B5's evidence.** The table gives Windows times in seconds for three runs: #320, #324's first run, and this run.
+
+  | Package | #320 | #324, first run | This run |
+  | --- | --- | --- | --- |
+  | `platform/node` | 416 | 552 | over 720 |
+  | `platform/store` | 95 | 105 | 152 |
+  | `storeholds` | 286 | 370 | 501 |
+  | `quarantine` | 46 | 64 | 97 |
+  | `security` | 107 | 174 | 215 |
+  | `syslogreceive` | 136 | 230 | 278 |
+
+  Packages that #324 does not touch slowed by the same 1.3× to 2×. The Linux time for `platform/node` is flat (165 to 170 s). So the cause is the runner's disk, not #324. A normal Windows run of `platform/node` used 58 to 77 percent of 12 minutes, which is the same headroom D4-5 recorded against 600 s. One slow disk uses it up.
+- **Decision.**
+  1. The Windows `go test ./...` step runs with `-timeout 20m`, and the job limit stays at 30 minutes. That still leaves room for a late package's goroutine dump. Linux is unchanged. This replaces D4-10 item 2's 12 minutes.
+  2. **A budget, so the new limit is not slack.** `platform/node` on a green Windows run must stay under 12 minutes, the old limit. A green run over 12 minutes is a finding for B5 under F-016, not a pass that nobody notices. B5 reports the ten slowest `platform/node` tests on Windows and cuts what is fixture time, as #252 and #264 did.
+  3. **Close's checkpoint is bounded in bytes but not in time.** `wal_checkpoint(TRUNCATE)` on `context.Background()` parks in `FlushFileBuffers`, which no context can cancel. That is acceptable at shutdown, where the service manager's stop timeout is the bound. B5 records it in the store's README under F-016.
+  4. A run that times out at 20 minutes is real, never a flake, and it is handled under D4-5.
+- **Owners.** B1 makes the `ci.yml` change in this PR. B5 and B6 review it. B5 owns items 2 and 3.
