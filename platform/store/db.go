@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -583,23 +584,26 @@ func (d *DB) QuickCheck(ctx context.Context) error {
 	return nil
 }
 
-// Usage is the payload the database's class quotas count, the sum of its
-// classes' ClassBytes, and the sum of the class quotas. Startup measures a
-// quota with it, the same count the runtime refusal uses (D4-14). Pages run
-// well over it, so comparing pages with the quotas reported a refusal that
-// was not happening.
-func (d *DB) Usage(ctx context.Context) (used, limit int64, err error) {
+// ClassUsage is each class's ClassBytes against its quota, in class order.
+// Startup measures a quota with it, the same count the runtime refusal uses
+// (D4-14). Pages run well over it, so comparing pages with the quotas
+// reported a refusal that was not happening, and summing the classes hid a
+// full class beside a light one.
+func (d *DB) ClassUsage(ctx context.Context) ([]c5.ClassUse, error) {
 	if err := d.lock(); err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 	defer d.mu.Unlock()
-	if err := d.conn.QueryRowContext(ctx, `SELECT COALESCE(SUM(bytes), 0) FROM class_bytes`).Scan(&used); err != nil {
-		return 0, 0, fmt.Errorf("class bytes: %w", err)
+	var out []c5.ClassUse
+	for class, q := range d.quotas {
+		used, err := d.classBytes(ctx, class)
+		if err != nil {
+			return nil, fmt.Errorf("class bytes %s: %w", class, err)
+		}
+		out = append(out, c5.ClassUse{Class: class, Used: used, Limit: q.Bytes, WarnAt: int64(q.WarnFraction * float64(q.Bytes)), Record: q.MaxRecordBytes})
 	}
-	for _, q := range d.quotas {
-		limit += q.Bytes
-	}
-	return used, limit, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].Class < out[j].Class })
+	return out, nil
 }
 
 // PageBytes is (page_count - freelist_count) * page_size: the space the

@@ -19,9 +19,6 @@ import (
 	"otsec.local/otsec/modules/security/collectorclient"
 )
 
-// holdDB opens database id of the store in dir with an exclusive-locking
-// connection, so that every other open of it is busy until the returned
-// release is called.
 // heldBusyTimeout is the busy_timeout of the runtimes `start` builds. It is
 // 0 (the store's 5 s) except while a test holds a database busy: each open
 // and each retry of a held database then waits it out, and a test that holds
@@ -31,6 +28,9 @@ import (
 // tests of this package do not run in parallel.
 var heldBusyTimeout time.Duration
 
+// holdDB opens database id of the store in dir with an exclusive-locking
+// connection, so that every other open of it is busy until the returned
+// release is called.
 func holdDB(t *testing.T, dir string, id c5.DatabaseID) (release func()) {
 	t.Helper()
 	heldBusyTimeout = 400 * time.Millisecond

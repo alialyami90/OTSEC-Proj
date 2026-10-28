@@ -372,6 +372,17 @@ func capture(s string) c5.Capture {
 	return c5.Capture{SHA256: hex.EncodeToString(sum[:]), Bytes: []byte(s)}
 }
 
+// evidenceUsed is the adapter-evidence class's Used in ClassUsage.
+func evidenceUsed(db *DB) (int64, error) {
+	uses, err := db.ClassUsage(bg)
+	for _, u := range uses {
+		if u.Class == c5.ClassAdapterEvidence {
+			return u.Used, err
+		}
+	}
+	return 0, err
+}
+
 // V-S9 conformance: PageBytes falls as pruning deletes, before any compaction,
 // and CompactStep reports done once the free pages are returned.
 func TestUsageAndCompaction(t *testing.T) {
@@ -391,7 +402,7 @@ func TestUsageAndCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usedBefore, _, err := db.Usage(bg)
+	usedBefore, err := evidenceUsed(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,12 +413,12 @@ func TestUsageAndCompaction(t *testing.T) {
 		t.Fatalf("prune: %d %v", n, err)
 	}
 	after, _ := db.PageBytes(bg)
-	// Usage is the quota's count: it fell with the prune, before any
+	// ClassUsage is the quota's count: it fell with the prune, before any
 	// compaction, and is the class bytes.
-	if usedAfter, _, _ := db.Usage(bg); usedAfter >= usedBefore/2 {
-		t.Fatalf("Usage %d after pruning 150 of 200, was %d", usedAfter, usedBefore)
+	if usedAfter, _ := evidenceUsed(db); usedAfter >= usedBefore/2 {
+		t.Fatalf("class usage %d after pruning 150 of 200, was %d", usedAfter, usedBefore)
 	} else if held, _ := db.ClassBytes(bg, c5.ClassAdapterEvidence); usedAfter != held {
-		t.Fatalf("Usage %d, class bytes %d", usedAfter, held)
+		t.Fatalf("class usage %d, class bytes %d", usedAfter, held)
 	}
 	if after >= before/2 {
 		t.Fatalf("usage %d after pruning 150 of 200, was %d: free pages counted as used", after, before)

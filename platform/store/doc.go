@@ -22,8 +22,9 @@
 //     bytes. Audit records are sealed with contracts/store.SealAudit.
 //   - Per-class quotas are counted in bytes of stored payload (event bytes,
 //     source cursors and captures), not pages, so that a class at quota is
-//     refused before the database as a whole is full. Usage, which startup
-//     uses to prune, counts live pages as C5 requires.
+//     refused before the database as a whole is full. ClassUsage, which startup
+//     uses to prune and to alarm, counts the same bytes for each class
+//     against its own quota; PageBytes counts live pages.
 //   - Close checkpoints the WAL (wal_checkpoint(TRUNCATE)) on a background
 //     context. That work is bounded in bytes, by the WAL bound above, and not
 //     in time: on a slow disk each flush can take seconds (F-016), so a
