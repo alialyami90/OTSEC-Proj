@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/adapter"
+	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/contracts/config"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
@@ -110,6 +112,62 @@ func TestConfigQuotaBelowTheRecordCap(t *testing.T) {
 	}
 }
 
+// D4-20 rule 5: a node that reads an asset's configuration refuses a
+// configuration quota below 16 records at the cap for each such asset, and
+// the error names the quota needed and the number of assets. Assets that
+// only send Syslog or SER events need no configuration room, and a quota with
+// no configuration collection loads: a C10 baseline is stored for such an
+// asset too.
+func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
+	const secondID = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
+	add := func(nc *nodeconfigtest.Config, asset string) {
+		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg-" + asset, AssetID: asset, Endpoint: "port1-telnet",
+			Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600})
+	}
+	floor := ConfigQuotaFloorRecords * ConfigRecordBytes
+	for _, c := range []struct {
+		name  string
+		reads int
+		quota int64
+		ok    bool
+	}{
+		{"one asset at the floor", 1, floor, true},
+		{"one asset a byte below", 1, floor - 1, false},
+		{"two assets need two floors", 2, floor, false},
+		{"two assets at two floors", 2, 2 * floor, true},
+		{"no configuration collection", 0, ConfigRecordBytes, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
+				nc.AddSEL751(secondID, "", 2324, 300)
+				nc.Store.Quotas["configuration"] = c.quota
+				for i := 0; i < c.reads; i++ {
+					add(nc, []string{relayID, secondID}[i])
+				}
+			})
+			cfg, err := ParseConfig(nc.Bytes())
+			if c.ok != (err == nil) {
+				t.Fatalf("quota %d for %d assets: %v", c.quota, c.reads, err)
+			}
+			if err != nil {
+				for _, want := range []string{"store.quotas.configuration", fmt.Sprint(int64(c.reads) * floor), fmt.Sprintf("%d assets", c.reads)} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %q", err, want)
+					}
+				}
+			} else if cfg.ConfigAssets() != c.reads {
+				t.Errorf("%d assets counted, want %d", cfg.ConfigAssets(), c.reads)
+			}
+		})
+	}
+	for op, want := range map[string]bool{"sel.config.read_all": true, "sel.config.read": true, "sel.ser.read_all": false,
+		"sel.config.write": false, "config.read_all": false, "sel.breaker.config.read_all": false, "sel.ser.config": false} {
+		if got := ConfigReadOperation(op); got != want {
+			t.Errorf("ConfigReadOperation(%q) = %v, want %v", op, got, want)
+		}
+	}
+}
+
 // The database starts with the recovery reserve of its largest commit, which
 // is one record at the cap (C5 0.5), and stores C9 and C10 documents byte
 // for byte under the node's document check.
@@ -136,7 +194,7 @@ func TestConfigDatabaseStoresDocuments(t *testing.T) {
 	if _, err := log.Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: diff}); err != nil {
 		t.Fatal(err)
 	}
-	base := contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")
+	base := canonicalBaseline(t)
 	if _, err := log.Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: base}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +207,22 @@ func TestConfigDatabaseStoresDocuments(t *testing.T) {
 			t.Errorf("record %d is not stored byte for byte", i+1)
 		}
 	}
+}
+
+// canonicalBaseline is the C10 fixture as baseline.Encode writes it. The
+// fixture file is indented, which baseline.Decode accepts and the store
+// refuses: a baseline's Hash is taken over the compact bytes.
+func canonicalBaseline(t *testing.T) []byte {
+	t.Helper()
+	b, err := baseline.Decode(contractFile(t, "baseline/testdata/valid/baseline-synthetic.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := baseline.Encode(b, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // The document check refuses what is not a C9 or C10 document, a snapshot
@@ -166,7 +240,7 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 	snap1, cap1 := configRead(t, "1")
 	_, cap2 := configRead(t, "2")
 	diff := contractFile(t, "config/testdata/valid/difference-1-2.json")
-	base := contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")
+	base := canonicalBaseline(t)
 	// The same length as the transcript the snapshot names and other bytes,
 	// with the SHA-256 of the bytes it carries: only the digest comparison
 	// tells it from the transcript (B3 on #299).
@@ -182,6 +256,7 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 		"a snapshot, a capture of the same length, other bytes": rec(snap1, &sameLength),
 		"a difference with a capture":                           rec(diff, &cap1),
 		"a baseline with a capture":                             rec(base, &cap1),
+		"a baseline, indented":                                  rec(contractFile(t, "baseline/testdata/valid/baseline-synthetic.json"), nil),
 		"a snapshot that is not one":                            rec([]byte(strings.Replace(string(snap1), `"asset_id"`, `"asset_idx"`, 1)), &cap1),
 	} {
 		if _, err := log.Append(bg, rc); err == nil {

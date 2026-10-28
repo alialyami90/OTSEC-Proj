@@ -50,6 +50,12 @@
 //     stay held as evidence. A
 //     reconcile that meets a hold code it does not know keeps that hold
 //     unchanged (no release, no new reason) and raises an alarm.
+//   - Startup measures a quota in class bytes (a defect fix in 0.6, B6's
+//     finding on #299). RecoveryStore.Usage is the payload the class quotas
+//     count, as the runtime refusal counts it, not the pages, which run well
+//     over it: a class at 75% of its quota raised store-quota-reached at
+//     every start. Pages are the store's PageBytes and stay bounded by
+//     DiskBytesPerQuotaByte.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
