@@ -21,7 +21,7 @@ import (
 
 func c3Rev4(t *testing.T, edit func(p map[string]any)) ([]byte, error) {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "register", "testdata", "sel-751.json"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "register", "testdata", "sel-751-rev4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestC3ContextRules(t *testing.T) {
 		{"read_by unknown", func(p map[string]any) { c3Ctx(p)["read_by"] = "sel.settings.show_all" }, false},
 		{"read_by is a session line", func(p map[string]any) { c3Ctx(p)["read_by"] = "QUI" }, false},
 		{"context on a 0.1 package", func(p map[string]any) { p["contract"] = "otsec.register/0.1" }, false},
-		{"a later minor", func(p map[string]any) { p["contract"] = "otsec.register/0.3" }, false},
+		{"a later minor", func(p map[string]any) { p["contract"] = "otsec.register/0.4" }, false},
 		{"values lower case", func(p map[string]any) { c3Ctx(p)["values"] = []any{"mdy"} }, false},
 		{"values repeated", func(p map[string]any) { c3Ctx(p)["values"] = []any{"MDY", "MDY"} }, false},
 		{"values empty", func(p map[string]any) { c3Ctx(p)["values"] = []any{} }, false},

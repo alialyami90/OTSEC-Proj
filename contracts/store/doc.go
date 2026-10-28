@@ -1,5 +1,5 @@
-// Package store is contract C5, otsec.store/0.3: how a site node keeps,
-// acknowledges, recovers and prunes events. It is owned by A5. Reviewers are
+// Package store is contract C5, otsec.store/0.6: how a site node keeps,
+// acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
 //
@@ -28,6 +28,40 @@
 //     one (Report.OpenBusy, P3-A5, docs/phase2/A5-p3-failed-open-retry.md).
 //   - Storage-full behaviour per stream class and the alarms the store
 //     raises (StreamClass, FullAction, Quota, Alarm).
+//   - Since 0.4 (P4-A5, docs/phase4/B5-c5-0.4-proposal.md): the
+//     configuration class, alone in its database, for C9 and C10 documents
+//     with a per-record cap and an injected DocumentValidator; held records,
+//     which pruning skips (Holder, Record.Holds, HoldReason); the
+//     syslog-unknown class, HR-11's absolute bound on what unknown senders
+//     store; and a commit cap, so the recovery reserve covers the largest
+//     commit (GroupOptions.MaxCommitBytes, LargestCommit,
+//     RecoveryReserveFor, D4-9).
+//   - Since 0.5 (D4-14, docs/phase4/B5-c5-0.5-proposal.md): the WAL a
+//     commit may write counts its rows, not only its bytes
+//     (GroupOptions.MaxCommitRecords, LargestCommitRecords, RowWALBytes,
+//     CommitWALBytes and RecoveryReserveFor take the record count), and the
+//     file's size against the quota is bounded (DiskBytesPerQuotaByte), after
+//     B6's event-size sweep showed that events near half a page and small
+//     rows write more WAL and disk than their bytes.
+//   - Since 0.6 (D4-18, D4-19): the hold codes HoldAcknowledgedDifference and
+//     HoldRestoredDifference. A
+//     configuration acknowledgement, or a return to the baseline, ends a
+//     change's alarm and not the hold on its snapshot and difference, which
+//     stay held as evidence. A
+//     reconcile that meets a hold code it does not know keeps that hold
+//     unchanged (no release, no new reason) and raises an alarm.
+//   - Startup measures each class's quota in class bytes (a defect fix in
+//     0.6, B6's findings on #299 and #320). RecoveryStore.ClassUsage is, for
+//     each class, the payload its quota counts, as the runtime refusal counts
+//     it, against that class's own quota. It is not the pages, which run well
+//     over the payload (a class at 75% of its quota raised
+//     store-quota-reached at every start), and the classes are not summed (a
+//     full class beside a light one restarted silently). Pruning steps only
+//     the streams of a class above the target. A class with no room for its
+//     largest record (event, capture and source cursor, as the runtime refusal counts it; Record.Bytes) raises the alarm the runtime raises for the class (FullAlarm: audit-store-full, syslog-unknown-full, or store-quota-reached) naming the class, and a
+//     class at its warning level raises store-quota-warning, as the runtime
+//     would at its next commit. Pages are the store's PageBytes and stay
+//     bounded by DiskBytesPerQuotaByte.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -50,4 +84,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.3"
+const Identifier = "otsec.store/0.6"

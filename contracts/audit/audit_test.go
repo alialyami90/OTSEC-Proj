@@ -276,8 +276,8 @@ func TestParseRecordRejectsSecretsAndAmbiguity(t *testing.T) {
 	}
 	// An unknown, harmless field from a later minor is kept; the same field
 	// on a record of this minor is refused (C8-A6-2).
-	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.5"`, 1)
-	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_5":1,"outcome"`, 1))); err != nil {
+	later := strings.Replace(string(ok), `"`+ContractID+`"`, `"otsec.audit/0.8"`, 1)
+	if _, err := ParseRecord([]byte(strings.Replace(later, `"outcome"`, `"new_field_in_0_8":1,"outcome"`, 1))); err != nil {
 		t.Fatalf("unknown field in a later minor: %v", err)
 	}
 	if _, err := ParseRecord([]byte(strings.Replace(string(ok), `"outcome"`, `"api_token":"x","outcome"`, 1))); !errors.Is(err, ErrRecordRejected) {

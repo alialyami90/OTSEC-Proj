@@ -136,7 +136,7 @@ func TestSEL751Rev3SupersedesRev2(t *testing.T) {
 // domain is unchanged, so a 0.1 package's signature input is what it was.
 func TestSEL751Rev4SupersedesRev3(t *testing.T) {
 	rev3, _ := readSEL751Content(t, "sel-751-rev3.json")
-	rev4, pkg4 := readSEL751Content(t, "sel-751.json")
+	rev4, pkg4 := readSEL751Content(t, "sel-751-rev4.json")
 	if pkg4.Revision != 4 || pkg4.Contract != "otsec.register/0.2" || len(pkg4.Context) == 0 {
 		t.Fatalf("sel-751.json is revision %d, %s, %d context reads", pkg4.Revision, pkg4.Contract, len(pkg4.Context))
 	}
@@ -161,7 +161,7 @@ func TestSEL751Rev4SupersedesRev3(t *testing.T) {
 // A stamp this reader does not decode is refused.
 func TestRegisterEnvelopeStamps(t *testing.T) {
 	rev3, _ := readSEL751Content(t, "sel-751-rev3.json")
-	rev4, _ := readSEL751Content(t, "sel-751.json")
+	rev4, _ := readSEL751Content(t, "sel-751-rev4.json")
 	rel := newSigner(t, "release-2026-1", 1)
 	anchors := []TrustAnchor{{KeyID: rel.id, PublicKey: rel.pub, Status: KeyActive}}
 	stamped := func(payload []byte, contract string) *register.Envelope {
@@ -176,7 +176,7 @@ func TestRegisterEnvelopeStamps(t *testing.T) {
 			}
 		}
 	}
-	for _, c := range []string{"", "otsec.register/0.3", "otsec.register/1.0", "otsec.register/0.2 ", "otsec.authz/0.4"} {
+	for _, c := range []string{"", "otsec.register/0.4", "otsec.register/1.0", "otsec.register/0.2 ", "otsec.authz/0.4"} {
 		if _, _, err := VerifyRegisterPackage(stamped(rev4, c), anchors, map[string]FamilyFloor{}); !errors.Is(err, ErrRegisterRejected) {
 			t.Errorf("stamped %q: %v", c, err)
 		}

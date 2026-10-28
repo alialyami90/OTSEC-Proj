@@ -15,7 +15,7 @@ import (
 
 func sel751Package(t *testing.T) *register.Package {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "register", "testdata", "sel-751.json"))
+	b, err := os.ReadFile(filepath.Join("..", "register", "testdata", "sel-751-rev4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

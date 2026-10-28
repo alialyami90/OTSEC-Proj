@@ -26,6 +26,11 @@ func (d *DB) Discard(ctx context.Context, consumers []c5.Consumer, stream c5.Str
 	if err != nil {
 		return c5.Discarded{}, err
 	}
+	if class == c5.ClassConfiguration {
+		// Its records may be held, and only pruning past a boundary removes
+		// them (C5 0.4).
+		return c5.Discarded{}, invalid("discard from %s: configuration records are never discarded", stream)
+	}
 	var out c5.Discarded
 	err = d.tx(ctx, "discard", func() error {
 		var n int

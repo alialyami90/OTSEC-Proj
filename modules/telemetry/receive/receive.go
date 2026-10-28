@@ -1,6 +1,7 @@
 package receive
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -39,11 +40,20 @@ const (
 	DropQueueFull     = "queue-full"     // a datagram arriving faster than the store commits
 	DropStore         = "store"          // a datagram batch the store refused (quota, or not open), or a message whose record could not be built
 	DropUnknownBudget = "unknown-budget" // an unknown sender's message past Limits.UnknownBytes
+	DropUnknownFull   = "unknown-full"   // an unknown sender's message the full syslog-unknown class refused (HR-11)
+	// DropUnknownQueueFull is a datagram from an unknown sender past its
+	// quarter of the listener's queue, by places or bytes (D4-21).
+	DropUnknownQueueFull = "unknown-queue-full"
 )
 
 // ErrConfig is returned by New and ServerTLS for a configuration the
 // listener refuses.
 var ErrConfig = errors.New("receive: invalid configuration")
+
+// ErrCertificatePeriod is returned by ServerTLS, wrapped with ErrConfig,
+// for a listener certificate outside its validity period, so the node can
+// tell an expired or not-yet-valid certificate from other refusals.
+var ErrCertificatePeriod = errors.New("receive: certificate outside its validity period")
 
 // Appender commits records and returns their receipts. *store.Log is one;
 // the node hands over a wrapper for the listener's database that fails
@@ -66,6 +76,22 @@ type Config struct {
 	// of class syslog-stream for TCP and TLS and syslog-datagram for UDP.
 	ID     string
 	Stream store.StreamID
+	// UnknownStream (C5 0.4, HR-11) is where messages from senders that
+	// resolve to no asset are stored, a stream of class syslog-unknown in
+	// the same database as Stream; the node declares it in the layout, and
+	// the receiver cannot check that. It must differ from Stream. Empty
+	// keeps unknown senders' records in Stream, in its class, as before
+	// 0.4, with no absolute bound.
+	//
+	// With it set, an unknown sender's records never share a part with a
+	// known sender's: a datagram batch is split in two, each committed in
+	// order, and a stream connection is one sender's, so it writes to one
+	// stream only. When the syslog-unknown class is at its quota the store
+	// refuses an unknown sender's part with CodeQuotaReached. That part is
+	// dropped and counted as DropUnknownFull, on a stream too: the
+	// connection is not held, and a known sender's connection never waits
+	// on the unknown stream.
+	UnknownStream store.StreamID
 	// Transport is syslog-tls, syslog-tcp or syslog-udp; Address is the
 	// ip:port to bind, an IP literal.
 	Transport asset.Transport
@@ -83,8 +109,19 @@ type Config struct {
 	// Received is the node clock's reading as a C4 receive time.
 	Received func() event.Received
 	Limits   Limits
+	// MaxCommitBytes and MaxCommitRecords are the commit caps of the
+	// database behind Log (store.GroupOptions.CommitBytes and
+	// CommitRecords): a batch is split before it passes either, as C5 0.4
+	// and 0.5 require, and the parts commit in order (see commitParts). The
+	// node sets them from the options it built the Log with. 0 means
+	// store.DefaultMaxCommitBytes and store.DefaultGroup.MaxEvents;
+	// otherwise at least store.MinRecordBytes, and 1 to store.MaxBatch. A
+	// Log with lower caps is learnt from its refusal, and the caps are
+	// lowered to fit.
+	MaxCommitBytes   int64
+	MaxCommitRecords int
 	// UnknownSpent is what unknown senders stored on this listener's
-	// stream in the Limits.UnknownWindow before this start, counted by the
+	// unknown stream (UnknownStream, or Stream when that is empty) in the Limits.UnknownWindow before this start, counted by the
 	// node from that stream (A3's conditions on D3-3):
 	//   - the sum of len(event) over the committed records that carry
 	//     asset-unresolved, each event as stored. The budget charges a
@@ -163,7 +200,19 @@ type Limits struct {
 	// MaxQueueBytes bounds the bytes of datagrams waiting for the store
 	// (default 8 MiB); a datagram past it is dropped as queue-full.
 	MaxQueueBytes int64
+	// ReadBuffer is the socket receive buffer (SO_RCVBUF) a UDP listener
+	// asks the OS for, in bytes: 0 leaves the OS default, otherwise
+	// 4 KiB to 256 MiB. A datagram that arrives while the buffer is full is
+	// lost before the read and counted by no one here, only by the OS
+	// (Linux RcvbufErrors, Windows netstat -s). The OS may grant less, or,
+	// on Linux, twice the request up to net.core.rmem_max; Status.ReadBuffer
+	// is what it granted. Streams take no ReadBuffer: TCP flow control
+	// stops a sender instead of losing its data.
+	ReadBuffer int
 }
+
+// Read buffer bounds (Limits.ReadBuffer).
+const minReadBuffer, maxReadBuffer = 4 << 10, 256 << 20
 
 func (l Limits) withDefaults(udp bool) Limits {
 	def := func(v *int, d int) {
@@ -232,6 +281,8 @@ func (l Limits) validate() error {
 		return errors.New("durations must be positive")
 	case l.UnknownIdleTimeout > l.IdleTimeout:
 		return errors.New("the unknown-sender idle timeout is above the idle timeout")
+	case l.ReadBuffer != 0 && (l.ReadBuffer < minReadBuffer || l.ReadBuffer > maxReadBuffer):
+		return fmt.Errorf("read buffer %d not 0 or in [%d, %d]", l.ReadBuffer, minReadBuffer, maxReadBuffer)
 	}
 	return nil
 }
@@ -268,6 +319,12 @@ type Status struct {
 	// (refuse-new: no more is read from that connection meanwhile).
 	Held    bool
 	LastErr string
+	// ReadBuffer is the UDP socket receive buffer the OS granted, in bytes,
+	// read back after Listen: the OS default when Limits.ReadBuffer is 0.
+	// It is 0 for a stream listener, before Listen, or where the OS does
+	// not report it (ReadBufferErr says why).
+	ReadBuffer    int
+	ReadBufferErr string
 }
 
 // Receiver is one Syslog listener.
@@ -289,6 +346,13 @@ type Receiver struct {
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
 	queued   atomic.Int64 // datagram bytes waiting for the store
+	// unknownQueued is how many unknown senders' datagrams are in the queue
+	// (not yet taken by the writer); unknownBytes is their bytes, until
+	// committed, as queued is for all of them (D4-21).
+	unknownQueued atomic.Int64
+	unknownBytes  atomic.Int64
+	commitAt      atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
+	commitN       atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
 
 	ln net.Listener
 	pc net.PacketConn
@@ -307,12 +371,21 @@ func New(cfg Config) (*Receiver, error) {
 	if !cfg.Stream.Valid() {
 		return bad("stream %q", cfg.Stream)
 	}
+	if cfg.UnknownStream != "" && (!cfg.UnknownStream.Valid() || cfg.UnknownStream == cfg.Stream) {
+		return bad("unknown stream %q is not a valid stream other than %q", cfg.UnknownStream, cfg.Stream)
+	}
 	switch cfg.Transport {
 	case asset.SyslogTLS:
 		if cfg.TLS == nil {
 			return bad("syslog-tls needs a TLS configuration (ServerTLS)")
 		}
+		if lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 	case asset.SyslogTCP, asset.SyslogUDP:
+		if cfg.Transport == asset.SyslogTCP && lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 		if !cfg.Plaintext {
 			return bad("%s is plaintext; it runs only when the operator enables plaintext for this listener", cfg.Transport)
 		}
@@ -335,6 +408,12 @@ func New(cfg Config) (*Receiver, error) {
 	if err := lim.validate(); err != nil {
 		return bad("%v", err)
 	}
+	if cfg.MaxCommitBytes != 0 && cfg.MaxCommitBytes < store.MinRecordBytes {
+		return bad("max commit bytes %d is neither 0 (the default) nor at least %d", cfg.MaxCommitBytes, store.MinRecordBytes)
+	}
+	if cfg.MaxCommitRecords < 0 || cfg.MaxCommitRecords > store.MaxBatch {
+		return bad("max commit records %d is neither 0 (the default) nor in [1, %d]", cfg.MaxCommitRecords, store.MaxBatch)
+	}
 	for a, s := range cfg.Senders {
 		if a != a.Unmap() || s.AssetID == "" || (s.Target != asset.DeviceObserved && s.Target != asset.Simulated) {
 			return bad("sender %s: %+v", a, s)
@@ -347,6 +426,8 @@ func New(cfg Config) (*Receiver, error) {
 		over:   make(chan struct{}, 1), now: time.Now,
 		st: Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
+	r.commitAt.Store(cmp.Or(cfg.MaxCommitBytes, store.DefaultMaxCommitBytes))
+	r.commitN.Store(int64(cmp.Or(cfg.MaxCommitRecords, store.DefaultGroup.MaxEvents)))
 	return r, nil
 }
 
@@ -357,6 +438,20 @@ func (r *Receiver) Listen() (net.Addr, error) {
 		if err != nil {
 			return nil, fmt.Errorf("receive: listener %s: %w", r.cfg.ID, err)
 		}
+		uc := pc.(*net.UDPConn)
+		if n := r.lim.ReadBuffer; n != 0 {
+			if err := uc.SetReadBuffer(n); err != nil {
+				pc.Close()
+				return nil, fmt.Errorf("receive: listener %s: read buffer %d: %w", r.cfg.ID, n, err)
+			}
+		}
+		granted, err := readBuffer(uc)
+		r.update(func(s *Status) {
+			s.ReadBuffer, s.ReadBufferErr = granted, ""
+			if err != nil {
+				s.ReadBufferErr = err.Error()
+			}
+		})
 		r.pc = pc
 		return pc.LocalAddr(), nil
 	}
@@ -458,8 +553,15 @@ type msg struct {
 // record builds msg's C5 record.
 func (r *Receiver) record(m msg) (store.Record, error) {
 	src, known := r.cfg.Senders[m.from]
+	stream, class := r.cfg.Stream, store.ClassSyslogStream
+	if r.cfg.Transport == asset.SyslogUDP {
+		class = store.ClassSyslogDatagram
+	}
+	if !known && r.cfg.UnknownStream != "" {
+		stream, class = r.cfg.UnknownStream, store.ClassSyslogUnknown
+	}
 	in := normalize.SyslogInput{
-		Node: r.cfg.Node, Stream: r.cfg.Stream, Message: m.msg, Sender: m.from.String(),
+		Node: r.cfg.Node, Stream: stream, Message: m.msg, Sender: m.from.String(),
 		Auth: m.auth, SenderCert: m.cert, Received: m.rcv, Flags: m.flags, Dialect: normalize.DialectRFC,
 		EvidenceClass: r.cfg.Target,
 	}
@@ -477,11 +579,7 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 	if err != nil {
 		return store.Record{}, err
 	}
-	class := store.ClassSyslogStream
-	if r.cfg.Transport == asset.SyslogUDP {
-		class = store.ClassSyslogDatagram
-	}
-	return store.Record{Stream: r.cfg.Stream, Class: class, Event: b}, nil
+	return store.Record{Stream: stream, Class: class, Event: b}, nil
 }
 
 // records builds the records of a batch, one by one, and returns them with

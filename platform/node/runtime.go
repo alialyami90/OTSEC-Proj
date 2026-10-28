@@ -30,20 +30,25 @@ type RuntimeOptions struct {
 	// ClockSync is the node clock's state as the node knows it. Phase 2 has
 	// no time-sync probe, so the default is unknown, never a guess.
 	ClockSync event.SyncState
+	// BusyTimeout is the stores' busy_timeout; zero means the store's 5 s.
+	// Only tests that hold a database busy on purpose set it.
+	BusyTimeout time.Duration
 }
 
 // Runtime is a started node: every database through C5 startup, a Log per
 // open database, and the node's status.
 type Runtime struct {
-	cfg    *Config
-	layout c5.Layout
-	opt    RuntimeOptions
-	dbs    []*database
+	cfg      *Config
+	keyWatch nodeKeyWatch
+	layout   c5.Layout
+	opt      RuntimeOptions
+	dbs      []*database
 
 	mu      sync.Mutex
-	pending []queued        // store alarms raised during a commit, for Tick
-	raised  map[string]bool // conditions whose alarm is raised (prune.go)
-	pruneMu sync.Mutex      // serializes Prune
+	pending []queued                    // store alarms raised during a commit, for Tick
+	slowAt  map[c5.DatabaseID]time.Time // when AlarmCommitSlow was last raised, by database
+	raised  map[string]bool             // conditions whose alarm is raised (prune.go)
+	pruneMu sync.Mutex                  // serializes Prune
 	// deferred holds the node records audit could not commit because the
 	// audit database had not opened, its open at start being only busy (C5
 	// 0.2). The retry in Tick that opens it commits them first, in order
@@ -106,13 +111,14 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		r.dbs = append(r.dbs, d)
 	}
 	r.recordStart(ctx)
+	r.reconcileHolds(ctx)
 	opt.Status.Write(string(cfg.NodeID))
 	return r, nil
 }
 
 func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
 	dbID := spec.ID
-	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now,
+	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments, BusyTimeout: r.opt.BusyTimeout,
 		Alarms: func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) }}
 	env, err := store.NewEnv(opt)
 	if err != nil {
@@ -126,10 +132,18 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 			}
 		}
 	}
+	group := groupFor(spec, r.opt.Group)
+	largest, rows := c5.LargestCommit(spec, group), c5.LargestCommitRecords(spec, group)
 	d := &database{spec: spec, env: env, policy: c5.StartupPolicy{
-		Streams:                spec.Streams,
-		Consumers:              mine,
-		RecoveryReserveBytes:   2 * store.WALBoundBytes,
+		Streams:   spec.Streams,
+		Consumers: mine,
+		// The reserve covers the database's largest commit (C5 0.5, D4-9,
+		// D4-14): twice the WAL bound, and the WAL of one commit at the
+		// byte and record caps.
+		RecoveryReserveBytes:   c5.RecoveryReserveFor(store.WALBoundBytes, largest, rows),
+		WALBoundBytes:          store.WALBoundBytes,
+		LargestCommitBytes:     largest,
+		LargestCommitRecords:   rows,
 		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
 		OpenHeadroomBytes:      store.WALBoundBytes + c5.MinOpenHeadroom,
 		PruneStepEvents:        50,
@@ -164,17 +178,15 @@ func (r *Runtime) adopt(d *database) error {
 	if !ok {
 		return fmt.Errorf("database %s: store is %T", d.spec.ID, d.report.Store)
 	}
-	classes := map[c5.StreamID]c5.StreamClass{}
 	last := map[c5.StreamID]c5.Seq{}
 	for _, s := range d.spec.Streams {
-		classes[s.ID] = s.Class
 		n, err := db.LastCommitted(context.Background(), s.ID)
 		if err != nil {
 			return fmt.Errorf("database %s: %w", d.spec.ID, err)
 		}
 		last[s.ID] = n
 	}
-	l, err := c5.NewLog(db, r.cfg.NodeID, classes, r.opt.Group, last)
+	l, err := c5.NewLogFor(db, r.cfg.NodeID, d.spec, groupFor(d.spec, r.opt.Group), last)
 	if err != nil {
 		return err
 	}
@@ -206,6 +218,13 @@ func (r *Runtime) recordStart(ctx context.Context) {
 }
 
 func (r *Runtime) modeChanged(ctx context.Context, d *database, mc c5.ModeChange) {
+	detail := modeDetail(d, mc)
+	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	r.modeHealth(ctx, d, mc)
+}
+
+// modeDetail is the detail of a store.mode_change record.
+func modeDetail(d *database, mc c5.ModeChange) string {
 	var codes []string
 	for _, a := range mc.Alarms {
 		codes = append(codes, string(a.Code))
@@ -214,7 +233,11 @@ func (r *Runtime) modeChanged(ctx context.Context, d *database, mc c5.ModeChange
 	if len(codes) > 0 {
 		detail += "; alarms " + strings.Join(codes, ",")
 	}
-	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	return detail
+}
+
+// modeHealth is the health event of a mode change.
+func (r *Runtime) modeHealth(ctx context.Context, d *database, mc c5.ModeChange) {
 	r.health(ctx, c5.HealthModeChanged, map[string]string{"database": string(d.spec.ID), "from": orNone(mc.From), "to": string(mc.To)})
 }
 
@@ -243,6 +266,7 @@ type queued struct {
 // change, turns queued store alarms into health events, and prunes
 // confirmed events of a class above its runtime target (Prune).
 func (r *Runtime) Tick(ctx context.Context) {
+	r.sampleCommits()
 	for _, d := range r.dbs {
 		r.state.Lock()
 		prev := d.report
@@ -277,12 +301,21 @@ func (r *Runtime) Tick(ctx context.Context) {
 			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmOpenFailed, At: r.opt.Now(), Detail: err.Error()})
 		}
 		now := d.report
-		r.state.Unlock()
+		mc, changed := c5.ModeChangeOf(prev, now, r.opt.Now())
+		recorded := false
 		if d.spec.ID == AuditDB && prev.OpenBusy() {
-			r.commitDeferred(ctx)
+			// Still under the state lock, so no other writer can append to
+			// the Log adopt just published before the kept records and the
+			// recovery are in the chain (D3-6; B6 on #249).
+			recorded = r.commitDeferred(ctx, d, mc, changed)
 		}
-		if mc, ok := c5.ModeChangeOf(prev, now, r.opt.Now()); ok {
-			r.modeChanged(ctx, d, mc)
+		r.state.Unlock()
+		if changed {
+			if recorded {
+				r.modeHealth(ctx, d, mc)
+			} else {
+				r.modeChanged(ctx, d, mc)
+			}
 		}
 	}
 	r.mu.Lock()
@@ -439,12 +472,27 @@ const AlarmAuditNotRecorded = "audit-not-recorded"
 // audit store may be what failed.
 func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.Outcome, reason, detail string) {
 	d := r.find(AuditDB)
-	_, log, mode := r.view(d)
-	if log == nil || !mode.AcceptsEvents() {
-		why := fmt.Sprintf("%s not recorded: audit database %s", action, r.Mode(AuditDB))
-		if log == nil && r.openBusy(d) {
-			why += "; " + r.deferAudit(action, outcome, reason, detail)
+	var (
+		log *c5.Log
+		why string
+	)
+	if d != nil {
+		// One read lock covers the check and the keeping, so a record is
+		// either kept before Tick takes the kept queue or committed after
+		// the kept records (D3-6).
+		r.state.RLock()
+		log = d.log
+		if mode := d.report.Mode; log == nil || !mode.AcceptsEvents() {
+			why = fmt.Sprintf("%s not recorded: audit database %s", action, mode)
+			if log == nil && d.report.OpenBusy() {
+				why += "; " + r.deferAudit(action, outcome, reason, detail)
+			}
 		}
+		r.state.RUnlock()
+	} else {
+		why = fmt.Sprintf("%s not recorded: no audit database", action)
+	}
+	if why != "" {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: why})
 		return
 	}
@@ -455,17 +503,6 @@ func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.
 	if err != nil {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})
 	}
-}
-
-// openBusy reports whether d failed at an open that was only busy, which
-// Tick retries.
-func (r *Runtime) openBusy(d *database) bool {
-	if d == nil {
-		return false
-	}
-	r.state.RLock()
-	defer r.state.RUnlock()
-	return d.report.OpenBusy()
 }
 
 // deferAudit keeps a record for commitDeferred, timed now, and says what
@@ -486,33 +523,51 @@ func (r *Runtime) deferAudit(action audit.Action, outcome audit.Outcome, reason,
 }
 
 // commitDeferred commits the records kept while the audit database's open
-// was busy, once a retry has opened it, before the retry's
-// store.mode_change. Each keeps the time it was made at. A new chain gets
-// its audit.chain_start first, as recordStart would have written.
-func (r *Runtime) commitDeferred(ctx context.Context) {
+// was busy, once a retry has opened it, and the retry's store.mode_change
+// after them, in one AppendBatch. Each kept record keeps the time it was
+// made at. A new chain gets its audit.chain_start first, as recordStart
+// would have written. Tick calls it holding the state lock, so no other
+// record can land between them (D3-6). It reports whether the mode change
+// was recorded with them.
+func (r *Runtime) commitDeferred(ctx context.Context, d *database, mc c5.ModeChange, changed bool) bool {
 	r.mu.Lock()
 	q, dropped := r.deferred, r.dropped
 	r.deferred, r.dropped = nil, 0
 	r.mu.Unlock()
-	db, log, mode := r.view(r.find(AuditDB))
+	db, log, mode := d.db, d.log, d.report.Mode
 	if log == nil || !mode.AcceptsEvents() {
 		if len(q) > 0 || dropped > 0 {
 			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: fmt.Sprintf("%d kept records not recorded: audit database %s", len(q)+dropped, mode)})
 		}
-		return
+		return false
+	}
+	var batch []c5.Record
+	add := func(action audit.Action, reason, detail string) {
+		rec, err := r.AuditRecord(action, audit.OutcomeInfo, reason, detail)
+		if err != nil {
+			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})
+			return
+		}
+		batch = append(batch, rec)
 	}
 	if n, err := db.LastCommitted(ctx, AuditStream); err == nil && n == 0 {
-		r.audit(ctx, audit.ActionAuditChainStart, audit.OutcomeInfo, "", "audit chain started for node "+string(r.cfg.NodeID))
+		add(audit.ActionAuditChainStart, "", "audit chain started for node "+string(r.cfg.NodeID))
 	}
-	for _, rec := range q {
-		if _, err := log.Append(ctx, rec); err != nil {
-			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: "kept record: " + err.Error()})
-		}
-	}
+	batch = append(batch, q...)
 	if dropped > 0 {
-		r.audit(ctx, audit.ActionStorageAlarm, audit.OutcomeInfo, "audit_not_recorded",
+		add(audit.ActionStorageAlarm, "audit_not_recorded",
 			fmt.Sprintf("%d node records were not recorded while the audit database's open was busy; status holds their alarms", dropped))
 	}
+	if changed {
+		add(audit.ActionStoreModeChange, string(mc.To), modeDetail(d, mc))
+	}
+	if len(batch) == 0 {
+		return changed
+	}
+	if _, err := log.AppendBatch(ctx, batch); err != nil {
+		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: fmt.Sprintf("%d kept records and the recovery: %v", len(batch), err)})
+	}
+	return changed
 }
 
 // AuditRecord builds a pending C8 record with the node as the actor.
@@ -527,4 +582,60 @@ func (r *Runtime) AuditRecord(action audit.Action, outcome audit.Outcome, reason
 		return c5.Record{}, err
 	}
 	return c5.Record{Stream: AuditStream, Class: c5.ClassAudit, Event: b}, nil
+}
+
+// AlarmCommitSlow: a database's write transaction took SlowCommit or longer,
+// or one has been running that long. Writes hold the write lock and wait for
+// the WAL sync, so a disk that syncs in seconds (the hosted Windows runner's
+// did, B6 #294) holds every writer and lets a receiver's queue fill and
+// datagrams drop; this is the early sign. Level 1, raised at most once per
+// CommitAlarmRepeat for a database, and shown by `otsec health`.
+const AlarmCommitSlow c5.AlarmCode = "store-commit-slow"
+
+// SlowCommit is the write-transaction time that raises AlarmCommitSlow, and
+// CommitAlarmRepeat is how often it is raised again while commits stay slow.
+// Variables so that a test can set them.
+var (
+	SlowCommit        = 5 * time.Second
+	CommitAlarmRepeat = 10 * time.Minute
+)
+
+// sampleCommits reads each open database's write-transaction times into
+// status, once per Tick, and raises AlarmCommitSlow.
+func (r *Runtime) sampleCommits() {
+	now := r.opt.Now()
+	raised := false
+	for _, d := range r.dbs {
+		db, _, _ := r.view(d)
+		if db == nil {
+			continue
+		}
+		cs := db.CommitStats()
+		recent := max(db.TakeRecentCommit(), cs.Waiting)
+		r.opt.Status.SetCommits(d.spec.ID, CommitStatus{Count: cs.Count, MaxMS: cs.Max.Milliseconds(), RecentMS: recent.Milliseconds(), WaitingMS: cs.Waiting.Milliseconds()})
+		if recent < SlowCommit {
+			continue
+		}
+		r.mu.Lock()
+		last, seen := r.slowAt[d.spec.ID]
+		due := !seen || now.Sub(last) >= CommitAlarmRepeat
+		if due {
+			if r.slowAt == nil {
+				r.slowAt = map[c5.DatabaseID]time.Time{}
+			}
+			r.slowAt[d.spec.ID] = now
+		}
+		r.mu.Unlock()
+		if due {
+			raised = true
+			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: AlarmCommitSlow, At: now,
+				Detail: fmt.Sprintf("a write transaction took %v (running now: %v); every writer to this database waits for it, so the disk may be slow, and a receiver's queue can fill", recent.Round(time.Millisecond), cs.Waiting.Round(time.Millisecond))})
+		}
+	}
+	if raised {
+		// The rest of Tick writes to the databases, which wait for the slow
+		// transaction, so the status file is written now rather than at the
+		// end of Tick (B6 on #311, strace-injected fsync delays).
+		r.opt.Status.Write(string(r.cfg.NodeID))
+	}
 }

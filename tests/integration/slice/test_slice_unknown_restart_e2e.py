@@ -2,8 +2,12 @@
 binaries (A6, independent check of #198; D3-3, receive.Config.UnknownSpent).
 
 One slice with a syslog-udp listener. The SEL-751's address (127.0.0.2)
-first sends 10050 short messages, so the stream holds more than one store
-read (store.MaxRead, 10000) before any unknown sender's record. Then a
+first sends 10050 short messages, so the listener's stream holds more than
+one store read (store.MaxRead, 10000). Since C5 0.4 the unknown senders'
+records are in their own stream (syslog-unknown/a6-udp, HR-11), and the
+start counts only that one, so these known records must not matter to it
+(before 0.4 they sat ahead of the unknown ones and the count paged past
+them). Then a
 host no asset claims (127.0.0.3) sends to it:
   1. until about two fifths of the listener's hourly budget is stored;
   2. the node is killed (SIGKILL, no shutdown path) and started again;
@@ -11,16 +15,19 @@ host no asset claims (127.0.0.3) sends to it:
      and after that until the budget refuses it.
 
 The oracle is the node's own store, read here with sqlite: the bytes of
-the listener stream's events flagged asset-unresolved, by their received
+the listener's syslog-unknown stream's events flagged asset-unresolved, by their received
 time. receive's rule is that unknown senders store at most UnknownBytes in
 any trailing UnknownWindow (1 h) plus its refill, across any number of
 restarts. Every record this test stores falls inside one hour, so their
 sum must stay within UnknownBytes plus the refill over the run. Without
 the restart count, each start hands out a fresh UnknownBytes, so the sum
 reaches about twice it. The count the node says it started with
-(unknown.spent_at_start_bytes) must equal the stream's own count.
+(unknown.spent_at_start_bytes) must equal the unknown stream's own count.
 
-Evidence class: simulated (Linux, loopback senders).
+Evidence class: simulated (loopback senders). It runs on Linux in CI's
+integration-long job, and on the hosted Windows runner against the
+installed services in a6-windows-slice.yml (P4-B6, gate item 1's owed
+unknown-restart leg).
 """
 
 import datetime
@@ -37,28 +44,21 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import Slice
-
-# A platform exemption, so OTSEC_SLICE_REQUIRED=1 does not fail it on
-# Windows (as for the admin relay leg, svcdry6 on #179). It has not been run
-# on Windows: it binds 127.0.0.2 and 127.0.0.3 and kills the node
-# mid-flood, and neither has been tried there. The restart count itself
-# (#198's unknownSpent tests) runs in CI's Windows Go job.
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="Linux-only leg, not yet run on Windows; it runs in CI's Linux integration-long job")
+from slicerun import Slice, read_live
 
 DEVICE, STRANGER = "127.0.0.2", "127.0.0.3"
 AHEAD = 10050   # known records ahead of the unknown ones: past one store read
-STREAM = "syslog/a6-udp"
+STREAM = "syslog/a6-udp"                  # the asset's datagrams
+UNKNOWN_STREAM = "syslog-unknown/a6-udp"  # the strangers' (HR-11)
 WINDOW = 3600.0
 MSG = 900       # bytes of message text per datagram
 RATE = 60       # datagrams a second, under the per-sender rate (100)
 
 
 def _status(s):
-    with open(os.path.join(s.layout["store_dir"], "status.json"), encoding="utf-8") as f:
-        return json.load(f)
+    # read_live: on Windows a plain open would hold off the node's replace
+    # of status.json.
+    return json.loads(read_live(os.path.join(s.layout["store_dir"], "status.json")))
 
 
 def _listener(s):
@@ -67,13 +67,13 @@ def _listener(s):
 
 def _unknown_records(s):
     """(received time, stored length) of every asset-unresolved event on the
-    listener stream, from whichever database holds it."""
+    unknown stream, from whichever database holds it."""
     out = []
     for path in glob.glob(os.path.join(s.layout["store_dir"], "*.db")):
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
             try:
-                rows = db.execute("SELECT event FROM events WHERE stream = ?", (STREAM,)).fetchall()
+                rows = db.execute("SELECT event FROM events WHERE stream = ?", (UNKNOWN_STREAM,)).fetchall()
             except sqlite3.OperationalError:
                 continue
         finally:

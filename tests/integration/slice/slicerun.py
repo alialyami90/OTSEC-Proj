@@ -10,8 +10,8 @@ the binaries under %ProgramFiles%) and drives the installed otsec-node and
 otsec-collector services through the SCM. The simulator and the receiver
 stay user processes on 127.0.0.1. Nothing of it runs otherwise: the
 variable unset leaves the process mode exactly as it was, and the variable
-set without Windows or without elevation stops the run before it changes
-anything.
+set off a GitHub-hosted Actions runner (D4-12), without Windows or without
+elevation stops the run before it changes anything.
 
   - Preflight: the run refuses to start when any part of an OTSEC install
     is already there (either service, %ProgramData%\OTSEC,
@@ -113,7 +113,12 @@ def _go_build(out, pkg):
 
 def check_service_mode():
     """Stops a service-mode run that cannot be one before it changes
-    anything: Windows and an elevated process only."""
+    anything: a GitHub-hosted Actions runner, Windows and an elevated
+    process only. The first is D4-12 as code, not only policy (B3 on #263):
+    service mode installs machine-wide services, so it never runs on a PC or
+    a self-hosted runner, whoever sets the variable there."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise RuntimeError("OTSEC_SLICE_SERVICE=1 installs machine-wide services and runs only on a GitHub-hosted Actions runner (D4-12); nothing was changed")
     if os.name != "nt":
         raise RuntimeError("OTSEC_SLICE_SERVICE=1 drives the installed Windows services; this is not Windows")
     if not ctypes.windll.shell32.IsUserAnAdmin():
@@ -420,6 +425,9 @@ class Slice:
         self.procs = {}
         self.logs = {}
         self.argv = {}
+        # name -> every environment the harness started that process with,
+        # restarts included (V-S11; B3 on #242).
+        self.start_envs = {}
         self.sim_extra = ()
         self.sim_password = CANARY
         self.service = None
@@ -439,6 +447,8 @@ class Slice:
         out = open(os.path.join(self.d, name + ".log"), "ab")
         self.logs[name] = out.name
         p = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, env=env)
+        # What the child inherits: env, or this process's own environment.
+        self.start_envs.setdefault(name, []).append(dict(os.environ if env is None else env))
         self.procs[name] = p
         self.argv[name] = (argv, env)
         return p
@@ -555,7 +565,12 @@ class Slice:
         """v, a layout value, moved from the installed %ProgramData%\\OTSEC
         to its copy at keep."""
         data = os.path.normcase(os.path.normpath(self.service.data))
-        if not isinstance(v, str) or not os.path.normcase(os.path.normpath(v)).startswith(data + os.sep):
+        if not isinstance(v, str):
+            return v
+        p = os.path.normcase(os.path.normpath(v))
+        if p == data:  # collector_data is the root itself
+            return keep
+        if not p.startswith(data + os.sep):
             return v
         return os.path.join(keep, os.path.relpath(v, self.service.data))
 
@@ -605,6 +620,17 @@ class Slice:
             if os.getuid() == 0 or os.stat(path).st_uid != 0:
                 raise
             return None
+
+    def start_environ(self, name):
+        """Every environment the harness started name with, as the bytes
+        /proc/<pid>/environ would hold, or None for a process the harness
+        did not start (an installed service, started by the SCM). It is
+        what the process was given, not what it holds now: a value the
+        process set itself is not in it."""
+        envs = self.start_envs.get(name)
+        if not envs:
+            return None
+        return b"".join(os.fsencode(f"{k}={v}") + b"\0" for env in envs for k, v in env.items())
 
     def image(self, name):
         """The path the process runs from: the installed copy in service

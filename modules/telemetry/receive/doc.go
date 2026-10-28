@@ -44,8 +44,12 @@
 //     message is stored the same way with asset-unresolved, within the
 //     unknown budget below, and the first message from each unknown
 //     address raises syslog.unknown-source on the health stream, with the
-//     stored event as its related ID. Past Limits.MaxUnknown addresses one summary alarm is
-//     raised instead, and nothing more is remembered.
+//     stored event as its related ID. Past Limits.MaxUnknown addresses one
+//     summary alarm is raised instead, and nothing more is remembered. With
+//     Config.UnknownStream set the message is stored in that stream (class
+//     syslog-unknown), and where that class is full it is dropped and
+//     counted as unknown-full: a stream connection from an unknown sender is
+//     read on, never held, and a known sender never waits on that stream.
 //   - Evidence class: device-observed only when both the asset's endpoint
 //     and the listener are; an unknown sender takes the listener's (C4,
 //     D1-24 amendment).
@@ -55,7 +59,14 @@
 //     stream over its rate is slowed: the connection is read no faster, and
 //     TCP flow control holds the sender. A datagram over its rate is
 //     dropped and counted.
-//   - Unknown senders cannot displace configured devices (A3 F1, F2).
+//   - Unknown senders cannot displace configured devices (A3 F1, F2). On a
+//     datagram listener they hold at most a quarter of the queue, by places
+//     (Limits.Queue) and by bytes (Limits.MaxQueueBytes), however the rate
+//     limits are set (D4-21), so with the store slow a flood of them cannot
+//     fill the queue and make a known device's datagrams drop as queue-full;
+//     one past their quarter is dropped and counted as unknown-queue-full.
+//     The share is fixed, not configurable. (MaxQueueBytes is at least 64
+//     KiB, so a quarter is at least 16 KiB.)
 //     They hold at most Limits.MaxUnknownConns stream connections, so the
 //     rest stay free for configured devices, and an idle one is closed
 //     after Limits.UnknownIdleTimeout. All of them together may store at
@@ -77,6 +88,20 @@
 //     like a datagram over its rate or past the queue, is dropped and
 //     counted, and the counts are reported as intake.drop-counted every
 //     Limits.ReportEvery and when the listener stops.
+//   - A batch commits in parts, in order, each within Config.MaxCommitBytes
+//     and MaxCommitRecords (C5 0.4, 0.5). A part that committed is not sent
+//     again: a stream part the store refuses is held and tried alone, a
+//     datagram part is dropped and counted, and a crash between parts
+//     leaves a sender's resend with duplicates, never a loss. See
+//     commitParts. A Log with lower caps is learnt downward only: a
+//     refusal halves the record cap from the refused part (any byte cap is
+//     met by few enough records, so the byte cap is never lowered and never
+//     falls below store.MinRecordBytes), and it does not rise again for the life
+//     of the Receiver; a restart starts from Config. A lone record the Log
+//     refuses as too large is dropped and counted as store, with the reason
+//     in Status.LastErr, but that path is defensive: Limits.MaxMessage keeps
+//     a message well under the store's record cap, so large messages are
+//     never handled this way.
 //   - A message whose record cannot be built is a fault in this package.
 //     It is dropped and counted as store, alone: the rest of its batch is
 //     stored.
@@ -107,7 +132,17 @@
 //   - The unknown budget bounds unattributed storage per window, not in
 //     all: over an upstream outage of T it can store up to UnknownBytes x
 //     (1 + T/UnknownWindow), restarts included when the node passes
-//     Config.UnknownSpent. The node should size it from the class quota
-//     and the outage it must ride out. A separate C5 stream and quota for
-//     unknown senders would bound it absolutely; it is not built.
+//     Config.UnknownSpent. The absolute bound is the syslog-unknown class
+//     (C5 0.4, HR-11): with Config.UnknownStream set, unknown senders'
+//     records go to that stream, and the class quota bounds the bytes they
+//     hold at once, which no clock step or restart refills. It is a bound
+//     on what is stored, not on what is received over time: pruning a
+//     forwarded record frees its bytes. A part refused at the quota is
+//     dropped whole, so a few records that would have fitted can be
+//     dropped with it. Without UnknownStream the budget is the only bound.
+//     The class is the node's to size and declare (P4-A5); the receiver
+//     does not check that the stream exists in the layout.
+//   - Known and unknown records of one listener are in two streams, so
+//     their seq orders are separate. Received time is the only order across
+//     them (C5 0.4 proposal, section 3).
 package receive

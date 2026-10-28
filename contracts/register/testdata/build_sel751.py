@@ -282,6 +282,124 @@ def rev4(p):
                          "of Table 4.90. Lines, deny rules, preconditions and warnings are unchanged.")
 
 
+# Revision 5 (C3 0.3, P4-A2, D4-13): the 24 SHO forms of S22 Table 7.67 and the
+# run that reads them in one session. Each form is (ID suffix, line, Table 7.67
+# row, settings sheet class, counted reply bound in bytes). The bounds are
+# count_settings.py's, rounded up to a KiB (docs/phase4/B2-register-rev5.md):
+# the settings of the class on S22's settings sheets at 16 + 6 + 64 bytes
+# each, 16 + 6 + 384 for an equation, plus 4,096 for headings. The 64 and 384
+# are assumptions (documented-untested, H-13), not numbers S22 gives.
+ROW = {
+    "group": "SHO n s: Shows relay settings for Group n (n = 1, 2, 3, or 4)",
+    "logic": "SHO L n s: Shows general logic settings for Group n (n = 1, 2, 3, or 4)",
+    "global": "SHO G s: Shows global settings",
+    "port": "SHO P n s: Shows serial port settings. n specifies the port (1, 2, 3, 4, or F)",
+    "report": "SHO R s: Shows report settings such as Sequential Events Recorder (SER) and Event Report (ER) settings",
+    "front-panel": "SHO F s: Shows front-panel settings",
+    "iec-103": "SHO I: Shows IEC 60870-5-103 settings",
+    "modbus": "SHO M s: Shows Modbus User Map settings",
+    "eip": "SHO E m s: Shows the EtherNet/IP Assembly Map m settings (m = 1, 2, or 3)",
+    "dnp": "SHO DNP m s: Shows DNP Map m settings (m = 1, 2, or 3)",
+}
+SHEET = {
+    "group": "Group Settings (SET Command)", "logic": "Logic Settings (SET L Command)",
+    "global": "Global Settings (SET G Command)", "port": "Port Settings (SET P Command)",
+    "report": "Report Settings (SET R Command)", "front-panel": "Front-Panel Settings (SET F Command)",
+    "iec-103": "IEC 60870-5-103 Map Settings (SET I Command)", "modbus": "Modbus Map Settings (SET M Command)",
+    "eip": "EtherNet/IP Assembly Map Settings (SET E Command)", "dnp": "DNP3 Map Settings (SET DNP n Command)",
+}
+# (ID suffix, line, row, bound). The run sends them in this order after
+# SHO P 1 and SHO G, which come first.
+FORMS = [
+    ("group_1", "SHO 1", "group", 103424), ("group_2", "SHO 2", "group", 103424),
+    ("group_3", "SHO 3", "group", 103424), ("group_4", "SHO 4", "group", 103424),
+    ("logic_1", "SHO L 1", "logic", 355328), ("logic_2", "SHO L 2", "logic", 355328),
+    ("logic_3", "SHO L 3", "logic", 355328), ("logic_4", "SHO L 4", "logic", 355328),
+    ("global", "SHO G", "global", 101376),
+    ("port_f", "SHO P F", "port", 7168), ("port1", "SHO P 1", "port", 24576),
+    ("port_2", "SHO P 2", "port", 9216), ("port_3", "SHO P 3", "port", 9216), ("port_4", "SHO P 4", "port", 9216),
+    ("report", "SHO R", "report", 13312), ("front_panel", "SHO F", "front-panel", 30720),
+    ("modbus", "SHO M", "modbus", 10240), ("iec103", "SHO I", "iec-103", 13312),
+    ("eip_1", "SHO E 1", "eip", 16384), ("eip_2", "SHO E 2", "eip", 16384), ("eip_3", "SHO E 3", "eip", 16384),
+    ("dnp_1", "SHO DNP 1", "dnp", 17408), ("dnp_2", "SHO DNP 2", "dnp", 17408), ("dnp_3", "SHO DNP 3", "dnp", 17408),
+]
+OPTIONAL = {"port_2", "port_3", "port_4", "modbus", "iec103", "eip_1", "eip_2", "eip_3", "dnp_1", "dnp_2", "dnp_3"}
+STEP_TIMEOUT_MS = 10_000
+RUN_TOTAL_BYTES = 512 * 1024  # T (B1, D4-13)
+RUN_DEADLINE_MS = 300_000
+
+
+def rev5(p):
+    """Revision 5 (C3 0.3): every SHO form of Table 7.67 is an operation with
+    limits, and sel.config.read_all sends them in one session, SHO P 1 first
+    (the LANG precondition and the posture warnings) and then SHO G. Nothing
+    else changes: no line, deny rule, precondition, warning, context or
+    firmware entry. Only the forms without a setting-name argument are
+    approved, so "SHO 1 CTR" and every other "s" form, and a bare "SHO P",
+    are unlisted and denied."""
+    p["contract"] = "otsec.register/0.3"
+    p["revision"] = 5
+    p["issued"] = "2026-10-27"
+    by_line = {o["line"]: o for o in p["operations"]}
+    ids = {}
+    for suffix, line, cls, bound in FORMS:
+        op = by_line.get(line)
+        if op is None:
+            op = {
+                "id": "sel.settings.show_" + suffix,
+                "classification": "read-only",
+                "line": line,
+                "access_level": "1",
+                "citations": [
+                    {"source": "S22", "ref": "Table 7.67 p.7.77 ('%s', Access Level 1)" % ROW[cls]},
+                    {"source": "S22", "ref": "%s, SEL-751 Settings Sheets (SET.1 to SET.114)" % SHEET[cls]},
+                ],
+                "evidence": {"class": "documented-untested"},
+                "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+                "notes": "Approved as this exact line, with no setting-name argument s. Read by the run "
+                         "sel.config.read_all.",
+            }
+            if suffix in OPTIONAL:
+                op["notes"] += (" The form exists only on a relay with the option (S22 Table 7.1); a relay without "
+                                "it answers Invalid Command, and C9 records the class as absent.")
+            p["operations"].append(op)
+        ids[line] = op["id"]
+        op["limits"] = {"max_reply_bytes": bound, "timeout_ms": STEP_TIMEOUT_MS}
+    # The existing two keep their IDs; SHO P 1 and SHO G lead the run.
+    lead = ["SHO P 1", "SHO G"]
+    order = lead + [l for _, l, _, _ in FORMS if l not in lead]
+    p["runs"] = [{
+        "id": "sel.config.read_all",
+        "steps": [ids[l] for l in order],
+        "max_total_bytes": RUN_TOTAL_BYTES,
+        "deadline_ms": RUN_DEADLINE_MS,
+        "citations": [{"source": "S22", "ref": "Table 7.67 p.7.77 (SHOW Command)"}],
+        "evidence": {"class": "documented-untested",
+                     "note": "No relay was read. Reply sizes and times are bounds, not measurements (H-13)."},
+        "side_effects": "None documented: SHO only displays settings. Output is sensitive configuration evidence.",
+        "notes": "One session, 24 forms, SHO P 1 first so LANG := ENGLISH is confirmed before any other line. "
+                 "Each step has its own reply and time limit; the run fails as a whole when a step passes its "
+                 "limit, the total passes max_total_bytes (T, 512 KiB, D4-13) or the deadline passes, and a relay "
+                 "whose settings pass T is not baselined. A form the relay does not have answers Invalid Command "
+                 "and costs one send.",
+    }]
+    # Keys in the order the Go struct writes them: runs after operations.
+    rebuilt = {}
+    for k, v in p.items():
+        if k != "runs":
+            rebuilt[k] = v
+        if k == "operations":
+            rebuilt["runs"] = p["runs"]
+    p.clear()
+    p.update(rebuilt)
+    p["notes"].insert(0, "Revision 5 by B2 (content owner), 2026-10-27, format otsec.register/0.3 (P4-A2, D4-13): "
+                         "all 24 SHO forms of S22 Table 7.67 without a setting-name argument are operations with "
+                         "reply and time limits, and the run sel.config.read_all reads them in one session. The "
+                         "175 touchscreen settings are in the files SET_HMI.zds and CDP.zds (S22 Table 7.80 "
+                         "p.7.87), not in any SHO form, and are not read (D4-13). No other line, deny rule, "
+                         "precondition, warning, context or firmware entry changes.")
+
+
 def write(p, name):
     with open(os.path.join(HERE, name), "w", encoding="utf-8", newline="\n") as f:
         json.dump(p, f, indent=2, ensure_ascii=False)
@@ -331,6 +449,8 @@ def main():
     rev3(p)
     write(p, "sel-751-rev3.json")
     rev4(p)
+    write(p, "sel-751-rev4.json")
+    rev5(p)
     write(p, "sel-751.json")
 
 

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -18,11 +19,23 @@ import (
 	"otsec.local/otsec/modules/security/collectorclient"
 )
 
+// heldBusyTimeout is the busy_timeout of the runtimes `start` builds. It is
+// 0 (the store's 5 s) except while a test holds a database busy: each open
+// and each retry of a held database then waits it out, and a test that holds
+// two databases through three ticks waited 30 s for nothing but the clock.
+// A test that does not hold a database keeps 5 s, so a commit held in a slow
+// WAL sync (F-016) is never mistaken for a lock that will not come free. The
+// tests of this package do not run in parallel. The timeout is fixed when
+// start builds the runtime, so holdDB must come before start.
+var heldBusyTimeout time.Duration
+
 // holdDB opens database id of the store in dir with an exclusive-locking
 // connection, so that every other open of it is busy until the returned
 // release is called.
 func holdDB(t *testing.T, dir string, id c5.DatabaseID) (release func()) {
 	t.Helper()
+	heldBusyTimeout = 400 * time.Millisecond
+	t.Cleanup(func() { heldBusyTimeout = 0 })
 	h, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, string(id)+".db")))
 	if err != nil {
 		t.Fatal(err)
@@ -297,5 +310,89 @@ func TestBusyAuditKeptRecordsBounded(t *testing.T) {
 	}
 	if len(r.deferred) != 0 || r.dropped != 0 {
 		t.Fatalf("still kept: %d, dropped %d", len(r.deferred), r.dropped)
+	}
+}
+
+// When a retry opens the audit database, the kept records and the
+// recovery's store.mode_change commit together, before any record another
+// goroutine writes once the database is open: a record made after the
+// release never lands among them (D3-6; B6 on #249, where a scheduled
+// run's collector.request did).
+func TestKeptRecordsCommitBeforeOthers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out busy_timeout")
+	}
+	c, dir := schedConfig(t, nil)
+	r, _, _ := start(t, c, dir)
+	r.Close()
+	release := holdDB(t, c.Store.Dir, AuditDB)
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	// The writer says when it has made its first record of each kind, so
+	// the test waits on that and not on a sleep (B6 on #262).
+	sawKept, sawLive := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		var kept, live bool
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			// "live": the open Log was visible before this record was made.
+			label := "kept"
+			if r.Log(AuditStream) != nil {
+				label = "live"
+			}
+			r.audit(bg, audit.ActionPolicyApply, audit.OutcomeInfo, "", fmt.Sprintf("%s %d", label, i))
+			switch {
+			case label == "kept" && !kept:
+				kept = true
+				close(sawKept)
+			case label == "live" && !live:
+				live = true
+				close(sawLive)
+			}
+		}
+	}()
+	wait := func(ch chan struct{}, what string) {
+		select {
+		case <-ch:
+		case <-time.After(time.Minute):
+			close(stop)
+			<-done
+			t.Fatalf("no %s record after a minute", what)
+		}
+	}
+	wait(sawKept, "kept")
+	release()
+	r.Tick(bg)
+	wait(sawLive, "live")
+	close(stop)
+	<-done
+	recs := auditRecords(t, r)
+	rec := slices.IndexFunc(recs, func(x *audit.Record) bool {
+		return x.Action == audit.ActionStoreModeChange && x.Detail == "database audit: failed to collecting"
+	})
+	if rec < 0 {
+		t.Fatal("no recovery record")
+	}
+	live, kept := 0, 0
+	for i, x := range recs {
+		switch {
+		case i < rec && strings.HasPrefix(x.Detail, "live "):
+			t.Fatalf("record %d (%q), made once the audit Log was visible, sits before the recovery at %d, among the kept records",
+				i, x.Detail, rec)
+		case i < rec && strings.HasPrefix(x.Detail, "kept "):
+			kept++
+		case i > rec && strings.HasPrefix(x.Detail, "live "):
+			live++
+		}
+	}
+	if kept == 0 || live == 0 {
+		t.Fatalf("%d kept and %d live records: the test did not race", kept, live)
 	}
 }
