@@ -569,3 +569,9 @@ Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 647661
 - **The answer.** At 18:10Z the owner answered the question asked at 15:40Z: "means all phase 4 items". Phase 4 is done only when all six items in [the Phase 4 briefs](../agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27) are done, not at the first exit gate.
 - **What stays the same.** The first exit gate (items 1 and 2) is still a checkpoint, and C1 still writes `docs/phase-4a-exit.md` for it. Passing it does not close Phase 4.
 - **The rest of the order.** Items 3 to 6 follow in the order of the briefs. Each is briefed only after the previous gate passes, and IDS (item 4) waits until the owner names the sites' protocols.
+
+## D4-34: Phase 4 goes item by item, with the owner's check at the end of each (owner, 2026-10-28)
+
+- **What the owner said.** At 18:11Z: "work on them item by item". At 18:12Z: "stop at the end of each item to check with me".
+- **The rule.** Each Phase 4 item is finished, gated and reported before the next one starts. At the end of each item, C1 reports to the owner and waits for their go before any agent starts the next item's briefing, contracts or code. An agent with nothing queued for the current item does reviews, verification or preparation for it, and does not start work on a later item.
+- **Items 1 and 2.** These two were briefed together, under one gate, because they share the store and the audit chain. C1 asked the owner whether they finish together or one at a time (decision card, 18:12Z). Until the owner answers, work already in flight on both continues, and no new item 2 slice starts that the owner's answer could stop. *To be completed with the owner's answer.*
