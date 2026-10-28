@@ -198,6 +198,27 @@ def test_absence_is_armed_at_the_acknowledgement(ev):
     assert old == []
 
 
+def test_absence_deadline_ahead_at_activation_stands(ev):
+    """D4-15: a deadline from the last occurrence still ahead at activation
+    stands; it is not moved to activation + interval + tolerance. Activated
+    half a limit after the last heartbeat, with the heartbeat silent from
+    then on, the type alarms once, at last + interval + tolerance, half a
+    limit before a re-anchored deadline would (B4 on #288)."""
+    end = seconds(ev["period"]["end"])
+    test_end = seconds(ev["period"]["test_end"])
+    hb = g.tkey("gt-inj-syslog", g.PERIODIC)
+    base = g.baseline([e for e in ev["events"] if e["t"] < end])
+    b = base[("gt-inj-syslog", hb)]
+    limit = b["interval"] + g.ceil_div(b["interval"] * g.PARAMS["absence_tolerance_pct"], 100)
+    start = b["last"] + limit // 2
+    # Not vacuous: the deadline that stands is ahead of activation and
+    # earlier than the re-anchored one.
+    assert start < b["last"] + limit < start + limit
+    silent = [e for e in ev["events"] if e["t"] >= start and g.key_of(e) != hb]
+    got = [a for a in g.evaluate(base, silent, start, test_end) if a["rule"] == "absence" and tuple(a["type"]) == hb]
+    assert [(a["asset"], a["at"]) for a in got] == [("gt-inj-syslog", b["last"] + limit)]
+
+
 def test_events_syslog_key_is_the_template(ev):
     """D4-4 item 4: no two Syslog type definitions share a key, a new type
     reuses a known msgid with a new text, and the controls (a known text

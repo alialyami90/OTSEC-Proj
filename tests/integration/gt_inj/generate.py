@@ -383,7 +383,9 @@ def evaluate(base, events, start, end, reanchor=True):
                 if c - a > limit and a + limit >= start:
                     alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=a + limit, events=[]))
             continue
-        deadline = max(b["last"] + limit, start + limit)
+        deadline = b["last"] + limit
+        if deadline < start:
+            deadline = start + limit
         for c in [e["t"] for e in by.get(k, []) if full(e)] + [end]:
             if c > deadline:
                 alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=deadline, events=[]))
