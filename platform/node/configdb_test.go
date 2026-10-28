@@ -136,11 +136,18 @@ func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
 		{"two assets need two floors", 2, floor, false},
 		{"two assets at two floors", 2, 2 * floor, true},
 		{"no configuration collection", 0, ConfigRecordBytes, true},
+		{"no quota at all, one asset reads", 1, 0, false},
+		{"no quota at all, two assets read", 2, 0, false},
+		{"no quota and no collection", 0, 0, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
 				nc.AddSEL751(secondID, "", 2324, 300)
-				nc.Store.Quotas["configuration"] = c.quota
+				if c.quota > 0 {
+					nc.Store.Quotas["configuration"] = c.quota
+				} else {
+					delete(nc.Store.Quotas, "configuration")
+				}
 				for i := 0; i < c.reads; i++ {
 					add(nc, []string{relayID, secondID}[i])
 				}
@@ -159,6 +166,9 @@ func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
 				t.Errorf("%d assets counted, want %d", cfg.ConfigAssets(), c.reads)
 			}
 		})
+	}
+	if !(Collection{Operation: "sel.config.read_all"}).ReadsConfiguration() || (Collection{Operation: "sel.ser.read_all"}).ReadsConfiguration() {
+		t.Error("Collection.ReadsConfiguration is not ConfigReadOperation")
 	}
 	for op, want := range map[string]bool{"sel.config.read_all": true, "sel.config.read": true, "sel.ser.read_all": false,
 		"sel.config.write": false, "config.read_all": false, "sel.breaker.config.read_all": false, "sel.ser.config": false} {

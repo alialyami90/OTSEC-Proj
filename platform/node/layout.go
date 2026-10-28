@@ -81,11 +81,18 @@ func ConfigReadOperation(op string) bool {
 	return len(parts) >= 3 && parts[1] == "config" && strings.HasPrefix(parts[len(parts)-1], "read")
 }
 
+// ReadsConfiguration reports whether the scheduled collection reads an
+// asset's configuration. It is the one predicate: the quota floor counts
+// assets with it, and the writer that stores configuration records takes only
+// the runs for which it holds, so the two cannot count differently (B1 and B6
+// on #299).
+func (s Collection) ReadsConfiguration() bool { return ConfigReadOperation(s.Operation) }
+
 // ConfigAssets counts the assets whose configuration the schedule reads.
 func (c *Config) ConfigAssets() int {
 	seen := map[string]bool{}
 	for _, s := range c.Schedule {
-		if ConfigReadOperation(s.Operation) {
+		if s.ReadsConfiguration() {
 			seen[s.AssetID] = true
 		}
 	}
@@ -117,6 +124,14 @@ func (c *Config) Layout() (c5.Layout, error) {
 	// to an asset that sends Syslog or SER events whether or not any
 	// configuration is read from it.
 	configDB := c5.Database{ID: ConfigDB, Writer: "node"}
+	floor := int64(c.ConfigAssets()) * ConfigQuotaFloorRecords * ConfigRecordBytes
+	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; !ok && floor > 0 {
+		// An absent quota is below the floor too (D4-20 rule 5): without it
+		// there is no configuration database, and the first read would have
+		// nowhere to go.
+		return c5.Layout{}, fmt.Errorf("store.quotas.configuration is required: the schedule reads the configuration of %d assets, which needs at least %d bytes (%d x the record cap for each, D4-20)",
+			c.ConfigAssets(), floor, ConfigQuotaFloorRecords)
+	}
 	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; ok {
 		for _, a := range c.assets {
 			configDB.Streams = append(configDB.Streams, c5.StreamSpec{ID: ConfigStream(a.AssetID), Class: c5.ClassConfiguration})
