@@ -239,7 +239,13 @@ def got(tmp_path_factory):
         out["i2"], out["steps"]["lost"] = lose_reply("a6-install-2", 2)
         runs = len(s.runs_reported())
         out["steps"]["lost"]["run_after"] = harness.wait_for(lambda: len(s.runs_reported()) > runs, 150, step=1.0)
-        out["steps"]["lost"]["run_health"] = s.health()
+        # The node forwards the run's report before it folds the run's
+        # audit records and writes status (Scheduler.RunOnce), so the
+        # receiver can hold the report a moment before status shows the run.
+        def run_shown():
+            h = s.health()
+            return h if re.search(r"last run ok at", h) else None
+        out["steps"]["lost"]["run_health"] = harness.wait_for(run_shown, 3 * RELAY, step=1.0) or s.health()
 
         # 5. Removed, forgotten, put back. The unread files are removed
         # first, so a scan reads every file and may forget.
