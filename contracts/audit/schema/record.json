@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.5/record",
+  "$id": "otsec.audit/0.6/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [

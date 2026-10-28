@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.5"
+const ContractID = "otsec.audit/0.6"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower

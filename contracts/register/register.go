@@ -1,8 +1,11 @@
 package register
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -12,11 +15,12 @@ import (
 // ContractID is the identifier this reader writes. A package carries it or
 // an earlier minor in Readable; a later minor is invalid here, because the
 // reader is strict (an unknown field is refused, never ignored).
-const ContractID = "otsec.register/0.2"
+const ContractID = "otsec.register/0.3"
 
 // Readable lists the package contracts this reader decodes. A 0.1 package
-// reads as before; only 0.2 may carry context.
-var Readable = []string{"otsec.register/0.1", ContractID}
+// reads as before; only 0.2 and later may carry context, and only 0.3 may
+// carry limits and runs.
+var Readable = []string{"otsec.register/0.1", "otsec.register/0.2", ContractID}
 
 // Classification of a register entry. The list an entry sits in fixes which
 // value it may carry: operations are read-only, session lines are
@@ -83,8 +87,11 @@ type Package struct {
 	Warnings []PostureWarning `json:"warnings,omitempty"`
 	// Context lists settings an operation needs to be read correctly (DATE_F
 	// for the SER's dates). Added in 0.2 (D3-2).
-	Context        []ContextRead `json:"context,omitempty"`
-	Operations     []Operation   `json:"operations"`
+	Context    []ContextRead `json:"context,omitempty"`
+	Operations []Operation   `json:"operations"`
+	// Runs are named, ordered lists of operations sent in one session. Added
+	// in 0.3 (P4-A2).
+	Runs           []Run         `json:"runs,omitempty"`
 	SessionControl []SessionLine `json:"session_control"`
 	Denied         []DenyRule    `json:"denied"`
 	Firmware       Firmware      `json:"firmware"`
@@ -121,12 +128,75 @@ type Operation struct {
 	// Phases lists where the transport may send the line: operate, probe or
 	// both. Empty means operate only. A probe line is sent before
 	// authentication, so it must be literal (no parameters).
-	Phases      []Phase    `json:"phases,omitempty"`
-	AccessLevel string     `json:"access_level"`
+	Phases      []Phase `json:"phases,omitempty"`
+	AccessLevel string  `json:"access_level"`
+	// Limits bound the reply to this line. Added in 0.3; required of every
+	// step of a run.
+	Limits      *Limits    `json:"limits,omitempty"`
 	Citations   []Citation `json:"citations"`
 	Evidence    Evidence   `json:"evidence"`
 	SideEffects string     `json:"side_effects"`
 	Notes       string     `json:"notes,omitempty"`
+}
+
+// Limits bound the reply to one line: the adapter ends a reply that passes
+// either with failed.response_too_large or failed.timeout, and keeps the bytes
+// read (C2). Both are required when Limits is present.
+type Limits struct {
+	MaxReplyBytes int64 `json:"max_reply_bytes"`
+	TimeoutMS     int64 `json:"timeout_ms"`
+}
+
+// The ceilings a limit may not pass. They are C2's invocation ceilings
+// (adapter.MaxResponseBytes, MaxStepTimeoutMS and MaxDeadlineMS); a test in
+// contracts/adapter pins them to the same values, because register cannot
+// import adapter.
+const (
+	MaxSessionBytes = 1 << 20
+	MaxStepMS       = 60_000
+	MaxDeadlineMS   = 600_000
+	// MaxRunSteps is the most operations one run may send.
+	MaxRunSteps = 32
+	// MaxRunAccessLevel is the highest access level a step of a run may need:
+	// a run reads, at the level a monitoring credential holds.
+	MaxRunAccessLevel = 1
+)
+
+// Run is a named, ordered list of operations sent in one session (P4-A2,
+// D4-13). It fails as a whole: when a step fails, the adapter sends QUI,
+// keeps every byte read and reports the read failed, never a partial result
+// presented as complete. A run's ID shares the namespace of operation IDs, so
+// a C2 invocation may name it.
+//
+// A step is the ID of an operation that is read-only, literal (no
+// parameters), runs in operate, needs access level MaxRunAccessLevel or lower
+// and carries Limits. The steps lead with the reads that gate everything
+// else: the precondition and firmware-condition reads, so LANG := ENGLISH is
+// confirmed before any other line is sent. The reads of the package's
+// warnings, and the context reads of each step, are steps too, a context read
+// before the step it is for, so a run sends every line once and no line
+// outside its steps.
+type Run struct {
+	ID    string   `json:"id"`
+	Steps []string `json:"steps"`
+	// MaxTotalBytes bounds the received bytes of the whole session, and
+	// DeadlineMS its time. They are at most C2's ceilings.
+	MaxTotalBytes int64      `json:"max_total_bytes"`
+	DeadlineMS    int64      `json:"deadline_ms"`
+	Citations     []Citation `json:"citations"`
+	Evidence      Evidence   `json:"evidence"`
+	SideEffects   string     `json:"side_effects"`
+	Notes         string     `json:"notes,omitempty"`
+}
+
+// Run returns the run with this ID.
+func (p *Package) Run(id string) *Run {
+	for i := range p.Runs {
+		if p.Runs[i].ID == id {
+			return &p.Runs[i]
+		}
+	}
+	return nil
 }
 
 // ParamKind is a closed list. A kind a reader does not know makes the whole
@@ -317,10 +387,52 @@ func Decode(data []byte) (*Package, error) {
 	if err := strictjson.Decode(data, &p); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
+	if err := checkNewKeys(data); err != nil {
+		return nil, err
+	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// checkNewKeys applies D4-16 as a general rule: a key introduced at a C3
+// version is refused by its presence in any package below that version,
+// whatever its value, [] and null included. An older reader refuses the key as
+// unknown, so a newer reader that took an empty one would read a package an
+// older reader refuses. Validate sees only the decoded package, where an empty
+// value and a missing key look alike, so the keys are looked for in the bytes.
+// The keys are context (0.2), runs and an operation's limits (0.3).
+func checkNewKeys(data []byte) error {
+	var raw struct {
+		Contract   string          `json:"contract"`
+		Context    json.RawMessage `json:"context"`
+		Runs       json.RawMessage `json:"runs"`
+		Operations []struct {
+			ID     string          `json:"id"`
+			Limits json.RawMessage `json:"limits"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	i := slices.Index(Readable, raw.Contract)
+	if i < 0 {
+		return nil
+	}
+	minor := i + 1
+	if raw.Context != nil && minor < 2 {
+		return fmt.Errorf("register: context is new in 0.2, so a %s package cannot carry the key", raw.Contract)
+	}
+	if raw.Runs != nil && minor < 3 {
+		return fmt.Errorf("register: runs are new in 0.3, so a %s package cannot carry the key", raw.Contract)
+	}
+	for _, o := range raw.Operations {
+		if o.Limits != nil && minor < 3 {
+			return fmt.Errorf("register: limits are new in 0.3, so operation %s cannot carry the key in a %s package", o.ID, raw.Contract)
+		}
+	}
+	return nil
 }
 
 var (
@@ -388,6 +500,9 @@ func (p *Package) Validate() error {
 			return fmt.Errorf("register: operation %s is %q; only read-only lines are invocable", o.ID, o.Classification)
 		}
 		if err := o.validateTemplate(); err != nil {
+			return err
+		}
+		if err := o.validateLimits(minor); err != nil {
 			return err
 		}
 		seen := map[Phase]bool{}
@@ -485,6 +600,18 @@ func (p *Package) Validate() error {
 	}
 	if err := p.validateFirmware(sources, ids); err != nil {
 		return err
+	}
+	if len(p.Runs) != 0 && minor < 3 {
+		return fmt.Errorf("register: runs are new in 0.3, so a %s package cannot carry them", p.Contract)
+	}
+	for i := range p.Runs {
+		r := &p.Runs[i]
+		if err := claim(r.ID); err != nil {
+			return err
+		}
+		if err := p.validateRun(r, sources); err != nil {
+			return err
+		}
 	}
 	// Second barrier: no approved line may match a deny rule.
 	m, err := p.compile()
@@ -638,6 +765,109 @@ func (p *Package) validateFirmware(sources, ids map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// validateLimits checks an operation's limits: they are new in 0.3, and both
+// numbers are positive and within the ceilings C2 holds an invocation to.
+func (o *Operation) validateLimits(minor int) error {
+	if o.Limits == nil {
+		return nil
+	}
+	if minor < 3 {
+		return fmt.Errorf("register: limits are new in 0.3, so operation %s cannot carry them in an earlier package", o.ID)
+	}
+	if l := o.Limits; l.MaxReplyBytes < 1 || l.MaxReplyBytes > MaxSessionBytes || l.TimeoutMS < 1 || l.TimeoutMS > MaxStepMS {
+		return fmt.Errorf("register: operation %s limits %+v are outside max_reply_bytes 1..%d and timeout_ms 1..%d",
+			o.ID, *l, MaxSessionBytes, MaxStepMS)
+	}
+	return nil
+}
+
+// validateRun applies the rules in Run's documentation.
+func (p *Package) validateRun(r *Run, sources map[string]bool) error {
+	if err := checkCommon(r.ID, "", r.Citations, r.Evidence, r.SideEffects, sources, false); err != nil {
+		return err
+	}
+	if r.MaxTotalBytes < 1 || r.MaxTotalBytes > MaxSessionBytes {
+		return fmt.Errorf("register: run %s max_total_bytes %d is outside 1..%d", r.ID, r.MaxTotalBytes, MaxSessionBytes)
+	}
+	if r.DeadlineMS < 1 || r.DeadlineMS > MaxDeadlineMS {
+		return fmt.Errorf("register: run %s deadline_ms %d is outside 1..%d", r.ID, r.DeadlineMS, MaxDeadlineMS)
+	}
+	if len(r.Steps) == 0 || len(r.Steps) > MaxRunSteps {
+		return fmt.Errorf("register: run %s has %d steps, want 1..%d", r.ID, len(r.Steps), MaxRunSteps)
+	}
+	at := map[string]int{}
+	for i, id := range r.Steps {
+		o := p.operation(id)
+		switch {
+		case o == nil:
+			return fmt.Errorf("register: run %s step %q is not an operation", r.ID, id)
+		case at[id] != 0:
+			return fmt.Errorf("register: run %s sends %s twice", r.ID, id)
+		case len(o.Params) != 0:
+			return fmt.Errorf("register: run %s step %s has parameters; a step is a literal line", r.ID, id)
+		case !o.InPhase(PhaseOperate):
+			return fmt.Errorf("register: run %s step %s does not run in operate", r.ID, id)
+		case !levelWithin(o.AccessLevel, MaxRunAccessLevel):
+			return fmt.Errorf("register: run %s step %s needs access level %q, above %d", r.ID, id, o.AccessLevel, MaxRunAccessLevel)
+		case o.Limits == nil:
+			return fmt.Errorf("register: run %s step %s has no limits", r.ID, id)
+		case o.Limits.MaxReplyBytes > r.MaxTotalBytes:
+			return fmt.Errorf("register: run %s step %s max_reply_bytes %d is above the run's max_total_bytes %d", r.ID, id, o.Limits.MaxReplyBytes, r.MaxTotalBytes)
+		case o.Limits.TimeoutMS > r.DeadlineMS:
+			return fmt.Errorf("register: run %s step %s timeout_ms %d is above the run's deadline_ms %d", r.ID, id, o.Limits.TimeoutMS, r.DeadlineMS)
+		}
+		at[id] = i + 1
+	}
+	// The gate reads lead: every precondition and firmware condition is read
+	// before any other line is sent, so a refusing setting stops the run before
+	// it reads anything else.
+	gate := map[string]bool{}
+	for _, c := range p.Preconditions {
+		gate[c.ReadBy] = true
+	}
+	for _, b := range p.Firmware.Branches {
+		for _, c := range b.Conditions {
+			gate[c.ReadBy] = true
+		}
+	}
+	for id := range gate {
+		if at[id] == 0 || at[id] > len(gate) {
+			return fmt.Errorf("register: run %s must lead with the reads %s that gate it, and %s is not among its first %d steps", r.ID, sortedKeys(gate), id, len(gate))
+		}
+	}
+	// Posture warnings are read in the run, and each step's context before it.
+	for _, w := range p.Warnings {
+		if at[w.ReadBy] == 0 {
+			return fmt.Errorf("register: run %s does not send %s, which reads warning %s", r.ID, w.ReadBy, w.ID)
+		}
+	}
+	for _, id := range r.Steps {
+		for _, c := range p.ContextFor(id) {
+			if at[c.ReadBy] == 0 || at[c.ReadBy] >= at[id] {
+				return fmt.Errorf("register: run %s must send %s, which reads %s, before step %s", r.ID, c.ReadBy, c.Setting, id)
+			}
+		}
+	}
+	return nil
+}
+
+// levelWithin reports whether an access level is a decimal number no higher
+// than max. A level that is not a number is never within: the order is not
+// assumed.
+func levelWithin(level string, max uint64) bool {
+	n, err := strconv.ParseUint(level, 10, 8)
+	return err == nil && n <= max
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (p *Package) operation(id string) *Operation {

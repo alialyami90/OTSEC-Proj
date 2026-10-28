@@ -35,10 +35,11 @@ type RuntimeOptions struct {
 // Runtime is a started node: every database through C5 startup, a Log per
 // open database, and the node's status.
 type Runtime struct {
-	cfg    *Config
-	layout c5.Layout
-	opt    RuntimeOptions
-	dbs    []*database
+	cfg      *Config
+	keyWatch nodeKeyWatch
+	layout   c5.Layout
+	opt      RuntimeOptions
+	dbs      []*database
 
 	mu      sync.Mutex
 	pending []queued        // store alarms raised during a commit, for Tick

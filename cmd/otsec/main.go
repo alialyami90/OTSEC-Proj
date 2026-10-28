@@ -336,6 +336,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(w, "node %s, status written %s\n", st.Node, st.Written.Format(time.RFC3339))
+	if st.GoVersion != "" {
+		fmt.Fprintf(w, "node built with %s\n", safe(st.GoVersion))
+	}
 	fmt.Fprintf(w, "collecting: %v\n", st.Collecting)
 	if st.RunsHeld != "" {
 		fmt.Fprintf(w, "RUNS HELD: %s; every run on this node is stopped while this line shows\n", safe(st.RunsHeld))
@@ -436,6 +439,17 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			confirmed = ts.LastConfirmed.Format(time.RFC3339)
 		}
 		fmt.Fprintf(w, "target %s (%s): %d confirmed, last %s\n", safe(n), ts.Class, ts.Confirmed, confirmed)
+		if ts.HeldBack != "" {
+			fmt.Fprintf(w, "  HELD BACK: the node's client certificate for this target is %s; no connection is made and its events wait in the store until the period is valid (HR-13)\n", safe(ts.HeldBack))
+		}
+		if na := ts.CertNotAfter; !na.IsZero() && ts.HeldBack == "" {
+			switch left := time.Until(na); {
+			case left <= 0:
+				fmt.Fprintf(w, "  CLIENT CERTIFICATE EXPIRED at %s: the target is still being tried; replace it and restart the node\n", na.Format(time.RFC3339))
+			case left <= node.CertWarning:
+				fmt.Fprintf(w, "  CLIENT CERTIFICATE EXPIRES at %s: replace it and restart the node before then\n", na.Format(time.RFC3339))
+			}
+		}
 		if ts.Open.IsZero() {
 			fmt.Fprintln(w, "  no session open")
 		} else {
@@ -465,6 +479,20 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintln(w, line)
 		}
 	}
+	for _, k := range st.NodeKeys {
+		verb := "EXPIRES"
+		if !time.Now().Before(k.NotAfter) {
+			verb = "EXPIRED"
+		}
+		fmt.Fprintf(w, "NODE KEY CERTIFICATE %s %s (%s) at %s: install a new version in the key register\n", verb, safe(k.Ref), safe(k.Kind), k.NotAfter.Format(time.RFC3339))
+	}
+	if st.LabTLSFiles {
+		refs := "no reference of this configuration uses one yet"
+		if len(st.LabTLSFileRefs) > 0 {
+			refs = "from files: " + safe(strings.Join(st.LabTLSFileRefs, ", "))
+		}
+		fmt.Fprintf(w, "LAB TLS KEYS IN FILES: lab_tls_files is set, so TLS private keys may be read from files in tls_dir, not a key store (lab nodes only, D2-12); %s\n", refs)
+	}
 	for _, id := range node.SortedListeners(st.Listeners) {
 		ls := st.Listeners[id]
 		state := "open"
@@ -476,6 +504,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			last = ls.LastMessage.Format(time.RFC3339)
 		}
 		fmt.Fprintf(w, "listener %s (%s %s): %s, %d received, %d stored, last message %s\n", safe(id), ls.Transport, safe(ls.Address), state, ls.Received, ls.Stored, last)
+		if ls.HeldBack != "" {
+			fmt.Fprintf(w, "  HELD BACK: the listener certificate is %s; the listener is not bound and receives nothing until the period is valid (HR-13)\n", safe(ls.HeldBack))
+		}
 		if ls.Plaintext {
 			fmt.Fprintln(w, "  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)")
 		}
@@ -502,11 +533,11 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			fmt.Fprintf(w, "  unknown senders stored %d bytes since start; budget %d bytes an hour, started %d bytes spent by the hour before start; with this class's other listeners at most %d bytes, %d%% of the %d-byte quota, over a %d h outage (HR-11)\n",
 				u.StoredBytes, u.HourlyBytes, u.SpentAtStart, u.BoundBytes, percent(u.BoundBytes, u.QuotaBytes), u.QuotaBytes, u.OutageHours)
 		}
-		if na := ls.CertNotAfter; !na.IsZero() {
+		if na := ls.CertNotAfter; !na.IsZero() && ls.HeldBack == "" {
 			switch left := time.Until(na); {
 			case left <= 0:
-				fmt.Fprintf(w, "  CERTIFICATE EXPIRED at %s: senders that check it refuse it\n", na.Format(time.RFC3339))
-			case left <= node.ListenerCertWarning:
+				fmt.Fprintf(w, "  CERTIFICATE EXPIRED at %s: the listener keeps running, and senders that check it refuse it\n", na.Format(time.RFC3339))
+			case left <= node.CertWarning:
 				fmt.Fprintf(w, "  CERTIFICATE EXPIRES at %s: replace it and restart the node before then\n", na.Format(time.RFC3339))
 			default:
 				fmt.Fprintf(w, "  certificate valid until %s\n", na.Format(time.RFC3339))
