@@ -212,6 +212,9 @@ func TestUnknownDatagramsDroppedAtTheClassQuota(t *testing.T) {
 	if s.Stored != 15 || s.Dropped[DropUnknownFull] != 15 || s.Dropped[DropStore] != 0 {
 		t.Errorf("status %+v", s)
 	}
+	if s.LastErr != "" {
+		t.Errorf("a full unknown class set LastErr %q, which is for real faults", s.LastErr)
+	}
 	if n := len(sc.events(t, testStream)); n != 15 {
 		t.Errorf("the known sender has %d stored, want 15", n)
 	}

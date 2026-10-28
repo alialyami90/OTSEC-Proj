@@ -260,6 +260,9 @@ func installConfig(src, pd string) error {
 	if cfg.TLSDir != "" && !strings.EqualFold(filepath.Clean(cfg.TLSDir), TLSDir(pd)) {
 		return fmt.Errorf("winsvc: tls_dir is %s; the installed node reads its TLS files from %s", cfg.TLSDir, TLSDir(pd))
 	}
+	if cfg.KeyRegister != "" && !strings.EqualFold(filepath.Clean(cfg.KeyRegister), KeyRegisterPath(pd)) {
+		return fmt.Errorf("winsvc: key_register is %s; the installed node reads its key register from %s", cfg.KeyRegister, KeyRegisterPath(pd))
+	}
 	if cfg.CollectorPublicDir != "" && !strings.EqualFold(filepath.Clean(cfg.CollectorPublicDir), PublicDir(pd)) {
 		return fmt.Errorf("winsvc: collector_public_dir is %s; the installed collector publishes its install key in %s", cfg.CollectorPublicDir, PublicDir(pd))
 	}
