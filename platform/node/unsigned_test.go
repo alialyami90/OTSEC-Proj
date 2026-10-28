@@ -75,7 +75,7 @@ func TestUnsignedQuarantineClearRefusedOffLab(t *testing.T) {
 	setTargets(t, q.s.rt.cfg, asset.Simulated)
 	q.s.QuarantineTick(bg)
 	cl := q.records(audit.ActionQuarantineCleared)
-	if len(cl) != 1 || !strings.Contains(cl[0].Detail, ClearQuarantineFileName+unsignedSuffix) {
+	if len(cl) != 1 || !strings.Contains(cl[0].Detail, ClearQuarantineFileName+" (unsigned file)") {
 		t.Fatalf("the lab node's record does not name the file as unsigned: %+v", cl)
 	}
 	if !q.hasAlarm(AlarmUnsignedAdminFileAccepted, ClearQuarantineFileName) {
@@ -116,12 +116,9 @@ func TestSignedQuarantineClearWinsOverTheUnsignedFile(t *testing.T) {
 }
 
 func TestUnsignedFileIgnoredWhileASignedRequestNamesIt(t *testing.T) {
-	q, mux, manifest := signedQuarantineNode(t)
-	mux.force = 0
+	q, _, manifest := signedQuarantineNode(t)
 	q.signedClear("admin-request-clear.json", 1, manifest)
-	// Scan the signed file without relaying it: the collector holds.
-	files, _, _ := q.s.scanAdmin()
-	q.s.setUnsignedWants(files)
+	// The signed file is in admin_dir but not yet sent: the collector holds.
 	q.clearFile(manifest, "")
 	q.s.QuarantineTick(bg)
 	if len(clearRecords(q)) != 0 || !q.hasAlarm(AlarmUnsignedAdminFileIgnored, "signed request") {
@@ -129,9 +126,60 @@ func TestUnsignedFileIgnoredWhileASignedRequestNamesIt(t *testing.T) {
 	}
 	// A signed request for another export does not shadow it.
 	other := strings.Repeat("cd", 32)
-	q.s.setUnsignedWants(nil)
-	if q.s.supersededQuarantine(relayID, other) || q.s.supersededQuarantine(relayID, manifest) {
-		t.Fatal("nothing is named after the wants are cleared")
+	w := q.s.signedWants()
+	if w.quarantine[relayID+" "+other] || !w.quarantine[relayID+" "+manifest] {
+		t.Fatalf("wants %+v", w)
+	}
+}
+
+// B6's probes on #347, in both orders: the tick comes before any relay scan
+// saw the signed file, and the wants a scan left behind are stale. The signed
+// request is acted on, once, and the unsigned file never is.
+func TestUnsignedClearNeverBeatsASignedOneWhicheverRunsFirst(t *testing.T) {
+	t.Run("tick before any relay scan", func(t *testing.T) {
+		q, _, manifest := signedQuarantineNode(t)
+		q.signedClear("admin-request-clear.json", 1, manifest)
+		q.clearFile(manifest, "")
+		q.s.QuarantineTick(bg)
+		q.s.relayAdmin(bg)
+		q.s.QuarantineTick(bg)
+		cl := clearRecords(q)
+		if len(cl) != 1 || strings.Contains(cl[0].Detail, "unsigned") || !strings.Contains(cl[0].Detail, "admin-request-clear.json") {
+			t.Fatalf("cleared records %+v", cl)
+		}
+	})
+	t.Run("stale empty scan", func(t *testing.T) {
+		q, _, manifest := signedQuarantineNode(t)
+		q.s.relayAdmin(bg) // an empty admin_dir scan
+		q.signedClear("admin-request-clear.json", 1, manifest)
+		q.clearFile(manifest, "")
+		q.s.QuarantineTick(bg)
+		if cl := clearRecords(q); len(cl) != 0 {
+			t.Fatalf("the unsigned file was acted on from a stale scan: %+v", cl)
+		}
+		q.s.relayAdmin(bg)
+		if cl := clearRecords(q); len(cl) != 1 || !strings.Contains(cl[0].Detail, "admin-request-clear.json") {
+			t.Fatalf("cleared records %+v", cl)
+		}
+	})
+}
+
+// A signed request the collector refused is never acted on, so it does not
+// withhold the unsigned file (B6 on #347, finding 2).
+func TestRefusedSignedRequestDoesNotSupersede(t *testing.T) {
+	q, _, manifest := signedQuarantineNode(t)
+	_, sum := q.signedClear("admin-request-clear.json", 1, manifest)
+	q.s.mu.Lock()
+	q.s.relayed[adminRequestID(sum)] = relayEntry{Outcome: audit.OutcomeDenied, Reason: "signature"}
+	q.s.mu.Unlock()
+	if w := q.s.signedWants(); len(w.quarantine) != 0 {
+		t.Fatalf("a refused request names a clear: %+v", w)
+	}
+	q.clearFile(manifest, "")
+	q.s.QuarantineTick(bg)
+	cl := clearRecords(q)
+	if len(cl) != 1 || !strings.Contains(cl[0].Detail, "(unsigned file)") {
+		t.Fatalf("the unsigned file was not acted on: %+v", cl)
 	}
 }
 
@@ -163,7 +211,7 @@ func TestUnsignedSeqResetAck(t *testing.T) {
 		t.Fatalf("not acknowledged in the lab: %+v", cs)
 	}
 	acks := q.records(audit.ActionCollectorSeqResetAck)
-	if len(acks) != 1 || !strings.Contains(acks[0].Detail, SeqResetAckFileName+unsignedSuffix) {
+	if len(acks) != 1 || !strings.Contains(acks[0].Detail, SeqResetAckFileName+" (unsigned file)") {
 		t.Fatalf("ack records %+v", acks)
 	}
 	if !q.hasAlarm(AlarmUnsignedAdminFileAccepted, SeqResetAckFileName) {
@@ -202,8 +250,6 @@ func TestSignedSeqResetAckWinsOverTheUnsignedFile(t *testing.T) {
 	// A signed acknowledgement of X is in admin_dir and read, but not yet sent.
 	writeAdminFile(t, nc, "admin-request-ack.json", authz.KindNodeSeqResetAck,
 		signN(t, authz.KindNodeSeqResetAck, 3, func(p *authz.AdminRequest) { p.InstallKeyID = kid("ik_test_second") }))
-	files, _, _ := s.scanAdmin()
-	s.setUnsignedWants(files)
 
 	// An unsigned file naming another key is not superseded: refused as
 	// any other key is, with no ignore notice.

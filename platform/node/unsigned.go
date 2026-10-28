@@ -2,8 +2,10 @@ package node
 
 import (
 	"fmt"
+	"slices"
 
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorwire"
 )
@@ -28,6 +30,7 @@ import (
 //     clear (the same export, or the same install key), the unsigned file is
 //     ignored (unsigned-admin-file-ignored): the signed one is acted on, and
 //     the signed one only.
+//     A signed request the collector has refused does not count.
 //
 // clear-suspension.json is not covered here: the node's suspension clear has
 // no signed counterpart yet (the collector reads the same file for its own
@@ -91,25 +94,31 @@ func unsignedWantsOf(files []*adminFile) unsignedWants {
 	return w
 }
 
-// setUnsignedWants records what the signed files of the last scan name.
-func (s *Scheduler) setUnsignedWants(files []*adminFile) {
-	w := unsignedWantsOf(files)
-	s.mu.Lock()
-	s.unsigned = w
-	s.mu.Unlock()
+// signedWants reads admin_dir now and returns what its signed requests name,
+// other than the ones the collector has refused: a request it refused is never
+// acted on, so it must not withhold the unsigned file (B6 on #347). It is read
+// at the moment of the check, not remembered from the relay's last scan, because
+// the quarantine tick and the relay run on their own timers and a signed file
+// may have arrived between them.
+func (s *Scheduler) signedWants() unsignedWants {
+	files, _, _ := s.scanAdmin()
+	return unsignedWantsOf(slices.DeleteFunc(files, func(f *adminFile) bool {
+		e, done := s.decided(f.id)
+		return done && e.Outcome == audit.OutcomeDenied
+	}))
 }
 
 // unsignedGate decides whether the node may act on the unsigned file name
-// (content hash sum). superseded says a signed request names the same
-// thing. It raises the alarm for a refusal or an ignored file, once per file
+// (content hash sum). superseded says, from what the signed requests in
+// admin_dir name now, that one names the same thing. It raises the alarm for a refusal or an ignored file, once per file
 // content, and returns whether to go on.
-func (s *Scheduler) unsignedGate(name, sum string, superseded bool) bool {
-	switch {
-	case !s.rt.cfg.LabOnly():
+func (s *Scheduler) unsignedGate(name, sum string, superseded func(unsignedWants) bool) bool {
+	if !s.rt.cfg.LabOnly() {
 		s.raiseOnceKey(AlarmUnsignedAdminFileRefused+" "+sum, "", AlarmUnsignedAdminFileRefused,
 			fmt.Sprintf("%s is not signed, and this node has an endpoint that is not simulated, so it is not acted on. Sign a request (node.quarantine_clear, node.seq_reset_ack) instead", name))
 		return false
-	case superseded:
+	}
+	if superseded(s.signedWants()) {
 		s.raiseOnceKey(AlarmUnsignedAdminFileIgnored+" "+sum, "", AlarmUnsignedAdminFileIgnored,
 			fmt.Sprintf("%s is not acted on: a signed request in admin_dir names the same clear, and only the signed one is acted on. Remove the unsigned file", name))
 		return false
@@ -127,15 +136,3 @@ func (s *Scheduler) unsignedAccepted(name, sum, assetID string) {
 // unsignedSuffix is added to the source a record names, so the audit record
 // of an unsigned clear says so.
 const unsignedSuffix = " (unsigned file)"
-
-func (s *Scheduler) supersededQuarantine(assetID, manifest string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.unsigned.quarantine[assetID+" "+manifest]
-}
-
-func (s *Scheduler) supersededAck(installKey string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.unsigned.ack[installKey]
-}
