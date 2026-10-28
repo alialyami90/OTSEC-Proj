@@ -24,6 +24,12 @@
 //     source cursors and captures), not pages, so that a class at quota is
 //     refused before the database as a whole is full. Usage, which startup
 //     uses to prune, counts live pages as C5 requires.
+//   - Close checkpoints the WAL (wal_checkpoint(TRUNCATE)) on a background
+//     context. That work is bounded in bytes, by the WAL bound above, and not
+//     in time: on a slow disk each flush can take seconds (F-016), so a
+//     caller that must stop by a deadline does not wait on Close.
+//   - Options.BusyTimeout is SQLite's busy_timeout, 5 s unless a test that
+//     holds a database busy on purpose shortens it.
 //   - Alarms go to Options.Alarms, a sink outside the store (C5-A3-5): the
 //     database that raises an alarm may be the one that cannot store it.
 //

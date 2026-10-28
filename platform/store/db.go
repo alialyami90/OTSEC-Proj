@@ -214,20 +214,33 @@ CREATE TABLE class_bytes (
 ) WITHOUT ROWID;
 `
 
-// connPragmas are set on every open. They are per connection in SQLite, so
-// setting them changes no persistent setting of an existing store.
+// connPragmas are set on every open (Options.BusyTimeout sets the first).
+// They are per connection in SQLite, so setting them changes no persistent
+// setting of an existing store.
 // busy_timeout comes first: it needs no read of the file, and every other
 // statement may start the connection's first read, which after a killed
 // writer can meet another connection's WAL recovery (SQLITE_BUSY_RECOVERY,
 // 261). With the handler set, the read waits for the recovery instead of
 // failing the open (A1 and A6, store-full e2e on 9c50395).
-var connPragmas = []string{
-	"PRAGMA busy_timeout=5000",
-	"PRAGMA synchronous=FULL",
-	fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
-	fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
-	"PRAGMA temp_store=MEMORY",
-	"PRAGMA foreign_keys=OFF",
+func (o Options) connPragmas() []string {
+	return []string{
+		busyPragma(o.BusyTimeout),
+		"PRAGMA synchronous=FULL",
+		fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
+		fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=OFF",
+	}
+}
+
+// DefaultBusyTimeout is busy_timeout when Options.BusyTimeout is zero.
+const DefaultBusyTimeout = 5 * time.Second
+
+func busyPragma(d time.Duration) string {
+	if d <= 0 {
+		d = DefaultBusyTimeout
+	}
+	return fmt.Sprintf("PRAGMA busy_timeout=%d", d.Milliseconds())
 }
 
 func open(ctx context.Context, path string, opt Options) (*DB, error) {
@@ -360,7 +373,7 @@ func connect(ctx context.Context, path string, opt Options) (*DB, error) {
 	d := &DB{opt: opt, path: path, db: sdb, conn: conn,
 		streams: map[c5.StreamID]c5.StreamClass{}, quotas: map[c5.StreamClass]c5.Quota{},
 		full: map[c5.StreamClass]bool{}, warned: map[c5.StreamClass]bool{}}
-	for _, q := range connPragmas {
+	for _, q := range opt.connPragmas() {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return nil, fmt.Errorf("open %s: %s: %w", path, q, err)
@@ -661,6 +674,10 @@ func (d *DB) Close() error {
 	}
 	d.closed = true
 	if !d.readOnly {
+		// Bounded in bytes, not in time: journal_size_limit and the WAL
+		// bound cap what this checkpoint copies, but not how long the
+		// disk's flush takes (F-016). The context is Background on
+		// purpose; a Close that gave up would leave a large WAL behind.
 		d.conn.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
 	}
 	return errors.Join(d.conn.Close(), d.db.Close())
