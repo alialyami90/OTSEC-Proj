@@ -549,3 +549,37 @@ Date: 2026-10-28. C1, on C4's ack question 1 (#357, comment 6476181758).
   - C6 has classified `TestUnknownSpentAcrossRestarts/seed_1`, which failed once on hosted Windows, on #346's head `95b91cd`, with a UDP marker reported lost without a count, and passed on the re-run. C6's first reading of the log: the counts reconcile (180 = 74 stored + 106 dropped) and the marker is in the store, so the test's loss detector may have raised a false alarm. C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
   - The row names D4-21's pass criterion as a gate before the first `device-observed` listener, with #336 as its evidence (C6, comment 6476212811 on #352).
 - **Cutover.** All six acks are on `main`: C1 #355, C2 #360, C3 #361, C4 #357, C5 #358 and C6 #356. Each question is answered on its PR. The C team holds the six roles from here, and the B threads can be resolved.
+
+## D4-32: the event-baseline checkpoint in the configuration class, and its remover rule (#340, slice 1c)
+
+Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 6476619232).
+
+1. **A C5 minor, folded into C5 0.7.** The configuration class holds C9 snapshots and differences and C10 baselines (`contracts/store/class.go:32`, `commit.go:50`). Retention is decided by class, and D4-20's remover refuses any record of another class. So adding the node's checkpoint document, `otsec.eventcheckpoint/0.1`, changes what the class means, even though no wire field changes. C5 0.7, which already carries D4-20 rules 1 and 2, adds three things: the class text names the checkpoint as a node document of the class; the validator tells the three kinds apart; and the remover rule in item 2. Reviewers: C2 and C4 as consumers, C6's contract tests, and C3 for the retention rule.
+2. **Superseded checkpoints are removable (a D4-20 amendment).** A checkpoint is working state, not evidence.
+   - **When it may be removed.** A checkpoint of one half and asset may be removed once three things hold: a newer checkpoint of the same half and asset has committed; the `node-eventbaseline` cursor has been saved after that commit; and the newer one is the checkpoint the node would restore. After the cursor moves, the older checkpoint's restart point may already be pruned, so the older checkpoint cannot serve as a fallback.
+   - **What is kept.** The newest checkpoint of each half and asset is kept while that half is running. The remover refuses it, any C9 or C10 record, and any held record.
+   - **A finished learner (C5 on #367).** When a learner finishes, its last checkpoint is never superseded. It becomes removable once the `config.baseline_recorded` of the baseline that learner produced is in the audit chain. From then on the node does not restore it. The baseline record, stored before the C8 record (D4-26 item 4), is what the node keeps.
+   - **How removal runs.** Removal runs in bounded steps with the `Discarder` pattern of rule 3, and each removal is counted in node status and a platform health event.
+   - **No C8 record.** A checkpoint is not in the audit chain, so its removal needs no C8 record. C3 confirms this in review.
+   - **When the newest checkpoint does not restore.** The node raises an alarm and writes an audit record. A learner half starts the audited re-learn of D4-26. A detector half is rebuilt from the acknowledged baseline, which is stored and hashed, so only the open windows and holds are lost, and the alarm says so (C5 on #367). The node never falls back to an older checkpoint.
+3. **Where D4-30 stands.** C4's option (a) is approved in direction (#364, comment 6476462128), with C5's layout of one self-contained record per half and a floor of about 8 MiB per asset. Six conditions apply. The C10 0.2 ceilings and the measured maximal-case figures are recorded when that PR merges.
+
+## D4-33: "Phase 4 done" means all six items (owner, 2026-10-28)
+
+- **The answer.** At 18:10Z the owner answered the question asked at 15:40Z: "means all phase 4 items". Phase 4 is done only when all six items in [the Phase 4 briefs](../agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27) are done, not at the first exit gate.
+- **What stays the same.** The first exit gate (items 1 and 2) is still a checkpoint, and C1 still writes `docs/phase-4a-exit.md` for it. Passing it does not close Phase 4.
+- **The rest of the order.** Items 3 to 6 follow in the order of the briefs. Each is briefed only after the previous gate passes, and IDS (item 4) waits until the owner names the sites' protocols.
+
+## D4-34: Phase 4 goes item by item, with the owner's check at the end of each (owner, 2026-10-28)
+
+- **What the owner said.** At 18:11Z: "work on them item by item". At 18:12Z: "stop at the end of each item to check with me".
+- **The rule.** Each Phase 4 item is finished, gated and reported before the next one starts. At the end of each item, C1 reports to the owner and waits for their go before any agent starts the next item's briefing, contracts or code. An agent with nothing queued for the current item does reviews, verification or preparation for it, and does not start work on a later item.
+- **Items 1 and 2 finish together.** These two were briefed together, under one gate, because they share the store and the audit chain. At 18:14Z the owner chose "Finish 1 and 2 together" on C1's decision card. They pass the first exit gate as one unit, and C1 checks with the owner at that gate. From item 3 on, each item is briefed, built, gated and checked with the owner before the next starts.
+
+## D4-35: the acknowledgement window, tightened (C8 0.8, #346)
+
+Date: 2026-10-28. C1, on C3's push `f8c615d` to #346, confirming C3's tightening of the D4-26 amendment (the acknowledgement window).
+
+- **The rule.** When `recs` holds a `config.baseline_recorded` of the asset before a succeeded event acknowledgement stamped 0.8 or later, that acknowledgement must name the digest of the asset's latest such recording before it. When `recs` holds no recording of the asset before it, the acknowledgement is refused only if `recs` holds the asset's version-1 recording, as the amendment says.
+- **What it replaces.** The amendment's "otherwise refuse only a digest that a recording inside `recs` has replaced". A recording inside the window replaced whatever was current then, so no other digest can be the current baseline, whether or not `recs` names it.
+- **The race.** A person who acknowledges a baseline that a re-learn has just replaced is refused, and acknowledges again against the baseline they now see. This fails closed, as D4-20's race does.
