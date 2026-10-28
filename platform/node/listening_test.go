@@ -152,9 +152,13 @@ func TestListenersStoreAndAttribute(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitStored(t, ls, st, "lab-tcp", 1)
-	evs = streamEvents(t, r, ListenerStream("lab-tcp"))
-	if len(evs) != 1 || evs[0].Source.Asset != nil || !slices.Contains(evs[0].Flags, "asset-unresolved") {
+	evs = streamEvents(t, r, UnknownStream("lab-tcp"))
+	if len(evs) != 1 || evs[0].Source.Asset != nil || !slices.Contains(evs[0].Flags, "asset-unresolved") || evs[0].ID.Stream != UnknownStream("lab-tcp") {
 		t.Fatalf("unknown sender's message: %+v", evs)
+	}
+	// The listener's own stream holds known senders' messages only (HR-11).
+	if known := streamEvents(t, r, ListenerStream("lab-tcp")); len(known) != 0 {
+		t.Fatalf("the unknown sender's message is also on the listener's stream: %+v", known)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for !slices.ContainsFunc(streamEvents(t, r, HealthStream), func(e *event.Event) bool {
