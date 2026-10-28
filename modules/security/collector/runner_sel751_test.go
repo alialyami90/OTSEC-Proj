@@ -137,7 +137,7 @@ func hostedFixture(t *testing.T, extra ...pipeOption) (*pipeFixture, net.Listene
 	}, extra...)...)
 	// The register on main (revision 4): its context read puts SHO G before
 	// SER, as the C2 goldens do (C3 0.2, D3-2).
-	if _, err := f.registers.Activate(signedRegister(t, readFixtureFrom(t, "../../../contracts/register/testdata/sel-751.json"), f.release, "release-2026")); err != nil {
+	if _, err := f.registers.Activate(signedRegister(t, readFixtureFrom(t, "../../../contracts/register/testdata/sel-751-rev4.json"), f.release, "release-2026")); err != nil {
 		t.Fatal(err)
 	}
 	reply, work := f.pipe.Handle(context.Background(), installRequest(t, f, pipeRef(1), canary))

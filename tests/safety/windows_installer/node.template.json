@@ -151,5 +151,5 @@
   "collector_pipe": "\\\\.\\pipe\\otsec-collector",
   "collector_public_dir": "PUBLICDIR",
   "policy_version": 3,
-  "register_version": 4
+  "register_version": 5
 }

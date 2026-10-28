@@ -1,8 +1,8 @@
 {
-  "contract": "otsec.register/0.2",
+  "contract": "otsec.register/0.3",
   "family": "sel-751",
-  "revision": 4,
-  "issued": "2026-10-26",
+  "revision": 5,
+  "issued": "2026-10-27",
   "owner": "A2",
   "sources": [
     {
@@ -329,7 +329,11 @@
       "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. Needed to state UTC offset and DST rule for SER local times. Output is sensitive configuration evidence. No password-bearing setting appears in any S22 settings sheet (A2 searched every ':=' line for pass/pwd/key/secret/community/auth: none); passwords are set only with PAS (Table 7.52) and are not settings. S22 prints no example SHO G output.",
       "classification": "read-only",
       "line": "SHO G",
-      "access_level": "1"
+      "access_level": "1",
+      "limits": {
+        "max_reply_bytes": 101376,
+        "timeout_ms": 10000
+      }
     },
     {
       "id": "sel.settings.show_port1",
@@ -354,7 +358,606 @@
       "notes": "APPROVED by A1 2026-10-23 as this exact line, with no setting-name argument s. The port number is always explicit (bare SHO P shows the active port). Lets the collector record MAXACC, FASTOP, LANG, FTPACC and HTTPACC before collecting; per A1, MAXACC above 1 is recorded and warned, not refused (owner decision pending). Output includes IP addresses and FTPUSER (a user name, not a password); no password-bearing setting exists in the Port 1 sheet. A1 asked for Table 2.5 as the Port 1 citation, but S22 Table 2.5 covers the Port 4 communications card; Table 7.1 is the correct citation.",
       "classification": "read-only",
       "line": "SHO P 1",
-      "access_level": "1"
+      "access_level": "1",
+      "limits": {
+        "max_reply_bytes": 24576,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_group_1",
+      "classification": "read-only",
+      "line": "SHO 1",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO n s: Shows relay settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Group Settings (SET Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 103424,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_group_2",
+      "classification": "read-only",
+      "line": "SHO 2",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO n s: Shows relay settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Group Settings (SET Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 103424,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_group_3",
+      "classification": "read-only",
+      "line": "SHO 3",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO n s: Shows relay settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Group Settings (SET Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 103424,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_group_4",
+      "classification": "read-only",
+      "line": "SHO 4",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO n s: Shows relay settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Group Settings (SET Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 103424,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_logic_1",
+      "classification": "read-only",
+      "line": "SHO L 1",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO L n s: Shows general logic settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Logic Settings (SET L Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 355328,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_logic_2",
+      "classification": "read-only",
+      "line": "SHO L 2",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO L n s: Shows general logic settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Logic Settings (SET L Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 355328,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_logic_3",
+      "classification": "read-only",
+      "line": "SHO L 3",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO L n s: Shows general logic settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Logic Settings (SET L Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 355328,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_logic_4",
+      "classification": "read-only",
+      "line": "SHO L 4",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO L n s: Shows general logic settings for Group n (n = 1, 2, 3, or 4)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Logic Settings (SET L Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 355328,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_port_f",
+      "classification": "read-only",
+      "line": "SHO P F",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO P n s: Shows serial port settings. n specifies the port (1, 2, 3, 4, or F)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Port Settings (SET P Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 7168,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_port_2",
+      "classification": "read-only",
+      "line": "SHO P 2",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO P n s: Shows serial port settings. n specifies the port (1, 2, 3, 4, or F)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Port Settings (SET P Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 9216,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_port_3",
+      "classification": "read-only",
+      "line": "SHO P 3",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO P n s: Shows serial port settings. n specifies the port (1, 2, 3, 4, or F)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Port Settings (SET P Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 9216,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_port_4",
+      "classification": "read-only",
+      "line": "SHO P 4",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO P n s: Shows serial port settings. n specifies the port (1, 2, 3, 4, or F)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Port Settings (SET P Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 9216,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_report",
+      "classification": "read-only",
+      "line": "SHO R",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO R s: Shows report settings such as Sequential Events Recorder (SER) and Event Report (ER) settings', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Report Settings (SET R Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 13312,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_front_panel",
+      "classification": "read-only",
+      "line": "SHO F",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO F s: Shows front-panel settings', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Front-Panel Settings (SET F Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all.",
+      "limits": {
+        "max_reply_bytes": 30720,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_modbus",
+      "classification": "read-only",
+      "line": "SHO M",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO M s: Shows Modbus User Map settings', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "Modbus Map Settings (SET M Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 10240,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_iec103",
+      "classification": "read-only",
+      "line": "SHO I",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO I: Shows IEC 60870-5-103 settings', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "IEC 60870-5-103 Map Settings (SET I Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 13312,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_eip_1",
+      "classification": "read-only",
+      "line": "SHO E 1",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO E m s: Shows the EtherNet/IP Assembly Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "EtherNet/IP Assembly Map Settings (SET E Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 16384,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_eip_2",
+      "classification": "read-only",
+      "line": "SHO E 2",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO E m s: Shows the EtherNet/IP Assembly Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "EtherNet/IP Assembly Map Settings (SET E Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 16384,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_eip_3",
+      "classification": "read-only",
+      "line": "SHO E 3",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO E m s: Shows the EtherNet/IP Assembly Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "EtherNet/IP Assembly Map Settings (SET E Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 16384,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_dnp_1",
+      "classification": "read-only",
+      "line": "SHO DNP 1",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO DNP m s: Shows DNP Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "DNP3 Map Settings (SET DNP n Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 17408,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_dnp_2",
+      "classification": "read-only",
+      "line": "SHO DNP 2",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO DNP m s: Shows DNP Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "DNP3 Map Settings (SET DNP n Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 17408,
+        "timeout_ms": 10000
+      }
+    },
+    {
+      "id": "sel.settings.show_dnp_3",
+      "classification": "read-only",
+      "line": "SHO DNP 3",
+      "access_level": "1",
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 ('SHO DNP m s: Shows DNP Map m settings (m = 1, 2, or 3)', Access Level 1)"
+        },
+        {
+          "source": "S22",
+          "ref": "DNP3 Map Settings (SET DNP n Command), SEL-751 Settings Sheets (SET.1 to SET.114)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "None documented. Output contains configuration values; store as sensitive evidence.",
+      "notes": "Approved as this exact line, with no setting-name argument s. Read by the run sel.config.read_all. The form exists only on a relay with the option (S22 Table 7.1); a relay without it answers Invalid Command, and C9 records the class as absent.",
+      "limits": {
+        "max_reply_bytes": 17408,
+        "timeout_ms": 10000
+      }
+    }
+  ],
+  "runs": [
+    {
+      "id": "sel.config.read_all",
+      "steps": [
+        "sel.settings.show_port1",
+        "sel.settings.show_global",
+        "sel.settings.show_group_1",
+        "sel.settings.show_group_2",
+        "sel.settings.show_group_3",
+        "sel.settings.show_group_4",
+        "sel.settings.show_logic_1",
+        "sel.settings.show_logic_2",
+        "sel.settings.show_logic_3",
+        "sel.settings.show_logic_4",
+        "sel.settings.show_port_f",
+        "sel.settings.show_port_2",
+        "sel.settings.show_port_3",
+        "sel.settings.show_port_4",
+        "sel.settings.show_report",
+        "sel.settings.show_front_panel",
+        "sel.settings.show_modbus",
+        "sel.settings.show_iec103",
+        "sel.settings.show_eip_1",
+        "sel.settings.show_eip_2",
+        "sel.settings.show_eip_3",
+        "sel.settings.show_dnp_1",
+        "sel.settings.show_dnp_2",
+        "sel.settings.show_dnp_3"
+      ],
+      "max_total_bytes": 524288,
+      "deadline_ms": 300000,
+      "citations": [
+        {
+          "source": "S22",
+          "ref": "Table 7.67 p.7.77 (SHOW Command)"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested",
+        "note": "No relay was read. Reply sizes and times are bounds, not measurements (H-13)."
+      },
+      "side_effects": "None documented: SHO only displays settings. Output is sensitive configuration evidence.",
+      "notes": "One session, 24 forms, SHO P 1 first so LANG := ENGLISH is confirmed before any other line. Each step has its own reply and time limit; the run fails as a whole when a step passes its limit, the total passes max_total_bytes (T, 512 KiB, D4-13) or the deadline passes, and a relay whose settings pass T is not baselined. A form the relay does not have answers Invalid Command and costs one send."
     }
   ],
   "session_control": [
@@ -2147,6 +2750,7 @@
     ]
   },
   "notes": [
+    "Revision 5 by B2 (content owner), 2026-10-27, format otsec.register/0.3 (P4-A2, D4-13): all 24 SHO forms of S22 Table 7.67 without a setting-name argument are operations with reply and time limits, and the run sel.config.read_all reads them in one session. The 175 touchscreen settings are in the files SET_HMI.zds and CDP.zds (S22 Table 7.80 p.7.87), not in any SHO form, and are not read (D4-13). No other line, deny rule, precondition, warning, context or firmware entry changes.",
     "Revision 4 by A2 (content owner), 2026-10-26, format otsec.register/0.2 (D3-2): context ctx.date_f reads DATE_F with SHO G for SER, and SHO G cites Table 4.84 for DATE_F instead of Table 4.90. Lines, deny rules, preconditions and warnings are unchanged.",
     "Revision 3 by A2 (content owner), 2026-10-25: every documented command word of S22 (Command Summary pp.1-9, English and Spanish, and Table C.2) is a deny-rule mnemonic, and the Spanish state-changing forms are denied. Allowlist decisions are unchanged.",
     "Revision 2 by A2 (content owner), 2026-10-24, from A1's Phase 0 conversion: C3 review changes 3 and 4 and the sel.ser.other_args citation (docs/phase1/reviews/C3-A2.md). Allowlist decisions are unchanged.",
