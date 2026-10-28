@@ -35,8 +35,8 @@ import (
 //     ends the alarm and not the hold (D4-18): the snapshot and difference
 //     stay held as HoldAcknowledgedDifference, same Ref, until a retention
 //     rule for configuration evidence says otherwise. A return to the
-//     baseline releases them (R3.5 is read for acknowledgements only; B1 to
-//     rule on a return).
+//     baseline ends the alarm the same way, under HoldRestoredDifference
+//     (D4-19).
 //
 // A record is held for one reason. When one is wanted for two, the baseline
 // wins, as the acknowledgement that made it the baseline is the later word.
@@ -80,6 +80,9 @@ type assetHolds struct {
 	// ended are the changes whose alarm a configuration acknowledgement
 	// ended (D4-18): their snapshot and difference stay held as evidence.
 	ended []openDifference
+	// returned are the changes whose alarm a return to the baseline ended
+	// (D4-19): held the same way, under their own code.
+	returned []openDifference
 }
 
 // foldHolds reads the configuration records of the node's audit stream, in
@@ -122,6 +125,11 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 			}
 		case audit.ActionConfigBaselineRestored:
 			a := of(r)
+			for _, o := range a.open {
+				if o.baseline == c.BaselineDigest {
+					a.returned = append(a.returned, o)
+				}
+			}
 			a.open = slices.DeleteFunc(a.open, func(o openDifference) bool { return o.baseline == c.BaselineDigest })
 		}
 	}
@@ -153,6 +161,10 @@ func (a *assetHolds) wants() []wantHold {
 		add(wantHold{o.snapshot, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
 		add(wantHold{o.difference, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
 	}
+	for _, o := range a.returned {
+		add(wantHold{o.snapshot, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
+		add(wantHold{o.difference, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
+	}
 	return out
 }
 
@@ -168,7 +180,7 @@ type holdPlan struct {
 }
 
 func knownCode(c c5.HoldCode) bool {
-	return c == c5.HoldBaseline || c == c5.HoldUnapprovedDifference || c == c5.HoldAcknowledgedDifference
+	return c == c5.HoldBaseline || c == c5.HoldUnapprovedDifference || c == c5.HoldAcknowledgedDifference || c == c5.HoldRestoredDifference
 }
 
 type planned struct {

@@ -86,9 +86,9 @@ func TestFoldHolds(t *testing.T) {
 		"an approved change holds nothing more": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, true)},
 			[]string{"baseline " + hBase[7:13] + " ref 0"}},
-		"a return to the baseline ends the alarm": {
+		"a return to the baseline ends the alarm and keeps the evidence (D4-19)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 0"}},
+			[]string{"baseline " + hBase[7:13] + " ref 0", "restored-difference " + hSnap[7:13] + " ref 1", "restored-difference " + hDiff[7:13] + " ref 1"}},
 		"a new baseline ends the alarm, is the one held, and the difference stays held (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hSnap)},
 			[]string{"baseline " + hSnap[7:13] + " ref 2", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
@@ -101,9 +101,9 @@ func TestFoldHolds(t *testing.T) {
 		"going to another baseline and back does not bring the alarm back (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent), ackRec(cfg, hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 3", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
-		"a return to the baseline releases the difference, even after a second acknowledgement": {
+		"a restored change stays restored after a later acknowledgement (D4-19)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 3"}},
+			[]string{"baseline " + hBase[7:13] + " ref 3", "restored-difference " + hSnap[7:13] + " ref 1", "restored-difference " + hDiff[7:13] + " ref 1"}},
 		"an event baseline's acknowledgement leaves the alarm open": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(ev, hEvent)},
 			[]string{"baseline " + hBase[7:13] + " ref 0", "baseline " + hEvent[7:13] + " ref 2", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
@@ -322,25 +322,32 @@ func TestUnjustifiedHoldsAreReleasedAtStart(t *testing.T) {
 	}
 }
 
-// A return to the baseline ends the alarm: the snapshot and the difference
-// are released, the baseline stays. An approval accepted afterwards would
-// not have (audit.VerifyConfig), so the fold ignores it.
-func TestReturnToBaselineReleasesTheDifference(t *testing.T) {
+// A return to the baseline ends the alarm and not the evidence (D4-19): the
+// snapshot and the difference are re-reasoned to restored-difference with the
+// change record as Ref, the baseline stays, and a second start corrects
+// nothing. An approval accepted afterwards would not have ended the alarm
+// (audit.VerifyConfig), so the fold ignores it.
+func TestReturnToBaselineKeepsTheDifference(t *testing.T) {
 	h := newHoldsNode(t)
+	var det c5.Seq
 	_, _, _ = h.restart(func(r *Runtime) {
 		putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.snap1)))
-		putAudit(t, r, detectedRec(config.Digest(h.snap1), config.Digest(h.snap2), config.Digest(h.diff), false))
+		det = putAudit(t, r, detectedRec(config.Digest(h.snap1), config.Digest(h.snap2), config.Digest(h.diff), false))
 	})
 	got, alarms, r := h.restart(func(r *Runtime) {
 		putAudit(t, r, restoredRec(config.Digest(h.snap1)))
 	})
-	if len(got) != 1 || got[1].Code != c5.HoldBaseline {
-		t.Fatalf("holds %+v, want the baseline alone", got)
+	if len(got) != 3 || got[1].Code != c5.HoldBaseline ||
+		got[2] != reasonAt(r, det, c5.HoldRestoredDifference) || got[3] != reasonAt(r, det, c5.HoldRestoredDifference) {
+		t.Fatalf("holds %+v, want the baseline and the two documents as restored-difference", got)
 	}
 	if n := reconciled(alarms); n != 2 {
-		t.Errorf("%d reconcile alarms, want 2 releases: %+v", n, alarms)
+		t.Errorf("%d reconcile alarms, want 2 reason corrections: %+v", n, alarms)
 	}
-	_ = r
+	_, alarms, _ = h.restart(nil)
+	if n := reconciled(alarms); n != 0 {
+		t.Errorf("the next start corrected %d holds: %+v", n, alarms)
+	}
 }
 
 // An acknowledged baseline the node cannot find is an alarm for the asset,
