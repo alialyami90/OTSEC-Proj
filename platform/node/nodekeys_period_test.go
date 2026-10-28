@@ -154,3 +154,55 @@ func TestKeyRegisterExpiredAnchorIsNeverTrusted(t *testing.T) {
 		t.Fatalf("handshake error %v", err)
 	}
 }
+
+// A sender CA in the register whose period has ended is loaded and never
+// trusted, as for the lab files: the node starts, the listener binds, and a
+// sender certified by that CA is refused at the handshake and stores
+// nothing. An expired sender CA is a refused peer, not a period fault of the
+// listener (B6 on #302; mutant: the strict TrustAnchors for SenderCARef).
+func TestKeyRegisterExpiredSenderCAIsNeverTrusted(t *testing.T) {
+	nc, p, reg, dir := keyConfigValid(t, nodeconfigtest.Validity{}, "127.0.0.1", time.Now().Add(time.Hour))
+	senders, err := nc.WritePKIValid("127.0.0.1", "sender-ca", "sender-client", nodeconfigtest.Validity{CA: expired()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sendersRef = "nodekey_senders01"
+	// Installed while the CA was valid, as the register would have it.
+	if err := reg.SetAnchors(sendersRef, [][]byte{senders.CA()}, nodeconfigtest.KeyAdmin, time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := nc.WriteRegister(reg); err != nil {
+		t.Fatal(err)
+	}
+	nc.AddListener("lab-tls", "syslog-tls", "127.0.0.1:0")
+	nc.Listeners[0].TLS.CredentialRef = nodeconfigtest.ListenerKeyRef
+	nc.Listeners[0].TLS.SenderCARef = sendersRef
+	nc.Listeners[0].TLS.RequireSenderCert = true
+	lockTLS(t, nc)
+	r, st, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls := serve(t, r)
+	if ls.Addr("lab-tls") == nil {
+		t.Fatal("an expired sender CA in the register held the listener back or stopped the node")
+	}
+	raw := dialFrom(t, "tcp", "127.0.0.1", ls.Addr("lab-tls"))
+	c := tls.Client(raw, &tls.Config{RootCAs: p.Roots, ServerName: "127.0.0.1", Certificates: []tls.Certificate{senders.Client}, MinVersion: tls.VersionTLS12})
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	// With TLS 1.3 the refusal shows on the first read.
+	if err := c.Handshake(); err == nil {
+		c.Write([]byte("<13>1 - - - - - - from an expired CA\n"))
+		if _, err := c.Read(make([]byte, 1)); err == nil {
+			t.Fatal("a sender certified by an expired CA was read from")
+		}
+	}
+	var got ListenerStatus
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		ls.Publish()
+		if got = st.Snapshot("x").Listeners["lab-tls"]; got.Refused["tls"] >= 1 {
+			break
+		}
+	}
+	if got.HeldBack != "" || got.Stored != 0 || got.Received != 0 || got.Refused["tls"] < 1 {
+		t.Fatalf("status %+v", got)
+	}
+}
