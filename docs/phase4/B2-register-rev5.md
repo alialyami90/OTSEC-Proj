@@ -31,7 +31,7 @@ Why not reuse `context`? A context entry names a setting that one operation need
 ## Revision 5 content
 
 - **24 operations**, all `read-only`, access level `1`, `documented-untested`, cited to S22 Table 7.67 (p. 7.77) and the settings class it shows: `sel.config.show_group_1` to `_4` (`SHO 1` to `SHO 4`), `show_logic_1` to `_4` (`SHO L n`), `show_global` and `show_port1` (these two exist already), `show_port_f`, `show_port_2` to `_4`, `show_report`, `show_front_panel`, `show_modbus`, `show_iec103`, `show_eip_1` to `_3`, `show_dnp_1` to `_3`. The existing IDs are kept so revision 4's references hold.
-- **One run**, `sel.config.read_all`: `SHO P 1` first (the `LANG` precondition), then `SHO G`, then the other 22 forms in the rule's order (C9 `sel-751-sho/1`). Its order is the order of C9's classes.
+- **One run**, `sel.config.read_all`: `SHO P 1` first (the `LANG` precondition), then `SHO G`, then the other 22 forms in the order of C9 0.2's classes (`sel-751-sho/2`, which lists them in the run's order).
 - **Nothing else changes:** no `SET`, `FIL`, Level 2 entry or `s` form. The deny rules stay, and B6's corpus adds every `SHO <form> s` form and every bare `SHO P` (V-S7).
 - **Spanish forms** (`MOS`) stay denied; the `LANG := ENGLISH` precondition is unchanged.
 

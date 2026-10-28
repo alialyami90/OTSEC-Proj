@@ -588,7 +588,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_6", schema="otsec.adapter/0.6")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_7", schema="otsec.adapter/0.7")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the

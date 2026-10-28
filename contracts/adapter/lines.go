@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 
 	"otsec.local/otsec/contracts/register"
 )
@@ -45,11 +46,25 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 	if r.RegisterVersion != p.Revision && !unverified {
 		fail("register_version %d, but the package is revision %d", r.RegisterVersion, p.Revision)
 	}
-	own, err := m.Render(inv.OperationID, inv.Params)
-	if err != nil {
+	// A run (C3 0.3) is checked as a whole below. Its lines are its steps, so
+	// no operate line outside them is allowed, and none that the register
+	// reads a check with and the run does not hold (C3 validation requires
+	// the run to hold them).
+	var own string
+	var steps []string
+	run, isRun := m.Run(inv.OperationID)
+	if isRun {
+		steps = run.Steps
+		if _, err := m.RenderRun(inv.OperationID); err != nil {
+			fail("the invocation's run does not render: %v", err)
+		}
+	} else if own, err = m.Render(inv.OperationID, inv.Params); err != nil {
 		fail("the invocation's operation does not render: %v", err)
 	}
 	reads := map[string]bool{inv.OperationID: true}
+	for _, id := range steps {
+		reads[id] = true
+	}
 	for _, s := range p.Preconditions {
 		reads[s.ReadBy] = true
 	}
@@ -71,6 +86,7 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 	// replyTo[i] is the operation whose line send i was, when it was an
 	// operate line the register knows; its reply runs to the next send.
 	replyTo := make([]string, len(ss))
+	var sent []string // the operate lines of a run, as operation IDs, in order
 	for i, x := range ss {
 		at := fmt.Sprintf("transcript.segments[%d]", x.seg)
 		if x.cred || (x.phase == PhaseProbe && isWake(x.b)) {
@@ -90,11 +106,21 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 			continue
 		}
 		replyTo[i] = id
+		sent = append(sent, id)
 		if !reads[id] {
 			fail("%s: %q is operation %s, which this invocation does not run or need", at, line, id)
 		}
-		if id == inv.OperationID && line != own {
+		if !isRun && id == inv.OperationID && line != own {
 			fail("%s: %q is not the invocation's line %q", at, line, own)
+		}
+	}
+	if isRun {
+		r.checkRun(steps, sent, ss, replyTo, fail)
+	} else {
+		for i, rec := range r.Records {
+			if rec.Kind == RecordConfigSection || rec.Kind == RecordConfigAbsent {
+				fail("records[%d]: %s is a record of a run, and %s is not one", i, rec.Kind, inv.OperationID)
+			}
 		}
 	}
 	ctx := p.ContextFor(inv.OperationID)
@@ -117,6 +143,46 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 		return fmt.Errorf("adapter: lines: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// checkRun checks a run's operate lines and records (C2 0.6, D4-13). A run's
+// result has exactly two shapes, because a run is all or nothing:
+//
+//   - ok: every step sent once and in order, and one configuration record per
+//     step, in the same order, each in the reply to its own step's line;
+//   - not ok (failed or refused): a prefix of the steps sent, because a run
+//     that fails stops where it failed, and no record at all.
+//
+// So partial is not a run outcome: partial.parse_errors would hand the
+// consumer some of a snapshot, and a snapshot is whole or absent (C9).
+func (r Result) checkRun(steps, sent []string, ss []send, replyTo []string, fail func(string, ...any)) {
+	if len(sent) > len(steps) || !slices.Equal(sent, steps[:min(len(sent), len(steps))]) {
+		fail("the run's operate lines are %v, not the run's steps %v, once each and in order", sent, steps)
+	}
+	if r.Status == StatusPartial {
+		fail("status partial is not a run outcome: a run is ok with a record for every step, or it reports no record")
+	}
+	if r.Status != StatusOK {
+		if len(r.Records) != 0 {
+			fail("status %s with %d records: a run that is not ok reports no record (the bytes are kept)", r.Status, len(r.Records))
+		}
+		return
+	}
+	if len(sent) != len(steps) {
+		fail("status ok, but the run sent %d of its %d steps", len(sent), len(steps))
+	}
+	if len(r.Records) != len(steps) {
+		fail("status ok, but the run has %d records for its %d steps", len(r.Records), len(steps))
+	}
+	for i, rec := range r.Records {
+		if rec.Kind != RecordConfigSection && rec.Kind != RecordConfigAbsent {
+			fail("records[%d]: %s is not a configuration record", i, rec.Kind)
+			continue
+		}
+		if i < len(steps) && r.replyHolding(ss, replyTo, rec.Span) != steps[i] {
+			fail("records[%d]: its span is not in the reply to step %d (%s)", i, i+1, steps[i])
+		}
+	}
 }
 
 // replyHolding returns the operation whose reply holds sp: the bytes from

@@ -40,7 +40,7 @@ import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-SCHEMA = "otsec.config/0.1"
+SCHEMA = "otsec.config/0.2"
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 INVOCATIONS = {  # invented
     1: "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
@@ -51,16 +51,16 @@ FID = "SEL-751-R501-V0-Z104101-D20260910"  # S22 Table A.1 p. A.2
 CID = "E754"
 RED = b"[REDACTED]"
 STX, ETX = b"\x02", b"\x03"
-RULE = "sel-751-sho/1"
+RULE = "sel-751-sho/2"
 
 # The rule's classes, in order (config.go RuleSEL751SHO).
 CLASSES = [
+    ("port.1", "SHO P 1", False, True), ("global", "SHO G", False, False),
     ("group.1", "SHO 1", False, False), ("group.2", "SHO 2", False, False),
     ("group.3", "SHO 3", False, False), ("group.4", "SHO 4", False, False),
     ("logic.1", "SHO L 1", False, False), ("logic.2", "SHO L 2", False, False),
     ("logic.3", "SHO L 3", False, False), ("logic.4", "SHO L 4", False, False),
-    ("global", "SHO G", False, False),
-    ("port.f", "SHO P F", False, True), ("port.1", "SHO P 1", False, True),
+    ("port.f", "SHO P F", False, True),
     ("port.2", "SHO P 2", True, True), ("port.3", "SHO P 3", True, True), ("port.4", "SHO P 4", True, True),
     ("report", "SHO R", False, False), ("front-panel", "SHO F", False, False),
     ("modbus", "SHO M", True, False), ("iec-103", "SHO I", True, False),
@@ -339,8 +339,8 @@ def main():
     write("valid/difference-1-3.json", dump(d13))
 
     later = copy.deepcopy(snaps[1])
-    later["schema"] = "otsec.config/0.2"
-    later["zz_new"] = "a field 0.1 does not know"
+    later["schema"] = "otsec.config/0.3"
+    later["zz_new"] = "a field 0.2 does not know"
     write("valid/later-minor-snapshot.json", dump(later))
 
     def bad(name, base, f):
@@ -351,13 +351,13 @@ def main():
     s1, d = snaps[1], d13
     bad("snapshot-missing-class", s1, lambda x: x["sections"].pop())
     bad("snapshot-classes-out-of-order", s1, lambda x: x["sections"].insert(0, x["sections"].pop(1)))
-    bad("snapshot-required-class-absent", s1, lambda x: (x["sections"][0].update(state="absent"),
-                                                         x["sections"][0].pop("settings")))
+    bad("snapshot-required-class-absent", s1, lambda x: (x["sections"][2].update(state="absent"),
+                                                         x["sections"][2].pop("settings")))
     bad("snapshot-absent-with-settings", s1, lambda x: x["sections"][11].update(settings=[{"name": "EPORT", "value": "Y"}]))
     bad("snapshot-present-without-settings", s1, lambda x: x["sections"][0].pop("settings"))
-    bad("snapshot-port-not-sensitive", s1, lambda x: x["sections"][10].update(sensitive=False))
-    bad("snapshot-unknown-rule", s1, lambda x: x.update(rule="sel-751-sho/2"))
-    bad("snapshot-setting-twice", s1, lambda x: x["sections"][4]["settings"].append(dict(x["sections"][4]["settings"][0])))
+    bad("snapshot-port-not-sensitive", s1, lambda x: x["sections"][0].update(sensitive=False))
+    bad("snapshot-unknown-rule", s1, lambda x: x.update(rule="sel-751-sho/3"))
+    bad("snapshot-setting-twice", s1, lambda x: x["sections"][6]["settings"].append(dict(x["sections"][6]["settings"][0])))
     bad("snapshot-value-two-spaces", s1, lambda x: x["sections"][0]["settings"][1].update(value="FEEDER  RELAY"))
     bad("snapshot-value-holds-assign", s1, lambda x: x["sections"][0]["settings"][1].update(value="A := B"))
     bad("snapshot-ref-not-transcript", s1, lambda x: x["transcript"].update(ref="sha256:" + "0" * 64))

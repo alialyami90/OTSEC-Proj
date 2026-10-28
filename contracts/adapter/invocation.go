@@ -15,9 +15,9 @@ import (
 
 // Contract is this package's identifier. Invocations are strict (unknown
 // fields rejected); results are not.
-const Contract = "otsec.adapter/0.5"
+const Contract = "otsec.adapter/0.6"
 
-var self = version.ID{Name: "adapter", Major: 0, Minor: 5}
+var self = version.ID{Name: "adapter", Major: 0, Minor: 6}
 
 // Invocation asks the collector to run one register operation against one
 // endpoint of one asset.
@@ -185,8 +185,26 @@ type OperationLookup interface {
 // Render refuses parameters that would produce any other line.
 type RegisterLookup struct{ M *register.Matcher }
 
-// Invocable implements OperationLookup.
+// Invocable implements OperationLookup. A run (C3 0.3) is invocable under its
+// own ID, with no parameters, at the highest access level of its steps; it
+// is rendered whole, so a step that does not render makes the run not
+// invocable (C2 0.6, D4-13).
 func (r RegisterLookup) Invocable(id string, params map[string]string) (string, error) {
+	if run, ok := r.M.Run(id); ok {
+		if len(params) != 0 {
+			return "", fmt.Errorf("adapter: run %s takes no parameters", id)
+		}
+		if _, err := r.M.RenderRun(id); err != nil {
+			return "", err
+		}
+		level := "0"
+		for _, step := range run.Steps {
+			if o, ok := r.M.Operation(step); ok && !register.LevelAtMost(o.AccessLevel, level) {
+				level = o.AccessLevel
+			}
+		}
+		return level, nil
+	}
 	o, ok := r.M.Operation(id)
 	if !ok {
 		return "", &NotInvocableError{OperationID: id}
@@ -309,6 +327,28 @@ func (inv Invocation) ValidateWith(reg OperationLookup) error {
 			Err: fmt.Errorf("operation %s needs access level 0, so the invocation names no credential", inv.OperationID)}
 	}
 	return nil
+}
+
+// ForRun returns the limits an invocation of a run carries (C2 0.6): the
+// run's total bytes and deadline, and the longest timeout of its steps as the
+// step timeout. The connect limits, retries and minimum interval are l's. The
+// adapter holds each step to its own register limits and to these, whichever
+// is tighter, so a looser invocation does not loosen a step (C3 0.3, D4-13).
+func (l Limits) ForRun(m *register.Matcher, runID string) (Limits, error) {
+	run, ok := m.Run(runID)
+	if !ok {
+		return Limits{}, fmt.Errorf("adapter: %q is not a run", runID)
+	}
+	step := int64(0)
+	for _, id := range run.Steps {
+		lim, ok := m.Limits(id)
+		if !ok {
+			return Limits{}, fmt.Errorf("adapter: run %s step %s has no limits", runID, id)
+		}
+		step = max(step, lim.TimeoutMS)
+	}
+	l.StepTimeoutMS, l.DeadlineMS, l.MaxResponseBytes = step, run.DeadlineMS, run.MaxTotalBytes
+	return l, nil
 }
 
 // NotInvocableError is what an OperationLookup returns for an ID that is

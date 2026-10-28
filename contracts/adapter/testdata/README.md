@@ -25,7 +25,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.6 result with a code 0.5 does not know: read as `failed.unknown`.
+- `results/valid/failed.unknown.json`: A 0.7 result with a code 0.6 does not know: read as `failed.unknown`.
 - `results/valid/failed.timeout-probe-unanswered.json`: No reply to the `QUI` probe before the step timeout (0.4, A6 on V-S12): `language_probe` unanswered, nothing more sent, nothing suspended.
 - `results/valid/failed.transport_closed-probe-unanswered.json`: Only the echo of the `QUI` probe, then the connection closed: as above.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
