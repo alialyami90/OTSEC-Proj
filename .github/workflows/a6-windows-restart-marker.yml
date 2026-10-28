@@ -1,0 +1,36 @@
+# B6 diagnostic for #284: TestUnknownSpentAcrossRestarts lost a marker on
+# the hosted Windows runner once (298dfda, seed 1, run 2) and passed at
+# f526e92, so one run of the Go job rarely shows the failure. This job runs
+# that test alone, repeatedly, so a failure is likely to print the
+# listener's counters (restart_test.go, rig.why). a6-* workflows are B6's
+# (handoffs/B6-handoff.md). No secrets, no services, no accounts; hosted
+# runner only. Results are simulated and printed to the job log.
+name: a6-windows-restart-marker
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "go test -count"
+        default: "12"
+  pull_request:
+    paths:
+      - .github/workflows/a6-windows-restart-marker.yml
+      - tests/integration/syslogreceive/**
+      - modules/telemetry/receive/**
+permissions:
+  contents: read
+jobs:
+  restart-marker:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run the restart test repeatedly
+        shell: pwsh
+        env:
+          COUNT: ${{ github.event.inputs.count || '12' }}
+        run: go test -timeout 40m -v -count $env:COUNT -run '^TestUnknownSpentAcrossRestarts$' ./tests/integration/syslogreceive/
