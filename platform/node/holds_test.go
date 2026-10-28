@@ -139,7 +139,7 @@ func newHoldsNode(t *testing.T) *holdsNode {
 	c, dir := configNode(t, nil)
 	h := &holdsNode{t: t, c: c, dir: dir,
 		diff:     contractFile(t, "config/testdata/valid/difference-1-2.json"),
-		baseline: contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")}
+		baseline: canonicalBaseline(t)}
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
 	_, log, _ := r.view(r.find(ConfigDB))
