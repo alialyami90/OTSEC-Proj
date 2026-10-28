@@ -116,7 +116,9 @@ func (s *Scheduler) applyAdminPart(ctx context.Context, f *adminFile) adminPart 
 		if b == nil || !sha256Hex.MatchString(b.ManifestSHA256) {
 			return s.notApplied(f, "the accepted payload has no valid node_quarantine_clear body")
 		}
-		c := quarantineClear{source: source, hash: f.sum, assetID: b.AssetID, manifest: b.ManifestSHA256, principal: e.Verified.Principal}
+		// The record links to the collector's accepted request by the hash of
+		// the payload it verified, not to a separate read of the file.
+		c := quarantineClear{source: source, hash: e.Verified.PayloadSHA256, assetID: b.AssetID, manifest: b.ManifestSHA256, principal: e.Verified.Principal}
 		if s.quarantineApplied(c.hash) {
 			return adminPart{done: true}
 		}

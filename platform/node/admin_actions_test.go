@@ -94,6 +94,19 @@ func (q *quarantineNode) signedClear(name string, n int, manifest string) (b []b
 	return b, hex.EncodeToString(h[:])
 }
 
+// verifiedHash is the payload hash the collector's accepted record for the
+// request of file hash sum names.
+func verifiedHash(t *testing.T, q *quarantineNode, sum string) string {
+	t.Helper()
+	for _, rec := range requestRecords(auditRecords(t, q.r), adminRequestID(sum)) {
+		if rec.Verified != nil {
+			return rec.Verified.PayloadSHA256
+		}
+	}
+	t.Fatal("no accepted record with verified")
+	return ""
+}
+
 func clearRecords(q *quarantineNode) []*audit.Record { return q.records(audit.ActionQuarantineCleared) }
 
 // A signed quarantine clear goes through the collector, and the node then
@@ -113,7 +126,7 @@ func TestSignedQuarantineClear(t *testing.T) {
 		t.Fatalf("relay records %+v", recs)
 	}
 	cl := clearRecords(q)
-	if len(cl) != 1 || cl[0].Outcome != audit.OutcomeSucceeded || cl[0].Quarantine.ClearSHA256 != sum || cl[0].Quarantine.RequestedBy != relayAdmin.ID ||
+	if len(cl) != 1 || cl[0].Outcome != audit.OutcomeSucceeded || cl[0].Quarantine.ClearSHA256 != recs[1].Verified.PayloadSHA256 || cl[0].Quarantine.RequestedBy != relayAdmin.ID ||
 		cl[0].Quarantine.ManifestSHA256 != manifest || cl[0].Quarantine.FirstSeq != 1 || cl[0].Quarantine.LastSeq != 4 {
 		t.Fatalf("cleared records %+v", cl)
 	}
@@ -157,7 +170,7 @@ func TestSignedQuarantineClearActsOnTheBytesSent(t *testing.T) {
 	}
 	q.s.relayAdmin(bg)
 	cl := clearRecords(q)
-	if len(cl) != 1 || cl[0].Quarantine.ManifestSHA256 != manifest || cl[0].Quarantine.ClearSHA256 != sum {
+	if len(cl) != 1 || cl[0].Quarantine.ManifestSHA256 != manifest || cl[0].Quarantine.ClearSHA256 != verifiedHash(t, q, sum) {
 		t.Fatalf("the node acted on the replaced file: %+v", cl)
 	}
 	// The replacement is a new request: relayed, accepted, and refused by
