@@ -332,3 +332,20 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
 - **Follow-up, in two PRs.**
   - B3 (`modules/security/nodekey`): loaders that return the certificate and the anchor set without judging the period. The strict loaders stay.
   - B5 (node): `ServerTLS` and `ClientTLS` decide the period for register keys exactly as they do for files. B3 reviews it.
+
+## D4-18: a configuration baseline acknowledgement ends the asset's open configuration alarms (C8 0.6, #305)
+
+- **Question (B3, from B6's probe on #305).** C8's `VerifyConfig` keys an open unapproved-change alarm by asset and baseline digest, and only a `config.baseline_restored` clears it. So after acknowledging B and then A again (A to B to A), an alarm raised against A before the acknowledgement of B is open again, and an approved detection against A is refused. C8's own text says that ending the alarm "takes a baseline acknowledgement (which moves the baseline) or a return to the baseline, recorded", and B5's hold fold follows the text.
+- **Decision: the text stands, and `VerifyConfig` changes (C8 0.6).**
+  - A succeeded configuration-kind `config.baseline_acknowledged` ends every open configuration alarm of its asset raised before it, whatever baseline they were raised against.
+  - Re-acknowledging A starts A again from that acknowledgement. Alarms from before it do not come back.
+  - Only an alarm raised after the latest acknowledgement blocks a later approval, until a restore or another acknowledgement.
+- **Why.**
+  - An acknowledgement is a signed decision by a person, verified against its acceptance. It is the act that accepts the device's configuration as the baseline. Letting an alarm from before it come back depending on which digest is acknowledged makes an alarm's state depend on history the person already decided on.
+  - The alarm records and the stored differences stay in the chain as evidence. Only their open state ends.
+  - Keeping alarms open until a restore would mean an alarm against a baseline the device never returns to stays open forever, which C8's text already rules out.
+- **Missing baseline (B6 condition 2 on #305).** If the newly acknowledged baseline cannot be found at reconcile, the node does not release the holds of the old one. It keeps what it held and raises an alarm, so nothing becomes unheld because a lookup failed. This is fail closed (P5).
+- **Owners.**
+  - B3 writes C8 0.6: the `VerifyConfig` change plus one sentence in `doc.go`.
+  - B6 tests it independently, with the A to B to A case and an alarm raised after the latest acknowledgement still blocking.
+  - B5 keeps #305's fold consistent with it.
