@@ -745,6 +745,14 @@ func (s *session) read(id string) adapter.Code {
 func (s *session) checkReply(id string) adapter.Code {
 	off, rx := s.lastReply()
 	msg, err := frame(rx, off)
+	if err == nil && s.checks(id) && string(bytes.Trim(msg.text, " \r\n")) == cfgNotAvailable {
+		// "Invalid Command" is an English reply, so it is a device error on
+		// every form that serves a check, the language gate's included, and
+		// never a refusal for language (B1 on #331).
+		line, _ := s.m.Render(id, nil)
+		s.detail = fmt.Sprintf("%s answered that it is not available, which a SEL-751 may not", line)
+		return adapter.FailedDeviceError
+	}
 	var set map[string]setting
 	if err == nil {
 		set, err = parseSettings(msg)

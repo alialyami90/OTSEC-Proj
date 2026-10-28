@@ -174,6 +174,25 @@ def results():
     return out
 
 
+def invalid():
+    """Results that C2 refuses. A run is ok with a parsed record per step, or
+    it reports no record, so these break that rule on purpose."""
+    out = {}
+    # A failed run that still carries all 24 records.
+    r = read()
+    r["status"] = "failed"
+    r["error"] = {"code": "failed.device_error"}
+    out["failed-with-24-records"] = r
+    # A run that ends partial.parse_errors, with the unparsed record that code needs.
+    r = read()
+    r["status"] = "partial"
+    r["error"] = {"code": "partial.parse_errors"}
+    bad = r["records"][5]
+    r["records"][5] = {"kind": bad["kind"], "span": bad["span"], "parse_ok": False}
+    out["partial.parse_errors-run"] = r
+    return out
+
+
 def invocation():
     with open(os.path.join(HERE, "invocations/valid/sel-ser-read.json")) as f:
         inv = json.load(f)
@@ -189,7 +208,7 @@ def invocation():
 
 def main():
     base = os.path.join(HERE, "config")
-    for d in ("results/valid", "invocations/valid"):
+    for d in ("results/valid", "results/invalid", "invocations/valid"):
         p = os.path.join(base, d)
         os.makedirs(p, exist_ok=True)
         for f in os.listdir(p):
@@ -197,6 +216,8 @@ def main():
                 os.remove(os.path.join(p, f))
     for name, r in results().items():
         g.write(os.path.join(base, "results/valid", name + ".json"), r)
+    for name, r in invalid().items():
+        g.write(os.path.join(base, "results/invalid", name + ".json"), r)
     g.write(os.path.join(base, "invocations/valid", "sel-config-read.json"), invocation())
 
 

@@ -137,9 +137,12 @@
 //     the run's order (RecordConfigSection, RecordConfigAbsent). The run is
 //     one session with one ACC: it fails as a whole on the first step that
 //     fails, the adapter sends QUI (unless the level dropped) and keeps the
-//     bytes, and a failed run reports no record (CheckLines holds the lines
-//     to the run's steps, once each and in order). Limits.ForRun gives an
-//     invocation the run's limits; each step is also held to its own
+//     bytes, and a failed run reports no record. A run's result has exactly
+//     two shapes (CheckLines): ok, with every step sent once and in order and
+//     one parsed record per step in step order; or not ok, with a prefix of
+//     the steps and no record. So partial is not a run outcome, and a record
+//     that did not parse is not a valid configuration record. Limits.ForRun
+//     gives an invocation the run's limits; each step is also held to its own
 //     register limits. A reply the rule cannot read ends the run with the new
 //     failed.config_unparsable (QUI, bytes kept, no record, no snapshot); SER
 //     keeps partial.parse_errors. Earlier results read unchanged.

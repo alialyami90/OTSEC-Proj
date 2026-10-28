@@ -17,8 +17,8 @@ import (
 // The result must be ok, of the invocation, and hold one configuration
 // record for each step of the run, in the run's order (adapter.CheckLines
 // holds the result to that). The steps' lines must be exactly the rule's
-// classes. Sections follow the rule's order, which is not the run's: the run
-// sends the gate reads first (C3 0.3). A record's fields are the settings the
+// classes. Sections follow the rule's order, which under rule sel-751-sho/2
+// is the run's (the gate reads come first in both). A record's fields are the settings the
 // adapter's own parser read, copied as they are; CheckAgainst makes them
 // agree with the contract's tokenizer, so FromResult does not tokenize.
 //

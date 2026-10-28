@@ -145,25 +145,34 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 	return nil
 }
 
-// checkRun checks a run's operate lines and records (C2 0.6, D4-13). The
-// lines are the run's steps, once each and in order: all of them when the
-// result is ok, and a prefix of them for any other outcome, because a run
-// that fails stops where it failed and sends nothing more. The records are
-// one configuration record per step, in the same order, each in the reply to
-// its own step's line, and nothing but configuration records: so a run's
-// result holds a record for every command it sent, or it is not ok.
+// checkRun checks a run's operate lines and records (C2 0.6, D4-13). A run's
+// result has exactly two shapes, because a run is all or nothing:
+//
+//   - ok: every step sent once and in order, and one configuration record per
+//     step, in the same order, each in the reply to its own step's line;
+//   - not ok (failed or refused): a prefix of the steps sent, because a run
+//     that fails stops where it failed, and no record at all.
+//
+// So partial is not a run outcome: partial.parse_errors would hand the
+// consumer some of a snapshot, and a snapshot is whole or absent (C9).
 func (r Result) checkRun(steps, sent []string, ss []send, replyTo []string, fail func(string, ...any)) {
 	if len(sent) > len(steps) || !slices.Equal(sent, steps[:min(len(sent), len(steps))]) {
 		fail("the run's operate lines are %v, not the run's steps %v, once each and in order", sent, steps)
 	}
-	if r.Status == StatusOK && len(sent) != len(steps) {
+	if r.Status == StatusPartial {
+		fail("status partial is not a run outcome: a run is ok with a record for every step, or it reports no record")
+	}
+	if r.Status != StatusOK {
+		if len(r.Records) != 0 {
+			fail("status %s with %d records: a run that is not ok reports no record (the bytes are kept)", r.Status, len(r.Records))
+		}
+		return
+	}
+	if len(sent) != len(steps) {
 		fail("status ok, but the run sent %d of its %d steps", len(sent), len(steps))
 	}
-	if r.Status == StatusOK && len(r.Records) != len(steps) {
+	if len(r.Records) != len(steps) {
 		fail("status ok, but the run has %d records for its %d steps", len(r.Records), len(steps))
-	}
-	if len(r.Records) > len(sent) {
-		fail("%d records for %d lines sent", len(r.Records), len(sent))
 	}
 	for i, rec := range r.Records {
 		if rec.Kind != RecordConfigSection && rec.Kind != RecordConfigAbsent {

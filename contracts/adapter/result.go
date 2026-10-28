@@ -529,12 +529,15 @@ func (c *check) configRecord(i int, rec Record) {
 	if rec.ContextSpan != nil {
 		c.fail("%s: a %s has no context span", p, rec.Kind)
 	}
+	// A run reports a record only when it is ok, and then every record is a
+	// parsed one: a reply the rule cannot read ends the run with
+	// failed.config_unparsable and no record.
 	switch {
-	case !rec.ParseOK && len(rec.Fields) > 0:
-		c.fail("%s: a record that did not parse carries no fields", p)
-	case rec.Kind == RecordConfigAbsent && (!rec.ParseOK || len(rec.Fields) > 0):
+	case !rec.ParseOK:
+		c.fail("%s: a %s is a parsed record; a reply that does not parse ends the run with %s and no record", p, rec.Kind, FailedConfigUnparsable)
+	case rec.Kind == RecordConfigAbsent && len(rec.Fields) > 0:
 		c.fail("%s: %s is a parsed record with no fields", p, rec.Kind)
-	case rec.Kind == RecordConfigSection && rec.ParseOK && len(rec.Fields) == 0:
+	case rec.Kind == RecordConfigSection && len(rec.Fields) == 0:
 		c.fail("%s: a parsed %s holds at least one setting (C9)", p, rec.Kind)
 	}
 	seen := map[string]bool{}

@@ -187,6 +187,27 @@ func TestConfigGateRefusals(t *testing.T) {
 	}
 }
 
+// "Invalid Command" is an English reply: to the language gate's own form, SHO
+// P 1, it is a device error with its detail, as for every other required
+// form, and never a refusal for language, which would suspend the asset
+// (B6 on #331, B1's ruling).
+func TestConfigGateFormNotAvailableIsADeviceError(t *testing.T) {
+	for _, line := range []string{"SHO P 1", "SHO G", "SHO 1"} {
+		steps := stepsUpTo(t, line, func(b []byte) []byte {
+			i, j := bytes.IndexByte(b, 2), bytes.LastIndexByte(b, 3)
+			return append(append(append([]byte(nil), b[:i+1]...), "Invalid Command\r\n"...), b[j:]...)
+		})
+		got, _, _ := play(t, loadConfig(t), steps, false, nil)
+		if got.Error == nil || got.Error.Code != adapter.FailedDeviceError || !got.Session.QuitSent || len(got.Records) != 0 {
+			t.Errorf("%s: result %s", line, jsonOf(t, got.Error))
+			continue
+		}
+		if got.Error.Code.Suspends() != "" || !strings.Contains(got.Error.Detail, line+" answered that it is not available") {
+			t.Errorf("%s: suspends %q, detail %q", line, got.Error.Code.Suspends(), got.Error.Detail)
+		}
+	}
+}
+
 // stepsUpTo returns the ok golden's script through the reply to line, then
 // the closing QUI exchange, with the reply to line changed by f.
 func stepsUpTo(t *testing.T, line string, f func(reply []byte) []byte) []step {

@@ -157,12 +157,60 @@ func TestConfigCheckLinesRefuses(t *testing.T) {
 		"a SER row in a run": {withRecords(func(r []Record) []Record { r[5].Kind = "sel.ser.row"; return r }), "is not a configuration record"},
 		"a record in the wrong reply": {withRecords(func(r []Record) []Record { r[2].Span = r[3].Span; return r }),
 			"is not in the reply to step 3"},
+		"a failed run with records": {func() Result {
+			r := ok
+			r.Status, r.Error = StatusFailed, &Error{Code: FailedDeviceError}
+			return r
+		}(), "reports no record"},
+		"a partial run": {func() Result {
+			r := ok
+			r.Status, r.Error, r.Records = StatusPartial, &Error{Code: PartialParseErrors}, nil
+			return r
+		}(), "not a run outcome"},
 		"register revision": {func() Result { r := ok; r.RegisterVersion = 4; return r }(), "package is revision 5"},
 	}
 	for n, c := range cases {
 		err := c.r.CheckLines(p, inv)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", n, err, c.want)
+		}
+	}
+}
+
+// The invalid examples break the all-or-nothing rule of a run: a result is ok
+// with a parsed record for every step, or it reports no record. Each is
+// refused at the stage and for the reason named here. DecodeResult validates,
+// so an example Validate refuses never reaches CheckLines; the partial run is
+// also pinned in TestConfigCheckLinesRefuses with a record that parses.
+func TestConfigInvalidExamples(t *testing.T) {
+	p, _ := rev5(t)
+	inv := configInvocation(t)
+	cases := map[string]struct{ decode, lines string }{
+		"failed-with-24-records":   {"", "reports no record"},
+		"partial.parse_errors-run": {"is a parsed record", ""},
+	}
+	fs, _ := filepath.Glob(filepath.Join("testdata", "config", "results", "invalid", "*.json"))
+	if len(fs) != len(cases) {
+		t.Fatalf("%d invalid examples, %d cases", len(fs), len(cases))
+	}
+	for n, c := range cases {
+		b, err := os.ReadFile(filepath.Join("testdata", "config", "results", "invalid", n+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := DecodeResult(b)
+		if c.decode != "" {
+			if err == nil || !strings.Contains(err.Error(), c.decode) {
+				t.Errorf("%s: DecodeResult: %v, want %q", n, err, c.decode)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: DecodeResult: %v, want none (the lines check refuses it)", n, err)
+			continue
+		}
+		if err := r.CheckLines(p, inv); err == nil || !strings.Contains(err.Error(), c.lines) {
+			t.Errorf("%s: CheckLines: %v, want %q", n, err, c.lines)
 		}
 	}
 }
@@ -194,7 +242,8 @@ func TestConfigRecordValidate(t *testing.T) {
 		"control byte":         {func(r Record) Record { r.Fields[0].Value = "1\x01"; return r }, "printable ASCII"},
 		"empty value":          {func(r Record) Record { r.Fields[0].Value = ""; return r }, "printable ASCII"},
 		"parsed, no settings":  {func(r Record) Record { r.Fields = nil; return r }, "holds at least one setting"},
-		"unparsed with fields": {func(r Record) Record { r.ParseOK = false; return r }, "carries no fields"},
+		"unparsed with fields": {func(r Record) Record { r.ParseOK = false; return r }, "is a parsed record"},
+		"unparsed, no fields":  {func(r Record) Record { r.ParseOK = false; r.Fields = nil; return r }, "is a parsed record"},
 		"absent with fields":   {func(r Record) Record { r.Kind = RecordConfigAbsent; return r }, "no fields"},
 		"context span":         {func(r Record) Record { c := sp; r.ContextSpan = &c; return r }, "no context span"},
 	}
@@ -237,7 +286,7 @@ func TestConfigExamplesHaveNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, dir := range []string{"results/valid", "invocations/valid"} {
+	for _, dir := range []string{"results/valid", "results/invalid", "invocations/valid"} {
 		fs, _ := filepath.Glob(filepath.Join("testdata", "config", dir, "*.json"))
 		for _, f := range fs {
 			if rel := dir + "/" + filepath.Base(f); !strings.Contains(string(readme), "`"+rel+"`") {
