@@ -357,3 +357,16 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   - B3 writes C8 0.6: the `VerifyConfig` change plus one sentence in `doc.go`.
   - B6 tests it independently, with the A to B to A case and an alarm raised after the latest acknowledgement still blocking.
   - B5 keeps #305's fold consistent with it, including the `acknowledged-difference` reason.
+
+## D4-19: a return to baseline keeps the alarm's evidence held too (C5 0.6, #305, #308)
+
+- **Question (B5 on #305).** D4-18 keeps the snapshot and difference of an alarm that an acknowledgement ends. It says nothing about an alarm that a `config.baseline_restored` ends, so #305 releases them on a return to baseline.
+- **Decision: they stay held.** A recorded return to baseline ends the alarm's open state, as before. The snapshot and difference it names are re-reasoned to `restored-difference` and are not released.
+- **Why.** R3.6 keeps the difference as evidence either way. A change that was made and then reverted with no approval is still an unexpected modification, and its bytes are the only evidence of what was on the device in between. A change and revert within one collection gap is also what someone covering their tracks would do.
+- **The code.**
+  - C5 0.6 (#308) gets a second code, `HoldRestoredDifference` = `restored-difference`, beside `acknowledged-difference`. Its `Ref` is the `config.change_detected` record, the same as the other two difference codes.
+  - The two codes stay separate, so a reviewer can read from the holds table how each alarm ended without walking the chain.
+  - D4-18's other rules apply unchanged: nothing ends the hold until the retention rule for configuration evidence, and a reconcile keeps a hold whose code it does not know.
+- **Ref for `acknowledged-difference`.** It is the `config.change_detected` record, as D4-18 already says. B5's #305 and #308 are right.
+- **What a flapping device does (B5 and B6 on #310).** Held evidence now grows by one snapshot and one difference for every alarm that ends. A device that keeps changing and reverting fills the configuration class. At its quota the class stops taking new reads, with the class warning raised first, and the node never releases a hold to make room. So configuration monitoring of that node stops and says so, and nothing already held is dropped. That is the intended failure (P5), but it stops monitoring, so the retention rule for configuration evidence is ruled before any device-observed asset is configured. It is tracked as an open risk until then.
+- **Owners.** B5 adds the code to #308 and the re-reasoning to #305's fold, with a fold case and a test at start. B6 adds the new code to #307's cross-version test. B3 reviews #308.
