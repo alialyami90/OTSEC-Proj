@@ -340,12 +340,14 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   - A succeeded configuration-kind `config.baseline_acknowledged` ends every open configuration alarm of its asset raised before it, whatever baseline they were raised against.
   - Re-acknowledging A starts A again from that acknowledgement. Alarms from before it do not come back.
   - Only an alarm raised after the latest acknowledgement blocks a later approval, until a restore or another acknowledgement.
+  - Detection compares each read against the latest acknowledged baseline. So re-acknowledging A while the device is still at S does not go quiet: the next read of S differs from A and raises a new alarm, unless an approval covers it.
 - **Why.**
   - An acknowledgement is a signed decision by a person, verified against its acceptance. It is the act that accepts the device's configuration as the baseline. Letting an alarm from before it come back depending on which digest is acknowledged makes an alarm's state depend on history the person already decided on.
-  - The alarm records and the stored differences stay in the chain as evidence. Only their open state ends.
+  - The alarm's C8 records stay in the chain. Only their open state ends.
   - Keeping alarms open until a restore would mean an alarm against a baseline the device never returns to stays open forever, which C8's text already rules out.
+- **Evidence bytes (B6 on #306).** The acknowledgement does not release the snapshot and difference an ended alarm names. They stay held, with the reason `acknowledged-difference` in place of `unapproved-difference`, so the bytes that showed an unexpected change are kept and not only its digest. R3.5 and R3.6 require this: "the difference is kept as evidence either way". Nothing ends that hold yet. Releasing it needs a retention rule for configuration evidence, which B1 rules with the retention rule #299 left open. Until then the node never releases it to make room, the same as every hold.
 - **Missing baseline (B6 condition 2 on #305).** If the newly acknowledged baseline cannot be found at reconcile, the node does not release the holds of the old one. It keeps what it held and raises an alarm, so nothing becomes unheld because a lookup failed. This is fail closed (P5).
 - **Owners.**
   - B3 writes C8 0.6: the `VerifyConfig` change plus one sentence in `doc.go`.
   - B6 tests it independently, with the A to B to A case and an alarm raised after the latest acknowledgement still blocking.
-  - B5 keeps #305's fold consistent with it.
+  - B5 keeps #305's fold consistent with it, including the `acknowledged-difference` reason.
