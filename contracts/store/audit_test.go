@@ -60,7 +60,7 @@ func readAll(t *testing.T, f *fake, stream StreamID) []Stored {
 // read back byte for byte as sealed.
 func TestAuditSealedInCommit(t *testing.T) {
 	f := auditFake()
-	l, err := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
+	l, err := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond, MaxCommitRecords: 3}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestAuditBeforeAct(t *testing.T) {
 	}
 
 	f := auditFake()
-	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond}, nil)
+	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: time.Millisecond, MaxCommitRecords: 3}, nil)
 	var got Receipt
 	if err := AuditBeforeAct(ctx, l, rec, func(r Receipt) error { got = r; return nil }); err != nil || got == nil || got.Key().Seq != 2 {
 		t.Fatalf("err %v receipt %v", err, got)

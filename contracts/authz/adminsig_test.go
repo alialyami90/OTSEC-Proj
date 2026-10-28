@@ -29,10 +29,17 @@ func seed(s string) []byte {
 func testAdminKeys() []AdminKey {
 	pub := testAdminPriv.Public().(ed25519.PublicKey)
 	other := testOtherPriv.Public().(ed25519.PublicKey)
+	// Alice's key lists every admin kind, so she may approve changes and
+	// acknowledge baselines (0.6); Bob's has no list and keeps the 0.5
+	// kinds.
 	return []AdminKey{
-		{KeyID: AdminKeyID(pub), PublicKey: pub, Principal: "alice@site-a", Status: KeyActive},
+		{KeyID: AdminKeyID(pub), PublicKey: pub, Principal: "alice@site-a", Status: KeyActive, Kinds: allAdminKinds()},
 		{KeyID: AdminKeyID(other), PublicKey: other, Principal: "bob@site-a", Status: KeyActive},
 	}
+}
+
+func allAdminKinds() []RequestKind {
+	return append(append([]RequestKind{}, DefaultAdminKinds...), KindNodeChangeApproval, KindNodeBaselineAck)
 }
 
 // installBody is the 0.1 golden's body, the one an admin signs from 0.4.
@@ -68,9 +75,19 @@ func adminPayload(t *testing.T, kind RequestKind) AdminRequest {
 		p.NodeQuarantineClear = &NodeQuarantineClearBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", ManifestSHA256: testManifestSHA256}
 	case KindNodeSeqResetAck:
 		p.NodeSeqResetAck = &NodeSeqResetAckBody{}
+	case KindNodeChangeApproval:
+		p.NodeChangeApproval = &NodeChangeApprovalBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", BaselineDigest: testBaselineDigest,
+			WindowStart: "2026-10-26T16:00:00Z", WindowEnd: "2026-10-26T20:00:00Z", Reason: "Replace CT ratio after relay test (work order 4711)"}
+	case KindNodeBaselineAck:
+		p.NodeBaselineAck = &NodeBaselineAckBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", Kind: BaselineConfiguration,
+			BaselineDigest: testBaselineDigest}
 	}
 	return p
 }
+
+// testBaselineDigest is "sha256:" and the SHA-256 of "otsec test
+// configuration baseline"; no baseline has it.
+const testBaselineDigest = "sha256:ee1d5cd04fcee7fd33c68453b7fb6a9ec1f7124bf9e88b03f1a4bb6640310e89"
 
 // testManifestSHA256 is the SHA-256 of "otsec test quarantine manifest";
 // no manifest has it.
@@ -133,6 +150,15 @@ func TestAdminRequestRefusals(t *testing.T) {
 	signed := func(edit func(*AdminRequest)) func(t *testing.T) *CollectorRequest {
 		return func(t *testing.T) *CollectorRequest {
 			p := adminPayload(t, KindCredentialInstall)
+			if edit != nil {
+				edit(&p)
+			}
+			return signedRequest(t, testAdminPriv, p)
+		}
+	}
+	signedKind := func(kind RequestKind, edit func(*AdminRequest)) func(t *testing.T) *CollectorRequest {
+		return func(t *testing.T) *CollectorRequest {
+			p := adminPayload(t, kind)
 			if edit != nil {
 				edit(&p)
 			}
@@ -261,6 +287,24 @@ func TestAdminRequestRefusals(t *testing.T) {
 		}},
 		{name: "another node", check: AdminCheckBinding, req: signed(nil), bind: &AdminBinding{NodeID: "site-b-node-1", InstallKeyID: testAdminBind.InstallKeyID}},
 		{name: "another install key", check: AdminCheckBinding, req: signed(nil), bind: &AdminBinding{NodeID: testAdminBind.NodeID, InstallKeyID: "site-a-node-1.collector-install.2"}},
+		// Authority (0.6, D4-2): a key pinned without a list keeps the 0.5
+		// kinds, so it may not approve a change.
+		{name: "key without a list approves a change", check: AdminCheckAuthority, req: signedKind(KindNodeChangeApproval, nil),
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = nil; return k }},
+		{name: "key without a list acknowledges a baseline", check: AdminCheckAuthority, req: signedKind(KindNodeBaselineAck, nil),
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = nil; return k }},
+		{name: "list leaves out the kind", check: AdminCheckAuthority, req: signed(nil),
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = []RequestKind{KindNodeChangeApproval}; return k }},
+		{name: "empty list", check: AdminCheckAuthority, req: signed(nil),
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = []RequestKind{}; return k }},
+		// Authority runs before the window: an expired request from a key
+		// that may not sign the kind names authority.
+		{name: "may not sign, and expired", check: AdminCheckAuthority, req: signed(nil), now: time.Date(2026, 10, 26, 15, 8, 0, 0, time.UTC),
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = []RequestKind{}; return k }},
+		// ...and after binding: a mis-bound request names binding.
+		{name: "may not sign, and for another node", check: AdminCheckBinding, req: signed(nil),
+			bind: &AdminBinding{NodeID: "site-b-node-1", InstallKeyID: testAdminBind.InstallKeyID},
+			keys: func(k []AdminKey) []AdminKey { k[0].Kinds = []RequestKind{}; return k }},
 		{name: "issued in the future", check: AdminCheckWindow, req: signed(func(p *AdminRequest) {
 			p.IssuedAt, p.ExpiresAt = "2026-10-26T15:02:01Z", "2026-10-26T15:10:00Z"
 		})},
@@ -275,6 +319,13 @@ func TestAdminRequestRefusals(t *testing.T) {
 		// more than 15 minutes ahead of the collector's clock.
 		{name: "expires too far ahead of the collector's clock", check: AdminCheckWindow, req: signed(func(p *AdminRequest) {
 			p.IssuedAt, p.ExpiresAt = "2026-10-26T15:02:00Z", "2026-10-26T15:16:00Z"
+		})},
+		// A change approval's own window, at the collector's clock (0.6).
+		{name: "approval window has ended", check: AdminCheckWindow, req: signedKind(KindNodeChangeApproval, func(p *AdminRequest) {
+			p.NodeChangeApproval.WindowStart, p.NodeChangeApproval.WindowEnd = "2026-10-26T11:00:00Z", "2026-10-26T15:00:00Z"
+		})},
+		{name: "approval window starts more than seven days ahead", check: AdminCheckWindow, req: signedKind(KindNodeChangeApproval, func(p *AdminRequest) {
+			p.NodeChangeApproval.WindowStart, p.NodeChangeApproval.WindowEnd = "2026-11-02T15:00:01Z", "2026-11-02T16:00:00Z"
 		})},
 	}
 	seenChecks := map[AdminCheck]bool{}
