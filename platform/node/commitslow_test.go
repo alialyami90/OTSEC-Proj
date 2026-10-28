@@ -13,6 +13,10 @@ import (
 func TestSlowCommitReachesStatusAndAlarms(t *testing.T) {
 	slow, repeat := SlowCommit, CommitAlarmRepeat
 	t.Cleanup(func() { SlowCommit, CommitAlarmRepeat = slow, repeat })
+	// No real commit is slow in the first step: on a loaded hosted runner an
+	// ordinary commit took 5.3 s (run 40727005166, Windows), over the default
+	// threshold, so the test sets its own instead of assuming the disk's.
+	SlowCommit = time.Hour
 	c, dir := schedConfig(t, nil)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
