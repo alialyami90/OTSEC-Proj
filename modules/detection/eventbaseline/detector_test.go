@@ -1,6 +1,7 @@
 package eventbaseline_test
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -331,5 +332,61 @@ func TestDetectorBeforeActivationAndOrder(t *testing.T) {
 	other.Source.Asset.ID = "6a6a6a6a-0001-4a6a-8a6a-000000000001"
 	if _, err := d.Observe(eventbaseline.Obs{Event: other}); !errors.Is(err, eventbaseline.ErrAsset) {
 		t.Errorf("other asset: %v", err)
+	}
+}
+
+// TestDetectorAlarmsDoNotDependOnTicks: an alarm is a function of the
+// baseline, the activation time and the events, not of when Tick was called.
+// The same events fed with no Tick, with a Tick before every event and with
+// Ticks between, give identical alarms in every field (B5's replay keys
+// alarms by what the doc of the package lists).
+func TestDetectorAlarmsDoNotDependOnTicks(t *testing.T) {
+	type step struct {
+		elem string
+		s    int
+	}
+	steps := []step{{"C", 2300}, {"C", 2400}, {"B", 2500}, {"C", 9000}, {"A", 9100}}
+	// The events are made once: ser numbers them, and the runs must see
+	// the same IDs.
+	evs := make([]*event.Event, len(steps))
+	for i, st := range steps {
+		evs[i] = ser(st.elem, "Asserted", at(st.s), "")
+	}
+	run := func(ticks []int) (out []byte) {
+		d := activeB(t, 2100)
+		ti := 0
+		var all []*baseline.Alarm
+		for i, st := range steps {
+			for ti < len(ticks) && ticks[ti] < st.s {
+				all = append(all, tick(t, d, ticks[ti])...)
+				ti++
+			}
+			all = append(all, feed(t, d, evs[i])...)
+		}
+		for _, a := range all {
+			if err := a.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			b, err := json.Marshal(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, b...)
+			out = append(out, '\n')
+		}
+		return out
+	}
+	none := run(nil)
+	if len(none) == 0 {
+		t.Fatal("no alarms to compare")
+	}
+	for name, ticks := range map[string][]int{
+		"before every event":  {2299, 2399, 2499, 8999, 9099},
+		"after each deadline": {2151, 2650, 2651, 2800, 9050},
+		"often":               {2200, 2250, 2300, 2350, 2450, 2551, 2700, 3000, 4000, 6000, 8000, 9000},
+	} {
+		if got := run(ticks); string(got) != string(none) {
+			t.Errorf("ticks %s change the alarms:\nwith none:\n%s\nwith ticks:\n%s", name, none, got)
+		}
 	}
 }
