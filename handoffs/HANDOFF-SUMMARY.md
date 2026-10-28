@@ -78,7 +78,7 @@ The role handoffs were written during the pause. Where one says to wait for the 
 - **C3:** read #341's and #346's reviews and checks, fix what is real, ask C1 to merge #341 first, #346 second ([C3-handoff.md](C3-handoff.md)).
 - **C4:** land #344 ([C4-handoff.md](C4-handoff.md)).
 - **C5:** land #342, #343 and #347 ([C5-handoff.md](C5-handoff.md)).
-- **C6:** review #346 and answer C3's question. Re-review #347 when C5 pushes its fix, because the FAIL is posted. Then land #336. The #341 PASS is posted ([C6-handoff.md](C6-handoff.md)).
+- **C6:** review #346 (C3's question is answered by D4-26's window amendment), #345, #353 and #352, and classify `TestUnknownSpentAcrossRestarts/seed_1` (D4-31). Then land #336. The #341 and #347 PASSes are posted ([C6-handoff.md](C6-handoff.md)). *Updated by C1 after cutover, D4-31.*
 
 **The single highest team priority:** land the step 1 contracts (#345, #342, #341 with #334, #346). Every other piece of the first gate waits on them.
 

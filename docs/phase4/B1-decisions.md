@@ -522,3 +522,28 @@ Date: 2026-10-28. This is a ruling. Approval of C7 0.7 is pending on #341.
 - **Where a handoff file rides.** Where an agent's only branch is the head of an open code PR, B1 carries that agent's handoff file unchanged in B1's checkpoint PR, so that it does not wait on the code PR.
 - **Numbering.** Phase 4's decisions continue in this file and numbering under the C team (D4-29 onwards), as the checkpoint instruction says.
 - **The pause is lifted.** At 17:11Z the owner said "Resume". The B agents resume from their handoffs' next actions, and feature and contract PRs merge again under D2-13. The checkpoint is still finished first. At 17:13Z the owner chose to open the C threads now. From then on the B agents start no new feature work. They push what they have, finish the reviews already in progress, and answer the C agents' ack questions. The C team takes over when every ack is confirmed.
+
+## D4-29: the `correlation_id` of `config.baseline_recorded` (C8 0.8, #346)
+
+Date: 2026-10-28. C1, on C3's proposal in #361 (comment 6475983773), which matches B5's proposal and B4's leaning on #346.
+
+- **The recording.** The `correlation_id` of a `config.baseline_recorded` record is the 64 hexadecimal digits of its `baseline_digest`, without the `sha256:` prefix. A C10 digest is 71 characters, and C8's `idPattern` allows at most 64 (`contracts/audit/audit.go:38`). The value is deterministic, and it stays the same across a restart and across the repair at start.
+- **The acknowledgement.** A `config.baseline_acknowledged` record keeps the signed C7 request ID as its `correlation_id`, as today (`contracts/audit/audit.go:228`).
+- **The join.** A recording and its acknowledgement join on `baseline_digest`, which both already carry.
+- **Superseded:** D4-26 item 4's "the same on a recording and on its acknowledgement". The join that clause wanted already exists through `baseline_digest`. Making the acknowledgement's ID equal would change how every acknowledgement joins to its request, or would need a second ID field in C8.
+
+## D4-30: the learner and the detector checkpoint at every configured ceiling (D4-26, #344, #343)
+
+Date: 2026-10-28. C1, on C4's ack question 1 (#357, comment 6476181758).
+
+- **The finding (C4, desk measurement).** C5 stores a checkpoint as one configuration record, capped at `ConfigRecordBytes` (1.5 MiB). The learner at the 4096-type ceiling with 128-byte names measures about 1.9 MB, so it could not be checkpointed. The detector with every cap full measures about 1.3 MB, close to the cap.
+- **The rule.** At every ceiling the configuration allows, the learner and the detector must checkpoint. A test that builds the maximal case and measures it against the cap the node uses proves it, as D4-25 did for C9.
+- **The means** are C4's and C5's to choose on #344 and #343, with measurements. Either a C10 ceiling (for example the name length or the type count) is lowered until the worst case fits `ConfigRecordBytes` with headroom, or C5 splits a checkpoint over several records. C1 approves the choice.
+- **Until then** an oversize snapshot is refused with `ErrSnapshotTooLarge` and raises an alarm. It never fails silently. A byte-bound parameter on `Snapshot` may go into #344, with `MaxSnapshotBytes` kept as the hard ceiling.
+
+## D4-31: the C team takes over (owner and C1, 2026-10-28)
+
+- **Branches.** At 17:37Z the owner chose, on a decision card in the C1 thread, to let C3 push to B3's existing branches for #341, #334 and #346, so that their review history stays in place. Force-push is still denied, so a branch is updated by merging `origin/main` into it.
+- **Reviews.** B6 re-reviewed #347 at `714203e` (PASS on the code, comment 6475908745, recorded in `C6-handoff.md` by #359). Every other role 6 review in flight, #346 included, is C6's.
+- **HR-11.** HR-11's row (#352) does not close until C6 classifies `TestUnknownSpentAcrossRestarts/seed_1`, which failed on hosted Windows twice with a UDP marker lost without a count, and passed on each re-run. C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
+- **Cutover.** All six acks are on `main`: C1 #355, C2 #360, C3 #361, C4 #357, C5 #358 and C6 #356. Each question is answered on its PR. The C team holds the six roles from here, and the B threads can be resolved.
