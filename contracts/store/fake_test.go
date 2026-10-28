@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 
 	"otsec.local/otsec/contracts/audit"
 	"sync"
@@ -214,12 +215,19 @@ func (f *fake) CheckSettings(context.Context) error { return f.call("CheckSettin
 func (f *fake) QuickCheck(context.Context) error    { return f.call("QuickCheck") }
 func (f *fake) Close() error                        { f.opened = false; return f.call("Close") }
 
-func (f *fake) Usage(context.Context) (int64, int64, error) {
-	var n int64
-	for _, ev := range f.events {
-		n += int64(len(ev))
+func (f *fake) ClassUsage(context.Context) ([]ClassUse, error) {
+	used := map[StreamClass]int64{}
+	for _, evs := range f.events {
+		for _, ev := range evs {
+			used[ev.Class] += f.eventSize
+		}
 	}
-	return n * f.eventSize, f.limit, f.call("Usage")
+	var out []ClassUse
+	for class, n := range used {
+		out = append(out, ClassUse{Class: class, Used: n, Limit: f.limit, WarnAt: int64(0.8 * float64(f.limit)), Record: 1})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Class < out[j].Class })
+	return out, f.call("Usage")
 }
 
 func (f *fake) CompactStep(context.Context, int) (bool, error) {

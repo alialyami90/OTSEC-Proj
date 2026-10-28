@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -295,8 +296,8 @@ func TestStartupMeasuresQuotaInClassBytes(t *testing.T) {
 	if (pages-free)*size < 1<<20 {
 		t.Fatalf("setup: pages %d bytes against a quota of %d, class bytes %d: the pages should run over the quota", (pages-free)*size, 1<<20, held)
 	}
-	if used, limit, err := db.Usage(ctx); err != nil || used != held || limit != 1<<20 {
-		t.Fatalf("Usage %d of %d, %v; class bytes %d", used, limit, err, held)
+	if uses, err := db.ClassUsage(ctx); err != nil || len(uses) != 1 || uses[0].Used != held || uses[0].Limit != 1<<20 {
+		t.Fatalf("ClassUsage %+v, %v; class bytes %d", uses, err, held)
 	}
 	db.Close()
 	r.Unlock()
@@ -304,5 +305,113 @@ func TestStartupMeasuresQuotaInClassBytes(t *testing.T) {
 	_, r = testStore(t, opt, p, c5.ModeCollecting)
 	if slices.Contains(codes(r), c5.AlarmQuotaReached) {
 		t.Fatalf("class at %d of %d bytes raised %v", held, 1<<20, r.Alarms)
+	}
+}
+
+// B6 on #320: startup measured the database's summed class bytes against its
+// summed quotas, so a class with no room left beside a light class raised
+// nothing, and a full class restarted silently until its next refused write
+// (P5: telemetry failures stay observable). Each class is measured against
+// its own quota and the alarm names the class.
+func TestStartupAlarmsForAFullClassBesideALightOne(t *testing.T) {
+	d := c5.Database{
+		ID:      "evidence",
+		Writer:  "node",
+		Streams: []c5.StreamSpec{{ID: "relay1/ser", Class: c5.ClassAdapterEvidence}, {ID: "platform/health", Class: c5.ClassPlatform}},
+		Classes: []c5.StreamClass{c5.ClassAdapterEvidence, c5.ClassPlatform},
+		Quotas: []c5.Quota{
+			{Class: c5.ClassAdapterEvidence, Bytes: 256 << 10, WarnFraction: 0.8, MaxRecordBytes: c5.MinRecordBytes},
+			{Class: c5.ClassPlatform, Bytes: 8 << 20, WarnFraction: 0.8},
+		},
+	}
+	dir := storeDir(t)
+	opt := Options{Dir: dir, Node: testNode, Database: d}
+	p := policy(d)
+	db, r := testStore(t, opt, p, c5.ModeCollecting)
+	l := testLog(t, db)
+	ctx := context.Background()
+	for n := 0; ; n++ {
+		cp := capture(fmt.Sprintf("%d %s", n, strings.Repeat("x", 40<<10)))
+		rc := rec("relay1/ser", c5.ClassAdapterEvidence, n)
+		rc.Capture = &cp
+		if _, err := l.Append(ctx, rc); err != nil {
+			if !isCode(err, c5.CodeQuotaReached) {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	held, _ := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	if held+c5.MinRecordBytes <= 256<<10 {
+		t.Fatalf("setup: %d of %d bytes held leaves room for a record", held, 256<<10)
+	}
+	db.Close()
+	r.Unlock()
+
+	_, r = testStore(t, opt, p, c5.ModeCollecting)
+	var reached []c5.StreamClass
+	for _, a := range r.Alarms {
+		if a.Code == c5.AlarmQuotaReached {
+			reached = append(reached, a.Class)
+		}
+	}
+	if !slices.Equal(reached, []c5.StreamClass{c5.ClassAdapterEvidence}) {
+		t.Fatalf("%d of %d bytes held: store-quota-reached for %v, alarms %v", held, 256<<10, reached, r.Alarms)
+	}
+}
+
+// Pruning looks at each class on its own: a class above the target is
+// pruned, a confirmed stream of a class below it is left alone.
+func TestStartupPrunesOnlyTheClassAboveTheTarget(t *testing.T) {
+	d := c5.Database{
+		ID:      "evidence",
+		Writer:  "node",
+		Streams: []c5.StreamSpec{{ID: "relay1/ser", Class: c5.ClassAdapterEvidence}, {ID: "platform/health", Class: c5.ClassPlatform}},
+		Classes: []c5.StreamClass{c5.ClassAdapterEvidence, c5.ClassPlatform},
+		Quotas: []c5.Quota{
+			{Class: c5.ClassAdapterEvidence, Bytes: 256 << 10, WarnFraction: 0.8, MaxRecordBytes: c5.MinRecordBytes},
+			{Class: c5.ClassPlatform, Bytes: 8 << 20, WarnFraction: 0.8},
+		},
+	}
+	dir := storeDir(t)
+	opt := Options{Dir: dir, Node: testNode, Database: d}
+	p := policy(d,
+		c5.Consumer{ID: "central-ser", Stream: "relay1/ser", Delivery: c5.Required},
+		c5.Consumer{ID: "central-health", Stream: "platform/health", Delivery: c5.Required})
+	db, r := testStore(t, opt, p, c5.ModeCollecting)
+	l := testLog(t, db)
+	ctx := context.Background()
+	for n := 0; ; n++ {
+		cp := capture(fmt.Sprintf("%d %s", n, strings.Repeat("x", 40<<10)))
+		rc := rec("relay1/ser", c5.ClassAdapterEvidence, n)
+		rc.Capture = &cp
+		if _, err := l.Append(ctx, rc); err != nil {
+			break
+		}
+	}
+	for n := 0; n < 20; n++ {
+		if _, err := l.Append(ctx, rec("platform/health", c5.ClassPlatform, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, s := range []c5.StreamID{"relay1/ser", "platform/health"} {
+		last, _ := db.LastCommitted(ctx, s)
+		if err := db.SaveCursor(ctx, c5.Cursor{Consumer: map[c5.StreamID]c5.ConsumerID{"relay1/ser": "central-ser", "platform/health": "central-health"}[s], Stream: s, Through: last}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serBefore, _ := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	healthBefore, _ := db.ClassBytes(ctx, c5.ClassPlatform)
+	db.Close()
+	r.Unlock()
+
+	db, _ = testStore(t, opt, p, c5.ModeCollecting)
+	serAfter, _ := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	healthAfter, _ := db.ClassBytes(ctx, c5.ClassPlatform)
+	if serAfter >= serBefore || float64(serAfter) > 0.8*(256<<10) {
+		t.Errorf("evidence class %d bytes before startup, %d after: not pruned to the target", serBefore, serAfter)
+	}
+	if healthAfter != healthBefore {
+		t.Errorf("platform class %d bytes before startup, %d after: pruned though far below its target", healthBefore, healthAfter)
 	}
 }
