@@ -145,6 +145,11 @@ type relayEntry struct {
 	// RepeatOf is the first decision's collector_seq when the acceptance
 	// was the repeat answer.
 	RepeatOf uint64 `json:"repeat_of,omitempty"`
+	// Tainted is set when the record was folded while the collector was held
+	// as restored: its collector_seq is at or below the high mark of its
+	// epoch, so the decision is not one the node acts on, now or after a
+	// later reinstall clears the hold (A6 on #339).
+	Tainted bool `json:"tainted,omitempty"`
 }
 
 // AdminRequestStatus is one admin-request file as node status shows it.
@@ -152,13 +157,13 @@ type AdminRequestStatus struct {
 	File      string `json:"file"`
 	RequestID string `json:"request_id,omitempty"`
 	Kind      string `json:"kind,omitempty"`
-	// State is accepted, refused, expired (the collector's window check
-	// refused it), waiting (not yet decided) or unread.
+	// State is accepted, refused, waiting (not yet decided) or unread.
 	State        string `json:"state"`
 	Detail       string `json:"detail,omitempty"`
 	CollectorSeq uint64 `json:"collector_seq,omitempty"`
-	// NodePart is the node's part of an accepted node kind: "done", or
-	// "pending" with Detail saying why. Empty for the credential kinds,
+	// NodePart is the node's part of an accepted node kind: "done",
+	// "nothing" (nothing to do), "refused" (the node will never act on this
+	// acceptance; sign again) or "pending", with Detail saying why. Empty for the credential kinds,
 	// whose acceptance is the whole operation.
 	NodePart string `json:"node_part,omitempty"`
 }
@@ -177,13 +182,15 @@ type adminFile struct {
 func adminRequestID(sum string) string { return adminRequestPrefix + sum[:16] }
 
 // applyRelay applies one audit record to the decided set m, request ID to
-// decision. It returns true when the record decides a relayed request.
-func applyRelay(m map[string]relayEntry, rec *audit.Record) bool {
+// decision. restored is whether the collector state, with rec applied, is
+// held as restored. It returns true when the record decides a relayed
+// request.
+func applyRelay(m map[string]relayEntry, rec *audit.Record, restored bool) bool {
 	if rec.Action != audit.ActionCollectorRequest || (rec.Outcome != audit.OutcomeAllowed && rec.Outcome != audit.OutcomeDenied) ||
 		!strings.HasPrefix(rec.CorrelationID, adminRequestPrefix) {
 		return false
 	}
-	e := relayEntry{Outcome: rec.Outcome, Reason: rec.ReasonCode, CollectorSeq: rec.CollectorSeq}
+	e := relayEntry{Outcome: rec.Outcome, Reason: rec.ReasonCode, CollectorSeq: rec.CollectorSeq, Tainted: restored}
 	if rec.Outcome == audit.OutcomeAllowed {
 		e.Verified, e.RepeatOf = rec.Verified, rec.RepeatOf
 	} else if c := refusedCheck.FindStringSubmatch(rec.Detail); c != nil && slices.Contains(authz.AdminChecks, authz.AdminCheck(c[1])) {
@@ -262,16 +269,15 @@ func (s *Scheduler) relayAdmin(ctx context.Context) {
 			case e.Outcome == audit.OutcomeAllowed:
 				shown[i].State, shown[i].Detail = "accepted", ""
 				if part, ok := parts[shown[i].RequestID]; ok {
-					shown[i].NodePart, shown[i].Detail = "pending", part.detail
-					if part.done {
-						shown[i].NodePart = "done"
-					}
+					shown[i].NodePart, shown[i].Detail = part.state, part.detail
 				}
 			case e.Check == authz.AdminCheckWindow:
 				// From the collector's numbered refusal, never from the
 				// payload's own expires_at, which nothing has verified (A3
-				// on #181, Q1 limit 2).
-				shown[i].State = "expired"
+				// on #181, Q1 limit 2). The collector decided, so the state
+				// stays refused; the detail says why, and that it may have
+				// been applied before (B1 on #339).
+				shown[i].Detail += " (check window: outside its validity window when the collector decided; an earlier send may have been applied, check before signing again)"
 			}
 		}
 	}

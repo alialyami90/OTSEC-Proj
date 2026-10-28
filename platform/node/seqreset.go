@@ -386,7 +386,7 @@ func (s *Scheduler) applySeqAck(ctx context.Context, source, key, installKey, op
 	// The collector must still be on the reset's key: one that went back
 	// to an earlier key since is held as restored, not acknowledged.
 	if now, err := s.readInstallKey(); err != nil || now != open {
-		return refuse("key "+key, fmt.Sprintf("%s names install key %s, but the collector's install key is no longer it (%s); nothing acknowledged", source, open, keyOrNone(now)))
+		return refuse("key "+key, fmt.Sprintf("%s names install key %s, but the collector's install key is now %s; nothing acknowledged", source, open, keyOrNone(now)))
 	}
 	rec, err := s.collectorRecord(audit.ActionCollectorSeqResetAck, open, nil, 0, "acknowledged by "+source)
 	if err == nil {

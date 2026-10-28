@@ -645,6 +645,11 @@ func TestRelayExpiredSaysCheckFirst(t *testing.T) {
 	if !alarm {
 		t.Fatal("the window alarm does not say the request may already have been applied")
 	}
+	// The collector decided, so the file shows as refused, with the window
+	// as the reason (B1 on #339).
+	if got := adminShown(st); len(got) != 1 || got[0].State != "refused" || !strings.Contains(got[0].Detail, "check window") {
+		t.Fatalf("status %+v", got)
+	}
 }
 
 // adminAlarm is the detail of the one alarm with code, or "" if there is
@@ -684,13 +689,13 @@ func TestRelayFoldsOnlyItsDecisions(t *testing.T) {
 		"run":     {Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, CorrelationID: "run-0123456789abcdef"},
 	} {
 		m := map[string]relayEntry{}
-		if applyRelay(m, rec) || len(m) != 0 {
+		if applyRelay(m, rec, false) || len(m) != 0 {
 			t.Errorf("%s: folded %+v", name, m)
 		}
 	}
 	m := map[string]relayEntry{}
 	if !applyRelay(m, &audit.Record{Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeDenied, CorrelationID: id,
-		ReasonCode: string(authz.RefuseAdminUnverified), CollectorSeq: 7}) || m[id].CollectorSeq != 7 || m[id].Outcome != audit.OutcomeDenied {
+		ReasonCode: string(authz.RefuseAdminUnverified), CollectorSeq: 7}, false) || m[id].CollectorSeq != 7 || m[id].Outcome != audit.OutcomeDenied {
 		t.Fatalf("a denied admin request not folded: %+v", m)
 	}
 
