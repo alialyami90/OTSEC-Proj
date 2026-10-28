@@ -527,7 +527,7 @@ func TestHealthShowsReadBuffer(t *testing.T) {
 	for _, want := range []string{
 		"  receive buffer: 212992 bytes (the OS default; read_buffer_bytes is not set)",
 		"  receive buffer: 2097152 bytes granted (asked 1048576)",
-		"  receive buffer: 425984 bytes granted, SHORT of the 8388608 asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them",
+		fmt.Sprintf("  receive buffer: 425984 bytes granted, SHORT of the %d expected for the 8388608 asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them", node.ReadBufferExpected(runtime.GOOS, 8<<20)),
 		"  receive buffer: the OS did not report it (not reported)",
 	} {
 		if !strings.Contains(out, want) {

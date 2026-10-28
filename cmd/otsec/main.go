@@ -31,6 +31,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -635,8 +636,8 @@ func readBufferLine(ls node.ListenerStatus) string {
 		return fmt.Sprintf("the OS did not report it (%s)", safe(ls.ReadBufferErr))
 	case ls.ReadBufferAsked == 0:
 		return fmt.Sprintf("%d bytes (the OS default; read_buffer_bytes is not set)", ls.ReadBuffer)
-	case ls.ReadBuffer < ls.ReadBufferAsked:
-		return fmt.Sprintf("%d bytes granted, SHORT of the %d asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them", ls.ReadBuffer, ls.ReadBufferAsked)
+	case node.ReadBufferShortHere(ls.ReadBufferAsked, ls.ReadBuffer):
+		return fmt.Sprintf("%d bytes granted, SHORT of the %d expected for the %d asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them", ls.ReadBuffer, node.ReadBufferExpected(runtime.GOOS, ls.ReadBufferAsked), ls.ReadBufferAsked)
 	}
 	return fmt.Sprintf("%d bytes granted (asked %d)", ls.ReadBuffer, ls.ReadBufferAsked)
 }

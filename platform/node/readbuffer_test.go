@@ -83,8 +83,37 @@ func TestReadBufferIsAppliedAndShown(t *testing.T) {
 	if set.ReadBuffer == 0 || set.ReadBuffer == def.ReadBuffer {
 		t.Fatalf("granted %d with a request, %d without: the request did not reach the socket", set.ReadBuffer, def.ReadBuffer)
 	}
-	short := set.ReadBuffer < asked || set.ReadBufferErr != ""
+	short := ReadBufferShortHere(asked, set.ReadBuffer) || set.ReadBufferErr != ""
 	if n := countAlarms(st, AlarmReadBufferShort); (n == 1) != short || n > 1 {
 		t.Fatalf("%d %s alarms, granted %d of %d asked (err %q)", n, AlarmReadBufferShort, set.ReadBuffer, asked, set.ReadBufferErr)
+	}
+}
+
+// What a grant should be for a request, and when it is short. The numbers are
+// B4's: on Linux a request above net.core.rmem_max is capped and then doubled,
+// so asking for 8 MiB with a 4 MiB cap is reported as 8 MiB, which is half of
+// what 8 MiB should get, while a request the cap leaves alone is reported
+// as twice its size.
+func TestReadBufferShort(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		goos                 string
+		asked, granted, want int
+		short                bool
+	}{
+		{"linux, cap halved the request", "linux", 8388608, 8388608, 16777216, true},
+		{"linux, met", "linux", 1048576, 2097152, 2097152, false},
+		{"linux, more than needed", "linux", 1048576, 4194304, 2097152, false},
+		{"linux, below the request", "linux", 1048576, 425984, 2097152, true},
+		{"windows, met", "windows", 1048576, 1048576, 1048576, false},
+		{"windows, short", "windows", 1048576, 524288, 1048576, true},
+		{"default is never short", "linux", 0, 212992, 0, false},
+	} {
+		if got := ReadBufferExpected(tc.goos, tc.asked); got != tc.want {
+			t.Errorf("%s: expected grant %d, want %d", tc.name, got, tc.want)
+		}
+		if got := ReadBufferShort(tc.goos, tc.asked, tc.granted); got != tc.short {
+			t.Errorf("%s: short %v, want %v", tc.name, got, tc.short)
+		}
 	}
 }

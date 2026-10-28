@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
@@ -244,20 +245,47 @@ func (ls *Listening) Listen() error {
 	return nil
 }
 
+// ReadBufferExpected is the grant to expect when a listener asks for a socket
+// receive buffer of asked bytes. Linux caps a request at net.core.rmem_max
+// and then doubles it, for its own bookkeeping (man 7 socket), and reports the
+// doubled size, so a full grant is twice the request and a grant of asked is
+// a request the cap halved. Elsewhere the OS grants what it is given.
+func ReadBufferExpected(goos string, asked int) int {
+	if goos == "linux" {
+		return 2 * asked
+	}
+	return asked
+}
+
+// ReadBufferShort reports whether the OS granted less than a request for
+// asked bytes should have been. It is the one test the alarm and `otsec
+// health` use, so they cannot disagree. A request of 0 asks for the OS
+// default and is never short.
+func ReadBufferShort(goos string, asked, granted int) bool {
+	return asked > 0 && granted < ReadBufferExpected(goos, asked)
+}
+
+// ReadBufferShortHere is ReadBufferShort on this OS.
+func ReadBufferShortHere(asked, granted int) bool {
+	return ReadBufferShort(runtime.GOOS, asked, granted)
+}
+
 // checkReadBuffer raises AlarmReadBufferShort when listener s asked for a
-// receive buffer and the OS granted less. Linux doubles a request and caps
-// it at net.core.rmem_max, so a request above the cap is granted less than
-// asked; Windows grants what it is given.
+// receive buffer and the OS granted less than ReadBufferExpected, or did not
+// say what it granted.
 func (ls *Listening) checkReadBuffer(s receive.Status) {
 	asked := ls.readBuffer[s.ID]
-	if asked == 0 || (s.ReadBufferErr == "" && s.ReadBuffer >= asked) {
+	if asked == 0 || (s.ReadBufferErr == "" && !ReadBufferShortHere(asked, s.ReadBuffer)) {
 		return
 	}
 	detail := fmt.Sprintf("read_buffer_bytes is %d and the OS granted %d: datagrams that arrive while the socket buffer is full are lost before the listener reads them, and only the OS counts them", asked, s.ReadBuffer)
 	if s.ReadBufferErr != "" {
 		detail = fmt.Sprintf("read_buffer_bytes is %d and the OS did not say what it granted (%s): datagrams that arrive while the socket buffer is full are lost before the listener reads them, and only the OS counts them", asked, s.ReadBufferErr)
 	}
-	ls.rt.opt.Status.RaiseTarget("listener "+s.ID, AlarmReadBufferShort, detail+". On Linux the request is capped by net.core.rmem_max")
+	if runtime.GOOS == "linux" {
+		detail += fmt.Sprintf(". Linux caps the request at net.core.rmem_max and then doubles it, so a full grant is %d; the size reported is twice the room for datagrams", ReadBufferExpected(runtime.GOOS, asked))
+	}
+	ls.rt.opt.Status.RaiseTarget("listener "+s.ID, AlarmReadBufferShort, detail)
 }
 
 // checkTargets raises AlarmTargetSmallForListeners for each target too
