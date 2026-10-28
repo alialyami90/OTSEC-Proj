@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otsec.local/schema/otsec.config/0.1/difference.schema.json",
+  "title": "otsec.config/0.1 difference (C9)",
+  "description": "The semantic difference between two snapshots of one asset under one rule, each named by its digest over its stored bytes. An empty changes list means no change. Ordering and the rule's classes are checked by contracts/config (Validate).",
+  "type": "object",
+  "required": ["schema", "kind", "asset_id", "rule", "target", "from", "to", "changes"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^otsec\\.config/0\\.(0|[1-9][0-9]{0,3})$"},
+    "kind": {"const": "config.difference"},
+    "asset_id": {"$ref": "#/$defs/uuid"},
+    "rule": {"type": "string", "minLength": 1},
+    "target": {"enum": ["device-observed", "simulated"]},
+    "from": {"$ref": "#/$defs/ref"},
+    "to": {"$ref": "#/$defs/ref"},
+    "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "ref": {
+      "type": "object",
+      "required": ["snapshot_digest", "invocation_id", "retrieved_at"],
+      "properties": {
+        "snapshot_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "invocation_id": {"$ref": "#/$defs/uuid"},
+        "retrieved_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+      }
+    },
+    "changeKind": {"enum": ["added", "changed", "removed", "section-appeared", "section-disappeared"]},
+    "value": {"type": "string", "pattern": "^[!-~](?:[ -~]*[!-~])?$"},
+    "change": {
+      "type": "object",
+      "required": ["class", "kind", "sensitive"],
+      "properties": {
+        "class": {"type": "string", "pattern": "^[a-z0-9]+([.-][a-z0-9]+)*$"},
+        "kind": {"$ref": "#/$defs/changeKind"},
+        "name": {"type": "string", "pattern": "^[A-Z0-9][A-Z0-9_]{0,15}$"},
+        "from": {"$ref": "#/$defs/value"},
+        "to": {"$ref": "#/$defs/value"},
+        "sensitive": {"type": "boolean"}
+      }
+    }
+  }
+}

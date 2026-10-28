@@ -43,6 +43,15 @@ const (
 	// an implementation sets it from the database's own error code, never
 	// from error text, and never for any other cause.
 	CodeOpenBusy Code = "open-busy"
+	// CodeRecordTooLarge (0.4): a record is over its class's
+	// MaxRecordBytes, or, in a class with no cap of its own, over the
+	// Log's MaxCommitBytes; or an AppendBatch of more than one record is
+	// over MaxCommitBytes. It is refused before it is queued, and nothing
+	// is stored.
+	CodeRecordTooLarge Code = "record-too-large"
+	// CodeNotHoldable (0.4): a hold names a record outside the
+	// configuration class, or one that is not stored.
+	CodeNotHoldable Code = "not-holdable"
 )
 
 // Error is the error type of this contract. Detail is free text that never

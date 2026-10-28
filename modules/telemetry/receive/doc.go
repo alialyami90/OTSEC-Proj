@@ -77,6 +77,20 @@
 //     like a datagram over its rate or past the queue, is dropped and
 //     counted, and the counts are reported as intake.drop-counted every
 //     Limits.ReportEvery and when the listener stops.
+//   - A batch commits in parts, in order, each within Config.MaxCommitBytes
+//     and MaxCommitRecords (C5 0.4, 0.5). A part that committed is not sent
+//     again: a stream part the store refuses is held and tried alone, a
+//     datagram part is dropped and counted, and a crash between parts
+//     leaves a sender's resend with duplicates, never a loss. See
+//     commitParts. A Log with lower caps is learnt downward only: a
+//     refusal halves the record cap from the refused part (any byte cap is
+//     met by few enough records, so the byte cap is never lowered and never
+//     falls below store.MinRecordBytes), and it does not rise again for the life
+//     of the Receiver; a restart starts from Config. A lone record the Log
+//     refuses as too large is dropped and counted as store, with the reason
+//     in Status.LastErr, but that path is defensive: Limits.MaxMessage keeps
+//     a message well under the store's record cap, so large messages are
+//     never handled this way.
 //   - A message whose record cannot be built is a fault in this package.
 //     It is dropped and counted as store, alone: the rest of its batch is
 //     stored.

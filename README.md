@@ -43,7 +43,7 @@ On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6. The roles and sc
 | `tests/fixtures/ied/` | Sanitized real device outputs | A2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | A4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | A6 |
-| `go.mod`, `.github/workflows/ci.yml` | Dependencies and CI (ten jobs, the main test path, D2-13; Markdown-only PRs skip it, D3-13) | A1 (`a6-*.yml` workflows: A6; `a5-windows-experiments.yml`: A5, changes authorized by A1) |
+| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s ten jobs and `govulncheck.yml`'s one job are the main test path, D2-13 and D4-3; Markdown-only PRs skip both, D3-13) | A1 (`a6-*.yml` workflows: A6; `a5-windows-experiments.yml`: A5, changes authorized by A1) |
 | `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | A1 (`contracts/node` maintained by A4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). Agents modify only their owned paths unless explicitly authorized. Shared contracts change only through A1 with a documented proposal and review by affected owners.
