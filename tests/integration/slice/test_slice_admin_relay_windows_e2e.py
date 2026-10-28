@@ -22,8 +22,9 @@ slice. Its credential.install already goes through the relay. Then:
      signed file. None is sent. Each is then put right (its DACL reset,
      its owner set back to Administrators, the second link removed, the
      link replaced by the file) and is decided once.
-  5. config\admin itself made to inherit its DACL, and then made to grant
-     Users write: nothing in it is read, and a file left meanwhile is
+  5. config\admin itself made to inherit its DACL, then made to grant
+     Users write, then made to grant the node's own service write (B3 on
+     #266): nothing in it is read, and a file left meanwhile is
      decided once after the DACL is put back exactly as the installer
      wrote it (compared as SDDL).
 
@@ -413,6 +414,9 @@ def got(tmp_path_factory):
 
         out["di"], out["steps"]["dir_inherits"] = dir_case("inherits", lambda: icacls(d, "/inheritance:e"))
         out["dw"], out["steps"]["dir_users_write"] = dir_case("users-write", lambda: icacls(d, "/grant", USERS + ":(W)"))
+        # The rule's worst case (B3 on #266): the node's own service may
+        # write config\admin, so a compromised node could replace a file there.
+        out["dn"], out["steps"]["dir_node_write"] = dir_case("node-write", lambda: icacls(d, "/grant", NODE_SVC + ":(W)"))
     finally:
         if suspended:
             _suspend(suspended, resume=True)
@@ -515,7 +519,8 @@ def test_a_file_put_right_is_decided_once(got, k):
     assert st["sddl"] == got["files"][k]["sddl"], st
 
 
-DIR_WHY = {"dir_inherits": "inherits its DACL", "dir_users_write": "grants access to S-1-5-32-545"}
+DIR_WHY = {"dir_inherits": "inherits its DACL", "dir_users_write": "grants access to S-1-5-32-545",
+           "dir_node_write": "a reader may only read and traverse"}
 
 
 @pytest.mark.parametrize("step", sorted(DIR_WHY))
