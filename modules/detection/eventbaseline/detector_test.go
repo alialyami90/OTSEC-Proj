@@ -339,7 +339,9 @@ func TestDetectorBeforeActivationAndOrder(t *testing.T) {
 // baseline, the activation time and the events, not of when Tick was called.
 // The same events fed with no Tick, with a Tick before every event and with
 // Ticks between, give identical alarms in every field (B5's replay keys
-// alarms by what the doc of the package lists).
+// alarms by what the doc of the package lists). Every Tick here is a
+// watermark: none is later than an event still to come. One that is loses
+// that event's alarms (TestDetectorTickIsAWatermark).
 func TestDetectorAlarmsDoNotDependOnTicks(t *testing.T) {
 	type step struct {
 		elem string
@@ -388,5 +390,49 @@ func TestDetectorAlarmsDoNotDependOnTicks(t *testing.T) {
 		if got := run(ticks); string(got) != string(none) {
 			t.Errorf("ticks %s change the alarms:\nwith none:\n%s\nwith ticks:\n%s", name, none, got)
 		}
+	}
+}
+
+// TestDetectorTickIsAWatermark: Tick(now) moves the detector's time to now,
+// so an event received before now that is observed afterwards is refused with
+// ErrOrder and its alarm is lost (B6 on #303). The same event, observed in
+// order, raises it, so the loss is the Tick's and not the event's. This pins
+// the precondition the feeder must keep: tick no later than the received time
+// of any event still to be observed, never with the wall clock.
+func TestDetectorTickIsAWatermark(t *testing.T) {
+	// "Z" is not in the baseline, so its first occurrence is a new-type alarm.
+	// The baseline's periodic "B" is long overdue by 2600 s, so absence alarms
+	// come too; the test is about the new-type alarm.
+	e := ser("Z", "Asserted", at(2600), "")
+	has := func(as []*baseline.Alarm, rule baseline.Rule) bool {
+		for _, a := range as {
+			if a.Rule == rule {
+				return true
+			}
+		}
+		return false
+	}
+
+	d := activeB(t, 2100)
+	if got := feed(t, d, e); !has(got, baseline.RuleNewType) {
+		t.Fatalf("in order, the event raised %v, want new-type among them", ruleList(got))
+	}
+
+	late := activeB(t, 2100)
+	tick(t, late, 2601)
+	o, err := late.Observe(eventbaseline.Obs{Event: e})
+	if !errors.Is(err, eventbaseline.ErrOrder) {
+		t.Fatalf("an event received at 2600 s, observed after a Tick at 2601 s: %v, want ErrOrder", err)
+	}
+	if len(o.Alarms) != 0 {
+		t.Errorf("the refused event raised %v", ruleList(o.Alarms))
+	}
+
+	// A watermark at the event's received time is fine: the event is not
+	// before it.
+	ok := activeB(t, 2100)
+	tick(t, ok, 2600)
+	if got := feed(t, ok, e); !has(got, baseline.RuleNewType) {
+		t.Errorf("after a Tick at its own received time, the event raised %v, want new-type among them", ruleList(got))
 	}
 }

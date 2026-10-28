@@ -73,6 +73,19 @@
 // to its event's time first, and so raises the same alarm). The Held notice
 // is Held: 1 whenever it is sent; only HeldNow grows.
 //
+// Tick is a watermark, and that is the precondition of the paragraph above.
+// Tick(now) says that no event received before now remains to be observed:
+// it moves the detector's time to now, and an Observe of an event received
+// before that is refused with ErrOrder and raises nothing, so its alarm is
+// lost. The feeder must therefore tick with a watermark, no later than the
+// received time of any event it has yet to Observe (for example the least
+// received time of what it has read but not yet passed on, or of what it
+// could still read), and never with the wall clock. A store stall (F-016)
+// can leave seconds between an event's receive and its Observe, so a wall
+// clock tick overtakes events. Ticks that respect the watermark change no
+// alarm; one that does not loses alarms, and TestDetectorTickIsAWatermark
+// pins the refusal.
+//
 // A run that starts from a later event, or leaves events out, does not
 // reproduce the same alarms. Windows, buckets and the holds depend on what
 // came before, so the fields that can differ are: whether an alarm is raised
