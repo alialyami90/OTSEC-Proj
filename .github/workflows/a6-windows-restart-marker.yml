@@ -1,9 +1,11 @@
-# B6 diagnostic for #284: TestUnknownSpentAcrossRestarts lost a marker on
-# the hosted Windows runner inside the full Go job (298dfda run 2, ec22a31
-# run 9) and passed 12 of 12 run alone (e6e11f3). This job runs that test
-# repeatedly while other store-heavy packages run beside it, as in the Go
-# job, so a failure is likely to print the listener's counters
-# (restart_test.go, rig.why). a6-* workflows are B6's
+# B6 diagnostic for #284 and #281: TestUnknownSpentAcrossRestarts lost a
+# marker on the hosted Windows runner inside the full Go job (298dfda run 2,
+# ec22a31 run 9). It passed 12 of 12 run alone (e6e11f3) and 12 of 12 beside
+# the store-heavy packages (b8596fc on #281's stack, 634cbf3 on main), so
+# only the full suite has shown it. This job runs the full suite as ci.yml's
+# Windows go step does, -count times, so #281's stack (#285) and main (#286)
+# are compared like for like, and a failure prints the listener's counters
+# and goroutine stacks (restart_test.go, rig.why). a6-* workflows are B6's
 # (handoffs/B6-handoff.md). No secrets, no services, no accounts; hosted
 # runner only. Results are simulated and printed to the job log.
 name: a6-windows-restart-marker
@@ -11,8 +13,8 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "go test -count"
-        default: "12"
+        description: "go test -count for the full suite"
+        default: "3"
   pull_request:
     paths:
       - .github/workflows/a6-windows-restart-marker.yml
@@ -21,31 +23,23 @@ on:
 permissions:
   contents: read
 jobs:
-  restart-marker:
+  full-suite:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
-      - name: Build the test binaries
-        run: go test -count 1 -run '^$' ./platform/... ./tests/...
-      - name: Run the restart test repeatedly, under load
-        shell: pwsh
+      # As ci.yml's go step, but every package runs -count times in one
+      # test binary. -timeout is per package binary, so it is ci.yml's 12m
+      # times the count, with room.
+      - name: Full suite, repeated
         env:
-          COUNT: ${{ github.event.inputs.count || '12' }}
+          COUNT: ${{ github.event.inputs.count || '3' }}
+        shell: pwsh
         run: |
-          # Load: the packages that ran beside it when it failed in the Go
-          # job, over and over until the restart test ends. Their results
-          # are not this job's.
-          $load = Start-Job -ScriptBlock {
-            Set-Location $using:PWD
-            while ($true) { go test -count 1 ./platform/node/ ./platform/store/ ./tests/integration/quarantine/ ./tests/integration/storeholds/ 2>&1 | Out-Null }
-          }
-          go test -timeout 40m -v -count $env:COUNT -run '^TestUnknownSpentAcrossRestarts$' ./tests/integration/syslogreceive/
-          $rc = $LASTEXITCODE
-          Stop-Job $load
-          Remove-Job -Force $load
-          exit $rc
+          $timeout = "$([int]$env:COUNT * 15)m"
+          go test -timeout $timeout -count $env:COUNT ./...
+          exit $LASTEXITCODE
