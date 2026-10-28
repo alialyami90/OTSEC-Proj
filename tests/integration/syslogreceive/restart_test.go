@@ -245,6 +245,9 @@ func (g *rig) awaitMarker(known net.Conn, mark string, rows0 int64, st0 receive.
 			return
 		}
 		held := st.Received - st.Stored - st.Empty - dropped(st)
+		if held <= 0 {
+			idle = 0 // "two polls in a row" means two held polls in a row
+		}
 		switch {
 		case held > 0:
 			quiet = time.Time{}
@@ -253,7 +256,8 @@ func (g *rig) awaitMarker(known net.Conn, mark string, rows0 int64, st0 receive.
 			// those messages are gone uncounted. Read from the goroutine
 			// states; a renamed function only disables this check, and
 			// the wait then ends at the binary's timeout.
-			if again := g.r.Status(); again.Received == st.Received && again.Stored == st.Stored && dropped(again) == dropped(st) && writerIdle(g.r) {
+			idleNow := writerIdle(g.r)
+			if lostUncounted(st, g.r.Status(), idleNow) {
 				idle++
 			} else {
 				idle = 0
@@ -329,6 +333,21 @@ func receiverStacks() string {
 		}
 	}
 	return strings.Join(out, "\n\n")
+}
+
+// lostUncounted reports whether one poll of awaitMarker shows held messages
+// lost without a count: the writer and the reader were idle in the stacks
+// (idle, sampled after before was read), and the counts read after the
+// stacks are the counts read before them. The order matters. The writer
+// adds a commit to Stored before it waits on its queue again, so with the
+// counts read only before the stacks, a commit that ended between the two
+// reads looked like an idle writer holding a message. That was the failure of seed_1 on
+// #346's head 95b91cd (Windows, run 40728171729 attempt 1): reported lost,
+// yet stored, with every count reconciled after it (C6). Read after the
+// stacks, a commit or a read that ends during them changes the counts.
+func lostUncounted(before, after receive.Status, idle bool) bool {
+	return idle && after.Received == before.Received && after.Stored == before.Stored &&
+		after.Empty == before.Empty && dropped(after) == dropped(before)
 }
 
 // writerIdle reports whether r's datagram writer waits on its queue and
@@ -737,5 +756,34 @@ func TestUnknownSpentOutOfRangeStartsEmpty(t *testing.T) {
 				t.Errorf("spent %d: nothing dropped as unknown-budget, so the flood did not reach the receiver", spent)
 			}
 		})
+	}
+}
+
+// The loss detector of awaitMarker (lostUncounted): a commit or a read that
+// ends while the stacks are taken is not a loss, and a writer idle with the
+// counts unchanged on both sides is. Desk check of the predicate; the
+// Windows legs of a6-windows-restart-marker.yml run it in place.
+func TestLostUncountedReadsTheCountsAfterTheStacks(t *testing.T) {
+	before := receive.Status{Received: 180, Stored: 73, Dropped: map[string]int64{"unknown-budget": 106}}
+	stored := before
+	stored.Stored++
+	read := before
+	read.Received++
+	dropped := before
+	dropped.Dropped = map[string]int64{"unknown-budget": 107}
+	for name, tc := range map[string]struct {
+		after receive.Status
+		idle  bool
+		want  bool
+	}{
+		"idle, nothing changed: lost":       {before, true, true},
+		"busy writer":                       {before, false, false},
+		"a commit ended during the stacks":  {stored, true, false},
+		"a datagram read during the stacks": {read, true, false},
+		"a drop counted during the stacks":  {dropped, true, false},
+	} {
+		if got := lostUncounted(before, tc.after, tc.idle); got != tc.want {
+			t.Errorf("%s: lostUncounted %v, want %v", name, got, tc.want)
+		}
 	}
 }
