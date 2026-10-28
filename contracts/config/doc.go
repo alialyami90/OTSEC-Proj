@@ -37,6 +37,17 @@
 //     configuration baseline is the snapshot an administrator acknowledged,
 //     so its baseline_digest is that snapshot's digest.
 //
+// # Coverage
+//
+// A snapshot covers the settings that SHO prints (S22 Table 7.67): the
+// classes of the rule, and nothing else. It does not cover the 175
+// touchscreen display settings of models that have one (S22 Table 7.80,
+// p. 7.87), which SHO does not print and which sit in files the relay keeps
+// elsewhere. The owner accepted that gap on 2026-10-28: it is recorded in
+// the capability records and is not read. So an unchanged difference says
+// nothing about those settings, and no document here claims full coverage of
+// a touchscreen model.
+//
 // # The rule for SEL-751 SHO replies (sel-751-sho/2)
 //
 // The rule is stated here, in RuleSEL751SHO's classes, and in

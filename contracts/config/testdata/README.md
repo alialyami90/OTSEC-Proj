@@ -11,6 +11,8 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 
 `generate.py` reads the replies with its own Python version of the rule in `doc.go`. The Go tests then check that each snapshot is exactly what Go's `CheckAgainst` reads from its transcript, and that each golden difference is exactly what Go's `Compare` computes. That way two implementations of the rule are checked against each other.
 
+Coverage: a snapshot holds what `SHO` prints. The touchscreen display settings (S22 Table 7.80) are not read, by the owner's decision of 2026-10-28, so nothing here claims full coverage of a touchscreen model.
+
 ## Transcripts
 
 | File | What it shows |
