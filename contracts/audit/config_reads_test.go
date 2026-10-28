@@ -34,13 +34,16 @@ func nodeRec(seq uint64, utc string, action Action, reason string, cfg Config) *
 		Target: &Target{AssetID: testAsset}, CorrelationID: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f", Config: &cfg}
 }
 
-func comparedNoDifference(seq, read uint64, utc string) *Record {
-	return nodeRec(seq, utc, ActionConfigReadCompared, ReasonNoDifference, Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: read})
+// comparedNoDifference and comparedSameChange are the node's results for read
+// decision read, whose snapshot is the record snap of the asset's
+// configuration stream.
+func comparedNoDifference(seq, read uint64, utc string, snap uint64) *Record {
+	return nodeRec(seq, utc, ActionConfigReadCompared, ReasonNoDifference, Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: read, SnapshotSeq: snap})
 }
 
-func comparedSameChange(seq, read uint64, utc, snapshot string) *Record {
+func comparedSameChange(seq, read uint64, utc, snapshot string, snap uint64) *Record {
 	return nodeRec(seq, utc, ActionConfigReadCompared, ReasonSameChange, Config{BaselineDigest: testBaseline, SnapshotDigest: snapshot,
-		ReadSeq: read, ChangeSeq: 23, ChangesDigest: testChanges})
+		ReadSeq: read, SnapshotSeq: snap, ChangeSeq: 23, ChangesDigest: testChanges})
 }
 
 // readsChain is a valid chain of the 0.7 read records: the baseline
@@ -53,12 +56,12 @@ func readsChain() []*Record {
 	chain := configChain()
 	since(chain[3], 8, "2026-10-26T15:00:00Z")
 	recs := acked(nil)
-	recs = append(recs, runAt(13, 8, "2026-10-26T15:00:00Z"), comparedNoDifference(14, 8, "2026-10-26T15:00:05Z"))
+	recs = append(recs, runAt(13, 8, "2026-10-26T15:00:00Z"), comparedNoDifference(14, 8, "2026-10-26T15:00:05Z", 41))
 	recs = append(recs, chain...)
 	recs = append(recs,
-		runAt(24, 12, "2026-10-26T19:00:00Z"), comparedSameChange(25, 12, "2026-10-26T19:00:05Z", testReadA),
-		runAt(26, 13, "2026-10-26T19:30:00Z"), comparedSameChange(27, 13, "2026-10-26T19:30:05Z", testReadB),
-		runAt(28, 14, "2026-10-26T19:45:00Z"), comparedSameChange(29, 14, "2026-10-26T19:45:05Z", testReadC),
+		runAt(24, 12, "2026-10-26T19:00:00Z"), comparedSameChange(25, 12, "2026-10-26T19:00:05Z", testReadA, 43),
+		runAt(26, 13, "2026-10-26T19:30:00Z"), comparedSameChange(27, 13, "2026-10-26T19:30:05Z", testReadB, 45),
+		runAt(28, 14, "2026-10-26T19:45:00Z"), comparedSameChange(29, 14, "2026-10-26T19:45:05Z", testReadC, 47),
 		nodeRec(30, "2026-10-26T20:00:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 2, RemovedFirstSeq: 41, RemovedLastSeq: 43,
 			RemovedDigest: RemovedReadsDigest([]string{testEqual, testReadA}), KeptDigest: testReadC}))
 	return recs
@@ -101,11 +104,11 @@ func TestReadCompared(t *testing.T) {
 		want string // "" accepts
 	}{
 		"no difference after a restore": {func(recs []*Record) []*Record {
-			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z"))
+			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z", 49))
 		}, ""},
 		"a second removal of what was compared since": {func(recs []*Record) []*Record {
-			recs = append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z"))
-			return append(recs, nodeRec(35, "2026-10-26T21:10:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 1, RemovedFirstSeq: 44, RemovedLastSeq: 44,
+			recs = append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedNoDifference(34, 16, "2026-10-26T21:00:05Z", 49))
+			return append(recs, nodeRec(35, "2026-10-26T21:10:00Z", ActionConfigReadsRemoved, "", Config{RemovedCount: 1, RemovedFirstSeq: 45, RemovedLastSeq: 45,
 				RemovedDigest: RemovedReadsDigest([]string{testReadB}), KeptDigest: testEqual}))
 		}, ""},
 		"no difference while a recorded change is open": {func(recs []*Record) []*Record {
@@ -114,7 +117,7 @@ func TestReadCompared(t *testing.T) {
 			return recs
 		}, "recorded a change against it"},
 		"the same change after a restore": {func(recs []*Record) []*Record {
-			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedSameChange(34, 16, "2026-10-26T21:00:05Z", testReadA))
+			return append(restored(recs), runAt(33, 16, "2026-10-26T21:00:00Z"), comparedSameChange(34, 16, "2026-10-26T21:00:05Z", testReadA, 49))
 		}, "not the newest recorded change"},
 		"the same change as an older record": {func(recs []*Record) []*Record {
 			bySeq(recs, 25).Config.ChangeSeq = 22
@@ -193,6 +196,63 @@ func TestReadCompared(t *testing.T) {
 			bySeq(recs, 30).Target.AssetID = other
 			return recs
 		}, "newest stay"},
+		"a result for an earlier read than the previous": {func(recs []*Record) []*Record {
+			return append(recs, runAt(31, 15, "2026-10-26T21:00:00Z"), runAt(32, 16, "2026-10-26T21:05:00Z"),
+				comparedSameChange(33, 16, "2026-10-26T21:05:05Z", testReadA, 51), comparedSameChange(34, 15, "2026-10-26T21:10:05Z", testReadB, 53))
+		}, "results follow the order of the reads"},
+		"two detections of one read": {func(recs []*Record) []*Record {
+			d := *bySeq(recs, 23)
+			c := *d.Config
+			d.Seq, d.Config, d.Time = 24, &c, at("2026-10-26T18:00:06Z")
+			out := append([]*Record{}, recs[:9]...)
+			return append(append(out, &d), recs[9:]...)
+		}, "results follow the order of the reads"},
+		"a read taken before a change repeating it": {func(recs []*Record) []*Record {
+			det := nodeRec(33, "2026-10-26T21:05:05Z", ActionConfigChangeDetected, ReasonUnapprovedChange, Config{BaselineDigest: testBaseline, SnapshotDigest: testSnapshot,
+				DifferenceDigest: testDifference, ChangesDigest: testOtherChanges, ReadSeq: 16, UnchangedAt: "2026-10-26T21:00:00Z", UnchangedReadSeq: 15})
+			det.Outcome = OutcomeWarning
+			same := comparedSameChange(34, 15, "2026-10-26T21:10:05Z", testReadA, 51)
+			same.Config.ChangeSeq, same.Config.ChangesDigest = 33, testOtherChanges
+			return append(recs, runAt(31, 15, "2026-10-26T21:00:00Z"), runAt(32, 16, "2026-10-26T21:05:00Z"), det, same)
+		}, "results follow the order of the reads"},
+		"the baseline's own read repeating a later change": {func(recs []*Record) []*Record {
+			return append(recs, comparedSameChange(31, 6, "2026-10-26T21:00:05Z", testReadA, 51))
+		}, "results follow the order of the reads"},
+		"a result for the read a detection already has": {func(recs []*Record) []*Record {
+			return append(recs, comparedSameChange(31, 11, "2026-10-26T21:00:05Z", testReadA, 51))
+		}, "second result"},
+		"the same decision number after a collector reset": {func(recs []*Record) []*Record {
+			reset := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 31, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T21:00:00Z"),
+				Actor: Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo,
+				PreviousHigh: new(uint64), InstallKeyID: "collector-2"}
+			return append(recs, reset, runAt(32, 12, "2026-10-26T21:10:00Z"), comparedSameChange(33, 12, "2026-10-26T21:10:05Z", testReadA, 51))
+		}, ""},
+		"a result after a collector reset for a read of the epoch before": {func(recs []*Record) []*Record {
+			reset := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 31, PrevHash: strings.Repeat("6", 64), Time: at("2026-10-26T21:00:00Z"),
+				Actor: Actor{Type: authz.PrincipalNode, ID: "site-a-node-1"}, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo,
+				PreviousHigh: new(uint64), InstallKeyID: "collector-2"}
+			return append(recs, reset, comparedSameChange(33, 14, "2026-10-26T21:10:05Z", testReadA, 51))
+		}, "not an earlier run"},
+		"results of a run of another operation": {func(recs []*Record) []*Record {
+			run := runAt(31, 15, "2026-10-26T21:00:00Z")
+			run.OperationID = "sel.ser.read_recent"
+			return append(recs, run, comparedSameChange(32, 15, "2026-10-26T21:00:05Z", testReadA, 51))
+		}, "names a run of sel.ser.read_recent"},
+		"a compared read whose stream seq does not increase": {func(recs []*Record) []*Record {
+			return append(recs, runAt(31, 15, "2026-10-26T21:00:00Z"), comparedSameChange(32, 15, "2026-10-26T21:00:05Z", testReadA, 47))
+		}, "stream seqs increase"},
+		"a removal over a wider range than its reads": {func(recs []*Record) []*Record {
+			bySeq(recs, 30).Config.RemovedFirstSeq, bySeq(recs, 30).Config.RemovedLastSeq = 1, 1000000
+			return recs
+		}, "is not the snapshot_seq of the first and last"},
+		"a removal whose range ends early": {func(recs []*Record) []*Record {
+			bySeq(recs, 30).Config.RemovedLastSeq = 42
+			return recs
+		}, "is not the snapshot_seq of the first and last"},
+		"a removal whose range starts late": {func(recs []*Record) []*Record {
+			bySeq(recs, 30).Config.RemovedFirstSeq = 42
+			return recs
+		}, "is not the snapshot_seq of the first and last"},
 		"removing before any read was compared": {func(recs []*Record) []*Record {
 			r := bySeq(recs, 30)
 			return append(recs[:3:3], r)
@@ -229,10 +289,17 @@ func TestReadCompareAcknowledgement(t *testing.T) {
 	recs := cloneChain(readsChain()[:12])
 	recs = append(recs, ackTo(29, 20, testSnapshot, testBaseline)...)
 	recs = append(recs, ackTo(31, 21, testBaseline, testSnapshot)...)
-	next := nodeRec(34, "2026-10-26T21:00:05Z", ActionConfigReadCompared, ReasonNoDifference, Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 15})
+	next := nodeRec(34, "2026-10-26T21:00:05Z", ActionConfigReadCompared, ReasonNoDifference, Config{BaselineDigest: testBaseline, SnapshotDigest: testEqual, ReadSeq: 15, SnapshotSeq: 49})
 	recs = append(recs, runAt(33, 15, "2026-10-26T21:00:00Z"), next)
 	if err := VerifyConfig(recs); err != nil {
 		t.Fatalf("no difference from the baseline acknowledged again: %v", err)
+	}
+	// A configuration acknowledgement is where an asset's read operation may
+	// change; before it, a result of another operation breaks the chain.
+	other := runAt(33, 15, "2026-10-26T21:00:00Z")
+	other.OperationID = "sel.config.read_settings"
+	if err := VerifyConfig(append(recs[:len(recs)-2:len(recs)-2], other, next)); err != nil {
+		t.Errorf("a result of another operation after the acknowledgement: %v", err)
 	}
 	// The baseline the second acknowledgement replaced is not the one reads
 	// compare against.
@@ -265,6 +332,13 @@ func TestReadRecordFields(t *testing.T) {
 		"compared without a baseline":            {"no_difference", func(r *Record) { r.Config.BaselineDigest = "" }},
 		"compared with a bare hex baseline":      {"no_difference", func(r *Record) { r.Config.BaselineDigest = testBaseline[7:] }},
 		"compared stamped 0.6":                   {"no_difference", func(r *Record) { r.Contract = "otsec.audit/0.6" }},
+		"compared without a snapshot_seq":        {"no_difference", func(r *Record) { r.Config.SnapshotSeq = 0 }},
+		"same change with the empty digest":      {"same_change", func(r *Record) { r.Config.ChangesDigest = EmptyChangesDigest }},
+		"detection with the empty digest":        {"detected", func(r *Record) { r.Config.ChangesDigest = EmptyChangesDigest }},
+		"detection with a snapshot_seq":          {"detected", func(r *Record) { r.Config.SnapshotSeq = 41 }},
+		"restore with a snapshot_seq":            {"detected", func(r *Record) { restoreOf(r); r.Config.SnapshotSeq = 41 }},
+		"removal with a snapshot_seq":            {"removed", func(r *Record) { r.Config.SnapshotSeq = 41 }},
+		"approval with a snapshot_seq":           {"approval", func(r *Record) { r.Config.SnapshotSeq = 41 }},
 		"no difference naming a change":          {"no_difference", func(r *Record) { r.Config.ChangeSeq = 23 }},
 		"no difference with a changes digest":    {"no_difference", func(r *Record) { r.Config.ChangesDigest = testChanges }},
 		"compared with a difference digest":      {"same_change", func(r *Record) { r.Config.DifferenceDigest = testDifference }},

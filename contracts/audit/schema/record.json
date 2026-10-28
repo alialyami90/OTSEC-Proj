@@ -1000,6 +1000,11 @@
                   "required": [
                     "kept_digest"
                   ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -1121,6 +1126,11 @@
                   "required": [
                     "kept_digest"
                   ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -1221,6 +1231,11 @@
                 {
                   "required": [
                     "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
                   ]
                 }
               ]
@@ -1445,6 +1460,11 @@
                   "required": [
                     "kept_digest"
                   ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -1488,7 +1508,8 @@
             "required": [
               "baseline_digest",
               "snapshot_digest",
-              "read_seq"
+              "read_seq",
+              "snapshot_seq"
             ],
             "not": {
               "anyOf": [
@@ -1733,6 +1754,11 @@
                   "required": [
                     "change_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -1940,7 +1966,10 @@
         "changes_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "0.7: C9 0.2 Difference.ChangesDigest: sha256 of the difference's changes array alone, in Compare's order; it names neither snapshot nor baseline, so \"the same change\" is this digest with the same baseline_digest (detected, required from 0.7; read_compared with reason same_change)"
+          "description": "0.7: C9 0.2 Difference.ChangesDigest: sha256 of the difference's changes array alone, in Compare's order. It names neither snapshot nor baseline, so \"the same change\" is this digest measured from the same baseline_digest. Never the digest of no changes, sha256 of [] (detected, required from 0.7; read_compared with reason same_change)",
+          "not": {
+            "const": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
         },
         "change_seq": {
           "type": "integer",
@@ -1955,12 +1984,12 @@
         "removed_first_seq": {
           "type": "integer",
           "minimum": 1,
-          "description": "0.7: stream seq of the first removed read (reads_removed only)"
+          "description": "0.7: snapshot_seq of the first removed read (reads_removed only)"
         },
         "removed_last_seq": {
           "type": "integer",
           "minimum": 1,
-          "description": "0.7: stream seq of the last removed read; the range holds at least removed_count (reads_removed only)"
+          "description": "0.7: snapshot_seq of the last removed read (reads_removed only)"
         },
         "removed_digest": {
           "type": "string",
@@ -1971,6 +2000,11 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
           "description": "0.7: snapshot digest of the newest compared read at the time, which stays with the one before it (reads_removed only)"
+        },
+        "snapshot_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: seq of the stored record of the compared snapshot in the asset's configuration stream; it increases from one compared read of the asset to the next (read_compared only)"
         }
       }
     }

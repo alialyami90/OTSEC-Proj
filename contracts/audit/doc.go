@@ -231,7 +231,8 @@
 // let such copies be removed without losing the evidence of why:
 //
 //   - config.read_compared is the node's record of one such read, info, with
-//     reason no_difference (baseline_digest, snapshot_digest, read_seq) or
+//     reason no_difference (baseline_digest, snapshot_digest, snapshot_seq,
+//     the snapshot's seq in the asset's configuration stream, and read_seq) or
 //     same_change (also change_seq, the config.change_detected record the
 //     read repeats, and changes_digest, the digest of that change's ordered
 //     changes, which C9 supplies and which config.change_detected carries
@@ -256,14 +257,31 @@
 //     ended;
 //   - a same_change read names the newest recorded change against the
 //     baseline, by its seq and its changes_digest;
+//   - results come in the order the reads were taken: per asset and
+//     collector epoch, each config.change_detected, config.baseline_restored
+//     or config.read_compared names a later read decision than the asset's
+//     previous result, and each compared read's snapshot_seq is greater than
+//     the previous one's. So a read cannot repeat a change that a later read
+//     found, and the baseline's own read cannot be given a result after a
+//     change;
+//   - an asset's results name runs of one operation, until a configuration
+//     acknowledgement sets a new baseline. Which operations are
+//     configuration reads is the register's, so this contract checks only
+//     the consistency;
 //   - a config.reads_removed takes the oldest recorded reads that no earlier
 //     removal took, leaving at least the two newest, with a removed_digest
-//     that matches them and a kept_digest that is the newest's.
+//     that matches them, a removed_first_seq and removed_last_seq that are
+//     the snapshot_seq of the first and last of them, and a kept_digest that
+//     is the newest's.
 //
 // Removal by seq range, never by time or space, is the store's rule (C5).
-// After a crash between the record and the removal, the node completes the
-// removal the chain names; the chain may name more than was removed, never
-// less.
+// The range bounds the stream; the set removed is the compared reads the
+// chain names inside it (removed_count of them), never every record in the
+// range, since the stream also holds held differences and baselines. After a
+// crash between the record and the removal, the node completes the removal
+// the chain names, re-deriving that set from the chain; the chain may name
+// more than was removed, never less. A node whose audit stream has lost its
+// first records cannot derive the set and removes nothing.
 //
 
 // Not covered: the approver and the person who changed the relay may be
