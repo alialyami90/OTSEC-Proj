@@ -30,6 +30,9 @@ type RuntimeOptions struct {
 	// ClockSync is the node clock's state as the node knows it. Phase 2 has
 	// no time-sync probe, so the default is unknown, never a guess.
 	ClockSync event.SyncState
+	// BusyTimeout is the stores' busy_timeout; zero means the store's 5 s.
+	// Only tests that hold a database busy on purpose set it.
+	BusyTimeout time.Duration
 }
 
 // Runtime is a started node: every database through C5 startup, a Log per
@@ -108,13 +111,14 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		r.dbs = append(r.dbs, d)
 	}
 	r.recordStart(ctx)
+	r.reconcileHolds(ctx)
 	opt.Status.Write(string(cfg.NodeID))
 	return r, nil
 }
 
 func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
 	dbID := spec.ID
-	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments,
+	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments, BusyTimeout: r.opt.BusyTimeout,
 		Alarms: func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) }}
 	env, err := store.NewEnv(opt)
 	if err != nil {

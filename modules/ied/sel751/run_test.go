@@ -64,7 +64,7 @@ func load(t testing.TB) inputs {
 	if f.profile, err = asset.DecodeProfile(read("contracts/asset/testdata/valid/profile-sel-751-ascii.json")); err != nil {
 		t.Fatal(err)
 	}
-	if f.reg, err = register.Decode(read("contracts/register/testdata/sel-751.json")); err != nil {
+	if f.reg, err = register.Decode(read("contracts/register/testdata/sel-751-rev4.json")); err != nil {
 		t.Fatal(err)
 	}
 	return f
