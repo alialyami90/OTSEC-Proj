@@ -27,6 +27,11 @@ const TickInterval = 60 * time.Second
 // is recorded and every database is closed.
 func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	st := NewStatus(StatusPath(cfg), oslog, nil)
+	// No status file is written until each target and listener has been
+	// judged against its certificate's period (below), so the first one
+	// never says the node is collecting without showing a link held back
+	// (HR-13). Start writes one when the databases are open.
+	st.Defer()
 	rt, err := Start(ctx, cfg, RuntimeOptions{Status: st})
 	if err != nil {
 		return err
@@ -59,6 +64,7 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if len(cfg.Listeners) > 0 {
 		ls.Publish()
 	}
+	st.Resume()
 	st.Write(string(cfg.NodeID))
 	listened := make(chan struct{})
 	go func() {

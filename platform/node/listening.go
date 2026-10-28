@@ -119,7 +119,7 @@ type heldListener struct {
 // Publish starts it once the period is valid. The sender table comes from the C1 assets'
 // inbound endpoints (receive.SendersFor), and each listener's unknown
 // budget from its class quota (Config.ListenerSizings), less what unknown
-// senders stored on its stream in the window before this start, so a
+// senders stored on its syslog-unknown stream in the window before this start, so a
 // restart does not refill it (D3-3). If that cannot be counted, the
 // budget starts empty and AlarmUnknownSpentUncounted is raised.
 func NewListening(rt *Runtime) (*Listening, error) {
@@ -142,10 +142,10 @@ func NewListening(rt *Runtime) (*Listening, error) {
 		if err != nil {
 			return nil, fmt.Errorf("listener %s: %w", l.ID, err)
 		}
-		stream := ListenerStream(l.ID)
+		stream, ustream := ListenerStream(l.ID), UnknownStream(l.ID)
 		unknown := new(atomic.Int64)
 		cfg := receive.Config{
-			Node: rt.cfg.NodeID, ID: l.ID, Stream: stream,
+			Node: rt.cfg.NodeID, ID: l.ID, Stream: stream, UnknownStream: ustream,
 			Transport: l.Transport, Address: l.Address, Target: l.Target,
 			Plaintext: l.Plaintext,
 			Senders:   senders,
@@ -161,7 +161,7 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			g := groupFor(d.spec, rt.opt.Group)
 			cfg.MaxCommitBytes, cfg.MaxCommitRecords = g.CommitBytes(), g.CommitRecords()
 		}
-		spent, err := unknownSpent(context.Background(), rt.Store(stream), stream, cfg.Limits.UnknownWindow, rt.opt.Now())
+		spent, err := unknownSpent(context.Background(), rt.Store(ustream), ustream, cfg.Limits.UnknownWindow, rt.opt.Now())
 		if err != nil {
 			// receive starts a budget empty at UnknownBytes.
 			spent = cfg.Limits.UnknownBytes

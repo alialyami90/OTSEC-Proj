@@ -30,6 +30,9 @@ type RuntimeOptions struct {
 	// ClockSync is the node clock's state as the node knows it. Phase 2 has
 	// no time-sync probe, so the default is unknown, never a guess.
 	ClockSync event.SyncState
+	// BusyTimeout is the stores' busy_timeout; zero means the store's 5 s.
+	// Only tests that hold a database busy on purpose set it.
+	BusyTimeout time.Duration
 }
 
 // Runtime is a started node: every database through C5 startup, a Log per
@@ -42,9 +45,10 @@ type Runtime struct {
 	dbs      []*database
 
 	mu      sync.Mutex
-	pending []queued        // store alarms raised during a commit, for Tick
-	raised  map[string]bool // conditions whose alarm is raised (prune.go)
-	pruneMu sync.Mutex      // serializes Prune
+	pending []queued                    // store alarms raised during a commit, for Tick
+	slowAt  map[c5.DatabaseID]time.Time // when AlarmCommitSlow was last raised, by database
+	raised  map[string]bool             // conditions whose alarm is raised (prune.go)
+	pruneMu sync.Mutex                  // serializes Prune
 	// deferred holds the node records audit could not commit because the
 	// audit database had not opened, its open at start being only busy (C5
 	// 0.2). The retry in Tick that opens it commits them first, in order
@@ -107,13 +111,14 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		r.dbs = append(r.dbs, d)
 	}
 	r.recordStart(ctx)
+	r.reconcileHolds(ctx)
 	opt.Status.Write(string(cfg.NodeID))
 	return r, nil
 }
 
 func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
 	dbID := spec.ID
-	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now,
+	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments, BusyTimeout: r.opt.BusyTimeout,
 		Alarms: func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) }}
 	env, err := store.NewEnv(opt)
 	if err != nil {
@@ -173,17 +178,15 @@ func (r *Runtime) adopt(d *database) error {
 	if !ok {
 		return fmt.Errorf("database %s: store is %T", d.spec.ID, d.report.Store)
 	}
-	classes := map[c5.StreamID]c5.StreamClass{}
 	last := map[c5.StreamID]c5.Seq{}
 	for _, s := range d.spec.Streams {
-		classes[s.ID] = s.Class
 		n, err := db.LastCommitted(context.Background(), s.ID)
 		if err != nil {
 			return fmt.Errorf("database %s: %w", d.spec.ID, err)
 		}
 		last[s.ID] = n
 	}
-	l, err := c5.NewLog(db, r.cfg.NodeID, classes, groupFor(d.spec, r.opt.Group), last)
+	l, err := c5.NewLogFor(db, r.cfg.NodeID, d.spec, groupFor(d.spec, r.opt.Group), last)
 	if err != nil {
 		return err
 	}
@@ -263,6 +266,7 @@ type queued struct {
 // change, turns queued store alarms into health events, and prunes
 // confirmed events of a class above its runtime target (Prune).
 func (r *Runtime) Tick(ctx context.Context) {
+	r.sampleCommits()
 	for _, d := range r.dbs {
 		r.state.Lock()
 		prev := d.report
@@ -578,4 +582,60 @@ func (r *Runtime) AuditRecord(action audit.Action, outcome audit.Outcome, reason
 		return c5.Record{}, err
 	}
 	return c5.Record{Stream: AuditStream, Class: c5.ClassAudit, Event: b}, nil
+}
+
+// AlarmCommitSlow: a database's write transaction took SlowCommit or longer,
+// or one has been running that long. Writes hold the write lock and wait for
+// the WAL sync, so a disk that syncs in seconds (the hosted Windows runner's
+// did, B6 #294) holds every writer and lets a receiver's queue fill and
+// datagrams drop; this is the early sign. Level 1, raised at most once per
+// CommitAlarmRepeat for a database, and shown by `otsec health`.
+const AlarmCommitSlow c5.AlarmCode = "store-commit-slow"
+
+// SlowCommit is the write-transaction time that raises AlarmCommitSlow, and
+// CommitAlarmRepeat is how often it is raised again while commits stay slow.
+// Variables so that a test can set them.
+var (
+	SlowCommit        = 5 * time.Second
+	CommitAlarmRepeat = 10 * time.Minute
+)
+
+// sampleCommits reads each open database's write-transaction times into
+// status, once per Tick, and raises AlarmCommitSlow.
+func (r *Runtime) sampleCommits() {
+	now := r.opt.Now()
+	raised := false
+	for _, d := range r.dbs {
+		db, _, _ := r.view(d)
+		if db == nil {
+			continue
+		}
+		cs := db.CommitStats()
+		recent := max(db.TakeRecentCommit(), cs.Waiting)
+		r.opt.Status.SetCommits(d.spec.ID, CommitStatus{Count: cs.Count, MaxMS: cs.Max.Milliseconds(), RecentMS: recent.Milliseconds(), WaitingMS: cs.Waiting.Milliseconds()})
+		if recent < SlowCommit {
+			continue
+		}
+		r.mu.Lock()
+		last, seen := r.slowAt[d.spec.ID]
+		due := !seen || now.Sub(last) >= CommitAlarmRepeat
+		if due {
+			if r.slowAt == nil {
+				r.slowAt = map[c5.DatabaseID]time.Time{}
+			}
+			r.slowAt[d.spec.ID] = now
+		}
+		r.mu.Unlock()
+		if due {
+			raised = true
+			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: AlarmCommitSlow, At: now,
+				Detail: fmt.Sprintf("a write transaction took %v (running now: %v); every writer to this database waits for it, so the disk may be slow, and a receiver's queue can fill", recent.Round(time.Millisecond), cs.Waiting.Round(time.Millisecond))})
+		}
+	}
+	if raised {
+		// The rest of Tick writes to the databases, which wait for the slow
+		// transaction, so the status file is written now rather than at the
+		// end of Tick (B6 on #311, strace-injected fsync delays).
+		r.opt.Status.Write(string(r.cfg.NodeID))
+	}
 }

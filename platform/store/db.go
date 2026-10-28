@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,6 +94,10 @@ type DB struct {
 	// begin* time BEGIN IMMEDIATE, where the connection waits when another
 	// connection holds the write lock (BeginStats).
 	beginCount, beginTotal, beginMax, beginSince atomic.Int64
+
+	// tx* time the write transaction from after BEGIN to COMMIT, the time
+	// the write lock is held and the WAL is synced (CommitStats).
+	txCount, txMax, txRecent, txSince atomic.Int64
 }
 
 // BeginStats says how long this connection has waited in BEGIN IMMEDIATE,
@@ -104,6 +109,49 @@ type BeginStats struct {
 	Count      int64
 	Total, Max time.Duration
 	Waiting    time.Duration
+}
+
+// CommitStats says how long this connection's write transactions take, from
+// after BEGIN IMMEDIATE returned to COMMIT: the writes and the WAL sync that
+// FULL durability waits for. A slow disk shows here (the hosted Windows
+// runner's WAL syncs took seconds, B6 #294) before a receiver's queue
+// fills. Max is the longest since open; Recent is the longest since the last
+// TakeRecentCommit; Waiting is how long the transaction in progress has
+// run, or zero when none is.
+type CommitStats struct {
+	Count   int64
+	Max     time.Duration
+	Recent  time.Duration
+	Waiting time.Duration
+}
+
+// CommitStats reports this database's write transactions so far.
+func (d *DB) CommitStats() CommitStats {
+	st := CommitStats{Count: d.txCount.Load(), Max: time.Duration(d.txMax.Load()), Recent: time.Duration(d.txRecent.Load())}
+	if since := d.txSince.Load(); since != 0 {
+		st.Waiting = time.Since(monoBase) - time.Duration(since-1)
+	}
+	return st
+}
+
+// monoBase is the instant txSince counts from: a value read with the
+// monotonic clock, so a wall-clock step cannot fake or hide Waiting (B3 on
+// #311). txSince holds the offset plus one, so zero means no transaction.
+var monoBase = time.Now()
+
+// TakeRecentCommit returns the longest write transaction since the last
+// call, and resets it.
+func (d *DB) TakeRecentCommit() time.Duration { return time.Duration(d.txRecent.Swap(0)) }
+
+// endTx records a write transaction that began at began.
+func (d *DB) endTx(began time.Time) {
+	d.txSince.Store(0)
+	took := int64(time.Since(began))
+	d.txCount.Add(1)
+	for m := d.txMax.Load(); took > m && !d.txMax.CompareAndSwap(m, took); m = d.txMax.Load() {
+	}
+	for m := d.txRecent.Load(); took > m && !d.txRecent.CompareAndSwap(m, took); m = d.txRecent.Load() {
+	}
 }
 
 // BeginStats reports the waits of this database's BEGIN IMMEDIATE so far.
@@ -167,20 +215,33 @@ CREATE TABLE class_bytes (
 ) WITHOUT ROWID;
 `
 
-// connPragmas are set on every open. They are per connection in SQLite, so
-// setting them changes no persistent setting of an existing store.
+// connPragmas are set on every open (Options.BusyTimeout sets the first).
+// They are per connection in SQLite, so setting them changes no persistent
+// setting of an existing store.
 // busy_timeout comes first: it needs no read of the file, and every other
 // statement may start the connection's first read, which after a killed
 // writer can meet another connection's WAL recovery (SQLITE_BUSY_RECOVERY,
 // 261). With the handler set, the read waits for the recovery instead of
 // failing the open (A1 and A6, store-full e2e on 9c50395).
-var connPragmas = []string{
-	"PRAGMA busy_timeout=5000",
-	"PRAGMA synchronous=FULL",
-	fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
-	fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
-	"PRAGMA temp_store=MEMORY",
-	"PRAGMA foreign_keys=OFF",
+func (o Options) connPragmas() []string {
+	return []string{
+		busyPragma(o.BusyTimeout),
+		"PRAGMA synchronous=FULL",
+		fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
+		fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=OFF",
+	}
+}
+
+// DefaultBusyTimeout is busy_timeout when Options.BusyTimeout is zero.
+const DefaultBusyTimeout = 5 * time.Second
+
+func busyPragma(d time.Duration) string {
+	if d <= 0 {
+		d = DefaultBusyTimeout
+	}
+	return fmt.Sprintf("PRAGMA busy_timeout=%d", d.Milliseconds())
 }
 
 func open(ctx context.Context, path string, opt Options) (*DB, error) {
@@ -313,7 +374,7 @@ func connect(ctx context.Context, path string, opt Options) (*DB, error) {
 	d := &DB{opt: opt, path: path, db: sdb, conn: conn,
 		streams: map[c5.StreamID]c5.StreamClass{}, quotas: map[c5.StreamClass]c5.Quota{},
 		full: map[c5.StreamClass]bool{}, warned: map[c5.StreamClass]bool{}}
-	for _, q := range connPragmas {
+	for _, q := range opt.connPragmas() {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return nil, fmt.Errorf("open %s: %s: %w", path, q, err)
@@ -406,6 +467,9 @@ func (d *DB) tx(ctx context.Context, name string, f func() error) error {
 	if err != nil {
 		return fmt.Errorf("%s: begin: %w", name, err)
 	}
+	txBegan := time.Now()
+	d.txSince.Store(int64(txBegan.Sub(monoBase)) + 1)
+	defer d.endTx(txBegan)
 	if err := f(); err != nil {
 		if _, rerr := d.conn.ExecContext(context.Background(), "ROLLBACK"); rerr != nil {
 			return errors.Join(err, fmt.Errorf("%s: rollback: %w", name, rerr))
@@ -520,21 +584,42 @@ func (d *DB) QuickCheck(ctx context.Context) error {
 	return nil
 }
 
-// Usage is (page_count - freelist_count) * page_size and the sum of the
-// database's class quotas.
-func (d *DB) Usage(ctx context.Context) (used, limit int64, err error) {
+// ClassUsage is each class's ClassBytes against its quota, in class order.
+// Startup measures a quota with it, the same count the runtime refusal uses
+// (D4-14). Pages run well over it, so comparing pages with the quotas
+// reported a refusal that was not happening, and summing the classes hid a
+// full class beside a light one.
+func (d *DB) ClassUsage(ctx context.Context) ([]c5.ClassUse, error) {
 	if err := d.lock(); err != nil {
-		return 0, 0, err
+		return nil, err
+	}
+	defer d.mu.Unlock()
+	var out []c5.ClassUse
+	for class, q := range d.quotas {
+		used, err := d.classBytes(ctx, class)
+		if err != nil {
+			return nil, fmt.Errorf("class bytes %s: %w", class, err)
+		}
+		out = append(out, c5.ClassUse{Class: class, Used: used, Limit: q.Bytes, WarnAt: int64(q.WarnFraction * float64(q.Bytes)), Record: q.MaxRecordBytes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Class < out[j].Class })
+	return out, nil
+}
+
+// PageBytes is (page_count - freelist_count) * page_size: the space the
+// live pages take. A delete leaves free pages in the file until compaction
+// and they do not count. It bounds the file against the quota
+// (DiskBytesPerQuotaByte); startup does not use it.
+func (d *DB) PageBytes(ctx context.Context) (int64, error) {
+	if err := d.lock(); err != nil {
+		return 0, err
 	}
 	defer d.mu.Unlock()
 	pages, free, size, err := d.pages(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	for _, q := range d.quotas {
-		limit += q.Bytes
-	}
-	return (pages - free) * size, limit, nil
+	return (pages - free) * size, nil
 }
 
 func (d *DB) pages(ctx context.Context) (pages, free, size int64, err error) {
@@ -593,6 +678,10 @@ func (d *DB) Close() error {
 	}
 	d.closed = true
 	if !d.readOnly {
+		// Bounded in bytes, not in time: journal_size_limit and the WAL
+		// bound cap what this checkpoint copies, but not how long the
+		// disk's flush takes (F-016). The context is Background on
+		// purpose; a Close that gave up would leave a large WAL behind.
 		d.conn.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
 	}
 	return errors.Join(d.conn.Close(), d.db.Close())

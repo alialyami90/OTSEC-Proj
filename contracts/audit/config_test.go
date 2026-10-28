@@ -21,6 +21,11 @@ const (
 	testSnapshot   = "sha256:2b4627fd426546888575da7c26ef571798f2d583d0027e686f016ed6b1de60ef"
 	testDifference = "sha256:c5e3dc4f27577c98a210d2eed87dc6294382624e4ac9a02811831fb8a866beb6"
 	testEqual      = "sha256:82fa24899a1607be48de01641e58ec3add0b30db75eada80ec4da264b3d4c439"
+	// testChanges is the digest over the changes in testDifference
+	// ("otsec test configuration changes"); testOtherChanges is another one
+	// ("otsec test other changes").
+	testChanges      = "sha256:c5facef81edb1ee68ab3b14c9dbfa8d2c3b7195a9753274c26e487807c2f36ed"
+	testOtherChanges = "sha256:c511b92b6eb5abcd146f928c8826f7a4abe73dd852267876eae938f9755dfe5d"
 )
 
 func at(utc string) Time {
@@ -58,7 +63,7 @@ func configChain() []*Record {
 	detected.Actor, detected.Action, detected.Outcome, detected.ReasonCode = node, ActionConfigChangeDetected, OutcomeInfo, ReasonApprovedChange
 	detected.Target, detected.CorrelationID = &Target{AssetID: testAsset}, "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
 	detected.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testSnapshot, DifferenceDigest: testDifference,
-		ReadSeq: 11, UnchangedAt: "2026-10-26T14:00:00Z", UnchangedReadSeq: 6, ApprovalSeq: 10}
+		ChangesDigest: testChanges, ReadSeq: 11, UnchangedAt: "2026-10-26T14:00:00Z", UnchangedReadSeq: 6, ApprovalSeq: 10}
 
 	return []*Record{&accept, &approved, &read, &detected}
 }
@@ -643,4 +648,132 @@ func TestBaselineSuccession(t *testing.T) {
 	if err := VerifyConfig(recs); err != nil {
 		t.Fatalf("after a denied acknowledgement: %v", err)
 	}
+}
+
+// ackRun is the collector's acceptance (decision) of a baseline
+// acknowledgement and the node's record of it, for asset, setting digest
+// after prev, as a C7 0.6 node.baseline_ack of the given kind.
+func ackRun(asset string, decision uint64, kind authz.BaselineKind, digest, prev string, outcome Outcome) []*Record {
+	v := testAdmin()
+	v.Kind = authz.KindNodeBaselineAck
+	v.Nonce = fmt.Sprintf("AAECAwQFBgcICQoL%06d", decision)
+	accept := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 2 * decision, PrevHash: strings.Repeat("6", 64),
+		Time: at("2026-10-26T15:10:00Z"), Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed,
+		CorrelationID: fmt.Sprintf("req-ack-%d", decision), CollectorSeq: decision, Verified: v}
+	ack := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 2*decision + 1, PrevHash: strings.Repeat("6", 64),
+		Time: at("2026-10-26T15:10:01Z"), Actor: adminActor, Action: ActionConfigBaselineAcknowledge, Outcome: outcome,
+		Target: &Target{AssetID: asset}, CorrelationID: fmt.Sprintf("req-ack-%d", decision),
+		Config: &Config{DecisionSeq: decision, PayloadSHA256: v.PayloadSHA256, Kind: kind, BaselineDigest: digest, PreviousDigest: prev}}
+	if outcome == OutcomeDenied {
+		ack.ReasonCode = "baseline_not_held"
+	}
+	return []*Record{accept, ack}
+}
+
+// aToBToA acknowledges testSnapshot after testBaseline, then testBaseline
+// again after it: the baseline is the one the alarm was raised against.
+func aToBToA(asset string, first uint64) []*Record {
+	return append(ackRun(asset, first, authz.BaselineConfiguration, testSnapshot, testBaseline, OutcomeSucceeded),
+		ackRun(asset, first+1, authz.BaselineConfiguration, testBaseline, testSnapshot, OutcomeSucceeded)...)
+}
+
+// shifted is recs on another asset, with every decision number moved up by
+// 100, so that two assets' records share a chain.
+func shifted(recs []*Record, asset string) []*Record {
+	out := cloneChain(recs)
+	for _, r := range out {
+		for _, n := range []*uint64{&r.CollectorSeq, &r.RepeatOf} {
+			if *n != 0 {
+				*n += 100
+			}
+		}
+		if r.Target != nil {
+			r.Target.AssetID = asset
+		}
+		if c := r.Config; c != nil {
+			for _, n := range []*uint64{&c.DecisionSeq, &c.ReadSeq, &c.UnchangedReadSeq, &c.ApprovalSeq} {
+				if *n != 0 {
+					*n += 100
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestAlarmEndedByAcknowledgement is the C8 0.6 rule (D4-18): a succeeded
+// configuration-kind acknowledgement ends every open configuration alarm of
+// its asset raised before it, whatever baseline it was raised against; only
+// an alarm raised after the latest acknowledgement blocks a later approval.
+func TestAlarmEndedByAcknowledgement(t *testing.T) {
+	const other = "3c8e5f21-9d4a-4b6c-8f32-8d5a1e7b9c24"
+	// The alarm of 15:00:05 against testBaseline, and the approved detection
+	// of 18:00:05 against it that a late approval cannot cover.
+	late := func() (prefix, suffix []*Record) {
+		recs := cloneChain(configChain())
+		since(recs[3], 8, "2026-10-26T15:00:00Z")
+		return acked(earlyAlarm(recs)), recs
+	}
+	join := func(parts ...[]*Record) []*Record {
+		var all []*Record
+		for _, p := range parts {
+			all = append(all, p...)
+		}
+		return all
+	}
+	still := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, ErrChainBroken) || !strings.Contains(err.Error(), "still open") {
+			t.Errorf("%s: got %v, want an open alarm", name, err)
+		}
+	}
+	prefix, suffix := late()
+	still("no acknowledgement after the alarm", VerifyConfig(join(prefix, suffix)))
+
+	// Acknowledging B and then A again ends the alarm against A, and the
+	// approved detection after it stands.
+	if err := VerifyConfig(join(prefix, aToBToA(testAsset, 40), suffix)); err != nil {
+		t.Fatalf("A to B to A after the alarm: %v", err)
+	}
+	// An alarm raised after the latest acknowledgement still blocks it: a
+	// second read (decision 9, 16:30) found the difference again.
+	prefix, suffix = late()
+	again := earlyAlarm(cloneChain(suffix))
+	again[0].CollectorSeq, again[0].Time = 9, at("2026-10-26T16:30:00Z")
+	again[1].Config.ReadSeq, again[1].Time = 9, at("2026-10-26T16:30:05Z")
+	again[1].Config.UnchangedReadSeq, again[1].Config.UnchangedAt = 8, "2026-10-26T15:00:00Z"
+	since(suffix[3], 9, "2026-10-26T16:30:00Z")
+	still("alarm after the latest acknowledgement", VerifyConfig(join(prefix, aToBToA(testAsset, 40), again, suffix)))
+
+	// An event-kind acknowledgement ends no configuration alarm.
+	prefix, suffix = late()
+	still("event-kind acknowledgement", VerifyConfig(join(prefix, ackChain(), suffix)))
+
+	// A denied acknowledgement moves nothing: neither the alarm nor the
+	// baseline.
+	prefix, suffix = late()
+	denied := join(
+		ackRun(testAsset, 40, authz.BaselineConfiguration, testSnapshot, testBaseline, OutcomeDenied),
+		ackRun(testAsset, 41, authz.BaselineConfiguration, testBaseline, testSnapshot, OutcomeDenied))
+	still("denied acknowledgements", VerifyConfig(join(prefix, denied, suffix)))
+
+	// The acknowledgement that ended the alarm also moved the baseline: B
+	// stays active when the return to A is refused, so a detection against
+	// A names a baseline that is no longer acknowledged.
+	prefix, suffix = late()
+	stuck := join(ackRun(testAsset, 40, authz.BaselineConfiguration, testSnapshot, testBaseline, OutcomeSucceeded),
+		ackRun(testAsset, 41, authz.BaselineConfiguration, testBaseline, testSnapshot, OutcomeDenied))
+	if err := VerifyConfig(join(prefix, stuck, suffix)); !errors.Is(err, ErrChainBroken) ||
+		!strings.Contains(err.Error(), "acknowledged configuration baseline is "+testSnapshot) {
+		t.Errorf("baseline moved by the first acknowledgement: got %v", err)
+	}
+
+	// An acknowledgement of one asset ends no alarm of another.
+	prefix, suffix = late()
+	prefix2, suffix2 := late()
+	prefix2, suffix2 = shifted(prefix2, other), shifted(suffix2, other)
+	if err := VerifyConfig(join(prefix2, aToBToA(other, 140), suffix2)); err != nil {
+		t.Fatalf("the other asset's own chain: %v", err)
+	}
+	still("acknowledgement of another asset", VerifyConfig(join(prefix2, prefix, aToBToA(testAsset, 40), suffix, suffix2)))
 }

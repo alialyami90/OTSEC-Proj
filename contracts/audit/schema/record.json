@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.5/record",
+  "$id": "otsec.audit/0.7/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -167,7 +167,9 @@
         "config.change_approved",
         "config.change_detected",
         "config.baseline_acknowledged",
-        "config.baseline_restored"
+        "config.baseline_restored",
+        "config.read_compared",
+        "config.reads_removed"
       ]
     },
     "outcome": {
@@ -850,7 +852,9 @@
               "config.change_approved",
               "config.baseline_acknowledged",
               "config.change_detected",
-              "config.baseline_restored"
+              "config.baseline_restored",
+              "config.read_compared",
+              "config.reads_removed"
             ]
           }
         },
@@ -913,6 +917,7 @@
           },
           "config": {
             "required": [
+              "baseline_digest",
               "decision_seq",
               "payload_sha256",
               "window_start",
@@ -960,6 +965,46 @@
                   "required": [
                     "unchanged_read_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -995,6 +1040,7 @@
           },
           "config": {
             "required": [
+              "baseline_digest",
               "decision_seq",
               "payload_sha256",
               "kind"
@@ -1045,6 +1091,46 @@
                   "required": [
                     "unchanged_read_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
             }
@@ -1074,6 +1160,7 @@
           },
           "config": {
             "required": [
+              "baseline_digest",
               "snapshot_digest",
               "difference_digest",
               "read_seq",
@@ -1114,6 +1201,41 @@
                 {
                   "required": [
                     "previous_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
                   ]
                 }
               ]
@@ -1243,6 +1365,7 @@
           },
           "config": {
             "required": [
+              "baseline_digest",
               "snapshot_digest",
               "read_seq"
             ],
@@ -1302,8 +1425,412 @@
                   "required": [
                     "approval_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
                 }
               ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.read_compared"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "reason_code"
+        ],
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "reason_code": {
+            "enum": [
+              "no_difference",
+              "same_change"
+            ]
+          },
+          "config": {
+            "required": [
+              "baseline_digest",
+              "snapshot_digest",
+              "read_seq",
+              "snapshot_seq"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_start"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "approval_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "previous_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "anyOf": [
+          {
+            "properties": {
+              "reason_code": {
+                "const": "no_difference"
+              },
+              "config": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "change_seq"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "changes_digest"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "reason_code": {
+                "const": "same_change"
+              },
+              "config": {
+                "required": [
+                  "change_seq",
+                  "changes_digest"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.reads_removed"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reason_code"
+          ]
+        },
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "config": {
+            "required": [
+              "removed_count",
+              "removed_first_seq",
+              "removed_last_seq",
+              "removed_digest",
+              "kept_digest"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "baseline_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_start"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "approval_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "previous_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "config.read_compared",
+              "config.reads_removed"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([7-9]|[1-9][0-9]{1,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.change_detected"
+          },
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([7-9]|[1-9][0-9]{1,3})$"
+          }
+        },
+        "required": [
+          "action",
+          "contract"
+        ]
+      },
+      "then": {
+        "properties": {
+          "config": {
+            "required": [
+              "changes_digest"
+            ]
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "config.change_detected"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "then": {
+          "properties": {
+            "config": {
+              "not": {
+                "required": [
+                  "changes_digest"
+                ]
+              }
             }
           }
         }
@@ -1360,10 +1887,7 @@
     "config": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "baseline_digest"
-      ],
-      "description": "0.5: on config.change_approved, config.baseline_acknowledged, config.change_detected and config.baseline_restored only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
+      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -1386,7 +1910,7 @@
         "baseline_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "C9 or C10 digest of the baseline: sha256 of its stored bytes"
+          "description": "C9 or C10 digest of the baseline: sha256 of its stored bytes (every configuration action but config.reads_removed)"
         },
         "window_start": {
           "type": "string",
@@ -1438,6 +1962,49 @@
           "type": "integer",
           "minimum": 1,
           "description": "collector_seq of the asset's last run of the same operation before read_seq in the epoch; absent when there is none (detected only)"
+        },
+        "changes_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "0.7: C9 0.2 Difference.ChangesDigest: sha256 of the difference's changes array alone, in Compare's order. It names neither snapshot nor baseline, so \"the same change\" is this digest measured from the same baseline_digest. Never the digest of no changes, sha256 of [] (detected, required from 0.7; read_compared with reason same_change)",
+          "not": {
+            "const": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "change_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: seq of the config.change_detected record a same_change read repeats (read_compared only)"
+        },
+        "removed_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: how many compared reads of the asset were removed from its configuration stream: the oldest recorded and not yet removed, leaving the two newest (reads_removed only)"
+        },
+        "removed_first_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: snapshot_seq of the first removed read (reads_removed only)"
+        },
+        "removed_last_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: snapshot_seq of the last removed read (reads_removed only)"
+        },
+        "removed_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "0.7: sha256 over each removed read's snapshot digest followed by a line feed, in stream order (reads_removed only)"
+        },
+        "kept_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "0.7: snapshot digest of the newest compared read at the time, which stays with the one before it (reads_removed only)"
+        },
+        "snapshot_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.7: seq of the stored record of the compared snapshot in the asset's configuration stream; it increases from one compared read of the asset to the next (read_compared only)"
         }
       }
     }

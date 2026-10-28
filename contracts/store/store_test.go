@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 5 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 6 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -945,6 +945,38 @@ func TestStartupReleasesLastResortWhenRecoveryIsNotEnough(t *testing.T) {
 	p.RecoveryReserveBytes = p.OpenHeadroomBytes - 1
 	if err := p.Validate(); !isCode(err, CodeInvalid) {
 		t.Fatalf("recovery reserve below headroom accepted: %v", err)
+	}
+}
+
+// B6 and B1 on #324: startup raises the alarm the runtime raises for the
+// class, so one condition is one alarm.
+func TestStartupRaisesTheClassesOwnFullAlarm(t *testing.T) {
+	for class, want := range map[StreamClass]AlarmCode{
+		ClassAdapterEvidence: AlarmQuotaReached,
+		ClassPlatform:        AlarmQuotaReached,
+		ClassAudit:           AlarmAuditFull,
+		ClassSyslogUnknown:   AlarmSyslogUnknownFull,
+	} {
+		if got := FullAlarm(class); got != want {
+			t.Errorf("FullAlarm(%s) = %s, want %s", class, got, want)
+		}
+		f := existing()
+		for i := range f.events["s"] {
+			f.events["s"][i].Class = class
+		}
+		f.limit = 200 * f.eventSize // full
+		p := policy()
+		p.Streams = []StreamSpec{{"s", class}}
+		r := RunStartup(context.Background(), f, p)
+		var got []AlarmCode
+		for _, a := range r.Alarms {
+			if a.Class == class && (a.Code == AlarmQuotaReached || a.Code == AlarmAuditFull || a.Code == AlarmSyslogUnknownFull) {
+				got = append(got, a.Code)
+			}
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("class %s full at start: alarms %v, want exactly %s", class, r.Alarms, want)
+		}
 	}
 }
 

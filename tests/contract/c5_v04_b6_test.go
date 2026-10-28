@@ -95,7 +95,7 @@ func c5vRef() store.HoldReason {
 }
 
 func TestC5v04Identifier(t *testing.T) {
-	if store.Identifier != "otsec.store/0.5" {
+	if store.Identifier != "otsec.store/0.6" {
 		t.Errorf("identifier %q", store.Identifier)
 	}
 }
