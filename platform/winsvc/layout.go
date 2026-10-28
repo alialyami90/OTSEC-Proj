@@ -163,6 +163,13 @@ const MaxCollectorConfigBytes = 4 << 20
 // keeps its own and the node refuses it if that grants anything else.
 func TLSDir(programData string) string { return filepath.Join(programData, "OTSEC", "config", "tls") }
 
+// KeyRegisterPath is the key_register the node configuration must name
+// when it has one: register.json in TLSDir, under the same DACL, written
+// by an administrator's tool and read by the node (nodekey, section 9).
+func KeyRegisterPath(programData string) string {
+	return filepath.Join(TLSDir(programData), "register.json")
+}
+
 // AdminDir is the admin_dir the node configuration must name when it has
 // one: OTSEC\config\admin, where an administrator leaves the Phase 2
 // interim files such as clear-suspension.json and seq-reset-ack.json. The
