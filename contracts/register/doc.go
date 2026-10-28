@@ -60,8 +60,9 @@
 //   - 0.1: the Phase 1 format.
 //   - 0.2 adds context. A 0.1 package with context is invalid.
 //   - 0.3 adds limits and runs. This reader decodes 0.1, 0.2 and 0.3
-//     packages; a package before 0.3 with limits or runs is invalid. A later
-//     minor is invalid here, because the reader is strict, so a node that has
+//     packages; a package before 0.3 with a limits or runs key is invalid,
+//     whatever the value: an empty list and null count, as a 0.2 reader
+//     refuses the key (D4-16). A later minor is invalid here, because the reader is strict, so a node that has
 //     not been upgraded refuses a 0.3 package and keeps the floor it has (fail
 //     closed). The envelope's
 //     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),

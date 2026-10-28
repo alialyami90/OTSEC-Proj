@@ -1,8 +1,10 @@
 package register
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -385,10 +387,45 @@ func Decode(data []byte) (*Package, error) {
 	if err := strictjson.Decode(data, &p); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
+	if err := checkNewKeys(data); err != nil {
+		return nil, err
+	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// checkNewKeys refuses a package before 0.3 that carries a runs or limits key
+// at all, whatever its value: [] and null included (D4-16). A 0.2 reader
+// refuses the key as unknown, so a 0.3 reader that took an empty one would
+// read a package a 0.2 reader refuses. Validate sees only the decoded
+// package, where an empty value and a missing key look alike, so the keys are
+// looked for in the bytes.
+func checkNewKeys(data []byte) error {
+	var raw struct {
+		Contract   string          `json:"contract"`
+		Runs       json.RawMessage `json:"runs"`
+		Operations []struct {
+			ID     string          `json:"id"`
+			Limits json.RawMessage `json:"limits"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	if i := slices.Index(Readable, raw.Contract); i < 0 || i+1 >= 3 {
+		return nil
+	}
+	if raw.Runs != nil {
+		return fmt.Errorf("register: runs are new in 0.3, so a %s package cannot carry the key", raw.Contract)
+	}
+	for _, o := range raw.Operations {
+		if o.Limits != nil {
+			return fmt.Errorf("register: limits are new in 0.3, so operation %s cannot carry the key in a %s package", o.ID, raw.Contract)
+		}
+	}
+	return nil
 }
 
 var (
