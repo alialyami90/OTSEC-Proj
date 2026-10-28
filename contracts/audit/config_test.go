@@ -21,6 +21,11 @@ const (
 	testSnapshot   = "sha256:2b4627fd426546888575da7c26ef571798f2d583d0027e686f016ed6b1de60ef"
 	testDifference = "sha256:c5e3dc4f27577c98a210d2eed87dc6294382624e4ac9a02811831fb8a866beb6"
 	testEqual      = "sha256:82fa24899a1607be48de01641e58ec3add0b30db75eada80ec4da264b3d4c439"
+	// testChanges is the digest over the changes in testDifference
+	// ("otsec test configuration changes"); testOtherChanges is another one
+	// ("otsec test other changes").
+	testChanges      = "sha256:c5facef81edb1ee68ab3b14c9dbfa8d2c3b7195a9753274c26e487807c2f36ed"
+	testOtherChanges = "sha256:c511b92b6eb5abcd146f928c8826f7a4abe73dd852267876eae938f9755dfe5d"
 )
 
 func at(utc string) Time {
@@ -58,7 +63,7 @@ func configChain() []*Record {
 	detected.Actor, detected.Action, detected.Outcome, detected.ReasonCode = node, ActionConfigChangeDetected, OutcomeInfo, ReasonApprovedChange
 	detected.Target, detected.CorrelationID = &Target{AssetID: testAsset}, "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
 	detected.Config = &Config{BaselineDigest: testBaseline, SnapshotDigest: testSnapshot, DifferenceDigest: testDifference,
-		ReadSeq: 11, UnchangedAt: "2026-10-26T14:00:00Z", UnchangedReadSeq: 6, ApprovalSeq: 10}
+		ChangesDigest: testChanges, ReadSeq: 11, UnchangedAt: "2026-10-26T14:00:00Z", UnchangedReadSeq: 6, ApprovalSeq: 10}
 
 	return []*Record{&accept, &approved, &read, &detected}
 }
