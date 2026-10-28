@@ -31,17 +31,19 @@ func TestRunStartsAndStops(t *testing.T) {
 	}()
 	var st StatusFile
 	var err error
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	began := time.Now()
+	for deadline := began.Add(5 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if st, err = ReadStatus(StatusPath(c)); err == nil && st.Collecting {
 			break
 		}
 	}
+	waited := time.Since(began)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 	if err != nil || !st.Collecting || st.Node != "site-a-node1" {
-		t.Fatalf("status %+v: %v", st, err)
+		t.Fatalf("after %s the last status read was %+v, read error: %v", waited.Round(time.Millisecond), st, err)
 	}
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -81,20 +83,41 @@ func TestRunStartsWithExpiredLinks(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, c, nil) }()
-	var st StatusFile
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	// The wait is for the property, not a deadline of the test's own: a start
+	// opens four databases with a WAL sync each, which took over 30 s on a
+	// hosted Windows runner's disk (B6's #294, job 122647514280). The cap
+	// only ends a test that would otherwise hang; Run returning early ends it
+	// at once.
+	var (
+		st      StatusFile
+		last    StatusFile // the last status read, held or not, for a miss
+		lastErr error
+		runDone bool
+		runErr  error
+	)
+	began := time.Now()
+	for deadline := began.Add(5 * time.Minute); time.Now().Before(deadline) && !runDone; time.Sleep(20 * time.Millisecond) {
 		s, err := ReadStatus(StatusPath(c))
-		if err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != "" {
+		if last, lastErr = s, err; err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != "" {
 			st = s
 			break
 		}
+		select {
+		case runErr = <-done:
+			runDone = true
+		default:
+		}
 	}
+	waited := time.Since(began)
 	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if !runDone {
+		runErr = <-done
+	}
+	if runErr != nil {
+		t.Fatal(runErr)
 	}
 	if !st.Collecting || st.Targets["central"].HeldBack != "expired" || st.Listeners["lab-tls"].HeldBack != "expired" {
-		t.Fatalf("status %+v", st)
+		t.Fatalf("after %s the last status read was %+v, read error: %v", waited.Round(time.Millisecond), last, lastErr)
 	}
 	var codes []string
 	for _, a := range st.Alarms {
