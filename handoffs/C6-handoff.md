@@ -1,6 +1,6 @@
 # C6 handoff: Independent Verification and OT Safety Engineer
 
-From B6 to C6, 2026-10-28, at `main` 04bb5048. Phase 4 (items 1 and 2, issued 2026-10-27, D4-1); paused by the owner at 16:39 UTC for this checkpoint. Role 6 of `CLAUDE.md` §4 (A6), with the review rules of §5.6. Read `handoffs/HANDOFF-SUMMARY.md` first (B1 is rewriting it as the B-to-C summary in #337; until that merges, read its B-team agent map with C for B, and its standing rules apply unchanged), then this file. After cutover, write `handoffs/C6-ack.md` (your scope, first three actions, questions) as a Markdown-only PR. [B6-handoff.md](B6-handoff.md) still holds the role definition, owned paths and the "never" list unchanged; [B6-ack.md](B6-ack.md) records how B6 read them. Two statements there are superseded: the owner accepted Phase 3 on 2026-10-27 (D4-1), and the owner's PC is paused (D4-12, below). `ci.yml` now has 12 jobs (go on Linux and Windows, python, integration, and 8 integration-long legs), plus `govulncheck.yml`; the "10 jobs" in older files is stale.
+From B6 to C6, 2026-10-28, at `main` 04bb5048. Phase 4 (items 1 and 2, issued 2026-10-27, D4-1); paused by the owner at 16:39 UTC for this checkpoint and resumed at 17:11 UTC (D4-28). Role 6 of `CLAUDE.md` §4 (A6), with the review rules of §5.6. Read `handoffs/HANDOFF-SUMMARY.md` first (B1 is rewriting it as the B-to-C summary in #337; until that merges, read its B-team agent map with C for B, and its standing rules apply unchanged), then this file. After cutover, write `handoffs/C6-ack.md` (your scope, first three actions, questions) as a Markdown-only PR. [B6-handoff.md](B6-handoff.md) still holds the role definition, owned paths and the "never" list unchanged; [B6-ack.md](B6-ack.md) records how B6 read them. Two statements there are superseded: the owner accepted Phase 3 on 2026-10-27 (D4-1), and the owner's PC is paused (D4-12, below). `ci.yml` now has 12 jobs (go on Linux and Windows, python, integration, and 8 integration-long legs), plus `govulncheck.yml`; the "10 jobs" in older files is stale.
 
 ## 1. Verified state
 
@@ -26,10 +26,10 @@ Evidence classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows` (GitHub-hosted r
 | What | Where | Head | CI | Reviewers | What is left | Exact next step |
 | --- | --- | --- | --- | --- | --- | --- |
 | #336, D4-21 cases on the real store (B6's own PR) | `claude/b6-d421-cases` | 10d03fb1 | 15/15 green (12 ci.yml jobs, govulncheck, 2 full-suite legs of `a6-windows-restart-marker.yml`); main has since moved past it (now 04bb5048) | B4, B3 (not yet posted) | Reviews, then B1 merges | When reviews come in, merge `origin/main` into the branch (no force push), wait for green, and tell B1. |
-| Review of #341, C7 0.7 code (B3) | PR head | was 89fefe42 when reviewed; now 61cf141f | not checked | B6 | Review not posted. At 89fefe42: 12 of 14 mutants killed (A11, the cancel-during-SetDeadline guard, and A14, `ctx.Err()==nil` in the timeout classification, survived; A12 is equivalent). One finding: `SEL751Runner` was not a `Hoster`, so a register run the adapter does not host reached the credential read. The commit title of 61cf141f claims a fix; that is unverified. | Re-fetch the head, re-run the probes and the 14 mutants on it (see section 4), check its CI, then post the verdict. |
-| Review of #347, relay PR 2b (B5) | PR head | 55c8583b | not checked | B6 | **Supersede rule broken (lab nodes only):** `TestB6Probe347TickBeforeScan` and `TestB6Probe347StaleWants` fail. `QuarantineTick` reads the wants cached by the last `relayAdmin` scan, and no scan runs during a run (up to 310 s). | Re-fetch the head; if still 55c8583b, post the FAIL with both probes; suggest scanning admin_dir's signed files inside `checkQuarantineClear`. Off-lab refusal does not depend on the wants and holds. |
+| Review of #341, C7 0.7 code (B3) | PR head | 61cf141f | not checked by B6 | B6 | **PASS on the code, posted** (comment 6475731030, 2026-10-28): 12 of 15 mutants killed; A11 (cancel-during-`SetDeadline` guard) and A14 (a caller's cancel reported as `ErrTimeout`) survive, A12 is equivalent. The `Hoster` finding from 89fefe42 is fixed and pinned by `TestSEL751RunnerHosts`. | Before merge: confirm every CI job is green on the head; if B3 pushes again, re-run the probes and the mutants it touches. |
+| Review of #347, relay PR 2b (B5) | PR head | 55c8583b | not checked by B6 | B6 | **FAIL posted** (comment 6475680160): two probes show the supersede rule broken on lab nodes; U3 (the `(unsigned file)` suffix) and U5 (ack supersede) mutants survive. Off-lab refusal holds. | When B5 pushes: re-run both probes (in `/mnt/project-files/b6-wip/`) and the mutants (`mut347.sh` there), then post PASS or FAIL. |
 | Review of #346, C8 0.8 `config.baseline_recorded` (B3) | PR head | was 0ff42d08; now 95b91cd4 | not checked | B6 | Only read so far. B3 asks whether an event-kind acknowledgement stamped 0.8 or later must name a recorded digest. | Re-fetch the head (95b91cd4 or later). Check for a nil `Config` or `Target` dereference in the new `VerifyConfig` case; mutate the succession rule; answer B3 (draft answer in the README, written against 0ff42d08: recheck it). |
-| Review of B1's checkpoint consolidation | #337 | 77d758ff before the push | n/a | B6 | B1 pushes the summary there | Review it when B1 says it is pushed. |
+| Review of B1's checkpoint consolidation | #337 | 77d758ff accepted (comment 6475723948) | n/a | B6 | B1 pushes the summary there | Review the consolidation when B1 says it is pushed. |
 | Checkpoint notes and probes (uncommitted test probes, never to be committed) | `/mnt/project-files/b6-wip/` (`README.md`, three `zz_b6probe*` files, `mut341.sh`; `b6-checkpoint/` is the same content) | n/a | n/a | n/a | Use them, then delete them once the reviews are posted | Copy a probe into a worktree of the PR, run it, and remove it before leaving. |
 
 Stale `claude/b6-*` branches: everything in them is on `main` through squash merges (#304, #307 to #309, #316). `b6-mut-*` and `b6-restart-diag*` (#285, #286) are mutant and diagnostic branches that were never meant to merge. Ignore them all.
@@ -49,13 +49,13 @@ Windows evidence comes only from GitHub Actions. The latest Windows runs on B6 c
 
 ## 4. Next tasks, in priority order
 
-1. **NEXT ACTION: post the FAIL review on #347 (P4-A6, item 4 of the B6 handoff), then the #341 and #346 reviews.**
+1. **NEXT ACTION: review #346, C8 0.8 `config.baseline_recorded` (P4-A6, item 4 of the B6 handoff), and answer B3's question.** Then re-review #347 when B5 pushes.
    - Paths: none changed. Use PR worktrees (PR head plus current `main`) with the probes from `/mnt/project-files/b6-wip/`; remove each probe and check `git status` before leaving.
-   - Depends on: B5 (#347), B3 (#341, #346).
+   - Depends on: B3 (#346), B5 (#347).
    - Acceptance: each PR gets a PASS or FAIL comment with its mutant count, its probes and survivors explained, and the attribution footer.
    - Tests that prove it:
-     - #347: the two probe tests fail at 55c8583b and pass after B5's fix.
-     - #341: `TestB6Probe341SEL751RunnerIsAHoster` passes at the new head, and so does the profile-without-the-run probe (refused before the credential, interval untouched). Re-run the mutants at the new head with `mut341.sh` (its line numbers are for 89fefe42; re-locate each line), one at a time, with no failing probe in the package (see Gotchas).
+     - #347 (re-review): the two probe tests fail at 55c8583b and pass after B5's fix; U3 and U5 are killed.
+     - #341: done; only CI on its head remains (B1 checks it at merge).
      - #346: a mutant dropping each `VerifyConfig` succession branch is killed.
 2. **Land #336 (P4-A6, D4-21).** Get B4's and B3's reviews, merge `main` in and get CI green. Acceptance: merged with all ci.yml and govulncheck jobs green on its head.
 3. **D4-20 cases (P4-A6, D4-20)** in `tests/contract/` and `tests/integration/storeholds/`, once B5's C5 0.7 code lands. All eight cases D4-20 assigns B6: a flapping device filling the class with nothing held dropped; an approved change held; the newest read kept and older ones removed; the acknowledgement race failing closed; a persistent unapproved change holding one snapshot and difference; a crash between a snapshot and its `config.change_detected`; fault injection at the removal commit; and the cross-version case. Acceptance: each fails on a mutant and passes on B5's code.
@@ -66,7 +66,8 @@ Windows evidence comes only from GitHub Actions. The latest Windows runs on B6 c
 5. **V-M4 on the real binaries (P4-A6).** Depends on B5's feeder (#340, #343) and B4's #344. Acceptance: the V-M4 row and "R4.8 observation period and measures". A redelivered `possible-duplicate` event must not trip Repeats unless C10 says so.
 6. **C2 0.6 contract tests** in `tests/contract/` (exit gate: C2 0.6 merged "with A6's contract tests"; #331 was checked by probes only). Acceptance: B6's own cases for the `config.read_all` run shapes (ok with one record per step, or not ok with none) and `failed.config_unparsable`, each killing a mutant.
 7. **Phase 4 status table** in `docs/verification.md`, like the Phase 3 table. Each row needs an evidence class and a source.
-8. **Small items:**
+8. **#346's Windows failure in `tests/integration/syslogreceive` (`restart_test.go`, a role-6 test).** The `go (windows-latest)` job of run 40728171729 was re-running at about 17:20Z (its one re-run). If it fails again, reproduce against `main` on hosted Windows and classify it under D4-5 and F-016; never call it a flake.
+9. **Small items:**
    - `a6-windows-restart-marker.yml` line 42 still says "ci.yml's 12m" (D4-22 made it 20m; fix it the next time the file is touched);
    - an assert in `test_slice_unknown_restart_e2e.py` that `_rows(s) == AHEAD`;
    - the #310 retention follow-up (a flapping device filling the class) under D4-20;
@@ -122,11 +123,11 @@ Failed approaches this generation:
 - Step 1 (ack): done, `handoffs/B6-ack.md`.
 - Step 2, the carried checks: all four are done and merged (#242 and #261 canary; #263 and #266 Windows slice and ACLs; #270 DMY and YMD). §7 gaps: no independent review record is linked here; the review records are on the PRs.
 - Step 3, Phase 4 items: done for the simulator `SHO` forms (#248), GT-INJ (#251, #288), and the contract tests for C9, C10, C5 0.4, C7 0.6 and C8 0.5. Not covered: a separate C2 0.6 contract-test PR. C2 0.6 was checked by probes in the #331 review only. **Not started:** the V-M2, V-M3 and V-M4 acceptance tests on the real binaries.
-- Step 4 (review every Phase 4 PR): done continuously; each verdict, with its mutant count, is a comment on its PR. The Phase status table was not kept, which is task 6 above.
+- Step 4 (review every Phase 4 PR): done continuously; each verdict, with its mutant count, is a comment on its PR. The Phase status table was not kept, which is task 7 above.
 - Step 5 (Go 1.27.3): done (#239, #245).
 - Regressions: none at this checkpoint. #271 needed a fix after a Windows failure (timed flood), not a retry. The `TestKeyRegisterForwardsAndRecords` Windows failure (1 in 18) is still unclassified (B5).
 - Repeated work: none found.
-- Review debt: #341 (asked 2026-10-28), #346 and #347 are under a day old. #336 has had no review for about 2 hours.
+- Review debt: #346 (asked 2026-10-28) is under a day old. #336 has had no review for about 2.5 hours.
 - Scope: all B6 commits stay in owned paths. Probes and mutants in product code were never committed.
 - Nothing has been untouched for two generations, so nothing is STALLED.
 
