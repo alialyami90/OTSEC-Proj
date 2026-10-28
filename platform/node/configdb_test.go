@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,62 @@ func TestConfigQuotaBelowTheRecordCap(t *testing.T) {
 		_, err := ParseConfig(nc.Bytes())
 		if ok != (err == nil) || (!ok && !strings.Contains(err.Error(), "store.quotas.configuration")) {
 			t.Errorf("quota %d: %v", n, err)
+		}
+	}
+}
+
+// D4-20 rule 5: a node that reads an asset's configuration refuses a
+// configuration quota below 16 records at the cap for each such asset, and
+// the error names the quota needed and the number of assets. Assets that
+// only send Syslog or SER events need no configuration room, and a quota with
+// no configuration collection loads: a C10 baseline is stored for such an
+// asset too.
+func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
+	const secondID = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
+	add := func(nc *nodeconfigtest.Config, asset string) {
+		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg-" + asset, AssetID: asset, Endpoint: "port1-telnet",
+			Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600})
+	}
+	floor := ConfigQuotaFloorRecords * ConfigRecordBytes
+	for _, c := range []struct {
+		name  string
+		reads int
+		quota int64
+		ok    bool
+	}{
+		{"one asset at the floor", 1, floor, true},
+		{"one asset a byte below", 1, floor - 1, false},
+		{"two assets need two floors", 2, floor, false},
+		{"two assets at two floors", 2, 2 * floor, true},
+		{"no configuration collection", 0, ConfigRecordBytes, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
+				nc.AddSEL751(secondID, "", 2324, 300)
+				nc.Store.Quotas["configuration"] = c.quota
+				for i := 0; i < c.reads; i++ {
+					add(nc, []string{relayID, secondID}[i])
+				}
+			})
+			cfg, err := ParseConfig(nc.Bytes())
+			if c.ok != (err == nil) {
+				t.Fatalf("quota %d for %d assets: %v", c.quota, c.reads, err)
+			}
+			if err != nil {
+				for _, want := range []string{"store.quotas.configuration", fmt.Sprint(int64(c.reads) * floor), fmt.Sprintf("%d assets", c.reads)} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %q", err, want)
+					}
+				}
+			} else if cfg.ConfigAssets() != c.reads {
+				t.Errorf("%d assets counted, want %d", cfg.ConfigAssets(), c.reads)
+			}
+		})
+	}
+	for op, want := range map[string]bool{"sel.config.read_all": true, "sel.config.read": true, "sel.ser.read_all": false,
+		"sel.config.write": false, "config.read_all": false, "sel.breaker.config.read_all": false, "sel.ser.config": false} {
+		if got := ConfigReadOperation(op); got != want {
+			t.Errorf("ConfigReadOperation(%q) = %v, want %v", op, got, want)
 		}
 	}
 }

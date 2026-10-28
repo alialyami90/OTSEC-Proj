@@ -66,6 +66,32 @@ func ConfigStream(assetID string) c5.StreamID { return c5.StreamID("config/" + a
 // to quarantine, so no partial snapshot is ever stored (C9).
 const ConfigRecordBytes int64 = 1536 << 10
 
+// ConfigQuotaFloorRecords (D4-20 rule 5) is how many full-size records the
+// configuration quota must hold for each asset whose configuration the node
+// reads: the baseline, the two newest reads that showed no difference, one
+// read in flight, and room for 12 held differences before the class stops.
+const ConfigQuotaFloorRecords = 16
+
+// ConfigReadOperation reports whether a register operation ID reads an
+// asset's configuration: the second segment is "config" and the last starts
+// with "read", as in sel.config.read_all (B2's C9 brief, register revision
+// 5). A schedule entry with such an operation is configuration collection.
+func ConfigReadOperation(op string) bool {
+	parts := strings.Split(op, ".")
+	return len(parts) >= 3 && parts[1] == "config" && strings.HasPrefix(parts[len(parts)-1], "read")
+}
+
+// ConfigAssets counts the assets whose configuration the schedule reads.
+func (c *Config) ConfigAssets() int {
+	seen := map[string]bool{}
+	for _, s := range c.Schedule {
+		if ConfigReadOperation(s.Operation) {
+			seen[s.AssetID] = true
+		}
+	}
+	return len(seen)
+}
+
 // Layout derives the node's C5 layout from the configuration: one SER
 // stream per asset with a scheduled collection, one stream per listener,
 // the health stream and the audit stream, each database with a quota for
@@ -128,6 +154,10 @@ func (c *Config) Layout() (c5.Layout, error) {
 			if class == c5.ClassConfiguration {
 				if bytes < ConfigRecordBytes {
 					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the record cap, %d bytes: it must hold at least one snapshot with its transcript", bytes, ConfigRecordBytes)
+				}
+				if n := int64(c.ConfigAssets()); n > 0 && bytes < n*ConfigQuotaFloorRecords*ConfigRecordBytes {
+					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the floor for configuration collection: %d bytes, %d x the record cap for each of the %d assets the schedule reads (D4-20)",
+						bytes, n*ConfigQuotaFloorRecords*ConfigRecordBytes, ConfigQuotaFloorRecords, n)
 				}
 				q.MaxRecordBytes = ConfigRecordBytes
 			}
