@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/netip"
@@ -193,17 +194,24 @@ func newEventFeed(c *Config, reader func(c5.StreamID) streamReader, now func() t
 
 // Step reads what the streams hold, up to FeedBatch records each, and
 // passes each asset's events up to its watermark.
+//
+// A record the feeder cannot take (its event or its alignment state does
+// not decode) stops its stream there and fails closed: the stream does not
+// move past it and its bound does not rise, so the assets that read it are
+// held, every Step returns the error, and nothing is discarded. The other
+// streams, and the assets that do not read the stream, go on.
 func (f *eventFeed) Step(ctx context.Context) error {
 	now := f.now()
+	var errs []error
 	for _, s := range f.streams {
 		if err := f.read(ctx, s, now); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(f.assets)) {
 		f.pass(f.assets[id])
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (f *eventFeed) read(ctx context.Context, s *feedStream, now time.Time) error {
@@ -216,10 +224,8 @@ func (f *eventFeed) read(ctx context.Context, s *feedStream, now time.Time) erro
 		return fmt.Errorf("stream %s: %w", s.id, err)
 	}
 	for _, rec := range recs {
-		if rec.Key.Seq > s.after+1 {
-			s.Skipped += int64(rec.Key.Seq - s.after - 1)
-		}
-		s.after = rec.Key.Seq
+		// The position moves only once the record is taken; take changes
+		// nothing when it fails.
 		var ev event.Event
 		if err := json.Unmarshal(rec.Event, &ev); err != nil {
 			return fmt.Errorf("stream %s seq %d: %w", s.id, rec.Key.Seq, err)
@@ -231,6 +237,10 @@ func (f *eventFeed) read(ctx context.Context, s *feedStream, now time.Time) erro
 		if err := f.take(s, rec, &ev, at); err != nil {
 			return fmt.Errorf("stream %s seq %d: %w", s.id, rec.Key.Seq, err)
 		}
+		if rec.Key.Seq > s.after+1 {
+			s.Skipped += int64(rec.Key.Seq - s.after - 1)
+		}
+		s.after = rec.Key.Seq
 	}
 	if len(recs) < f.batch {
 		s.bound = now.Add(-FeedLateness)
@@ -259,14 +269,22 @@ func (f *eventFeed) take(s *feedStream, rec c5.Stored, ev *event.Event, at time.
 		a.pending = append(a.pending, it)
 		return nil
 	}
-	if n := len(a.open); n > 0 && !sameRead(a.open[n-1], it) {
-		if err := closeRead(a, nil); err != nil {
-			return err
+	// Decode the read's state before anything changes, so a row that fails
+	// here is taken whole when it is read again.
+	var keys []string
+	if rec.SourceCursor != nil {
+		var err error
+		if keys, err = normalize.DecodeState(rec.SourceCursor); err != nil {
+			return fmt.Errorf("alignment state: %w", err)
 		}
+	}
+	if n := len(a.open); n > 0 && !sameRead(a.open[n-1], it) {
+		closeRead(a)
 	}
 	a.open = append(a.open, it)
 	if rec.SourceCursor != nil {
-		return closeRead(a, rec.SourceCursor)
+		closeRead(a)
+		a.prev = keys
 	}
 	return nil
 }
@@ -283,9 +301,10 @@ func sameRead(x, y feedItem) bool {
 	return ix == iy && x.at.Equal(y.at)
 }
 
-// closeRead marks the open read's rows and moves them to pending. state is
-// the read's alignment state, nil if its last row was not seen with it.
-func closeRead(a *feedAsset, state []byte) error {
+// closeRead marks the open read's rows against the previous read's state
+// and moves them to pending. The caller keeps the read's own state, when
+// its last row carried it.
+func closeRead(a *feedAsset) {
 	evs := make([]*event.Event, len(a.open))
 	for i, it := range a.open {
 		evs[i] = it.ev
@@ -294,16 +313,8 @@ func closeRead(a *feedAsset, state []byte) error {
 	for i := range a.open {
 		a.open[i].notCounted = !counts[i]
 	}
-	if state != nil {
-		keys, err := normalize.DecodeState(state)
-		if err != nil {
-			return fmt.Errorf("alignment state: %w", err)
-		}
-		a.prev = keys
-	}
 	a.pending = append(a.pending, a.open...)
 	a.open = nil
-	return nil
 }
 
 // takeHealth keeps the collection outcomes of the observed assets' SER

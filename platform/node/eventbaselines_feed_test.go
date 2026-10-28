@@ -468,3 +468,147 @@ func TestFeedReadsAreComparedApart(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// Which collection outcomes open a gap and which close one. A wrong entry
+// makes a read type-only that should be learned in full, or the reverse.
+func TestFeedOutcomeTable(t *testing.T) {
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	for _, c := range []struct {
+		typ, status string
+		opens       bool // the outcome alone opens a gap
+		closes      bool // it closes a gap a failed run opened
+	}{
+		{HealthCollectionRun, "ok", false, true},
+		{HealthCollectionRun, "partial", false, true},
+		{HealthCollectionRun, "failed", true, false},
+		{HealthCollectionRun, "refused", true, false},
+		{HealthCollectionRefused, "", true, false},
+		{HealthCollectionNoDecision, "", true, false},
+		{HealthCollectionOutcomeUnknown, "", true, false},
+		{HealthCollectionQuarantined, "", true, false},
+		{"node.started", "", false, false},
+	} {
+		t.Run(strings.TrimSpace(c.typ+" "+c.status), func(t *testing.T) {
+			reason := c.typ
+			if c.typ == HealthCollectionRun {
+				reason += " " + c.status
+			}
+			for _, afterFail := range []bool{false, true} {
+				r := newFeedRig(t)
+				if afterFail {
+					r.st.add(t, HealthStream, sec(30), runHealth(relayID, HealthCollectionRun, "failed", sec(30)), nil)
+				}
+				r.st.add(t, HealthStream, sec(60), runHealth(relayID, c.typ, c.status, sec(60)), nil)
+				r.st.add(t, SERStream(relayID), sec(120), feedSER(relayID, "inv2", sec(120), k("a"), event.AlignFirstRead), state(t, k("a")))
+				r.step(t, sec(200).Add(FeedLateness))
+				var gap string
+				af := false
+				switch {
+				case !afterFail && c.opens:
+					gap, af = "2026-10-28T10:01:00Z 2026-10-28T10:02:00Z "+reason, true
+				case afterFail && c.closes:
+					gap = "2026-10-28T10:00:30Z 2026-10-28T10:01:00Z collection.run failed"
+				case afterFail:
+					gap, af = "2026-10-28T10:00:30Z 2026-10-28T10:02:00Z collection.run failed", true
+				}
+				var want []string
+				if gap != "" {
+					want = append(want, "gap "+relayID+" "+gap)
+				}
+				want = append(want, fmt.Sprintf("obs %s ser 2026-10-28T10:02:00.000000Z af=%v nc=false", relayID, af))
+				var got []string
+				for _, l := range r.log.lines {
+					if !strings.HasPrefix(l, "tick ") {
+						got = append(got, l)
+					}
+				}
+				if !slices.Equal(got, want) {
+					t.Fatalf("after a failure %v: got\n%s\nwant\n%s", afterFail, strings.Join(got, "\n"), strings.Join(want, "\n"))
+				}
+			}
+		})
+	}
+}
+
+// An event received exactly at the watermark already passed is late.
+func TestFeedEventAtTheWatermarkIsLate(t *testing.T) {
+	r := newFeedRig(t)
+	r.step(t, feedT0.Add(FeedLateness))
+	r.st.add(t, ListenerStream(feedListener), feedT0.Add(FeedLateness), syslogMsg(relayID, feedT0), nil)
+	r.st.add(t, ListenerStream(feedListener), feedT0.Add(FeedLateness), syslogMsg(relayID, feedT0.Add(time.Microsecond)), nil)
+	r.step(t, feedT0.Add(2*FeedLateness))
+	if a := r.f.assets[relayID]; a.Late != 1 || len(r.log.observed()) != 1 {
+		t.Fatalf("late %d, passed %v", a.Late, r.log.observed())
+	}
+}
+
+// A record whose event does not decode stops its stream there: every step
+// says so, the asset is held, and nothing after it is lost. Once the record
+// reads, the stream goes on from it.
+func TestFeedUndecodableEventStopsItsStream(t *testing.T) {
+	r := newFeedRig(t)
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	l := ListenerStream(feedListener)
+	r.st.add(t, l, sec(1), syslogMsg(relayID, sec(1)), nil)
+	r.st.add(t, l, sec(2), syslogMsg(relayID, sec(2)), nil)
+	r.st.add(t, l, sec(3), syslogMsg(relayID, sec(3)), nil)
+	good := r.st.recs[l][1].Event
+	r.st.recs[l][1].Event = []byte("not json")
+	r.st.add(t, SERStream(relayID), sec(2), feedSER(relayID, "inv1", sec(2), k("a"), event.AlignFirstRead), state(t, k("a")))
+	for i := range 3 {
+		r.now = sec(100 * (i + 1)).Add(FeedLateness)
+		err := r.f.Step(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "seq 2") {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	if got := r.log.lines; len(got) != 0 {
+		t.Fatalf("the asset was not held: %v", got)
+	}
+	r.st.recs[l][1].Event = good
+	r.step(t, sec(400).Add(FeedLateness))
+	var skipped int64
+	for _, s := range r.f.streams {
+		skipped += s.Skipped
+	}
+	if got := r.log.observed(); len(got) != 4 || r.f.assets[relayID].Late != 0 || skipped != 0 {
+		t.Fatalf("passed %v, late %d, skipped %d", got, r.f.assets[relayID].Late, skipped)
+	}
+}
+
+// A SER row whose alignment state does not decode stops the stream before
+// it changes anything, so the read is taken once, whole, when it reads.
+func TestFeedUndecodableStateStopsItsStream(t *testing.T) {
+	r := newFeedRig(t)
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	ser := SERStream(relayID)
+	r.st.add(t, ser, sec(1), feedSER(relayID, "inv1", sec(1), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.st.add(t, ser, sec(60), feedSER(relayID, "inv2", sec(60), k("a"), event.AlignPossibleDuplicate), nil)
+	r.st.add(t, ser, sec(60), feedSER(relayID, "inv2", sec(60), k("b"), event.AlignOK), []byte("garbage"))
+	r.st.add(t, ListenerStream(feedListener), sec(90), syslogMsg(relayID, sec(90)), nil)
+	for range 2 {
+		r.now = sec(200).Add(FeedLateness)
+		if err := r.f.Step(context.Background()); err == nil || !strings.Contains(err.Error(), "alignment state") {
+			t.Fatalf("step: %v", err)
+		}
+	}
+	if a := r.f.assets[relayID]; len(a.open) != 1 || len(r.log.lines) != 0 {
+		t.Fatalf("open %d rows, passed %v", len(a.open), r.log.lines)
+	}
+	// The other streams are still read.
+	if s := r.f.streams[len(r.f.streams)-1]; s.id != ListenerStream(feedListener) || s.after != 1 {
+		t.Fatalf("stream %s at %d", s.id, s.after)
+	}
+	r.st.recs[ser][2].SourceCursor = state(t, k("a"), k("a"), k("b"))
+	r.step(t, sec(300).Add(FeedLateness))
+	got := r.log.observed()
+	want := []string{
+		"obs " + relayID + " ser 2026-10-28T10:00:01.000000Z af=false nc=false",
+		"obs " + relayID + " ser 2026-10-28T10:01:00.000000Z af=false nc=true",
+		"obs " + relayID + " ser 2026-10-28T10:01:00.000000Z af=false nc=false",
+		"obs " + relayID + " syslog 2026-10-28T10:01:30.000000Z af=false nc=false",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
