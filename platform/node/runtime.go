@@ -112,7 +112,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 
 func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
 	dbID := spec.ID
-	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now,
+	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments,
 		Alarms: func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) }}
 	env, err := store.NewEnv(opt)
 	if err != nil {
@@ -172,17 +172,15 @@ func (r *Runtime) adopt(d *database) error {
 	if !ok {
 		return fmt.Errorf("database %s: store is %T", d.spec.ID, d.report.Store)
 	}
-	classes := map[c5.StreamID]c5.StreamClass{}
 	last := map[c5.StreamID]c5.Seq{}
 	for _, s := range d.spec.Streams {
-		classes[s.ID] = s.Class
 		n, err := db.LastCommitted(context.Background(), s.ID)
 		if err != nil {
 			return fmt.Errorf("database %s: %w", d.spec.ID, err)
 		}
 		last[s.ID] = n
 	}
-	l, err := c5.NewLog(db, r.cfg.NodeID, classes, groupFor(d.spec, r.opt.Group), last)
+	l, err := c5.NewLogFor(db, r.cfg.NodeID, d.spec, groupFor(d.spec, r.opt.Group), last)
 	if err != nil {
 		return err
 	}
