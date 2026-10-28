@@ -148,10 +148,36 @@ func (g *rig) floodUntil(end time.Time, mark string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	g.t.Fatalf("marker %q not stored: %s", mark, g.why(mark))
+}
+
+// why is a diagnostic for a marker not found: the listener's counts, the
+// commit caps it has learnt, whether the Log has stopped and Serve has
+// returned, and how many stored events hold the marker read both ways
+// (hasMarker's text search, and the decoded native bytes).
+func (g *rig) why(mark string) string {
 	st := g.r.Status()
 	b, n := g.r.CommitCaps()
-	g.t.Fatalf("marker %q not stored: received %d, stored %d, dropped %v, held %v, last error %q, caps %d bytes %d records",
-		mark, st.Received, st.Stored, st.Dropped, st.Held, st.LastErr, b, n)
+	served := "running"
+	select {
+	case err := <-g.done:
+		served = fmt.Sprintf("returned (%v)", err)
+		g.done <- err
+	default:
+	}
+	var text, native int
+	ev := g.events()
+	for _, s := range ev {
+		if strings.Contains(string(s.Raw), mark[len("<13>"):]) {
+			text++
+		}
+		if string(s.Bytes) == mark {
+			native++
+		}
+	}
+	return fmt.Sprintf("received %d, stored %d, dropped %v, held %v, last error %q; caps %d bytes %d records; log stopped %v; Serve %s; "+
+		"%d events on the stream, %d holding the marker's text, %d whose native bytes are the marker",
+		st.Received, st.Stored, st.Dropped, st.Held, st.LastErr, b, n, g.log.Stopped(), served, len(ev), text, native)
 }
 
 // hasMarker reports whether a stored event holds mark, without reading and
