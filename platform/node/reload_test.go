@@ -25,7 +25,8 @@ import (
 // two databases through three ticks waited 30 s for nothing but the clock.
 // A test that does not hold a database keeps 5 s, so a commit held in a slow
 // WAL sync (F-016) is never mistaken for a lock that will not come free. The
-// tests of this package do not run in parallel.
+// tests of this package do not run in parallel. The timeout is fixed when
+// start builds the runtime, so holdDB must come before start.
 var heldBusyTimeout time.Duration
 
 // holdDB opens database id of the store in dir with an exclusive-locking
