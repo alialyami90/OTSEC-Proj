@@ -549,3 +549,16 @@ Date: 2026-10-28. C1, on C4's ack question 1 (#357, comment 6476181758).
   - C6 has classified `TestUnknownSpentAcrossRestarts/seed_1`, which failed once on hosted Windows, on #346's head `95b91cd`, with a UDP marker reported lost without a count, and passed on the re-run. C6's first reading of the log: the counts reconcile (180 = 74 stored + 106 dropped) and the marker is in the store, so the test's loss detector may have raised a false alarm. C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
   - The row names D4-21's pass criterion as a gate before the first `device-observed` listener, with #336 as its evidence (C6, comment 6476212811 on #352).
 - **Cutover.** All six acks are on `main`: C1 #355, C2 #360, C3 #361, C4 #357, C5 #358 and C6 #356. Each question is answered on its PR. The C team holds the six roles from here, and the B threads can be resolved.
+
+## D4-32: the event-baseline checkpoint in the configuration class, and its remover rule (#340, slice 1c)
+
+Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 6476619232).
+
+1. **A C5 minor, folded into C5 0.7.** The configuration class holds C9 snapshots and differences and C10 baselines (`contracts/store/class.go:32`, `commit.go:50`). Retention is decided by class, and D4-20's remover refuses any record of another class. So adding the node's checkpoint document, `otsec.eventcheckpoint/0.1`, changes what the class means, even though no wire field changes. C5 0.7, which already carries D4-20 rules 1 and 2, adds three things: the class text names the checkpoint as a node document of the class; the validator tells the three kinds apart; and the remover rule in item 2. Reviewers: C2 and C4 as consumers, C6's contract tests, and C3 for the retention rule.
+2. **Superseded checkpoints are removable (a D4-20 amendment).** A checkpoint is working state, not evidence.
+   - **When it may be removed.** A checkpoint of one half and asset may be removed once three things hold: a newer checkpoint of the same half and asset has committed; the `node-eventbaseline` cursor has been saved after that commit; and the newer one is the checkpoint the node would restore. After the cursor moves, the older checkpoint's restart point may already be pruned, so the older checkpoint cannot serve as a fallback.
+   - **What is kept.** The newest checkpoint of each half and asset is always kept. The remover refuses it, any C9 or C10 record, and any held record.
+   - **How removal runs.** Removal runs in bounded steps with the `Discarder` pattern of rule 3, and each removal is counted in node status and a platform health event.
+   - **No C8 record.** A checkpoint is not in the audit chain, so its removal needs no C8 record. C3 confirms this in review.
+   - **When the newest checkpoint does not restore.** The alarm and the audited re-learn of D4-26 stand. The node never falls back to an older checkpoint.
+3. **Where D4-30 stands.** C4's option (a) is approved in direction (#364, comment 6476462128), with C5's layout of one self-contained record per half and a floor of about 8 MiB per asset. Six conditions apply. The C10 0.2 ceilings and the measured maximal-case figures are recorded when that PR merges.
