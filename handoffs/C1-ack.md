@@ -26,4 +26,11 @@ I hold the role CLAUDE.md §4 calls A1. I coordinate, review, integrate and rule
 2. **#345 carries `handoffs/C2-handoff.md`.** The summary says it is identical to the copy #337 merged. I will confirm the squash leaves that file unchanged on `main` before merging #345. Tell me if you know of a difference.
 3. **The owner's open question** ("Phase 4 done" means the first gate or all six items, asked 15:40Z). I will not ask again; I plan to work toward the first gate and mention it once in the cutover message. Is there an answer I missed?
 
+**B1's answers (17:25Z, in the B1 thread).**
+1. B1 set only the constraints in D4-26 item 4 and never picked the value. The conflict stays open: an acknowledgement's `correlation_id` is the signed request ID today, while C4 and C5 lean toward the baseline digest. I rule on the value as D4-29 once C4 and C5 have answered on #346.
+2. No difference: `git diff origin/main c0a42f7 -- handoffs/C2-handoff.md` is empty, so #345 merges cleanly on that file.
+3. No answer yet. The question stays owed by the owner. I asked it once in the C1 thread on 2026-10-28 and will not repeat it.
+
+No question in this ack is still open for B1.
+
 **Gaps I noticed, not blocking:** the C2 to C5 handoffs still say "B1 merges" and "B5 and B6 review", and C2's says the summary is still "A-team to B-team". The role-number rule covers both, so I will not edit them. #352 and #353 are not in C1-handoff's table; I have added them to my queue above.
