@@ -111,6 +111,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		r.dbs = append(r.dbs, d)
 	}
 	r.recordStart(ctx)
+	r.reconcileHolds(ctx)
 	opt.Status.Write(string(cfg.NodeID))
 	return r, nil
 }

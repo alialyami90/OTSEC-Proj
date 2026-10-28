@@ -88,13 +88,11 @@ The node runs `CheckAgainst` on every snapshot, as it runs C2's `CheckLines` on 
 
   A held difference holds both of its snapshots, and a held record keeps its capture. The node releases a hold only after the C8 record that ends it has committed.
 - **The record cap** (transcript plus snapshot) is `Quota.MaxRecordBytes`, a parameter.
-  - **Default: 1 MiB, provisional** (B1 on #247). B5 measured the golden snapshot, encoded compact, at 11,715 bytes for a 6,397-byte transcript: about 5.3 KB fixed plus 34.5 bytes per setting. So a fully configured relay can pass 512 KiB.
+  - **Default: 1.5 MiB** (B1, D4-13; it replaces the provisional 1 MiB of #247). It is a derived bound: `2 × T + 363,442` with T = 512 KiB, the run's `max_total_bytes`, and `contracts/config/bound_test.go` fails if a change raises it over the cap. B5 measured the golden snapshot, encoded compact, at 11,715 bytes for a 6,397-byte transcript: about 5.3 KB fixed plus 34.5 bytes per setting. So a fully configured relay can pass 512 KiB.
   - A read over the cap fails into quarantine, with its bytes kept.
   - The C2 session ceiling `MaxResponseBytes` (1 MiB received) bounds the transcript the same way.
 - **The recovery reserve is per database:** `RecoveryReserveBytes ≥ 2 × WALBoundBytes + W(C)`, with `W(C) = 1.1 × C + 64 KiB`. B5 and B6 measured the WAL as a fixed 21 to 34 KB plus about 1.0 times the payload, on two engines. For the configuration database, C is `MaxRecordBytes`. The figure is `desk` until B6's storekill leg exists (D4-9).
-- **The size is an estimate, not yet a count.** A full 24-form read is estimated at 5,000 to 8,000 printed settings, about 150 to 250 KB of transcript, and a compact snapshot of similar size.
-  - Register revision 5 will state a counted byte cap for each `SHO` line, from S22's settings sheets.
-  - The record cap and the reserve then follow from that sum.
+- **The size is counted, not estimated** (register revision 5, D4-13). S22's settings sheets list 8,734 names in the 24 forms, and each `SHO` line has a counted reply cap (`docs/phase4/B2-register-rev5.md`). The structural worst case is 2.1 MB, over C2's 1 MiB ceiling, so the run holds a total cap T = 512 KiB and a relay beyond it fails the read closed. The value-length assumptions (64 and 384 bytes) are `documented-untested`. Touchscreen settings (175, in the files `SET_HMI.zds` and `CDP.zds`) are in no `SHO` form and are not read.
 
 ## Against P4-A2's acceptance tests
 
