@@ -237,10 +237,10 @@ func TestLowerLogCapIsLearnt(t *testing.T) {
 	g.wait("all read", func() bool { return g.r.Status().Received == int64(len(sent)) })
 	close(tap.gate)
 	g.wait("all stored", func() bool { return g.store.count() == len(sent) })
-	// The cap is halved until a part fits, so it ends below the default,
-	// and never below the smallest cap a Log can have.
-	if cap := g.r.commitAt.Load(); cap >= store.DefaultMaxCommitBytes || cap < store.MinRecordBytes {
-		t.Errorf("cap %d after learning from a Log that takes %d", cap, logCap)
+	// The record cap is halved until a part fits the Log's byte cap, so it
+	// ends below the default; the byte cap itself is never lowered.
+	if bytes, n := g.r.CommitCaps(); n >= store.DefaultGroup.MaxEvents || n < 1 || bytes != store.DefaultMaxCommitBytes {
+		t.Errorf("caps %d bytes, %d records after learning from a Log that takes %d bytes", bytes, n, logCap)
 	}
 	if st := g.r.Status(); st.Dropped[DropStore] != 0 || !strings.Contains(st.LastErr, string(store.CodeRecordTooLarge)) {
 		t.Errorf("dropped %d, last error %q: the refusal that taught the cap must show", st.Dropped[DropStore], st.LastErr)
@@ -276,34 +276,28 @@ func TestLowerRecordCapOnlyLowersRecords(t *testing.T) {
 	}
 }
 
-// TestLowerCapsFloors: the byte cap is halved from the refused part but never
-// below store.MinRecordBytes, a part of at most that many bytes lowers only
-// the record cap, and the record cap never falls below one.
-func TestLowerCapsFloors(t *testing.T) {
+// TestLowerCapsOnlyRecords: a refusal halves the record cap from the refused
+// part, never below one, and never touches the byte cap, which therefore never
+// falls below store.MinRecordBytes whatever the part's bytes.
+func TestLowerCapsOnlyRecords(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		sizes         []int
-		bytes         int64 // want
-		records       int64 // want
-		start, startN int64
+		name  string
+		sizes []int
+		start int64
+		want  int64
 	}{
-		{"large part halves bytes", []int{300 << 10, 300 << 10}, 300 << 10, 100, store.DefaultMaxCommitBytes, 100},
-		{"halving stops at the floor", []int{50 << 10, 50 << 10}, store.MinRecordBytes, 2, store.DefaultMaxCommitBytes, 2},
-		{"a record cap of two goes to one", []int{20 << 10, 20 << 10}, store.DefaultMaxCommitBytes, 1, store.DefaultMaxCommitBytes, 2},
-		{"just over the floor", []int{store.MinRecordBytes/2 + 1, store.MinRecordBytes/2 + 1}, store.MinRecordBytes, 100, store.DefaultMaxCommitBytes, 100},
-		{"exactly the floor lowers records", []int{store.MinRecordBytes / 2, store.MinRecordBytes / 2}, store.DefaultMaxCommitBytes, 1, store.DefaultMaxCommitBytes, 2},
-		{"small part lowers records only", []int{10, 10, 10, 10, 10}, store.DefaultMaxCommitBytes, 2, store.DefaultMaxCommitBytes, 100},
+		{"halves the part", []int{10, 10, 10, 10, 10}, 100, 2},
+		{"large part, same", []int{300 << 10, 300 << 10}, 100, 1},
+		{"just over the floor", []int{store.MinRecordBytes/2 + 1, store.MinRecordBytes/2 + 1}, 100, 1},
+		{"never below one", []int{10, 10}, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &Receiver{}
-			r.commitAt.Store(tc.start)
-			r.commitN.Store(tc.startN)
+			r.commitAt.Store(store.DefaultMaxCommitBytes)
+			r.commitN.Store(tc.start)
 			r.lowerCaps(recsOf(tc.sizes...))
-			if bytes, records := r.CommitCaps(); bytes != tc.bytes || int64(records) != tc.records {
-				t.Errorf("caps %d bytes, %d records; want %d, %d", bytes, records, tc.bytes, tc.records)
-			}
-			if bytes, _ := r.CommitCaps(); bytes < store.MinRecordBytes {
-				t.Errorf("byte cap %d is below the smallest a Log can have", bytes)
+			if bytes, records := r.CommitCaps(); bytes != store.DefaultMaxCommitBytes || int64(records) != tc.want {
+				t.Errorf("caps %d bytes, %d records; want %d, %d", bytes, records, store.DefaultMaxCommitBytes, tc.want)
 			}
 		})
 	}
@@ -481,9 +475,9 @@ func TestCommitCapsAreReported(t *testing.T) {
 	g.wait("all read", func() bool { return g.r.Status().Received == int64(len(sent)) })
 	close(tap.gate)
 	g.wait("all stored", func() bool { return g.store.count() == len(sent) })
-	// The refused parts were far over the Log's byte cap, so only the byte
-	// cap fell.
-	if b, n := g.r.CommitCaps(); b >= store.DefaultMaxCommitBytes || n != store.DefaultGroup.MaxEvents {
+	// A Log with a lower byte cap is met by fewer records: only the record
+	// cap falls.
+	if b, n := g.r.CommitCaps(); b != store.DefaultMaxCommitBytes || n >= store.DefaultGroup.MaxEvents {
 		t.Errorf("after a refusal: %d bytes, %d records", b, n)
 	}
 }

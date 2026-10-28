@@ -9,7 +9,8 @@ import (
 
 // CommitCaps returns the most bytes and the most records the receiver puts
 // in one part now: Config.MaxCommitBytes and MaxCommitRecords, or their
-// defaults, lowered if the Log has refused a larger part (see commitParts).
+// defaults; the record cap is lowered if the Log has refused a larger part
+// (see commitParts).
 func (r *Receiver) CommitCaps() (bytes int64, records int) {
 	return r.commitAt.Load(), int(r.commitN.Load())
 }
@@ -34,25 +35,16 @@ func (r *Receiver) partEnd(recs []store.Record, lo int) int {
 	return hi
 }
 
-func partBytes(recs []store.Record) int64 {
-	var n int64
-	for _, rec := range recs {
-		n += int64(len(rec.Event))
-	}
-	return n
-}
-
-// lowerCaps lowers the cap that a refused part of several records exceeded,
-// by half. The Log's byte cap is never below store.MinRecordBytes, so a part
-// of at most that many bytes can only have exceeded the record cap, and the
-// byte cap is left alone; a larger part may have exceeded either, and its
-// bytes are halved, never below store.MinRecordBytes. The caps only fall, and
-// each call makes the next part smaller, so the loop in commitParts ends.
+// lowerCaps halves the record cap from the size of a refused part of several
+// records, never below one. The refusal does not say which of the Log's caps
+// the part exceeded, and a part's bytes are not a safe guide: an event is the
+// whole JSON envelope, so a part of a few records can pass 64 KiB and still be
+// within the Log's byte cap. Records are the one measure that fits both:
+// any byte cap is met by few enough records, so lowering only the record cap
+// ends, at worst, at one record, and the byte cap is never lowered at all (so
+// it never falls below store.MinRecordBytes). The cap only falls, and each
+// call makes the next part smaller, so the loop in commitParts ends.
 func (r *Receiver) lowerCaps(part []store.Record) {
-	if b := partBytes(part); b > store.MinRecordBytes {
-		r.commitAt.Store(max(b/2, store.MinRecordBytes))
-		return
-	}
 	r.commitN.Store(int64(max(len(part)/2, 1)))
 }
 
@@ -73,8 +65,8 @@ func (r *Receiver) lowerCaps(part []store.Record) {
 //
 // A part of several records that the Log refuses as too large means one of
 // its caps is below Config.MaxCommitBytes or MaxCommitRecords, and the
-// refusal does not say which. Only the cap the part can have exceeded is
-// lowered (see lowerCaps) and the part is split again. A single record the
+// refusal does not say which. The record cap is halved (see lowerCaps) and
+// the part is split again. A single record the
 // Log refuses as too large can never commit, so holding it would stop the
 // stream; it is dropped and counted as store, with the reason in
 // Status.LastErr.
