@@ -444,6 +444,37 @@ func TestHealthShowsQuarantine(t *testing.T) {
 	}
 }
 
+// health tells the administrator what a node-kind admin request still owes:
+// the node's part pending (keep the file), done (the file may go), nothing to
+// do, and refused (the node will not act on it; sign again).
+func TestHealthShowsAdminRequestNodePart(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetAdminRequests([]node.AdminRequestStatus{
+		{File: "admin-request-a.json", Kind: "node.quarantine_clear", State: "accepted", CollectorSeq: 7, NodePart: "pending", Detail: "the chain holds no quarantine.exported record"},
+		{File: "admin-request-b.json", Kind: "node.seq_reset_ack", State: "accepted", CollectorSeq: 8, NodePart: "done"},
+		{File: "admin-request-c.json", Kind: "credential.revoke", State: "accepted", CollectorSeq: 9},
+		{File: "admin-request-e.json", Kind: "node.quarantine_clear", State: "accepted", CollectorSeq: 11, NodePart: "refused", Detail: "accepted by a collector the node did not trust"},
+		{File: "admin-request-f.json", Kind: "node.seq_reset_ack", State: "accepted", CollectorSeq: 12, NodePart: "nothing", Detail: "install key k is already the trusted key"},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"ADMIN REQUEST ACCEPTED, NODE'S PART PENDING admin-request-a.json (node.quarantine_clear): accepted by the collector, collector_seq 7; the chain holds no quarantine.exported record. Leave the file in place until this line is gone",
+		"admin request admin-request-b.json (node.seq_reset_ack): accepted by the collector, collector_seq 8, and applied by the node; the file may be removed",
+		"admin request admin-request-c.json (credential.revoke): accepted by the collector, collector_seq 9; the file may be removed",
+		"ADMIN REQUEST ACCEPTED, NOT APPLIED BY THE NODE admin-request-e.json (node.quarantine_clear): collector_seq 11; accepted by a collector the node did not trust; the node will not act on it. The file stays until it is replaced; sign a new request",
+		"admin request admin-request-f.json (node.seq_reset_ack): accepted by the collector, collector_seq 12; nothing for the node to do (install key k is already the trusted key); the file may be removed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 // health says when a link is held back for its certificate's period
 // (HR-13), and does not call a held listener's expired certificate a
 // running one's.

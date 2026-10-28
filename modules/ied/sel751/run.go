@@ -53,6 +53,11 @@ var ops = map[string]bool{
 	opConfig: true,
 }
 
+// Hosts reports whether this adapter can invoke the register operation or run
+// with that ID. The collector holds every shipped profile to it, so a profile
+// cannot name an operation no adapter hosts.
+func Hosts(operationID string) bool { return ops[operationID] }
+
 const (
 	opID     = "sel.id"
 	opSER    = "sel.ser.read_all"

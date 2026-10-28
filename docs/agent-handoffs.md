@@ -57,7 +57,7 @@ On 2026-10-27 the owner handed agents A1 to A6 over to B1 to B6. The roles are u
 | #177 (bounded crash children) | Open, deferred until after the gate | A5 |
 | #181 (signed files and relay design) | Open, deferred until after the gate | A5 |
 | #182 (refused-identity detail) | Open, deferred until after the gate | A5 |
-| Relay PR 2 of #181 | Not started | A5 |
+| Relay PR 2 of #181 | 2a (signed `node.quarantine_clear` and `node.seq_reset_ack` acted on by the node, C8 0.4 fields) in review; 2b (refuse unsigned clear files on a non-lab node) and the event-baseline feeder follow | A5 |
 | Go 1.27.3 (D3-10 rule) | Not started; Phase 4 hygiene | A1, with A3 and A6 |
 | Phase 4 items 1 and 2 (configuration baselines, event-behaviour baseline) and their carry-over | Drafted below. **Held** until the owner accepts Phase 3. | P4-A2 to P4-A6 |
 | Phase 4 items 3 to 6 (vulnerability applicability, IDS, engineering access, central role) | Outlined below | One brief at a time, each after the previous item's gate |

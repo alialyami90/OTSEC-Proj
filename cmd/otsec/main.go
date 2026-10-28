@@ -389,7 +389,18 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	for _, a := range st.AdminRequests {
 		switch a.State {
 		case "accepted":
-			fmt.Fprintf(w, "admin request %s (%s): accepted by the collector, collector_seq %d; the file may be removed\n", safe(a.File), safe(a.Kind), a.CollectorSeq)
+			switch a.NodePart {
+			case "pending":
+				fmt.Fprintf(w, "ADMIN REQUEST ACCEPTED, NODE'S PART PENDING %s (%s): accepted by the collector, collector_seq %d; %s. Leave the file in place until this line is gone\n", safe(a.File), safe(a.Kind), a.CollectorSeq, safe(a.Detail))
+			case "done":
+				fmt.Fprintf(w, "admin request %s (%s): accepted by the collector, collector_seq %d, and applied by the node; the file may be removed\n", safe(a.File), safe(a.Kind), a.CollectorSeq)
+			case "nothing":
+				fmt.Fprintf(w, "admin request %s (%s): accepted by the collector, collector_seq %d; nothing for the node to do (%s); the file may be removed\n", safe(a.File), safe(a.Kind), a.CollectorSeq, safe(a.Detail))
+			case "refused":
+				fmt.Fprintf(w, "ADMIN REQUEST ACCEPTED, NOT APPLIED BY THE NODE %s (%s): collector_seq %d; %s; the node will not act on it. The file stays until it is replaced; sign a new request\n", safe(a.File), safe(a.Kind), a.CollectorSeq, safe(a.Detail))
+			default:
+				fmt.Fprintf(w, "admin request %s (%s): accepted by the collector, collector_seq %d; the file may be removed\n", safe(a.File), safe(a.Kind), a.CollectorSeq)
+			}
 		case "refused":
 			fmt.Fprintf(w, "ADMIN REQUEST REFUSED %s (%s): %s, collector_seq %d; it is not sent again, sign a new request\n", safe(a.File), safe(a.Kind), safe(a.Detail), a.CollectorSeq)
 		case "unread":
