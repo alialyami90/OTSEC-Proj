@@ -101,7 +101,7 @@ func TestUnknownPastBudgetTakesNoQueueRoom(t *testing.T) {
 		onlyA(c)
 		bl = &blockingLog{Appender: c.Log, entered: make(chan struct{}, 1), release: make(chan struct{})}
 		c.Log = bl
-		c.Limits.Queue, c.Limits.UnknownBytes, c.Limits.UnknownWindow = 64, minUnknownBytes, time.Hour
+		c.Limits.Queue, c.Limits.UnknownBytes, c.Limits.UnknownWindow = 512, minUnknownBytes, time.Hour
 	})
 	release := sync.OnceFunc(func() { close(bl.release) })
 	t.Cleanup(release)
@@ -109,7 +109,8 @@ func TestUnknownPastBudgetTakesNoQueueRoom(t *testing.T) {
 	defer flood.Close()
 	flood.Write([]byte(unknownMsg))
 	<-bl.entered
-	// Past the budget, and past the queue's 64 had they been queued. Sent
+	// Past the budget, and past the unknown share of the queue (a quarter of
+	// its 512 places, D4-21) had they been queued. Sent
 	// until counted, since a datagram can be lost before the read (UDP).
 	for end := time.Now().Add(20 * time.Second); g.r.Status().Dropped[DropUnknownBudget] < 100; time.Sleep(time.Millisecond) {
 		if time.Now().After(end) {
