@@ -290,6 +290,9 @@ Every 10 s, `Forwarding.Check` copies each forwarder's state into node status (`
 
 - `forward-unreachable`: a required target has events waiting and nothing confirmed for 60 s, or has had no session open for 60 s even with nothing waiting (`Status.Open`). Waiting means past what the target confirmed (`StreamStatus.Confirmed`, A4 #103), not past the cursor, which stays behind while a report about the stream is owed. A held stream's events do not count as waiting. A `forward.unreachable` health event is committed with it. C6 gives no period; 60 s follows the proposed V-S12, and A1 and A6 own the number.
 - `forward-held`: a stream is held, with the forwarder's reason.
+- `forward-target-held-back` (HR-13, D4-11): the node's client certificate for the target is expired or not yet valid at start, so the forwarder is not run. Raised at start and again every `CertAlarmRepeat` (1 h) while the target is held back. It is not in C6 or C8.
+- `forward-certificate-expiring` (HR-13): the target's client certificate is within 30 days of its end (raised once), and has passed it (raised at expiry, then again every `CertAlarmRepeat` while the forwarder runs, which is never stopped at expiry).
+- `syslog-listener-held-back` (HR-13, listeners): the same for a `syslog-tls` listener's certificate; the listener is not bound. `syslog-listener-certificate-expiring` follows the same schedule as `forward-certificate-expiring`.
 
 ## Example
 
