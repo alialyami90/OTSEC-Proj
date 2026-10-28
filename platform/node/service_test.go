@@ -2,6 +2,9 @@ package node
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -60,6 +63,19 @@ func TestRunStartsAndStops(t *testing.T) {
 // both outside their periods starts and runs: it is collecting, the two
 // links are held back in status with their alarms, and it stops cleanly
 // (HR-13, D4-11).
+// diagf writes a B6 diagnostic line to stderr and, when B6DIAG_FILE is
+// set, appends it there (B6 DIAGNOSTIC, never merged).
+func diagf(format string, a ...any) {
+	line := fmt.Sprintf(format, a...)
+	os.Stderr.WriteString(line)
+	if p := os.Getenv("B6DIAG_FILE"); p != "" {
+		if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			f.WriteString(line)
+			f.Close()
+		}
+	}
+}
+
 func TestRunStartsWithExpiredLinks(t *testing.T) {
 	var nc *nodeconfigtest.Config
 	c, _ := schedConfig(t, func(n *nodeconfigtest.Config) {
@@ -82,16 +98,61 @@ func TestRunStartsWithExpiredLinks(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, c, nil) }()
 	var st StatusFile
+	// B6 DIAGNOSTIC (never merged): the original 30 s wait, then on a miss
+	// a goroutine dump and a further wait of up to 5 minutes, logging each
+	// change of what the status file says, and how long Run takes to stop.
+	t0 := time.Now()
+	var last string
+	note := func(s StatusFile, err error) {
+		e := ""
+		if err != nil {
+			e = err.Error()
+			if len(e) > 160 {
+				e = e[:160]
+			}
+		}
+		k := fmt.Sprintf("collecting=%v written=%s target=%q listener=%q alarms=%d err=%s", s.Collecting, s.Written.Format(time.RFC3339Nano),
+			s.Targets["central"].HeldBack, s.Listeners["lab-tls"].HeldBack, len(s.Alarms), e)
+		if k != last {
+			diagf("B6DIAG %s +%v %s\n", t.Name(), time.Since(t0).Round(time.Millisecond), k)
+			last = k
+		}
+	}
+	ok := func(s StatusFile, err error) bool {
+		return err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != ""
+	}
+	missed := true
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		s, err := ReadStatus(StatusPath(c))
-		if err == nil && s.Collecting && s.Targets["central"].HeldBack != "" && s.Listeners["lab-tls"].HeldBack != "" {
-			st = s
+		note(s, err)
+		if ok(s, err) {
+			st, missed = s, false
 			break
 		}
 	}
+	if missed {
+		buf := make([]byte, 8<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		diagf("B6DIAG %s MISSED at +%v; goroutines:\n%s\nB6DIAG END DUMP\n", t.Name(), time.Since(t0).Round(time.Millisecond), buf)
+		for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			s, err := ReadStatus(StatusPath(c))
+			note(s, err)
+			if ok(s, err) {
+				st = s
+				diagf("B6DIAG %s reached at +%v\n", t.Name(), time.Since(t0).Round(time.Millisecond))
+				break
+			}
+		}
+	}
+	tc := time.Now()
 	cancel()
-	if err := <-done; err != nil {
+	err := <-done
+	diagf("B6DIAG %s run returned after %v from cancel: %v (missed=%v)\n", t.Name(), time.Since(tc).Round(time.Millisecond), err, missed)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if missed {
+		t.Errorf("B6DIAG: the 30 s wait missed (the original test fails here)")
 	}
 	if !st.Collecting || st.Targets["central"].HeldBack != "expired" || st.Listeners["lab-tls"].HeldBack != "expired" {
 		t.Fatalf("status %+v", st)

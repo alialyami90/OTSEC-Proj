@@ -1,0 +1,44 @@
+# B6 diagnostic, never merged: TestRunStartsWithExpiredLinks failed once in
+# a6-windows-restart-marker full-suite (1) on #294 (job 122647514280): its
+# 30 s wait for a collecting status with both links held back was missed,
+# and Run took about 25 s to return after cancel. This branch's copy of the
+# test logs each change of the status file, dumps the goroutines when the
+# 30 s pass, and waits up to 5 minutes more, so the log says whether the
+# property arrived late (a slow start) or never (a start-path fault). The
+# full suite runs as in a6-windows-restart-marker, on three runners. No
+# secrets, no services, hosted runners only. Results are simulated.
+name: a6-windows-expired-links-diag
+on:
+  push:
+    branches: [claude/b6-diag-expired-links]
+permissions:
+  contents: read
+jobs:
+  full-suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1, 2, 3]
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Full suite, repeated
+        env:
+          COUNT: "3"
+          B6DIAG_FILE: ${{ runner.temp }}\b6diag.txt
+        shell: pwsh
+        run: |
+          $timeout = "$([int]$env:COUNT * 15)m"
+          go test -timeout $timeout -count $env:COUNT ./...
+          exit $LASTEXITCODE
+      - name: B6 diagnostic lines
+        if: always()
+        shell: pwsh
+        run: |
+          $p = Join-Path $env:RUNNER_TEMP "b6diag.txt"
+          if (Test-Path $p) { Get-Content $p | Where-Object { $_ -like "B6DIAG*" } } else { "no diagnostic file" }
