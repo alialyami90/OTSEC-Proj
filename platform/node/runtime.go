@@ -42,10 +42,10 @@ type Runtime struct {
 	dbs      []*database
 
 	mu      sync.Mutex
-	pending []queued        // store alarms raised during a commit, for Tick
+	pending []queued                    // store alarms raised during a commit, for Tick
 	slowAt  map[c5.DatabaseID]time.Time // when AlarmCommitSlow was last raised, by database
-	raised  map[string]bool // conditions whose alarm is raised (prune.go)
-	pruneMu sync.Mutex      // serializes Prune
+	raised  map[string]bool             // conditions whose alarm is raised (prune.go)
+	pruneMu sync.Mutex                  // serializes Prune
 	// deferred holds the node records audit could not commit because the
 	// audit database had not opened, its open at start being only busy (C5
 	// 0.2). The retry in Tick that opens it commits them first, in order
