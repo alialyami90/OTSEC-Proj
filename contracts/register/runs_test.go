@@ -364,3 +364,56 @@ func TestSchemaCeilings(t *testing.T) {
 		t.Errorf("the schema's bounds %+v %+v are not the ceilings", l, r)
 	}
 }
+
+// A package before 0.3 that carries a runs or limits key is refused whatever
+// its value, [] and null included: a 0.2 reader refuses the key, so this
+// reader must not read what it refuses (D4-16, B6 on #279).
+func TestEmptyNewKeysBeforeOnePointThree(t *testing.T) {
+	bare := func(c string, f func(m map[string]any)) []byte {
+		return v3(t, func(m map[string]any) {
+			m["contract"] = c
+			delete(m, "runs")
+			for _, o := range list(m, "operations") {
+				delete(o.(map[string]any), "limits")
+			}
+			f(m)
+		})
+	}
+	for _, c := range []string{"otsec.register/0.1", "otsec.register/0.2"} {
+		withoutContext := func(m map[string]any) {
+			if c == "otsec.register/0.1" {
+				delete(m, "context")
+			}
+		}
+		cases := map[string]func(m map[string]any){
+			`"runs": []`:     func(m map[string]any) { m["runs"] = []any{} },
+			`"runs": null`:   func(m map[string]any) { m["runs"] = nil },
+			`"limits": null`: func(m map[string]any) { opOf(t, m, "sel.ser.read_all")["limits"] = nil },
+		}
+		for n, f := range cases {
+			_, err := Decode(bare(c, func(m map[string]any) { withoutContext(m); f(m) }))
+			if err == nil || !strings.Contains(err.Error(), "new in 0.3") {
+				t.Errorf("%s with %s: %v", c, n, err)
+			}
+		}
+		// The control: the same package with neither key is valid.
+		if _, err := Decode(bare(c, withoutContext)); err != nil {
+			t.Errorf("%s with neither key: %v", c, err)
+		}
+	}
+	// D4-16 is general: context is new in 0.2, so a 0.1 package refuses the
+	// key whatever its value, and a 0.2 package may carry it empty.
+	for n, v := range map[string]any{`"context": []`: []any{}, `"context": null`: nil} {
+		_, err := Decode(bare("otsec.register/0.1", func(m map[string]any) { m["context"] = v }))
+		if err == nil || !strings.Contains(err.Error(), "new in 0.2") {
+			t.Errorf("otsec.register/0.1 with %s: %v", n, err)
+		}
+		if _, err := Decode(bare("otsec.register/0.2", func(m map[string]any) { delete(m, "context"); m["context"] = v })); err != nil {
+			t.Errorf("otsec.register/0.2 with %s: %v", n, err)
+		}
+	}
+	// At 0.3 an empty runs list is a package with no runs.
+	if p, err := Decode(v3(t, func(m map[string]any) { m["runs"] = []any{} })); err != nil || len(p.Runs) != 0 {
+		t.Errorf("0.3 with runs []: %v", err)
+	}
+}
