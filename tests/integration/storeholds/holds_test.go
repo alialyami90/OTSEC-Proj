@@ -797,10 +797,20 @@ func fileSums(t *testing.T, file string) map[string]string {
 	return out
 }
 
+// durableSums is fileSums without the -shm, which SQLite may rewrite on
+// any open: it is the wal-index, rebuilt from the -wal.
+func durableSums(t *testing.T, file string) map[string]string {
+	t.Helper()
+	out := fileSums(t, file)
+	delete(out, "-shm")
+	return out
+}
+
 // A store of the first format is refused at start and by the offline
-// reader, and the refusal writes nothing: the database, its -wal and its
-// -shm are byte-identical afterwards, also when the node stopped with
-// frames not yet checkpointed (D4-14 item 4, B1's ruling on #282). The
+// reader, and the refusal writes nothing: the database and its -wal are
+// byte-identical afterwards, also when the node stopped with frames not yet
+// checkpointed (D4-14 item 4, B1's ruling on #282). The -shm may change: it
+// is SQLite's wal-index, derived from the -wal and holding no record data. The
 // store is made by this build, with the first format's identifier and an
 // UPDATE left in the WAL, then copied while that writer is still open, as
 // a crash leaves it.
@@ -844,7 +854,7 @@ func TestFirstFormatWithAHotWALIsLeftAlone(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before := fileSums(t, copied)
+	before := durableSums(t, copied)
 	if before["-wal"] == "absent" || strings.HasSuffix(before["-wal"], "(0 bytes)") {
 		t.Fatalf("the copy has no frames in its WAL, so this measures nothing: %v", before)
 	}
@@ -852,7 +862,7 @@ func TestFirstFormatWithAHotWALIsLeftAlone(t *testing.T) {
 	if _, err := store.OpenReadOnly(ctx, crash, node, d.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
 		t.Errorf("the offline reader on the first format: %v", err)
 	}
-	if after := fileSums(t, copied); !maps.Equal(before, after) {
+	if after := durableSums(t, copied); !maps.Equal(before, after) {
 		t.Errorf("the offline reader's refusal changed the files:\n before %v\n after  %v", before, after)
 	}
 
@@ -878,7 +888,74 @@ func TestFirstFormatWithAHotWALIsLeftAlone(t *testing.T) {
 	if r.Mode != c5.ModeFailed || r.Err == nil || !strings.Contains(r.Err.Error(), "earlier layout") {
 		t.Errorf("start on the first format: mode %s, %v", r.Mode, r.Err)
 	}
-	if after := fileSums(t, copied); !maps.Equal(before, after) {
+	if after := durableSums(t, copied); !maps.Equal(before, after) {
 		t.Errorf("the refusal at start changed the files:\n before %v\n after  %v", before, after)
 	}
+}
+
+// The inverse of the case above: a store of the current format that a
+// crash left with a hot WAL opens at start and recovers, with every record
+// whose commit is only in the -wal (B1 on #282). The layout check must not
+// take a hot WAL for the first format.
+func TestCurrentFormatWithAHotWALOpensAndRecovers(t *testing.T) {
+	ctx := context.Background()
+	d := database(c5.MinRecordBytes)
+	dir := newDir(t)
+	db := open(t, dir, d)
+	l, err := c5.NewLogFor(db, node, d, c5.GroupOptions{MaxEvents: 10, MaxWait: time.Millisecond}, map[c5.StreamID]c5.Seq{cfg: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &model{stored: map[c5.Seq]bool{}, held: map[c5.Seq]bool{}, event: map[c5.Seq][]byte{},
+		capOf: map[c5.Seq]string{}, capSize: map[string]int64{}}
+	file := walPath(t, dir)
+	// The main file before the records: what a reader of the main file
+	// alone would see.
+	quiet := fileSums(t, file)[""]
+	for i := 1; i <= 6; i++ {
+		r := c5.Record{Stream: cfg, Class: c5.ClassConfiguration, Event: fmt.Appendf(nil, `{"doc":%d}`, i)}
+		if _, err := l.Append(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		m.stored[c5.Seq(i)], m.event[c5.Seq(i)] = true, r.Event
+	}
+	// Copied while the writer is still open, as a crash leaves it.
+	crash := newDir(t)
+	copied := filepath.Join(crash, filepath.Base(file))
+	for _, suf := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(file + suf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(copied+suf, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	before := fileSums(t, copied)
+	// Not vacuous: the records are in the -wal only, so the open has to
+	// recover them from it.
+	if before["-wal"] == "absent" || strings.HasSuffix(before["-wal"], "(0 bytes)") || before[""] != quiet {
+		t.Fatalf("the copy's records are not only in its WAL (main file before the records %s), so this measures nothing: %v", quiet, before)
+	}
+
+	env, err := store.NewEnv(store.Options{Dir: crash, Node: node, Database: d, Documents: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c5.RunStartup(ctx, env, c5.StartupPolicy{Streams: d.Streams, RecoveryReserveBytes: 2 * store.WALBoundBytes,
+		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom, OpenHeadroomBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
+		PruneStepEvents: 50, CompactStepPages: 32, PruneTarget: 0.8})
+	if r.Unlock != nil {
+		defer r.Unlock()
+	}
+	if r.Mode != c5.ModeCollecting {
+		if r.Store != nil {
+			r.Store.Close()
+		}
+		t.Fatalf("start on the current format with a hot WAL: mode %s, %v", r.Mode, r.Err)
+	}
+	got, _ := store.AsDB(r.Store)
+	defer got.Close()
+	check(t, ctx, got, m, "after recovery from the hot WAL")
 }
