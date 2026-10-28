@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -398,3 +399,204 @@ func (l *chanListener) Accept() (net.Conn, error) {
 }
 func (l *chanListener) Close() error   { close(l.done); return nil }
 func (l *chanListener) Addr() net.Addr { return &net.UnixAddr{Name: "mem", Net: "unix"} }
+
+// stalls answers a request with the frames and then holds the connection
+// open without sending anything more, counting how often it is dialled.
+func stalls(t *testing.T, dials *atomic.Int32, frames ...[]byte) *Client {
+	t.Helper()
+	c := NewWithDialer(func(ctx context.Context) (net.Conn, error) {
+		dials.Add(1)
+		cl, s := net.Pipe()
+		go func() {
+			defer s.Close()
+			if _, err := collectorwire.ReadFrame(s, authz.MaxRequestBytes); err != nil {
+				return
+			}
+			for _, f := range frames {
+				if err := collectorwire.WriteFrame(s, f, len(f)); err != nil {
+					return
+				}
+			}
+			io.Copy(io.Discard, s) // never sends the outcome
+		}()
+		return cl, nil
+	})
+	c.grace = 50 * time.Millisecond
+	return c
+}
+
+// D4-24: a collector that accepts a run and never sends the outcome is
+// waited for the run's deadline from the reply plus the grace, then the
+// request fails closed with ErrTimeout, keeps the accepted reply, and is not
+// sent again.
+func TestOutcomeDeadline(t *testing.T) {
+	var dials atomic.Int32
+	rep := accepted(10)
+	rep.RunDeadlineMS = 100
+	start := time.Now()
+	resp, err := stalls(t, &dials, mustJSON(t, rep)).Do(ctx(t), runReq())
+	took := time.Since(start)
+	if !errors.Is(err, ErrTimeout) || !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrOutcomeQuarantined) {
+		t.Fatalf("err %v; want ErrTimeout with ErrOutcomeUnknown", err)
+	}
+	if resp.Reply.CollectorSeq != 10 || resp.Outcome != nil || resp.Quarantine != nil {
+		t.Fatalf("the accepted reply must be kept: %+v", resp)
+	}
+	if took < 140*time.Millisecond || took > 3*time.Second {
+		t.Fatalf("gave up after %s; want the 100 ms deadline plus 50 ms grace", took)
+	}
+	if n := dials.Load(); n != 1 {
+		t.Fatalf("dialled %d times; a timed-out request is not sent again", n)
+	}
+}
+
+// The caller's own deadline still wins when it is sooner, and is not
+// reported as the run's timeout.
+func TestCallerDeadlineBeforeOutcomeDeadline(t *testing.T) {
+	var dials atomic.Int32
+	rep := accepted(10)
+	rep.RunDeadlineMS = 60000
+	cx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := stalls(t, &dials, mustJSON(t, rep)).Do(cx, runReq())
+	if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
+		t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+	}
+}
+
+// hookedConn is the node's end of a pipe whose reads and deadline changes a
+// test can step into, to put a cancel at an exact point of Do.
+type hookedConn struct {
+	net.Conn
+	onRead     func(error)
+	onDeadline func(time.Time)
+}
+
+func (c *hookedConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if c.onRead != nil {
+		c.onRead(err)
+	}
+	return n, err
+}
+
+func (c *hookedConn) SetDeadline(t time.Time) error {
+	if c.onDeadline != nil {
+		c.onDeadline(t)
+	}
+	return c.Conn.SetDeadline(t)
+}
+
+// hooked is stalls with the node's end wrapped by hook.
+func hooked(t *testing.T, hook func(*hookedConn), frames ...[]byte) *Client {
+	t.Helper()
+	c := stalls(t, new(atomic.Int32), frames...)
+	dial := c.dial
+	c.dial = func(ctx context.Context) (net.Conn, error) {
+		conn, err := dial(ctx)
+		if err != nil {
+			return nil, err
+		}
+		h := &hookedConn{Conn: conn}
+		hook(h)
+		return h, nil
+	}
+	return c
+}
+
+// A caller's cancel that lands as the outcome bound runs out is the caller's,
+// and not reported as the run's timeout (B6's mutant A14 on #341): the read
+// times out at the bound, and the caller has cancelled before Do looks.
+func TestCallerCancelAtTheBoundIsNotTimeout(t *testing.T) {
+	rep := accepted(10)
+	rep.RunDeadlineMS = 20
+	cx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := hooked(t, func(h *hookedConn) {
+		h.onRead = func(err error) {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				cancel()
+			}
+		}
+	}, mustJSON(t, rep))
+	_, err := c.Do(cx, runReq())
+	if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
+		t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+	}
+}
+
+// A cancel that fires after the reply and before Do sets the outcome
+// deadline is not lost when that deadline overwrites the one the cancel set
+// (B6's mutant A11 on #341): Do returns at once and does not wait out the
+// run's deadline.
+func TestCancelBeforeTheOutcomeDeadlineIsKept(t *testing.T) {
+	rep := accepted(10)
+	rep.RunDeadlineMS = 60000
+	cx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	past := make(chan struct{})
+	var once, pastOnce sync.Once
+	c := hooked(t, func(h *hookedConn) {
+		h.onDeadline = func(d time.Time) {
+			if d.Equal(time.Unix(1, 0)) {
+				h.Conn.SetDeadline(d) // set before the wait below ends
+				pastOnce.Do(func() { close(past) })
+				return
+			}
+			// The first other deadline is the outcome's (cx has none):
+			// cancel, and let the cancel's deadline land before it.
+			once.Do(func() {
+				cancel()
+				select {
+				case <-past:
+				case <-time.After(5 * time.Second):
+					t.Error("the cancel did not set a deadline")
+				}
+			})
+		}
+	}, mustJSON(t, rep))
+	done := make(chan error, 1)
+	go func() { _, err := c.Do(cx, runReq()); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
+			t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Do waited for the run's deadline after the caller cancelled")
+	}
+}
+
+func TestOutcomeBound(t *testing.T) {
+	c := New(collectorwire.Endpoint{})
+	rep := accepted(1)
+	if got, want := c.outcomeBound(rep), 600*time.Second+10*time.Second; got != want {
+		t.Errorf("no run deadline: %s, want the 600 s ceiling plus 10 s = %s", got, want)
+	}
+	rep.RunDeadlineMS = 300000
+	if got, want := c.outcomeBound(rep), 310*time.Second; got != want {
+		t.Errorf("sel.config.read_all: %s, want %s", got, want)
+	}
+}
+
+// A node at 0.7 reads a reply from a collector still at 0.6 or 0.8 (the same
+// major), and refuses another major.
+func TestReplyMinorAccepted(t *testing.T) {
+	for _, stamp := range []string{"otsec.authz/0.6", "otsec.authz/0.7", "otsec.authz/0.9"} {
+		rep := accepted(10)
+		rep.Contract = stamp
+		resp, err := scripted(t, mustJSON(t, rep)).Do(ctx(t), runReq())
+		if errors.Is(err, ErrProtocol) {
+			t.Errorf("%s: %v", stamp, err)
+		}
+		if resp.Reply.CollectorSeq != 10 {
+			t.Errorf("%s: reply not kept: %+v", stamp, resp)
+		}
+	}
+	rep := accepted(10)
+	rep.Contract = "otsec.authz/1.0"
+	if _, err := scripted(t, mustJSON(t, rep)).Do(ctx(t), runReq()); !errors.Is(err, ErrProtocol) {
+		t.Errorf("1.0: %v", err)
+	}
+}

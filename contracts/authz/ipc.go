@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"otsec.local/otsec/contracts/asset"
@@ -333,6 +334,35 @@ type CollectorReply struct {
 	// request stamped 0.5 or later, and on no other reply: what the
 	// collector verified.
 	Admin *AdminAccepted `json:"admin,omitempty"`
+	// RunDeadlineMS (since 0.7) is set on an accepted reply to a run request
+	// stamped 0.7 or later, and on no other reply: the bound, in
+	// milliseconds, of the invocation the collector built for it (the run's
+	// own deadline for a register run, Limits.ForRun). The node waits for
+	// the outcome no longer than this plus RunOutcomeGrace (D4-24).
+	RunDeadlineMS uint64 `json:"run_deadline_ms,omitempty"`
+}
+
+// RunOutcomeGrace is how long past RunDeadlineMS a node waits for a run's
+// outcome: the collector bounds the run itself at its deadline plus this
+// (Pipeline.execute), so a node that waits less would give up on a run still
+// inside its bound.
+const RunOutcomeGrace = 10 * time.Second
+
+// MaxRunDeadlineMS is the longest bound a reply may name: C2's ceiling on an
+// invocation's deadline, which C3 holds a run's deadline to.
+const MaxRunDeadlineMS = register.MaxDeadlineMS
+
+// runsSince is the minor that let a run request name a register run, and
+// added run_deadline_ms to the reply of an accepted run.
+const runsSince = 7
+
+// NamesRuns reports whether a request stamped contract may name a register
+// run, and gets run_deadline_ms in the reply: from 0.7. A reader built for
+// 0.6 decodes replies strictly and knows no such field, so a collector
+// leaves it out of the reply to an older request.
+func NamesRuns(contract string) bool {
+	got, err := version.Parse(contract)
+	return err == nil && got.Minor >= runsSince
 }
 
 // AdminAccepted is what the collector verified of an admin-signed request
@@ -419,6 +449,9 @@ func (r CollectorReply) AdminAcceptance(sent *CollectorRequest) (*AdminAccepted,
 // own number; and admin, when present, is well formed. A reader runs it
 // after strict decoding (collectorwire.DecodeReply).
 func (r CollectorReply) Validate() error {
+	if err := r.validateRunDeadline(); err != nil {
+		return err
+	}
 	if r.Admin == nil && r.RepeatOf == 0 {
 		return nil
 	}
@@ -442,6 +475,25 @@ func (r CollectorReply) Validate() error {
 		return errors.New("authz: admin.nonce is malformed")
 	case !sha256HexPattern.MatchString(a.PayloadSHA256):
 		return errors.New("authz: admin.payload_sha256 is not 64 lowercase hex digits")
+	}
+	return nil
+}
+
+// validateRunDeadline checks run_deadline_ms (since 0.7): only on an
+// accepted run reply stamped 0.7 or later, within C2's ceiling, and never
+// with the fields of an admin acceptance.
+func (r CollectorReply) validateRunDeadline() error {
+	switch {
+	case r.RunDeadlineMS == 0:
+		return nil
+	case !NamesRuns(r.Contract):
+		return fmt.Errorf("authz: a reply stamped %q carries run_deadline_ms, which needs 0.%d", r.Contract, runsSince)
+	case r.Status != ReplyAccepted || r.Refusal != nil || r.InvocationID == "":
+		return errors.New("authz: run_deadline_ms belongs on an accepted run reply only")
+	case r.Admin != nil || r.RepeatOf != 0:
+		return errors.New("authz: a run reply carries no admin acceptance")
+	case r.RunDeadlineMS > MaxRunDeadlineMS:
+		return fmt.Errorf("authz: run_deadline_ms %d is above %d", r.RunDeadlineMS, MaxRunDeadlineMS)
 	}
 	return nil
 }
@@ -672,37 +724,120 @@ func (b *RunBody) validate() error {
 }
 
 // ValidateAgainst checks a run request against the collector's active,
-// verified register (C3): the operation exists among the invocable
-// operations (session-control lines and deny rules are never returned, C-A2-1),
-// is read-only, runs in the operate phase (a probe-only operation belongs to
+// verified register (C3): the ID names an invocable operation or a register
+// run, read-only, in the operate phase (a probe-only operation belongs to
 // the transport, before authentication, and a schedule cannot ask for it),
 // carries a credential_ref exactly when its access level is above 0 (C7-A2-5),
 // and the parameters render through Matcher.Render, which also applies the deny
 // rules. The transport still checks every line with Matcher.Permit at egress.
 // A nil matcher means no verified register package is active for the family.
+//
+// A run (since 0.7, D4-13) takes no parameters, and every step must render
+// through Matcher.RenderRun, so a step a deny rule matches, or that no longer
+// classifies as its own operation, refuses the whole run as not_invocable
+// before a credential is read. Its level is the highest of its steps'
+// (AccessLevel); a run of level 0 steps is refused, because the adapter's run
+// mode always authenticates. CollectorRequest.ValidateRun adds the rule that
+// the request must be stamped 0.7 or later to name one.
 func (b *RunBody) ValidateAgainst(m *register.Matcher) error {
 	if m == nil {
 		return refuse(RefuseRegisterUnverified, "no verified register package")
 	}
-	op, ok := m.Operation(b.OperationID)
-	if !ok || op == nil {
-		return refuse(RefuseUnknownOperation, "%s", b.OperationID)
-	}
-	if op.Classification != register.ReadOnly {
-		return refuse(RefuseNotInvocable, "%s is %s", b.OperationID, op.Classification)
-	}
-	if !op.InPhase(register.PhaseOperate) {
-		return refuse(RefuseNotInvocable, "%s does not run in the operate phase", b.OperationID)
+	level := ""
+	run, isRun := m.Run(b.OperationID)
+	if isRun {
+		l, err := b.runLevel(m, run)
+		if err != nil {
+			return err
+		}
+		level = l
+	} else {
+		op, ok := m.Operation(b.OperationID)
+		if !ok || op == nil {
+			return refuse(RefuseUnknownOperation, "%s", b.OperationID)
+		}
+		if op.Classification != register.ReadOnly {
+			return refuse(RefuseNotInvocable, "%s is %s", b.OperationID, op.Classification)
+		}
+		if !op.InPhase(register.PhaseOperate) {
+			return refuse(RefuseNotInvocable, "%s does not run in the operate phase", b.OperationID)
+		}
+		level = op.AccessLevel
 	}
 	// A level 0 operation (sel.id) is sent before ACC, so no password is
 	// needed and none may be resolved; any other operation needs one.
-	if (op.AccessLevel == register.ProbeAccessLevel) != (b.CredentialRef == "") {
-		return refuse(RefuseCredentialMismatch, "%s at level %q: credential_ref must be present exactly when the level is above 0", b.OperationID, op.AccessLevel)
+	if (level == register.ProbeAccessLevel) != (b.CredentialRef == "") {
+		return refuse(RefuseCredentialMismatch, "%s at level %q: credential_ref must be present exactly when the level is above 0", b.OperationID, level)
+	}
+	if isRun {
+		return nil // rendered whole by runLevel
 	}
 	if _, err := m.Render(b.OperationID, b.Params); err != nil {
 		return refuse(RefuseBadParams, "%s", b.OperationID)
 	}
 	return nil
+}
+
+// runLevel applies the rules for a run to b and returns its access level.
+// That each step is a read-only operation in the operate phase, with a
+// literal line and limits, is the register's own rule for a run
+// (register.Package.Validate), so no package that fails it is ever active
+// and none is checked again here.
+func (b *RunBody) runLevel(m *register.Matcher, run *register.Run) (string, error) {
+	if len(b.Params) != 0 {
+		return "", refuse(RefuseBadParams, "%s is a run and takes no parameters", b.OperationID)
+	}
+	if _, err := m.RenderRun(b.OperationID); err != nil {
+		return "", refuse(RefuseNotInvocable, "%s: a step does not render", b.OperationID)
+	}
+	level := register.ProbeAccessLevel
+	for _, id := range run.Steps {
+		o, ok := m.Operation(id)
+		switch {
+		case !ok || o == nil:
+			return "", refuse(RefuseNotInvocable, "%s: step %s is not an operation", b.OperationID, id)
+		case !register.LevelAtMost(o.AccessLevel, level):
+			level = o.AccessLevel // higher than any step so far
+		}
+	}
+	if level == register.ProbeAccessLevel {
+		return "", refuse(RefuseNotInvocable, "%s has no step above level 0, and a run always authenticates", b.OperationID)
+	}
+	return level, nil
+}
+
+// AccessLevel returns the access level the credential must reach for the
+// operation or run b names: an operation's own, and a run's highest step.
+// It reads the register only; ValidateAgainst decides whether the request
+// is allowed. A name that is neither is an error, so a nil operation never
+// reaches the credential path.
+func (b *RunBody) AccessLevel(m *register.Matcher) (string, error) {
+	if m == nil {
+		return "", refuse(RefuseRegisterUnverified, "no verified register package")
+	}
+	if run, ok := m.Run(b.OperationID); ok {
+		return b.runLevel(m, run)
+	}
+	op, ok := m.Operation(b.OperationID)
+	if !ok || op == nil {
+		return "", refuse(RefuseUnknownOperation, "%s", b.OperationID)
+	}
+	return op.AccessLevel, nil
+}
+
+// ValidateRun is ValidateAgainst for the request's own body, with the
+// request's stamp: a request stamped before 0.7 cannot name a register run,
+// and is refused as the 0.6 collector would refuse it, unknown_operation.
+func (r *CollectorRequest) ValidateRun(m *register.Matcher) error {
+	if r.Run == nil {
+		return refuse(RefuseInvalid, "body does not match kind %q", r.Kind)
+	}
+	if m != nil && !NamesRuns(r.Contract) {
+		if _, ok := m.Run(r.Run.OperationID); ok {
+			return refuse(RefuseUnknownOperation, "%s", r.Run.OperationID)
+		}
+	}
+	return r.Run.ValidateAgainst(m)
 }
 
 // decodeRefusal maps a strictjson error to a refusal code: a key that is not

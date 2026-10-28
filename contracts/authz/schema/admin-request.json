@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.6/admin-request",
+  "$id": "otsec.authz/0.7/admin-request",
   "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5; configuration bodies since 0.6). Strict. Decoded only after the signature verifies. Every field is signed.",
   "type": "object",
   "additionalProperties": false,
@@ -93,7 +93,7 @@
       ],
       "properties": {
         "ref": {
-          "$ref": "otsec.authz/0.6/credential-ref"
+          "$ref": "otsec.authz/0.7/credential-ref"
         },
         "sealed": {
           "type": "object",

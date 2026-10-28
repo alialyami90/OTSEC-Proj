@@ -18,8 +18,10 @@ import (
 // answer (repeat_of) and what the collector verified (admin) (P3-A3, #181).
 // 0.6 added the admin-signed kinds node.change_approval and
 // node.baseline_ack, each pinned admin key's list of the kinds it may sign
-// (AdminKey.Kinds), and the authority check (P4-A3, D4-2).
-const ContractID = "otsec.authz/0.6"
+// (AdminKey.Kinds), and the authority check (P4-A3, D4-2). 0.7 lets a run
+// request name a register run (operation_id is then a run's ID), and adds
+// run_deadline_ms to the accepted reply of a run (P4-A3, D4-13, D4-24).
+const ContractID = "otsec.authz/0.7"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a
