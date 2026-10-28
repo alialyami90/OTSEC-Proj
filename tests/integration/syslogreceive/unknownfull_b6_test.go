@@ -37,6 +37,11 @@ const sUnknown = c5.StreamID("syslog-unknown/a6")
 // one part (B4's design note), and the tests hold it to that.
 const partCap = 64 << 10
 
+// unknownQueueFull is D4-21's drop reason (#317): an unknown sender's
+// datagram past its quarter of the listener's queue. Named here, not as
+// receive.DropUnknownQueueFull, so these cases hold before and after #317.
+const unknownQueueFull = "unknown-queue-full"
+
 // commitRecords is the Log's record cap here, given to the receiver as its
 // MaxCommitRecords, as the node gives both from one group (groupFor).
 const commitRecords = 64
@@ -54,7 +59,9 @@ type unknownRig struct {
 	done   chan error
 }
 
-func startUnknown(t *testing.T, tr asset.Transport, quota int64, lim receive.Limits) *unknownRig {
+// startUnknown starts the rig. wrap, if given, stands between the receiver
+// and the real Log (a gate, in the D4-21 cases).
+func startUnknown(t *testing.T, tr asset.Transport, quota int64, lim receive.Limits, wrap ...func(receive.Appender) receive.Appender) *unknownRig {
 	t.Helper()
 	d := filepath.Join(t.TempDir(), "store")
 	if err := store.CreateDir(d, ""); err != nil {
@@ -95,11 +102,15 @@ func startUnknown(t *testing.T, tr asset.Transport, quota int64, lim receive.Lim
 	if err != nil {
 		t.Fatal(err)
 	}
+	var app receive.Appender = log
+	for _, w := range wrap {
+		app = w(app)
+	}
 	r, err := receive.New(receive.Config{
 		Node: node, ID: "a6", Stream: known, UnknownStream: sUnknown, Transport: tr, Address: "127.0.0.1:0",
 		Target: asset.Simulated, Plaintext: true,
 		Senders: receive.Senders{ipA: {AssetID: assetA, Target: asset.Simulated, Dialect: normalize.DialectRFC}},
-		Log:     log, Health: &healths{}, Received: received, Limits: lim,
+		Log:     app, Health: &healths{}, Received: received, Limits: lim,
 		MaxCommitBytes: partCap, MaxCommitRecords: commitRecords,
 	})
 	if err != nil {
@@ -343,18 +354,22 @@ func TestB6UnknownClassFullOverDatagrams(t *testing.T) {
 			break
 		}
 	}
-	if len(v.unknown) == 0 || len(v.unknown) == n {
-		t.Errorf("unknown sender: %d of %d stored; the class should have filled", len(v.unknown), n)
-	}
 	// Only the unknown sender's datagrams are dropped: at the class quota,
-	// and past the hourly budget, which a part refused at the quota also
-	// spends (#291).
-	full, budget := st.Dropped[receive.DropUnknownFull], st.Dropped[receive.DropUnknownBudget]
-	if full == 0 || full+budget != int64(n-len(v.unknown)) || sumMap(st.Dropped) != full+budget {
-		t.Errorf("dropped %+v, want only %s (at least 1) and %s, %d in all", st.Dropped, receive.DropUnknownFull, receive.DropUnknownBudget, n-len(v.unknown))
+	// past the hourly budget, which a part refused at the quota also
+	// spends (#291), and, with #317, past its quarter of the queue.
+	full, budget, uq := st.Dropped[receive.DropUnknownFull], st.Dropped[receive.DropUnknownBudget], st.Dropped[unknownQueueFull]
+	if full+budget+uq != int64(n-len(v.unknown)) || sumMap(st.Dropped) != full+budget+uq {
+		t.Errorf("dropped %+v, want only %s, %s and %s, %d in all", st.Dropped, receive.DropUnknownFull, receive.DropUnknownBudget, unknownQueueFull, n-len(v.unknown))
 	}
-	if v.unknownBytes < quota-partCap {
-		t.Errorf("the syslog-unknown class stopped at %d bytes, more than one part (%d) short of its quota %d", v.unknownBytes, partCap, quota)
+	// The class fills, unless a stall held the unknown sender at its share
+	// of the queue instead (D4-21), which only a slow disk does.
+	if uq == 0 {
+		if full == 0 || len(v.unknown) == 0 {
+			t.Errorf("unknown sender: %d of %d stored, %d dropped as %s; the class should have filled", len(v.unknown), n, full, receive.DropUnknownFull)
+		}
+		if v.unknownBytes < quota-partCap {
+			t.Errorf("the syslog-unknown class stopped at %d bytes, more than one part (%d) short of its quota %d", v.unknownBytes, partCap, quota)
+		}
 	}
 }
 
@@ -365,8 +380,9 @@ func TestB6UnknownClassFullOverDatagrams(t *testing.T) {
 // runner 84 of 600 were (job 122683927190). This case pins what must hold
 // either way, and logs how many known datagrams were lost, so the residual
 // is seen on every run: every known datagram is stored, in order, or
-// counted as queue-full; no drop has another reason; unknown-full falls
-// only on the unknown sender; and the class fills and stays in its bound.
+// counted as queue-full; no drop has another reason; unknown-full (and,
+// with D4-21's #317, unknown-queue-full) falls only on the unknown sender;
+// and the class stays in its bound.
 func TestB6F017UnknownFloodSharesTheQueue(t *testing.T) {
 	const quota, n = 384 << 10, 600
 	g := startUnknown(t, asset.SyslogUDP, quota, receive.Limits{Rate: 100000, Burst: 100000,
@@ -379,21 +395,22 @@ func TestB6F017UnknownFloodSharesTheQueue(t *testing.T) {
 		}
 	})
 	lostKnown, lostUnknown := int64(n-len(v.known)), int64(n-len(v.unknown))
-	full, queue := st.Dropped[receive.DropUnknownFull], st.Dropped[receive.DropQueueFull]
-	t.Logf("F-017 residual (simulated): %d of %d known datagrams lost to queue-full with the rate limits lifted; queue-full %d in all", lostKnown, n, queue)
-	if other := sumMap(st.Dropped) - full - queue; other != 0 {
-		t.Errorf("dropped %+v: only %s and %s are expected", st.Dropped, receive.DropUnknownFull, receive.DropQueueFull)
+	full, queue, uq := st.Dropped[receive.DropUnknownFull], st.Dropped[receive.DropQueueFull], st.Dropped[unknownQueueFull]
+	t.Logf("F-017 residual (simulated): %d of %d known datagrams lost to queue-full with the rate limits lifted; queue-full %d, %s %d in all", lostKnown, n, queue, unknownQueueFull, uq)
+	if other := sumMap(st.Dropped) - full - queue - uq; other != 0 {
+		t.Errorf("dropped %+v: only %s, %s and %s are expected", st.Dropped, receive.DropUnknownFull, receive.DropQueueFull, unknownQueueFull)
 	}
-	if lostKnown+lostUnknown != full+queue {
-		t.Errorf("%d known and %d unknown lost, but %d counted", lostKnown, lostUnknown, full+queue)
+	if lostKnown+lostUnknown != full+queue+uq {
+		t.Errorf("%d known and %d unknown lost, but %d counted", lostKnown, lostUnknown, full+queue+uq)
 	}
 	if lostKnown > queue {
 		t.Errorf("%d known datagrams lost, only %d counted as queue-full", lostKnown, queue)
 	}
-	if full == 0 || full > lostUnknown {
-		t.Errorf("%s %d: the class should have filled, on the unknown sender only (%d of its datagrams lost)", receive.DropUnknownFull, full, lostUnknown)
+	// unknown-full and unknown-queue-full fall on the unknown sender only.
+	if full+uq == 0 || full+uq > lostUnknown {
+		t.Errorf("%s %d, %s %d: the unknown sender should have been stopped, on its own datagrams only (%d of them lost)", receive.DropUnknownFull, full, unknownQueueFull, uq, lostUnknown)
 	}
-	if v.unknownBytes < quota-partCap {
+	if full > 0 && v.unknownBytes < quota-partCap {
 		t.Errorf("the syslog-unknown class stopped at %d bytes, more than one part (%d) short of its quota %d", v.unknownBytes, partCap, quota)
 	}
 	// What is stored keeps the device's order.
