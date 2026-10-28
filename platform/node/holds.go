@@ -305,6 +305,20 @@ func configAuditRecords(ctx context.Context, db *store.DB) ([]auditRec, error) {
 	return out, nil
 }
 
+// auditPruned reports whether the audit stream no longer begins at its first
+// record: some of it has been pruned, so a hold's record may be gone.
+func auditPruned(ctx context.Context, db *store.DB) (bool, error) {
+	last, err := db.LastCommitted(ctx, AuditStream)
+	if err != nil || last == 0 {
+		return false, err
+	}
+	first, err := db.FirstRetained(ctx, AuditStream)
+	if err != nil {
+		return false, err
+	}
+	return first != 1, nil
+}
+
 // reconcileHolds rebuilds the holds the C8 records justify and corrects the
 // configuration database to match, at start. It adds what is missing and
 // replaces a wrong reason before it releases anything, so a crash part-way
@@ -334,6 +348,21 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 	if err != nil {
 		fail(err)
 		return
+	}
+	// A pruned audit stream no longer shows the acknowledgements and
+	// detections the holds came from, so what is wanted is only what the
+	// retained records show. The reconcile then adds what they justify and
+	// corrects and releases nothing: a hold is never taken away on a view
+	// that begins after the record that justified it (as the suspension
+	// rebuild refuses a pruned prefix).
+	pruned, err := auditPruned(ctx, adb)
+	if err != nil {
+		fail(err)
+		return
+	}
+	if pruned {
+		r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: c5.AlarmHoldsReconciled, At: r.opt.Now(),
+			Detail: "the audit stream has been pruned, so the C8 records for some holds may be gone: holds are added from the records that remain and none is corrected or released"})
 	}
 	folded := foldHolds(recs)
 	var added, replaced, released, failed int
@@ -375,6 +404,9 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 			}
 		}
 		apply(p.add, "held", &added)
+		if pruned {
+			continue
+		}
 		apply(p.replace, "reason corrected to", &replaced)
 		if len(p.missing) > 0 {
 			// Something C8 wants held is not there: the holds the node has

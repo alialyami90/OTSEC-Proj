@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
@@ -449,5 +450,61 @@ func TestUnknownHoldCodeIsKept(t *testing.T) {
 	p := planHolds(node, wants, map[string]c5.Seq{"d1": 1}, have)
 	if len(p.unknown) != 2 || len(p.add) != 0 || len(p.replace) != 0 || len(p.release) != 1 || p.release[0].Seq != 3 {
 		t.Fatalf("plan %+v", p)
+	}
+}
+
+// An audit stream that has been pruned past the acknowledgement and the
+// detection no longer shows what the holds came from, and the reconcile
+// releases and corrects nothing (B6 on #305). Fails without the pruned check:
+// all three holds are released as unjustified.
+func TestPrunedAuditKeepsEveryHold(t *testing.T) {
+	h := newHoldsNode(t)
+	h.restart(func(r *Runtime) {
+		putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.snap1)))
+		putAudit(t, r, detectedRec(config.Digest(h.snap1), config.Digest(h.snap2), config.Digest(h.diff), false))
+	})
+	want, _, _ := h.restart(nil)
+	if len(want) != 3 {
+		t.Fatalf("before the prune, holds %v", want)
+	}
+	h.restart(func(r *Runtime) {
+		fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
+		db := r.Store(AuditStream)
+		last, err := db.LastCommitted(bg, AuditStream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The forwarder has confirmed the whole stream, and the suspension
+		// checkpoint (which pruneConsumers adds) has reached it.
+		for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
+			if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: last}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		b, err := c5.ComputeBoundary(bg, db, db, pruneConsumers([]c5.Consumer{fwd}), AuditStream, c5.ClassAudit, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := db.PruneStep(bg, b, 1000); err != nil || n == 0 {
+			t.Fatalf("pruned %d: %v", n, err)
+		}
+	})
+	got, alarms, _ := h.restart(nil)
+	if len(got) != len(want) {
+		t.Fatalf("after the prune, holds %v, want %v", got, want)
+	}
+	for s, w := range want {
+		if got[s] != w {
+			t.Errorf("seq %d held as %+v, want %+v", s, got[s], w)
+		}
+	}
+	var said bool
+	for _, a := range alarms {
+		if a.Code == string(c5.AlarmHoldsReconciled) && strings.Contains(a.Detail, "pruned") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("no alarm says the audit stream is pruned: %+v", alarms)
 	}
 }
