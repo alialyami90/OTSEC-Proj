@@ -268,6 +268,49 @@ func TestSameChanges(t *testing.T) {
 	}
 }
 
+// ChangesDigest (C8 0.7's changes_digest): equal exactly when the changes are
+// equal, whatever snapshots they come from, and not the baseline's.
+func TestChangesDigest(t *testing.T) {
+	s3, b3 := snapshot(t, "3")
+	_, b1 := snapshot(t, "1")
+	_, b2 := snapshot(t, "2")
+	d13, _ := Compare(b1, b3)
+	later := []byte(strings.NewReplacer(s3.RetrievedAt, "2026-10-25T09:00:00Z", s3.InvocationID, "8d1f4b2a-3c5e-4f60-9a7b-1c2d3e4f5a6b").Replace(string(b3)))
+	d13b, err := Compare(b1, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d23, _ := Compare(b2, b3)
+	d12, _ := Compare(b1, b2)
+	if !digestPattern.MatchString(d13.ChangesDigest()) {
+		t.Errorf("digest %q", d13.ChangesDigest())
+	}
+	if d13.ChangesDigest() != d13b.ChangesDigest() || d13.ChangesDigest() != d23.ChangesDigest() {
+		t.Error("the same changes from other snapshots or another baseline have different digests")
+	}
+	if d13.ChangesDigest() == d12.ChangesDigest() {
+		t.Error("a change and no change have one digest")
+	}
+	// No changes is "[]", whether the slice is empty or nil.
+	empty := Difference{}
+	if d12.ChangesDigest() != empty.ChangesDigest() || d12.ChangesDigest() != Digest([]byte("[]")) {
+		t.Errorf("no changes: %s, want %s", d12.ChangesDigest(), Digest([]byte("[]")))
+	}
+	// One value moved is another digest, and "<" is not escaped.
+	other := d13
+	other.Changes = append([]Change(nil), d13.Changes...)
+	to := "A<B"
+	other.Changes[0].To = &to
+	if other.ChangesDigest() == d13.ChangesDigest() {
+		t.Error("another value, the same digest")
+	}
+	one := Difference{Changes: []Change{{Class: "global", Kind: Changed, Name: "X", From: &to, To: &to}}}
+	want := Digest([]byte(`[{"class":"global","kind":"changed","name":"X","from":"A<B","to":"A<B","sensitive":false}]`))
+	if one.ChangesDigest() != want {
+		t.Errorf("encoding: %s, want %s", one.ChangesDigest(), want)
+	}
+}
+
 // Reversed, every change is its inverse.
 func TestCompareReversed(t *testing.T) {
 	_, b1 := snapshot(t, "1")

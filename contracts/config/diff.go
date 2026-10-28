@@ -1,6 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -150,6 +154,30 @@ func DecodeDifference(b []byte) (Difference, error) {
 		return Difference{}, fmt.Errorf("config: difference: %w", err)
 	}
 	return d, d.Validate()
+}
+
+// ChangesDigest names the changes alone, whatever snapshots they were
+// measured between: "sha256:" and the SHA-256 of the changes array as UTF-8
+// JSON in the order Compare gives (the rule's class order, then name), fields
+// in the order of Change's declaration, no whitespace, and without HTML
+// escaping, so "<" in a SELOGIC equation is written as it is. No changes is
+// "[]", never "null". Two reads of a configuration that stays changed have
+// one ChangesDigest (C8 0.7's changes_digest). It does not name the baseline:
+// the same changes from another baseline are another change, so callers pair
+// it with the baseline's digest, as SameChanges does.
+func (d Difference) ChangesDigest() string {
+	changes := d.Changes
+	if changes == nil {
+		changes = []Change{}
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(changes); err != nil {
+		panic("config: a Change does not encode: " + err.Error()) // strings and pointers to them cannot fail
+	}
+	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // SameChanges reports whether o is the same change as d: the same asset, rule
