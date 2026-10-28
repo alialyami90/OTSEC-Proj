@@ -114,7 +114,11 @@ func (ks *keyStore) provider(p nodekey.Provider) (nodekey.Keys, error) {
 }
 
 // keyCertificate resolves a tls-key reference to a certificate whose key is
-// used where it lives.
+// used where it lives. It does not judge the validity period: the TLS
+// configuration does, with the clock its stack uses, so an expired or
+// not-yet-valid certificate holds back its own link only, as a lab file's
+// does (HR-13, D4-11, D4-17). Every other fault, the provider, the key and
+// the public key included, is still refused here.
 func (c *Config) keyCertificate(ref string) (*tls.Certificate, error) {
 	ks, err := c.nodeKeys()
 	if err != nil {
@@ -128,7 +132,7 @@ func (c *Config) keyCertificate(ref string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ref, err)
 	}
-	cert, _, err := ks.reg.Certificate(ref, keys, time.Now())
+	cert, _, err := ks.reg.LoadCertificate(ref, keys)
 	return cert, err
 }
 
@@ -142,21 +146,19 @@ func (ks *keyStore) providerOf(ref string) (nodekey.Provider, error) {
 	return "", fmt.Errorf("nodekey: %s has no active version", ref)
 }
 
-// keyAnchors resolves a trust-anchors reference.
+// keyAnchors resolves a trust-anchors reference. An expired anchor stays in
+// the pool and is never trusted: a verification that chains to it fails on
+// the expiry, as for a lab file (D4-11 item 5).
 func (c *Config) keyAnchors(ref string) (*x509.CertPool, error) {
 	ks, err := c.nodeKeys()
 	if err != nil {
 		return nil, err
 	}
-	pool, _, err := ks.reg.TrustAnchors(ref, time.Now())
+	pool, _, err := ks.reg.LoadTrustAnchors(ref)
 	return pool, err
 }
 
-// keyLoadTarget is loadTarget from the key register. The register refuses
-// an expired or not-yet-valid certificate or trust anchor itself, with an
-// error that does not wrap forward.ErrCertificatePeriod, so under
-// key_register such a fault stops the node (D4-11 item 2 reads it as any
-// other fault); HR-13's hold-back applies to the lab files only.
+// keyLoadTarget is loadTarget from the key register.
 func (c *Config) keyLoadTarget(t *syslog.Target) (*targetCreds, error) {
 	roots, err := c.keyAnchors(t.TLS.TrustAnchorRef)
 	if err != nil {

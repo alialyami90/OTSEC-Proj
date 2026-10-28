@@ -549,7 +549,7 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 	if r.cfg.Transport == asset.SyslogUDP {
 		class = store.ClassSyslogDatagram
 	}
-	if _, known := r.cfg.Senders[m.from]; !known && r.cfg.UnknownStream != "" {
+	if !known && r.cfg.UnknownStream != "" {
 		stream, class = r.cfg.UnknownStream, store.ClassSyslogUnknown
 	}
 	in := normalize.SyslogInput{
