@@ -66,7 +66,8 @@ Windows evidence comes only from GitHub Actions. The latest Windows runs on B6 c
 5. **V-M4 on the real binaries (P4-A6).** Depends on B5's feeder (#340, #343) and B4's #344. Acceptance: the V-M4 row and "R4.8 observation period and measures". A redelivered `possible-duplicate` event must not trip Repeats unless C10 says so.
 6. **C2 0.6 contract tests** in `tests/contract/` (exit gate: C2 0.6 merged "with A6's contract tests"; #331 was checked by probes only). Acceptance: B6's own cases for the `config.read_all` run shapes (ok with one record per step, or not ok with none) and `failed.config_unparsable`, each killing a mutant.
 7. **Phase 4 status table** in `docs/verification.md`, like the Phase 3 table. Each row needs an evidence class and a source.
-8. **Small items:**
+8. **#346's Windows failure in `tests/integration/syslogreceive` (`restart_test.go`, a role-6 test).** The `go (windows-latest)` job of run 40728171729 was re-running at about 17:20Z (its one re-run). If it fails again, reproduce against `main` on hosted Windows and classify it under D4-5 and F-016; never call it a flake.
+9. **Small items:**
    - `a6-windows-restart-marker.yml` line 42 still says "ci.yml's 12m" (D4-22 made it 20m; fix it the next time the file is touched);
    - an assert in `test_slice_unknown_restart_e2e.py` that `_rows(s) == AHEAD`;
    - the #310 retention follow-up (a flapping device filling the class) under D4-20;
