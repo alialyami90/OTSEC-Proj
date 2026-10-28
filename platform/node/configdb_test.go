@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/adapter"
+	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/contracts/config"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
@@ -193,7 +194,7 @@ func TestConfigDatabaseStoresDocuments(t *testing.T) {
 	if _, err := log.Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: diff}); err != nil {
 		t.Fatal(err)
 	}
-	base := contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")
+	base := canonicalBaseline(t)
 	if _, err := log.Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: base}); err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +207,22 @@ func TestConfigDatabaseStoresDocuments(t *testing.T) {
 			t.Errorf("record %d is not stored byte for byte", i+1)
 		}
 	}
+}
+
+// canonicalBaseline is the C10 fixture as baseline.Encode writes it. The
+// fixture file is indented, which baseline.Decode accepts and the store
+// refuses: a baseline's Hash is taken over the compact bytes.
+func canonicalBaseline(t *testing.T) []byte {
+	t.Helper()
+	b, err := baseline.Decode(contractFile(t, "baseline/testdata/valid/baseline-synthetic.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := baseline.Encode(b, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // The document check refuses what is not a C9 or C10 document, a snapshot
@@ -223,7 +240,7 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 	snap1, cap1 := configRead(t, "1")
 	_, cap2 := configRead(t, "2")
 	diff := contractFile(t, "config/testdata/valid/difference-1-2.json")
-	base := contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")
+	base := canonicalBaseline(t)
 	// The same length as the transcript the snapshot names and other bytes,
 	// with the SHA-256 of the bytes it carries: only the digest comparison
 	// tells it from the transcript (B3 on #299).
@@ -239,6 +256,7 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 		"a snapshot, a capture of the same length, other bytes": rec(snap1, &sameLength),
 		"a difference with a capture":                           rec(diff, &cap1),
 		"a baseline with a capture":                             rec(base, &cap1),
+		"a baseline, indented":                                  rec(contractFile(t, "baseline/testdata/valid/baseline-synthetic.json"), nil),
 		"a snapshot that is not one":                            rec([]byte(strings.Replace(string(snap1), `"asset_id"`, `"asset_idx"`, 1)), &cap1),
 	} {
 		if _, err := log.Append(bg, rc); err == nil {

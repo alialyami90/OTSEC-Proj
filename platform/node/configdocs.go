@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,8 @@ import (
 //   - a C9 difference (config.difference) that decodes and validates, with
 //     no capture. It names its two snapshots by digest;
 //   - a C10 baseline (otsec.baseline) that decodes and validates, with no
-//     capture.
+//     capture, in the compact bytes baseline.Encode produces, so that the
+//     stored bytes hash to the baseline's Hash (B4 on #299).
 //
 // The validator cannot see the record's stream. The writer, which builds the
 // record for config/<asset>, must give it the asset's own document; the
@@ -66,8 +68,23 @@ func ConfigDocuments(document []byte, capture *c5.Capture) error {
 		if capture != nil {
 			return errors.New("configuration document: a baseline has no capture")
 		}
-		_, err := baseline.Decode(document)
-		return err
+		b, err := baseline.Decode(document)
+		if err != nil {
+			return err
+		}
+		// Decode accepts any strictly valid JSON, whitespace and key order
+		// included, but a baseline's Hash is taken over the bytes Encode
+		// produces, and the store keeps the bytes it is given. Anything
+		// else would store a document whose SHA-256 is not the Hash the
+		// acknowledgement names (B4 on #299).
+		canonical, err := baseline.Encode(b, 0)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(document, canonical) {
+			return errors.New("configuration document: a baseline must be stored as baseline.Encode's bytes")
+		}
+		return nil
 	}
 	return fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference or a C10 baseline", head.Schema, head.Kind)
 }
