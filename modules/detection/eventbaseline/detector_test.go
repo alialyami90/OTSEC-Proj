@@ -160,7 +160,7 @@ func TestDetectorRepeatsOffWhenTheBaselineSawN(t *testing.T) {
 // TestDetectorRate: a bucket above the bound alarms once, on the event that
 // passes it; a later bucket starts again.
 func TestDetectorRate(t *testing.T) {
-	d := active(t, 2100, func(p *baseline.Params) { p.RateBucketS = 100; p.RepeatsN = 50 })
+	d := active(t, 2100, func(p *baseline.Params) { p.RateBucketS = 100; p.RepeatsN = eventbaseline.MaxRepeatsN })
 	e := []*event.Event{ser("A", "Asserted", at(3000), ""), ser("A", "Asserted", at(3010), ""), ser("A", "Asserted", at(3020), "")}
 	wantRules(t, feed(t, d, e[:2]...))
 	got := feed(t, d, e[2])
@@ -302,7 +302,7 @@ func TestDetectorHolds(t *testing.T) {
 // TestDetectorNotCounted: a possible duplicate that was not counted breaks
 // no rule and is shown on the next alarm of its type.
 func TestDetectorNotCounted(t *testing.T) {
-	d := active(t, 2100, func(p *baseline.Params) { p.RateMin = 100; p.RepeatsN = 50 })
+	d := active(t, 2100, func(p *baseline.Params) { p.RateMin = 100; p.RepeatsN = eventbaseline.MaxRepeatsN })
 	dup := ser("A", "Asserted", at(3000), event.AlignPossibleDuplicate)
 	o, err := d.Observe(eventbaseline.Obs{Event: dup, NotCounted: true})
 	if err != nil || len(o.Alarms) != 0 {

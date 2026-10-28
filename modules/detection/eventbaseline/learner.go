@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"sort"
 	"time"
@@ -41,12 +42,17 @@ type Learner struct {
 	cfg   LearnerConfig
 	p     baseline.Params
 	types map[baseline.Key]*learnt
-	// overflow holds the keys of types first met while MaxTypesCeiling types
+	// overflow holds the digests of types first met while MaxTypes types
 	// were held (the working set, D4-15), so Counts.TypesOverflow counts
-	// types and not events. It stops growing at MaxTypesCeiling too;
+	// types and not events. It stops growing at MaxTypes too;
 	// overflowSaturated then says the count is a lower bound.
-	overflow          map[baseline.Key]struct{}
+	overflow          map[digest]struct{}
 	overflowSaturated bool
+	// gapsHeld is the distinct gap lengths held over all types (gapBudget),
+	// and gapDrops the types that stopped being periodic candidates because
+	// the budget was spent.
+	gapsHeld int
+	gapDrops int64
 
 	started  bool
 	startNS  int64
@@ -98,7 +104,7 @@ func NewLearner(c LearnerConfig) (*Learner, error) {
 	return &Learner{
 		cfg: c, p: c.Params,
 		types:    map[baseline.Key]*learnt{},
-		overflow: map[baseline.Key]struct{}{},
+		overflow: map[digest]struct{}{},
 		excluded: map[baseline.Exclusion]int64{},
 	}, nil
 }
@@ -143,12 +149,12 @@ func (l *Learner) Observe(o Obs) error {
 	}
 	ty := l.types[k]
 	if ty == nil {
-		if len(l.types) >= baseline.MaxTypesCeiling {
-			if _, ok := l.overflow[k]; !ok {
-				if len(l.overflow) >= baseline.MaxTypesCeiling {
+		if len(l.types) >= MaxTypes {
+			if dg := digestOf(k); !l.overflowHas(dg) {
+				if len(l.overflow) >= MaxTypes {
 					l.overflowSaturated = true
 				} else {
-					l.overflow[k] = struct{}{}
+					l.overflow[dg] = struct{}{}
 				}
 			}
 			return nil
@@ -159,12 +165,15 @@ func (l *Learner) Observe(o Obs) error {
 	ty.count++
 	ty.last = t
 	if use == baseline.UseFull {
-		ty.addFull(t, &l.p)
+		l.addFull(ty, t)
 	}
 	return nil
 }
 
-func (ty *learnt) addFull(t int64, p *baseline.Params) {
+func (l *Learner) overflowHas(dg digest) bool { _, ok := l.overflow[dg]; return ok }
+
+func (l *Learner) addFull(ty *learnt, t int64) {
+	p := &l.p
 	ty.full++
 	ty.hours[hourOf(t)]++
 
@@ -191,11 +200,24 @@ func (ty *learnt) addFull(t int64, p *baseline.Params) {
 			ty.gapMin, ty.gapMax = g, g
 		}
 		ty.gapMin, ty.gapMax = min(ty.gapMin, g), max(ty.gapMax, g)
+		_, had := ty.gaps[g]
 		ty.gaps[g]++
+		if !had {
+			l.gapsHeld++
+		}
 		// No median can hold every gap within spread% when the largest
 		// and the smallest are further apart than twice that of the
 		// largest: the type can never be found periodic, so stop holding.
-		if (ty.gapMax-ty.gapMin)*100 > 2*ty.gapMax*p.PeriodicSpreadPct || len(ty.gaps) > gapCap {
+		// Past gapCap distinct gaps, or the learner's gapBudget, it is not
+		// held either (D4-30): the budget is counted, because only a flood
+		// of near-periodic types spends it.
+		drop := (ty.gapMax-ty.gapMin)*100 > 2*ty.gapMax*p.PeriodicSpreadPct || len(ty.gaps) > gapCap
+		if !drop && l.gapsHeld > gapBudget {
+			drop = true
+			l.gapDrops++
+		}
+		if drop {
+			l.gapsHeld -= len(ty.gaps)
 			ty.notPeriodic, ty.gaps = true, nil
 		}
 	}
@@ -243,13 +265,37 @@ func abs(x int64) int64 {
 	return x
 }
 
+// ErrGap is a gap the record could not hold: its reason is not a C10 token
+// (for example the C2 code "failed.timeout"), it ends before it starts, or a
+// time is outside the years 1 to 9999. Such a gap is not taken.
+var ErrGap = errors.New("eventbaseline: gap refused")
+
+// reasonForm is C10's form for a gap's reason (contracts/baseline, tokenForm).
+var reasonForm = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
+
 // Gap records an interval in which the asset's collection failed (a V-S12
 // failure) and which therefore does not count toward the observation period.
-// Gaps are given in order, as they close.
-func (l *Learner) Gap(from, to time.Time, reason string) {
-	l.gaps = append(l.gaps, baseline.Gap{
-		FromUTC: from.UTC().Format(time.RFC3339Nano), ToUTC: to.UTC().Format(time.RFC3339Nano), Reason: reason,
-	})
+// Gaps are given in order, as they close. A gap the record could not hold is
+// refused (ErrGap) and not taken, so a snapshot's gaps stay bounded.
+func (l *Learner) Gap(from, to time.Time, reason string) error {
+	switch {
+	case !reasonForm.MatchString(reason):
+		return fmt.Errorf("%w: reason %.64q is not a token", ErrGap, reason)
+	case to.Before(from):
+		return fmt.Errorf("%w: it ends before it starts", ErrGap)
+	case from.UTC().Year() < 1 || to.UTC().Year() > 9999:
+		return fmt.Errorf("%w: a time is outside the years 1 to 9999", ErrGap)
+	}
+	g := baseline.Gap{FromUTC: from.UTC().Format(time.RFC3339Nano), ToUTC: to.UTC().Format(time.RFC3339Nano), Reason: reason}
+	if len(l.gaps) >= MaxGaps {
+		// Past MaxGaps the gap is merged into the last one: the time between
+		// them counts as not collected, so the period gets longer, never
+		// shorter, and the state stays bounded (D4-30).
+		l.gaps[len(l.gaps)-1].ToUTC = g.ToUTC
+		return nil
+	}
+	l.gaps = append(l.gaps, g)
+	return nil
 }
 
 // Progress is how far the observation period has come.
@@ -306,8 +352,14 @@ type Result struct {
 }
 
 // TypesHeld reports the working set: the types held, and the types first met
-// while MaxTypesCeiling were held, which are counted and never held.
+// while MaxTypes were held, which are counted and never held.
 func (l *Learner) TypesHeld() (held, overflow int) { return len(l.types), len(l.overflow) }
+
+// GapBudgetDrops is the number of types that stopped being periodic
+// candidates because the learner held gapBudget distinct gap lengths over
+// all types. It is zero unless a flood of near-periodic types spent it; the
+// node reports it as status, as it does Counts.TypesOverflow.
+func (l *Learner) GapBudgetDrops() int64 { return l.gapDrops }
 
 // Finish ends the period at now and records the baseline. It refuses before
 // both minima are met (ErrNotDone). Of the types held it keeps the

@@ -113,7 +113,7 @@ func plainDetector(t *testing.T, activeS int, mut func(*baseline.Params)) (*even
 	return d, cfg
 }
 
-var beyondNote = regexp.MustCompile(`; (\d+) more held breaks beyond the cap of (\d+) tracked new types are not listed`)
+var beyondNote = regexp.MustCompile(`; (\d+) more held breaks beyond the detector's caps are not listed`)
 
 // TestPairCapFloodStaysBoundedAndCountsStayExact: 114,688 distinct new types
 // in one hold, then more in later holds, leave the detector's pairs at the
@@ -148,9 +148,6 @@ func TestPairCapFloodStaysBoundedAndCountsStayExact(t *testing.T) {
 			if m := beyondNote.FindStringSubmatch(a.Observation); m != nil {
 				c, _ := strconv.ParseInt(m[1], 10, 64)
 				stated += c
-				if m[2] != strconv.Itoa(eventbaseline.MaxNewTypePairs) {
-					t.Fatalf("the note names a cap of %s", m[2])
-				}
 			}
 		}
 		if o.Held != nil {

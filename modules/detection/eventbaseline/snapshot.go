@@ -19,10 +19,13 @@ import (
 // MaxSnapshotBytes bounds a snapshot of either half, whatever bound the
 // caller passes. A snapshot above the bound is not made: Snapshot returns
 // ErrSnapshotTooLarge and the caller keeps the previous one (and says so,
-// because a restart then replays from that point or relearns). The package
-// documentation, "Snapshot and Restore", gives the sizes this is chosen
-// against.
-const MaxSnapshotBytes = 8 << 20
+// because a restart then replays from that point or relearns). It is above
+// the largest snapshot either half's format allows (TestSnapshotMaximalCase:
+// the learner 1,167,117 bytes, the detector 910,592), so at every ceiling
+// the configuration allows a snapshot is made, and below what C5's
+// checkpoint record leaves for it (D4-30). The package documentation,
+// "Snapshot and Restore", gives the sizes.
+const MaxSnapshotBytes = 1280 << 10
 
 // snapshotBound is the bound a Snapshot call works to: maxBytes when it is
 // above zero and at most MaxSnapshotBytes, else MaxSnapshotBytes.
@@ -82,6 +85,19 @@ func (e *snapW) bool(v bool) {
 	}
 }
 
+// digests writes a set of digests in ascending order, 16 bytes each.
+func (e *snapW) digests(m map[digest]struct{}) {
+	ds := make([]digest, 0, len(m))
+	for dg := range m {
+		ds = append(ds, dg)
+	}
+	slices.SortFunc(ds, func(a, b digest) int { return bytes.Compare(a[:], b[:]) })
+	e.u(uint64(len(ds)))
+	for _, dg := range ds {
+		e.b = append(e.b, dg[:]...)
+	}
+}
+
 // big is true once the state is known not to fit. The encoders ask after
 // each type, so an oversize state is refused within about one type's bytes
 // of the bound, not after it is built in full.
@@ -120,6 +136,35 @@ func (d *snapR) fail(format string, a ...any) {
 	if d.err == nil {
 		d.err = fmt.Errorf("%w: "+format, append([]any{ErrSnapshot}, a...)...)
 	}
+}
+
+// dg reads a digest, which must come after prev in ascending order (first
+// is true for the first of a list), so none appears twice.
+func (d *snapR) dg(prev digest, first bool) (out digest) {
+	if d.err != nil {
+		return out
+	}
+	if len(d.b) < len(out) {
+		d.fail("cut short")
+		return out
+	}
+	copy(out[:], d.b)
+	d.b = d.b[len(out):]
+	if !first && bytes.Compare(out[:], prev[:]) <= 0 {
+		d.fail("digests out of order")
+	}
+	return out
+}
+
+// digests reads a set that digests wrote, of at most max.
+func (d *snapR) digests(what string, max int) map[digest]struct{} {
+	m := map[digest]struct{}{}
+	var prev digest
+	for i, n := 0, d.n(what, max); i < n && d.err == nil; i++ {
+		prev = d.dg(prev, i == 0)
+		m[prev] = struct{}{}
+	}
+	return m
 }
 
 func (d *snapR) u() uint64 {
@@ -265,7 +310,7 @@ func sortedKeys[V any](m map[baseline.Key]V) []keyed {
 // readKey reads a key, which must come after prev in the canonical order,
 // so no key appears twice.
 func (d *snapR) key(prev string) (baseline.Key, string) {
-	s := d.s(1024)
+	s := d.s(maxKey)
 	if d.err != nil {
 		return baseline.Key{}, ""
 	}
@@ -280,7 +325,13 @@ func (d *snapR) key(prev string) (baseline.Key, string) {
 	return k, s
 }
 
-const maxText = 1024
+// maxKey is the longest canonical key: a SER element and state of
+// baseline.TextMax bytes each, every byte percent-escaped to three.
+const maxKey = len("ser||") + 2*3*baseline.TextMax
+
+// maxGapTime is the longest gap time Gap writes (RFC 3339, UTC, a four-digit
+// year and nine digits of fraction).
+const maxGapTime = len("2006-01-02T15:04:05.999999999Z")
 
 // ---- Learner ----
 
@@ -316,6 +367,7 @@ func (l *Learner) Snapshot(maxBytes int) ([]byte, error) {
 	e.i(l.typeOnly)
 	e.i(l.notCnt)
 	e.bool(l.overflowSaturated)
+	e.i(l.gapDrops)
 
 	why := make([]string, 0, len(l.excluded))
 	for w := range l.excluded {
@@ -335,11 +387,7 @@ func (l *Learner) Snapshot(maxBytes int) ([]byte, error) {
 		e.s(g.Reason)
 	}
 
-	ov := sortedKeys(l.overflow)
-	e.u(uint64(len(ov)))
-	for _, k := range ov {
-		e.s(k.s)
-	}
+	e.digests(l.overflow)
 
 	ts := sortedKeys(l.types)
 	e.u(uint64(len(ts)))
@@ -435,6 +483,7 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 	l.events, l.full = d.nonNeg("events"), d.nonNeg("full")
 	l.typeOnly, l.notCnt = d.nonNeg("type_only"), d.nonNeg("not_counted")
 	l.overflowSaturated = d.bool()
+	l.gapDrops = d.nonNeg("gap budget drops")
 	if d.err == nil {
 		switch {
 		case l.events != l.full+l.typeOnly+l.notCnt:
@@ -460,31 +509,27 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 		}
 	}
 
-	for n := d.n("gaps", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
-		g := baseline.Gap{FromUTC: d.s(64), ToUTC: d.s(64), Reason: d.s(1024)}
+	for n := d.n("gaps", MaxGaps); n > 0 && d.err == nil; n-- {
+		g := baseline.Gap{FromUTC: d.s(maxGapTime), ToUTC: d.s(maxGapTime), Reason: d.s(64)}
 		for _, s := range []string{g.FromUTC, g.ToUTC} {
 			if _, err := time.Parse(time.RFC3339Nano, s); d.err == nil && err != nil {
 				d.fail("gap time %q: %v", s, err)
 			}
 		}
+		if d.err == nil && !reasonForm.MatchString(g.Reason) {
+			d.fail("gap reason %q is not a token", g.Reason)
+		}
 		l.gaps = append(l.gaps, g)
 	}
 
-	prev = ""
-	for n := d.n("overflow", baseline.MaxTypesCeiling); n > 0 && d.err == nil; n-- {
-		k, s := d.key(prev)
-		prev = s
-		if d.err == nil {
-			l.overflow[k] = struct{}{}
-		}
-	}
+	l.overflow = d.digests("overflow", MaxTypes)
 
 	prev = ""
-	nTypes := d.n("types", baseline.MaxTypesCeiling)
+	nTypes := d.n("types", MaxTypes)
 	for ; nTypes > 0 && d.err == nil; nTypes-- {
 		k, s := d.key(prev)
 		prev = s
-		ty := &learnt{key: k, text: d.s(maxText)}
+		ty := &learnt{key: k, text: d.s(baseline.TextMax)}
 		ty.count, ty.full = d.nonNeg("count"), d.nonNeg("full")
 		var hours int64
 		for h := range ty.hours {
@@ -525,6 +570,7 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 				ty.gaps[g] = c
 				gapSum += c
 			}
+			l.gapsHeld += len(ty.gaps)
 			if d.err == nil && ng > 0 && (ty.gapMin != lo || ty.gapMax != hi) {
 				d.fail("a type's smallest and largest gaps do not match its gaps")
 			}
@@ -558,12 +604,14 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 			counted += ty.count
 		}
 		switch {
-		case counted > l.full+l.typeOnly, counted != l.full+l.typeOnly && len(l.types) < baseline.MaxTypesCeiling:
+		case counted > l.full+l.typeOnly, counted != l.full+l.typeOnly && len(l.types) < MaxTypes:
 			d.fail("the types count %d events, the learner %d full and %d type-only", counted, l.full, l.typeOnly)
-		case len(l.overflow) > 0 && len(l.types) < baseline.MaxTypesCeiling:
+		case len(l.overflow) > 0 && len(l.types) < MaxTypes:
 			d.fail("types were left out with only %d held", len(l.types))
-		case l.overflowSaturated && len(l.overflow) < baseline.MaxTypesCeiling:
+		case l.overflowSaturated && len(l.overflow) < MaxTypes:
 			d.fail("the left-out count is saturated at %d", len(l.overflow))
+		case l.gapsHeld > gapBudget:
+			d.fail("%d gap lengths held, above the budget of %d", l.gapsHeld, gapBudget)
 		}
 	}
 	if d.err != nil {
@@ -622,11 +670,7 @@ func (d *Detector) Snapshot(maxBytes int) ([]byte, error) {
 	body.i(d.nextSweep)
 	body.i(d.beyond)
 
-	ns := sortedKeys(d.newSeen)
-	body.u(uint64(len(ns)))
-	for _, k := range ns {
-		body.s(k.s)
-	}
+	body.digests(d.newSeen)
 
 	for i := range d.b.Types {
 		w := d.types[d.b.Types[i].Key]
@@ -657,14 +701,14 @@ func (d *Detector) Snapshot(maxBytes int) ([]byte, error) {
 	}
 	ps := make([]rp, 0, len(d.pairs))
 	for p := range d.pairs {
-		ps = append(ps, rp{string(p.rule) + "\x00" + p.key.String(), p})
+		ps = append(ps, rp{string(p.rule) + "\x00" + string(p.key[:]), p})
 	}
 	sort.Slice(ps, func(i, j int) bool { return ps[i].s < ps[j].s })
 	body.u(uint64(len(ps)))
 	for _, x := range ps {
 		pd := d.pairs[x.p]
 		body.s(string(x.p.rule))
-		body.s(x.p.key.String())
+		body.b = append(body.b, x.p.key[:]...)
 		body.i(pd.born)
 		body.i(pd.lastAlarm)
 		body.bool(pd.raisedOnce)
@@ -675,6 +719,9 @@ func (d *Detector) Snapshot(maxBytes int) ([]byte, error) {
 		}
 	}
 
+	if len(tab.pairs) > MaxStreams {
+		return nil, fmt.Errorf("%w: the held event IDs name %d streams, above %d", ErrSnapshotTooLarge, len(tab.pairs), MaxStreams)
+	}
 	head.s(d.hash)
 	head.s(d.b.AssetID)
 	head.i(d.activeNS)
@@ -712,8 +759,8 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		d.err = fmt.Errorf("%w: the baseline has %d types, the snapshot %d", ErrSnapshotMismatch, len(c.Baseline.Types), v)
 	}
 	var ids [][2]string
-	for n := d.n("event ID table", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
-		ids = append(ids, [2]string{d.s(256), d.s(256)})
+	for n := d.n("event ID table", MaxStreams); n > 0 && d.err == nil; n-- {
+		ids = append(ids, [2]string{d.s(63), d.s(128)}) // node.IDPattern, node.StreamPattern
 	}
 	idRef := func() event.EventID {
 		i, seq := d.u(), d.u()
@@ -754,15 +801,10 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		}
 	}
 
-	prev := ""
-	for n := d.n("new types seen", newSeenMax); n > 0 && d.err == nil; n-- {
-		k, s := d.key(prev)
-		prev = s
-		if d.err == nil {
-			if _, known := det.types[k]; known {
-				d.fail("%s is a type of the baseline, listed as a new one", s)
-			}
-			det.newSeen[k] = struct{}{}
+	det.newSeen = d.digests("new types seen", newSeenMax)
+	for dg := range det.newSeen {
+		if det.inBaseline[dg] {
+			d.fail("a type of the baseline is listed as a new one")
 		}
 	}
 
@@ -799,13 +841,13 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 	}
 
 	var last [2]string
-	for n := d.n("pairs", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
+	for n := d.n("pairs", (len(knownRules)-1)*len(c.Baseline.Types)+pairCap); n > 0 && d.err == nil; n-- {
 		rule := baseline.Rule(d.s(32))
-		k, s := d.key("")
+		k := d.dg(digest{}, true)
 		if d.err == nil && !slices.Contains(knownRules, rule) {
 			d.fail("%q is not a rule", rule)
 		}
-		if cur := [2]string{string(rule), s}; d.err == nil && last != ([2]string{}) && (cur[0] < last[0] || (cur[0] == last[0] && cur[1] <= last[1])) {
+		if cur := [2]string{string(rule), string(k[:])}; d.err == nil && last != ([2]string{}) && (cur[0] < last[0] || (cur[0] == last[0] && cur[1] <= last[1])) {
 			d.fail("pairs are out of order")
 		} else {
 			last = cur
@@ -815,11 +857,13 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		if d.err == nil && pd.total < int64(len(pd.ids)) {
 			d.fail("a pair holds %d events but counts %d", len(pd.ids), pd.total)
 		}
+		if det.heldIDs += len(pd.ids); d.err == nil && det.heldIDs > heldIDBudget {
+			d.fail("the pairs hold more than %d event IDs", heldIDBudget)
+		}
 		if d.err == nil {
-			_, inBaseline := det.types[k]
 			switch {
-			case (rule == baseline.RuleNewType) == inBaseline:
-				d.fail("a %s pair for %s: the new-type rule is for types outside the baseline, the others for types in it", rule, s)
+			case (rule == baseline.RuleNewType) == det.inBaseline[k]:
+				d.fail("a %s pair: the new-type rule is for types outside the baseline, the others for types in it", rule)
 			case rule == baseline.RuleNewType && det.newPairs >= pairCap:
 				d.fail("more than %d new-type pairs", pairCap)
 			}

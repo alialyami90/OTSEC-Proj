@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/modules/detection/eventbaseline"
 )
 
@@ -575,20 +578,100 @@ func TestSnapshotRefusesInconsistentState(t *testing.T) {
 	if err := edit(func(b []byte) []byte { b[open] = 0x02; return b }); !errors.Is(err, eventbaseline.ErrSnapshot) {
 		t.Errorf("a hold flag of 2: %v", err)
 	}
+	// The new-type memory holds 16-byte digests of Key.String (D4-30).
+	digestOf := func(key string) []byte { sum := sha256.Sum256([]byte(key)); return sum[:16] }
 	known := "ser|A|Asserted" // a type of the baseline
 	if err := edit(func(b []byte) []byte {
-		ins := append([]byte{0x01, byte(len(known))}, known...)
+		ins := append([]byte{0x01}, digestOf(known)...)
 		return append(b[:seen], append(ins, b[seen+1:]...)...)
 	}); !errors.Is(err, eventbaseline.ErrSnapshot) {
 		t.Errorf("a type of the baseline listed among the new ones: %v", err)
 	}
 	unknown := "ser|N|Asserted" // not in the baseline: this one is consistent
 	if err := edit(func(b []byte) []byte {
-		ins := append([]byte{0x01, byte(len(unknown))}, unknown...)
+		ins := append([]byte{0x01}, digestOf(unknown)...)
 		return append(b[:seen], append(ins, b[seen+1:]...)...)
 	}); err != nil {
 		t.Errorf("a new type listed among the new ones: %v", err)
 	}
+	two := append(append([]byte{0x02}, digestOf(unknown)...), digestOf(unknown)...)
+	if err := edit(func(b []byte) []byte {
+		return append(b[:seen], append(two, b[seen+1:]...)...)
+	}); !errors.Is(err, eventbaseline.ErrSnapshot) {
+		t.Errorf("one new type listed twice: %v", err)
+	}
+
+	// States Snapshot encodes but no run reaches, one check each (C6 on
+	// #364: each was a surviving mutant). Every one is refused whole.
+	lfresh := func() *eventbaseline.Learner {
+		r, err := eventbaseline.RestoreLearner(cfg, snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for name, fault := range eventbaseline.LearnerFaults {
+		x := lfresh()
+		fault(x)
+		if r, err := eventbaseline.RestoreLearner(cfg, mustSnap(t, x.Snapshot)); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+			t.Errorf("learner, %s: %v, %v", name, r, err)
+		}
+	}
+	// K9: the type listed twice. Restore keeps one of a key, so the counts
+	// still add up and only the order of the keys is wrong; accepted, it
+	// would encode to other bytes.
+	dbl := snap
+	key := append([]byte{byte(len("ser|B|Asserted"))}, "ser|B|Asserted"...)
+	pos := bytes.Index(dbl, key)
+	if pos < 1 || dbl[pos-1] != 0x01 {
+		t.Fatal("the learner's one type is not where the test expects")
+	}
+	seg := dbl[pos : len(dbl)-sha256.Size]
+	twice := append(append(append(append([]byte{}, dbl[:pos-1]...), 0x02), seg...), seg...)
+	if r, err := eventbaseline.RestoreLearner(cfg, reseal(append(twice, make([]byte, sha256.Size)...))); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+		t.Errorf("learner, one type listed twice: %v, %v", r, err)
+	}
+	// The gap budget: the type's one gap length is over a budget of none.
+	func() {
+		defer eventbaseline.SetGapBudget(0)()
+		if r, err := eventbaseline.RestoreLearner(cfg, snap); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+			t.Errorf("learner, gap lengths over the budget: %v, %v", r, err)
+		}
+	}()
+	// K3: an input above MaxSnapshotBytes is refused for its size, before
+	// anything in it is read.
+	if _, err := eventbaseline.RestoreLearner(cfg, make([]byte, eventbaseline.MaxSnapshotBytes+1)); !errors.Is(err, eventbaseline.ErrSnapshot) || !strings.Contains(err.Error(), "above") {
+		t.Errorf("an input above MaxSnapshotBytes: %v", err)
+	}
+
+	pd, pcfg := plainDetector(t, 2100, nil)
+	pds := mustSnap(t, pd.Snapshot)
+	dfresh := func() *eventbaseline.Detector {
+		r, err := eventbaseline.RestoreDetector(pcfg, pds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for name, fault := range eventbaseline.DetectorFaults {
+		x := dfresh()
+		fault(x)
+		if r, err := eventbaseline.RestoreDetector(pcfg, mustSnap(t, x.Snapshot)); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+			t.Errorf("detector, %s: %v, %v", name, r, err)
+		}
+	}
+	dd := dfresh()
+	eventbaseline.HoldTwoIDs(dd)
+	b2 := mustSnap(t, dd.Snapshot)
+	if _, err := eventbaseline.RestoreDetector(pcfg, b2); err != nil {
+		t.Errorf("detector, two held IDs: %v", err)
+	}
+	func() {
+		defer eventbaseline.SetHeldIDBudget(1)()
+		if r, err := eventbaseline.RestoreDetector(pcfg, b2); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+			t.Errorf("detector, held IDs over the budget: %v, %v", r, err)
+		}
+	}()
 }
 
 // TestSnapshotTooLargeIsRefusedAndHarmless: a state above the bound the
@@ -722,14 +805,14 @@ func TestSnapshotRestoredLearnerAndDetectorWorkOn(t *testing.T) {
 // them, and one whose count had stopped (saturated) says so as the original
 // does.
 func TestSnapshotLearnerAtTheWorkingSetLimit(t *testing.T) {
-	for _, extra := range []int{100, baseline.MaxTypesCeiling + 50} {
+	for _, extra := range []int{100, eventbaseline.MaxTypes + 50} {
 		p := unitParams()
 		cfg := eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: p, Version: 1}
 		a, err := eventbaseline.NewLearner(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		n := baseline.MaxTypesCeiling + extra
+		n := eventbaseline.MaxTypes + extra
 		for i := 0; i < n; i++ {
 			observe1(t, a, ser(fmt.Sprintf("T%05d", i), "Asserted", at(i/8), ""))
 		}
@@ -753,12 +836,12 @@ func TestSnapshotLearnerAtTheWorkingSetLimit(t *testing.T) {
 		if !bytes.Equal(ra.Bytes, rb.Bytes) || ra.OverflowSaturated != rb.OverflowSaturated {
 			t.Errorf("%d types past the ceiling: the restored learner recorded another baseline (saturated %v and %v)", extra, ra.OverflowSaturated, rb.OverflowSaturated)
 		}
-		if want := extra > baseline.MaxTypesCeiling; ra.OverflowSaturated != want {
+		if want := extra > eventbaseline.MaxTypes; ra.OverflowSaturated != want {
 			t.Errorf("%d types past the ceiling: saturated is %v, the case wants %v", extra, ra.OverflowSaturated, want)
 		}
 		ha, oa := a.TypesHeld()
 		hb, ob := b.TypesHeld()
-		if ha != hb || oa != ob || ha != baseline.MaxTypesCeiling {
+		if ha != hb || oa != ob || ha != eventbaseline.MaxTypes {
 			t.Errorf("held %d and %d, overflow %d and %d", ha, hb, oa, ob)
 		}
 	}
@@ -772,12 +855,12 @@ func longName(prefix string, i int) string {
 	return s + strings.Repeat("x", baseline.TextMax-len(s))
 }
 
-// bigParams are B6's GT-INJ parameters, with the types at the ceiling.
+// bigParams are B6's GT-INJ parameters, with the types at the learner's ceiling.
 func bigParams() baseline.Params {
 	p := unitParams()
 	p.MinDurationS, p.MinEvents = 14*86400, 1
 	p.RepeatsN, p.RepeatsWindowS = 5, 600
-	p.MaxTypes = baseline.MaxTypesCeiling
+	p.MaxTypes = eventbaseline.MaxTypes
 	return p
 }
 
@@ -813,8 +896,9 @@ func TestSnapshotSizes(t *testing.T) {
 		t.Logf("GT-INJ %s: learner %d bytes (%d types) after 14 days; detector %d bytes fresh, baseline record %d bytes", asset, len(ls), len(r.Baseline.Types), len(ds), len(r.Bytes))
 	}
 
-	// The learner at the ceiling: 4096 types of the longest names, each seen
-	// 30 times with distinct gaps (a type is held as periodic while it can be).
+	// The learner at its ceiling: MaxTypes types of the longest names, each
+	// seen 30 times with distinct gaps (a type is held as periodic while it
+	// can be), and as many types again left out.
 	p := bigParams()
 	cfg := eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: p, Version: 1}
 	l, err := eventbaseline.NewLearner(cfg)
@@ -825,34 +909,31 @@ func TestSnapshotSizes(t *testing.T) {
 	start := time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC)
 	const perType = 30
 	for j := 0; j < perType; j++ {
-		for i := 0; i < baseline.MaxTypesCeiling; i++ {
+		for i := 0; i < 2*eventbaseline.MaxTypes; i++ {
 			// 30 occurrences, two hours apart plus a few seconds, in time order.
 			at := start.Add(time.Duration(j)*2*time.Hour + time.Duration(j%7)*time.Second + time.Duration(i)*400*time.Millisecond)
-			if err := l.Observe(eventbaseline.Obs{Event: mk(longName("E", i), longName("S", i), at)}); err != nil {
-				t.Fatal(err)
-			}
+			observe1(t, l, mk(longName("E", i), longName("S", i), at))
 		}
 	}
 	held, over := l.TypesHeld()
 	big := mustSnap(t, l.Snapshot)
 	t.Logf("learner at the ceiling: %d types held, %d left out, %d occurrences each: %d bytes (%d per type)", held, over, perType, len(big), len(big)/held)
-	if held != baseline.MaxTypesCeiling || len(big) > MaxSnapshotBytesForTest {
-		t.Errorf("held %d types, snapshot %d bytes", held, len(big))
+	if held != eventbaseline.MaxTypes || over != eventbaseline.MaxTypes {
+		t.Errorf("held %d types, left out %d", held, over)
 	}
 	if r, err := eventbaseline.RestoreLearner(cfg, big); err != nil || !bytes.Equal(mustSnap(t, r.Snapshot), big) {
 		t.Errorf("the ceiling-size snapshot does not restore: %v", err)
 	}
 
 	// One type at the most the caps let it hold: a full window (windowCap
-	// stamps within the repeats window) and 4096 distinct gaps. Per type, this
-	// is the largest the state gets.
+	// stamps within the repeats window) and 4096 distinct gaps.
 	win, err := eventbaseline.NewLearner(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for j := 0; j < 5000; j++ {
-		// 0.1 s apart: 5000 occurrences in 500 s; the window holds the last 4096.
-		observe1(t, win, mk("W", "Dense", start.Add(time.Duration(j)*100*time.Millisecond)))
+	for j := 0; j < 100; j++ {
+		// 1 s apart: 100 occurrences in 100 s; the window holds the last 32.
+		observe1(t, win, mk("W", "Dense", start.Add(time.Duration(j)*time.Second)))
 	}
 	wb := mustSnap(t, win.Snapshot)
 	gaps, err := eventbaseline.NewLearner(cfg)
@@ -865,20 +946,17 @@ func TestSnapshotSizes(t *testing.T) {
 		at = at.Add(time.Duration(80000+j*4) * time.Second) // 4096 distinct gaps within 20% of the largest
 	}
 	gb := mustSnap(t, gaps.Snapshot)
-	t.Logf("one type at the caps: a full window of %d stamps %d bytes; %d distinct gaps %d bytes", 4096, len(wb), 4096, len(gb))
-	if len(wb) > 20<<10 || len(gb) > 20<<10 || len(wb) < 12<<10 || len(gb) < 12<<10 {
-		t.Errorf("a type at the caps takes %d bytes (window) and %d (gaps), not the 12 to 20 KiB the package documentation states", len(wb), len(gb))
-	}
+	t.Logf("one type at the caps: a full window of %d stamps %d bytes; %d distinct gaps %d bytes", eventbaseline.MaxRepeatsN+1, len(wb), 4096, len(gb))
 
-	// The detector: a baseline of as many types as fit the record cap, every
-	// one with a full repeats window, 4*4096 types seen as new, and each of
-	// those with a held break.
+	// The detector: a baseline of MaxTypes types, every one with a full
+	// repeats window, newSeenMax types seen as new, and the new-type pairs
+	// at their cap with a held break each.
 	dl, err := eventbaseline.NewLearner(eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: p, Version: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for j := 0; j < 3; j++ {
-		for i := 0; i < baseline.MaxTypesCeiling; i++ {
+		for i := 0; i < eventbaseline.MaxTypes; i++ {
 			observe1(t, dl, mk(fmt.Sprintf("E%04d", i), "Asserted", start.Add(time.Duration(j)*2*time.Hour+time.Duration(i)*time.Second)))
 		}
 	}
@@ -887,7 +965,8 @@ func TestSnapshotSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ack := start.Add(16 * 24 * time.Hour)
-	d, err := eventbaseline.NewDetector(eventbaseline.DetectorConfig{Baseline: rec.Baseline, Hash: rec.Hash, ActiveFrom: ack})
+	dcfg := eventbaseline.DetectorConfig{Baseline: rec.Baseline, Hash: rec.Hash, ActiveFrom: ack}
+	d, err := eventbaseline.NewDetector(dcfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -896,52 +975,112 @@ func TestSnapshotSizes(t *testing.T) {
 	for i := range rec.Baseline.Types {
 		for j := 0; j < int(p.RepeatsN)+1; j++ {
 			now = now.Add(time.Second)
-			o, err := d.Observe(eventbaseline.Obs{Event: mk(rec.Baseline.Types[i].Key.Element, rec.Baseline.Types[i].Key.State, now)})
-			if err != nil {
+			if _, err := d.Observe(eventbaseline.Obs{Event: mk(rec.Baseline.Types[i].Key.Element, rec.Baseline.Types[i].Key.State, now)}); err != nil {
 				t.Fatal(err)
 			}
-			_ = o
 		}
 	}
 	filled := mustSnap(t, d.Snapshot)
-	for i := 0; i < baseline.MaxTypesCeiling*4; i++ {
+	for i := 0; i < eventbaseline.MaxTypes*4; i++ {
 		now = now.Add(time.Second)
-		if _, err := d.Observe(eventbaseline.Obs{Event: mk(fmt.Sprintf("NEW%05d", i), "Asserted", now)}); err != nil {
+		if _, err := d.Observe(eventbaseline.Obs{Event: mk(longName("N", i), longName("S", i), now)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	full := mustSnap(t, d.Snapshot)
-	t.Logf("detector: baseline record %d bytes, %d types; fresh %d bytes; every type's window full %d bytes; with %d new types seen and their pairs %d bytes",
-		len(rec.Bytes), len(rec.Baseline.Types), len(fresh), len(filled), baseline.MaxTypesCeiling*4, len(full))
-	if len(full) > MaxSnapshotBytesForTest {
-		t.Errorf("the detector at its caps takes %d bytes", len(full))
+	t.Logf("detector: baseline record %d bytes, %d types; fresh %d bytes; every type's window full %d bytes; with %d new types of the longest names seen and their pairs %d bytes",
+		len(rec.Bytes), len(rec.Baseline.Types), len(fresh), len(filled), eventbaseline.MaxTypes*4, len(full))
+	if len(rec.Baseline.Types) != eventbaseline.MaxTypes {
+		t.Errorf("the baseline holds %d types", len(rec.Baseline.Types))
 	}
-	dcfg := eventbaseline.DetectorConfig{Baseline: rec.Baseline, Hash: rec.Hash, ActiveFrom: ack}
 	if r, err := eventbaseline.RestoreDetector(dcfg, full); err != nil || !bytes.Equal(mustSnap(t, r.Snapshot), full) {
 		t.Errorf("the detector at its caps does not restore: %v", err)
 	}
+}
 
-	// The same with the longest names a key keeps, which is the contract's
-	// maximum and not anything a device prints: the keys and their pairs
-	// together are above what is stored, and the snapshot is refused.
-	d2, err := eventbaseline.NewDetector(dcfg)
+// checkpointRoom is what a snapshot may take of C5's checkpoint record, one
+// record per half (#364): the configuration class's record cap
+// (configRecordBytes, platform/node.ConfigRecordBytes, which D2-1 does not
+// let a module import) less 64 KiB of headroom, less
+// checkpointEnvelope, the most C5's document may add around its contents,
+// and less feederState, the feeder's own state in the same record: the
+// previous read's alignment keys (asset.MaxReadRowsCeiling rows of 71 bytes,
+// C5's figure) and 16 KiB for the stream positions, the watermark and the
+// open gap.
+const (
+	checkpointEnvelope = 16 << 10
+	feederState        = asset.MaxReadRowsCeiling*71 + 16<<10
+	configRecordBytes  = 1536 << 10
+	checkpointRoom     = configRecordBytes - 64<<10 - checkpointEnvelope - feederState
+)
+
+// TestSnapshotMaximalCase (D4-30): at every ceiling the configuration
+// allows, a snapshot of either half fits MaxSnapshotBytes, and
+// MaxSnapshotBytes fits the checkpoint record. The state measured is not
+// one a run reaches: every list is at the bound Restore reads it to, every
+// string at the longest Restore takes (a key of 2 x 128 escaped bytes, IDs
+// of the longest node and stream over MaxStreams streams), and every number
+// at its widest encoding (WidenLearner, WidenDetector). The encoding of each
+// field only grows with its value's width and each list's length, so no
+// state that restores is larger. Each run also takes a bound of one byte
+// less than its size and is refused.
+func TestSnapshotMaximalCase(t *testing.T) {
+	p := unitParams()
+	p.RepeatsN, p.MaxTypes = eventbaseline.MaxRepeatsN, eventbaseline.MaxTypes
+	// The parameters at their widest JSON that the learner takes.
+	wp := p
+	wp.MinDurationS, wp.MinEvents, wp.RateMin = math.MinInt64, math.MinInt64, math.MinInt64
+	wp.RepeatsWindowS, wp.RateBucketS, wp.RateFactorPct, wp.PeriodicMinOccurrences = math.MaxInt64, math.MaxInt64, math.MaxInt64, math.MaxInt64
+	wp.PeriodicSpreadPct, wp.AbsenceTolerancePct, wp.AlarmHoldS, wp.MaxAlarmsPerHold = math.MinInt64, math.MinInt64, math.MinInt64, math.MinInt64
+	cfg := eventbaseline.LearnerConfig{
+		Node: node.ID(strings.Repeat("n", 63)), AssetID: strings.Repeat("a", 256), Params: wp,
+		Version: math.MaxInt, Previous: strings.Repeat("p", 256), MaxBytes: math.MaxInt,
+	}
+	l, err := eventbaseline.NewLearner(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < baseline.MaxTypesCeiling*4; i++ {
-		now = now.Add(time.Second)
-		if _, err := d2.Observe(eventbaseline.Obs{Event: mk(longName("N", i), longName("S", i), now)}); err != nil {
-			t.Fatal(err)
-		}
+	eventbaseline.WidenLearner(l)
+	ls, err := l.Snapshot(0)
+	if err != nil {
+		t.Fatalf("the learner at its widest: %v", err)
 	}
-	_, err = d2.Snapshot(0)
-	t.Logf("detector with %d new types of the longest names: %v", baseline.MaxTypesCeiling*4, err)
-	if !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
-		t.Errorf("unexpected: %v", err)
+	if _, err := l.Snapshot(len(ls) - 1); !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
+		t.Errorf("the learner at its widest under a bound one byte short: %v", err)
 	}
-	// A caller's bound above MaxSnapshotBytes does not raise the ceiling.
-	if b, err := d2.Snapshot(2 * eventbaseline.MaxSnapshotBytes); !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
-		t.Errorf("bound 2 x MaxSnapshotBytes: %d bytes, %v", len(b), err)
+
+	// A baseline of MaxTypes types at repeats_n MaxRepeatsN. The detector's
+	// state does not hold the keys, so short ones do.
+	bl := learner(t, func(q *baseline.Params) { *q = p })
+	for i := 0; i < eventbaseline.MaxTypes; i++ {
+		observe(t, bl, ser(fmt.Sprintf("E%04d", i), "Asserted", at(i), ""))
+	}
+	r, err := bl.Finish(at(eventbaseline.MaxTypes + 2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := eventbaseline.NewDetector(eventbaseline.DetectorConfig{Baseline: r.Baseline, Hash: r.Hash, ActiveFrom: at(eventbaseline.MaxTypes + 3000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Baseline.Types) != eventbaseline.MaxTypes {
+		t.Fatalf("the baseline holds %d types", len(r.Baseline.Types))
+	}
+	eventbaseline.WidenDetector(d)
+	ds, err := d.Snapshot(0)
+	if err != nil {
+		t.Fatalf("the detector at its widest: %v", err)
+	}
+	if _, err := d.Snapshot(len(ds) - 1); !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
+		t.Errorf("the detector at its widest under a bound one byte short: %v", err)
+	}
+
+	t.Logf("at the widest: learner %d bytes, detector %d bytes; MaxSnapshotBytes %d; the checkpoint record leaves %d", len(ls), len(ds), eventbaseline.MaxSnapshotBytes, checkpointRoom)
+	if len(ls) > eventbaseline.MaxSnapshotBytes || len(ds) > eventbaseline.MaxSnapshotBytes {
+		t.Errorf("a snapshot at the widest is above MaxSnapshotBytes (%d)", eventbaseline.MaxSnapshotBytes)
+	}
+	if eventbaseline.MaxSnapshotBytes > checkpointRoom {
+		t.Errorf("MaxSnapshotBytes (%d) is above what the checkpoint record leaves (%d)", eventbaseline.MaxSnapshotBytes, checkpointRoom)
 	}
 }
 
