@@ -100,6 +100,52 @@
 // breaking event's own ID is not a safe key part: Events lists the first 32
 // breaks, and an absence alarm may list none.
 //
+// # Snapshot and Restore
+//
+// A node that restarts cannot replay a 14-day period: the records are
+// forwarded and pruned. Learner.Snapshot and Detector.Snapshot return the
+// whole state as bytes, and RestoreLearner and RestoreDetector build the
+// learner or detector back from them. Restoring a snapshot taken at any
+// point gives a learner or detector whose every later call returns what the
+// one that never stopped would have returned: the same alarms, the same
+// baseline bytes, the same errors (TestSnapshotLearnerRestoredAtEveryStep and
+// TestSnapshotDetectorRestoredAtEveryStep restore after every call of the
+// GT-INJ series and compare the whole state, byte for byte, after each).
+//
+// The format is versioned (the header says 1), deterministic (one state gives
+// one set of bytes: keys and maps are in order, numbers in their shortest
+// form, so Restore then Snapshot returns the bytes it was given) and ends in
+// a SHA-256 of everything before it. A snapshot is bound to what it was taken
+// under: the learner's to the node, asset, baseline version, previous hash,
+// byte cap and every parameter, and the detector's to the baseline hash, asset
+// and activation time. Restoring under others is ErrSnapshotMismatch. Bytes
+// that are cut short, changed, of another format or learner version
+// (ErrSnapshotVersion), of the other half, or not consistent with
+// themselves (counts that do not add up, keys out of order) are ErrSnapshot.
+// Every restore error returns no learner or detector, never part of one.
+//
+// What the snapshot does not hold, the caller does. It holds no stream
+// position: the node stores, in the same record as the snapshot, the position
+// of the last event it passed to Observe, so a restart resumes at the next
+// one. An event replayed after the snapshot's last one is taken a second time
+// (the learner counts it twice, the detector may alarm twice); one earlier
+// is refused with ErrOrder. The feeder's own facts (whether a read follows a
+// V-S12 failure, a failure still open, which rows are possible duplicates)
+// are the feeder's, passed in Obs and Gap as before.
+//
+// Size. A snapshot is at most MaxSnapshotBytes (8 MiB); a state that does not
+// fit is refused with ErrSnapshotTooLarge and the learner or detector goes
+// on unharmed, so the node keeps its previous snapshot and says so. Measured
+// (TestSnapshotSizes, docs/phase4/B4-snapshot.md): the GT-INJ learner after
+// 14 days is 1.2 to 1.6 KB; a learner at the ceiling of 4096 types with
+// 128-byte names, 30 occurrences each, is 1.9 MB (475 bytes a type); a type
+// at the most the caps let it hold is 17 KB for a full window of 4096
+// stamps, or 17 KB for 4096 distinct gaps (which no 14-day period reaches: at most
+// about 550 at periodic_spread_pct 10). A detector is 15 KB fresh for a
+// baseline of 1910 types (the most that fit the 512 KiB record), 340 KB with
+// every type's repeats window full, and 1.3 MB with the new-type memory
+// full (16,384 types) and a held break for each.
+//
 // # Limits
 //
 // These are places this implementation is not exact or not complete. Each is
@@ -126,7 +172,11 @@
 //     stopped at 4096). After activation a type left out alarms as new.
 //   - The new-type memory is bounded (16,384 types); a flood of distinct
 //     new types beyond that alarms on each occurrence, under the alarm
-//     bounds.
+//     bounds. The detector's record of held breaks per (rule, type) is not
+//     bounded: one entry is kept for every distinct new type that alarmed or
+//     was held, so such a flood grows the detector's memory and its snapshot
+//     until the snapshot is refused (ErrSnapshotTooLarge). Found while
+//     bounding the snapshot, and reported to B1 (B4-snapshot.md, F1).
 //   - Absence (D4-15). A periodic type whose deadline ran out before the
 //     acknowledgement is given activation + interval + tolerance as its
 //     deadline, so a source that fell silent during the wait and never
