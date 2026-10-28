@@ -48,6 +48,35 @@ func (r *Receiver) lowerCaps(part []store.Record) {
 	r.commitN.Store(int64(max(len(part)/2, 1)))
 }
 
+// commitSplit commits recs, the records of kept, with a known sender's and
+// an unknown sender's in separate calls when Config.UnknownStream is set:
+// the two are different streams of different classes, and one AppendBatch
+// is one stream. Each group keeps its order. The known group goes first, and
+// the unknown group is committed (or dropped) whether or not the known one
+// went in. It returns false only when ctx ended while a part was held.
+// Without UnknownStream every record is in one group.
+func (r *Receiver) commitSplit(ctx context.Context, recs []store.Record, kept []msg, hold bool) bool {
+	if r.cfg.UnknownStream == "" {
+		return r.commitParts(ctx, recs, kept, hold)
+	}
+	var kr, ur []store.Record
+	var km, um []msg
+	for i := range recs {
+		if recs[i].Class == store.ClassSyslogUnknown {
+			ur, um = append(ur, recs[i]), append(um, kept[i])
+		} else {
+			kr, km = append(kr, recs[i]), append(km, kept[i])
+		}
+	}
+	if len(kr) > 0 && !r.commitParts(ctx, kr, km, hold) {
+		return false
+	}
+	if len(ur) > 0 {
+		return r.commitParts(ctx, ur, um, hold)
+	}
+	return true
+}
+
 // commitParts commits recs, the records of kept, as one or more AppendBatch
 // calls of at most the commit cap each, in order, and tells the caller
 // whether to go on (false only when ctx ended while a part was held).
@@ -62,6 +91,16 @@ func (r *Receiver) lowerCaps(part []store.Record) {
 // that resends gives duplicates, never a loss. Nothing is acknowledged to
 // a sender before this returns, so an acknowledgement, where a transport
 // has one, covers the whole batch only once every part has committed.
+//
+// All of recs are of one stream and class. When that class is
+// syslog-unknown and the Log refuses a part because the class is at its
+// quota (CodeQuotaReached), the part is dropped and counted as
+// DropUnknownFull, for a stream as for a datagram: an unknown sender is
+// never held at the quota (HR-11), so its connection goes on being read
+// and each message after the first is dropped the same way. The class's
+// full action is drop-and-count (store.ActionFor), and the store raises
+// syslog-unknown-full once. Any other refusal of an unknown stream's part
+// is handled like a known one's.
 //
 // A part of several records that the Log refuses as too large means one of
 // its caps is below Config.MaxCommitBytes or MaxCommitRecords, and the
@@ -88,6 +127,11 @@ func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []
 			continue
 		}
 		r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
+		if recs[lo].Class == store.ClassSyslogUnknown && errors.Is(err, &store.Error{Code: store.CodeQuotaReached}) {
+			r.drop(DropUnknownFull, int64(hi-lo))
+			lo = hi
+			continue
+		}
 		if errors.Is(err, &store.Error{Code: store.CodeRecordTooLarge}) {
 			if hi-lo > 1 {
 				r.lowerCaps(recs[lo:hi])
