@@ -10,8 +10,8 @@ the binaries under %ProgramFiles%) and drives the installed otsec-node and
 otsec-collector services through the SCM. The simulator and the receiver
 stay user processes on 127.0.0.1. Nothing of it runs otherwise: the
 variable unset leaves the process mode exactly as it was, and the variable
-set without Windows or without elevation stops the run before it changes
-anything.
+set off a GitHub-hosted Actions runner (D4-12), without Windows or without
+elevation stops the run before it changes anything.
 
   - Preflight: the run refuses to start when any part of an OTSEC install
     is already there (either service, %ProgramData%\OTSEC,
@@ -113,7 +113,12 @@ def _go_build(out, pkg):
 
 def check_service_mode():
     """Stops a service-mode run that cannot be one before it changes
-    anything: Windows and an elevated process only."""
+    anything: a GitHub-hosted Actions runner, Windows and an elevated
+    process only. The first is D4-12 as code, not only policy (B3 on #263):
+    service mode installs machine-wide services, so it never runs on a PC or
+    a self-hosted runner, whoever sets the variable there."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise RuntimeError("OTSEC_SLICE_SERVICE=1 installs machine-wide services and runs only on a GitHub-hosted Actions runner (D4-12); nothing was changed")
     if os.name != "nt":
         raise RuntimeError("OTSEC_SLICE_SERVICE=1 drives the installed Windows services; this is not Windows")
     if not ctypes.windll.shell32.IsUserAnAdmin():
