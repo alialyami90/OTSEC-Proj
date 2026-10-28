@@ -19,11 +19,23 @@ import (
 	"otsec.local/otsec/modules/security/collectorclient"
 )
 
+// heldBusyTimeout is the busy_timeout of the runtimes `start` builds. It is
+// 0 (the store's 5 s) except while a test holds a database busy: each open
+// and each retry of a held database then waits it out, and a test that holds
+// two databases through three ticks waited 30 s for nothing but the clock.
+// A test that does not hold a database keeps 5 s, so a commit held in a slow
+// WAL sync (F-016) is never mistaken for a lock that will not come free. The
+// tests of this package do not run in parallel. The timeout is fixed when
+// start builds the runtime, so holdDB must come before start.
+var heldBusyTimeout time.Duration
+
 // holdDB opens database id of the store in dir with an exclusive-locking
 // connection, so that every other open of it is busy until the returned
 // release is called.
 func holdDB(t *testing.T, dir string, id c5.DatabaseID) (release func()) {
 	t.Helper()
+	heldBusyTimeout = 400 * time.Millisecond
+	t.Cleanup(func() { heldBusyTimeout = 0 })
 	h, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, string(id)+".db")))
 	if err != nil {
 		t.Fatal(err)

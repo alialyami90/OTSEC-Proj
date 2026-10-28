@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.4: how a site node keeps,
+// Package store is contract C5, otsec.store/0.6: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
