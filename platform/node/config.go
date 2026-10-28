@@ -389,6 +389,10 @@ func (c *Config) check() error {
 		}
 		if !operationPattern.MatchString(s.Operation) {
 			fail("%s.operation %q is not a register operation ID", p, s.Operation)
+		} else if len(s.Operation) > MaxOperationBytes {
+			// It is in every event of a read, so it is part of the bound
+			// on the evidence database's commit cap (commitcap.go).
+			fail("%s.operation is %d bytes, over %d", p, len(s.Operation), MaxOperationBytes)
 		}
 		if s.EverySeconds < MinIntervalSeconds {
 			fail("%s.every_seconds %d below %d", p, s.EverySeconds, MinIntervalSeconds)

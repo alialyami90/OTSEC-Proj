@@ -3,6 +3,7 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,7 @@ var (
 		"prune:begin", "prune:commit", "prune:done",
 	}
 	startPoints = []string{
-		"create:begin", "create:commit", "create:done", "create:rename",
+		"create:begin", "create:commit", "create:done", "create:closed", "create:rename", "create:renamed",
 		"streams:begin", "streams:commit", "streams:done",
 	}
 )
@@ -57,17 +58,47 @@ func TestKillAtEveryCommitPoint(t *testing.T) {
 		for _, nth := range runs[point] {
 			t.Run(fmt.Sprintf("%s#%d", point, nth), func(t *testing.T) {
 				dir := storeDir(t)
-				cmd := exec.Command(os.Args[0], "-test.run=^TestCrashChild$", "-test.v")
-				cmd.Env = append(os.Environ(), "OTSEC_CRASH_DIR="+dir, "OTSEC_CRASH_POINT="+point, fmt.Sprintf("OTSEC_CRASH_NTH=%d", nth))
-				out, err := cmd.Output()
-				var exit *exec.ExitError
-				if !errors.As(err, &exit) || exit.ExitCode() != crashExit {
-					t.Fatalf("child did not stop at %s: %v\n%s", point, err, out)
-				}
-				checkAfterCrash(t, dir, out)
+				checkAfterCrash(t, dir, runCrashChild(t, dir, point, nth))
 			})
 		}
 	}
+}
+
+// Bounds on one crash child (A1, after a hang on Windows on #172). The
+// child runs with its own test timeout, so a child that blocks panics
+// with every goroutine's stack on stderr before the parent's deadline
+// kills it; either way the parent fails with both outputs instead of
+// waiting out the package's timeout. WaitDelay bounds the wait for the
+// child's output pipes once it has exited or been killed.
+const (
+	crashChildTimeout  = 90 * time.Second
+	crashChildDeadline = 2 * time.Minute
+	crashChildWait     = 10 * time.Second
+)
+
+// runCrashChild runs TestCrashChild in dir until it stops at the nth
+// visit of point, and returns its stdout. Anything else fails the test
+// with the child's stdout and stderr.
+func runCrashChild(t *testing.T, dir, point string, nth int) []byte {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), crashChildDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCrashChild$", "-test.v", "-test.timeout="+crashChildTimeout.String())
+	cmd.Env = append(os.Environ(), "OTSEC_CRASH_DIR="+dir, "OTSEC_CRASH_POINT="+point, fmt.Sprintf("OTSEC_CRASH_NTH=%d", nth))
+	cmd.WaitDelay = crashChildWait
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	start := time.Now()
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != crashExit {
+		why := fmt.Sprint(err)
+		if ctx.Err() != nil {
+			why = fmt.Sprintf("killed after %s, the deadline: %v", crashChildDeadline, err)
+		}
+		t.Fatalf("child did not stop at %s#%d after %s: %s\nstdout:\n%s\nstderr:\n%s", point, nth, time.Since(start).Round(time.Millisecond), why, stdout.Bytes(), stderr.Bytes())
+	}
+	return stdout.Bytes()
 }
 
 type ack struct {

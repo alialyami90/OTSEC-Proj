@@ -127,10 +127,18 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 			}
 		}
 	}
+	group := groupFor(spec, r.opt.Group)
+	largest, rows := c5.LargestCommit(spec, group), c5.LargestCommitRecords(spec, group)
 	d := &database{spec: spec, env: env, policy: c5.StartupPolicy{
-		Streams:                spec.Streams,
-		Consumers:              mine,
-		RecoveryReserveBytes:   2 * store.WALBoundBytes,
+		Streams:   spec.Streams,
+		Consumers: mine,
+		// The reserve covers the database's largest commit (C5 0.5, D4-9,
+		// D4-14): twice the WAL bound, and the WAL of one commit at the
+		// byte and record caps.
+		RecoveryReserveBytes:   c5.RecoveryReserveFor(store.WALBoundBytes, largest, rows),
+		WALBoundBytes:          store.WALBoundBytes,
+		LargestCommitBytes:     largest,
+		LargestCommitRecords:   rows,
 		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
 		OpenHeadroomBytes:      store.WALBoundBytes + c5.MinOpenHeadroom,
 		PruneStepEvents:        50,
@@ -175,7 +183,7 @@ func (r *Runtime) adopt(d *database) error {
 		}
 		last[s.ID] = n
 	}
-	l, err := c5.NewLog(db, r.cfg.NodeID, classes, r.opt.Group, last)
+	l, err := c5.NewLog(db, r.cfg.NodeID, classes, groupFor(d.spec, r.opt.Group), last)
 	if err != nil {
 		return err
 	}
@@ -207,6 +215,13 @@ func (r *Runtime) recordStart(ctx context.Context) {
 }
 
 func (r *Runtime) modeChanged(ctx context.Context, d *database, mc c5.ModeChange) {
+	detail := modeDetail(d, mc)
+	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	r.modeHealth(ctx, d, mc)
+}
+
+// modeDetail is the detail of a store.mode_change record.
+func modeDetail(d *database, mc c5.ModeChange) string {
 	var codes []string
 	for _, a := range mc.Alarms {
 		codes = append(codes, string(a.Code))
@@ -215,7 +230,11 @@ func (r *Runtime) modeChanged(ctx context.Context, d *database, mc c5.ModeChange
 	if len(codes) > 0 {
 		detail += "; alarms " + strings.Join(codes, ",")
 	}
-	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	return detail
+}
+
+// modeHealth is the health event of a mode change.
+func (r *Runtime) modeHealth(ctx context.Context, d *database, mc c5.ModeChange) {
 	r.health(ctx, c5.HealthModeChanged, map[string]string{"database": string(d.spec.ID), "from": orNone(mc.From), "to": string(mc.To)})
 }
 
@@ -278,12 +297,21 @@ func (r *Runtime) Tick(ctx context.Context) {
 			r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: c5.AlarmOpenFailed, At: r.opt.Now(), Detail: err.Error()})
 		}
 		now := d.report
-		r.state.Unlock()
+		mc, changed := c5.ModeChangeOf(prev, now, r.opt.Now())
+		recorded := false
 		if d.spec.ID == AuditDB && prev.OpenBusy() {
-			r.commitDeferred(ctx)
+			// Still under the state lock, so no other writer can append to
+			// the Log adopt just published before the kept records and the
+			// recovery are in the chain (D3-6; B6 on #249).
+			recorded = r.commitDeferred(ctx, d, mc, changed)
 		}
-		if mc, ok := c5.ModeChangeOf(prev, now, r.opt.Now()); ok {
-			r.modeChanged(ctx, d, mc)
+		r.state.Unlock()
+		if changed {
+			if recorded {
+				r.modeHealth(ctx, d, mc)
+			} else {
+				r.modeChanged(ctx, d, mc)
+			}
 		}
 	}
 	r.mu.Lock()
@@ -440,12 +468,27 @@ const AlarmAuditNotRecorded = "audit-not-recorded"
 // audit store may be what failed.
 func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.Outcome, reason, detail string) {
 	d := r.find(AuditDB)
-	_, log, mode := r.view(d)
-	if log == nil || !mode.AcceptsEvents() {
-		why := fmt.Sprintf("%s not recorded: audit database %s", action, r.Mode(AuditDB))
-		if log == nil && r.openBusy(d) {
-			why += "; " + r.deferAudit(action, outcome, reason, detail)
+	var (
+		log *c5.Log
+		why string
+	)
+	if d != nil {
+		// One read lock covers the check and the keeping, so a record is
+		// either kept before Tick takes the kept queue or committed after
+		// the kept records (D3-6).
+		r.state.RLock()
+		log = d.log
+		if mode := d.report.Mode; log == nil || !mode.AcceptsEvents() {
+			why = fmt.Sprintf("%s not recorded: audit database %s", action, mode)
+			if log == nil && d.report.OpenBusy() {
+				why += "; " + r.deferAudit(action, outcome, reason, detail)
+			}
 		}
+		r.state.RUnlock()
+	} else {
+		why = fmt.Sprintf("%s not recorded: no audit database", action)
+	}
+	if why != "" {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: why})
 		return
 	}
@@ -456,17 +499,6 @@ func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.
 	if err != nil {
 		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})
 	}
-}
-
-// openBusy reports whether d failed at an open that was only busy, which
-// Tick retries.
-func (r *Runtime) openBusy(d *database) bool {
-	if d == nil {
-		return false
-	}
-	r.state.RLock()
-	defer r.state.RUnlock()
-	return d.report.OpenBusy()
 }
 
 // deferAudit keeps a record for commitDeferred, timed now, and says what
@@ -487,33 +519,51 @@ func (r *Runtime) deferAudit(action audit.Action, outcome audit.Outcome, reason,
 }
 
 // commitDeferred commits the records kept while the audit database's open
-// was busy, once a retry has opened it, before the retry's
-// store.mode_change. Each keeps the time it was made at. A new chain gets
-// its audit.chain_start first, as recordStart would have written.
-func (r *Runtime) commitDeferred(ctx context.Context) {
+// was busy, once a retry has opened it, and the retry's store.mode_change
+// after them, in one AppendBatch. Each kept record keeps the time it was
+// made at. A new chain gets its audit.chain_start first, as recordStart
+// would have written. Tick calls it holding the state lock, so no other
+// record can land between them (D3-6). It reports whether the mode change
+// was recorded with them.
+func (r *Runtime) commitDeferred(ctx context.Context, d *database, mc c5.ModeChange, changed bool) bool {
 	r.mu.Lock()
 	q, dropped := r.deferred, r.dropped
 	r.deferred, r.dropped = nil, 0
 	r.mu.Unlock()
-	db, log, mode := r.view(r.find(AuditDB))
+	db, log, mode := d.db, d.log, d.report.Mode
 	if log == nil || !mode.AcceptsEvents() {
 		if len(q) > 0 || dropped > 0 {
 			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: AlarmAuditNotRecorded, At: r.opt.Now(), Detail: fmt.Sprintf("%d kept records not recorded: audit database %s", len(q)+dropped, mode)})
 		}
-		return
+		return false
+	}
+	var batch []c5.Record
+	add := func(action audit.Action, reason, detail string) {
+		rec, err := r.AuditRecord(action, audit.OutcomeInfo, reason, detail)
+		if err != nil {
+			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: string(action) + ": " + err.Error()})
+			return
+		}
+		batch = append(batch, rec)
 	}
 	if n, err := db.LastCommitted(ctx, AuditStream); err == nil && n == 0 {
-		r.audit(ctx, audit.ActionAuditChainStart, audit.OutcomeInfo, "", "audit chain started for node "+string(r.cfg.NodeID))
+		add(audit.ActionAuditChainStart, "", "audit chain started for node "+string(r.cfg.NodeID))
 	}
-	for _, rec := range q {
-		if _, err := log.Append(ctx, rec); err != nil {
-			r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: "kept record: " + err.Error()})
-		}
-	}
+	batch = append(batch, q...)
 	if dropped > 0 {
-		r.audit(ctx, audit.ActionStorageAlarm, audit.OutcomeInfo, "audit_not_recorded",
+		add(audit.ActionStorageAlarm, "audit_not_recorded",
 			fmt.Sprintf("%d node records were not recorded while the audit database's open was busy; status holds their alarms", dropped))
 	}
+	if changed {
+		add(audit.ActionStoreModeChange, string(mc.To), modeDetail(d, mc))
+	}
+	if len(batch) == 0 {
+		return changed
+	}
+	if _, err := log.AppendBatch(ctx, batch); err != nil {
+		r.opt.Status.Alarm(AuditDB, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: AuditStream, Detail: fmt.Sprintf("%d kept records and the recovery: %v", len(batch), err)})
+	}
+	return changed
 }
 
 // AuditRecord builds a pending C8 record with the node as the actor.

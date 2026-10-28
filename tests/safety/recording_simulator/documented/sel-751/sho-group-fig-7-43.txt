@@ -1,0 +1,160 @@
+Group 1
+Relay Settings
+
+ID Settings
+RID      := SEL-751
+TID      := FEEDER RELAY
+
+
+Config Settings
+CTR      := 120            CTRN     := 120     PTR       := 180.00
+LEA_S_R := 180.00          LEA_S_SC := 4.80    DELTA_Y   := DELTA
+VSCONN   := VS             SINGLEV := N        VNOM      := 120.00
+
+Line Parameter Settings
+Z1MAG    := 2.14           Z1ANG    := 68.86   Z0MAG     := 6.38
+Z0ANG    := 72.47          Z0SMAG   := 0.36    Z0SANG    := 84.61
+LL       := 4.84
+
+Fault Locator
+EFLOC    := N
+
+Max Ph Overcurr
+50P1P    := 10.00          50P1D    := 0.00
+50P1TC   := 1
+50P2P    := 10.00          50P2D    := 0.00
+50P2TC   := 1
+50P3P    := 10.00          50P3D    := 0.00
+50P3TC   := 1
+50P4P    := 10.00          50P4D    := 0.00
+50P4TC   := 1
+
+
+Neutral Overcurr
+50N1P    := OFF            50N2P    := OFF     50N3P     := OFF
+50N4P    := OFF
+
+Residual Overcurr
+50G1P    := OFF            50G2P    := OFF     50G3P     := OFF
+50G4P    := OFF
+
+Neg Seq Overcurr
+50Q1P    := OFF            50Q2P    := OFF     50Q3P     := OFF
+50Q4P    := OFF
+
+Incipient Fault 50
+E50INC   := 15.00          50IALC   := 1       50ITRC    := 10
+
+Phase TOC
+51AP     := 6.00           51AC     := U3      51ATD     := 3.00
+51ARS    := N              51ACT    := 0.00    51AMR     := 0.00
+51ATC    := 1
+51BP     := 6.00           51BC     := U3      51BTD     := 3.00
+51BRS    := N              51BCT    := 0.00    51BMR     := 0.00
+51BTC    := 1
+51CP     := 6.00           51CC     := U3      51CTD     := 3.00
+51CRS    := N              51CCT    := 0.00    51CMR     := 0.00
+51CTC    := 1
+
+Maximum Ph TOC
+51P1P    := 6.00           51P1C    := U3      51P1TD    := 3.00
+51P1RS   := N              51P1CT   := 0.00    51P1MR    := 0.00
+51P1TC   := 1
+51P2P    := 6.00           51P2C    := U3      51P2TD    := 3.00
+51P2RS   := N              51P2CT   := 0.00    51P2MR    := 0.00
+51P2TC   := 1
+
+
+Negative Seq TOC
+51QP     := 6.00           51QC     := U3      51QTD     := 3.00
+51QRS    := N              51QCT    := 0.00    51QMR     := 0.00
+51QTC    := 1
+
+Neutral TOC
+51N1P    := OFF            51N2P    := OFF
+
+Residual TOC
+51G1P    := 0.50           51G1C    := U3      51G1TD    := 1.50
+51G1RS   := N              51G1CT   := 0.00    51G1MR    := 0.00
+51G1TC   := 1
+51G2P    := 0.50           51G2C    := U3      51G2TD    := 1.50
+51G2RS   := N              51G2CT   := 0.00    51G2MR    := 0.00
+51G2TC   := 1
+
+Harmonic Blocking Set
+EHBL2    := N               EHBL5     := N
+
+Load Encroach Set
+ELOAD    := N
+
+Phase Discontinuity Detection Settings
+EPDDET   := N
+
+Cold Load Pickup
+ECLPU    := N
+
+RTD Settings
+E49RTD   := NONE
+
+Thermal Settings
+E49IEC   := N
+
+
+Undervoltage Set
+27PP1P   := OFF             27PP2P    := OFF        27S1P    := OFF
+27S2P    := OFF
+
+Overvoltage Set
+59PP1P   := OFF             59PP2P    := OFF        59Q1P    := OFF
+59Q2P    := OFF             59S1P     := OFF        59S2P    := OFF
+
+27 Inverse Time
+E27I1    := N               E27I2     := N
+
+59 Inverse Time
+E59I1    := N               E59I2     := N          E59I3    := N
+E59I4    := N
+
+SyncCheck Set
+E25      := N
+
+LOP Setting
+LOPBLK   := 0
+
+
+Power Factor Set
+55LGTP   := OFF             55LDTP    := OFF        55LGAP   := OFF
+55LDAP   := OFF
+
+Vector Shift Set
+E78VS    := N
+
+Freq Settings
+81D1TP   := OFF             81D2TP    := OFF        81D3TP   := OFF
+81D4TP   := OFF             81D5TP    := OFF        81D6TP   := OFF
+
+Rate of Frequency Set
+E81R     := N
+
+Fast Rate of Frequency Set
+E81RF    := N
+
+Demand Mtr Set
+EDEM     := THM             DMTC      := 5          PHDEMP   := 5.00
+GNDEMP   := 1.00            3I2DEMP   := 1.00
+
+Power Elements
+EPWR     := N
+
+Trip/Close Logic
+TDURD    := 0.5           CFD      := 1.0
+TR       := ORED50T OR ORED51T OR ORED81T OR REMTRIP OR OC OR SV04T
+REMTRIP := 0
+ULTRIP   := NOT ( 51P1P OR 51G1P OR 51N1P OR 52A )
+52A      := 0
+52B      := NOT 52A
+CL       := SV03T AND LT02 OR CC
+ULCL     := 0
+
+Reclosing Control
+E79 := N

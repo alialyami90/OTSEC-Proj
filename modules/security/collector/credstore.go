@@ -736,12 +736,12 @@ func (s *CredStore) write(next credDoc) error {
 		err = replaceFile(s.path, b)
 	}
 	if err != nil {
-		s.broken = fmt.Errorf("%w: write %s: %v", ErrStateUnavailable, s.path, err)
+		s.broken = fmt.Errorf("%w: write %s: %w", ErrStateUnavailable, s.path, err)
 		return s.broken
 	}
 	s.doc = next
 	if err := s.gens.RaiseCredGeneration(next.Generation); err != nil {
-		s.broken = fmt.Errorf("%w: record generation of %s: %v", ErrStateUnavailable, s.path, err)
+		s.broken = fmt.Errorf("%w: record generation of %s: %w", ErrStateUnavailable, s.path, err)
 		return s.broken
 	}
 	return nil

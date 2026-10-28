@@ -90,49 +90,21 @@ type publishedKey struct {
 }
 
 // publishInstallKey writes install-key.json at every start, before the
-// collector serves. It writes a temporary file, syncs it and renames it over
-// the old one, so a reader sees the old file or the new one, never part of
-// one. The public directory is the installer's (A5), and a missing one is an
-// error, not a skip.
+// collector serves, through collector.ReplaceFile: a reader sees the old file
+// or the new one, never part of one. The node reads it before every request,
+// and the replace rides out a read in progress for a bounded time (A6 on
+// #106); a key that still cannot be published stops the start. The public
+// directory is the installer's (A5), and a missing one is an error, not a
+// skip.
 func publishInstallKey(l layout, s *collector.CredStore) error {
 	k := s.InstallKey()
 	b, err := json.MarshalIndent(publishedKey{installKeySchema, k.KeyID, k.PublicKey, s.Fingerprint()}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := l.publicKey + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
+	if err := collector.ReplaceFile(l.publicKey, append(b, '\n'), 0o644); err != nil {
+		os.Remove(l.publicKey + ".tmp")
 		return err
 	}
-	_, err = f.Write(append(b, '\n'))
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	// On Windows the rename fails while a reader holds the file open
-	// without FILE_SHARE_DELETE, and the node reads it before every
-	// request, so a few retries ride out a read in progress (A6 on #106).
-	for try := 0; ; try++ {
-		err = os.Rename(tmp, l.publicKey)
-		if err == nil || try == renameTries-1 {
-			break
-		}
-		time.Sleep(renameWait)
-	}
-	if err != nil {
-		os.Remove(tmp)
-	}
-	return err
+	return nil
 }
-
-const (
-	renameTries = 20
-	renameWait  = 50 * time.Millisecond
-)
