@@ -82,9 +82,11 @@
 //     again: a stream part the store refuses is held and tried alone, a
 //     datagram part is dropped and counted, and a crash between parts
 //     leaves a sender's resend with duplicates, never a loss. See
-//     commitParts. The caps a Log refuses are learnt downward only: after a
-//     refusal both are halved, and they do not rise again for the life of
-//     the Receiver; a restart starts from Config. A lone record the Log
+//     commitParts. The caps a Log refuses are learnt downward only: a
+//     refusal lowers, by half, only the cap the part can have exceeded (the
+//     record cap for a part of at most store.MinRecordBytes, otherwise the
+//     byte cap, never below that), and they do not rise again for the life
+//     of the Receiver; a restart starts from Config. A lone record the Log
 //     refuses as too large is dropped and counted as store, with the reason
 //     in Status.LastErr, but that path is defensive: Limits.MaxMessage keeps
 //     a message well under the store's record cap, so large messages are

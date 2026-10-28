@@ -42,6 +42,20 @@ func partBytes(recs []store.Record) int64 {
 	return n
 }
 
+// lowerCaps lowers the cap that a refused part of several records exceeded,
+// by half. The Log's byte cap is never below store.MinRecordBytes, so a part
+// of at most that many bytes can only have exceeded the record cap, and the
+// byte cap is left alone; a larger part may have exceeded either, and its
+// bytes are halved, never below store.MinRecordBytes. The caps only fall, and
+// each call makes the next part smaller, so the loop in commitParts ends.
+func (r *Receiver) lowerCaps(part []store.Record) {
+	if b := partBytes(part); b > store.MinRecordBytes {
+		r.commitAt.Store(max(b/2, store.MinRecordBytes))
+		return
+	}
+	r.commitN.Store(int64(max(len(part)/2, 1)))
+}
+
 // commitParts commits recs, the records of kept, as one or more AppendBatch
 // calls of at most the commit cap each, in order, and tells the caller
 // whether to go on (false only when ctx ended while a part was held).
@@ -58,10 +72,12 @@ func partBytes(recs []store.Record) int64 {
 // has one, covers the whole batch only once every part has committed.
 //
 // A part of several records that the Log refuses as too large means one of
-// its caps is below Config.MaxCommitBytes or MaxCommitRecords: both are
-// halved from the size of the refused part and the part is split again. A single record the Log refuses as too large can never
-// commit, so holding it would stop the stream; it is dropped and counted as
-// store, with the reason in Status.LastErr.
+// its caps is below Config.MaxCommitBytes or MaxCommitRecords, and the
+// refusal does not say which. Only the cap the part can have exceeded is
+// lowered (see lowerCaps) and the part is split again. A single record the
+// Log refuses as too large can never commit, so holding it would stop the
+// stream; it is dropped and counted as store, with the reason in
+// Status.LastErr.
 func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []msg, hold bool) bool {
 	held := false
 	defer func() {
@@ -82,8 +98,7 @@ func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []
 		r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
 		if errors.Is(err, &store.Error{Code: store.CodeRecordTooLarge}) {
 			if hi-lo > 1 {
-				r.commitAt.Store(max(partBytes(recs[lo:hi])/2, 1))
-				r.commitN.Store(int64(max((hi-lo)/2, 1)))
+				r.lowerCaps(recs[lo:hi])
 				continue
 			}
 			r.drop(DropStore, 1)
