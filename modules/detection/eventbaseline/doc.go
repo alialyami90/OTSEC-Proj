@@ -133,9 +133,12 @@
 // V-S12 failure, a failure still open, which rows are possible duplicates)
 // are the feeder's, passed in Obs and Gap as before.
 //
-// Size. A snapshot is at most MaxSnapshotBytes (8 MiB); a state that does not
-// fit is refused with ErrSnapshotTooLarge and the learner or detector goes
-// on unharmed, so the node keeps its previous snapshot and says so. Measured
+// Size. Snapshot takes the caller's bound in bytes (the node passes what its
+// checkpoint record can hold), and never more than MaxSnapshotBytes (8 MiB).
+// A state that does not fit is refused with ErrSnapshotTooLarge, within about
+// one type's bytes of the bound rather than after it is built in full, and
+// the learner or detector goes on unharmed, so the node keeps its previous
+// snapshot and says so. Measured
 // (TestSnapshotSizes, docs/phase4/B4-snapshot.md): the GT-INJ learner after
 // 14 days is 1.2 to 1.6 KB; a learner at the ceiling of 4096 types with
 // 128-byte names, 30 occurrences each, is 1.9 MB (475 bytes a type); a type
@@ -144,7 +147,9 @@
 // about 550 at periodic_spread_pct 10). A detector is 15 KB fresh for a
 // baseline of 1910 types (the most that fit the 512 KiB record), 340 KB with
 // every type's repeats window full, and 1.3 MB with the new-type memory
-// full (16,384 types) and a held break for each.
+// full (16,384 types) and a held break for each. Those detector figures are
+// at repeats_n 5 and short names, not at the ceilings: D4-30 requires a
+// checkpoint at every configured ceiling, and the means are open.
 //
 // # Limits
 //

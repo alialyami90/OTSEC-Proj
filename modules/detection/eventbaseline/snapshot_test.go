@@ -22,9 +22,10 @@ func gtLearnerConfig(s gtSeries, asset string) eventbaseline.LearnerConfig {
 	return eventbaseline.LearnerConfig{Node: gtNode, AssetID: gtAssets[asset], Params: s.Params, Version: 1}
 }
 
-func mustSnap(t testing.TB, snap func() ([]byte, error)) []byte {
+// mustSnap takes a snapshot at the package's own bound (maxBytes 0).
+func mustSnap(t testing.TB, snap func(maxBytes int) ([]byte, error)) []byte {
 	t.Helper()
-	b, err := snap()
+	b, err := snap(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,6 +589,65 @@ func TestSnapshotRefusesInconsistentState(t *testing.T) {
 	}
 }
 
+// TestSnapshotTooLargeIsRefusedAndHarmless: a state above the bound the
+// caller passes is refused with ErrSnapshotTooLarge, nothing is returned,
+// and the learner or detector goes on as if Snapshot had not been called. A
+// bound of zero, below zero or above MaxSnapshotBytes is MaxSnapshotBytes,
+// and a bound exactly the snapshot's size takes it (D4-30; C5 on #343).
+func TestSnapshotTooLargeIsRefusedAndHarmless(t *testing.T) {
+	l, lcfg := busyLearner(t)
+	d, dcfg := busyDetector(t)
+	// The twins are restored before any refusal, so they hold the same
+	// event IDs (ser numbers its events from one counter).
+	twin, err := eventbaseline.RestoreLearner(lcfg, mustSnap(t, l.Snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dtwin, err := eventbaseline.RestoreDetector(dcfg, mustSnap(t, d.Snapshot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		what string
+		snap func(int) ([]byte, error)
+	}{{"learner", l.Snapshot}, {"detector", d.Snapshot}} {
+		full := mustSnap(t, c.snap)
+		for _, n := range []int{-1, eventbaseline.MaxSnapshotBytes, eventbaseline.MaxSnapshotBytes + 1} {
+			if b, err := c.snap(n); err != nil || !bytes.Equal(b, full) {
+				t.Errorf("%s, bound %d: %v, or other bytes than bound 0", c.what, n, err)
+			}
+		}
+		if b, err := c.snap(len(full)); err != nil || !bytes.Equal(b, full) {
+			t.Errorf("%s, bound exactly its size %d: %v", c.what, len(full), err)
+		}
+		for _, n := range []int{len(full) - 1, len(full) / 2, 1} {
+			b, err := c.snap(n)
+			if !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) || b != nil {
+				t.Errorf("%s, bound %d below its size %d: %d bytes, %v", c.what, n, len(full), len(b), err)
+			}
+		}
+		if !bytes.Equal(full, mustSnap(t, c.snap)) {
+			t.Errorf("%s: a refused snapshot changed the state", c.what)
+		}
+	}
+	// It goes on as its twin, which was never asked for an oversize one.
+	e := ser("A", "Asserted", at(740), "")
+	for _, x := range []*eventbaseline.Learner{l, twin} {
+		observe(t, x, e)
+	}
+	if !bytes.Equal(mustSnap(t, l.Snapshot), mustSnap(t, twin.Snapshot)) {
+		t.Error("the learner refused a snapshot and then differs from its twin")
+	}
+	a, err1 := d.Tick(at(7200))
+	b, err2 := dtwin.Tick(at(7200))
+	if err1 != nil || err2 != nil || fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Errorf("the detector refused a snapshot and then ticks otherwise than its twin: %v %v", err1, err2)
+	}
+	if !bytes.Equal(mustSnap(t, d.Snapshot), mustSnap(t, dtwin.Snapshot)) {
+		t.Error("the detector refused a snapshot and then differs from its twin")
+	}
+}
+
 // TestSnapshotRestoredLearnerAndDetectorWorkOn: what is restored is not a
 // copy that stopped: it takes the next event, refuses an old one as the
 // original does, and the original is not changed by being snapshotted.
@@ -872,10 +932,14 @@ func TestSnapshotSizes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err = d2.Snapshot()
+	_, err = d2.Snapshot(0)
 	t.Logf("detector with %d new types of the longest names: %v", baseline.MaxTypesCeiling*4, err)
-	if err != nil && !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
+	if !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
 		t.Errorf("unexpected: %v", err)
+	}
+	// A caller's bound above MaxSnapshotBytes does not raise the ceiling.
+	if b, err := d2.Snapshot(2 * eventbaseline.MaxSnapshotBytes); !errors.Is(err, eventbaseline.ErrSnapshotTooLarge) {
+		t.Errorf("bound 2 x MaxSnapshotBytes: %d bytes, %v", len(b), err)
 	}
 }
 

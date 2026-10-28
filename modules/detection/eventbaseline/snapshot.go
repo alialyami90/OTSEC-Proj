@@ -16,16 +16,22 @@ import (
 	"otsec.local/otsec/contracts/event"
 )
 
-// MaxSnapshotBytes bounds a snapshot of either half. A snapshot above it is
-// not made: Snapshot returns ErrSnapshotTooLarge and the caller keeps the
-// previous one (and says so, because a restart then replays from that
-// point or relearns). The package documentation, "Snapshot and Restore",
-// gives the sizes this is chosen against.
+// MaxSnapshotBytes bounds a snapshot of either half, whatever bound the
+// caller passes. A snapshot above the bound is not made: Snapshot returns
+// ErrSnapshotTooLarge and the caller keeps the previous one (and says so,
+// because a restart then replays from that point or relearns). The package
+// documentation, "Snapshot and Restore", gives the sizes this is chosen
+// against.
 const MaxSnapshotBytes = 8 << 20
 
-// snapshotLimit is MaxSnapshotBytes; the tests lower it to reach the refusal
-// without building 8 MiB of state.
-var snapshotLimit = MaxSnapshotBytes
+// snapshotBound is the bound a Snapshot call works to: maxBytes when it is
+// above zero and at most MaxSnapshotBytes, else MaxSnapshotBytes.
+func snapshotBound(maxBytes int) int {
+	if maxBytes <= 0 || maxBytes > MaxSnapshotBytes {
+		return MaxSnapshotBytes
+	}
+	return maxBytes
+}
 
 // snapshotVersion is the format. A snapshot of another version is refused
 // (ErrSnapshotVersion), never read as best as it can be.
@@ -53,13 +59,17 @@ var (
 	// (other parameters, node, asset, baseline or activation time) than the
 	// one it is being restored into.
 	ErrSnapshotMismatch = fmt.Errorf("%w: made for another configuration", ErrSnapshot)
-	// ErrSnapshotTooLarge: the state does not fit MaxSnapshotBytes.
-	ErrSnapshotTooLarge = errors.New("eventbaseline: state does not fit MaxSnapshotBytes")
+	// ErrSnapshotTooLarge: the state does not fit the bound Snapshot was
+	// given (at most MaxSnapshotBytes).
+	ErrSnapshotTooLarge = errors.New("eventbaseline: state does not fit the snapshot bound")
 )
 
 // snapW writes the format: unsigned and signed varints, and strings as a
-// length and the bytes.
-type snapW struct{ b []byte }
+// length and the bytes. max is the bound the snapshot is made to.
+type snapW struct {
+	b   []byte
+	max int
+}
 
 func (e *snapW) u(v uint64) { e.b = binary.AppendUvarint(e.b, v) }
 func (e *snapW) i(v int64)  { e.b = binary.AppendVarint(e.b, v) }
@@ -72,11 +82,14 @@ func (e *snapW) bool(v bool) {
 	}
 }
 
-// big is true once the state is known not to fit.
-func (e *snapW) big() bool { return len(e.b) > snapshotLimit }
+// big is true once the state is known not to fit. The encoders ask after
+// each type, so an oversize state is refused within about one type's bytes
+// of the bound, not after it is built in full.
+func (e *snapW) big() bool { return len(e.b) > e.max }
 
-// seal puts the header before body and the checksum after it.
-func seal(kind byte, parts ...[]byte) ([]byte, error) {
+// seal puts the header before body and the checksum after it, and refuses
+// the whole above max bytes.
+func seal(max int, kind byte, parts ...[]byte) ([]byte, error) {
 	h := append([]byte{}, snapshotMagic[:]...)
 	h = binary.AppendUvarint(h, snapshotVersion)
 	h = append(h, kind)
@@ -84,8 +97,8 @@ func seal(kind byte, parts ...[]byte) ([]byte, error) {
 	for _, p := range parts {
 		n += len(p)
 	}
-	if n > snapshotLimit {
-		return nil, fmt.Errorf("%w: %d bytes, above %d", ErrSnapshotTooLarge, n, snapshotLimit)
+	if n > max {
+		return nil, fmt.Errorf("%w: %d bytes, above %d", ErrSnapshotTooLarge, n, max)
 	}
 	out := make([]byte, 0, n)
 	out = append(out, h...)
@@ -202,8 +215,8 @@ func (d *snapR) done() {
 // a decoder at its body. The format version is read before the checksum,
 // because another version may place the checksum elsewhere.
 func open(snap []byte, kind byte) (*snapR, error) {
-	if len(snap) > snapshotLimit {
-		return nil, fmt.Errorf("%w: %d bytes, above %d", ErrSnapshot, len(snap), snapshotLimit)
+	if len(snap) > MaxSnapshotBytes {
+		return nil, fmt.Errorf("%w: %d bytes, above %d", ErrSnapshot, len(snap), MaxSnapshotBytes)
 	}
 	if len(snap) < len(snapshotMagic)+2+sha256.Size || !bytes.Equal(snap[:len(snapshotMagic)], snapshotMagic[:]) {
 		return nil, fmt.Errorf("%w: not a snapshot", ErrSnapshot)
@@ -278,13 +291,14 @@ func learnerIdentity(c LearnerConfig) (params []byte, err error) {
 // Snapshot is the learner's whole state as bytes: the same state gives the
 // same bytes, and RestoreLearner of them gives a learner whose every later
 // call gives what this one's would. It does not change the learner. A state
-// above MaxSnapshotBytes is refused (ErrSnapshotTooLarge).
-func (l *Learner) Snapshot() ([]byte, error) {
+// above maxBytes is refused (ErrSnapshotTooLarge); maxBytes of zero or above
+// MaxSnapshotBytes means MaxSnapshotBytes.
+func (l *Learner) Snapshot(maxBytes int) ([]byte, error) {
 	params, err := learnerIdentity(l.cfg)
 	if err != nil {
 		return nil, err
 	}
-	var e snapW
+	e := snapW{max: snapshotBound(maxBytes)}
 	e.s(string(l.cfg.Node))
 	e.s(l.cfg.AssetID)
 	e.u(uint64(l.cfg.Version))
@@ -373,10 +387,10 @@ func (l *Learner) Snapshot() ([]byte, error) {
 			}
 		}
 		if e.big() {
-			return nil, fmt.Errorf("%w: past %d bytes at the type %s", ErrSnapshotTooLarge, snapshotLimit, k.s)
+			return nil, fmt.Errorf("%w: past %d bytes at the type %s", ErrSnapshotTooLarge, e.max, k.s)
 		}
 	}
-	return seal(kindLearner, e.b)
+	return seal(e.max, kindLearner, e.b)
 }
 
 // RestoreLearner builds the learner a snapshot was taken of. c is the
@@ -446,7 +460,7 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 		}
 	}
 
-	for n := d.n("gaps", snapshotLimit); n > 0 && d.err == nil; n-- {
+	for n := d.n("gaps", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
 		g := baseline.Gap{FromUTC: d.s(64), ToUTC: d.s(64), Reason: d.s(1024)}
 		for _, s := range []string{g.FromUTC, g.ToUTC} {
 			if _, err := time.Parse(time.RFC3339Nano, s); d.err == nil && err != nil {
@@ -593,10 +607,12 @@ func (t *idTable) refs(e *snapW, ids []event.EventID) {
 // watches (by its hash) and to its activation time. The same state gives the
 // same bytes, and RestoreDetector of them gives a detector whose every later
 // call gives what this one's would. It does not change the detector. A state
-// above MaxSnapshotBytes is refused (ErrSnapshotTooLarge).
-func (d *Detector) Snapshot() ([]byte, error) {
+// above maxBytes is refused (ErrSnapshotTooLarge); maxBytes of zero or above
+// MaxSnapshotBytes means MaxSnapshotBytes.
+func (d *Detector) Snapshot(maxBytes int) ([]byte, error) {
 	var tab idTable
-	var body, head snapW
+	max := snapshotBound(maxBytes)
+	body, head := snapW{max: max}, snapW{max: max}
 
 	body.i(d.lastNS)
 	body.bool(d.holdOpen)
@@ -629,7 +645,7 @@ func (d *Detector) Snapshot() ([]byte, error) {
 		tab.refs(&body, w.notCounted)
 		body.i(w.notCountedTotal)
 		if body.big() {
-			return nil, fmt.Errorf("%w: past %d bytes at the type %s", ErrSnapshotTooLarge, snapshotLimit, w.t.Key)
+			return nil, fmt.Errorf("%w: past %d bytes at the type %s", ErrSnapshotTooLarge, max, w.t.Key)
 		}
 	}
 
@@ -652,7 +668,7 @@ func (d *Detector) Snapshot() ([]byte, error) {
 		body.i(pd.total)
 		tab.refs(&body, pd.ids)
 		if body.big() {
-			return nil, fmt.Errorf("%w: past %d bytes in the held breaks", ErrSnapshotTooLarge, snapshotLimit)
+			return nil, fmt.Errorf("%w: past %d bytes in the held breaks", ErrSnapshotTooLarge, max)
 		}
 	}
 
@@ -665,7 +681,7 @@ func (d *Detector) Snapshot() ([]byte, error) {
 		head.s(p[0])
 		head.s(p[1])
 	}
-	return seal(kindDetector, head.b, body.b)
+	return seal(max, kindDetector, head.b, body.b)
 }
 
 var knownRules = []baseline.Rule{baseline.RuleNewType, baseline.RuleRepeats, baseline.RuleRate, baseline.RuleTime, baseline.RuleAbsence}
@@ -693,7 +709,7 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		d.err = fmt.Errorf("%w: the baseline has %d types, the snapshot %d", ErrSnapshotMismatch, len(c.Baseline.Types), v)
 	}
 	var ids [][2]string
-	for n := d.n("event ID table", snapshotLimit); n > 0 && d.err == nil; n-- {
+	for n := d.n("event ID table", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
 		ids = append(ids, [2]string{d.s(256), d.s(256)})
 	}
 	idRef := func() event.EventID {
@@ -779,7 +795,7 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 	}
 
 	var last [2]string
-	for n := d.n("pairs", snapshotLimit); n > 0 && d.err == nil; n-- {
+	for n := d.n("pairs", MaxSnapshotBytes); n > 0 && d.err == nil; n-- {
 		rule := baseline.Rule(d.s(32))
 		k, s := d.key("")
 		if d.err == nil && !slices.Contains(knownRules, rule) {

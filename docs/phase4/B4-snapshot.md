@@ -9,16 +9,16 @@ A node that restarts cannot replay a 14-day observation period: the records are 
 ## What was added
 
 ```go
-func (l *Learner)  Snapshot() ([]byte, error)
+func (l *Learner)  Snapshot(maxBytes int) ([]byte, error)
 func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error)
-func (d *Detector) Snapshot() ([]byte, error)
+func (d *Detector) Snapshot(maxBytes int) ([]byte, error)
 func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error)
 
 const MaxSnapshotBytes = 8 << 20
 var ErrSnapshot, ErrSnapshotVersion, ErrSnapshotMismatch, ErrSnapshotTooLarge
 ```
 
-`Snapshot` does not change the object. `Restore*` builds a new one; on any error it returns nil and an error, so there is never a partial state.
+`Snapshot` does not change the object. `maxBytes` is the caller's bound: the node passes what its checkpoint record holds (C5 on #343). Zero, below zero or above `MaxSnapshotBytes` means `MaxSnapshotBytes`. The encoder checks the size after each type and after the held breaks, so an oversize state is refused within about one type's bytes of the bound, not after it is built in full (C4, 2026-10-28). `Restore*` builds a new one; on any error it returns nil and an error, so there is never a partial state.
 
 ## The format
 
@@ -44,7 +44,7 @@ A learner or detector restored from a snapshot taken at **any** point returns, f
 | Another value of any of 9 parameters, the node, asset, version, previous hash, byte cap; another baseline hash, activation time or baseline: `ErrSnapshotMismatch` | `TestSnapshotRefusesAnotherConfiguration` |
 | With the checksum made right, every byte changed five ways: refused, or accepted only as a state that encodes back to the same bytes and records a valid baseline (learner) or goes on without a panic (detector). 4,480 learner changes (3,901 refused) and 2,295 detector changes (1,709 refused). | `TestSnapshotChangedAndSealedAgainIsRefusedOrCanonical` |
 | States that cannot have come from the code (a gap count that does not add up, a hold flag of 2, alarms held with no hold open, a baseline type listed as new) are refused | `TestSnapshotRefusesInconsistentState` |
-| A state above the limit is refused with `ErrSnapshotTooLarge` and the learner or detector goes on | `TestSnapshotTooLargeIsRefusedAndHarmless` (limit lowered by `SetSnapshotLimit` in `export_test.go`) |
+| A state above the caller's bound is refused with `ErrSnapshotTooLarge`, returns no bytes, and the learner or detector goes on exactly as a twin restored before the refusal; a bound of exactly the snapshot's size takes it; 0, -1 and above `MaxSnapshotBytes` mean `MaxSnapshotBytes` | `TestSnapshotTooLargeIsRefusedAndHarmless` (added by C4: B4's text named it, but it was not in `7dbe6b0`) |
 
 Mutation check (local, not committed): 42 mutants of `snapshot.go` that drop or replace one field or one consistency check (each learner and detector field, the id table, the pairs, the hold fields, the new-type memory, the checks on counts, order and gaps) are each killed by at least one test. Seven survived at first (the pairs' event IDs, the saturation flag, the excluded counts and four consistency checks) and are why `TestSnapshotRestoredLearnerAndDetectorWorkOn`, `TestSnapshotLearnerAtTheWorkingSetLimit` and `TestSnapshotRefusesInconsistentState` exist. A stronger fuzz check (an accepted change must still record a valid baseline) also found a missing check on the sum of the type counts, now made.
 
