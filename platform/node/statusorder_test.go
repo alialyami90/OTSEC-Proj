@@ -16,7 +16,9 @@ import (
 // report of it. The reader below takes every status the node writes while it
 // starts, and none may have Collecting true with the two links not yet held.
 func TestStatusNeverCollectsBeforeLinksAreHeldBack(t *testing.T) {
+	var nc *nodeconfigtest.Config
 	c, _ := schedConfig(t, func(n *nodeconfigtest.Config) {
+		nc = n
 		p, err := n.WritePKIValid("127.0.0.1", "test-ca", "test-client", nodeconfigtest.Validity{Client: expired()})
 		if err != nil {
 			t.Fatal(err)
@@ -28,6 +30,8 @@ func TestStatusNeverCollectsBeforeLinksAreHeldBack(t *testing.T) {
 		n.AddListener("lab-tls", "syslog-tls", "127.0.0.1:0")
 		lockTLS(t, n)
 	})
+	locked := *nc
+	t.Cleanup(func() { locked.UnlockTLS() })
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
 	done := make(chan error, 1)
