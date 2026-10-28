@@ -155,13 +155,20 @@ func open(t *testing.T, quota int64) (*c5.Log, string) {
 	if !ok {
 		t.Fatal("not a platform store")
 	}
+	path := filepath.Join(d, "syslog.db")
+	stores.Store(path, sdb)
+	t.Cleanup(func() { stores.Delete(path) })
 	l, err := c5.NewLog(sdb, node, map[c5.StreamID]c5.StreamClass{sStream: c5.ClassSyslogStream, sDgram: c5.ClassSyslogDatagram},
 		c5.GroupOptions{MaxEvents: 64, MaxWait: 5 * time.Millisecond}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return l, filepath.Join(d, "syslog.db")
+	return l, path
 }
+
+// stores is each open rig store by its file, for the diagnostic's
+// BeginStats (why, commitTrail).
+var stores sync.Map
 
 func received() event.Received {
 	return event.Received{UTC: time.Now().UTC().Format("2006-01-02T15:04:05.000000Z"), ResolutionNS: 1000,

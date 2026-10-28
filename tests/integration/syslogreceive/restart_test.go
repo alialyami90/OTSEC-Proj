@@ -20,6 +20,7 @@ import (
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/telemetry/normalize"
 	"otsec.local/otsec/modules/telemetry/receive"
+	"otsec.local/otsec/platform/store"
 )
 
 // The unknown budget across restarts (A4, #178; A3's conditions on D3-3).
@@ -447,10 +448,22 @@ func (g *rig) commitTrail() string {
 		if len(commits) == 0 {
 			commits = []string{"none"}
 		}
-		out = append(out, fmt.Sprintf("  t+%ds: received %d stored %d; %d sql pools open; commits: %s",
-			i, g.r.Status().Received, g.r.Status().Stored, pools, strings.Join(commits, "; ")))
+		out = append(out, fmt.Sprintf("  t+%ds: received %d stored %d; %d sql pools open; BEGIN IMMEDIATE %s; commits: %s",
+			i, g.r.Status().Received, g.r.Status().Stored, pools, g.begins(), strings.Join(commits, "; ")))
 	}
 	return strings.Join(out, "\n")
+}
+
+// begins is the store's BEGIN IMMEDIATE waits (store.DB.BeginStats): how
+// many, their total and longest, and how long the one in progress has
+// waited.
+func (g *rig) begins() string {
+	v, ok := stores.Load(g.db)
+	if !ok {
+		return "not known"
+	}
+	b := v.(*store.DB).BeginStats()
+	return fmt.Sprintf("%d, total %v, longest %v, waiting %v", b.Count, b.Total, b.Max, b.Waiting)
 }
 
 // frames is a pprof debug=1 stack's innermost frames, to the first in this
