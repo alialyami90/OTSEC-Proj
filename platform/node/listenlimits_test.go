@@ -162,7 +162,7 @@ func TestListenerUsesSizedBudget(t *testing.T) {
 		t.Fatalf("unknown share in status: %+v", u)
 	}
 	var stored int64
-	got2, err := r.Store(ListenerStream("lab-tcp")).Read(bg, ListenerStream("lab-tcp"), 0, 100)
+	got2, err := r.Store(UnknownStream("lab-tcp")).Read(bg, UnknownStream("lab-tcp"), 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestUnknownBudgetAcrossRestart(t *testing.T) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 		nc.Store.Quotas["syslog-stream"] = MinUnknownBytes * 25 * UnknownQuotaShare
 	})
-	stream := ListenerStream("lab-tcp")
+	stream := UnknownStream("lab-tcp")
 	c := parse(t, nc)
 	r, st, _ := start(t, c, dir)
 	ls := serve(t, r)
