@@ -22,7 +22,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 30 minutes on Windows, so a package that starts late in the go test
+    # step still reaches its own -timeout below (B1 and B6, #252).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -49,7 +51,11 @@ jobs:
       - name: collector pipe between two services (A6)
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
-      - run: go test ./...
+      # -timeout applies to each package's test binary from its own start,
+      # not to the step. On Windows it is 12m, so a slow or hung package
+      # dumps its goroutine stacks when it passes 12m; the 30-minute job
+      # limit leaves room for packages that start late (B1, #230 and #252).
+      - run: go test ${{ runner.os == 'Windows' && '-timeout 12m' || '' }} ./...
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -85,7 +91,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp openssl
       - run: rsyslogd -v && openssl version
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
-      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py --ignore=tests/integration/slice/test_slice_busy_open_e2e.py --ignore=tests/integration/slice/test_slice_admin_relay_e2e.py --ignore=tests/integration/slice/test_slice_unknown_restart_e2e.py
+      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py --ignore=tests/integration/slice/test_slice_busy_open_e2e.py --ignore=tests/integration/slice/test_slice_admin_relay_e2e.py --ignore=tests/integration/slice/test_slice_unknown_restart_e2e.py --ignore=tests/integration/slice/test_slice_date_orders_e2e.py
   # The long slice files (7 to 9 minutes each), one job per file so each
   # stays inside its limit and they run beside the integration job, which
   # ignores exactly these (A1, #132; busy_open added by A6 with A1's
@@ -104,6 +110,7 @@ jobs:
           - test_slice_busy_open_e2e.py
           - test_slice_admin_relay_e2e.py
           - test_slice_unknown_restart_e2e.py
+          - test_slice_date_orders_e2e.py
     env:
       OTSEC_SLICE_REQUIRED: "1"
     steps:

@@ -674,7 +674,9 @@ class SEL751DocResponder:
             out = self._show_global(text[6:].strip() or None)
             return (Reply(out + self._prompt(), notes=[self.last_note]) if out
                     else Reply(CRLF + UNMODELLED + self._prompt()))
-        group = re.fullmatch(r"SHO\w*(?:\s+([1-4]))?", text)
+        # SHO, or its long form SHOW; any other word starting SHO is not
+        # this command (B3 on #248) and falls through as unmodelled.
+        group = re.fullmatch(r"SHOW?(?:\s+([1-4]))?", text)
         if group:
             out, note = self._show_group(int(group.group(1) or 1))
             if self.sho_fault == "hang":

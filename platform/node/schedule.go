@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -503,6 +504,16 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 	}
 	if len(ser) > 0 {
 		if _, err := log.AppendBatch(ctx, ser); err != nil {
+			if errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}) {
+				// A read over the evidence database's commit cap is
+				// refused whole and nothing is stored; the bound on a
+				// read (commitcap.go) makes this a normalizer or adapter
+				// fault, so the outcome is kept as quarantine (D4-9).
+				rep.Outcome = "quarantined"
+				s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, "the read's events are over the evidence database's commit cap: "+err.Error(), false)
+				s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
+				return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the read is over the commit cap; kept as quarantine, nothing stored as events")
+			}
 			return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "SER events: "+err.Error())
 		}
 		rep.Events = len(ser)
@@ -730,7 +741,16 @@ func noDecisionDetail(err error) string {
 	case errors.Is(err, collectorclient.ErrProtocol):
 		return "the collector's reply breaks C7"
 	case errors.Is(err, collectorwire.ErrPeerRefused):
-		return "the collector's identity was refused"
+		// The reason comes from the node's own OS calls (OpenProcess,
+		// OpenProcessToken, the SID check), not from the collector, so
+		// it is shown (A3 on #179).
+		// The reason follows ErrPeerRefused's own text, wherever the
+		// callers' wrapping puts it.
+		msg := err.Error()
+		if _, reason, ok := strings.Cut(msg, collectorwire.ErrPeerRefused.Error()+": "); ok {
+			msg = reason
+		}
+		return "the collector's identity was refused: " + msg
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return "no reply before the deadline"
 	}

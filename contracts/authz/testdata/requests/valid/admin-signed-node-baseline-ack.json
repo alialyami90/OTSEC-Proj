@@ -1,0 +1,16 @@
+{
+  "contract": "otsec.authz/0.6",
+  "kind": "node.baseline_ack",
+  "request_id": "req-20261026-0001",
+  "on_behalf_of": {
+    "type": "human",
+    "id": "alice@site-a"
+  },
+  "policy_version": 3,
+  "admin_signed": {
+    "key_id": "ed25519-183d5080d1a2ef2b",
+    "algorithm": "ed25519",
+    "payload": "eyJmb3JtYXQiOiJvdHNlYy5hdXRoei5hZG1pbi1yZXF1ZXN0LzAuNCIsImtpbmQiOiJub2RlLmJhc2VsaW5lX2FjayIsInByaW5jaXBhbCI6eyJ0eXBlIjoiaHVtYW4iLCJpZCI6ImFsaWNlQHNpdGUtYSJ9LCJhZG1pbl9rZXlfaWQiOiJlZDI1NTE5LTE4M2Q1MDgwZDFhMmVmMmIiLCJub2RlX2lkIjoic2l0ZS1hLW5vZGUtMSIsImluc3RhbGxfa2V5X2lkIjoic2l0ZS1hLW5vZGUtMS5jb2xsZWN0b3ItaW5zdGFsbC4xIiwibm9uY2UiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R3IiwiaXNzdWVkX2F0IjoiMjAyNi0xMC0yNlQxNDo1ODowMFoiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0yNlQxNTowODowMFoiLCJub2RlX2Jhc2VsaW5lX2FjayI6eyJhc3NldF9pZCI6IjJiN2Q0ZTEwLThjM2YtNGE1Yi05ZTIxLTdjNGYwZDZhOGIxMyIsImtpbmQiOiJjb25maWd1cmF0aW9uIiwiYmFzZWxpbmVfZGlnZXN0Ijoic2hhMjU2OmVlMWQ1Y2QwNGZjZWU3ZmQzM2M2ODQ1M2I3ZmI2YTllYzFmNzEyNGJmOWU4OGIwM2YxYTRiYjY2NDAzMTBlODkifX0=",
+    "signature": "oAsAC8JKlL7ZDJrMxA9Y+BFWyvOB8/+9iWu/umwMij6YSjt4EorpkkOnQARGN+07HNTLqhHijr+f/YcW0AX+Cg=="
+  }
+}
