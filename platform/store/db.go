@@ -570,21 +570,39 @@ func (d *DB) QuickCheck(ctx context.Context) error {
 	return nil
 }
 
-// Usage is (page_count - freelist_count) * page_size and the sum of the
-// database's class quotas.
+// Usage is the payload the database's class quotas count, the sum of its
+// classes' ClassBytes, and the sum of the class quotas. Startup measures a
+// quota with it, the same count the runtime refusal uses (D4-14). Pages run
+// well over it, so comparing pages with the quotas reported a refusal that
+// was not happening.
 func (d *DB) Usage(ctx context.Context) (used, limit int64, err error) {
 	if err := d.lock(); err != nil {
 		return 0, 0, err
 	}
 	defer d.mu.Unlock()
-	pages, free, size, err := d.pages(ctx)
-	if err != nil {
-		return 0, 0, err
+	if err := d.conn.QueryRowContext(ctx, `SELECT COALESCE(SUM(bytes), 0) FROM class_bytes`).Scan(&used); err != nil {
+		return 0, 0, fmt.Errorf("class bytes: %w", err)
 	}
 	for _, q := range d.quotas {
 		limit += q.Bytes
 	}
-	return (pages - free) * size, limit, nil
+	return used, limit, nil
+}
+
+// PageBytes is (page_count - freelist_count) * page_size: the space the
+// live pages take. A delete leaves free pages in the file until compaction
+// and they do not count. It bounds the file against the quota
+// (DiskBytesPerQuotaByte); startup does not use it.
+func (d *DB) PageBytes(ctx context.Context) (int64, error) {
+	if err := d.lock(); err != nil {
+		return 0, err
+	}
+	defer d.mu.Unlock()
+	pages, free, size, err := d.pages(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return (pages - free) * size, nil
 }
 
 func (d *DB) pages(ctx context.Context) (pages, free, size int64, err error) {
