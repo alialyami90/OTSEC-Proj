@@ -1,0 +1,209 @@
+package audit
+
+import (
+	"strings"
+	"testing"
+
+	"otsec.local/otsec/contracts/authz"
+)
+
+// Digests of baseline records in the tests: fixed strings, not of any stored
+// document.
+var (
+	testEventV1 = "sha256:" + strings.Repeat("1", 64)
+	testEventV2 = "sha256:" + strings.Repeat("2", 64)
+	testEventV3 = "sha256:" + strings.Repeat("3", 64)
+)
+
+// recordedRec is the node's config.baseline_recorded on testAsset. Its
+// correlation_id is the digest's hex digits (D4-29).
+func recordedRec(seq uint64, kind authz.BaselineKind, digest, previous string, version int) *Record {
+	r := nodeRec(seq, "2026-10-26T14:00:00Z", ActionConfigBaselineRecorded, "",
+		Config{Kind: kind, BaselineDigest: digest, PreviousDigest: previous, BaselineVersion: version})
+	r.CorrelationID = strings.TrimPrefix(digest, "sha256:")
+	return r
+}
+
+func TestBaselineRecordedFields(t *testing.T) {
+	good := map[string]*Record{
+		"event, first":      recordedRec(5, authz.BaselineEvent, testEventV1, "", 1),
+		"event, a re-learn": recordedRec(5, authz.BaselineEvent, testEventV2, testEventV1, 2),
+	}
+	for name, r := range good {
+		if err := r.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string]func(r *Record){
+		"stamped 0.7":                  func(r *Record) { r.Contract = "otsec.audit/0.7" },
+		"by a person":                  func(r *Record) { r.Actor = adminActor },
+		"as a warning":                 func(r *Record) { r.Outcome = OutcomeWarning },
+		"with a reason code":           func(r *Record) { r.ReasonCode = "relearn" },
+		"without config":               func(r *Record) { r.Config = nil },
+		"without a target":             func(r *Record) { r.Target = nil },
+		"without a correlation id":     func(r *Record) { r.CorrelationID = "" },
+		"a request ID as correlation":  func(r *Record) { r.CorrelationID = "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" },
+		"another digest's correlation": func(r *Record) { r.CorrelationID = testEventV2[7:] },
+		"correlation with the prefix":  func(r *Record) { r.CorrelationID = testEventV1[:64] },
+		"without a kind":               func(r *Record) { r.Config.Kind = "" },
+		"of an unknown kind":           func(r *Record) { r.Config.Kind = "settings" },
+		"without a digest":             func(r *Record) { r.Config.BaselineDigest = "" },
+		"digest bare hex":              func(r *Record) { r.Config.BaselineDigest = testEventV1[7:] },
+		"version 0":                    func(r *Record) { r.Config.BaselineVersion = 0 },
+		"version 0 with a previous":    func(r *Record) { r.Config.BaselineVersion, r.Config.PreviousDigest = 0, testEventV2 },
+		"version 1 with a previous":    func(r *Record) { r.Config.PreviousDigest = testEventV2 },
+		"version 2 without a previous": func(r *Record) { r.Config.BaselineVersion, r.Config.PreviousDigest = 2, "" },
+		"replacing itself":             func(r *Record) { r.Config.BaselineVersion, r.Config.PreviousDigest = 2, r.Config.BaselineDigest },
+		"previous bare hex":            func(r *Record) { r.Config.BaselineVersion, r.Config.PreviousDigest = 2, testEventV2[7:] },
+		"negative version":             func(r *Record) { r.Config.BaselineVersion = -1 },
+		"a version on a configuration": func(r *Record) { r.Config.Kind, r.Config.BaselineVersion = authz.BaselineConfiguration, 1 },
+		"with a decision":              func(r *Record) { r.Config.DecisionSeq = 10 },
+		"with a payload hash":          func(r *Record) { r.Config.PayloadSHA256 = strings.Repeat("a", 64) },
+		"with a window":                func(r *Record) { r.Config.WindowStart = "2026-10-26T16:00:00Z" },
+		"with a reason":                func(r *Record) { r.Config.Reason = "relearn" },
+		"with a snapshot":              func(r *Record) { r.Config.SnapshotDigest = testSnapshot },
+		"with a difference":            func(r *Record) { r.Config.DifferenceDigest = testDifference },
+		"with a read":                  func(r *Record) { r.Config.ReadSeq = 11 },
+		"with an unchanged time":       func(r *Record) { r.Config.UnchangedAt = "2026-10-26T15:00:00Z" },
+		"with an unchanged read":       func(r *Record) { r.Config.UnchangedReadSeq = 8 },
+		"with an approval":             func(r *Record) { r.Config.ApprovalSeq = 10 },
+		"with changes":                 func(r *Record) { r.Config.ChangesDigest = testChanges },
+		"with a change seq":            func(r *Record) { r.Config.ChangeSeq = 23 },
+		"with a snapshot seq":          func(r *Record) { r.Config.SnapshotSeq = 41 },
+		"with a removal":               func(r *Record) { r.Config.RemovedCount = 2 },
+		"with a kept digest":           func(r *Record) { r.Config.KeptDigest = testSnapshot },
+	}
+	for name, mut := range bad {
+		r := recordedRec(5, authz.BaselineEvent, testEventV1, "", 1)
+		mut(r)
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// baseline_version belongs here and nowhere else.
+	for _, r := range []*Record{
+		comparedNoDifference(14, 8, "2026-10-26T15:00:05Z", 41),
+		configChain()[3],
+		configChain()[1],
+	} {
+		r.Config.BaselineVersion = 1
+		if err := r.Validate(); err == nil {
+			t.Errorf("baseline_version accepted on %s", r.Action)
+		}
+	}
+}
+
+// The chain of recorded baselines of one asset and kind: each names the one
+// before it, and an event baseline's version rises by one.
+func TestBaselineRecordedSuccession(t *testing.T) {
+	event := func(seq uint64, digest, previous string, version int) *Record {
+		return recordedRec(seq, authz.BaselineEvent, digest, previous, version)
+	}
+	other := func(r *Record) *Record {
+		c := *r
+		t := *r.Target
+		t.AssetID = "9c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+		c.Target = &t
+		return &c
+	}
+	ok := map[string][]*Record{
+		"nothing recorded":         nil,
+		"one":                      {event(1, testEventV1, "", 1)},
+		"a re-learn":               {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 2), event(3, testEventV3, testEventV2, 3)},
+		"a window after the first": {event(1, testEventV2, testEventV1, 2), event(2, testEventV3, testEventV2, 3)},
+		"two assets are separate":  {event(1, testEventV1, "", 1), other(event(2, testEventV1, "", 1)), event(3, testEventV2, testEventV1, 2)},
+	}
+	for name, recs := range ok {
+		if err := VerifyConfig(recs); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string][]*Record{
+		"a skipped baseline":      {event(1, testEventV1, "", 1), event(2, testEventV3, testEventV2, 2)},
+		"a skipped version":       {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 3)},
+		"a version that repeats":  {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 1)},
+		"a first after a first":   {event(1, testEventV1, "", 1), event(2, testEventV2, "", 1)},
+		"an older baseline again": {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 2), event(3, testEventV1, testEventV1, 3)},
+	}
+	for name, recs := range bad {
+		if err := VerifyConfig(recs); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// The recorded baselines do not disturb the other checks: a chain of the 0.7
+// records with a baseline recorded in the middle still verifies.
+func TestBaselineRecordedInAChain(t *testing.T) {
+	chain := readsChain()
+	chain = append([]*Record{recordedRec(1, authz.BaselineEvent, testEventV1, "", 1)}, chain...)
+	chain = append(chain, recordedRec(99, authz.BaselineEvent, testEventV2, testEventV1, 2))
+	if err := VerifyConfig(chain); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ack08 is an acknowledgement of an event baseline stamped 0.8.
+func ack08(asset string, decision uint64, digest, prev string, outcome Outcome) []*Record {
+	recs := ackRun(asset, decision, authz.BaselineEvent, digest, prev, outcome)
+	recs[1].Contract = ContractID
+	return recs
+}
+
+// B1 on #346: a succeeded event acknowledgement stamped 0.8 names a baseline
+// that a config.baseline_recorded of its asset recorded earlier and that no
+// later one has replaced. recs may start partway through the chain (the D4-26
+// amendment): with no recording of the asset before the acknowledgement, it
+// is refused only when recs holds the asset's version-1 recording.
+func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
+	const other = "9c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+	join := func(parts ...[]*Record) []*Record {
+		var out []*Record
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	rec := func(r ...*Record) []*Record { return r }
+	v1 := recordedRec(1, authz.BaselineEvent, testEventV1, "", 1)
+	v2 := recordedRec(2, authz.BaselineEvent, testEventV2, testEventV1, 2)
+	v3 := recordedRec(3, authz.BaselineEvent, testEventV3, testEventV2, 3)
+	otherV1 := recordedRec(3, authz.BaselineEvent, testEventV1, "", 1)
+	otherV1.Target = &Target{AssetID: other}
+
+	ok := map[string][]*Record{
+		"recorded, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a re-learn, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded),
+			rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeSucceeded)),
+		"a denied acknowledgement of anything": join(ack08(testAsset, 30, testEventV1, "", OutcomeDenied)),
+		"an acknowledgement stamped 0.7":       join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded)),
+		"a configuration acknowledgement":      join(ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)),
+		"each asset's own record":              join(rec(v1, otherV1), ack08(other, 30, testEventV1, "", OutcomeSucceeded), ack08(testAsset, 31, testEventV1, "", OutcomeSucceeded)),
+		// The window starts after the recording: nothing in recs shows the
+		// digest was not recorded.
+		"a window that starts after the recording":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a window with only another asset's first":          join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a re-learn after the acknowledgement, in a window": join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2)),
+		"a window that starts at a re-learn":                join(rec(v2), ack08(testAsset, 30, testEventV2, testEventV1, OutcomeSucceeded)),
+	}
+	for name, recs := range ok {
+		if err := VerifyConfig(recs); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string][]*Record{
+		"recorded after":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		"another digest":          join(rec(v1), ack08(testAsset, 30, testEventV2, "", OutcomeSucceeded)),
+		"recorded, then replaced": join(rec(v1, v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"another asset's first":   join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		// The window starts after the first recording.
+		"replaced inside the window":        join(rec(v2, v3), ack08(testAsset, 30, testEventV2, testEventV1, OutcomeSucceeded)),
+		"replaced before the window":        join(rec(v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"not the window's latest recording": join(rec(v2), ack08(testAsset, 30, testEventV3, testEventV2, OutcomeSucceeded)),
+	}
+	for name, recs := range bad {
+		if err := VerifyConfig(recs); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

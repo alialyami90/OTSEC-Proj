@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.7: the audit record every module
+// Package audit is contract C8, otsec.audit/0.8: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -294,6 +294,51 @@
 // A record stamped 0.4 or earlier cannot carry these actions, Config or
 // Admin.kind.
 //
+// # Baseline records (0.8)
+//
+// A configuration baseline is a person's acknowledgement of a snapshot
+// that is already stored, and config.baseline_acknowledged records it. An
+// event baseline is different: the node's learner writes a C10 record when
+// an observation period ends, and nobody acknowledges it yet. Until a person
+// does, nothing in the chain showed that the baseline existed, was replaced
+// or was lost. config.baseline_recorded is the node's record of one event
+// baseline record it stored (0.8 has no other kind: nothing records a
+// configuration baseline as a record of its own, and a later minor adds that
+// kind with its first writer):
+//
+//   - info, written by the node, with a target asset and, as correlation_id,
+//     the 64 hex digits of baseline_digest (D4-29: the acknowledgement keeps
+//     its request ID, and the two join on baseline_digest);
+//   - kind event, and baseline_digest, the stored record's hash (C10 Hash);
+//   - baseline_version, C10's Version: 1 exactly when nothing is replaced,
+//     and one more than the replaced record's otherwise;
+//   - previous_digest, the baseline of that asset that this one replaces
+//     (C10 Previous), absent for the asset's first.
+//
+// The baseline and its record live in different databases (C5), so they
+// cannot be committed in one step. The node stores the baseline first and
+// then writes the record, and a baseline whose record is missing after a
+// crash is recorded at the next start, after the chain is folded so that a
+// digest is never recorded twice. A record without a baseline does not occur.
+// This contract cannot see the store; that is C5's and the writer's to test.
+//
+// VerifyConfig adds two checks. Each config.baseline_recorded names, as
+// previous_digest, the baseline the last one in recs recorded for the
+// asset, and its version is one more than that record's; with none before it
+// in recs nothing is checked, as for acknowledgements. And a succeeded
+// config.baseline_acknowledged of kind event, stamped 0.8 or later, names the
+// digest that the latest config.baseline_recorded of its asset before it in
+// recs recorded, so "recorded, then acknowledged" is provable from the chain
+// (R4.8). recs may start partway through the chain: with no recording of the
+// asset before the acknowledgement, it is refused only when recs holds the
+// asset's version-1 recording (the D4-26 amendment). An acknowledgement stamped earlier is
+// not held to it, because no record existed, and a configuration-kind
+// acknowledgement keeps the rule of 0.6. So a node upgraded to 0.8 records
+// the event baselines it already holds before a person can acknowledge one.
+//
+// A record stamped 0.7 or earlier cannot carry config.baseline_recorded or
+// baseline_version.
+//
 // # What it leaves out
 //
 //   - Secrets, full configurations and raw device output. Values that need
@@ -358,6 +403,6 @@
 //
 // # Requirements and threat-model entries served
 //
-// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4,
+// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4, R4.8 (the event baseline, 0.8),
 // AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8, V-S11 and V-M2.
 package audit

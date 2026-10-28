@@ -10,6 +10,7 @@ import (
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/version"
 )
 
 // The configuration actions (0.5, P4-A3). All four are written by the
@@ -37,11 +38,24 @@ const (
 	ActionConfigReadsRemoved Action = "config.reads_removed"
 )
 
+// The baseline record action (0.8, D4-26). It is written by the node, in the
+// same commit step as the baseline record it names: both or neither. A
+// configuration baseline is a person's acknowledgement of a snapshot that is
+// already stored (config.baseline_acknowledged names it), and an event
+// baseline is a record the node's learner writes with no person in the
+// loop; this action is the chain's record of the second. In 0.8 it is for
+// event baselines only: nothing records a configuration baseline as a record
+// of its own, and a later minor adds that kind with its first writer.
+const ActionConfigBaselineRecorded Action = "config.baseline_recorded"
+
 // configSince is the minor that added the configuration actions, Config and
-// Admin.Kind; configReadsSince the one that added the read actions.
+// Admin.Kind; configReadsSince the one that added the read actions;
+// configRecordedSince the one that added config.baseline_recorded and
+// Config.BaselineVersion.
 const (
-	configSince      = 5
-	configReadsSince = 7
+	configSince         = 5
+	configReadsSince    = 7
+	configRecordedSince = 8
 )
 
 // EmptyChangesDigest is C9's ChangesDigest of a difference with no changes:
@@ -91,6 +105,8 @@ const (
 //     changes_digest of the change it repeats.
 //   - config.reads_removed (0.7): the removal fields only (removed_count,
 //     removed_first_seq, removed_last_seq, removed_digest, kept_digest).
+//   - config.baseline_recorded (0.8): kind (event), baseline_digest,
+//     baseline_version and, when the baseline replaces one, previous_digest.
 //
 // The digests are C9's (config.Digest) or C10's: "sha256:" and the SHA-256
 // of the document's stored bytes. A configuration baseline is an
@@ -103,17 +119,24 @@ type Config struct {
 	// PayloadSHA256 is that acceptance's verified.payload_sha256, lowercase
 	// hex, so the record names exactly the signed bytes it acts on.
 	PayloadSHA256 string `json:"payload_sha256,omitempty"`
-	// Kind is the baseline's kind, on config.baseline_acknowledged only.
+	// Kind is the baseline's kind, on config.baseline_acknowledged and
+	// config.baseline_recorded (event only in 0.8).
 	Kind           authz.BaselineKind `json:"kind,omitempty"`
 	BaselineDigest string             `json:"baseline_digest,omitempty"`
 	// PreviousDigest is the baseline of the same asset and kind that the
 	// acknowledgement replaces (or would have replaced, when denied), on
-	// config.baseline_acknowledged only; absent for the asset's first. With
-	// it, C8 alone shows each asset's succession of baselines after the
-	// baseline records themselves are pruned (B4 on #250).
+	// config.baseline_acknowledged; and, on config.baseline_recorded, the
+	// baseline the recorded one replaces (for an event baseline, C10's
+	// Previous). Absent for the asset's first. With it, C8 alone shows each
+	// asset's succession of baselines after the baseline records themselves
+	// are pruned (B4 on #250).
 	PreviousDigest string `json:"previous_digest,omitempty"`
-	WindowStart    string `json:"window_start,omitempty"`
-	WindowEnd      string `json:"window_end,omitempty"`
+	// BaselineVersion (0.8) is the recorded baseline's own version: C10's
+	// Baseline.Version, 1 for an asset's first and one more for each re-learn.
+	// On config.baseline_recorded only.
+	BaselineVersion int    `json:"baseline_version,omitempty"`
+	WindowStart     string `json:"window_start,omitempty"`
+	WindowEnd       string `json:"window_end,omitempty"`
 	// Reason is the approval's reason, shown with any alarm it silences.
 	Reason           string `json:"reason,omitempty"`
 	SnapshotDigest   string `json:"snapshot_digest,omitempty"`
@@ -201,7 +224,8 @@ func (r *Record) validateConfig(minor int) error {
 	restored := r.Action == ActionConfigBaselineRestored
 	compared := r.Action == ActionConfigReadCompared
 	removed := r.Action == ActionConfigReadsRemoved
-	if !approved && !acked && !detected && !restored && !compared && !removed {
+	recorded := r.Action == ActionConfigBaselineRecorded
+	if !approved && !acked && !detected && !restored && !compared && !removed && !recorded {
 		if r.Config != nil {
 			return fmt.Errorf("audit: config belongs on the configuration actions, not %s", r.Action)
 		}
@@ -219,6 +243,12 @@ func (r *Record) validateConfig(minor int) error {
 	}
 	if r.CorrelationID == "" {
 		return fmt.Errorf("audit: %s needs a correlation_id", r.Action)
+	}
+	if recorded {
+		return r.validateBaselineRecorded()
+	}
+	if c.BaselineVersion != 0 {
+		return fmt.Errorf("audit: baseline_version belongs on config.baseline_recorded, not %s", r.Action)
 	}
 	if removed {
 		return r.validateReadsRemoved()
@@ -282,6 +312,42 @@ func (r *Record) validateConfig(minor int) error {
 	case r.Outcome == OutcomeInfo && r.ReasonCode == ReasonApprovedChange && c.ApprovalSeq != 0:
 	default:
 		return fmt.Errorf("audit: config.change_detected is warning %s, or info %s with approval_seq", ReasonUnapprovedChange, ReasonApprovedChange)
+	}
+	return nil
+}
+
+// validateBaselineRecorded checks config.baseline_recorded: the node's own
+// record, outcome info, of an event baseline record it stored. It names the
+// baseline's digest, the baseline it replaces when there is one, and C10's
+// version, which is 1 exactly when nothing is replaced.
+func (r *Record) validateBaselineRecorded() error {
+	c := r.Config
+	switch {
+	case r.Actor.Type != authz.PrincipalNode:
+		return errors.New("audit: config.baseline_recorded is written by the node (actor type node)")
+	case r.Outcome != OutcomeInfo || r.ReasonCode != "":
+		return errors.New("audit: config.baseline_recorded has outcome info and no reason code")
+	case c.Kind != authz.BaselineEvent:
+		return fmt.Errorf("audit: config.baseline_recorded kind is %q in 0.%d: nothing records a configuration baseline yet", authz.BaselineEvent, configRecordedSince)
+	case !digestPattern.MatchString(c.BaselineDigest):
+		return errors.New("audit: config.baseline_recorded needs baseline_digest sha256:<hex>")
+	case r.CorrelationID != strings.TrimPrefix(c.BaselineDigest, "sha256:"):
+		// D4-29: the 64 hex digits of the digest (C8's ID pattern is too
+		// short for the prefix). The acknowledgement keeps its request ID;
+		// the two join on baseline_digest.
+		return errors.New("audit: config.baseline_recorded has correlation_id the hex digits of its baseline_digest")
+	case c.DecisionSeq != 0 || c.PayloadSHA256 != "" || c.WindowStart != "" || c.WindowEnd != "" || c.Reason != "" ||
+		c.SnapshotDigest != "" || c.DifferenceDigest != "" || c.ReadSeq != 0 || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 ||
+		c.ApprovalSeq != 0 || c.ChangesDigest != "" || c.ChangeSeq != 0 || c.SnapshotSeq != 0 || c.removalFields():
+		return errors.New("audit: config.baseline_recorded carries kind, baseline_digest, previous_digest and baseline_version only")
+	case c.PreviousDigest != "" && (!digestPattern.MatchString(c.PreviousDigest) || c.PreviousDigest == c.BaselineDigest):
+		return errors.New("audit: previous_digest is sha256:<hex> and another baseline")
+	}
+	switch {
+	case c.BaselineVersion < 1:
+		return errors.New("audit: an event baseline needs baseline_version of 1 or more")
+	case (c.BaselineVersion == 1) != (c.PreviousDigest == ""):
+		return errors.New("audit: baseline_version is 1 exactly when no baseline is replaced (previous_digest absent)")
 	}
 	return nil
 }
@@ -481,6 +547,21 @@ func ApprovalCovers(approval, detected *Record) error {
 //     event-kind or denied acknowledgement ends nothing, and the alarm
 //     records stay in the chain.
 //
+// From 0.8 each config.baseline_recorded of an asset names, as
+// previous_digest, the baseline the last one in recs recorded for that asset,
+// and its baseline_version is one more than that record's. With none before
+// it in recs, nothing is checked: recs may start after the asset's first.
+// A succeeded config.baseline_acknowledged of kind event, stamped 0.8 or
+// later, must name the digest that the latest config.baseline_recorded of its
+// asset before it in recs recorded, so "recorded, then acknowledged" is
+// provable from the chain (R4.8). recs may start partway through the chain
+// (D4-26 amendment): with no recording of the asset before the
+// acknowledgement, it is refused only when recs holds the asset's version-1
+// recording, which shows that none came before. One stamped earlier than 0.8
+// is not held to it, because no such record existed. That the record and the
+// stored baseline are written together is the writer's (C5): this checks the
+// chain only.
+//
 // Each succeeded config.baseline_acknowledged names, as previous_digest, the
 // baseline of its asset and kind that the last succeeded acknowledgement in
 // recs set, or none when recs shows none and it is the asset's first; so a
@@ -525,6 +606,18 @@ func VerifyConfig(recs []*Record) error {
 		kind  authz.BaselineKind
 	}
 	active := map[kindOf]string{} // the baseline the last succeeded acknowledgement set
+	// 0.8: the last event baseline the node recorded for each asset, and
+	// every digest it recorded.
+	recorded := map[string]*Record{}
+	// firstIn holds the assets whose version-1 config.baseline_recorded is
+	// in recs: only for them can an acknowledgement before any recording be
+	// shown to name a baseline never recorded (D4-26 amendment).
+	firstIn := map[string]bool{}
+	for _, r := range recs {
+		if r.Action == ActionConfigBaselineRecorded && r.Config != nil && r.Config.BaselineVersion == 1 && r.Target != nil {
+			firstIn[r.Target.AssetID] = true
+		}
+	}
 	// 0.7 (D4-20): the newest recorded change against each baseline, until a
 	// restore or a configuration acknowledgement ends it; the result each
 	// read has been given; and, for each asset, the snapshot digests of its
@@ -597,6 +690,17 @@ func VerifyConfig(recs []*Record) error {
 			}
 			if r.Action == ActionConfigBaselineAcknowledge && r.Outcome == OutcomeSucceeded {
 				k := kindOf{r.Target.AssetID, c.Kind}
+				if c.Kind == authz.BaselineEvent && recordedEventsSince(r) {
+					// 0.8: an event baseline is acknowledged only once the
+					// node has recorded it, and only while it is the
+					// asset's latest recorded one, as far as recs shows.
+					switch last := recorded[r.Target.AssetID]; {
+					case last == nil && firstIn[r.Target.AssetID]:
+						return broken("record %d acknowledges event baseline %s before the first config.baseline_recorded of asset %s", r.Seq, c.BaselineDigest, r.Target.AssetID)
+					case last != nil && last.Config.BaselineDigest != c.BaselineDigest:
+						return broken("record %d acknowledges event baseline %s, but the latest one recorded for asset %s is %s (record %d)", r.Seq, c.BaselineDigest, r.Target.AssetID, last.Config.BaselineDigest, last.Seq)
+					}
+				}
 				if prev, ok := active[k]; ok && c.PreviousDigest != prev {
 					return broken("record %d acknowledges %s after %s, but names %q as the baseline it replaces", r.Seq, c.BaselineDigest, prev, c.PreviousDigest)
 				}
@@ -662,6 +766,17 @@ func VerifyConfig(recs []*Record) error {
 			if err := ApprovalCovers(a, r); err != nil {
 				return broken("record %d: approval %d does not cover it: %v", r.Seq, c.ApprovalSeq, err)
 			}
+		case r.Action == ActionConfigBaselineRecorded:
+			c := r.Config
+			if prev := recorded[r.Target.AssetID]; prev != nil {
+				switch {
+				case c.PreviousDigest != prev.Config.BaselineDigest:
+					return broken("record %d records event baseline %s, but names %q as the one it replaces, and record %d recorded %s", r.Seq, c.BaselineDigest, c.PreviousDigest, prev.Seq, prev.Config.BaselineDigest)
+				case c.BaselineVersion != prev.Config.BaselineVersion+1:
+					return broken("record %d records event baseline version %d after version %d (record %d): versions rise by one", r.Seq, c.BaselineVersion, prev.Config.BaselineVersion, prev.Seq)
+				}
+			}
+			recorded[r.Target.AssetID] = r
 		case r.Action == ActionConfigReadCompared:
 			run, asset := runs[num{epoch, r.Config.ReadSeq}], r.Target.AssetID
 			if err := readCompared(r, run, active[kindOf{asset, authz.BaselineConfiguration}],
@@ -699,6 +814,13 @@ func VerifyConfig(recs []*Record) error {
 		}
 	}
 	return nil
+}
+
+// recordedEventsSince reports whether r is stamped with the minor that added
+// config.baseline_recorded or a later one.
+func recordedEventsSince(r *Record) bool {
+	got, err := version.Parse(r.Contract)
+	return err == nil && got.Minor >= configRecordedSince
 }
 
 // readCompared checks a config.read_compared record (0.7) against what the
