@@ -38,6 +38,15 @@ func QuarantineStream(assetID string) c5.StreamID { return c5.StreamID(c5.Quaran
 // ListenerStream is the stream of the messages a listener receives.
 func ListenerStream(listenerID string) c5.StreamID { return c5.StreamID("syslog/" + listenerID) }
 
+// UnknownStream is the stream of the messages a listener receives from
+// senders that resolve to no asset (HR-11, C5 0.4). It is in the
+// listener's database and has class syslog-unknown, whose quota is the
+// absolute bound on what unknown senders hold at once. A stream keeps one
+// class for life, so known and unknown messages cannot share one.
+func UnknownStream(listenerID string) c5.StreamID {
+	return c5.StreamID("syslog-unknown/" + listenerID)
+}
+
 // Layout derives the node's C5 layout from the configuration: one SER
 // stream per asset with a scheduled collection, one stream per listener,
 // the health stream and the audit stream, each database with a quota for
@@ -63,7 +72,9 @@ func (c *Config) Layout() (c5.Layout, error) {
 		if l.Transport == asset.SyslogUDP {
 			class = c5.ClassSyslogDatagram
 		}
-		syslogDB.Streams = append(syslogDB.Streams, c5.StreamSpec{ID: ListenerStream(l.ID), Class: class})
+		syslogDB.Streams = append(syslogDB.Streams,
+			c5.StreamSpec{ID: ListenerStream(l.ID), Class: class},
+			c5.StreamSpec{ID: UnknownStream(l.ID), Class: c5.ClassSyslogUnknown})
 	}
 	auditDB := c5.Database{ID: AuditDB, Writer: "security", Streams: []c5.StreamSpec{{ID: AuditStream, Class: c5.ClassAudit}}}
 

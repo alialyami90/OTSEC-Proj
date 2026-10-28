@@ -91,7 +91,7 @@ func New(node, storeDir string) *Config {
 		Schema: "otsec.nodeconfig/0.1",
 		NodeID: node,
 		Store: Store{Dir: storeDir, WarnFraction: 0.8, Quotas: map[string]int64{
-			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "platform": q, "audit": q,
+			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "syslog-unknown": q, "platform": q, "audit": q,
 		}},
 		Listeners:          []Listener{},
 		Assets:             []map[string]any{},
