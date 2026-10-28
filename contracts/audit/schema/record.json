@@ -1829,7 +1829,8 @@
           "config": {
             "required": [
               "kind",
-              "baseline_digest"
+              "baseline_digest",
+              "baseline_version"
             ],
             "not": {
               "anyOf": [
@@ -1930,45 +1931,28 @@
                 }
               ]
             },
+            "properties": {
+              "kind": {
+                "const": "event"
+              }
+            },
             "if": {
-              "properties": {
-                "kind": {
-                  "const": "event"
-                }
-              },
               "required": [
-                "kind"
+                "previous_digest"
               ]
             },
             "then": {
-              "required": [
-                "baseline_version"
-              ],
-              "if": {
-                "required": [
-                  "previous_digest"
-                ]
-              },
-              "then": {
-                "properties": {
-                  "baseline_version": {
-                    "minimum": 2
-                  }
-                }
-              },
-              "else": {
-                "properties": {
-                  "baseline_version": {
-                    "const": 1
-                  }
+              "properties": {
+                "baseline_version": {
+                  "minimum": 2
                 }
               }
             },
             "else": {
-              "not": {
-                "required": [
-                  "baseline_version"
-                ]
+              "properties": {
+                "baseline_version": {
+                  "const": 1
+                }
               }
             }
           }
@@ -2133,7 +2117,7 @@
             "configuration",
             "event"
           ],
-          "description": "The baseline's kind (baseline_acknowledged and, from 0.8, baseline_recorded only)"
+          "description": "The baseline's kind (baseline_acknowledged; from 0.8 baseline_recorded, event only)"
         },
         "baseline_digest": {
           "type": "string",
@@ -2237,7 +2221,7 @@
         "baseline_version": {
           "type": "integer",
           "minimum": 1,
-          "description": "0.8: the recorded baseline's own version, C10 Baseline.Version: 1 for an asset's first and one more for each re-learn (baseline_recorded of kind event only; a configuration snapshot has none)"
+          "description": "0.8: the recorded baseline's own version, C10 Baseline.Version: 1 for an asset's first and one more for each re-learn (baseline_recorded only)"
         }
       }
     }

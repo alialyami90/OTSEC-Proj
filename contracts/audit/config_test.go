@@ -542,7 +542,7 @@ func TestBaselineAcknowledged(t *testing.T) {
 		}, "acknowledged configuration baseline is " + testBaseline},
 		"only an event baseline acknowledged": {func() []*Record {
 			all := acked(unapproved(cloneChain(configChain())))
-			all[2].Config.Kind = authz.BaselineEvent
+			all[2].Config.Kind, all[2].Contract = authz.BaselineEvent, "otsec.audit/0.7"
 			return all
 		}, "no earlier acknowledgement"},
 		"the acknowledgement was refused": {func() []*Record {
@@ -592,7 +592,7 @@ func ackChain() []*Record {
 		accept := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: uint64(40 + 2*i), PrevHash: strings.Repeat("6", 64),
 			Time: at("2026-10-26T19:00:00Z"), Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed,
 			CorrelationID: fmt.Sprintf("req-ack-%d", i), CollectorSeq: d.seq, Verified: v}
-		ack := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: uint64(41 + 2*i), PrevHash: strings.Repeat("6", 64),
+		ack := &Record{Contract: "otsec.audit/0.7", NodeID: "site-a-node-1", Seq: uint64(41 + 2*i), PrevHash: strings.Repeat("6", 64),
 			Time: at("2026-10-26T19:00:01Z"), Actor: adminActor, Action: ActionConfigBaselineAcknowledge, Outcome: OutcomeSucceeded,
 			Target: &Target{AssetID: testAsset}, CorrelationID: fmt.Sprintf("req-ack-%d", i),
 			Config: &Config{DecisionSeq: d.seq, PayloadSHA256: v.PayloadSHA256, Kind: authz.BaselineEvent, BaselineDigest: d.baseline, PreviousDigest: d.prev}}
@@ -653,6 +653,16 @@ func TestBaselineSuccession(t *testing.T) {
 // ackRun is the collector's acceptance (decision) of a baseline
 // acknowledgement and the node's record of it, for asset, setting digest
 // after prev, as a C7 0.6 node.baseline_ack of the given kind.
+// ackContract is the stamp of an acknowledgement in these tests: an event
+// acknowledgement stamped 0.8 or later needs a recorded baseline, and the
+// tests of the older rules stamp theirs 0.7.
+func ackContract(kind authz.BaselineKind) string {
+	if kind == authz.BaselineEvent {
+		return "otsec.audit/0.7"
+	}
+	return ContractID
+}
+
 func ackRun(asset string, decision uint64, kind authz.BaselineKind, digest, prev string, outcome Outcome) []*Record {
 	v := testAdmin()
 	v.Kind = authz.KindNodeBaselineAck
@@ -660,7 +670,7 @@ func ackRun(asset string, decision uint64, kind authz.BaselineKind, digest, prev
 	accept := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 2 * decision, PrevHash: strings.Repeat("6", 64),
 		Time: at("2026-10-26T15:10:00Z"), Actor: adminActor, Action: ActionCollectorRequest, Outcome: OutcomeAllowed,
 		CorrelationID: fmt.Sprintf("req-ack-%d", decision), CollectorSeq: decision, Verified: v}
-	ack := &Record{Contract: ContractID, NodeID: "site-a-node-1", Seq: 2*decision + 1, PrevHash: strings.Repeat("6", 64),
+	ack := &Record{Contract: ackContract(kind), NodeID: "site-a-node-1", Seq: 2*decision + 1, PrevHash: strings.Repeat("6", 64),
 		Time: at("2026-10-26T15:10:01Z"), Actor: adminActor, Action: ActionConfigBaselineAcknowledge, Outcome: outcome,
 		Target: &Target{AssetID: asset}, CorrelationID: fmt.Sprintf("req-ack-%d", decision),
 		Config: &Config{DecisionSeq: decision, PayloadSHA256: v.PayloadSHA256, Kind: kind, BaselineDigest: digest, PreviousDigest: prev}}

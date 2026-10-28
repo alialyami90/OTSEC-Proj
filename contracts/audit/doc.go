@@ -301,30 +301,36 @@
 // event baseline is different: the node's learner writes a C10 record when
 // an observation period ends, and nobody acknowledges it yet. Until a person
 // does, nothing in the chain showed that the baseline existed, was replaced
-// or was lost. config.baseline_recorded is the node's record of one baseline
-// record it stored:
+// or was lost. config.baseline_recorded is the node's record of one event
+// baseline record it stored (0.8 has no other kind: nothing records a
+// configuration baseline as a record of its own, and a later minor adds that
+// kind with its first writer):
 //
 //   - info, written by the node, with a target asset and a correlation ID;
-//   - kind (event, or configuration for a configuration baseline the node
-//     stores as a record of its own), and baseline_digest, the stored
-//     record's hash (C10 Hash; C9's digest for a snapshot);
-//   - previous_digest, the baseline of that asset and kind that this one
-//     replaces, absent for the asset's first;
-//   - baseline_version for kind event only: C10's Version, 1 exactly when
-//     nothing is replaced and one more than the replaced record's
-//     otherwise. A configuration snapshot has no version.
+//   - kind event, and baseline_digest, the stored record's hash (C10 Hash);
+//   - baseline_version, C10's Version: 1 exactly when nothing is replaced,
+//     and one more than the replaced record's otherwise;
+//   - previous_digest, the baseline of that asset that this one replaces
+//     (C10 Previous), absent for the asset's first.
 //
-// The node writes the record in the same commit step as the baseline record
-// (both or neither), so a baseline the store holds has a record, and a
-// record names a baseline the store holds. This contract cannot see the
-// store: that rule is C5's and the writer's to test.
+// The baseline and its record live in different databases (C5), so they
+// cannot be committed in one step. The node stores the baseline first and
+// then writes the record, and a baseline whose record is missing after a
+// crash is recorded at the next start, after the chain is folded so that a
+// digest is never recorded twice. A record without a baseline does not occur.
+// This contract cannot see the store; that is C5's and the writer's to test.
 //
-// VerifyConfig adds one check: each config.baseline_recorded names, as
-// previous_digest, the baseline the last one in recs recorded for the same
-// asset and kind, and an event baseline's version is one more than that
-// record's. With none before it in recs nothing is checked, as for
-// acknowledgements: recs may start after the asset's first. Nothing ties an
-// acknowledgement to a recorded baseline in 0.8.
+// VerifyConfig adds two checks. Each config.baseline_recorded names, as
+// previous_digest, the baseline the last one in recs recorded for the
+// asset, and its version is one more than that record's; with none before it
+// in recs nothing is checked, as for acknowledgements. And a succeeded
+// config.baseline_acknowledged of kind event, stamped 0.8 or later, names a
+// digest that a config.baseline_recorded of its asset recorded earlier in
+// recs and that no later one has replaced, so "recorded, then acknowledged"
+// is provable from the chain (R4.8). An acknowledgement stamped earlier is
+// not held to it, because no record existed, and a configuration-kind
+// acknowledgement keeps the rule of 0.6. So a node upgraded to 0.8 records
+// the event baselines it already holds before a person can acknowledge one.
 //
 // A record stamped 0.7 or earlier cannot carry config.baseline_recorded or
 // baseline_version.

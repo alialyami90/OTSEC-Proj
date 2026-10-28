@@ -23,10 +23,8 @@ func recordedRec(seq uint64, kind authz.BaselineKind, digest, previous string, v
 
 func TestBaselineRecordedFields(t *testing.T) {
 	good := map[string]*Record{
-		"event, first":               recordedRec(5, authz.BaselineEvent, testEventV1, "", 1),
-		"event, a re-learn":          recordedRec(5, authz.BaselineEvent, testEventV2, testEventV1, 2),
-		"configuration, first":       recordedRec(5, authz.BaselineConfiguration, testBaseline, "", 0),
-		"configuration, a successor": recordedRec(5, authz.BaselineConfiguration, testSnapshot, testBaseline, 0),
+		"event, first":      recordedRec(5, authz.BaselineEvent, testEventV1, "", 1),
+		"event, a re-learn": recordedRec(5, authz.BaselineEvent, testEventV2, testEventV1, 2),
 	}
 	for name, r := range good {
 		if err := r.Validate(); err != nil {
@@ -95,9 +93,6 @@ func TestBaselineRecordedSuccession(t *testing.T) {
 	event := func(seq uint64, digest, previous string, version int) *Record {
 		return recordedRec(seq, authz.BaselineEvent, digest, previous, version)
 	}
-	cfg := func(seq uint64, digest, previous string) *Record {
-		return recordedRec(seq, authz.BaselineConfiguration, digest, previous, 0)
-	}
 	other := func(r *Record) *Record {
 		c := *r
 		t := *r.Target
@@ -110,7 +105,6 @@ func TestBaselineRecordedSuccession(t *testing.T) {
 		"one":                      {event(1, testEventV1, "", 1)},
 		"a re-learn":               {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 2), event(3, testEventV3, testEventV2, 3)},
 		"a window after the first": {event(1, testEventV2, testEventV1, 2), event(2, testEventV3, testEventV2, 3)},
-		"two kinds are separate":   {event(1, testEventV1, "", 1), cfg(2, testBaseline, ""), event(3, testEventV2, testEventV1, 2), cfg(4, testSnapshot, testBaseline)},
 		"two assets are separate":  {event(1, testEventV1, "", 1), other(event(2, testEventV1, "", 1)), event(3, testEventV2, testEventV1, 2)},
 	}
 	for name, recs := range ok {
@@ -119,13 +113,11 @@ func TestBaselineRecordedSuccession(t *testing.T) {
 		}
 	}
 	bad := map[string][]*Record{
-		"a skipped baseline":                      {event(1, testEventV1, "", 1), event(2, testEventV3, testEventV2, 2)},
-		"a skipped version":                       {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 3)},
-		"a version that repeats":                  {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 1)},
-		"a first after a first":                   {event(1, testEventV1, "", 1), event(2, testEventV2, "", 1)},
-		"an older baseline again":                 {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 2), event(3, testEventV1, testEventV1, 3)},
-		"a configuration that skips":              {cfg(1, testBaseline, ""), cfg(2, testEqual, testSnapshot)},
-		"a configuration without one it replaces": {cfg(1, testBaseline, ""), cfg(2, testSnapshot, "")},
+		"a skipped baseline":      {event(1, testEventV1, "", 1), event(2, testEventV3, testEventV2, 2)},
+		"a skipped version":       {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 3)},
+		"a version that repeats":  {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 1)},
+		"a first after a first":   {event(1, testEventV1, "", 1), event(2, testEventV2, "", 1)},
+		"an older baseline again": {event(1, testEventV1, "", 1), event(2, testEventV2, testEventV1, 2), event(3, testEventV1, testEventV1, 3)},
 	}
 	for name, recs := range bad {
 		if err := VerifyConfig(recs); err == nil {
@@ -142,5 +134,58 @@ func TestBaselineRecordedInAChain(t *testing.T) {
 	chain = append(chain, recordedRec(99, authz.BaselineEvent, testEventV2, testEventV1, 2))
 	if err := VerifyConfig(chain); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ack08 is an acknowledgement of an event baseline stamped 0.8.
+func ack08(asset string, decision uint64, digest, prev string, outcome Outcome) []*Record {
+	recs := ackRun(asset, decision, authz.BaselineEvent, digest, prev, outcome)
+	recs[1].Contract = ContractID
+	return recs
+}
+
+// B1 on #346: a succeeded event acknowledgement stamped 0.8 names a baseline
+// that a config.baseline_recorded of its asset recorded earlier and that no
+// later one has replaced.
+func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
+	const other = "9c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+	join := func(parts ...[]*Record) []*Record {
+		var out []*Record
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	rec := func(r ...*Record) []*Record { return r }
+	v1 := recordedRec(1, authz.BaselineEvent, testEventV1, "", 1)
+	v2 := recordedRec(2, authz.BaselineEvent, testEventV2, testEventV1, 2)
+	otherV1 := recordedRec(3, authz.BaselineEvent, testEventV1, "", 1)
+	otherV1.Target = &Target{AssetID: other}
+
+	ok := map[string][]*Record{
+		"recorded, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"a re-learn, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded),
+			rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeSucceeded)),
+		"a denied acknowledgement of anything": join(ack08(testAsset, 30, testEventV1, "", OutcomeDenied)),
+		"an acknowledgement stamped 0.7":       join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded)),
+		"a configuration acknowledgement":      join(ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)),
+		"each asset's own record":              join(rec(v1, otherV1), ack08(other, 30, testEventV1, "", OutcomeSucceeded), ack08(testAsset, 31, testEventV1, "", OutcomeSucceeded)),
+	}
+	for name, recs := range ok {
+		if err := VerifyConfig(recs); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string][]*Record{
+		"never recorded":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"recorded after":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		"another digest":          join(rec(v1), ack08(testAsset, 30, testEventV2, "", OutcomeSucceeded)),
+		"recorded, then replaced": join(rec(v1, v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"another asset's record":  join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+	}
+	for name, recs := range bad {
+		if err := VerifyConfig(recs); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
