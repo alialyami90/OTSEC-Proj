@@ -66,7 +66,7 @@ func TestKeyRegisterForwardsAndRecords(t *testing.T) {
 	defer srv.Close()
 	nc.Targets[0]["port"] = srv.Addr().Port
 	lockTLS(t, nc)
-	r, _, _ := start(t, parse(t, nc), dir)
+	r, st, _ := start(t, parse(t, nc), dir)
 	fw, err := NewForwarding(r)
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,13 @@ func TestKeyRegisterForwardsAndRecords(t *testing.T) {
 	}
 
 	if left := r.RecordNodeKeys(bg); left != 0 {
-		t.Fatalf("%d entries not recorded", left)
+		// Two left means a commit failed for each entry (a register that did
+		// not load leaves one). The alarm says which error; B6's Windows
+		// trace had none, so the cause is not known (#313 thread).
+		alarms := st.Snapshot("n").Alarms
+		audit := r.Mode(AuditDB)
+		r.Close()
+		t.Fatalf("%d entries not recorded; audit database %s; alarms %+v", left, audit, alarms)
 	}
 	got := keyRecords(t, r)
 	var want []string

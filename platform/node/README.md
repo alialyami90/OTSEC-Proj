@@ -267,6 +267,8 @@ Every reference is resolved and checked through A4's `forward.ClientTLS` before 
 
 ### Certificate periods (HR-13, D4-11)
 
+The rule is the same with `key_register` (D4-17): the node loads the register's certificates and trust anchors without judging their period (`nodekey.LoadCertificate`, `LoadTrustAnchors`) and the TLS configuration decides it, so an expired or not-yet-valid key holds back its own link, an expired anchor is loaded and never trusted, and any other fault of the entry (provider, key, public key) still stops the node.
+
 A target's client certificate, a listener's certificate, or either outside its validity period (expired, or not yet valid) at start narrows to that one link. Nothing else changes: every other TLS file fault still stops the node at start, and nothing falls back to another credential, plain TLS or the system roots. The only fault that narrows is `ErrCertificatePeriod` from `forward.ClientTLS` and `receive.ServerTLS`, which is returned only when the period is the sole fault.
 
 - **A held-back link does nothing.** A held-back listener has no receiver: it binds no socket and reads nothing, so a connection to its address is refused. A held-back target's forwarder is not run: it opens no connection and sends no byte, and its events wait in the store. A required target held back is therefore unreachable like any other: it raises `forward-unreachable` after `UnreachableAfter`, its unconfirmed events are never pruned, and the class fills toward its quota with the store's own alarms (`TestHeldRequiredTargetPastItsQuota` pins the order: `forward-target-held-back`, `forward-unreachable`, `store-quota-warning`, `store-quota-reached`, and nothing pruned).
