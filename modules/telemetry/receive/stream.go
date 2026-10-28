@@ -225,37 +225,14 @@ func (r *Receiver) write(cctx context.Context, q <-chan msg) {
 	}
 }
 
-// commit stores a stream batch, waiting while the store refuses it. It
-// returns false when cctx ends first. An unknown sender's frames were paid
-// for as read (payUnknown), so a held batch spends the unknown budget once.
+// commit stores a stream batch in parts of at most the commit cap
+// (commitParts), waiting while the store refuses a part. It returns false
+// when cctx ends first. An unknown sender's frames were paid for as read
+// (payUnknown), so a held part spends the unknown budget once.
 func (r *Receiver) commit(cctx context.Context, batch []msg) bool {
 	recs, kept := r.records(batch)
 	if len(recs) == 0 {
 		return true
 	}
-	held := false
-	defer func() {
-		if held {
-			r.mu.Lock()
-			r.held--
-			r.mu.Unlock()
-		}
-	}()
-	for {
-		receipts, err := r.cfg.Log.AppendBatch(cctx, recs)
-		if err == nil {
-			r.stored(cctx, kept, receipts)
-			return true
-		}
-		r.mu.Lock()
-		r.st.LastErr = "store: " + err.Error()
-		if !held {
-			held = true
-			r.held++
-		}
-		r.mu.Unlock()
-		if !sleep(cctx, r.lim.Retry) {
-			return false
-		}
-	}
+	return r.commitParts(cctx, recs, kept, true)
 }
