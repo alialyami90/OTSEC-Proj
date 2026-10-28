@@ -43,10 +43,10 @@
 // classes of the rule, and nothing else. It does not cover the 175
 // touchscreen display settings of models that have one (S22 Table 7.80,
 // p. 7.87), which SHO does not print and which sit in files the relay keeps
-// elsewhere. The owner accepted that gap on 2026-10-28: it is recorded in
-// the capability records and is not read. So an unchanged difference says
-// nothing about those settings, and no document here claims full coverage of
-// a touchscreen model.
+// elsewhere. Touchscreen settings are not required (owner, 2026-10-28): the
+// model is in scope, those settings are not, and they are not read. So an
+// unchanged difference says nothing about those settings, and no document
+// here claims them or full coverage of a touchscreen model.
 //
 // # The rule for SEL-751 SHO replies (sel-751-sho/2)
 //
