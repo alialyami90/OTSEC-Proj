@@ -41,6 +41,9 @@ const (
 	DropStore         = "store"          // a datagram batch the store refused (quota, or not open), or a message whose record could not be built
 	DropUnknownBudget = "unknown-budget" // an unknown sender's message past Limits.UnknownBytes
 	DropUnknownFull   = "unknown-full"   // an unknown sender's message the full syslog-unknown class refused (HR-11)
+	// DropUnknownQueueFull is a datagram from an unknown sender past its
+	// quarter of the listener's queue, by places or bytes (D4-21).
+	DropUnknownQueueFull = "unknown-queue-full"
 )
 
 // ErrConfig is returned by New and ServerTLS for a configuration the
@@ -344,8 +347,10 @@ type Receiver struct {
 	reported map[string]int64
 	queued   atomic.Int64 // datagram bytes waiting for the store
 	// unknownQueued is how many unknown senders' datagrams are in the queue
-	// (not yet taken by the writer).
+	// (not yet taken by the writer); unknownBytes is their bytes, until
+	// committed, as queued is for all of them (D4-21).
 	unknownQueued atomic.Int64
+	unknownBytes  atomic.Int64
 	commitAt      atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
 	commitN       atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
 

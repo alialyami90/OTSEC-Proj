@@ -351,7 +351,8 @@ func TestNewRefusesBadUnknownStream(t *testing.T) {
 }
 
 // TestUnknownFloodCannotTakeTheKnownQueuePlaces (HR-11): with the store held,
-// an unknown sender's datagrams hold at most half the queue's places, so a
+// an unknown sender's datagrams hold at most a quarter of the queue's places
+// (D4-21), the rest dropped as unknown-queue-full, so a
 // known sender's datagrams still queue and are all stored once the store
 // takes them. Without the share, the unknown flood fills the queue and the
 // known sender's datagrams are dropped as queue-full (the same drop, with a
@@ -396,9 +397,49 @@ func TestUnknownFloodCannotTakeTheKnownQueuePlaces(t *testing.T) {
 	if known := len(sc.events(t, testStream)); known != knownN {
 		t.Errorf("the known sender has %d of %d stored; status %+v", known, knownN, s)
 	}
-	if s.Dropped[DropQueueFull] == 0 {
-		t.Errorf("no unknown datagram was dropped for the queue: the test did not fill it; status %+v", s)
+	if want := int64(unknownN - queue/4); s.Dropped[DropUnknownQueueFull] < want {
+		t.Errorf("%d unknown datagrams dropped as %s, want at least %d; status %+v", s.Dropped[DropUnknownQueueFull], DropUnknownQueueFull, want, s)
 	}
+	if got := len(sc.events(t, testUnknown)); got > queue/4+1 {
+		t.Errorf("%d unknown datagrams stored, more than a quarter of the queue (%d)", got, queue/4)
+	}
+}
+
+// TestUnknownQueueShareIsAQuarterOfTheBytes (D4-21): the unknown share is
+// held by bytes as well as places, so large datagrams hit the byte share
+// before the place share.
+func TestUnknownQueueShareIsAQuarterOfTheBytes(t *testing.T) {
+	const maxBytes, size, unknownN = 64 << 10, 1000, 60
+	tap := &tapLog{gate: make(chan struct{})}
+	g, _ := unknownRig(t, asset.SyslogUDP, func(c *Config) {
+		c.Limits.Queue = 1000
+		c.Limits.MaxQueueBytes = maxBytes
+		c.Limits.UnknownBytes = 64 << 20
+		c.Limits.Rate, c.Limits.Burst, c.Limits.UnknownRate, c.Limits.UnknownBurst = 100000, 100000, 100000, 100000
+		tap.inner = c.Log
+		c.Log = tap
+	})
+	a, b := g.udp(addrA), g.udp(addrB)
+	defer a.Close()
+	defer b.Close()
+	a.Write([]byte(m1))
+	g.wait("first read", func() bool { return g.r.Status().Received == 1 })
+	time.Sleep(50 * time.Millisecond)
+	pad := strings.Repeat("x", size-20)
+	for i := 0; i < unknownN; i++ {
+		b.Write([]byte(fmt.Sprintf("<13>unknown %03d %s", i, pad)))
+		if i%10 == 9 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	g.wait("all read", func() bool { return g.r.Status().Received == int64(unknownN+1) })
+	s := g.r.Status()
+	// A quarter of 64 KiB is 16 KiB: at most sixteen 1000-byte datagrams.
+	if max := int64(maxBytes / 4 / size); s.Dropped[DropUnknownQueueFull] < int64(unknownN)-max {
+		t.Errorf("%d dropped as %s, want at least %d; status %+v", s.Dropped[DropUnknownQueueFull], DropUnknownQueueFull, int64(unknownN)-max, s)
+	}
+	close(tap.gate)
+	g.settled()
 }
 
 func sumDropped(s Status) (n int64) {
