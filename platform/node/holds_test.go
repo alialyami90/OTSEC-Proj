@@ -89,16 +89,19 @@ func TestFoldHolds(t *testing.T) {
 		"a return to the baseline ends the alarm": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 0"}},
-		"a new baseline ends the alarm and is the one held": {
+		"a new baseline ends the alarm, is the one held, and the difference stays held (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hSnap)},
-			[]string{"baseline " + hSnap[7:13] + " ref 2"}},
-		"a second acknowledgement of the same baseline ends the alarm (D4-18)": {
+			[]string{"baseline " + hSnap[7:13] + " ref 2", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+		"another baseline ends the alarm and both documents stay held (D4-18)": {
+			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent)},
+			[]string{"baseline " + hEvent[7:13] + " ref 2", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+		"a second acknowledgement of the same baseline ends the alarm too (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 2"}},
-		"going to another baseline and back leaves no alarm (D4-18)": {
+			[]string{"baseline " + hBase[7:13] + " ref 2", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+		"going to another baseline and back does not bring the alarm back (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 3"}},
-		"a return to the baseline ends it for good, even after a second acknowledgement": {
+			[]string{"baseline " + hBase[7:13] + " ref 3", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+		"a return to the baseline releases the difference, even after a second acknowledgement": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase), ackRec(cfg, hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 3"}},
 		"an event baseline's acknowledgement leaves the alarm open": {
@@ -385,5 +388,59 @@ func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
 	}
 	if !seen {
 		t.Errorf("no %s alarm: %+v", AlarmBaselineNotStored, alarms)
+	}
+}
+
+// A configuration acknowledgement ends an alarm and not the evidence
+// (D4-18): the snapshot and the difference stay held as
+// acknowledged-difference with the change record as Ref, the old baseline is
+// released, and a second start corrects nothing (B6 on #305).
+func TestAcknowledgedDifferenceStaysHeld(t *testing.T) {
+	h := newHoldsNode(t)
+	var det, ackB c5.Seq
+	got, _, r := h.restart(func(r *Runtime) {
+		putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.snap1)))
+		det = putAudit(t, r, detectedRec(config.Digest(h.snap1), config.Digest(h.snap2), config.Digest(h.diff), false))
+	})
+	if len(got) != 3 {
+		t.Fatalf("with the alarm open, holds %v", got)
+	}
+	// B is the C10 document's digest: any stored record can be acknowledged.
+	got, _, r = h.restart(func(r *Runtime) {
+		ackB = putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.baseline)))
+	})
+	want := map[c5.Seq]c5.HoldReason{
+		2: reasonAt(r, det, c5.HoldAcknowledgedDifference),
+		3: reasonAt(r, det, c5.HoldAcknowledgedDifference),
+		4: reasonAt(r, ackB, c5.HoldBaseline),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("holds %v, want %v", got, want)
+	}
+	for s, w := range want {
+		if got[s] != w {
+			t.Errorf("seq %d held as %+v, want %+v", s, got[s], w)
+		}
+	}
+	_, alarms, _ := h.restart(nil)
+	if n := reconciled(alarms); n != 0 {
+		t.Errorf("the next start corrected %d holds: %+v", n, alarms)
+	}
+}
+
+// A hold of a code this node does not know is kept as it is, whatever the
+// records say (C5 0.6): not released, not given a new reason, not added over.
+func TestUnknownHoldCodeIsKept(t *testing.T) {
+	node := c5.NodeID("n")
+	ref := func(seq c5.Seq) c5.Key { return c5.Key{NodeID: node, Stream: AuditStream, Seq: seq} }
+	have := []c5.HeldRecord{
+		{Seq: 1, Reason: c5.HoldReason{Code: "future-code", Ref: ref(9)}},   // wanted, as a baseline
+		{Seq: 2, Reason: c5.HoldReason{Code: "future-code", Ref: ref(9)}},   // not wanted at all
+		{Seq: 3, Reason: c5.HoldReason{Code: c5.HoldBaseline, Ref: ref(9)}}, // not wanted: released
+	}
+	wants := []wantHold{{digest: "d1", code: c5.HoldBaseline, ref: 4}}
+	p := planHolds(node, wants, map[string]c5.Seq{"d1": 1}, have)
+	if len(p.unknown) != 2 || len(p.add) != 0 || len(p.replace) != 0 || len(p.release) != 1 || p.release[0].Seq != 3 {
+		t.Fatalf("plan %+v", p)
 	}
 }

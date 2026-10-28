@@ -31,7 +31,12 @@ import (
 //     or a succeeded acknowledgement of a configuration baseline (D4-18)
 //     ends it: the snapshot and the difference it names, held as
 //     HoldUnapprovedDifference, Ref that record. An approval accepted after
-//     the alarm does not end it (audit.VerifyConfig).
+//     the alarm does not end it (audit.VerifyConfig). An acknowledgement
+//     ends the alarm and not the hold (D4-18): the snapshot and difference
+//     stay held as HoldAcknowledgedDifference, same Ref, until a retention
+//     rule for configuration evidence says otherwise. A return to the
+//     baseline releases them (R3.5 is read for acknowledgements only; B1 to
+//     rule on a return).
 //
 // A record is held for one reason. When one is wanted for two, the baseline
 // wins, as the acknowledgement that made it the baseline is the later word.
@@ -72,6 +77,9 @@ type openDifference struct {
 type assetHolds struct {
 	baseline map[authz.BaselineKind]ackedBaseline
 	open     []openDifference
+	// ended are the changes whose alarm a configuration acknowledgement
+	// ended (D4-18): their snapshot and difference stay held as evidence.
+	ended []openDifference
 }
 
 // foldHolds reads the configuration records of the node's audit stream, in
@@ -101,7 +109,8 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 			a := of(r)
 			a.baseline[c.Kind] = ackedBaseline{c.BaselineDigest, s.seq}
 			if c.Kind == authz.BaselineConfiguration {
-				a.open = nil // D4-18: an acknowledgement ends the earlier open alarms
+				a.ended = append(a.ended, a.open...) // D4-18: the alarm ends, the evidence stays held
+				a.open = nil
 			}
 		case audit.ActionConfigChangeDetected:
 			if c.ApprovalSeq != 0 {
@@ -140,6 +149,10 @@ func (a *assetHolds) wants() []wantHold {
 		add(wantHold{o.snapshot, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d", o.ref)})
 		add(wantHold{o.difference, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d", o.ref)})
 	}
+	for _, o := range a.ended {
+		add(wantHold{o.snapshot, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
+		add(wantHold{o.difference, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
+	}
 	return out
 }
 
@@ -149,6 +162,13 @@ type holdPlan struct {
 	add, replace []planned
 	release      []c5.HeldRecord
 	missing      []wantHold
+	// unknown are holds of a code this node does not know (a later C5):
+	// kept as they are, never replaced or released.
+	unknown []c5.HeldRecord
+}
+
+func knownCode(c c5.HoldCode) bool {
+	return c == c5.HoldBaseline || c == c5.HoldUnapprovedDifference || c == c5.HoldAcknowledgedDifference
 }
 
 type planned struct {
@@ -171,6 +191,10 @@ func planHolds(node c5.NodeID, wants []wantHold, found map[string]c5.Seq, have [
 	}
 	held := map[c5.Seq]c5.HeldRecord{}
 	for _, h := range have {
+		if !knownCode(h.Reason.Code) {
+			p.unknown = append(p.unknown, h)
+			continue
+		}
 		held[h.Seq] = h
 	}
 	seqs := make([]c5.Seq, 0, len(want))
@@ -181,6 +205,9 @@ func planHolds(node c5.NodeID, wants []wantHold, found map[string]c5.Seq, have [
 	for _, s := range seqs {
 		w := want[s]
 		h, ok := held[s]
+		if slices.ContainsFunc(p.unknown, func(u c5.HeldRecord) bool { return u.Seq == s }) {
+			continue
+		}
 		switch {
 		case !ok:
 			p.add = append(p.add, planned{s, w})
@@ -189,6 +216,9 @@ func planHolds(node c5.NodeID, wants []wantHold, found map[string]c5.Seq, have [
 		}
 	}
 	for _, h := range have {
+		if !knownCode(h.Reason.Code) {
+			continue
+		}
 		if _, ok := want[h.Seq]; !ok {
 			p.release = append(p.release, h)
 		}
@@ -321,6 +351,10 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		p := planHolds(r.cfg.NodeID, wants, found, have)
 		for _, w := range p.missing {
 			r.opt.Status.Raise(assetID, AlarmBaselineNotStored, fmt.Sprintf("%s (%s) is not in stream %s, so nothing holds it; the stream's other holds are kept", w.why, w.digest, spec.ID))
+		}
+		for _, h := range p.unknown {
+			r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: c5.AlarmHoldsReconciled, At: r.opt.Now(), Stream: spec.ID,
+				Detail: fmt.Sprintf("%s seq %d: hold code %q is not known to this node (C5 0.6); kept as it is", spec.ID, h.Seq, h.Reason.Code)})
 		}
 		apply := func(ps []planned, verb string, n *int) {
 			for _, pl := range ps {
