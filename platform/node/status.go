@@ -143,6 +143,14 @@ type TargetStatus struct {
 	Unreported int                          `json:"unreported,omitempty"`
 	ReportErr  string                       `json:"report_error,omitempty"`
 	Streams    map[string]TargetStreamState `json:"streams"`
+	// HeldBack is "expired" or "not-yet-valid" while the node's client
+	// certificate for this target is outside its validity period: the
+	// forwarder is not running, no connection is made, and the target's
+	// events wait in the store (HR-13, D4-11). Empty otherwise.
+	HeldBack string `json:"held_back,omitempty"`
+	// CertNotAfter is when the node's client certificate for this target
+	// expires; zero when the target names none.
+	CertNotAfter time.Time `json:"certificate_not_after,omitzero"`
 }
 
 // TargetStreamState is one stream of a target: the saved cursor, the last

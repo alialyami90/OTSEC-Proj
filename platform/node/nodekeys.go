@@ -20,8 +20,6 @@ import (
 	"otsec.local/otsec/contracts/syslog"
 	"otsec.local/otsec/modules/security/collectorwire"
 	"otsec.local/otsec/modules/security/nodekey"
-	"otsec.local/otsec/modules/telemetry/forward"
-	"otsec.local/otsec/modules/telemetry/receive"
 	"otsec.local/otsec/platform/store/protect"
 )
 
@@ -154,38 +152,38 @@ func (c *Config) keyAnchors(ref string) (*x509.CertPool, error) {
 	return pool, err
 }
 
-// keyTargetTLS is TargetTLS from the key register.
-func (c *Config) keyTargetTLS(t *syslog.Target) (*tls.Config, error) {
+// keyLoadTarget is loadTarget from the key register. The register refuses
+// an expired or not-yet-valid certificate or trust anchor itself, with an
+// error that does not wrap forward.ErrCertificatePeriod, so under
+// key_register such a fault stops the node (D4-11 item 2 reads it as any
+// other fault); HR-13's hold-back applies to the lab files only.
+func (c *Config) keyLoadTarget(t *syslog.Target) (*targetCreds, error) {
 	roots, err := c.keyAnchors(t.TLS.TrustAnchorRef)
 	if err != nil {
 		return nil, fmt.Errorf("target %s: trust anchors: %w", t.Name, err)
 	}
-	var client *tls.Certificate
+	creds := &targetCreds{roots: roots}
 	if ref := t.TLS.ClientCredentialRef; ref != "" {
-		if client, err = c.keyCertificate(ref); err != nil {
+		if creds.client, err = c.keyCertificate(ref); err != nil {
 			return nil, fmt.Errorf("target %s: client credential: %w", t.Name, err)
 		}
 	}
-	return forward.ClientTLS(t, roots, client)
+	return creds, nil
 }
 
-// keyListenerTLS is ListenerTLS from the key register.
-func (c *Config) keyListenerTLS(l Listener) (*tls.Config, error) {
+// keyLoadListener is loadListener from the key register.
+func (c *Config) keyLoadListener(l Listener) (*listenerCreds, error) {
 	cert, err := c.keyCertificate(l.TLS.CredentialRef)
 	if err != nil {
 		return nil, fmt.Errorf("listener %s: credential: %w", l.ID, err)
 	}
-	var senders *x509.CertPool
+	creds := &listenerCreds{cert: cert}
 	if ref := l.TLS.SenderCARef; ref != "" {
-		if senders, err = c.keyAnchors(ref); err != nil {
+		if creds.senders, err = c.keyAnchors(ref); err != nil {
 			return nil, fmt.Errorf("listener %s: sender CAs: %w", l.ID, err)
 		}
 	}
-	cfg, err := receive.ServerTLS(cert, senders, l.TLS.RequireSenderCert)
-	if err != nil {
-		return nil, fmt.Errorf("listener %s: %w", l.ID, err)
-	}
-	return cfg, nil
+	return creds, nil
 }
 
 // nodeKeysFile is NodeKeysFileName: the register entries recorded.
