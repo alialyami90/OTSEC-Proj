@@ -209,6 +209,7 @@ func (s *Scheduler) relayAdmin(ctx context.Context) {
 		return
 	}
 	files, shown, complete := s.scanAdmin()
+	s.setUnsignedWants(files)
 	seen := map[string]bool{}
 	var todo []*adminFile
 	for _, f := range files {

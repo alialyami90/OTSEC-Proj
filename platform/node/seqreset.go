@@ -365,7 +365,12 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 		s.raiseOnceKey(key, "", AlarmResetAckRefused, fmt.Sprintf("%s is not a %s object with install_key_id", SeqResetAckFileName, SeqResetAckSchema))
 		return
 	}
-	s.applySeqAck(ctx, SeqResetAckFileName, key, ack.InstallKeyID, open)
+	if !s.unsignedGate(SeqResetAckFileName, digest(b), s.supersededAck(ack.InstallKeyID)) {
+		return
+	}
+	if done, _ := s.applySeqAck(ctx, SeqResetAckFileName+unsignedSuffix, key, ack.InstallKeyID, open); done {
+		s.unsignedAccepted(SeqResetAckFileName, digest(b), "")
+	}
 }
 
 // applySeqAck acknowledges the open reset on install key open, for an

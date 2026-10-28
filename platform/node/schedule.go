@@ -81,6 +81,7 @@ type Scheduler struct {
 	quar      map[string]*quarantineEntry // manifest SHA-256: a recorded export (quarantine.go)
 	quarDone  map[string]bool             // manifest SHA-256: its range stores nothing now
 	relayed   map[string]relayEntry       // request ID: the collector's decision on a relayed admin request (adminrelay.go)
+	unsigned  unsignedWants               // what the signed requests in admin_dir name (unsigned.go)
 	// adminShown is the admin-request files as status last showed them.
 	adminShown []AdminRequestStatus
 	// reloadSusp: the suspensions were not loaded because the audit
