@@ -126,12 +126,14 @@ func (r *Receiver) commitParts(ctx context.Context, recs []store.Record, kept []
 			lo = hi
 			continue
 		}
-		r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
 		if recs[lo].Class == store.ClassSyslogUnknown && errors.Is(err, &store.Error{Code: store.CodeQuotaReached}) {
+			// Expected behaviour of a full class, counted and alarmed
+			// elsewhere: Status.LastErr stays for real faults.
 			r.drop(DropUnknownFull, int64(hi-lo))
 			lo = hi
 			continue
 		}
+		r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
 		if errors.Is(err, &store.Error{Code: store.CodeRecordTooLarge}) {
 			if hi-lo > 1 {
 				r.lowerCaps(recs[lo:hi])

@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
@@ -29,6 +31,7 @@ type Status struct {
 
 	mu      sync.Mutex
 	modes   map[c5.DatabaseID]c5.Mode
+	commits map[c5.DatabaseID]CommitStatus
 	alarms  []StatusAlarm
 	targets map[string]TargetStatus
 	// suspensions are the scheduler's current asset suspensions.
@@ -39,7 +42,15 @@ type Status struct {
 	assets      map[string]AssetResult
 	runsHeld    string
 	listeners   map[string]ListenerStatus
+	nodeKeys    []NodeKeyExpiry
 	adminReqs   []AdminRequestStatus
+	labTLS      bool
+	labTLSRefs  []string
+
+	// deferred holds Write back: Run sets it until the links' certificate
+	// periods are judged, so no status file says the node is collecting
+	// before a held-back link is shown as held back (HR-13).
+	deferred atomic.Bool
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -59,11 +70,19 @@ type StatusAlarm struct {
 
 // StatusFile is the content of the status file.
 type StatusFile struct {
-	Schema  string                    `json:"schema"`
-	Node    string                    `json:"node_id"`
-	Written time.Time                 `json:"written"`
-	Modes   map[c5.DatabaseID]c5.Mode `json:"modes"`
-	Alarms  []StatusAlarm             `json:"alarms"`
+	Schema  string    `json:"schema"`
+	Node    string    `json:"node_id"`
+	Written time.Time `json:"written"`
+	// GoVersion is the Go toolchain the running node was built with
+	// (runtime.Version), so an operator can check it against the latest
+	// patch of a supported minor (D3-10). Empty in a file written by an
+	// older node.
+	GoVersion string                    `json:"go_version,omitempty"`
+	Modes     map[c5.DatabaseID]c5.Mode `json:"modes"`
+	Alarms    []StatusAlarm             `json:"alarms"`
+	// Commits is each open database's write-transaction times, sampled at
+	// each node tick (AlarmCommitSlow).
+	Commits map[c5.DatabaseID]CommitStatus `json:"commits,omitempty"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
 	// RunsHeld is the alarm code that stops every run on the node, level
@@ -94,9 +113,17 @@ type StatusFile struct {
 	Assets map[string]AssetResult `json:"assets,omitempty"`
 	// Listeners is each Syslog listener's state (listening.go).
 	Listeners map[string]ListenerStatus `json:"listeners,omitempty"`
+	// NodeKeys are the key register's active entries whose certificate
+	// expires within NodeKeyWarning, or has expired (nodekeys.go).
+	NodeKeys []NodeKeyExpiry `json:"node_keys_expiring,omitempty"`
 	// AdminRequests is each admin-request file in admin_dir and the
 	// collector's decision on it, if any (adminrelay.go).
 	AdminRequests []AdminRequestStatus `json:"admin_requests,omitempty"`
+	// LabTLSFiles is true when lab_tls_files is set, and LabTLSFileRefs
+	// names the references whose private key is read from a file
+	// (nodekeys.go, B3 on #176).
+	LabTLSFiles    bool     `json:"lab_tls_files,omitempty"`
+	LabTLSFileRefs []string `json:"lab_tls_file_refs,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -126,6 +153,14 @@ type TargetStatus struct {
 	Unreported int                          `json:"unreported,omitempty"`
 	ReportErr  string                       `json:"report_error,omitempty"`
 	Streams    map[string]TargetStreamState `json:"streams"`
+	// HeldBack is "expired" or "not-yet-valid" while the node's client
+	// certificate for this target is outside its validity period: the
+	// forwarder is not running, no connection is made, and the target's
+	// events wait in the store (HR-13, D4-11). Empty otherwise.
+	HeldBack string `json:"held_back,omitempty"`
+	// CertNotAfter is when the node's client certificate for this target
+	// expires; zero when the target names none.
+	CertNotAfter time.Time `json:"certificate_not_after,omitzero"`
 }
 
 // TargetStreamState is one stream of a target: the saved cursor, the last
@@ -151,8 +186,14 @@ func NewStatus(path string, oslog func(string), now func() time.Time) *Status {
 	if now == nil {
 		now = time.Now
 	}
-	return &Status{path: path, oslog: oslog, now: now, modes: map[c5.DatabaseID]c5.Mode{}}
+	return &Status{path: path, oslog: oslog, now: now, modes: map[c5.DatabaseID]c5.Mode{}, commits: map[c5.DatabaseID]CommitStatus{}}
 }
+
+// Defer holds Write back, writing nothing, until Resume.
+func (s *Status) Defer() { s.deferred.Store(true) }
+
+// Resume ends Defer. It does not write.
+func (s *Status) Resume() { s.deferred.Store(false) }
 
 // Alarm records one alarm of database db.
 func (s *Status) Alarm(db c5.DatabaseID, a c5.Alarm) {
@@ -256,6 +297,21 @@ func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Unlock()
 }
 
+// SetNodeKeys records the node key register's expiring entries.
+func (s *Status) SetNodeKeys(k []NodeKeyExpiry) {
+	s.mu.Lock()
+	s.nodeKeys = k
+	s.mu.Unlock()
+}
+
+// SetLabTLSFiles records that lab_tls_files is set, and the references
+// whose private key is read from a file.
+func (s *Status) SetLabTLSFiles(refs []string) {
+	s.mu.Lock()
+	s.labTLS, s.labTLSRefs = true, slices.Clone(refs)
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -284,6 +340,24 @@ func (s *Status) add(sa StatusAlarm) {
 	s.mu.Unlock()
 }
 
+// CommitStatus is how long a database's write transactions take (store
+// CommitStats), in milliseconds, sampled at each node tick: the longest
+// since open, the longest since the last tick, and how long the one in
+// progress has run. A slow disk shows here before a receiver's queue fills.
+type CommitStatus struct {
+	Count     int64 `json:"count"`
+	MaxMS     int64 `json:"max_ms"`
+	RecentMS  int64 `json:"recent_ms"`
+	WaitingMS int64 `json:"waiting_ms,omitempty"`
+}
+
+// SetCommits records database db's write-transaction times.
+func (s *Status) SetCommits(db c5.DatabaseID, c CommitStatus) {
+	s.mu.Lock()
+	s.commits[db] = c
+	s.mu.Unlock()
+}
+
 // SetMode records database db's mode.
 func (s *Status) SetMode(db c5.DatabaseID, m c5.Mode) {
 	if s.oslog != nil {
@@ -298,8 +372,11 @@ func (s *Status) SetMode(db c5.DatabaseID, m c5.Mode) {
 func (s *Status) Snapshot(node string) StatusFile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
+	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), GoVersion: runtime.Version(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
 	f.Collecting = len(s.modes) > 0
+	if len(s.commits) > 0 {
+		f.Commits = maps.Clone(s.commits)
+	}
 	f.RunsHeld = s.runsHeld
 	for db, m := range s.modes {
 		f.Modes[db] = m
@@ -327,6 +404,8 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if len(s.listeners) > 0 {
 		f.Listeners = maps.Clone(s.listeners)
 	}
+	f.NodeKeys = slices.Clone(s.nodeKeys)
+	f.LabTLSFiles, f.LabTLSFileRefs = s.labTLS, slices.Clone(s.labTLSRefs)
 	if len(s.adminReqs) > 0 {
 		f.AdminRequests = slices.Clone(s.adminReqs)
 	}
@@ -342,7 +421,7 @@ func (s *Status) Snapshot(node string) StatusFile {
 // Write writes the snapshot to the status file: to a temporary file in the
 // same directory, flushed, then renamed, so a reader never sees half a file.
 func (s *Status) Write(node string) error {
-	if s.path == "" {
+	if s.path == "" || s.deferred.Load() {
 		return nil
 	}
 	b, err := json.MarshalIndent(s.Snapshot(node), "", "  ")

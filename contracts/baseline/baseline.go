@@ -179,7 +179,13 @@ type Counts struct {
 	NotCounted int64 `json:"not_counted"` // possible duplicates suppressed (PossibleDuplicates)
 	// TypesOverflow is the number of types left out, past Params.MaxTypes
 	// or past MaxBytes; their events are in Full and TypeOnly but in no Type.
-	// A learner keeps the types with the highest Count, ties by key.
+	// A learner keeps the types with the highest Count, on a tie the lower key
+	// in byte order. It holds at most MaxTypesCeiling types while it observes,
+	// so a type first met past that is counted here without being held: the
+	// rule is exact for an asset that shows MaxTypesCeiling types or fewer in
+	// its period. The types met while the working set was full are counted by
+	// distinct key up to MaxTypesCeiling of them; past that this number is a
+	// lower bound.
 	TypesOverflow int64 `json:"types_overflow"`
 }
 
@@ -437,8 +443,9 @@ func (b *Baseline) checkTypes(c *checker, start, end time.Time) {
 	if int64(len(b.Types)) > b.Params.MaxTypes && b.Params.MaxTypes > 0 {
 		c.fail(CodeRange, "types", "%d types, above params.max_types %d", len(b.Types), b.Params.MaxTypes)
 	}
-	// With TypesOverflow set, Types holds max_types or fewer: a learner
-	// stops at max_types or at MaxBytes, whichever comes first.
+	// With TypesOverflow set, Types holds max_types or fewer: a learner keeps
+	// the max_types types with the highest Count (ties: the lower key in byte
+	// order), then leaves out the lowest Count until the record fits MaxBytes.
 	if b.Counts.TypesOverflow > 0 && len(b.Types) == 0 {
 		c.fail(CodeConflict, "counts.types_overflow", "types overflowed, so at least one type was kept")
 	}

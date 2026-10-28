@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 
@@ -87,6 +89,77 @@ type DB struct {
 	closed  bool
 	// readOnly is set by OpenReadOnly: every transaction is refused.
 	readOnly bool
+
+	// begin* time BEGIN IMMEDIATE, where the connection waits when another
+	// connection holds the write lock (BeginStats).
+	beginCount, beginTotal, beginMax, beginSince atomic.Int64
+
+	// tx* time the write transaction from after BEGIN to COMMIT, the time
+	// the write lock is held and the WAL is synced (CommitStats).
+	txCount, txMax, txRecent, txSince atomic.Int64
+}
+
+// BeginStats says how long this connection has waited in BEGIN IMMEDIATE,
+// the statement that waits for SQLite's write lock (busy_timeout, 5 s).
+// Waiting is how long the BEGIN in progress has waited, or zero when none is.
+// A commit that returns an error stops the Log, so a BEGIN that gave up is
+// seen there; this is for one that is slow or has not returned.
+type BeginStats struct {
+	Count      int64
+	Total, Max time.Duration
+	Waiting    time.Duration
+}
+
+// CommitStats says how long this connection's write transactions take, from
+// after BEGIN IMMEDIATE returned to COMMIT: the writes and the WAL sync that
+// FULL durability waits for. A slow disk shows here (the hosted Windows
+// runner's WAL syncs took seconds, B6 #294) before a receiver's queue
+// fills. Max is the longest since open; Recent is the longest since the last
+// TakeRecentCommit; Waiting is how long the transaction in progress has
+// run, or zero when none is.
+type CommitStats struct {
+	Count   int64
+	Max     time.Duration
+	Recent  time.Duration
+	Waiting time.Duration
+}
+
+// CommitStats reports this database's write transactions so far.
+func (d *DB) CommitStats() CommitStats {
+	st := CommitStats{Count: d.txCount.Load(), Max: time.Duration(d.txMax.Load()), Recent: time.Duration(d.txRecent.Load())}
+	if since := d.txSince.Load(); since != 0 {
+		st.Waiting = time.Since(monoBase) - time.Duration(since-1)
+	}
+	return st
+}
+
+// monoBase is the instant txSince counts from: a value read with the
+// monotonic clock, so a wall-clock step cannot fake or hide Waiting (B3 on
+// #311). txSince holds the offset plus one, so zero means no transaction.
+var monoBase = time.Now()
+
+// TakeRecentCommit returns the longest write transaction since the last
+// call, and resets it.
+func (d *DB) TakeRecentCommit() time.Duration { return time.Duration(d.txRecent.Swap(0)) }
+
+// endTx records a write transaction that began at began.
+func (d *DB) endTx(began time.Time) {
+	d.txSince.Store(0)
+	took := int64(time.Since(began))
+	d.txCount.Add(1)
+	for m := d.txMax.Load(); took > m && !d.txMax.CompareAndSwap(m, took); m = d.txMax.Load() {
+	}
+	for m := d.txRecent.Load(); took > m && !d.txRecent.CompareAndSwap(m, took); m = d.txRecent.Load() {
+	}
+}
+
+// BeginStats reports the waits of this database's BEGIN IMMEDIATE so far.
+func (d *DB) BeginStats() BeginStats {
+	st := BeginStats{Count: d.beginCount.Load(), Total: time.Duration(d.beginTotal.Load()), Max: time.Duration(d.beginMax.Load())}
+	if since := d.beginSince.Load(); since != 0 {
+		st.Waiting = time.Since(time.Unix(0, since))
+	}
+	return st
 }
 
 var (
@@ -368,9 +441,21 @@ func (d *DB) tx(ctx context.Context, name string, f func() error) error {
 		return errReadOnly
 	}
 	d.point(name + ":begin")
-	if _, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	began := time.Now()
+	d.beginSince.Store(began.UnixNano())
+	_, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	d.beginSince.Store(0)
+	waited := time.Since(began)
+	d.beginCount.Add(1)
+	d.beginTotal.Add(int64(waited))
+	for m := d.beginMax.Load(); int64(waited) > m && !d.beginMax.CompareAndSwap(m, int64(waited)); m = d.beginMax.Load() {
+	}
+	if err != nil {
 		return fmt.Errorf("%s: begin: %w", name, err)
 	}
+	txBegan := time.Now()
+	d.txSince.Store(int64(txBegan.Sub(monoBase)) + 1)
+	defer d.endTx(txBegan)
 	if err := f(); err != nil {
 		if _, rerr := d.conn.ExecContext(context.Background(), "ROLLBACK"); rerr != nil {
 			return errors.Join(err, fmt.Errorf("%s: rollback: %w", name, rerr))
