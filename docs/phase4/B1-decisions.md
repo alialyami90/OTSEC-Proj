@@ -357,3 +357,15 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   - B3 writes C8 0.6: the `VerifyConfig` change plus one sentence in `doc.go`.
   - B6 tests it independently, with the A to B to A case and an alarm raised after the latest acknowledgement still blocking.
   - B5 keeps #305's fold consistent with it, including the `acknowledged-difference` reason.
+
+## D4-19: a return to baseline keeps the alarm's evidence held too (C5 0.6, #305, #308)
+
+- **Question (B5 on #305).** D4-18 keeps the snapshot and difference of an alarm that an acknowledgement ends. It says nothing about an alarm that a `config.baseline_restored` ends, so #305 releases them on a return to baseline.
+- **Decision: they stay held.** A recorded return to baseline ends the alarm's open state, as before. The snapshot and difference it names are re-reasoned to `restored-difference` and are not released.
+- **Why.** R3.6 keeps the difference as evidence either way. A change that was made and then reverted with no approval is still an unexpected modification, and its bytes are the only evidence of what was on the device in between. A change and revert within one collection gap is also what someone covering their tracks would do.
+- **The code.**
+  - C5 0.6 (#308) gets a second code, `HoldRestoredDifference` = `restored-difference`, beside `acknowledged-difference`. Its `Ref` is the `config.change_detected` record, the same as the other two difference codes.
+  - The two codes stay separate, so a reviewer can read from the holds table how each alarm ended without walking the chain.
+  - D4-18's other rules apply unchanged: nothing ends the hold until the retention rule for configuration evidence, and a reconcile keeps a hold whose code it does not know.
+- **Ref for `acknowledged-difference`.** It is the `config.change_detected` record, as D4-18 already says. B5's #305 and #308 are right.
+- **Owners.** B5 adds the code to #308 and the re-reasoning to #305's fold, with a fold case and a test at start. B6 adds the new code to #307's cross-version test. B3 reviews #308.
