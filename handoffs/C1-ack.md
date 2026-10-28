@@ -1,6 +1,6 @@
 # C1 acknowledgement: Principal Architect and team lead
 
-From C1 to B1, 2026-10-28. `main` at `5d51fc4` (#337, which carries the B-to-C summary, every C handoff and D4-23 to D4-28). I read [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [C1-handoff.md](C1-handoff.md), [GENERATIONS.md](GENERATIONS.md), [B1-ack.md](B1-ack.md), D4-25 to D4-28 in [B1-decisions.md](../docs/phase4/B1-decisions.md), the header, scope and NEXT ACTION of each of [C2](C2-handoff.md) to [C6](C6-handoff.md), and the open PR list and #346's comments on GitHub at about 17:30Z.
+C1's acknowledgement, with questions for B1, 2026-10-28. `main` at `5d51fc4` (#337, which carries the B-to-C summary, every C handoff and D4-23 to D4-28). I read [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [C1-handoff.md](C1-handoff.md), [GENERATIONS.md](GENERATIONS.md), [B1-ack.md](B1-ack.md), D4-25 to D4-28 in [B1-decisions.md](../docs/phase4/B1-decisions.md), the header, scope and NEXT ACTION of each of [C2](C2-handoff.md) to [C6](C6-handoff.md), and the open PR list and #346's comments on GitHub at about 17:30Z.
 
 ## My understanding of my scope
 
@@ -18,7 +18,7 @@ I hold the role CLAUDE.md §4 calls A1. I coordinate, review, integrate and rule
 
 1. **Confirm the cutover.** Merge this ack on C6's review, then review and squash-merge the C2 to C6 ack PRs as they open. I check each against the agent map for overlaps and gaps, and get every question answered (by the B agent while its thread is open, else from the records, else by asking the owner), fixing each gap in the handoff file itself. When six acks are on `main` with no open question, I tell the coordinator so the B threads can be resolved.
 2. **Land the step 1 contracts in order**, reading each PR's head, reviews and checks again first, because heads have moved since the summary (for example #347 is now at `714203e`, not `55c8583`): #345 (C9 0.3) and #342, with #353 (the test-only fix for #345's Windows failure); then #341 with #334 (C7 0.7); then #346 (C8 0.8) once D4-26 item 4, its window amendment and `correlation_id` are settled and its `syslogreceive` Windows failure is explained against `main`. Then I update the `contracts/README.md` rows for C7 0.7, C8 0.8 and C9 0.3.
-3. **Then the rest of the dependency order:** #344 and C4's F1 PR; #340, #343 and the feeder slices; #347 after C6 clears its FAIL; #336; #352 (C3's HR-11 row, opened after the summary was written); and #181 updated or closed (STALLED).
+3. **Then the rest of the dependency order:** #344 and C4's F1 PR; #340, #343 and the feeder slices; #347 after C6 clears its FAIL; #336; #352 (C3's HR-11 row, opened after the summary was written); and #181 updated or closed (STALLED). After that, C6's gate runs (V-M2, V-M3 and V-M4 on the real binaries, dependency step 5) and my `docs/phase-4a-exit.md`.
 
 ## Questions and gaps for B1
 
