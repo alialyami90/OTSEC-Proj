@@ -247,16 +247,30 @@ func decode[T any](b []byte, v *T) error {
 
 // The size of a snapshot is bounded (C9 0.3, D4-25), so that a configuration
 // record, which is the snapshot and the transcript it points into, always fits
-// the configuration database's record cap (1.5 MiB, D4-13).
+// the configuration database's record cap with room to spare. C5's
+// Record.Bytes counts the event (Encode's bytes), the capture (the
+// transcript's bytes) and the source cursor, and the record cap
+// (Quota.MaxRecordBytes) is held to it.
 const (
+	// RecordCap is the configuration database's record cap, 1.5 MiB (D4-13).
+	// platform/node.ConfigRecordBytes is the same number; a test in
+	// bound_node_test.go fails if the two drift apart.
+	RecordCap = 3 << 19
+	// MaxTranscriptBytes is the longest transcript a configuration run keeps:
+	// the register run's max_total_bytes. A test holds it to the register.
+	MaxTranscriptBytes = 512 << 10
+	// RecordHeadroom is what a record at both bounds leaves under RecordCap,
+	// for a source cursor and anything else Record.Bytes counts that the
+	// snapshot and the transcript do not (B1 on #345).
+	RecordHeadroom = 64 << 10
 	// MaxSettings bounds the settings of all sections together: S22's 8,734
 	// plus a quarter. A relay printing more is not read as a SEL-751.
 	MaxSettings = 10918
-	// MaxSnapshotBytes bounds Encode's output. With the longest transcript a
-	// run can keep (the register's max_total_bytes, 512 KiB), a record at this
-	// bound is exactly the 1.5 MiB cap. The count bound alone does not give
-	// that, because a value can be long and JSON can double it.
-	MaxSnapshotBytes = 1 << 20
+	// MaxSnapshotBytes bounds Encode's output: what is left of RecordCap
+	// after the longest transcript and the headroom, 960 KiB. The count bound
+	// alone does not give this, because a value can be long and JSON can
+	// double a quote.
+	MaxSnapshotBytes = RecordCap - MaxTranscriptBytes - RecordHeadroom
 	// SnapshotFixedMax is what RecordsFit allows for everything but the
 	// settings: the header, the transcript reference and the 24 sections'
 	// own fields. B5 measured 5.3 KB for the golden snapshot.

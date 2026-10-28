@@ -9,6 +9,7 @@ import (
 
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/register"
+	"otsec.local/otsec/contracts/store"
 )
 
 // The configuration record's size is a derived bound, as the SER cap is (D4-9,
@@ -37,9 +38,7 @@ const (
 	snapshotPerSetting = 25 + 16
 	maxSettings        = MaxSettings
 	s22Settings        = 8734
-	// recordCap is the configuration database's commit cap (B1, D4-13), 1.5
-	// MiB. B5's Quota.MaxRecordBytes for the configuration class is this value.
-	recordCap = 3 << 19
+	recordCap          = RecordCap
 )
 
 func TestRecordBoundFitsTheCap(t *testing.T) {
@@ -71,9 +70,9 @@ func TestRecordBoundFitsTheCap(t *testing.T) {
 	}
 }
 
-// A record at both bounds fits the cap, including the longest transcript a run
-// can keep (D4-25): the bytes bound with T, and the count bound with its
-// values.
+// A record at both bounds fits the cap with the headroom to spare, measured
+// the way the store counts it (C5's Record.Bytes: event, capture, source
+// cursor), including the longest transcript a run can keep (D4-25, B1 on #345).
 func TestBoundsFitTheCap(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "register", "testdata", "sel-751.json"))
 	if err != nil {
@@ -83,9 +82,25 @@ func TestBoundsFitTheCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	T := p.Run("sel.config.read_all").MaxTotalBytes
-	if got := MaxSnapshotBytes + T; got > recordCap {
-		t.Errorf("a snapshot at MaxSnapshotBytes with a %d-byte transcript is %d bytes, over the %d cap", T, got, recordCap)
+	if T := p.Run("sel.config.read_all").MaxTotalBytes; T != MaxTranscriptBytes {
+		t.Fatalf("the register's run keeps %d bytes of transcript, not MaxTranscriptBytes %d: change the constant and the bound together", T, MaxTranscriptBytes)
+	}
+	capture := make([]byte, MaxTranscriptBytes)
+	rec := store.Record{Event: make([]byte, MaxSnapshotBytes), Capture: &store.Capture{Bytes: capture}}
+	if got := rec.Bytes(); got > RecordCap-RecordHeadroom {
+		t.Errorf("a record at both bounds is %d bytes, over %d (the cap %d less %d headroom)", got, RecordCap-RecordHeadroom, RecordCap, RecordHeadroom)
+	}
+	// The headroom takes a source cursor and is not the cap's whole margin.
+	rec.SourceCursor = make([]byte, RecordHeadroom)
+	if got := rec.Bytes(); got > RecordCap {
+		t.Errorf("with a %d-byte source cursor a record at both bounds is %d bytes, over the %d cap", RecordHeadroom, got, RecordCap)
+	}
+	if one := RecordCap - MaxSnapshotBytes - MaxTranscriptBytes; one != RecordHeadroom {
+		t.Errorf("MaxSnapshotBytes leaves %d under the cap, not %d", one, RecordHeadroom)
+	}
+	// The count bound with its values also fits, by B5's arithmetic.
+	if worst := 2*MaxTranscriptBytes + snapshotFixed + MaxSettings*snapshotPerSetting; worst > RecordCap-RecordHeadroom {
+		t.Errorf("MaxSettings settings can make a record of %d bytes, over %d", worst, RecordCap-RecordHeadroom)
 	}
 	if MaxSettings != s22Settings+(s22Settings+3)/4 {
 		t.Errorf("MaxSettings %d is not S22's %d plus a quarter", MaxSettings, s22Settings)
@@ -210,5 +225,31 @@ func TestRecordsFitImpliesValidate(t *testing.T) {
 				t.Errorf("%d settings of %q x %d: RecordsFit passes, Validate: %v", n, ch, lo, err)
 			}
 		}
+	}
+}
+
+// The largest snapshot Validate accepts, with the longest transcript, is a
+// record under the cap less the headroom, as C5 counts it.
+func TestLargestAcceptedSnapshotFitsTheCap(t *testing.T) {
+	lo, hi := 1, 400
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if s, _ := bigSnapshot(t, 3000, strings.Repeat("V", mid)); s.Validate() == nil {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	s, _ := bigSnapshot(t, 3000, strings.Repeat("V", lo))
+	if _, err := s.Encode(); err != nil || s.Validate() != nil {
+		t.Fatalf("the largest accepted snapshot does not validate: %v", s.Validate())
+	}
+	b, _ := s.Encode()
+	if len(b) < MaxSnapshotBytes-3500 {
+		t.Fatalf("the search stopped at %d bytes, far from the %d bound", len(b), MaxSnapshotBytes)
+	}
+	rec := store.Record{Event: b, Capture: &store.Capture{Bytes: make([]byte, MaxTranscriptBytes)}}
+	if got := rec.Bytes(); got > RecordCap-RecordHeadroom {
+		t.Errorf("the largest accepted snapshot makes a record of %d bytes, over %d", got, RecordCap-RecordHeadroom)
 	}
 }

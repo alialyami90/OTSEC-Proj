@@ -16,6 +16,7 @@ import (
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/config"
 	"otsec.local/otsec/contracts/register"
+	c5 "otsec.local/otsec/contracts/store"
 )
 
 // The configuration read (C2 0.6, register run sel.config.read_all, D4-13)
@@ -466,10 +467,6 @@ func TestConfigStepTimeoutIsTheRegisters(t *testing.T) {
 	}
 }
 
-// configRecordCap is the configuration database's record cap, 1.5 MiB (D4-13;
-// platform/node.ConfigRecordBytes).
-const configRecordCap = 3 << 19
-
 const nameDigits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 // nameN is the i-th setting name in order of length: 0..9, A..Z, then two
@@ -639,11 +636,13 @@ func recordOf(t *testing.T, got adapter.Result, f inputs, m *register.Matcher) (
 	if err := snap.CheckAgainst(got.Transcript); err != nil {
 		t.Fatal(err)
 	}
-	sb, err := json.Marshal(snap)
+	sb, err := snap.Encode()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return len(sb), len(sb) + len(got.Transcript.Data)
+	// The record as C5 counts it: the event, and the transcript as its capture.
+	rec := c5.Record{Event: sb, Capture: &c5.Capture{Bytes: got.Transcript.Data}}
+	return len(sb), int(rec.Bytes())
 }
 
 // A relay that prints up to C9 0.3's bound, with values filling the run's byte
@@ -659,9 +658,9 @@ func TestConfigMaximalRecordFitsTheCap(t *testing.T) {
 		}
 		snap, rec := recordOf(t, got, f, m)
 		t.Logf("%d settings with values to the byte limit: snapshot %d bytes, transcript %d, record %d (cap %d, %.1f%%)",
-			n, snap, len(got.Transcript.Data), rec, configRecordCap, 100*float64(rec)/configRecordCap)
-		if rec > configRecordCap {
-			t.Errorf("%d settings: the record is %d bytes, over the %d cap", n, rec, configRecordCap)
+			n, snap, len(got.Transcript.Data), rec, config.RecordCap, 100*float64(rec)/config.RecordCap)
+		if rec > config.RecordCap-config.RecordHeadroom {
+			t.Errorf("%d settings: the record is %d bytes, over the cap %d less its %d headroom", n, rec, config.RecordCap, config.RecordHeadroom)
 		}
 	}
 }
