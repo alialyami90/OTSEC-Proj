@@ -450,3 +450,16 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   3. **Close's checkpoint is bounded in bytes but not in time.** `wal_checkpoint(TRUNCATE)` on `context.Background()` parks in `FlushFileBuffers`, which no context can cancel. That is acceptable at shutdown, where the service manager's stop timeout is the bound. B5 records it in the store's README under F-016.
   4. A run that times out at 20 minutes is real, never a flake, and it is handled under D4-5.
 - **Owners.** B1 makes the `ci.yml` change in this PR. B5 and B6 review it. B5 owns items 2 and 3.
+
+## D4-23: a configuration run is all or nothing, and "Invalid Command" is never a language refusal (C2 0.6, C9 0.2, #331)
+
+Date: 2026-10-28. B6 raised two items in the review of #331 at 4be058c. B2 fixed both at 5a10fb8, and B6 re-reviewed and accepted 8e57949.
+
+1. **The device-error check comes before the language check.** On `SHO P 1`, the language gate's form, a reply of "Invalid Command" was refused as `refused.language_not_english` with an empty detail. That code suspends the asset for language. "Invalid Command" is an English reply from the device. So on every form that serves a check, the gate form included, the adapter tests for it before the parse and the language check, and it reports `failed.device_error`. The gate form is not carved out of rule 4, because a carve-out would leave the wrong order in place for the next form.
+2. **A run's result has exactly two shapes, and C2 holds it, not only the adapter.** `checkRun` accepts:
+   - `ok`, with every step sent once and in order, and one parsed configuration record per step, in step order;
+   - not `ok` (failed or refused), with a prefix of the steps sent and no record.
+
+   `partial` is not a run outcome, and a configuration record that did not parse is invalid. A reply the rule cannot read ends the run with `failed.config_unparsable` and no record. A partial snapshot would give C9 false differences against the baseline, and a snapshot is whole or absent. The two invalid examples are a failed run with 24 records and a `partial.parse_errors` run.
+- **Not blocking (B6).** `failed.config_unparsable` is still accepted on a single SER read. B2 may close that in a follow-up.
+- **Approved.** C2 0.6 and C9 0.2 merged as #331 (6c33f14). The next steps belong to others. B2 adds `sel751.Hosts` and a measured maximal result frame. B3 builds the collector run wiring under C7 0.7 (#334), including B5's `checkReply` fix: it accepts any contract the node accepts (`AcceptsContract`), so a mixed 0.6/0.7 node and collector do not reply `ErrProtocol`.
