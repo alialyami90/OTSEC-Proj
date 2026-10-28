@@ -45,6 +45,18 @@ func TestLabOnly(t *testing.T) {
 	if !(&Config{}).LabOnly() {
 		t.Fatal("a node with no asset is not lab-only")
 	}
+
+	// Every endpoint of every asset counts, not only the first.
+	sim := asset.Endpoint{Target: asset.Simulated}
+	dev := asset.Endpoint{Target: asset.DeviceObserved}
+	later := &Config{assets: []asset.Asset{{Endpoints: []asset.Endpoint{sim, dev}}}}
+	if later.LabOnly() {
+		t.Fatal("a device-observed second endpoint left the node lab-only")
+	}
+	second := &Config{assets: []asset.Asset{{Endpoints: []asset.Endpoint{sim}}, {Endpoints: []asset.Endpoint{sim, dev}}}}
+	if second.LabOnly() {
+		t.Fatal("a device-observed endpoint on the second asset left the node lab-only")
+	}
 }
 
 // On a node with a device endpoint, clear-quarantine.json is refused in
