@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -15,16 +16,17 @@ import (
 )
 
 // A store written by a later C5 holds a code this code's closed set does
-// not know (D4-18: C5 0.6 adds acknowledged-difference). Opened, listed
+// not know (C5 0.6 adds acknowledged-difference for D4-18 and
+// restored-difference for D4-19). Opened, listed
 // and pruned by this code, the record stays stored and held, with its code
 // as written: an older binary never unholds what a newer one held
-// (B6, D4-18). The newer writer is stood in for by setting the code with
+// (B6, D4-18, D4-19). The newer writer is stood in for by setting the code with
 // SQL after a hold this code takes. Evidence class: simulated.
 func TestB6NewerHoldCodeIsKeptByThisCode(t *testing.T) {
 	ctx := context.Background()
 	d := database(c5.MinRecordBytes)
 	dir := newDir(t)
-	newer := map[c5.Seq]c5.HoldCode{2: "acknowledged-difference", 3: "a-code-from-c5-9.9"}
+	newer := map[c5.Seq]c5.HoldCode{2: "acknowledged-difference", 3: "restored-difference", 4: "a-code-from-c5-9.9"}
 	func() {
 		env, err := store.NewEnv(store.Options{Dir: dir, Node: node, Database: d, Documents: docs})
 		if err != nil {
@@ -75,8 +77,10 @@ func TestB6NewerHoldCodeIsKeptByThisCode(t *testing.T) {
 		}
 	}
 	raw.Close()
-	if err := (c5.HoldReason{Code: newer[2], Ref: c5.Key{NodeID: node, Stream: "audit", Seq: 1}}).Validate(); err == nil {
-		t.Log("this code's C5 knows acknowledged-difference: the case is then only the later code")
+	for _, seq := range []c5.Seq{2, 3} {
+		if err := (c5.HoldReason{Code: newer[seq], Ref: c5.Key{NodeID: node, Stream: "audit", Seq: 1}}).Validate(); err == nil {
+			t.Logf("this code's C5 knows %s: for it the case is only the later code", newer[seq])
+		}
 	}
 
 	// This code opens it, lists it, and prunes past every record.
@@ -92,7 +96,7 @@ func TestB6NewerHoldCodeIsKeptByThisCode(t *testing.T) {
 			t.Errorf("seq %d: ref %+v, want audit seq %d", h.Seq, h.Reason.Ref, want)
 		}
 	}
-	if len(got) != len(newer) || got[2] != newer[2] || got[3] != newer[3] {
+	if !maps.Equal(got, newer) {
 		t.Fatalf("held %v, want %v", got, newer)
 	}
 	if err := db.SaveCursor(ctx, c5.Cursor{Consumer: "central", Stream: cfg, Through: 5}); err != nil {
@@ -102,8 +106,8 @@ func TestB6NewerHoldCodeIsKeptByThisCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, err := db.PruneStep(ctx, b, 100); err != nil || n != 3 {
-		t.Fatalf("PruneStep: %d %v, want the 3 unheld records", n, err)
+	if n, err := db.PruneStep(ctx, b, 100); err != nil || n != 2 {
+		t.Fatalf("PruneStep: %d %v, want the 2 unheld records", n, err)
 	}
 	recs, err := db.Read(ctx, cfg, 0, 100)
 	if err != nil {
@@ -113,10 +117,10 @@ func TestB6NewerHoldCodeIsKeptByThisCode(t *testing.T) {
 	for _, r := range recs {
 		left = append(left, r.Key.Seq)
 	}
-	if !slices.Equal(left, []c5.Seq{2, 3}) {
-		t.Fatalf("stored after the prune %v, want the held 2 and 3", left)
+	if !slices.Equal(left, []c5.Seq{2, 3, 4}) {
+		t.Fatalf("stored after the prune %v, want the held 2, 3 and 4", left)
 	}
-	if held, err := db.Held(ctx, cfg); err != nil || len(held) != 2 {
+	if held, err := db.Held(ctx, cfg); err != nil || len(held) != 3 {
 		t.Fatalf("held after the prune %v %v", held, err)
 	}
 }
