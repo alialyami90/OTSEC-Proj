@@ -462,13 +462,7 @@ func (s *Scheduler) checkQuarantineClear(ctx context.Context) {
 		return
 	}
 	ch := sha256Of(b)
-	s.mu.Lock()
-	applied := false
-	for _, e := range s.quar {
-		applied = applied || slices.Contains(e.Clears, ch)
-	}
-	s.mu.Unlock()
-	if applied {
+	if s.quarantineApplied(ch) {
 		return // the chain holds this file's clear; it may stay in place
 	}
 	var cl clearQuarantine
@@ -477,56 +471,92 @@ func (s *Scheduler) checkQuarantineClear(ctx context.Context) {
 		s.refuseQuarantineClear("file "+ch, "", fmt.Sprintf("%s is not a %s object with asset_id, manifest_sha256 and a human principal", ClearQuarantineFileName, ClearQuarantineSchema))
 		return
 	}
+	s.applyQuarantineClear(ctx, quarantineClear{source: ClearQuarantineFileName, hash: ch, assetID: cl.AssetID, manifest: cl.ManifestSHA256, principal: cl.Principal})
+}
+
+// quarantineClear is an administrator's clear of one export, from either
+// source: clear-quarantine.json (unsigned, Phase 2 interim) or an accepted
+// node.quarantine_clear. hash is the SHA-256 of the file's bytes, which the
+// chain's quarantine.cleared record names, so one file's clear is applied
+// once; principal is the person the file names (the collector verified it,
+// for a signed file).
+type quarantineClear struct {
+	source    string
+	hash      string
+	assetID   string
+	manifest  string
+	principal string
+}
+
+// quarantineApplied reports whether the chain holds the clear whose file
+// hashes to hash. s.mu is not held.
+func (s *Scheduler) quarantineApplied(hash string) bool {
 	s.mu.Lock()
-	e := s.quar[cl.ManifestSHA256]
+	defer s.mu.Unlock()
+	for _, e := range s.quar {
+		if slices.Contains(e.Clears, hash) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyQuarantineClear applies one clear, in the design's order: the chain
+// holds the export (A3-1); a clear of an export already cleared changes
+// nothing and is recorded as stale (A3-4); every listed item is still stored
+// and hash-equal, or nothing is removed (A3-2); and quarantine.cleared is
+// committed before anything is removed (A3-3). Removal is stepClear's, from
+// that record, never from the file. It returns whether the clear is in the
+// chain, and otherwise why not (which it also raises). settleMu is held and
+// the chain folded.
+func (s *Scheduler) applyQuarantineClear(ctx context.Context, c quarantineClear) (done bool, why string) {
+	s.mu.Lock()
+	e := s.quar[c.manifest]
 	var entry quarantineEntry
 	if e != nil {
 		entry = *e
 	}
 	s.mu.Unlock()
-	if e == nil || entry.AssetID != cl.AssetID {
-		s.refuseQuarantineClear("file "+ch, cl.AssetID, fmt.Sprintf("%s names manifest %s, for which the chain holds no quarantine.exported record of asset %s; nothing removed", ClearQuarantineFileName, cl.ManifestSHA256, cl.AssetID))
-		return
+	if e == nil || entry.AssetID != c.assetID {
+		return false, s.refuseQuarantineClear("file "+c.hash, c.assetID, fmt.Sprintf("%s names manifest %s, for which the chain holds no quarantine.exported record of asset %s; nothing removed", c.source, c.manifest, c.assetID))
 	}
-	q := &audit.Quarantine{ManifestSHA256: cl.ManifestSHA256, FirstSeq: entry.FirstSeq, LastSeq: entry.LastSeq, Items: entry.Items, ClearSHA256: ch, RequestedBy: cl.Principal}
+	q := &audit.Quarantine{ManifestSHA256: c.manifest, FirstSeq: entry.FirstSeq, LastSeq: entry.LastSeq, Items: entry.Items, ClearSHA256: c.hash, RequestedBy: c.principal}
 	if entry.Cleared {
-		if err := s.commitQuarantineRecord(ctx, audit.ActionQuarantineCleared, audit.OutcomeInfo, audit.ReasonAlreadyCleared, cl.AssetID, q, ClearQuarantineFileName+" names a manifest already cleared; nothing removed"); err != nil {
-			s.refuseQuarantineClear("audit "+ch, cl.AssetID, "stale clear not recorded: "+err.Error())
-			return
+		if err := s.commitQuarantineRecord(ctx, audit.ActionQuarantineCleared, audit.OutcomeInfo, audit.ReasonAlreadyCleared, c.assetID, q, c.source+" names a manifest already cleared; nothing removed"); err != nil {
+			return false, s.refuseQuarantineClear("audit "+c.hash, c.assetID, "stale clear not recorded: "+err.Error())
 		}
 		s.foldOK(s.fold(ctx, true))
-		return
+		return true, ""
 	}
 	// The items come from the manifest copy the node verified: the copy in
 	// admin_dir must still be that one.
-	name := QuarantineExportFileName(cl.AssetID)
+	name := QuarantineExportFileName(c.assetID)
 	mb, err := protect.ReadFileFor(filepath.Join(s.rt.cfg.AdminDir, name), MaxQuarantineManifestBytes, AdminReaders())
-	if err != nil || sha256Of(mb) != cl.ManifestSHA256 {
-		s.refuseQuarantineClear("copy "+ch, cl.AssetID, fmt.Sprintf("%s in admin_dir is no longer manifest %s, so its items cannot be checked; nothing removed (clear the newest recorded export instead)", name, cl.ManifestSHA256))
-		return
+	if err != nil || sha256Of(mb) != c.manifest {
+		return false, s.refuseQuarantineClear("copy "+c.hash, c.assetID, fmt.Sprintf("%s in admin_dir is no longer manifest %s, so its items cannot be checked; nothing removed (clear the newest recorded export instead)", name, c.manifest))
 	}
-	if got, err := s.verifyManifest(ctx, cl.AssetID, mb); err != nil || got.FirstSeq != entry.FirstSeq || got.LastSeq != entry.LastSeq || got.Items != entry.Items {
+	if got, err := s.verifyManifest(ctx, c.assetID, mb); err != nil || got.FirstSeq != entry.FirstSeq || got.LastSeq != entry.LastSeq || got.Items != entry.Items {
 		why := "its range differs from the record"
 		if err != nil {
 			why = err.Error()
 		}
-		s.refuseQuarantineClear("check "+ch, cl.AssetID, "the stream no longer matches manifest "+cl.ManifestSHA256+"; nothing removed: "+why)
-		return
+		return false, s.refuseQuarantineClear("check "+c.hash, c.assetID, "the stream no longer matches manifest "+c.manifest+"; nothing removed: "+why)
 	}
-	if err := s.commitQuarantineRecord(ctx, audit.ActionQuarantineCleared, audit.OutcomeSucceeded, "", cl.AssetID, q,
-		fmt.Sprintf("%s applied; seqs %d to %d are removed in steps after this record", ClearQuarantineFileName, entry.FirstSeq, entry.LastSeq)); err != nil {
-		s.refuseQuarantineClear("audit "+ch, cl.AssetID, "clear not recorded in the audit stream, so nothing is removed: "+err.Error())
-		return
+	if err := s.commitQuarantineRecord(ctx, audit.ActionQuarantineCleared, audit.OutcomeSucceeded, "", c.assetID, q,
+		fmt.Sprintf("%s applied; seqs %d to %d are removed in steps after this record", c.source, entry.FirstSeq, entry.LastSeq)); err != nil {
+		return false, s.refuseQuarantineClear("audit "+c.hash, c.assetID, "clear not recorded in the audit stream, so nothing is removed: "+err.Error())
 	}
 	if err := s.fold(ctx, true); s.foldOK(err) {
 		s.mu.Lock()
-		delete(s.quarDone, cl.ManifestSHA256)
+		delete(s.quarDone, c.manifest)
 		s.mu.Unlock()
 	}
+	return true, ""
 }
 
-func (s *Scheduler) refuseQuarantineClear(key, assetID, detail string) {
+func (s *Scheduler) refuseQuarantineClear(key, assetID, detail string) string {
 	s.raiseOnceKey("quarantine clear "+key, assetID, AlarmQuarantineClearRefused, detail)
+	return detail
 }
 
 func (s *Scheduler) commitQuarantineRecord(ctx context.Context, action audit.Action, outcome audit.Outcome, reason, assetID string, q *audit.Quarantine, detail string) error {

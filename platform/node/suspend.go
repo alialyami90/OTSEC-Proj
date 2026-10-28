@@ -498,7 +498,7 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 			if err == nil {
 				accepted = applyCollectorClear(s.collClear, rec)
 				applyQuarantine(s.quar, rec)
-				applyRelay(s.relayed, rec)
+				applyRelay(s.relayed, rec, s.cs.Restored != nil)
 			}
 			if err == nil {
 				if rec.Action == audit.ActionAssetSuspend {

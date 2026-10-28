@@ -365,28 +365,41 @@ func (s *Scheduler) checkAck(ctx context.Context) {
 		s.raiseOnceKey(key, "", AlarmResetAckRefused, fmt.Sprintf("%s is not a %s object with install_key_id", SeqResetAckFileName, SeqResetAckSchema))
 		return
 	}
-	if ack.InstallKeyID != open {
-		s.raiseOnceKey(key, "", AlarmResetAckRefused, fmt.Sprintf("%s names install key %s; the open reset is on %s; nothing acknowledged", SeqResetAckFileName, ack.InstallKeyID, open))
-		return
+	s.applySeqAck(ctx, SeqResetAckFileName, key, ack.InstallKeyID, open)
+}
+
+// applySeqAck acknowledges the open reset on install key open, for an
+// acknowledgement that names installKey, from either source:
+// seq-reset-ack.json or an accepted node.seq_reset_ack. key is the
+// raise-once key. Only an acknowledgement of the open reset's own key
+// applies, and only while the collector is still on that key. settleMu is
+// held and the chain folded. It returns whether the reset is acknowledged,
+// and otherwise why not.
+func (s *Scheduler) applySeqAck(ctx context.Context, source, key, installKey, open string) (done bool, why string) {
+	refuse := func(k, detail string) (bool, string) {
+		s.raiseOnceKey(k, "", AlarmResetAckRefused, detail)
+		return false, detail
+	}
+	if installKey != open {
+		return refuse(key, fmt.Sprintf("%s names install key %s; the open reset is on %s; nothing acknowledged", source, installKey, open))
 	}
 	// The collector must still be on the reset's key: one that went back
 	// to an earlier key since is held as restored, not acknowledged.
 	if now, err := s.readInstallKey(); err != nil || now != open {
-		s.raiseOnceKey("key "+key, "", AlarmResetAckRefused, fmt.Sprintf("%s names install key %s, but the collector's install key is no longer it (%s); nothing acknowledged", SeqResetAckFileName, open, keyOrNone(now)))
-		return
+		return refuse("key "+key, fmt.Sprintf("%s names install key %s, but the collector's install key is now %s; nothing acknowledged", source, open, keyOrNone(now)))
 	}
-	rec, err := s.collectorRecord(audit.ActionCollectorSeqResetAck, open, nil, 0, "acknowledged by "+SeqResetAckFileName)
+	rec, err := s.collectorRecord(audit.ActionCollectorSeqResetAck, open, nil, 0, "acknowledged by "+source)
 	if err == nil {
 		err = s.commitAudit(ctx, rec)
 	}
 	if err != nil {
-		s.raiseOnceKey("audit "+key, "", AlarmResetAckRefused, "acknowledgement not recorded in the audit stream, so not applied: "+err.Error())
-		return
+		return refuse("audit "+key, "acknowledgement not recorded in the audit stream, so not applied: "+err.Error())
 	}
 	// The acknowledgement applies from the stream, as at a start.
 	s.settleLocked(ctx)
 	s.rt.opt.Status.Raise("", AlarmResetAcknowledged, "reset on install key "+open+" acknowledged by an administrator; collection resumes")
 	s.publishCollector()
+	return true, ""
 }
 
 // publishCollector shows the collector's keys in node status.

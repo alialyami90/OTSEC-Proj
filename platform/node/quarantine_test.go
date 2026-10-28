@@ -47,6 +47,7 @@ type quarantineNode struct {
 	st           *Status
 	s            *Scheduler
 	f            *fakeCollector
+	via          Collector // when set, the scheduler's collector instead of f
 	unauthorized bool
 }
 
@@ -67,7 +68,11 @@ func (q *quarantineNode) restart() {
 	}
 	q.r, q.st, _ = start(q.t, q.c, q.dir)
 	q.t.Cleanup(func() { q.r.Close() })
-	q.s = newScheduler(q.t, q.r, q.f)
+	var col Collector = q.f
+	if q.via != nil {
+		col = q.via
+	}
+	q.s = newScheduler(q.t, q.r, col)
 }
 
 // runs makes n quarantined runs, two records each.
