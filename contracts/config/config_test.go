@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/adapter"
+	"otsec.local/otsec/contracts/audit"
 )
 
 // invalidWant is the error each invalid example must produce. Every file in
@@ -295,6 +296,11 @@ func TestChangesDigest(t *testing.T) {
 	empty := Difference{}
 	if d12.ChangesDigest() != empty.ChangesDigest() || d12.ChangesDigest() != Digest([]byte("[]")) {
 		t.Errorf("no changes: %s, want %s", d12.ChangesDigest(), Digest([]byte("[]")))
+	}
+	// C8 0.7 names the same value, so the audit chain can refuse a "change"
+	// that holds nothing: the two constants must not drift.
+	if d12.ChangesDigest() != audit.EmptyChangesDigest {
+		t.Errorf("no changes: %s, but C8 names %s", d12.ChangesDigest(), audit.EmptyChangesDigest)
 	}
 	// One value moved is another digest, and "<" is not escaped.
 	other := d13
