@@ -242,8 +242,8 @@ func (g *rig) awaitMarker(known net.Conn, mark string, rows0 int64, st0 receive.
 					// The receiver's goroutines tell a commit in progress
 					// (the writer in AppendBatch) from a message lost
 					// uncounted (the writer idle with messages held).
-					fmt.Fprintf(os.Stderr, "%s: marker %q: the receiver has held %d read messages for %v; waiting. Its goroutines:\n%s\n",
-						g.t.Name(), mark, held, d, receiverStacks())
+					fmt.Fprintf(os.Stderr, "%s: marker %q: the receiver has held %d read messages for %v; waiting. Its goroutines:\n%s\nThe store's commits:\n%s\n",
+						g.t.Name(), mark, held, d, receiverStacks(), g.commitTrail())
 				}
 			}
 		case sent == 0 || st.Received > last.Received:
@@ -360,6 +360,10 @@ func (g *rig) markerFatalf(mark, format string, args ...any) {
 // returned, and how many stored events hold the marker read both ways
 // (hasMarker's text search, and the decoded native bytes).
 func (g *rig) why(mark string) string {
+	// The trail first: every probe below opens a connection of its own,
+	// and writeLock's BEGIN IMMEDIATE by itself puts a committing store in
+	// SQLite's busy handler.
+	trail := g.commitTrail()
 	st := g.r.Status()
 	b, n := g.r.CommitCaps()
 	served := "running"
@@ -385,16 +389,18 @@ func (g *rig) why(mark string) string {
 	}
 	return fmt.Sprintf("received %d, stored %d, dropped %v, held %v, last error %q, so %d read and neither stored nor dropped; "+
 		"caps %d bytes %d records; log stopped %v; Serve %s; store write lock %s; "+
-		"%d events on the stream, %d holding the marker's text, %d whose native bytes are the marker\n%s",
+		"%d events on the stream, %d holding the marker's text, %d whose native bytes are the marker; files %s\n"+
+		"the store's commits, sampled before these probes:\n%s\n%s",
 		st.Received, st.Stored, st.Dropped, st.Held, st.LastErr, st.Received-st.Stored-dropped-st.Empty,
-		b, n, g.log.Stopped(), served, g.writeLock(), len(ev), text, native, stacks())
+		b, n, g.log.Stopped(), served, g.writeLock(), len(ev), text, native, g.files(), trail, stacks())
 }
 
-// writeLock says whether another connection holds SQLite's write lock now,
-// as the store does while it commits: free means the store is not in a
-// commit, so a stalled writer is waiting elsewhere.
+// writeLock says whether another connection holds SQLite's write lock at
+// this instant (no busy wait), as the store does while it commits: free
+// means the store is not in a commit, so a stalled writer is waiting
+// elsewhere. The error text carries SQLite's extended code.
 func (g *rig) writeLock() string {
-	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: g.db}).EscapedPath()+"?_pragma=busy_timeout(1000)")
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: g.db}).EscapedPath()+"?_pragma=busy_timeout(0)")
 	if err != nil {
 		return err.Error()
 	}
@@ -410,6 +416,77 @@ func (g *rig) writeLock() string {
 	}
 	c.ExecContext(ctx, "ROLLBACK")
 	return "free"
+}
+
+// commitTrail samples the Log's commit goroutines four times, a second
+// apart: the rows stored, the database/sql pools open in this process (one
+// connectionOpener goroutine each, so a connection left open by anyone
+// shows), and where each commit goroutine is. A commit in one place on
+// every sample is stuck there; one that moves is slow.
+func (g *rig) commitTrail() string {
+	var out []string
+	for i := range 4 {
+		if i > 0 {
+			time.Sleep(time.Second)
+		}
+		var w strings.Builder
+		pprof.Lookup("goroutine").WriteTo(&w, 1)
+		all := w.String()
+		pools := 0
+		var commits []string
+		for _, s := range strings.Split(all, "\n\n") {
+			n := 1
+			fmt.Sscanf(s, "%d @", &n)
+			if strings.Contains(s, "database/sql.(*DB).connectionOpener") {
+				pools += n
+			}
+			if strings.Contains(s, "contracts/store.(*Log).run") {
+				commits = append(commits, fmt.Sprintf("%d at %s", n, frames(s)))
+			}
+		}
+		if len(commits) == 0 {
+			commits = []string{"none"}
+		}
+		out = append(out, fmt.Sprintf("  t+%ds: received %d stored %d; %d sql pools open; commits: %s",
+			i, g.r.Status().Received, g.r.Status().Stored, pools, strings.Join(commits, "; ")))
+	}
+	return strings.Join(out, "\n")
+}
+
+// frames is a pprof debug=1 stack's innermost frames, to the first in this
+// module, each as its function and line.
+func frames(s string) string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 4 || f[0] != "#" {
+			continue
+		}
+		fn, _, _ := strings.Cut(f[2], "+0x")
+		file := f[len(f)-1]
+		if i := strings.LastIndex(file, "/"); i >= 0 {
+			file = file[i+1:]
+		}
+		out = append(out, fn[strings.LastIndex(fn, "/")+1:]+" "+file)
+		if strings.HasPrefix(fn, "otsec.local/otsec/") || len(out) == 12 {
+			break
+		}
+	}
+	return strings.Join(out, " < ")
+}
+
+// files is the store's file and its -wal and -shm, with their sizes.
+func (g *rig) files() string {
+	var out []string
+	for _, f := range []string{g.db, g.db + "-wal", g.db + "-shm"} {
+		fi, err := os.Stat(f)
+		if err != nil {
+			out = append(out, f[strings.LastIndexAny(f, `/\`)+1:]+" absent")
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %d bytes", fi.Name(), fi.Size()))
+	}
+	return strings.Join(out, ", ")
 }
 
 // stacks is every goroutine stack that runs this module's code, grouped:

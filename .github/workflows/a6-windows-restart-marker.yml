@@ -1,0 +1,51 @@
+# B6 diagnostic for the restart-marker stall on the hosted Windows runner
+# (TestUnknownSpentAcrossRestarts; B1's read of #292's a9287b6 run): the
+# store's commit goroutine was seen in SQLite's busy handler under BEGIN
+# IMMEDIATE while a fresh connection found the write lock free. That dump
+# was taken after the diagnostic's own write-lock probe, so it may show the
+# probe. restart_test.go's why() now samples the commits first: four
+# samples a second apart of where each commit goroutine is and how many
+# database/sql pools the process has open. Only the full suite has shown the
+# stall (12 of 12 alone and 8 of 8 full-suite passes before), so this runs
+# the full suite as ci.yml's Windows go step does, -count times, on two
+# runners at once. a6-* workflows are B6's (handoffs/B6-handoff.md). No
+# secrets, no services, no accounts; hosted runners only. Results are
+# simulated and printed to the job log.
+name: a6-windows-restart-marker
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "go test -count for the full suite, on each runner"
+        default: "3"
+  pull_request:
+    paths:
+      - .github/workflows/a6-windows-restart-marker.yml
+      - tests/integration/syslogreceive/**
+permissions:
+  contents: read
+jobs:
+  full-suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1, 2]
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      # As ci.yml's go step, but every package runs -count times in one
+      # test binary. -timeout is per package binary, so it is ci.yml's 12m
+      # times the count, with room.
+      - name: Full suite, repeated
+        env:
+          COUNT: ${{ github.event.inputs.count || '3' }}
+        shell: pwsh
+        run: |
+          $timeout = "$([int]$env:COUNT * 15)m"
+          go test -timeout $timeout -count $env:COUNT ./...
+          exit $LASTEXITCODE
