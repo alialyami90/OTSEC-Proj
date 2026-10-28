@@ -137,6 +137,22 @@ func TestRunNeedsOnePointThree(t *testing.T) {
 			t.Errorf("%s with a run: %v", c, err)
 		}
 	}
+	// Limits alone, with no run, are as new as runs: the gate on limits must
+	// hold without a run to trip the other one (B3's mutant on #279).
+	for _, c := range []string{"otsec.register/0.1", "otsec.register/0.2"} {
+		_, err := Decode(v3(t, func(m map[string]any) {
+			m["contract"] = c
+			delete(m, "context")
+			delete(m, "runs")
+		}))
+		if err == nil || !strings.Contains(err.Error(), "new in 0.3") {
+			t.Errorf("%s with limits and no run: %v", c, err)
+		}
+	}
+	// And at 0.3 the same package, limits and no run, is valid.
+	if _, err := Decode(v3(t, func(m map[string]any) { delete(m, "runs") })); err != nil {
+		t.Errorf("0.3 with limits and no run: %v", err)
+	}
 	for _, id := range []string{"sel-751-phase0.json", "sel-751-rev2.json", "sel-751-rev3.json", "sel-751.json"} {
 		data, err := os.ReadFile("testdata/" + id)
 		if err != nil {
