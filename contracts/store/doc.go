@@ -58,7 +58,7 @@
 //     store-quota-reached at every start), and the classes are not summed (a
 //     full class beside a light one restarted silently). Pruning steps only
 //     the streams of a class above the target. A class with no room for its
-//     largest record raises store-quota-reached naming the class, and a
+//     largest record (event, capture and source cursor, as the runtime refusal counts it; Record.Bytes) raises the alarm the runtime raises for the class (FullAlarm: audit-store-full, syslog-unknown-full, or store-quota-reached) naming the class, and a
 //     class at its warning level raises store-quota-warning, as the runtime
 //     would at its next commit. Pages are the store's PageBytes and stay
 //     bounded by DiskBytesPerQuotaByte.

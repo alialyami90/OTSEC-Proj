@@ -126,13 +126,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			refusal = codeErr(c5.CodeQuotaReached, nil, "class %s: %d of %d bytes used, batch needs %d", class, used, q.Bytes, add)
 			if !d.full[class] {
 				d.full[class] = true
-				code, detail := c5.AlarmQuotaReached, refusal.Error()
-				switch class {
-				case c5.ClassAudit:
-					code = c5.AlarmAuditFull
-				case c5.ClassSyslogUnknown:
-					code = c5.AlarmSyslogUnknownFull
-				}
+				code, detail := c5.FullAlarm(class), refusal.Error()
 				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown {
 					detail += "; most bytes: " + d.topStreams(ctx, class, 3)
 				}

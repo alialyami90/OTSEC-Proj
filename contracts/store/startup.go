@@ -622,7 +622,7 @@ func (s *startup) checkQuota(ctx context.Context, st RecoveryStore) {
 	for _, u := range uses {
 		switch {
 		case u.Used+max(u.Record, 1) > u.Limit:
-			s.r.Alarms = append(s.r.Alarms, Alarm{Code: AlarmQuotaReached, At: s.now, Class: u.Class, Step: StepPrune,
+			s.r.Alarms = append(s.r.Alarms, Alarm{Code: FullAlarm(u.Class), At: s.now, Class: u.Class, Step: StepPrune,
 				Detail: fmt.Sprintf("class %s: %d of %d bytes used after pruning; a record of %d bytes will be refused", u.Class, u.Used, u.Limit, max(u.Record, 1))})
 			s.stalled(ctx, st, u.Class)
 		case u.WarnAt > 0 && u.Used >= u.WarnAt:
