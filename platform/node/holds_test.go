@@ -26,8 +26,11 @@ func ackRec(kind authz.BaselineKind, digest string) *audit.Record {
 		Target: &audit.Target{AssetID: relayID}, Config: &audit.Config{Kind: kind, BaselineDigest: digest}}
 }
 
+// changesDigest is a digest of some changes; the holds do not read it.
+const changesDigest = "sha256:" + "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+
 func detectedRec(baseline, snap, diff string, approved bool) *audit.Record {
-	c := &audit.Config{BaselineDigest: baseline, SnapshotDigest: snap, DifferenceDigest: diff}
+	c := &audit.Config{BaselineDigest: baseline, SnapshotDigest: snap, DifferenceDigest: diff, ChangesDigest: changesDigest}
 	if approved {
 		c.ApprovalSeq = 5
 	}
