@@ -164,13 +164,38 @@ def test_events_before_the_ack_would_alarm(ev):
 
 
 def test_heldout_raises_nothing(ev):
+    """The held-out series starts at the acknowledgement and, armed there
+    (D4-15), raises nothing."""
     ho = load("events-heldout.json")
     for e in ho["events"]:
         e["t"] = seconds(e["received_utc"])
+    ack = seconds(ev["period"]["baseline_ack"])
     start = min(e["t"] for e in ho["events"])
-    assert start > seconds(ev["period"]["baseline_ack"])
-    assert ho["seed"] != ev["seed"] and len({e["t"] // g.DAY for e in ho["events"]}) >= g.OBS_DAYS
-    assert _alarms(ev, ho["events"], start - start % g.DAY, max(e["t"] for e in ho["events"]) + 1) == []
+    assert ack <= start < ack + 3600
+    assert ho["seed"] != ev["seed"] and max(e["t"] for e in ho["events"]) - ack >= (g.OBS_DAYS - 1) * g.DAY
+    assert _alarms(ev, ho["events"], ack, max(e["t"] for e in ho["events"]) + 1) == []
+
+
+def test_absence_is_armed_at_the_acknowledgement(ev):
+    """D4-15: a periodic type that goes silent while the baseline waits for
+    the acknowledgement and never returns alarms once, at exactly ack +
+    interval + tolerance. The arming B6 read before (from the last
+    occurrence only, nothing whose deadline fell before ack) raises
+    nothing for it: the hole the ruling closes."""
+    end, ack = seconds(ev["period"]["end"]), seconds(ev["period"]["baseline_ack"])
+    test_end = seconds(ev["period"]["test_end"])
+    hb = g.tkey("gt-inj-syslog", g.PERIODIC)
+    base = g.baseline([e for e in ev["events"] if e["t"] < end])
+    b = base[("gt-inj-syslog", hb)]
+    limit = b["interval"] + g.ceil_div(b["interval"] * g.PARAMS["absence_tolerance_pct"], 100)
+    # Not vacuous: the last heartbeat's own deadline passed before ack, so
+    # only the arming at ack can raise the alarm.
+    assert b["last"] + limit < ack
+    silent = [e for e in ev["events"] if e["t"] >= ack and g.key_of(e) != hb]
+    got = [a for a in g.evaluate(base, silent, ack, test_end) if a["rule"] == "absence"]
+    assert [(a["asset"], tuple(a["type"]), a["at"]) for a in got] == [("gt-inj-syslog", hb, ack + limit)]
+    old = [a for a in g.evaluate(base, silent, ack, test_end, reanchor=False) if a["rule"] == "absence"]
+    assert old == []
 
 
 def test_events_syslog_key_is_the_template(ev):
