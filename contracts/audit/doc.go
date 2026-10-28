@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.5: the audit record every module
+// Package audit is contract C8, otsec.audit/0.6: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -197,8 +197,12 @@
 // baseline may be approved until a config.baseline_restored for it follows
 // the alarm, so an approval accepted after a change was found never
 // silences it. Ending that alarm takes a signed baseline acknowledgement or
-// a recorded return to the baseline. VerifyConfig checks all of this over
-// the chain:
+// a recorded return to the baseline. From 0.6 (D4-18) a succeeded
+// configuration-kind acknowledgement ends every open alarm of its asset
+// raised before it, whatever baseline it was against, so acknowledging A
+// again starts A afresh; an alarm raised after the latest acknowledgement
+// still blocks a later approval, and an event-kind or denied acknowledgement
+// ends none. VerifyConfig checks all of this over the chain:
 //   - each approval and acknowledgement follows a real acceptance of its kind
 //     by its actor for the same signed bytes;
 //   - each detection and restore names a real read of its asset;
@@ -209,7 +213,8 @@
 //     configuration baseline that the last succeeded acknowledgement set;
 //   - every approval_seq names an approval that covers the detection;
 //   - no approved detection follows an unapproved one against the same
-//     baseline without a restore in between;
+//     baseline without a restore, or a configuration acknowledgement of
+//     its asset, in between;
 //   - each succeeded acknowledgement names, as previous_digest, the
 //     baseline of its asset and kind the last one set.
 //

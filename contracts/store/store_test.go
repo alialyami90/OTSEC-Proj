@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 5 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 6 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
