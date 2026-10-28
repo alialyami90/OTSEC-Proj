@@ -336,6 +336,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(w, "node %s, status written %s\n", st.Node, st.Written.Format(time.RFC3339))
+	if st.GoVersion != "" {
+		fmt.Fprintf(w, "node built with %s\n", safe(st.GoVersion))
+	}
 	fmt.Fprintf(w, "collecting: %v\n", st.Collecting)
 	if st.RunsHeld != "" {
 		fmt.Fprintf(w, "RUNS HELD: %s; every run on this node is stopped while this line shows\n", safe(st.RunsHeld))
@@ -464,6 +467,20 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 			}
 			fmt.Fprintln(w, line)
 		}
+	}
+	for _, k := range st.NodeKeys {
+		verb := "EXPIRES"
+		if !time.Now().Before(k.NotAfter) {
+			verb = "EXPIRED"
+		}
+		fmt.Fprintf(w, "NODE KEY CERTIFICATE %s %s (%s) at %s: install a new version in the key register\n", verb, safe(k.Ref), safe(k.Kind), k.NotAfter.Format(time.RFC3339))
+	}
+	if st.LabTLSFiles {
+		refs := "no reference of this configuration uses one yet"
+		if len(st.LabTLSFileRefs) > 0 {
+			refs = "from files: " + safe(strings.Join(st.LabTLSFileRefs, ", "))
+		}
+		fmt.Fprintf(w, "LAB TLS KEYS IN FILES: lab_tls_files is set, so TLS private keys may be read from files in tls_dir, not a key store (lab nodes only, D2-12); %s\n", refs)
 	}
 	for _, id := range node.SortedListeners(st.Listeners) {
 		ls := st.Listeners[id]

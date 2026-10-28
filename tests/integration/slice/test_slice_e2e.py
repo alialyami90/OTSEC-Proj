@@ -22,10 +22,13 @@ What is checked, against ground truth that is not the product's own:
     session at a time, one password per session, QUI last (check.py;
     V-S7, V-S13);
   - the test password appears in no file, log, receiver record, process
-    argument or process environment of the platform (V-S11). An
+    argument or process environment of the platform (V-S11). The live
     environment is read on Linux only, and not the collector's: it is
     non-dumpable, so /proc keeps it from the harness. Each environment not
-    read is reported as a warning, never counted as clean.
+    read is reported as a warning, never counted as clean. Every
+    environment the harness started a process with is scanned as well, on
+    every platform (B3 on #242), so the collector's is covered as given,
+    though not as it is while it runs.
 
 Evidence class: simulated. The simulator answers from manual examples
 (documented-example), not from a device; nothing here is hardware
@@ -75,6 +78,7 @@ def run(tmp_path_factory):
         # on Windows (processes or installed services).
         s.cmdlines = {name: s.cmdline(name) for name in ("node", "collector")}
         s.environs = {name: s.environ(name) for name in ("node", "collector")}
+        s.start_environs = {name: s.start_environ(name) for name in ("node", "collector")}
         yield s
     finally:
         s.stop()
@@ -161,6 +165,14 @@ def test_the_password_is_nowhere(run):
             not_read.append(name)
         elif canary in env:
             hits.append(f"{name} environment")
+        given = run.start_environs.get(name)
+        # A process the harness started has a start environment; one the
+        # SCM started (service mode) does not, and is reported as not read.
+        assert given is not None or run.service, f"{name} start environment not kept"
+        if given is None:
+            not_read.append(f"{name} (start)")
+        elif canary in given:
+            hits.append(f"{name} start environment")
     # The simulator's log records the in-band password as an auth event,
     # never its bytes (sim.py); it is the device's side, checked here too.
     with open(run.sim_log, "rb") as f:
@@ -169,4 +181,4 @@ def test_the_password_is_nowhere(run):
     assert hits == [], hits
     if not_read:
         warnings.warn(f"V-S11: the process environment of {not_read} was not read, so it was not scanned "
-                      "(Windows, or the non-dumpable collector on Linux)")
+                      "(Windows, the non-dumpable collector on Linux, or a service the SCM started)")

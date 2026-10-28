@@ -53,9 +53,9 @@ from slicerun import CANARY, Slice
 # A platform exemption, not a missing tool, so OTSEC_SLICE_REQUIRED=1 does
 # not fail it on Windows (A5's service-mode run svcdry6, #179): the checks
 # stop the collector with SIGSTOP and set admin_dir's POSIX modes, neither
-# of which Windows has. The Windows relay is covered only by C7's contract
-# tests in the Go job; an end-to-end Windows check of admin_dir's ACLs and
-# the relay is still owed (A6).
+# of which Windows has. On Windows, test_slice_admin_relay_windows_e2e.py
+# checks the relay and config\admin's ACLs against the installed services
+# (B6, a6-windows-slice.yml).
 pytestmark = pytest.mark.skipif(
     os.name == "nt",
     reason="Linux-only: needs SIGSTOP and POSIX file modes; it runs in CI's Linux integration-long job")
@@ -239,7 +239,13 @@ def got(tmp_path_factory):
         out["i2"], out["steps"]["lost"] = lose_reply("a6-install-2", 2)
         runs = len(s.runs_reported())
         out["steps"]["lost"]["run_after"] = harness.wait_for(lambda: len(s.runs_reported()) > runs, 150, step=1.0)
-        out["steps"]["lost"]["run_health"] = s.health()
+        # The node forwards the run's report before it folds the run's
+        # audit records and writes status (Scheduler.RunOnce), so the
+        # receiver can hold the report a moment before status shows the run.
+        def run_shown():
+            h = s.health()
+            return h if re.search(r"last run ok at", h) else None
+        out["steps"]["lost"]["run_health"] = harness.wait_for(run_shown, 3 * RELAY, step=1.0) or s.health()
 
         # 5. Removed, forgotten, put back. The unread files are removed
         # first, so a scan reads every file and may forget.

@@ -44,9 +44,15 @@ const (
 //
 // Nothing is cached and nothing falls back: the node calls it at start, and
 // a missing or bad file stops it.
+//
+// With key_register the references resolve from the node key register
+// instead (keyTargetTLS), under the same rule: nothing falls back.
 func (c *Config) TargetTLS(t *syslog.Target) (*tls.Config, error) {
 	if t.TLS == nil {
 		return nil, fmt.Errorf("target %s: no tls section", t.Name)
+	}
+	if c.KeyRegister != "" {
+		return c.keyTargetTLS(t)
 	}
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("target %s: tls_dir is not set", t.Name)
@@ -76,6 +82,9 @@ func (c *Config) TargetTLS(t *syslog.Target) (*tls.Config, error) {
 func (c *Config) ListenerTLS(l Listener) (*tls.Config, error) {
 	if l.TLS == nil {
 		return nil, fmt.Errorf("listener %s: no tls section", l.ID)
+	}
+	if c.KeyRegister != "" {
+		return c.keyListenerTLS(l)
 	}
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("listener %s: tls_dir is not set", l.ID)

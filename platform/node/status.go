@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
@@ -39,7 +40,10 @@ type Status struct {
 	assets      map[string]AssetResult
 	runsHeld    string
 	listeners   map[string]ListenerStatus
+	nodeKeys    []NodeKeyExpiry
 	adminReqs   []AdminRequestStatus
+	labTLS      bool
+	labTLSRefs  []string
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -59,11 +63,16 @@ type StatusAlarm struct {
 
 // StatusFile is the content of the status file.
 type StatusFile struct {
-	Schema  string                    `json:"schema"`
-	Node    string                    `json:"node_id"`
-	Written time.Time                 `json:"written"`
-	Modes   map[c5.DatabaseID]c5.Mode `json:"modes"`
-	Alarms  []StatusAlarm             `json:"alarms"`
+	Schema  string    `json:"schema"`
+	Node    string    `json:"node_id"`
+	Written time.Time `json:"written"`
+	// GoVersion is the Go toolchain the running node was built with
+	// (runtime.Version), so an operator can check it against the latest
+	// patch of a supported minor (D3-10). Empty in a file written by an
+	// older node.
+	GoVersion string                    `json:"go_version,omitempty"`
+	Modes     map[c5.DatabaseID]c5.Mode `json:"modes"`
+	Alarms    []StatusAlarm             `json:"alarms"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
 	// RunsHeld is the alarm code that stops every run on the node, level
@@ -94,9 +103,17 @@ type StatusFile struct {
 	Assets map[string]AssetResult `json:"assets,omitempty"`
 	// Listeners is each Syslog listener's state (listening.go).
 	Listeners map[string]ListenerStatus `json:"listeners,omitempty"`
+	// NodeKeys are the key register's active entries whose certificate
+	// expires within NodeKeyWarning, or has expired (nodekeys.go).
+	NodeKeys []NodeKeyExpiry `json:"node_keys_expiring,omitempty"`
 	// AdminRequests is each admin-request file in admin_dir and the
 	// collector's decision on it, if any (adminrelay.go).
 	AdminRequests []AdminRequestStatus `json:"admin_requests,omitempty"`
+	// LabTLSFiles is true when lab_tls_files is set, and LabTLSFileRefs
+	// names the references whose private key is read from a file
+	// (nodekeys.go, B3 on #176).
+	LabTLSFiles    bool     `json:"lab_tls_files,omitempty"`
+	LabTLSFileRefs []string `json:"lab_tls_file_refs,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -256,6 +273,21 @@ func (s *Status) SetCollector(c *CollectorStatus) {
 	s.mu.Unlock()
 }
 
+// SetNodeKeys records the node key register's expiring entries.
+func (s *Status) SetNodeKeys(k []NodeKeyExpiry) {
+	s.mu.Lock()
+	s.nodeKeys = k
+	s.mu.Unlock()
+}
+
+// SetLabTLSFiles records that lab_tls_files is set, and the references
+// whose private key is read from a file.
+func (s *Status) SetLabTLSFiles(refs []string) {
+	s.mu.Lock()
+	s.labTLS, s.labTLSRefs = true, slices.Clone(refs)
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -298,7 +330,7 @@ func (s *Status) SetMode(db c5.DatabaseID, m c5.Mode) {
 func (s *Status) Snapshot(node string) StatusFile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
+	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), GoVersion: runtime.Version(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
 	f.Collecting = len(s.modes) > 0
 	f.RunsHeld = s.runsHeld
 	for db, m := range s.modes {
@@ -327,6 +359,8 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if len(s.listeners) > 0 {
 		f.Listeners = maps.Clone(s.listeners)
 	}
+	f.NodeKeys = slices.Clone(s.nodeKeys)
+	f.LabTLSFiles, f.LabTLSFileRefs = s.labTLS, slices.Clone(s.labTLSRefs)
 	if len(s.adminReqs) > 0 {
 		f.AdminRequests = slices.Clone(s.adminReqs)
 	}
