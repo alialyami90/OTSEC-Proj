@@ -148,7 +148,10 @@ func (g *rig) floodUntil(end time.Time, mark string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	g.t.Fatalf("marker %q not stored", mark)
+	st := g.r.Status()
+	b, n := g.r.CommitCaps()
+	g.t.Fatalf("marker %q not stored: received %d, stored %d, dropped %v, held %v, last error %q, caps %d bytes %d records",
+		mark, st.Received, st.Stored, st.Dropped, st.Held, st.LastErr, b, n)
 }
 
 // hasMarker reports whether a stored event holds mark, without reading and
