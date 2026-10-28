@@ -274,36 +274,71 @@ func (r *Register) active(ref string, kind Kind) (*Entry, error) {
 	return nil, fmt.Errorf("nodekey: %s has no active version", ref)
 }
 
-// TrustAnchors resolves a trust-anchors reference: its certificates as a
-// pool, and the entry, whose version and fingerprint the node's C8 record
-// names. Every certificate must be valid at now: one expired certificate
-// refuses the whole set, so the set of trusted peers never shrinks or
-// changes silently, and Expiring reports it 30 days ahead.
-func (r *Register) TrustAnchors(ref string, now time.Time) (*x509.CertPool, *Entry, error) {
+// ErrCertificatePeriod is wrapped by TrustAnchors and Certificate when a
+// certificate is outside its validity period and nothing else is wrong with
+// the entry: it is the last check, after the references, the key and the
+// public key have all passed. A caller that holds back one link for an
+// expired certificate (HR-13, D4-11) can then tell that fault from every
+// other, and LoadTrustAnchors and LoadCertificate give it the material to
+// judge the period itself.
+var ErrCertificatePeriod = errors.New("nodekey: certificate outside its validity period")
+
+// LoadTrustAnchors resolves a trust-anchors reference without judging the
+// validity period: its certificates as a pool, and the entry, whose version
+// and fingerprint the node's C8 record names. An expired certificate stays
+// in the pool, so a TLS verification that chains to it fails on the expiry
+// and the set of trusted peers never shrinks silently; Expiring reports it
+// 30 days ahead. TrustAnchors is the same with the period checked.
+func (r *Register) LoadTrustAnchors(ref string) (*x509.CertPool, *Entry, error) {
+	pool, e, _, err := r.loadTrustAnchors(ref)
+	return pool, e, err
+}
+
+// loadTrustAnchors also returns the parsed certificates, for the period.
+func (r *Register) loadTrustAnchors(ref string) (*x509.CertPool, *Entry, []*x509.Certificate, error) {
 	e, err := r.active(ref, KindTrustAnchors)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	pool := x509.NewCertPool()
+	certs := make([]*x509.Certificate, 0, len(e.Certificates))
 	for i, der := range e.Certificates {
 		c, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, nil, fmt.Errorf("nodekey: %s certificates[%d] does not parse", ref, i)
-		}
-		if now.Before(c.NotBefore) || now.After(c.NotAfter) {
-			return nil, nil, fmt.Errorf("nodekey: %s certificates[%d] is valid from %s to %s", ref, i, utc(c.NotBefore), utc(c.NotAfter))
+			return nil, nil, nil, fmt.Errorf("nodekey: %s certificates[%d] does not parse", ref, i)
 		}
 		pool.AddCert(c)
+		certs = append(certs, c)
+	}
+	return pool, e, certs, nil
+}
+
+// TrustAnchors is LoadTrustAnchors for a caller that wants the period
+// checked. Every certificate must be valid at now: one expired certificate
+// refuses the whole set, so the set of trusted peers never shrinks or
+// changes silently, and Expiring reports it 30 days ahead. The refusal wraps
+// ErrCertificatePeriod.
+func (r *Register) TrustAnchors(ref string, now time.Time) (*x509.CertPool, *Entry, error) {
+	pool, e, certs, err := r.loadTrustAnchors(ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, c := range certs {
+		if now.Before(c.NotBefore) || now.After(c.NotAfter) {
+			return nil, nil, fmt.Errorf("%w: %s certificates[%d] is valid from %s to %s", ErrCertificatePeriod, ref, i, utc(c.NotBefore), utc(c.NotAfter))
+		}
 	}
 	return pool, e, nil
 }
 
-// Certificate resolves a tls-key reference to a certificate whose private
-// key is the provider's crypto.Signer: the key is used where it lives and
-// never read out. keys must be the entry's provider, the key must be the
-// one the register and the certificate name, and the leaf must be valid
-// at now.
-func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certificate, *Entry, error) {
+// LoadCertificate resolves a tls-key reference to a certificate whose
+// private key is the provider's crypto.Signer: the key is used where it
+// lives and never read out. keys must be the entry's provider, and the key
+// must be the one the register and the certificate name. The validity period
+// is not judged: the caller checks it, with the clock its TLS stack uses
+// (forward.ClientTLS and receive.ServerTLS do). Certificate is the same with
+// the period checked.
+func (r *Register) LoadCertificate(ref string, keys Keys) (*tls.Certificate, *Entry, error) {
 	e, err := r.active(ref, KindTLSKey)
 	if err != nil {
 		return nil, nil, err
@@ -315,9 +350,6 @@ func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certi
 	if err != nil {
 		return nil, nil, fmt.Errorf("nodekey: %s certificate does not parse", ref)
 	}
-	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-		return nil, nil, fmt.Errorf("nodekey: %s certificate is valid from %s to %s", ref, utc(leaf.NotBefore), utc(leaf.NotAfter))
-	}
 	signer, err := keys.Open(KeyName(e.Ref, e.Version))
 	if err != nil {
 		return nil, nil, err
@@ -327,6 +359,21 @@ func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certi
 		return nil, nil, fmt.Errorf("nodekey: the %s key %s is not the key the register names", e.Provider, KeyName(e.Ref, e.Version))
 	}
 	return &tls.Certificate{Certificate: slices.Clone(e.Certificates), PrivateKey: signer, Leaf: leaf}, e, nil
+}
+
+// Certificate is LoadCertificate for a caller that wants the period
+// checked: the leaf must be valid at now, and the refusal wraps
+// ErrCertificatePeriod only when the key and the register are otherwise
+// right.
+func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certificate, *Entry, error) {
+	cert, e, err := r.LoadCertificate(ref, keys)
+	if err != nil {
+		return nil, nil, err
+	}
+	if leaf := cert.Leaf; now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return nil, nil, fmt.Errorf("%w: %s certificate is valid from %s to %s", ErrCertificatePeriod, ref, utc(leaf.NotBefore), utc(leaf.NotAfter))
+	}
+	return cert, e, nil
 }
 
 // Expiry is an active reference whose earliest certificate expires soon.
