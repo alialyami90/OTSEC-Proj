@@ -93,6 +93,18 @@ func TestClientTLSChecksLeaf(t *testing.T) {
 			t.Errorf("%s: %v: ErrCertificatePeriod %v", name, err, !c.period)
 		}
 	}
+	// An expired certificate that also fails another check is refused for
+	// that check, not for the period: ErrCertificatePeriod means the period
+	// is the only fault, so a node that holds the link back for it still
+	// stops for the other (HR-13, D4-11 item 2).
+	expired := p.issueAt(t, string(node), nil, client, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	wrongPeer := newTarget(t, 2514, func(x *syslog.Target) { x.DurableAck.PermittedPeer = "site-b-node1" })
+	if _, err := ClientTLS(wrongPeer, p.roots, &expired); !errors.Is(err, ErrConfig) || errors.Is(err, ErrCertificatePeriod) {
+		t.Errorf("expired, with a wrong permitted_peer: %v", err)
+	}
+	if _, err := ClientTLS(tg, p.roots, &expired); !errors.Is(err, ErrCertificatePeriod) {
+		t.Errorf("expired and nothing else: %v", err)
+	}
 	// An EKU extension listing only OIDs Go does not know is still an EKU
 	// extension without clientAuth (A3 #94).
 	unknown := p.issueAt(t, string(node), nil, nil, now.Add(-time.Hour), now.Add(time.Hour), asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1})
