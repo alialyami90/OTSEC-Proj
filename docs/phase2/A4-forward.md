@@ -21,7 +21,7 @@ Any failure ends the session, and the next session resends everything after the 
 - SPKI pins when the target has them;
 - the node's client certificate, which is always sent.
 
-For a required target, the client certificate must carry `durable_ack.permitted_peer` as its CN or as one of its DNS names (A3 #81 S-2). The certificate must also be for client authentication and valid at load (A3 #89). `DialTLS` and `DialTCP` turn a target into a `Config.Dial`.
+For a required target, the client certificate must carry `durable_ack.permitted_peer` as its CN or as one of its DNS names (A3 #81 S-2). The certificate must also be for client authentication and valid at load (A3 #89). A refusal for the validity period wraps `ErrCertificatePeriod` as well as `ErrConfig`, so the node can tell an expired or not-yet-valid certificate from other refusals (HR-13). `DialTLS` and `DialTCP` turn a target into a `Config.Dial`.
 
 ## Seams
 
@@ -66,7 +66,7 @@ For a required target, the client certificate must carry `durable_ack.permitted_
 | `TestTextOmitted`, `TestTooLargeHeldThenPassed`, `TestUnrenderableHolds` | The C6 size rules, and holds that never skip. |
 | `TestLastTXNRReopens` | At the last TXNR the session drains, sends `close` and reopens, with no duplicates. |
 | `TestBestEffortStartsAtWindow` | A new best-effort target (lab-only plain `relp`, one-hour window) starts at the first event committed in its window: of 15 events, the 10 committed two hours ago are not sent, and nothing is reported as skipped. Each event stream of a best-effort target needs a C5 `CommitIndex` (`Stream.Index`). (A6 #89 nit.) |
-| `TestClientTLSChecksLeaf` | At load, the node's client certificate must be for client authentication (an EKU naming it, `any`, or none) and valid now; serverAuth-only, expired and not-yet-valid certificates are refused with the reason (A3 #89). |
+| `TestClientTLSChecksLeaf` | At load, the node's client certificate must be for client authentication (an EKU naming it, `any`, or none) and valid now; serverAuth-only, expired and not-yet-valid certificates are refused with the reason (A3 #89). Only the expired and not-yet-valid refusals wrap `ErrCertificatePeriod`. |
 | `TestNewRefuses`, `TestClientTLSRefuses`, `TestTLSPeerChecks`, `TestDialTCPOnlyForPlainRELP` | Configuration refusals. Against a TLS collector, the forwarder refuses: the wrong name; another CA; a certificate without serverAuth; TLS below 1.2; a pin mismatch. The collector refuses the node when it permits another name. |
 | `TestRsyslogExactlyOnce` | **P2-A4 acceptance, local rsyslog.** 500 events through imrelp over TLS with `tls.authmode="name"`, one permitted peer, a Direct ruleset queue and omfile `sync="on"`: the file holds every eid exactly once, in order. |
 | `TestRsyslogKilledMidStream` | rsyslogd is killed with SIGKILL once about 1,000 of 3,000 events are confirmed, then restarted. Every event confirmed before the kill is in the file, and every event arrives. Three runs gave 4 to 6 duplicates, within one window of 8. |
