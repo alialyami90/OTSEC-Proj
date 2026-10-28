@@ -429,6 +429,25 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-017 — 2026-10-28 — With the rate limits lifted, an unknown sender's flood shares the datagram listener's queue, so a held commit drops known datagrams as `queue-full` (HR-11 residual)
+
+- **What was tested:** B6's real-store cases for #291 (PR #316, `tests/integration/syslogreceive/unknownfull_b6_test.go`). One `syslog-udp` receiver has a known device and an unknown sender, and 600 datagrams from each are interleaved. The `syslog-unknown` class quota is 384 KiB, and the commit caps are 64 KiB and 64 records, as the node sets them.
+- **Result on hosted Windows** ([job 122683927190](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40648846041/job/122683927190), `full-suite (2)`, Go 1.27.3, `-count 3`). Every rate limit was lifted to 100000 and the unknown budget to 64 MiB.
+  - 1200 datagrams were received and 636 stored.
+  - Dropped: `queue-full` 168 and `unknown-full` 396. Only 516 of the 600 known datagrams were stored.
+  - In the same job, `TestUnknownSpentAcrossRestarts/seed_2` printed a commit trail showing the store's commit in `FlushFileBuffers` for 3 s or more (the F-016 shape).
+  - That run's `LastErr`, `record-too-large: batch of 68 records`, came from the test rig, not the product. The rig gave the receiver no `MaxCommitRecords`, so it started at 100 records against a Log capped at 64. The receiver halved its cap as designed, and nothing was lost to the refusal. The rig now passes 64, as the node does.
+- **Reproduced on Linux.** strace delayed every `fsync` and `fdatasync` by 3 s from the 20th call on, running the same test binary.
+  - **Rate limits lifted:** 68 of 600 known datagrams were lost, every one counted as `queue-full` (136 in all).
+  - **receive's default limits**, with each sender paced at 80 a second under its rate of 100: all 600 known datagrams were stored. The only drops were the unknown sender's: `unknown-full` 223 and `unknown-budget` 244. A part refused at the quota also spends the hourly budget (#291).
+- **What it means.** The datagram listener has one queue of 1024 for every sender (and 8 MiB, which these datagrams never reach). While a commit is held, whatever arrives fills it, so an unthrottled unknown flood takes the room a known device needs. With the default limits, two checks bound the unknown share before a datagram is queued: the rate limits (100 a second per sender, 400 for all unknown senders together) and the hourly byte budget, which is spent as each unknown datagram is read and only when there is room to queue it (`payUnknown`). In the default case here, each sender was paced under its rate, so the rate limits were not exercised. The budget stopped the unknown sender (244 `unknown-budget` drops). At no more than 160 datagrams a second, the queue survives a hold of at least 6.4 s. A longer hold overflows it whoever sends, and F-016 saw holds of up to 37.9 s on the hosted runner. That loss comes from the disk stall (F-016), not the flood, and it is counted, not silent. No case here shows it with the default limits.
+- **How it is pinned.**
+  - `TestB6UnknownClassFullOverDatagrams` runs with the default limits and must pass: every known datagram is stored, in order, and only the unknown sender's datagrams are dropped.
+  - `TestB6F017UnknownFloodSharesTheQueue` keeps the lifted limits as this residual's evidence. It requires that every lost known datagram is counted as `queue-full`, that no drop has another reason, and that the class fills within its bound. It logs the known loss on every run, so the residual stays visible.
+  - A mutant that drops the known group whenever the class is full, disguised as `queue-full`, fails the default case. The residual case cannot tell it from a stall, by design.
+- **Open, for B1 and B4:** does HR-11 need the known senders' room in the queue reserved (a queue per class, or the unknown share capped), so that a lifted or misconfigured rate limit cannot take it?
+- **Evidence class:** `simulated (hosted Windows)` for the CI run, and `simulated` for the Linux run with injected sync delays. Neither was measured on site hardware.
+
 ### F-016 — 2026-10-28 — Windows marker stall: in the one hold traced, the store's commit sat in the WAL sync (`FlushFileBuffers`) on the hosted runner's disk
 
 - **What was tested:** the marker stall seen on Windows since #292, where a known datagram, sent after a flood, was read but not stored for 20 s or more. #294 adds a commit trail to every marker wait in `tests/integration/syslogreceive`, sampled four times, a second apart, before any probe of the test's own. Each sample records: the rows stored, the `database/sql` pools open in the process, the store's `BEGIN IMMEDIATE` statistics (#295), and where each commit goroutine of the Log is.
