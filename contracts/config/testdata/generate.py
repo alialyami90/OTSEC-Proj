@@ -40,7 +40,7 @@ import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-SCHEMA = "otsec.config/0.2"
+SCHEMA = "otsec.config/0.3"
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 INVOCATIONS = {  # invented
     1: "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
@@ -339,8 +339,8 @@ def main():
     write("valid/difference-1-3.json", dump(d13))
 
     later = copy.deepcopy(snaps[1])
-    later["schema"] = "otsec.config/0.3"
-    later["zz_new"] = "a field 0.2 does not know"
+    later["schema"] = "otsec.config/0.4"
+    later["zz_new"] = "a field 0.3 does not know"
     write("valid/later-minor-snapshot.json", dump(later))
 
     def bad(name, base, f):
