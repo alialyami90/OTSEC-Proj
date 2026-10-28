@@ -89,7 +89,7 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 	return nil
 }
 
-// writeDatagrams commits queued datagrams in arrival order. A refused batch
+// writeDatagrams commits queued datagrams in arrival order. A refused part
 // is dropped and counted, never retried: the datagrams behind it would
 // otherwise be dropped instead.
 func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
@@ -116,14 +116,8 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 			r.queued.Add(-n)
 			continue
 		}
-		receipts, err := r.cfg.Log.AppendBatch(cctx, recs)
+		r.commitParts(cctx, recs, kept, false)
 		r.queued.Add(-n)
-		if err != nil {
-			r.update(func(s *Status) { s.LastErr = "store: " + err.Error() })
-			r.drop(DropStore, int64(len(kept)))
-			continue
-		}
-		r.stored(cctx, kept, receipts)
 	}
 }
 
