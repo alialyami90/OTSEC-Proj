@@ -89,9 +89,18 @@ func TestFoldHolds(t *testing.T) {
 		"a return to the baseline ends the alarm": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 0"}},
-		"a new baseline ends the alarm and is the one held": {
+		"a new baseline makes the alarm not wanted, and is the one held": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hSnap)},
 			[]string{"baseline " + hSnap[7:13] + " ref 2"}},
+		"a second acknowledgement of the same baseline keeps the alarm (B6 on #305)": {
+			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hBase)},
+			[]string{"baseline " + hBase[7:13] + " ref 2", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
+		"going to another baseline and back wants the alarm again (B6 on #305)": {
+			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent), ackRec(cfg, hBase)},
+			[]string{"baseline " + hBase[7:13] + " ref 3", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
+		"a return to the baseline ends it for good, even after a second acknowledgement": {
+			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase), ackRec(cfg, hBase)},
+			[]string{"baseline " + hBase[7:13] + " ref 3"}},
 		"an event baseline's acknowledgement leaves the alarm open": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(ev, hEvent)},
 			[]string{"baseline " + hBase[7:13] + " ref 0", "baseline " + hEvent[7:13] + " ref 2", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
@@ -346,6 +355,33 @@ func TestAcknowledgedBaselineNotStored(t *testing.T) {
 		if a.Code == AlarmBaselineNotStored && a.Asset == relayID && strings.Contains(a.Detail, hBase) {
 			seen = true
 		}
+	}
+	if !seen {
+		t.Errorf("no %s alarm: %+v", AlarmBaselineNotStored, alarms)
+	}
+}
+
+// When a record C8 says to hold is not there, the holds the node has are
+// the evidence it has left: the old baseline stays held, with the alarm
+// (B6 on #305).
+func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
+	h := newHoldsNode(t)
+	var ackA c5.Seq
+	got, alarms, r := h.restart(func(r *Runtime) {
+		ackA = putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.snap1)))
+	})
+	if len(got) != 1 || got[1] != reasonAt(r, ackA, c5.HoldBaseline) {
+		t.Fatalf("holds %+v", got)
+	}
+	got, alarms, r = h.restart(func(r *Runtime) {
+		putAudit(t, r, ackRec(authz.BaselineConfiguration, hBase)) // B, never stored
+	})
+	if len(got) != 1 || got[1] != reasonAt(r, ackA, c5.HoldBaseline) {
+		t.Fatalf("after the acknowledgement of a baseline that is not stored, holds %+v: the old baseline must stay", got)
+	}
+	var seen bool
+	for _, a := range alarms {
+		seen = seen || (a.Code == AlarmBaselineNotStored && strings.Contains(a.Detail, hBase))
 	}
 	if !seen {
 		t.Errorf("no %s alarm: %+v", AlarmBaselineNotStored, alarms)
