@@ -13,6 +13,13 @@ const (
 	// whose change is not yet approved or acknowledged. Ref is the
 	// config.change_detected C8 record.
 	HoldUnapprovedDifference HoldCode = "unapproved-difference"
+	// HoldAcknowledgedDifference (D4-18): the record is the snapshot or
+	// difference of a change whose alarm a configuration acknowledgement
+	// ended. It stays held as evidence; nothing ends the hold until a
+	// retention rule for configuration evidence is ruled, and the node never
+	// releases it to make room. Ref is the config.change_detected C8 record,
+	// which names the digests.
+	HoldAcknowledgedDifference HoldCode = "acknowledged-difference"
 )
 
 // HoldReason names the C8 record that justifies a hold, never free text
@@ -26,7 +33,7 @@ type HoldReason struct {
 
 // Validate checks the reason.
 func (r HoldReason) Validate() error {
-	if r.Code != HoldBaseline && r.Code != HoldUnapprovedDifference {
+	if r.Code != HoldBaseline && r.Code != HoldUnapprovedDifference && r.Code != HoldAcknowledgedDifference {
 		return errf(CodeInvalid, nil, "unknown hold code %q", r.Code)
 	}
 	if !r.Ref.NodeID.Valid() || !r.Ref.Stream.Valid() || r.Ref.Seq == 0 {

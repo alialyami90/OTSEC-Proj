@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 
@@ -87,6 +89,30 @@ type DB struct {
 	closed  bool
 	// readOnly is set by OpenReadOnly: every transaction is refused.
 	readOnly bool
+
+	// begin* time BEGIN IMMEDIATE, where the connection waits when another
+	// connection holds the write lock (BeginStats).
+	beginCount, beginTotal, beginMax, beginSince atomic.Int64
+}
+
+// BeginStats says how long this connection has waited in BEGIN IMMEDIATE,
+// the statement that waits for SQLite's write lock (busy_timeout, 5 s).
+// Waiting is how long the BEGIN in progress has waited, or zero when none is.
+// A commit that returns an error stops the Log, so a BEGIN that gave up is
+// seen there; this is for one that is slow or has not returned.
+type BeginStats struct {
+	Count      int64
+	Total, Max time.Duration
+	Waiting    time.Duration
+}
+
+// BeginStats reports the waits of this database's BEGIN IMMEDIATE so far.
+func (d *DB) BeginStats() BeginStats {
+	st := BeginStats{Count: d.beginCount.Load(), Total: time.Duration(d.beginTotal.Load()), Max: time.Duration(d.beginMax.Load())}
+	if since := d.beginSince.Load(); since != 0 {
+		st.Waiting = time.Since(time.Unix(0, since))
+	}
+	return st
 }
 
 var (
@@ -368,7 +394,16 @@ func (d *DB) tx(ctx context.Context, name string, f func() error) error {
 		return errReadOnly
 	}
 	d.point(name + ":begin")
-	if _, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	began := time.Now()
+	d.beginSince.Store(began.UnixNano())
+	_, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	d.beginSince.Store(0)
+	waited := time.Since(began)
+	d.beginCount.Add(1)
+	d.beginTotal.Add(int64(waited))
+	for m := d.beginMax.Load(); int64(waited) > m && !d.beginMax.CompareAndSwap(m, int64(waited)); m = d.beginMax.Load() {
+	}
+	if err != nil {
 		return fmt.Errorf("%s: begin: %w", name, err)
 	}
 	if err := f(); err != nil {

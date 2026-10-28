@@ -43,6 +43,11 @@
 //     file's size against the quota is bounded (DiskBytesPerQuotaByte), after
 //     B6's event-size sweep showed that events near half a page and small
 //     rows write more WAL and disk than their bytes.
+//   - Since 0.6 (D4-18): the hold code HoldAcknowledgedDifference. A
+//     configuration acknowledgement ends a change's alarm and not the hold
+//     on its snapshot and difference, which stay held as evidence. A
+//     reconcile that meets a hold code it does not know keeps that hold
+//     unchanged (no release, no new reason) and raises an alarm.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -65,4 +70,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.5"
+const Identifier = "otsec.store/0.6"

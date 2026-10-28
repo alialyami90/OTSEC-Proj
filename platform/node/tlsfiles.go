@@ -29,6 +29,44 @@ const (
 	ClientKeySuffix   = ".key"
 )
 
+// targetCreds is what a target's TLS references name, loaded and not yet
+// judged: the CA set that verifies the collector, and the node's client
+// certificate when the target names one.
+type targetCreds struct {
+	roots  *x509.CertPool
+	client *tls.Certificate
+}
+
+// loadTarget resolves target t's TLS references in tls_dir, under
+// TargetTLS's rules.
+func (c *Config) loadTarget(t *syslog.Target) (*targetCreds, error) {
+	if t.TLS == nil {
+		return nil, fmt.Errorf("target %s: no tls section", t.Name)
+	}
+	if c.KeyRegister != "" {
+		return c.keyLoadTarget(t)
+	}
+	if c.TLSDir == "" {
+		return nil, fmt.Errorf("target %s: tls_dir is not set", t.Name)
+	}
+	if err := protect.CheckDir(c.TLSDir); err != nil {
+		return nil, fmt.Errorf("target %s: tls_dir: %w", t.Name, err)
+	}
+	roots, err := c.readCAs(t.TLS.TrustAnchorRef)
+	if err != nil {
+		return nil, fmt.Errorf("target %s: trust anchors: %w", t.Name, err)
+	}
+	creds := &targetCreds{roots: roots}
+	if ref := t.TLS.ClientCredentialRef; ref != "" {
+		pair, err := c.readKeyPair(ref)
+		if err != nil {
+			return nil, fmt.Errorf("target %s: client credential: %w", t.Name, err)
+		}
+		creds.client = pair
+	}
+	return creds, nil
+}
+
 // TargetTLS resolves target t's TLS references in tls_dir and returns the
 // forwarder's TLS configuration from forward.ClientTLS, which refuses a
 // required target whose permitted_peer is not the client certificate's
@@ -43,39 +81,36 @@ const (
 //     file failed.
 //
 // Nothing is cached and nothing falls back: the node calls it at start, and
-// a missing or bad file stops it.
+// a missing or bad file stops it. A client certificate outside its validity
+// period is the one fault the node does not stop for (HR-13, D4-11):
+// NewForwarding holds that target back and the error wraps
+// forward.ErrCertificatePeriod.
+//
+// With key_register the references resolve from the node key register
+// instead (keyLoadTarget), under the same rule: nothing falls back.
 func (c *Config) TargetTLS(t *syslog.Target) (*tls.Config, error) {
-	if t.TLS == nil {
-		return nil, fmt.Errorf("target %s: no tls section", t.Name)
-	}
-	if c.TLSDir == "" {
-		return nil, fmt.Errorf("target %s: tls_dir is not set", t.Name)
-	}
-	if err := protect.CheckDir(c.TLSDir); err != nil {
-		return nil, fmt.Errorf("target %s: tls_dir: %w", t.Name, err)
-	}
-	roots, err := c.readCAs(t.TLS.TrustAnchorRef)
+	creds, err := c.loadTarget(t)
 	if err != nil {
-		return nil, fmt.Errorf("target %s: trust anchors: %w", t.Name, err)
+		return nil, err
 	}
-	var client *tls.Certificate
-	if ref := t.TLS.ClientCredentialRef; ref != "" {
-		pair, err := c.readKeyPair(ref)
-		if err != nil {
-			return nil, fmt.Errorf("target %s: client credential: %w", t.Name, err)
-		}
-		client = pair
-	}
-	return forward.ClientTLS(t, roots, client)
+	return forward.ClientTLS(t, creds.roots, creds.client)
 }
 
-// ListenerTLS resolves a syslog-tls listener's references in tls_dir, under
-// TargetTLS's rules, and returns receive.ServerTLS's configuration: the
-// listener's certificate and key from <credential_ref>.crt and .key, and,
-// with sender_ca_ref, the CA set a sender's certificate must chain to.
-func (c *Config) ListenerTLS(l Listener) (*tls.Config, error) {
+// listenerCreds is what a syslog-tls listener's references name, loaded and
+// not yet judged.
+type listenerCreds struct {
+	cert    *tls.Certificate
+	senders *x509.CertPool
+}
+
+// loadListener resolves a syslog-tls listener's references in tls_dir,
+// under TargetTLS's rules.
+func (c *Config) loadListener(l Listener) (*listenerCreds, error) {
 	if l.TLS == nil {
 		return nil, fmt.Errorf("listener %s: no tls section", l.ID)
+	}
+	if c.KeyRegister != "" {
+		return c.keyLoadListener(l)
 	}
 	if c.TLSDir == "" {
 		return nil, fmt.Errorf("listener %s: tls_dir is not set", l.ID)
@@ -87,17 +122,37 @@ func (c *Config) ListenerTLS(l Listener) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listener %s: credential: %w", l.ID, err)
 	}
-	var senders *x509.CertPool
+	creds := &listenerCreds{cert: cert}
 	if ref := l.TLS.SenderCARef; ref != "" {
-		if senders, err = c.readCAs(ref); err != nil {
+		if creds.senders, err = c.readCAs(ref); err != nil {
 			return nil, fmt.Errorf("listener %s: sender CAs: %w", l.ID, err)
 		}
 	}
-	cfg, err := receive.ServerTLS(cert, senders, l.TLS.RequireSenderCert)
+	return creds, nil
+}
+
+// serverTLS is receive.ServerTLS's configuration for listener l and its
+// loaded references.
+func serverTLS(l Listener, creds *listenerCreds) (*tls.Config, error) {
+	cfg, err := receive.ServerTLS(creds.cert, creds.senders, l.TLS.RequireSenderCert)
 	if err != nil {
 		return nil, fmt.Errorf("listener %s: %w", l.ID, err)
 	}
 	return cfg, nil
+}
+
+// ListenerTLS resolves a syslog-tls listener's references in tls_dir, under
+// TargetTLS's rules, and returns receive.ServerTLS's configuration: the
+// listener's certificate and key from <credential_ref>.crt and .key, and,
+// with sender_ca_ref, the CA set a sender's certificate must chain to. A
+// certificate outside its validity period is the one fault the node does
+// not stop for (HR-13, D4-11): the error wraps receive.ErrCertificatePeriod.
+func (c *Config) ListenerTLS(l Listener) (*tls.Config, error) {
+	creds, err := c.loadListener(l)
+	if err != nil {
+		return nil, err
+	}
+	return serverTLS(l, creds)
 }
 
 // readCAs reads <ref>.pem, which must hold certificates only, at least one.

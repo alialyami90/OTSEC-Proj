@@ -1,0 +1,78 @@
+# B6 (P4-B6, the carried checks): end-to-end slice suites against the
+# installed Windows services on the hosted runner, which is elevated. These
+# are gate item 1's owed items (docs/phase-3-exit.md): the canary scan of
+# the services' command lines (test_slice_e2e.py, #242), the
+# unknown-restart leg, and the admin relay end to end with config\admin's
+# ACLs (test_slice_admin_relay_windows_e2e.py). The run installs
+# otsec-node and otsec-collector with the real installer, drives them
+# through the SCM, and removes everything it created; the last step checks that independently.
+#
+# Hosted Windows only, no secrets, read-only token. It runs by hand and on
+# pull requests that change this file or the slice tests. Evidence class:
+# simulated (a hosted Windows Server VM, a simulated device on loopback).
+name: a6-windows-slice
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/a6-windows-slice.yml'
+      - 'tests/integration/slice/**'
+permissions:
+  contents: read
+jobs:
+  service:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      OTSEC_SLICE_SERVICE: "1"
+      OTSEC_SLICE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
+      - run: openssl version
+      # One pytest per suite, so each installs and removes the services on
+      # its own, and one suite's failure does not hide the other's result.
+      - name: e2e against the installed services (command-line canary scan)
+        run: |
+          python -m pytest -v -rfEs -W always --basetemp="$env:RUNNER_TEMP\e2e" tests/integration/slice/test_slice_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-e2e.txt"
+          exit $LASTEXITCODE
+      - name: unknown-restart against the installed services
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\unknown" tests/integration/slice/test_slice_unknown_restart_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-unknown.txt"
+          exit $LASTEXITCODE
+      - name: admin relay and config\admin's ACLs against the installed services
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pytest -v -rfEs --basetemp="$env:RUNNER_TEMP\relay" tests/integration/slice/test_slice_admin_relay_windows_e2e.py | Tee-Object -FilePath "$env:RUNNER_TEMP\pytest-relay.txt"
+          exit $LASTEXITCODE
+      - name: run logs
+        if: always()
+        run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\e2e", "$env:RUNNER_TEMP\unknown", "$env:RUNNER_TEMP\relay" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'current' } | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
+      - name: independent leftovers check
+        if: always()
+        run: |
+          $left = @()
+          foreach ($s in 'otsec-node','otsec-collector') { if (Get-Service -Name $s -ErrorAction SilentlyContinue) { $left += "service $s" } }
+          foreach ($p in "$env:ProgramData\OTSEC", "$env:ProgramFiles\OTSEC") { if (Test-Path -LiteralPath $p) { $left += $p } }
+          if (Get-NetFirewallRule -DisplayName 'otsec-node: no outbound Telnet (W-3)' -ErrorAction SilentlyContinue) { $left += 'firewall rule' }
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\ExcludedApplications'
+          if ((Test-Path $k) -and ((Get-Item $k).GetValueNames() -contains 'otsec-collector.exe')) { $left += 'WER value' }
+          foreach ($s in 'otsec-node','otsec-collector') { if ([Diagnostics.EventLog]::SourceExists($s)) { $left += "event source $s" } }
+          if ($left.Count) { "left behind: $($left -join '; ')"; exit 1 } else { 'nothing left behind' }
+      - name: pytest summary (last, so it is in the log's tail)
+        if: always()
+        run: |
+          foreach ($f in "$env:RUNNER_TEMP\pytest-e2e.txt", "$env:RUNNER_TEMP\pytest-unknown.txt", "$env:RUNNER_TEMP\pytest-relay.txt") {
+            if (Test-Path $f) {
+              "==== $f"
+              Select-String -CaseSensitive -Path $f -Pattern '^(FAILED|ERROR|SKIPPED)|^E  |short test summary|passed|failed|V-S11' | ForEach-Object { $_.Line }
+            }
+          }
