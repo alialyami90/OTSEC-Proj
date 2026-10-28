@@ -37,9 +37,20 @@ var (
 // node and the current install key, then the nonce spent once. It numbers
 // every decision. lose makes it decide and then drop the reply.
 type adminCollector struct {
-	mu     sync.Mutex
-	seq    uint64
-	spent  map[string]bool
+	mu    sync.Mutex
+	seq   uint64
+	spent map[string]bool
+	// first and payload remember the decision on each spent nonce, for the
+	// repeat answer.
+	first   map[string]uint64
+	payload map[string]string
+	// installKey is the install key ID the collector binds requests to; ""
+	// is testInstallKey.
+	installKey string
+	// repeat makes the collector answer admin-signed bytes it already
+	// accepted with the repeat answer (C7 0.5), as the real one does; off,
+	// it refuses them as a replay, as a 0.4 collector did.
+	repeat bool
 	sent   []*authz.CollectorRequest
 	runs   int
 	lose   bool
@@ -53,7 +64,9 @@ type adminCollector struct {
 	left []time.Duration
 }
 
-func newAdminCollector() *adminCollector { return &adminCollector{spent: map[string]bool{}} }
+func newAdminCollector() *adminCollector {
+	return &adminCollector{spent: map[string]bool{}, first: map[string]uint64{}, payload: map[string]string{}}
+}
 
 func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (collectorclient.Response, error) {
 	c.mu.Lock()
@@ -70,9 +83,18 @@ func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (c
 	reply := authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, CollectorSeq: c.seq, Status: authz.ReplyAccepted}
 	keys := []authz.AdminKey{{KeyID: authz.AdminKeyID(relayAdminPriv.Public().(ed25519.PublicKey)),
 		PublicKey: relayAdminPriv.Public().(ed25519.PublicKey), Principal: relayAdmin.ID, Status: authz.KeyActive}}
-	p, err := authz.VerifyAdminRequest(req, keys, authz.AdminBinding{NodeID: "site-a-node1", InstallKeyID: testInstallKey}, time.Now())
+	p, err := authz.VerifyAdminRequest(req, keys, authz.AdminBinding{NodeID: "site-a-node1", InstallKeyID: c.boundKey()}, time.Now())
+	sum := ""
+	if err == nil {
+		sum = authz.AdminPayloadSHA256(req.AdminSigned)
+	}
+	repeatOf := uint64(0)
 	if err == nil && c.spent[p.Nonce] {
-		err = &authz.AdminRejected{Check: authz.AdminCheckReplay}
+		if c.repeat && c.payload[p.Nonce] == sum {
+			repeatOf = c.first[p.Nonce]
+		} else {
+			err = &authz.AdminRejected{Check: authz.AdminCheckReplay}
+		}
 	}
 	var rej *authz.AdminRejected
 	switch {
@@ -81,7 +103,11 @@ func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (c
 	case err != nil:
 		panic(err)
 	default:
-		c.spent[p.Nonce] = true
+		if repeatOf == 0 {
+			c.spent[p.Nonce], c.first[p.Nonce], c.payload[p.Nonce] = true, c.seq, sum
+		}
+		reply.RepeatOf = repeatOf
+		reply.Admin = &authz.AdminAccepted{AdminKeyID: req.AdminSigned.KeyID, Principal: req.OnBehalfOf, Nonce: p.Nonce, PayloadSHA256: sum}
 	}
 	if c.lose {
 		return collectorclient.Response{}, errors.New("collectorclient: no reply: EOF")
@@ -90,6 +116,13 @@ func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (c
 		c.edit(&reply)
 	}
 	return collectorclient.Response{Reply: reply}, nil
+}
+
+func (c *adminCollector) boundKey() string {
+	if c.installKey != "" {
+		return c.installKey
+	}
+	return testInstallKey
 }
 
 func (c *adminCollector) requests() []*authz.CollectorRequest {
@@ -115,6 +148,11 @@ func signAdmin(t *testing.T, kind authz.RequestKind, edit func(*authz.AdminReque
 		p.CredentialRevoke = &authz.CredentialRevokeBody{RefID: nodeconfigtest.TestCredentialRef, Reason: authz.RevokeRotated}
 	case authz.KindAssetClearSusp:
 		p.AssetClearSusp = &authz.AssetClearSuspBody{AssetID: relayID, Ref: okInvocation}
+	case authz.KindNodeSeqResetAck:
+		p.NodeSeqResetAck = &authz.NodeSeqResetAckBody{}
+	case authz.KindNodeQuarantineClear:
+		// The manifest is the test's to name, through edit.
+		p.NodeQuarantineClear = &authz.NodeQuarantineClearBody{AssetID: relayID}
 	}
 	if edit != nil {
 		edit(&p)
@@ -480,13 +518,16 @@ func TestRelayRecordFits(t *testing.T) {
 		claims: adminClaims{Kind: authz.KindCredentialClearSusp, Principal: authz.Principal{Type: authz.PrincipalHuman, ID: "a" + strings.Repeat("b", 127)},
 			AdminKeyID: "ed25519-0123456789abcdef", Nonce: strings.Repeat("A", 22), ExpiresAt: "2026-10-26T12:00:00Z"}}
 	f.id = adminRequestID(f.sum)
-	req := &authz.CollectorRequest{RequestID: f.id, PolicyVersion: 3}
+	f.signed = &authz.AdminSigned{KeyID: f.claims.AdminKeyID, Payload: []byte(`{"nonce":"` + f.claims.Nonce + `"}`)}
+	req := &authz.CollectorRequest{Contract: authz.ContractID, RequestID: f.id, PolicyVersion: 3, OnBehalfOf: f.claims.Principal, AdminSigned: f.signed}
+	accepted := authz.CollectorReply{Contract: authz.ContractID, RequestID: f.id, Status: authz.ReplyAccepted, CollectorSeq: 1 << 62, RepeatOf: 1 << 61,
+		Admin: &authz.AdminAccepted{AdminKeyID: f.claims.AdminKeyID, Principal: f.claims.Principal, Nonce: f.claims.Nonce, PayloadSHA256: authz.AdminPayloadSHA256(f.signed)}}
 	for _, o := range []struct {
 		outcome audit.Outcome
 		reply   authz.CollectorReply
 	}{
 		{audit.OutcomeInfo, authz.CollectorReply{}},
-		{audit.OutcomeAllowed, authz.CollectorReply{CollectorSeq: 1 << 62}},
+		{audit.OutcomeAllowed, accepted},
 		{audit.OutcomeDenied, authz.CollectorReply{CollectorSeq: 1 << 62, Refusal: authz.AdminRefusal(authz.AdminCheckSignature)}},
 	} {
 		if _, err := s.relayRecord(f, req, o.outcome, o.reply); err != nil {

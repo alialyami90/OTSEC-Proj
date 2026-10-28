@@ -59,6 +59,18 @@ const (
 	// more than MaxAdminRequestFiles. The alarm says why, never what the
 	// file holds.
 	AlarmAdminRequestUnread = "admin-request-unread"
+	// AlarmAdminRequestNotApplied: the collector accepted a node kind, and
+	// the node did not do its part, or will not: the acceptance does not
+	// match the file, the collector is held as restored, or the part itself
+	// was refused (the detail says which). Nothing is applied from a file
+	// the acceptance does not name.
+	AlarmAdminRequestNotApplied = "admin-request-not-applied"
+	// AlarmAdminAcceptanceInvalid: the collector's reply accepted a relayed
+	// request but did not name the verified administrator, the payload's
+	// hash, the key, the person and the nonce of the request sent
+	// (authz.CollectorReply.AdminAcceptance). The reply is recorded without
+	// verified, and the node does nothing on it.
+	AlarmAdminAcceptanceInvalid = "admin-request-acceptance-invalid"
 	// AlarmAdminRequestNoDecision: a relayed request got no decision (no
 	// reply, or a refusal the collector did not number). It is sent again
 	// each tick until it is decided or expires.
@@ -78,11 +90,25 @@ var (
 	// patterns VerifyAdminRequest applies (A3 on #181).
 	adminKeyIDClaim = regexp.MustCompile(`^ed25519-[0-9a-f]{16}$`)
 	adminNonceClaim = regexp.MustCompile(`^[A-Za-z0-9_-]{22}$`)
+	// refusedCheck reads the check out of the node's own record of a
+	// refusal (relayRecord writes "check <name>;"), which carries no field
+	// for it.
+	refusedCheck = regexp.MustCompile(`refused by the collector, check ([a-z_]+);`)
 )
 
-// relayKinds are the kinds this node relays.
+// relayKinds are the kinds this node relays. The credential kinds are the
+// collector's whole operation. The two node kinds (since C7 0.5) are the
+// node's too: after the collector accepts one, the node does its part, from
+// the payload it sent (admin_actions.go).
 var relayKinds = map[authz.RequestKind]bool{
 	authz.KindCredentialInstall: true, authz.KindCredentialRevoke: true, authz.KindCredentialClearSusp: true,
+	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
+}
+
+// nodeActKinds are the relayed kinds whose node part follows the
+// acceptance.
+var nodeActKinds = map[authz.RequestKind]bool{
+	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
 }
 
 // adminRequestFile is an admin-request file as the client writes it.
@@ -109,6 +135,16 @@ type relayEntry struct {
 	Outcome      audit.Outcome `json:"outcome"` // allowed or denied
 	Reason       string        `json:"reason,omitempty"`
 	CollectorSeq uint64        `json:"collector_seq"`
+	// Check is the admin check a refusal named, from the closed set; empty
+	// if the record names none.
+	Check authz.AdminCheck `json:"check,omitempty"`
+	// Verified is what the collector verified on an acceptance (C8 0.4's
+	// verified group): the node does its part of a node kind only from an
+	// acceptance that holds it, and only for the payload it names.
+	Verified *audit.Admin `json:"verified,omitempty"`
+	// RepeatOf is the first decision's collector_seq when the acceptance
+	// was the repeat answer.
+	RepeatOf uint64 `json:"repeat_of,omitempty"`
 }
 
 // AdminRequestStatus is one admin-request file as node status shows it.
@@ -116,10 +152,15 @@ type AdminRequestStatus struct {
 	File      string `json:"file"`
 	RequestID string `json:"request_id,omitempty"`
 	Kind      string `json:"kind,omitempty"`
-	// State is accepted, refused, waiting (not yet decided) or unread.
+	// State is accepted, refused, expired (the collector's window check
+	// refused it), waiting (not yet decided) or unread.
 	State        string `json:"state"`
 	Detail       string `json:"detail,omitempty"`
 	CollectorSeq uint64 `json:"collector_seq,omitempty"`
+	// NodePart is the node's part of an accepted node kind: "done", or
+	// "pending" with Detail saying why. Empty for the credential kinds,
+	// whose acceptance is the whole operation.
+	NodePart string `json:"node_part,omitempty"`
 }
 
 // adminFile is one admin-request file read this tick.
@@ -142,7 +183,13 @@ func applyRelay(m map[string]relayEntry, rec *audit.Record) bool {
 		!strings.HasPrefix(rec.CorrelationID, adminRequestPrefix) {
 		return false
 	}
-	m[rec.CorrelationID] = relayEntry{Outcome: rec.Outcome, Reason: rec.ReasonCode, CollectorSeq: rec.CollectorSeq}
+	e := relayEntry{Outcome: rec.Outcome, Reason: rec.ReasonCode, CollectorSeq: rec.CollectorSeq}
+	if rec.Outcome == audit.OutcomeAllowed {
+		e.Verified, e.RepeatOf = rec.Verified, rec.RepeatOf
+	} else if c := refusedCheck.FindStringSubmatch(rec.Detail); c != nil && slices.Contains(authz.AdminChecks, authz.AdminCheck(c[1])) {
+		e.Check = authz.AdminCheck(c[1])
+	}
+	m[rec.CorrelationID] = e
 	return true
 }
 
@@ -169,12 +216,20 @@ func (s *Scheduler) relayAdmin(ctx context.Context) {
 			// collectorHold folded the stream if it could, so a decided
 			// file still shows as decided below.
 			s.raiseOnceKey("collector "+code, "", code, detail)
+			if code == AlarmCollectorReset {
+				// The one request this hold waits for is an administrator's
+				// acknowledgement of the new key, so a signed one is sent:
+				// the collector binds it to its current install key, and
+				// accepts it only for that (D3-3). Everything else waits.
+				todo = slices.DeleteFunc(todo, func(f *adminFile) bool { return f.kind != authz.KindNodeSeqResetAck })
+			} else {
+				todo = nil
+			}
 			for i := range shown {
-				if shown[i].State == "waiting" {
+				if shown[i].State == "waiting" && !slices.ContainsFunc(todo, func(f *adminFile) bool { return f.id == shown[i].RequestID }) {
 					shown[i].Detail = "not sent: " + code
 				}
 			}
-			todo = nil
 		}
 	}
 	for i, f := range todo {
@@ -199,11 +254,24 @@ func (s *Scheduler) relayAdmin(ctx context.Context) {
 			break
 		}
 	}
+	parts := s.applyAdminParts(ctx, files)
 	for i := range shown {
 		if e, done := s.decided(shown[i].RequestID); done {
 			shown[i].State, shown[i].Detail, shown[i].CollectorSeq = "refused", e.Reason, e.CollectorSeq
-			if e.Outcome == audit.OutcomeAllowed {
+			switch {
+			case e.Outcome == audit.OutcomeAllowed:
 				shown[i].State, shown[i].Detail = "accepted", ""
+				if part, ok := parts[shown[i].RequestID]; ok {
+					shown[i].NodePart, shown[i].Detail = "pending", part.detail
+					if part.done {
+						shown[i].NodePart = "done"
+					}
+				}
+			case e.Check == authz.AdminCheckWindow:
+				// From the collector's numbered refusal, never from the
+				// payload's own expires_at, which nothing has verified (A3
+				// on #181, Q1 limit 2).
+				shown[i].State = "expired"
 			}
 		}
 	}
@@ -364,6 +432,12 @@ func (s *Scheduler) relayOne(ctx context.Context, f *adminFile) (answered bool) 
 	case !reply.Accepted():
 		outcome = audit.OutcomeDenied
 	}
+	if outcome == audit.OutcomeAllowed {
+		if _, err := reply.AdminAcceptance(req); err != nil {
+			s.raiseOnceKey(AlarmAdminAcceptanceInvalid+" "+f.id, "", AlarmAdminAcceptanceInvalid,
+				fmt.Sprintf("the collector accepted %s in %s, but its reply does not name this request as verified: %s; recorded without verified, and the node does nothing on it", f.kind, f.name, err))
+		}
+	}
 	rec, err := s.relayRecord(f, req, outcome, reply)
 	if err != nil {
 		s.rt.opt.Status.Raise("", AlarmAuditUnavailable, "collector.request "+string(outcome)+" record of "+f.id+": "+err.Error())
@@ -425,9 +499,21 @@ func (s *Scheduler) relayRecord(f *adminFile, req *authz.CollectorRequest, outco
 	switch outcome {
 	case audit.OutcomeInfo:
 		rec.Detail = fmt.Sprintf("admin-signed %s relayed; unverified until the collector decides: %s", f.kind, claims)
+		rec.Claimed = &audit.Admin{AdminKeyID: c.AdminKeyID, Principal: c.Principal.ID, Nonce: c.Nonce,
+			PayloadSHA256: authz.AdminPayloadSHA256(f.signed), Kind: f.kind}
 	case audit.OutcomeAllowed:
 		rec.Actor = audit.Actor{Type: authz.PrincipalHuman, ID: c.Principal.ID, Role: authz.RoleAdmin}
 		rec.Detail = fmt.Sprintf("admin-signed %s accepted by the collector, which verified: %s", f.kind, claims)
+		if acc, err := reply.AdminAcceptance(req); err != nil {
+			// Accepted and numbered, but not shown to name this request:
+			// nothing is claimed as verified and the node acts on nothing.
+			rec.Actor = audit.Actor{Type: authz.PrincipalNode, ID: string(s.rt.cfg.NodeID)}
+			rec.Detail = fmt.Sprintf("admin-signed %s accepted by the collector, but the acceptance does not name this request as verified (%s); unverified: %s", f.kind, err, claims)
+		} else {
+			rec.Verified = &audit.Admin{AdminKeyID: acc.AdminKeyID, Principal: acc.Principal.ID, Nonce: acc.Nonce,
+				PayloadSHA256: acc.PayloadSHA256, Kind: f.kind}
+			rec.RepeatOf = reply.RepeatOf
+		}
 	case audit.OutcomeDenied:
 		code, check := refusalOf(reply)
 		rec.ReasonCode = code
