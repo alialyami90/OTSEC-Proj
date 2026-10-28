@@ -337,7 +337,7 @@ func TestHealthShowsListeners(t *testing.T) {
 		"  connections refused: tls 3",
 		"  last error: store: quota reached",
 		"  unknown senders stored 20582 bytes since start; budget 671088 bytes an hour, started 4096 bytes spent by the hour before start; with this class's other listeners at most 16777200 bytes, 24% of the 67108864-byte quota, over a 24 h outage (HR-11)",
-		"  CERTIFICATE EXPIRED at 2020-01-02T03:04:05Z: senders that check it refuse it",
+		"  CERTIFICATE EXPIRED at 2020-01-02T03:04:05Z: the listener keeps running, and senders that check it refuse it",
 		"listener lab-tls2 (syslog-tls 127.0.0.1:6515): NOT OPEN, 0 received, 0 stored, last message never in this process\n  CERTIFICATE EXPIRES at ",
 		"listener lab-tls3 (syslog-tls 127.0.0.1:6516): NOT OPEN, 0 received, 0 stored, last message never in this process\n  certificate valid until 2100-01-02T03:04:05Z",
 	} {
@@ -441,5 +441,38 @@ func TestHealthShowsQuarantine(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("health lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// health says when a link is held back for its certificate's period
+// (HR-13), and does not call a held listener's expired certificate a
+// running one's.
+func TestHealthShowsHeldBackLinks(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetTarget("central", node.TargetStatus{Class: "required", HeldBack: "expired",
+		CertNotAfter: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC), Streams: map[string]node.TargetStreamState{}})
+	st.SetTarget("other", node.TargetStatus{Class: "required",
+		CertNotAfter: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC), Streams: map[string]node.TargetStreamState{}})
+	st.SetListeners(map[string]node.ListenerStatus{"lab-tls": {Transport: "syslog-tls", Address: "127.0.0.1:6514",
+		HeldBack: "not-yet-valid", CertNotAfter: time.Date(2100, 1, 2, 3, 4, 5, 0, time.UTC)}})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"target central (required)",
+		"  HELD BACK: the node's client certificate for this target is expired; no connection is made and its events wait in the store until the period is valid (HR-13)",
+		"target other (required)",
+		"  CLIENT CERTIFICATE EXPIRED at 2020-01-02T03:04:05Z: the target is still being tried; replace it and restart the node",
+		"  HELD BACK: the listener certificate is not-yet-valid; the listener is not bound and receives nothing until the period is valid (HR-13)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "CLIENT CERTIFICATE EXPIRED") != 1 || strings.Contains(out, "certificate valid until 2100") {
+		t.Errorf("a held-back link is shown with a running link's certificate line:\n%s", out)
 	}
 }

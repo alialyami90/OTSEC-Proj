@@ -1,8 +1,10 @@
 package register
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -385,10 +387,52 @@ func Decode(data []byte) (*Package, error) {
 	if err := strictjson.Decode(data, &p); err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
+	if err := checkNewKeys(data); err != nil {
+		return nil, err
+	}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// checkNewKeys applies D4-16 as a general rule: a key introduced at a C3
+// version is refused by its presence in any package below that version,
+// whatever its value, [] and null included. An older reader refuses the key as
+// unknown, so a newer reader that took an empty one would read a package an
+// older reader refuses. Validate sees only the decoded package, where an empty
+// value and a missing key look alike, so the keys are looked for in the bytes.
+// The keys are context (0.2), runs and an operation's limits (0.3).
+func checkNewKeys(data []byte) error {
+	var raw struct {
+		Contract   string          `json:"contract"`
+		Context    json.RawMessage `json:"context"`
+		Runs       json.RawMessage `json:"runs"`
+		Operations []struct {
+			ID     string          `json:"id"`
+			Limits json.RawMessage `json:"limits"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	i := slices.Index(Readable, raw.Contract)
+	if i < 0 {
+		return nil
+	}
+	minor := i + 1
+	if raw.Context != nil && minor < 2 {
+		return fmt.Errorf("register: context is new in 0.2, so a %s package cannot carry the key", raw.Contract)
+	}
+	if raw.Runs != nil && minor < 3 {
+		return fmt.Errorf("register: runs are new in 0.3, so a %s package cannot carry the key", raw.Contract)
+	}
+	for _, o := range raw.Operations {
+		if o.Limits != nil && minor < 3 {
+			return fmt.Errorf("register: limits are new in 0.3, so operation %s cannot carry the key in a %s package", o.ID, raw.Contract)
+		}
+	}
+	return nil
 }
 
 var (

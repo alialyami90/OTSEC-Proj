@@ -19,7 +19,9 @@ const TickInterval = 60 * time.Second
 // reference), one Syslog listener per configured listener (NewListening,
 // which stops the node on a bad TLS reference or an address it cannot
 // bind), the scheduler through the collector at cfg's pipe, and
-// Tick every TickInterval and Forwarding.Check every CheckInterval. oslog receives every alarm line (the Event Log under the
+// Tick every TickInterval and Forwarding.Check every CheckInterval. A
+// certificate outside its validity period holds back only its own target or
+// listener (HR-13, D4-11); every other TLS fault stops the node. oslog receives every alarm line (the Event Log under the
 // SCM, stderr otherwise). Each tick also does the scheduler's part of a
 // quarantine export and clear (Scheduler.QuarantineTick). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
@@ -50,10 +52,14 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if err := ls.Listen(); err != nil {
 		return err
 	}
+	// Status shows each target and listener from the start, a link held back
+	// for its certificate's period among them (HR-13), not after the first
+	// CheckInterval.
+	fw.Check(ctx)
 	if len(cfg.Listeners) > 0 {
 		ls.Publish()
-		st.Write(string(cfg.NodeID))
 	}
+	st.Write(string(cfg.NodeID))
 	listened := make(chan struct{})
 	go func() {
 		defer close(listened)
