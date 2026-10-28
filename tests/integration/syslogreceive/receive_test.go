@@ -402,10 +402,11 @@ func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 	const rate, floodN, quietN = 20, 200, 10
 	g := start(t, asset.SyslogTCP, nil, receive.Limits{Rate: rate, Burst: rate})
 	b := dialFrom(t, ipB, "tcp", g.addr)
-	// quiet sends B's 10 messages in one write and returns how long they
-	// took to be stored and how far apart the listener read the first and
-	// the last.
-	quiet := func(prefix string) (lag, span time.Duration) {
+	// quiet sends B's 10 messages in one write and returns how long the
+	// listener took to read the last of them (by its own received time),
+	// how long they took to be stored, and how far apart the listener read
+	// the first and the last.
+	quiet := func(prefix string) (read, lag, span time.Duration) {
 		sent := time.Now()
 		var w bytes.Buffer
 		for i := 0; i < quietN; i++ {
@@ -422,12 +423,12 @@ func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 				}
 			}
 			if len(got) == quietN {
-				return time.Since(sent), got[quietN-1].Received.Sub(got[0].Received)
+				return got[quietN-1].Received.Sub(sent), time.Since(sent), got[quietN-1].Received.Sub(got[0].Received)
 			}
 		}
-		return 0, 0
+		return 0, 0, 0
 	}
-	alone, aloneSpan := quiet("alone")
+	aloneRead, alone, aloneSpan := quiet("alone")
 	if alone == 0 {
 		t.Fatal("B's 10 messages with no flood were not stored in 60 s")
 	}
@@ -439,9 +440,9 @@ func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 	go w.Flush()
 	// A's burst is spent within this, and B's bucket has refilled.
 	time.Sleep(time.Second)
-	lagB, span := quiet("quiet")
-	t.Logf("B's 10 messages: stored %s after sending and read within %s with no flood; %s and %s behind A's flood",
-		alone, aloneSpan, lagB, span)
+	readB, lagB, span := quiet("quiet")
+	t.Logf("B's 10 messages: read %s and stored %s after sending, read within %s, with no flood; %s, %s and %s behind A's flood",
+		aloneRead, alone, aloneSpan, readB, lagB, span)
 	// B's own bucket: read back to back. A shared bucket spaces the nine
 	// after the first at least 1/Rate apart (450 ms here); half that is
 	// the line, far above a reader that never waited.
@@ -449,8 +450,16 @@ func TestStreamFloodIsSlowedNotDropped(t *testing.T) {
 		t.Errorf("B's 10 frames were read over %s behind A's flood (%s with none): B waited for tokens, as if it shared A's bucket (a shared bucket takes at least %s)",
 			span, aloneSpan, shared)
 	}
-	if limit := 3*alone + 5*time.Second; lagB > limit {
-		t.Errorf("B's 10 messages took %s to be stored behind A's flood, past the liveness bound %s (3 x %s with none, + 5 s)", lagB, limit, alone)
+	// Liveness is the listener's: B is read while A floods, judged by the
+	// received time the listener stamps as it reads. How long the store
+	// then takes to commit is the store's, and a slow commit there is not
+	// starvation (F-016: hosted Windows held one commit for 37.9 s; job
+	// 122655194850 stored B 5.39 s behind A's flood against the old 5.12 s
+	// bound, read within 0 s). Every message read is still required stored,
+	// below.
+	if limit := 3*aloneRead + 5*time.Second; readB > limit {
+		t.Errorf("the listener read B's 10 messages %s after they were sent, behind A's flood, past the liveness bound %s (3 x %s with none, + 5 s): B waited behind A",
+			readB, limit, aloneRead)
 	}
 	ev := g.waitN(floodN+2*quietN, 20*time.Second)
 	var fromA []stored
