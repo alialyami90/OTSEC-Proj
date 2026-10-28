@@ -362,3 +362,31 @@ func TestHosterAppliesToOperations(t *testing.T) {
 	}
 	work.Discard()
 }
+
+// The SEL-751 runner says what the adapter hosts: the operations and the
+// configuration run, and not a step of the run on its own. A request for
+// such a step is refused before the credential is read, where it was
+// refused by the adapter after (B2 on #338).
+func TestSEL751RunnerHosts(t *testing.T) {
+	var _ Hoster = (*SEL751Runner)(nil)
+	r := &SEL751Runner{}
+	for id, want := range map[string]bool{
+		"sel.id": true, "sel.ser.read_all": true, "sel.settings.show_global": true, configRun: true,
+		"sel.settings.show_dnp_1": false, "sel.ser.clear": false, "": false,
+	} {
+		if got := r.Hosts(id); got != want {
+			t.Errorf("Hosts(%q) = %v, want %v", id, got, want)
+		}
+	}
+	f, _ := hostedFixture(t)
+	rev5 := readFixtureFrom(t, "../../../contracts/register/testdata/sel-751.json")
+	if _, err := f.registers.Activate(signedRegister(t, rev5, f.release, "release-2026")); err != nil {
+		t.Fatal(err)
+	}
+	req := pipeRun("sel.settings.show_dnp_1", "cred_absent001")
+	req.Run.RegisterVersion = 5
+	reply, work := f.pipe.Handle(context.Background(), req)
+	if work != nil || refusalOf(reply) != authz.RefuseNotInvocable {
+		t.Fatalf("reply %+v (%+v); want not_invocable before the credential", reply, reply.Refusal)
+	}
+}
