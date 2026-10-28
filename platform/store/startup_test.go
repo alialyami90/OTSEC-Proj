@@ -255,3 +255,54 @@ func TestAuditBeforeActAfterCommitFailure(t *testing.T) {
 		t.Fatalf("after stop: ran %v err %v", ran, err)
 	}
 }
+
+// B6's finding on #299: startup measured a class quota against the live
+// pages, which run well over the payload the quota counts. A class holding
+// 75% of its quota in payload therefore raised "store-quota-reached" at every
+// start although the next append succeeded. Startup now measures class bytes,
+// the same count the runtime refusal uses (D4-14).
+func TestStartupMeasuresQuotaInClassBytes(t *testing.T) {
+	d := evidenceDB
+	d.Classes = []c5.StreamClass{c5.ClassAdapterEvidence}
+	d.Streams = []c5.StreamSpec{{ID: "relay1/ser", Class: c5.ClassAdapterEvidence}}
+	d.Quotas = []c5.Quota{{Class: c5.ClassAdapterEvidence, Bytes: 1 << 20, WarnFraction: 0.8}}
+	dir := storeDir(t)
+	opt := Options{Dir: dir, Node: testNode, Database: d}
+	p := policy(d)
+	db, r := testStore(t, opt, p, c5.ModeCollecting)
+	l := testLog(t, db)
+	ctx := context.Background()
+	for n := 0; ; n++ {
+		held, err := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held >= 3<<18 {
+			break
+		}
+		cp := capture(fmt.Sprintf("%d %s", n, string(make([]byte, 2000))))
+		rc := rec("relay1/ser", c5.ClassAdapterEvidence, n)
+		rc.Capture = &cp
+		if _, err := l.Append(ctx, rc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held, _ := db.ClassBytes(ctx, c5.ClassAdapterEvidence)
+	pages, free, size, err := db.pages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if (pages-free)*size < 1<<20 {
+		t.Fatalf("setup: pages %d bytes against a quota of %d, class bytes %d: the pages should run over the quota", (pages-free)*size, 1<<20, held)
+	}
+	if used, limit, err := db.Usage(ctx); err != nil || used != held || limit != 1<<20 {
+		t.Fatalf("Usage %d of %d, %v; class bytes %d", used, limit, err, held)
+	}
+	db.Close()
+	r.Unlock()
+
+	_, r = testStore(t, opt, p, c5.ModeCollecting)
+	if slices.Contains(codes(r), c5.AlarmQuotaReached) {
+		t.Fatalf("class at %d of %d bytes raised %v", held, 1<<20, r.Alarms)
+	}
+}

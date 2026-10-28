@@ -82,12 +82,14 @@ type RecoveryStore interface {
 	CheckSettings(ctx context.Context) error
 	// QuickCheck runs a structural check of the database.
 	QuickCheck(ctx context.Context) error
-	// Usage is the space the database's live pages take, (page_count -
-	// freelist_count) * page_size, and its limit (the sum of its class
-	// quotas). Free pages do not count: a delete leaves them in the file
-	// until compaction, and counting them would make step 6 prune every
-	// confirmed event instead of stopping at the target (A6 review of C5,
-	// change 2).
+	// Usage is the payload the database's class quotas count (the sum of its
+	// classes' bytes, as the runtime refusal counts them, D4-14) and its
+	// limit (the sum of its class quotas). It is not the pages: they run
+	// well over the payload (DiskBytesPerQuotaByte), and comparing them with
+	// a quota reported a refusal that was not happening (B6, #299). A delete
+	// lowers it at once, before compaction returns the free pages, so step 6
+	// stops at the target instead of pruning every confirmed event (A6
+	// review of C5, change 2).
 	Usage(ctx context.Context) (used, limit int64, err error)
 	// CompactStep returns up to pages free pages to the filesystem and
 	// checkpoints, in one step; more is false when no free pages are left.
