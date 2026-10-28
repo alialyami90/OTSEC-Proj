@@ -31,6 +31,7 @@ type Status struct {
 
 	mu      sync.Mutex
 	modes   map[c5.DatabaseID]c5.Mode
+	commits map[c5.DatabaseID]CommitStatus
 	alarms  []StatusAlarm
 	targets map[string]TargetStatus
 	// suspensions are the scheduler's current asset suspensions.
@@ -79,6 +80,9 @@ type StatusFile struct {
 	GoVersion string                    `json:"go_version,omitempty"`
 	Modes     map[c5.DatabaseID]c5.Mode `json:"modes"`
 	Alarms    []StatusAlarm             `json:"alarms"`
+	// Commits is each open database's write-transaction times, sampled at
+	// each node tick (AlarmCommitSlow).
+	Commits map[c5.DatabaseID]CommitStatus `json:"commits,omitempty"`
 	// Collecting is true only when every database accepts events.
 	Collecting bool `json:"collecting"`
 	// RunsHeld is the alarm code that stops every run on the node, level
@@ -182,7 +186,7 @@ func NewStatus(path string, oslog func(string), now func() time.Time) *Status {
 	if now == nil {
 		now = time.Now
 	}
-	return &Status{path: path, oslog: oslog, now: now, modes: map[c5.DatabaseID]c5.Mode{}}
+	return &Status{path: path, oslog: oslog, now: now, modes: map[c5.DatabaseID]c5.Mode{}, commits: map[c5.DatabaseID]CommitStatus{}}
 }
 
 // Defer holds Write back, writing nothing, until Resume.
@@ -336,6 +340,24 @@ func (s *Status) add(sa StatusAlarm) {
 	s.mu.Unlock()
 }
 
+// CommitStatus is how long a database's write transactions take (store
+// CommitStats), in milliseconds, sampled at each node tick: the longest
+// since open, the longest since the last tick, and how long the one in
+// progress has run. A slow disk shows here before a receiver's queue fills.
+type CommitStatus struct {
+	Count     int64 `json:"count"`
+	MaxMS     int64 `json:"max_ms"`
+	RecentMS  int64 `json:"recent_ms"`
+	WaitingMS int64 `json:"waiting_ms,omitempty"`
+}
+
+// SetCommits records database db's write-transaction times.
+func (s *Status) SetCommits(db c5.DatabaseID, c CommitStatus) {
+	s.mu.Lock()
+	s.commits[db] = c
+	s.mu.Unlock()
+}
+
 // SetMode records database db's mode.
 func (s *Status) SetMode(db c5.DatabaseID, m c5.Mode) {
 	if s.oslog != nil {
@@ -352,6 +374,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	defer s.mu.Unlock()
 	f := StatusFile{Schema: StatusSchema, Node: node, Written: s.now().UTC(), GoVersion: runtime.Version(), Modes: map[c5.DatabaseID]c5.Mode{}, Alarms: append([]StatusAlarm{}, s.alarms...)}
 	f.Collecting = len(s.modes) > 0
+	if len(s.commits) > 0 {
+		f.Commits = maps.Clone(s.commits)
+	}
 	f.RunsHeld = s.runsHeld
 	for db, m := range s.modes {
 		f.Modes[db] = m

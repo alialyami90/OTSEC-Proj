@@ -127,6 +127,14 @@ On an unauthorized line, the alarm is `collection-unauthorized-line` and collect
 
 If a quarantine cannot be stored, the alarm is `collection-quarantine-not-stored`, and every run on the node, level 0 included, stops.
 
+## Slow commits (B6 #294, B1's question)
+
+Every write to a database holds SQLite's write lock and waits for the WAL sync (`synchronous=FULL`). On a disk that syncs in seconds, as the hosted Windows runner's did (B6's trail in #294: one commit inside `FlushFileBuffers` for tens of seconds), every writer to that database waits, a receiver's queue fills and datagrams drop. The receiver counts what it reads and cannot hold (`queue-full`), but nothing counted the cause. At each `Tick` the node now reads `store.DB.CommitStats` (a write transaction's time from after `BEGIN IMMEDIATE` to `COMMIT`) into the status file's `commits`, per database: `count`, `max_ms` since open, `recent_ms` since the last tick and `waiting_ms` for one still running. A transaction at or over `SlowCommit` (5 s), finished or still running, raises `store-commit-slow` for that database, at most once per `CommitAlarmRepeat` (10 min). `otsec health` prints a `write transactions:` line under the database when the last interval had a transaction of a second or more, and marks it `SLOW` at the threshold. The sample is as fine as the tick (proposed every 60 s), so a stall shorter than that between ticks shows in `recent_ms` and not as a live reading.
+
+The alarm is written to the status file at once, before the rest of `Tick` (which writes to the databases and so waits for the slow transaction). The status file's own sync still shares the disk, so on a disk that stalls every sync it can appear only when the stall ends; the OS log line appears at once (B6, with real 7 s and 12 s fsync delays).
+
+Not covered: datagrams the kernel drops on a full socket buffer before the receiver reads them are counted by nobody (Linux could read them; Windows has no equivalent); `read_buffer_bytes` and its granted size, where #297 is merged, show only the size.
+
 ## Pruning while running (A6, V-S9)
 
 C5 startup prunes confirmed events only while a database's total usage is above `PruneTarget` (0.8) of the sum of its quotas. One class can fill well before that point. For example, `adapter-evidence` is half of `evidence.db`'s default quotas, and runs stop `QuarantineRoom` short of its quota. So `Runtime.Prune` also prunes while the node runs:
