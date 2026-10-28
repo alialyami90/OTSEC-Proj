@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.6/collector-reply",
+  "$id": "otsec.authz/0.7/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -120,6 +120,12 @@
       "minimum": 1,
       "description": "Since 0.5, on an accepted reply to admin-signed bytes the collector had already accepted: the collector_seq of that first decision, lower than this reply's own. The collector did nothing again. Only with admin. Never on a reply stamped before 0.5."
     },
+    "run_deadline_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600000,
+      "description": "Since 0.7, on an accepted reply to a run request (kind run, naming an operation or a register run) stamped 0.7 or later, and on no other reply: the invocation's total time limit in milliseconds (a register run's own deadline from the signed register). The node bounds its wait for the outcome at this plus 10 s. Never sent in reply to a request stamped before 0.7, and never to an admin-signed request."
+    },
     "admin": {
       "type": "object",
       "additionalProperties": false,
@@ -197,6 +203,11 @@
             "required": [
               "admin"
             ]
+          },
+          {
+            "required": [
+              "run_deadline_ms"
+            ]
           }
         ]
       }
@@ -212,6 +223,47 @@
       "then": {
         "required": [
           "admin"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "run_deadline_ms"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "not": {
+              "enum": [
+                "otsec.authz/0.0",
+                "otsec.authz/0.1",
+                "otsec.authz/0.2",
+                "otsec.authz/0.3",
+                "otsec.authz/0.4",
+                "otsec.authz/0.5",
+                "otsec.authz/0.6"
+              ]
+            }
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "admin"
+              ]
+            },
+            {
+              "required": [
+                "repeat_of"
+              ]
+            }
+          ]
+        },
+        "required": [
+          "invocation_id"
         ]
       }
     },

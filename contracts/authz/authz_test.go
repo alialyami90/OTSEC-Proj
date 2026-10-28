@@ -738,3 +738,131 @@ func TestSchemaPatterns(t *testing.T) {
 		}
 	}
 }
+
+// loadSEL751Runs is the revision that has the register run (rev 5).
+func loadSEL751Runs(t *testing.T) *register.Matcher {
+	t.Helper()
+	_, pkg := readSEL751Content(t, "sel-751.json")
+	m, err := register.NewMatcher(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func TestRunNamesARegisterRun(t *testing.T) {
+	m := loadSEL751Runs(t)
+	ok := RunBody{AssetID: "a1", OperationID: "sel.config.read_all", Params: map[string]string{}, CredentialRef: "cred_abcdefgh", RegisterVersion: 1}
+	if err := ok.ValidateAgainst(m); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ok.AccessLevel(m); err != nil || got != "1" {
+		t.Fatalf("level of a run of level 1 steps: %q, %v", got, err)
+	}
+	if got, err := (&RunBody{OperationID: "sel.id"}).AccessLevel(m); err != nil || got != "0" {
+		t.Fatalf("level of an operation: %q, %v", got, err)
+	}
+	cases := []struct {
+		name string
+		mut  func(*RunBody)
+		want RefusalCode
+	}{
+		{"params", func(b *RunBody) { b.Params = map[string]string{"row": "1"} }, RefuseBadParams},
+		{"no credential", func(b *RunBody) { b.CredentialRef = "" }, RefuseCredentialMismatch},
+		{"unknown name", func(b *RunBody) { b.OperationID = "sel.config.read_some" }, RefuseUnknownOperation},
+	}
+	for _, c := range cases {
+		b := ok
+		c.mut(&b)
+		var ref *Refusal
+		if err := b.ValidateAgainst(m); !errors.As(err, &ref) || ref.Code != c.want {
+			t.Errorf("%s: got %v, want %s", c.name, err, c.want)
+		}
+		if c.want != RefuseCredentialMismatch {
+			if _, err := b.AccessLevel(m); err == nil {
+				t.Errorf("%s: AccessLevel gave a level to a run that is refused", c.name)
+			}
+		}
+	}
+}
+
+// A run whose steps the policy does not allow never reaches a credential. A
+// package whose run has a state-changing step, or one that is not in the
+// operate phase, is refused by the register itself, so no collector holds
+// one to ask; a run with nothing above level 0 is a valid package, and is
+// not invocable, because a run always logs in.
+func TestRunStepsAreEachChecked(t *testing.T) {
+	body := RunBody{AssetID: "a1", OperationID: "sel.config.read_all", Params: map[string]string{}, CredentialRef: "cred_abcdefgh", RegisterVersion: 1}
+	build := func(mutate func(*register.Package)) (*register.Matcher, error) {
+		_, p := readSEL751Content(t, "sel-751.json")
+		mutate(p)
+		return register.NewMatcher(p)
+	}
+	step := func(p *register.Package, f func(*register.Operation)) {
+		for i := range p.Operations {
+			if p.Operations[i].ID == "sel.settings.show_dnp_3" {
+				f(&p.Operations[i])
+			}
+		}
+	}
+	if _, err := build(func(p *register.Package) {
+		step(p, func(o *register.Operation) { o.Classification = register.StateChanging })
+	}); err == nil {
+		t.Error("the register accepts a run with a state-changing step")
+	}
+	if _, err := build(func(p *register.Package) {
+		step(p, func(o *register.Operation) { o.Phases = []register.Phase{register.PhaseProbe} })
+	}); err == nil {
+		t.Error("the register accepts a run with a step outside the operate phase")
+	}
+	m, err := build(func(p *register.Package) {
+		for i := range p.Operations {
+			if strings.HasPrefix(p.Operations[i].ID, "sel.settings.") {
+				p.Operations[i].AccessLevel = register.ProbeAccessLevel
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref *Refusal
+	if err := body.ValidateAgainst(m); !errors.As(err, &ref) || ref.Code != RefuseNotInvocable {
+		t.Errorf("run of level 0 steps: got %v, want not_invocable", err)
+	}
+	if _, err := body.AccessLevel(m); !errors.As(err, &ref) || ref.Code != RefuseNotInvocable {
+		t.Errorf("AccessLevel of a run of level 0 steps: got %v", err)
+	}
+}
+
+// A request stamped before 0.7 cannot name a run: a 0.6 collector answers
+// unknown_operation, and so does a 0.7 collector for that stamp.
+func TestValidateRunByStamp(t *testing.T) {
+	m := loadSEL751Runs(t)
+	req := func(contract, op string) *CollectorRequest {
+		return &CollectorRequest{Contract: contract, Kind: KindRun, Run: &RunBody{AssetID: "a1", OperationID: op, Params: map[string]string{}, CredentialRef: "cred_abcdefgh", RegisterVersion: 1}}
+	}
+	if err := req(ContractID, "sel.config.read_all").ValidateRun(m); err != nil {
+		t.Fatal(err)
+	}
+	var ref *Refusal
+	if err := req("otsec.authz/0.6", "sel.config.read_all").ValidateRun(m); !errors.As(err, &ref) || ref.Code != RefuseUnknownOperation {
+		t.Errorf("stamped 0.6: %v", err)
+	}
+	// An operation is still allowed under the older stamp.
+	if err := req("otsec.authz/0.6", "sel.ser.read_all").ValidateRun(m); err != nil {
+		t.Errorf("operation stamped 0.6: %v", err)
+	}
+	if err := (&CollectorRequest{Contract: ContractID, Kind: KindRun}).ValidateRun(m); !errors.As(err, &ref) || ref.Code != RefuseInvalid {
+		t.Errorf("no body: %v", err)
+	}
+}
+
+func TestNamesRuns(t *testing.T) {
+	for c, want := range map[string]bool{
+		"otsec.authz/0.6": false, "otsec.authz/0.7": true, "otsec.authz/0.9": true, "": false, "junk": false,
+	} {
+		if got := NamesRuns(c); got != want {
+			t.Errorf("NamesRuns(%q) = %v", c, got)
+		}
+	}
+}

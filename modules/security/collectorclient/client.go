@@ -30,6 +30,14 @@ import (
 // accepted reply, whose collector_seq the node must audit.
 var ErrOutcomeUnknown = errors.New("collectorclient: run accepted, outcome unknown")
 
+// ErrTimeout means the collector accepted a run and its outcome did not
+// arrive within the bound the node holds it to (D4-24): the run's own
+// deadline from the reply, plus authz.RunOutcomeGrace. It is returned with
+// ErrOutcomeUnknown, so the node records the outcome as unknown as it does
+// for any lost outcome, and the same request is not sent again in the
+// session (the next scheduled slot may ask again).
+var ErrTimeout = errors.New("collectorclient: outcome not received within the run's deadline")
+
 // ErrOutcomeQuarantined means the outcome arrived but failed a check. It is
 // always returned together with ErrOutcomeUnknown, and the Response carries
 // the outcome as Quarantine: evidence the node must keep, never a result.
@@ -58,6 +66,10 @@ type Client struct {
 	// ErrOutcomeUnknown. When Register is nil, CheckLines runs only in the
 	// collector, before the outcome is sent.
 	Register func(version uint64) *register.Package
+
+	// grace is how long past the collector's own bound the node waits for
+	// an outcome; zero means authz.RunOutcomeGrace. Tests shorten it.
+	grace time.Duration
 }
 
 // New returns a client for the collector at ep. ep.Peer is the identity the
@@ -175,8 +187,21 @@ func (c *Client) Do(ctx context.Context, req *authz.CollectorRequest) (Response,
 		return resp, nil
 	}
 
+	// The outcome is awaited no longer than the collector bounds the run
+	// itself (D4-24). The caller's context still ends the wait sooner: its
+	// AfterFunc above moves the deadline into the past.
+	bound := c.outcomeBound(reply)
+	until := time.Now().Add(bound)
+	conn.SetDeadline(until)
+	if ctx.Err() != nil { // cancelled before the line above could be overtaken
+		conn.SetDeadline(time.Unix(1, 0))
+	}
 	ob, err := collectorwire.ReadFrame(conn, collectorwire.MaxOutcomeBytes)
 	if err != nil {
+		var ne net.Error
+		if ctx.Err() == nil && errors.As(err, &ne) && ne.Timeout() && !time.Now().Before(until) {
+			return resp, fmt.Errorf("%w: %w after %s: %v", ErrOutcomeUnknown, ErrTimeout, bound, err)
+		}
 		return resp, fmt.Errorf("%w: %v", ErrOutcomeUnknown, err)
 	}
 	out, q, err := checkOutcome(req, reply, ob, c.Register)
@@ -188,9 +213,26 @@ func (c *Client) Do(ctx context.Context, req *authz.CollectorRequest) (Response,
 	return resp, nil
 }
 
+// outcomeBound is how long to wait for the outcome of an accepted request:
+// the run deadline the reply names (since C7 0.7) plus the grace the
+// collector itself allows past it, and for a reply without one, the ceiling
+// C3 puts on any deadline, so a collector that predates the field is
+// bounded too.
+func (c *Client) outcomeBound(r authz.CollectorReply) time.Duration {
+	grace := c.grace
+	if grace == 0 {
+		grace = authz.RunOutcomeGrace
+	}
+	ms := r.RunDeadlineMS
+	if ms == 0 {
+		ms = authz.MaxRunDeadlineMS
+	}
+	return time.Duration(ms)*time.Millisecond + grace
+}
+
 // checkReply applies C7 to a decoded reply.
 func checkReply(req *authz.CollectorRequest, r authz.CollectorReply) error {
-	if r.Contract != authz.ContractID {
+	if !authz.AcceptsContract(r.Contract) {
 		return fmt.Errorf("%w: contract %q", ErrProtocol, r.Contract)
 	}
 	switch r.Status {

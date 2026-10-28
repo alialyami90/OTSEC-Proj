@@ -6,6 +6,7 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | --- | --- |
 | `requests/valid/run-ser-read-all.json` | A schedule asks for `sel.ser.read_all` on one enrolled asset: no line, no limits, no secret. |
 | `requests/valid/run-id-without-credential.json` | A run of `sel.id`, a level 0 operation sent before `ACC`: it carries no `credential_ref` (C7-A2-5). `TestRunAgainstRegister` refuses a level 0 run that carries one, and a level 1 run that does not. |
+| `requests/valid/run-config-read-all.json` | 0.7: a schedule asks for the register run `sel.config.read_all` (24 read-only SHOW steps in one session). Same shape as an operation; no params, a credential reference for level 1. `TestRunNamesARegisterRun` checks it against revision 5. |
 | `requests/valid/credential-install.json` | An admin installs version 2 of a lab-only Telnet credential, as ciphertext sealed to the collector. |
 | `requests/valid/credential-revoke.json` | An admin revokes a credential after rotation. |
 | `requests/valid/credential-clear-suspension.json` | An admin clears a suspension on the exact version they reviewed. |
@@ -58,3 +59,9 @@ Files under `replies/valid/` decode strictly and pass `CollectorReply.Validate`;
 | `replies/invalid/admin-stamped-0.4.json` | `admin` on a reply stamped 0.4. |
 | `replies/invalid/repeat-without-admin.json` | A repeat that names nothing the collector verified. |
 | `replies/invalid/admin-on-a-refusal.json` | `admin` on a refused reply. |
+| `replies/valid/accepted-run-0.7.json` | 0.7: an accepted reply to the run request above, with `run_deadline_ms` (300000: the run's own limit from the signed register). |
+| `replies/invalid/run-deadline-stamped-0.6.json` | `run_deadline_ms` on a reply stamped 0.6, which no 0.6 collector writes and a 0.6 reader would not decode. |
+| `replies/invalid/run-deadline-on-a-refusal.json` | `run_deadline_ms` on a refused reply. |
+| `replies/invalid/run-deadline-over-the-ceiling.json` | `run_deadline_ms` of 600001, above C3's 600 s deadline ceiling. |
+| `replies/invalid/run-deadline-without-invocation.json` | An accepted reply with a run deadline and no `invocation_id`. |
+| `replies/invalid/run-deadline-with-admin.json` | `run_deadline_ms` next to an admin acceptance: runs are never admin-signed. |
