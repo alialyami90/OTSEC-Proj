@@ -167,14 +167,22 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 	_, cap2 := configRead(t, "2")
 	diff := contractFile(t, "config/testdata/valid/difference-1-2.json")
 	base := contractFile(t, "baseline/testdata/valid/baseline-synthetic.json")
+	// The same length as the transcript the snapshot names and other bytes,
+	// with the SHA-256 of the bytes it carries: only the digest comparison
+	// tells it from the transcript (B3 on #299).
+	flipped := append([]byte(nil), cap1.Bytes...)
+	flipped[0] ^= 0xff
+	flipSum := sha256.Sum256(flipped)
+	sameLength := c5.Capture{SHA256: hex.EncodeToString(flipSum[:]), Bytes: flipped}
 	for name, rc := range map[string]c5.Record{
 		"a C4 event":                  rec([]byte(`{"schema":"otsec.event/0.2","kind":"syslog"}`), nil),
 		"not JSON":                    rec([]byte("SHO 1"), nil),
 		"a snapshot with no capture":  rec(snap1, nil),
 		"a snapshot, another capture": rec(snap1, &cap2),
-		"a difference with a capture": rec(diff, &cap1),
-		"a baseline with a capture":   rec(base, &cap1),
-		"a snapshot that is not one":  rec([]byte(strings.Replace(string(snap1), `"asset_id"`, `"asset_idx"`, 1)), &cap1),
+		"a snapshot, a capture of the same length, other bytes": rec(snap1, &sameLength),
+		"a difference with a capture":                           rec(diff, &cap1),
+		"a baseline with a capture":                             rec(base, &cap1),
+		"a snapshot that is not one":                            rec([]byte(strings.Replace(string(snap1), `"asset_id"`, `"asset_idx"`, 1)), &cap1),
 	} {
 		if _, err := log.Append(bg, rc); err == nil {
 			t.Errorf("%s was stored", name)
