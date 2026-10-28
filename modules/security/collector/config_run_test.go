@@ -3,6 +3,7 @@ package collector
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -287,12 +288,13 @@ func TestConfigRunStampedBefore07(t *testing.T) {
 	}
 }
 
-// B6 on #334: a run ID with parameters, or with a step the policy denies, is
-// refused before any credential is read. The credential named here does not
-// exist, so a refusal other than the one under test (credential_unusable)
-// would show the credential was looked at first; the control row shows it is
-// looked at when the run is allowed. Nothing is recorded for the floor or
-// the interval, and the device is free.
+// B6 on #334 and #341: a run ID with parameters, with a step the policy
+// denies, or that the asset's profile does not name, is refused before any
+// credential is read. The credential named here does not exist, so a refusal
+// other than the one under test (credential_unusable) would show the
+// credential was looked at first; the control row shows it is looked at when
+// the run is allowed. Nothing is recorded for the floor or the interval, and
+// the device is free.
 func TestConfigRunRefusalsComeBeforeTheCredential(t *testing.T) {
 	const absent = "cred_absent001"
 	cases := []struct {
@@ -310,6 +312,12 @@ func TestConfigRunRefusalsComeBeforeTheCredential(t *testing.T) {
 		{name: "no credential for a level 1 run", req: func() *authz.CollectorRequest { return configReq("") }, want: authz.RefuseCredentialMismatch},
 		{name: "not hosted by the adapter", opts: []pipeOption{func(c *PipelineConfig, f *pipeFixture) {
 			c.Runner = hosting{f.runner, map[string]bool{"sel.ser.read_all": true}}
+		}}, req: func() *authz.CollectorRequest { return configReq(absent) }, want: authz.RefuseNotInvocable},
+		{name: "not named by the asset's profile", opts: []pipeOption{func(c *PipelineConfig, _ *pipeFixture) {
+			pr := &c.Assets[0].Profile
+			pr.Capabilities = slices.DeleteFunc(slices.Clone(pr.Capabilities), func(k asset.Capability) bool {
+				return slices.Contains(k.Operations, configRun)
+			})
 		}}, req: func() *authz.CollectorRequest { return configReq(absent) }, want: authz.RefuseNotInvocable},
 		{name: "register revision before the run", req: func() *authz.CollectorRequest {
 			r := configReq(absent)

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -460,6 +461,110 @@ func TestCallerDeadlineBeforeOutcomeDeadline(t *testing.T) {
 	_, err := stalls(t, &dials, mustJSON(t, rep)).Do(cx, runReq())
 	if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
 		t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+	}
+}
+
+// hookedConn is the node's end of a pipe whose reads and deadline changes a
+// test can step into, to put a cancel at an exact point of Do.
+type hookedConn struct {
+	net.Conn
+	onRead     func(error)
+	onDeadline func(time.Time)
+}
+
+func (c *hookedConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if c.onRead != nil {
+		c.onRead(err)
+	}
+	return n, err
+}
+
+func (c *hookedConn) SetDeadline(t time.Time) error {
+	if c.onDeadline != nil {
+		c.onDeadline(t)
+	}
+	return c.Conn.SetDeadline(t)
+}
+
+// hooked is stalls with the node's end wrapped by hook.
+func hooked(t *testing.T, hook func(*hookedConn), frames ...[]byte) *Client {
+	t.Helper()
+	c := stalls(t, new(atomic.Int32), frames...)
+	dial := c.dial
+	c.dial = func(ctx context.Context) (net.Conn, error) {
+		conn, err := dial(ctx)
+		if err != nil {
+			return nil, err
+		}
+		h := &hookedConn{Conn: conn}
+		hook(h)
+		return h, nil
+	}
+	return c
+}
+
+// A caller's cancel that lands as the outcome bound runs out is the caller's,
+// and not reported as the run's timeout (B6's mutant A14 on #341): the read
+// times out at the bound, and the caller has cancelled before Do looks.
+func TestCallerCancelAtTheBoundIsNotTimeout(t *testing.T) {
+	rep := accepted(10)
+	rep.RunDeadlineMS = 20
+	cx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := hooked(t, func(h *hookedConn) {
+		h.onRead = func(err error) {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				cancel()
+			}
+		}
+	}, mustJSON(t, rep))
+	_, err := c.Do(cx, runReq())
+	if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
+		t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+	}
+}
+
+// A cancel that fires after the reply and before Do sets the outcome
+// deadline is not lost when that deadline overwrites the one the cancel set
+// (B6's mutant A11 on #341): Do returns at once and does not wait out the
+// run's deadline.
+func TestCancelBeforeTheOutcomeDeadlineIsKept(t *testing.T) {
+	rep := accepted(10)
+	rep.RunDeadlineMS = 60000
+	cx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	past := make(chan struct{})
+	var once, pastOnce sync.Once
+	c := hooked(t, func(h *hookedConn) {
+		h.onDeadline = func(d time.Time) {
+			if d.Equal(time.Unix(1, 0)) {
+				h.Conn.SetDeadline(d) // set before the wait below ends
+				pastOnce.Do(func() { close(past) })
+				return
+			}
+			// The first other deadline is the outcome's (cx has none):
+			// cancel, and let the cancel's deadline land before it.
+			once.Do(func() {
+				cancel()
+				select {
+				case <-past:
+				case <-time.After(5 * time.Second):
+					t.Error("the cancel did not set a deadline")
+				}
+			})
+		}
+	}, mustJSON(t, rep))
+	done := make(chan error, 1)
+	go func() { _, err := c.Do(cx, runReq()); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrOutcomeUnknown) || errors.Is(err, ErrTimeout) {
+			t.Fatalf("err %v; want ErrOutcomeUnknown and not ErrTimeout", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Do waited for the run's deadline after the caller cancelled")
 	}
 }
 
