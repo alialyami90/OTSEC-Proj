@@ -116,7 +116,7 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 			r.queued.Add(-n)
 			continue
 		}
-		r.commitParts(cctx, recs, kept, false)
+		r.commitSplit(cctx, recs, kept, false)
 		r.queued.Add(-n)
 	}
 }

@@ -8,7 +8,8 @@
       "audit": 67108864,
       "platform": 67108864,
       "syslog-datagram": 67108864,
-      "syslog-stream": 67108864
+      "syslog-stream": 67108864,
+      "syslog-unknown": 67108864
     },
     "warn_fraction": 0.8
   },

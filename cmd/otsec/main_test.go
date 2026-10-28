@@ -476,3 +476,33 @@ func TestHealthShowsHeldBackLinks(t *testing.T) {
 		t.Errorf("a held-back link is shown with a running link's certificate line:\n%s", out)
 	}
 }
+
+// The health line for write transactions is empty on a healthy node, shows
+// a second or more, and says SLOW at the alarm's threshold (store-commit-slow).
+func TestCommitLine(t *testing.T) {
+	for name, tc := range map[string]struct {
+		c    node.CommitStatus
+		want []string
+	}{
+		"quiet":         {node.CommitStatus{Count: 10, MaxMS: 40, RecentMS: 12}, nil},
+		"just a bit":    {node.CommitStatus{Count: 10, MaxMS: 999, RecentMS: 999}, nil},
+		"over a second": {node.CommitStatus{Count: 10, MaxMS: 2100, RecentMS: 1500}, []string{"slowest 1500 ms", "2100 ms since the node started"}},
+		"running now":   {node.CommitStatus{Count: 10, MaxMS: 200, RecentMS: 100, WaitingMS: 3000}, []string{"one has been running 3000 ms"}},
+		"slow":          {node.CommitStatus{Count: 10, MaxMS: 31000, RecentMS: 26800}, []string{"SLOW"}},
+	} {
+		got := commitLine(tc.c)
+		if len(tc.want) == 0 && got != "" {
+			t.Errorf("%s: %q", name, got)
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q lacks %q", name, got, w)
+			}
+		}
+		if tc.want == nil || name != "slow" {
+			if strings.Contains(got, "SLOW") && name != "slow" {
+				t.Errorf("%s: says SLOW: %q", name, got)
+			}
+		}
+	}
+}

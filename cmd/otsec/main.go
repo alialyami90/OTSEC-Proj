@@ -345,6 +345,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	}
 	for _, db := range sortedDBs(st.Modes) {
 		fmt.Fprintf(w, "database %s: %s\n", db, st.Modes[db])
+		if line := commitLine(st.Commits[db]); line != "" {
+			fmt.Fprintln(w, line)
+		}
 	}
 	if dbs, closeAll, err := readers(ctx, cfg); err != nil {
 		fmt.Fprintf(w, "store not readable: %v\n", err)
@@ -602,4 +605,21 @@ func percent(n, of int64) int64 {
 		return 0
 	}
 	return n * 100 / of
+}
+
+// commitLine says when a database's write transactions were slow at the last
+// tick: a transaction that ran a second or more, or is still running. It is
+// empty otherwise, so a healthy node prints nothing (AlarmCommitSlow).
+func commitLine(c node.CommitStatus) string {
+	if c.RecentMS < 1000 && c.WaitingMS < 1000 {
+		return ""
+	}
+	line := fmt.Sprintf("  write transactions: slowest %d ms since the last check, %d ms since the node started", c.RecentMS, c.MaxMS)
+	if c.WaitingMS > 0 {
+		line += fmt.Sprintf("; one has been running %d ms", c.WaitingMS)
+	}
+	if c.RecentMS >= node.SlowCommit.Milliseconds() {
+		line += "; SLOW: every writer to this database waits for them, so check the disk"
+	}
+	return line
 }

@@ -44,8 +44,12 @@
 //     message is stored the same way with asset-unresolved, within the
 //     unknown budget below, and the first message from each unknown
 //     address raises syslog.unknown-source on the health stream, with the
-//     stored event as its related ID. Past Limits.MaxUnknown addresses one summary alarm is
-//     raised instead, and nothing more is remembered.
+//     stored event as its related ID. Past Limits.MaxUnknown addresses one
+//     summary alarm is raised instead, and nothing more is remembered. With
+//     Config.UnknownStream set the message is stored in that stream (class
+//     syslog-unknown), and where that class is full it is dropped and
+//     counted as unknown-full: a stream connection from an unknown sender is
+//     read on, never held, and a known sender never waits on that stream.
 //   - Evidence class: device-observed only when both the asset's endpoint
 //     and the listener are; an unknown sender takes the listener's (C4,
 //     D1-24 amendment).
@@ -121,7 +125,17 @@
 //   - The unknown budget bounds unattributed storage per window, not in
 //     all: over an upstream outage of T it can store up to UnknownBytes x
 //     (1 + T/UnknownWindow), restarts included when the node passes
-//     Config.UnknownSpent. The node should size it from the class quota
-//     and the outage it must ride out. A separate C5 stream and quota for
-//     unknown senders would bound it absolutely; it is not built.
+//     Config.UnknownSpent. The absolute bound is the syslog-unknown class
+//     (C5 0.4, HR-11): with Config.UnknownStream set, unknown senders'
+//     records go to that stream, and the class quota bounds the bytes they
+//     hold at once, which no clock step or restart refills. It is a bound
+//     on what is stored, not on what is received over time: pruning a
+//     forwarded record frees its bytes. A part refused at the quota is
+//     dropped whole, so a few records that would have fitted can be
+//     dropped with it. Without UnknownStream the budget is the only bound.
+//     The class is the node's to size and declare (P4-A5); the receiver
+//     does not check that the stream exists in the layout.
+//   - Known and unknown records of one listener are in two streams, so
+//     their seq orders are separate. Received time is the only order across
+//     them (C5 0.4 proposal, section 3).
 package receive
