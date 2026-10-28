@@ -128,10 +128,15 @@ type CommitStats struct {
 func (d *DB) CommitStats() CommitStats {
 	st := CommitStats{Count: d.txCount.Load(), Max: time.Duration(d.txMax.Load()), Recent: time.Duration(d.txRecent.Load())}
 	if since := d.txSince.Load(); since != 0 {
-		st.Waiting = time.Since(time.Unix(0, since))
+		st.Waiting = time.Since(monoBase) - time.Duration(since-1)
 	}
 	return st
 }
+
+// monoBase is the instant txSince counts from: a value read with the
+// monotonic clock, so a wall-clock step cannot fake or hide Waiting (B3 on
+// #311). txSince holds the offset plus one, so zero means no transaction.
+var monoBase = time.Now()
 
 // TakeRecentCommit returns the longest write transaction since the last
 // call, and resets it.
@@ -449,7 +454,7 @@ func (d *DB) tx(ctx context.Context, name string, f func() error) error {
 		return fmt.Errorf("%s: begin: %w", name, err)
 	}
 	txBegan := time.Now()
-	d.txSince.Store(txBegan.UnixNano())
+	d.txSince.Store(int64(txBegan.Sub(monoBase)) + 1)
 	defer d.endTx(txBegan)
 	if err := f(); err != nil {
 		if _, rerr := d.conn.ExecContext(context.Background(), "ROLLBACK"); rerr != nil {
