@@ -59,7 +59,11 @@
 //     stream over its rate is slowed: the connection is read no faster, and
 //     TCP flow control holds the sender. A datagram over its rate is
 //     dropped and counted.
-//   - Unknown senders cannot displace configured devices (A3 F1, F2).
+//   - Unknown senders cannot displace configured devices (A3 F1, F2). On a
+//     datagram listener they hold at most half the queue's places
+//     (Limits.Queue), so with the store slow a flood of them cannot fill the
+//     queue and make a known device's datagrams drop as queue-full; one past
+//     their half is dropped and counted as queue-full.
 //     They hold at most Limits.MaxUnknownConns stream connections, so the
 //     rest stay free for configured devices, and an idle one is closed
 //     after Limits.UnknownIdleTimeout. All of them together may store at

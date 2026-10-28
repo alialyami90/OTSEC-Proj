@@ -3,6 +3,7 @@ package receive
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -347,4 +348,62 @@ func TestNewRefusesBadUnknownStream(t *testing.T) {
 			t.Errorf("unknown stream %q: %v", u, err)
 		}
 	}
+}
+
+// TestUnknownFloodCannotTakeTheKnownQueuePlaces (HR-11): with the store held,
+// an unknown sender's datagrams hold at most half the queue's places, so a
+// known sender's datagrams still queue and are all stored once the store
+// takes them. Without the share, the unknown flood fills the queue and the
+// known sender's datagrams are dropped as queue-full (the same drop, with a
+// slow disk, as B6 saw on hosted Windows in #316).
+func TestUnknownFloodCannotTakeTheKnownQueuePlaces(t *testing.T) {
+	const queue, knownN, unknownN = 200, 100, 400
+	tap := &tapLog{gate: make(chan struct{})}
+	g, sc := unknownRig(t, asset.SyslogUDP, func(c *Config) {
+		c.Limits.Queue = queue
+		c.Limits.UnknownBytes = 64 << 20
+		c.Limits.Rate, c.Limits.Burst, c.Limits.UnknownRate, c.Limits.UnknownBurst = 100000, 100000, 100000, 100000
+		tap.inner = c.Log
+		c.Log = tap
+	})
+	a, b := g.udp(addrA), g.udp(addrB)
+	defer a.Close()
+	defer b.Close()
+	// The first datagram goes alone, so the writer takes it and then waits
+	// at the gate for the store; everything after it queues.
+	a.Write([]byte(m1))
+	g.wait("first read", func() bool { return g.r.Status().Received == 1 })
+	time.Sleep(50 * time.Millisecond)
+	sent := 1
+	for i := 0; i < unknownN; i++ {
+		b.Write([]byte(fmt.Sprintf("<13>unknown %03d", i)))
+		sent++
+		if i%4 == 0 && i/4 < knownN-1 {
+			a.Write([]byte(fmt.Sprintf("<13>device %03d", i/4)))
+			sent++
+		}
+		if i%20 == 19 {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	g.wait("all read", func() bool { return g.r.Status().Received == int64(sent) })
+	close(tap.gate)
+	g.settled()
+	s := g.r.Status()
+	if s.Stored+sumDropped(s) != s.Received {
+		t.Fatalf("accounting %+v", s)
+	}
+	if known := len(sc.events(t, testStream)); known != knownN {
+		t.Errorf("the known sender has %d of %d stored; status %+v", known, knownN, s)
+	}
+	if s.Dropped[DropQueueFull] == 0 {
+		t.Errorf("no unknown datagram was dropped for the queue: the test did not fill it; status %+v", s)
+	}
+}
+
+func sumDropped(s Status) (n int64) {
+	for _, d := range s.Dropped {
+		n += d
+	}
+	return n
 }

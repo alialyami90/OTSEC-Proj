@@ -343,8 +343,11 @@ type Receiver struct {
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
 	queued   atomic.Int64 // datagram bytes waiting for the store
-	commitAt atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
-	commitN  atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
+	// unknownQueued is how many unknown senders' datagrams are in the queue
+	// (not yet taken by the writer).
+	unknownQueued atomic.Int64
+	commitAt      atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
+	commitN       atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
 
 	ln net.Listener
 	pc net.PacketConn

@@ -20,7 +20,9 @@ const maxDatagram = 65536
 // message (RFC 5426), kept whole. The sender cannot be slowed, so a
 // datagram over its sender's rate, one that finds the queue full, and a
 // batch the store refuses are dropped and counted (drop-and-count), and the
-// counts are reported as intake.drop-counted every Limits.ReportEvery.
+// counts are reported as intake.drop-counted every Limits.ReportEvery. Unknown
+// senders' datagrams share the queue with known senders' but may hold at most
+// half of its places; one past that is dropped as queue-full.
 func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 	q := make(chan msg, r.lim.Queue)
 	done := make(chan struct{})
@@ -66,7 +68,11 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 		if !known {
 			// Spent as read (payUnknown), and only with room to queue it: this
 			// loop is the queue's only sender.
-			if len(q) == cap(q) {
+			// An unknown sender may hold at most half the queue's places, so
+			// a flood of them behind a slow store cannot take the places a
+			// known sender's datagrams need (HR-11). The check comes before
+			// payUnknown so a datagram dropped here spends no budget.
+			if len(q) == cap(q) || r.unknownQueued.Load() >= int64(max(cap(q)/2, 1)) {
 				r.drop(DropQueueFull, 1)
 				continue
 			}
@@ -77,6 +83,9 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 		select {
 		case q <- m:
 			r.queued.Add(int64(n))
+			if m.rec != nil {
+				r.unknownQueued.Add(1)
+			}
 		default:
 			r.drop(DropQueueFull, 1)
 		}
@@ -93,8 +102,14 @@ func (r *Receiver) serveDatagrams(ctx, cctx context.Context) error {
 // is dropped and counted, never retried: the datagrams behind it would
 // otherwise be dropped instead.
 func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
+	taken := func(m msg) msg {
+		if m.rec != nil {
+			r.unknownQueued.Add(-1)
+		}
+		return m
+	}
 	for m := range q {
-		batch := []msg{m}
+		batch := []msg{taken(m)}
 	fill:
 		for len(batch) < store.MaxBatch {
 			select {
@@ -102,7 +117,7 @@ func (r *Receiver) writeDatagrams(cctx context.Context, q <-chan msg) {
 				if !ok {
 					break fill
 				}
-				batch = append(batch, m)
+				batch = append(batch, taken(m))
 			default:
 				break fill
 			}
