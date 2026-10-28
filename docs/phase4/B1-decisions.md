@@ -575,3 +575,11 @@ Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 647661
 - **What the owner said.** At 18:11Z: "work on them item by item". At 18:12Z: "stop at the end of each item to check with me".
 - **The rule.** Each Phase 4 item is finished, gated and reported before the next one starts. At the end of each item, C1 reports to the owner and waits for their go before any agent starts the next item's briefing, contracts or code. An agent with nothing queued for the current item does reviews, verification or preparation for it, and does not start work on a later item.
 - **Items 1 and 2 finish together.** These two were briefed together, under one gate, because they share the store and the audit chain. At 18:14Z the owner chose "Finish 1 and 2 together" on C1's decision card. They pass the first exit gate as one unit, and C1 checks with the owner at that gate. From item 3 on, each item is briefed, built, gated and checked with the owner before the next starts.
+
+## D4-35: the acknowledgement window, tightened (C8 0.8, #346)
+
+Date: 2026-10-28. C1, on C3's push `f8c615d` to #346, confirming C3's tightening of the D4-26 amendment (the acknowledgement window).
+
+- **The rule.** When `recs` holds a `config.baseline_recorded` of the asset before a succeeded event acknowledgement stamped 0.8 or later, that acknowledgement must name the digest of the asset's latest such recording before it. When `recs` holds no recording of the asset before it, the acknowledgement is refused only if `recs` holds the asset's version-1 recording, as the amendment says.
+- **What it replaces.** The amendment's "otherwise refuse only a digest that a recording inside `recs` has replaced". A recording inside the window replaced whatever was current then, so no other digest can be the current baseline, whether or not `recs` names it.
+- **The race.** A person who acknowledges a baseline that a re-learn has just replaced is refused, and acknowledges again against the baseline they now see. This fails closed, as D4-20's race does.
