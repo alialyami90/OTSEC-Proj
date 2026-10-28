@@ -312,3 +312,14 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
 
      The configuration database arrives with the next node PR.
    - All figures are `simulated` and measured on Linux. The reserve formula stays `desk` until B6's storekill leg runs (D4-9, C5 item 5).
+
+## D4-16: a pre-0.3 register package with `runs` or `limits` is refused even when they are empty (#279)
+
+- **Decision.** Under C3 0.3, a package with a version below 0.3 that carries a `runs` key or a `limits` key is refused. This holds when the value is empty (`[]`) or `null`. The key's presence decides, not its content.
+- **Why.**
+  - A 0.2 reader already refuses these keys as unknown fields (strictjson). With this rule, the same signed bytes get the same verdict on an old node and an upgraded one.
+  - It reads the C3 text ("with limits or runs is invalid") literally, and it fails closed.
+  - Found by B6 in the independent C3 0.3 review. At #279's merge the reader accepted all three cases. They carry nothing, so nothing unsafe got through.
+- **Follow-up.**
+  - B2: a small C3 0.3 change ahead of register revision 5. The reader checks for the raw key, `contracts/register/doc.go` says so in one sentence, and there is one test for each of `"runs": []`, `"runs": null` and `"limits": null` in a 0.2 package.
+  - B6: pins the same three cases in the independent tests (#292 or a follow-up to it).
