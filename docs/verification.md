@@ -429,6 +429,20 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-016 — 2026-10-28 — Windows marker stall: in the one hold traced, the store's commit sat in the WAL sync (`FlushFileBuffers`) on the hosted runner's disk
+
+- **What was tested:** the marker stall seen on Windows since #292, where a known datagram, sent after a flood, was read but not stored for 20 s or more. #294 adds a commit trail to every marker wait in `tests/integration/syslogreceive`, sampled four times, a second apart, before any probe of the test's own. Each sample records: the rows stored, the `database/sql` pools open in the process, the store's `BEGIN IMMEDIATE` statistics (#295), and where each commit goroutine of the Log is.
+- **Result, for this run only.** The trail fired once, in `TestUnknownSpentAcrossRestarts/seed_1` ([job 122640646042](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40635260038/job/122640646042), `windows-latest`, Go 1.27.3), during a hold of 26.8 s.
+  - On every sample there was one commit, inside SQLite's WAL sync (`windows.FlushFileBuffers` < `_winSync` < `_sqlite3OsSync` < `_walFrames`). It moved from one sync to the next between samples.
+  - There was one pool, and no wait on `BEGIN IMMEDIATE`. The receiver's writer was in `AppendBatch`, and every marker was stored after one send.
+  - The worst hold in the run was **37.9 s**, and the largest read-to-commit lag 31.1 s.
+  - So that hold was the runner's disk taking seconds for each flush: not a lock, a leaked connection or a message lost. **The stall is explained for this run, not fixed in general.** A later stall whose trail shows anything else reopens it.
+- **Two waits in A6's tests were timings, not properties.** Fixed in e710a46 (#294), with no bound or pass condition changed.
+  - `TestUnknownShareOverTheOutage` waited a fixed 20 s for its marker. That failed in [job 122631846811](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40632486199/job/122631846811). It now waits on the receiver's own accounting (`awaitMarker`).
+  - `floodUntil` fixed the flood's end before its own setup. In the traced run, the first restart stored 0 bytes and dropped none, so the non-vacuity guard tripped. The likely cause is a setup that outlasted the flood; the guard now reports the datagrams sent, which will confirm or refute it.
+- **Open, for B5 (B1, 2026-10-28):** does a node on a slow disk show held commits in its health, so that an operator sees it before datagrams drop? Also open: whether the OS can drop datagrams uncounted while a commit is held this long.
+- **Evidence class:** `simulated`, measured on a GitHub-hosted Windows runner, not on site hardware (H-14 covers that).
+
 ### F-015 — 2026-10-24 — A6's Appendix A count was wrong (79 rows, not 84); two FIDs in the C3 package are in no revision table
 
 - **What happened:** A1 relayed that A2 counts 82 rows in Tables A.1 to A.5 of the SEL-751 IM (20260910): 79 with a FID, which come to 78 unique FIDs, plus 3 marked "not released". A6 had reported 84. A6 re-ran its parser (`tests/safety/firmware_review/check_allowlist.py`) and listed each record with its line in the manual text.
