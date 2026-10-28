@@ -79,6 +79,35 @@ Health events share the evidence database. This is so a capture carried by a hea
 
 `Config.Consumers` gives every target one C5 consumer per event stream, plus `audit` when the target sets `audit` (C6 `syslog.Consumers`). No target consumes a `quarantine/` stream. A C5 stream with no consumer is never pruned, so a quarantine stays on the node until an operator deals with it.
 
+## Commit caps and recovery reserve per database (C5 0.5, D4-9, D4-14)
+
+Each database has a commit cap in bytes (`GroupOptions.MaxCommitBytes`) and in records (`MaxCommitRecords`), and a recovery reserve of `2 × WALBoundBytes + 1.1 × (largest commit) + 64 KiB + 3 KiB × (records in it)` (`c5.RecoveryReserveFor`). Both are per database, and the node releases and re-creates one reserve at a time.
+
+| Database | Commit cap | Records | Recovery reserve (WAL bound 512 KiB) |
+| --- | --- | --- | --- |
+| `evidence` | 11 MiB (`SERCommitBytes`) | 2048 | 20,093,337 bytes (19.16 MiB) |
+| `syslog` | 1 MiB (c5 default) | 1024 | 5,413,273 bytes (5.16 MiB) |
+| `audit` | 1 MiB (c5 default) | 128 | 2,660,761 bytes (2.54 MiB) |
+
+The evidence byte cap is derived, not measured. One SER read commits atomically, so the cap is `commitcap.go`'s bound on a read: C2's 1 MiB capture, 4.34 encoded bytes for each row byte, 2048 rows (`MaxReadRowsCeiling`) of at most 2560 fixed bytes, and 64 KiB of health events, 10.4 MiB, rounded up to a MiB. `serbound_test.go` measures the constants through the real normalizer and fails if the bound rises above the cap or the cap exceeds it by a MiB. A quarantine (a whole outcome frame of up to 8 MiB, its reason and two events) fits the same cap. The schedule's `operation` is at most 64 bytes, because it is in every event of a read.
+
+A read over a cap is refused whole by the Log (`record-too-large`), nothing is stored as events, its bytes go to quarantine, and the node raises `collection-result-refused`. The bound holds for rows the SEL-751 adapter parses (`serRowRE`); a result that marked a row with characters JSON escapes as parsed would be larger and fails the same way.
+
+## Store layout changes (C5 0.5, D4-14)
+
+Format 2 of a database (`meta.format` `otsec.platform-store/2`) keeps `events` and `captures` in rowid tables with unique `(stream, seq)` and `sha256` indexes. Format 1 used `WITHOUT ROWID` tables, whose rows over about 1 KB each took an overflow page of their own: a commit wrote up to 3.3 times the WAL the reserve rule allows, and the file grew up to 4.5 times the bytes the quota counts.
+
+A database of format 1 is **refused at start**: the node does not open, change, migrate or delete it. Before it opens a read-write connection, the store reads the format row, through the `-wal` when that holds frames (a format row can be only in the `-wal`, as after a crash before the first checkpoint) and from the main file alone, immutable, when it does not. The read is read-only: it cannot checkpoint or delete the `-wal`, so a store left with a hot `-wal` by a crash is refused with the database file and `-wal` byte for byte as found. The `-shm` is derived from the `-wal` and may be rewritten. A current-format store with a hot `-wal` is not refused: it starts and recovers it (`TestLegacyRefusalWritesNothingWithAHotWAL`, `TestLegacyFormatOnlyInTheWALIsRefusedWithoutWriting`, `TestCurrentFormatWithAHotWALStartsAndRecovers`). Startup stops at its open step with the `store-open-failed` alarm and an error that names the way out, and the node reports that database as failed. (The first draft refused it at the settings step with `store-settings-invalid`; that step runs after an ordinary open, which folds a hot `-wal` into the file and deletes it.) To start on the new layout:
+
+1. Stop the node.
+2. Copy the store directory aside. Keep the copy as the evidence it holds.
+3. If events in it are not yet forwarded upstream and you need them, start the old node build against the copy until its targets have confirmed them.
+4. Remove the database files (`*.db`, `*.db-wal`, `*.db-shm`) and the reserve files from the store directory, and start the node. It creates format 2 databases.
+
+There is no migration. It would need free space equal to the database and a copy of every event, and all data written so far is simulated lab data.
+
+**Sizing the volume (D4-14).** The file of a database grows by at most `DiskBytesPerQuotaByte` (2.5) bytes for each byte its class quotas count. A volume therefore needs the sum of the class quotas × 2.5, plus each database's recovery and last-resort reserves (the table above). No figure for a volume may come from the raw sum of the quotas.
+
 ## The scheduler
 
 `Scheduler` runs the schedule one entry at a time, so the node never holds more than one device session (AP-13, SC-9). The first run of each entry waits 60 s after start, so a node in a restart loop never polls faster than the minimum interval. A late run is not repeated to catch up. However the schedule is written, an asset gets at least 60 s between the end of one session and the start of the next, so two entries for one asset, or a run longer than its interval, never poll a device faster than the minimum (A6 review of #92).

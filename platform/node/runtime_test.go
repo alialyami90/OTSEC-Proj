@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,8 +39,11 @@ func runtimeConfig(t *testing.T) (*Config, string) {
 
 func start(t *testing.T, c *Config, dir string) (*Runtime, *Status, *[]string) {
 	t.Helper()
-	var logged []string
-	st := NewStatus(filepath.Join(dir, "status.json"), func(s string) { logged = append(logged, s) }, nil)
+	var (
+		logged []string
+		mu     sync.Mutex // Status calls oslog from any goroutine
+	)
+	st := NewStatus(filepath.Join(dir, "status.json"), func(s string) { mu.Lock(); logged = append(logged, s); mu.Unlock() }, nil)
 	r, err := Start(bg, c, RuntimeOptions{Status: st, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
