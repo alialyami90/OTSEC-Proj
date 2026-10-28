@@ -603,6 +603,8 @@ func (d *Detector) Snapshot() ([]byte, error) {
 	body.i(d.holdFrom)
 	body.i(d.raised)
 	body.i(d.held)
+	body.i(d.nextSweep)
+	body.i(d.beyond)
 
 	ns := sortedKeys(d.newSeen)
 	body.u(uint64(len(ns)))
@@ -647,6 +649,7 @@ func (d *Detector) Snapshot() ([]byte, error) {
 		pd := d.pairs[x.p]
 		body.s(string(x.p.rule))
 		body.s(x.p.key.String())
+		body.i(pd.born)
 		body.i(pd.lastAlarm)
 		body.bool(pd.raisedOnce)
 		body.i(pd.total)
@@ -723,6 +726,7 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 	det.lastNS = d.i()
 	det.holdOpen = d.bool()
 	det.holdFrom, det.raised, det.held = d.i(), d.nonNeg("raised"), d.nonNeg("held")
+	det.nextSweep, det.beyond = d.i(), d.nonNeg("beyond")
 	if d.err == nil {
 		switch {
 		case det.lastNS < det.activeNS:
@@ -735,7 +739,7 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 	}
 
 	prev := ""
-	for n := d.n("new types seen", baseline.MaxTypesCeiling*4); n > 0 && d.err == nil; n-- {
+	for n := d.n("new types seen", newSeenMax); n > 0 && d.err == nil; n-- {
 		k, s := d.key(prev)
 		prev = s
 		if d.err == nil {
@@ -790,12 +794,22 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		} else {
 			last = cur
 		}
-		pd := &pending{lastAlarm: d.i(), raisedOnce: d.bool(), total: d.nonNeg("total")}
+		pd := &pending{born: d.i(), lastAlarm: d.i(), raisedOnce: d.bool(), total: d.nonNeg("total")}
 		pd.ids = idList("held events", baseline.MaxEventIDs)
 		if d.err == nil && pd.total < int64(len(pd.ids)) {
 			d.fail("a pair holds %d events but counts %d", len(pd.ids), pd.total)
 		}
 		if d.err == nil {
+			_, inBaseline := det.types[k]
+			switch {
+			case (rule == baseline.RuleNewType) == inBaseline:
+				d.fail("a %s pair for %s: the new-type rule is for types outside the baseline, the others for types in it", rule, s)
+			case rule == baseline.RuleNewType && det.newPairs >= pairCap:
+				d.fail("more than %d new-type pairs", pairCap)
+			}
+			if rule == baseline.RuleNewType {
+				det.newPairs++
+			}
 			det.pairs[pair{rule, k}] = pd
 		}
 	}
