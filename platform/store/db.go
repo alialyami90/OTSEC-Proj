@@ -36,17 +36,26 @@ func legacyRefusal(path string) error {
 		path, legacyFormat)
 }
 
-// refuseLegacy returns legacyRefusal when the database file at path is of
-// the first format, and nil otherwise, including when the file cannot be
-// read as a store: the open that follows reports that. It reads the main
-// file alone and immutable, so SQLite takes no lock, runs no WAL recovery
-// and creates or writes no -wal or -shm. An ordinary open folds a hot -wal
-// into the file and deletes it when the connection closes; a refused
-// database must be left byte for byte as it was found (B1 on #282). The
-// format row is written when the database is created and the main file is
-// flushed whole before the rename, so the -wal never holds a different one.
+// refuseLegacy returns legacyRefusal when the database at path is of the
+// first format, and nil otherwise, including when the file cannot be read as
+// a store: the open that follows reports that. It must write neither the
+// database file nor its -wal. An ordinary open folds a hot -wal into the file
+// and deletes it when the connection closes, and a refused database must be
+// left as it was found (B1 on #282).
+//
+// A format row can be in the -wal, not yet in the main file (B6's #280), so
+// the main file alone is not enough once the -wal holds frames. Then the
+// check reads through the WAL with a read-only connection: it cannot
+// checkpoint or delete the -wal, and the most it writes is the -shm, which is
+// derived from the -wal and rebuilt when it is missing. With no -wal, or an
+// empty one, nothing is in it, and the main file is read alone and immutable,
+// so SQLite takes no lock and creates no -wal or -shm.
 func refuseLegacy(ctx context.Context, path string) error {
-	sdb, err := sql.Open("sqlite", fileURI(path, "mode=ro&immutable=1"))
+	query := "mode=ro"
+	if st, err := os.Stat(path + "-wal"); err != nil || st.Size() == 0 {
+		query = "mode=ro&immutable=1"
+	}
+	sdb, err := sql.Open("sqlite", fileURI(path, query))
 	if err != nil {
 		return nil
 	}

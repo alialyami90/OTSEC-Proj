@@ -141,11 +141,11 @@ func hashes(t *testing.T, file string) [3]string {
 	return out
 }
 
-// A refusal writes nothing, even when the old database was left with a hot
-// -wal by a crash: an ordinary open folds the -wal into the file and deletes
-// it. The database file and its -wal and -shm are the same bytes after the
-// node's start and after the offline reader's, and none is created (B1's
-// ruling on #282).
+// A refusal writes neither the database nor its -wal, even when the old
+// database was left with a hot -wal by a crash: an ordinary open folds the
+// -wal into the file and deletes it. Both are the same bytes after the node's
+// start and after the offline reader's. The -shm is derived from the -wal, so
+// a read through the -wal may rewrite it (B1's ruling on #282).
 func TestLegacyRefusalWritesNothingWithAHotWAL(t *testing.T) {
 	src, srcFile := legacyStore(t)
 	_ = src
@@ -192,15 +192,121 @@ func TestLegacyRefusalWritesNothingWithAHotWAL(t *testing.T) {
 	if r.Mode != c5.ModeFailed || !strings.Contains(fmt.Sprint(r.Err, r.Alarms), "earlier layout") {
 		t.Fatalf("mode %s, err %v, alarms %v", r.Mode, r.Err, r.Alarms)
 	}
-	if got := hashes(t, file); got != before {
-		t.Fatalf("the refusal changed the files:\nbefore %v\nafter  %v", before, got)
+	if got := hashes(t, file); got[0] != before[0] || got[1] != before[1] {
+		t.Fatalf("the refusal changed the database or its -wal:\nbefore %v\nafter  %v", before, got)
 	}
 	if _, err := OpenReadOnly(bg, dir, testNode, evidenceDB.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
 		t.Fatalf("OpenReadOnly on the old layout: %v", err)
 	}
-	if got := hashes(t, file); got != before {
-		t.Fatalf("the offline reader changed the files:\nbefore %v\nafter  %v", before, got)
+	if got := hashes(t, file); got[0] != before[0] || got[1] != before[1] {
+		t.Fatalf("the offline reader changed the database or its -wal:\nbefore %v\nafter  %v", before, got)
 	}
+}
+
+// hotStore makes the files of a node that stopped with frames not yet
+// checkpointed: a store with one event, a connection that never checkpoints,
+// the statements in exec left in its -wal, and the three files copied while
+// that connection is still open, as a crash leaves them. It returns the
+// copy's directory and database file.
+func hotStore(t *testing.T, exec ...string) (dir, file string) {
+	t.Helper()
+	src := storeDir(t)
+	db := open1(t, src, evidenceDB, nil)
+	if _, err := testLog(t, db).Append(bg, rec("relay1/ser", c5.ClassAdapterEvidence, 1)); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := filepath.Glob(filepath.Join(src, "*.db"))
+	if len(m) != 1 {
+		t.Fatalf("database files %v", m)
+	}
+	db.Close()
+	live, err := sql.Open("sqlite", m[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	live.SetMaxOpenConns(1)
+	t.Cleanup(func() { live.Close() })
+	for _, q := range append([]string{"PRAGMA journal_mode=WAL", "PRAGMA wal_autocheckpoint=0"}, exec...) {
+		if _, err := live.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	dir = storeDir(t)
+	file = filepath.Join(dir, filepath.Base(m[0]))
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(m[0] + suffix)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file+suffix, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fi, err := os.Stat(file + "-wal"); err != nil || fi.Size() == 0 {
+		t.Fatalf("the copy has no hot -wal: %v", err)
+	}
+	return dir, file
+}
+
+// The format row can be in the -wal and not in the main file: a first-format
+// node that stopped before its first checkpoint. The main file alone then
+// reads as the current format, and an ordinary open would fold the -wal in
+// and delete it before the refusal. The refusal reads through the -wal, and
+// the database file and its -wal are byte for byte as found. The -shm is
+// derived from the -wal, so it may change (B6's #280 on #282, B1's ruling).
+func TestLegacyFormatOnlyInTheWALIsRefusedWithoutWriting(t *testing.T) {
+	dir, file := hotStore(t, `UPDATE meta SET value = '`+legacyFormat+`' WHERE key = 'format'`)
+	before := hashes(t, file)
+	env, err := NewEnv(Options{Dir: dir, Node: testNode, Database: evidenceDB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c5.RunStartup(bg, env, policy(evidenceDB))
+	unlock(r)
+	if r.Mode != c5.ModeFailed || !strings.Contains(fmt.Sprint(r.Err, r.Alarms), "earlier layout") {
+		t.Fatalf("mode %s, err %v, alarms %v", r.Mode, r.Err, r.Alarms)
+	}
+	if _, err := OpenReadOnly(bg, dir, testNode, evidenceDB.ID); err == nil || !strings.Contains(err.Error(), "earlier layout") {
+		t.Fatalf("OpenReadOnly on the old layout: %v", err)
+	}
+	got := hashes(t, file)
+	if got[0] != before[0] || got[1] != before[1] {
+		t.Fatalf("the refusal changed the database or its -wal:\nbefore %v\nafter  %v", before, got)
+	}
+}
+
+// The inverse: a store of the current format that stopped with a hot -wal is
+// not refused. It starts, and everything in the -wal is recovered (a rule
+// that refused every non-empty -wal would stop crash recovery).
+func TestCurrentFormatWithAHotWALStartsAndRecovers(t *testing.T) {
+	dir, file := hotStore(t, `INSERT INTO cursors (consumer, stream, through) VALUES ('hot', 'relay1/ser', 1)`)
+	env, err := NewEnv(Options{Dir: dir, Node: testNode, Database: evidenceDB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c5.RunStartup(bg, env, policy(evidenceDB))
+	unlock(r)
+	if r.Store != nil {
+		defer r.Store.Close()
+	}
+	if r.Mode == c5.ModeFailed || r.Err != nil {
+		t.Fatalf("mode %s, err %v, alarms %v", r.Mode, r.Err, r.Alarms)
+	}
+	db, ok := AsDB(r.Store)
+	if !ok {
+		t.Fatalf("store is %T", r.Store)
+	}
+	if n, err := db.LastCommitted(bg, "relay1/ser"); err != nil || n != 1 {
+		t.Fatalf("the event in the store: last %d, %v", n, err)
+	}
+	var through int64
+	if err := db.conn.QueryRowContext(bg, `SELECT through FROM cursors WHERE consumer = 'hot'`).Scan(&through); err != nil || through != 1 {
+		t.Fatalf("the cursor left in the -wal: %d, %v", through, err)
+	}
+	_ = file
 }
 
 // Once checkpointed, the file grows by no more than DiskBytesPerQuotaByte
