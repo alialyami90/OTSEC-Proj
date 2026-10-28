@@ -27,7 +27,7 @@ Evidence classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows` (GitHub-hosted r
 | --- | --- | --- | --- | --- | --- | --- |
 | #336, D4-21 cases on the real store (B6's own PR) | `claude/b6-d421-cases` | 10d03fb1 | 15/15 green (12 ci.yml jobs, govulncheck, 2 full-suite legs of `a6-windows-restart-marker.yml`); main has since moved past it (now 04bb5048) | B4, B3 (not yet posted) | Reviews, then B1 merges | When reviews come in, merge `origin/main` into the branch (no force push), wait for green, and tell B1. |
 | Review of #341, C7 0.7 code (B3) | PR head | 61cf141f | not checked by B6 | B6 | **PASS on the code, posted** (comment 6475731030, 2026-10-28): 12 of 15 mutants killed; A11 (cancel-during-`SetDeadline` guard) and A14 (a caller's cancel reported as `ErrTimeout`) survive, A12 is equivalent. The `Hoster` finding from 89fefe42 is fixed and pinned by `TestSEL751RunnerHosts`. | Before merge: confirm every CI job is green on the head; if B3 pushes again, re-run the probes and the mutants it touches. |
-| Review of #347, relay PR 2b (B5) | PR head | 55c8583b | not checked by B6 | B6 | **FAIL posted** (comment 6475680160): two probes show the supersede rule broken on lab nodes; U3 (the `(unsigned file)` suffix) and U5 (ack supersede) mutants survive. Off-lab refusal holds. | When B5 pushes: re-run both probes (in `/mnt/project-files/b6-wip/`) and the mutants (`mut347.sh` there), then post PASS or FAIL. |
+| Review of #347, relay PR 2b (B5) | PR head | 714203ee | pending at review time | B6 | **PASS on the code at 714203ee** (comment 6475908745): both probes pass, 7 of 7 mutants killed (including the earlier U3 and U5 survivors), `go test -race` clean. The FAIL at 55c8583b (comment 6475680160) is resolved. | Before merge: CI green on the head. Re-review only if B5 pushes again. |
 | Review of #346, C8 0.8 `config.baseline_recorded` (B3) | PR head | was 0ff42d08; now 95b91cd4 | not checked | B6 | Only read so far. B3 asks whether an event-kind acknowledgement stamped 0.8 or later must name a recorded digest. | Re-fetch the head (95b91cd4 or later). Check for a nil `Config` or `Target` dereference in the new `VerifyConfig` case; mutate the succession rule; answer B3 (draft answer in the README, written against 0ff42d08: recheck it). |
 | Review of B1's checkpoint consolidation | #337 | 77d758ff accepted (comment 6475723948) | n/a | B6 | B1 pushes the summary there | Review the consolidation when B1 says it is pushed. |
 | Checkpoint notes and probes (uncommitted test probes, never to be committed) | `/mnt/project-files/b6-wip/` (`README.md`, three `zz_b6probe*` files, `mut341.sh`; `b6-checkpoint/` is the same content) | n/a | n/a | n/a | Use them, then delete them once the reviews are posted | Copy a probe into a worktree of the PR, run it, and remove it before leaving. |
@@ -49,12 +49,12 @@ Windows evidence comes only from GitHub Actions. The latest Windows runs on B6 c
 
 ## 4. Next tasks, in priority order
 
-1. **NEXT ACTION: review #346, C8 0.8 `config.baseline_recorded` (P4-A6, item 4 of the B6 handoff), and answer B3's question.** Then re-review #347 when B5 pushes.
+1. **NEXT ACTION: review #346, C8 0.8 `config.baseline_recorded` (P4-A6, item 4 of the B6 handoff), and answer B3's question.** (#347 was re-reviewed and passes on the code at 714203ee.)
    - Paths: none changed. Use PR worktrees (PR head plus current `main`) with the probes from `/mnt/project-files/b6-wip/`; remove each probe and check `git status` before leaving.
    - Depends on: B3 (#346), B5 (#347).
    - Acceptance: each PR gets a PASS or FAIL comment with its mutant count, its probes and survivors explained, and the attribution footer.
    - Tests that prove it:
-     - #347 (re-review): the two probe tests fail at 55c8583b and pass after B5's fix; U3 and U5 are killed.
+     - #347: done at 714203ee; only CI on its head remains.
      - #341: done; only CI on its head remains (B1 checks it at merge).
      - #346: a mutant dropping each `VerifyConfig` succession branch is killed.
 2. **Land #336 (P4-A6, D4-21).** Get B4's and B3's reviews, merge `main` in and get CI green. Acceptance: merged with all ci.yml and govulncheck jobs green on its head.
