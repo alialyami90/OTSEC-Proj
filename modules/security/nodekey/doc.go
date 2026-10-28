@@ -58,5 +58,9 @@
 //     fingerprint (section 9, A5).
 //   - It does not renew certificates. Expiry is reported (Expiring) for node
 //     health 30 days ahead, and an expired certificate is refused at
-//     resolution.
+//     resolution (Certificate, TrustAnchors), with an error that wraps
+//     ErrCertificatePeriod only when the period is the sole fault. A caller
+//     that holds back one link for an expired certificate loads with
+//     LoadCertificate and LoadTrustAnchors, which leave the period to the
+//     TLS check (HR-13, D4-11).
 package nodekey
