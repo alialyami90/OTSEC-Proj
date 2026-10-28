@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -447,4 +448,112 @@ func sumDropped(s Status) (n int64) {
 		n += d
 	}
 	return n
+}
+
+// unknownShareRig holds the store with one known datagram in the writer, so
+// the unknown datagrams that follow queue. queue and maxBytes set which of
+// the two bounds is the tighter; the rates and the budget never are.
+func unknownShareRig(t *testing.T, queue int, maxBytes int64, mut func(*Config)) (g *rig, sc *streamCommitter, tap *tapLog, known, unknown net.Conn) {
+	t.Helper()
+	tap = &tapLog{gate: make(chan struct{})}
+	g, sc = unknownRig(t, asset.SyslogUDP, func(c *Config) {
+		c.Limits.Queue = queue
+		if maxBytes > 0 {
+			c.Limits.MaxQueueBytes = maxBytes
+		}
+		c.Limits.UnknownBytes = 64 << 20
+		c.Limits.Rate, c.Limits.Burst, c.Limits.UnknownRate, c.Limits.UnknownBurst = 100000, 100000, 100000, 100000
+		if mut != nil {
+			mut(c)
+		}
+		tap.inner = c.Log
+		c.Log = tap
+	})
+	known, unknown = g.udp(addrA), g.udp(addrB)
+	t.Cleanup(func() { known.Close(); unknown.Close() })
+	known.Write([]byte(m1))
+	g.wait("first read", func() bool { return g.r.Status().Received == 1 })
+	time.Sleep(50 * time.Millisecond)
+	return g, sc, tap, known, unknown
+}
+
+// TestUnknownShareIsReleasedWhenTheStoreDrains (B3's mutants on #317): the
+// share bounds what unknown senders hold at once, not what they may ever
+// send. After the store drains what filled it, a listener admits unknown
+// datagrams again, more than a quarter of the queue in all, by places and
+// by bytes.
+func TestUnknownShareIsReleasedWhenTheStoreDrains(t *testing.T) {
+	pad := strings.Repeat("x", 980)
+	for _, c := range []struct {
+		name     string
+		queue    int
+		maxBytes int64
+		pad      string
+		share    int // the unknown datagrams the share admits at once
+	}{
+		{"places", 40, 0, "", 10},
+		{"bytes", 1000, 64 << 10, pad, 16},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g, sc, tap, _, unknown := unknownShareRig(t, c.queue, c.maxBytes, nil)
+			send := func(from, n int) {
+				for i := from; i < from+n; i++ {
+					unknown.Write([]byte(fmt.Sprintf("<13>unknown %03d %s", i, c.pad)))
+					time.Sleep(time.Millisecond)
+				}
+			}
+			stored := func() int { return len(sc.events(t, testUnknown)) }
+			// Fill the share and past it with the store held.
+			send(0, 3*c.share)
+			g.wait("the flood read", func() bool { return g.r.Status().Received == int64(1+3*c.share) })
+			if got, want := g.r.Status().Dropped[DropUnknownQueueFull], int64(2*c.share); got != want {
+				t.Fatalf("%d dropped as %s with the share full, want %d; status %+v", got, DropUnknownQueueFull, want, g.r.Status())
+			}
+			close(tap.gate)
+			g.wait("the share stored", func() bool { return stored() == c.share })
+			// Drained: further rounds, each within the share, are all stored.
+			total, dropped := c.share, g.r.Status().Dropped[DropUnknownQueueFull]
+			for round := 0; round < 3; round++ {
+				n := c.share / 2
+				send(1000+round*n, n)
+				total += n
+				g.wait("the round stored", func() bool { return stored() == total })
+			}
+			if got := g.r.Status().Dropped[DropUnknownQueueFull]; got != dropped {
+				t.Errorf("%d more dropped as %s after the store drained; status %+v", got-dropped, DropUnknownQueueFull, g.r.Status())
+			}
+		})
+	}
+}
+
+// TestUnknownShareDropSpendsNoBudget: a datagram dropped for the share is
+// dropped before payUnknown, so the unknown budget is what it was.
+func TestUnknownShareDropSpendsNoBudget(t *testing.T) {
+	const queue = 40
+	// A small budget over a long window, so its refill during the test is
+	// a fraction of one datagram.
+	g, _, tap, _, unknown := unknownShareRig(t, queue, 0, func(c *Config) {
+		c.Limits.UnknownBytes, c.Limits.UnknownWindow = minUnknownBytes, time.Hour
+	})
+	defer close(tap.gate)
+	tokens := func() float64 {
+		g.r.mu.Lock()
+		defer g.r.mu.Unlock()
+		return g.r.budget.tokens
+	}
+	for i := 0; i < queue/4; i++ {
+		unknown.Write([]byte(fmt.Sprintf("<13>unknown %03d", i)))
+		time.Sleep(time.Millisecond)
+	}
+	g.wait("the share filled", func() bool { return g.r.Status().Received == int64(1+queue/4) })
+	before := tokens()
+	for i := 0; i < 3*queue; i++ {
+		unknown.Write([]byte(fmt.Sprintf("<13>unknown over %03d %s", i, strings.Repeat("x", 1000))))
+		time.Sleep(time.Millisecond)
+	}
+	g.wait("the rest dropped", func() bool { return g.r.Status().Dropped[DropUnknownQueueFull] == int64(3*queue) })
+	// The bucket only refills; a spend for a dropped datagram would lower it.
+	if after := tokens(); after < before {
+		t.Errorf("unknown budget fell from %.0f to %.0f for datagrams dropped at the share", before, after)
+	}
 }
