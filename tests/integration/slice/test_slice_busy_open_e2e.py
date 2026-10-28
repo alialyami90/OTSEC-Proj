@@ -138,6 +138,9 @@ def test_the_restart_reaches_the_chain(got):
     them, and nothing was lost."""
     rows = got["audit"]
     show = [(r["seq"], r["time"]["utc"], r["action"], r.get("detail")) for r in rows]
+    # Pytest cuts a long assertion message, so the whole chain goes to the
+    # captured output, which a failure prints in full.
+    print("\n".join(repr((r["seq"], r["time"]["utc"], r["action"], r["outcome"], r.get("correlation_id"), r.get("detail"))) for r in rows))
     idx = lambda pred: [i for i, r in enumerate(rows) if pred(r)]
     starts = idx(lambda r: r["action"] == "service.start")
     recovered = idx(lambda r: r["action"] == "store.mode_change" and r["detail"] == "database audit: failed to collecting")
