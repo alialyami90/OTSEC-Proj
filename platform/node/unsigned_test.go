@@ -1,11 +1,14 @@
 package node
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/audit"
+	"otsec.local/otsec/contracts/authz"
 )
 
 // setTargets sets the target of every endpoint of every asset. The config
@@ -165,5 +168,97 @@ func TestUnsignedSeqResetAck(t *testing.T) {
 	}
 	if !q.hasAlarm(AlarmUnsignedAdminFileAccepted, SeqResetAckFileName) {
 		t.Fatalf("no accepted alarm: %+v", q.st.Snapshot("x").Alarms)
+	}
+}
+
+// The ack twin of the quarantine supersede test (B3 on #347): a signed
+// node.seq_reset_ack naming install key X in admin_dir supersedes the
+// unsigned seq-reset-ack.json naming X, which is ignored and raises the
+// notice; the unsigned file naming another key is not superseded (it is
+// refused as any other key is). The signed one is then acted on.
+func TestSignedSeqResetAckWinsOverTheUnsignedFile(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := newAdminCollector()
+	s := newScheduler(t, r, col)
+	writeAdminFile(t, nc, "admin-request-first.json", authz.KindCredentialRevoke, signN(t, authz.KindCredentialRevoke, 1, nil))
+	s.relayAdmin(bg)
+	if err := nc.WriteInstallKey("ik_test_second"); err != nil {
+		t.Fatal(err)
+	}
+	col.mu.Lock()
+	col.installKey = kid("ik_test_second")
+	col.mu.Unlock()
+	writeAdminFile(t, nc, "admin-request-second.json", authz.KindCredentialRevoke, signN(t, authz.KindCredentialRevoke, 2, func(p *authz.AdminRequest) { p.InstallKeyID = kid("ik_test_second") }))
+	s.relayAdmin(bg) // finds the new key and opens the reset
+	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.OpenResetKey != kid("ik_test_second") {
+		t.Fatalf("no reset open: %+v", cs)
+	}
+	has := func(code string) bool {
+		return slices.ContainsFunc(st.Snapshot("site-a-node1").Alarms, func(a StatusAlarm) bool { return a.Code == code })
+	}
+
+	// A signed acknowledgement of X is in admin_dir and read, but not yet sent.
+	writeAdminFile(t, nc, "admin-request-ack.json", authz.KindNodeSeqResetAck,
+		signN(t, authz.KindNodeSeqResetAck, 3, func(p *authz.AdminRequest) { p.InstallKeyID = kid("ik_test_second") }))
+	files, _, _ := s.scanAdmin()
+	s.setUnsignedWants(files)
+
+	// An unsigned file naming another key is not superseded: refused as
+	// any other key is, with no ignore notice.
+	writeAck(t, nc, "ik_test_other")
+	s.checkAck(bg)
+	if has(AlarmUnsignedAdminFileIgnored) || !has(AlarmResetAckRefused) {
+		t.Fatalf("the file naming another key was treated as superseded or not refused: %+v", st.Snapshot("site-a-node1").Alarms)
+	}
+	// The unsigned file naming X is ignored, and nothing is acknowledged.
+	writeAck(t, nc, "ik_test_second")
+	s.checkAck(bg)
+	if !has(AlarmUnsignedAdminFileIgnored) || has(AlarmUnsignedAdminFileAccepted) {
+		t.Fatalf("the unsigned file naming X was not ignored: %+v", st.Snapshot("site-a-node1").Alarms)
+	}
+	if cs := st.Snapshot("site-a-node1").Collector; cs == nil || cs.OpenResetKey != kid("ik_test_second") {
+		t.Fatalf("the reset was acknowledged by the unsigned file: %+v", cs)
+	}
+	if len(actionsOf(t, r, audit.ActionCollectorSeqResetAck)) != 0 {
+		t.Fatal("an acknowledgement was recorded from the unsigned file")
+	}
+
+	// The signed one is acted on, and only that.
+	s.relayAdmin(bg)
+	acks := actionsOf(t, r, audit.ActionCollectorSeqResetAck)
+	if len(acks) != 1 || strings.Contains(acks[0].Detail, "unsigned") || !strings.Contains(acks[0].Detail, "admin-request-ack.json") {
+		t.Fatalf("ack records %+v", acks)
+	}
+}
+
+// A payload whose own kind is not the file's names nothing: the collector
+// would refuse it, and an unverified payload may withhold the unsigned file
+// only when it plainly asks for the same clear (B3 on #347).
+func TestUnsignedWantsReadOnlyAPayloadOfTheFilesKind(t *testing.T) {
+	want := func(kind authz.RequestKind, p authz.AdminRequest) unsignedWants {
+		t.Helper()
+		b, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return unsignedWantsOf([]*adminFile{{kind: kind, signed: &authz.AdminSigned{Payload: b}}})
+	}
+	ack := authz.AdminRequest{Kind: authz.KindNodeSeqResetAck, InstallKeyID: "ik-x", NodeSeqResetAck: &authz.NodeSeqResetAckBody{}}
+	if w := want(authz.KindNodeSeqResetAck, ack); !w.ack["ik-x"] {
+		t.Fatalf("a matching ack payload names nothing: %+v", w)
+	}
+	ack.Kind = authz.KindCredentialRevoke
+	if w := want(authz.KindNodeSeqResetAck, ack); len(w.ack) != 0 {
+		t.Fatalf("a payload of another kind supersedes the unsigned ack: %+v", w)
+	}
+	clr := authz.AdminRequest{Kind: authz.KindNodeQuarantineClear, NodeQuarantineClear: &authz.NodeQuarantineClearBody{AssetID: relayID, ManifestSHA256: "ab"}}
+	if w := want(authz.KindNodeQuarantineClear, clr); !w.quarantine[relayID+" ab"] {
+		t.Fatalf("a matching clear payload names nothing: %+v", w)
+	}
+	clr.Kind = authz.KindCredentialRevoke
+	if w := want(authz.KindNodeQuarantineClear, clr); len(w.quarantine) != 0 {
+		t.Fatalf("a payload of another kind supersedes the unsigned clear: %+v", w)
 	}
 }
