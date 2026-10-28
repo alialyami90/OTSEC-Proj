@@ -29,10 +29,12 @@ type Config struct {
 	Assets            []map[string]any `json:"assets"`
 	Targets           []map[string]any `json:"targets"`
 	Schedule          []Collection     `json:"schedule"`
-	CollectorPipe     string           `json:"collector_pipe"`
-	CollectorPeer     string           `json:"collector_peer,omitempty"`
-	PolicyVersion     uint64           `json:"policy_version"`
-	RegisterVersion   uint64           `json:"register_version"`
+	// EventBaselines is the event_baselines section (AddEventBaseline).
+	EventBaselines  []EventBaseline `json:"event_baselines,omitempty"`
+	CollectorPipe   string          `json:"collector_pipe"`
+	CollectorPeer   string          `json:"collector_peer,omitempty"`
+	PolicyVersion   uint64          `json:"policy_version"`
+	RegisterVersion uint64          `json:"register_version"`
 	// LabTLSFiles is the lab flag tls_dir needs (D2-12); New sets it.
 	LabTLSFiles bool   `json:"lab_tls_files,omitempty"`
 	TLSDir      string `json:"tls_dir,omitempty"`
@@ -41,6 +43,33 @@ type Config struct {
 	AdminDir    string `json:"admin_dir,omitempty"`
 	// CollectorPublicDir holds install-key.json (WriteInstallKey).
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
+}
+
+// EventBaseline is one event_baselines entry: an asset and a whole C10
+// parameter object.
+type EventBaseline struct {
+	AssetID string         `json:"asset_id"`
+	Params  map[string]any `json:"params"`
+}
+
+// EventBaselineParams is a valid parameter object, with the two minima small
+// enough for a test (an hour and ten events): C10's own values are 14 days
+// and 200 events, and the node has no defaults.
+func EventBaselineParams() map[string]any {
+	return map[string]any{
+		"min_duration_s": 3600, "min_events": 10,
+		"repeats_n": 3, "repeats_window_s": 600,
+		"rate_bucket_s": 3600, "rate_factor_pct": 200, "rate_min": 2,
+		"periodic_min_occurrences": 4, "periodic_spread_pct": 10, "absence_tolerance_pct": 50,
+		"time_clock": "received", "max_types": 4096, "alarm_hold_s": 3600, "max_alarms_per_hold": 8,
+	}
+}
+
+// AddEventBaseline adds an event_baselines entry for an asset with
+// EventBaselineParams.
+func (c *Config) AddEventBaseline(assetID string) *Config {
+	c.EventBaselines = append(c.EventBaselines, EventBaseline{AssetID: assetID, Params: EventBaselineParams()})
+	return c
 }
 
 type Store struct {
