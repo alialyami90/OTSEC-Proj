@@ -281,6 +281,79 @@ func TestLearnerWorkingSetBoundary(t *testing.T) {
 	}
 }
 
+// TestLearnerOverflowSaturates: the types met while the working set was full
+// are counted by distinct key up to MaxTypesCeiling of them; past that the
+// count is a lower bound and the result says so.
+func TestLearnerOverflowSaturates(t *testing.T) {
+	l := learner(t, nil)
+	for i := range baseline.MaxTypesCeiling + baseline.MaxTypesCeiling {
+		observe(t, l, ser(fmt.Sprintf("T%05d", i), "Asserted", at(1), ""))
+	}
+	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != baseline.MaxTypesCeiling {
+		t.Fatalf("held %d, overflow %d", h, o)
+	}
+	r := finish(t, l)
+	if r.OverflowSaturated {
+		t.Errorf("saturated at exactly %d counted: the count is still exact", baseline.MaxTypesCeiling)
+	}
+	exact := r.Baseline.Counts.TypesOverflow
+	if want := int64(baseline.MaxTypesCeiling + baseline.MaxTypesCeiling - len(r.Baseline.Types)); exact != want {
+		t.Errorf("overflow %d, want %d", exact, want)
+	}
+	// One more distinct key, and the same one again.
+	observe(t, l, ser("X", "Asserted", at(2), ""), ser("X", "Asserted", at(3), ""))
+	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != baseline.MaxTypesCeiling {
+		t.Errorf("held %d, overflow %d: the set stops growing at the ceiling", h, o)
+	}
+	r = finish(t, l)
+	if !r.OverflowSaturated || r.Baseline.Counts.TypesOverflow != exact {
+		t.Errorf("saturated %v, overflow %d, want a flagged lower bound of %d", r.OverflowSaturated, r.Baseline.Counts.TypesOverflow, exact)
+	}
+}
+
+// TestLearnerTiesAreByteOrder: on equal counts the lower key in byte order is
+// kept, both for max_types and for the byte cap: "C" and "D" sort before "a"
+// and "b".
+func TestLearnerTiesAreByteOrder(t *testing.T) {
+	names := []string{"b", "C", "a", "D"}
+	feed := func(l *eventbaseline.Learner) {
+		for i, n := range names {
+			observe(t, l, ser(n, "Asserted", at(i+1), ""))
+		}
+	}
+	kept := func(r *eventbaseline.Result) (out []string) {
+		for _, ty := range r.Baseline.Types {
+			out = append(out, ty.Key.Element)
+		}
+		return out
+	}
+	l := learner(t, func(p *baseline.Params) { p.MaxTypes = 2 })
+	feed(l)
+	if got := kept(finish(t, l)); fmt.Sprint(got) != "[C D]" {
+		t.Errorf("max_types kept %v", got)
+	}
+	full := func() *eventbaseline.Result {
+		l := learner(t, nil)
+		feed(l)
+		return finish(t, l)
+	}()
+	for cap := len(full.Bytes) - 1; cap > 0; cap-- {
+		l, err := eventbaseline.NewLearner(eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: unitParams(), Version: 1, MaxBytes: cap})
+		if err != nil {
+			t.Fatal(err)
+		}
+		feed(l)
+		r := finish(t, l)
+		if n := len(r.Baseline.Types); n < 4 {
+			if want := []string{"C", "D", "a", "b"}[:n]; fmt.Sprint(kept(r)) != fmt.Sprint(want) {
+				t.Errorf("the byte cap kept %v, want %v", kept(r), want)
+			}
+			return
+		}
+	}
+	t.Fatal("no cap left a type out")
+}
+
 // TestLearnerByteCapLeavesOutTheLeastCounted: a record that does not fit the
 // cap drops the types with the lowest count, ties by key.
 func TestLearnerByteCapLeavesOutTheLeastCounted(t *testing.T) {

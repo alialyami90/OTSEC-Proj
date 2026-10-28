@@ -64,7 +64,9 @@
 //     the baseline is active. A learner holds at most MaxTypesCeiling types
 //     while it observes, so a type first met past that is counted without
 //     being held: the rule is exact for an asset that shows that many types
-//     or fewer in its period.
+//     or fewer in its period, and types_overflow is a lower bound once more
+//     than MaxTypesCeiling such types were met. On a tie in count the lower
+//     key in byte order is kept.
 //   - The baseline hash (Hash, D4-4 item 5): SHA-256 over the stored
 //     record's exact bytes (the record's bytes, never a C5 frame), with no
 //     canonical JSON. C7 0.6 node.baseline_ack names it; C9 uses the same
