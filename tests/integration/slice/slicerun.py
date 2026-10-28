@@ -425,6 +425,9 @@ class Slice:
         self.procs = {}
         self.logs = {}
         self.argv = {}
+        # name -> every environment the harness started that process with,
+        # restarts included (V-S11; B3 on #242).
+        self.start_envs = {}
         self.sim_extra = ()
         self.sim_password = CANARY
         self.service = None
@@ -444,6 +447,8 @@ class Slice:
         out = open(os.path.join(self.d, name + ".log"), "ab")
         self.logs[name] = out.name
         p = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, env=env)
+        # What the child inherits: env, or this process's own environment.
+        self.start_envs.setdefault(name, []).append(dict(os.environ if env is None else env))
         self.procs[name] = p
         self.argv[name] = (argv, env)
         return p
@@ -615,6 +620,17 @@ class Slice:
             if os.getuid() == 0 or os.stat(path).st_uid != 0:
                 raise
             return None
+
+    def start_environ(self, name):
+        """Every environment the harness started name with, as the bytes
+        /proc/<pid>/environ would hold, or None for a process the harness
+        did not start (an installed service, started by the SCM). It is
+        what the process was given, not what it holds now: a value the
+        process set itself is not in it."""
+        envs = self.start_envs.get(name)
+        if not envs:
+            return None
+        return b"".join(os.fsencode(f"{k}={v}") + b"\0" for env in envs for k, v in env.items())
 
     def image(self, name):
         """The path the process runs from: the installed copy in service

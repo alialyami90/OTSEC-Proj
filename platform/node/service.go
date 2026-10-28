@@ -38,6 +38,11 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if err != nil {
 		return err
 	}
+	// Every reference is resolved now, so the key register is loaded:
+	// record its new entries (section 9).
+	keysLeft := rt.RecordNodeKeys(ctx)
+	rt.CheckNodeKeys()
+	rt.RecordLabTLSFiles(ctx)
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
 	if err != nil {
 		return err
@@ -80,7 +85,11 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 				return
 			case <-t.C:
 				fw.Check(ctx)
-				if len(cfg.Listeners) > 0 {
+				if keysLeft > 0 {
+					keysLeft = rt.RecordNodeKeys(ctx)
+				}
+				rt.CheckNodeKeys()
+				if len(cfg.Listeners) > 0 || cfg.KeyRegister != "" {
 					ls.Publish()
 					st.Write(string(cfg.NodeID))
 				}

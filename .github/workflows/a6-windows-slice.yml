@@ -3,9 +3,9 @@
 # are gate item 1's owed items (docs/phase-3-exit.md): the canary scan of
 # the services' command lines (test_slice_e2e.py, #242), the
 # unknown-restart leg, and the admin relay end to end with config\admin's
-# ACLs (test_slice_admin_relay_windows_e2e.py). The run installs otsec-node and otsec-collector with
-# the real installer, drives them through the SCM, and removes everything
-# it created; the last step checks that independently.
+# ACLs (test_slice_admin_relay_windows_e2e.py). The run installs
+# otsec-node and otsec-collector with the real installer, drives them
+# through the SCM, and removes everything it created; the last step checks that independently.
 #
 # Hosted Windows only, no secrets, read-only token. It runs by hand and on
 # pull requests that change this file or the slice tests. Evidence class:
