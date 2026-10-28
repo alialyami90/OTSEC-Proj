@@ -35,7 +35,7 @@ func c2v05(t *testing.T) (adapter.Result, *register.Package, adapter.Invocation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := register.Decode(read("register", "testdata", "sel-751.json"))
+	p, err := register.Decode(read("register", "testdata", "sel-751-rev4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

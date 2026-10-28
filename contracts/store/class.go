@@ -64,6 +64,21 @@ const (
 	FailClosed FullAction = "fail-closed"
 )
 
+// FullAlarm is the alarm a class raises when its quota cannot hold the next
+// record: audit-store-full for the audit class, syslog-unknown-full for the
+// syslog-unknown class, and store-quota-reached for every other class. The
+// runtime refusal and startup raise the same code, so one condition is one
+// alarm to an operator and to the C6 views (B6 and B1 on #324).
+func FullAlarm(c StreamClass) AlarmCode {
+	switch c {
+	case ClassAudit:
+		return AlarmAuditFull
+	case ClassSyslogUnknown:
+		return AlarmSyslogUnknownFull
+	}
+	return AlarmQuotaReached
+}
+
 // ActionFor is the fixed storage-full action for each class (ADR-0004 item
 // 9). It is not configurable: a node never evicts unconfirmed records of any
 // class to make room.

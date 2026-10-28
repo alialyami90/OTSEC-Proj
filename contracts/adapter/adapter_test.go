@@ -360,7 +360,7 @@ func TestProbeGrammar(t *testing.T) {
 // sel751 is A2's SEL-751 register content (C3).
 func sel751(t *testing.T) RegisterLookup {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "register", "testdata", "sel-751.json"))
+	b, err := os.ReadFile(filepath.Join("..", "register", "testdata", "sel-751-rev4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

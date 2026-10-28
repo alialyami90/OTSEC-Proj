@@ -44,7 +44,7 @@ func start(t *testing.T, c *Config, dir string) (*Runtime, *Status, *[]string) {
 		mu     sync.Mutex // Status calls oslog from any goroutine
 	)
 	st := NewStatus(filepath.Join(dir, "status.json"), func(s string) { mu.Lock(); logged = append(logged, s); mu.Unlock() }, nil)
-	r, err := Start(bg, c, RuntimeOptions{Status: st, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}, BusyTimeout: heldBusyTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}

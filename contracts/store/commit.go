@@ -66,9 +66,15 @@ type Record struct {
 	Holds []Hold
 }
 
-// Bytes is what the record adds to a commit: its event and its capture.
+// Bytes is what the record adds to a commit and to its class's quota: its
+// event, its capture and its source cursor, the bytes the runtime refusal
+// counts. The record cap (Quota.MaxRecordBytes), the commit cap
+// (GroupOptions.MaxCommitBytes) and startup's check that a class has room for
+// its largest record use the same measure. The source cursor is counted since
+// #324, so a record with a cursor that is near a cap can now be refused, or
+// commit alone, where before it was not (B6 on #324).
 func (r Record) Bytes() int64 {
-	n := int64(len(r.Event))
+	n := int64(len(r.Event)) + int64(len(r.SourceCursor))
 	if r.Capture != nil {
 		n += int64(len(r.Capture.Bytes))
 	}

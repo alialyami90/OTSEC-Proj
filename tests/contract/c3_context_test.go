@@ -21,7 +21,7 @@ import (
 
 func c3Rev4(t *testing.T, edit func(p map[string]any)) ([]byte, error) {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "register", "testdata", "sel-751.json"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "register", "testdata", "sel-751-rev4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
