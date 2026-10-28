@@ -15,9 +15,9 @@ import (
 )
 
 // Identifier is this contract's identifier, stamped on every record.
-const Identifier = "otsec.baseline/0.1"
+const Identifier = "otsec.baseline/0.2"
 
-var self = version.ID{Name: "baseline", Major: 0, Minor: 1}
+var self = version.ID{Name: "baseline", Major: 0, Minor: 2}
 
 // Proposed defaults from docs/verification.md, "R4.8 observation period and
 // measures". They are parameters, recorded in every baseline, never
@@ -27,9 +27,18 @@ const (
 	DefaultMinEvents   = 200
 )
 
-// MaxTypesCeiling is the most types any baseline may hold. Params.MaxTypes
-// is at or below it.
-const MaxTypesCeiling = 4096
+// MaxTypesCeiling is the most types a baseline may hold. Params.MaxTypes is
+// at or below it. 0.2 lowered it from 4096 (MaxTypesCeiling01) so that a
+// learner and a detector at every ceiling checkpoint in one C5 configuration
+// record (D4-30). A record stamped 0.1 is still read under 0.1's ceiling.
+// The basis is documented-untested: an SEL-751 reports at most 96 Relay Word
+// bits in SER (751 IM, Table 4.122), so at most 192 SER types; a chatty
+// non-SEL Syslog source may exceed 512, and Counts.TypesOverflow above zero
+// then says the asset is only partly baselined.
+const (
+	MaxTypesCeiling   = 512
+	MaxTypesCeiling01 = 4096
+)
 
 // MaxBytes is C10's own cap on a stored baseline. It is set at or below
 // the MaxRecordBytes of C5 0.4's configuration class, which stores the
@@ -328,7 +337,11 @@ func (b *Baseline) Validate() error {
 	if b.Learner.Name == "" || b.Learner.Version == "" {
 		c.fail(CodeMissing, "learner", "name and version are required")
 	}
-	b.Params.check(c)
+	ceiling := int64(MaxTypesCeiling)
+	if v, err := version.Parse(b.Schema); err == nil && v.Name == self.Name && v.Major == 0 && v.Minor <= 1 {
+		ceiling = MaxTypesCeiling01
+	}
+	b.Params.check(c, ceiling)
 	start, end := b.Period.check(c)
 	b.checkCounts(c)
 	b.checkTypes(c, start, end)
@@ -338,7 +351,17 @@ func (b *Baseline) Validate() error {
 	return errors.Join(c.errs...)
 }
 
-func (p *Params) check(c *checker) {
+// Validate checks the parameters as a 0.2 record states them: what
+// Baseline.Validate checks of params, with max_types at most
+// MaxTypesCeiling. A node checks its configured parameters with it before it
+// starts a learner.
+func (p *Params) Validate() error {
+	c := &checker{}
+	p.check(c, MaxTypesCeiling)
+	return errors.Join(c.errs...)
+}
+
+func (p *Params) check(c *checker, maxTypes int64) {
 	positive := []struct {
 		name string
 		v    int64
@@ -372,8 +395,8 @@ func (p *Params) check(c *checker) {
 	if p.MaxAlarmsPerHold > MaxAlarmsPerHoldCeiling {
 		c.fail(CodeRange, "params.max_alarms_per_hold", "%d is above %d", p.MaxAlarmsPerHold, MaxAlarmsPerHoldCeiling)
 	}
-	if p.MaxTypes > MaxTypesCeiling {
-		c.fail(CodeRange, "params.max_types", "%d is above %d", p.MaxTypes, MaxTypesCeiling)
+	if p.MaxTypes > maxTypes {
+		c.fail(CodeRange, "params.max_types", "%d is above %d", p.MaxTypes, maxTypes)
 	}
 	if p.TimeClock != ClockReceived && p.TimeClock != ClockDevice {
 		c.fail(CodeForm, "params.time_clock", "%q is not %s or %s", p.TimeClock, ClockReceived, ClockDevice)

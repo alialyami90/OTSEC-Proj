@@ -2,7 +2,7 @@
 // behaviour baseline (R4.8, P4-A4): it learns, per asset, what the asset's
 // SER rows and Syslog messages normally look like, and raises explainable
 // alarms when the asset departs from it. The record and the alarm are
-// contract C10, otsec.baseline/0.1 (contracts/baseline); the rules are
+// contract C10, otsec.baseline/0.2 (contracts/baseline); the rules are
 // docs/verification.md, "R4.8 observation period and measures", and B1's
 // rulings D4-4 and D4-9. Deterministic rules only; no machine learning.
 //
@@ -91,7 +91,9 @@
 // came before, so the fields that can differ are: whether an alarm is raised
 // at all (the holds), Events and EventsTotal (they include breaks held since
 // the pair's last alarm, so Events[0] is not the breaking event), NotCounted
-// and NotCountedTotal, and BaselineValue and Observation for repeats and rate.
+// and NotCountedTotal, BaselineValue and Observation for repeats and rate, and
+// the Observation of any rule once the pair cap has dropped a record (it then
+// ends with the count of breaks not listed).
 // A replay that dedupes alarms should therefore replay from the baseline's
 // activation, and key an alarm by its asset, Baseline (the hash), Rule, Key
 // and AtUTC. That is unique: alarms of one rule and key are at least
@@ -133,23 +135,26 @@
 // V-S12 failure, a failure still open, which rows are possible duplicates)
 // are the feeder's, passed in Obs and Gap as before.
 //
+// The seal detects corruption, not tampering: it is a SHA-256, not a MAC,
+// so a restore trusts the store as much as the node does.
+//
 // Size. Snapshot takes the caller's bound in bytes (the node passes what its
-// checkpoint record can hold), and never more than MaxSnapshotBytes (8 MiB).
-// A state that does not fit is refused with ErrSnapshotTooLarge, within about
-// one type's bytes of the bound rather than after it is built in full, and
-// the learner or detector goes on unharmed, so the node keeps its previous
-// snapshot and says so. Measured
-// (TestSnapshotSizes, docs/phase4/B4-snapshot.md): the GT-INJ learner after
-// 14 days is 1.2 to 1.6 KB; a learner at the ceiling of 4096 types with
-// 128-byte names, 30 occurrences each, is 1.9 MB (475 bytes a type); a type
-// at the most the caps let it hold is 17 KB for a full window of 4096
-// stamps, or 17 KB for 4096 distinct gaps (which no 14-day period reaches: at most
-// about 550 at periodic_spread_pct 10). A detector is 15 KB fresh for a
-// baseline of 1910 types (the most that fit the 512 KiB record), 340 KB with
-// every type's repeats window full, and 1.3 MB with the new-type memory
-// full (16,384 types) and a held break for each. Those detector figures are
-// at repeats_n 5 and short names, not at the ceilings: D4-30 requires a
-// checkpoint at every configured ceiling, and the means are open.
+// checkpoint record can hold), and never more than MaxSnapshotBytes
+// (1.25 MiB). A state that does not fit is refused with ErrSnapshotTooLarge,
+// within about one type's bytes of the bound rather than after it is built
+// in full, and the learner or detector goes on unharmed, so the node keeps
+// its previous snapshot and says so. Every list the state holds is capped
+// (MaxTypes, windowCap, gapCap and gapBudget, MaxGaps, the new-type memory,
+// MaxNewTypePairs, the held-ID budget, MaxStreams), so no state reaches the
+// bound: TestSnapshotMaximalCase measures the widest state each half's format
+// allows, every list at its cap, every string at its longest and every
+// number at its widest encoding, at 1,167,117 bytes for the learner and
+// 910,592 for the detector, under ConfigRecordBytes less 64 KiB, C5's
+// envelope and the feeder's own state (D4-30). TestSnapshotSizes gives
+// reachable figures: the GT-INJ learner after 14 days is 1.2 to 1.6 KB; a
+// learner of 512 types with 128-byte names, 30 occurrences each, is about
+// 250 KB; a detector of 512 types with every repeats window full and the
+// new-type memory full of long names is about 140 KB at repeats_n 5.
 //
 // # Limits
 //
@@ -160,28 +165,48 @@
 //     asset (ties in any fixed order). Anything earlier is returned as
 //     ErrOrder and not taken. The node reads several streams for one asset,
 //     so the feeder sorts; a late event is the feeder's to handle.
-//   - Max per window saturates at 4096 occurrences (windowCap), which is why
-//     repeats_n is at most 4095: the repeats rule is exact within its range.
+//   - Max per window saturates at 32 occurrences (windowCap), which is why
+//     repeats_n is at most 31 (MaxRepeatsN): the repeats rule is exact
+//     within its range, and a repeats alarm lists its whole window. A
+//     larger repeats_n is refused, not clamped.
 //   - Periodic types. Gaps are whole seconds, rounded to nearest. A type
 //     that can never meet periodic_spread_pct is dropped from periodic
 //     tracking as soon as that is certain, and one with more than 4096
-//     distinct gap lengths is not found periodic.
-//   - Max types (D4-15). While learning, at most baseline.MaxTypesCeiling
-//     types are held per asset; a type first met while that many are held is
-//     counted (Counts.TypesOverflow) and never held. Finish keeps the
-//     max_types with the highest count, ties by key, then leaves out the
-//     lowest counts until the record fits the byte cap, and counts every
-//     type left out. This is exact for an asset that shows 4096 types or
-//     fewer in its period; past that the asset is pathological and the
-//     overflow count says so (Result.OverflowSaturated: the count itself
-//     stopped at 4096). After activation a type left out alarms as new.
-//   - The new-type memory is bounded (16,384 types); a flood of distinct
-//     new types beyond that alarms on each occurrence, under the alarm
-//     bounds. The detector's record of held breaks per (rule, type) is not
-//     bounded: one entry is kept for every distinct new type that alarmed or
-//     was held, so such a flood grows the detector's memory and its snapshot
-//     until the snapshot is refused (ErrSnapshotTooLarge). Found while
-//     bounding the snapshot, and reported to B1 (B4-snapshot.md, F1).
+//     distinct gap lengths, or one met when the learner holds 16,384 gap
+//     lengths over all types, is not found periodic (GapBudgetDrops counts
+//     the latter). Past MaxGaps (256) collection gaps, a gap is merged into
+//     the last, so the period is longer, never shorter. A gap whose reason
+//     is not a token, that ends before it starts, or whose time is outside
+//     the years 1 to 9999 is refused (ErrGap).
+//   - Max types (D4-15, D4-30). At most 512 types per asset (MaxTypes, C10
+//     0.2's ceiling) are held while learning; a type first met while that
+//     many are held is counted (Counts.TypesOverflow) and never held. The
+//     basis is documented-untested: an SEL-751 reports at most 96 Relay Word
+//     bits in SER (751 IM, Table 4.122), so at most 192 SER types. A chatty
+//     non-SEL Syslog source may exceed 512; types_overflow above zero then
+//     says the asset is only partly baselined, and the node reports it as
+//     status. Finish keeps the max_types with the highest count, ties by
+//     key, then leaves out the lowest counts until the record fits the byte
+//     cap, and counts every type left out. Left-out types are remembered by
+//     a 16-byte SHA-256 prefix of their key, up to 512 of them
+//     (Result.OverflowSaturated says the count stopped). After activation a
+//     type left out alarms as new.
+//   - The new-type memory holds 2048 types (16-byte digests); a flood of
+//     distinct new types beyond that alarms on each occurrence, under the
+//     alarm bounds. A digest collision can only make a new type look seen,
+//     so it can hide a new-type alarm of that asset and nothing else. The
+//     detector's record of held breaks per (rule, type) for the new-type
+//     rule is bounded too (MaxNewTypePairs, 512; F1, D4-26), and the IDs all
+//     records list together are bounded at 2048. Once an alarm hold ends, a
+//     record that lists nothing is dropped (no change to any output); if the
+//     cap is still reached, records whose hold ended are dropped with the
+//     breaks they list. Those breaks, and any held past the ID budget, are
+//     counted and stated by the next alarm ("N more held breaks beyond the
+//     detector's caps are not listed"). The count is exact; the events are
+//     not listed. The other rules' records are bounded by the baseline's
+//     types and are not swept.
+//   - Streams. The IDs a detector holds may name at most 16 (node, stream)
+//     pairs (MaxStreams); a detector past that is refused a snapshot.
 //   - Absence (D4-15). A periodic type whose deadline ran out before the
 //     acknowledgement is given activation + interval + tolerance as its
 //     deadline, so a source that fell silent during the wait and never

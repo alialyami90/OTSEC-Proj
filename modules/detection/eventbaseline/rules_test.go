@@ -23,7 +23,7 @@ func unitParams() baseline.Params {
 		RepeatsN: 3, RepeatsWindowS: 600,
 		RateBucketS: 3600, RateFactorPct: 200, RateMin: 2,
 		PeriodicMinOccurrences: 4, PeriodicSpreadPct: 10, AbsenceTolerancePct: 50,
-		TimeClock: baseline.ClockReceived, MaxTypes: 4096, AlarmHoldS: 3600, MaxAlarmsPerHold: 8,
+		TimeClock: baseline.ClockReceived, MaxTypes: 512, AlarmHoldS: 3600, MaxAlarmsPerHold: 8,
 	}
 }
 
@@ -255,25 +255,25 @@ func TestLearnerMaxTypesKeepsTheHighestCounts(t *testing.T) {
 	}
 }
 
-// TestLearnerWorkingSetBoundary: the learner holds MaxTypesCeiling types; the
+// TestLearnerWorkingSetBoundary: the learner holds MaxTypes types; the
 // next type met is counted and never held, and a repeat of it is not
 // counted twice.
 func TestLearnerWorkingSetBoundary(t *testing.T) {
 	l := learner(t, nil)
-	for i := range baseline.MaxTypesCeiling {
+	for i := range eventbaseline.MaxTypes {
 		observe(t, l, ser(fmt.Sprintf("T%04d", i), "Asserted", at(1), ""))
 	}
-	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != 0 {
-		t.Fatalf("after %d types: held %d, overflow %d", baseline.MaxTypesCeiling, h, o)
+	if h, o := l.TypesHeld(); h != eventbaseline.MaxTypes || o != 0 {
+		t.Fatalf("after %d types: held %d, overflow %d", eventbaseline.MaxTypes, h, o)
 	}
 	observe(t, l, ser("X", "Asserted", at(2), ""), ser("X", "Asserted", at(3), ""), ser("T0000", "Asserted", at(4), ""))
-	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != 1 {
-		t.Errorf("the 4097th type: held %d, overflow %d", h, o)
+	if h, o := l.TypesHeld(); h != eventbaseline.MaxTypes || o != 1 {
+		t.Errorf("the type past MaxTypes: held %d, overflow %d", h, o)
 	}
 	r := finish(t, l)
-	// 4096 types do not fit the byte cap, so the record is cut by count, and
-	// everything left out, and the type never held, is counted.
-	if c := r.Baseline.Counts; c.TypesOverflow != int64(1+baseline.MaxTypesCeiling-len(r.Baseline.Types)) || c.Events != baseline.MaxTypesCeiling+3 {
+	// Whatever the record keeps, everything left out, and the type never
+	// held, is counted.
+	if c := r.Baseline.Counts; c.TypesOverflow != int64(1+eventbaseline.MaxTypes-len(r.Baseline.Types)) || c.Events != eventbaseline.MaxTypes+3 {
 		t.Errorf("%d types, counts %+v", len(r.Baseline.Types), c)
 	}
 	if _, ok := r.Baseline.Lookup(baseline.Key{Source: baseline.SourceSER, Element: "T0000", State: "Asserted"}); !ok {
@@ -282,27 +282,27 @@ func TestLearnerWorkingSetBoundary(t *testing.T) {
 }
 
 // TestLearnerOverflowSaturates: the types met while the working set was full
-// are counted by distinct key up to MaxTypesCeiling of them; past that the
+// are counted by distinct key up to MaxTypes of them; past that the
 // count is a lower bound and the result says so.
 func TestLearnerOverflowSaturates(t *testing.T) {
 	l := learner(t, nil)
-	for i := range baseline.MaxTypesCeiling + baseline.MaxTypesCeiling {
+	for i := range eventbaseline.MaxTypes + eventbaseline.MaxTypes {
 		observe(t, l, ser(fmt.Sprintf("T%05d", i), "Asserted", at(1), ""))
 	}
-	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != baseline.MaxTypesCeiling {
+	if h, o := l.TypesHeld(); h != eventbaseline.MaxTypes || o != eventbaseline.MaxTypes {
 		t.Fatalf("held %d, overflow %d", h, o)
 	}
 	r := finish(t, l)
 	if r.OverflowSaturated {
-		t.Errorf("saturated at exactly %d counted: the count is still exact", baseline.MaxTypesCeiling)
+		t.Errorf("saturated at exactly %d counted: the count is still exact", eventbaseline.MaxTypes)
 	}
 	exact := r.Baseline.Counts.TypesOverflow
-	if want := int64(baseline.MaxTypesCeiling + baseline.MaxTypesCeiling - len(r.Baseline.Types)); exact != want {
+	if want := int64(eventbaseline.MaxTypes + eventbaseline.MaxTypes - len(r.Baseline.Types)); exact != want {
 		t.Errorf("overflow %d, want %d", exact, want)
 	}
 	// One more distinct key, and the same one again.
 	observe(t, l, ser("X", "Asserted", at(2), ""), ser("X", "Asserted", at(3), ""))
-	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != baseline.MaxTypesCeiling {
+	if h, o := l.TypesHeld(); h != eventbaseline.MaxTypes || o != eventbaseline.MaxTypes {
 		t.Errorf("held %d, overflow %d: the set stops growing at the ceiling", h, o)
 	}
 	r = finish(t, l)

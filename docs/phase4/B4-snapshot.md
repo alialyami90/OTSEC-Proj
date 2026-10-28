@@ -67,15 +67,22 @@ Mutation check (local, not committed): 42 mutants of `snapshot.go` that drop or 
 **The largest snapshot is `MaxSnapshotBytes`, 8 MiB (8,388,608 bytes).** That is the size B5 can bound the checkpoint at. What reaches it:
 
 - *Learner.* The fixed part at 4096 types is about 2 MB. What adds to it is the repeats window and the gap lengths of a type, 17 KB each at the caps, so the limit is reached with about 370 types at that maximum. A window of 4096 stamps needs 4096 occurrences of one type inside the repeats window (a flood). 4096 distinct gap lengths needs 4097 occurrences at least 5.7 hours apart, which no 14-day period holds: at `periodic_spread_pct` 10 a type that is still held as periodic has at most about 550 distinct gap lengths in 14 days (2 KB). The state itself has no byte bound beyond these caps; the limit is the bound.
-- *Detector.* Bounded by the baseline (at most what fits 512 KiB, so about 2000 types) and the new-type memory (16,384 keys), **except for the pairs** (F1 below).
+- *Detector.* Bounded by the baseline (at most what fits 512 KiB, so about 2000 types), the new-type memory (16,384 keys) and the pair cap (`MaxNewTypePairs`, 4096; F1 below). With the cap, a flood of 114,688 distinct new types leaves a snapshot of 553 KB.
 
 A state above the limit is not truncated. `Snapshot` returns `ErrSnapshotTooLarge`, the object is unharmed, and the node keeps its previous snapshot and raises a health event. A restart then resumes at the older snapshot's position and replays from there, which is correct because the output is deterministic.
 
-## Finding F1 (for B1): the detector's pairs are unbounded
+## F1: the detector's pairs, and how they are bounded (B1's ruling, D4-26)
 
-`Detector.pairs` holds one entry for every (rule, type) that raised or held a break, and nothing removes it. The new-type memory stops at 16,384 keys, but past that every distinct new type still raises (under the alarm holds) and still adds an entry. Measured by feeding distinct new types to a detector (not committed): the snapshot was 0.98 MB at 16,384, 2.3 MB at 49,152 and 4.8 MB at 114,688 distinct new types, and refused at 245,760. The memory grows the same way. A sender that varies its message text can do this to its own asset (the template normalisation only folds digits). Until it is bounded, `ErrSnapshotTooLarge` is the backstop, and the package documentation says so under Limits.
+`Detector.pairs` holds one record for every (rule, type) that raised or held a break. The new-type memory stops at 16,384 keys, but past that every distinct new type still raised (under the alarm holds) and still added a record, and nothing removed one. Measured before the fix (not committed): the snapshot was 0.98 MB at 16,384, 2.3 MB at 49,152 and 4.8 MB at 114,688 distinct new types, and refused at 245,760. A sender that varies its message text can do this to its own asset (the template normalisation only folds digits).
 
-A fix needs a decision, so it is not in this change. The smallest one: drop an entry once its hold has ended and it holds no events (behaviour-neutral, since a missing entry and an expired empty one act alike), and cap the rest at the new-type memory's size, counting the pairs past the cap so the next alarm says breaks were not tracked. The second part changes what an alarm lists in a flood. I can do it as a small PR if B1 agrees.
+B1's four rules, and what was built:
+
+1. A record whose alarm hold ended and that lists no held break is dropped. A missing record and an expired empty one act alike, so no output changes. Test: `TestPairSweepChangesNoOutput` (the output equals that of a detector with no cap and no sweeping, and the capped detector without the sweep differs, so the test is not vacuous).
+2. The rest are capped at `MaxNewTypePairs` (4096), a constant beside the new-type memory's 16,384. The sweep covers new-type records only: an absence alarm is stamped with its deadline, so dropping an absence record is not output-neutral.
+3. Past the cap no break is lost silently or re-alarms without bound. A break held with no record is counted (`d.beyond`); when the cap is still reached after pass 1, pass 2 drops records whose hold ended that list breaks, and adds the breaks they listed to the count. The next alarm ends its observation with "; N more held breaks beyond the cap of M tracked new types are not listed" and resets the count. Test: `TestPairSweepDropsListedPairsLast`.
+4. A flood of 114,688 distinct new types keeps the records at the cap and the snapshot at 553 KB, and the counts stay exact: over three floods (154,690 breaks) every break is an alarm, a break listed by an alarm or a record, or a break counted and stated. Test: `TestPairCapFloodStaysBoundedAndCountsStayExact`.
+
+What changes for an operator: in a flood the alarm lists fewer held events than before, and says how many it does not list. Sweeps run at most once per alarm hold. The snapshot carries the next sweep time, the count not yet stated and each record's birth, and a restore rebuilds the record count and refuses a state where a record is in the wrong place. `ErrSnapshotTooLarge` stays as the backstop.
 
 ## What the feeder must do (for B5)
 

@@ -52,11 +52,25 @@ type Detector struct {
 	types map[baseline.Key]*watch
 	// periodic lists the watched periodic types in key order.
 	periodic []*watch
-	newSeen  map[baseline.Key]struct{}
-	activeNS int64
-	lastNS   int64
+	// newSeen holds the digests of the new types alarmed (at most
+	// newSeenMax); inBaseline those of the baseline's types.
+	newSeen    map[digest]struct{}
+	inBaseline map[digest]bool
+	activeNS   int64
+	lastNS     int64
 
 	pairs map[pair]*pending
+	// newPairs counts the pairs of the new-type rule, the only ones whose
+	// number is not bounded by the baseline (MaxNewTypePairs).
+	newPairs int
+	// nextSweep is the time before which the new-type pairs are not swept
+	// again for ones that expired.
+	nextSweep int64
+	// beyond counts the breaks held for want of a pair to record them in,
+	// or of room in heldIDBudget to list them, since an alarm last stated
+	// it; heldIDs counts the IDs the pending records list.
+	beyond  int64
+	heldIDs int
 	// The asset's hold: it opened at holdFrom with raised alarms.
 	holdOpen bool
 	holdFrom int64
@@ -89,11 +103,14 @@ type stamp struct {
 
 type pair struct {
 	rule baseline.Rule
-	key  baseline.Key
+	key  digest
 }
 
 // pending is what breaks of a pair added up since its last alarm.
 type pending struct {
+	// born is when the record was made; a pair that never raised ends its
+	// hold AlarmHoldS after it.
+	born       int64
 	lastAlarm  int64
 	raisedOnce bool
 	ids        []event.EventID
@@ -112,9 +129,12 @@ func NewDetector(c DetectorConfig) (*Detector, error) {
 	if err := b.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrConfig, err)
 	}
+	if len(b.Types) > MaxTypes {
+		return nil, fmt.Errorf("%w: the baseline has %d types, above %d (D4-30)", ErrConfig, len(b.Types), MaxTypes)
+	}
 	d := &Detector{
 		b: b, hash: c.Hash, p: &b.Params,
-		types: map[baseline.Key]*watch{}, newSeen: map[baseline.Key]struct{}{},
+		types: map[baseline.Key]*watch{}, newSeen: map[digest]struct{}{}, inBaseline: map[digest]bool{},
 		pairs: map[pair]*pending{}, activeNS: c.ActiveFrom.UnixNano(), lastNS: c.ActiveFrom.UnixNano(),
 	}
 	for i := range b.Types {
@@ -139,6 +159,7 @@ func NewDetector(c DetectorConfig) (*Detector, error) {
 			d.periodic = append(d.periodic, w)
 		}
 		d.types[t.Key] = w
+		d.inBaseline[digestOf(t.Key)] = true
 	}
 	return d, nil
 }
@@ -179,9 +200,9 @@ func (d *Detector) Observe(o Obs) (Output, error) {
 		if o.NotCounted {
 			return out, nil
 		}
-		if _, seen := d.newSeen[k]; !seen {
-			if len(d.newSeen) < baseline.MaxTypesCeiling*4 {
-				d.newSeen[k] = struct{}{}
+		if dg := digestOf(k); !d.seenNew(dg) {
+			if len(d.newSeen) < newSeenMax {
+				d.newSeen[dg] = struct{}{}
 			}
 			d.raiseNew(&out, k, text, e, t, use)
 		}
@@ -226,9 +247,17 @@ func (d *Detector) Tick(now time.Time) (Output, error) {
 	return d.advance(ns), nil
 }
 
+func (d *Detector) seenNew(dg digest) bool { _, ok := d.newSeen[dg]; return ok }
+
 // HeldNow is the number of alarms the asset could not raise in the hold now
 // open, or 0.
 func (d *Detector) HeldNow() int64 { return d.held }
+
+// BeyondNow is the number of breaks that were held and are listed nowhere,
+// because the new-type rule already tracked MaxNewTypePairs types: they are
+// counted in HeldNow while their hold lasts, and the next alarm of the asset
+// states the count in its Observation and starts it again from zero.
+func (d *Detector) BeyondNow() int64 { return d.beyond }
 
 // advance raises absence alarms for every deadline before now.
 func (d *Detector) advance(now int64) (out Output) {
@@ -366,23 +395,35 @@ type raise struct {
 
 // raise applies the holds (Params.AlarmHoldS, MaxAlarmsPerHold) and, if the
 // break is not held, appends its alarm.
+//
+// Each (rule, type) has a pending record that holds its hold and the breaks
+// held since its last alarm. The records of the four rules on baseline types
+// are bounded by the baseline. The new-type rule's are not, so they are
+// bounded here (D4-26, F1): at MaxNewTypePairs the ones whose hold ended and
+// that list nothing are dropped, which changes no output (see sweepNewPairs),
+// and a break that still finds none is raised or held on the asset's hold
+// alone and, if held, counted in d.beyond for the next alarm to state. A held
+// break past heldIDBudget is counted there too (hold).
 func (d *Detector) raise(out *Output, now int64, r raise) {
 	hold := nsOf(d.p.AlarmHoldS)
-	pr := pair{r.rule, r.key}
+	pr := pair{r.rule, digestOf(r.key)}
 	pd := d.pairs[pr]
 	if pd == nil {
-		pd = &pending{}
-		d.pairs[pr] = pd
+		pd = d.newPair(pr, r.at)
 	}
 	if d.holdOpen && r.at >= d.holdFrom+hold {
 		d.holdOpen, d.raised, d.held = false, 0, 0
 	}
 	switch {
-	case pd.raisedOnce && r.at < pd.lastAlarm+hold:
-		pd.hold(r)
+	case pd != nil && pd.raisedOnce && r.at < pd.lastAlarm+hold:
+		d.hold(pd, r)
 		return
 	case d.holdOpen && d.raised >= d.p.MaxAlarmsPerHold:
-		pd.hold(r)
+		if pd != nil {
+			d.hold(pd, r)
+		} else {
+			d.beyond++
+		}
 		d.held++
 		if d.held == 1 {
 			out.Held = &Held{AssetID: d.b.AssetID, HoldS: d.p.AlarmHoldS, Held: 1}
@@ -390,8 +431,12 @@ func (d *Detector) raise(out *Output, now int64, r raise) {
 		return
 	}
 	// Raise it, with the breaks held since this pair's last alarm.
-	ids := slices.Clone(pd.ids)
-	total := pd.total
+	var ids []event.EventID
+	var total int64
+	if pd != nil {
+		ids = slices.Clone(pd.ids)
+		total = pd.total
+	}
 	for _, id := range r.ids {
 		if !slices.Contains(ids, id) {
 			total++
@@ -403,10 +448,16 @@ func (d *Detector) raise(out *Output, now int64, r raise) {
 	if r.idsTotal > int64(len(r.ids)) {
 		total += r.idsTotal - int64(len(r.ids))
 	}
+	obs := r.obs
+	if d.beyond > 0 {
+		note := fmt.Sprintf("; %d more held breaks beyond the detector's caps are not listed", d.beyond)
+		obs += note // every rule's observation is under 120 bytes, so the note fits ExplainMax whole
+		d.beyond = 0
+	}
 	a := &baseline.Alarm{
 		Schema: baseline.Identifier, AssetID: d.b.AssetID, Baseline: d.hash, BaselineVersion: d.b.Version,
 		Rule: r.rule, Key: r.key, KeyText: r.keyText, Params: r.params,
-		BaselineValue: clip(r.value), Observation: clip(r.obs), Clock: baseline.ClockReceived,
+		BaselineValue: clip(r.value, baseline.ExplainMax), Observation: clip(obs, baseline.ExplainMax), Clock: baseline.ClockReceived,
 		AtUTC: fmtNS(r.at), Events: ids, EventsTotal: total,
 	}
 	if r.w != nil {
@@ -414,30 +465,102 @@ func (d *Detector) raise(out *Output, now int64, r raise) {
 		r.w.notCounted, r.w.notCountedTotal = nil, 0
 	}
 	out.Alarms = append(out.Alarms, a)
-	*pd = pending{lastAlarm: r.at, raisedOnce: true}
+	if pd != nil {
+		d.heldIDs -= len(pd.ids)
+		*pd = pending{born: pd.born, lastAlarm: r.at, raisedOnce: true}
+	}
 	if !d.holdOpen {
 		d.holdOpen, d.holdFrom, d.raised, d.held = true, r.at, 0, 0
 	}
 	d.raised++
 }
 
-// hold adds a held break's event to what the pair's next alarm will list.
-func (pd *pending) hold(r raise) {
+// newPair adds the record of a pair that has none, or returns nil when the
+// pair is a new-type one and MaxNewTypePairs are tracked already.
+func (d *Detector) newPair(pr pair, at int64) *pending {
+	if pr.rule == baseline.RuleNewType {
+		if d.newPairs >= pairCap {
+			d.sweepNewPairs(at)
+		}
+		if d.newPairs >= pairCap {
+			return nil
+		}
+		d.newPairs++
+	}
+	pd := &pending{born: at}
+	d.pairs[pr] = pd
+	return pd
+}
+
+// sweepNewPairs makes room among the new-type pairs, at most once in an alarm
+// hold. First it drops the ones whose hold ended and that list no break. Such a
+// pair acts exactly as no pair does: the next break of its type is not held by
+// it, and it adds nothing to the next alarm, so this changes no output. That is
+// only so for the new-type rule, whose breaks are stamped with the event's
+// received time and so never earlier than at, which the Observe order
+// guarantees; an absence alarm is stamped with its deadline, which can be
+// earlier than the time it was noticed, so the pairs of the other rules are
+// kept (and are bounded by the baseline's types).
+//
+// If that leaves no room, it drops the ones whose hold ended and that list
+// breaks no alarm has yet listed. Those breaks stay counted (d.beyond, which
+// the next alarm states), but they will not be listed if their type recurs.
+func (d *Detector) sweepNewPairs(at int64) {
+	if !pairPrune || at < d.nextSweep {
+		return
+	}
+	hold := nsOf(d.p.AlarmHoldS)
+	d.nextSweep = at + hold
+	ended := func(pd *pending) bool {
+		if pd.raisedOnce {
+			return at >= pd.lastAlarm+hold
+		}
+		return at >= pd.born+hold
+	}
+	for pr, pd := range d.pairs {
+		if pr.rule == baseline.RuleNewType && ended(pd) && len(pd.ids) == 0 && pd.total == 0 {
+			delete(d.pairs, pr)
+			d.newPairs--
+		}
+	}
+	if d.newPairs < pairCap {
+		return
+	}
+	for pr, pd := range d.pairs {
+		if pr.rule == baseline.RuleNewType && ended(pd) {
+			d.beyond += pd.total
+			d.heldIDs -= len(pd.ids)
+			delete(d.pairs, pr)
+			d.newPairs--
+		}
+	}
+}
+
+// hold adds a held break's event to what the pair's next alarm will list. A
+// break whose ID would be listed when heldIDBudget IDs are listed already is
+// counted in d.beyond instead, so the alarm's list stays the first of its
+// total (C10) and the next alarm's note states it (D4-30).
+func (d *Detector) hold(pd *pending, r raise) {
 	if r.brk == (event.EventID{}) {
 		return
 	}
 	if len(pd.ids) > 0 && pd.ids[len(pd.ids)-1] == r.brk {
 		return
 	}
-	pd.total++
 	if len(pd.ids) < baseline.MaxEventIDs {
+		if d.heldIDs >= heldIDBudget {
+			d.beyond++
+			return
+		}
 		pd.ids = append(pd.ids, r.brk)
+		d.heldIDs++
 	}
+	pd.total++
 }
 
-func clip(s string) string {
-	if len(s) > baseline.ExplainMax {
-		return s[:baseline.ExplainMax]
+func clip(s string, max int) string {
+	if len(s) > max {
+		return s[:max]
 	}
 	return s
 }
