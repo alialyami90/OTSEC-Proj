@@ -25,6 +25,12 @@ import (
 // runs. Nothing more is received on it until the node restarts.
 const AlarmListenerStopped = "syslog-listener-stopped"
 
+// AlarmReadBufferShort: a syslog-udp listener asked for a socket receive
+// buffer (read_buffer_bytes) and the OS granted less, or did not say what
+// it granted. Datagrams that arrive while the buffer is full are lost before
+// the listener reads them and counted by no one but the OS.
+const AlarmReadBufferShort = "syslog-read-buffer-short"
+
 // AlarmListenerCertExpiring: a syslog-tls listener's certificate expires
 // within ListenerCertWarning, or has expired. The listener keeps presenting
 // it until the node restarts with a new one, and senders that check it
@@ -63,7 +69,9 @@ type Listening struct {
 	receivers []*receive.Receiver
 	bound     map[string]net.Addr
 	plaintext map[string]bool
-	sizing    map[string]ListenerSizing
+	// readBuffer is the receive buffer each UDP listener asked for.
+	readBuffer map[string]int
+	sizing     map[string]ListenerSizing
 	// unknown counts the record bytes stored from unknown senders since
 	// start, per listener (liveLog); spent is what they stored in the
 	// window before start, as counted from the stream (unknownSpent), or
@@ -115,7 +123,7 @@ type heldListener struct {
 // restart does not refill it (D3-3). If that cannot be counted, the
 // budget starts empty and AlarmUnknownSpentUncounted is raised.
 func NewListening(rt *Runtime) (*Listening, error) {
-	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{},
+	ls := &Listening{rt: rt, bound: map[string]net.Addr{}, plaintext: map[string]bool{}, readBuffer: map[string]int{},
 		unknown: map[string]*atomic.Int64{}, spent: map[string]int64{}, notAfter: map[string]time.Time{}, watch: map[string]*certWatch{}}
 	if len(rt.cfg.Listeners) == 0 {
 		return ls, nil
@@ -146,6 +154,7 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			Received:  rt.received,
 			Limits:    sizing[l.ID].limits(),
 		}
+		cfg.Limits.ReadBuffer = l.ReadBuffer
 		// The receiver splits a batch at the caps of the Log behind it, which
 		// are the ones the node built that Log with (C5 0.4, 0.5).
 		if d := rt.dbFor(stream); d != nil {
@@ -193,6 +202,7 @@ func NewListening(rt *Runtime) (*Listening, error) {
 		}
 		ls.receivers = append(ls.receivers, r)
 		ls.plaintext[l.ID] = l.Plaintext
+		ls.readBuffer[l.ID] = l.ReadBuffer
 		ls.unknown[l.ID] = unknown
 		ls.spent[l.ID] = spent
 	}
@@ -224,6 +234,7 @@ func (ls *Listening) Listen() error {
 		ls.bound[r.Status().ID] = a
 	}
 	for _, r := range ls.receivers {
+		ls.checkReadBuffer(r.Status())
 		if s := r.Status(); ls.plaintext[s.ID] {
 			ls.rt.audit(context.Background(), audit.ActionNodePostureChange, audit.OutcomeInfo, ReasonPlaintextListener,
 				fmt.Sprintf("listener %s receives %s on %s in plaintext: no sender authentication or integrity (D3-5)", s.ID, s.Transport, ls.bound[s.ID]))
@@ -231,6 +242,22 @@ func (ls *Listening) Listen() error {
 	}
 	ls.checkTargets()
 	return nil
+}
+
+// checkReadBuffer raises AlarmReadBufferShort when listener s asked for a
+// receive buffer and the OS granted less. Linux doubles a request and caps
+// it at net.core.rmem_max, so a request above the cap is granted less than
+// asked; Windows grants what it is given.
+func (ls *Listening) checkReadBuffer(s receive.Status) {
+	asked := ls.readBuffer[s.ID]
+	if asked == 0 || (s.ReadBufferErr == "" && s.ReadBuffer >= asked) {
+		return
+	}
+	detail := fmt.Sprintf("read_buffer_bytes is %d and the OS granted %d: datagrams that arrive while the socket buffer is full are lost before the listener reads them, and only the OS counts them", asked, s.ReadBuffer)
+	if s.ReadBufferErr != "" {
+		detail = fmt.Sprintf("read_buffer_bytes is %d and the OS did not say what it granted (%s): datagrams that arrive while the socket buffer is full are lost before the listener reads them, and only the OS counts them", asked, s.ReadBufferErr)
+	}
+	ls.rt.opt.Status.RaiseTarget("listener "+s.ID, AlarmReadBufferShort, detail+". On Linux the request is capped by net.core.rmem_max")
 }
 
 // checkTargets raises AlarmTargetSmallForListeners for each target too
@@ -435,6 +462,7 @@ func (ls *Listening) Publish() {
 		id := r.Status().ID
 		s := listenerStatus(r.Status())
 		s.Plaintext = ls.plaintext[id]
+		s.ReadBufferAsked = ls.readBuffer[id]
 		sz := ls.sizing[id]
 		s.Unknown = &UnknownShare{
 			HourlyBytes: sz.UnknownBytes, BoundBytes: sz.UnknownBound,
@@ -474,6 +502,12 @@ type ListenerStatus struct {
 	UnknownOverflow    bool             `json:"unknown_overflow,omitempty"`
 	Held               bool             `json:"held,omitempty"`
 	LastErr            string           `json:"last_error,omitempty"`
+	// ReadBuffer is the receive buffer the OS granted a UDP listener, in
+	// bytes; ReadBufferAsked is read_buffer_bytes (0: the OS default was
+	// kept); ReadBufferErr says why the OS did not report it.
+	ReadBuffer      int    `json:"read_buffer_granted_bytes,omitempty"`
+	ReadBufferAsked int    `json:"read_buffer_asked_bytes,omitempty"`
+	ReadBufferErr   string `json:"read_buffer_error,omitempty"`
 	// Unknown is the unknown senders' storage: their budget and bound
 	// (ListenerSizings) and what they stored since start (HR-11, D3-3).
 	Unknown *UnknownShare `json:"unknown,omitempty"`
@@ -521,6 +555,7 @@ func listenerStatus(s receive.Status) ListenerStatus {
 		Truncated: s.Truncated, Misframed: s.Misframed, Discarded: s.Discarded,
 		UnknownSenders: s.UnknownSenders, UnknownOverflow: s.UnknownOverflow,
 		Held: s.Held, LastErr: s.LastErr,
+		ReadBuffer: s.ReadBuffer, ReadBufferErr: s.ReadBufferErr,
 	}
 }
 

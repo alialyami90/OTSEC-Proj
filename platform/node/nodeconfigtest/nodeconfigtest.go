@@ -56,6 +56,8 @@ type Listener struct {
 	Target    string       `json:"target"`
 	Plaintext bool         `json:"plaintext,omitempty"`
 	TLS       *ListenerTLS `json:"tls,omitempty"`
+	// ReadBuffer is a syslog-udp listener's read_buffer_bytes.
+	ReadBuffer int `json:"read_buffer_bytes,omitempty"`
 }
 
 type ListenerTLS struct {
