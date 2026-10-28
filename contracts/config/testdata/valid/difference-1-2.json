@@ -1,16 +1,16 @@
 {
-  "schema": "otsec.config/0.2",
+  "schema": "otsec.config/0.3",
   "kind": "config.difference",
   "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
   "rule": "sel-751-sho/2",
   "target": "simulated",
   "from": {
-    "snapshot_digest": "sha256:4996e186bbc8b6d7255161e798a01df8d057b06cbec6e3cb1168ad0b4673fd1a",
+    "snapshot_digest": "sha256:83060361e9e729584cfb9f89d1266500b12396e4e7f9053d15cfcf5cb30bc586",
     "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
     "retrieved_at": "2026-10-27T09:10:06.0Z"
   },
   "to": {
-    "snapshot_digest": "sha256:84f0b697407403e2ed01c7de7e74c6e39d0d1db1af1dad4dfa22d6b7e75f6af9",
+    "snapshot_digest": "sha256:37c58b4ad0226784c7d1606472ab503014bef647a17c18408a79624a00ba37d2",
     "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a52",
     "retrieved_at": "2026-10-27T09:20:06.0Z"
   },
