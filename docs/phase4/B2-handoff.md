@@ -38,6 +38,9 @@ Failures of the run as a whole: `failed.timeout`, `failed.response_too_large`, `
 
 C2 0.6 (new codes `failed.config_unparsable`, record kinds, `Limits.ForRun`, `RegisterLookup.Invocable` for runs), C3 0.3, C9 0.2 (rule `sel-751-sho/2`, which replaces `/1`). Exported for the collector: `sel751.Hosts(operationID) bool`. `contracts/README.md` rows for C2 and C9 are B1's (#337).
 
+- **Record size against the 1.5 MiB cap (simulated).** With S22's 8,734 settings and values filling the run's 512 KiB limit, the snapshot is 690,328 bytes and the record (snapshot plus transcript) 1,210,476 bytes, 77% of the cap (`TestConfigMaximalRecordFitsTheCap`, built with `config.FromResult` and checked with `CheckAgainst`). B5's derived bound is in `contracts/config/bound_test.go`.
+- **Gap, raised to B1 on #338 as a D4-13 question.** Neither the adapter nor C9 bounds the number of settings. A transcript at the byte limit packed with one-character settings gives 65,822 settings, a 1,775,279-byte snapshot and a 2,295,738-byte record, over the cap (`TestConfigDenseRecordExceedsTheCap` pins this). A relay that really prints so many is not expected, but a faulty one could, and the commit would then be refused by C5.
+
 ## Limitations
 
 - **Touchscreen settings are not read and not baselined** (owner, 2026-10-28). The model is in scope. The 175 `/HMI` settings (S22 Table 7.80 p. 7.87) have no `SHO` form, and a change in them is not seen. No document may claim the snapshot covers them.
@@ -54,7 +57,7 @@ C2 0.6 (new codes `failed.config_unparsable`, record kinds, `Limits.ForRun`, `Re
 ## Dependencies for others
 
 - B3: wire `sel.config.read_all` through C7 0.7 with `sel751.Hosts` and the longer run deadline (the default 120 s is below the run's 300 s).
-- B5: the node stores snapshots in the C5 0.4 configuration class (1.5 MiB record cap); the maximal case above fits.
+- B5: the node stores snapshots in the C5 0.4 configuration class (1.5 MiB record cap). A record is the snapshot plus the transcript. See the first risk: the cap holds for a relay that prints no more settings than S22 lists, and nothing enforces that count yet.
 - B6: hardware procedures H-13 for the first real `SHO` captures when the owner authorizes a lab relay.
 
 ## Files changed

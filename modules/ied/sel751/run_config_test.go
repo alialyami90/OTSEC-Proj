@@ -466,11 +466,36 @@ func TestConfigStepTimeoutIsTheRegisters(t *testing.T) {
 	}
 }
 
+// configRecordCap is the configuration database's record cap, 1.5 MiB (D4-13;
+// platform/node.ConfigRecordBytes).
+const configRecordCap = 3 << 19
+
+const nameDigits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// nameN is the i-th setting name in order of length: 0..9, A..Z, then two
+// characters, then three. They are unique, and as short as names can be.
+func nameN(i int) string {
+	for l, base := 1, 0; ; l++ {
+		span := 1
+		for k := 0; k < l; k++ {
+			span *= len(nameDigits)
+		}
+		if i < base+span {
+			b := make([]byte, l)
+			for k, v := l-1, i-base; k >= 0; k-- {
+				b[k] = nameDigits[v%len(nameDigits)]
+				v /= len(nameDigits)
+			}
+			return string(b)
+		}
+		base += span
+	}
+}
+
 // denseSection prints about n bytes of the densest section C9's tokenizer
-// reads: unique one-to-three character names, a one-byte value each, eight to
-// a line. It maximizes the records per byte of transcript.
-func denseSection(n int) []byte {
-	const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+// reads: unique names, a one-byte value each, eight to a line. It maximizes
+// the settings per byte of transcript.
+func denseSection(n, _ int) []byte {
 	var out []byte
 	var line []string
 	flush := func() {
@@ -479,25 +504,8 @@ func denseSection(n int) []byte {
 			line = nil
 		}
 	}
-	name := func(i int) string {
-		for l, base := 1, 0; ; l++ {
-			span := 1
-			for k := 0; k < l; k++ {
-				span *= len(digits)
-			}
-			if i < base+span {
-				b := make([]byte, l)
-				for k, v := l-1, i-base; k >= 0; k-- {
-					b[k] = digits[v%len(digits)]
-					v /= len(digits)
-				}
-				return string(b)
-			}
-			base += span
-		}
-	}
 	for i := 0; len(out) < n; i++ {
-		line = append(line, name(i)+":=1")
+		line = append(line, nameN(i)+":=1")
 		if len(line) == 8 {
 			flush()
 		}
@@ -506,15 +514,31 @@ func denseSection(n int) []byte {
 	return out
 }
 
-// The largest result a configuration run can produce is an ok run whose
-// transcript reaches the run's byte limit and whose sections are as dense as
-// the tokenizer allows. Its JSON must fit one RunOutcome frame (C7, B3's
-// MaxOutcomeBytes test); the measured size is logged, simulated evidence only.
-func TestConfigMaximalResultFrame(t *testing.T) {
+// fullSection prints about n bytes in exactly k settings, one to a line, the
+// values as long as it takes: the most a transcript of n bytes can put into a
+// snapshot of k settings.
+func fullSection(n, k int) []byte {
+	var out []byte
+	per := n/k - 4 // the name, ":=" and the line end
+	for i := 0; i < k; i++ {
+		nm := nameN(i)
+		out = append(out, nm+":="+strings.Repeat("V", max(1, per-len(nm)))+"\r\n"...)
+	}
+	return out
+}
+
+// maximalRun plays an ok run whose transcript reaches the run's byte limit,
+// each of the 22 replaceable sections filled by section(bytes, n), where n is
+// the section's share of the settings (S22's 8,734 over the 22 sections).
+func maximalRun(t *testing.T, section func(n, k int) []byte, settings int) (adapter.Result, inputs, *register.Matcher) {
 	f := loadConfig(t)
 	m := mustMatcher(t, f.reg)
 	run, _ := m.Run(opConfig)
-	steps := script(configGolden(t, "ok"))
+	gold := configGolden(t, "ok")
+	if settings > 0 { // the two gate sections keep their golden settings
+		settings -= len(gold.Records[0].Fields) + len(gold.Records[1].Fields)
+	}
+	steps := script(gold)
 	var fixed int
 	var cut []int
 	for i, st := range steps {
@@ -539,11 +563,12 @@ func TestConfigMaximalResultFrame(t *testing.T) {
 		caps[line+"\r\n"] = lim.MaxReplyBytes
 	}
 	left := int(run.MaxTotalBytes) - fixed - 4096
+	reserve := max(100, 9*(settings/len(cut)+1)) // what each section still to come needs for its settings
 	for n, i := range cut {
 		a := bytes.IndexByte(steps[i].reply, 0x02)
 		b := bytes.LastIndexByte(steps[i].reply, 0x03)
-		body := min(int(caps[string(steps[i].expect)])-1024, left-100*(len(cut)-n-1))
-		sec := denseSection(body)
+		body := min(int(caps[string(steps[i].expect)])-1024, left-reserve*(len(cut)-n-1))
+		sec := section(body, settings/len(cut)+min(1, max(0, settings%len(cut)-n)))
 		left -= len(sec)
 		steps[i].reply = append(append(append([]byte(nil), steps[i].reply[:a+1]...), sec...), steps[i].reply[b:]...)
 	}
@@ -551,17 +576,87 @@ func TestConfigMaximalResultFrame(t *testing.T) {
 	if got.Status != adapter.StatusOK || len(got.Records) != 24 {
 		t.Fatalf("status %s (%v), %d records", got.Status, got.Error, len(got.Records))
 	}
-	var fields int
-	for _, r := range got.Records {
-		fields += len(r.Fields)
+	return got, f, m
+}
+
+func settingsIn(r adapter.Result) (n int) {
+	for _, rec := range r.Records {
+		n += len(rec.Fields)
 	}
+	return n
+}
+
+// The largest result a configuration run can produce is an ok run whose
+// transcript reaches the run's byte limit and whose sections are as dense as
+// the tokenizer allows. Its JSON must fit one RunOutcome frame (C7, B3's
+// MaxOutcomeBytes test); the measured size is logged, simulated evidence only.
+func TestConfigMaximalResultFrame(t *testing.T) {
+	got, _, _ := maximalRun(t, denseSection, 0)
 	b, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("maximal ok run: transcript %d bytes of %d, %d settings, result JSON %d bytes (%.1f%% of the 8 MiB outcome frame)",
-		len(got.Transcript.Data), run.MaxTotalBytes, fields, len(b), 100*float64(len(b))/(8<<20))
+	t.Logf("maximal ok run: transcript %d bytes, %d settings, result JSON %d bytes (%.1f%% of the 8 MiB outcome frame)",
+		len(got.Transcript.Data), settingsIn(got), len(b), 100*float64(len(b))/(8<<20))
 	if len(b) > 4<<20 {
 		t.Errorf("the largest result is %d bytes, more than half the 8 MiB outcome frame", len(b))
+	}
+}
+
+// s22Settings is the count of setting names in the 24 forms on S22's settings
+// sheets (contracts/register/testdata/count_settings.py), which the record
+// bound of D4-13 is derived from.
+const s22Settings = 8734
+
+// recordOf builds the configuration record of an ok run: the snapshot C9 makes
+// from it, and the transcript it keeps (C5 0.4's Event and Capture).
+func recordOf(t *testing.T, got adapter.Result, f inputs, m *register.Matcher) (snapshot, record int) {
+	t.Helper()
+	snap, err := config.FromResult(config.RuleSEL751SHO.ID, m, f.inv, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snap.CheckAgainst(got.Transcript); err != nil {
+		t.Fatal(err)
+	}
+	sb, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(sb), len(sb) + len(got.Transcript.Data)
+}
+
+// A relay that prints no more settings than S22 lists, with values filling
+// the run's byte limit, makes the largest record the configuration database
+// can be asked to hold, and it must fit the cap (D4-13, B5's bound in
+// contracts/config/bound_test.go, here measured on a real snapshot).
+func TestConfigMaximalRecordFitsTheCap(t *testing.T) {
+	got, f, m := maximalRun(t, fullSection, s22Settings)
+	if n := settingsIn(got); n != s22Settings {
+		t.Fatalf("%d settings, want %d", n, s22Settings)
+	}
+	snap, rec := recordOf(t, got, f, m)
+	t.Logf("%d settings with values to the byte limit: snapshot %d bytes, transcript %d, record %d (cap %d, %.1f%%)",
+		s22Settings, snap, len(got.Transcript.Data), rec, configRecordCap, 100*float64(rec)/configRecordCap)
+	if rec > configRecordCap {
+		t.Errorf("the record is %d bytes, over the %d cap", rec, configRecordCap)
+	}
+}
+
+// Nothing in the adapter or the contract stops a relay from printing more
+// settings than S22 lists. A transcript at the byte limit packed with
+// one-character settings makes a record over the cap. This pins the
+// measurement so the gap is not forgotten: if the contract or the adapter
+// starts to bound the count, this test is the one to change (D4-13 question,
+// raised by B2 on #338).
+func TestConfigDenseRecordExceedsTheCap(t *testing.T) {
+	got, f, m := maximalRun(t, denseSection, 0)
+	snap, rec := recordOf(t, got, f, m)
+	t.Logf("%d settings at the byte limit: snapshot %d bytes, record %d (cap %d)", settingsIn(got), snap, rec, configRecordCap)
+	if settingsIn(got) <= s22Settings {
+		t.Fatalf("only %d settings: the dense run is not denser than S22", settingsIn(got))
+	}
+	if rec <= configRecordCap {
+		t.Errorf("the record is %d bytes and fits the %d cap: the gap is closed, so delete this test and say so in D4-13", rec, configRecordCap)
 	}
 }
