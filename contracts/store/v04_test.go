@@ -221,19 +221,19 @@ func TestRecoveryReserveFor(t *testing.T) {
 		{128 << 10, 164832}, {256 << 10, 296672}, {512 << 10, 560352}, {768 << 10, 824032}, // B5, modernc
 		{128 << 10, 152472}, {256 << 10, 284312}, {512 << 10, 547992}, {768 << 10, 811672}, // B6, sqlite3
 	} {
-		if w := CommitWALBytes(m.payload); w < m.wal {
+		if w := CommitWALBytes(m.payload, 1); w < m.wal {
 			t.Errorf("payload %d: W %d below the measured %d", m.payload, w, m.wal)
 		}
 	}
 	// The fixed cost, about 34 KB, dominates at the smallest cap: a ratio
 	// rule of 1.25 would allow 81,920 bytes there.
-	if w := CommitWALBytes(MinRecordBytes); w < MinRecordBytes+34<<10 {
+	if w := CommitWALBytes(MinRecordBytes, 1); w < MinRecordBytes+34<<10 {
 		t.Errorf("W at the smallest cap %d", w)
 	}
-	if got, want := RecoveryReserveFor(walBound, 512<<10), int64(2*walBound+512<<10+512<<10/10+64<<10); got != want {
+	if got, want := RecoveryReserveFor(walBound, 512<<10, 1), int64(2*walBound+512<<10+512<<10/10+64<<10+RowWALBytes); got != want {
 		t.Errorf("reserve %d, want %d", got, want)
 	}
-	if got := RecoveryReserveFor(walBound, DefaultMaxCommitBytes); got > 23<<20/10 {
+	if got := RecoveryReserveFor(walBound, DefaultMaxCommitBytes, 1); got > 23<<20/10 {
 		t.Errorf("event database reserve %d, over about 2.2 MiB", got)
 	}
 }

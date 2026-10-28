@@ -172,6 +172,9 @@ func TestChecks(t *testing.T) {
 		"unknown asset":      func(c *nodeconfigtest.Config) { c.Schedule[0].AssetID = "00000000-0000-4000-8000-000000000000" },
 		"unknown endpoint":   func(c *nodeconfigtest.Config) { c.Schedule[0].Endpoint = "port2" },
 		"bad operation":      func(c *nodeconfigtest.Config) { c.Schedule[0].Operation = "SER" },
+		"long operation": func(c *nodeconfigtest.Config) {
+			c.Schedule[0].Operation = "sel." + strings.Repeat("a", MaxOperationBytes)
+		},
 		"fast schedule":      func(c *nodeconfigtest.Config) { c.Schedule[0].EverySeconds = 5 },
 		"other node's asset": func(c *nodeconfigtest.Config) { c.Assets[0]["node_id"] = "site-b-node1" },
 		"duplicate target":   func(c *nodeconfigtest.Config) { c.Targets = append(c.Targets, c.Targets[0]) },
