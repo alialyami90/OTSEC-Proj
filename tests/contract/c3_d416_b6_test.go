@@ -80,12 +80,22 @@ func TestC3D416ContextKeyInOnePointOne(t *testing.T) {
 		if _, err := register.Decode(b); err == nil || !strings.Contains(err.Error(), "context") {
 			t.Errorf("0.1 with context %v: want refused for its context key, got %v", v, err)
 		}
-		b, err = c3Rev4(t, func(p map[string]any) { p["context"] = v })
+		// The control: at 0.2 the key is the format's own, so an empty or
+		// null context is a package with no context. The 0.3 keys (runs,
+		// an operation's limits) are taken out so the package is 0.2 whole.
+		b, err = c3Rev4(t, func(p map[string]any) {
+			p["contract"] = "otsec.register/0.2"
+			p["context"] = v
+			delete(p, "runs")
+			for _, o := range p["operations"].([]any) {
+				delete(o.(map[string]any), "limits")
+			}
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := register.Decode(b); err != nil {
-			t.Logf("0.2 with context %v: %v", v, err)
+		if pkg, err := register.Decode(b); err != nil || len(pkg.Context) != 0 {
+			t.Errorf("0.2 with context %v: want a package with no context, got %v", v, err)
 		}
 	}
 }
