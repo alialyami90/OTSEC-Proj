@@ -154,6 +154,16 @@ func TestServerTLSRefusesCertificate(t *testing.T) {
 	if _, err := ServerTLS(&p.server, nil, true); err == nil {
 		t.Error("required client certificates with no CA set: accepted")
 	}
+	// An expired certificate that also fails another check is refused for
+	// that check: ErrCertificatePeriod means the period is the only fault
+	// (HR-13, D4-11 item 2).
+	expired := p.issue(t, "node.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, now.Add(-2*time.Hour), now.Add(-time.Hour))
+	if _, err := ServerTLS(&expired, nil, true); !errors.Is(err, ErrConfig) || errors.Is(err, ErrCertificatePeriod) {
+		t.Errorf("expired, with required client certificates and no CA set: %v", err)
+	}
+	if _, err := ServerTLS(&expired, p.roots, true); !errors.Is(err, ErrCertificatePeriod) {
+		t.Errorf("expired and nothing else: %v", err)
+	}
 	if _, err := ServerTLS(nil, nil, false); err == nil {
 		t.Error("no certificate: accepted")
 	}

@@ -39,11 +39,14 @@ func ServerTLS(cert *tls.Certificate, clients *x509.CertPool, requireClient bool
 	if hasEKU && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth) && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageAny) {
 		return nil, fmt.Errorf("%w: the listener certificate is not for server authentication", ErrConfig)
 	}
-	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-		return nil, fmt.Errorf("%w: %w: the listener certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
-	}
 	if requireClient && clients == nil {
 		return nil, fmt.Errorf("%w: client certificates required, but no CA set verifies them", ErrConfig)
+	}
+	// Last, so that ErrCertificatePeriod means the period is the only fault
+	// (HR-13, D4-11 item 2): a node may hold the link back for a certificate
+	// that has only expired, and must still stop for any other refusal.
+	if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return nil, fmt.Errorf("%w: %w: the listener certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
 	}
 	cfg := &tls.Config{
 		MinVersion:   tls.VersionTLS12,

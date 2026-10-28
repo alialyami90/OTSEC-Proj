@@ -66,11 +66,15 @@ func ClientTLS(t *syslog.Target, roots *x509.CertPool, client *tls.Certificate) 
 		if hasEKU && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageClientAuth) && !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageAny) {
 			return nil, fmt.Errorf("%w: target %s: the node's client certificate is not for client authentication", ErrConfig, t.Name)
 		}
-		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-			return nil, fmt.Errorf("%w: %w: target %s: the node's client certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, t.Name, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
-		}
 		if d := t.DurableAck; d != nil && !slices.Contains(certNames(leaf), d.PermittedPeer) {
 			return nil, fmt.Errorf("%w: target %s: the collector permits %q, and the node's client certificate names %q", ErrConfig, t.Name, d.PermittedPeer, certNames(leaf))
+		}
+		// Last, so that ErrCertificatePeriod means the period is the only
+		// fault (HR-13, D4-11 item 2): a node may hold the link back for a
+		// certificate that has only expired, and must still stop for any other
+		// refusal.
+		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+			return nil, fmt.Errorf("%w: %w: target %s: the node's client certificate is valid from %s to %s", ErrConfig, ErrCertificatePeriod, t.Name, leaf.NotBefore.UTC().Format(time.RFC3339), leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
 	}
 	pins := map[string]bool{}
