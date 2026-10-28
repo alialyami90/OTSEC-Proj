@@ -1,0 +1,807 @@
+{
+ "schema": "gt-inj/1",
+ "series": "config",
+ "seed": 202610271,
+ "evidence": "synthetic (simulated)",
+ "source": "settings and values from B6's transcription of S22 Figure 7.43 (tests/safety/recording_simulator/documented/sel-751/sho-group-fig-7-43.txt)",
+ "timeline": {
+  "R0": 0,
+  "baseline_ack": 30,
+  "Rm": 105,
+  "change": 120,
+  "R1": 180
+ },
+ "other_device": "gt-inj-cfg-other",
+ "pass": "per change: alarm exactly when expect.alarm, within one retrieval cycle of R1; an approved change links its approval; a non-approver's approval is refused and recorded; both snapshots and the difference are stored in every case; prior means audit-chain order.",
+ "changes": [
+  {
+   "id": "cfg-01",
+   "asset": "gt-inj-cfg-01",
+   "case": "window-ended",
+   "approval": {
+    "device": "self",
+    "window": [
+     50,
+     100
+    ],
+    "recorded": 40,
+    "claims": 40,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "50P4P": "9.95"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "50P4P",
+     "kind": "changed",
+     "from": "10.00",
+     "to": "9.95"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-02",
+   "asset": "gt-inj-cfg-02",
+   "case": "window-ended",
+   "approval": {
+    "device": "self",
+    "window": [
+     50,
+     100
+    ],
+    "recorded": 40,
+    "claims": 40,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "4": {
+      "51CMR": "0.02"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.4",
+     "name": "51CMR",
+     "kind": "changed",
+     "from": "0.00",
+     "to": "0.02"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-03",
+   "asset": "gt-inj-cfg-03",
+   "case": "non-semantic",
+   "approval": null,
+   "inject": {
+    "layout": "one-per-line"
+   },
+   "expect_changes": [],
+   "expect": {
+    "alarm": false,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-04",
+   "asset": "gt-inj-cfg-04",
+   "case": "no-approval",
+   "approval": null,
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "4": {
+      "E59I3": "Y"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.4",
+     "name": "E59I3",
+     "kind": "changed",
+     "from": "N",
+     "to": "Y"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-05",
+   "asset": "gt-inj-cfg-05",
+   "case": "approved",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "1": {
+      "Z1ANG": "68.87"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.1",
+     "name": "Z1ANG",
+     "kind": "changed",
+     "from": "68.86",
+     "to": "68.87"
+    }
+   ],
+   "expect": {
+    "alarm": false,
+    "approval_linked": true,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-06",
+   "asset": "gt-inj-cfg-06",
+   "case": "no-approval",
+   "approval": null,
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "EPDDET": "Y"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "EPDDET",
+     "kind": "changed",
+     "from": "N",
+     "to": "Y"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-07",
+   "asset": "gt-inj-cfg-07",
+   "case": "no-approval",
+   "approval": null,
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "3": {
+      "51P1CT": "0.01"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.3",
+     "name": "51P1CT",
+     "kind": "changed",
+     "from": "0.00",
+     "to": "0.01"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-08",
+   "asset": "gt-inj-cfg-08",
+   "case": "backdated",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 240,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "1": {
+      "Z0MAG": "6.41"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.1",
+     "name": "Z0MAG",
+     "kind": "changed",
+     "from": "6.38",
+     "to": "6.41"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-09",
+   "asset": "gt-inj-cfg-09",
+   "case": "approved",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "1": {
+      "51BTD": "3.01"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.1",
+     "name": "51BTD",
+     "kind": "changed",
+     "from": "3.00",
+     "to": "3.01"
+    }
+   ],
+   "expect": {
+    "alarm": false,
+    "approval_linked": true,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-10",
+   "asset": "gt-inj-cfg-10",
+   "case": "backdated",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 240,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "4": {
+      "E49IEC": "Y"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.4",
+     "name": "E49IEC",
+     "kind": "changed",
+     "from": "N",
+     "to": "Y"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-11",
+   "asset": "gt-inj-cfg-11",
+   "case": "other-device",
+   "approval": {
+    "device": "other",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "3I2DEMP": "1.03"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "3I2DEMP",
+     "kind": "changed",
+     "from": "1.00",
+     "to": "1.03"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-12",
+   "asset": "gt-inj-cfg-12",
+   "case": "approved",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "1": {
+      "50P2TC": "5"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.1",
+     "name": "50P2TC",
+     "kind": "changed",
+     "from": "1",
+     "to": "5"
+    }
+   ],
+   "expect": {
+    "alarm": false,
+    "approval_linked": true,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-13",
+   "asset": "gt-inj-cfg-13",
+   "case": "non-approver",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": false
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "3": {
+      "51ATC": "3"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.3",
+     "name": "51ATC",
+     "kind": "changed",
+     "from": "1",
+     "to": "3"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": true,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-14",
+   "asset": "gt-inj-cfg-14",
+   "case": "non-semantic",
+   "approval": null,
+   "inject": {
+    "layout": "one-per-line"
+   },
+   "expect_changes": [],
+   "expect": {
+    "alarm": false,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-15",
+   "asset": "gt-inj-cfg-15",
+   "case": "window-ended",
+   "approval": {
+    "device": "self",
+    "window": [
+     50,
+     100
+    ],
+    "recorded": 40,
+    "claims": 40,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "4": {
+      "Z0SANG": "84.62"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.4",
+     "name": "Z0SANG",
+     "kind": "changed",
+     "from": "84.61",
+     "to": "84.62"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-16",
+   "asset": "gt-inj-cfg-16",
+   "case": "non-approver",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": false
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "1": {
+      "51P1MR": "0.04"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.1",
+     "name": "51P1MR",
+     "kind": "changed",
+     "from": "0.00",
+     "to": "0.04"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": true,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-17",
+   "asset": "gt-inj-cfg-17",
+   "case": "non-approver",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": false
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "51P1TC": "2"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "51P1TC",
+     "kind": "changed",
+     "from": "1",
+     "to": "2"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": true,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-18",
+   "asset": "gt-inj-cfg-18",
+   "case": "other-device",
+   "approval": {
+    "device": "other",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "4": {
+      "EFLOC": "Y"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.4",
+     "name": "EFLOC",
+     "kind": "changed",
+     "from": "N",
+     "to": "Y"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-19",
+   "asset": "gt-inj-cfg-19",
+   "case": "other-device",
+   "approval": {
+    "device": "other",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 60,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "51AP": "5.98"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "51AP",
+     "kind": "changed",
+     "from": "6.00",
+     "to": "5.98"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-20",
+   "asset": "gt-inj-cfg-20",
+   "case": "backdated",
+   "approval": {
+    "device": "self",
+    "window": [
+     90,
+     600
+    ],
+    "recorded": 240,
+    "claims": 60,
+    "approver": true
+   },
+   "inject": {
+    "layout": "figure",
+    "settings": {
+     "2": {
+      "ELOAD": "Y"
+     }
+    }
+   },
+   "expect_changes": [
+    {
+     "class": "group.2",
+     "name": "ELOAD",
+     "kind": "changed",
+     "from": "N",
+     "to": "Y"
+    }
+   ],
+   "expect": {
+    "alarm": true,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  },
+  {
+   "id": "cfg-21",
+   "asset": "gt-inj-cfg-21",
+   "case": "non-semantic",
+   "approval": null,
+   "inject": {
+    "layout": "one-per-line"
+   },
+   "expect_changes": [],
+   "expect": {
+    "alarm": false,
+    "approval_linked": false,
+    "approval_refused": false,
+    "stored": [
+     "snapshot R0",
+     "snapshot R1",
+     "difference R0 to R1"
+    ]
+   }
+  }
+ ]
+}

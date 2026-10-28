@@ -123,7 +123,7 @@ func testLog(t *testing.T, db *DB) *c5.Log {
 		}
 		last[s] = n
 	}
-	l, err := c5.NewLog(db, testNode, db.Streams(), c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}, last)
+	l, err := c5.NewLog(db, testNode, db.Streams(), c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond, MaxCommitRecords: 1000}, last)
 	if err != nil {
 		t.Fatal(err)
 	}
