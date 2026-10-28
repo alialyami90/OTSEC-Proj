@@ -142,7 +142,14 @@ func (c *Config) WriteListenerCredential(p *PKI, ref, host string) (tls.Certific
 // WriteListenerCredentialValid is WriteListenerCredential with the validity
 // period per.
 func (c *Config) WriteListenerCredentialValid(p *PKI, ref, host string, per Period) (tls.Certificate, error) {
-	cert, err := p.IssueValid(host, x509.ExtKeyUsageServerAuth, per)
+	return c.WriteListenerCredentialUsage(p, ref, host, x509.ExtKeyUsageServerAuth, per)
+}
+
+// WriteListenerCredentialUsage is WriteListenerCredentialValid for a
+// certificate whose extended key usage is usage, so a test can make one that
+// is not for server authentication.
+func (c *Config) WriteListenerCredentialUsage(p *PKI, ref, host string, usage x509.ExtKeyUsage, per Period) (tls.Certificate, error) {
+	cert, err := p.IssueValid(host, usage, per)
 	if err != nil {
 		return tls.Certificate{}, err
 	}

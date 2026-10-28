@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/telemetry/forward"
 	"otsec.local/otsec/modules/telemetry/forward/relptest"
+	"otsec.local/otsec/modules/telemetry/receive"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
 
@@ -679,6 +681,30 @@ func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
 	defer r.Close()
 	if _, err := NewForwarding(r); err == nil || errors.Is(err, forward.ErrCertificatePeriod) {
 		t.Fatalf("an expired certificate with the wrong name: %v", err)
+	}
+}
+
+// The same for a listener: an expired certificate that is also not for
+// server authentication is no period fault alone, so the node stops at start
+// and does not hold the listener back (B3 on #290).
+func TestExpiredListenerCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nc.WriteListenerCredentialUsage(p, "test-listener", "127.0.0.1", x509.ExtKeyUsageClientAuth, expired()); err != nil {
+			t.Fatal(err)
+		}
+		nc.AddListener("lab-tls", "syslog-tls", "127.0.0.1:0")
+	})
+	locked := *nc
+	t.Cleanup(func() { locked.UnlockTLS() })
+	lockTLS(t, nc)
+	r, _, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	if _, err := NewListening(r); err == nil || errors.Is(err, receive.ErrCertificatePeriod) {
+		t.Fatalf("an expired listener certificate for client authentication: %v", err)
 	}
 }
 
