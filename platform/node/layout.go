@@ -130,8 +130,8 @@ func (c *Config) Layout() (c5.Layout, error) {
 		// An absent quota is below the floor too (D4-20 rule 5): without it
 		// there is no configuration database, and the first read would have
 		// nowhere to go.
-		return c5.Layout{}, fmt.Errorf("store.quotas.configuration is required: the schedule reads the configuration of %d assets and %d event baselines are set, which needs at least %d bytes (%d x the record cap for each configuration asset, D4-20, and %d x %d bytes for each other event-baseline asset)",
-			c.ConfigAssets(), len(c.EventBaselines), floor, ConfigQuotaFloorRecords, EventBaselineQuotaRecords, baseline.MaxBytes)
+		return c5.Layout{}, fmt.Errorf("store.quotas.configuration is required: the schedule reads the configuration of %d assets and %d event baselines are set, which needs at least %d bytes (%d x the record cap for each configuration asset, D4-20, and %d x %d bytes and %d x %d bytes for the baselines and checkpoints of each other event-baseline asset)",
+			c.ConfigAssets(), len(c.EventBaselines), floor, ConfigQuotaFloorRecords, EventBaselineQuotaRecords, baseline.MaxBytes, EventCheckpointRecords, ConfigRecordBytes)
 	}
 	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; ok {
 		for _, a := range c.assets {
@@ -176,8 +176,8 @@ func (c *Config) Layout() (c5.Layout, error) {
 						bytes, n*ConfigQuotaFloorRecords*ConfigRecordBytes, ConfigQuotaFloorRecords, n)
 				}
 				if bytes < floor {
-					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the floor for event baselines and configuration: %d bytes (%d x %d bytes for each event-baseline asset whose configuration is not read, and the D4-20 floor for each that is)",
-						bytes, floor, EventBaselineQuotaRecords, baseline.MaxBytes)
+					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the floor for event baselines and configuration: %d bytes (%d x %d bytes of baselines and %d x %d bytes of checkpoints for each event-baseline asset whose configuration is not read, and the D4-20 floor for each that is)",
+						bytes, floor, EventBaselineQuotaRecords, baseline.MaxBytes, EventCheckpointRecords, ConfigRecordBytes)
 				}
 				q.MaxRecordBytes = ConfigRecordBytes
 			}

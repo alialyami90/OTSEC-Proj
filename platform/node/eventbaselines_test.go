@@ -44,7 +44,7 @@ func TestEventBaselinesLoad(t *testing.T) {
 	if _, ok := c.EventBaselineFor("nobody"); ok {
 		t.Fatal("a baseline for an asset that has none")
 	}
-	if got, want := c.EventBaselineQuotaFloor(), int64(EventBaselineQuotaRecords)*int64(baseline.MaxBytes); got != want {
+	if got, want := c.EventBaselineQuotaFloor(), int64(EventBaselineQuotaRecords)*int64(baseline.MaxBytes)+EventCheckpointRecords*ConfigRecordBytes; got != want {
 		t.Fatalf("floor %d, want %d", got, want)
 	}
 	l, err := c.Layout()
@@ -90,7 +90,7 @@ func TestEventBaselinesRefused(t *testing.T) {
 		}, "store.quotas.configuration"},
 		"quota below the floor": {func(nc *nodeconfigtest.Config) {
 			nc.AddEventBaseline(relayID)
-			nc.Store.Quotas["configuration"] = EventBaselineQuotaRecords*int64(baseline.MaxBytes) - 1
+			nc.Store.Quotas["configuration"] = EventBaselineQuotaRecords*int64(baseline.MaxBytes) + EventCheckpointRecords*ConfigRecordBytes - 1
 		}, "below the floor for event baselines"},
 		"no events to observe": {func(nc *nodeconfigtest.Config) {
 			nc.Schedule = nil
@@ -99,6 +99,11 @@ func TestEventBaselinesRefused(t *testing.T) {
 		"only a configuration read": {func(nc *nodeconfigtest.Config) {
 			nc.Schedule = []nodeconfigtest.Collection{{ID: "sch-cfg", AssetID: relayID, Endpoint: "port1-telnet",
 				Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600}}
+			nc.AddEventBaseline(relayID)
+		}, "no events to observe"},
+		"only a state-changing operation": {func(nc *nodeconfigtest.Config) {
+			nc.Schedule = []nodeconfigtest.Collection{{ID: "sch-clr", AssetID: relayID, Endpoint: "port1-telnet",
+				Operation: "sel.ser.clear", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600}}
 			nc.AddEventBaseline(relayID)
 		}, "no events to observe"},
 		"a parameter missing": {func(nc *nodeconfigtest.Config) {

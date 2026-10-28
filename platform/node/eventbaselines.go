@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"strings"
 
 	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/modules/detection/eventbaseline"
@@ -27,14 +28,24 @@ type EventBaseline struct {
 // must hold for each asset that has an event baseline and no configuration
 // read: the active baseline, one recorded and awaiting acknowledgement, the
 // superseded one that stays held (D4-20 rule 2), and room for the next, each
-// at most baseline.MaxBytes. An asset whose configuration is also read is
-// covered by its D4-20 floor, which is far larger.
+// at most baseline.MaxBytes.
 const EventBaselineQuotaRecords = 4
+
+// EventCheckpointRecords is how many checkpoints the quota must hold for each
+// event-baseline asset: the learner and detector snapshot the node commits
+// with its position (feeder slice 1c), and room for the next while the last
+// is still held. A checkpoint is a record of the asset's configuration
+// stream, so it is bounded by the class's record cap, ConfigRecordBytes: the
+// node refuses a snapshot above it and keeps the last checkpoint (the object
+// goes on, and the refusal is a health event; B4 on #343).
+const EventCheckpointRecords = 2
 
 // EventBaselineQuotaFloor is the bytes a node's configuration quota must
 // hold for its event baselines: EventBaselineQuotaRecords x baseline.MaxBytes
-// for each event-baseline asset whose configuration the schedule does not
-// read.
+// and EventCheckpointRecords x ConfigRecordBytes for each event-baseline
+// asset whose configuration the schedule does not read. An asset whose
+// configuration is read is covered by its D4-20 floor, which is far larger
+// (ConfigQuotaFloorRecords x ConfigRecordBytes holds both).
 func (c *Config) EventBaselineQuotaFloor() int64 {
 	reads := map[string]bool{}
 	for _, s := range c.Schedule {
@@ -48,7 +59,7 @@ func (c *Config) EventBaselineQuotaFloor() int64 {
 			n++
 		}
 	}
-	return n * EventBaselineQuotaRecords * int64(baseline.MaxBytes)
+	return n * (EventBaselineQuotaRecords*int64(baseline.MaxBytes) + EventCheckpointRecords*ConfigRecordBytes)
 }
 
 // EventBaselineFor is the event-baseline setting of an asset.
@@ -92,11 +103,12 @@ func (c *Config) checkEventBaselines(fail func(format string, args ...any)) {
 }
 
 // producesEvents reports whether the node stores events of the asset: a
-// scheduled collection that is not a configuration read, or an inbound
-// Syslog endpoint.
+// scheduled SER read (second segment "ser", last starting with "read", as
+// ConfigReadOperation does for configuration, so a state-changing operation
+// never counts), or an inbound Syslog endpoint.
 func (c *Config) producesEvents(assetID string) bool {
 	for _, s := range c.Schedule {
-		if s.AssetID == assetID && !s.ReadsConfiguration() {
+		if s.AssetID == assetID && serReadOperation(s.Operation) {
 			return true
 		}
 	}
@@ -108,6 +120,13 @@ func (c *Config) producesEvents(assetID string) bool {
 		}
 	}
 	return false
+}
+
+// serReadOperation reports whether a register operation ID reads an asset's
+// SER, as in sel.ser.read_all.
+func serReadOperation(op string) bool {
+	parts := strings.Split(op, ".")
+	return len(parts) >= 3 && parts[1] == "ser" && strings.HasPrefix(parts[len(parts)-1], "read")
 }
 
 // checkEventBaselineParams is C10's range check on the parameters
