@@ -64,6 +64,17 @@ class Figure(unittest.TestCase):
             self.assertEqual(reply.out, FIGURE_BYTES, line)
             self.assertEqual(reply.notes, [{"what": "settings", "class": "1", "settings": figure_settings()}])
 
+    def test_only_sho_and_show_are_sho(self):
+        """Only the command's name, SHO, and its long form, SHOW, answer as
+        SHO n (B3 on #248): any other word that starts with SHO falls
+        through as unmodelled, so no test passes on a spelling the manual
+        does not give."""
+        for line in (b"SHOX", b"SHOX 1", b"SHOWS 1", b"SHOWSET 1"):
+            reply = responder().handle(line)
+            self.assertNotEqual(reply.out, FIGURE_BYTES, line)
+            self.assertIn(profile_sel751.UNMODELLED, reply.out, line)
+            self.assertEqual(reply.notes, [], line)
+
     def test_the_figure_as_read(self):
         s = figure_settings()
         self.assertEqual(len(s), 158)
