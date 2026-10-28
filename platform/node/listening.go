@@ -309,6 +309,14 @@ func (ls *Listening) release(now time.Time) {
 		}
 		cfg := h.cfg
 		cfg.TLS = tlsCfg
+		// The check that Run has not ended, the bind and the hand-over to
+		// Run are one step under mu: a listener that binds after Run
+		// returned would never be served or closed (B6 on #290).
+		ls.mu.Lock()
+		if ls.runStop {
+			ls.mu.Unlock()
+			return
+		}
 		r, err := receive.New(cfg)
 		var a net.Addr
 		if err == nil {
@@ -317,17 +325,17 @@ func (ls *Listening) release(now time.Time) {
 			}
 		}
 		if err != nil {
+			ls.mu.Unlock()
 			if h.failed != err.Error() {
 				h.failed = err.Error()
 				ls.rt.opt.Status.RaiseTarget("listener "+h.l.ID, AlarmListenerStopped, "the listener's certificate period is valid, but it could not start: "+err.Error()+"; it stays held back and is tried again")
 			}
 			continue
 		}
-		ls.mu.Lock()
 		ls.held = slices.DeleteFunc(ls.held, func(x *heldListener) bool { return x == h })
 		ls.receivers = append(ls.receivers, r)
 		ls.bound[h.l.ID] = a
-		if ls.runCtx != nil && !ls.runStop {
+		if ls.runCtx != nil {
 			ls.serve(r)
 		}
 		ls.mu.Unlock()

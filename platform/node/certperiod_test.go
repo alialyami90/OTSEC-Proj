@@ -93,6 +93,10 @@ func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
 	}
 	fw.Check(bg)
 	snap := st.Snapshot("site-a-node1")
+	if e := snap.Targets["central"].LastErr; e != "" {
+		// A forwarder that ran would show its dial error here (B6 on #290).
+		t.Fatalf("the held target's forwarder ran: %s", e)
+	}
 	if snap.Targets["central"].HeldBack != "expired" || snap.Targets["other"].HeldBack != "" {
 		t.Fatalf("held back: central %q, other %q", snap.Targets["central"].HeldBack, snap.Targets["other"].HeldBack)
 	}
@@ -535,6 +539,9 @@ func TestHeldRequiredTargetPastItsQuota(t *testing.T) {
 		fw.Check(bg)
 		r.Prune(bg)
 		r.Tick(bg)
+		// One more event each tick: past the quota it must be refused, not
+		// stored by pruning something unconfirmed (B6 on #290).
+		r.health(bg, HealthCollectionRun, map[string]string{"n": "after the quota"})
 	}
 	// The alarms come in this order, each once: held back at start, then
 	// unreachable once a minute has passed, then the store's own warning
@@ -599,5 +606,49 @@ func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
 	defer r.Close()
 	if _, err := NewForwarding(r); err == nil || errors.Is(err, forward.ErrCertificatePeriod) {
 		t.Fatalf("an expired certificate with the wrong name: %v", err)
+	}
+}
+
+// A held listener whose period becomes valid after Run has returned is not
+// bound: the node's last Publish at shutdown must not open a socket that
+// nothing serves or closes (B6 on #290).
+func TestHeldListenerIsNotBoundAfterRun(t *testing.T) {
+	addr := freeAddr(t)
+	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
+		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := nc.WriteListenerCredentialValid(p, "test-listener", "127.0.0.1", notYet(2*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		nc.AddListener("lab-tls", "syslog-tls", addr)
+	})
+	locked := *nc
+	t.Cleanup(func() { locked.UnlockTLS() })
+	lockTLS(t, nc)
+	r, _, _ := start(t, parse(t, nc), dir)
+	defer r.Close()
+	ls, err := NewListening(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ls.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan struct{})
+	go func() { defer close(done); ls.Run(ctx) }()
+	cancel()
+	<-done
+	// The period becomes valid only now.
+	time.Sleep(3 * time.Second)
+	ls.Publish()
+	if ls.Addr("lab-tls") != nil {
+		t.Fatal("the held listener was bound after Run returned")
+	}
+	if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+		c.Close()
+		t.Fatal("a socket opened after Run returned accepts connections")
 	}
 }
