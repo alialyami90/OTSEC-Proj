@@ -91,7 +91,9 @@
 // came before, so the fields that can differ are: whether an alarm is raised
 // at all (the holds), Events and EventsTotal (they include breaks held since
 // the pair's last alarm, so Events[0] is not the breaking event), NotCounted
-// and NotCountedTotal, and BaselineValue and Observation for repeats and rate.
+// and NotCountedTotal, BaselineValue and Observation for repeats and rate, and
+// the Observation of any rule once the pair cap has dropped a record (it then
+// ends with the count of breaks not listed).
 // A replay that dedupes alarms should therefore replay from the baseline's
 // activation, and key an alarm by its asset, Baseline (the hash), Rule, Key
 // and AtUTC. That is unique: alarms of one rule and key are at least
@@ -177,11 +179,15 @@
 //     stopped at 4096). After activation a type left out alarms as new.
 //   - The new-type memory is bounded (16,384 types); a flood of distinct
 //     new types beyond that alarms on each occurrence, under the alarm
-//     bounds. The detector's record of held breaks per (rule, type) is not
-//     bounded: one entry is kept for every distinct new type that alarmed or
-//     was held, so such a flood grows the detector's memory and its snapshot
-//     until the snapshot is refused (ErrSnapshotTooLarge). Found while
-//     bounding the snapshot, and reported to B1 (B4-snapshot.md, F1).
+//     bounds. The detector's record of held breaks per (rule, type) for the
+//     new-type rule is bounded too (MaxNewTypePairs, 4096; F1, D4-26). Once
+//     an alarm hold ends, a record that lists nothing is dropped (no change
+//     to any output); if the cap is still reached, records whose hold ended
+//     are dropped with the breaks they list, and those breaks are counted and
+//     stated by the next alarm ("N more held breaks beyond the cap of M
+//     tracked new types are not listed"). The count is exact; the events
+//     are not listed. The other rules' records are bounded by the baseline's
+//     types and are not swept.
 //   - Absence (D4-15). A periodic type whose deadline ran out before the
 //     acknowledgement is given activation + interval + tolerance as its
 //     deadline, so a source that fell silent during the wait and never

@@ -556,6 +556,8 @@ func TestSnapshotRefusesInconsistentState(t *testing.T) {
 	num()       // raised
 	held := off // held
 	num()       // held
+	num()       // next sweep
+	num()       // beyond
 	seen := off // the count of new types seen
 	if ds[seen] != 0 || ds[open] != 0 {
 		t.Fatalf("the fresh detector's fields are not where the test expects")

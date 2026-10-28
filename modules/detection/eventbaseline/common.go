@@ -50,6 +50,23 @@ const (
 	gapCap = 4096
 )
 
+// MaxNewTypePairs bounds the new-type rule's pending records (D4-26, F1): the
+// (rule, type) pairs that hold a repeated alarm of one type and list the
+// breaks held since the last. The other rules' pairs are bounded by the
+// baseline's types. With this and the new-type memory (4*MaxTypesCeiling), a
+// flood of distinct new types leaves the detector's state, and its snapshot,
+// under a bound that does not grow with the flood.
+const MaxNewTypePairs = 4096
+
+// pairCap and pairPrune are MaxNewTypePairs and whether expired pairs are
+// swept; the tests change them to reach the cap and to show that sweeping
+// changes no output.
+var (
+	pairCap    = MaxNewTypePairs
+	pairPrune  = true
+	newSeenMax = baseline.MaxTypesCeiling * 4
+)
+
 // received parses e's received.utc to nanoseconds since the epoch.
 func received(e *event.Event) (int64, error) {
 	t, err := time.Parse(time.RFC3339Nano, e.Received.UTC)
