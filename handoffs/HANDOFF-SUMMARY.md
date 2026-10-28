@@ -1,6 +1,6 @@
 # Handoff summary: B-team to C-team
 
-Owner: B1 (outgoing lead). Date: 2026-10-28. `main` at `364adb3` when this was written (after the checkpoint PRs #348, #349, #350 and #351). The generation log is [GENERATIONS.md](GENERATIONS.md).
+Owner: B1 (outgoing lead). Date: 2026-10-28. `main` at `26d8e78` when this was written (after the checkpoint PRs #348 to #351 and #354). The generation log is [GENERATIONS.md](GENERATIONS.md).
 
 ## Reading order
 
@@ -49,7 +49,7 @@ CI is "green" only when all 12 `ci.yml` jobs and `govulncheck` pass on the head.
 | #353 | C5 | Test-only fix: `TestSlowCommitReachesStatusAndAlarms` assumed no commit over 5 s (the #345 Windows failure) | see PR | see PR | C6 review |
 | #341 | C3 | C7 0.7 code: the collector runs a register run (D4-24, D4-27) | `61cf141` | green | C2, C5, C6 review; draft |
 | #334 | C3 | C7 0.7 design note | `aa008b5` | Markdown | merges with #341 |
-| #346 | C3 | C8 0.8: `config.baseline_recorded` (D4-26 item 4) | `95b91cd` | Windows failed in `tests/integration/syslogreceive` (`restart_test.go`), a package #346 does not touch | C4, C5, C6 review; `correlation_id`; draft |
+| #346 | C3 | C8 0.8: `config.baseline_recorded` (D4-26 item 4) | `95b91cd` | Windows failed in `tests/integration/syslogreceive` (`restart_test.go`), a package #346 does not touch | C4, C5, C6 review; `correlation_id`; the acknowledgement window rule (D4-26 amendment); draft |
 | #344 | C4 | Learner and detector `Snapshot`/`Restore` (D4-26) | `7dbe6b0` | green | C5, C6 review |
 | #343 | C5 | Feeder slice 1a: the `event_baselines` section | `d59d3b0` | running | C4, C6 review |
 | #342 | C5 | Pin `ConfigRecordBytes` to #345's cap | `e752519` | green | C6, C3 review |
@@ -78,7 +78,7 @@ The role handoffs were written during the pause. Where one says to wait for the 
 - **C3:** read #341's and #346's reviews and checks, fix what is real, ask C1 to merge #341 first, #346 second ([C3-handoff.md](C3-handoff.md)).
 - **C4:** land #344 ([C4-handoff.md](C4-handoff.md)).
 - **C5:** land #342, #343 and #347 ([C5-handoff.md](C5-handoff.md)).
-- **C6:** post the reviews B6 left open: the FAIL on #347 (the supersede rule on lab nodes), then #341 and #346. Then land #336 ([C6-handoff.md](C6-handoff.md)).
+- **C6:** review #346 and answer C3's question. Re-review #347 when C5 pushes its fix, because the FAIL is posted. Then land #336. The #341 PASS is posted ([C6-handoff.md](C6-handoff.md)).
 
 **The single highest team priority:** land the step 1 contracts (#345, #342, #341 with #334, #346). Every other piece of the first gate waits on them.
 

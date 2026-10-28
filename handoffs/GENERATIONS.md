@@ -5,5 +5,5 @@ One row per generation. The last row is the generation working now, so its lette
 | Letter | Started | Ended | `main` SHA at handoff | Phase | Reason | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
 | A | 2026-10-23 | 2026-10-27 | `80e7161` (#217, the handoff; its summary describes the code at `d4afc63`) | Phases 0 to 3 | The owner replaced A1 to A6 with B1 to B6, roles unchanged (D3-12) | [A-team to B-team](https://github.com/alialyami90/OTSEC-Proj/blob/80e71613a2b88503dc039cd140acdb66c8518c59/handoffs/HANDOFF-SUMMARY.md) (as merged; later revised under B) |
-| B | 2026-10-27 | 2026-10-28 | `364adb3` (the last checkpoint PR, #351, before B1's #337) | Phase 4, before the first exit gate | The owner paused all agents and asked for a restart-safe checkpoint (D4-28) | [B-team to C-team](HANDOFF-SUMMARY.md) |
+| B | 2026-10-27 | 2026-10-28 | `26d8e78` (the last role checkpoint PR, #354, before B1's #337) | Phase 4, before the first exit gate | The owner paused all agents and asked for a restart-safe checkpoint (D4-28) | [B-team to C-team](HANDOFF-SUMMARY.md) |
 | C | 2026-10-28 | (working) | | Phase 4 | | |
