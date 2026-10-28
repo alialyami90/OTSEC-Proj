@@ -12,10 +12,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net"
 	"net/netip"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -319,22 +321,47 @@ func (g *rig) events() []stored {
 // waitN waits until at least n events are stored, or until no new event
 // has been stored for d: a slow store, as on a busy Windows runner, is
 // still progress, and only a stall ends the wait early (#183, job
-// 121863122339: 193 of 301 after a fixed 20 s). waitN never waits more
-// than two minutes in all.
+// 121863122339: 193 of 301 after a fixed 20 s). Neither d nor the
+// two-minute limit ends the wait while the receiver holds messages it has
+// read (queued, or in a commit): a commit can sit in one WAL sync for
+// tens of seconds on a hosted runner, and that is not a loss (F-016; #294,
+// job 122640645465: 21 of 25 stored after 5 s). The test binary's timeout
+// is the backstop, and a hold past markerUnread prints the commit trail.
 func (g *rig) waitN(n int, d time.Duration) []stored {
 	g.t.Helper()
 	now := time.Now()
 	moved, limit, seen := now, now.Add(2*time.Minute), -1
+	var heldSince time.Time
+	noted := false
 	for {
 		ev := g.events()
 		if len(ev) != seen {
 			seen, moved = len(ev), time.Now()
 		}
-		if len(ev) >= n || time.Since(moved) > d || time.Now().After(limit) {
+		if len(ev) >= n {
 			return ev
+		}
+		if g.r == nil || g.held() == 0 {
+			heldSince = time.Time{}
+			if time.Since(moved) > d || time.Now().After(limit) {
+				return ev
+			}
+		} else if heldSince.IsZero() {
+			heldSince = time.Now()
+		} else if h := time.Since(heldSince); h > markerUnread && !noted {
+			noted = true
+			fmt.Fprintf(os.Stderr, "%s: waitN(%d): %d stored; the receiver has held %d read messages for %v; waiting. The store's commits:\n%s\n",
+				g.t.Name(), n, len(ev), g.held(), h, g.commitTrail())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// held is how many messages the receiver has read and neither stored,
+// dropped nor found empty: queued, or in a commit.
+func (g *rig) held() int64 {
+	st := g.r.Status()
+	return st.Received - st.Stored - st.Empty - dropped(st)
 }
 
 // waitStatus polls the receiver's status until ok holds or d passes, and

@@ -599,7 +599,7 @@ func TestUnknownSendersAreKeptAndAlarmedOnce(t *testing.T) {
 	}
 	ev := g.events()
 	if len(ev) != want {
-		t.Fatalf("%d stored, %d sent", len(ev), want)
+		t.Fatalf("%d stored, %d sent; receiver %+v", len(ev), want, g.r.Status())
 	}
 	byID := map[string]stored{}
 	for _, s := range ev {
