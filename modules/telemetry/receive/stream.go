@@ -234,5 +234,5 @@ func (r *Receiver) commit(cctx context.Context, batch []msg) bool {
 	if len(recs) == 0 {
 		return true
 	}
-	return r.commitParts(cctx, recs, kept, true)
+	return r.commitSplit(cctx, recs, kept, true)
 }

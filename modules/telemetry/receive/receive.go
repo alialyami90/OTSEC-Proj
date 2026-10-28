@@ -40,6 +40,7 @@ const (
 	DropQueueFull     = "queue-full"     // a datagram arriving faster than the store commits
 	DropStore         = "store"          // a datagram batch the store refused (quota, or not open), or a message whose record could not be built
 	DropUnknownBudget = "unknown-budget" // an unknown sender's message past Limits.UnknownBytes
+	DropUnknownFull   = "unknown-full"   // an unknown sender's message the full syslog-unknown class refused (HR-11)
 )
 
 // ErrConfig is returned by New and ServerTLS for a configuration the
@@ -72,6 +73,22 @@ type Config struct {
 	// of class syslog-stream for TCP and TLS and syslog-datagram for UDP.
 	ID     string
 	Stream store.StreamID
+	// UnknownStream (C5 0.4, HR-11) is where messages from senders that
+	// resolve to no asset are stored, a stream of class syslog-unknown in
+	// the same database as Stream; the node declares it in the layout, and
+	// the receiver cannot check that. It must differ from Stream. Empty
+	// keeps unknown senders' records in Stream, in its class, as before
+	// 0.4, with no absolute bound.
+	//
+	// With it set, an unknown sender's records never share a part with a
+	// known sender's: a datagram batch is split in two, each committed in
+	// order, and a stream connection is one sender's, so it writes to one
+	// stream only. When the syslog-unknown class is at its quota the store
+	// refuses an unknown sender's part with CodeQuotaReached. That part is
+	// dropped and counted as DropUnknownFull, on a stream too: the
+	// connection is not held, and a known sender's connection never waits
+	// on the unknown stream.
+	UnknownStream store.StreamID
 	// Transport is syslog-tls, syslog-tcp or syslog-udp; Address is the
 	// ip:port to bind, an IP literal.
 	Transport asset.Transport
@@ -101,7 +118,7 @@ type Config struct {
 	MaxCommitBytes   int64
 	MaxCommitRecords int
 	// UnknownSpent is what unknown senders stored on this listener's
-	// stream in the Limits.UnknownWindow before this start, counted by the
+	// unknown stream (UnknownStream, or Stream when that is empty) in the Limits.UnknownWindow before this start, counted by the
 	// node from that stream (A3's conditions on D3-3):
 	//   - the sum of len(event) over the committed records that carry
 	//     asset-unresolved, each event as stored. The budget charges a
@@ -346,6 +363,9 @@ func New(cfg Config) (*Receiver, error) {
 	if !cfg.Stream.Valid() {
 		return bad("stream %q", cfg.Stream)
 	}
+	if cfg.UnknownStream != "" && (!cfg.UnknownStream.Valid() || cfg.UnknownStream == cfg.Stream) {
+		return bad("unknown stream %q is not a valid stream other than %q", cfg.UnknownStream, cfg.Stream)
+	}
 	switch cfg.Transport {
 	case asset.SyslogTLS:
 		if cfg.TLS == nil {
@@ -525,8 +545,15 @@ type msg struct {
 // record builds msg's C5 record.
 func (r *Receiver) record(m msg) (store.Record, error) {
 	src, known := r.cfg.Senders[m.from]
+	stream, class := r.cfg.Stream, store.ClassSyslogStream
+	if r.cfg.Transport == asset.SyslogUDP {
+		class = store.ClassSyslogDatagram
+	}
+	if !known && r.cfg.UnknownStream != "" {
+		stream, class = r.cfg.UnknownStream, store.ClassSyslogUnknown
+	}
 	in := normalize.SyslogInput{
-		Node: r.cfg.Node, Stream: r.cfg.Stream, Message: m.msg, Sender: m.from.String(),
+		Node: r.cfg.Node, Stream: stream, Message: m.msg, Sender: m.from.String(),
 		Auth: m.auth, SenderCert: m.cert, Received: m.rcv, Flags: m.flags, Dialect: normalize.DialectRFC,
 		EvidenceClass: r.cfg.Target,
 	}
@@ -544,11 +571,7 @@ func (r *Receiver) record(m msg) (store.Record, error) {
 	if err != nil {
 		return store.Record{}, err
 	}
-	class := store.ClassSyslogStream
-	if r.cfg.Transport == asset.SyslogUDP {
-		class = store.ClassSyslogDatagram
-	}
-	return store.Record{Stream: r.cfg.Stream, Class: class, Event: b}, nil
+	return store.Record{Stream: stream, Class: class, Event: b}, nil
 }
 
 // records builds the records of a batch, one by one, and returns them with
