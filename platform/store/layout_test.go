@@ -318,7 +318,7 @@ func TestFileGrowthStaysUnderTheDiskFactor(t *testing.T) {
 	l := testLog(t, db)
 	ctx := context.Background()
 	size := func() int64 {
-		used, _, err := db.Usage(ctx)
+		used, err := db.PageBytes(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,7 @@ func TestFileGrowthWithACaptureEachStaysUnderTheDiskFactor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			used, _, err := db.Usage(ctx)
+			used, err := db.PageBytes(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -396,7 +396,7 @@ func TestFileGrowthWithACaptureEachStaysUnderTheDiskFactor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			now, _, err := db.Usage(ctx)
+			now, err := db.PageBytes(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

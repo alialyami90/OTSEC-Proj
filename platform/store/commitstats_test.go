@@ -19,7 +19,10 @@ func TestCommitStatsSeeASlowTransaction(t *testing.T) {
 	if _, err := l.Append(context.Background(), rec("syslog/relay1", c5.ClassSyslogStream, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if st := db.CommitStats(); st.Count < 1 || st.Waiting != 0 || st.Max > 250*time.Millisecond {
+	// No bound on Max: the first commit is unprovoked, and on a hosted
+	// Windows runner it took 787 ms in the WAL sync (F-016). The property is
+	// that a slow commit is seen, which the provoked hold below proves.
+	if st := db.CommitStats(); st.Count < 1 || st.Waiting != 0 {
 		t.Fatalf("a fast commit: %+v", st)
 	}
 	db.TakeRecentCommit()
