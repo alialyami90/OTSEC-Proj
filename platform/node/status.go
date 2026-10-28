@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
@@ -45,6 +46,11 @@ type Status struct {
 	adminReqs   []AdminRequestStatus
 	labTLS      bool
 	labTLSRefs  []string
+
+	// deferred holds Write back: Run sets it until the links' certificate
+	// periods are judged, so no status file says the node is collecting
+	// before a held-back link is shown as held back (HR-13).
+	deferred atomic.Bool
 }
 
 // StatusAlarm is one alarm as node status shows it: a store alarm, which
@@ -182,6 +188,12 @@ func NewStatus(path string, oslog func(string), now func() time.Time) *Status {
 	}
 	return &Status{path: path, oslog: oslog, now: now, modes: map[c5.DatabaseID]c5.Mode{}, commits: map[c5.DatabaseID]CommitStatus{}}
 }
+
+// Defer holds Write back, writing nothing, until Resume.
+func (s *Status) Defer() { s.deferred.Store(true) }
+
+// Resume ends Defer. It does not write.
+func (s *Status) Resume() { s.deferred.Store(false) }
 
 // Alarm records one alarm of database db.
 func (s *Status) Alarm(db c5.DatabaseID, a c5.Alarm) {
@@ -409,7 +421,7 @@ func (s *Status) Snapshot(node string) StatusFile {
 // Write writes the snapshot to the status file: to a temporary file in the
 // same directory, flushed, then renamed, so a reader never sees half a file.
 func (s *Status) Write(node string) error {
-	if s.path == "" {
+	if s.path == "" || s.deferred.Load() {
 		return nil
 	}
 	b, err := json.MarshalIndent(s.Snapshot(node), "", "  ")
