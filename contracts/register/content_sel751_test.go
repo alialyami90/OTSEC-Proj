@@ -209,7 +209,7 @@ func loadRev3(t *testing.T) *Package {
 // entry is unchanged, so the deny corpus result cannot move.
 func TestContentRev4(t *testing.T) {
 	old, p := loadRev3(t), loadContent(t)
-	if p.Revision != 4 || p.Contract != ContractID || p.Issued != "2026-10-26" {
+	if p.Revision != 4 || p.Contract != "otsec.register/0.2" || p.Issued != "2026-10-26" {
 		t.Fatalf("revision %d, %s, issued %s", p.Revision, p.Contract, p.Issued)
 	}
 	want := []ContextRead{{ID: "ctx.date_f", Setting: "DATE_F", ReadBy: "sel.settings.show_global",
