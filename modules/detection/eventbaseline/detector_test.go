@@ -237,13 +237,28 @@ func TestDetectorAbsence(t *testing.T) {
 		t.Errorf("at %s", got[0].AtUTC)
 	}
 
-	// A deadline that ran out before the acknowledgement alarms nothing, until
-	// the type occurs again.
+	// A deadline that ran out before the acknowledgement starts again at it
+	// (D4-15): a source that went silent during the wait and never returns
+	// alarms at exactly activation + interval + tolerance, and not before.
 	d = activeB(t, 2200)
-	wantRules(t, tick(t, d, 3000))
-	wantRules(t, feed(t, d, ser("B", "Asserted", at(3000), "")))
-	wantRules(t, tick(t, d, 3150))
-	wantRules(t, tick(t, d, 3151), baseline.RuleAbsence)
+	wantRules(t, tick(t, d, 2350))
+	got = tick(t, d, 2351)
+	wantRules(t, got, baseline.RuleAbsence)
+	if got[0].AtUTC != at(2350).Format(time.RFC3339Nano) {
+		t.Errorf("at %s, want activation + interval + tolerance", got[0].AtUTC)
+	}
+	// ... unless it occurs first, which starts its deadline as any occurrence.
+	d = activeB(t, 2200)
+	wantRules(t, feed(t, d, ser("B", "Asserted", at(2300), "")))
+	wantRules(t, tick(t, d, 2450))
+	wantRules(t, tick(t, d, 2451), baseline.RuleAbsence)
+
+	// A deadline exactly at the acknowledgement still stands.
+	d = activeB(t, 2150)
+	wantRules(t, tick(t, d, 2150))
+	if got = tick(t, d, 2151); len(got) != 1 || got[0].AtUTC != at(2150).Format(time.RFC3339Nano) {
+		t.Errorf("alarms %v", got)
+	}
 }
 
 // TestDetectorHolds: one alarm per rule and type per hold, the breaks held

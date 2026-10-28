@@ -37,8 +37,8 @@ type DetectorConfig struct {
 	Hash string
 	// ActiveFrom is when the operator's acknowledgement entered the audit
 	// chain. Departures are alarmed from then on. A periodic type whose
-	// interval and tolerance ran out before then raises no absence alarm
-	// until it has occurred again.
+	// interval and tolerance ran out before then is given ActiveFrom +
+	// interval + tolerance as its deadline (D4-15).
 	ActiveFrom time.Time
 }
 
@@ -129,11 +129,13 @@ func NewDetector(c DetectorConfig) (*Detector, error) {
 				return nil, fmt.Errorf("%w: %v", ErrConfig, err)
 			}
 			w.last = last.UnixNano()
-			// A type whose deadline ran out before the acknowledgement is
-			// not armed until it occurs again: the wait for the
-			// acknowledgement alarms nothing (B6's reading of V-M4). A type
-			// that never returns is therefore not alarmed (a limit).
-			w.absent = w.deadline() < c.ActiveFrom.UnixNano()
+			// A type whose deadline ran out before the acknowledgement has its
+			// deadline start at the acknowledgement (D4-15): none is ever left
+			// unarmed, so a source that falls silent during the wait and never
+			// returns still alarms, and nothing alarms before activation.
+			if w.deadline() < c.ActiveFrom.UnixNano() {
+				w.last = c.ActiveFrom.UnixNano()
+			}
 			d.periodic = append(d.periodic, w)
 		}
 		d.types[t.Key] = w

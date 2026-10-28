@@ -77,22 +77,23 @@
 //     that can never meet periodic_spread_pct is dropped from periodic
 //     tracking as soon as that is certain, and one with more than 4096
 //     distinct gap lengths is not found periodic.
-//   - Max types. A learner that kept the types with the highest counts
-//     would hold every type until the end, which a flood of distinct
-//     messages makes unbounded. This one keeps the first max_types it meets
-//     and counts the rest as left out (Counts.TypesOverflow, up to
-//     max_types of them: Result.OverflowSaturated says it stopped). Only
-//     when the record is above the byte cap does it drop the lowest
-//     counts (ties by key), as C10 states. After activation a type left out
-//     alarms as new.
+//   - Max types (D4-15). While learning, at most baseline.MaxTypesCeiling
+//     types are held per asset; a type first met while that many are held is
+//     counted (Counts.TypesOverflow) and never held. Finish keeps the
+//     max_types with the highest count, ties by key, then leaves out the
+//     lowest counts until the record fits the byte cap, and counts every
+//     type left out. This is exact for an asset that shows 4096 types or
+//     fewer in its period; past that the asset is pathological and the
+//     overflow count says so (Result.OverflowSaturated: the count itself
+//     stopped at 4096). After activation a type left out alarms as new.
 //   - The new-type memory is bounded (16,384 types); a flood of distinct
 //     new types beyond that alarms on each occurrence, under the alarm
 //     bounds.
-//   - Absence is armed only by an occurrence after activation, or by a
-//     deadline still in the future at activation (B6's reading, the one the
-//     held-out series is built on). A periodic type that falls silent
-//     during the wait for the acknowledgement, and never returns, is not
-//     alarmed.
+//   - Absence (D4-15). A periodic type whose deadline ran out before the
+//     acknowledgement is given activation + interval + tolerance as its
+//     deadline, so a source that fell silent during the wait and never
+//     returns still alarms, at most one interval and tolerance after
+//     activation. Nothing alarms before activation.
 //   - The held-alarm notice carries a count that grows after it is sent.
 //   - Every value learnt on a synthetic series says nothing about a real
 //     device (V-M4 reports it as simulated).

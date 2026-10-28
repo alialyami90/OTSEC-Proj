@@ -322,6 +322,13 @@ func TestGTINJHeldOutRaisesNothing(t *testing.T) {
 	h := load(t, "events-heldout.json")
 	base := learn(t, s, nil)
 	ack := ts(t, s.Period.Ack)
+	// The held-out series starts 16.5 hours after the acknowledgement, a gap
+	// of the schedule and not a behaviour of the device (B1, D4-15): until
+	// B6 regenerates it to start at the acknowledgement, the replay is
+	// activated at its first event.
+	if first := ts(t, h.Events[0].Received); first.Sub(ack) > time.Hour {
+		ack = first
+	}
 	last := ts(t, h.Events[len(h.Events)-1].Received)
 	if got := detect(t, base, ack, h.Events, last); len(got) != 0 {
 		t.Errorf("%d alarms on the benign series: %v", len(got), got)

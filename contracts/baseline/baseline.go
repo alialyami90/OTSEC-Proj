@@ -179,7 +179,10 @@ type Counts struct {
 	NotCounted int64 `json:"not_counted"` // possible duplicates suppressed (PossibleDuplicates)
 	// TypesOverflow is the number of types left out, past Params.MaxTypes
 	// or past MaxBytes; their events are in Full and TypeOnly but in no Type.
-	// A learner keeps the types with the highest Count, ties by key.
+	// A learner keeps the types with the highest Count, ties by key. It holds
+	// at most MaxTypesCeiling types while it observes, so a type first met
+	// past that is counted here without being held: the rule is exact for an
+	// asset that shows MaxTypesCeiling types or fewer in its period.
 	TypesOverflow int64 `json:"types_overflow"`
 }
 

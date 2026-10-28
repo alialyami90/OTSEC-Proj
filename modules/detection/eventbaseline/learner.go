@@ -41,9 +41,10 @@ type Learner struct {
 	cfg   LearnerConfig
 	p     baseline.Params
 	types map[baseline.Key]*learnt
-	// overflow holds the keys of types past Params.MaxTypes, so
-	// Counts.TypesOverflow counts types and not events. It stops growing at
-	// MaxTypes too; overflowSaturated then says the count is a lower bound.
+	// overflow holds the keys of types first met while MaxTypesCeiling types
+	// were held (the working set, D4-15), so Counts.TypesOverflow counts
+	// types and not events. It stops growing at MaxTypesCeiling too;
+	// overflowSaturated then says the count is a lower bound.
 	overflow          map[baseline.Key]struct{}
 	overflowSaturated bool
 
@@ -142,9 +143,9 @@ func (l *Learner) Observe(o Obs) error {
 	}
 	ty := l.types[k]
 	if ty == nil {
-		if int64(len(l.types)) >= l.p.MaxTypes {
+		if len(l.types) >= baseline.MaxTypesCeiling {
 			if _, ok := l.overflow[k]; !ok {
-				if int64(len(l.overflow)) >= l.p.MaxTypes {
+				if len(l.overflow) >= baseline.MaxTypesCeiling {
 					l.overflowSaturated = true
 				} else {
 					l.overflow[k] = struct{}{}
@@ -304,12 +305,15 @@ type Result struct {
 	OverflowSaturated bool
 }
 
+// TypesHeld reports the working set: the types held, and the types first met
+// while MaxTypesCeiling were held, which are counted and never held.
+func (l *Learner) TypesHeld() (held, overflow int) { return len(l.types), len(l.overflow) }
+
 // Finish ends the period at now and records the baseline. It refuses before
-// both minima are met (ErrNotDone). Types past Params.MaxTypes, or past
-// what fits in the byte cap, are left out; the learner keeps the first
-// MaxTypes it met (a learner that kept the highest counts would hold every
-// type until the end), and drops from those, lowest count first and ties by
-// key, until the record fits.
+// both minima are met (ErrNotDone). Of the types held it keeps the
+// Params.MaxTypes with the highest count (ties by key), then leaves out the
+// lowest count (ties by key) until the record fits the byte cap. Every type
+// left out is counted in Counts.TypesOverflow, as are those never held.
 func (l *Learner) Finish(now time.Time) (*Result, error) {
 	if pr := l.Progress(now); !pr.Started || !pr.Done {
 		return nil, fmt.Errorf("%w: %d s collected of %d, %d events of %d", ErrNotDone, pr.CollectedS, l.p.MinDurationS, pr.Events, l.p.MinEvents)
@@ -340,6 +344,8 @@ func (l *Learner) Finish(now time.Time) (*Result, error) {
 		}
 		return all[i].key.String() < all[j].key.String()
 	})
+	held := len(all)
+	all = all[:min(held, int(l.p.MaxTypes))]
 	build := func(n int) {
 		b.Types = make([]baseline.Type, 0, n)
 		for _, ty := range all[:n] {
@@ -355,7 +361,7 @@ func (l *Learner) Finish(now time.Time) (*Result, error) {
 			}
 			return 0
 		})
-		b.Counts.TypesOverflow = int64(len(l.overflow) + len(all) - n)
+		b.Counts.TypesOverflow = int64(len(l.overflow) + held - n)
 	}
 	limit := l.cfg.MaxBytes
 	// With no type at all the record is the same whatever the limit. With

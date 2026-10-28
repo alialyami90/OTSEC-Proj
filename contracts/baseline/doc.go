@@ -61,7 +61,10 @@
 //     (Encode) in C5 0.4's configuration class, and is at most MaxBytes:
 //     past max_types, or past what fits, the types with the lowest count
 //     are left out and counted in types_overflow, and are new types once
-//     the baseline is active.
+//     the baseline is active. A learner holds at most MaxTypesCeiling types
+//     while it observes, so a type first met past that is counted without
+//     being held: the rule is exact for an asset that shows that many types
+//     or fewer in its period.
 //   - The baseline hash (Hash, D4-4 item 5): SHA-256 over the stored
 //     record's exact bytes (the record's bytes, never a C5 frame), with no
 //     canonical JSON. C7 0.6 node.baseline_ack names it; C9 uses the same

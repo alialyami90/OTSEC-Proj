@@ -229,14 +229,55 @@ func TestLearnerGapsExtendThePeriod(t *testing.T) {
 	}
 }
 
-// TestLearnerMaxTypes: types past max_types are counted aside and their events
-// stay in the counts.
-func TestLearnerMaxTypes(t *testing.T) {
+// TestLearnerMaxTypesKeepsTheHighestCounts: past max_types the types with
+// the highest count are kept, ties by key, whenever they were met; a later
+// high-count type displaces an earlier low-count one (C10, D4-15).
+func TestLearnerMaxTypesKeepsTheHighestCounts(t *testing.T) {
+	has := func(r *eventbaseline.Result, el string) bool {
+		_, ok := r.Baseline.Lookup(baseline.Key{Source: baseline.SourceSER, Element: el, State: "Asserted"})
+		return ok
+	}
 	l := learner(t, func(p *baseline.Params) { p.MaxTypes = 2 })
 	observe(t, l, ser("A", "Asserted", at(1), ""), ser("B", "Asserted", at(2), ""), ser("C", "Asserted", at(3), ""), ser("C", "Asserted", at(4), ""), ser("D", "Asserted", at(5), ""))
 	r := finish(t, l)
-	if len(r.Baseline.Types) != 2 || r.Baseline.Counts.TypesOverflow != 2 || r.Baseline.Counts.Events != 5 || r.Baseline.Counts.Full != 5 {
-		t.Errorf("types %d, counts %+v", len(r.Baseline.Types), r.Baseline.Counts)
+	if len(r.Baseline.Types) != 2 || !has(r, "C") || !has(r, "A") || has(r, "B") || has(r, "D") {
+		t.Errorf("kept %d types, A:%v B:%v C:%v D:%v: C (2 events) displaces the first-met B, and A wins the tie with B and D by key",
+			len(r.Baseline.Types), has(r, "A"), has(r, "B"), has(r, "C"), has(r, "D"))
+	}
+	if c := r.Baseline.Counts; c.TypesOverflow != 2 || c.Events != 5 || c.Full != 5 {
+		t.Errorf("counts %+v", c)
+	}
+	// Ties alone: the first two keys.
+	l = learner(t, func(p *baseline.Params) { p.MaxTypes = 2 })
+	observe(t, l, ser("D", "Asserted", at(1), ""), ser("C", "Asserted", at(2), ""), ser("B", "Asserted", at(3), ""), ser("A", "Asserted", at(4), ""))
+	if r = finish(t, l); !has(r, "A") || !has(r, "B") || has(r, "C") || has(r, "D") {
+		t.Errorf("a tie keeps the lowest keys, not the first met")
+	}
+}
+
+// TestLearnerWorkingSetBoundary: the learner holds MaxTypesCeiling types; the
+// next type met is counted and never held, and a repeat of it is not
+// counted twice.
+func TestLearnerWorkingSetBoundary(t *testing.T) {
+	l := learner(t, nil)
+	for i := range baseline.MaxTypesCeiling {
+		observe(t, l, ser(fmt.Sprintf("T%04d", i), "Asserted", at(1), ""))
+	}
+	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != 0 {
+		t.Fatalf("after %d types: held %d, overflow %d", baseline.MaxTypesCeiling, h, o)
+	}
+	observe(t, l, ser("X", "Asserted", at(2), ""), ser("X", "Asserted", at(3), ""), ser("T0000", "Asserted", at(4), ""))
+	if h, o := l.TypesHeld(); h != baseline.MaxTypesCeiling || o != 1 {
+		t.Errorf("the 4097th type: held %d, overflow %d", h, o)
+	}
+	r := finish(t, l)
+	// 4096 types do not fit the byte cap, so the record is cut by count, and
+	// everything left out, and the type never held, is counted.
+	if c := r.Baseline.Counts; c.TypesOverflow != int64(1+baseline.MaxTypesCeiling-len(r.Baseline.Types)) || c.Events != baseline.MaxTypesCeiling+3 {
+		t.Errorf("%d types, counts %+v", len(r.Baseline.Types), c)
+	}
+	if _, ok := r.Baseline.Lookup(baseline.Key{Source: baseline.SourceSER, Element: "T0000", State: "Asserted"}); !ok {
+		t.Errorf("T0000, the highest count, was left out")
 	}
 }
 
