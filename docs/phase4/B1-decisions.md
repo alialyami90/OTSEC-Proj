@@ -463,3 +463,36 @@ Date: 2026-10-28. B6 raised two items in the review of #331 at 4be058c. B2 fixed
    `partial` is not a run outcome, and a configuration record that did not parse is invalid. A reply the rule cannot read ends the run with `failed.config_unparsable` and no record. A partial snapshot would give C9 false differences against the baseline, and a snapshot is whole or absent. The two invalid examples are a failed run with 24 records and a `partial.parse_errors` run.
 - **Not blocking (B6).** `failed.config_unparsable` is still accepted on a single SER read. B2 may close that in a follow-up.
 - **Approved.** C2 0.6 and C9 0.2 merged as #331 (6c33f14). The next steps belong to others. B2 adds `sel751.Hosts` and a measured maximal result frame. B3 builds the collector run wiring under C7 0.7 (#334), including B5's `checkReply` fix: it accepts any contract the node accepts (`AcceptsContract`), so a mixed 0.6/0.7 node and collector do not reply `ErrProtocol`.
+
+## D4-24: the collector client's deadline, the clear's actor, and acceptances from an untrusted collector (#339, relay PR 2a)
+
+Date: 2026-10-28.
+
+1. **`collectorclient.Do` gets a deadline for each request, not a fixed constant.** The deadline is the collector's own bound for that request plus 10 s. For an invocation, that bound is the operation's or run's total limit from the signed register (`Limits.ForRun` for a run), which gives the 310 s or more that C7 0.7 (#334) expects. For the credential and admin-relay kinds, it is their existing reply bound. When the deadline passes, the request fails closed with `ErrTimeout` and is not retried in the same session. B3 builds it in the C7 0.7 collector PR, together with `AcceptsContract` in `checkReply`.
+2. **On `quarantine.cleared` the actor stays the node, so C8 does not change.** The node performs the clear. The person who signed the request is recorded in `requested_by`, and the record links to the collector's accepted admin-signed request by the hash of the payload the collector verified, not by a later read of the file. Relay PR 2b only adds the refusal of unsigned clear files when any endpoint is not lab or simulated.
+3. **An acceptance from a collector the node did not trust is never acted on (B6's high finding on #339, A3's item 3 on #181).** Before this fix, a clear that a restored collector accepted was applied once the collector was reinstalled and the reset acknowledged. Two rules close this, and both are required:
+   - **(a) Taint at fold time.** A relay entry is tainted if the restored hold was in force when its acceptance was folded, that is, if `Restored` was non-nil after that record (B3's refinement), or if its `collector_seq` is at or below the high mark. The taint is derived from the chain, so a restart keeps it.
+   - **(b) Bind to the install key.** An acceptance is acted on only while its `install_key_id` is the trusted key. A reinstall retires every acceptance from the old key, and going back to an earlier key does not revive them.
+
+   A tainted or retired entry is refused, not left pending. Its status and the health line tell the administrator to sign the request again. Tests: B6's probe (a restored acceptance, then a reinstall, then an acknowledged reset, and nothing is cleared), (b) on its own, and the node's own `applySeqAck` key check reached through the relay. B3 confirmed the rule.
+
+## D4-25: a configuration snapshot is bounded in C9, so a valid run always fits the record cap (#338)
+
+Date: 2026-10-28.
+
+- **What B2 measured (simulated, `config.FromResult`).** With S22's 8,734 settings and values that fill the 512 KiB run limit, the stored record (snapshot plus transcript) is 1,210,476 bytes, which is 77% of the 1.5 MiB cap. But nothing bounds the number of settings. A transcript at the byte limit packed with one-character settings gives 65,822 settings and a record of 2,295,738 bytes. C5 would refuse that commit, and the run would store nothing.
+- **Decision: C9 0.3 bounds a snapshot.** The bound is set by setting count, starting from S22's count plus a margin that B2 proposes (25% to start), with a byte bound on the snapshot as encoded as the backstop. Both are chosen so that a record at both bounds, with a full 512 KiB transcript, fits the 1.5 MiB cap with room to spare, and tests pin this. A run over either bound fails as `failed.config_unparsable`. The detail names the bound, the transcript is kept, and no snapshot is made.
+- **Why not accept a run that stores nothing, or raise the cap.** A run that passes every check and is then refused at commit drops evidence silently (brief §1.4). A larger cap only moves the edge, because the transcript limit does not bound the setting count. A relay that prints far more settings than S22 lists is outside our evidence, so it should fail visibly, with its bytes kept.
+- **Owners.** B2 drafts C9 0.3 as its own contract PR, which deletes `TestConfigDenseRecordExceedsTheCap`. B5 and B6 review it, and B1 approves. #338 merges with the gap pinned and stated.
+
+## D4-26: the event-baseline feeder keeps its state across a restart, and the recording is in the audit chain (#340)
+
+Date: 2026-10-28.
+
+1. **Learner and detector state: snapshots plus a required C5 consumer (B5's option A).**
+   - **The snapshot API.** B4 adds `Snapshot` and `Restore` to the learner and the detector. The format is deterministic, versioned and bounded, and B4 states the largest snapshot at the 4096-type ceiling. Restoring at any point gives byte-identical output to a run that never stopped.
+   - **How the node uses it.** The node writes the snapshot atomically, together with the per-stream positions that the snapshot reflects. After the snapshot is durable, it commits the required `node-eventbaseline` consumer. On restore, each stream resumes from the later of the snapshot's position and the consumer's cursor, so a crash between the two steps counts nothing twice.
+   - **A snapshot that does not restore** (corrupt, an unknown version, or other `Params`) raises an alarm and starts an audited re-learn that names the replaced baseline. It is never a silent restart.
+   - **Rejected:** keeping 14 days of events (an unbounded replay, and a flood fills the quota), and restarting the period (a node that is updated weekly never learns).
+2. **C8 0.8 adds `config.baseline_recorded`.** Its fields are asset, kind (event, or configuration where that applies), digest, version, and previous (the replaced digest on a re-learn). It is written in the same commit step as the baseline record. verification.md requires the baseline to be "recorded once, versioned and hashed in the audit chain", and the C5 record alone does not show a baseline that was recorded but never acknowledged. B3 drafts it, B4, B5 and B6 review it, and B1 approves.
+3. **Order.** B5 builds the configuration and layout, then the merge reader with its watermarks, then the lifecycle with learner state in memory only. That stage is not shippable, and V-M4 is not claimed on it. The snapshot and the restart tests follow once B4's API lands. B4's snapshot PR and C8 0.8 run alongside.
