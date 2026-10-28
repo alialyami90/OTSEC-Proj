@@ -51,6 +51,7 @@ var (
 var adminKinds = map[RequestKind]bool{
 	KindCredentialInstall: true, KindCredentialRevoke: true, KindCredentialClearSusp: true, KindAssetClearSusp: true,
 	KindNodeQuarantineClear: true, KindNodeSeqResetAck: true,
+	KindNodeChangeApproval: true, KindNodeBaselineAck: true,
 }
 
 // AdminSigned is the envelope of an admin-signed request (0.4). The
@@ -93,6 +94,10 @@ type AdminRequest struct {
 	// as a payload error, as it refuses the kind.
 	NodeQuarantineClear *NodeQuarantineClearBody `json:"node_quarantine_clear,omitempty"`
 	NodeSeqResetAck     *NodeSeqResetAckBody     `json:"node_seq_reset_ack,omitempty"`
+	// The configuration kinds' bodies (since 0.6), the same way: a 0.5
+	// reader refuses either as a payload error.
+	NodeChangeApproval *NodeChangeApprovalBody `json:"node_change_approval,omitempty"`
+	NodeBaselineAck    *NodeBaselineAckBody    `json:"node_baseline_ack,omitempty"`
 }
 
 // Expires is the request's parsed expiry; it is valid on a request
@@ -110,6 +115,10 @@ type AdminKey struct {
 	// Principal is the human principal ID the key speaks for.
 	Principal string
 	Status    KeyStatus
+	// Kinds (since 0.6) are the request kinds the key may sign. A key
+	// pinned without a list (nil) may sign DefaultAdminKinds, the 0.5
+	// kinds, and nothing added later (D4-2). See Allows.
+	Kinds []RequestKind
 }
 
 // AdminKeyID is the key ID of an Ed25519 public key: "ed25519-" and the
@@ -138,14 +147,15 @@ const (
 	AdminCheckSignature AdminCheck = "signature" // does not verify over this kind's prefix
 	AdminCheckPayload   AdminCheck = "payload"   // not strict JSON, another format, or a body that fails its rules
 	AdminCheckBinding   AdminCheck = "binding"   // kind, principal, key ID, node or install key differ
-	AdminCheckWindow    AdminCheck = "window"    // not yet valid, expired, or longer than MaxAdminLifetime
+	AdminCheckAuthority AdminCheck = "authority" // since 0.6: the key may not sign this kind (AdminKey.Kinds)
+	AdminCheckWindow    AdminCheck = "window"    // not yet valid, expired, longer than MaxAdminLifetime, or an approval window ended or too far ahead
 	AdminCheckReplay    AdminCheck = "replay"    // the nonce was spent already (the collector's check)
 	AdminCheckCapacity  AdminCheck = "capacity"  // the collector holds too many unexpired nonces
 )
 
 // AdminChecks lists every check, in the order they run.
 var AdminChecks = []AdminCheck{AdminCheckEnvelope, AdminCheckKey, AdminCheckSignature, AdminCheckPayload,
-	AdminCheckBinding, AdminCheckWindow, AdminCheckReplay, AdminCheckCapacity}
+	AdminCheckBinding, AdminCheckAuthority, AdminCheckWindow, AdminCheckReplay, AdminCheckCapacity}
 
 // AdminRejected is why VerifyAdminRequest refused. Reason is for tests and
 // the collector's own diagnostics; it never holds the payload, but it may
@@ -219,9 +229,17 @@ func SignAdminRequest(priv ed25519.PrivateKey, p AdminRequest) (*AdminSigned, er
 //  5. binding: the payload's kind, the principal (a person, equal to
 //     on_behalf_of and to the key's principal), admin_key_id, node_id and
 //     install_key_id match;
-//  6. window: issued_at is at most MaxAdminClockSkew ahead of now,
+//  6. authority (0.6): the key may sign the kind (AdminKey.Allows);
+//  7. window: issued_at is at most MaxAdminClockSkew ahead of now,
 //     expires_at is after issued_at and after now, and at most
-//     MaxAdminLifetime after either.
+//     MaxAdminLifetime after either; and for node.change_approval, the
+//     approval's window has not ended and starts at most MaxApprovalLead
+//     ahead of now.
+//
+// Authority runs after binding, so a mis-bound request names binding, and
+// before the window and the collector's replay check, so a key that may
+// not sign the kind spends no nonce (D4-2). The signer is authenticated by
+// then, so naming the check tells the sender nothing about the signature.
 //
 // Every failure is an *AdminRejected. Spending the nonce durably is the
 // collector's step, after this and before any other decision.
@@ -280,6 +298,9 @@ func VerifyAdminRequest(req *CollectorRequest, keys []AdminKey, bind AdminBindin
 	case p.InstallKeyID != bind.InstallKeyID:
 		return nil, adminReject(AdminCheckBinding, "signed for install key %s", p.InstallKeyID)
 	}
+	if !key.Allows(p.Kind) {
+		return nil, adminReject(AdminCheckAuthority, "key %q may not sign %s", key.KeyID, p.Kind)
+	}
 	issued, _ := time.Parse(time.RFC3339, p.IssuedAt) // checked by validate
 	expires := p.Expires()
 	switch {
@@ -293,6 +314,11 @@ func VerifyAdminRequest(req *CollectorRequest, keys []AdminKey, bind AdminBindin
 		return nil, adminReject(AdminCheckWindow, "valid for longer than %s", MaxAdminLifetime)
 	case expires.Sub(now) > MaxAdminLifetime:
 		return nil, adminReject(AdminCheckWindow, "expires more than %s ahead of the collector's clock", MaxAdminLifetime)
+	}
+	if p.NodeChangeApproval != nil {
+		if rej := p.NodeChangeApproval.checkWindow(now); rej != nil {
+			return nil, rej
+		}
 	}
 	return &p, nil
 }
@@ -323,14 +349,13 @@ func (p *AdminRequest) validate() error {
 		return errors.New("nonce is not 16 bytes of base64url without padding")
 	}
 	for _, ts := range []string{p.IssuedAt, p.ExpiresAt} {
-		t, err := time.Parse(time.RFC3339, ts)
-		if err != nil || t.Location() != time.UTC || t.Format(time.RFC3339Nano) != ts {
-			return fmt.Errorf("time %q is not RFC 3339 UTC", ts)
+		if _, err := parseUTC(ts); err != nil {
+			return err
 		}
 	}
 	set := 0
 	for _, present := range []bool{p.CredentialInstall != nil, p.CredentialRevoke != nil, p.CredentialClearSusp != nil, p.AssetClearSusp != nil,
-		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil} {
+		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil, p.NodeChangeApproval != nil, p.NodeBaselineAck != nil} {
 		if present {
 			set++
 		}
@@ -341,5 +366,6 @@ func (p *AdminRequest) validate() error {
 	return validateBody(p.Kind, p.Principal, requestBodies{
 		CredentialInstall: p.CredentialInstall, CredentialRevoke: p.CredentialRevoke,
 		CredentialClearSusp: p.CredentialClearSusp, AssetClearSusp: p.AssetClearSusp,
-		NodeQuarantineClear: p.NodeQuarantineClear, NodeSeqResetAck: p.NodeSeqResetAck})
+		NodeQuarantineClear: p.NodeQuarantineClear, NodeSeqResetAck: p.NodeSeqResetAck,
+		NodeChangeApproval: p.NodeChangeApproval, NodeBaselineAck: p.NodeBaselineAck})
 }

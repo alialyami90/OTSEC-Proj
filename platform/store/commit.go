@@ -21,8 +21,12 @@ import (
 //
 // It refuses a batch, having written nothing, with CodeInvalid (an unknown
 // stream, a class that is not the stream's, an event that is not a pending
-// C4 event of this node and stream, or a pending audit record SealAudit
-// rejects) or CodeQuotaReached (the class's quota cannot hold the batch).
+// C4 event of this node and stream, a pending audit record SealAudit
+// rejects, or a configuration document Options.Documents rejects),
+// CodeQuotaReached (the class's quota cannot hold the batch),
+// CodeRecordTooLarge (a record over its class's MaxRecordBytes) or
+// CodeNotHoldable (a hold outside the configuration class, or on a record
+// that is not stored).
 // Any other error leaves the batch's durability unknown, and the Log stops.
 func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Record) (c5.Commit, error) {
 	if err := d.lock(); err != nil {
@@ -49,6 +53,12 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		// review of #77).
 		if err := r.Validate(); err != nil {
 			return c5.Commit{}, err
+		}
+		if q, ok := d.quotas[class]; ok && q.MaxRecordBytes > 0 && r.Bytes() > q.MaxRecordBytes {
+			return c5.Commit{}, codeErr(c5.CodeRecordTooLarge, nil, "record %d: %d bytes, over the %s cap %d", i, r.Bytes(), class, q.MaxRecordBytes)
+		}
+		if len(r.Holds) > 0 && class != c5.ClassConfiguration {
+			return c5.Commit{}, codeErr(c5.CodeNotHoldable, nil, "record %d of class %s takes holds; only configuration records may", i, class)
 		}
 	}
 
@@ -83,6 +93,16 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 				return err
 			}
 			payload, head = sealed, h
+		} else if class == c5.ClassConfiguration {
+			// A typed document, kept exactly: no seq is written in, so a
+			// digest over the stored bytes is stable (C9, C10).
+			for i, r := range recs {
+				if err := d.opt.Documents(r.Event, r.Capture); err != nil {
+					refusal = invalid("record %d: %v", i, err)
+					return refusal
+				}
+				payload[i] = r.Event
+			}
 		} else {
 			for i, r := range recs {
 				b, err := assignSeq(r.Event, event.EventID{NodeID: d.opt.Node, Stream: stream, Seq: first + c5.Seq(i)})
@@ -106,11 +126,11 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			refusal = codeErr(c5.CodeQuotaReached, nil, "class %s: %d of %d bytes used, batch needs %d", class, used, q.Bytes, add)
 			if !d.full[class] {
 				d.full[class] = true
-				code := c5.AlarmQuotaReached
-				if class == c5.ClassAudit {
-					code = c5.AlarmAuditFull
+				code, detail := c5.FullAlarm(class), refusal.Error()
+				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown {
+					detail += "; most bytes: " + d.topStreams(ctx, class, 3)
 				}
-				alarm = &c5.Alarm{Code: code, Class: class, Stream: stream, Detail: refusal.Error()}
+				alarm = &c5.Alarm{Code: code, Class: class, Stream: stream, Detail: detail}
 			}
 			return refusal
 		}
@@ -134,6 +154,28 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			if _, err := d.conn.ExecContext(ctx, `INSERT INTO events (stream, seq, event, capture, source_cursor, committed_at) VALUES (?, ?, ?, ?, ?, ?)`,
 				string(stream), int64(first)+int64(i), payload[i], capture, nullBytes(r.SourceCursor), at); err != nil {
 				return fmt.Errorf("insert event: %w", err)
+			}
+		}
+		// Holds commit with their record, so no prune step can fall between
+		// a snapshot and its hold (B3 on #246).
+		for i, r := range recs {
+			for _, h := range r.Holds {
+				if h.Stream == "" {
+					h.Stream = stream
+				}
+				if h.Seq == 0 {
+					h.Seq = first + c5.Seq(i)
+				}
+				if err := d.checkHold(h.Stream); err != nil {
+					refusal = err
+					return err
+				}
+				if err := d.putHold(ctx, h); err != nil {
+					if errors.Is(err, &c5.Error{Code: c5.CodeNotHoldable}) {
+						refusal = err
+					}
+					return err
+				}
 			}
 		}
 		var cursor []byte

@@ -47,6 +47,18 @@ type Options struct {
 	// called synchronously and must not call back into the store. Nil
 	// discards them, which only tests should do.
 	Alarms func(c5.Alarm)
+	// Documents checks every configuration-class record before it is
+	// stored (C5 0.4), as SealAudit checks audit records. A database
+	// whose layout holds the configuration class requires it; the node
+	// injects the C9 and C10 decoders, so the store imports neither.
+	Documents c5.DocumentValidator
+	// BusyTimeout is how long a statement waits for another connection's
+	// lock (SQLite's busy_timeout). Zero means DefaultBusyTimeout, 5 s, and
+	// production leaves it so: a commit held in a slow WAL sync (F-016) must
+	// not be mistaken for a lock that will not come free. Only tests that
+	// hold a database busy on purpose shorten it, so they do not wait out the
+	// full 5 s on every open and tick.
+	BusyTimeout time.Duration
 
 	// hook is called at named points of every transaction. Only tests set
 	// it, to kill the process at each commit point.
@@ -67,6 +79,9 @@ func (o Options) validate() error {
 	}
 	if len(o.Database.Streams) == 0 {
 		return invalid("database %s has no streams", o.Database.ID)
+	}
+	if holdable(o.Database) && o.Documents == nil {
+		return invalid("database %s holds the configuration class and has no document validator", o.Database.ID)
 	}
 	// Layout.Validate requires exactly one audit stream per node. Only one
 	// database holds it, so a database without one is checked next to a

@@ -96,8 +96,8 @@ type a6Store struct {
 
 func (s *a6Store) CheckSettings(context.Context) error { return s.env.call("CheckSettings") }
 func (s *a6Store) QuickCheck(context.Context) error    { return s.env.call("QuickCheck") }
-func (s *a6Store) Usage(context.Context) (int64, int64, error) {
-	return 0, 1 << 30, s.env.call("Usage")
+func (s *a6Store) ClassUsage(context.Context) ([]store.ClassUse, error) {
+	return nil, s.env.call("Usage")
 }
 func (s *a6Store) CompactStep(context.Context, int) (bool, error) {
 	return false, s.env.call("CompactStep")

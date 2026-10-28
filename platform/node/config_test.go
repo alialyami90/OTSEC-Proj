@@ -44,6 +44,7 @@ func TestLoadSample(t *testing.T) {
 		QuarantineStream(relayID): c5.ClassAdapterEvidence,
 		HealthStream:              c5.ClassPlatform,
 		ListenerStream("lab-udp"): c5.ClassSyslogDatagram,
+		UnknownStream("lab-udp"):  c5.ClassSyslogUnknown,
 		AuditStream:               c5.ClassAudit,
 	}
 	got := l.StreamClasses()
@@ -60,8 +61,9 @@ func TestLoadSample(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One required consumer per stream, audit included (the target audits),
-	// and none for the quarantine stream, which nothing forwards.
-	if len(cs) != 4 {
+	// (the unknown stream too), and none for the quarantine stream, which
+	// nothing forwards.
+	if len(cs) != 5 {
 		t.Fatalf("consumers %v", cs)
 	}
 	for _, x := range cs {
@@ -172,6 +174,9 @@ func TestChecks(t *testing.T) {
 		"unknown asset":      func(c *nodeconfigtest.Config) { c.Schedule[0].AssetID = "00000000-0000-4000-8000-000000000000" },
 		"unknown endpoint":   func(c *nodeconfigtest.Config) { c.Schedule[0].Endpoint = "port2" },
 		"bad operation":      func(c *nodeconfigtest.Config) { c.Schedule[0].Operation = "SER" },
+		"long operation": func(c *nodeconfigtest.Config) {
+			c.Schedule[0].Operation = "sel." + strings.Repeat("a", MaxOperationBytes)
+		},
 		"fast schedule":      func(c *nodeconfigtest.Config) { c.Schedule[0].EverySeconds = 5 },
 		"other node's asset": func(c *nodeconfigtest.Config) { c.Assets[0]["node_id"] = "site-b-node1" },
 		"duplicate target":   func(c *nodeconfigtest.Config) { c.Targets = append(c.Targets, c.Targets[0]) },

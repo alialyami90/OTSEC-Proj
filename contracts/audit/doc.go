@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.4: the audit record every module
+// Package audit is contract C8, otsec.audit/0.7: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -154,6 +154,146 @@
 // but its VerifyCollectorSeq reports a first decision that only a repeat
 // accounts for as a gap: the safe side.
 //
+// # Configuration approvals, acknowledgements and differences (0.5)
+//
+// Four actions record configuration monitoring (P4-A3, V-M2). The node
+// writes all four, each with a target asset, a correlation_id and a Config
+// group holding exactly that action's fields (config.go):
+//
+//   - config.change_approved follows the collector's acceptance of a C7 0.6
+//     node.change_approval. Its actor is the verified person. It copies the
+//     body (baseline_digest, the window and the reason, checked by C7's own
+//     rule) and names the acceptance by decision_seq and payload_sha256. It
+//     is succeeded, or denied when the node refuses to act on it.
+//   - config.baseline_acknowledged follows a node.baseline_ack in the same
+//     way, with the baseline's kind (configuration or event) and
+//     previous_digest, the baseline it replaces. It is denied when the node
+//     holds no baseline of that asset and kind whose stored bytes hash to
+//     baseline_digest, or (B4 on #250) when that record is of the other
+//     kind, of another asset or node, or not the next in the asset's chain.
+//   - config.change_detected is the node's own record of a read whose
+//     snapshot differs from the baseline: the snapshot, the C9 difference,
+//     the decision on the read that found it (read_seq), and the asset's
+//     last run of that operation before it (unchanged_read_seq, and
+//     unchanged_at, that run's record time; or the epoch's collector reset
+//     when it has no earlier run). It is warning unapproved_change,
+//     which is the alarm, or info approved_change with approval_seq naming
+//     the approval that covers it.
+//   - config.baseline_restored is the node's record of the first read
+//     equal to the baseline after a recorded difference from it.
+//
+// The digests are C9's and C10's "sha256:<hex>" over a document's stored
+// bytes. Admin gains kind in 0.5: the request's C7 kind, which the node
+// fills on claimed and verified.
+//
+// "In advance" is decided by order, never by a time the approval states. An
+// approval covers a difference only if the collector numbered its acceptance
+// below its decision on the read that first found the difference, in the
+// same collector epoch (ApprovalCovers). The window must also overlap the
+// time the change happened in, between unchanged_at and the detection. The
+// node writes config.change_detected when a read finds a configuration
+// state it has not recorded against the baseline, not on every read. Once a
+// difference was recorded unapproved, no later detection against the same
+// baseline may be approved until a config.baseline_restored for it follows
+// the alarm, so an approval accepted after a change was found never
+// silences it. Ending that alarm takes a signed baseline acknowledgement or
+// a recorded return to the baseline. From 0.6 (D4-18) a succeeded
+// configuration-kind acknowledgement ends every open alarm of its asset
+// raised before it, whatever baseline it was against, so acknowledging A
+// again starts A afresh; an alarm raised after the latest acknowledgement
+// still blocks a later approval, and an event-kind or denied acknowledgement
+// ends none. VerifyConfig checks all of this over the chain:
+//   - each approval and acknowledgement follows a real acceptance of its kind
+//     by its actor for the same signed bytes;
+//   - each detection and restore names a real read of its asset;
+//   - each detection's unchanged_at is the time of the asset's last run
+//     before that read, a record already in the chain, so the node cannot
+//     choose how early the change happened;
+//   - each detection, restore and succeeded approval names the asset's
+//     configuration baseline that the last succeeded acknowledgement set;
+//   - every approval_seq names an approval that covers the detection;
+//   - no approved detection follows an unapproved one against the same
+//     baseline without a restore, or a configuration acknowledgement of
+//     its asset, in between;
+//   - each succeeded acknowledgement names, as previous_digest, the
+//     baseline of its asset and kind the last one set.
+//
+// A node that forges records can still forge all of them, as for any
+// collector event (VerifyCollectorSeq). What it cannot do is silence an
+// alarm by citing an acceptance the collector numbered later, or one of
+// another kind or person, without VerifyConfig failing.
+//
+// # Compared reads and their removal (0.7)
+//
+// A configuration read that shows no difference from the baseline, or only
+// the change the asset's newest recorded change already is, would otherwise
+// fill the store with copies that say nothing new (D4-20). Two node actions
+// let such copies be removed without losing the evidence of why:
+//
+//   - config.read_compared is the node's record of one such read, info, with
+//     reason no_difference (baseline_digest, snapshot_digest, snapshot_seq,
+//     the snapshot's seq in the asset's configuration stream, and read_seq) or
+//     same_change (also change_seq, the config.change_detected record the
+//     read repeats, and changes_digest, the digest of that change's ordered
+//     changes, which C9 supplies and which config.change_detected carries
+//     from 0.7). It is the only result a read can have besides a detection
+//     or a restore: a second result for the same read breaks the chain.
+//   - config.reads_removed is the node's record, written and receipted
+//     before any copy is removed, of the oldest compared reads of one asset
+//     that the chain shows and no earlier removal took: removed_count, the
+//     stream seqs removed_first_seq and removed_last_seq, removed_digest
+//     (RemovedReadsDigest over their snapshot digests in order) and
+//     kept_digest, the snapshot digest of the newest compared read. The two
+//     newest compared reads of an asset always stay (D4-20), so a removal can
+//     only take what other recorded reads already show, and a person who
+//     views a read has at least one schedule interval before it goes.
+//
+// VerifyConfig adds to its checks:
+//   - a config.read_compared names a real read of its asset, compares
+//     against the asset's acknowledged configuration baseline, and gives
+//     the read its only result;
+//   - a no_difference read follows no recorded change against that
+//     baseline that a restore or a configuration acknowledgement has not
+//     ended;
+//   - a same_change read names the newest recorded change against the
+//     baseline, by its seq and its changes_digest;
+//   - results come in the order the reads were taken: per asset and
+//     collector epoch, each config.change_detected, config.baseline_restored
+//     or config.read_compared names a later read decision than the asset's
+//     previous result, and each compared read's snapshot_seq is greater than
+//     the previous one's. So a read cannot repeat a change that a later read
+//     found, and the baseline's own read cannot be given a result after a
+//     change;
+//   - an asset's results name runs of one operation, until a configuration
+//     acknowledgement sets a new baseline. Which operations are
+//     configuration reads is the register's, so this contract checks only
+//     the consistency;
+//   - a config.reads_removed takes the oldest recorded reads that no earlier
+//     removal took, leaving at least the two newest, with a removed_digest
+//     that matches them, a removed_first_seq and removed_last_seq that are
+//     the snapshot_seq of the first and last of them, and a kept_digest that
+//     is the newest's.
+//
+// Removal by seq range, never by time or space, is the store's rule (C5).
+// The range bounds the stream; the set removed is the compared reads the
+// chain names inside it (removed_count of them), never every record in the
+// range, since the stream also holds held differences and baselines. After a
+// crash between the record and the removal, the node completes the removal
+// the chain names, re-deriving that set from the chain; the chain may name
+// more than was removed, never less. A node whose audit stream has lost its
+// first records cannot derive the set and removes nothing.
+//
+
+// Not covered: the approver and the person who changed the relay may be
+// the same. Nothing observes who changed a relay until engineering access
+// (R2) exists, so this stays a limitation that R2 can close (D4-2). An
+// approval covers any change from its baseline in its window, not named
+// settings. The reason says what was meant, and the alarm text shows which
+// approval silenced a difference.
+//
+// A record stamped 0.4 or earlier cannot carry these actions, Config or
+// Admin.kind.
+//
 // # What it leaves out
 //
 //   - Secrets, full configurations and raw device output. Values that need
@@ -218,6 +358,6 @@
 //
 // # Requirements and threat-model entries served
 //
-// R2.4 (session auditing), R4.4, AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8
-// and V-S11.
+// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4,
+// AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8, V-S11 and V-M2.
 package audit

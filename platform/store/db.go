@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 
@@ -16,7 +19,59 @@ import (
 
 // Format is the schema identifier kept in every database's meta table.
 // A database with another format is refused, never migrated, in Phase 2.
-const Format = "otsec.platform-store/1"
+// Format 2 (C5 0.5, D4-14) has rowid events and captures tables: the first
+// format's WITHOUT ROWID tables spilled every row over about 1 KB to an
+// overflow page of its own, so a commit wrote up to 3.3 times the WAL the
+// reserve rule allows and the file grew up to 4.5 times the bytes the quota
+// counts.
+const Format = "otsec.platform-store/2"
+
+// legacyFormat is the first format. It is refused with legacyRefusal.
+const legacyFormat = "otsec.platform-store/1"
+
+// legacyRefusal is why a database of the first format is not opened, and
+// the way out. It is never changed, rewritten or deleted by the node.
+func legacyRefusal(path string) error {
+	return invalid("store %s was created by an earlier layout (format %s, events and captures WITHOUT ROWID); "+
+		"the recovery reserve is not sized for it (C5 0.5, D4-14), so it is not opened, changed or deleted. "+
+		"To start on this layout: stop the node, copy the store directory aside, let any events you need "+
+		"forward upstream first (or keep the copy), remove the database files, and start the node (platform/node README, \"Store layout changes\")",
+		path, legacyFormat)
+}
+
+// refuseLegacy returns legacyRefusal when the database at path is of the
+// first format, and nil otherwise, including when the file cannot be read as
+// a store: the open that follows reports that. It must write neither the
+// database file nor its -wal. An ordinary open folds a hot -wal into the file
+// and deletes it when the connection closes, and a refused database must be
+// left as it was found (B1 on #282).
+//
+// A format row can be in the -wal, not yet in the main file (B6's #280), so
+// the main file alone is not enough once the -wal holds frames. Then the
+// check reads through the WAL with a read-only connection: it cannot
+// checkpoint or delete the -wal, and the most it writes is the -shm, which is
+// derived from the -wal and rebuilt when it is missing. With no -wal, or an
+// empty one, nothing is in it, and the main file is read alone and immutable,
+// so SQLite takes no lock and creates no -wal or -shm.
+func refuseLegacy(ctx context.Context, path string) error {
+	query := "mode=ro"
+	if st, err := os.Stat(path + "-wal"); err != nil || st.Size() == 0 {
+		query = "mode=ro&immutable=1"
+	}
+	sdb, err := sql.Open("sqlite", fileURI(path, query))
+	if err != nil {
+		return nil
+	}
+	defer sdb.Close()
+	var format string
+	if err := sdb.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'format'`).Scan(&format); err != nil {
+		return nil
+	}
+	if format == legacyFormat {
+		return legacyRefusal(path)
+	}
+	return nil
+}
 
 // DB is one open database. It implements contracts/store.Committer and
 // contracts/store.RecoveryStore.
@@ -35,6 +90,77 @@ type DB struct {
 	closed  bool
 	// readOnly is set by OpenReadOnly: every transaction is refused.
 	readOnly bool
+
+	// begin* time BEGIN IMMEDIATE, where the connection waits when another
+	// connection holds the write lock (BeginStats).
+	beginCount, beginTotal, beginMax, beginSince atomic.Int64
+
+	// tx* time the write transaction from after BEGIN to COMMIT, the time
+	// the write lock is held and the WAL is synced (CommitStats).
+	txCount, txMax, txRecent, txSince atomic.Int64
+}
+
+// BeginStats says how long this connection has waited in BEGIN IMMEDIATE,
+// the statement that waits for SQLite's write lock (busy_timeout, 5 s).
+// Waiting is how long the BEGIN in progress has waited, or zero when none is.
+// A commit that returns an error stops the Log, so a BEGIN that gave up is
+// seen there; this is for one that is slow or has not returned.
+type BeginStats struct {
+	Count      int64
+	Total, Max time.Duration
+	Waiting    time.Duration
+}
+
+// CommitStats says how long this connection's write transactions take, from
+// after BEGIN IMMEDIATE returned to COMMIT: the writes and the WAL sync that
+// FULL durability waits for. A slow disk shows here (the hosted Windows
+// runner's WAL syncs took seconds, B6 #294) before a receiver's queue
+// fills. Max is the longest since open; Recent is the longest since the last
+// TakeRecentCommit; Waiting is how long the transaction in progress has
+// run, or zero when none is.
+type CommitStats struct {
+	Count   int64
+	Max     time.Duration
+	Recent  time.Duration
+	Waiting time.Duration
+}
+
+// CommitStats reports this database's write transactions so far.
+func (d *DB) CommitStats() CommitStats {
+	st := CommitStats{Count: d.txCount.Load(), Max: time.Duration(d.txMax.Load()), Recent: time.Duration(d.txRecent.Load())}
+	if since := d.txSince.Load(); since != 0 {
+		st.Waiting = time.Since(monoBase) - time.Duration(since-1)
+	}
+	return st
+}
+
+// monoBase is the instant txSince counts from: a value read with the
+// monotonic clock, so a wall-clock step cannot fake or hide Waiting (B3 on
+// #311). txSince holds the offset plus one, so zero means no transaction.
+var monoBase = time.Now()
+
+// TakeRecentCommit returns the longest write transaction since the last
+// call, and resets it.
+func (d *DB) TakeRecentCommit() time.Duration { return time.Duration(d.txRecent.Swap(0)) }
+
+// endTx records a write transaction that began at began.
+func (d *DB) endTx(began time.Time) {
+	d.txSince.Store(0)
+	took := int64(time.Since(began))
+	d.txCount.Add(1)
+	for m := d.txMax.Load(); took > m && !d.txMax.CompareAndSwap(m, took); m = d.txMax.Load() {
+	}
+	for m := d.txRecent.Load(); took > m && !d.txRecent.CompareAndSwap(m, took); m = d.txRecent.Load() {
+	}
+}
+
+// BeginStats reports the waits of this database's BEGIN IMMEDIATE so far.
+func (d *DB) BeginStats() BeginStats {
+	st := BeginStats{Count: d.beginCount.Load(), Total: time.Duration(d.beginTotal.Load()), Max: time.Duration(d.beginMax.Load())}
+	if since := d.beginSince.Load(); since != 0 {
+		st.Waiting = time.Since(time.Unix(0, since))
+	}
+	return st
 }
 
 var (
@@ -59,21 +185,24 @@ CREATE TABLE streams (
 	anchor_hash   TEXT
 ) WITHOUT ROWID;
 CREATE TABLE events (
+	id            INTEGER PRIMARY KEY,
 	stream        TEXT NOT NULL,
 	seq           INTEGER NOT NULL,
 	event         BLOB NOT NULL,
 	capture       TEXT,
 	source_cursor BLOB,
-	committed_at  INTEGER NOT NULL,
-	PRIMARY KEY (stream, seq)
-) WITHOUT ROWID;
+	committed_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX events_key ON events (stream, seq);
 CREATE INDEX events_by_time ON events (stream, committed_at, seq);
 CREATE INDEX events_by_capture ON events (capture) WHERE capture IS NOT NULL;
 CREATE TABLE captures (
-	sha256 TEXT PRIMARY KEY,
+	id     INTEGER PRIMARY KEY,
+	sha256 TEXT NOT NULL,
 	class  TEXT NOT NULL,
 	bytes  BLOB NOT NULL
-) WITHOUT ROWID;
+);
+CREATE UNIQUE INDEX captures_key ON captures (sha256);
 CREATE TABLE cursors (
 	consumer TEXT NOT NULL,
 	stream   TEXT NOT NULL,
@@ -86,20 +215,33 @@ CREATE TABLE class_bytes (
 ) WITHOUT ROWID;
 `
 
-// connPragmas are set on every open. They are per connection in SQLite, so
-// setting them changes no persistent setting of an existing store.
+// connPragmas are set on every open (Options.BusyTimeout sets the first).
+// They are per connection in SQLite, so setting them changes no persistent
+// setting of an existing store.
 // busy_timeout comes first: it needs no read of the file, and every other
 // statement may start the connection's first read, which after a killed
 // writer can meet another connection's WAL recovery (SQLITE_BUSY_RECOVERY,
 // 261). With the handler set, the read waits for the recovery instead of
 // failing the open (A1 and A6, store-full e2e on 9c50395).
-var connPragmas = []string{
-	"PRAGMA busy_timeout=5000",
-	"PRAGMA synchronous=FULL",
-	fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
-	fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
-	"PRAGMA temp_store=MEMORY",
-	"PRAGMA foreign_keys=OFF",
+func (o Options) connPragmas() []string {
+	return []string{
+		busyPragma(o.BusyTimeout),
+		"PRAGMA synchronous=FULL",
+		fmt.Sprintf("PRAGMA wal_autocheckpoint=%d", WALAutocheckpointPages),
+		fmt.Sprintf("PRAGMA journal_size_limit=%d", JournalSizeLimitBytes),
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA foreign_keys=OFF",
+	}
+}
+
+// DefaultBusyTimeout is busy_timeout when Options.BusyTimeout is zero.
+const DefaultBusyTimeout = 5 * time.Second
+
+func busyPragma(d time.Duration) string {
+	if d <= 0 {
+		d = DefaultBusyTimeout
+	}
+	return fmt.Sprintf("PRAGMA busy_timeout=%d", d.Milliseconds())
 }
 
 func open(ctx context.Context, path string, opt Options) (*DB, error) {
@@ -114,6 +256,8 @@ func open(ctx context.Context, path string, opt Options) (*DB, error) {
 		if err := create(ctx, path, opt); err != nil {
 			return nil, err
 		}
+	} else if err := refuseLegacy(ctx, path); err != nil {
+		return nil, err
 	}
 	d, err := connect(ctx, path, opt)
 	if err != nil {
@@ -161,9 +305,14 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err != nil {
 		return err
 	}
+	// Nothing reads the file before the rename, so its writes need no flush
+	// of their own: synchronous=OFF here, and one flush of the whole file
+	// before the rename below. This replaces about ten flushes per new
+	// database (#230). synchronous is per connection; every later open sets
+	// FULL again, and load checks it.
 	// auto_vacuum must be set before the first table (E-A5-3 case 3), and
 	// journal_mode=WAL is persistent. Both are set only here, on a new file.
-	for _, q := range []string{"PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
+	for _, q := range []string{"PRAGMA synchronous=OFF", "PRAGMA auto_vacuum=INCREMENTAL", "PRAGMA journal_mode=WAL"} {
 		if _, err := d.conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return fmt.Errorf("create %s: %s: %w", tmp, q, err)
@@ -176,11 +325,36 @@ func create(ctx context.Context, path string, opt Options) error {
 	if err := d.Close(); err != nil {
 		return fmt.Errorf("create %s: close: %w", tmp, err)
 	}
+	d.point("create:closed")
+	if err := flushCreated(tmp); err != nil {
+		return fmt.Errorf("create %s: %w", tmp, err)
+	}
 	d.point("create:rename")
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
+	d.point("create:renamed")
 	return syncDir(opt.Dir)
+}
+
+// flushCreated flushes a closed new database to disk. The close checkpointed
+// its WAL into it and removed the -wal file; one that is still there holds
+// committed pages the rename would leave behind, so it is refused.
+func flushCreated(tmp string) error {
+	if _, err := os.Lstat(tmp + "-wal"); err == nil {
+		return errors.New("WAL left after close")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // connect opens path on one connection with the per-connection settings.
@@ -200,7 +374,7 @@ func connect(ctx context.Context, path string, opt Options) (*DB, error) {
 	d := &DB{opt: opt, path: path, db: sdb, conn: conn,
 		streams: map[c5.StreamID]c5.StreamClass{}, quotas: map[c5.StreamClass]c5.Quota{},
 		full: map[c5.StreamClass]bool{}, warned: map[c5.StreamClass]bool{}}
-	for _, q := range connPragmas {
+	for _, q := range opt.connPragmas() {
 		if _, err := conn.ExecContext(ctx, q); err != nil {
 			d.Close()
 			return nil, fmt.Errorf("open %s: %s: %w", path, q, err)
@@ -256,18 +430,21 @@ func (d *DB) load(ctx context.Context) error {
 			return invalid("stream %s is stored as %s and configured as %s; a stream has one class for life", s.ID, have, s.Class)
 		}
 	}
-	if len(add) == 0 {
-		return nil
-	}
-	return d.tx(ctx, "streams", func() error {
-		for _, s := range add {
-			if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
-				return err
+	if len(add) > 0 {
+		err := d.tx(ctx, "streams", func() error {
+			for _, s := range add {
+				if _, err := d.conn.ExecContext(ctx, `INSERT INTO streams (stream, class) VALUES (?, ?)`, string(s.ID), string(s.Class)); err != nil {
+					return err
+				}
+				d.streams[s.ID] = s.Class
 			}
-			d.streams[s.ID] = s.Class
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return d.ensureHolds(ctx)
 }
 
 // tx runs f in one BEGIN IMMEDIATE transaction on the connection. The
@@ -278,9 +455,21 @@ func (d *DB) tx(ctx context.Context, name string, f func() error) error {
 		return errReadOnly
 	}
 	d.point(name + ":begin")
-	if _, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+	began := time.Now()
+	d.beginSince.Store(began.UnixNano())
+	_, err := d.conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	d.beginSince.Store(0)
+	waited := time.Since(began)
+	d.beginCount.Add(1)
+	d.beginTotal.Add(int64(waited))
+	for m := d.beginMax.Load(); int64(waited) > m && !d.beginMax.CompareAndSwap(m, int64(waited)); m = d.beginMax.Load() {
+	}
+	if err != nil {
 		return fmt.Errorf("%s: begin: %w", name, err)
 	}
+	txBegan := time.Now()
+	d.txSince.Store(int64(txBegan.Sub(monoBase)) + 1)
+	defer d.endTx(txBegan)
 	if err := f(); err != nil {
 		if _, rerr := d.conn.ExecContext(context.Background(), "ROLLBACK"); rerr != nil {
 			return errors.Join(err, fmt.Errorf("%s: rollback: %w", name, rerr))
@@ -355,6 +544,9 @@ func (d *DB) CheckSettings(ctx context.Context) error {
 		meta[k] = v
 	}
 	rows.Close()
+	if meta["format"] == legacyFormat {
+		return legacyRefusal(d.path)
+	}
 	for k, v := range map[string]string{"format": Format, "node_id": string(d.opt.Node), "database": string(d.opt.Database.ID)} {
 		if meta[k] != v {
 			return invalid("store %s is %q, want %q", k, meta[k], v)
@@ -392,21 +584,42 @@ func (d *DB) QuickCheck(ctx context.Context) error {
 	return nil
 }
 
-// Usage is (page_count - freelist_count) * page_size and the sum of the
-// database's class quotas.
-func (d *DB) Usage(ctx context.Context) (used, limit int64, err error) {
+// ClassUsage is each class's ClassBytes against its quota, in class order.
+// Startup measures a quota with it, the same count the runtime refusal uses
+// (D4-14). Pages run well over it, so comparing pages with the quotas
+// reported a refusal that was not happening, and summing the classes hid a
+// full class beside a light one.
+func (d *DB) ClassUsage(ctx context.Context) ([]c5.ClassUse, error) {
 	if err := d.lock(); err != nil {
-		return 0, 0, err
+		return nil, err
+	}
+	defer d.mu.Unlock()
+	var out []c5.ClassUse
+	for class, q := range d.quotas {
+		used, err := d.classBytes(ctx, class)
+		if err != nil {
+			return nil, fmt.Errorf("class bytes %s: %w", class, err)
+		}
+		out = append(out, c5.ClassUse{Class: class, Used: used, Limit: q.Bytes, WarnAt: int64(q.WarnFraction * float64(q.Bytes)), Record: q.MaxRecordBytes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Class < out[j].Class })
+	return out, nil
+}
+
+// PageBytes is (page_count - freelist_count) * page_size: the space the
+// live pages take. A delete leaves free pages in the file until compaction
+// and they do not count. It bounds the file against the quota
+// (DiskBytesPerQuotaByte); startup does not use it.
+func (d *DB) PageBytes(ctx context.Context) (int64, error) {
+	if err := d.lock(); err != nil {
+		return 0, err
 	}
 	defer d.mu.Unlock()
 	pages, free, size, err := d.pages(ctx)
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	for _, q := range d.quotas {
-		limit += q.Bytes
-	}
-	return (pages - free) * size, limit, nil
+	return (pages - free) * size, nil
 }
 
 func (d *DB) pages(ctx context.Context) (pages, free, size int64, err error) {
@@ -465,6 +678,10 @@ func (d *DB) Close() error {
 	}
 	d.closed = true
 	if !d.readOnly {
+		// Bounded in bytes, not in time: journal_size_limit and the WAL
+		// bound cap what this checkpoint copies, but not how long the
+		// disk's flush takes (F-016). The context is Background on
+		// purpose; a Close that gave up would leave a large WAL behind.
 		d.conn.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
 	}
 	return errors.Join(d.conn.Close(), d.db.Close())

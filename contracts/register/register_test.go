@@ -548,7 +548,7 @@ func TestWarnings(t *testing.T) {
 // edits A2's SEL-751 content, revision 4, which reads DATE_F with SHO G for
 // SER.
 func TestContext(t *testing.T) {
-	data, err := os.ReadFile(content)
+	data, err := os.ReadFile(contentRev4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestContext(t *testing.T) {
 		want string
 	}{
 		"context in a 0.1 package": {func(m map[string]any) { m["contract"] = "otsec.register/0.1" }, "new in 0.2"},
-		"a later minor":            {func(m map[string]any) { m["contract"] = "otsec.register/0.3" }, "want one of"},
+		"a later minor":            {func(m map[string]any) { m["contract"] = "otsec.register/0.4" }, "want one of"},
 		"unknown field":            {func(m map[string]any) { ctx(m)["default"] = "MDY" }, "not a field name"},
 		"ID of another entry":      {func(m map[string]any) { ctx(m)["id"] = "sel.id" }, "duplicated"},
 		"lower-case setting":       {func(m map[string]any) { ctx(m)["setting"] = "date_f" }, "needs a setting"},

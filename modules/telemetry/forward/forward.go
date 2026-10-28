@@ -67,6 +67,11 @@ type Config struct {
 // forwarder refuses.
 var ErrConfig = errors.New("forward: invalid configuration")
 
+// ErrCertificatePeriod is returned by ClientTLS, wrapped with ErrConfig,
+// for a node client certificate outside its validity period, so the node
+// can tell an expired or not-yet-valid certificate from other refusals.
+var ErrCertificatePeriod = errors.New("forward: certificate outside its validity period")
+
 // Forwarder sends the committed events of its streams to one RELP target.
 // See the package doc for the rules.
 type Forwarder struct {

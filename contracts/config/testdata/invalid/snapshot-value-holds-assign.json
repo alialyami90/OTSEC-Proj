@@ -1,0 +1,1070 @@
+{
+  "schema": "otsec.config/0.1",
+  "kind": "config.snapshot",
+  "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
+  "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
+  "operation_id": "sel.config.read_all",
+  "adapter": {
+    "id": "sel-751-ascii",
+    "version": "0.3.0-example"
+  },
+  "register_version": 5,
+  "target": "simulated",
+  "retrieved_at": "2026-10-27T09:10:06.0Z",
+  "rule": "sel-751-sho/1",
+  "transcript": {
+    "ref": "sha256:c1c14e12d2c2858f4b2659ebd4533027f20af195c0e99413e6a6086f0ddb633e",
+    "sha256": "c1c14e12d2c2858f4b2659ebd4533027f20af195c0e99413e6a6086f0ddb633e",
+    "length": 6397
+  },
+  "sections": [
+    {
+      "command": "SHO 1",
+      "class": "group.1",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 350,
+        "length": 889
+      },
+      "sha256": "b521789ac1004daf295cb5f55222cf3981a4fec82d32774c57ce17db56daeb19",
+      "settings": [
+        {
+          "name": "RID",
+          "value": "SEL-751"
+        },
+        {
+          "name": "TID",
+          "value": "A := B"
+        },
+        {
+          "name": "CTR",
+          "value": "120"
+        },
+        {
+          "name": "CTRN",
+          "value": "120"
+        },
+        {
+          "name": "PTR",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_R",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_SC",
+          "value": "4.80"
+        },
+        {
+          "name": "DELTA_Y",
+          "value": "DELTA"
+        },
+        {
+          "name": "VSCONN",
+          "value": "VS"
+        },
+        {
+          "name": "SINGLEV",
+          "value": "N"
+        },
+        {
+          "name": "VNOM",
+          "value": "120.00"
+        },
+        {
+          "name": "Z1MAG",
+          "value": "2.14"
+        },
+        {
+          "name": "Z1ANG",
+          "value": "68.86"
+        },
+        {
+          "name": "Z0MAG",
+          "value": "6.38"
+        },
+        {
+          "name": "Z0ANG",
+          "value": "72.47"
+        },
+        {
+          "name": "Z0SMAG",
+          "value": "0.36"
+        },
+        {
+          "name": "Z0SANG",
+          "value": "84.61"
+        },
+        {
+          "name": "LL",
+          "value": "4.84"
+        },
+        {
+          "name": "EFLOC",
+          "value": "N"
+        },
+        {
+          "name": "50P1P",
+          "value": "10.00"
+        },
+        {
+          "name": "50P1D",
+          "value": "0.00"
+        },
+        {
+          "name": "50P1TC",
+          "value": "1"
+        },
+        {
+          "name": "TDURD",
+          "value": "0.5"
+        },
+        {
+          "name": "CFD",
+          "value": "1.0"
+        },
+        {
+          "name": "TR",
+          "value": "ORED50T OR ORED51T OR ORED81T OR REMTRIP OR OC OR SV04T"
+        },
+        {
+          "name": "REMTRIP",
+          "value": "0"
+        },
+        {
+          "name": "ULTRIP",
+          "value": "NOT ( 51P1P OR 51G1P OR 51N1P OR 52A )"
+        },
+        {
+          "name": "52A",
+          "value": "0"
+        },
+        {
+          "name": "52B",
+          "value": "NOT 52A"
+        },
+        {
+          "name": "CL",
+          "value": "SV03T AND LT02 OR CC"
+        },
+        {
+          "name": "ULCL",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "command": "SHO 2",
+      "class": "group.2",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 1257,
+        "length": 889
+      },
+      "sha256": "23c42568c22e1030d8b7a6f4629c9b6f4bef8a47e889670c1d2d7b5a04e923cd",
+      "settings": [
+        {
+          "name": "RID",
+          "value": "SEL-751"
+        },
+        {
+          "name": "TID",
+          "value": "FEEDER RELAY"
+        },
+        {
+          "name": "CTR",
+          "value": "120"
+        },
+        {
+          "name": "CTRN",
+          "value": "120"
+        },
+        {
+          "name": "PTR",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_R",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_SC",
+          "value": "4.80"
+        },
+        {
+          "name": "DELTA_Y",
+          "value": "DELTA"
+        },
+        {
+          "name": "VSCONN",
+          "value": "VS"
+        },
+        {
+          "name": "SINGLEV",
+          "value": "N"
+        },
+        {
+          "name": "VNOM",
+          "value": "120.00"
+        },
+        {
+          "name": "Z1MAG",
+          "value": "2.14"
+        },
+        {
+          "name": "Z1ANG",
+          "value": "68.86"
+        },
+        {
+          "name": "Z0MAG",
+          "value": "6.38"
+        },
+        {
+          "name": "Z0ANG",
+          "value": "72.47"
+        },
+        {
+          "name": "Z0SMAG",
+          "value": "0.36"
+        },
+        {
+          "name": "Z0SANG",
+          "value": "84.61"
+        },
+        {
+          "name": "LL",
+          "value": "4.84"
+        },
+        {
+          "name": "EFLOC",
+          "value": "N"
+        },
+        {
+          "name": "50P1P",
+          "value": "10.00"
+        },
+        {
+          "name": "50P1D",
+          "value": "0.00"
+        },
+        {
+          "name": "50P1TC",
+          "value": "1"
+        },
+        {
+          "name": "TDURD",
+          "value": "0.5"
+        },
+        {
+          "name": "CFD",
+          "value": "1.0"
+        },
+        {
+          "name": "TR",
+          "value": "ORED50T OR ORED51T OR ORED81T OR REMTRIP OR OC OR SV04T"
+        },
+        {
+          "name": "REMTRIP",
+          "value": "0"
+        },
+        {
+          "name": "ULTRIP",
+          "value": "NOT ( 51P1P OR 51G1P OR 51N1P OR 52A )"
+        },
+        {
+          "name": "52A",
+          "value": "0"
+        },
+        {
+          "name": "52B",
+          "value": "NOT 52A"
+        },
+        {
+          "name": "CL",
+          "value": "SV03T AND LT02 OR CC"
+        },
+        {
+          "name": "ULCL",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "command": "SHO 3",
+      "class": "group.3",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 2164,
+        "length": 889
+      },
+      "sha256": "8007360f438cae03ffae350012e41c7c5c6bf92fb4dca9430fa51293a13321fb",
+      "settings": [
+        {
+          "name": "RID",
+          "value": "SEL-751"
+        },
+        {
+          "name": "TID",
+          "value": "FEEDER RELAY"
+        },
+        {
+          "name": "CTR",
+          "value": "120"
+        },
+        {
+          "name": "CTRN",
+          "value": "120"
+        },
+        {
+          "name": "PTR",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_R",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_SC",
+          "value": "4.80"
+        },
+        {
+          "name": "DELTA_Y",
+          "value": "DELTA"
+        },
+        {
+          "name": "VSCONN",
+          "value": "VS"
+        },
+        {
+          "name": "SINGLEV",
+          "value": "N"
+        },
+        {
+          "name": "VNOM",
+          "value": "120.00"
+        },
+        {
+          "name": "Z1MAG",
+          "value": "2.14"
+        },
+        {
+          "name": "Z1ANG",
+          "value": "68.86"
+        },
+        {
+          "name": "Z0MAG",
+          "value": "6.38"
+        },
+        {
+          "name": "Z0ANG",
+          "value": "72.47"
+        },
+        {
+          "name": "Z0SMAG",
+          "value": "0.36"
+        },
+        {
+          "name": "Z0SANG",
+          "value": "84.61"
+        },
+        {
+          "name": "LL",
+          "value": "4.84"
+        },
+        {
+          "name": "EFLOC",
+          "value": "N"
+        },
+        {
+          "name": "50P1P",
+          "value": "10.00"
+        },
+        {
+          "name": "50P1D",
+          "value": "0.00"
+        },
+        {
+          "name": "50P1TC",
+          "value": "1"
+        },
+        {
+          "name": "TDURD",
+          "value": "0.5"
+        },
+        {
+          "name": "CFD",
+          "value": "1.0"
+        },
+        {
+          "name": "TR",
+          "value": "ORED50T OR ORED51T OR ORED81T OR REMTRIP OR OC OR SV04T"
+        },
+        {
+          "name": "REMTRIP",
+          "value": "0"
+        },
+        {
+          "name": "ULTRIP",
+          "value": "NOT ( 51P1P OR 51G1P OR 51N1P OR 52A )"
+        },
+        {
+          "name": "52A",
+          "value": "0"
+        },
+        {
+          "name": "52B",
+          "value": "NOT 52A"
+        },
+        {
+          "name": "CL",
+          "value": "SV03T AND LT02 OR CC"
+        },
+        {
+          "name": "ULCL",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "command": "SHO 4",
+      "class": "group.4",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 3071,
+        "length": 889
+      },
+      "sha256": "d206d0ee81109741993c6e6f28c47e50fe79584605850258055646aa067cd05a",
+      "settings": [
+        {
+          "name": "RID",
+          "value": "SEL-751"
+        },
+        {
+          "name": "TID",
+          "value": "FEEDER RELAY"
+        },
+        {
+          "name": "CTR",
+          "value": "120"
+        },
+        {
+          "name": "CTRN",
+          "value": "120"
+        },
+        {
+          "name": "PTR",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_R",
+          "value": "180.00"
+        },
+        {
+          "name": "LEA_S_SC",
+          "value": "4.80"
+        },
+        {
+          "name": "DELTA_Y",
+          "value": "DELTA"
+        },
+        {
+          "name": "VSCONN",
+          "value": "VS"
+        },
+        {
+          "name": "SINGLEV",
+          "value": "N"
+        },
+        {
+          "name": "VNOM",
+          "value": "120.00"
+        },
+        {
+          "name": "Z1MAG",
+          "value": "2.14"
+        },
+        {
+          "name": "Z1ANG",
+          "value": "68.86"
+        },
+        {
+          "name": "Z0MAG",
+          "value": "6.38"
+        },
+        {
+          "name": "Z0ANG",
+          "value": "72.47"
+        },
+        {
+          "name": "Z0SMAG",
+          "value": "0.36"
+        },
+        {
+          "name": "Z0SANG",
+          "value": "84.61"
+        },
+        {
+          "name": "LL",
+          "value": "4.84"
+        },
+        {
+          "name": "EFLOC",
+          "value": "N"
+        },
+        {
+          "name": "50P1P",
+          "value": "10.00"
+        },
+        {
+          "name": "50P1D",
+          "value": "0.00"
+        },
+        {
+          "name": "50P1TC",
+          "value": "1"
+        },
+        {
+          "name": "TDURD",
+          "value": "0.5"
+        },
+        {
+          "name": "CFD",
+          "value": "1.0"
+        },
+        {
+          "name": "TR",
+          "value": "ORED50T OR ORED51T OR ORED81T OR REMTRIP OR OC OR SV04T"
+        },
+        {
+          "name": "REMTRIP",
+          "value": "0"
+        },
+        {
+          "name": "ULTRIP",
+          "value": "NOT ( 51P1P OR 51G1P OR 51N1P OR 52A )"
+        },
+        {
+          "name": "52A",
+          "value": "0"
+        },
+        {
+          "name": "52B",
+          "value": "NOT 52A"
+        },
+        {
+          "name": "CL",
+          "value": "SV03T AND LT02 OR CC"
+        },
+        {
+          "name": "ULCL",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "command": "SHO L 1",
+      "class": "logic.1",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 3982,
+        "length": 93
+      },
+      "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
+      "settings": [
+        {
+          "name": "SET01",
+          "value": "PB01"
+        },
+        {
+          "name": "RST01",
+          "value": "PB02"
+        },
+        {
+          "name": "SET02",
+          "value": "PB03"
+        },
+        {
+          "name": "RST02",
+          "value": "PB04"
+        }
+      ]
+    },
+    {
+      "command": "SHO L 2",
+      "class": "logic.2",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 4097,
+        "length": 93
+      },
+      "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
+      "settings": [
+        {
+          "name": "SET01",
+          "value": "PB01"
+        },
+        {
+          "name": "RST01",
+          "value": "PB02"
+        },
+        {
+          "name": "SET02",
+          "value": "PB03"
+        },
+        {
+          "name": "RST02",
+          "value": "PB04"
+        }
+      ]
+    },
+    {
+      "command": "SHO L 3",
+      "class": "logic.3",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 4212,
+        "length": 93
+      },
+      "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
+      "settings": [
+        {
+          "name": "SET01",
+          "value": "PB01"
+        },
+        {
+          "name": "RST01",
+          "value": "PB02"
+        },
+        {
+          "name": "SET02",
+          "value": "PB03"
+        },
+        {
+          "name": "RST02",
+          "value": "PB04"
+        }
+      ]
+    },
+    {
+      "command": "SHO L 4",
+      "class": "logic.4",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 4327,
+        "length": 93
+      },
+      "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
+      "settings": [
+        {
+          "name": "SET01",
+          "value": "PB01"
+        },
+        {
+          "name": "RST01",
+          "value": "PB02"
+        },
+        {
+          "name": "SET02",
+          "value": "PB03"
+        },
+        {
+          "name": "RST02",
+          "value": "PB04"
+        }
+      ]
+    },
+    {
+      "command": "SHO G",
+      "class": "global",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 4438,
+        "length": 281
+      },
+      "sha256": "ae20c1b79bc13e5e8768892b2cfc4ba82e26a8b76fe4287abed77086f85daa47",
+      "settings": [
+        {
+          "name": "PHROT",
+          "value": "ABC"
+        },
+        {
+          "name": "FNOM",
+          "value": "60"
+        },
+        {
+          "name": "DATE_F",
+          "value": "MDY"
+        },
+        {
+          "name": "FAULT",
+          "value": "50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP"
+        },
+        {
+          "name": "IRIGC",
+          "value": "NONE"
+        },
+        {
+          "name": "UTC_OFF",
+          "value": "0.00"
+        },
+        {
+          "name": "DST_BEGM",
+          "value": "OFF"
+        },
+        {
+          "name": "SC850BM",
+          "value": "LT02"
+        },
+        {
+          "name": "SC850TM",
+          "value": "LT01"
+        }
+      ]
+    },
+    {
+      "command": "SHO P F",
+      "class": "port.f",
+      "state": "present",
+      "sensitive": true,
+      "span": {
+        "offset": 4741,
+        "length": 260
+      },
+      "sha256": "095b8897148b8fb79038c06aa833d8c58ba04f6862cd96f641abcbf2241cd1d2",
+      "settings": [
+        {
+          "name": "EPORT",
+          "value": "Y"
+        },
+        {
+          "name": "PROTO",
+          "value": "SEL"
+        },
+        {
+          "name": "MAXACC",
+          "value": "2"
+        },
+        {
+          "name": "SPEED",
+          "value": "9600"
+        },
+        {
+          "name": "BITS",
+          "value": "8"
+        },
+        {
+          "name": "PARITY",
+          "value": "N"
+        },
+        {
+          "name": "STOP",
+          "value": "1"
+        },
+        {
+          "name": "T_OUT",
+          "value": "5"
+        },
+        {
+          "name": "RTSCTS",
+          "value": "N"
+        },
+        {
+          "name": "LANG",
+          "value": "ENGLISH"
+        },
+        {
+          "name": "AUTO",
+          "value": "N"
+        },
+        {
+          "name": "SLAVEID",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "command": "SHO P 1",
+      "class": "port.1",
+      "state": "present",
+      "sensitive": true,
+      "span": {
+        "offset": 5023,
+        "length": 119
+      },
+      "sha256": "03cded0679ab2caa94849b9e3eaae27c1b3fbc33234304e87b504fe5f24797b5",
+      "settings": [
+        {
+          "name": "MAXACC",
+          "value": "2"
+        },
+        {
+          "name": "FASTOP",
+          "value": "N"
+        },
+        {
+          "name": "LANG",
+          "value": "ENGLISH"
+        },
+        {
+          "name": "EHTTP",
+          "value": "N"
+        },
+        {
+          "name": "FTPACC",
+          "value": "1"
+        },
+        {
+          "name": "HTTPACC",
+          "value": "1"
+        },
+        {
+          "name": "TIDLE",
+          "value": "15"
+        }
+      ]
+    },
+    {
+      "command": "SHO P 2",
+      "class": "port.2",
+      "state": "absent",
+      "sensitive": true,
+      "span": {
+        "offset": 5164,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO P 3",
+      "class": "port.3",
+      "state": "absent",
+      "sensitive": true,
+      "span": {
+        "offset": 5203,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO P 4",
+      "class": "port.4",
+      "state": "absent",
+      "sensitive": true,
+      "span": {
+        "offset": 5242,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO R",
+      "class": "report",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 5277,
+        "length": 272
+      },
+      "sha256": "034688f5d440a2f76dd0899926f890e61266e17baaa0b242562a6e65fa4d641b",
+      "settings": [
+        {
+          "name": "ESERDEL",
+          "value": "N"
+        },
+        {
+          "name": "SRDLCNT",
+          "value": "5"
+        },
+        {
+          "name": "SRDLTIM",
+          "value": "1.0"
+        },
+        {
+          "name": "ER",
+          "value": "R_TRIG 51P1P OR R_TRIG 51G1P OR R_TRIG 50P1P OR R_TRIG 50G1P OR R_TRIG 51N1P OR R_TRIG CF"
+        },
+        {
+          "name": "LER",
+          "value": "15"
+        },
+        {
+          "name": "PRE",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "command": "SHO F",
+      "class": "front-panel",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 5567,
+        "length": 136
+      },
+      "sha256": "fadc41d2f326854919ec04d7ace8addfeb41961086b991db8195969710f0322d",
+      "settings": [
+        {
+          "name": "FP_TO",
+          "value": "15"
+        },
+        {
+          "name": "FP_CONT",
+          "value": "10"
+        },
+        {
+          "name": "FP_AUTO",
+          "value": "OVERRIDE"
+        },
+        {
+          "name": "RSTLED",
+          "value": "Y"
+        },
+        {
+          "name": "MAXACC",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "command": "SHO M",
+      "class": "modbus",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 5721,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO I",
+      "class": "iec-103",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 5756,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO E 1",
+      "class": "eip.1",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 5795,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO E 2",
+      "class": "eip.2",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 5834,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO E 3",
+      "class": "eip.3",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 5873,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO DNP 1",
+      "class": "dnp.1",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 5916,
+        "length": 284
+      },
+      "sha256": "71d0ab60e0fe72643c516d174a8e8fa030f940af616df2a75c739f7e266f09fb",
+      "settings": [
+        {
+          "name": "BI_00",
+          "value": "ENABLED"
+        },
+        {
+          "name": "BI_01",
+          "value": "TRIP_LED"
+        },
+        {
+          "name": "BI_02",
+          "value": "TLED_01"
+        },
+        {
+          "name": "BI_03",
+          "value": "TLED_02"
+        },
+        {
+          "name": "BO_00",
+          "value": "RB01"
+        },
+        {
+          "name": "BO_01",
+          "value": "RB02"
+        },
+        {
+          "name": "BO_02",
+          "value": "RB03"
+        },
+        {
+          "name": "AI_00",
+          "value": "IA_MAG"
+        },
+        {
+          "name": "AI_01",
+          "value": "IB_MAG"
+        },
+        {
+          "name": "AI_02",
+          "value": "IC_MAG"
+        }
+      ]
+    },
+    {
+      "command": "SHO DNP 2",
+      "class": "dnp.2",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 6226,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    },
+    {
+      "command": "SHO DNP 3",
+      "class": "dnp.3",
+      "state": "absent",
+      "sensitive": false,
+      "span": {
+        "offset": 6269,
+        "length": 17
+      },
+      "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
+    }
+  ]
+}

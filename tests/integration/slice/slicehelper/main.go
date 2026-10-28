@@ -206,7 +206,17 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 
 	// The node: one simulated SEL-751 and one required RELP/TLS target.
+	payload, err := os.ReadFile(filepath.Join(repo, "contracts", "register", "testdata", "sel-751.json"))
+	if err != nil {
+		return err
+	}
+	reg, err := register.Decode(payload)
+	if err != nil {
+		return err
+	}
 	nc := nodeconfigtest.New(nodeID, l.StoreDir)
+	// The node names the revision the collector has active: the register's own.
+	nc.RegisterVersion = reg.Revision
 	if installed {
 		// Written to the staging folder; the suite copies the files into
 		// the installed tls_dir, where they inherit its DACL.
@@ -274,10 +284,6 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	// The collector: the same asset record, the C1 profile, and the C3
 	// register on main, signed by a release key made for this run.
 	profile, err := os.ReadFile(filepath.Join(repo, "cmd", "otsec-collector", "testdata", "profile-sel-751-ascii.json"))
-	if err != nil {
-		return err
-	}
-	payload, err := os.ReadFile(filepath.Join(repo, "contracts", "register", "testdata", "sel-751.json"))
 	if err != nil {
 		return err
 	}

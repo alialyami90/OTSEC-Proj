@@ -33,8 +33,12 @@ type Config struct {
 	CollectorPeer     string           `json:"collector_peer,omitempty"`
 	PolicyVersion     uint64           `json:"policy_version"`
 	RegisterVersion   uint64           `json:"register_version"`
-	TLSDir            string           `json:"tls_dir,omitempty"`
-	AdminDir          string           `json:"admin_dir,omitempty"`
+	// LabTLSFiles is the lab flag tls_dir needs (D2-12); New sets it.
+	LabTLSFiles bool   `json:"lab_tls_files,omitempty"`
+	TLSDir      string `json:"tls_dir,omitempty"`
+	// KeyRegister is the node key register (WriteKeyRegister).
+	KeyRegister string `json:"key_register,omitempty"`
+	AdminDir    string `json:"admin_dir,omitempty"`
 	// CollectorPublicDir holds install-key.json (WriteInstallKey).
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 }
@@ -91,7 +95,7 @@ func New(node, storeDir string) *Config {
 		Schema: "otsec.nodeconfig/0.1",
 		NodeID: node,
 		Store: Store{Dir: storeDir, WarnFraction: 0.8, Quotas: map[string]int64{
-			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "platform": q, "audit": q,
+			"adapter-evidence": q, "syslog-stream": q, "syslog-datagram": q, "syslog-unknown": q, "platform": q, "audit": q,
 		}},
 		Listeners:          []Listener{},
 		Assets:             []map[string]any{},
@@ -101,6 +105,7 @@ func New(node, storeDir string) *Config {
 		CollectorPeer:      peer,
 		PolicyVersion:      3,
 		RegisterVersion:    4,
+		LabTLSFiles:        true,
 		TLSDir:             filepath.Join(filepath.Dir(storeDir), "tls"),
 		CollectorPublicDir: filepath.Join(filepath.Dir(storeDir), "collector-public"),
 	}
