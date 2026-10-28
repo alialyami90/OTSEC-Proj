@@ -948,6 +948,38 @@ func TestStartupReleasesLastResortWhenRecoveryIsNotEnough(t *testing.T) {
 	}
 }
 
+// B6 and B1 on #324: startup raises the alarm the runtime raises for the
+// class, so one condition is one alarm.
+func TestStartupRaisesTheClassesOwnFullAlarm(t *testing.T) {
+	for class, want := range map[StreamClass]AlarmCode{
+		ClassAdapterEvidence: AlarmQuotaReached,
+		ClassPlatform:        AlarmQuotaReached,
+		ClassAudit:           AlarmAuditFull,
+		ClassSyslogUnknown:   AlarmSyslogUnknownFull,
+	} {
+		if got := FullAlarm(class); got != want {
+			t.Errorf("FullAlarm(%s) = %s, want %s", class, got, want)
+		}
+		f := existing()
+		for i := range f.events["s"] {
+			f.events["s"][i].Class = class
+		}
+		f.limit = 200 * f.eventSize // full
+		p := policy()
+		p.Streams = []StreamSpec{{"s", class}}
+		r := RunStartup(context.Background(), f, p)
+		var got []AlarmCode
+		for _, a := range r.Alarms {
+			if a.Class == class && (a.Code == AlarmQuotaReached || a.Code == AlarmAuditFull || a.Code == AlarmSyslogUnknownFull) {
+				got = append(got, a.Code)
+			}
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("class %s full at start: alarms %v, want exactly %s", class, r.Alarms, want)
+		}
+	}
+}
+
 // A6 review of C5, change 4: at quota with nothing prunable, startup says so.
 func TestStartupAtQuotaWithNothingPrunable(t *testing.T) {
 	f := existing()
