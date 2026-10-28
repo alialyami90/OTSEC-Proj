@@ -275,7 +275,7 @@ func ApprovalCovers(approval, detected *Record) error {
 }
 
 // VerifyConfig checks the configuration records of one node in chain order
-// (0.5), so that a node cannot silence an alarm with an approval that does
+// (0.5; 0.6 changes the alarm rule below), so that a node cannot silence an alarm with an approval that does
 // not exist or does not cover it:
 //
 //   - each config.change_approved and config.baseline_acknowledged follows
@@ -304,10 +304,16 @@ func ApprovalCovers(approval, detected *Record) error {
 //     same way;
 //   - once a difference from a baseline was recorded unapproved, no later
 //     detection against the same baseline is approved until a
-//     config.baseline_restored for that baseline follows the alarm. An
-//     approval accepted after the alarm therefore never silences the change
-//     that raised it; ending that alarm takes a baseline acknowledgement
-//     (which moves the baseline) or a return to the baseline, recorded.
+//     config.baseline_restored for that baseline, or a succeeded
+//     configuration-kind config.baseline_acknowledged of the asset, follows
+//     the alarm. An approval accepted after the alarm therefore never
+//     silences the change that raised it. From 0.6 (D4-18) the
+//     acknowledgement ends every open alarm of its asset raised before it,
+//     whatever baseline the alarm was against, so re-acknowledging a
+//     baseline starts it again from that acknowledgement; only an alarm
+//     raised after the latest acknowledgement blocks a later approval. An
+//     event-kind or denied acknowledgement ends nothing, and the alarm
+//     records stay in the chain.
 //
 // Each succeeded config.baseline_acknowledged names, as previous_digest, the
 // baseline of its asset and kind that the last succeeded acknowledgement in
@@ -333,7 +339,7 @@ func VerifyConfig(recs []*Record) error {
 	runs := map[num]*Record{}     // allowed collector.request records of runs
 	byOp := map[opOf][]*Record{}  // this epoch's runs, in chain order
 	approvals := map[num]*Record{}
-	alarmed := map[baseline]bool{} // an unapproved difference with no restore after it
+	alarmed := map[baseline]bool{} // an unapproved difference with no restore or configuration acknowledgement after it
 	type kindOf struct {
 		asset string
 		kind  authz.BaselineKind
@@ -384,6 +390,16 @@ func VerifyConfig(recs []*Record) error {
 					return broken("record %d acknowledges %s after %s, but names %q as the baseline it replaces", r.Seq, c.BaselineDigest, prev, c.PreviousDigest)
 				}
 				active[k] = c.BaselineDigest
+				if c.Kind == authz.BaselineConfiguration {
+					// 0.6 (D4-18): the acknowledgement ends every open alarm
+					// of the asset raised before it, whatever baseline it was
+					// raised against; one raised after it is added later.
+					for b := range alarmed {
+						if b.asset == r.Target.AssetID {
+							delete(alarmed, b)
+						}
+					}
+				}
 			}
 		case r.Action == ActionConfigChangeDetected || r.Action == ActionConfigBaselineRestored:
 			c := r.Config
