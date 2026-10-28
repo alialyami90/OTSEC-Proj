@@ -700,17 +700,17 @@ func (p *Package) checkContext(c ContextRead, claim func(string) error) error {
 			return fmt.Errorf("register: context %s is for %q, which is not another operation or is repeated", c.ID, f)
 		}
 		needs[f] = true
-		if !levelAtMost(by.AccessLevel, o.AccessLevel) {
+		if !LevelAtMost(by.AccessLevel, o.AccessLevel) {
 			return fmt.Errorf("register: context %s is read at access level %s, above %s's level %s", c.ID, by.AccessLevel, f, o.AccessLevel)
 		}
 	}
 	return nil
 }
 
-// levelAtMost reports whether access level a is no higher than b. Levels are
+// LevelAtMost reports whether access level a is no higher than b. Levels are
 // compared as numbers; a level that is not a number is compared only for
 // equality, so an order the format does not know is never assumed.
-func levelAtMost(a, b string) bool {
+func LevelAtMost(a, b string) bool {
 	x, errA := strconv.ParseUint(a, 10, 8)
 	y, errB := strconv.ParseUint(b, 10, 8)
 	if errA != nil || errB != nil {

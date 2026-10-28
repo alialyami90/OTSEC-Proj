@@ -50,9 +50,12 @@
     },
     {
       "capability": "configuration-retrieval",
-      "mechanism": "none",
-      "status": "unknown",
-      "notes": "Out of slice 1 (A2 section 8)"
+      "mechanism": "adapter-operation",
+      "operations": [
+        "sel.config.read_all"
+      ],
+      "status": "simulated",
+      "citation": "S22 Table 7.67 (SHO forms); simulator only (C-10). A register run (C3 0.3), not a single operation; the touchscreen HMI settings are not read (D4-13)"
     }
   ],
   "session_limits": {

@@ -1,4 +1,4 @@
-// Package config is contract C9, otsec.config/0.1. It defines a device's
+// Package config is contract C9, otsec.config/0.2. It defines a device's
 // configuration as read in one session (the snapshot), the semantic difference
 // between two snapshots, and, per family, the rule that decides what in a
 // reply is a setting and what is not (P4-A2; R3.1, R3.3, R3.5, R3.7).
@@ -37,7 +37,18 @@
 //     configuration baseline is the snapshot an administrator acknowledged,
 //     so its baseline_digest is that snapshot's digest.
 //
-// # The rule for SEL-751 SHO replies (sel-751-sho/1)
+// # Coverage
+//
+// A snapshot covers the settings that SHO prints (S22 Table 7.67): the
+// classes of the rule, and nothing else. It does not cover the 175
+// touchscreen display settings of models that have one (S22 Table 7.80,
+// p. 7.87), which SHO does not print and which sit in files the relay keeps
+// elsewhere. Touchscreen settings are not required (owner, 2026-10-28): the
+// model is in scope, those settings are not, and they are not read. So an
+// unchanged difference says nothing about those settings, and no document
+// here claims them or full coverage of a touchscreen model.
+//
+// # The rule for SEL-751 SHO replies (sel-751-sho/2)
 //
 // The rule is stated here, in RuleSEL751SHO's classes, and in
 // CheckAgainst, which enforces it against the transcript. A snapshot that
@@ -134,7 +145,11 @@
 // Section state and change kind are closed enums. A rule ID a reader does not
 // know is refused, because a difference under an unknown rule cannot be
 // computed or trusted. A new family or a changed rule is a new rule ID in a
-// later minor, never an edit of sel-751-sho/1.
+// later minor, never an edit of sel-751-sho/2. (0.2 retired sel-751-sho/1 for
+// the same reason: it listed the classes in the order of S22 Table 7.67, and a
+// snapshot holds them in the order the register's run reads them. Same
+// tokenization; no snapshot under /1 was ever stored, since every example
+// was simulated.)
 //
 // Every example in testdata is constructed, not captured. The setting lines
 // are copied from S22's printed examples and settings tables, and the

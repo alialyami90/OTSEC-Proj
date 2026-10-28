@@ -204,10 +204,14 @@ type Limits struct {
 	// asks the OS for, in bytes: 0 leaves the OS default, otherwise
 	// 4 KiB to 256 MiB. A datagram that arrives while the buffer is full is
 	// lost before the read and counted by no one here, only by the OS
-	// (Linux RcvbufErrors, Windows netstat -s). The OS may grant less, or,
-	// on Linux, twice the request up to net.core.rmem_max; Status.ReadBuffer
-	// is what it granted. Streams take no ReadBuffer: TCP flow control
-	// stops a sender instead of losing its data.
+	// (Linux RcvbufErrors, Windows netstat -s). The OS may grant less. On
+	// Linux the request is capped at net.core.rmem_max and the result is
+	// doubled for bookkeeping overhead, so Status.ReadBuffer, what it
+	// granted, is up to twice the payload room, and a granted size at or
+	// above the request does not show that the request was met: compare it
+	// with twice the request there. Windows grants what it is given. Streams
+	// take no ReadBuffer: TCP flow control stops a sender instead of losing
+	// its data.
 	ReadBuffer int
 }
 
@@ -321,6 +325,7 @@ type Status struct {
 	LastErr string
 	// ReadBuffer is the UDP socket receive buffer the OS granted, in bytes,
 	// read back after Listen: the OS default when Limits.ReadBuffer is 0.
+	// On Linux it is twice the usable size (see Limits.ReadBuffer).
 	// It is 0 for a stream listener, before Listen, or where the OS does
 	// not report it (ReadBufferErr says why).
 	ReadBuffer    int

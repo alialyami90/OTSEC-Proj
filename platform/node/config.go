@@ -118,7 +118,20 @@ type Listener struct {
 	// TLS is a syslog-tls listener's references, required for that
 	// transport and refused for the others.
 	TLS *ListenerTLS `json:"tls,omitempty"`
+	// ReadBuffer is a syslog-udp listener's socket receive buffer in bytes
+	// (SO_RCVBUF); 0 keeps the OS default. A datagram that arrives while
+	// the buffer is full is lost before the listener reads it and counted
+	// by no one but the OS, so a device that sends bursts needs a larger
+	// buffer. Health shows what the OS granted. It is refused on a stream
+	// listener, which has TCP flow control instead.
+	ReadBuffer int `json:"read_buffer_bytes,omitempty"`
 }
+
+// The bounds of Listener.ReadBuffer, as receive.Limits.ReadBuffer's.
+const (
+	MinReadBuffer = 4 << 10
+	MaxReadBuffer = 256 << 20
+)
 
 // ListenerTLS names a TLS listener's files in tls_dir, as a target's
 // references do (D2-12, lab only, until A3's node key store; see "TLS
@@ -267,6 +280,12 @@ func (c *Config) check() error {
 			fail("%s.tls is set on a %s listener", p, l.Transport)
 		case l.Transport.Inbound() && l.Transport != asset.SyslogTLS && !l.Plaintext:
 			fail("%s: a %s listener has no sender authentication or integrity and needs \"plaintext\": true (D3-5)", p, l.Transport)
+		}
+		switch {
+		case l.ReadBuffer != 0 && l.Transport != asset.SyslogUDP:
+			fail("%s.read_buffer_bytes is set on a %s listener; it applies to syslog-udp only", p, l.Transport)
+		case l.ReadBuffer != 0 && (l.ReadBuffer < MinReadBuffer || l.ReadBuffer > MaxReadBuffer):
+			fail("%s.read_buffer_bytes %d is not 0 or in [%d, %d]", p, l.ReadBuffer, MinReadBuffer, MaxReadBuffer)
 		}
 		if l.TLS != nil {
 			if l.TLS.RequireSenderCert && l.TLS.SenderCARef == "" {

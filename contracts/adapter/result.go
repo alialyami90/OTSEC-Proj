@@ -299,6 +299,25 @@ var RecordFields = map[string][]string{
 	"sel.ser.row": {"#", "DATE", "TIME", "ELEMENT", "STATE"},
 }
 
+// The record kinds of a configuration read (0.6, P4-A2). Their fields are not
+// a fixed list, so RecordFields does not name them:
+//
+//   - RecordConfigSection is the reply to one settings command: its span is
+//     the reply's message text, and its fields are the settings the adapter
+//     read from it, one field per setting, in printed order, the name and the
+//     value exactly as printed (C9 rule sel-751-sho/2). A section the
+//     adapter could not read has parse_ok false and no fields.
+//   - RecordConfigAbsent is the reply that says the command is not available
+//     ("Invalid Command", C9 decision 6): the span is that reply's text, and
+//     there are no fields.
+//
+// Neither has a context span. A run's records are one per step, in the
+// order of the run's steps (CheckLines). C9 reads them into a snapshot.
+const (
+	RecordConfigSection = "sel.config.section"
+	RecordConfigAbsent  = "sel.config.absent"
+)
+
 // Field is one native field, verbatim.
 type Field struct {
 	Name  string `json:"name"`
@@ -457,6 +476,9 @@ func (r Result) Validate() error {
 				c.fail("records[%d].fields[%d].name is empty", i, j)
 			}
 		}
+		if rec.Kind == RecordConfigSection || rec.Kind == RecordConfigAbsent {
+			c.configRecord(i, rec)
+		}
 		if want, ok := RecordFields[rec.Kind]; ok && rec.ParseOK {
 			names := make([]string, len(rec.Fields))
 			for j, f := range rec.Fields {
@@ -494,6 +516,40 @@ func (r Result) Validate() error {
 		}
 	}
 	return c.err()
+}
+
+// configRecord checks a configuration record (0.6): a section holds settings
+// with a name and a printable value each, once, an absent record holds none,
+// and an unparsed record holds none and keeps its bytes.
+func (c *check) configRecord(i int, rec Record) {
+	p := fmt.Sprintf("records[%d]", i)
+	if c.minor < 6 {
+		c.fail("%s: %s is new in 0.6, so a 0.%d result cannot carry it", p, rec.Kind, c.minor)
+	}
+	if rec.ContextSpan != nil {
+		c.fail("%s: a %s has no context span", p, rec.Kind)
+	}
+	// A run reports a record only when it is ok, and then every record is a
+	// parsed one: a reply the rule cannot read ends the run with
+	// failed.config_unparsable and no record.
+	switch {
+	case !rec.ParseOK:
+		c.fail("%s: a %s is a parsed record; a reply that does not parse ends the run with %s and no record", p, rec.Kind, FailedConfigUnparsable)
+	case rec.Kind == RecordConfigAbsent && len(rec.Fields) > 0:
+		c.fail("%s: %s is a parsed record with no fields", p, rec.Kind)
+	case rec.Kind == RecordConfigSection && len(rec.Fields) == 0:
+		c.fail("%s: a parsed %s holds at least one setting (C9)", p, rec.Kind)
+	}
+	seen := map[string]bool{}
+	for j, f := range rec.Fields {
+		if !settingName.MatchString(f.Name) || !settingValue.MatchString(f.Value) {
+			c.fail("%s.fields[%d]: needs a setting name and a value of printable ASCII", p, j)
+		}
+		if seen[f.Name] {
+			c.fail("%s.fields[%d]: %s is reported twice in one section", p, j, f.Name)
+		}
+		seen[f.Name] = true
+	}
 }
 
 // status checks Status against Error and returns the effective code ("" for ok).

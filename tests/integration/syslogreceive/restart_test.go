@@ -143,10 +143,33 @@ func spentIn(recs []unknownRecord, now time.Time, window time.Duration) (n int64
 // dropped none).
 func (g *rig) floodFor(d time.Duration, mark string) (sent int) {
 	g.t.Helper()
+	var end time.Time
+	return g.flood(func(sent int) bool {
+		if sent == 0 {
+			end = time.Now().Add(d)
+		}
+		return sent == 0 || time.Now().Before(end)
+	}, mark)
+}
+
+// floodN is floodFor by count: n stranger datagrams, however long they
+// take to send. A case that needs a given number of bytes offered floods by
+// count, since a timed flood on a loaded runner sends fewer (#271,
+// full-suite job 122888480694: 56 records in 400 ms on hosted Windows,
+// short of a 512 KiB budget).
+func (g *rig) floodN(n int, mark string) (sent int) {
+	g.t.Helper()
+	return g.flood(func(sent int) bool { return sent < n }, mark)
+}
+
+// flood sends while more(sent) holds, then waits for the marker as
+// floodFor says.
+func (g *rig) flood(more func(sent int) bool, mark string) (sent int) {
+	g.t.Helper()
 	c := dialFrom(g.t, ipStranger, "udp", g.addr)
 	known := dialFrom(g.t, ipA, "udp", g.addr)
 	rows0, st0 := g.rows(), g.r.Status()
-	for end := time.Now().Add(d); sent == 0 || time.Now().Before(end); sent++ {
+	for ; more(sent); sent++ {
 		c.Write(strangerMsg)
 		if sent%20 == 0 {
 			fmt.Fprintf(known, "<13>known %d", sent)
@@ -567,12 +590,21 @@ type runSpan struct {
 // spent(i, records so far). It returns each run's span and stored bytes.
 func restarts(t *testing.T, seed int64, n int, lim receive.Limits, spent func(now time.Time, recs []unknownRecord) int64) []runSpan {
 	t.Helper()
+	w := lim.UnknownWindow
+	return restartsFor(t, seed, n, lim, w/4, func(rnd *rand.Rand) time.Duration { return w/10 + time.Duration(rnd.Int63n(int64(w/3))) }, spent)
+}
+
+// restartsFor is restarts with each gap random below maxGap and each flood
+// lasting flood(rnd), whatever the window.
+func restartsFor(t *testing.T, seed int64, n int, lim receive.Limits, maxGap time.Duration, flood func(*rand.Rand) time.Duration,
+	spent func(now time.Time, recs []unknownRecord) int64) []runSpan {
+	t.Helper()
 	log, path := open(t, 256<<20)
 	rnd := rand.New(rand.NewSource(seed))
 	var runs []runSpan
 	var before int64
 	for i := range n {
-		time.Sleep(time.Duration(rnd.Int63n(int64(lim.UnknownWindow / 4))))
+		time.Sleep(time.Duration(rnd.Int63n(int64(maxGap))))
 		from := time.Now()
 		var recs []unknownRecord
 		var edge int64
@@ -587,7 +619,7 @@ func restarts(t *testing.T, seed int64, n int, lim receive.Limits, spent func(no
 			}
 		}
 		g := serveOn(t, log, path, lim, spent(from, recs))
-		sent := g.floodFor(lim.UnknownWindow/10+time.Duration(rnd.Int63n(int64(lim.UnknownWindow/3))), fmt.Sprintf("<13>a6 marker %d", i))
+		sent := g.floodFor(flood(rnd), fmt.Sprintf("<13>a6 marker %d", i))
 		to := time.Now()
 		var all int64
 		for _, r := range g.unknownRecords() {
@@ -654,11 +686,28 @@ func TestUnknownSpentAcrossRestarts(t *testing.T) {
 			}
 		})
 	}
-	// Control: the same restarts each passing 0, as before #178, break the
-	// bound; otherwise the check above could not tell.
-	runs := restarts(t, 1, 10, lim, func(time.Time, []unknownRecord) int64 { return 0 })
-	if e, at := worst(runs, per, window); e <= 0 {
-		t.Errorf("control: restarts passing 0 kept to the bound (%s, %.0f), so the test cannot tell", at, e)
+	// Control: restarts each passing 0, as before #178, break the bound;
+	// otherwise the check above could not tell. The control's window is an
+	// hour, so the bound is UnknownBytes for any span this test can take,
+	// and each start that refills the budget shows as a whole budget over
+	// it. With the 3 s window the bound grew with the time the restarts
+	// themselves took, and under -race on a slow runner it outgrew what
+	// ten refills stored (#245, job 122436178474: -95899 bytes): the control
+	// then said nothing about the check.
+	ctl := lim
+	ctl.UnknownWindow = time.Hour
+	const n = 3
+	runs := restartsFor(t, 1, n, ctl, 100*time.Millisecond, func(*rand.Rand) time.Duration { return 1500 * time.Millisecond },
+		func(time.Time, []unknownRecord) int64 { return 0 })
+	e, at := worst(runs, per, ctl.UnknownWindow)
+	t.Logf("control: worst span %s, %.0f bytes from the bound", at, e)
+	for i, r := range runs {
+		if r.stored < per*8/10 {
+			t.Errorf("control: run %d stored %d of a budget of %d: the flood did not refill it, so the control shows nothing", i, r.stored, per)
+		}
+	}
+	if e < float64(per)*(n-1)/2 {
+		t.Errorf("control: restarts passing 0 kept within half a budget per restart of the bound (%s, %.0f), so the test cannot tell", at, e)
 	}
 }
 
@@ -673,7 +722,9 @@ func TestUnknownSpentOutOfRangeStartsEmpty(t *testing.T) {
 			t.Parallel()
 			log, path := open(t, 64<<20)
 			g := serveOn(t, log, path, lim, spent)
-			g.floodFor(400*time.Millisecond, "<13>a6 marker")
+			// Twice the budget offered, by count: spent 0 must use it up
+			// and drop the rest as unknown-budget.
+			g.floodN(2*per/len(strangerMsg)+1, "<13>a6 marker")
 			recs := g.unknownRecords()
 			st := g.r.Status()
 			g.close()

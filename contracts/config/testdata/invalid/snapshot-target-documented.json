@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.config/0.1",
+  "schema": "otsec.config/0.2",
   "kind": "config.snapshot",
   "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
   "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
@@ -11,20 +11,110 @@
   "register_version": 5,
   "target": "documented",
   "retrieved_at": "2026-10-27T09:10:06.0Z",
-  "rule": "sel-751-sho/1",
+  "rule": "sel-751-sho/2",
   "transcript": {
-    "ref": "sha256:c1c14e12d2c2858f4b2659ebd4533027f20af195c0e99413e6a6086f0ddb633e",
-    "sha256": "c1c14e12d2c2858f4b2659ebd4533027f20af195c0e99413e6a6086f0ddb633e",
+    "ref": "sha256:b708a116f4b224f910e45eb51aebdb808bda6491a20ada52fd43999a4baa5eb7",
+    "sha256": "b708a116f4b224f910e45eb51aebdb808bda6491a20ada52fd43999a4baa5eb7",
     "length": 6397
   },
   "sections": [
+    {
+      "command": "SHO P 1",
+      "class": "port.1",
+      "state": "present",
+      "sensitive": true,
+      "span": {
+        "offset": 354,
+        "length": 119
+      },
+      "sha256": "03cded0679ab2caa94849b9e3eaae27c1b3fbc33234304e87b504fe5f24797b5",
+      "settings": [
+        {
+          "name": "MAXACC",
+          "value": "2"
+        },
+        {
+          "name": "FASTOP",
+          "value": "N"
+        },
+        {
+          "name": "LANG",
+          "value": "ENGLISH"
+        },
+        {
+          "name": "EHTTP",
+          "value": "N"
+        },
+        {
+          "name": "FTPACC",
+          "value": "1"
+        },
+        {
+          "name": "HTTPACC",
+          "value": "1"
+        },
+        {
+          "name": "TIDLE",
+          "value": "15"
+        }
+      ]
+    },
+    {
+      "command": "SHO G",
+      "class": "global",
+      "state": "present",
+      "sensitive": false,
+      "span": {
+        "offset": 491,
+        "length": 281
+      },
+      "sha256": "ae20c1b79bc13e5e8768892b2cfc4ba82e26a8b76fe4287abed77086f85daa47",
+      "settings": [
+        {
+          "name": "PHROT",
+          "value": "ABC"
+        },
+        {
+          "name": "FNOM",
+          "value": "60"
+        },
+        {
+          "name": "DATE_F",
+          "value": "MDY"
+        },
+        {
+          "name": "FAULT",
+          "value": "50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP"
+        },
+        {
+          "name": "IRIGC",
+          "value": "NONE"
+        },
+        {
+          "name": "UTC_OFF",
+          "value": "0.00"
+        },
+        {
+          "name": "DST_BEGM",
+          "value": "OFF"
+        },
+        {
+          "name": "SC850BM",
+          "value": "LT02"
+        },
+        {
+          "name": "SC850TM",
+          "value": "LT01"
+        }
+      ]
+    },
     {
       "command": "SHO 1",
       "class": "group.1",
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 350,
+        "offset": 790,
         "length": 889
       },
       "sha256": "b521789ac1004daf295cb5f55222cf3981a4fec82d32774c57ce17db56daeb19",
@@ -161,7 +251,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 1257,
+        "offset": 1697,
         "length": 889
       },
       "sha256": "23c42568c22e1030d8b7a6f4629c9b6f4bef8a47e889670c1d2d7b5a04e923cd",
@@ -298,7 +388,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 2164,
+        "offset": 2604,
         "length": 889
       },
       "sha256": "8007360f438cae03ffae350012e41c7c5c6bf92fb4dca9430fa51293a13321fb",
@@ -435,7 +525,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 3071,
+        "offset": 3511,
         "length": 889
       },
       "sha256": "d206d0ee81109741993c6e6f28c47e50fe79584605850258055646aa067cd05a",
@@ -572,7 +662,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 3982,
+        "offset": 4422,
         "length": 93
       },
       "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
@@ -601,7 +691,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 4097,
+        "offset": 4537,
         "length": 93
       },
       "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
@@ -630,7 +720,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 4212,
+        "offset": 4652,
         "length": 93
       },
       "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
@@ -659,7 +749,7 @@
       "state": "present",
       "sensitive": false,
       "span": {
-        "offset": 4327,
+        "offset": 4767,
         "length": 93
       },
       "sha256": "7bce1d16003c70b59a73185b03cf2b245e1cde29b209f522132f47b63a4c7f5d",
@@ -683,61 +773,12 @@
       ]
     },
     {
-      "command": "SHO G",
-      "class": "global",
-      "state": "present",
-      "sensitive": false,
-      "span": {
-        "offset": 4438,
-        "length": 281
-      },
-      "sha256": "ae20c1b79bc13e5e8768892b2cfc4ba82e26a8b76fe4287abed77086f85daa47",
-      "settings": [
-        {
-          "name": "PHROT",
-          "value": "ABC"
-        },
-        {
-          "name": "FNOM",
-          "value": "60"
-        },
-        {
-          "name": "DATE_F",
-          "value": "MDY"
-        },
-        {
-          "name": "FAULT",
-          "value": "50G1P OR 50N1P OR 51P1P OR 51QP OR 50Q1P OR TRIP"
-        },
-        {
-          "name": "IRIGC",
-          "value": "NONE"
-        },
-        {
-          "name": "UTC_OFF",
-          "value": "0.00"
-        },
-        {
-          "name": "DST_BEGM",
-          "value": "OFF"
-        },
-        {
-          "name": "SC850BM",
-          "value": "LT02"
-        },
-        {
-          "name": "SC850TM",
-          "value": "LT01"
-        }
-      ]
-    },
-    {
       "command": "SHO P F",
       "class": "port.f",
       "state": "present",
       "sensitive": true,
       "span": {
-        "offset": 4741,
+        "offset": 4882,
         "length": 260
       },
       "sha256": "095b8897148b8fb79038c06aa833d8c58ba04f6862cd96f641abcbf2241cd1d2",
@@ -789,47 +830,6 @@
         {
           "name": "SLAVEID",
           "value": "1"
-        }
-      ]
-    },
-    {
-      "command": "SHO P 1",
-      "class": "port.1",
-      "state": "present",
-      "sensitive": true,
-      "span": {
-        "offset": 5023,
-        "length": 119
-      },
-      "sha256": "03cded0679ab2caa94849b9e3eaae27c1b3fbc33234304e87b504fe5f24797b5",
-      "settings": [
-        {
-          "name": "MAXACC",
-          "value": "2"
-        },
-        {
-          "name": "FASTOP",
-          "value": "N"
-        },
-        {
-          "name": "LANG",
-          "value": "ENGLISH"
-        },
-        {
-          "name": "EHTTP",
-          "value": "N"
-        },
-        {
-          "name": "FTPACC",
-          "value": "1"
-        },
-        {
-          "name": "HTTPACC",
-          "value": "1"
-        },
-        {
-          "name": "TIDLE",
-          "value": "15"
         }
       ]
     },

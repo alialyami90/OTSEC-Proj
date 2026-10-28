@@ -11,6 +11,8 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 
 `generate.py` reads the replies with its own Python version of the rule in `doc.go`. The Go tests then check that each snapshot is exactly what Go's `CheckAgainst` reads from its transcript, and that each golden difference is exactly what Go's `Compare` computes. That way two implementations of the rule are checked against each other.
 
+Coverage: a snapshot holds what `SHO` prints. The touchscreen display settings (S22 Table 7.80) are not required (owner, 2026-10-28) and are not read, so nothing here claims them or full coverage of a touchscreen model.
+
 ## Transcripts
 
 | File | What it shows |
@@ -28,7 +30,7 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | `valid/snapshot-read-3.json` | The snapshot of read 3. |
 | `valid/difference-1-2.json` | Read 1 to read 2: no changes. The header's time, columns, order and wrapping are not semantic (P4-A2's acceptance case). |
 | `valid/difference-1-3.json` | Read 1 to read 3: one changed, one removed, Port 2 appeared with its settings added, and DNP map 1 disappeared with its settings removed. |
-| `valid/later-minor-snapshot.json` | A 0.2 snapshot with a field 0.1 does not know: a 0.1 reader accepts it and ignores the field. |
+| `valid/later-minor-snapshot.json` | A 0.3 snapshot with a field 0.2 does not know: a 0.2 reader accepts it and ignores the field. |
 
 ## Invalid
 
@@ -46,11 +48,11 @@ These files are written by `generate.py`; run `python3 -I generate.py` here.
 | `invalid/snapshot-value-holds-assign.json` | No value holds `:=`. |
 | `invalid/snapshot-ref-not-transcript.json` | The transcript ref is `sha256:` plus the transcript's SHA-256, and nothing else. |
 | `invalid/snapshot-other-major.json` | Another major version is refused. |
-| `invalid/snapshot-unknown-field-in-own-minor.json` | An unknown field in a 0.1 document is a writer bug and is refused. |
+| `invalid/snapshot-unknown-field-in-own-minor.json` | An unknown field in a 0.2 document is a writer bug and is refused. |
 | `invalid/snapshot-wrong-kind.json` | A snapshot's kind is `config.snapshot`. |
 | `invalid/snapshot-without-register-version.json` | The register package that permitted the lines is required. |
 | `invalid/snapshot-target-documented.json` | The target is `device-observed` or `simulated`, as in C2. |
-| `invalid/snapshot-sections-overlap.json` | Sections are read in order, so their spans never overlap. |
+| `invalid/snapshot-sections-overlap.json` | Sections are in the order the run read them, so a span never starts before the end of the one before it. |
 | `invalid/difference-changed-equal-values.json` | A changed setting has two different values. |
 | `invalid/difference-added-with-from.json` | An added setting has no `from` value. |
 | `invalid/difference-out-of-order.json` | Changes follow the rule's class order, then names in byte order. |

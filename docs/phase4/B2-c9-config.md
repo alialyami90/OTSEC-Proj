@@ -1,4 +1,4 @@
-# C9 `otsec.config/0.1`: configuration snapshot and difference (P4-A2, B2)
+# C9 `otsec.config/0.1` (0.2 since the read was built): configuration snapshot and difference (P4-A2, B2)
 
 Date: 2026-10-27.
 
@@ -121,3 +121,14 @@ These wait until C9 is approved:
 
 1. **Register revision 5.** The 24 exact forms at Level 1, each with a timeout and a counted byte cap, and the read's total time. The deny corpus, updated by B6, covers every `s` form and every bare `SHO P`.
 2. **C2 0.6 `config.read`** in `sel751`. It follows the `ser.read` session rules, with a parser and a fuzz target per class, and goldens from S22's figures and tables. B6's simulator forms are not read until those goldens are fixed.
+
+## What changed when the read was built (P4-A2)
+
+Building the C2 0.6 read changed four things in C9 0.1. B1 ruled on the first two on #279, and the C2 0.6 PR carries all four.
+
+1. **C9 0.2: sections are in the run's order.** C9 0.1 required each section's span to follow the one before it, in the rule's order, which was the order of S22 Table 7.67. A run must send its gate reads first (C3 0.3: `SHO P 1` for LANG, then `SHO G`), so a real read's spans were not in the rule's order. B1 ruled to keep the strict ordering and use the run's step order. Rule `sel-751-sho/1` is retired and `sel-751-sho/2` lists the classes in the run's order; the tokenization is the same. No snapshot under `/1` was ever stored, since every example was simulated. The difference lists changes in the same order.
+2. **An unreadable section fails the read: `failed.config_unparsable`** (C2 0.6, B1's ruling). The adapter stops the run at the first reply the rule cannot read (a name printed twice, a line that does not tokenize, no framed message), sends QUI, keeps the bytes and reports no record, so no snapshot is made. SER keeps `partial.parse_errors`. A run's result is ok with one parsed record per step in step order, or not ok with no record; `partial` is not a run outcome and `CheckLines` refuses it (B6's review of #331).
+3. **`config.FromResult`** builds a snapshot from an ok run result: one record per step in the run's order, which is the rule's order, the settings the adapter's parser read, the SHA-256 of each span. It refuses a result that is not ok, not of the invocation, or short of a record. It does not tokenize: `CheckAgainst` makes the adapter's parser and the contract's agree, and a test shows a parser that drops, changes, swaps or splits a setting is refused.
+4. **A form every SEL-751 has that answers `Invalid Command` is `failed.device_error`.** Only the eleven forms C9 marks `MayBeAbsent` can be an absent section.
+
+The adapter keeps its own table of forms (`cfgForms`) and does not import the contract it is checked against; `TestCfgFormsAreTheRule` makes the two agree.

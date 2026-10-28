@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/schema/otsec.config/0.1/difference.schema.json",
-  "title": "otsec.config/0.1 difference (C9)",
+  "$id": "https://otsec.local/schema/otsec.config/0.2/difference.schema.json",
+  "title": "otsec.config/0.2 difference (C9)",
   "description": "The semantic difference between two snapshots of one asset under one rule, each named by its digest over its stored bytes. An empty changes list means no change. Ordering and the rule's classes are checked by contracts/config (Validate).",
   "type": "object",
   "required": ["schema", "kind", "asset_id", "rule", "target", "from", "to", "changes"],

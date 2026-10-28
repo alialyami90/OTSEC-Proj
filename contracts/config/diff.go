@@ -1,8 +1,13 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"otsec.local/otsec/contracts/asset"
@@ -149,6 +154,53 @@ func DecodeDifference(b []byte) (Difference, error) {
 		return Difference{}, fmt.Errorf("config: difference: %w", err)
 	}
 	return d, d.Validate()
+}
+
+// ChangesDigest names the changes alone, whatever snapshots they were
+// measured between: "sha256:" and the SHA-256 of the changes array as UTF-8
+// JSON in the order Compare gives (the rule's class order, then name), fields
+// in the order of Change's declaration, no whitespace, and without HTML
+// escaping, so "<" in a SELOGIC equation is written as it is. No changes is
+// "[]", never "null". Two reads of a configuration that stays changed have
+// one ChangesDigest (C8 0.7's changes_digest). It does not name the baseline:
+// the same changes from another baseline are another change, so callers pair
+// it with the baseline's digest, as SameChanges does.
+func (d Difference) ChangesDigest() string {
+	changes := d.Changes
+	if changes == nil {
+		changes = []Change{}
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(changes); err != nil {
+		panic("config: a Change does not encode: " + err.Error()) // strings and pointers to them cannot fail
+	}
+	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// SameChanges reports whether o is the same change as d: the same asset, rule
+// and target, measured from the same baseline snapshot, with equal Changes.
+// The two may differ in the snapshot they end at, its invocation and its
+// time. So a configuration that stays changed read after read compares as
+// one change, not a new one each time. Changes are in the rule's order, so
+// equal slices are the same set. Two empty differences are the same
+// (nothing changed in either), which callers that mean "a change" must rule
+// out first.
+func (d Difference) SameChanges(o Difference) bool {
+	return d.AssetID == o.AssetID && d.Rule == o.Rule && d.Target == o.Target &&
+		d.From.SnapshotDigest == o.From.SnapshotDigest && slices.EqualFunc(d.Changes, o.Changes, func(a, b Change) bool {
+		return a.Class == b.Class && a.Kind == b.Kind && a.Name == b.Name && a.Sensitive == b.Sensitive &&
+			equalValue(a.From, b.From) && equalValue(a.To, b.To)
+	})
+}
+
+func equalValue(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // Validate checks every rule that can be checked from the difference alone.

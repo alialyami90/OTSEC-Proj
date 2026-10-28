@@ -446,7 +446,7 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.6 result read by a 0.5 reader; no 0.5 adapter writes it",
+	"failed.unknown":                     "a 0.7 result read by a 0.6 reader; no 0.6 adapter writes it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",

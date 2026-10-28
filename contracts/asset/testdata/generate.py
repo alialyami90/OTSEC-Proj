@@ -208,8 +208,9 @@ PROFILE_751 = {
          "status": "documented-untested", "citation": "S22 Table 4.90 (UTC_OFF, DST), Table 7.16 (Time Source)"},
         {"capability": "event-push", "mechanism": "none", "status": "unsupported",
          "citation": "S22 Table 7.5: no Syslog on Port 1"},
-        {"capability": "configuration-retrieval", "mechanism": "none", "status": "unknown",
-         "notes": "Out of slice 1 (A2 section 8)"},
+        {"capability": "configuration-retrieval", "mechanism": "adapter-operation",
+         "operations": ["sel.config.read_all"], "status": "simulated",
+         "citation": "S22 Table 7.67 (SHO forms); simulator only (C-10). A register run (C3 0.3), not a single operation; the touchscreen HMI settings are not read (D4-13)"},
     ],
     "max_read_rows": 1024,
     "session_limits": {

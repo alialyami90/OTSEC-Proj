@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/adapter"
+	"otsec.local/otsec/contracts/audit"
 )
 
 // invalidWant is the error each invalid example must produce. Every file in
@@ -21,26 +22,26 @@ import (
 // for an unrelated reason.
 var invalidWant = map[string]string{
 	"snapshot-missing-class":               "has 24 classes and a snapshot holds every one",
-	"snapshot-classes-out-of-order":        "holds group.1 (\"SHO 1\") here, not group.2",
+	"snapshot-classes-out-of-order":        "holds port.1 (\"SHO P 1\") here, not global",
 	"snapshot-required-class-absent":       "group.1 cannot be absent",
 	"snapshot-absent-with-settings":        "an absent section has no settings",
 	"snapshot-present-without-settings":    "a present section holds at least one setting",
 	"snapshot-port-not-sensitive":          "sensitive is true for port.1",
-	"snapshot-unknown-rule":                `rule "sel-751-sho/2" is not a rule`,
+	"snapshot-unknown-rule":                `rule "sel-751-sho/3" is not a rule`,
 	"snapshot-setting-twice":               "SET01 is printed twice in one section",
 	"snapshot-value-two-spaces":            "no two spaces together",
 	"snapshot-value-holds-assign":          "no :=",
 	"snapshot-ref-not-transcript":          `ref "sha256:" + sha256`,
-	"snapshot-other-major":                 "not readable as otsec.config/0.1",
+	"snapshot-other-major":                 "not readable as otsec.config/0.2",
 	"snapshot-unknown-field-in-own-minor":  `key "zz_new" is not a field name`,
 	"snapshot-wrong-kind":                  `kind "config.baseline" is not "config.snapshot"`,
 	"snapshot-without-register-version":    "register_version is required",
 	"snapshot-target-documented":           "target must be",
-	"snapshot-sections-overlap":            "overlaps or precedes the section before it",
+	"snapshot-sections-overlap":            "comes before the end of the section before it",
 	"difference-changed-equal-values":      "changed with equal values",
 	"difference-added-with-from":           "added carries to only",
 	"difference-out-of-order":              "changes are in class order",
-	"difference-required-section-appeared": "group.1 cannot be absent under rule sel-751-sho/1, so it cannot appear",
+	"difference-required-section-appeared": "group.1 cannot be absent under rule sel-751-sho/2, so it cannot appear",
 	"difference-without-changes":           "changes is required",
 	"difference-digest-without-prefix":     `from needs a snapshot_digest "sha256:<hex>"`,
 	"difference-sensitive-unmarked":        "sensitive is true for port.2",
@@ -212,6 +213,110 @@ func TestSameConfigurationOtherBytesIsNoChange(t *testing.T) {
 	}
 }
 
+// SameChanges (D4-20): a change that stays is one change however many reads
+// show it. Another end snapshot of the same changes is the same; another
+// baseline, other changes, or another asset is not.
+func TestSameChanges(t *testing.T) {
+	s3, b3 := snapshot(t, "3")
+	_, b1 := snapshot(t, "1")
+	_, b2 := snapshot(t, "2")
+	d13, err := Compare(b1, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Read 3 again, later: other time and invocation, the same settings.
+	later := []byte(strings.NewReplacer(s3.RetrievedAt, "2026-10-25T09:00:00Z", s3.InvocationID, "8d1f4b2a-3c5e-4f60-9a7b-1c2d3e4f5a6b").Replace(string(b3)))
+	d13b, err := Compare(b1, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d13b.To.SnapshotDigest == d13.To.SnapshotDigest {
+		t.Fatal("the later read has the same digest, so the case tests nothing")
+	}
+	if len(d13.Changes) == 0 || !d13.SameChanges(d13b) || !d13b.SameChanges(d13) {
+		t.Errorf("the same changes at another time: %v", d13.SameChanges(d13b))
+	}
+	d12, err := Compare(b1, b2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d13.SameChanges(d12) || d12.SameChanges(d13) {
+		t.Error("a change and no change are the same")
+	}
+	if !d12.SameChanges(d12) {
+		t.Error("two differences with no change are not the same")
+	}
+	// The same changes from another baseline are another change.
+	d23, err := Compare(b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(d23.Changes, d13.Changes) || d23.SameChanges(d13) {
+		t.Errorf("another baseline: equal changes %v, same %v", reflect.DeepEqual(d23.Changes, d13.Changes), d23.SameChanges(d13))
+	}
+	// One value changed is another change; another asset is another change.
+	other := d13
+	other.Changes = append([]Change(nil), d13.Changes...)
+	to := "9"
+	other.Changes[0].To = &to
+	if d13.SameChanges(other) {
+		t.Error("a different value is the same change")
+	}
+	other = d13
+	other.AssetID += "x"
+	if d13.SameChanges(other) {
+		t.Error("another asset is the same change")
+	}
+}
+
+// ChangesDigest (C8 0.7's changes_digest): equal exactly when the changes are
+// equal, whatever snapshots they come from, and not the baseline's.
+func TestChangesDigest(t *testing.T) {
+	s3, b3 := snapshot(t, "3")
+	_, b1 := snapshot(t, "1")
+	_, b2 := snapshot(t, "2")
+	d13, _ := Compare(b1, b3)
+	later := []byte(strings.NewReplacer(s3.RetrievedAt, "2026-10-25T09:00:00Z", s3.InvocationID, "8d1f4b2a-3c5e-4f60-9a7b-1c2d3e4f5a6b").Replace(string(b3)))
+	d13b, err := Compare(b1, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d23, _ := Compare(b2, b3)
+	d12, _ := Compare(b1, b2)
+	if !digestPattern.MatchString(d13.ChangesDigest()) {
+		t.Errorf("digest %q", d13.ChangesDigest())
+	}
+	if d13.ChangesDigest() != d13b.ChangesDigest() || d13.ChangesDigest() != d23.ChangesDigest() {
+		t.Error("the same changes from other snapshots or another baseline have different digests")
+	}
+	if d13.ChangesDigest() == d12.ChangesDigest() {
+		t.Error("a change and no change have one digest")
+	}
+	// No changes is "[]", whether the slice is empty or nil.
+	empty := Difference{}
+	if d12.ChangesDigest() != empty.ChangesDigest() || d12.ChangesDigest() != Digest([]byte("[]")) {
+		t.Errorf("no changes: %s, want %s", d12.ChangesDigest(), Digest([]byte("[]")))
+	}
+	// C8 0.7 names the same value, so the audit chain can refuse a "change"
+	// that holds nothing: the two constants must not drift.
+	if d12.ChangesDigest() != audit.EmptyChangesDigest {
+		t.Errorf("no changes: %s, but C8 names %s", d12.ChangesDigest(), audit.EmptyChangesDigest)
+	}
+	// One value moved is another digest, and "<" is not escaped.
+	other := d13
+	other.Changes = append([]Change(nil), d13.Changes...)
+	to := "A<B"
+	other.Changes[0].To = &to
+	if other.ChangesDigest() == d13.ChangesDigest() {
+		t.Error("another value, the same digest")
+	}
+	one := Difference{Changes: []Change{{Class: "global", Kind: Changed, Name: "X", From: &to, To: &to}}}
+	want := Digest([]byte(`[{"class":"global","kind":"changed","name":"X","from":"A<B","to":"A<B","sensitive":false}]`))
+	if one.ChangesDigest() != want {
+		t.Errorf("encoding: %s, want %s", one.ChangesDigest(), want)
+	}
+}
+
 // Reversed, every change is its inverse.
 func TestCompareReversed(t *testing.T) {
 	_, b1 := snapshot(t, "1")
@@ -291,7 +396,7 @@ func TestCheckAgainstCatches(t *testing.T) {
 		"a setting dropped": {func(s *Snapshot) {
 			g := section(s, "group.1")
 			g.Settings = append(g.Settings[:3:3], g.Settings[4:]...)
-		}, "not what rule sel-751-sho/1 reads"},
+		}, "not what rule sel-751-sho/2 reads"},
 		"a value misread": {func(s *Snapshot) { setting(section(s, "group.1"), "50P1P").Value = "10.0" }, "not what rule"},
 		"a name misread":  {func(s *Snapshot) { setting(section(s, "group.1"), "CTRN").Name = "CTRM" }, "not what rule"},
 		"two settings swapped": {func(s *Snapshot) {
@@ -487,9 +592,10 @@ func FuzzTokenize(f *testing.F) {
 
 // The rule holds exactly the SHO forms of S22 Table 7.67 (p. 7.77), each
 // without the setting-name parameter and with an explicit port or map (#231).
+// The rule is S22 Table 7.67 in the order the run sends it (0.2).
 func TestRuleIsTable767(t *testing.T) {
-	want := []string{"SHO 1", "SHO 2", "SHO 3", "SHO 4", "SHO L 1", "SHO L 2", "SHO L 3", "SHO L 4", "SHO G",
-		"SHO P F", "SHO P 1", "SHO P 2", "SHO P 3", "SHO P 4", "SHO R", "SHO F", "SHO M", "SHO I",
+	want := []string{"SHO P 1", "SHO G", "SHO 1", "SHO 2", "SHO 3", "SHO 4", "SHO L 1", "SHO L 2", "SHO L 3", "SHO L 4",
+		"SHO P F", "SHO P 2", "SHO P 3", "SHO P 4", "SHO R", "SHO F", "SHO M", "SHO I",
 		"SHO E 1", "SHO E 2", "SHO E 3", "SHO DNP 1", "SHO DNP 2", "SHO DNP 3"}
 	var got []string
 	ids := map[string]bool{}
