@@ -614,7 +614,15 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 	case plan.Floor.LoginConfirmed() && !report.QUISent:
 		// Level 1 may outlive the connection until TIDLE expires: set the
 		// floor again so no session lands on it (no TIDLE reconnect).
-		if err := p.cfg.State.BeginAuth(asset); err != nil {
+		err := p.cfg.State.BeginAuth(asset)
+		if errors.Is(err, ErrStateUnavailable) {
+			// The state broke during this session: the run began only
+			// after CheckFloor passed, and FloorAfterBreak needs a broken
+			// state. The floor on disk runs from ACC; move it to the
+			// session's end (D4-3).
+			err = p.cfg.State.FloorAfterBreak(asset)
+		}
+		if err != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: set floor after unclean exit from %s: %w", asset, err))
 		}
 	case plan.Floor.LoginConfirmed():

@@ -16,7 +16,10 @@ import (
 // added the admin-signed node kinds node.quarantine_clear and
 // node.seq_reset_ack, and on an accepted admin-signed request the repeat
 // answer (repeat_of) and what the collector verified (admin) (P3-A3, #181).
-const ContractID = "otsec.authz/0.5"
+// 0.6 added the admin-signed kinds node.change_approval and
+// node.baseline_ack, each pinned admin key's list of the kinds it may sign
+// (AdminKey.Kinds), and the authority check (P4-A3, D4-2).
+const ContractID = "otsec.authz/0.6"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a

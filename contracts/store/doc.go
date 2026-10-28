@@ -36,6 +36,13 @@
 //     store; and a commit cap, so the recovery reserve covers the largest
 //     commit (GroupOptions.MaxCommitBytes, LargestCommit,
 //     RecoveryReserveFor, D4-9).
+//   - Since 0.5 (D4-14, docs/phase4/B5-c5-0.5-proposal.md): the WAL a
+//     commit may write counts its rows, not only its bytes
+//     (GroupOptions.MaxCommitRecords, LargestCommitRecords, RowWALBytes,
+//     CommitWALBytes and RecoveryReserveFor take the record count), and the
+//     file's size against the quota is bounded (DiskBytesPerQuotaByte), after
+//     B6's event-size sweep showed that events near half a page and small
+//     rows write more WAL and disk than their bytes.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -58,4 +65,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.4"
+const Identifier = "otsec.store/0.5"

@@ -126,10 +126,18 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 			}
 		}
 	}
+	group := groupFor(spec, r.opt.Group)
+	largest, rows := c5.LargestCommit(spec, group), c5.LargestCommitRecords(spec, group)
 	d := &database{spec: spec, env: env, policy: c5.StartupPolicy{
-		Streams:                spec.Streams,
-		Consumers:              mine,
-		RecoveryReserveBytes:   2 * store.WALBoundBytes,
+		Streams:   spec.Streams,
+		Consumers: mine,
+		// The reserve covers the database's largest commit (C5 0.5, D4-9,
+		// D4-14): twice the WAL bound, and the WAL of one commit at the
+		// byte and record caps.
+		RecoveryReserveBytes:   c5.RecoveryReserveFor(store.WALBoundBytes, largest, rows),
+		WALBoundBytes:          store.WALBoundBytes,
+		LargestCommitBytes:     largest,
+		LargestCommitRecords:   rows,
 		LastResortReserveBytes: store.WALBoundBytes + c5.MinOpenHeadroom,
 		OpenHeadroomBytes:      store.WALBoundBytes + c5.MinOpenHeadroom,
 		PruneStepEvents:        50,
@@ -174,7 +182,7 @@ func (r *Runtime) adopt(d *database) error {
 		}
 		last[s.ID] = n
 	}
-	l, err := c5.NewLog(db, r.cfg.NodeID, classes, r.opt.Group, last)
+	l, err := c5.NewLog(db, r.cfg.NodeID, classes, groupFor(d.spec, r.opt.Group), last)
 	if err != nil {
 		return err
 	}
