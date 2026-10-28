@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Phase 0 passed its exit gate with conditions on 2026-10-23. Phase 1 (contracts C1 to C8) passed with conditions on 2026-10-24. Phase 2 (the simulated SEL-751 SER-to-Syslog slice) passed with conditions on 2026-10-25, and the owner accepted it on 2026-10-26. On 2026-10-26 the owner also clarified the monitoring goals and the order of collection methods (ADR-0008; requirements R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9).
 
-Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`. The first Phase 4 contract batch (C5 0.4, C7 0.6, C8 0.5, C9 0.1 and C10 0.1) was approved and merged on 2026-10-27 (D4-9). Test runs on the owner's PC are paused until the owner resumes them (D4-12), so GitHub Actions is the only test path.
+Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`. The first Phase 4 contract batch (C5 0.4, C7 0.6, C8 0.5, C9 0.1 and C10 0.1) was approved and merged on 2026-10-27 (D4-9). Merged since then: C2 0.6, C5 0.6, C8 0.7 and C9 0.2; C7 0.7, C8 0.8 and C9 0.3 are in review. Test runs on the owner's PC are paused until the owner resumes them (D4-12), so GitHub Actions is the only test path.
 
 The product code is two Go binaries:
 
@@ -22,7 +22,7 @@ The code is organized as follows:
 
 Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3, D4-7). Python is used only for verification tooling.
 
-**Team handoff (owner, 2026-10-27).** Agents A1 to A6 are replaced by B1 to B6 with the same roles. In this brief and in older records, A*n* means the role that B*n* now holds. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/B{n}-handoff.md`.
+**Team handoff (owner, 2026-10-27 and 2026-10-28).** Agents A1 to A6 were replaced by B1 to B6 (D3-12), and B1 to B6 by C1 to C6 (D4-28), each time with the same roles. In this brief and in older records, A*n* and B*n* mean the role that C*n* now holds. The generations are listed in `handoffs/GENERATIONS.md`. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/C{n}-handoff.md`. On 2026-10-28 the owner paused all agents for this checkpoint and resumed them the same day (D4-28).
 
 Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
 
