@@ -257,7 +257,7 @@ Date: 2026-10-27. Source: B2's design note, `docs/phase4/B2-register-rev5.md` (#
 2. **Caps.** The read's total cap T is 512 KiB. The configuration record cap is 1.5 MiB, which replaces C9's provisional 1 MiB (D4-9, C9 item 1).
    - The cap is a derived bound (`2 × T + 363,442` bytes), and a test enforces it, as for the SER cap. B2 owns that test, which ships in the register revision 5 PR, because it reads the run's `max_total_bytes` and C9's constants.
    - The configuration database's commit cap is 1.5 MiB, and its reserve follows the C5 0.4 formula. The 64- and 384-byte value assumptions are `documented-untested`.
-3. **Touchscreen HMI settings** (`SET_HMI.zds`, `CDP.zds`) are files, and P4-A2 excludes file transfer. They are not baselined, and this is recorded as an exception in the capabilities and in C9's limitations. Whether touchscreen models are in scope is an open question for the owner.
+3. **Touchscreen HMI settings** (`SET_HMI.zds`, `CDP.zds`) are files, and P4-A2 excludes file transfer. They are not baselined, and this is recorded as an exception in the capabilities and in C9's limitations. The owner settled this on 2026-10-28: touchscreen settings are not required. A touchscreen model is in scope, but its touchscreen settings are not, so they are not read or baselined, and no document may claim that a snapshot covers them.
 
 ## D4-14: the store's commit rule gets a per-record term, and `events` becomes a rowid table (C5 0.5, #280)
 
