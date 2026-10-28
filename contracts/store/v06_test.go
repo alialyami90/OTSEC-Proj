@@ -19,7 +19,10 @@ func TestHoldAcknowledgedDifference(t *testing.T) {
 	if err := (HoldReason{Code: HoldAcknowledgedDifference}).Validate(); !isCode(err, CodeInvalid) {
 		t.Errorf("no C8 record: %v", err)
 	}
-	for _, c := range []HoldCode{HoldBaseline, HoldUnapprovedDifference, HoldAcknowledgedDifference} {
+	if HoldRestoredDifference != "restored-difference" {
+		t.Fatalf("code %q", HoldRestoredDifference)
+	}
+	for _, c := range []HoldCode{HoldBaseline, HoldUnapprovedDifference, HoldAcknowledgedDifference, HoldRestoredDifference} {
 		if err := (HoldReason{Code: c, Ref: auditRef}).Validate(); err != nil {
 			t.Errorf("%s: %v", c, err)
 		}
@@ -32,7 +35,9 @@ func TestHoldAcknowledgedDifference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Append(context.Background(), configRec(100, Hold{Reason: r})); err != nil {
-		t.Fatalf("a record held as acknowledged-difference: %v", err)
+	for _, c := range []HoldCode{HoldAcknowledgedDifference, HoldRestoredDifference} {
+		if _, err := l.Append(context.Background(), configRec(100, Hold{Reason: HoldReason{Code: c, Ref: auditRef}})); err != nil {
+			t.Fatalf("a record held as %s: %v", c, err)
+		}
 	}
 }
