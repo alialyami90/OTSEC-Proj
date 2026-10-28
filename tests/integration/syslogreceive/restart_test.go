@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net/url"
+	"runtime/pprof"
 	"strings"
 	"testing"
 	"time"
@@ -148,7 +149,79 @@ func (g *rig) floodUntil(end time.Time, mark string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	g.t.Fatalf("marker %q not stored", mark)
+	g.t.Fatalf("marker %q not stored: %s", mark, g.why(mark))
+}
+
+// why is a diagnostic for a marker not found: the listener's counts, the
+// commit caps it has learnt, whether the Log has stopped and Serve has
+// returned, and how many stored events hold the marker read both ways
+// (hasMarker's text search, and the decoded native bytes).
+func (g *rig) why(mark string) string {
+	st := g.r.Status()
+	b, n := g.r.CommitCaps()
+	served := "running"
+	select {
+	case err := <-g.done:
+		served = fmt.Sprintf("returned (%v)", err)
+		g.done <- err
+	default:
+	}
+	var text, native int
+	ev := g.events()
+	for _, s := range ev {
+		if strings.Contains(string(s.Raw), mark[len("<13>"):]) {
+			text++
+		}
+		if string(s.Bytes) == mark {
+			native++
+		}
+	}
+	var dropped int64
+	for _, d := range st.Dropped {
+		dropped += d
+	}
+	return fmt.Sprintf("received %d, stored %d, dropped %v, held %v, last error %q, so %d read and neither stored nor dropped; "+
+		"caps %d bytes %d records; log stopped %v; Serve %s; store write lock %s; "+
+		"%d events on the stream, %d holding the marker's text, %d whose native bytes are the marker\n%s",
+		st.Received, st.Stored, st.Dropped, st.Held, st.LastErr, st.Received-st.Stored-dropped-st.Empty,
+		b, n, g.log.Stopped(), served, g.writeLock(), len(ev), text, native, stacks())
+}
+
+// writeLock says whether another connection holds SQLite's write lock now,
+// as the store does while it commits: free means the store is not in a
+// commit, so a stalled writer is waiting elsewhere.
+func (g *rig) writeLock() string {
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: g.db}).EscapedPath()+"?_pragma=busy_timeout(1000)")
+	if err != nil {
+		return err.Error()
+	}
+	defer db.Close()
+	ctx := context.Background()
+	c, err := db.Conn(ctx)
+	if err != nil {
+		return err.Error()
+	}
+	defer c.Close()
+	if _, err := c.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return "held (" + err.Error() + ")"
+	}
+	c.ExecContext(ctx, "ROLLBACK")
+	return "free"
+}
+
+// stacks is every goroutine stack that runs this module's code, grouped:
+// where the listener's writer and the Log wait when a marker is lost.
+func stacks() string {
+	var w strings.Builder
+	pprof.Lookup("goroutine").WriteTo(&w, 1)
+	var out []string
+	for _, s := range strings.Split(w.String(), "\n\n") {
+		if strings.Contains(s, "otsec.local/otsec/modules/") || strings.Contains(s, "otsec.local/otsec/contracts/store") ||
+			strings.Contains(s, "otsec.local/otsec/platform/store") {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, "\n\n")
 }
 
 // hasMarker reports whether a stored event holds mark, without reading and

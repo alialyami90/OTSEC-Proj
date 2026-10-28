@@ -1,0 +1,68 @@
+{
+  "schema": "otsec.baseline/0.1",
+  "asset_id": "2f1c5e0a-8b7d-4c3e-9a1f-0d2e3c4b5a69",
+  "baseline": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "baseline_version": 1,
+  "rule": "repeats",
+  "key": {
+    "source": "ser",
+    "element": "51P1P",
+    "state": "Asserted"
+  },
+  "key_text": "51P1P Asserted",
+  "params": [
+    {
+      "name": "repeats_n",
+      "value": "5"
+    },
+    {
+      "name": "repeats_window_s",
+      "value": "600"
+    }
+  ],
+  "baseline_value": "max_per_window 2",
+  "observation": "6 in the 600 s to 2026-11-20T14:05:00Z",
+  "clock": "received",
+  "at_utc": "2026-11-20T14:05:00Z",
+  "events": [
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 1
+    },
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 2
+    },
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 3
+    },
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 4
+    },
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 5
+    },
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 6
+    }
+  ],
+  "events_total": 6,
+  "not_counted": [
+    {
+      "node_id": "site-a",
+      "stream": "sel751/feeder-1/ser",
+      "seq": 7
+    }
+  ],
+  "not_counted_total": 1
+}

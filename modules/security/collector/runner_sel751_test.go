@@ -121,8 +121,9 @@ func farEndOn(l net.Listener, turns []turn, hangUp bool) <-chan error {
 }
 
 // hostedFixture is a pipeline hosting the SEL-751 runner, with the asset's
-// endpoint on a loopback listener and canary installed.
-func hostedFixture(t *testing.T) (*pipeFixture, net.Listener) {
+// endpoint on a loopback listener and canary installed. extra options
+// apply after its own.
+func hostedFixture(t *testing.T, extra ...pipeOption) (*pipeFixture, net.Listener) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -130,10 +131,10 @@ func hostedFixture(t *testing.T) (*pipeFixture, net.Listener) {
 	}
 	t.Cleanup(func() { l.Close() })
 	port := l.Addr().(*net.TCPAddr).Port
-	f := newPipeline(t,
+	f := newPipeline(t, append([]pipeOption{
 		withAsset(func(a *asset.Asset) { a.Endpoints[0].Port = port }),
 		func(c *PipelineConfig, f *pipeFixture) { c.Runner = &SEL751Runner{Alarm: c.Alarm} },
-	)
+	}, extra...)...)
 	// The register on main (revision 4): its context read puts SHO G before
 	// SER, as the C2 goldens do (C3 0.2, D3-2).
 	if _, err := f.registers.Activate(signedRegister(t, readFixtureFrom(t, "../../../contracts/register/testdata/sel-751.json"), f.release, "release-2026")); err != nil {

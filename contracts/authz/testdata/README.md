@@ -12,11 +12,14 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/valid/asset-clear-suspension.json` | 0.2: the node asks the collector to clear its suspension of one asset, naming the invocation that suspended it. The collector still reads the administrator's file itself before it clears. |
 | `requests/valid/admin-signed-credential-install.json` | 0.4: the same install, stamped 0.4, signed by a test admin key (seed: SHA-256 of `otsec test admin key 1`, test only, D2-5). The body travels only inside the signed payload. `TestAdminSignedGolden` rebuilds it byte for byte and verifies it. |
 | `requests/valid/admin-signed-node-quarantine-clear.json` | 0.5: an administrator's signed clear of one quarantine the node holds, with the same test key and nonce. The body names the asset and the manifest's SHA-256 (of `otsec test quarantine manifest`, not a real manifest). `TestNodeQuarantineClearGolden` rebuilds and verifies it. |
+| `requests/valid/admin-signed-node-change-approval.json` | 0.6: an approval of a change to one asset's configuration against a baseline, for 16:00 to 20:00 UTC, with a reason. The baseline digest is the SHA-256 of `otsec test configuration baseline`, not of a stored snapshot. `TestConfigKindGoldens` rebuilds and verifies it with a key whose list allows the kind. |
+| `requests/valid/admin-signed-node-baseline-ack.json` | 0.6: an acknowledgement of the same test digest as the asset's configuration baseline. |
 | `requests/invalid/bad_params__line-break-in-param.json` | A parameter value carrying CR LF and a second command. |
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
 | `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
 | `requests/invalid/invalid__asset-clear-suspension-stamped-0.1.json` | An asset clear stamped 0.1, which does not have that kind. |
 | `requests/invalid/invalid__node-quarantine-clear-stamped-0.4.json` | The signed quarantine clear golden stamped 0.4, which does not have the node kinds. |
+| `requests/invalid/invalid__node-change-approval-stamped-0.5.json` | The signed change approval stamped 0.5, which does not have the configuration kinds. |
 | `requests/invalid/invalid__node-seq-reset-ack-unsigned.json` | A reset acknowledgement with no signature: the node kinds exist only signed, and have no body outside the payload. |
 | `requests/invalid/invalid__body-does-not-match-kind.json` | Kind `run` with a revoke body. |
 | `requests/invalid/invalid__engineering-purpose.json` | A credential whose purpose is not `collect-readonly`. |

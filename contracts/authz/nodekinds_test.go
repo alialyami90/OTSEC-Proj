@@ -251,6 +251,9 @@ func TestAnswersRepeat(t *testing.T) {
 func TestNodeQuarantineClearGolden(t *testing.T) {
 	const path = "testdata/requests/valid/admin-signed-node-quarantine-clear.json"
 	req := signedRequest(t, testAdminPriv, adminPayload(t, KindNodeQuarantineClear))
+	// Stamped 0.5, as a 0.5 node sends it: a 0.6 reader decodes and
+	// verifies it unchanged.
+	req.Contract = "otsec.authz/0.5"
 	want, err := json.MarshalIndent(req, "", "  ")
 	if err != nil {
 		t.Fatal(err)
