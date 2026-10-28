@@ -43,9 +43,11 @@
 //     file's size against the quota is bounded (DiskBytesPerQuotaByte), after
 //     B6's event-size sweep showed that events near half a page and small
 //     rows write more WAL and disk than their bytes.
-//   - Since 0.6 (D4-18): the hold code HoldAcknowledgedDifference. A
-//     configuration acknowledgement ends a change's alarm and not the hold
-//     on its snapshot and difference, which stay held as evidence. A
+//   - Since 0.6 (D4-18, D4-19): the hold codes HoldAcknowledgedDifference and
+//     HoldRestoredDifference. A
+//     configuration acknowledgement, or a return to the baseline, ends a
+//     change's alarm and not the hold on its snapshot and difference, which
+//     stay held as evidence. A
 //     reconcile that meets a hold code it does not know keeps that hold
 //     unchanged (no release, no new reason) and raises an alarm.
 //   - Audit records: one audit stream per node, sealed into the C8 hash

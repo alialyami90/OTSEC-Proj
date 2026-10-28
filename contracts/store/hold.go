@@ -20,6 +20,11 @@ const (
 	// releases it to make room. Ref is the config.change_detected C8 record,
 	// which names the digests.
 	HoldAcknowledgedDifference HoldCode = "acknowledged-difference"
+	// HoldRestoredDifference (D4-19): the same, for a change whose alarm
+	// ended by a return to the baseline (config.baseline_restored). A
+	// separate code, so the holds table shows how each alarm ended. Ref is
+	// the config.change_detected C8 record. Nothing ends the hold either.
+	HoldRestoredDifference HoldCode = "restored-difference"
 )
 
 // HoldReason names the C8 record that justifies a hold, never free text
@@ -33,7 +38,7 @@ type HoldReason struct {
 
 // Validate checks the reason.
 func (r HoldReason) Validate() error {
-	if r.Code != HoldBaseline && r.Code != HoldUnapprovedDifference && r.Code != HoldAcknowledgedDifference {
+	if r.Code != HoldBaseline && r.Code != HoldUnapprovedDifference && r.Code != HoldAcknowledgedDifference && r.Code != HoldRestoredDifference {
 		return errf(CodeInvalid, nil, "unknown hold code %q", r.Code)
 	}
 	if !r.Ref.NodeID.Valid() || !r.Ref.Stream.Valid() || r.Ref.Seq == 0 {
