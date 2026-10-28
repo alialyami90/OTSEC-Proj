@@ -13,6 +13,7 @@ import (
 
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/config"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/ied/telnet"
 )
@@ -21,7 +22,7 @@ import (
 // EP-4).
 const (
 	AdapterID = "sel-751-ascii"
-	Version   = "0.3.0" // 0.3.0: the configuration read, a register run (P4-A2); 0.2.0: the C1 path rule, DATE_F from SHO G, TIDLE after ok or partial (P3-A2)
+	Version   = "0.3.1" // 0.3.1: a read over C9 0.3's bounds fails as failed.config_unparsable (D4-25); 0.3.0: the configuration read, a register run (P4-A2); 0.2.0: the C1 path rule, DATE_F from SHO G, TIDLE after ok or partial (P3-A2)
 )
 
 // Timing the manual does not give, chosen here until a capture shows the
@@ -932,6 +933,12 @@ func (s *session) operateRun() adapter.Code {
 		if code := s.section(id, s.stepLine[i]); code != "" {
 			return code
 		}
+	}
+	// A read that C9 could not hold as a snapshot ends the run as one it cannot
+	// read (C9 0.3, D4-25): QUI, the bytes kept, no record and no snapshot.
+	if err := config.RecordsFit(s.records); err != nil {
+		s.detail = "the settings read are more than a snapshot can hold"
+		return adapter.FailedConfigUnparsable
 	}
 	return ""
 }
