@@ -116,6 +116,12 @@ func NewListening(rt *Runtime) (*Listening, error) {
 			Received:  rt.received,
 			Limits:    sizing[l.ID].limits(),
 		}
+		// The receiver splits a batch at the caps of the Log behind it, which
+		// are the ones the node built that Log with (C5 0.4, 0.5).
+		if d := rt.dbFor(stream); d != nil {
+			g := groupFor(d.spec, rt.opt.Group)
+			cfg.MaxCommitBytes, cfg.MaxCommitRecords = g.CommitBytes(), g.CommitRecords()
+		}
 		spent, err := unknownSpent(context.Background(), rt.Store(stream), stream, cfg.Limits.UnknownWindow, rt.opt.Now())
 		if err != nil {
 			// receive starts a budget empty at UnknownBytes.
