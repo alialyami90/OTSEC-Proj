@@ -504,6 +504,16 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 	}
 	if len(ser) > 0 {
 		if _, err := log.AppendBatch(ctx, ser); err != nil {
+			if errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}) {
+				// A read over the evidence database's commit cap is
+				// refused whole and nothing is stored; the bound on a
+				// read (commitcap.go) makes this a normalizer or adapter
+				// fault, so the outcome is kept as quarantine (D4-9).
+				rep.Outcome = "quarantined"
+				s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, "the read's events are over the evidence database's commit cap: "+err.Error(), false)
+				s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
+				return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the read is over the commit cap; kept as quarantine, nothing stored as events")
+			}
 			return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "SER events: "+err.Error())
 		}
 		rep.Events = len(ser)

@@ -452,19 +452,19 @@ func measureWAL(t *testing.T, dir string, commit func()) int64 {
 	return after.Size() - before.Size()
 }
 
-// withinRule fails unless one commit of payload bytes grew the WAL by more
-// than its payload (else the pin did not hold and nothing was measured) and
-// by no more than CommitWALBytes(payload).
-func withinRule(t *testing.T, payload, grew int64) {
+// withinRule fails unless one commit of payload bytes in records rows grew
+// the WAL by more than its payload (else the pin did not hold and nothing
+// was measured) and by no more than CommitWALBytes(payload, records).
+func withinRule(t *testing.T, payload, records, grew int64) {
 	t.Helper()
-	rule := c5.CommitWALBytes(payload)
-	t.Logf("payload %d bytes: the WAL grew %d bytes (%.3f × payload + %d), rule %d", payload, grew,
+	rule := c5.CommitWALBytes(payload, records)
+	t.Logf("payload %d bytes in %d records: the WAL grew %d bytes (%.3f × payload + %d), rule %d", payload, records, grew,
 		float64(grew)/float64(payload), grew-payload, rule)
 	if grew <= payload {
 		t.Fatalf("the WAL grew %d bytes for a %d-byte payload: the pin did not hold it, so this measured nothing", grew, payload)
 	}
 	if grew > rule {
-		t.Fatalf("one commit of %d payload bytes wrote %d WAL bytes, over CommitWALBytes %d", payload, grew, rule)
+		t.Fatalf("one commit of %d payload bytes in %d records wrote %d WAL bytes, over CommitWALBytes %d", payload, records, grew, rule)
 	}
 }
 
@@ -480,10 +480,10 @@ func compactAll(t *testing.T, db *store.DB) {
 	}
 }
 
-// The WAL one commit writes stays under CommitWALBytes of its payload, on
-// the real store with its own schema, indexes and settings: one
-// configuration record per commit, from MinRecordBytes to 11 MiB, the
-// largest cap any database uses (the evidence database's, D4-9).
+// The WAL one commit writes stays under CommitWALBytes of its payload and
+// its one record, on the real store with its own schema, indexes and
+// settings: one configuration record per commit, from MinRecordBytes to
+// 11 MiB, the largest cap any database uses (the evidence database's, D4-9).
 func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 	ctx := context.Background()
 	for _, size := range []int64{c5.MinRecordBytes, 256 << 10, 768 << 10, 1 << 20, 1536 << 10, 4 << 20, 11 << 20} {
@@ -510,7 +510,8 @@ func TestOneCommitsWALIsWithinTheRule(t *testing.T) {
 			if r.Bytes() > size {
 				t.Fatalf("record %d bytes over its cap %d", r.Bytes(), size)
 			}
-			withinRule(t, r.Bytes(), measureWAL(t, dir, func() {
+			// One Append with no other writer: the commit holds this one record.
+			withinRule(t, r.Bytes(), 1, measureWAL(t, dir, func() {
 				if _, err := l.Append(ctx, r); err != nil {
 					t.Fatal(err)
 				}
