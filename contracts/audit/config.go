@@ -1,8 +1,11 @@
 package audit
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,9 +28,30 @@ const (
 	ActionConfigBaselineRestored    Action = "config.baseline_restored"
 )
 
+// The configuration read actions (0.7, D4-20). Both are written by the node.
+// config.read_compared is the node's record of a read that showed no
+// difference from the asset's baseline, or only the change the asset's
+// newest recorded change already is. config.reads_removed is its record,
+// written before it removes any, of the oldest such reads' stored copies.
+const (
+	ActionConfigReadCompared Action = "config.read_compared"
+	ActionConfigReadsRemoved Action = "config.reads_removed"
+)
+
 // configSince is the minor that added the configuration actions, Config and
-// Admin.Kind.
-const configSince = 5
+// Admin.Kind; configReadsSince the one that added the read actions.
+const (
+	configSince      = 5
+	configReadsSince = 7
+)
+
+// The reason codes of config.read_compared (info): the read showed no
+// difference from the baseline, or the same change as the asset's newest
+// recorded change against it.
+const (
+	ReasonNoDifference = "no_difference"
+	ReasonSameChange   = "same_change"
+)
 
 // The reason codes of config.change_detected: warning when no approval
 // covers the difference (the alarm), info when one does.
@@ -48,10 +72,16 @@ const (
 //   - config.change_detected: baseline_digest, snapshot_digest,
 //     difference_digest, read_seq, unchanged_at, unchanged_read_seq (absent
 //     when no earlier read is in the epoch), and approval_seq when an
-//     approval covers the difference.
+//     approval covers the difference; from 0.7 also changes_digest.
 //   - config.baseline_restored: baseline_digest, snapshot_digest and
 //     read_seq of the first read equal to the baseline after a recorded
 //     difference from it.
+//   - config.read_compared (0.7): baseline_digest, snapshot_digest and
+//     read_seq of a read that showed no difference from the baseline (reason
+//     no_difference), or, with reason same_change, also change_seq and
+//     changes_digest of the change it repeats.
+//   - config.reads_removed (0.7): the removal fields only (removed_count,
+//     removed_first_seq, removed_last_seq, removed_digest, kept_digest).
 //
 // The digests are C9's (config.Digest) or C10's: "sha256:" and the SHA-256
 // of the document's stored bytes. A configuration baseline is an
@@ -66,7 +96,7 @@ type Config struct {
 	PayloadSHA256 string `json:"payload_sha256,omitempty"`
 	// Kind is the baseline's kind, on config.baseline_acknowledged only.
 	Kind           authz.BaselineKind `json:"kind,omitempty"`
-	BaselineDigest string             `json:"baseline_digest"`
+	BaselineDigest string             `json:"baseline_digest,omitempty"`
 	// PreviousDigest is the baseline of the same asset and kind that the
 	// acknowledgement replaces (or would have replaced, when denied), on
 	// config.baseline_acknowledged only; absent for the asset's first. With
@@ -98,6 +128,43 @@ type Config struct {
 	// ApprovalSeq is the decision_seq of the config.change_approved record
 	// that covers the difference (ApprovalCovers). Absent when none does.
 	ApprovalSeq uint64 `json:"approval_seq,omitempty"`
+	// ChangesDigest (0.7) is C9's digest of the difference's ordered
+	// changes, so that two reads show the same change exactly when their
+	// digests are equal, whatever snapshots they came from. On
+	// config.change_detected (required from 0.7) and on config.read_compared
+	// with reason same_change.
+	ChangesDigest string `json:"changes_digest,omitempty"`
+	// ChangeSeq (0.7) is the seq of the config.change_detected record that a
+	// same_change read repeats.
+	ChangeSeq uint64 `json:"change_seq,omitempty"`
+	// The removal fields (0.7), on config.reads_removed only. RemovedCount
+	// reads of the asset were removed from its configuration stream, the
+	// oldest of those the chain records as compared and not yet removed;
+	// RemovedFirstSeq and RemovedLastSeq are the stream seqs of the first
+	// and last of them, and RemovedDigest is RemovedReadsDigest of their
+	// snapshot digests in order. KeptDigest is the snapshot digest of a
+	// recorded read that stays, the newest at the time.
+	RemovedCount    int    `json:"removed_count,omitempty"`
+	RemovedFirstSeq uint64 `json:"removed_first_seq,omitempty"`
+	RemovedLastSeq  uint64 `json:"removed_last_seq,omitempty"`
+	RemovedDigest   string `json:"removed_digest,omitempty"`
+	KeptDigest      string `json:"kept_digest,omitempty"`
+}
+
+// RemovedReadsDigest is the digest config.reads_removed carries over the
+// snapshot digests of the reads it removed, in stream order: "sha256:" and
+// the SHA-256 of each digest as written ("sha256:<hex>") followed by a line
+// feed.
+func RemovedReadsDigest(snapshotDigests []string) string {
+	h := sha256.New()
+	for _, d := range snapshotDigests {
+		h.Write([]byte(d + "\n"))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+func (c *Config) removalFields() bool {
+	return c.RemovedCount != 0 || c.RemovedFirstSeq != 0 || c.RemovedLastSeq != 0 || c.RemovedDigest != "" || c.KeptDigest != ""
 }
 
 func (c *Config) approvalBody(assetID string) *authz.NodeChangeApprovalBody {
@@ -113,7 +180,9 @@ func (r *Record) validateConfig(minor int) error {
 	acked := r.Action == ActionConfigBaselineAcknowledge
 	detected := r.Action == ActionConfigChangeDetected
 	restored := r.Action == ActionConfigBaselineRestored
-	if !approved && !acked && !detected && !restored {
+	compared := r.Action == ActionConfigReadCompared
+	removed := r.Action == ActionConfigReadsRemoved
+	if !approved && !acked && !detected && !restored && !compared && !removed {
 		if r.Config != nil {
 			return fmt.Errorf("audit: config belongs on the configuration actions, not %s", r.Action)
 		}
@@ -132,10 +201,16 @@ func (r *Record) validateConfig(minor int) error {
 	if r.CorrelationID == "" {
 		return fmt.Errorf("audit: %s needs a correlation_id", r.Action)
 	}
+	if removed {
+		return r.validateReadsRemoved()
+	}
 	if !digestPattern.MatchString(c.BaselineDigest) {
 		return fmt.Errorf("audit: %s needs baseline_digest sha256:<hex>", r.Action)
 	}
 	if approved || acked {
+		if c.ChangesDigest != "" || c.ChangeSeq != 0 || c.removalFields() {
+			return fmt.Errorf("audit: %s carries no read result or removal fields", r.Action)
+		}
 		return r.validateConfigDecision(approved)
 	}
 	switch {
@@ -143,6 +218,8 @@ func (r *Record) validateConfig(minor int) error {
 		return fmt.Errorf("audit: %s is written by the node (actor type node)", r.Action)
 	case c.DecisionSeq != 0 || c.PayloadSHA256 != "" || c.Kind != "" || c.WindowStart != "" || c.WindowEnd != "" || c.Reason != "" || c.PreviousDigest != "":
 		return fmt.Errorf("audit: %s carries no approval or acknowledgement fields", r.Action)
+	case c.removalFields():
+		return fmt.Errorf("audit: %s carries no removal fields", r.Action)
 	case !digestPattern.MatchString(c.SnapshotDigest) || c.ReadSeq == 0:
 		return fmt.Errorf("audit: %s needs snapshot_digest sha256:<hex> and read_seq", r.Action)
 	}
@@ -150,12 +227,23 @@ func (r *Record) validateConfig(minor int) error {
 		switch {
 		case c.DifferenceDigest != "" || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 || c.ApprovalSeq != 0:
 			return errors.New("audit: config.baseline_restored has no difference, unchanged or approval fields")
+		case c.ChangesDigest != "" || c.ChangeSeq != 0:
+			return errors.New("audit: config.baseline_restored has no changes_digest or change_seq")
 		case r.Outcome != OutcomeInfo || r.ReasonCode != "":
 			return errors.New("audit: config.baseline_restored has outcome info and no reason code")
 		}
 		return nil
 	}
+	if compared {
+		return r.validateReadCompared()
+	}
 	switch {
+	case c.ChangeSeq != 0:
+		return errors.New("audit: config.change_detected has no change_seq")
+	case minor < configReadsSince && c.ChangesDigest != "":
+		return fmt.Errorf("audit: changes_digest is new in 0.%d, so a 0.%d record cannot carry it", configReadsSince, minor)
+	case minor >= configReadsSince && !digestPattern.MatchString(c.ChangesDigest):
+		return errors.New("audit: config.change_detected needs changes_digest sha256:<hex> from 0.7")
 	case !digestPattern.MatchString(c.DifferenceDigest):
 		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>")
 	case c.SnapshotDigest == c.BaselineDigest:
@@ -173,6 +261,58 @@ func (r *Record) validateConfig(minor int) error {
 	case r.Outcome == OutcomeInfo && r.ReasonCode == ReasonApprovedChange && c.ApprovalSeq != 0:
 	default:
 		return fmt.Errorf("audit: config.change_detected is warning %s, or info %s with approval_seq", ReasonUnapprovedChange, ReasonApprovedChange)
+	}
+	return nil
+}
+
+// validateReadCompared checks config.read_compared: the node's record of a
+// read with no difference from the baseline (reason no_difference), or with
+// the change the asset's newest recorded change already is (same_change, with
+// that record's seq and the changes digest they share).
+func (r *Record) validateReadCompared() error {
+	c := r.Config
+	switch {
+	case c.DifferenceDigest != "" || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 || c.ApprovalSeq != 0:
+		return errors.New("audit: config.read_compared has no difference, unchanged or approval fields")
+	case r.Outcome != OutcomeInfo:
+		return errors.New("audit: config.read_compared has outcome info")
+	}
+	switch r.ReasonCode {
+	case ReasonNoDifference:
+		if c.ChangeSeq != 0 || c.ChangesDigest != "" {
+			return errors.New("audit: config.read_compared no_difference names no change")
+		}
+	case ReasonSameChange:
+		switch {
+		case c.ChangeSeq == 0 || !digestPattern.MatchString(c.ChangesDigest):
+			return errors.New("audit: config.read_compared same_change needs change_seq and changes_digest sha256:<hex>")
+		case c.SnapshotDigest == c.BaselineDigest:
+			return errors.New("audit: config.read_compared same_change names its baseline as the new snapshot")
+		}
+	default:
+		return fmt.Errorf("audit: config.read_compared reason is %s or %s", ReasonNoDifference, ReasonSameChange)
+	}
+	return nil
+}
+
+// validateReadsRemoved checks config.reads_removed: the node's record, made
+// before it removes any, of the stored copies of the asset's oldest recorded
+// compared reads. It has the removal fields and nothing else.
+func (r *Record) validateReadsRemoved() error {
+	c := r.Config
+	switch {
+	case r.Actor.Type != authz.PrincipalNode:
+		return errors.New("audit: config.reads_removed is written by the node (actor type node)")
+	case r.Outcome != OutcomeInfo || r.ReasonCode != "":
+		return errors.New("audit: config.reads_removed has outcome info and no reason code")
+	case c.BaselineDigest != "" || c.DecisionSeq != 0 || c.PayloadSHA256 != "" || c.Kind != "" || c.PreviousDigest != "" ||
+		c.WindowStart != "" || c.WindowEnd != "" || c.Reason != "" || c.SnapshotDigest != "" || c.DifferenceDigest != "" ||
+		c.ReadSeq != 0 || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 || c.ApprovalSeq != 0 || c.ChangesDigest != "" || c.ChangeSeq != 0:
+		return errors.New("audit: config.reads_removed carries the removal fields only")
+	case c.RemovedCount < 1 || c.RemovedFirstSeq == 0 || c.RemovedLastSeq < c.RemovedFirstSeq || uint64(c.RemovedCount) > c.RemovedLastSeq-c.RemovedFirstSeq+1:
+		return errors.New("audit: config.reads_removed needs removed_count and a removed_first_seq to removed_last_seq range that can hold them")
+	case !digestPattern.MatchString(c.RemovedDigest) || !digestPattern.MatchString(c.KeptDigest):
+		return errors.New("audit: config.reads_removed needs removed_digest and kept_digest sha256:<hex>")
 	}
 	return nil
 }
@@ -275,8 +415,9 @@ func ApprovalCovers(approval, detected *Record) error {
 }
 
 // VerifyConfig checks the configuration records of one node in chain order
-// (0.5; 0.6 changes the alarm rule below), so that a node cannot silence an alarm with an approval that does
-// not exist or does not cover it:
+// (0.5; 0.6 changes the alarm rule below; 0.7 adds the read records after the
+// list), so that a node cannot silence an alarm with an approval that does not
+// exist or does not cover it:
 //
 //   - each config.change_approved and config.baseline_acknowledged follows
 //     the collector's acceptance it names (decision_seq): an allowed
@@ -320,6 +461,15 @@ func ApprovalCovers(approval, detected *Record) error {
 // recs set, or none when recs shows none and it is the asset's first; so a
 // node cannot record a skipped or reordered succession.
 //
+// From 0.7 each config.read_compared names a real read of its asset that has
+// no other result, against the asset's acknowledged baseline; reports no
+// difference only when no change recorded against that baseline is still
+// open (a restore or a configuration acknowledgement ends it); and repeats a
+// change only by naming the newest one, by seq and changes_digest. Each
+// config.reads_removed takes the oldest compared reads of its asset that no
+// earlier removal took, fewer than are recorded (the newest stays), with the
+// removed_digest of those and a kept_digest that names one that stays.
+//
 // A collector.seq_reset starts a new epoch: numbers from before it name
 // nothing after it, so an approval does not survive a collector reinstall.
 // recs must start at the chain's first record, or at a point before every
@@ -345,6 +495,13 @@ func VerifyConfig(recs []*Record) error {
 		kind  authz.BaselineKind
 	}
 	active := map[kindOf]string{} // the baseline the last succeeded acknowledgement set
+	// 0.7 (D4-20): the newest recorded change against each baseline, until a
+	// restore or a configuration acknowledgement ends it; the result each
+	// read has been given; and, for each asset, the snapshot digests of its
+	// compared reads that a config.reads_removed has not yet taken.
+	lastChange := map[baseline]*Record{}
+	resulted := map[num]Action{}
+	pending := map[string][]string{}
 	for _, r := range recs {
 		switch {
 		case r.Action == ActionCollectorSeqReset:
@@ -399,6 +556,11 @@ func VerifyConfig(recs []*Record) error {
 							delete(alarmed, b)
 						}
 					}
+					for b := range lastChange {
+						if b.asset == r.Target.AssetID {
+							delete(lastChange, b)
+						}
+					}
 				}
 			}
 		case r.Action == ActionConfigChangeDetected || r.Action == ActionConfigBaselineRestored:
@@ -416,6 +578,15 @@ func VerifyConfig(recs []*Record) error {
 				}
 			}
 			k := baseline{r.Target.AssetID, c.BaselineDigest}
+			if resulted[num{epoch, c.ReadSeq}] == ActionConfigReadCompared {
+				return broken("record %d (%s) gives read decision %d a second result: a config.read_compared already has it", r.Seq, r.Action, c.ReadSeq)
+			}
+			resulted[num{epoch, c.ReadSeq}] = r.Action
+			if r.Action == ActionConfigChangeDetected {
+				lastChange[k] = r
+			} else {
+				delete(lastChange, k)
+			}
 			switch {
 			case r.Action == ActionConfigBaselineRestored:
 				delete(alarmed, k)
@@ -433,6 +604,61 @@ func VerifyConfig(recs []*Record) error {
 			if err := ApprovalCovers(a, r); err != nil {
 				return broken("record %d: approval %d does not cover it: %v", r.Seq, c.ApprovalSeq, err)
 			}
+		case r.Action == ActionConfigReadCompared:
+			if err := readCompared(r, runs[num{epoch, r.Config.ReadSeq}], active[kindOf{r.Target.AssetID, authz.BaselineConfiguration}],
+				lastChange[baseline{r.Target.AssetID, r.Config.BaselineDigest}], resulted[num{epoch, r.Config.ReadSeq}]); err != nil {
+				return err
+			}
+			resulted[num{epoch, r.Config.ReadSeq}] = r.Action
+			pending[r.Target.AssetID] = append(pending[r.Target.AssetID], r.Config.SnapshotDigest)
+		case r.Action == ActionConfigReadsRemoved:
+			p := pending[r.Target.AssetID]
+			c := r.Config
+			switch {
+			case c.RemovedCount >= len(p):
+				return broken("record %d removes %d reads of asset %s, but only %d compared reads are recorded and the newest stays", r.Seq, c.RemovedCount, r.Target.AssetID, len(p))
+			case c.RemovedDigest != RemovedReadsDigest(p[:c.RemovedCount]):
+				return broken("record %d: removed_digest is not the digest of the %d oldest compared reads of asset %s", r.Seq, c.RemovedCount, r.Target.AssetID)
+			case !slices.Contains(p[c.RemovedCount:], c.KeptDigest):
+				return broken("record %d: kept_digest names no compared read that stays", r.Seq)
+			}
+			pending[r.Target.AssetID] = p[c.RemovedCount:]
+		}
+	}
+	return nil
+}
+
+// readCompared checks a config.read_compared record (0.7) against what the
+// chain has so far: the run it names (nil when none), the asset's active
+// configuration baseline, the asset's newest recorded change against the
+// baseline it names (nil when none, or ended by a restore or
+// acknowledgement), and the result its read has already been given (the
+// zero action when none). A read has one result, it compares against the
+// acknowledged baseline, a no_difference read cannot follow a recorded change
+// the baseline has not been restored from, and a same_change read repeats the
+// newest recorded change exactly, by its changes digest.
+func readCompared(r, run *Record, active string, last *Record, given Action) error {
+	c := r.Config
+	switch {
+	case run == nil || run.Target.AssetID != r.Target.AssetID:
+		return broken("record %d names read decision %d, which is not an earlier run on asset %s in its epoch", r.Seq, c.ReadSeq, r.Target.AssetID)
+	case given != "":
+		return broken("record %d gives read decision %d a second result: %s already has it", r.Seq, c.ReadSeq, given)
+	}
+	if err := acknowledged(r, active); err != nil {
+		return err
+	}
+	switch r.ReasonCode {
+	case ReasonNoDifference:
+		if last != nil {
+			return broken("record %d reports no difference from baseline %s, but record %d recorded a change against it and no restore or acknowledgement ended it", r.Seq, c.BaselineDigest, last.Seq)
+		}
+	case ReasonSameChange:
+		switch {
+		case last == nil || last.Seq != c.ChangeSeq:
+			return broken("record %d repeats change %d, which is not the newest recorded change against baseline %s", r.Seq, c.ChangeSeq, c.BaselineDigest)
+		case last.Config.ChangesDigest == "" || last.Config.ChangesDigest != c.ChangesDigest:
+			return broken("record %d repeats change %d with changes_digest %s, but that change has %q", r.Seq, c.ChangeSeq, c.ChangesDigest, last.Config.ChangesDigest)
 		}
 	}
 	return nil

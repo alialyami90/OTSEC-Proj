@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.6: the audit record every module
+// Package audit is contract C8, otsec.audit/0.7: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -223,6 +223,48 @@
 // alarm by citing an acceptance the collector numbered later, or one of
 // another kind or person, without VerifyConfig failing.
 //
+// # Compared reads and their removal (0.7)
+//
+// A configuration read that shows no difference from the baseline, or only
+// the change the asset's newest recorded change already is, would otherwise
+// fill the store with copies that say nothing new (D4-20). Two node actions
+// let such copies be removed without losing the evidence of why:
+//
+//   - config.read_compared is the node's record of one such read, info, with
+//     reason no_difference (baseline_digest, snapshot_digest, read_seq) or
+//     same_change (also change_seq, the config.change_detected record the
+//     read repeats, and changes_digest, the digest of that change's ordered
+//     changes, which C9 supplies and which config.change_detected carries
+//     from 0.7). It is the only result a read can have besides a detection
+//     or a restore: a second result for the same read breaks the chain.
+//   - config.reads_removed is the node's record, written and receipted
+//     before any copy is removed, of the oldest compared reads of one asset
+//     that the chain shows and no earlier removal took: removed_count, the
+//     stream seqs removed_first_seq and removed_last_seq, removed_digest
+//     (RemovedReadsDigest over their snapshot digests in order) and
+//     kept_digest, the snapshot digest of a compared read that stays. The
+//     newest compared read always stays, so a removal can only take what
+//     another recorded read already shows.
+//
+// VerifyConfig adds to its checks:
+//   - a config.read_compared names a real read of its asset, compares
+//     against the asset's acknowledged configuration baseline, and gives
+//     the read its only result;
+//   - a no_difference read follows no recorded change against that
+//     baseline that a restore or a configuration acknowledgement has not
+//     ended;
+//   - a same_change read names the newest recorded change against the
+//     baseline, by its seq and its changes_digest;
+//   - a config.reads_removed takes fewer reads than are recorded and not yet
+//     removed, the oldest first, with a removed_digest that matches them and
+//     a kept_digest that names one of those that stay.
+//
+// Removal by seq range, never by time or space, is the store's rule (C5).
+// After a crash between the record and the removal, the node completes the
+// removal the chain names; the chain may name more than was removed, never
+// less.
+//
+
 // Not covered: the approver and the person who changed the relay may be
 // the same. Nothing observes who changed a relay until engineering access
 // (R2) exists, so this stays a limitation that R2 can close (D4-2). An
