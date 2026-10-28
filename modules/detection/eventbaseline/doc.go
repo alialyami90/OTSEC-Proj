@@ -62,6 +62,44 @@
 // and ends AlarmHoldS later. The notice (Held) goes out on the first alarm
 // the limit held back; Detector.HeldNow gives the count so far.
 //
+// # Replay and alarm identity
+//
+// A Detector holds no clock and does no I/O, so its Output is a pure function
+// of the baseline (its Hash and ActiveFrom) and the calls made: Observe's
+// events in order, with their received times. Two runs over the same events
+// give byte-identical alarms in every field, and so do two runs that differ
+// only in when Tick is called, because an absence alarm's content comes from
+// its deadline, never from the time it was noticed (a later Observe advances
+// to its event's time first, and so raises the same alarm). The Held notice
+// is Held: 1 whenever it is sent; only HeldNow grows.
+//
+// Tick is a watermark, and that is the precondition of the paragraph above.
+// Tick(now) says that no event received before now remains to be observed:
+// it moves the detector's time to now, and an Observe of an event received
+// before that is refused with ErrOrder and raises nothing, so its alarm is
+// lost. The feeder must therefore tick with a watermark, no later than the
+// received time of any event it has yet to Observe (for example the least
+// received time of what it has read but not yet passed on, or of what it
+// could still read), and never with the wall clock. A store stall (F-016)
+// can leave seconds between an event's receive and its Observe, so a wall
+// clock tick overtakes events. Ticks that respect the watermark change no
+// alarm; one that does not loses alarms, and TestDetectorTickIsAWatermark
+// pins the refusal.
+//
+// A run that starts from a later event, or leaves events out, does not
+// reproduce the same alarms. Windows, buckets and the holds depend on what
+// came before, so the fields that can differ are: whether an alarm is raised
+// at all (the holds), Events and EventsTotal (they include breaks held since
+// the pair's last alarm, so Events[0] is not the breaking event), NotCounted
+// and NotCountedTotal, and BaselineValue and Observation for repeats and rate.
+// A replay that dedupes alarms should therefore replay from the baseline's
+// activation, and key an alarm by its asset, Baseline (the hash), Rule, Key
+// and AtUTC. That is unique: alarms of one rule and key are at least
+// Params.AlarmHoldS (3600 s at the least) apart, and AtUTC is the received
+// time of the event that broke the baseline, or the deadline for absence. The
+// breaking event's own ID is not a safe key part: Events lists the first 32
+// breaks, and an absence alarm may list none.
+//
 // # Limits
 //
 // These are places this implementation is not exact or not complete. Each is

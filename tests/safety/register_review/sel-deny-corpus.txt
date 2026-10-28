@@ -105,21 +105,9 @@ SHO P 1 LANG
 SHO P 1 PASS
 SHO P 1;SET
 SHO P 1 
-SHO P 2
-SHO P 3
-SHO P 4
-SHO P F
 SHO P 1A
 SHO P 10
 SHO
-SHO 1
-SHO L 1
-SHO R
-SHO F
-SHO I
-SHO M
-SHO E 1
-SHO DNP 1
 # Added 2026-10-23: Spanish command names and Spanish clear arguments
 # (SEL-751 Command Summary, Spanish column). The register is English-only
 # (ADR-0005), so none of these may classify read-only.
@@ -146,3 +134,86 @@ HORA 00:00:00
 GRUPO 2
 89A 1
 AYUDA
+# Added 2026-10-28 by B6 for register revision 5 (D4-13, #301). D4-13
+# approves the 24 SHO forms of S22 Table 7.67 without a setting name, as
+# exact lines. These deny lines from 2026-10-23 were removed because the
+# owner's process approved them, not because they were found safe by this
+# corpus: SHO 1, SHO L 1, SHO P 2, SHO P 3, SHO P 4, SHO P F, SHO R, SHO F,
+# SHO I, SHO M, SHO E 1, SHO DNP 1. Every form with a setting name s, every
+# bare or out-of-range form, and every spacing, case, chaining or control
+# variant of the 24 stays refused. tests/contract/c3_rev5_corpus_b6_test.go
+# also sweeps these variants for each of the 24.
+# The s argument (Table 7.67: SHO n s, SHO L n s, SHO G s, SHO P n s, ...).
+SHO 1 CTR
+SHO 2 50P1P
+SHO 3 E50P
+SHO 4 TR
+SHO L 1 SV01
+SHO L 2 SV01
+SHO L 3 OUT101
+SHO L 4 SV01
+SHO G DATE_F
+SHO P 1 EHTTP
+SHO P F SPEED
+SHO P 2 PROTO
+SHO P 3 PROTO
+SHO P 4 PROTO
+SHO R SER1
+SHO F DISP_ER
+SHO M MOD
+SHO I SLAVEID
+SHO E 1 EIPEN
+SHO E 2 EIPEN
+SHO E 3 EIPEN
+SHO DNP 1 DNPSRC
+SHO DNP 2 DNPSRC
+SHO DNP 3 DNPSRC
+# Bare class words and numbers outside the table.
+SHO L
+SHO E
+SHO DNP
+SHO 0
+SHO 5
+SHO L 0
+SHO L 5
+SHO P 0
+SHO P 5
+SHO E 0
+SHO E 4
+SHO DNP 0
+SHO DNP 4
+SHO T
+SHO X
+# Spacing, case, abbreviation, chaining and control variants of the new forms.
+SHO  1
+SHO 1 
+SHO 1\t
+ SHO 1
+sho 1
+Sho L 1
+SHO l 1
+SHO1
+SHOL 1
+SHO L1
+SHO DNP1
+SHO E1
+SHOW 1
+SHOW L 1
+SHO 1;SET
+SHO L 1;SET L
+SHO DNP 3;SET DNP 3
+SHO R\r
+SHO F\x00
+SHO 01
+SHO L 01
+SHO P 02
+# Spanish forms of the new lines (MOS is SHO; ADR-0005 English only).
+MOS 1
+MOS L 1
+MOS R
+MOS F
+MOS M
+MOS I
+MOS E 1
+MOS DNP 1
+MOS P F

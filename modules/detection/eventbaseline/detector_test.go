@@ -1,6 +1,7 @@
 package eventbaseline_test
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -331,5 +332,107 @@ func TestDetectorBeforeActivationAndOrder(t *testing.T) {
 	other.Source.Asset.ID = "6a6a6a6a-0001-4a6a-8a6a-000000000001"
 	if _, err := d.Observe(eventbaseline.Obs{Event: other}); !errors.Is(err, eventbaseline.ErrAsset) {
 		t.Errorf("other asset: %v", err)
+	}
+}
+
+// TestDetectorAlarmsDoNotDependOnTicks: an alarm is a function of the
+// baseline, the activation time and the events, not of when Tick was called.
+// The same events fed with no Tick, with a Tick before every event and with
+// Ticks between, give identical alarms in every field (B5's replay keys
+// alarms by what the doc of the package lists). Every Tick here is a
+// watermark: none is later than an event still to come. One that is loses
+// that event's alarms (TestDetectorTickIsAWatermark).
+func TestDetectorAlarmsDoNotDependOnTicks(t *testing.T) {
+	type step struct {
+		elem string
+		s    int
+	}
+	steps := []step{{"C", 2300}, {"C", 2400}, {"B", 2500}, {"C", 9000}, {"A", 9100}}
+	// The events are made once: ser numbers them, and the runs must see
+	// the same IDs.
+	evs := make([]*event.Event, len(steps))
+	for i, st := range steps {
+		evs[i] = ser(st.elem, "Asserted", at(st.s), "")
+	}
+	run := func(ticks []int) (out []byte) {
+		d := activeB(t, 2100)
+		ti := 0
+		var all []*baseline.Alarm
+		for i, st := range steps {
+			for ti < len(ticks) && ticks[ti] < st.s {
+				all = append(all, tick(t, d, ticks[ti])...)
+				ti++
+			}
+			all = append(all, feed(t, d, evs[i])...)
+		}
+		for _, a := range all {
+			if err := a.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			b, err := json.Marshal(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, b...)
+			out = append(out, '\n')
+		}
+		return out
+	}
+	none := run(nil)
+	if len(none) == 0 {
+		t.Fatal("no alarms to compare")
+	}
+	for name, ticks := range map[string][]int{
+		"before every event":  {2299, 2399, 2499, 8999, 9099},
+		"after each deadline": {2151, 2650, 2651, 2800, 9050},
+		"often":               {2200, 2250, 2300, 2350, 2450, 2551, 2700, 3000, 4000, 6000, 8000, 9000},
+	} {
+		if got := run(ticks); string(got) != string(none) {
+			t.Errorf("ticks %s change the alarms:\nwith none:\n%s\nwith ticks:\n%s", name, none, got)
+		}
+	}
+}
+
+// TestDetectorTickIsAWatermark: Tick(now) moves the detector's time to now,
+// so an event received before now that is observed afterwards is refused with
+// ErrOrder and its alarm is lost (B6 on #303). The same event, observed in
+// order, raises it, so the loss is the Tick's and not the event's. This pins
+// the precondition the feeder must keep: tick no later than the received time
+// of any event still to be observed, never with the wall clock.
+func TestDetectorTickIsAWatermark(t *testing.T) {
+	// "Z" is not in the baseline, so its first occurrence is a new-type alarm.
+	// The baseline's periodic "B" is long overdue by 2600 s, so absence alarms
+	// come too; the test is about the new-type alarm.
+	e := ser("Z", "Asserted", at(2600), "")
+	has := func(as []*baseline.Alarm, rule baseline.Rule) bool {
+		for _, a := range as {
+			if a.Rule == rule {
+				return true
+			}
+		}
+		return false
+	}
+
+	d := activeB(t, 2100)
+	if got := feed(t, d, e); !has(got, baseline.RuleNewType) {
+		t.Fatalf("in order, the event raised %v, want new-type among them", ruleList(got))
+	}
+
+	late := activeB(t, 2100)
+	tick(t, late, 2601)
+	o, err := late.Observe(eventbaseline.Obs{Event: e})
+	if !errors.Is(err, eventbaseline.ErrOrder) {
+		t.Fatalf("an event received at 2600 s, observed after a Tick at 2601 s: %v, want ErrOrder", err)
+	}
+	if len(o.Alarms) != 0 {
+		t.Errorf("the refused event raised %v", ruleList(o.Alarms))
+	}
+
+	// A watermark at the event's received time is fine: the event is not
+	// before it.
+	ok := activeB(t, 2100)
+	tick(t, ok, 2600)
+	if got := feed(t, ok, e); !has(got, baseline.RuleNewType) {
+		t.Errorf("after a Tick at its own received time, the event raised %v, want new-type among them", ruleList(got))
 	}
 }

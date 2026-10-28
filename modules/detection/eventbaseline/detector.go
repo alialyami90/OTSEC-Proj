@@ -211,6 +211,12 @@ func (d *Detector) Observe(o Obs) (Output, error) {
 
 // Tick raises the absence alarms that have fallen due by now. A deadline is
 // due once now is past it: an occurrence at the deadline is in time.
+//
+// now is a watermark: no event received before now may remain to be
+// observed. Tick moves the detector's time to now, and Observe refuses an
+// event received before it with ErrOrder, so a Tick with the wall clock ahead
+// of events not yet observed loses their alarms. See the package documentation,
+// "Replay and alarm identity".
 func (d *Detector) Tick(now time.Time) (Output, error) {
 	ns := now.UnixNano()
 	if ns < d.lastNS {
