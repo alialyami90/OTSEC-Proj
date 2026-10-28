@@ -24,13 +24,20 @@ import (
 // port, and its test PKI written to tls_dir, not yet locked (lockTLS).
 func forwardConfig(t *testing.T, port int, mod func(*nodeconfigtest.Config)) (*nodeconfigtest.Config, *nodeconfigtest.PKI, string) {
 	t.Helper()
+	return forwardConfigValid(t, port, nodeconfigtest.Validity{}, mod)
+}
+
+// forwardConfigValid is forwardConfig with the validity periods of the test
+// PKI's certificates set (HR-13).
+func forwardConfigValid(t *testing.T, port int, v nodeconfigtest.Validity, mod func(*nodeconfigtest.Config)) (*nodeconfigtest.Config, *nodeconfigtest.PKI, string) {
+	t.Helper()
 	dir := t.TempDir()
 	storeDir := filepath.Join(dir, "store")
 	if err := store.CreateDir(storeDir, ""); err != nil {
 		t.Fatal(err)
 	}
 	nc := nodeconfigtest.New("site-a-node1", storeDir).AddSEL751(relayID, "", 2323, 300)
-	p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
+	p, err := nc.WritePKIValid("127.0.0.1", "test-ca", "test-client", v)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,5 @@
 // Package register is contract C3, the approved command register format
-// otsec.register/0.2 (A1 owns the format, A2 the content).
+// otsec.register/0.3 (A1 owns the format, A2 the content).
 //
 // A register package lists, for one device family, every line the collector
 // may send and the conditions under which it may send them. It serves risk 1
@@ -38,16 +38,35 @@
 //     runs in operate at an access level no higher than any operation in
 //     for. Its line counts against the run's line and rate limits and is
 //     kept in the raw capture like any other.
+//   - Limits and runs (0.3, P4-A2, D4-13) let one session read many lines.
+//     An operation's limits give the bytes and time its reply may take. A run
+//     is a named, ordered list of operations sent in one session, which a C2
+//     invocation may name. A step is a literal, read-only operation that runs
+//     in operate at access level 1 or lower and has limits; a run holds at
+//     most 32 steps, none twice, leads with the precondition and
+//     firmware-condition reads, and holds the warning reads and each step's
+//     context read (before it). Its total bytes and deadline are at most C2's
+//     ceilings (1 MiB, 600 s), and a step's limits are within them. A run
+//     fails as a whole: when a step fails, the adapter sends QUI, keeps every
+//     byte read and reports the read failed. Matcher.RenderRun produces the
+//     lines, and Matcher.Permit still checks every one on its own, so a run
+//     adds no line the register does not already permit. A run is read-only
+//     without exception: a state-changing or Level 2 step is invalid.
 //   - The firmware allowlist for the family ships in the same package, so it
 //     is covered by the same signature and anti-rollback floor (C-A2-2).
 //
 // # Versions
 //
 //   - 0.1: the Phase 1 format.
-//   - 0.2 adds context. This reader decodes 0.1 and 0.2 packages; a 0.1
-//     package with context is invalid. A later minor is invalid here, because
-//     the reader is strict, so a node that has not been upgraded refuses a
-//     0.2 package and keeps the floor it has (fail closed). The envelope's
+//   - 0.2 adds context. A 0.1 package with context is invalid.
+//   - 0.3 adds limits and runs. This reader decodes 0.1, 0.2 and 0.3
+//     packages. A later minor is invalid here, because the reader is strict,
+//     so a node that has not been upgraded refuses a 0.3 package and keeps the
+//     floor it has (fail closed).
+//   - A key introduced at a version is refused by its presence in any package
+//     below that version, whatever its value: an empty list and null count,
+//     as an older reader refuses the key (D4-16). That covers context before
+//     0.2 and runs and limits before 0.3. The envelope's
 //     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),
 //     and the signed payload names its own contract. SigningDomain stays
 //     "otsec.register/0.1 package\n" in every minor, so a signature made over

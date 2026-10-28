@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 4 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 5 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -612,15 +612,23 @@ func TestStartupPolicyValidate(t *testing.T) {
 		// 0.4: the reserve covers the largest commit, down to the
 		// smallest cap.
 		"reserve below the largest commit": func(p *StartupPolicy) {
-			p.WALBoundBytes, p.LargestCommitBytes = 512<<10, 512<<10
-			p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10) - 1
+			p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = 512<<10, 512<<10, 1
+			p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10, 1) - 1
 		},
 		"reserve below the smallest cap": func(p *StartupPolicy) {
-			p.WALBoundBytes, p.LargestCommitBytes = 512<<10, MinRecordBytes
+			p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = 512<<10, MinRecordBytes, 1
 			p.RecoveryReserveBytes = 2 * 512 << 10 // the 0.3 rule alone
 		},
 		"largest commit without a WAL bound": func(p *StartupPolicy) {
-			p.LargestCommitBytes, p.RecoveryReserveBytes = MinRecordBytes, 64<<20
+			p.LargestCommitBytes, p.LargestCommitRecords, p.RecoveryReserveBytes = MinRecordBytes, 1, 64<<20
+		},
+		// 0.5: the record count is part of the rule and set with the rest.
+		"largest commit without its records": func(p *StartupPolicy) {
+			p.WALBoundBytes, p.LargestCommitBytes, p.RecoveryReserveBytes = 512<<10, MinRecordBytes, 64<<20
+		},
+		"reserve below the rows": func(p *StartupPolicy) {
+			p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = 512<<10, 1<<20, 2048
+			p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 1<<20, 2048) - 1
 		},
 	} {
 		p := policy()
@@ -636,8 +644,8 @@ func TestStartupPolicyValidate(t *testing.T) {
 // A reserve at the 0.4 rule is accepted.
 func TestStartupPolicyReserveRule(t *testing.T) {
 	p := policy()
-	p.WALBoundBytes, p.LargestCommitBytes = 512<<10, 512<<10
-	p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10)
+	p.WALBoundBytes, p.LargestCommitBytes, p.LargestCommitRecords = 512<<10, 512<<10, 1
+	p.RecoveryReserveBytes = RecoveryReserveFor(512<<10, 512<<10, 1)
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -81,6 +81,13 @@ func (r Record) Bytes() int64 {
 // writer injects it, so C5 imports neither C9 nor C10.
 type DocumentValidator func(document []byte, capture *Capture) error
 
+// MaxHoldsPerRecord (0.5) bounds Record.Holds. A held difference holds its
+// two snapshots and itself, so 16 is generous; each hold is one small row,
+// and the WAL of a configuration record with this many holds was measured
+// at 4,120 bytes (one page) more than without (B5, #281, simulated), inside
+// the fixed term of CommitWALBytes.
+const MaxHoldsPerRecord = 16
+
 // Validate checks a record before it is queued.
 func (r Record) Validate() error {
 	if !r.Stream.Valid() {
@@ -91,6 +98,9 @@ func (r Record) Validate() error {
 	}
 	if len(r.Event) == 0 {
 		return errf(CodeInvalid, nil, "record for %s has no event bytes", r.Stream)
+	}
+	if len(r.Holds) > MaxHoldsPerRecord {
+		return errf(CodeInvalid, nil, "record for %s takes %d holds, at most %d", r.Stream, len(r.Holds), MaxHoldsPerRecord)
 	}
 	for _, h := range r.Holds {
 		if err := h.Reason.Validate(); err != nil {
@@ -183,6 +193,22 @@ type GroupOptions struct {
 	// DefaultMaxCommitBytes. The recovery reserve is sized from it
 	// (RecoveryReserveFor).
 	MaxCommitBytes int64
+	// MaxCommitRecords (0.5, D4-14) bounds the records in one commit the
+	// way MaxCommitBytes bounds its bytes: an AppendBatch of more records
+	// than this is refused with CodeRecordTooLarge and nothing is queued, so
+	// the producer splits it. Groups already close at MaxEvents, so it is at
+	// least MaxEvents. 0 means MaxEvents. The recovery reserve is sized
+	// from it (RecoveryReserveFor), because each row costs WAL beyond its
+	// payload (RowWALBytes).
+	MaxCommitRecords int
+}
+
+// CommitRecords is the effective MaxCommitRecords.
+func (o GroupOptions) CommitRecords() int {
+	if o.MaxCommitRecords == 0 {
+		return o.MaxEvents
+	}
+	return o.MaxCommitRecords
 }
 
 // DefaultGroup is the proposed default (A5, not yet measured on site
@@ -202,6 +228,9 @@ func (o GroupOptions) Validate() error {
 	}
 	if o.MaxCommitBytes != 0 && o.MaxCommitBytes < MinRecordBytes {
 		return errf(CodeInvalid, nil, "group MaxCommitBytes %d below %d", o.MaxCommitBytes, MinRecordBytes)
+	}
+	if o.MaxCommitRecords != 0 && (o.MaxCommitRecords < o.MaxEvents || o.MaxCommitRecords > MaxBatch) {
+		return errf(CodeInvalid, nil, "group MaxCommitRecords %d not in [MaxEvents %d, %d]", o.MaxCommitRecords, o.MaxEvents, MaxBatch)
 	}
 	return nil
 }
@@ -225,24 +254,70 @@ func LargestCommit(d Database, opt GroupOptions) int64 {
 	return n
 }
 
-// CommitWALBytes is the WAL one commit of payload bytes may write, a fixed
-// cost plus about the payload: 1.1 × payload + 64 KiB. Measured on one
-// record after a TRUNCATE checkpoint with 4 KiB pages, 128 KiB to 768 KiB
-// (B5, modernc SQLite; B6, SQLite through Python, another schema): a fixed
-// 21 to 34 KB plus 1.0 to 1.03 × the payload (simulated, #246). A ratio
-// alone fails at small caps, so the rule is payload plus a constant.
-func CommitWALBytes(payload int64) int64 { return payload + payload/10 + 64<<10 }
+// LargestCommitRecords (0.5) is the most records one commit of database d
+// can carry under opt: the commit record cap, or one for a database that
+// holds only the configuration class, whose commit is one record and the
+// holds it takes (at most MaxHoldsPerRecord small rows, inside the fixed
+// term of CommitWALBytes).
+func LargestCommitRecords(d Database, opt GroupOptions) int64 {
+	if len(d.Classes) > 0 {
+		only := true
+		for _, c := range d.Classes {
+			only = only && c == ClassConfiguration
+		}
+		if only {
+			return 1
+		}
+	}
+	return int64(opt.CommitRecords())
+}
+
+// RowWALBytes (0.5, D4-14) is the WAL each record of a commit may write
+// beyond its payload: a row's cell, its index entries, and, on a rowid
+// table with 4 KiB pages, the page it takes alone when it is too big to
+// share one (an event just over half a page), which is the worst case.
+// Measured on the real store by B6's event-size sweep (#280, 100 B to
+// 64 KiB, 128 events a commit): the worst excess over 1.1 × payload is
+// 2,051 bytes a row, at events of 2 KB (simulated, Linux). 3 KiB is that
+// plus about 50%. It does not depend on the payload.
+const RowWALBytes = 3 << 10
+
+// CommitWALBytes is the WAL one commit of payload bytes and records rows may
+// write: 1.1 × payload, a fixed 64 KiB, and RowWALBytes a record. Measured
+// on one record after a TRUNCATE checkpoint with 4 KiB pages, 128 KiB to
+// 768 KiB (B5, modernc SQLite; B6, SQLite through Python, another schema): a
+// fixed 21 to 34 KB plus 1.0 to 1.03 × the payload (simulated, #246). A
+// ratio alone fails at small caps, so the rule is payload plus a constant,
+// and since 0.5 a term a record, because small and half-page events cost
+// more WAL than their payload (D4-14).
+func CommitWALBytes(payload, records int64) int64 {
+	return payload + payload/10 + 64<<10 + records*RowWALBytes
+}
 
 // RecoveryReserveFor is the smallest recovery reserve of a database whose
 // WAL holds at most walBound between checkpoints when every commit is
-// small, and whose largest commit carries largestCommit payload bytes
-// (0.4). A store found full at start may hold un-checkpointed frames:
-// checkpointing them can extend the database by up to walBound plus the
-// largest commit's WAL, and recovery's own small commits (prune and
-// compaction steps) need up to walBound more.
-func RecoveryReserveFor(walBound, largestCommit int64) int64 {
-	return 2*walBound + CommitWALBytes(largestCommit)
+// small, and whose largest commit carries largestCommit payload bytes in
+// at most records rows (0.5). A store found full at start may hold
+// un-checkpointed frames: checkpointing them can extend the database by up
+// to walBound plus the largest commit's WAL, and recovery's own small
+// commits (prune and compaction steps) need up to walBound more.
+func RecoveryReserveFor(walBound, largestCommit, records int64) int64 {
+	return 2*walBound + CommitWALBytes(largestCommit, records)
 }
+
+// DiskBytesPerQuotaByte (0.5, D4-14) bounds the file's size against what the
+// quota counts: once checkpointed, a database's file grows by at most this
+// many bytes for each byte its class quotas count (ClassBytes). The quota
+// counts event, capture and cursor bytes, not the pages, indexes and cell
+// slack around them. Measured on the real store by B6's event-size sweep
+// (#280): at most 2.02 at events of 2 KB on a rowid table, where two events
+// do not fit one page (simulated, Linux). Volume sizing is therefore
+//
+//	sum of class quotas × DiskBytesPerQuotaByte
+//	  + each database's RecoveryReserveBytes and LastResortReserveBytes
+//
+// and no volume figure may come from the raw sum of quotas.
+const DiskBytesPerQuotaByte = 2.5
 
 // Log is the only way to append to a store. It groups records per stream,
 // hands each group to the Committer, checks the returned Commit, and only then
@@ -372,9 +447,11 @@ func (l *Log) Append(ctx context.Context, rec Record) (Receipt, error) {
 		return nil, errf(CodeLogStopped, l.stopped, "log stopped")
 	}
 	g := l.pending[rec.Stream]
-	if g != nil && g.bytes+size > l.opt.CommitBytes() {
+	if g != nil && (g.bytes+size > l.opt.CommitBytes() || len(g.recs) >= l.opt.MaxEvents) {
 		// The group commits before this record would take it past the
-		// commit cap.
+		// commit cap, or past MaxEvents: a full group is flushed by the
+		// Append that filled it after it lets go of l.mu, and an Append
+		// arriving in that gap must not join it (0.5, B6 on #281).
 		delete(l.pending, rec.Stream)
 		g.timer.Stop()
 		go l.run(g)
@@ -422,7 +499,8 @@ const MaxBatch = 10000
 // queued, the call returns only when the commit has returned.
 //
 // Since 0.4 a batch of more than one record must fit MaxCommitBytes, a
-// capture shared by several records counting once, or it is refused with
+// capture shared by several records counting once, and since 0.5 hold no
+// more than MaxCommitRecords records, or it is refused with
 // CodeRecordTooLarge and nothing is queued: the producer splits it. A
 // configuration batch holds one record.
 func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error) {
@@ -450,6 +528,9 @@ func (l *Log) AppendBatch(ctx context.Context, recs []Record) ([]Receipt, error)
 		}
 		if size > l.opt.CommitBytes() {
 			return nil, errf(CodeRecordTooLarge, nil, "batch of %d records, %d bytes, over the commit cap %d", len(recs), size, l.opt.CommitBytes())
+		}
+		if len(recs) > l.opt.CommitRecords() {
+			return nil, errf(CodeRecordTooLarge, nil, "batch of %d records, over the commit record cap %d", len(recs), l.opt.CommitRecords())
 		}
 	}
 	if err := ctx.Err(); err != nil {

@@ -14,8 +14,9 @@ It writes three files next to itself:
                        each R4.8 kind, and one departure before the
                        acknowledgement that must raise nothing.
   events-heldout.json  a benign series from the same generator with another
-                       seed, as long as the observation period, to replay
-                       after the acknowledgement: it must raise nothing.
+                       seed, as long as the observation period, starting at
+                       the acknowledgement, to replay from it: it must raise
+                       nothing.
 
 docs/verification.md defines GT-INJ: written from a fixed seed before the
 implementation exists, and committed before the test first runs against the
@@ -316,10 +317,12 @@ def baseline(events):
     return out
 
 
-def evaluate(base, events, start, end):
+def evaluate(base, events, start, end, reanchor=True):
     """The departures the five rules find in events (after the
     acknowledgement at start, up to end), as alarms: rule, asset, type,
-    at, and the event IDs that broke the baseline (none for absence)."""
+    at, and the event IDs that broke the baseline (none for absence).
+    reanchor=False is the arming B6 read before D4-15, kept only so a test
+    can show the difference."""
     p = PARAMS
     alarms = []
     by = {}
@@ -364,17 +367,29 @@ def evaluate(base, events, start, end):
         for e in es:
             if (e["t"] % DAY) // 3600 not in b["hours"]:
                 alarms.append(dict(rule="time", asset=asset, type=name, at=e["t"], events=[e["id"]]))
-    # 5. absence: from the last occurrence (before or after start), each
-    # time the next is later than interval x (1 + tolerance).
+    # 5. absence: each time the next occurrence is later than the deadline,
+    # last + interval + tolerance, alarmed at the deadline. Armed at
+    # activation (start) as D4-15 rules: a deadline from the baseline's last
+    # occurrence still ahead at start stands; one already passed becomes
+    # start + interval + tolerance, so a source that stopped before start
+    # and never returns still alarms. Nothing alarms before start.
     for k, b in base.items():
         if not b["interval"]:
             continue
         limit = b["interval"] + ceil_div(b["interval"] * p["absence_tolerance_pct"], 100)
-        ts = [b["last"]] + [e["t"] for e in by.get(k, []) if full(e)]
-        ts.append(end)
-        for a, c in zip(ts, ts[1:]):
-            if c - a > limit and a + limit >= start:
-                alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=a + limit, events=[]))
+        if not reanchor:
+            ts = [b["last"]] + [e["t"] for e in by.get(k, []) if full(e)] + [end]
+            for a, c in zip(ts, ts[1:]):
+                if c - a > limit and a + limit >= start:
+                    alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=a + limit, events=[]))
+            continue
+        deadline = b["last"] + limit
+        if deadline < start:
+            deadline = start + limit
+        for c in [e["t"] for e in by.get(k, []) if full(e)] + [end]:
+            if c > deadline:
+                alarms.append(dict(rule="absence", asset=k[0], type=list(k[1]), at=deadline, events=[]))
+            deadline = c + limit
     alarms.sort(key=lambda a: (a["at"], a["rule"], a["asset"]))
     return alarms
 
@@ -586,12 +601,17 @@ def event_series():
     }
 
 
-def heldout_series(start_day):
+def heldout_series(ack):
+    """OBS_DAYS of benign events from the acknowledgement on. It starts at
+    ack, not at the next midnight, because absence is armed at activation
+    (D4-15): a replay that left the hours after ack empty would be a
+    heartbeat lost, not a benign series."""
     rng = random.Random(HELDOUT_SEED)
-    obs_days = OBS_DAYS
+    first = ack // DAY
     events = []
-    for day in range(start_day, start_day + obs_days):
+    for day in range(first, first + OBS_DAYS + 1):
         events += benign_day(rng, day)
+    events = [e for e in events if ack <= e["t"] < ack + OBS_DAYS * DAY]
     number(events, "ho")
     return events
 
@@ -599,25 +619,24 @@ def heldout_series(start_day):
 def main():
     cfg = config_series()
     ev = event_series()
-    # The held-out series starts where the test period starts, so it can be
-    # replayed after the acknowledgement in place of the injected one.
-    start_day = OBS_DAYS + 1
-    ho = heldout_series(start_day)
-    # Check it against the baseline the injected series learnt.
+    # The held-out series starts at the acknowledgement, so it can be
+    # replayed after it in place of the injected test period.
     ev_full = json.loads(json.dumps(ev))
+    secs = lambda ts: int((dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
     for e in ev_full["events"]:
-        e["t"] = int((dt.datetime.strptime(e["received_utc"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
-    period_end = int((dt.datetime.strptime(ev["period"]["end"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
+        e["t"] = secs(e["received_utc"])
+    period_end, ack = secs(ev["period"]["end"]), secs(ev["period"]["baseline_ack"])
+    ho = heldout_series(ack)
+    # Check it against the baseline the injected series learnt, armed at
+    # the acknowledgement (D4-15).
     base = baseline([e for e in ev_full["events"] if e["t"] < period_end])
-    end = (start_day + OBS_DAYS) * DAY
-    # The heartbeat before the held-out series is the observation period's
-    # last; nothing between them is removed.
-    ho_alarms = evaluate(base, ho, start_day * DAY, end)
+    end = ack + OBS_DAYS * DAY
+    ho_alarms = evaluate(base, ho, ack, end)
     assert not ho_alarms, ho_alarms[:3]
     for e in ho:
         e.pop("t")
     held = {"schema": SCHEMA, "series": "events-heldout", "seed": HELDOUT_SEED, "evidence": "synthetic (simulated)",
-            "params": PARAMS, "replay": "after events.json's baseline_ack, in place of its test period",
+            "params": PARAMS, "replay": "from events.json's baseline_ack, in place of its test period; absence is armed at baseline_ack (D4-15)",
             "pass": "departure alarms per asset-day at most 0 (proposed bound for synthetic series)",
             "expected_alarms": [], "events": ho}
     for name, doc in (("config.json", cfg), ("events.json", ev), ("events-heldout.json", held)):

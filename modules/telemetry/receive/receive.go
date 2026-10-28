@@ -1,6 +1,7 @@
 package receive
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -45,6 +46,11 @@ const (
 // listener refuses.
 var ErrConfig = errors.New("receive: invalid configuration")
 
+// ErrCertificatePeriod is returned by ServerTLS, wrapped with ErrConfig,
+// for a listener certificate outside its validity period, so the node can
+// tell an expired or not-yet-valid certificate from other refusals.
+var ErrCertificatePeriod = errors.New("receive: certificate outside its validity period")
+
 // Appender commits records and returns their receipts. *store.Log is one;
 // the node hands over a wrapper for the listener's database that fails
 // while the database is not open.
@@ -83,6 +89,17 @@ type Config struct {
 	// Received is the node clock's reading as a C4 receive time.
 	Received func() event.Received
 	Limits   Limits
+	// MaxCommitBytes and MaxCommitRecords are the commit caps of the
+	// database behind Log (store.GroupOptions.CommitBytes and
+	// CommitRecords): a batch is split before it passes either, as C5 0.4
+	// and 0.5 require, and the parts commit in order (see commitParts). The
+	// node sets them from the options it built the Log with. 0 means
+	// store.DefaultMaxCommitBytes and store.DefaultGroup.MaxEvents;
+	// otherwise at least store.MinRecordBytes, and 1 to store.MaxBatch. A
+	// Log with lower caps is learnt from its refusal, and the caps are
+	// lowered to fit.
+	MaxCommitBytes   int64
+	MaxCommitRecords int
 	// UnknownSpent is what unknown senders stored on this listener's
 	// stream in the Limits.UnknownWindow before this start, counted by the
 	// node from that stream (A3's conditions on D3-3):
@@ -163,7 +180,19 @@ type Limits struct {
 	// MaxQueueBytes bounds the bytes of datagrams waiting for the store
 	// (default 8 MiB); a datagram past it is dropped as queue-full.
 	MaxQueueBytes int64
+	// ReadBuffer is the socket receive buffer (SO_RCVBUF) a UDP listener
+	// asks the OS for, in bytes: 0 leaves the OS default, otherwise
+	// 4 KiB to 256 MiB. A datagram that arrives while the buffer is full is
+	// lost before the read and counted by no one here, only by the OS
+	// (Linux RcvbufErrors, Windows netstat -s). The OS may grant less, or,
+	// on Linux, twice the request up to net.core.rmem_max; Status.ReadBuffer
+	// is what it granted. Streams take no ReadBuffer: TCP flow control
+	// stops a sender instead of losing its data.
+	ReadBuffer int
 }
+
+// Read buffer bounds (Limits.ReadBuffer).
+const minReadBuffer, maxReadBuffer = 4 << 10, 256 << 20
 
 func (l Limits) withDefaults(udp bool) Limits {
 	def := func(v *int, d int) {
@@ -232,6 +261,8 @@ func (l Limits) validate() error {
 		return errors.New("durations must be positive")
 	case l.UnknownIdleTimeout > l.IdleTimeout:
 		return errors.New("the unknown-sender idle timeout is above the idle timeout")
+	case l.ReadBuffer != 0 && (l.ReadBuffer < minReadBuffer || l.ReadBuffer > maxReadBuffer):
+		return fmt.Errorf("read buffer %d not 0 or in [%d, %d]", l.ReadBuffer, minReadBuffer, maxReadBuffer)
 	}
 	return nil
 }
@@ -268,6 +299,12 @@ type Status struct {
 	// (refuse-new: no more is read from that connection meanwhile).
 	Held    bool
 	LastErr string
+	// ReadBuffer is the UDP socket receive buffer the OS granted, in bytes,
+	// read back after Listen: the OS default when Limits.ReadBuffer is 0.
+	// It is 0 for a stream listener, before Listen, or where the OS does
+	// not report it (ReadBufferErr says why).
+	ReadBuffer    int
+	ReadBufferErr string
 }
 
 // Receiver is one Syslog listener.
@@ -289,6 +326,8 @@ type Receiver struct {
 	summary  bool // the past-MaxUnknown summary has been raised
 	reported map[string]int64
 	queued   atomic.Int64 // datagram bytes waiting for the store
+	commitAt atomic.Int64 // the most bytes in a part: Config.MaxCommitBytes, lowered by a Log that refuses it
+	commitN  atomic.Int64 // the most records in a part: Config.MaxCommitRecords, lowered the same way
 
 	ln net.Listener
 	pc net.PacketConn
@@ -312,7 +351,13 @@ func New(cfg Config) (*Receiver, error) {
 		if cfg.TLS == nil {
 			return bad("syslog-tls needs a TLS configuration (ServerTLS)")
 		}
+		if lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 	case asset.SyslogTCP, asset.SyslogUDP:
+		if cfg.Transport == asset.SyslogTCP && lim.ReadBuffer != 0 {
+			return bad("read buffer is for UDP listeners only")
+		}
 		if !cfg.Plaintext {
 			return bad("%s is plaintext; it runs only when the operator enables plaintext for this listener", cfg.Transport)
 		}
@@ -335,6 +380,12 @@ func New(cfg Config) (*Receiver, error) {
 	if err := lim.validate(); err != nil {
 		return bad("%v", err)
 	}
+	if cfg.MaxCommitBytes != 0 && cfg.MaxCommitBytes < store.MinRecordBytes {
+		return bad("max commit bytes %d is neither 0 (the default) nor at least %d", cfg.MaxCommitBytes, store.MinRecordBytes)
+	}
+	if cfg.MaxCommitRecords < 0 || cfg.MaxCommitRecords > store.MaxBatch {
+		return bad("max commit records %d is neither 0 (the default) nor in [1, %d]", cfg.MaxCommitRecords, store.MaxBatch)
+	}
 	for a, s := range cfg.Senders {
 		if a != a.Unmap() || s.AssetID == "" || (s.Target != asset.DeviceObserved && s.Target != asset.Simulated) {
 			return bad("sender %s: %+v", a, s)
@@ -347,6 +398,8 @@ func New(cfg Config) (*Receiver, error) {
 		over:   make(chan struct{}, 1), now: time.Now,
 		st: Status{ID: cfg.ID, Transport: cfg.Transport, Address: cfg.Address, Dropped: map[string]int64{}, Refused: map[string]int64{}},
 	}
+	r.commitAt.Store(cmp.Or(cfg.MaxCommitBytes, store.DefaultMaxCommitBytes))
+	r.commitN.Store(int64(cmp.Or(cfg.MaxCommitRecords, store.DefaultGroup.MaxEvents)))
 	return r, nil
 }
 
@@ -357,6 +410,20 @@ func (r *Receiver) Listen() (net.Addr, error) {
 		if err != nil {
 			return nil, fmt.Errorf("receive: listener %s: %w", r.cfg.ID, err)
 		}
+		uc := pc.(*net.UDPConn)
+		if n := r.lim.ReadBuffer; n != 0 {
+			if err := uc.SetReadBuffer(n); err != nil {
+				pc.Close()
+				return nil, fmt.Errorf("receive: listener %s: read buffer %d: %w", r.cfg.ID, n, err)
+			}
+		}
+		granted, err := readBuffer(uc)
+		r.update(func(s *Status) {
+			s.ReadBuffer, s.ReadBufferErr = granted, ""
+			if err != nil {
+				s.ReadBufferErr = err.Error()
+			}
+		})
 		r.pc = pc
 		return pc.LocalAddr(), nil
 	}
