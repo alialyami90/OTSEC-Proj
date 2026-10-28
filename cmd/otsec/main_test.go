@@ -506,3 +506,32 @@ func TestCommitLine(t *testing.T) {
 		}
 	}
 }
+
+// A UDP listener's receive buffer is shown with what the OS granted, and a
+// request the OS met only in part is called out (the node half of B4's
+// Limits.ReadBuffer).
+func TestHealthShowsReadBuffer(t *testing.T) {
+	path, cfg := ranNode(t)
+	st := node.NewStatus(node.StatusPath(cfg), nil, nil)
+	st.SetListeners(map[string]node.ListenerStatus{
+		"a-default": {Transport: "syslog-udp", Address: "127.0.0.1:5514", Open: true, ReadBuffer: 212992},
+		"b-met":     {Transport: "syslog-udp", Address: "127.0.0.1:5515", Open: true, ReadBuffer: 2 << 20, ReadBufferAsked: 1 << 20},
+		"c-short":   {Transport: "syslog-udp", Address: "127.0.0.1:5516", Open: true, ReadBuffer: 425984, ReadBufferAsked: 8 << 20},
+		"d-unknown": {Transport: "syslog-udp", Address: "127.0.0.1:5517", Open: true, ReadBufferAsked: 1 << 20, ReadBufferErr: "not reported"},
+	})
+	st.Write("site-a-node1")
+	out, errs, code := otsec(t, "health", "-config", path)
+	if code != 0 {
+		t.Fatalf("health: %d %s", code, errs)
+	}
+	for _, want := range []string{
+		"  receive buffer: 212992 bytes (the OS default; read_buffer_bytes is not set)",
+		"  receive buffer: 2097152 bytes granted (asked 1048576)",
+		fmt.Sprintf("  receive buffer: 425984 bytes granted, SHORT of the %d expected for the 8388608 asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them", node.ReadBufferExpected(runtime.GOOS, 8<<20)),
+		"  receive buffer: the OS did not report it (not reported)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("health lacks %q:\n%s", want, out)
+		}
+	}
+}

@@ -31,6 +31,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -513,6 +514,9 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 		if ls.Plaintext {
 			fmt.Fprintln(w, "  PLAINTEXT: no sender authentication or integrity; any host on the path can send or alter messages (D3-5)")
 		}
+		if ls.ReadBuffer != 0 || ls.ReadBufferErr != "" {
+			fmt.Fprintf(w, "  receive buffer: %s\n", readBufferLine(ls))
+		}
 		if ls.Held {
 			fmt.Fprintln(w, "  HELD: the store is not taking this listener's messages; senders are not read meanwhile")
 		}
@@ -622,4 +626,18 @@ func commitLine(c node.CommitStatus) string {
 		line += "; SLOW: every writer to this database waits for them, so check the disk"
 	}
 	return line
+}
+
+// readBufferLine describes a UDP listener's socket receive buffer: what the
+// OS granted, and, when read_buffer_bytes asked for more, that it fell short.
+func readBufferLine(ls node.ListenerStatus) string {
+	switch {
+	case ls.ReadBufferErr != "":
+		return fmt.Sprintf("the OS did not report it (%s)", safe(ls.ReadBufferErr))
+	case ls.ReadBufferAsked == 0:
+		return fmt.Sprintf("%d bytes (the OS default; read_buffer_bytes is not set)", ls.ReadBuffer)
+	case node.ReadBufferShortHere(ls.ReadBufferAsked, ls.ReadBuffer):
+		return fmt.Sprintf("%d bytes granted, SHORT of the %d expected for the %d asked: datagrams that arrive while it is full are lost before the listener reads them, and only the OS counts them", ls.ReadBuffer, node.ReadBufferExpected(runtime.GOOS, ls.ReadBufferAsked), ls.ReadBufferAsked)
+	}
+	return fmt.Sprintf("%d bytes granted (asked %d)", ls.ReadBuffer, ls.ReadBufferAsked)
 }
