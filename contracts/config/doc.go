@@ -1,4 +1,4 @@
-// Package config is contract C9, otsec.config/0.2. It defines a device's
+// Package config is contract C9, otsec.config/0.3. It defines a device's
 // configuration as read in one session (the snapshot), the semantic difference
 // between two snapshots, and, per family, the rule that decides what in a
 // reply is a setting and what is not (P4-A2; R3.1, R3.3, R3.5, R3.7).
@@ -138,6 +138,19 @@
 //     values like any other section. Sensitive tells a display or an alarm
 //     to mask them. No settings class prints a password: passwords are set
 //     with PAS (S22 Table 7.52), not as settings.
+//
+// # Size (0.3, D4-25)
+//
+// A snapshot is bounded: at most MaxSettings (10,918, S22's 8,734 plus a
+// quarter) settings in all, and at most MaxSnapshotBytes (1 MiB) encoded by
+// Encode. A configuration record is the snapshot and the transcript it points
+// into, and the transcript is at most the register run's max_total_bytes (512
+// KiB), so a record at both bounds is 1.5 MiB, the cap of the configuration
+// database (D4-13). Validate refuses a snapshot over either bound, wrapping
+// ErrTooLarge. RecordsFit makes the same check on a read's records before a
+// snapshot exists, which is how the SEL-751 adapter ends a run that would not
+// fit: failed.config_unparsable, the bytes kept, no snapshot. 0.2 documents
+// had no bound; none was ever stored.
 //
 // # Compatibility
 //

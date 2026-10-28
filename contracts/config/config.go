@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -15,9 +17,9 @@ import (
 )
 
 // Contract is this package's identifier.
-const Contract = "otsec.config/0.2"
+const Contract = "otsec.config/0.3"
 
-var self = version.ID{Name: "config", Major: 0, Minor: 2}
+var self = version.ID{Name: "config", Major: 0, Minor: 3}
 
 // Kinds of document. A document's kind says which of the two it is, so one
 // reader can tell them apart.
@@ -243,6 +245,92 @@ func decode[T any](b []byte, v *T) error {
 	return nil
 }
 
+// The size of a snapshot is bounded (C9 0.3, D4-25), so that a configuration
+// record, which is the snapshot and the transcript it points into, always fits
+// the configuration database's record cap (1.5 MiB, D4-13).
+const (
+	// MaxSettings bounds the settings of all sections together: S22's 8,734
+	// plus a quarter. A relay printing more is not read as a SEL-751.
+	MaxSettings = 10918
+	// MaxSnapshotBytes bounds Encode's output. With the longest transcript a
+	// run can keep (the register's max_total_bytes, 512 KiB), a record at this
+	// bound is exactly the 1.5 MiB cap. The count bound alone does not give
+	// that, because a value can be long and JSON can double it.
+	MaxSnapshotBytes = 1 << 20
+	// SnapshotFixedMax is what RecordsFit allows for everything but the
+	// settings: the header, the transcript reference and the 24 sections'
+	// own fields. B5 measured 5.3 KB for the golden snapshot.
+	SnapshotFixedMax = 16 << 10
+)
+
+// ErrTooLarge is wrapped by every refusal for size, so a caller can tell a
+// read that is too big for a snapshot from one that is malformed.
+var ErrTooLarge = errors.New("a snapshot is bounded in settings and bytes")
+
+// Encode is the snapshot's one stored form: compact UTF-8 JSON in the order
+// of the struct, with no HTML escaping and no trailing newline. MaxSnapshotBytes
+// bounds its length.
+func (s Snapshot) Encode() ([]byte, error) {
+	return encodeCompact(s)
+}
+
+func encodeCompact(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+}
+
+// RecordsFit reports whether a read of these records can become a snapshot
+// within the bounds, before one is built: at most MaxSettings settings, and
+// the encoded settings plus SnapshotFixedMax within MaxSnapshotBytes. A run
+// that fails it ends with failed.config_unparsable and no snapshot (C2 0.6).
+// Validate holds a built snapshot to the same bounds, and TestRecordsFit shows
+// that a read RecordsFit passes is a snapshot Validate passes.
+func RecordsFit(recs []adapter.Record) error {
+	var n int
+	size := SnapshotFixedMax
+	for _, r := range recs {
+		n += len(r.Fields)
+		if n > MaxSettings {
+			return fmt.Errorf("config: the read holds more than %d settings: %w", MaxSettings, ErrTooLarge)
+		}
+		for _, f := range r.Fields {
+			b, err := encodeCompact(Setting{Name: f.Name, Value: f.Value})
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			size += len(b) + 1
+		}
+		if size > MaxSnapshotBytes {
+			return fmt.Errorf("config: the read's settings encode to more than %d bytes: %w", MaxSnapshotBytes-SnapshotFixedMax, ErrTooLarge)
+		}
+	}
+	return nil
+}
+
+// checkSize holds a snapshot that is otherwise valid to the bounds.
+func (s Snapshot) checkSize() error {
+	var n int
+	for _, sec := range s.Sections {
+		n += len(sec.Settings)
+	}
+	if n > MaxSettings {
+		return fmt.Errorf("config: snapshot: %d settings, more than %d: %w", n, MaxSettings, ErrTooLarge)
+	}
+	b, err := s.Encode()
+	if err != nil {
+		return fmt.Errorf("config: snapshot: %w", err)
+	}
+	if len(b) > MaxSnapshotBytes {
+		return fmt.Errorf("config: snapshot: %d bytes encoded, more than %d: %w", len(b), MaxSnapshotBytes, ErrTooLarge)
+	}
+	return nil
+}
+
 // Validate checks every rule that can be checked from the snapshot alone.
 // CheckAgainst checks it against its transcript.
 func (s Snapshot) Validate() error {
@@ -326,7 +414,10 @@ func (s Snapshot) Validate() error {
 			}
 		}
 	}
-	return c.err("snapshot")
+	if err := c.err("snapshot"); err != nil {
+		return err
+	}
+	return s.checkSize()
 }
 
 type check struct{ errs []error }
