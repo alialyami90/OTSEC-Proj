@@ -31,10 +31,15 @@ const (
 // at or below it. 0.2 lowered it from 4096 (MaxTypesCeiling01) so that a
 // learner and a detector at every ceiling checkpoint in one C5 configuration
 // record (D4-30). A record stamped 0.1 is still read under 0.1's ceiling.
-// The basis is documented-untested: an SEL-751 reports at most 96 Relay Word
-// bits in SER (751 IM, Table 4.122), so at most 192 SER types; a chatty
-// non-SEL Syslog source may exceed 512, and Counts.TypesOverflow above zero
-// then says the asset is only partly baselined.
+// The basis is documented-untested: an SEL-751 or SEL-787 reports at most 96
+// Relay Word bits in SER (751 IM Table 4.122, p. 4.268; 787-4 IM Table
+// 4.83), so at most 192 SER types plus a few relay messages, and only the
+// SEL-751 is collected. An SEL-400 series relay may have as many as 250 SER
+// points, each with its own set and clear names (400-Series IM, p. 9.31): up
+// to 500 types plus at least seven relay messages, at the ceiling. Revisit
+// the ceiling before a 400-series adapter is briefed (C2 on #369). A chatty
+// non-SEL Syslog source may exceed 512; Counts.TypesOverflow above zero then
+// says the asset is only partly baselined.
 const (
 	MaxTypesCeiling   = 512
 	MaxTypesCeiling01 = 4096

@@ -182,11 +182,18 @@
 //   - Max types (D4-15, D4-30). At most 512 types per asset (MaxTypes, C10
 //     0.2's ceiling) are held while learning; a type first met while that
 //     many are held is counted (Counts.TypesOverflow) and never held. The
-//     basis is documented-untested: an SEL-751 reports at most 96 Relay Word
-//     bits in SER (751 IM, Table 4.122), so at most 192 SER types. A chatty
-//     non-SEL Syslog source may exceed 512; types_overflow above zero then
-//     says the asset is only partly baselined, for the node to report as
-//     status. Finish keeps the max_types with the highest count, ties by
+//     basis is documented-untested: an SEL-751 or SEL-787 reports at most
+//     96 Relay Word bits in SER, so at most 192 SER types plus a few relay
+//     messages, and only the SEL-751 is collected. An SEL-400 series relay
+//     may reach about 507 types (250 SER points with their own set and
+//     clear names, and seven relay messages), so the ceiling is revisited
+//     before any 400-series adapter (C2 on #369; the sources are in C10's
+//     MaxTypesCeiling). A chatty non-SEL Syslog source may exceed 512;
+//     types_overflow above zero then says the asset is only partly
+//     baselined, for the node to report as status. An overflow right after
+//     a relay's first real collection is read as a parser problem first: a
+//     SER row the parser does not read is keyed on its record, a type of
+//     its own, so a layout mismatch fills the ceiling. Finish keeps the max_types with the highest count, ties by
 //     key, then leaves out the lowest counts until the record fits the byte
 //     cap, and counts every type left out. Left-out types are remembered by
 //     a 16-byte SHA-256 prefix of their key, up to 512 of them
@@ -198,7 +205,8 @@
 //     one asset: a new type that collides with one already alarmed looks
 //     seen, so its new-type alarm is hidden; two baseline types that collide
 //     share a record of held breaks, so one's repeats or rate alarm can be
-//     held under the other's hold; and two left-out types that collide are
+//     held under the other's hold and its break listed under the other's
+//     key; and two left-out types that collide are
 //     counted once in Counts.TypesOverflow. A collision costs
 //     about 2^64 work over two keys an attacker chooses, and about 2^128 to
 //     match a given key. A new type colliding with a baseline type alarms as
