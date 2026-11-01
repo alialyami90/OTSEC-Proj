@@ -55,6 +55,23 @@ def _hold(path):
     return h
 
 
+def _runs_since(s, t):
+    """The collection.run reports the node made at or after t, by event ID.
+    A run committed before the kill can be forwarded only after the respawn,
+    and a reconnect can send a report twice, so the receiver's count alone
+    is not the node's (C5 on #372 at bb62c06: held_runs 1, held_sessions 0).
+    rcv is the node's own time for the report."""
+    ids = set()
+    for m in s.received():
+        if b' htype="collection.run" ' not in m:
+            continue
+        text = m.decode("utf-8", "replace")
+        eid, rcv = re.search(r' eid="([^"]*)"', text), re.search(r' rcv="([^"]*)"', text)
+        if _utc({"time": {"utc": rcv.group(1)}}) >= t:
+            ids.add(eid.group(1))
+    return len(ids)
+
+
 def _audit_rows(path):
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
@@ -79,18 +96,18 @@ def got(tmp_path_factory):
         out["audit_exists"] = os.path.exists(audit)
         holder = _hold(audit)
         out["respawn_utc"] = datetime.datetime.now(datetime.timezone.utc)
-        runs, sessions = len(s.runs_reported()), _ser_sessions(s)
+        sessions = _ser_sessions(s)
         s.respawn("node")
         # Held for longer than a schedule interval and a tick.
         time.sleep(max(SCHEDULE, TICK) + 15)
         out["held_health"] = s.health()
-        out["held_runs"] = len(s.runs_reported()) - runs
+        out["held_runs"] = _runs_since(s, out["respawn_utc"])
         out["held_sessions"] = _ser_sessions(s) - sessions
         out["released_utc"] = datetime.datetime.now(datetime.timezone.utc)
         holder.close()
         holder = None
         released = time.monotonic()
-        out["resumed"] = harness.wait_for(lambda: len(s.runs_reported()) > runs and _ser_sessions(s) > sessions,
+        out["resumed"] = harness.wait_for(lambda: _runs_since(s, out["released_utc"]) > 0 and _ser_sessions(s) > sessions,
                                           TICK + SCHEDULE + 60, step=1.0)
         out["resumed_after"] = time.monotonic() - released
         out["health"] = s.health()
