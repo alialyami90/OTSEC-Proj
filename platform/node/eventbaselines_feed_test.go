@@ -487,6 +487,7 @@ func TestFeedOutcomeTable(t *testing.T) {
 		{HealthCollectionNoDecision, "", true, false},
 		{HealthCollectionOutcomeUnknown, "", true, false},
 		{HealthCollectionQuarantined, "", true, false},
+		{HealthCollectionMissed, "", true, false},
 		{"node.started", "", false, false},
 	} {
 		t.Run(strings.TrimSpace(c.typ+" "+c.status), func(t *testing.T) {

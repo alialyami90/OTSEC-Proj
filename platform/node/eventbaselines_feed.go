@@ -74,8 +74,8 @@ type feedSink interface {
 // happened to run: an Observe delayed past a tick changes nothing (#303).
 //
 // AfterFailure: a failed SER collection of the asset (a collection.run
-// whose status is not ok or partial, or a run that failed before an outcome)
-// opens a gap at its received time, or at the watermark when it arrives
+// whose status is not ok or partial, a run that failed before an outcome, or
+// a series of slots that stored nothing, collection.missed) opens a gap at its received time, or at the watermark when it arrives
 // late, so gaps stay in order. The next successful SER read closes it: the
 // sink gets Gap, and that read's rows are AfterFailure.
 //
@@ -335,7 +335,7 @@ func (f *eventFeed) takeHealth(it feedItem) {
 		it.ok = st == adapter.StatusOK || st == adapter.StatusPartial
 		it.fail = !it.ok
 		it.reason = h.Type + "." + h.Details["status"] // a C10 gap reason is a token
-	case HealthCollectionRefused, HealthCollectionNoDecision, HealthCollectionOutcomeUnknown, HealthCollectionQuarantined:
+	case HealthCollectionRefused, HealthCollectionNoDecision, HealthCollectionOutcomeUnknown, HealthCollectionQuarantined, HealthCollectionMissed:
 		it.fail = true
 		it.reason = h.Type
 	default:
