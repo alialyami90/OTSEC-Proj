@@ -75,6 +75,21 @@ This is how slice 1c will be built. It needs #364 (Snapshot and Restore), C10 0.
 - **Retention.** A checkpoint superseded by a newer one of the same half and asset is no longer needed. Removing it needs a remover rule (D4-20 rule 3, C4's note on #343), which is C1's amendment. Until then the floor's "room for the next" means one superseded record of each half may stay, and quota pressure from more is visible.
 - **Tests.** Restart at every step of GT-INJ gives the transcript of a run that never stopped. A crash before and after the cursor commit loses or duplicates nothing. A corrupt, wrong-version or other-parameters snapshot raises the alarm and the stated recovery, never a silent restart. `ErrSnapshotTooLarge` keeps the last checkpoint and raises the health event.
 
+## Conditions carried from reviews
+
+These came out of the reviews of #365, #369 and #372. Each is a condition on the slice named, not on the PR where it was raised.
+
+**Slice 1c:**
+- A stream the feeder cannot read past raises an alarm and a health record (C6 on #365). While it is stuck, the held assets' pending events from their other streams are bounded: the feeder stops reading streams whose assets are all held, or caps pending and says so. This matters most for `platform/health`, which every SER-reading asset reads.
+- An error from `Learner.Gap` or `Observe` raises a health event and a count. It is not dropped (C4 on #365).
+- A node restart opens a gap for every observed asset, from the last watermark to the first read after the start. This also covers a `collection.missed` series lost in memory (C1 on #372).
+- `ErrSnapshotTooLarge` raises a health event, not only a log line. This includes a detector whose held IDs name more than 16 (node, stream) pairs (C6 on #369).
+
+**Slice 1d:**
+- Status shows each asset's `types_overflow` beside the baseline's version, and a baseline stored with it above zero raises a health event (C1's condition 4). While the learner is still learning, the count is `Learner.TypesHeld()`'s overflow, a lower bound (C4 on #369).
+- Status also shows `Learner.GapBudgetDrops()`, which the C10 record does not carry (C6 on #369).
+- The chain fold runs `Validate` on each record before `VerifyConfig` (C3 on #346).
+
 ## Questions still open
 
 - **C1:** the C5 contract text (`contracts/store`, class configuration) lists the documents the validator accepts as C9 and C10 documents. The checkpoint is a node document in the same class. Does that need a C5 minor, or only the `ConfigDocuments` comment? And the remover rule for superseded checkpoints (D4-20 amendment).
