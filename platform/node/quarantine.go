@@ -471,7 +471,12 @@ func (s *Scheduler) checkQuarantineClear(ctx context.Context) {
 		s.refuseQuarantineClear("file "+ch, "", fmt.Sprintf("%s is not a %s object with asset_id, manifest_sha256 and a human principal", ClearQuarantineFileName, ClearQuarantineSchema))
 		return
 	}
-	s.applyQuarantineClear(ctx, quarantineClear{source: ClearQuarantineFileName, hash: ch, assetID: cl.AssetID, manifest: cl.ManifestSHA256, principal: cl.Principal})
+	if !s.unsignedGate(ClearQuarantineFileName, ch, func(w unsignedWants) bool { return w.quarantine[cl.AssetID+" "+cl.ManifestSHA256] }) {
+		return
+	}
+	if done, _ := s.applyQuarantineClear(ctx, quarantineClear{source: ClearQuarantineFileName + unsignedSuffix, hash: ch, assetID: cl.AssetID, manifest: cl.ManifestSHA256, principal: cl.Principal}); done {
+		s.unsignedAccepted(ClearQuarantineFileName, ch, cl.AssetID)
+	}
 }
 
 // quarantineClear is an administrator's clear of one export, from either

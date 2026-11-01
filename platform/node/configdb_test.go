@@ -289,3 +289,13 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 		t.Fatalf("a good snapshot after the refusals: %v", err)
 	}
 }
+
+// The record cap is the figure contracts/config/bound_test.go derives the
+// largest record from: 1.5 MiB (B1, D4-13). If either moves alone, a read
+// that the bound says fits could be refused here, or a cap could be left
+// larger than its bound. Change both together (B6 on #301).
+func TestConfigRecordBytesIsTheDerivedCap(t *testing.T) {
+	if ConfigRecordBytes != 3<<19 {
+		t.Fatalf("ConfigRecordBytes is %d, not the 3<<19 (1.5 MiB) that contracts/config/bound_test.go derives the record bound against", ConfigRecordBytes)
+	}
+}

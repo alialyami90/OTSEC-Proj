@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.config/0.2",
+  "schema": "otsec.config/0.3",
   "kind": "config.snapshot",
   "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
   "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
