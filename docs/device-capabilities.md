@@ -117,6 +117,8 @@ The same file and command model as the SEL-751.
 | Configuration | SFTP or SCP: `unsupported` (Table 15.4 note a). | FTP `SETTINGS/SET_ALL.TXT` and `CFG.TXT`: `documented-untested`. Unlike the SEL-751, the manual states per file that every settings file reads at Level 1 and that no file writes at Level 1 (writes need P, A, O or 2; Table 15.9 pp. 15.23–15.24). The FTP login is an access-level command and its password, one connection, three failures in a minute pulse SALARM and BADPASS (p. 15.16); the FTP server defaults off (Table 12.15 p. 12.12). Still cleartext (D7). | `SHO` at Level 1: `documented-untested` (Table 14.123 p. 14.59). | Rung 2 candidate: documented as read-only at Level 1, needs A3's acceptance of the cleartext login and a hardware check. |
 | Identity | SNMPv3: `unsupported` (Table 15.4 note a). | `ID` at Level 0: `documented-untested` (Table 14.88 p. 14.42). `CFG.XML` carries the firmware identification (p. 15.22), at Level 1 over FTP. | Passive. | Rung 2 eligible, not built. |
 
+**SER size.** As many as 250 SER points (`SITM1` to `SITM250`), each with its own reporting, set-state and clear-state names, and the relay always records power-up, relay enable and disable, group change, settings change, diagnostic restart and memory overflow (S32 "Setting SER Points", p. 9.31): `documented-untested`. That is up to 500 element and state event types plus at least seven relay messages, at C10 0.2's ceiling of 512 types an asset (C2 on #369). The SEL-751 and SEL-787-4 take 96 SER points and the SEL-311L 72.
+
 ### SEL-311L (S33)
 
 | Data | Rung 1 | Rung 2 | Rung 3 | Reached |
