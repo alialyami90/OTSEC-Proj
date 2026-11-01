@@ -234,6 +234,13 @@ var LearnerFaults = map[string]func(l *Learner){
 		ty.lastFullNS = ty.win[len(ty.win)-2]
 	},
 	"K29 the left-out count saturated below the ceiling": func(l *Learner) { l.overflowSaturated = true },
+	"gaps out of order": func(l *Learner) {
+		g := baseline.Gap{FromUTC: fmtNS(l.startNS), ToUTC: fmtNS(l.lastNS), Reason: "failed.timeout"}
+		l.gaps = []baseline.Gap{g, g}
+	},
+	"a gap that ends before it starts": func(l *Learner) {
+		l.gaps = []baseline.Gap{{FromUTC: fmtNS(l.lastNS), ToUTC: fmtNS(l.startNS), Reason: "failed.timeout"}}
+	},
 	"a gap reason that is not a token": func(l *Learner) {
 		l.gaps = []baseline.Gap{{FromUTC: fmtNS(l.startNS), ToUTC: fmtNS(l.lastNS), Reason: "Not a token"}}
 	},

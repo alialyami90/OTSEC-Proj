@@ -519,6 +519,9 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error) {
 		if d.err == nil && !reasonForm.MatchString(g.Reason) {
 			d.fail("gap reason %q is not a token", g.Reason)
 		}
+		if d.err == nil && (gapEnd(g).Before(gapStart(g)) || len(l.gaps) > 0 && gapStart(g).Before(gapEnd(l.gaps[len(l.gaps)-1]))) {
+			d.fail("gap %s to %s is backwards or out of order", g.FromUTC, g.ToUTC)
+		}
 		l.gaps = append(l.gaps, g)
 	}
 

@@ -162,6 +162,16 @@ func TestGapRefusesWhatTheRecordCannotHold(t *testing.T) {
 	if err := l.Gap(at(100), at(400), "failed.timeout"); err != nil {
 		t.Errorf("a well-formed gap: %v", err)
 	}
+	// C10 holds gaps in order without overlap: one that starts before the
+	// last ends is refused, and one that starts as it ends is taken.
+	for _, g := range [][2]int{{300, 500}, {10, 20}} {
+		if err := l.Gap(at(g[0]), at(g[1]), "failed.timeout"); !errors.Is(err, eventbaseline.ErrGap) {
+			t.Errorf("a gap from %d s to %d s after one from 100 s to 400 s: %v", g[0], g[1], err)
+		}
+	}
+	if err := l.Gap(at(400), at(450), "failed.timeout"); err != nil {
+		t.Errorf("a gap that starts as the last ends: %v", err)
+	}
 	// MaxGaps + 1 gaps: the last is merged into the one before, so the time
 	// between them counts as not collected.
 	m := learner(t, nil)

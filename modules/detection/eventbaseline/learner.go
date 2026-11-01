@@ -285,6 +285,10 @@ func (l *Learner) Gap(from, to time.Time, reason string) error {
 		return fmt.Errorf("%w: it ends before it starts", ErrGap)
 	case from.UTC().Year() < 1 || to.UTC().Year() > 9999:
 		return fmt.Errorf("%w: a time is outside the years 1 to 9999", ErrGap)
+	case len(l.gaps) > 0 && from.Before(gapEnd(l.gaps[len(l.gaps)-1])):
+		// C10 holds gaps in order without overlap, and Finish keeps them in
+		// the order given.
+		return fmt.Errorf("%w: it starts before the last gap ends", ErrGap)
 	}
 	g := baseline.Gap{FromUTC: from.UTC().Format(time.RFC3339Nano), ToUTC: to.UTC().Format(time.RFC3339Nano), Reason: reason}
 	if len(l.gaps) >= MaxGaps {
@@ -360,6 +364,16 @@ func (l *Learner) TypesHeld() (held, overflow int) { return len(l.types), len(l.
 // all types. It is zero unless a flood of near-periodic types spent it; the
 // node reports it as status, as it does Counts.TypesOverflow.
 func (l *Learner) GapBudgetDrops() int64 { return l.gapDrops }
+
+func gapStart(g baseline.Gap) time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, g.FromUTC)
+	return t
+}
+
+func gapEnd(g baseline.Gap) time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, g.ToUTC)
+	return t
+}
 
 // Finish ends the period at now and records the baseline. It refuses before
 // both minima are met (ErrNotDone). Of the types held it keeps the

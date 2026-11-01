@@ -176,8 +176,9 @@
 //     lengths over all types, is not found periodic (GapBudgetDrops counts
 //     the latter). Past MaxGaps (256) collection gaps, a gap is merged into
 //     the last, so the period is longer, never shorter. A gap whose reason
-//     is not a token, that ends before it starts, or whose time is outside
-//     the years 1 to 9999 is refused (ErrGap).
+//     is not a token, that ends before it starts, that starts before the
+//     last gap ends, or whose time is outside the years 1 to 9999 is
+//     refused (ErrGap).
 //   - Max types (D4-15, D4-30). At most 512 types per asset (MaxTypes, C10
 //     0.2's ceiling) are held while learning; a type first met while that
 //     many are held is counted (Counts.TypesOverflow) and never held. The
