@@ -40,6 +40,7 @@ const (
 	HealthCollectionOutcomeUnknown = "collection.outcome-unknown"
 	HealthCollectionQuarantined    = "collection.quarantined"
 	HealthQuarantineReason         = "collection.quarantine-reason"
+	HealthCollectionMissed         = "collection.missed"
 )
 
 // QuarantineRoom is the room the adapter-evidence class must have left
