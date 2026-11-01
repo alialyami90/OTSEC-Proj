@@ -109,7 +109,7 @@ func TestEventBaselinesRefused(t *testing.T) {
 		"a parameter missing": {func(nc *nodeconfigtest.Config) {
 			nc.AddEventBaseline(relayID)
 			delete(nc.EventBaselines[0].Params, "repeats_n")
-		}, "repeats_n 0 is below 1"},
+		}, "params.repeats_n: range: 0 is below 1"},
 		"device clock": {func(nc *nodeconfigtest.Config) {
 			nc.AddEventBaseline(relayID)
 			nc.EventBaselines[0].Params["time_clock"] = "device"
@@ -140,10 +140,10 @@ func TestEventBaselineForASyslogSender(t *testing.T) {
 	}
 }
 
-// The node repeats C10's range check on the parameters, because C10 states
-// it on a whole baseline. Each single-field break of C10's valid baseline is
-// refused by both; the baseline's own parameters pass both.
-func TestEventBaselineParamsMatchC10(t *testing.T) {
+// The node checks the parameters with C10's Params.Validate: the valid
+// baseline's own parameters (a 0.1 record, so its max_types is brought to
+// 0.2's ceiling) pass, and a max_types above that ceiling is refused.
+func TestEventBaselineParamsUseC10(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "baseline", "testdata", "valid", "baseline-synthetic.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -152,38 +152,13 @@ func TestEventBaselineParamsMatchC10(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkEventBaselineParams(base.Params); err != nil {
+	p := base.Params
+	p.MaxTypes = baseline.MaxTypesCeiling
+	if err := checkEventBaselineParams(p); err != nil {
 		t.Fatalf("the valid baseline's own parameters: %v", err)
 	}
-	for name, mut := range map[string]func(*baseline.Params){
-		"min_duration_s":          func(p *baseline.Params) { p.MinDurationS = 0 },
-		"min_events":              func(p *baseline.Params) { p.MinEvents = 0 },
-		"repeats_n":               func(p *baseline.Params) { p.RepeatsN = 0 },
-		"repeats_window_s":        func(p *baseline.Params) { p.RepeatsWindowS = 0 },
-		"rate_bucket_s":           func(p *baseline.Params) { p.RateBucketS = 0 },
-		"rate_min":                func(p *baseline.Params) { p.RateMin = 0 },
-		"max_types zero":          func(p *baseline.Params) { p.MaxTypes = 0 },
-		"max_types ceiling":       func(p *baseline.Params) { p.MaxTypes = baseline.MaxTypesCeiling + 1 },
-		"alarm_hold_s zero":       func(p *baseline.Params) { p.AlarmHoldS = 0 },
-		"alarm_hold_s short":      func(p *baseline.Params) { p.AlarmHoldS = baseline.MinAlarmHoldS - 1 },
-		"max_alarms zero":         func(p *baseline.Params) { p.MaxAlarmsPerHold = 0 },
-		"max_alarms ceiling":      func(p *baseline.Params) { p.MaxAlarmsPerHold = baseline.MaxAlarmsPerHoldCeiling + 1 },
-		"rate_factor_pct":         func(p *baseline.Params) { p.RateFactorPct = 99 },
-		"periodic_min":            func(p *baseline.Params) { p.PeriodicMinOccurrences = 2 },
-		"periodic_spread_pct low": func(p *baseline.Params) { p.PeriodicSpreadPct = -1 },
-		"periodic_spread_pct":     func(p *baseline.Params) { p.PeriodicSpreadPct = 101 },
-		"absence_tolerance low":   func(p *baseline.Params) { p.AbsenceTolerancePct = -1 },
-		"absence_tolerance":       func(p *baseline.Params) { p.AbsenceTolerancePct = 101 },
-	} {
-		t.Run(name, func(t *testing.T) {
-			v := *base
-			mut(&v.Params)
-			if v.Validate() == nil {
-				t.Fatal("C10 accepts it: the test breaks nothing")
-			}
-			if checkEventBaselineParams(v.Params) == nil {
-				t.Fatal("the node accepts what C10 refuses")
-			}
-		})
+	p.MaxTypes++
+	if err := checkEventBaselineParams(p); err == nil {
+		t.Fatal("max_types above the ceiling accepted")
 	}
 }
