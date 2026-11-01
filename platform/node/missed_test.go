@@ -222,18 +222,21 @@ func TestMissedSeriesHoldsRunsUntilStored(t *testing.T) {
 	}, &seq)
 	s := newScheduler(t, r, wire)
 	log, db := r.Log(HealthStream), r.Store(HealthStream)
-	for i := 0; ; i++ {
-		rec, err := r.healthRecord(HealthStream, HealthCollectionRun, map[string]string{"n": "filler"})
-		if err == nil {
-			_, err = log.Append(bg, rec)
-		}
-		if err != nil {
-			break
-		}
-		if i > 5000 {
-			t.Fatalf("platform still takes events after %d", i)
+	fill := func() {
+		for i := 0; ; i++ {
+			rec, err := r.healthRecord(HealthStream, HealthCollectionRun, map[string]string{"n": "filler"})
+			if err == nil {
+				_, err = log.Append(bg, rec)
+			}
+			if err != nil {
+				return
+			}
+			if i > 5000 {
+				t.Fatalf("platform still takes events after %d", i)
+			}
 		}
 	}
+	fill()
 
 	// A read with the class full: its rows are stored, so it starts no
 	// series and the next run is sent (X1).
@@ -241,11 +244,12 @@ func TestMissedSeriesHoldsRunsUntilStored(t *testing.T) {
 		t.Fatalf("read with platform full: %+v", rep)
 	}
 	// A refusal whose collection.refused is refused is missed (X10).
-	s.c = &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+	refuse := &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
 		seq++
 		return collectorclient.Response{Reply: authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyRefused,
 			Refusal: &authz.Refusal{Code: authz.RefuseRateLimited, Detail: "inside the floor"}, CollectorSeq: seq}}, nil
 	}}
+	s.c = refuse
 	before := time.Now()
 	refused := s.RunOnce(bg, 0)
 	after := time.Now()
@@ -253,14 +257,16 @@ func TestMissedSeriesHoldsRunsUntilStored(t *testing.T) {
 		t.Fatalf("refusal after the read was not sent: %+v", refused)
 	}
 	id := c.Schedule[0].ID
-	raised := 0
-	for _, a := range st.Snapshot("x").Alarms {
-		if a.Code == AlarmEvidenceNotStored && strings.Contains(a.Detail, HealthCollectionMissed+" of schedule entry "+id+" not stored") {
-			raised++
+	raised := func() (n int) {
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == AlarmEvidenceNotStored && strings.Contains(a.Detail, HealthCollectionMissed+" of schedule entry "+id+" not stored") {
+				n++
+			}
 		}
+		return n
 	}
-	if raised != 1 {
-		t.Fatalf("%d alarms for the unwritten series, want 1 (X14)", raised)
+	if n := raised(); n != 1 {
+		t.Fatalf("%d alarms for the unwritten series, want 1 (X14)", n)
 	}
 
 	// The next slot is held: nothing is sent while the series is unwritten.
@@ -310,5 +316,16 @@ func TestMissedSeriesHoldsRunsUntilStored(t *testing.T) {
 	}
 	if i := slices.Index(types, HealthCollectionMissed); i < 0 || run < i {
 		t.Fatalf("health order: %v", types)
+	}
+
+	// A later series held on the same entry raises the alarm again (D4-37,
+	// C6's H3 on #372).
+	fill()
+	s.c = refuse
+	if rep := s.RunOnce(bg, 0); !rep.Sent || rep.Alarm != AlarmCollectorRefused {
+		t.Fatalf("second refusal: %+v", rep)
+	}
+	if n := raised(); n != 2 {
+		t.Fatalf("%d alarms after a second unwritten series, want 2", n)
 	}
 }
