@@ -144,11 +144,13 @@
 // A snapshot is bounded: at most MaxSettings (10,918, S22's 8,734 plus a
 // quarter) settings in all, and at most MaxSnapshotBytes (960 KiB) encoded by
 // Encode. A configuration record is the snapshot and the transcript it points
-// into, and the transcript is at most the register run's max_total_bytes (512
-// KiB, MaxTranscriptBytes), so a record at both bounds is 1,472 KiB and leaves
-// RecordHeadroom (64 KiB) under the configuration database's 1.5 MiB cap
-// (RecordCap, D4-13) for what C5's Record.Bytes counts besides, such as a
-// source cursor. MaxSnapshotBytes is derived from the other three, and tests
+// into. The register run's max_total_bytes (512 KiB, MaxTranscriptBytes)
+// bounds the bytes the run receives, so a record at both bounds is 1,472 KiB
+// and leaves RecordHeadroom (64 KiB) under the configuration database's
+// 1.5 MiB cap (RecordCap, D4-13). The headroom covers what the transcript
+// holds beyond the received bytes (the lines sent and the adapter's allowance
+// for the QUI reply, about 5 KiB together) and what C5's Record.Bytes counts
+// besides, such as a source cursor. MaxSnapshotBytes is derived from the other three, and tests
 // hold them to the register and to the node's cap. Validate refuses a snapshot
 // over either bound, wrapping ErrTooLarge. RecordsFit makes the same check on
 // a read's records before a snapshot exists, which is how the SEL-751 adapter

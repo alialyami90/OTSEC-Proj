@@ -113,7 +113,7 @@ func TestAlarmTravelsAsC4Health(t *testing.T) {
 	if _, err := AlarmFromHealth(h); !slices.Contains(Codes(err), CodeConflict) {
 		t.Errorf("an unknown detail at this minor: %v", err)
 	}
-	h.Details["schema"] = "otsec.baseline/0.2"
+	h.Details["schema"] = "otsec.baseline/0.3"
 	if _, err := AlarmFromHealth(h); err != nil {
 		t.Errorf("a later minor may add details: %v", err)
 	}

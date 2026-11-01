@@ -1,0 +1,10 @@
+{
+  "contract": "otsec.authz/0.7",
+  "request_id": "req-20261028-0001",
+  "status": "refused",
+  "collector_seq": 21,
+  "refusal": {
+    "code": "busy"
+  },
+  "run_deadline_ms": 300000
+}

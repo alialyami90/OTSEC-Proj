@@ -12,16 +12,16 @@ B2 to C2. Date 2026-10-28. `origin/main` at `04bb504` (#338); a local `main` ref
 | C9 0.2 (`sel-751-sho/2`, `FromResult`, `Compare`, `ChangesDigest`, `SameChanges`) | working | CI-Linux, CI-Windows | #331 |
 | SEL-751 configuration read in `modules/ied/sel751` (one session, one `ACC`, gate forms first, device error before the language check) | working | simulated | #331, `run_config_test.go` |
 | `sel751.Hosts`; maximal-result and record-size measurements | working | simulated | #338 (`04bb504`) |
-| C9 0.3: snapshot bound (10,918 settings, 960 KiB encoded, record headroom 64 KiB), over-bound read is `failed.config_unparsable`; adapter 0.3.1 | **in review, CI running** | local only until CI finishes | #345, head `aa3ebf3` |
+| C9 0.3: snapshot bound (10,918 settings, 960 KiB encoded, record headroom 64 KiB), over-bound read is `failed.config_unparsable`; adapter 0.3.1 | **in review** (C5 accepted; C6 owed) | CI-Linux, CI-Windows (13/13 green on `c0a42f7`) | #345, head `c0a42f7`, run 40730154598; **merged** as `2ddf8ad` (2026-10-28, C2 note) |
 | Touchscreen (`/HMI`) settings | not read, not baselined (owner, 2026-10-28) | n/a | `docs/device-capabilities.md`, `contracts/config/doc.go` |
 | SER system rows ("Relay Powered Up", "Relay Settings Changed") | deferred until an H-13 capture | desk | `docs/phase4/B2-handoff.md` |
 | Any real relay capture (H-13) | not done, owner-gated | none | `docs/verification.md` |
 
 ## 2. Work in flight
 
-- **PR #345**, branch `claude/project-thread-0e41t5`, head `aa3ebf3feada0ade95acc9c09ff9b7675f15cea7`, base `main` `04bb504`, not merged, no review submitted. It changes code (`contracts/config`, `modules/ied/sel751`, goldens, two Markdown docs), so it needs every CI job green.
+- **PR #345**, branch `claude/project-thread-0e41t5`, head `c0a42f7` (*corrected by C2, 2026-10-28: this file first gave `aa3ebf3`, the head before this file was committed*), base `main` `04bb504`, not merged. It changes code (`contracts/config`, `modules/ied/sel751`, goldens, two Markdown docs), so it needs every CI job green.
   - CI at the time of writing (run 40727695256 and govulncheck 40727695124): green for `go (ubuntu-latest)`, `python`, govulncheck and four `integration-long` legs; `go (windows-latest)`, `integration` and the other `integration-long` legs were still running. Re-read them on the head before anything else. `ci.yml` has 12 jobs plus govulncheck (13 check runs).
-  - B1 asked for the record headroom (done in `aa3ebf3`) and said everything else was accepted. B5 and B6 are to review. B5 was asked on the PR whether node config records carry a source cursor (the 64 KiB headroom covers one).
+  - B1 asked for the record headroom (done in `aa3ebf3`) and said everything else was accepted. B5 accepted at 17:15Z and answered: a configuration record has no source cursor, so the 64 KiB headroom is all spare. B5's `TestLargestConfigRecordIsStored` (`fit345-node`, `a6f7594`) follows #345 as C5's own PR (C1 on #360). C6's review is owed.
   - This handoff file is committed on that branch, because the branch is occupied by #345 and a second PR cannot share it. B1: say if you want it as its own Markdown-only PR.
 - No uncommitted code, no stash, no patch files. The container has stale local branches (`local-c2-06`, `wip-b2-all`, `pr279`, `pr292`, `pr337`); ignore them, they are not records.
 - **#337** (B1's D4-23 and README rows) is B1's. B2 checked the C2 and C9 rows on it: the C2 row names the kinds `config_section` and `config_absent`, the code has `sel.config.section` and `sel.config.absent`, and the C3 row still says rev 4.
@@ -43,9 +43,9 @@ Run in B2's container on `aa3ebf3` (2026-10-28), `CI` marks what only GitHub can
 
 ## 4. Next tasks
 
-1. **NEXT ACTION: Ali paused all agents on 2026-10-28; when they resume work, read #345's checks on its current head, fix anything red, and get B5 and B6 to review.** Objective: merge C9 0.3 (D4-25). Paths: `contracts/config/`, `modules/ied/sel751/`, `docs/phase4/B2-*.md`. Dependencies: B5 (cursor question, and a node-side check), B6 (independent review of the bounds). Acceptance: all 12 `ci.yml` jobs and govulncheck green on the head, reviews accepted. Tests that prove it: `TestBoundsFitTheCap`, `TestLargestAcceptedSnapshotFitsTheCap`, `TestRecordCapIsTheNodes`, `TestRecordsFitImpliesValidate`, `TestConfigOverBoundRunFails`, `TestConfigMaximalRecordFitsTheCap`. Merge is B1's. After it merges, restart your branch from `main` (see Gotchas).
+1. ~~NEXT ACTION: land #345~~ *Done: #345 merged as `2ddf8ad` (C2 note, 2026-10-28). C2 reviewed #341 (PASS, task 2). The C2 work list is now empty until H-16 captures exist or C1 issues a new brief (C1 on #360).* Objective: merge C9 0.3 (D4-25). Paths: `contracts/config/`, `modules/ied/sel751/`, `docs/phase4/B2-*.md`. Dependencies: B5 (cursor question, and a node-side check), B6 (independent review of the bounds). Acceptance: all 12 `ci.yml` jobs and govulncheck green on the head, reviews accepted. Tests that prove it: `TestBoundsFitTheCap`, `TestLargestAcceptedSnapshotFitsTheCap`, `TestRecordCapIsTheNodes`, `TestRecordsFitImpliesValidate`, `TestConfigOverBoundRunFails`, `TestConfigMaximalRecordFitsTheCap`. Merge is B1's. After it merges, restart your branch from `main` (see Gotchas).
 2. **Hand B3 the number once #345 is on `main`.** B3 owes the collector wiring for `sel.config.read_all` (C7 0.7): the run deadline is 300 s, above the collector default of 120 s, and its test profile copy lacks the run. Answer B3's review questions on the limits.
-3. **Ask B6 to widen H-13** (`docs/verification.md`, B6's file) to capture `SHO G`, each revision 5 form including the `Invalid Command` reply of an absent port or protocol, and one 24-form run against a lab relay. Until then every layout in `contracts/adapter/testdata/config` is invented.
+3. ~~Ask B6 to widen H-13~~ *Dropped by C2, 2026-10-28: H-16 in `docs/verification.md` (D4-8) already covers each revision 5 form including `SHO G`, an absent option's `Invalid Command` reply, and one 24-form run. Nothing is owed to C6.* Until H-16 runs, every layout in `contracts/adapter/testdata/config` is invented.
 4. **Parked, owner-gated:** SER system rows, any real capture, SEL-family expansion beyond the SEL-751. Do not start any without a brief.
 5. **After that:** the P4-A2 brief is complete; the next brief for this role comes from B1 (`docs/agent-handoffs.md`).
 
@@ -54,7 +54,7 @@ Run in B2's container on `aa3ebf3` (2026-10-28), `CI` marks what only GitHub can
 - **H-13** (hardware capture of `QUI`, `SHO P 1`, `SHO G`, the new forms and the framing) is owed by the owner; no real device may be contacted until then. The assumed 25% margin on the settings count, the reply sizes and the 300 s run time are bounds, not measurements.
 - A real relay may print a section in a way the parser cannot read. The run then fails closed with `failed.config_unparsable`, bytes kept, and that relay has no baseline until the parser is fixed from a capture.
 - Open risks that gate the first `device-observed` endpoint: HR-11, D2-11, D2-12, D2-16, B-01 (full list in `docs/phase-3-exit.md`). D4-12: test runs on the owner's PC are paused, so GitHub Actions is the only test path.
-- Unverified: Windows results for `aa3ebf3`, and whether node config records carry a source cursor (B5).
+- Unverified: nothing about #345 beyond C6's pending review (Windows is green on `c0a42f7`; B5 answered the cursor question).
 
 ## 6. Decisions to know
 
