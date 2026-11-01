@@ -143,7 +143,8 @@
 //     the steps and no record. So partial is not a run outcome, and a record
 //     that did not parse is not a valid configuration record. Limits.ForRun
 //     gives an invocation the run's limits; each step is also held to its own
-//     register limits. A reply the rule cannot read ends the run with the new
+//     register limits. A reply the rule cannot read, or a read too big for a C9
+//     snapshot (config.RecordsFit, D4-25), ends the run with the new
 //     failed.config_unparsable (QUI, bytes kept, no record, no snapshot); SER
 //     keeps partial.parse_errors. Earlier results read unchanged.
 //

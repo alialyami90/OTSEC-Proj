@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.config/0.3",
+  "schema": "otsec.config/0.4",
   "kind": "config.snapshot",
   "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
   "invocation_id": "8a2f6c41-5b7e-4d93-a0c2-1e9f3b7d6a51",
@@ -1067,5 +1067,5 @@
       "sha256": "a72a434fc51400859fd671ab641fd29eae5d7507594ba6bc644db6356efe98fc"
     }
   ],
-  "zz_new": "a field 0.2 does not know"
+  "zz_new": "a field 0.3 does not know"
 }
