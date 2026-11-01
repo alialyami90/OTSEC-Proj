@@ -663,6 +663,17 @@ func TestFeedLateOutcomes(t *testing.T) {
 	if got := nonTick(r); !slices.Equal(got, want) || r.f.assets[relayID].Late != 1 {
 		t.Fatalf("a late success: late %d, got\n%s\nwant\n%s", r.f.assets[relayID].Late, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+
+	// A late failure while a gap is already open leaves its start alone.
+	r = newFeedRig(t)
+	r.st.add(t, HealthStream, sec(60), runHealth(relayID, HealthCollectionRun, "failed", sec(60)), nil)
+	r.step(t, sec(100).Add(FeedLateness))
+	r.st.add(t, HealthStream, sec(110).Add(FeedLateness), runHealth(relayID, HealthCollectionOutcomeUnknown, "", sec(50)), nil)
+	r.st.add(t, SERStream(relayID), sec(200), feedSER(relayID, "inv3", sec(200), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(300).Add(FeedLateness))
+	if got := nonTick(r); !slices.Equal(got, want) || r.f.assets[relayID].Late != 1 {
+		t.Fatalf("a late failure in an open gap: late %d, got\n%s\nwant\n%s", r.f.assets[relayID].Late, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
 }
 
 // A collection.missed written after its outage opens the gap where the
@@ -690,6 +701,16 @@ func TestFeedMissedGapStartsAtItsSeries(t *testing.T) {
 	r.st.add(t, SERStream(relayID), sec(301), feedSER(relayID, "inv2", sec(301), k("a"), event.AlignFirstRead), state(t, k("a")))
 	r.step(t, sec(400).Add(FeedLateness))
 	if got := gaps(r); len(got) != 1 || got[0] != "gap "+relayID+" 2026-10-28T10:01:00Z 2026-10-28T10:05:01Z collection.missed" {
+		t.Fatalf("gaps %v", got)
+	}
+
+	// A first_at after the record's own time is not believed: the gap
+	// starts at the record.
+	r = newFeedRig(t)
+	r.st.add(t, HealthStream, sec(300), missed(sec(350), sec(300)), nil)
+	r.st.add(t, SERStream(relayID), sec(301), feedSER(relayID, "inv2", sec(301), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(400).Add(FeedLateness))
+	if got := gaps(r); len(got) != 1 || got[0] != "gap "+relayID+" 2026-10-28T10:05:00Z 2026-10-28T10:05:01Z collection.missed" {
 		t.Fatalf("gaps %v", got)
 	}
 
