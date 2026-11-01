@@ -253,6 +253,9 @@ var DetectorFaults = map[string]func(d *Detector){
 	"K17 a pair of an unknown rule": func(d *Detector) {
 		d.pairs[pair{"bogus", digestOf(d.b.Types[0].Key)}] = &pending{born: d.lastNS}
 	},
+	"a repeats pair of a type outside the baseline": func(d *Detector) {
+		d.pairs[pair{baseline.RuleRepeats, digestOf(baseline.Key{Source: baseline.SourceSER, Element: "OUTSIDE", State: "Asserted"})}] = &pending{born: d.lastNS}
+	},
 	"K18 a pair listing more IDs than it counts": func(d *Detector) {
 		d.pairs[pair{baseline.RuleRepeats, digestOf(d.b.Types[0].Key)}] = &pending{born: d.lastNS, ids: []event.EventID{faultID(1)}}
 	},
@@ -281,6 +284,17 @@ var DetectorFaults = map[string]func(d *Detector){
 func HoldTwoIDs(d *Detector) {
 	d.pairs[pair{baseline.RuleRepeats, digestOf(d.b.Types[0].Key)}] = &pending{born: d.lastNS, ids: []event.EventID{faultID(1), faultID(2)}, total: 2}
 	d.heldIDs += 2
+}
+
+// CollideNewType gives the detector the state a new type whose digest
+// collides with the baseline's first type leaves: that digest among the new
+// types seen, and a new-type record of it holding one break.
+func CollideNewType(d *Detector) {
+	dg := digestOf(d.b.Types[0].Key)
+	d.newSeen[dg] = struct{}{}
+	d.pairs[pair{baseline.RuleNewType, dg}] = &pending{born: d.lastNS, ids: []event.EventID{faultID(1)}, total: 1}
+	d.heldIDs++
+	d.newPairs++
 }
 
 func faultID(seq uint64) event.EventID {

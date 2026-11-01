@@ -194,8 +194,15 @@
 //     type left out alarms as new.
 //   - The new-type memory holds 2048 types (16-byte digests); a flood of
 //     distinct new types beyond that alarms on each occurrence, under the
-//     alarm bounds. A digest collision can only make a new type look seen,
-//     so it can hide a new-type alarm of that asset and nothing else. The
+//     alarm bounds. A digest collision has three effects, all within the
+//     one asset: a new type that collides with one already alarmed looks
+//     seen, so its new-type alarm is hidden; two baseline types that collide
+//     share a record of held breaks, so one's repeats or rate alarm can be
+//     held under the other's hold; and two left-out types that collide are
+//     counted once in Counts.TypesOverflow. A collision costs
+//     about 2^64 work over two keys an attacker chooses, and about 2^128 to
+//     match a given key. A new type colliding with a baseline type alarms as
+//     new, and its state restores (C3 on #369). The
 //     detector's record of held breaks per (rule, type) for the new-type
 //     rule is bounded too (MaxNewTypePairs, 512; F1, D4-26), and the IDs all
 //     records list together are bounded at 2048. Once an alarm hold ends, a

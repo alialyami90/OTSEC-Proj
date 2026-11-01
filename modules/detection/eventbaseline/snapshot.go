@@ -804,12 +804,9 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		}
 	}
 
+	// A new type whose digest collides with a baseline type's is listed
+	// here, so a baseline digest among them is a state Observe can reach.
 	det.newSeen = d.digests("new types seen", newSeenMax)
-	for dg := range det.newSeen {
-		if det.inBaseline[dg] {
-			d.fail("a type of the baseline is listed as a new one")
-		}
-	}
 
 	for i := range c.Baseline.Types {
 		if d.err != nil {
@@ -865,8 +862,10 @@ func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error) {
 		}
 		if d.err == nil {
 			switch {
-			case (rule == baseline.RuleNewType) == det.inBaseline[k]:
-				d.fail("a %s pair: the new-type rule is for types outside the baseline, the others for types in it", rule)
+			case rule != baseline.RuleNewType && !det.inBaseline[k]:
+				// A new-type pair may name a baseline digest, after a
+				// collision; the other rules' pairs name only baseline types.
+				d.fail("a %s pair of a type outside the baseline", rule)
 			case rule == baseline.RuleNewType && det.newPairs >= pairCap:
 				d.fail("more than %d new-type pairs", pairCap)
 			}

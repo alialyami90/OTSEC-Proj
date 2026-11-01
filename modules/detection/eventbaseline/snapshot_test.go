@@ -584,7 +584,9 @@ func TestSnapshotRefusesInconsistentState(t *testing.T) {
 	if err := edit(func(b []byte) []byte {
 		ins := append([]byte{0x01}, digestOf(known)...)
 		return append(b[:seen], append(ins, b[seen+1:]...)...)
-	}); !errors.Is(err, eventbaseline.ErrSnapshot) {
+	}); err != nil {
+		// A new type whose digest collides with a baseline type's puts it
+		// there (C3 on #369).
 		t.Errorf("a type of the baseline listed among the new ones: %v", err)
 	}
 	unknown := "ser|N|Asserted" // not in the baseline: this one is consistent
@@ -659,6 +661,16 @@ func TestSnapshotRefusesInconsistentState(t *testing.T) {
 		if r, err := eventbaseline.RestoreDetector(pcfg, mustSnap(t, x.Snapshot)); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
 			t.Errorf("detector, %s: %v, %v", name, r, err)
 		}
+	}
+	// The state a digest collision leaves restores, to the same bytes (C3 on
+	// #369).
+	cd := dfresh()
+	eventbaseline.CollideNewType(cd)
+	cb := mustSnap(t, cd.Snapshot)
+	if r, err := eventbaseline.RestoreDetector(pcfg, cb); err != nil {
+		t.Errorf("detector, a new type colliding with a baseline type: %v", err)
+	} else if !bytes.Equal(mustSnap(t, r.Snapshot), cb) {
+		t.Errorf("detector, a new type colliding with a baseline type: restored to other bytes")
 	}
 	dd := dfresh()
 	eventbaseline.HoldTwoIDs(dd)
