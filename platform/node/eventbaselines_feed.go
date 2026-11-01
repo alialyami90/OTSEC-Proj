@@ -122,6 +122,7 @@ type feedAsset struct {
 
 	failedAt   time.Time // a gap is open since then, if not zero
 	failReason string
+	lastEnd    time.Time // where the last gap sent ended
 
 	// Late counts events that arrived behind the watermark (FeedLateness).
 	Late int64
@@ -138,6 +139,9 @@ type feedItem struct {
 	// ok closes one.
 	fail, ok bool
 	reason   string
+	// from, on a collection.missed, is when its series began: the record
+	// is written once the health stream takes it, which can be long after.
+	from time.Time
 }
 
 // health is 1 for a collection outcome and 0 for an event of the asset.
@@ -338,6 +342,9 @@ func (f *eventFeed) takeHealth(it feedItem) {
 	case HealthCollectionRefused, HealthCollectionNoDecision, HealthCollectionOutcomeUnknown, HealthCollectionQuarantined, HealthCollectionMissed:
 		it.fail = true
 		it.reason = h.Type
+		if h.Type == HealthCollectionMissed {
+			it.from, _ = time.Parse(time.RFC3339Nano, h.Details["first_at"])
+		}
 	default:
 		return
 	}
@@ -381,7 +388,19 @@ func (f *eventFeed) pass(a *feedAsset) {
 			}
 		case it.fail:
 			if a.failedAt.IsZero() {
-				a.failedAt, a.failReason = it.at, it.reason
+				// A missed series opens its gap where it began, so the outage
+				// is not counted as collected time, but never before what
+				// was already passed or the last gap's end.
+				start := it.at
+				if !it.from.IsZero() && it.from.Before(start) {
+					start = it.from
+					for _, t := range []time.Time{a.wm, a.lastEnd} {
+						if t.After(start) {
+							start = t
+						}
+					}
+				}
+				a.failedAt, a.failReason = start, it.reason
 			}
 		case it.ok:
 			f.closeGap(a, it.at)
@@ -409,5 +428,5 @@ func (f *eventFeed) closeGap(a *feedAsset, at time.Time) {
 		return
 	}
 	f.sink.Gap(a.id, a.failedAt, at, a.failReason)
-	a.failedAt, a.failReason = time.Time{}, ""
+	a.failedAt, a.failReason, a.lastEnd = time.Time{}, "", at
 }

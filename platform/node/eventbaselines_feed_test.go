@@ -664,3 +664,59 @@ func TestFeedLateOutcomes(t *testing.T) {
 		t.Fatalf("a late success: late %d, got\n%s\nwant\n%s", r.f.assets[relayID].Late, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// A collection.missed written after its outage opens the gap where the
+// series began, so the outage is not collected time; never before the
+// watermark or the last gap's end.
+func TestFeedMissedGapStartsAtItsSeries(t *testing.T) {
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	missed := func(first, at time.Time) event.Event {
+		e := runHealth(relayID, HealthCollectionMissed, "", at)
+		e.Health.Details["first_at"] = first.UTC().Format(time.RFC3339Nano)
+		return e
+	}
+	gaps := func(r *feedRig) []string {
+		var got []string
+		for _, l := range r.log.lines {
+			if strings.HasPrefix(l, "gap ") {
+				got = append(got, l)
+			}
+		}
+		return got
+	}
+
+	r := newFeedRig(t)
+	r.st.add(t, HealthStream, sec(300), missed(sec(60), sec(300)), nil)
+	r.st.add(t, SERStream(relayID), sec(301), feedSER(relayID, "inv2", sec(301), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(400).Add(FeedLateness))
+	if got := gaps(r); len(got) != 1 || got[0] != "gap "+relayID+" 2026-10-28T10:01:00Z 2026-10-28T10:05:01Z collection.missed" {
+		t.Fatalf("gaps %v", got)
+	}
+
+	// The series began before the watermark: the gap starts at it.
+	r = newFeedRig(t)
+	r.step(t, sec(30).Add(FeedLateness)) // the watermark is at 00:00:30
+	r.st.add(t, HealthStream, sec(300), missed(sec(20), sec(300)), nil)
+	r.st.add(t, SERStream(relayID), sec(301), feedSER(relayID, "inv2", sec(301), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(400).Add(FeedLateness))
+	if got := gaps(r); len(got) != 1 || got[0] != "gap "+relayID+" 2026-10-28T10:00:30Z 2026-10-28T10:05:01Z collection.missed" {
+		t.Fatalf("gaps %v", got)
+	}
+
+	// The series began before the watermark and before the end of a gap
+	// already sent: the gap starts at the later of the two.
+	r = newFeedRig(t)
+	r.st.add(t, HealthStream, sec(10), runHealth(relayID, HealthCollectionRun, "failed", sec(10)), nil)
+	r.st.add(t, HealthStream, sec(40), runHealth(relayID, HealthCollectionRun, "ok", sec(40)), nil)
+	r.step(t, sec(30).Add(FeedLateness)) // the watermark is at 00:00:30
+	r.st.add(t, HealthStream, sec(300), missed(sec(20), sec(300)), nil)
+	r.st.add(t, SERStream(relayID), sec(301), feedSER(relayID, "inv2", sec(301), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(400).Add(FeedLateness))
+	want := []string{
+		"gap " + relayID + " 2026-10-28T10:00:10Z 2026-10-28T10:00:40Z collection.run.failed",
+		"gap " + relayID + " 2026-10-28T10:00:40Z 2026-10-28T10:05:01Z collection.missed",
+	}
+	if got := gaps(r); !slices.Equal(got, want) {
+		t.Fatalf("gaps\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
