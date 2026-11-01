@@ -351,6 +351,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		s.raiseOnce(col.AssetID, code, detail)
 		return Report{Alarm: code}
 	}
+	if s.heldMissed(col.ID) {
+		return Report{Alarm: AlarmEvidenceNotStored} // writeMissed raised it
+	}
 	s.clearQuiet(col.AssetID)
 
 	rep := Report{RequestID: s.newID()}
