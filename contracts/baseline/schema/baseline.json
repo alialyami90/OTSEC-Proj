@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/contracts/baseline/0.1/baseline.json",
-  "title": "otsec.baseline/0.1 baseline record",
+  "$id": "https://otsec.local/contracts/baseline/0.2/baseline.json",
+  "title": "otsec.baseline/0.2 baseline record",
   "description": "C10 event-behaviour baseline of one asset (R4.8). Rules across fields (counts sum, hours sum to full, types ordered by key, collected_s is the period less its gaps, previous set exactly when version > 1, tolerance from the percentage) are enforced by Baseline.Validate in Go; this schema states structure only. Not strict: readers ignore unknown fields. The baseline hash is SHA-256 over the stored bytes exactly, never over a re-encoding.",
   "type": "object",
   "required": [
@@ -117,6 +117,7 @@
           "$ref": "#/$defs/clock"
         },
         "max_types": {
+          "description": "At most 512 in a record stamped 0.2 or later (D4-30), at most 4096 in one stamped 0.1; Baseline.Validate checks it by the record's minor.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4096

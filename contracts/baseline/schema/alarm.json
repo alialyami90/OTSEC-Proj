@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/contracts/baseline/0.1/alarm.json",
-  "title": "otsec.baseline/0.1 departure alarm",
+  "$id": "https://otsec.local/contracts/baseline/0.2/alarm.json",
+  "title": "otsec.baseline/0.2 departure alarm",
   "description": "C10 departure alarm, as the Go type Alarm. On the wire it travels as a C4 telemetry-health event of type baseline.departure (Alarm.Health): related holds events, and every other field is a detail (param.<name> per parameter; not_counted as space-separated event IDs). Rules across fields (the rule's exact parameters, device clock only for the time rule, events required except for absence) are enforced by Alarm.Validate in Go.",
   "type": "object",
   "required": [
