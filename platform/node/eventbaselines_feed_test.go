@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -280,7 +281,7 @@ func TestFeedFailureGivesGapAndAfterFailure(t *testing.T) {
 	}
 	want := []string{
 		"obs " + relayID + " ser 2026-10-28T10:00:01.000000Z af=false nc=false",
-		"gap " + relayID + " 2026-10-28T10:01:00Z 2026-10-28T10:03:00Z collection.run failed",
+		"gap " + relayID + " 2026-10-28T10:01:00Z 2026-10-28T10:03:00Z collection.run.failed",
 		"obs " + relayID + " ser 2026-10-28T10:03:00.000000Z af=true nc=false",
 		"obs " + relayID + " ser 2026-10-28T10:03:00.000000Z af=true nc=false",
 		"obs " + relayID + " ser 2026-10-28T10:04:00.000000Z af=false nc=false",
@@ -491,7 +492,11 @@ func TestFeedOutcomeTable(t *testing.T) {
 		t.Run(strings.TrimSpace(c.typ+" "+c.status), func(t *testing.T) {
 			reason := c.typ
 			if c.typ == HealthCollectionRun {
-				reason += " " + c.status
+				reason += "." + c.status
+			}
+			// C10's form of a gap reason (contracts/baseline tokenForm).
+			if !regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`).MatchString(reason) {
+				t.Fatalf("gap reason %q is not a C10 token", reason)
 			}
 			for _, afterFail := range []bool{false, true} {
 				r := newFeedRig(t)
@@ -507,9 +512,9 @@ func TestFeedOutcomeTable(t *testing.T) {
 				case !afterFail && c.opens:
 					gap, af = "2026-10-28T10:01:00Z 2026-10-28T10:02:00Z "+reason, true
 				case afterFail && c.closes:
-					gap = "2026-10-28T10:00:30Z 2026-10-28T10:01:00Z collection.run failed"
+					gap = "2026-10-28T10:00:30Z 2026-10-28T10:01:00Z collection.run.failed"
 				case afterFail:
-					gap, af = "2026-10-28T10:00:30Z 2026-10-28T10:02:00Z collection.run failed", true
+					gap, af = "2026-10-28T10:00:30Z 2026-10-28T10:02:00Z collection.run.failed", true
 				}
 				var want []string
 				if gap != "" {
@@ -610,5 +615,51 @@ func TestFeedUndecodableStateStopsItsStream(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A late failure opens its gap at the watermark, not at its own time, so a
+// gap never starts before one already sent; a late success closes nothing.
+// Both are counted late.
+func TestFeedLateOutcomes(t *testing.T) {
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	nonTick := func(r *feedRig) []string {
+		var got []string
+		for _, l := range r.log.lines {
+			if !strings.HasPrefix(l, "tick ") {
+				got = append(got, l)
+			}
+		}
+		return got
+	}
+
+	r := newFeedRig(t)
+	r.st.add(t, HealthStream, sec(10), runHealth(relayID, HealthCollectionRun, "failed", sec(10)), nil)
+	r.st.add(t, HealthStream, sec(20), runHealth(relayID, HealthCollectionRun, "ok", sec(20)), nil)
+	r.step(t, sec(100).Add(FeedLateness)) // the watermark is at 00:01:40
+	r.st.add(t, HealthStream, sec(110).Add(FeedLateness), runHealth(relayID, HealthCollectionOutcomeUnknown, "", sec(50)), nil)
+	r.st.add(t, SERStream(relayID), sec(200), feedSER(relayID, "inv3", sec(200), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(300).Add(FeedLateness))
+	want := []string{
+		"gap " + relayID + " 2026-10-28T10:00:10Z 2026-10-28T10:00:20Z collection.run.failed",
+		"gap " + relayID + " 2026-10-28T10:01:40Z 2026-10-28T10:03:20Z collection.outcome-unknown",
+		"obs " + relayID + " ser 2026-10-28T10:03:20.000000Z af=true nc=false",
+	}
+	if got := nonTick(r); !slices.Equal(got, want) || r.f.assets[relayID].Late != 1 {
+		t.Fatalf("a late failure: late %d, got\n%s\nwant\n%s", r.f.assets[relayID].Late, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	r = newFeedRig(t)
+	r.st.add(t, HealthStream, sec(60), runHealth(relayID, HealthCollectionRun, "failed", sec(60)), nil)
+	r.step(t, sec(100).Add(FeedLateness))
+	r.st.add(t, HealthStream, sec(110).Add(FeedLateness), runHealth(relayID, HealthCollectionRun, "ok", sec(30)), nil)
+	r.st.add(t, SERStream(relayID), sec(200), feedSER(relayID, "inv3", sec(200), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(300).Add(FeedLateness))
+	want = []string{
+		"gap " + relayID + " 2026-10-28T10:01:00Z 2026-10-28T10:03:20Z collection.run.failed",
+		"obs " + relayID + " ser 2026-10-28T10:03:20.000000Z af=true nc=false",
+	}
+	if got := nonTick(r); !slices.Equal(got, want) || r.f.assets[relayID].Late != 1 {
+		t.Fatalf("a late success: late %d, got\n%s\nwant\n%s", r.f.assets[relayID].Late, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

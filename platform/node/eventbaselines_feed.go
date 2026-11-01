@@ -75,8 +75,9 @@ type feedSink interface {
 //
 // AfterFailure: a failed SER collection of the asset (a collection.run
 // whose status is not ok or partial, or a run that failed before an outcome)
-// opens a gap at its received time. The next successful SER read closes it:
-// the sink gets Gap, and that read's rows are AfterFailure.
+// opens a gap at its received time, or at the watermark when it arrives
+// late, so gaps stay in order. The next successful SER read closes it: the
+// sink gets Gap, and that read's rows are AfterFailure.
 //
 // NotCounted: the rows of one SER read are taken together (they share an
 // invocation and a received time, and the last carries the read's alignment
@@ -333,7 +334,7 @@ func (f *eventFeed) takeHealth(it feedItem) {
 		st := adapter.Status(h.Details["status"])
 		it.ok = st == adapter.StatusOK || st == adapter.StatusPartial
 		it.fail = !it.ok
-		it.reason = h.Type + " " + h.Details["status"]
+		it.reason = h.Type + "." + h.Details["status"] // a C10 gap reason is a token
 	case HealthCollectionRefused, HealthCollectionNoDecision, HealthCollectionOutcomeUnknown, HealthCollectionQuarantined:
 		it.fail = true
 		it.reason = h.Type
@@ -370,14 +371,20 @@ func (f *eventFeed) pass(a *feedAsset) {
 		n++
 		late := !a.wm.IsZero() && !it.at.After(a.wm)
 		switch {
+		case late:
+			// A late failure still opens a gap, at the watermark, so the gaps
+			// stay in order and the next read is AfterFailure. A late
+			// success closes nothing: the rows it read were late too.
+			a.Late++
+			if it.fail && a.failedAt.IsZero() {
+				a.failedAt, a.failReason = a.wm, it.reason
+			}
 		case it.fail:
 			if a.failedAt.IsZero() {
 				a.failedAt, a.failReason = it.at, it.reason
 			}
 		case it.ok:
 			f.closeGap(a, it.at)
-		case late:
-			a.Late++
 		default:
 			if it.ev.Kind == event.KindSER {
 				if !it.at.Equal(readAt) {
