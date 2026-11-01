@@ -168,6 +168,8 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 	v1 := recordedRec(1, authz.BaselineEvent, testEventV1, "", 1)
 	v2 := recordedRec(2, authz.BaselineEvent, testEventV2, testEventV1, 2)
 	v3 := recordedRec(3, authz.BaselineEvent, testEventV3, testEventV2, 3)
+	// The node, upgraded to 0.8, records the baseline it already holds.
+	v1Late := recordedRec(99, authz.BaselineEvent, testEventV1, "", 1)
 	otherV1 := recordedRec(3, authz.BaselineEvent, testEventV1, "", 1)
 	otherV1.Target = &Target{AssetID: other}
 
@@ -175,10 +177,11 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 		"recorded, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
 		"a re-learn, then acknowledged": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded),
 			rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeSucceeded)),
-		"a denied acknowledgement of anything": join(ack08(testAsset, 30, testEventV1, "", OutcomeDenied)),
-		"an acknowledgement stamped 0.7":       join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded)),
-		"a configuration acknowledgement":      join(ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)),
-		"each asset's own record":              join(rec(v1, otherV1), ack08(other, 30, testEventV1, "", OutcomeSucceeded), ack08(testAsset, 31, testEventV1, "", OutcomeSucceeded)),
+		"a denied acknowledgement of anything":         join(ack08(testAsset, 30, testEventV1, "", OutcomeDenied)),
+		"an acknowledgement stamped 0.7":               join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded)),
+		"the upgrade path: stamped 0.7, then recorded": join(ackRun(testAsset, 30, authz.BaselineEvent, testEventV1, "", OutcomeSucceeded), rec(v1Late)),
+		"a configuration acknowledgement":              join(ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)),
+		"each asset's own record":                      join(rec(v1, otherV1), ack08(other, 30, testEventV1, "", OutcomeSucceeded), ack08(testAsset, 31, testEventV1, "", OutcomeSucceeded)),
 		// The window starts after the recording: nothing in recs shows the
 		// digest was not recorded.
 		"a window that starts after the recording":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
@@ -192,10 +195,11 @@ func TestEventAcknowledgementNeedsARecordedBaseline(t *testing.T) {
 		}
 	}
 	bad := map[string][]*Record{
-		"recorded after":          join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
-		"another digest":          join(rec(v1), ack08(testAsset, 30, testEventV2, "", OutcomeSucceeded)),
-		"recorded, then replaced": join(rec(v1, v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
-		"another asset's first":   join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		"recorded after":             join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
+		"stamped 0.8, then recorded": join(ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1Late)),
+		"another digest":             join(rec(v1), ack08(testAsset, 30, testEventV2, "", OutcomeSucceeded)),
+		"recorded, then replaced":    join(rec(v1, v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
+		"another asset's first":      join(rec(otherV1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v1)),
 		// The window starts after the first recording.
 		"replaced inside the window":        join(rec(v2, v3), ack08(testAsset, 30, testEventV2, testEventV1, OutcomeSucceeded)),
 		"replaced before the window":        join(rec(v2), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded)),
