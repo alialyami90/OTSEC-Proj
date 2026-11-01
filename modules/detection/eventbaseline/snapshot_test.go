@@ -1004,12 +1004,12 @@ func TestSnapshotSizes(t *testing.T) {
 // let a module import) less 64 KiB of headroom, less
 // checkpointEnvelope, the most C5's document may add around its contents,
 // and less feederState, the feeder's own state in the same record: the
-// previous read's alignment keys (asset.MaxReadRowsCeiling rows of 71 bytes,
+// previous read's alignment keys (asset.MaxReadRowsCeiling rows of 74 bytes,
 // C5's figure) and 16 KiB for the stream positions, the watermark and the
 // open gap.
 const (
 	checkpointEnvelope = 16 << 10
-	feederState        = asset.MaxReadRowsCeiling*71 + 16<<10
+	feederState        = asset.MaxReadRowsCeiling*74 + 16<<10
 	configRecordBytes  = 1536 << 10
 	checkpointRoom     = configRecordBytes - 64<<10 - checkpointEnvelope - feederState
 )

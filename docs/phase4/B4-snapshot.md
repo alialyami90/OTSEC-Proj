@@ -57,7 +57,7 @@ Mutation check (local, not committed): 42 mutants of `snapshot.go` that drop or 
 | Learner | **1,167,117** |
 | Detector | **910,592** |
 | `MaxSnapshotBytes` | 1,310,720 (1.25 MiB) |
-| What one checkpoint record leaves: `ConfigRecordBytes` (1.5 MiB) less 64 KiB headroom, a 16 KiB envelope allowance (C5 to confirm) and the feeder's state (2048 × 71 B of alignment keys + 16 KiB) | 1,329,152 |
+| What one checkpoint record leaves: `ConfigRecordBytes` (1.5 MiB) less 64 KiB headroom, a 16 KiB envelope allowance (C5 confirmed it on #369, with the snapshot carried raw as the record's capture) and the feeder's state (2048 × 74 B of alignment keys, C5's figure on #340, + 16 KiB) | 1,323,008 |
 
 One record per half (C5 on #364), so both halves never share a record during a re-learn.
 
