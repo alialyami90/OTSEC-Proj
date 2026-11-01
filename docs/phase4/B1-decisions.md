@@ -562,7 +562,7 @@ Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 647661
    - **How removal runs.** Removal runs in bounded steps with the `Discarder` pattern of rule 3, and each removal is counted in node status and a platform health event.
    - **No C8 record.** A checkpoint is not in the audit chain, so its removal needs no C8 record. C3 confirms this in review.
    - **When the newest checkpoint does not restore.** The node raises an alarm and writes an audit record. A learner half starts the audited re-learn of D4-26. A detector half is rebuilt from the acknowledged baseline, which is stored and hashed, so only the open windows and holds are lost, and the alarm says so (C5 on #367). The node never falls back to an older checkpoint.
-3. **Where D4-30 stands.** C4's option (a) is approved in direction (#364, comment 6476462128), with C5's layout of one self-contained record per half and a floor of about 8 MiB per asset. Six conditions apply. The C10 0.2 ceilings and the measured maximal-case figures are recorded when that PR merges.
+3. **Where D4-30 stands.** C4's option (a) is approved in direction (#364, comment 6476462128), with C5's layout of one self-contained record per half and a floor of about 8 MiB per asset. Six conditions apply. The C10 0.2 ceilings and the measured maximal-case figures are recorded when that PR merges. *(Recorded in D4-38.)*
 
 ## D4-33: "Phase 4 done" means all six items (owner, 2026-10-28)
 
