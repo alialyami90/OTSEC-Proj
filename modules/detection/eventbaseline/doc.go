@@ -184,7 +184,7 @@
 //     basis is documented-untested: an SEL-751 reports at most 96 Relay Word
 //     bits in SER (751 IM, Table 4.122), so at most 192 SER types. A chatty
 //     non-SEL Syslog source may exceed 512; types_overflow above zero then
-//     says the asset is only partly baselined, and the node reports it as
+//     says the asset is only partly baselined, for the node to report as
 //     status. Finish keeps the max_types with the highest count, ties by
 //     key, then leaves out the lowest counts until the record fits the byte
 //     cap, and counts every type left out. Left-out types are remembered by

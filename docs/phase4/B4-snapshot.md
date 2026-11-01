@@ -14,7 +14,7 @@ func RestoreLearner(c LearnerConfig, snap []byte) (*Learner, error)
 func (d *Detector) Snapshot(maxBytes int) ([]byte, error)
 func RestoreDetector(c DetectorConfig, snap []byte) (*Detector, error)
 
-const MaxSnapshotBytes = 8 << 20
+const MaxSnapshotBytes = 1280 << 10 // 1.25 MiB since D4-30 (C4, #369); 8 MiB before
 var ErrSnapshot, ErrSnapshotVersion, ErrSnapshotMismatch, ErrSnapshotTooLarge
 ```
 
@@ -26,7 +26,7 @@ var ErrSnapshot, ErrSnapshotVersion, ErrSnapshotMismatch, ErrSnapshotTooLarge
 - Body: varints (signed ones zig-zagged), and strings as a length and the bytes. Keys use `Key.String()`. Maps are written in key order and numbers in their shortest form; the reader refuses anything else. So **one state has exactly one encoding**, and `Restore` then `Snapshot` returns the bytes it was given (checked after every call in the tests).
 - Stamps (the learner's repeats window, the detector's recent occurrences) are written as the first value and then the steps. Event IDs are written as a number into a table of (node, stream) pairs, and the seq.
 - **Bound to what it was taken under.** The learner's snapshot holds the node, asset, baseline version, previous hash, byte cap, the learner's name and version and every parameter (as the JSON of `Params`). The detector's holds the baseline hash, the asset, the number of types and the activation time. Restoring under another is `ErrSnapshotMismatch`. A different format version or learner version is `ErrSnapshotVersion`. Both are `ErrSnapshot`, as is anything cut short, changed, of the other half, or not consistent with itself.
-- **Checked whole before use.** Every list is bounded by the caps (4096 types, 4096 window stamps, 4096 gap lengths, 32 event IDs, 16,384 new types) and by the bytes left, so no length in the input causes a large allocation. Counts must add up the way the code makes them add up (events = full + type-only + not-counted; a type's hours sum to its full count; gap counts sum to full - 1; the type counts sum to full + type-only until types are left out; and so on), keys are in order and once each, and a type of the baseline is never among the new types seen.
+- **Checked whole before use.** Every list is bounded by the caps (since D4-30: 512 types, 32 window stamps, 4096 gap lengths a type and 16,384 in all, 256 gaps, 32 event IDs, 2048 new types, 512 new-type pairs, 2048 held IDs, 16 streams) and by the bytes left, so no length in the input causes a large allocation. Counts must add up the way the code makes them add up (events = full + type-only + not-counted; a type's hours sum to its full count; gap counts sum to full - 1; the type counts sum to full + type-only until types are left out; and so on), keys are in order and once each, and a type of the baseline is never among the new types seen.
 
 ## What a restore guarantees
 
@@ -50,26 +50,32 @@ Mutation check (local, not committed): 42 mutants of `snapshot.go` that drop or 
 
 ## Sizes
 
-`go test ./modules/detection/eventbaseline -run TestSnapshotSizes -v -count=1` prints every figure.
+**Since D4-30 (C4, #369)** every list the state holds is capped, so the bound is proven, not argued. `TestSnapshotMaximalCase` builds the widest state each half's format allows: every list at the bound `Restore` reads it to, every string at the longest `Restore` takes (a key of 2 × 128 percent-escaped bytes, 16 streams of the longest node ID and stream), and every number at its widest varint. That state does not restore; it is an upper bound on every state that does.
+
+| Widest state | Bytes |
+| --- | --- |
+| Learner | **1,167,117** |
+| Detector | **910,592** |
+| `MaxSnapshotBytes` | 1,310,720 (1.25 MiB) |
+| What one checkpoint record leaves: `ConfigRecordBytes` (1.5 MiB) less 64 KiB headroom, a 16 KiB envelope allowance (C5 to confirm) and the feeder's state (2048 × 71 B of alignment keys + 16 KiB) | 1,329,152 |
+
+One record per half (C5 on #364), so both halves never share a record during a re-learn.
+
+Reachable figures, `go test ./modules/detection/eventbaseline -run TestSnapshotSizes -v -count=1`:
 
 | State | Bytes |
 | --- | --- |
 | GT-INJ learner after the 14 days | 1,235 (7 types) and 1,576 (5 types) |
-| GT-INJ detector, fresh | 229 and 221 |
-| Learner at the 4096-type ceiling, names at the 128-byte limit, 30 occurrences each | **1,946,050** (475 per type) |
-| One type at the most the caps let it hold: a full repeats window of 4096 stamps | 16,931 |
-| One type at the most the caps let it hold: 4096 distinct gap lengths (built over years of simulated time; not reachable in 14 days) | 16,958 |
-| Detector, baseline of 1910 types (the most that fit the 512 KiB record), fresh | 15,454 |
-| Same, every type's repeats window full (6 stamps and IDs) | 340,931 |
-| Same, plus the new-type memory full (16,384 types) and a held break for each | 1,340,486 |
-| Detector with 16,384 new types of 128-byte names, and their held breaks | above 8 MiB: refused |
+| GT-INJ detector, fresh | 231 and 223 |
+| Learner at the 512-type ceiling, names at the 128-byte limit, 30 occurrences each, 512 more left out | 251,843 (491 per type) |
+| One type with a full repeats window (32 stamps) | 704 |
+| One type with 4096 distinct gap lengths (built over years of simulated time; not reachable in 14 days) | 16,958 |
+| Detector, baseline of 512 types, fresh | 4,272 |
+| Same, every type's repeats window full (6 stamps and IDs, `repeats_n` 5) | 87,795 |
+| Same, plus 2048 new types of 128-byte names and their pairs at the cap | 142,077 |
+| A flood of 114,688 distinct new types (`TestPairCapFloodStaysBoundedAndCountsStayExact`) | 53,912 |
 
-**The largest snapshot is `MaxSnapshotBytes`, 8 MiB (8,388,608 bytes).** That is the size B5 can bound the checkpoint at. What reaches it:
-
-- *Learner.* The fixed part at 4096 types is about 2 MB. What adds to it is the repeats window and the gap lengths of a type, 17 KB each at the caps, so the limit is reached with about 370 types at that maximum. A window of 4096 stamps needs 4096 occurrences of one type inside the repeats window (a flood). 4096 distinct gap lengths needs 4097 occurrences at least 5.7 hours apart, which no 14-day period holds: at `periodic_spread_pct` 10 a type that is still held as periodic has at most about 550 distinct gap lengths in 14 days (2 KB). The state itself has no byte bound beyond these caps; the limit is the bound.
-- *Detector.* Bounded by the baseline (at most what fits 512 KiB, so about 2000 types), the new-type memory (16,384 keys) and the pair cap (`MaxNewTypePairs`, 4096; F1 below). With the cap, a flood of 114,688 distinct new types leaves a snapshot of 553 KB.
-
-A state above the limit is not truncated. `Snapshot` returns `ErrSnapshotTooLarge`, the object is unharmed, and the node keeps its previous snapshot and raises a health event. A restart then resumes at the older snapshot's position and replays from there, which is correct because the output is deterministic.
+Before D4-30 the learner at the 4096-type ceiling measured 1,946,050 bytes and the worst cases at the configured ceilings were past 8 MiB, so the limit was the only bound. A state above the caller's bound is still not truncated: `Snapshot` returns `ErrSnapshotTooLarge`, the object is unharmed, and the node keeps its previous snapshot and raises a health event.
 
 ## F1: the detector's pairs, and how they are bounded (B1's ruling, D4-26)
 
@@ -78,9 +84,9 @@ A state above the limit is not truncated. `Snapshot` returns `ErrSnapshotTooLarg
 B1's four rules, and what was built:
 
 1. A record whose alarm hold ended and that lists no held break is dropped. A missing record and an expired empty one act alike, so no output changes. Test: `TestPairSweepChangesNoOutput` (the output equals that of a detector with no cap and no sweeping, and the capped detector without the sweep differs, so the test is not vacuous).
-2. The rest are capped at `MaxNewTypePairs` (4096), a constant beside the new-type memory's 16,384. The sweep covers new-type records only: an absence alarm is stamped with its deadline, so dropping an absence record is not output-neutral.
-3. Past the cap no break is lost silently or re-alarms without bound. A break held with no record is counted (`d.beyond`); when the cap is still reached after pass 1, pass 2 drops records whose hold ended that list breaks, and adds the breaks they listed to the count. The next alarm ends its observation with "; N more held breaks beyond the cap of M tracked new types are not listed" and resets the count. Test: `TestPairSweepDropsListedPairsLast`.
-4. A flood of 114,688 distinct new types keeps the records at the cap and the snapshot at 553 KB, and the counts stay exact: over three floods (154,690 breaks) every break is an alarm, a break listed by an alarm or a record, or a break counted and stated. Test: `TestPairCapFloodStaysBoundedAndCountsStayExact`.
+2. The rest are capped at `MaxNewTypePairs` (4096 when built; 512 since D4-30), a constant beside the new-type memory (16,384; 2048 since D4-30). The sweep covers new-type records only: an absence alarm is stamped with its deadline, so dropping an absence record is not output-neutral.
+3. Past the cap no break is lost silently or re-alarms without bound. A break held with no record is counted (`d.beyond`); when the cap is still reached after pass 1, pass 2 drops records whose hold ended that list breaks, and adds the breaks they listed to the count. The next alarm ends its observation with "; N more held breaks beyond the cap of M tracked new types are not listed" and resets the count. Since D4-30 the note reads "; N more held breaks beyond the detector's caps are not listed", because it also counts breaks held past the detector-wide budget of 2048 listed IDs. Test: `TestPairSweepDropsListedPairsLast`.
+4. A flood of 114,688 distinct new types keeps the records at the cap and the snapshot at 553 KB (54 KB since D4-30), and the counts stay exact: over three floods (154,690 breaks) every break is an alarm, a break listed by an alarm or a record, or a break counted and stated. Test: `TestPairCapFloodStaysBoundedAndCountsStayExact`.
 
 What changes for an operator: in a flood the alarm lists fewer held events than before, and says how many it does not list. Sweeps run at most once per alarm hold. The snapshot carries the next sweep time, the count not yet stated and each record's birth, and a restore rebuilds the record count and refuses a state where a record is in the wrong place. `ErrSnapshotTooLarge` stays as the backstop.
 
