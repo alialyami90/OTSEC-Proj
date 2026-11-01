@@ -38,8 +38,9 @@ const (
 	ActionConfigReadsRemoved Action = "config.reads_removed"
 )
 
-// The baseline record action (0.8, D4-26). It is written by the node, in the
-// same commit step as the baseline record it names: both or neither. A
+// The baseline record action (0.8, D4-26). It is written by the node after
+// the baseline record it names is stored, and a stored baseline whose record
+// is missing is recorded at the next start (D4-26 item 4). A
 // configuration baseline is a person's acknowledgement of a snapshot that is
 // already stored (config.baseline_acknowledged names it), and an event
 // baseline is a record the node's learner writes with no person in the
@@ -508,7 +509,8 @@ func ApprovalCovers(approval, detected *Record) error {
 // VerifyConfig checks the configuration records of one node in chain order
 // (0.5; 0.6 changes the alarm rule below; 0.7 adds the read records after the
 // list), so that a node cannot silence an alarm with an approval that does not
-// exist or does not cover it:
+// exist or does not cover it. Each record must already pass Validate: a
+// configuration record with no Config or Target can make it panic.
 //
 //   - each config.change_approved and config.baseline_acknowledged follows
 //     the collector's acceptance it names (decision_seq): an allowed
