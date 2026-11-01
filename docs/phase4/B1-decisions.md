@@ -450,3 +450,145 @@ Date: 2026-10-28. Sources: B4's two readings on #287, B6's GT-INJ regeneration (
   3. **Close's checkpoint is bounded in bytes but not in time.** `wal_checkpoint(TRUNCATE)` on `context.Background()` parks in `FlushFileBuffers`, which no context can cancel. That is acceptable at shutdown, where the service manager's stop timeout is the bound. B5 records it in the store's README under F-016.
   4. A run that times out at 20 minutes is real, never a flake, and it is handled under D4-5.
 - **Owners.** B1 makes the `ci.yml` change in this PR. B5 and B6 review it. B5 owns items 2 and 3.
+
+## D4-23: a configuration run is all or nothing, and "Invalid Command" is never a language refusal (C2 0.6, C9 0.2, #331)
+
+Date: 2026-10-28. B6 raised two items in the review of #331 at 4be058c. B2 fixed both at 5a10fb8, and B6 re-reviewed and accepted 8e57949.
+
+1. **The device-error check comes before the language check.** On `SHO P 1`, the language gate's form, a reply of "Invalid Command" was refused as `refused.language_not_english` with an empty detail. That code suspends the asset for language. "Invalid Command" is an English reply from the device. So on every form that serves a check, the gate form included, the adapter tests for it before the parse and the language check, and it reports `failed.device_error`. The gate form is not carved out of rule 4, because a carve-out would leave the wrong order in place for the next form.
+2. **A run's result has exactly two shapes, and C2 holds it, not only the adapter.** `checkRun` accepts:
+   - `ok`, with every step sent once and in order, and one parsed configuration record per step, in step order;
+   - not `ok` (failed or refused), with a prefix of the steps sent and no record.
+
+   `partial` is not a run outcome, and a configuration record that did not parse is invalid. A reply the rule cannot read ends the run with `failed.config_unparsable` and no record. A partial snapshot would give C9 false differences against the baseline, and a snapshot is whole or absent. The two invalid examples are a failed run with 24 records and a `partial.parse_errors` run.
+- **Not blocking (B6).** `failed.config_unparsable` is still accepted on a single SER read. B2 may close that in a follow-up.
+- **Approved.** C2 0.6 and C9 0.2 merged as #331 (6c33f14). The next steps belong to others. B2 adds `sel751.Hosts` and a measured maximal result frame. B3 builds the collector run wiring under C7 0.7 (#334), including B5's `checkReply` fix: it accepts any contract the node accepts (`AcceptsContract`), so a mixed 0.6/0.7 node and collector do not reply `ErrProtocol`.
+
+## D4-24: the collector client's deadline, the clear's actor, and acceptances from an untrusted collector (#339, relay PR 2a)
+
+Date: 2026-10-28.
+
+1. **`collectorclient.Do` gets a deadline for each request, not a fixed constant.** The deadline is the collector's own bound for that request plus 10 s. For an invocation, that bound is the operation's or run's total limit from the signed register (`Limits.ForRun` for a run), which gives the 310 s or more that C7 0.7 (#334) expects. For the credential and admin-relay kinds, it is their existing reply bound. When the deadline passes, the request fails closed with `ErrTimeout` and is not retried in the same session. B3 builds it in the C7 0.7 collector PR, together with `AcceptsContract` in `checkReply`.
+2. **On `quarantine.cleared` the actor stays the node, so C8 does not change.** The node performs the clear. The person who signed the request is recorded in `requested_by`, and the record links to the collector's accepted admin-signed request by the hash of the payload the collector verified, not by a later read of the file. Relay PR 2b only adds the refusal of unsigned clear files when any endpoint is not lab or simulated.
+3. **An acceptance from a collector the node did not trust is never acted on (B6's high finding on #339, A3's item 3 on #181).** Before this fix, a clear that a restored collector accepted was applied once the collector was reinstalled and the reset acknowledged. Two rules close this, and both are required:
+   - **(a) Taint at fold time.** A relay entry is tainted if the restored hold was in force when its acceptance was folded, that is, if `Restored` was non-nil after that record (B3's refinement), or if its `collector_seq` is at or below the high mark. The taint is derived from the chain, so a restart keeps it.
+   - **(b) Bind to the install key.** An acceptance is acted on only while its `install_key_id` is the trusted key. A reinstall retires every acceptance from the old key, and going back to an earlier key does not revive them.
+
+   A tainted or retired entry is refused, not left pending. Its status and the health line tell the administrator to sign the request again. Tests: B6's probe (a restored acceptance, then a reinstall, then an acknowledged reset, and nothing is cleared), (b) on its own, and the node's own `applySeqAck` key check reached through the relay. B3 confirmed the rule.
+
+## D4-25: a configuration snapshot is bounded in C9, so a valid run always fits the record cap (#338)
+
+Date: 2026-10-28.
+
+- **What B2 measured (simulated, `config.FromResult`).** With S22's 8,734 settings and values that fill the 512 KiB run limit, the stored record (snapshot plus transcript) is 1,210,476 bytes, which is 77% of the 1.5 MiB cap. But nothing bounds the number of settings. A transcript at the byte limit packed with one-character settings gives 65,822 settings and a record of 2,295,738 bytes. C5 would refuse that commit, and the run would store nothing.
+- **Decision: C9 0.3 bounds a snapshot.** The bound is set by setting count, starting from S22's count plus a margin that B2 proposes (25% to start), with a byte bound on the snapshot as encoded as the backstop. Both are chosen so that a record at both bounds, with a full 512 KiB transcript, fits the 1.5 MiB cap with room to spare, and tests pin this. A run over either bound fails as `failed.config_unparsable`. The detail names the bound, the transcript is kept, and no snapshot is made.
+- **Why not accept a run that stores nothing, or raise the cap.** A run that passes every check and is then refused at commit drops evidence silently (brief §1.4). A larger cap only moves the edge, because the transcript limit does not bound the setting count. A relay that prints far more settings than S22 lists is outside our evidence, so it should fail visibly, with its bytes kept.
+- **Owners.** B2 drafts C9 0.3 as its own contract PR, which deletes `TestConfigDenseRecordExceedsTheCap`. B5 and B6 review it, and B1 approves. #338 merges with the gap pinned and stated.
+- **Amendment (B1 on #345).** The fit is measured on the record the node actually commits, with `store.Record.Bytes` (event, capture and source cursor). It is not measured as snapshot plus transcript. It leaves at least 64 KiB of headroom under the cap. #345 derives `MaxSnapshotBytes` as the record cap, less the run's `max_total_bytes`, less 64 KiB (960 KiB), and a test fails if the register or the node's `ConfigRecordBytes` drifts from it.
+
+## D4-26: the event-baseline feeder keeps its state across a restart, and the recording is in the audit chain (#340)
+
+Date: 2026-10-28.
+
+1. **Learner and detector state: snapshots plus a required C5 consumer (B5's option A).**
+   - **The snapshot API.** B4 adds `Snapshot` and `Restore` to the learner and the detector. The format is deterministic, versioned and bounded, and B4 states the largest snapshot at the 4096-type ceiling. Restoring at any point gives byte-identical output to a run that never stopped.
+   - **How the node uses it.** The node writes the snapshot atomically, together with the per-stream positions that the snapshot reflects. After the snapshot is durable, it commits the required `node-eventbaseline` consumer. On restore, each stream resumes from the later of the snapshot's position and the consumer's cursor, so a crash between the two steps counts nothing twice.
+   - **A snapshot that does not restore** (corrupt, an unknown version, or other `Params`) raises an alarm and starts an audited re-learn that names the replaced baseline. It is never a silent restart.
+   - **Rejected:** keeping 14 days of events (an unbounded replay, and a flood fills the quota), and restarting the period (a node that is updated weekly never learns).
+2. **C8 0.8 adds `config.baseline_recorded`.** Its fields are asset, kind (event, or configuration where that applies), digest, version, and previous (the replaced digest on a re-learn). It is written in the same commit step as the baseline record. verification.md requires the baseline to be "recorded once, versioned and hashed in the audit chain", and the C5 record alone does not show a baseline that was recorded but never acknowledged. B3 drafts it, B4, B5 and B6 review it, and B1 approves.
+3. **Order.** B5 builds the configuration and layout, then the merge reader with its watermarks, then the lifecycle with learner state in memory only. That stage is not shippable, and V-M4 is not claimed on it. The snapshot and the restart tests follow once B4's API lands. B4's snapshot PR and C8 0.8 run alongside.
+4. **Amendments after review (B3's #346, B4's F1 on #344).**
+   - **C8 0.8 is event-only.** `config.baseline_recorded` with `kind: configuration` is refused until a writer for it exists. A succeeded event-kind `config.baseline_acknowledged` must name a `baseline_digest` that an earlier `config.baseline_recorded` for the same asset and kind recorded and no later one replaced. `VerifyConfig` refuses any other, and tests cover a digest that was never recorded and one that was replaced. `correlation_id` is proposed by B4 and B5 on #346. It is deterministic, derived only from data already in the chain or in the C10 record, and the same on a recording and on its acknowledgement. *(The last clause is superseded by D4-29.)*
+   - **Ordering across two databases, which replaces "the same commit step" in item 2 (B5 and B3 on #346).** The baseline lives in the configuration database and the audit record in the audit database, so one commit step cannot cover both. The node stores the baseline first, then writes `config.baseline_recorded`. At start it folds the chain and writes any missing record for a stored baseline. A baseline whose record is not yet in the chain is never shown as awaiting acknowledgement, and it cannot be acknowledged. A crash test covers each of the two points.
+   - **The acknowledgement window (B1 on #346, from B6's review of #337).** `VerifyConfig` may receive records that start partway through the chain. It applies "a succeeded event acknowledgement names a recorded digest" only when the records hold that asset's version-1 `config.baseline_recorded`. Otherwise it refuses only a digest that a recording inside the records has replaced. A test covers each side.
+   - **The detector's per-(rule, type) hold records are bounded (B4's F1).** Before this, a flood of distinct new types grew `Detector.pairs` and the snapshot without bound: 4.8 MB at 114,688 types, and refused at 245,760. A pair whose hold has ended and that holds no events is dropped, which changes no output, and a test shows it. What remains is capped, with the cap stated in the package doc. Past the cap, every departure still counts toward an alarm or the held notice. That alarm or notice states how many it does not list, and it never re-alarms without bound or drops an alarm. B4 builds it as a small PR, and B5 and B6 review it.
+
+## D4-27: a run's limits come from the signed register only (C7 0.7, #334, #341)
+
+Date: 2026-10-28. This is a ruling. Approval of C7 0.7 is pending on #341.
+
+- **What C7 0.7 does.** A run request names a register run in `operation_id`, with no new field. Every run check comes before any credential, failed-auth floor or interval check (B6's `TestConfigRunRefusalsComeBeforeTheCredential`). The run's access level comes from `RunBody.AccessLevel`.
+- **Limits.** A run's limits are `Limits.ForRun` from the signed register. The collector configuration cannot change them, not even to tighten them. A local override would make a run behave in a way that was never verified, and a tighter deadline only turns a valid read into `failed.timeout` on every poll. A site that needs a lower bound ships a new register revision, which is signed and reviewed.
+- **Deadlines (D4-24 item 1).** `run_deadline_ms` goes on every run-kind request stamped 0.7 or later, operations included (120 s by default). The node waits `run_deadline_ms` plus 10 s, and `ErrTimeout` wraps `ErrOutcomeUnknown`.
+- **Mixed versions.** `collectorclient.checkReply` accepts any contract the node accepts (`AcceptsContract`). Before this, a reply with a different minor was `ErrProtocol` (B5 on #334). The upgrade order is the node first, then the collector.
+- **Hosting.** The collector holds each shipped profile to `sel751.Hosts` (#338), so a profile cannot name an operation no adapter hosts. A run of only Level 0 steps is already refused (`refused.not_invocable`).
+- **Approval.** C7 0.7 is approved when B2, B5 and B6 accept #341 and CI is green on its head.
+
+## D4-28: the owner pauses all agents, and the B team hands off to the C team (owner, 2026-10-28)
+
+- **The pause.** At 16:39Z the owner asked every agent to pause at a safe checkpoint. Agents start no new work, commit or save what is in progress, and merge nothing until the owner resumes.
+- **The checkpoint.** At 16:46Z the owner issued the restart-safe generation checkpoint: B1 to B6 hand off to C1 to C6, with the same roles, paths and rules. Each B agent writes `handoffs/C{n}-handoff.md`. B1 rewrites `handoffs/HANDOFF-SUMMARY.md`, creates `handoffs/GENERATIONS.md`, and updates the names in `CLAUDE.md` and `README.md`.
+- **What may merge during the pause.** Only checkpoint PRs, which change Markdown files under `handoffs/` (plus this file and the name updates). They merge on review (D3-13). Feature and contract PRs stay open as they are.
+- **Where a handoff file rides.** Where an agent's only branch is the head of an open code PR, B1 carries that agent's handoff file unchanged in B1's checkpoint PR, so that it does not wait on the code PR.
+- **Numbering.** Phase 4's decisions continue in this file and numbering under the C team (D4-29 onwards), as the checkpoint instruction says.
+- **The pause is lifted.** At 17:11Z the owner said "Resume". The B agents resume from their handoffs' next actions, and feature and contract PRs merge again under D2-13. The checkpoint is still finished first. At 17:13Z the owner chose to open the C threads now. From then on the B agents start no new feature work. They push what they have, finish the reviews already in progress, and answer the C agents' ack questions. The C team takes over when every ack is confirmed.
+
+## D4-29: the `correlation_id` of `config.baseline_recorded` (C8 0.8, #346)
+
+Date: 2026-10-28. C1, on C3's proposal in #361 (comment 6475983773), which matches B5's proposal and B4's leaning on #346.
+
+- **The recording.** The `correlation_id` of a `config.baseline_recorded` record is the 64 hexadecimal digits of its `baseline_digest`, without the `sha256:` prefix. A C10 digest is 71 characters, and C8's `idPattern` allows at most 64 (`contracts/audit/audit.go:38`). The value is deterministic, and it stays the same across a restart and across the repair at start.
+- **The acknowledgement.** A `config.baseline_acknowledged` record keeps the signed C7 request ID as its `correlation_id`, as today (`contracts/audit/audit.go:228`).
+- **The join.** A recording and its acknowledgement join on `baseline_digest`, which both already carry.
+- **Superseded:** D4-26 item 4's "the same on a recording and on its acknowledgement". The join that clause wanted already exists through `baseline_digest`. Making the acknowledgement's ID equal would change how every acknowledgement joins to its request, or would need a second ID field in C8.
+
+## D4-30: the learner and the detector checkpoint at every configured ceiling (D4-26, #344, #343)
+
+Date: 2026-10-28. C1, on C4's ack question 1 (#357, comment 6476181758).
+
+- **The finding (C4, desk measurement).** C5 stores a checkpoint as one configuration record, capped at `ConfigRecordBytes` (1.5 MiB). The learner at the 4096-type ceiling with 128-byte names measures about 1.9 MB, so it could not be checkpointed. The detector with every cap full measures about 1.3 MB, close to the cap.
+- **The rule.** At every ceiling the configuration allows, the learner and the detector must checkpoint. A test that builds the maximal case and measures it against the cap the node uses proves it, as D4-25 did for C9.
+- **The means** are C4's and C5's to choose on #344 and #343, with measurements. Either a C10 ceiling (for example the name length or the type count) is lowered until the worst case fits `ConfigRecordBytes` with headroom, or C5 splits a checkpoint over several records. C1 approves the choice.
+- **Until then** an oversize snapshot is refused with `ErrSnapshotTooLarge` and raises an alarm. It never fails silently. A byte-bound parameter on `Snapshot` may go into #344, with `MaxSnapshotBytes` kept as the hard ceiling.
+
+## D4-31: the C team takes over (owner and C1, 2026-10-28)
+
+- **Branches.** At 17:37Z the owner chose, on a decision card in the C1 thread, to let C3 push to B3's existing branches for #341, #334 and #346, so that their review history stays in place. Force-push is still denied, so a branch is updated by merging `origin/main` into it.
+- **Reviews.** B6 re-reviewed #347 at `714203e` (PASS on the code, comment 6475908745, recorded in `C6-handoff.md` by #359). C5 has since pushed `fc31c79` for C3, so that commit needs a role 6 review. Every role 6 review from here, #346 and `fc31c79` included, is C6's.
+- **HR-11.** HR-11's row (#352) closes only when both conditions hold:
+  - C6 has classified `TestUnknownSpentAcrossRestarts/seed_1`, which failed once on hosted Windows, on #346's head `95b91cd`, with a UDP marker reported lost without a count, and passed on the re-run. C6's first reading of the log: the counts reconcile (180 = 74 stored + 106 dropped) and the marker is in the store, so the test's loss detector may have raised a false alarm. *(Classified in D4-36.)* C6 owns the classification. C4 supports it as the receiver's owner and fixes any product fault.
+  - The row names D4-21's pass criterion as a gate before the first `device-observed` listener, with #336 as its evidence (C6, comment 6476212811 on #352).
+- **Cutover.** All six acks are on `main`: C1 #355, C2 #360, C3 #361, C4 #357, C5 #358 and C6 #356. Each question is answered on its PR. The C team holds the six roles from here, and the B threads can be resolved.
+
+## D4-32: the event-baseline checkpoint in the configuration class, and its remover rule (#340, slice 1c)
+
+Date: 2026-10-28. C1, on C5's two questions on #340 at `438062e` (comment 6476619232).
+
+1. **A C5 minor, folded into C5 0.7.** The configuration class holds C9 snapshots and differences and C10 baselines (`contracts/store/class.go:32`, `commit.go:50`). Retention is decided by class, and D4-20's remover refuses any record of another class. So adding the node's checkpoint document, `otsec.eventcheckpoint/0.1`, changes what the class means, even though no wire field changes. C5 0.7, which already carries D4-20 rules 1 and 2, adds three things: the class text names the checkpoint as a node document of the class; the validator tells the three kinds apart; and the remover rule in item 2. Reviewers: C2 and C4 as consumers, C6's contract tests, and C3 for the retention rule.
+2. **Superseded checkpoints are removable (a D4-20 amendment).** A checkpoint is working state, not evidence.
+   - **When it may be removed.** A checkpoint of one half and asset may be removed once three things hold: a newer checkpoint of the same half and asset has committed; the `node-eventbaseline` cursor has been saved after that commit; and the newer one is the checkpoint the node would restore. *(Defined in D4-36.)* After the cursor moves, the older checkpoint's restart point may already be pruned, so the older checkpoint cannot serve as a fallback.
+   - **What is kept.** The newest checkpoint of each half and asset is kept while that half is running. The remover refuses it, any C9 or C10 record, and any held record.
+   - **A finished learner (C5 on #367).** When a learner finishes, its last checkpoint is never superseded. It becomes removable once the `config.baseline_recorded` of the baseline that learner produced is in the audit chain. From then on the node does not restore it. The baseline record, stored before the C8 record (D4-26 item 4), is what the node keeps.
+   - **How removal runs.** Removal runs in bounded steps with the `Discarder` pattern of rule 3, and each removal is counted in node status and a platform health event.
+   - **No C8 record.** A checkpoint is not in the audit chain, so its removal needs no C8 record. C3 confirms this in review.
+   - **When the newest checkpoint does not restore.** The node raises an alarm and writes an audit record. A learner half starts the audited re-learn of D4-26. A detector half is rebuilt from the acknowledged baseline, which is stored and hashed, so only the open windows and holds are lost, and the alarm says so (C5 on #367). The node never falls back to an older checkpoint.
+3. **Where D4-30 stands.** C4's option (a) is approved in direction (#364, comment 6476462128), with C5's layout of one self-contained record per half and a floor of about 8 MiB per asset. Six conditions apply. The C10 0.2 ceilings and the measured maximal-case figures are recorded when that PR merges.
+
+## D4-33: "Phase 4 done" means all six items (owner, 2026-10-28)
+
+- **The answer.** At 18:10Z the owner answered the question asked at 15:40Z: "means all phase 4 items". Phase 4 is done only when all six items in [the Phase 4 briefs](../agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27) are done, not at the first exit gate.
+- **What stays the same.** The first exit gate (items 1 and 2) is still a checkpoint, and C1 still writes `docs/phase-4a-exit.md` for it. Passing it does not close Phase 4.
+- **The rest of the order.** Items 3 to 6 follow in the order of the briefs. Each is briefed only after the previous gate passes, and IDS (item 4) waits until the owner names the sites' protocols.
+
+## D4-34: Phase 4 goes item by item, with the owner's check at the end of each (owner, 2026-10-28)
+
+- **What the owner said.** At 18:11Z: "work on them item by item". At 18:12Z: "stop at the end of each item to check with me".
+- **The rule.** Each Phase 4 item is finished, gated and reported before the next one starts. At the end of each item, C1 reports to the owner and waits for their go before any agent starts the next item's briefing, contracts or code. An agent with nothing queued for the current item does reviews, verification or preparation for it, and does not start work on a later item.
+- **Items 1 and 2 finish together.** These two were briefed together, under one gate, because they share the store and the audit chain. At 18:14Z the owner chose "Finish 1 and 2 together" on C1's decision card. They pass the first exit gate as one unit, and C1 checks with the owner at that gate. From item 3 on, each item is briefed, built, gated and checked with the owner before the next starts.
+
+## D4-35: the acknowledgement window, tightened (C8 0.8, #346)
+
+Date: 2026-10-28. C1, on C3's push `f8c615d` to #346, confirming C3's tightening of the D4-26 amendment (the acknowledgement window).
+
+- **The rule.** When `recs` holds a `config.baseline_recorded` of the asset before a succeeded event acknowledgement stamped 0.8 or later, that acknowledgement must name the digest of the asset's latest such recording before it. When `recs` holds no recording of the asset before it, the acknowledgement is refused only if `recs` holds the asset's version-1 recording, as the amendment says.
+- **What it replaces.** The amendment's "otherwise refuse only a digest that a recording inside `recs` has replaced". A recording inside the window replaced whatever was current then, so no other digest can be the current baseline, whether or not `recs` names it.
+- **The race.** A person who acknowledges a baseline that a re-learn has just replaced is refused, and acknowledges again against the baseline they now see. This fails closed, as D4-20's race does.
+
+## D4-36: follow-ups to D4-31 and D4-32 (C6's reviews of #367)
+
+Date: 2026-11-01. C1, on C6's reviews of #367 (at `8b6c9d7` and `ccf3a8d`).
+
+1. **`seed_1` is classified (D4-31, HR-11).** The `TestUnknownSpentAcrossRestarts/seed_1` failure on #346's `95b91cd` was a defect in role 6's test, not a product fault. The loss detector read the counts before the goroutine stacks, so a commit that ended between the two reads looked like a held message, and its idle counter never reset on an unheld poll. #366 fixes the test (merged as `cf856e1`, accepted by C4 as the receiver's owner), and F-018 in `docs/verification.md` records it. HR-11's row (#352) now waits only on D4-21's criterion.
+2. **"The checkpoint the node would restore" (D4-32 item 2) means the newest committed checkpoint of that half and asset, chosen by commit order and without decoding it.** This is C6's reading (a). When the newest committed checkpoint does not restore, the older one is still removable once the cursor has been saved after the newer commit. The node raises the alarm and rebuilds or re-learns as D4-32 says, and never falls back. C6's C5 0.7 contract tests pin this with a case in which the newest checkpoint is committed and corrupt.
+3. **What a detector rebuild repeats (D4-32 item 2).** A detector rebuilt from the acknowledged baseline loses `newSeen`, the pair holds and the per-hold counts. So a new type that alarmed before the rebuild alarms again when next seen, and a (rule, type) pair can alarm again inside its `alarm_hold_s` and pass `max_alarms_per_hold` across the rebuild. This is the stated failure behaviour. The rebuild alarm names both effects, and V-M4's accounting does not count those repeats as detector faults.
+4. **The record.** The owner merged #367 at `643f444` on 2026-11-01. C6 had reviewed it up to `ccf3a8d`, so C6 reviews D4-34's completion (`f0a93eb`) and D4-35 (`643f444`) after the merge. Any finding is fixed by a later entry.

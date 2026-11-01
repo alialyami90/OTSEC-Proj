@@ -171,7 +171,7 @@ PARAMS = {
     # is absent when not seen within m + absence_tolerance_pct of m, rounded
     # up (C10 Tolerance).
     "periodic_min_occurrences": 11, "periodic_spread_pct": 10, "absence_tolerance_pct": 50,
-    "time_clock": "received", "max_types": 4096,
+    "time_clock": "received", "max_types": 512,
     # Alarm bounds (C10): one alarm per (asset, rule, type) per alarm_hold_s,
     # at most max_alarms_per_hold per asset per hold. The expected alarms
     # below never meet either (test_events_expected_alarms_are_hold_free).

@@ -36,6 +36,16 @@ type Runner interface {
 	Run(ctx context.Context, plan RunPlan) RunReport
 }
 
+// Hoster is optionally implemented by a Runner that can say which operations
+// and runs its adapter hosts. decideRun asks it before it reads a
+// credential, so a register run the adapter would not run (it hosts only the
+// runs it was built and tested for) is refused as not_invocable and costs
+// no secret read, floor entry or interval. A Runner without it is trusted
+// to refuse in Run, as before.
+type Hoster interface {
+	Hosts(operationID string) bool
+}
+
 // RunPlan is one run that passed every check. Everything in it comes from
 // the collector's configuration, its verified register and its stores; from
 // the request only the operation, its parameters and the credential
@@ -252,7 +262,14 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 		var invID string
 		invID, work, r = p.decideRun(req, seq)
 		if r == nil {
-			return authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: invID, CollectorSeq: seq}, work
+			reply := authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, Status: authz.ReplyAccepted, InvocationID: invID, CollectorSeq: seq}
+			if w, ok := work.(*runWork); ok && authz.NamesRuns(req.Contract) {
+				// The bound the node holds its wait to (D4-24). Only a
+				// request stamped 0.7 or later gets it: a node built for
+				// 0.6 decodes replies strictly.
+				reply.RunDeadlineMS = uint64(w.plan.Invocation.Limits.DeadlineMS)
+			}
+			return reply, work
 		}
 	case req.Kind == authz.KindAssetClearSusp && req.AssetClearSusp != nil:
 		r = p.clearAsset(req)
@@ -446,7 +463,11 @@ func (p *Pipeline) install(body authz.CredentialInstallBody) error {
 //     adapter is hosted.
 //  6. The operation is invocable, read-only, in the operate phase, with
 //     parameters that render, and a credential exactly when it needs one
-//     (RunBody.ValidateAgainst).
+//     (RunBody.ValidateAgainst). A register run (C7 0.7) takes no
+//     parameters, its steps are each held to the same rules, its level is
+//     its highest step's, and a request stamped before 0.7 may not name
+//     one (CollectorRequest.ValidateRun). If the runner says which
+//     operations it hosts (Hoster), the name must be one of them.
 //  7. The invocation the collector builds passes C2's checks against the
 //     asset and profile (Validate, ValidateWith, CheckAgainst): asset not
 //     suspended, a binding that compares something, a credential only where
@@ -485,10 +506,16 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		return "", nil, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: fmt.Sprintf("this collector hosts no adapter for family %s", e.Profile.ProductFamily)}
 	}
 	// 6.
-	if err := body.ValidateAgainst(m); err != nil {
+	if err := req.ValidateRun(m); err != nil {
 		return "", nil, err
 	}
-	op, _ := m.Operation(body.OperationID)
+	level, err := body.AccessLevel(m)
+	if err != nil {
+		return "", nil, err
+	}
+	if h, ok := p.cfg.Runner.(Hoster); ok && !h.Hosts(body.OperationID) {
+		return "", nil, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: fmt.Sprintf("this collector's adapter for family %s does not host %s", e.Profile.ProductFamily, body.OperationID)}
+	}
 	// 7.
 	inv, err := p.invocation(req, e, ep)
 	if err != nil {
@@ -515,7 +542,7 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 	if body.CredentialRef != "" {
 		use := authz.Use{
 			NodeID: p.cfg.NodeID, AssetID: body.AssetID, EndpointID: ep.ID,
-			Transport: authz.Transport(ep.Transport), AckScope: ackScope(&ep), AccessLevel: op.AccessLevel,
+			Transport: authz.Transport(ep.Transport), AckScope: ackScope(&ep), AccessLevel: level,
 		}
 		h, ref, err := p.cfg.Creds.Acquire(body.CredentialRef, use, pkg)
 		if err != nil {
@@ -708,6 +735,16 @@ func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.
 		CredentialRef: req.Run.CredentialRef,
 		Limits:        p.cfg.Limits,
 	}
+	_, m, _ := p.cfg.Registers.Active(e.Profile.ProductFamily)
+	if _, isRun := m.Run(req.Run.OperationID); isRun {
+		// A run's bytes, deadline and step timeout come from the signed
+		// register, never from the request or this collector's defaults
+		// (C7 0.7): the defaults would cut a run short.
+		var err error
+		if inv.Limits, err = p.cfg.Limits.ForRun(m, req.Run.OperationID); err != nil {
+			return adapter.Invocation{}, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: err.Error()}
+		}
+	}
 	if len(inv.Params) == 0 {
 		inv.Params = nil
 	}
@@ -719,7 +756,6 @@ func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.
 			inv.Expected = append(inv.Expected, adapter.Expected{Name: name, Value: v})
 		}
 	}
-	_, m, _ := p.cfg.Registers.Active(e.Profile.ProductFamily)
 	if err := inv.ValidateWith(adapter.RegisterLookup{M: m}); err != nil {
 		return adapter.Invocation{}, c2Refusal(err)
 	}

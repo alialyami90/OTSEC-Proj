@@ -129,40 +129,12 @@ func serReadOperation(op string) bool {
 	return len(parts) >= 3 && parts[1] == "ser" && strings.HasPrefix(parts[len(parts)-1], "read")
 }
 
-// checkEventBaselineParams is C10's range check on the parameters
-// (baseline.Params), then the learner's own: the learner 0.1 runs on the
-// received clock only. C10 states its check on a whole baseline, so the
-// ranges are repeated here and pinned by TestEventBaselineParamsMatchC10.
+// checkEventBaselineParams is C10's check on the parameters
+// (baseline.Params.Validate), then the learner's own: the learner 0.1 runs
+// on the received clock only.
 func checkEventBaselineParams(p baseline.Params) error {
-	for _, f := range []struct {
-		name string
-		v    int64
-	}{
-		{"min_duration_s", p.MinDurationS}, {"min_events", p.MinEvents},
-		{"repeats_n", p.RepeatsN}, {"repeats_window_s", p.RepeatsWindowS},
-		{"rate_bucket_s", p.RateBucketS}, {"rate_min", p.RateMin},
-		{"max_types", p.MaxTypes}, {"alarm_hold_s", p.AlarmHoldS},
-		{"max_alarms_per_hold", p.MaxAlarmsPerHold},
-	} {
-		if f.v < 1 {
-			return fmt.Errorf("%s %d is below 1", f.name, f.v)
-		}
-	}
-	switch {
-	case p.RateFactorPct < 100:
-		return fmt.Errorf("rate_factor_pct %d is below 100", p.RateFactorPct)
-	case p.PeriodicMinOccurrences < 3:
-		return fmt.Errorf("periodic_min_occurrences %d is below 3", p.PeriodicMinOccurrences)
-	case p.PeriodicSpreadPct < 0 || p.PeriodicSpreadPct > 100:
-		return fmt.Errorf("periodic_spread_pct %d is outside 0 to 100", p.PeriodicSpreadPct)
-	case p.AbsenceTolerancePct < 0 || p.AbsenceTolerancePct > 100:
-		return fmt.Errorf("absence_tolerance_pct %d is outside 0 to 100", p.AbsenceTolerancePct)
-	case p.AlarmHoldS < baseline.MinAlarmHoldS:
-		return fmt.Errorf("alarm_hold_s %d is below %d", p.AlarmHoldS, baseline.MinAlarmHoldS)
-	case p.MaxAlarmsPerHold > baseline.MaxAlarmsPerHoldCeiling:
-		return fmt.Errorf("max_alarms_per_hold %d is above %d", p.MaxAlarmsPerHold, baseline.MaxAlarmsPerHoldCeiling)
-	case p.MaxTypes > baseline.MaxTypesCeiling:
-		return fmt.Errorf("max_types %d is above %d", p.MaxTypes, baseline.MaxTypesCeiling)
+	if err := p.Validate(); err != nil {
+		return err
 	}
 	// The learner has the last word: it refuses a clock it does not run on
 	// and a repeats_n past its window cap.

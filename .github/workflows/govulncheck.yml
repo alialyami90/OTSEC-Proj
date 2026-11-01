@@ -2,7 +2,7 @@
 # govulncheck reports known vulnerabilities in the root module's
 # dependencies and in the Go toolchain that go.mod pins, counting only those
 # the code can reach. It runs on every pull request that ci.yml runs on, with
-# the same Markdown filter (D3-13), and weekly on main, so a vulnerability
+# the same document filter (D3-13), and weekly on main, so a vulnerability
 # published after a merge is found without waiting for the next pull
 # request. A finding fails the job; nothing here is allowed to fail.
 name: govulncheck
@@ -11,6 +11,11 @@ on:
     paths:
       - '**'
       - '!**.md'
+      - '!**.pdf'
+      - '!**.doc'
+      - '!**.docx'
+      - '!**.pptx'
+      - '!**.xlsx'
       - '**/testdata/**'
   schedule:
     # Mondays at 05:17 UTC.

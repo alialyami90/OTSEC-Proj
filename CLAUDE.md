@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Phase 0 passed its exit gate with conditions on 2026-10-23. Phase 1 (contracts C1 to C8) passed with conditions on 2026-10-24. Phase 2 (the simulated SEL-751 SER-to-Syslog slice) passed with conditions on 2026-10-25, and the owner accepted it on 2026-10-26. On 2026-10-26 the owner also clarified the monitoring goals and the order of collection methods (ADR-0008; requirements R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9).
 
-Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`. The first Phase 4 contract batch (C5 0.4, C7 0.6, C8 0.5, C9 0.1 and C10 0.1) was approved and merged on 2026-10-27 (D4-9). Test runs on the owner's PC are paused until the owner resumes them (D4-12), so GitHub Actions is the only test path.
+Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`. The first Phase 4 contract batch (C5 0.4, C7 0.6, C8 0.5, C9 0.1 and C10 0.1) was approved and merged on 2026-10-27 (D4-9). Merged since then: C2 0.6, C5 0.6, C8 0.7 and C9 0.2; C7 0.7, C8 0.8 and C9 0.3 are in review. Test runs on the owner's PC are paused until the owner resumes them (D4-12), so GitHub Actions is the only test path.
 
 The product code is two Go binaries:
 
@@ -22,7 +22,7 @@ The code is organized as follows:
 
 Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3, D4-7). Python is used only for verification tooling.
 
-**Team handoff (owner, 2026-10-27).** Agents A1 to A6 are replaced by B1 to B6 with the same roles. In this brief and in older records, A*n* means the role that B*n* now holds. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/B{n}-handoff.md`.
+**Team handoff (owner, 2026-10-27 and 2026-10-28).** Agents A1 to A6 were replaced by B1 to B6 (D3-12), and B1 to B6 by C1 to C6 (D4-28), each time with the same roles. In this brief and in older records, A*n* and B*n* mean the role that C*n* now holds. The generations are listed in `handoffs/GENERATIONS.md`. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/C{n}-handoff.md`. On 2026-10-28 the owner paused all agents for this checkpoint and resumed them the same day (D4-28).
 
 Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
 
@@ -31,7 +31,7 @@ Commands, from the repository root (the root Go module is `otsec.local/otsec`; `
 - Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
 - Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
 - Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
-- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in twelve jobs: Go on Linux and Windows, pytest, `integration`, and eight `integration-long` legs (the seventh, date orders, since #270; the eighth, the unknown-sender fill across an outage, since #321). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main` (D4-3). The two workflows are the main test path (D2-13): a PR merges when its reviewers accept it and every job in both is green on its head. A PR that changes only Markdown files (other than test-data READMEs) skips both and merges on review (D3-13). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
+- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in twelve jobs: Go on Linux and Windows, pytest, `integration`, and eight `integration-long` legs (the seventh, date orders, since #270; the eighth, the unknown-sender fill across an outage, since #321). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main` (D4-3). The two workflows are the main test path (D2-13): a PR merges when its reviewers accept it and every job in both is green on its head. A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both and merges on review (D3-13); a push to `main` with only such changes skips `ci.yml` too (owner, 2026-11-01). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
 Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
 
@@ -52,6 +52,71 @@ The `impeccable` skill is used for UI and UX design work only: designing, buildi
 - No `DESIGN.md` exists yet. The first real surface is built through the skill's new-work flow, which establishes the visual world and writes `DESIGN.md`. Do not create `DESIGN.md` by hand.
 - The brief's constraint stands: the UI is the minimum needed to verify end-to-end workflows until foundational workflows are proven. Use the skill's Operate mode for app screens; keep scope tight.
 - Never fabricate evidence (device outputs, screenshots, customers, benchmarks) for a UI or marketing surface. `PRODUCT.md` records that none exists.
+
+## Coding guidelines (owner, 2026-11-01)
+
+These apply to all code and documentation work in this repository.
+
+### 1. Think Before Coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 ---
 

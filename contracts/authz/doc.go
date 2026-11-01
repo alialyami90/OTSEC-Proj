@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.6: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.7: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -313,9 +313,30 @@
 // before 0.6 gets key in place of authority. The admin payload's format stays
 // otsec.authz.admin-request/0.4, and the signing prefix names
 // otsec.authz/0.4, so a 0.4 request verifies unchanged; a 0.4 reader
-// refuses a node body in the payload as a payload error. The labels bound into the sealing (the seal AAD and the HKDF
-// info, both "otsec.authz/0.1 ...") are fixed byte strings, not the
-// contract version, and do not change with it.
+// refuses a node body in the payload as a payload error.
+//
+// # Register runs (0.7)
+//
+// From 0.7 a run request's operation_id may name a C3 register run
+// (register.Run: one session, fixed ordered read-only steps) as well as an
+// operation. The wire is unchanged. A run takes no parameters; its access
+// level is the highest of its steps (RunBody.AccessLevel), and a run with
+// no step above level 0 is not invocable, because a run always logs in. A
+// request stamped before 0.7 that names a run is refused unknown_operation
+// (CollectorRequest.ValidateRun), as a 0.6 collector refuses it. The
+// collector takes a run's limits from the signed register
+// (collector Limits.ForRun), never from the request. An accepted reply to a
+// run request (kind run, an operation or a register run) stamped 0.7 or
+// later carries run_deadline_ms, the invocation's total limit, and the
+// node bounds its wait for the outcome at that plus RunOutcomeGrace
+// (D4-24); the field is left out of every other reply, because a reader
+// built for 0.6 decodes replies strictly. A node is upgraded before its
+// collector for the same reason, and AcceptsContract (not equality) is what
+// a node requires of a reply's stamp.
+//
+// The labels bound into the sealing (the seal AAD and the HKDF info, both
+// "otsec.authz/0.1 ...") are fixed byte strings, not the contract version,
+// and do not change with it.
 //
 // # What it leaves out
 //
@@ -340,5 +361,5 @@
 // R2 (separation of monitoring and engineering privilege), R5.7 (no
 // unrestricted CLI), TB3, TB4, AP-1, AP-3, AP-4, AP-7, AP-13, AP-14, AP-15,
 // AP-23, AP-27, HR-1, HR-5, HR-8, SC-2, SC-5, SC-6, SC-18, V-S11, and, from
-// 0.6, R3.4, R3.6 and V-M2.
+// 0.6, R3.4, R3.6 and V-M2, and, from 0.7, R3.1 and AP-4.
 package authz

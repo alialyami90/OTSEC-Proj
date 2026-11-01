@@ -61,7 +61,7 @@ func EventBaselineParams() map[string]any {
 		"repeats_n": 3, "repeats_window_s": 600,
 		"rate_bucket_s": 3600, "rate_factor_pct": 200, "rate_min": 2,
 		"periodic_min_occurrences": 4, "periodic_spread_pct": 10, "absence_tolerance_pct": 50,
-		"time_clock": "received", "max_types": 4096, "alarm_hold_s": 3600, "max_alarms_per_hold": 8,
+		"time_clock": "received", "max_types": 512, "alarm_hold_s": 3600, "max_alarms_per_hold": 8,
 	}
 }
 

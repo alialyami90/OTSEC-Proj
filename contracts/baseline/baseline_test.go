@@ -25,7 +25,7 @@ func valid() *Baseline {
 			RepeatsN: 5, RepeatsWindowS: 600,
 			RateBucketS: 3600, RateFactorPct: 200, RateMin: 2,
 			PeriodicMinOccurrences: 6, PeriodicSpreadPct: 10, AbsenceTolerancePct: 10,
-			TimeClock: ClockReceived, MaxTypes: 4096,
+			TimeClock: ClockReceived, MaxTypes: MaxTypesCeiling,
 			AlarmHoldS: 3600, MaxAlarmsPerHold: 8,
 		},
 		Period: Period{
@@ -53,6 +53,39 @@ func valid() *Baseline {
 func TestValidBaseline(t *testing.T) {
 	if err := valid().Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMaxTypesCeilingByMinor: 0.2 lowered the ceiling to 512 (D4-30); a
+// record stamped 0.1 is still read under 0.1's 4096, as every reader
+// accepts the earlier minors of its major. Params.Validate states the
+// parameters as 0.2 does.
+func TestMaxTypesCeilingByMinor(t *testing.T) {
+	for _, tc := range []struct {
+		schema string
+		max    int64
+		ok     bool
+	}{
+		{Identifier, MaxTypesCeiling, true},
+		{Identifier, MaxTypesCeiling + 1, false},
+		{"otsec.baseline/0.3", MaxTypesCeiling + 1, false},
+		{"otsec.baseline/0.1", MaxTypesCeiling01, true},
+		{"otsec.baseline/0.1", MaxTypesCeiling01 + 1, false},
+	} {
+		b := valid()
+		b.Schema, b.Params.MaxTypes = tc.schema, tc.max
+		err := b.Validate()
+		if tc.ok != (err == nil) || (!tc.ok && !slices.Contains(Codes(err), CodeRange)) {
+			t.Errorf("%s with max_types %d: %v", tc.schema, tc.max, err)
+		}
+		if (tc.schema == Identifier) && tc.ok != (b.Params.Validate() == nil) {
+			t.Errorf("Params.Validate, max_types %d: %v", tc.max, b.Params.Validate())
+		}
+	}
+	p := valid().Params
+	p.RepeatsN = 0
+	if err := p.Validate(); !slices.Contains(Codes(err), CodeRange) {
+		t.Errorf("Params.Validate, repeats_n 0: %v", err)
 	}
 }
 
@@ -223,7 +256,10 @@ func TestDecodeIsStrictForThisMinor(t *testing.T) {
 		}
 	}
 	// A later minor's added field is ignored.
-	later := bytes.Replace(a, []byte(`"schema":"otsec.baseline/0.1",`), []byte(`"schema":"otsec.baseline/0.2","added":true,`), 1)
+	later := bytes.Replace(a, []byte(`"schema":"otsec.baseline/0.2",`), []byte(`"schema":"otsec.baseline/0.3","added":true,`), 1)
+	if bytes.Equal(later, a) {
+		t.Fatal("the schema is not where the test expects")
+	}
 	if _, err := Decode(later); err != nil {
 		t.Errorf("a later minor must decode: %v", err)
 	}

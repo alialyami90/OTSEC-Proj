@@ -23,6 +23,11 @@ type SEL751Runner struct {
 	Alarm func(error)
 }
 
+// Hosts reports whether the SEL-751 adapter invokes the register operation or
+// run with this ID (Hoster). The other SHO forms of the register are steps of
+// the configuration run and are not invoked alone.
+func (r *SEL751Runner) Hosts(operationID string) bool { return sel751.Hosts(operationID) }
+
 // passwordPrompt is the SEL-751 password prompt (C3 register, prompts).
 var passwordPrompt = []byte("Password: ?")
 
