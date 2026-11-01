@@ -33,7 +33,7 @@ The evidence ceiling is `simulated`. No device has been contacted. No capability
 
 ## Owed by the owner
 
-- Whether "Phase 4 done" means the first gate or all six items (asked 2026-10-28 15:40Z).
+- ~~Whether "Phase 4 done" means the first gate or all six items (asked 2026-10-28 15:40Z).~~ Answered 18:10Z: all six items (D4-33).
 - Authorization for an out-of-service lab relay before any H-test or Q3.
 - The protocols at their sites, before IDS (item 4) is briefed.
 - Resuming test runs on their PC (D4-12).
