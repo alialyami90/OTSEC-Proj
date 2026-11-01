@@ -209,6 +209,23 @@ func SetGapBudget(n int) (restore func()) {
 	return func() { gapBudget = old }
 }
 
+// SetGapCap lowers the distinct gap lengths the learner holds for one type.
+func SetGapCap(n int) (restore func()) {
+	old := gapCap
+	gapCap = n
+	return func() { gapCap = old }
+}
+
+// AddNewTypePairs gives the detector n new-type records of types outside its
+// baseline, each listing nothing.
+func AddNewTypePairs(d *Detector, n int) {
+	for i := range n {
+		k := baseline.Key{Source: baseline.SourceSER, Element: fmt.Sprintf("NEW%d", i), State: "Asserted"}
+		d.pairs[pair{baseline.RuleNewType, digestOf(k)}] = &pending{born: d.lastNS}
+		d.newPairs++
+	}
+}
+
 // onlyType is the learner's one type.
 func (l *Learner) onlyType() *learnt {
 	if len(l.types) != 1 {

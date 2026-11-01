@@ -189,3 +189,50 @@ func TestGapRefusesWhatTheRecordCannotHold(t *testing.T) {
 		t.Errorf("collected %d s, want %d (%d gaps of 4 s and one merged of 14 s)", p.CollectedS, want, eventbaseline.MaxGaps-1)
 	}
 }
+
+// TestLearnerGapCaps: a type past gapCap distinct gap lengths, or one that
+// takes the learner past gapBudget of them, is not found periodic and holds
+// none, so the learner stays within both and restores from its own snapshot.
+// Only the budget's drops are counted (C6 on #369).
+func TestLearnerGapCaps(t *testing.T) {
+	cfg := eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: unitParams(), Version: 1}
+	// Gaps of 1000, 1001 and 1002 s: well within the spread, three lengths.
+	run := func(name string, drops int64) {
+		t.Helper()
+		l, err := eventbaseline.NewLearner(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observe(t, l, ser("A", "Asserted", at(0), ""), ser("A", "Asserted", at(1000), ""),
+			ser("A", "Asserted", at(2001), ""), ser("A", "Asserted", at(3003), ""))
+		if got := l.GapBudgetDrops(); got != drops {
+			t.Errorf("%s: %d gap budget drops, want %d", name, got, drops)
+		}
+		if _, err := eventbaseline.RestoreLearner(cfg, mustSnap(t, l.Snapshot)); err != nil {
+			t.Errorf("%s: the learner's own snapshot: %v", name, err)
+		}
+	}
+	func() {
+		defer eventbaseline.SetGapCap(2)()
+		run("gap cap 2", 0)
+	}()
+	func() {
+		defer eventbaseline.SetGapBudget(2)()
+		run("gap budget 2", 1)
+	}()
+}
+
+// TestRestoreRefusesNewTypePairsPastTheCap: a detector state with more
+// new-type records than pairCap is refused (C6 on #369).
+func TestRestoreRefusesNewTypePairsPastTheCap(t *testing.T) {
+	d, cfg := busyDetector(t)
+	eventbaseline.AddNewTypePairs(d, 2)
+	b := mustSnap(t, d.Snapshot)
+	if _, err := eventbaseline.RestoreDetector(cfg, b); err != nil {
+		t.Fatalf("two new-type pairs under the cap: %v", err)
+	}
+	defer eventbaseline.SetPairCap(1)()
+	if r, err := eventbaseline.RestoreDetector(cfg, b); !errors.Is(err, eventbaseline.ErrSnapshot) || r != nil {
+		t.Errorf("two new-type pairs over a cap of one: %v, %v", r, err)
+	}
+}

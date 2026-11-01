@@ -56,10 +56,6 @@ const (
 	// baseline.MaxEventIDs - 1, so a repeats alarm lists its whole window.
 	windowCap   = baseline.MaxEventIDs
 	MaxRepeatsN = windowCap - 1
-	// gapCap bounds the distinct gap lengths, in seconds, that the learner
-	// holds for one type, and gapBudget (below) those it holds for all types
-	// together. A type that would pass either is not found periodic.
-	gapCap = 4096
 	// MaxGaps bounds the collection gaps the learner holds. A gap past it is
 	// merged into the last one, which counts the time between them as not
 	// collected: the period gets longer, never shorter.
@@ -71,12 +67,14 @@ const (
 	MaxStreams = 16
 )
 
-// gapBudget bounds the distinct gap lengths the learner holds over all
-// types. heldIDBudget bounds the event IDs the detector's pending records
+// gapCap bounds the distinct gap lengths, in seconds, that the learner holds
+// for one type, and gapBudget those it holds for all types together. A type
+// that would pass either is not found periodic. heldIDBudget bounds the event IDs the detector's pending records
 // list over all pairs together; a break held past it is counted in the next
 // alarm's note, as one past MaxNewTypePairs is, not listed. Variables so a
 // test can lower them.
 var (
+	gapCap       = 4096
 	gapBudget    = 16384
 	heldIDBudget = 2048
 )
