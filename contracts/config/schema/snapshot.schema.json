@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://otsec.local/schema/otsec.config/0.2/snapshot.schema.json",
-  "title": "otsec.config/0.2 snapshot (C9)",
+  "$id": "https://otsec.local/schema/otsec.config/0.3/snapshot.schema.json",
+  "title": "otsec.config/0.3 snapshot (C9)",
   "description": "One configuration read of one asset: every settings class of its rule, in the rule's order, each pointing at its reply in the session's C2 transcript by span and SHA-256. The bytes are only in the transcript (D4-8). Rules the schema cannot state (class order, sensitivity, which classes may be absent, the tokenization) are in contracts/config (Validate, CheckAgainst).",
   "type": "object",
   "required": ["schema", "kind", "asset_id", "invocation_id", "operation_id", "adapter", "register_version", "target", "retrieved_at", "rule", "transcript", "sections"],

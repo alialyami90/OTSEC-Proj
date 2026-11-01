@@ -32,7 +32,7 @@ var invalidWant = map[string]string{
 	"snapshot-value-two-spaces":            "no two spaces together",
 	"snapshot-value-holds-assign":          "no :=",
 	"snapshot-ref-not-transcript":          `ref "sha256:" + sha256`,
-	"snapshot-other-major":                 "not readable as otsec.config/0.2",
+	"snapshot-other-major":                 "not readable as otsec.config/0.3",
 	"snapshot-unknown-field-in-own-minor":  `key "zz_new" is not a field name`,
 	"snapshot-wrong-kind":                  `kind "config.baseline" is not "config.snapshot"`,
 	"snapshot-without-register-version":    "register_version is required",

@@ -31,7 +31,7 @@ Commands, from the repository root (the root Go module is `otsec.local/otsec`; `
 - Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
 - Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
 - Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
-- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in twelve jobs: Go on Linux and Windows, pytest, `integration`, and eight `integration-long` legs (the seventh, date orders, since #270; the eighth, the unknown-sender fill across an outage, since #321). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main` (D4-3). The two workflows are the main test path (D2-13): a PR merges when its reviewers accept it and every job in both is green on its head. A PR that changes only Markdown files (other than test-data READMEs) skips both and merges on review (D3-13). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
+- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in twelve jobs: Go on Linux and Windows, pytest, `integration`, and eight `integration-long` legs (the seventh, date orders, since #270; the eighth, the unknown-sender fill across an outage, since #321). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main` (D4-3). The two workflows are the main test path (D2-13): a PR merges when its reviewers accept it and every job in both is green on its head. A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both and merges on review (D3-13); a push to `main` with only such changes skips `ci.yml` too (owner, 2026-11-01). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
 Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
 
@@ -52,6 +52,71 @@ The `impeccable` skill is used for UI and UX design work only: designing, buildi
 - No `DESIGN.md` exists yet. The first real surface is built through the skill's new-work flow, which establishes the visual world and writes `DESIGN.md`. Do not create `DESIGN.md` by hand.
 - The brief's constraint stands: the UI is the minimum needed to verify end-to-end workflows until foundational workflows are proven. Use the skill's Operate mode for app screens; keep scope tight.
 - Never fabricate evidence (device outputs, screenshots, customers, benchmarks) for a UI or marketing surface. `PRODUCT.md` records that none exists.
+
+## Coding guidelines (owner, 2026-11-01)
+
+These apply to all code and documentation work in this repository.
+
+### 1. Think Before Coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 ---
 
