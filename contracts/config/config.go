@@ -308,8 +308,13 @@ func encodeCompact(v any) ([]byte, error) {
 // within the bounds, before one is built: at most MaxSettings settings, and
 // the encoded settings plus SnapshotFixedMax within MaxSnapshotBytes. A run
 // that fails it ends with failed.config_unparsable and no snapshot (C2 0.6).
-// Validate holds a built snapshot to the same bounds, and TestRecordsFit shows
-// that a read RecordsFit passes is a snapshot Validate passes.
+// Validate holds a built snapshot to the same bounds, and
+// TestRecordsFitImpliesValidate shows that a read RecordsFit passes is a
+// snapshot Validate passes. That holds only while everything but the settings
+// stays within SnapshotFixedMax, as the SEL-751 adapter's constant version and
+// IDs keep it; Adapter.Version and the operation ID have no length bound of
+// their own, so a result with longer ones passes RecordsFit and is refused by
+// Validate at the node (C6, C1, 2026-11-01).
 func RecordsFit(recs []adapter.Record) error {
 	var n int
 	size := SnapshotFixedMax
