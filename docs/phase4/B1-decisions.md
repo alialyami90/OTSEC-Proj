@@ -694,3 +694,20 @@ Date: 2026-11-04. C1, on C4's question on #387.
   - at start that order does not hold on `main`: `New` opens the audit database, whose start-up step 6 prunes, before `reconcileHolds` runs (`runtime.go`, C5). So a crash between the Receipt and the hold, followed by a start-up prune, loses the hold;
   - **the fix (C5's): a node-local required consumer on the audit stream, `HoldsConsumer`,** on the `SuspensionConsumer` precedent (`pruneConsumers`). Its cursor is the last audit seq through which every hold the fold wants is taken. The live path advances it after each hold, and reconcile advances it once nothing is missing. Neither the start-up prune nor the runtime prune passes it, and no C5 contract change is needed. A hold that cannot be taken, for example because its baseline document is missing, stops audit pruning and raises an alarm, as `AlarmSuspensionNotDurable` does;
   - C5 builds it with the node side of `node.baseline_ack`. C6 tests both cases: an acknowledgement followed by a prune within one run, and a crash between the Receipt and the hold followed by a start-up prune.
+
+## D4-42: an oversize configuration difference is recorded without a stored difference (C2 on #392)
+
+Date: 2026-11-04. C1, on section 4 of `docs/phase4/C2-c9-0.4.md` (C9 0.4, #392).
+
+- **The fact.** C2 measured the SEL-751's settings sheets (`contracts/config/testdata/difference_max.py`). A read in which every setting of every form changes makes a difference of 1.62 to 1.70 MB. Both snapshots fit, but the difference does not fit `MaxDifferenceBytes` (1,507,328 bytes). A realistic large change fits: 8,500 settings of 30 characters encode to about 1.22 MB. Evidence class: `desk` for the measurement, `simulated` for the tests. C9 0.4 makes the case visible: `Validate` refuses with `ErrTooLarge`, and `Compare` still returns the difference with that error.
+- **The ruling: C2's option (a).** On `ErrTooLarge`, the node:
+  - records the change as `config.change_detected` with `changes_digest` from the returned difference and no `difference_digest`, plus a field that says the difference was too large to store;
+  - raises `config-unapproved-change` as for any change not covered by an approval, with "difference not stored: too large" in its text (my ask to C5 on #390);
+  - holds the read's snapshot for as long as it would have held the difference. The baseline is held `baseline`, and `Compare` is a pure function of the two stored snapshots, so the difference can be recomputed whenever it is needed. No evidence is lost.
+- **Refused.** Options (b), a difference without values, and (c), one with only the new values. Each changes C9's stored format to cover a case that needs a whole relay reloaded at once. And `changes_digest` would no longer be computable from the stored difference alone.
+- **What stays unchanged.** Approval (`node.change_approval`) names a baseline and a window, not a difference, and acknowledging the read as the new baseline names its snapshot digest. So an oversize change can be approved and acknowledged like any other. `config.read_compared` with `same_change` already names a change by `changes_digest`.
+- **Who.**
+  - C3 proposes the C8 change: `config.change_detected` without `difference_digest` only when the too-large field is set, and never otherwise. `VerifyConfig` checks the held read snapshot in place of the difference.
+  - C5 builds the node side in #390, switching `encodeDifference` to `Difference.Encode` once #392 merges.
+  - C6 tests three things: an every-setting change that is alarmed and recorded with no stored difference; a `changes_digest` that equals `Compare` re-run on the two held snapshots; and a realistic large change that is still stored as a difference.
+  - C9 0.4 (#392) needs nothing more.
