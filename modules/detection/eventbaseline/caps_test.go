@@ -174,7 +174,7 @@ func TestGapRefusesWhatTheRecordCannotHold(t *testing.T) {
 	}
 	// MaxGaps + 1 gaps: the last is merged into the one before, so the time
 	// between them counts as not collected.
-	m := learner(t, nil)
+	m := learner(t, func(p *baseline.Params) { p.MinEvents = 2 }) // the period ends at the second event (D4-45)
 	observe(t, m, ser("A", "Asserted", at(0), ""))
 	for i := 0; i <= eventbaseline.MaxGaps; i++ {
 		if err := m.Gap(at(10*i+1), at(10*i+5), "failed.timeout"); err != nil {
@@ -195,7 +195,9 @@ func TestGapRefusesWhatTheRecordCannotHold(t *testing.T) {
 // none, so the learner stays within both and restores from its own snapshot.
 // Only the budget's drops are counted (C6 on #369).
 func TestLearnerGapCaps(t *testing.T) {
-	cfg := eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: unitParams(), Version: 1}
+	p := unitParams()
+	p.MinEvents = 4 // the period ends at the fourth event (D4-45)
+	cfg := eventbaseline.LearnerConfig{Node: gtNode, AssetID: unitAsset, Params: p, Version: 1}
 	// Gaps of 1000, 1001 and 1002 s: well within the spread, three lengths.
 	run := func(name string, drops int64) {
 		t.Helper()

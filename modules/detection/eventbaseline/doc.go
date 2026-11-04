@@ -16,7 +16,11 @@
 //
 //   - Learner: NewLearner, Observe for each stored event of the asset, Gap
 //     for each closed V-S12 collection failure, Progress for health, and
-//     Finish once both minima are met. Finish returns the baseline, the
+//     Finish once End says the period's end is final. The period ends at
+//     the first instant both minima hold, given the events and gaps, so
+//     however late Finish comes the baseline is the same; an event after
+//     the end is refused, and a gap still open (Obs.OpenGapFrom) holds the
+//     end until it is fed (D4-45). Finish returns the baseline, the
 //     compact bytes it is stored as (baseline.Encode) and their hash
 //     (baseline.Hash), which C7 0.6 node.baseline_ack names.
 //   - Detector: NewDetector over the stored record, the hash and the time
@@ -42,7 +46,7 @@
 //     passes baseline.RateBound. It alarms on the event that passes the
 //     bound, and lists the bucket's events up to and including it.
 //   - Time: a full occurrence in a UTC hour in which the baseline never saw
-//     the type. Learner 0.1 always uses received time.
+//     the type. Learner 0.2 always uses received time.
 //   - Absence: a periodic type not seen by last + interval + tolerance. An
 //     occurrence exactly at the deadline is in time; the alarm is raised
 //     when time (an event or a Tick) is past the deadline, and is stamped

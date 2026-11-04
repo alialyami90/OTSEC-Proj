@@ -34,6 +34,11 @@ type Obs struct {
 	// baseline.PossibleDuplicates did not count. It is kept out of every
 	// rule and listed on the alarms of its type (D4-4 item 3).
 	NotCounted bool
+	// OpenGapFrom is the start of the asset's collection gap that is still
+	// open, zero when none is. Only the learner reads it: an open gap counts
+	// as not collected from its start, so the period's end is not known
+	// while the duration minimum is not met before it (D4-45).
+	OpenGapFrom time.Time
 }
 
 // Limits of the state either half holds, so that a flood cannot grow memory
