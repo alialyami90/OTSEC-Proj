@@ -173,6 +173,9 @@
 // # Compatibility
 //
 // Readers accept every 0.x minor and ignore unknown fields (contracts/README.md).
+// A minor bump changes every new snapshot's digest, because its schema bytes
+// change, but never its comparison: an unchanged read compares to a baseline
+// of an earlier minor with no changes (C5 on #392).
 // Section state and change kind are closed enums. A rule ID a reader does not
 // know is refused, because a difference under an unknown rule cannot be
 // computed or trusted. A new family or a changed rule is a new rule ID in a
