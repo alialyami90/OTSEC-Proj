@@ -44,7 +44,8 @@ import datetime
 import hashlib
 
 DEPARTURE = "baseline.departure"
-RULES = ("new", "repeats", "rate", "time", "absence")
+# C10's rule names (contracts/baseline Rule), as the series' kinds.
+RULES = {"new-type": "new", "repeats": "repeats", "rate": "rate", "time": "time", "absence": "absence"}
 
 
 def _utc(s):
@@ -108,7 +109,7 @@ def _read1(n, h, ids, assets):
             failures.append(f"{where}: cites {_id(e)}, which the harness did not send")
         else:
             cited.append(ids[_id(e)])
-    return {"rule": d["rule"], "asset": assets[d["asset_id"]], "type": typ,
+    return {"rule": RULES[d["rule"]], "asset": assets[d["asset_id"]], "type": typ,
             "at": _utc(d["at_utc"]), "events": sorted(cited)}, failures
 
 
