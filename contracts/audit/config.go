@@ -49,14 +49,74 @@ const (
 // of its own, and a later minor adds that kind with its first writer.
 const ActionConfigBaselineRecorded Action = "config.baseline_recorded"
 
+// The checkpoint action (0.9, D4-32 item 2, D4-40 item 6). The node writes
+// it when the newest committed checkpoint of one half of an asset's event
+// baseline does not restore (D4-36 item 2). It never falls back to an older
+// checkpoint: a learner starts the audited re-learn of D4-26, whose version
+// and replaced baseline the record names, and a detector is rebuilt from
+// the asset's acknowledged event baseline, which the record names. A
+// checkpoint is working state, not evidence, so the record names it only by
+// its seq in the asset's configuration stream.
+const ActionConfigCheckpointNotRestored Action = "config.checkpoint_not_restored"
+
+// The halves of an event baseline that a checkpoint holds (Config.CheckpointHalf).
+const (
+	CheckpointLearner  = "learner"
+	CheckpointDetector = "detector"
+)
+
+// The reason codes of config.checkpoint_not_restored (warning): why the
+// newest checkpoint did not restore. The set is closed.
+//
+//   - corrupt: the stored record does not decode or check: the document is
+//     not one the node's encoder writes, the capture is not the snapshot the
+//     document names, or the snapshot fails its own checks.
+//   - version: the document's schema or the snapshot's format is one this
+//     node does not read.
+//   - mismatch: it decodes and checks but is not this asset's current state:
+//     another asset, a learner whose version or previous baseline is not the
+//     asset's next re-learn, or a detector whose baseline is not the
+//     acknowledged one.
+//   - refused: the checkpoint was read in full and decodes, and the node's
+//     own check of its content refused it: the half would not take the
+//     snapshot it holds.
+//
+// A read that did not complete (the database not open or busy, or a read
+// error) is not a restore outcome and is not a reason for this record: the
+// node keeps the half unstarted, alarms, retries, and writes no record (C1
+// on #387).
+const (
+	ReasonCheckpointCorrupt  = "corrupt"
+	ReasonCheckpointVersion  = "version"
+	ReasonCheckpointMismatch = "mismatch"
+	ReasonCheckpointRefused  = "refused"
+)
+
+var checkpointReasons = map[string]bool{
+	ReasonCheckpointCorrupt: true, ReasonCheckpointVersion: true, ReasonCheckpointMismatch: true, ReasonCheckpointRefused: true,
+}
+
+// CheckpointCorrelationID is the correlation_id of a
+// config.checkpoint_not_restored: the checkpoint's C5 series (D4-39 item 3)
+// and its seq, so it names one stored record and is the same when a restart
+// finds the same checkpoint again.
+func CheckpointCorrelationID(half string, seq uint64) string {
+	return fmt.Sprintf("eventcheckpoint.%s:%d", half, seq)
+}
+
 // configSince is the minor that added the configuration actions, Config and
 // Admin.Kind; configReadsSince the one that added the read actions;
 // configRecordedSince the one that added config.baseline_recorded and
-// Config.BaselineVersion.
+// Config.BaselineVersion; configCheckpointSince the one that added
+// config.checkpoint_not_restored, Config.CheckpointHalf and
+// Config.CheckpointSeq; configTooLargeSince the one that added
+// Config.DifferenceTooLarge.
 const (
-	configSince         = 5
-	configReadsSince    = 7
-	configRecordedSince = 8
+	configSince           = 5
+	configReadsSince      = 7
+	configRecordedSince   = 8
+	configCheckpointSince = 9
+	configTooLargeSince   = 10
 )
 
 // EmptyChangesDigest is C9's ChangesDigest of a difference with no changes:
@@ -108,6 +168,10 @@ const (
 //     removed_first_seq, removed_last_seq, removed_digest, kept_digest).
 //   - config.baseline_recorded (0.8): kind (event), baseline_digest,
 //     baseline_version and, when the baseline replaces one, previous_digest.
+//   - config.checkpoint_not_restored (0.9): kind (event), checkpoint_half
+//     and checkpoint_seq; for a learner, baseline_version and, from version
+//     2, previous_digest of the re-learn it starts; for a detector,
+//     baseline_digest of the acknowledged baseline it is rebuilt from.
 //
 // The digests are C9's (config.Digest) or C10's: "sha256:" and the SHA-256
 // of the document's stored bytes. A configuration baseline is an
@@ -120,8 +184,9 @@ type Config struct {
 	// PayloadSHA256 is that acceptance's verified.payload_sha256, lowercase
 	// hex, so the record names exactly the signed bytes it acts on.
 	PayloadSHA256 string `json:"payload_sha256,omitempty"`
-	// Kind is the baseline's kind, on config.baseline_acknowledged and
-	// config.baseline_recorded (event only in 0.8).
+	// Kind is the baseline's kind, on config.baseline_acknowledged,
+	// config.baseline_recorded (event only in 0.8) and
+	// config.checkpoint_not_restored (event).
 	Kind           authz.BaselineKind `json:"kind,omitempty"`
 	BaselineDigest string             `json:"baseline_digest,omitempty"`
 	// PreviousDigest is the baseline of the same asset and kind that the
@@ -134,14 +199,29 @@ type Config struct {
 	PreviousDigest string `json:"previous_digest,omitempty"`
 	// BaselineVersion (0.8) is the recorded baseline's own version: C10's
 	// Baseline.Version, 1 for an asset's first and one more for each re-learn.
-	// On config.baseline_recorded only.
-	BaselineVersion int    `json:"baseline_version,omitempty"`
-	WindowStart     string `json:"window_start,omitempty"`
-	WindowEnd       string `json:"window_end,omitempty"`
+	// On config.baseline_recorded, and from 0.9 on a learner's
+	// config.checkpoint_not_restored, where it is the version the re-learn
+	// will record.
+	BaselineVersion int `json:"baseline_version,omitempty"`
+	// CheckpointHalf (0.9) is the half whose checkpoint did not restore,
+	// CheckpointLearner or CheckpointDetector, and CheckpointSeq the seq of
+	// that checkpoint's record in the asset's configuration stream. On
+	// config.checkpoint_not_restored only.
+	CheckpointHalf string `json:"checkpoint_half,omitempty"`
+	CheckpointSeq  uint64 `json:"checkpoint_seq,omitempty"`
+	WindowStart    string `json:"window_start,omitempty"`
+	WindowEnd      string `json:"window_end,omitempty"`
 	// Reason is the approval's reason, shown with any alarm it silences.
 	Reason           string `json:"reason,omitempty"`
 	SnapshotDigest   string `json:"snapshot_digest,omitempty"`
 	DifferenceDigest string `json:"difference_digest,omitempty"`
+	// DifferenceTooLarge (0.10) says that the difference config.change_detected
+	// found was over C9's MaxDifferenceBytes, so it was not stored and the
+	// record has no difference_digest (D4-42). The change is still named by
+	// changes_digest, and the difference is C9's Compare of the baseline and
+	// the read's snapshot, both held. On config.change_detected only, and
+	// there exactly when difference_digest is absent.
+	DifferenceTooLarge bool `json:"difference_too_large,omitempty"`
 	// ReadSeq is the collector_seq of the collector's decision on the
 	// configuration read that first found the difference (its allowed
 	// collector.request record).
@@ -226,7 +306,8 @@ func (r *Record) validateConfig(minor int) error {
 	compared := r.Action == ActionConfigReadCompared
 	removed := r.Action == ActionConfigReadsRemoved
 	recorded := r.Action == ActionConfigBaselineRecorded
-	if !approved && !acked && !detected && !restored && !compared && !removed && !recorded {
+	notRestored := r.Action == ActionConfigCheckpointNotRestored
+	if !approved && !acked && !detected && !restored && !compared && !removed && !recorded && !notRestored {
 		if r.Config != nil {
 			return fmt.Errorf("audit: config belongs on the configuration actions, not %s", r.Action)
 		}
@@ -244,6 +325,15 @@ func (r *Record) validateConfig(minor int) error {
 	}
 	if r.CorrelationID == "" {
 		return fmt.Errorf("audit: %s needs a correlation_id", r.Action)
+	}
+	if c.DifferenceTooLarge && !detected {
+		return fmt.Errorf("audit: difference_too_large belongs on config.change_detected, not %s", r.Action)
+	}
+	if notRestored {
+		return r.validateCheckpointNotRestored()
+	}
+	if c.CheckpointHalf != "" || c.CheckpointSeq != 0 {
+		return fmt.Errorf("audit: checkpoint_half and checkpoint_seq belong on config.checkpoint_not_restored, not %s", r.Action)
 	}
 	if recorded {
 		return r.validateBaselineRecorded()
@@ -296,8 +386,12 @@ func (r *Record) validateConfig(minor int) error {
 		return errors.New("audit: config.change_detected needs changes_digest sha256:<hex> from 0.7")
 	case c.ChangesDigest == EmptyChangesDigest:
 		return errors.New("audit: config.change_detected has changes, so changes_digest is not the digest of none")
-	case !digestPattern.MatchString(c.DifferenceDigest):
-		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>")
+	case c.DifferenceTooLarge && minor < configTooLargeSince:
+		return fmt.Errorf("audit: difference_too_large is new in 0.%d, so a 0.%d record cannot carry it", configTooLargeSince, minor)
+	case c.DifferenceTooLarge && c.DifferenceDigest != "":
+		return errors.New("audit: config.change_detected with difference_too_large stored no difference, so it has no difference_digest")
+	case !c.DifferenceTooLarge && !digestPattern.MatchString(c.DifferenceDigest):
+		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>, or difference_too_large from 0.10")
 	case c.SnapshotDigest == c.BaselineDigest:
 		return errors.New("audit: config.change_detected names its baseline as the new snapshot")
 	case c.ApprovalSeq >= c.ReadSeq:
@@ -349,6 +443,52 @@ func (r *Record) validateBaselineRecorded() error {
 		return errors.New("audit: an event baseline needs baseline_version of 1 or more")
 	case (c.BaselineVersion == 1) != (c.PreviousDigest == ""):
 		return errors.New("audit: baseline_version is 1 exactly when no baseline is replaced (previous_digest absent)")
+	}
+	return nil
+}
+
+// validateCheckpointNotRestored checks config.checkpoint_not_restored: the
+// node's own record, a warning whose reason code is why the checkpoint did
+// not restore, of one half's newest checkpoint of an event baseline. A
+// learner names the re-learn it starts, as config.baseline_recorded will
+// (version 1 exactly when no baseline is replaced); a detector names the
+// baseline it is rebuilt from, and nothing else.
+func (r *Record) validateCheckpointNotRestored() error {
+	c := r.Config
+	switch {
+	case r.Actor.Type != authz.PrincipalNode:
+		return errors.New("audit: config.checkpoint_not_restored is written by the node (actor type node)")
+	case r.Outcome != OutcomeWarning || !checkpointReasons[r.ReasonCode]:
+		return fmt.Errorf("audit: config.checkpoint_not_restored is a warning with reason code %s, %s, %s or %s",
+			ReasonCheckpointCorrupt, ReasonCheckpointVersion, ReasonCheckpointMismatch, ReasonCheckpointRefused)
+	case c.Kind != authz.BaselineEvent:
+		return fmt.Errorf("audit: config.checkpoint_not_restored has kind %q", authz.BaselineEvent)
+	case c.CheckpointHalf != CheckpointLearner && c.CheckpointHalf != CheckpointDetector:
+		return fmt.Errorf("audit: checkpoint_half is %s or %s", CheckpointLearner, CheckpointDetector)
+	case c.CheckpointSeq == 0:
+		return errors.New("audit: config.checkpoint_not_restored needs checkpoint_seq")
+	case r.CorrelationID != CheckpointCorrelationID(c.CheckpointHalf, c.CheckpointSeq):
+		return errors.New("audit: config.checkpoint_not_restored has correlation_id eventcheckpoint.<half>:<checkpoint_seq>")
+	case c.DecisionSeq != 0 || c.PayloadSHA256 != "" || c.WindowStart != "" || c.WindowEnd != "" || c.Reason != "" ||
+		c.SnapshotDigest != "" || c.DifferenceDigest != "" || c.ReadSeq != 0 || c.UnchangedAt != "" || c.UnchangedReadSeq != 0 ||
+		c.ApprovalSeq != 0 || c.ChangesDigest != "" || c.ChangeSeq != 0 || c.SnapshotSeq != 0 || c.removalFields():
+		return errors.New("audit: config.checkpoint_not_restored carries the checkpoint and baseline fields only")
+	}
+	if c.CheckpointHalf == CheckpointDetector {
+		if !digestPattern.MatchString(c.BaselineDigest) || c.BaselineVersion != 0 || c.PreviousDigest != "" {
+			return errors.New("audit: a detector's config.checkpoint_not_restored names the baseline it is rebuilt from (baseline_digest sha256:<hex>), and no version or previous_digest")
+		}
+		return nil
+	}
+	switch {
+	case c.BaselineDigest != "":
+		return errors.New("audit: a learner's config.checkpoint_not_restored has no baseline_digest: the re-learn has not recorded one")
+	case c.BaselineVersion < 1:
+		return errors.New("audit: a learner's config.checkpoint_not_restored needs baseline_version of 1 or more")
+	case (c.BaselineVersion == 1) != (c.PreviousDigest == ""):
+		return errors.New("audit: baseline_version is 1 exactly when no baseline is replaced (previous_digest absent)")
+	case c.PreviousDigest != "" && !digestPattern.MatchString(c.PreviousDigest):
+		return errors.New("audit: previous_digest is sha256:<hex>")
 	}
 	return nil
 }
@@ -589,7 +729,76 @@ func ApprovalCovers(approval, detected *Record) error {
 // each configuration baseline they name, before the last run on each asset
 // ahead of each detection, and before the oldest compared read of each asset
 // that a config.reads_removed in recs takes and an earlier removal did not.
+// A view that starts after the chain's first record because the node's
+// audit stream was pruned is checked with VerifyConfigFrom instead.
 func VerifyConfig(recs []*Record) error {
+	return VerifyConfigFrom(recs, 1)
+}
+
+// VerifyConfigFrom is VerifyConfig on the view of the chain from seq first
+// on (0.9, D4-40 item 8): the configuration and collector records of a node
+// whose audit stream was pruned before first. first is the seq of the first
+// record the node retained after its recorded prune point, and every record
+// in recs must be at or after it. VerifyConfigFrom(recs, 1) is VerifyConfig.
+// It checks the records only: that the view is the retained chain from the
+// prune point, linked by hash in full, is the caller's, with VerifyChain
+// from the prune point's checkpoint, and the full chain stays verifiable
+// upstream.
+//
+// In a view that starts after seq 1, a reference to what came before first
+// is unknown, not broken; every other reference must resolve as in
+// VerifyConfig. Before first means:
+//
+//   - for a chain seq (change_seq), a seq below first;
+//   - for a decision (decision_seq, read_seq, unchanged_read_seq,
+//     approval_seq), a collector_seq below the lowest one that a
+//     collector.request in the view records before its first
+//     collector.seq_reset (with none, every decision of that epoch). A
+//     collector numbers its decisions in order, so a decision below that
+//     one was taken before it. After a collector.seq_reset in the view,
+//     nothing is unknown;
+//   - for state the chain carries (an asset's active configuration
+//     baseline, its open alarms and changes, and the compared reads no
+//     removal has taken), what the view does not yet show. The active
+//     baseline is taken from the first record of the asset in the view that
+//     names one, and from then on it is checked. An asset's first
+//     config.reads_removed in the view may take reads from before it and
+//     keep reads from before it: its digest is then not checked, but its
+//     range must end at the last read it takes from the view, and its
+//     kept_digest must be the view's newest compared read when the view
+//     holds one. A removal whose reads are all in the view is checked in
+//     full.
+//
+// A record whose decision is unknown is checked for everything that does
+// not need that decision.
+//
+// A condition on the writer: the node has one collector request in flight
+// at a time, and writes its collector.request record before it sends the
+// next, so its chain holds decisions in collector_seq order. A node that
+// broke this could write a decision after a higher one; a prune point
+// between them would make a reference to the pruned one broken, not
+// unknown.
+func VerifyConfigFrom(recs []*Record, first uint64) error {
+	if first == 0 {
+		return errors.New("audit: a view starts at seq 1 or later")
+	}
+	cut := first > 1
+	for _, r := range recs {
+		if r.Seq < first {
+			return broken("record %d is before the view's first seq %d", r.Seq, first)
+		}
+	}
+	// low is the lowest decision the view's first epoch records: below it,
+	// a decision of that epoch is unknown in a view that starts after seq 1.
+	low := ^uint64(0)
+	for _, r := range recs {
+		if r.Action == ActionCollectorSeqReset {
+			break
+		}
+		if r.Action == ActionCollectorRequest && r.CollectorSeq != 0 && r.CollectorSeq < low {
+			low = r.CollectorSeq
+		}
+	}
 	type num struct {
 		epoch int
 		seq   uint64
@@ -597,6 +806,7 @@ func VerifyConfig(recs []*Record) error {
 	type baseline struct{ asset, digest string }
 	type opOf struct{ asset, op string }
 	epoch := 0
+	unknown := func(decision uint64) bool { return cut && epoch == 0 && decision < low }
 	var reset *Record             // the collector.seq_reset that began this epoch
 	accepted := map[num]*Record{} // allowed admin collector.request records, by decision
 	runs := map[num]*Record{}     // allowed collector.request records of runs
@@ -608,6 +818,16 @@ func VerifyConfig(recs []*Record) error {
 		kind  authz.BaselineKind
 	}
 	active := map[kindOf]string{} // the baseline the last succeeded acknowledgement set
+	// activeFor is the asset's active configuration baseline. In a view that
+	// starts after seq 1, an asset with none yet takes the one its first
+	// record names: the chain before the view set it.
+	activeFor := func(r *Record) string {
+		k := kindOf{r.Target.AssetID, authz.BaselineConfiguration}
+		if _, ok := active[k]; !ok && cut {
+			active[k] = r.Config.BaselineDigest
+		}
+		return active[k]
+	}
 	// 0.8: the last event baseline the node recorded for each asset, and
 	// every digest it recorded.
 	recorded := map[string]*Record{}
@@ -632,6 +852,7 @@ func VerifyConfig(recs []*Record) error {
 	}
 	pending := map[string][]compared{}
 	lastSnap := map[string]uint64{} // each asset's latest compared snapshot_seq, removed or not
+	removedIn := map[string]bool{}  // the assets with a config.reads_removed in recs so far
 	// The read decision of each asset's latest result, so that results come
 	// in the order the reads were taken (B6 on #322), and the operation of
 	// the runs its results name, which a configuration acknowledgement
@@ -645,10 +866,14 @@ func VerifyConfig(recs []*Record) error {
 		if prev, ok := lastRead[asset]; ok && prev.epoch == epoch && k.seq <= prev.seq {
 			return broken("record %d (%s) gives read decision %d a result, but the asset's previous result is for decision %d: results follow the order of the reads", r.Seq, r.Action, k.seq, prev.seq)
 		}
+		lastRead[asset] = k
+		if run == nil {
+			return nil // an unknown read: its operation is not known
+		}
 		if op, ok := resultOp[asset]; ok && op != run.OperationID {
 			return broken("record %d (%s) names a run of %s, but the asset's earlier results name runs of %s", r.Seq, r.Action, run.OperationID, op)
 		}
-		lastRead[asset], resultOp[asset] = k, run.OperationID
+		resultOp[asset] = run.OperationID
 		return nil
 	}
 	for _, r := range recs {
@@ -677,6 +902,7 @@ func VerifyConfig(recs []*Record) error {
 			}
 			acc := accepted[num{epoch, c.DecisionSeq}]
 			switch {
+			case acc == nil && unknown(c.DecisionSeq):
 			case acc == nil:
 				return broken("record %d (%s) names decision %d, which no earlier acceptance in its epoch has", r.Seq, r.Action, c.DecisionSeq)
 			case acc.Verified.Principal != r.Actor.ID || acc.Verified.PayloadSHA256 != c.PayloadSHA256:
@@ -685,7 +911,7 @@ func VerifyConfig(recs []*Record) error {
 				return broken("record %d (%s) follows an acceptance of %q, not %s", r.Seq, r.Action, acc.Verified.Kind, want)
 			}
 			if r.Action == ActionConfigChangeApproved && r.Outcome == OutcomeSucceeded {
-				if err := acknowledged(r, active[kindOf{r.Target.AssetID, authz.BaselineConfiguration}]); err != nil {
+				if err := acknowledged(r, activeFor(r)); err != nil {
 					return err
 				}
 				approvals[num{epoch, c.DecisionSeq}] = r
@@ -727,14 +953,16 @@ func VerifyConfig(recs []*Record) error {
 		case r.Action == ActionConfigChangeDetected || r.Action == ActionConfigBaselineRestored:
 			c := r.Config
 			run := runs[num{epoch, c.ReadSeq}]
-			if run == nil || run.Target.AssetID != r.Target.AssetID {
+			switch {
+			case run == nil && unknown(c.ReadSeq):
+			case run == nil || run.Target.AssetID != r.Target.AssetID:
 				return broken("record %d names read decision %d, which is not an earlier run on asset %s in its epoch", r.Seq, c.ReadSeq, r.Target.AssetID)
 			}
-			if err := acknowledged(r, active[kindOf{r.Target.AssetID, authz.BaselineConfiguration}]); err != nil {
+			if err := acknowledged(r, activeFor(r)); err != nil {
 				return err
 			}
-			if r.Action == ActionConfigChangeDetected {
-				if err := unchangedRead(r, byOp[opOf{run.Target.AssetID, run.OperationID}], reset); err != nil {
+			if r.Action == ActionConfigChangeDetected && run != nil {
+				if err := unchangedRead(r, byOp[opOf{run.Target.AssetID, run.OperationID}], reset, unknown); err != nil {
 					return err
 				}
 			}
@@ -762,6 +990,9 @@ func VerifyConfig(recs []*Record) error {
 				return broken("record %d is approved, but the unapproved difference from baseline %s is still open", r.Seq, c.BaselineDigest)
 			}
 			a := approvals[num{epoch, c.ApprovalSeq}]
+			if a == nil && unknown(c.ApprovalSeq) {
+				continue
+			}
 			if a == nil {
 				return broken("record %d names approval %d, which is not an earlier succeeded approval in its epoch", r.Seq, c.ApprovalSeq)
 			}
@@ -779,10 +1010,15 @@ func VerifyConfig(recs []*Record) error {
 				}
 			}
 			recorded[r.Target.AssetID] = r
+		case r.Action == ActionConfigCheckpointNotRestored:
+			if err := checkpointNotRestored(r, recorded[r.Target.AssetID], firstIn[r.Target.AssetID],
+				active[kindOf{r.Target.AssetID, authz.BaselineEvent}], cut); err != nil {
+				return err
+			}
 		case r.Action == ActionConfigReadCompared:
 			run, asset := runs[num{epoch, r.Config.ReadSeq}], r.Target.AssetID
-			if err := readCompared(r, run, active[kindOf{asset, authz.BaselineConfiguration}],
-				lastChange[baseline{asset, r.Config.BaselineDigest}], resulted[num{epoch, r.Config.ReadSeq}]); err != nil {
+			if err := readCompared(r, run, activeFor(r), lastChange[baseline{asset, r.Config.BaselineDigest}],
+				resulted[num{epoch, r.Config.ReadSeq}], unknown(r.Config.ReadSeq), cut && r.Config.ChangeSeq != 0 && r.Config.ChangeSeq < first); err != nil {
 				return err
 			}
 			if err := inOrder(r, run); err != nil {
@@ -797,6 +1033,28 @@ func VerifyConfig(recs []*Record) error {
 		case r.Action == ActionConfigReadsRemoved:
 			p := pending[r.Target.AssetID]
 			c := r.Config
+			if cut && !removedIn[r.Target.AssetID] {
+				// The asset's first removal in a view that starts after seq
+				// 1: it may take reads compared before the view.
+				removedIn[r.Target.AssetID] = true
+				k := 0
+				for k < len(p) && p[k].seq <= c.RemovedLastSeq {
+					k++
+				}
+				if k < c.RemovedCount {
+					// The reads it kept may be before the view too; the newest
+					// is checked when the view holds it.
+					switch {
+					case k > 0 && (p[k-1].seq != c.RemovedLastSeq || c.RemovedFirstSeq >= p[0].seq):
+						return broken("record %d: the range %d to %d does not end at a compared read of asset %s and start before the view", r.Seq, c.RemovedFirstSeq, c.RemovedLastSeq, r.Target.AssetID)
+					case len(p) > k && c.KeptDigest != p[len(p)-1].digest:
+						return broken("record %d: kept_digest is not the newest compared read of asset %s", r.Seq, r.Target.AssetID)
+					}
+					pending[r.Target.AssetID] = p[k:]
+					continue
+				}
+			}
+			removedIn[r.Target.AssetID] = true
 			if c.RemovedCount+keptReads > len(p) {
 				return broken("record %d removes %d reads of asset %s, but only %d compared reads are recorded and the %d newest stay", r.Seq, c.RemovedCount, r.Target.AssetID, len(p), keptReads)
 			}
@@ -818,6 +1076,38 @@ func VerifyConfig(recs []*Record) error {
 	return nil
 }
 
+// checkpointNotRestored checks a config.checkpoint_not_restored (0.9)
+// against what recs shows of its asset: last is the latest
+// config.baseline_recorded before it (nil when none), first whether recs
+// holds the asset's version-1 recording, and acked the event baseline the
+// latest succeeded acknowledgement before it set ("" when none). A learner's
+// re-learn records the next version, replacing the latest recorded
+// baseline; a detector is rebuilt from the acknowledged baseline. cut says
+// recs is a view that starts after seq 1 (VerifyConfigFrom): only there can
+// a recording or an acknowledgement be missing because it is before the
+// view, and not even there once recs holds the asset's version-1 recording,
+// since everything of the asset comes after it (C6 on #387).
+func checkpointNotRestored(r, last *Record, first bool, acked string, cut bool) error {
+	c := r.Config
+	if c.CheckpointHalf == CheckpointDetector {
+		switch {
+		case acked == "" && (!cut || first):
+			return broken("record %d rebuilds the detector of asset %s from %s, but no acknowledgement of an event baseline of the asset comes before it", r.Seq, r.Target.AssetID, c.BaselineDigest)
+		case acked != "" && c.BaselineDigest != acked:
+			return broken("record %d rebuilds the detector of asset %s from %s, but the acknowledged event baseline is %s", r.Seq, r.Target.AssetID, c.BaselineDigest, acked)
+		}
+		return nil
+	}
+	switch {
+	case last != nil && (c.BaselineVersion != last.Config.BaselineVersion+1 || c.PreviousDigest != last.Config.BaselineDigest):
+		return broken("record %d starts a re-learn of asset %s as version %d replacing %q, but record %d recorded version %d, %s",
+			r.Seq, r.Target.AssetID, c.BaselineVersion, c.PreviousDigest, last.Seq, last.Config.BaselineVersion, last.Config.BaselineDigest)
+	case last == nil && (!cut || first) && c.BaselineVersion != 1:
+		return broken("record %d starts a re-learn of asset %s as version %d, but no recording of the asset comes before it", r.Seq, r.Target.AssetID, c.BaselineVersion)
+	}
+	return nil
+}
+
 // recordedEventsSince reports whether r is stamped with the minor that added
 // config.baseline_recorded or a later one.
 func recordedEventsSince(r *Record) bool {
@@ -833,10 +1123,13 @@ func recordedEventsSince(r *Record) bool {
 // zero action when none). A read has one result, it compares against the
 // acknowledged baseline, a no_difference read cannot follow a recorded change
 // the baseline has not been restored from, and a same_change read repeats the
-// newest recorded change exactly, by its changes digest.
-func readCompared(r, run *Record, active string, last *Record, given Action) error {
+// newest recorded change exactly, by its changes digest. unknownRead and
+// unknownChange are VerifyConfigFrom's: the run, or the change repeated, is
+// before the view.
+func readCompared(r, run *Record, active string, last *Record, given Action, unknownRead, unknownChange bool) error {
 	c := r.Config
 	switch {
+	case run == nil && unknownRead:
 	case run == nil || run.Target.AssetID != r.Target.AssetID:
 		return broken("record %d names read decision %d, which is not an earlier run on asset %s in its epoch", r.Seq, c.ReadSeq, r.Target.AssetID)
 	case given != "":
@@ -852,6 +1145,7 @@ func readCompared(r, run *Record, active string, last *Record, given Action) err
 		}
 	case ReasonSameChange:
 		switch {
+		case last == nil && unknownChange:
 		case last == nil || last.Seq != c.ChangeSeq:
 			return broken("record %d repeats change %d, which is not the newest recorded change against baseline %s", r.Seq, c.ChangeSeq, c.BaselineDigest)
 		case last.Config.ChangesDigest == "" || last.Config.ChangesDigest != c.ChangesDigest:
@@ -877,8 +1171,9 @@ func acknowledged(r *Record, active string) error {
 // unchangedRead checks a detection's unchanged_read_seq and unchanged_at
 // against the runs of its operation on its asset in this epoch, in chain
 // order, and the collector.seq_reset that began the epoch (nil in the
-// first).
-func unchangedRead(r *Record, runs []*Record, reset *Record) error {
+// first). unknown is VerifyConfigFrom's: with no earlier run in the view, a
+// run or reset from before the view cannot be checked.
+func unchangedRead(r *Record, runs []*Record, reset *Record, unknown func(uint64) bool) error {
 	c := r.Config
 	var last *Record
 	for _, run := range runs {
@@ -888,6 +1183,10 @@ func unchangedRead(r *Record, runs []*Record, reset *Record) error {
 	}
 	bound := last
 	switch {
+	case last == nil && c.UnchangedReadSeq != 0 && unknown(c.UnchangedReadSeq):
+		return nil
+	case last == nil && c.UnchangedReadSeq == 0 && unknown(0):
+		return nil // the reset that began the epoch is before the view
 	case last != nil && c.UnchangedReadSeq != last.CollectorSeq:
 		return broken("record %d names unchanged read %d, but the asset's last run before read %d is %d", r.Seq, c.UnchangedReadSeq, c.ReadSeq, last.CollectorSeq)
 	case last == nil && c.UnchangedReadSeq != 0:

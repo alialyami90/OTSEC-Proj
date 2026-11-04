@@ -46,12 +46,13 @@ func database(maxRecord int64) c5.Database {
 }
 
 // docs accepts any JSON object: the document check is the node's, not
-// what this package tests.
-func docs(doc []byte, _ *c5.Capture) error {
+// what this package tests. Since C5 0.7 it names each one a configuration
+// snapshot.
+func docs(doc []byte, _ *c5.Capture) (c5.DocumentInfo, error) {
 	if len(doc) == 0 || doc[0] != '{' {
-		return fmt.Errorf("not a document")
+		return c5.DocumentInfo{}, fmt.Errorf("not a document")
 	}
-	return nil
+	return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigSnapshot}, nil
 }
 
 func open(t *testing.T, dir string, d c5.Database) *store.DB {

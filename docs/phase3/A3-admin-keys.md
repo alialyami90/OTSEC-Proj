@@ -37,8 +37,8 @@ The signing client (a CLI on the admin workstation, or a browser holding a non-e
    ```json
    {"key_id": "ed25519-…", "public_key": "<base64>", "principal": "<person>@<site>", "status": "active"}
    ```
-   `principal` is the C7 human principal ID the person signs as.
-6. Restart the collector. A config error stops the start, so a mistyped key never runs: wrong length, a key ID not derived from the key, a duplicate, or an unknown status.
+   `principal` is the C7 human principal ID the person signs as. An optional `kinds` list names the admin kinds the key may sign (C7 0.6). Without it the key keeps the 0.5 kinds: the credential kinds, the asset clear and the two node clears. So no key can approve a change (`node.change_approval`) or acknowledge a baseline (`node.baseline_ack`) until its list names that kind. A list replaces the defaults, so it must also name any 0.5 kind the person still signs. An empty list allows nothing.
+6. Restart the collector. A config error stops the start, so a mistyped key never runs: wrong length, a key ID not derived from the key, a duplicate, an unknown status, or a `kinds` entry that is not an admin kind or appears twice.
 7. Check the start log. Each pinned key is listed (`admin key pinned`, with key ID, principal and status). If no key is active, the collector raises `no active admin key pinned: every credential request will be refused`.
 8. Record the enrolment in the site's change record: the person, the key ID, the fingerprint, the date and both people's names.
 
@@ -71,7 +71,7 @@ A reinstalled collector has a new install key. Every signed request is bound to 
 
 | Step | Check |
 | --- | --- |
-| Enrol | A key whose ID is not derived from it, a duplicate ID, a 31-byte key, an empty principal or an unknown status stops the start (`cmd/otsec-collector` `TestParseConfig`). |
+| Enrol | A key whose ID is not derived from it, a duplicate ID, a 31-byte key, an empty principal, an unknown status, or a `kinds` list with a kind that is not an admin kind or with a repeat stops the start (`cmd/otsec-collector` `TestParseConfig`). A key without a kind is refused at check `authority`, numbered, with its nonce unspent (`modules/security/collector` `TestConfigKindsRefused`). |
 | Enrol | A collector with no active key raises the start alarm, and refuses an install with check `key`. |
 | Rotate | With both keys pinned, both are accepted. With the old one revoked, only the new one is. |
 | Revoke | A request signed before the revocation is refused after the restart (check `key`). |

@@ -61,3 +61,38 @@ The asset ID and the read's invocation ID are invented.
 | `invalid/config-change-detected-unchanged-read-not-before-read.json` | `unchanged_read_seq` must be below `read_seq`. It also passes the schema and fails `Validate`. |
 
 The chain rules (an approval names a real acceptance of its kind, a detection names a real read, a covering approval came first and in the same collector epoch, no approval silences a change already found unapproved without a recorded restore in between, and each acknowledgement names the baseline it replaces) are in `TestVerifyConfig` and `TestBaselineSuccession`, because they span records.
+
+## 0.9: a checkpoint that does not restore
+
+The digests reuse the 0.8 test values (`sha256:111…`, `sha256:222…`), which are fixed strings, not the hash of any stored record.
+
+| File | What it shows |
+| --- | --- |
+| `valid/config-checkpoint-not-restored-learner-first.json` | The learner's newest checkpoint (stream seq 17) is corrupt, and the re-learn it starts is the asset's first: version 1, no `previous_digest`. |
+| `valid/config-checkpoint-not-restored-learner-relearn.json` | The learner's checkpoint does not match, and the re-learn records version 3, replacing `sha256:222…`. |
+| `valid/config-checkpoint-not-restored-detector.json` | The detector's checkpoint is of a version the node does not read; the detector is rebuilt from the acknowledged baseline `sha256:222…`. |
+| `invalid/config-checkpoint-not-restored-stamped-0.8.json` | The action on a record stamped 0.8. |
+| `invalid/config-checkpoint-not-restored-as-info.json`, `invalid/config-checkpoint-not-restored-unknown-class.json` | Not a warning, or a reason code outside the closed set. |
+| `invalid/config-checkpoint-not-restored-by-a-person.json` | The node writes it. |
+| `invalid/config-checkpoint-not-restored-without-half.json`, `invalid/config-checkpoint-not-restored-without-seq.json` | A required field missing. |
+| `invalid/config-checkpoint-not-restored-half-not-in-correlation.json` | `correlation_id` names the other half. |
+| `invalid/config-checkpoint-not-restored-learner-with-baseline.json`, `invalid/config-checkpoint-not-restored-learner-first-with-previous.json`, `invalid/config-checkpoint-not-restored-learner-relearn-without-previous.json` | A learner names a baseline it has not recorded, or its version and `previous_digest` disagree. |
+| `invalid/config-checkpoint-not-restored-detector-with-version.json`, `invalid/config-checkpoint-not-restored-detector-without-baseline.json` | A detector names a version, or not the baseline it is rebuilt from. |
+| `invalid/config-checkpoint-not-restored-with-a-read.json` | A field of another action. |
+| `invalid/config-baseline-recorded-with-checkpoint-seq.json` | `checkpoint_seq` on another action. |
+
+The chain rules (a learner's re-learn follows the latest recorded baseline; a detector is rebuilt from the acknowledged one) are in `TestCheckpointNotRestoredInAChain`.
+
+## 0.10: a difference too large to store
+
+The digests reuse the 0.7 test values.
+
+| File | What it shows |
+| --- | --- |
+| `valid/config-change-detected-difference-too-large.json` | An unapproved change whose difference was over C9's `MaxDifferenceBytes`: `difference_too_large`, `changes_digest`, and no `difference_digest` (D4-42). |
+| `invalid/config-change-detected-too-large-with-difference.json` | `difference_too_large` with a `difference_digest`. |
+| `invalid/config-change-detected-without-difference.json` | Neither a `difference_digest` nor `difference_too_large`. |
+| `invalid/config-change-detected-too-large-stamped-0.9.json` | The field on a record stamped 0.9. |
+| `invalid/config-read-compared-with-difference-too-large.json` | The field on another action. |
+
+The chain case (a too-large detection, then reads of the same change that name it) is in `TestDifferenceTooLargeInAChain`.

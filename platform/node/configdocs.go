@@ -15,7 +15,7 @@ import (
 // ConfigDocuments is the C5 DocumentValidator of the configuration class
 // (C5 0.4): the store runs it on every record of the class before it is
 // stored, as it runs C8's seal on audit records, so C5 imports neither C9 nor
-// C10. It accepts three documents and nothing else:
+// C10. It accepts four documents and nothing else:
 //
 //   - a C9 snapshot (otsec.config, kind config.snapshot) that decodes and
 //     validates, with a capture that is the transcript it names: the same
@@ -28,49 +28,60 @@ import (
 //     no capture. It names its two snapshots by digest;
 //   - a C10 baseline (otsec.baseline) that decodes and validates, with no
 //     capture, in the compact bytes baseline.Encode produces, so that the
-//     stored bytes hash to the baseline's Hash (B4 on #299).
+//     stored bytes hash to the baseline's Hash (B4 on #299);
+//   - the node's event-baseline checkpoint (otsec.eventcheckpoint, feeder
+//     slice 1c), in the bytes its encoder writes, with a capture that is the
+//     snapshot it names. It is working state, not evidence (D4-32).
+//
+// It returns each document's C5 0.7 DocumentInfo. The first three are
+// evidence, in the series config.snapshot or config.difference (C9's own
+// kind names) or baseline.event. A checkpoint is working state, in the
+// series of its half, eventcheckpoint.learner or eventcheckpoint.detector,
+// taken from the decoded document (C3 on #376).
 //
 // The validator cannot see the record's stream. The writer, which builds the
 // record for config/<asset>, must give it the asset's own document; the
 // document names the asset it is about.
-func ConfigDocuments(document []byte, capture *c5.Capture) error {
+func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
 	var head struct {
 		Schema string `json:"schema"`
 		Kind   string `json:"kind"`
 	}
 	if err := json.Unmarshal(document, &head); err != nil {
-		return fmt.Errorf("configuration document: %w", err)
+		return c5.DocumentInfo{}, fmt.Errorf("configuration document: %w", err)
 	}
 	switch {
 	case strings.HasPrefix(head.Schema, "otsec.config/") && head.Kind == config.KindSnapshot:
 		s, err := config.DecodeSnapshot(document)
 		if err != nil {
-			return err
+			return c5.DocumentInfo{}, err
 		}
 		if capture == nil {
-			return errors.New("configuration document: a snapshot has no capture; its transcript is the capture")
+			return c5.DocumentInfo{}, errors.New("configuration document: a snapshot has no capture; its transcript is the capture")
 		}
 		if err := capture.Validate(); err != nil {
-			return err
+			return c5.DocumentInfo{}, err
 		}
 		if capture.SHA256 != s.Transcript.SHA256 || int64(len(capture.Bytes)) != s.Transcript.Length {
-			return fmt.Errorf("configuration document: the capture (sha256 %s, %d bytes) is not the transcript the snapshot names (sha256 %s, %d bytes)",
+			return c5.DocumentInfo{}, fmt.Errorf("configuration document: the capture (sha256 %s, %d bytes) is not the transcript the snapshot names (sha256 %s, %d bytes)",
 				capture.SHA256, len(capture.Bytes), s.Transcript.SHA256, s.Transcript.Length)
 		}
-		return nil
+		return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: config.KindSnapshot}, nil
 	case strings.HasPrefix(head.Schema, "otsec.config/") && head.Kind == config.KindDifference:
 		if capture != nil {
-			return errors.New("configuration document: a difference has no capture")
+			return c5.DocumentInfo{}, errors.New("configuration document: a difference has no capture")
 		}
-		_, err := config.DecodeDifference(document)
-		return err
+		if _, err := config.DecodeDifference(document); err != nil {
+			return c5.DocumentInfo{}, err
+		}
+		return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: config.KindDifference}, nil
 	case strings.HasPrefix(head.Schema, "otsec.baseline/"):
 		if capture != nil {
-			return errors.New("configuration document: a baseline has no capture")
+			return c5.DocumentInfo{}, errors.New("configuration document: a baseline has no capture")
 		}
 		b, err := baseline.Decode(document)
 		if err != nil {
-			return err
+			return c5.DocumentInfo{}, err
 		}
 		// Decode accepts any strictly valid JSON, whitespace and key order
 		// included, but a baseline's Hash is taken over the bytes Encode
@@ -79,12 +90,14 @@ func ConfigDocuments(document []byte, capture *c5.Capture) error {
 		// acknowledgement names (B4 on #299).
 		canonical, err := baseline.Encode(b, 0)
 		if err != nil {
-			return err
+			return c5.DocumentInfo{}, err
 		}
 		if !bytes.Equal(document, canonical) {
-			return errors.New("configuration document: a baseline must be stored as baseline.Encode's bytes")
+			return c5.DocumentInfo{}, errors.New("configuration document: a baseline must be stored as baseline.Encode's bytes")
 		}
-		return nil
+		return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesBaselineEvent}, nil
+	case head.Schema == EventCheckpointSchema:
+		return checkCheckpointRecord(document, capture)
 	}
-	return fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference or a C10 baseline", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline or an event checkpoint", head.Schema, head.Kind)
 }

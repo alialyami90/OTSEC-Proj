@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.8/record",
+  "$id": "otsec.audit/0.10/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -170,7 +170,8 @@
         "config.baseline_restored",
         "config.read_compared",
         "config.reads_removed",
-        "config.baseline_recorded"
+        "config.baseline_recorded",
+        "config.checkpoint_not_restored"
       ]
     },
     "outcome": {
@@ -856,7 +857,8 @@
               "config.baseline_restored",
               "config.read_compared",
               "config.reads_removed",
-              "config.baseline_recorded"
+              "config.baseline_recorded",
+              "config.checkpoint_not_restored"
             ]
           }
         },
@@ -1012,6 +1014,21 @@
                   "required": [
                     "baseline_version"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1143,6 +1160,21 @@
                   "required": [
                     "baseline_version"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1174,7 +1206,6 @@
             "required": [
               "baseline_digest",
               "snapshot_digest",
-              "difference_digest",
               "read_seq",
               "unchanged_at"
             ],
@@ -1254,7 +1285,39 @@
                   "required": [
                     "baseline_version"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
                 }
+              ]
+            },
+            "if": {
+              "properties": {
+                "difference_too_large": {
+                  "const": true
+                }
+              },
+              "required": [
+                "difference_too_large"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "difference_digest"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "difference_digest"
               ]
             }
           }
@@ -1487,6 +1550,21 @@
                   "required": [
                     "baseline_version"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1618,6 +1696,21 @@
                 {
                   "required": [
                     "baseline_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
                   ]
                 }
               ]
@@ -1791,6 +1884,21 @@
                   "required": [
                     "baseline_version"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1931,6 +2039,21 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "checkpoint_half"
+                  ]
+                },
+                {
+                  "required": [
+                    "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             },
@@ -1977,6 +2100,272 @@
         "properties": {
           "contract": {
             "pattern": "^otsec\\.audit/0\\.([8-9]|[1-9][0-9]{1,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.checkpoint_not_restored"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "reason_code"
+        ],
+        "properties": {
+          "outcome": {
+            "const": "warning"
+          },
+          "reason_code": {
+            "enum": [
+              "corrupt",
+              "version",
+              "mismatch",
+              "refused"
+            ]
+          },
+          "correlation_id": {
+            "pattern": "^eventcheckpoint\\.(learner|detector):[1-9][0-9]{0,19}$"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.(9|[1-9][0-9]{1,3})$"
+          },
+          "config": {
+            "required": [
+              "kind",
+              "checkpoint_half",
+              "checkpoint_seq"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "decision_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_start"
+                  ]
+                },
+                {
+                  "required": [
+                    "window_end"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "approval_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "unchanged_read_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "changes_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "change_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_count"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_first_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_last_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "removed_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "kept_digest"
+                  ]
+                },
+                {
+                  "required": [
+                    "snapshot_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "kind": {
+                "const": "event"
+              }
+            },
+            "if": {
+              "properties": {
+                "checkpoint_half": {
+                  "const": "detector"
+                }
+              },
+              "required": [
+                "checkpoint_half"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseline_digest"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "baseline_version"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "previous_digest"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "baseline_version"
+              ],
+              "not": {
+                "required": [
+                  "baseline_digest"
+                ]
+              },
+              "if": {
+                "required": [
+                  "previous_digest"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "baseline_version": {
+                    "minimum": 2
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "baseline_version": {
+                    "const": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.checkpoint_not_restored"
+          },
+          "config": {
+            "properties": {
+              "checkpoint_half": {
+                "const": "learner"
+              }
+            },
+            "required": [
+              "checkpoint_half"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "config"
+        ]
+      },
+      "then": {
+        "properties": {
+          "correlation_id": {
+            "pattern": "^eventcheckpoint\\.learner:"
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "config.checkpoint_not_restored"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "then": {
+          "properties": {
+            "correlation_id": {
+              "pattern": "^eventcheckpoint\\.detector:"
+            }
           }
         }
       }
@@ -2050,6 +2439,31 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.change_detected"
+          },
+          "config": {
+            "required": [
+              "difference_too_large"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "config"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([1-9][0-9]{1,3})$"
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -2102,7 +2516,7 @@
     "config": {
       "type": "object",
       "additionalProperties": false,
-      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed; from 0.8 also config.baseline_recorded) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
+      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed; from 0.8 also config.baseline_recorded; from 0.9 also config.checkpoint_not_restored) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -2120,12 +2534,12 @@
             "configuration",
             "event"
           ],
-          "description": "The baseline's kind (baseline_acknowledged; from 0.8 baseline_recorded, event only)"
+          "description": "The baseline's kind (baseline_acknowledged; from 0.8 baseline_recorded, event only; from 0.9 checkpoint_not_restored, event)"
         },
         "baseline_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "C9 or C10 digest of the baseline: sha256 of its stored bytes (every configuration action but config.reads_removed)"
+          "description": "C9 or C10 digest of the baseline: sha256 of its stored bytes (every configuration action but config.reads_removed and a learner's config.checkpoint_not_restored; on a detector's config.checkpoint_not_restored, the acknowledged event baseline it is rebuilt from)"
         },
         "window_start": {
           "type": "string",
@@ -2151,7 +2565,11 @@
         "difference_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "The C9 difference from the baseline (detected only)"
+          "description": "The C9 difference from the baseline (detected only; absent from 0.10 exactly when difference_too_large is set)"
+        },
+        "difference_too_large": {
+          "const": true,
+          "description": "0.10: the difference was over C9's MaxDifferenceBytes and was not stored, so difference_digest is absent (change_detected only, D4-42)"
         },
         "read_seq": {
           "type": "integer",
@@ -2171,7 +2589,7 @@
         "previous_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "The baseline of the same asset and kind this acknowledgement replaces, or, on baseline_recorded (0.8), the baseline the recorded one replaces (C10 Previous); absent for the asset's first"
+          "description": "The baseline of the same asset and kind this acknowledgement replaces, or, on baseline_recorded (0.8), the baseline the recorded one replaces (C10 Previous); absent for the asset's first; on a learner's checkpoint_not_restored (0.9), the baseline the re-learn will replace"
         },
         "unchanged_read_seq": {
           "type": "integer",
@@ -2224,7 +2642,20 @@
         "baseline_version": {
           "type": "integer",
           "minimum": 1,
-          "description": "0.8: the recorded baseline's own version, C10 Baseline.Version: 1 for an asset's first and one more for each re-learn (baseline_recorded only)"
+          "description": "0.8: the recorded baseline's own version, C10 Baseline.Version: 1 for an asset's first and one more for each re-learn (baseline_recorded; from 0.9 a learner's checkpoint_not_restored, the version the re-learn will record)"
+        },
+        "checkpoint_half": {
+          "type": "string",
+          "enum": [
+            "learner",
+            "detector"
+          ],
+          "description": "0.9: the half of the event baseline whose newest checkpoint did not restore (checkpoint_not_restored only)"
+        },
+        "checkpoint_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.9: seq of that checkpoint's record in the asset's configuration stream (checkpoint_not_restored only)"
         }
       }
     }

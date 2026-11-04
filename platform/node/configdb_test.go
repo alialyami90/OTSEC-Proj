@@ -20,6 +20,15 @@ import (
 )
 
 // C9 and C10 fixtures are the contracts' own.
+// addRegister gives nc the signed SEL-751 register, revision 5, which a
+// scheduled configuration read requires (D4-40 item 7).
+func addRegister(t *testing.T, nc *nodeconfigtest.Config) {
+	t.Helper()
+	if err := nc.WriteCommandRegister(t.TempDir(), contractFile(t, "register/testdata/sel-751.json"), 5); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func contractFile(t *testing.T, rel string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", rel))
@@ -123,6 +132,7 @@ func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
 	add := func(nc *nodeconfigtest.Config, asset string) {
 		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg-" + asset, AssetID: asset, Endpoint: "port1-telnet",
 			Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600})
+		addRegister(t, nc)
 	}
 	floor := ConfigQuotaFloorRecords * ConfigRecordBytes
 	for _, c := range []struct {
@@ -297,5 +307,35 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 func TestConfigRecordBytesIsTheDerivedCap(t *testing.T) {
 	if ConfigRecordBytes != 3<<19 {
 		t.Fatalf("ConfigRecordBytes is %d, not the 3<<19 (1.5 MiB) that contracts/config/bound_test.go derives the record bound against", ConfigRecordBytes)
+	}
+}
+
+// C5 0.7: ConfigDocuments names each document's kind and series from the
+// closed table, with C9's own kind names, and no C9 or C10 document is
+// working state. Evidence class: desk.
+func TestConfigDocumentsSeries(t *testing.T) {
+	if config.KindSnapshot != c5.SeriesConfigSnapshot || config.KindDifference != c5.SeriesConfigDifference {
+		t.Fatalf("C9's kinds %q %q are not C5's series", config.KindSnapshot, config.KindDifference)
+	}
+	snap, cp := configRead(t, "1")
+	for name, c := range map[string]struct {
+		doc  []byte
+		cp   *c5.Capture
+		want c5.DocumentInfo
+	}{
+		"a snapshot":   {snap, &cp, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigSnapshot}},
+		"a difference": {contractFile(t, "config/testdata/valid/difference-1-2.json"), nil, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigDifference}},
+		"a baseline":   {canonicalBaseline(t), nil, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesBaselineEvent}},
+	} {
+		got, err := ConfigDocuments(c.doc, c.cp)
+		if err != nil || got != c.want {
+			t.Errorf("%s: %+v %v, want %+v", name, got, err, c.want)
+		}
+		if err := got.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got, err := ConfigDocuments([]byte("SHO 1"), nil); err == nil || got != (c5.DocumentInfo{}) {
+		t.Errorf("a refused document: %+v %v", got, err)
 	}
 }
