@@ -1273,3 +1273,78 @@ func TestConfigReadRestoreLeavesEarlierApprovals(t *testing.T) {
 		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
 	}
 }
+
+// lastSeq is the audit seq of the newest record with the action.
+func (n *cfgNode) lastSeq(action audit.Action) c5.Seq {
+	n.t.Helper()
+	var seq c5.Seq
+	for _, r := range auditRecords(n.t, n.r) {
+		if r.Action == action {
+			seq = c5.Seq(r.Seq)
+		}
+	}
+	if seq == 0 {
+		n.t.Fatalf("no %s record", action)
+	}
+	return seq
+}
+
+// restartOn closes the node and starts it again on c and dir.
+func (n *cfgNode) restartOn(c *Config, dir string) {
+	n.t.Helper()
+	n.r.Close()
+	r, st, _ := start(n.t, c, dir)
+	n.t.Cleanup(func() { r.Close() })
+	n.r, n.st = r, st
+	n.s = newScheduler(n.t, r, n.f)
+}
+
+// After a prune past an approved change, the start raises no
+// unapproved-change alarm for it: a held approved-difference is not open
+// (C6 on #390, D11).
+func TestConfigChainPrunedApprovedChangeNotRaised(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present")
+	if res := n.results(); res[len(res)-1].ReasonCode != audit.ReasonApprovedChange {
+		t.Fatalf("%+v", res[len(res)-1])
+	}
+	seq := n.lastSeq(audit.ActionConfigChangeDetected)
+	n.read("failed.timeout-in-run")
+	n.pruneAudit(seq)
+	n.restartOn(c, dir)
+	if got := countAlarms(n.st, AlarmUnapprovedChange); got != 0 {
+		t.Fatalf("%d unapproved-change alarms at start for an approved change", got)
+	}
+}
+
+// After a prune past a restore, the restored change is not open: the start
+// raises nothing, and the next read of the baseline is no_difference (C6
+// on #390, B7).
+func TestConfigChainPrunedRestoreNotOpen(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	n.read("ok")
+	seq := n.lastSeq(audit.ActionConfigBaselineRestored)
+	n.read("failed.timeout-in-run")
+	n.pruneAudit(seq)
+	n.restartOn(c, dir)
+	if got := countAlarms(n.st, AlarmUnapprovedChange); got != 0 {
+		t.Fatalf("%d unapproved-change alarms at start after the restore", got)
+	}
+	n.read("ok")
+	res := n.pruned()
+	if last := res[len(res)-1]; last.ReasonCode != audit.ReasonNoDifference {
+		t.Fatalf("the read of the baseline after the restore: %s %s", last.Action, last.ReasonCode)
+	}
+}
