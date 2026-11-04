@@ -344,8 +344,10 @@ func (l *Learner) collected(endNS int64) (int64, []baseline.Gap) {
 
 // End returns the period's end, T: the first instant at which both minima
 // hold, given the events and gaps taken so far and the start of a gap still
-// open (zero: none). It is false until T is final, which is when both
-// minima hold and no gap that began at or before T is open (D4-45). An
+// open (zero: none). It is false while a minimum is not met, or a gap that
+// began at or before T is open (D4-45). T is final once End is true and the
+// caller's watermark is past T: a T the duration minimum sets can lie ahead
+// of the watermark, and a gap not yet released could still move it. An
 // event after T is refused (ErrPeriodEnded), and Finish ends the period at
 // T however late it is called.
 func (l *Learner) End(openGapFrom time.Time) (time.Time, bool) {
