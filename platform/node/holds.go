@@ -83,6 +83,11 @@ type assetHolds struct {
 	// returned are the changes whose alarm a return to the baseline ended
 	// (D4-19): held the same way, under their own code.
 	returned []openDifference
+	// approved are the changes an approval covered (C5 0.7).
+	approved []openDifference
+	// superseded are the baselines a newer acknowledgement of the same kind
+	// replaced, with that acknowledgement's seq as ref (C5 0.7).
+	superseded []ackedBaseline
 }
 
 // foldHolds reads the configuration records of the node's audit stream, in
@@ -110,18 +115,25 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 				continue
 			}
 			a := of(r)
+			if prev, ok := a.baseline[c.Kind]; ok && prev.digest != c.BaselineDigest {
+				a.superseded = append(a.superseded, ackedBaseline{prev.digest, s.seq})
+			}
 			a.baseline[c.Kind] = ackedBaseline{c.BaselineDigest, s.seq}
 			if c.Kind == authz.BaselineConfiguration {
 				a.ended = append(a.ended, a.open...) // D4-18: the alarm ends, the evidence stays held
 				a.open = nil
 			}
 		case audit.ActionConfigChangeDetected:
-			if c.ApprovalSeq != 0 {
+			a := of(r)
+			b, ok := a.baseline[authz.BaselineConfiguration]
+			if !ok || b.digest != c.BaselineDigest {
 				continue
 			}
-			a := of(r)
-			if b, ok := a.baseline[authz.BaselineConfiguration]; ok && b.digest == c.BaselineDigest {
-				a.open = append(a.open, openDifference{c.BaselineDigest, c.SnapshotDigest, c.DifferenceDigest, s.seq})
+			o := openDifference{c.BaselineDigest, c.SnapshotDigest, c.DifferenceDigest, s.seq}
+			if c.ApprovalSeq != 0 {
+				a.approved = append(a.approved, o)
+			} else {
+				a.open = append(a.open, o)
 			}
 		case audit.ActionConfigBaselineRestored:
 			a := of(r)
@@ -136,16 +148,22 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 	return out
 }
 
-// wants lists an asset's holds in a fixed order: the baselines, then each
-// open difference's snapshot and difference. A digest already wanted is not
-// wanted twice.
+// wants lists an asset's holds: the baselines, then each change's
+// snapshot and difference, then the superseded baselines. A digest wanted
+// for two reasons is wanted once, for the reason first in c5.HoldPriority
+// (C5 0.7), keeping the place of its first mention.
 func (a *assetHolds) wants() []wantHold {
 	var out []wantHold
-	seen := map[string]bool{}
+	at := map[string]int{}
+	rank := func(c c5.HoldCode) int { return slices.Index(c5.HoldPriority(), c) }
 	add := func(w wantHold) {
-		if !seen[w.digest] {
-			seen[w.digest] = true
+		i, ok := at[w.digest]
+		switch {
+		case !ok:
+			at[w.digest] = len(out)
 			out = append(out, w)
+		case rank(w.code) < rank(out[i].code):
+			out[i] = w
 		}
 	}
 	for _, k := range []authz.BaselineKind{authz.BaselineConfiguration, authz.BaselineEvent} {
@@ -153,17 +171,18 @@ func (a *assetHolds) wants() []wantHold {
 			add(wantHold{b.digest, c5.HoldBaseline, b.ref, fmt.Sprintf("the %s baseline acknowledged in audit record %d", k, b.ref)})
 		}
 	}
-	for _, o := range a.open {
-		add(wantHold{o.snapshot, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d", o.ref)})
-		add(wantHold{o.difference, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d", o.ref)})
+	diff := func(os []openDifference, code c5.HoldCode, why string) {
+		for _, o := range os {
+			add(wantHold{o.snapshot, code, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d%s", o.ref, why)})
+			add(wantHold{o.difference, code, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d%s", o.ref, why)})
+		}
 	}
-	for _, o := range a.ended {
-		add(wantHold{o.snapshot, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
-		add(wantHold{o.difference, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
-	}
-	for _, o := range a.returned {
-		add(wantHold{o.snapshot, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
-		add(wantHold{o.difference, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
+	diff(a.open, c5.HoldUnapprovedDifference, "")
+	diff(a.approved, c5.HoldApprovedDifference, ", which an approval covered")
+	diff(a.ended, c5.HoldAcknowledgedDifference, ", its alarm ended by an acknowledgement")
+	diff(a.returned, c5.HoldRestoredDifference, ", its alarm ended by a return to the baseline")
+	for _, b := range a.superseded {
+		add(wantHold{b.digest, c5.HoldSupersededBaseline, b.ref, fmt.Sprintf("a baseline superseded by the acknowledgement in audit record %d", b.ref)})
 	}
 	return out
 }
@@ -179,9 +198,7 @@ type holdPlan struct {
 	unknown []c5.HeldRecord
 }
 
-func knownCode(c c5.HoldCode) bool {
-	return c == c5.HoldBaseline || c == c5.HoldUnapprovedDifference || c == c5.HoldAcknowledgedDifference || c == c5.HoldRestoredDifference
-}
+func knownCode(c c5.HoldCode) bool { return slices.Contains(c5.HoldPriority(), c) }
 
 type planned struct {
 	seq c5.Seq
@@ -395,7 +412,7 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		}
 		for _, h := range p.unknown {
 			r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: c5.AlarmHoldsReconciled, At: r.opt.Now(), Stream: spec.ID,
-				Detail: fmt.Sprintf("%s seq %d: hold code %q is not known to this node (C5 0.6); kept as it is", spec.ID, h.Seq, h.Reason.Code)})
+				Detail: fmt.Sprintf("%s seq %d: hold code %q is not known to this node (C5 0.7); kept as it is", spec.ID, h.Seq, h.Reason.Code)})
 		}
 		apply := func(ps []planned, verb string, n *int) {
 			for _, pl := range ps {

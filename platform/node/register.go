@@ -52,7 +52,13 @@ const AlarmRegisterRefused = "config-register-refused"
 func (c *Config) checkRegister(fail func(format string, args ...any)) {
 	reads := false
 	for _, s := range c.Schedule {
-		reads = reads || s.ReadsConfiguration()
+		if !s.ReadsConfiguration() {
+			continue
+		}
+		reads = true
+		if _, ok := c.configRule(s.AssetID); !ok {
+			fail("schedule %s reads the configuration of asset %s, whose profile has no configuration rule (ConfigRules)", s.ID, s.AssetID)
+		}
 	}
 	r := c.Register
 	switch {
