@@ -240,7 +240,8 @@ func (s *Scheduler) decisionRecord(f *adminFile, e relayEntry, action audit.Acti
 // the holds the chain now justifies in the asset's configuration stream:
 // what reconcileHolds would add or correct, without its alarms, which are
 // for a crash or tampering. A hold not taken raises AlarmEvidenceNotStored;
-// the next start's reconcile takes it.
+// the next start's reconcile takes it, and until then HoldsConsumer keeps
+// the acknowledgement from being pruned.
 func (s *Scheduler) holdAcknowledged(ctx context.Context, assetID string, ref c5.Seq) {
 	stream := ConfigStream(assetID)
 	fail := func(err error) {
@@ -251,25 +252,25 @@ func (s *Scheduler) holdAcknowledged(ctx context.Context, assetID string, ref c5
 		fail(errors.New("database not open"))
 		return
 	}
-	recs, err := configAuditRecords(ctx, adb)
+	if err := holdFault(holdFaults.ack); err != nil {
+		fail(err)
+		return
+	}
+	folded, pruned, err := foldView(ctx, adb, cdb, []string{assetID})
 	if err != nil {
 		fail(err)
 		return
 	}
-	pruned, err := auditPruned(ctx, adb)
+	p, err := s.rt.planStream(ctx, cdb, stream, folded[assetID])
 	if err != nil {
 		fail(err)
 		return
 	}
-	p, err := s.rt.planStream(ctx, cdb, stream, foldHolds(recs)[assetID])
-	if err != nil {
-		fail(err)
-		return
+	replace := p.replace
+	if pruned {
+		replace = prunedReplace(replace)
 	}
-	todo := p.add
-	if !pruned {
-		todo = append(todo, p.replace...)
-	}
+	todo := append(p.add, replace...)
 	for _, pl := range todo {
 		if err := cdb.Hold(ctx, c5.Hold{Stream: stream, Seq: pl.seq, Reason: reasonOf(s.rt.cfg.NodeID, pl.w)}); err != nil {
 			fail(err)

@@ -554,15 +554,17 @@ func (e badRecord) Unwrap() error { return e.err }
 // rebuild must find every record after through_seq.
 const SuspensionConsumer c5.ConsumerID = "node-suspensions"
 
-// pruneConsumers adds SuspensionConsumer to the audit stream's consumers.
-// It is added only when the stream already has a required consumer: C5
-// prunes audit only after a required consumer confirmed delivery, and the
-// checkpoint must never make an unforwarded record prunable. With it, the
-// boundary is the lower of the delivery cursors and the checkpoint.
+// pruneConsumers adds SuspensionConsumer and HoldsConsumer to the audit
+// stream's consumers. They are added only when the stream already has a
+// required consumer: C5 prunes audit only after a required consumer
+// confirmed delivery, and neither must ever make an unforwarded record
+// prunable. With them, the boundary is the lower of the delivery cursors,
+// the checkpoint and the holds cursor.
 func pruneConsumers(cs []c5.Consumer) []c5.Consumer {
 	for _, c := range cs {
 		if c.Stream == AuditStream && c.Delivery == c5.Required {
-			return append(cs, c5.Consumer{ID: SuspensionConsumer, Stream: AuditStream, Delivery: c5.Required})
+			return append(cs, c5.Consumer{ID: SuspensionConsumer, Stream: AuditStream, Delivery: c5.Required},
+				c5.Consumer{ID: HoldsConsumer, Stream: AuditStream, Delivery: c5.Required})
 		}
 	}
 	return cs

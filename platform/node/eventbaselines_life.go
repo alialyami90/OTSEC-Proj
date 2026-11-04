@@ -529,13 +529,19 @@ func (l *eventLife) asset(assetID string) *lifeAsset {
 }
 
 // Observe is feedSink's: the event goes to the asset's learner or detector.
-func (l *eventLife) Observe(assetID string, o eventbaseline.Obs) {
+// open is the start of the asset's collection gap still open, zero when
+// none is. The learner takes it to find where its period ends, and an event
+// after that end is in no baseline: the next Tick finishes the learner
+// (D4-45).
+func (l *eventLife) Observe(assetID string, o eventbaseline.Obs, open time.Time) {
 	a := l.asset(assetID)
 	if a == nil {
 		return
 	}
 	if a.learner != nil {
-		if err := a.learner.Observe(o); err != nil {
+		lo := o
+		lo.OpenGapFrom = open
+		if err := a.learner.Observe(lo); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 			l.refused(a, err)
 		}
 	}
@@ -561,15 +567,20 @@ func (l *eventLife) Gap(assetID string, from, to time.Time, reason string) {
 	}
 }
 
-// Tick is feedSink's: the watermark finishes a learner whose minima are met,
-// and moves a detector's time.
-func (l *eventLife) Tick(assetID string, at time.Time) {
+// Tick is feedSink's: a watermark past the end of a learner's period, once
+// that end is final, finishes the learner; and it moves a detector's time.
+// open is as for Observe. A watermark at the end does not finish it, as an
+// event at the end still counts. The baseline ends at the period's end, not
+// at the watermark, so how late the Tick comes does not change it (D4-45).
+func (l *eventLife) Tick(assetID string, at, open time.Time) {
 	a := l.asset(assetID)
 	if a == nil {
 		return
 	}
-	if a.learner != nil && a.learner.Progress(at).Done {
-		l.finish(a, at)
+	if a.learner != nil {
+		if end, ok := a.learner.End(open); ok && at.After(end) {
+			l.finish(a, at)
+		}
 	}
 	if a.unrecorded {
 		if err := l.record(a); err != nil {
@@ -587,7 +598,7 @@ func (l *eventLife) Tick(assetID string, at time.Time) {
 	}
 }
 
-// finish ends the learner at the watermark, stores the baseline, and
+// finish ends the learner at its period's end, stores the baseline, and
 // records it. A baseline that cannot be stored leaves the learner learning,
 // to be finished again at the next watermark.
 func (l *eventLife) finish(a *lifeAsset, at time.Time) {

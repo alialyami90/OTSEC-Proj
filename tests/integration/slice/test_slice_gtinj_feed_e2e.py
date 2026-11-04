@@ -255,11 +255,16 @@ def _run(tmp_path_factory, events, end):
         harness.wait_for(clock.reached, 10, step=0.002)
         _nudge(clock, end + datetime.timedelta(minutes=10), lambda: clock.at >= end + datetime.timedelta(minutes=3), "")
         time.sleep(1)
+        out["status"] = _baseline(s)
     finally:
         starting.clear()
         s.stop()
     out["stored"] = _stored(s.layout["store_dir"])
     out["health"] = _stored(s.layout["store_dir"], HEALTH)
+    # The asset's baseline records, as stored: its configuration stream also
+    # holds the event-baseline checkpoints.
+    out["config"] = [ev for (ev,) in _query(s.layout["store_dir"], "SELECT event FROM events WHERE stream = ? ORDER BY seq", "config/" + s.layout["gtinj_asset"])
+                     if json.loads(ev).get("schema", "").startswith("otsec.baseline/")]
     return out
 
 
@@ -359,18 +364,46 @@ def test_departure_alarms_are_the_expected_ones(run):
     assert not failures, "\n".join(failures)
 
 
+def test_the_three_runs_learn_the_same_baseline(run, repeat, heldout):
+    # The same events before the acknowledgement give the same baseline
+    # bytes, however the feeder's steps fell in each run: the period ends
+    # where both minima first hold (D4-45; F-020).
+    for r in (run, repeat, heldout):
+        assert len(r["config"]) == 1, f"{len(r['config'])} baseline records, want one"
+        assert r["baseline"]["active"]["hash"] == run["baseline"]["active"]["hash"], (r["baseline"], run["baseline"])
+    p = json.loads(run["config"][0])
+    print("baseline", run["baseline"]["active"]["hash"], "period", p["period"], "events", p["counts"]["events"])
+    # T computed from the series: no gaps, so the later of the event that
+    # meets min_events and the first event plus min_duration_s; every event
+    # at or before T counts (C4 on #417). Learner 0.1 ended at a watermark,
+    # after T, whatever the cadence.
+    par, times = run["series"]["params"], [_utc(e["received_utc"]) for e in run["events"]]
+    end = max(times[par["min_events"] - 1], times[0] + datetime.timedelta(seconds=par["min_duration_s"]))
+    got = (_parse(p["period"]["start_utc"]), _parse(p["period"]["end_utc"]), p["period"]["collected_s"])
+    assert got == (times[0], end, int((end - times[0]).total_seconds())) and not p["period"].get("gaps"), (p["period"], end)
+    assert p["counts"]["events"] == sum(t <= end for t in times), (p["counts"], end)
+    assert repeat["config"][0] == run["config"][0]
+    assert heldout["config"][0] == run["config"][0]
+
+
+def test_the_repeat_run_raises_the_expected_alarms(repeat):
+    # The repeat run is checked against the oracle on its own, not only
+    # against the first run.
+    m = _alarms()
+    failures, report = m.check(repeat["series"], _departures(repeat), _ids(repeat), {repeat["layout"]["gtinj_asset"]: "gt-inj-syslog"})
+    print(json.dumps(report, indent=1, default=str))
+    assert not failures, "\n".join(failures)
+
+
 def test_a_second_run_raises_the_same_alarms(run, repeat):
-    # Every field of every alarm, and the events it cites, but the baseline
-    # hash: each run's learner ends at the watermark of the feeder step that
-    # first finds its minima met, so the two baselines' periods and counts
-    # differ (F-020). Each alarm must cite its own run's active baseline.
+    # Every field of every alarm, the baseline it cites among them, and the
+    # events it cites.
     def norm(r):
         ids, active = _ids(r), r["baseline"]["active"]["hash"]
         out = []
         for h in _departures(r):
-            d = dict(h["details"])
-            assert d.pop("baseline") == active, (d, active)
-            out.append((d, sorted(ids.get(f"{e['node_id']}:{e['stream']}:{e['seq']}", "?") for e in h.get("related") or [])))
+            assert h["details"].get("baseline") == active, (h["details"], active)
+            out.append((h["details"], sorted(ids.get(f"{e['node_id']}:{e['stream']}:{e['seq']}", "?") for e in h.get("related") or [])))
         return out
     first = norm(run)
     assert first, "no alarms to compare"
@@ -383,3 +416,7 @@ def test_the_heldout_series_raises_no_departure(heldout):
     assert (heldout.get("baseline") or {}).get("phase") == "active", heldout.get("baseline")
     alarms = _departures(heldout)
     assert not alarms, json.dumps(alarms, indent=1)
+    # No event was refused or late, so the input the learner and the
+    # detector took is the series (C4 on #411).
+    st = heldout["status"]
+    assert st.get("phase") == "active" and st.get("refused", 0) == 0 and st.get("late", 0) == 0, st
