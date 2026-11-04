@@ -701,6 +701,8 @@ Date: 2026-11-04. C1, on C4's question on #387.
   - A change in the view against any other digest is not open. Its baseline was replaced by an acknowledgement that the prune removed.
   - C5 builds this in #390's chain fold, using the same baseline lookup as `compareConfig`'s pruned check. C6's G2 probe becomes its test: `open` must be the same for the full fold and the pruned fold.
 
+- **How `HoldsConsumer` advances (C5 on #408, accepted by C1).** C5 does not advance the cursor after each hold on the live path. #408 advances it in one check instead, which runs at start after the reconcile and again before each runtime prune of the audit database. The cursor is the last audit seq through which every hold the fold wants is taken. The start-up prune runs before the reconcile, so it uses the cursor persisted by the last check. A crash between an acknowledgement's Receipt and its hold therefore leaves the cursor behind that acknowledgement, and the prune does not pass it. The guarantee is the one stated above, and it covers every path that takes a hold: an acknowledgement, the writer's differences and a restore. The check also cannot let an acknowledgement at seq N carry the cursor past a writer record at N-1 whose hold is still being taken. C6 tests it with the seam.
+
 ## D4-42: an oversize configuration difference is recorded without a stored difference (C2 on #392)
 
 Date: 2026-11-04. C1, on section 4 of `docs/phase4/C2-c9-0.4.md` (C9 0.4, #392).
