@@ -1,4 +1,4 @@
-// Package config is contract C9, otsec.config/0.3. It defines a device's
+// Package config is contract C9, otsec.config/0.4. It defines a device's
 // configuration as read in one session (the snapshot), the semantic difference
 // between two snapshots, and, per family, the rule that decides what in a
 // reply is a setting and what is not (P4-A2; R3.1, R3.3, R3.5, R3.7).
@@ -157,9 +157,25 @@
 // ends a run that would not fit: failed.config_unparsable, the bytes kept, no
 // snapshot. 0.2 documents had no bound; none was ever stored.
 //
+// A difference is bounded too (0.4): at most MaxDifferenceBytes (RecordCap
+// less RecordHeadroom) encoded by its own Encode, since it is stored alone
+// with no capture. It carries both values of each changed setting, so it can
+// be more than twice the size of either snapshot. Measured against the
+// SEL-751's settings sheets, a read in which every setting changes can make
+// a difference over the bound while both snapshots fit
+// (docs/phase4/C2-c9-0.4.md). Validate refuses such a difference with
+// ErrDifferenceTooLarge, which wraps ErrTooLarge, and Compare returns it with
+// that error, so the caller still knows the change and can name it. A caller
+// keys on ErrDifferenceTooLarge: a stored snapshot over its own bound wraps
+// ErrTooLarge too, and Compare then returns no difference. 0.3 differences
+// had no bound.
+//
 // # Compatibility
 //
 // Readers accept every 0.x minor and ignore unknown fields (contracts/README.md).
+// A minor bump changes every new snapshot's digest, because its schema bytes
+// change, but never its comparison: an unchanged read compares to a baseline
+// of an earlier minor with no changes (C5 on #392).
 // Section state and change kind are closed enums. A rule ID a reader does not
 // know is refused, because a difference under an unknown rule cannot be
 // computed or trusted. A new family or a changed rule is a new rule ID in a

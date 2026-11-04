@@ -74,8 +74,18 @@ func TestEventCheckpointRoundTrip(t *testing.T) {
 				t.Fatalf("round trip changed the bytes:\n%s\n%s", b, again)
 			}
 			capture := snapCapture(snap)
-			if err := ConfigDocuments(b, &capture); err != nil {
+			info, err := ConfigDocuments(b, &capture)
+			if err != nil {
 				t.Fatalf("ConfigDocuments: %v", err)
+			}
+			// Working state in its half's series, never evidence (C3 on
+			// #376).
+			want := c5.DocumentInfo{Kind: c5.DocumentWorkingState, Series: c5.SeriesCheckpointLearner}
+			if cp.Half == CheckpointDetector {
+				want.Series = c5.SeriesCheckpointDetector
+			}
+			if info != want {
+				t.Fatalf("stored as %+v, want %+v", info, want)
 			}
 		})
 	}
@@ -167,7 +177,7 @@ func TestEventCheckpointRefusals(t *testing.T) {
 		"a mutated half": {strings.Replace(string(b), `"half":"learner"`, `"half":"detector"`, 1), &capture},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := ConfigDocuments([]byte(tc.doc), tc.capture); err == nil {
+			if _, err := ConfigDocuments([]byte(tc.doc), tc.capture); err == nil {
 				t.Fatal("accepted")
 			}
 		})

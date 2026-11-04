@@ -27,15 +27,24 @@ var configDB = c5.Database{
 
 // testDocs accepts a document that starts with {"doc": and, when the
 // record has a capture, names the capture's digest: the shape of the node's
-// C9 check that a snapshot names its own transcript.
-func testDocs(doc []byte, capture *c5.Capture) error {
+// C9 check that a snapshot names its own transcript. Its series (C5 0.7) is
+// config.snapshot unless the document names one with "series":, and a
+// checkpoint series is working state.
+func testDocs(doc []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
 	if !bytes.HasPrefix(doc, []byte(`{"doc":`)) {
-		return errors.New("not a test document")
+		return c5.DocumentInfo{}, errors.New("not a test document")
 	}
 	if capture != nil && !bytes.Contains(doc, []byte(capture.SHA256)) {
-		return errors.New("document does not name its capture")
+		return c5.DocumentInfo{}, errors.New("document does not name its capture")
 	}
-	return nil
+	info := c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigSnapshot}
+	if _, after, ok := bytes.Cut(doc, []byte(`"series":"`)); ok {
+		info.Series, _, _ = strings.Cut(string(after), `"`)
+		if strings.HasPrefix(info.Series, "eventcheckpoint.") {
+			info.Kind = c5.DocumentWorkingState
+		}
+	}
+	return info, nil
 }
 
 func doc(n int) []byte { return fmt.Appendf(nil, `{"doc":%d}`, n) }

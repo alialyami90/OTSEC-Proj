@@ -218,20 +218,25 @@ func utcTime(field, s string) error {
 // checkCheckpointRecord is ConfigDocuments' case for a checkpoint: the
 // document decodes as above, and its capture is the snapshot it names.
 // Restore checks the snapshot's own format and checksum; here it is opaque.
-func checkCheckpointRecord(document []byte, capture *c5.Capture) error {
+// The record is working state in its half's series (C5 0.7).
+func checkCheckpointRecord(document []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
 	c, err := decodeCheckpoint(document)
 	if err != nil {
-		return err
+		return c5.DocumentInfo{}, err
 	}
 	if capture == nil {
-		return errors.New("configuration document: a checkpoint has no capture; its snapshot is the capture")
+		return c5.DocumentInfo{}, errors.New("configuration document: a checkpoint has no capture; its snapshot is the capture")
 	}
 	if err := capture.Validate(); err != nil {
-		return err
+		return c5.DocumentInfo{}, err
 	}
 	if capture.SHA256 != c.Snapshot.SHA256 || int64(len(capture.Bytes)) != c.Snapshot.Length {
-		return fmt.Errorf("configuration document: the capture (sha256 %s, %d bytes) is not the snapshot the checkpoint names (sha256 %s, %d bytes)",
+		return c5.DocumentInfo{}, fmt.Errorf("configuration document: the capture (sha256 %s, %d bytes) is not the snapshot the checkpoint names (sha256 %s, %d bytes)",
 			capture.SHA256, len(capture.Bytes), c.Snapshot.SHA256, c.Snapshot.Length)
 	}
-	return nil
+	series := c5.SeriesCheckpointLearner
+	if c.Half == CheckpointDetector {
+		series = c5.SeriesCheckpointDetector
+	}
+	return c5.DocumentInfo{Kind: c5.DocumentWorkingState, Series: series}, nil
 }
