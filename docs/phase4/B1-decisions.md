@@ -650,3 +650,10 @@ Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-ne
    - **The seam.** C4 owns the per-asset learner and detector state. Slice 1c snapshots and restores through C4's interface and holds no copy of its own. C4 and C5 agree that seam before either side builds it.
    - **The clock.** The test clock drives everything that waits, not only `Now`: the scheduler's timer, the service tickers and any deadline the GT-INJ series crosses.
    - **C5's order.** First the C5 0.7 store, then the configuration-read writer with the C8 records, alarm and fold. Slice 1c follows, then the node side of the signed kinds, and rule 3 last.
+6. **The audit record D4-32 names for a checkpoint that does not restore: C8 0.9 adds `config.checkpoint_not_restored`** (C5 and C4, 2026-11-04). It is node-written, its Target is the asset, and its kind is `event`. It carries:
+   - the half (`learner` or `detector`);
+   - an error class from a closed set (`corrupt`, `version`, `mismatch`, `refused`);
+   - the checkpoint's seq;
+   - for a learner, the version and previous digest of the re-learn it starts.
+
+   C3 drafts it as C8's owner. C5 and C4 review as writers, and C6 writes the contract tests. Until it merges, slice 1c raises the alarm and the health event only, and does not claim D4-32's audit. The first gate needs the record.
