@@ -104,6 +104,11 @@ func TestC6FTPEndpointIsRefusedAtStart(t *testing.T) {
 // checks only its form at start. The guard is the signed register: it holds
 // no FTP operation and no line that is an FTP command, so the collector
 // refuses any FTP operation the configuration names before it connects.
+// That refusal is pinned elsewhere, and this test does not repeat it:
+// TestRunNamesARegisterRun in contracts/authz (an operation the register
+// does not name is unknown_operation) and the "unknown operation" case of
+// TestRunRefusals in modules/security/collector (Pipeline.Handle refuses it
+// unknown_operation).
 func TestC6FTPOperationHasNoRegisterEntry(t *testing.T) {
 	m := config(t)
 	first(t, m, "schedule")["operation"] = "sel.config.ftp_read"
