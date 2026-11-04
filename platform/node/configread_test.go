@@ -549,8 +549,9 @@ func (n *cfgNode) pruneAudit(through c5.Seq) {
 	n.t.Helper()
 	db := n.r.Store(AuditStream)
 	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
-	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
-		// The suspension checkpoint may be past through already.
+	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer, HoldsConsumer} {
+		// The suspension checkpoint and the holds cursor may be past
+		// through already.
 		if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: through}); err != nil && !errors.Is(err, &c5.Error{Code: c5.CodeCursorRegress}) {
 			n.t.Fatal(err)
 		}

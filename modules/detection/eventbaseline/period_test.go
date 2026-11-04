@@ -207,3 +207,34 @@ func TestPeriodLearnerOfTheEarlierVersionIsRefused(t *testing.T) {
 		t.Errorf("its own snapshot: %v", err)
 	}
 }
+
+// C6's probes on #414, adopted. A gap that opens at the very instant the
+// duration minimum is met does not move T, as the collected time already
+// reached it: an event after T is refused while that gap is open, and T is
+// final once the gap is fed.
+func TestPeriodGapOpenAtTheDurationInstant(t *testing.T) {
+	var none time.Time
+	l := learner(t, nil) // 1000 s, 1 event
+	take(t, l, 0, none, nil)
+	open := at(1000)
+	take(t, l, 1000, open, nil)
+	take(t, l, 1100, open, eventbaseline.ErrPeriodEnded)
+	wantEnd(t, l, open, -1) // a gap that began at T holds it
+	if err := l.Gap(open, at(1200), "failed.timeout"); err != nil {
+		t.Fatal(err)
+	}
+	wantEnd(t, l, none, 1000)
+}
+
+// A gap that ends before the first event (a collection that failed before
+// its first good read) is outside the period, so it does not move T.
+func TestPeriodGapBeforeTheFirstEvent(t *testing.T) {
+	var none time.Time
+	l := learner(t, nil) // 1000 s, 1 event
+	if err := l.Gap(at(-300), at(-100), "failed.timeout"); err != nil {
+		t.Fatal(err)
+	}
+	take(t, l, 0, none, nil)
+	wantEnd(t, l, none, 1000)
+	take(t, l, 1001, none, eventbaseline.ErrPeriodEnded)
+}

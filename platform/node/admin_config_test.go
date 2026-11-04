@@ -28,6 +28,8 @@ var configKinds = append(append([]authz.RequestKind{}, authz.DefaultAdminKinds..
 type signedCfgNode struct {
 	*cfgNode
 	nc    *nodeconfigtest.Config
+	c     *Config
+	dir   string
 	mux   *adminMux
 	files int
 	ids   map[string]string // file name: request ID
@@ -51,7 +53,7 @@ func newSignedCfgNode(t *testing.T, mod func(*nodeconfigtest.Config)) *signedCfg
 	t.Cleanup(func() { locked.UnlockTLS() })
 	r, st, _ := start(t, c, dir)
 	t.Cleanup(func() { r.Close() })
-	n := &signedCfgNode{cfgNode: &cfgNode{t: t, r: r, st: st}, nc: nc, ids: map[string]string{}}
+	n := &signedCfgNode{cfgNode: &cfgNode{t: t, r: r, st: st}, nc: nc, c: c, dir: dir, ids: map[string]string{}}
 	n.f = &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
 		raw, err := json.Marshal(n.next)
 		if err != nil {
