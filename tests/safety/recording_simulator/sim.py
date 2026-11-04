@@ -401,13 +401,15 @@ def main():
     ap.add_argument("--profile-fid", help="sel-751-doc: FID in the ID reply, line checksum recomputed")
     ap.add_argument("--profile-stx-etx", action="store_true",
                     help="sel-751-doc: frame messages in STX ... ETX (p. 7.28)")
-    ap.add_argument("--profile-ser", choices=("example", "none", "grow", "hang", "malformed", "dst", "script"),
+    ap.add_argument("--profile-ser", choices=("example", "none", "grow", "hang", "malformed", "dst", "script", "file"),
                     default="example",
                     help="sel-751-doc: SER answers Figure 10.16, No Data Available, or Figure 10.16 "
                          "with SYNTHESIZED rows added at each read (needs --profile-ser-state); "
                          "SYNTHESIZED faults: hang stops after four rows, malformed damages one row; "
                          "SYNTHESIZED dst: rows in a fall-back hour under Time Source: External; "
-                         "SYNTHESIZED script: the V-S4 buffer sequence (needs --profile-ser-state)")
+                         "SYNTHESIZED script: the V-S4 buffer sequence (needs --profile-ser-state); "
+                         "SYNTHESIZED file: the rows in --profile-ser-file, re-read at each SER")
+    ap.add_argument("--profile-ser-file", help="sel-751-doc file: the SER buffer, JSON {now, rows}, written by the harness")
     ap.add_argument("--profile-ser-grow", type=int, default=4, help="sel-751-doc grow: rows added per SER read")
     ap.add_argument("--profile-ser-state", help="sel-751-doc grow: file holding the count of added rows")
     ap.add_argument("--profile-inherit", choices=("none", "level", "prompt"), default="none",
@@ -426,6 +428,8 @@ def main():
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
     args = ap.parse_args()
+    if (args.profile_ser == "file") != bool(args.profile_ser_file):
+        ap.error("--profile-ser file needs --profile-ser-file, and only it takes one")
     if args.profile_ser in ("grow", "script") and not args.profile_ser_state:
         ap.error("--profile-ser grow and script need --profile-ser-state")
     if args.transport == "ssh" and not (args.user and args.password):
@@ -447,7 +451,7 @@ def main():
             stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay, date_f=args.profile_date_f,
             settings_file=args.profile_settings, sho_layout=args.profile_sho_layout,
             sho_fault=None if args.profile_sho_fault == "none" else args.profile_sho_fault,
-            config_run=args.profile_config_run,
+            config_run=args.profile_config_run, ser_file=args.profile_ser_file,
             growth=profile_sel751.SerGrowth(args.profile_ser_state,
                                             1 if args.profile_ser == "script" else args.profile_ser_grow)
             if args.profile_ser in ("grow", "script") else None)
