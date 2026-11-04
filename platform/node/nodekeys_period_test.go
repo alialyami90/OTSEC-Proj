@@ -60,7 +60,7 @@ func TestKeyRegisterExpiredClientHoldsItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an expired client key in the register stopped the node: %v", err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	fw.Check(bg)
 	if got := st.Snapshot("x").Targets["central"]; got.HeldBack != "expired" || got.LastErr != "" {
 		t.Fatalf("target: held back %q, last error %q", got.HeldBack, got.LastErr)
