@@ -435,9 +435,10 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 	// A pruned audit stream no longer shows the acknowledgements and
 	// detections the holds came from, so what is wanted is only what the
 	// retained records show. The reconcile then adds what they justify and
-	// corrects and releases nothing: a hold is never taken away on a view
-	// that begins after the record that justified it (as the suspension
-	// rebuild refuses a pruned prefix).
+	// corrects and releases nothing but a baseline's reason
+	// (prunedReplace): a hold is never taken away on a view that begins
+	// after the record that justified it (as the suspension rebuild refuses
+	// a pruned prefix).
 	pruned, err := auditPruned(ctx, adb)
 	if err != nil {
 		fail(err)
@@ -465,12 +466,16 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		}
 		apply := func(ps []planned, verb string, n *int) {
 			for _, pl := range ps {
-				err := cdb.Hold(ctx, c5.Hold{Stream: spec.ID, Seq: pl.seq, Reason: reasonOf(r.cfg.NodeID, pl.w)})
+				err := holdFault(holdFaults.reconcile)
+				if err == nil {
+					err = cdb.Hold(ctx, c5.Hold{Stream: spec.ID, Seq: pl.seq, Reason: reasonOf(r.cfg.NodeID, pl.w)})
+				}
 				r.reconciled(spec.ID, pl.seq, verb+" as "+string(pl.w.code)+": "+pl.w.why, err, n, &failed)
 			}
 		}
 		apply(p.add, "held", &added)
 		if pruned {
+			apply(prunedReplace(p.replace), "reason corrected to", &replaced)
 			continue
 		}
 		apply(p.replace, "reason corrected to", &replaced)
@@ -489,6 +494,24 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		r.audit(ctx, audit.ActionStorageAlarm, audit.OutcomeWarning, "holds_reconciled",
 			fmt.Sprintf("configuration holds corrected at start: %d added, %d reason corrected, %d released, %d not done; each is a %s alarm", added, replaced, released, failed, c5.AlarmHoldsReconciled))
 	}
+}
+
+// prunedReplace is the part of a plan's replace that a pruned view still
+// applies: a record the fold wants as the baseline. The newest succeeded
+// acknowledgement of a kind is in any view that holds one, so the fold's
+// baseline is right on a pruned view too, and once the prune passes the
+// acknowledgement the node finds the active baseline by that hold (D4-41).
+// Without it, a snapshot held as an unapproved difference and then
+// acknowledged would keep that reason, and the older baseline would be
+// taken as active.
+func prunedReplace(ps []planned) []planned {
+	var out []planned
+	for _, pl := range ps {
+		if pl.w.code == c5.HoldBaseline {
+			out = append(out, pl)
+		}
+	}
+	return out
 }
 
 // planStream is planHolds for one configuration stream, given what the C8

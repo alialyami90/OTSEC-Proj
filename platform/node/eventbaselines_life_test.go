@@ -843,7 +843,7 @@ func pruneLifeAudit(t *testing.T, r *Runtime, through c5.Seq) {
 	t.Helper()
 	db := r.Store(AuditStream)
 	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
-	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
+	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer, HoldsConsumer} {
 		if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: through}); err != nil && !errors.Is(err, &c5.Error{Code: c5.CodeCursorRegress}) {
 			t.Fatal(err)
 		}
