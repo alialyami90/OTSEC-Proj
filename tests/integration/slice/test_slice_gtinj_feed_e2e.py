@@ -1,20 +1,26 @@
-"""V-M4's feed, on the real binaries with the stepped test clock (C6;
+"""V-M4 on the real binaries with the stepped test clock, Syslog half (C6;
 D4-40 item 4).
 
 The node is built with otsec_testclock and run with -test-clock. The
 harness steps the clock to each Syslog event of the GT-INJ series
 (tests/integration/gt_inj/events.json, asset gt-inj-syslog) and sends
 that event from the GT-INJ asset's address to the node's syslog-udp
-listener. This is the half of V-M4 that can run on main now: the node has
-no detector yet (D4-40 item 2, C4), so no alarm is checked here. The alarm
-half is added when the detector lands.
+listener.
 
-The oracle is the node's store, read by C6's own SQLite connection. Every
-event of the series must be stored once, in schedule order, bound to the
-GT-INJ asset, with its sent bytes, and with received.utc equal to its
-received_utc, so the series reaches the event baseline on the schedule's
-own clock. A step the node had not read when its datagram came would show
-as an earlier received time.
+The feed's oracle is the node's store, read by C6's own SQLite
+connection. Every event of the series must be stored once, in schedule
+order, bound to the GT-INJ asset, with its sent bytes, and with
+received.utc equal to its received_utc, so the series reaches the event
+baseline on the schedule's own clock. A step the node had not read when its
+datagram came would show as an earlier received time.
+
+The alarms: at period.baseline_ack the harness steps the clock until the
+node shows the asset's learnt baseline as recorded, and acknowledges it
+with a signed node.baseline_ack of kind event, as an administrator would.
+After the last event the clock goes to period.test_end. The departure
+alarms the node stored (platform/health, baseline.departure) are checked
+by tests/integration/gt_inj/alarms.py's check() against events.json, for
+the gt-inj-syslog asset only: gt-inj-ser needs the SER half.
 
 Evidence class: simulated. The series is synthetic (GT-INJ), and the
 sender is a test socket on loopback.
@@ -23,11 +29,13 @@ sender is a test socket on loopback.
 import datetime
 import glob
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
 import socket
 import sqlite3
+import subprocess
 import threading
 import time
 
@@ -37,8 +45,10 @@ import harness
 from conftest import need
 from slicerun import SERVICE, Slice
 
-EVENTS = os.path.join(harness.REPO, "tests", "integration", "gt_inj", "events.json")
+GTINJ = os.path.join(harness.REPO, "tests", "integration", "gt_inj")
+EVENTS = os.path.join(GTINJ, "events.json")
 STREAM = "syslog/a6-udp"
+HEALTH = "platform/health"
 T0 = datetime.datetime(2026, 11, 1, tzinfo=datetime.timezone.utc)
 
 
@@ -100,12 +110,12 @@ def _datagram(e):
     return f"<{pri}>1 {e['received_utc']} gtinj app - {e['msgid']} - {e['msg']}".encode()
 
 
-def _query(store_dir, sql):
-    """sql's rows for STREAM, from whichever database holds it."""
+def _query(store_dir, sql, stream=STREAM):
+    """sql's rows for stream, from whichever database holds it."""
     for path in glob.glob(os.path.join(store_dir, "*.db")):
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            rows = db.execute(sql, (STREAM,)).fetchall()
+            rows = db.execute(sql, (stream,)).fetchall()
         except sqlite3.OperationalError:
             rows = []
         finally:
@@ -115,14 +125,58 @@ def _query(store_dir, sql):
     return []
 
 
-def _stored(store_dir):
-    """The events of STREAM, in seq order."""
-    return [json.loads(ev) for (ev,) in _query(store_dir, "SELECT event FROM events WHERE stream = ? ORDER BY seq")]
+def _stored(store_dir, stream=STREAM):
+    """The events of stream, in seq order."""
+    return [json.loads(ev) for (ev,) in _query(store_dir, "SELECT event FROM events WHERE stream = ? ORDER BY seq", stream)]
 
 
 def _count(store_dir):
     rows = _query(store_dir, "SELECT COUNT(*) FROM events WHERE stream = ?")
     return rows[0][0] if rows else 0
+
+
+def _status(s):
+    try:
+        with open(os.path.join(s.layout["store_dir"], "status.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _baseline(s):
+    """The GT-INJ asset's event baseline as node status shows it."""
+    return (_status(s).get("event_baselines") or {}).get(s.layout["gtinj_asset"]) or {}
+
+
+def _nudge(clock, until, done, what):
+    """Moves the node's clock a second at a time, no further than until,
+    until done() holds."""
+    while not done():
+        if clock.at + datetime.timedelta(seconds=1) >= until:
+            raise AssertionError(f"{what} by {_stamp(clock.at)}, before the next event at {_stamp(until)}")
+        clock.set(clock.at + datetime.timedelta(seconds=1))
+        if not harness.wait_for(clock.reached, 10, step=0.002):
+            raise AssertionError(f"the node's clock did not reach {_stamp(clock.at)}")
+        time.sleep(0.05)
+
+
+def _acknowledge(s, clock, at, until):
+    """At at, acknowledges the baseline the node recorded for the GT-INJ
+    asset with a signed node.baseline_ack, and waits until it is active.
+    Returns the baseline status at activation."""
+    clock.set(at)
+    if not harness.wait_for(clock.reached, 10, step=0.002):
+        raise AssertionError(f"the node's clock did not reach {_stamp(at)}")
+    _nudge(clock, until, lambda: _baseline(s).get("phase") == "awaiting", f"no baseline recorded ({_baseline(s)})")
+    digest = _baseline(s)["recorded"]["hash"]
+    out = subprocess.run([s.exe("slicehelper"), "admin-file", "-root", s.root, "-kind", "baseline-ack",
+                          "-name", "gtinj-baseline-ack", "-digest", digest], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    try:
+        _nudge(clock, until, lambda: (_baseline(s).get("active") or {}).get("hash") == digest, f"baseline {digest} not active")
+    except AssertionError as e:
+        raise AssertionError(f"{e}: {_baseline(s)}; admin requests {_status(s).get('admin_requests')}") from None
+    return _baseline(s)
 
 
 @pytest.fixture(scope="module")
@@ -153,7 +207,8 @@ def run(tmp_path_factory):
 
     stepper = threading.Thread(target=tick, daemon=True)
     stepper.start()
-    out = {"events": events}
+    out = {"series": series, "events": events}
+    ack = _utc(series["period"]["baseline_ack"])
     try:
         s.start(setup_extra=("-syslog-udp", str(udp), "-gtinj-events", EVENTS))
         assert harness.wait_for(lambda: "listener a6-udp" in s.health(), 60, step=0.5), s.health() + s.text("node")
@@ -170,6 +225,8 @@ def run(tmp_path_factory):
             # (C5 on #405), and each datagram is stored before the next
             # step, so none can be stamped with another event's time.
             for i, e in enumerate(events, 1):
+                if "baseline" not in out and _utc(e["received_utc"]) > ack:
+                    out["baseline"] = _acknowledge(s, clock, ack, _utc(e["received_utc"]))
                 clock.set(_utc(e["received_utc"]))
                 if not harness.wait_for(clock.reached, 10, step=0.002):
                     raise AssertionError(f"the node's clock did not reach {e['received_utc']} ({e['id']})")
@@ -179,11 +236,18 @@ def run(tmp_path_factory):
         finally:
             sock.close()
         out["arrived"] = _count(layout["store_dir"]) >= len(events)
+        # To the end of the test period, and past the feeder's lateness, so
+        # every event and absence deadline in it reaches the detector.
+        end = _utc(series["period"]["test_end"])
+        clock.set(end)
+        harness.wait_for(clock.reached, 10, step=0.002)
+        _nudge(clock, end + datetime.timedelta(minutes=10), lambda: clock.at >= end + datetime.timedelta(minutes=3), "")
         time.sleep(1)
     finally:
         starting.clear()
         s.stop()
     out["stored"] = _stored(s.layout["store_dir"])
+    out["health"] = _stored(s.layout["store_dir"], HEALTH)
     return out
 
 
@@ -220,3 +284,28 @@ def test_type_key_fields_are_the_series(run):
         fields = {f["name"]: f["value"] for f in ev["native"].get("fields", [])}
         assert fields.get("pri") == str(e["facility"] * 8 + e["severity"]), (e["id"], fields)
         assert fields.get("msg") == e["msg"], (e["id"], fields)
+
+
+def _alarms():
+    spec = importlib.util.spec_from_file_location("gtinj_alarms", os.path.join(GTINJ, "alarms.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_the_baseline_is_acknowledged_at_baseline_ack(run):
+    b = run.get("baseline")
+    assert b and b.get("phase") == "active", b
+    ack = _utc(run["series"]["period"]["baseline_ack"])
+    assert ack <= _parse(b["active_from"]) < ack + datetime.timedelta(minutes=2), b
+
+
+def test_departure_alarms_are_the_expected_ones(run):
+    m = _alarms()
+    got = _gtinj(run)
+    assert len(got) == len(run["events"]), "the feed is incomplete, so the alarms are not checked"
+    ids = {f"{ev['id']['node_id']}:{ev['id']['stream']}:{ev['id']['seq']}": e["id"] for e, ev in zip(run["events"], got)}
+    alarms = [ev["health"] for ev in run["health"] if (ev.get("health") or {}).get("type") == m.DEPARTURE]
+    failures, report = m.check(run["series"], alarms, ids, {run["layout"]["gtinj_asset"]: "gt-inj-syslog"})
+    print(json.dumps(report, indent=1, default=str))
+    assert not failures, "\n".join(failures)
