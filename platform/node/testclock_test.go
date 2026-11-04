@@ -89,6 +89,17 @@ func TestTestClockSteps(t *testing.T) {
 	if fired(timer) || fired(tick) {
 		t.Fatal("fired a second early")
 	}
+	// The clock says where it is, for a harness to wait on (C5 on #405).
+	seen := nodeClock.(*fileClock).path + ".seen"
+	for end := time.Now().Add(time.Second); ; time.Sleep(time.Millisecond) {
+		at, err := readTestClock(seen)
+		if err == nil && at.Equal(clockT0.Add(59*time.Second)) {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("%s says %s (%v), not the step", seen, at, err)
+		}
+	}
 	step(clockT0.Add(time.Minute))
 	if !fired(timer) || !fired(tick) {
 		t.Fatal("did not fire at the step")
