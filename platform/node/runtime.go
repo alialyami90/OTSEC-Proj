@@ -82,7 +82,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		return nil, errors.New("node: no status sink")
 	}
 	if opt.Now == nil {
-		opt.Now = time.Now
+		opt.Now = nodeClock.Now
 	}
 	if opt.Group == (c5.GroupOptions{}) {
 		opt.Group = c5.DefaultGroup

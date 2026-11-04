@@ -374,6 +374,22 @@ func (p *Pipeline) decideAdmin(req *authz.CollectorRequest, a *authz.AdminReques
 		// AdminAcceptance. The collector's part is the checks and the
 		// spent nonce, and the decision in the node's audit chain.
 		return nil
+	case a.NodeChangeApproval != nil, a.NodeBaselineAck != nil:
+		// The node's own action too (C7 0.6): the collector's part is the
+		// checks, the approval's window included, and the spent nonce. Its
+		// collector_seq is what makes an approval provably prior to a read
+		// (C8 ApprovalCovers). The asset is checked only now, after a valid
+		// signature by a key allowed the kind, so the answer is no probe.
+		id := ""
+		if a.NodeChangeApproval != nil {
+			id = a.NodeChangeApproval.AssetID
+		} else {
+			id = a.NodeBaselineAck.AssetID
+		}
+		if _, ok := p.assets[id]; !ok {
+			return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: id}
+		}
+		return nil
 	}
 	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"} // VerifyAdminRequest refuses this first
 }

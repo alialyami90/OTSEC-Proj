@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.8"
+const ContractID = "otsec.audit/0.9"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -154,6 +154,7 @@ func init() {
 		ActionQuarantineExported, ActionQuarantineCleared,
 		ActionConfigChangeApproved, ActionConfigChangeDetected, ActionConfigBaselineAcknowledge, ActionConfigBaselineRestored,
 		ActionConfigReadCompared, ActionConfigReadsRemoved, ActionConfigBaselineRecorded,
+		ActionConfigCheckpointNotRestored,
 	} {
 		actions[a] = true
 	}
@@ -167,7 +168,8 @@ var actionSince = map[Action]int{
 	ActionConfigChangeApproved: configSince, ActionConfigChangeDetected: configSince, ActionConfigBaselineAcknowledge: configSince,
 	ActionConfigBaselineRestored: configSince,
 	ActionConfigReadCompared:     configReadsSince, ActionConfigReadsRemoved: configReadsSince,
-	ActionConfigBaselineRecorded: configRecordedSince,
+	ActionConfigBaselineRecorded:      configRecordedSince,
+	ActionConfigCheckpointNotRestored: configCheckpointSince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
