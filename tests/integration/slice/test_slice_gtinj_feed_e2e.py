@@ -27,6 +27,10 @@ whose alarms must equal the first's, and one fed events-heldout.json in
 place of the test period (its "replay"), which must raise no departure
 alarm.
 
+A fourth node is the untagged release build on the wall clock (D4-40 item
+4): a short period with its own params shows the lifecycle and the
+new-type and repeats rules on the binary that ships.
+
 Evidence class: simulated. The series is synthetic (GT-INJ), and the
 sender is a test socket on loopback.
 """
@@ -420,3 +424,117 @@ def test_the_heldout_series_raises_no_departure(heldout):
     # detector took is the series (C4 on #411).
     st = heldout["status"]
     assert st.get("phase") == "active" and st.get("refused", 0) == 0 and st.get("late", 0) == 0, st
+
+
+# The untagged binary (D4-40 item 4): a short period, on the wall clock.
+# 11 events of one type are sent at least 3 s apart, against minima of 10
+# events and 30 s, so the period holds the rows up to T (D4-45), usually 10;
+# the type is too sparse to be periodic, and at most one occurrence falls in
+# any 2 s repeats window. After the acknowledgement, one event of a new type
+# and four of the learnt type within a second must raise exactly a new-type
+# alarm and a repeats alarm, citing those events, and a time alarm citing
+# the first burst row in a UTC hour the period never saw, if one is (C4 on
+# #423: the wall clock can cross an hour between the period and the burst).
+SHORT = {"min_duration_s": 30, "min_events": 10, "repeats_n": 3, "repeats_window_s": 2,
+         "rate_bucket_s": 3600, "rate_factor_pct": 300, "rate_min": 2, "periodic_min_occurrences": 50,
+         "periodic_spread_pct": 10, "absence_tolerance_pct": 50, "time_clock": "received", "max_types": 512,
+         "alarm_hold_s": 3600, "max_alarms_per_hold": 8}
+# The feeder's watermark trails the node's clock by FeedLateness (2 min).
+LATENESS = datetime.timedelta(minutes=2)
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _wall(msg):
+    t = _now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return f"<134>1 {t} gtinj app - - - {msg}".encode()
+
+
+@pytest.fixture(scope="module")
+def untagged(tmp_path_factory):
+    need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
+    need(os.name != "nt" and not SERVICE, "loopback senders other than 127.0.0.1 are a Linux runner's")
+    d = str(tmp_path_factory.mktemp("slice-untagged"))
+    params = os.path.join(d, "params.json")
+    with open(params, "w", encoding="utf-8") as f:
+        json.dump({"params": SHORT}, f)
+    s = Slice(d)  # no build tag: the release build
+    s.build()
+    out = {}
+    try:
+        s.start(setup_extra=("-syslog-udp", str(harness.free_port()), "-gtinj-events", params))
+        assert harness.wait_for(lambda: "listener a6-udp" in s.health(), 60, step=0.5), s.health() + s.text("node")
+        layout = out["layout"] = s.layout
+        host, port = layout["syslog_udp"].rsplit(":", 1)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((layout["gtinj_sender"], 0))
+
+        def send(msgs, gap):
+            n = _count(layout["store_dir"])
+            for m in msgs:
+                sock.sendto(_wall(m), (host, int(port)))
+                n += 1
+                assert harness.wait_for(lambda: _count(layout["store_dir"]) >= n, 10, step=0.01), m
+                time.sleep(gap)
+
+        try:
+            send([f"port {i} link up" for i in range(1, 12)], 3)
+            out["learnt"] = _count(layout["store_dir"])
+            assert harness.wait_for(lambda: _baseline(s).get("phase") == "awaiting", (LATENESS + datetime.timedelta(seconds=60)).total_seconds(), step=1), _baseline(s)
+            out["recorded"] = _baseline(s)
+            out["before_ack"] = _departures({"health": _stored(layout["store_dir"], HEALTH)})
+            digest = out["recorded"]["recorded"]["hash"]
+            a = subprocess.run([s.exe("slicehelper"), "admin-file", "-root", s.root, "-kind", "baseline-ack",
+                                "-name", "untagged-baseline-ack", "-digest", digest], capture_output=True, text=True)
+            assert a.returncode == 0, a.stderr
+            assert harness.wait_for(lambda: (_baseline(s).get("active") or {}).get("hash") == digest, 60, step=0.5), _baseline(s)
+            out["active"] = _baseline(s)
+            send(["user 7 changed setting"], 0)
+            send(["port 9 link up"] * 4, 0.1)
+            done = lambda: {d.get("details", {}).get("rule") for d in _departures({"health": _stored(layout["store_dir"], HEALTH)})} >= {"new-type", "repeats"}
+            harness.wait_for(done, (LATENESS + datetime.timedelta(seconds=60)).total_seconds(), step=1)
+            time.sleep(5)
+        finally:
+            sock.close()
+    finally:
+        s.stop()
+    out["stored"] = _stored(s.layout["store_dir"])
+    out["health"] = _stored(s.layout["store_dir"], HEALTH)
+    return out
+
+
+def test_untagged_the_lifecycle_and_the_event_rules(untagged):
+    u = untagged
+    ids = [f"{ev['id']['node_id']}:{ev['id']['stream']}:{ev['id']['seq']}" for ev in u["stored"]
+           if (ev.get("source", {}).get("asset") or {}).get("id") == u["layout"]["gtinj_asset"]]
+    assert len(ids) == 11 + 1 + 4 and u["learnt"] >= 11, ids
+    # Recorded from the period's rows, then active only on the
+    # acknowledgement, with no alarm in between.
+    assert u["recorded"]["phase"] == "awaiting" and u["recorded"]["recorded"]["hash"], u["recorded"]
+    assert not u["before_ack"], u["before_ack"]
+    assert u["active"]["phase"] == "active", u["active"]
+    alarms = _departures(u)
+    got = sorted((a["details"]["rule"], tuple(_id_text(e) for e in a.get("related") or [])) for a in alarms)
+    learnt, new, burst = ids[:11], ids[11], ids[12:]
+    # The period's hours from the stored received times: T is the later of
+    # the 10th row and the first plus 30 s (D4-45), and the rows at or
+    # before T are the period's.
+    times = [_parse(ev["received"]["utc"]) for ev in u["stored"]
+             if (ev.get("source", {}).get("asset") or {}).get("id") == u["layout"]["gtinj_asset"]]
+    end = max(times[SHORT["min_events"] - 1], times[0] + datetime.timedelta(seconds=SHORT["min_duration_s"]))
+    hours = {t.hour for t in times[:11] if t <= end}
+    late = [i for i, t in zip(burst, times[12:]) if t.hour not in hours]
+    want = ["new-type", "repeats"] + (["time"] if late else [])
+    assert [r for r, _ in got] == want, (sorted(hours), json.dumps(alarms, indent=1))
+    new_cites, burst_cites = got[0][1], got[1][1]
+    assert new_cites == (new,), (new_cites, new)
+    assert set(burst_cites) <= set(burst) and len(burst_cites) > SHORT["repeats_n"], (burst_cites, burst)
+    if late:
+        assert got[2][1] == (late[0],), (got[2], late)
+    assert not set(sum((c for _, c in got), ())) & set(learnt)
+
+
+def _id_text(e):
+    return f"{e['node_id']}:{e['stream']}:{e['seq']}"
