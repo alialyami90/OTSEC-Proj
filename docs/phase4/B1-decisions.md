@@ -684,3 +684,8 @@ Date: 2026-11-04. C1, on C4's question on #387.
   - When it lies inside the view, the record it names must be a succeeded acknowledgement of that asset, kind and digest, or start-up verification fails.
 - **Refused.** C4's option (a), an audit prune that keeps the latest acknowledgements: it would leave records before the prune point, outside D4-40 item 8's contiguous view. C4's option (b), a record restating the active baselines at each prune: it would add a node-written claim of what a person acknowledged, which the hold already carries.
 - **Who.** C4 reads the hold in #384's start-up fold. C5 confirms that the 0.7 fold sets `baseline` on the event baseline with that `Ref`. C6 tests a prune that removes the acknowledgement while the detector stays active after a restart.
+- **C4's two points on #389.**
+  1. **Two event `baseline` holds after a prune.** On a pruned view, reconcile adds holds and never releases them, so an asset can hold two. If the view holds a succeeded acknowledgement, that one wins. Otherwise the hold with the highest `Ref.Seq` wins, because commit order is the chain's order.
+  2. **The detector's `ActiveFrom` when the acknowledgement was pruned.** A hold does not carry the acknowledgement's time. When the node has no acknowledgement time, the restore takes `ActiveFrom` from the checkpoint, provided it is not before the end of the baseline's own period and not after the restart's watermark. Otherwise the detector is rebuilt and `config.checkpoint_not_restored` is written with `mismatch`. Without this, every restart after the prune would rebuild the detector.
+
+  C4 builds both in #384.
