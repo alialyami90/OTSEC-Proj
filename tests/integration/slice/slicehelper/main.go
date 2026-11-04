@@ -51,6 +51,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -166,13 +167,14 @@ func main() {
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
 	gtinj := fs.String("gtinj-events", "", "setup: add the GT-INJ Syslog asset, sending from 127.0.0.4 to the syslog-udp listener, with an event baseline whose params are this events.json's (V-M4)")
-	kind := fs.String("kind", "install", "admin-file: install or revoke")
+	kind := fs.String("kind", "install", "admin-file: install, revoke or baseline-ack")
 	name := fs.String("name", "", "admin-file: the file's name, or the <name> in admin-request-<name>.json")
 	expires := fs.Duration("expires", 10*time.Minute, "admin-file: the request's lifetime from now (negative: already expired)")
 	tamper := fs.Bool("tamper", false, "admin-file: change one payload byte after signing")
 	mode := fs.Uint("mode", 0o440, "admin-file: the file's mode")
 	bad := fs.String("bad", "", "admin-file: a claim to malform and sign anyway: nonce (21 characters) or key (the envelope's key ID)")
 	version := fs.Uint("version", 1, "admin-file: an install's credential version (2 rotates the first)")
+	digest := fs.String("digest", "", "admin-file: the GT-INJ asset's event baseline a baseline-ack acknowledges (V-M4)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
@@ -181,7 +183,7 @@ func main() {
 	case "install-credential":
 		err = installCredential(*root)
 	case "admin-file":
-		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode), uint32(*version))
+		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode), uint32(*version), *digest)
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
@@ -311,16 +313,25 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err := os.WriteFile(l.AdminKey, []byte(base64.StdEncoding.EncodeToString(adminPriv.Seed())), 0o600); err != nil {
 		return err
 	}
+	adminKey := map[string]any{"key_id": authz.AdminKeyID(adminPub),
+		"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}
+	assets := []any{nc.Assets[0]}
+	if gtinj != "" {
+		// V-M4 acknowledges the GT-INJ asset's event baseline, which a key
+		// with no kinds may not (C7 0.6), and which the collector accepts
+		// only for an asset it enrols.
+		adminKey["kinds"] = append(slices.Clone(authz.DefaultAdminKinds), authz.KindNodeBaselineAck)
+		assets = append(assets, nc.Assets[len(nc.Assets)-1])
+	}
 	collectorConfig := func(peer string) ([]byte, error) {
 		return json.MarshalIndent(map[string]any{
 			"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
 			"ipc":           map[string]any{"address": l.Socket, "node_peer": peer},
-			"assets":        []any{nc.Assets[0]},
+			"assets":        assets,
 			"profiles":      []any{json.RawMessage(profile)},
 			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
 			"registers":     []any{env},
-			"admin_keys": []any{map[string]any{"key_id": authz.AdminKeyID(adminPub),
-				"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}},
+			"admin_keys":    []any{adminKey},
 		}, "", "  ")
 	}
 	b, err := collectorConfig(l.NodePeer)
@@ -474,8 +485,9 @@ func loadAdmin(root string) (*adminContext, error) {
 // sign makes a signed request of kind, issued now and expiring after
 // expires (negative: already expired), with a fresh nonce. An install
 // seals OTSEC_SLICE_SECRET to the install key as the reference's version;
-// a revoke names the run's credential reference.
-func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, version uint32) (*authz.AdminSigned, []byte, error) {
+// a revoke names the run's credential reference; a baseline acknowledgement
+// names the GT-INJ asset's event baseline digest.
+func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, version uint32, digest string) (*authz.AdminSigned, []byte, error) {
 	admin := adminPrincipal
 	nonce := make([]byte, authz.AdminNonceLen)
 	if _, err := rand.Read(nonce); err != nil {
@@ -514,8 +526,10 @@ func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, versi
 		p.CredentialInstall = &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}
 	case authz.KindCredentialRevoke:
 		p.CredentialRevoke = &authz.CredentialRevokeBody{RefID: a.l.CredentialRef, Reason: authz.RevokeRotated}
+	case authz.KindNodeBaselineAck:
+		p.NodeBaselineAck = &authz.NodeBaselineAckBody{AssetID: gtinjAssetID, Kind: authz.BaselineEvent, BaselineDigest: digest}
 	default:
-		return nil, nil, fmt.Errorf("kind %q: only install and revoke", kind)
+		return nil, nil, fmt.Errorf("kind %q: only install, revoke and baseline-ack", kind)
 	}
 	signed, err := authz.SignAdminRequest(a.priv, p)
 	return signed, nonce, err
@@ -529,7 +543,7 @@ func installCredential(root string) error {
 	l := a.l
 	// Under the 15-minute maximum less the 2-minute skew allowance, so a
 	// collector clock a little ahead still accepts it (A1 on #146).
-	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute, 1)
+	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute, 1, "")
 	if err != nil {
 		return err
 	}
@@ -568,20 +582,21 @@ func installCredential(root string) error {
 }
 
 // adminFile leaves one signed admin-request file in admin_dir and returns
-// at once (A6, #189): kind install or revoke, expiring after expires
-// (negative: already expired), with one payload byte changed after
+// at once (A6, #189): kind install, revoke or baseline-ack, expiring after
+// expires (negative: already expired), with one payload byte changed after
 // signing when tamper is set, written with mode (0440 is the rule; a
 // wider mode is a file the node must not read); an install names
-// credential version. It prints the file's name,
+// credential version, and a baseline-ack the GT-INJ asset's event baseline
+// digest (V-M4). It prints the file's name,
 // its request ID as the node derives it from the bytes (admin- and 16 hex
 // digits of their SHA-256) and the nonce.
-func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode, version uint32) error {
+func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode, version uint32, digest string) error {
 	a, err := loadAdmin(root)
 	if err != nil {
 		return err
 	}
-	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke}[kind]
-	signed, _, err := a.sign(k, expires, version)
+	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke, "baseline-ack": authz.KindNodeBaselineAck}[kind]
+	signed, _, err := a.sign(k, expires, version, digest)
 	if err != nil {
 		return err
 	}

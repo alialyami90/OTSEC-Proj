@@ -430,6 +430,22 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-019 — 2026-11-04 — V-M4's first alarm run (Syslog half): the node raised exactly the expected alarms; the oracle, not the node, misread a rule name
+
+- **What ran.** `tests/integration/slice/test_slice_gtinj_feed_e2e.py` (#410) ran on main `d34c7ad`, with #405 (slice 1c) and #406 (`node.baseline_ack`) merged and #408 not needed. The binaries were built with `otsec_testclock`. The 1,175 `gt-inj-syslog` events of `tests/integration/gt_inj/events.json` were each sent on the stepped clock. At `period.baseline_ack` the harness acknowledged the recorded baseline with a signed `node.baseline_ack` of kind `event`, and the baseline was active before the next event. The clock then went to `period.test_end`. The node's `baseline.departure` health events went to `alarms.check()`.
+- **Result.** 10 alarms were raised, exactly the 10 `expected_alarms` of `gt-inj-syslog`.
+  - Recall: absence 3/3, new 1/1, rate 2/2, repeats 3/3, time 1/1.
+  - Precision: 10/10.
+  - None came before the acknowledgement, and none cites a control event.
+  - `gt-inj-ser` is not run yet: it needs the SER half.
+- **What it disproved: the oracle's rule name.** The first run failed on one alarm. `alarms.py` took the series' kind `new` to be a C10 rule, but C10 names the rule `new-type` (`contracts/baseline` `RuleNewType`). The bug was in C6's harness, not in the node. The oracle's self-tests built their alarms from the series' names, so they could not show it. The fix and its test are in #410 (`test_the_series_name_new_is_not_a_c10_rule`).
+- **Not yet shown.** Four things remain:
+  - the held-out benign series (`events-heldout.json`);
+  - the same input giving the same alarms on a second run;
+  - CI's run of the leg;
+  - any real device's false-positive rate, which needs hardware or site data.
+- **Evidence class:** `simulated`. The series is synthetic, and the sender is a loopback socket. The run was local, on Linux, and is not a hardware result.
+
 ### F-018 — 2026-10-28 — `TestUnknownSpentAcrossRestarts/seed_1` reported a marker "lost without a count" that was stored: the test's loss detector read the counts before the stacks
 
 - **What failed.** On #346's head `95b91cd`, `go (windows-latest)` failed once ([run 40728171729, attempt 1](https://github.com/alialyami90/OTSEC-Proj/actions/runs/40728171729), job 122956968635) at `restart_test.go:662`: "the receiver holds 1 read messages and its writer waits on an empty queue: messages lost without a count". The re-run passed. It is the only failure of this test on record. #345's red run (40727005166), reported at first as a second one, failed in `TestSlowCommitReachesStatusAndAlarms` instead (fixed by #353).
