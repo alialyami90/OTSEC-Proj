@@ -48,6 +48,7 @@ Run in B2's container on `aa3ebf3` (2026-10-28), `CI` marks what only GitHub can
 3. ~~Ask B6 to widen H-13~~ *Dropped by C2, 2026-10-28: H-16 in `docs/verification.md` (D4-8) already covers each revision 5 form including `SHO G`, an absent option's `Invalid Command` reply, and one 24-form run. Nothing is owed to C6.* Until H-16 runs, every layout in `contracts/adapter/testdata/config` is invented.
 4. **Parked, owner-gated:** SER system rows, any real capture, SEL-family expansion beyond the SEL-751. Do not start any without a brief.
 5. **After that:** the P4-A2 brief is complete; the next brief for this role comes from B1 (`docs/agent-handoffs.md`).
+6. **Open item for the next register revision (C1, 2026-11-04; listed in the exit report).** In `contracts/register/testdata/sel-751.json`, `sel.session.acc`'s `side_effects` still says the factory default `OUT101 := HALARM OR SALARM` "closes the alarm contact". OUT101 is fail-safe by default (`OUT101FS := Y`): SALARM de-energizes its coil for 1 s, and whether a contact opens or closes depends on the site's wiring (S22 Table 4.83, p. 2.31). `docs/device-capabilities.md` was corrected in #388 (C6's V-M3 finding 2, #394). The register is signed, so the fix goes into the next revision, not its own: nothing reads the field, but an approver reads it.
 
 ## 5. Blockers and risks
 
