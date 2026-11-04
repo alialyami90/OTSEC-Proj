@@ -96,20 +96,25 @@ func statusAlarms(st *Status, code, target string) []StatusAlarm {
 	return out
 }
 
-// runForwarding runs fw until the test ends.
-func runForwarding(t *testing.T, fw *Forwarding) {
+// runForwarding runs fw until stop is called or the test ends. Callers
+// defer stop after the runtime's Close, so the forwarder ends before the
+// databases close, as in Serve.
+func runForwarding(t *testing.T, fw *Forwarding) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(bg)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); fw.Run(ctx) }()
-	t.Cleanup(func() { cancel(); wg.Wait() })
+	stop = func() { cancel(); wg.Wait() }
+	t.Cleanup(stop)
+	return stop
 }
 
 // A client certificate outside its period holds back its own target: the
 // node and its other target start and forward, the held target is not run,
 // and no connection is made to its collector (items 1 and 10).
 func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
+	t.Parallel()
 	nc, p, dir := forwardConfigValid(t, 1, nodeconfigtest.Validity{Client: expired()}, nil)
 	if _, err := nc.WriteClientCredential(p, "other-client", nodeconfigtest.Period{}); err != nil {
 		t.Fatal(err)
@@ -136,7 +141,7 @@ func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an expired client certificate stopped the node: %v", err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	deadline := time.Now().Add(15 * time.Second)
 	for len(otherSrv.Acked()) == 0 && time.Now().Before(deadline) {
 		fw.Check(bg)
@@ -171,6 +176,7 @@ func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
 // certificate it already loaded, and its events are delivered (items 4 and
 // 10).
 func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
+	t.Parallel()
 	notYetRun(t, func(period nodeconfigtest.Period, w window) bool {
 		nc, p, dir := forwardConfigValid(t, 1, nodeconfigtest.Validity{Client: period}, nil)
 		srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
@@ -190,7 +196,7 @@ func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
 		if !w.open() {
 			return true
 		}
-		runForwarding(t, fw)
+		defer runForwarding(t, fw)()
 		end := time.Now().Add(1500 * time.Millisecond)
 		for time.Now().Before(end) && w.open() {
 			fw.Check(bg)
@@ -222,6 +228,7 @@ func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
 // certificate passes its end, and the alarm that names the target is raised
 // again every CertAlarmRepeat while it runs (item 9).
 func TestTargetCertWarningAndRunningPastItsEnd(t *testing.T) {
+	t.Parallel()
 	if CertAlarmRepeat < time.Minute || CertAlarmRepeat > 24*time.Hour {
 		t.Fatalf("CertAlarmRepeat %s: the alarm must be raised again at least daily, and not flood the status", CertAlarmRepeat)
 	}
@@ -282,6 +289,7 @@ func TestTargetCertWarningAndRunningPastItsEnd(t *testing.T) {
 // node's verification, so the node's own TLS configuration refuses the
 // peer, and the forwarder confirms nothing.
 func TestExpiredTrustAnchorIsNeverTrusted(t *testing.T) {
+	t.Parallel()
 	nc, p, dir := forwardConfigValid(t, 1, nodeconfigtest.Validity{CA: expired()}, nil)
 	srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
 	if err != nil {
@@ -331,7 +339,7 @@ func TestExpiredTrustAnchorIsNeverTrusted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	deadline := time.Now().Add(10 * time.Second)
 	for fw.targets[0].f.Status().LastErr == nil && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
@@ -383,6 +391,7 @@ func freeAddr(t *testing.T) string {
 // from the certificate it loaded once the period is valid (items 1, 4 and
 // 10).
 func TestExpiredListenerCertHoldsOnlyItsListener(t *testing.T) {
+	t.Parallel()
 	t.Run("expired", func(t *testing.T) {
 		listenerHeldCase(t, expired(), window{t, time.Time{}}, "expired", false)
 	})
@@ -481,6 +490,7 @@ func listenerHeldCase(t *testing.T, per nodeconfigtest.Period, w window, state s
 // A running listener whose certificate passes its end is not stopped, and
 // the alarm that names it is raised again every CertAlarmRepeat (item 9).
 func TestListenerPastItsEndKeepsAlarming(t *testing.T) {
+	t.Parallel()
 	long := nodeconfigtest.Period{NotAfter: time.Now().Add(90 * 24 * time.Hour)}
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
@@ -526,6 +536,7 @@ func TestListenerPastItsEndKeepsAlarming(t *testing.T) {
 // handshake of a listener that requires sender certificates, and nothing is
 // stored.
 func TestExpiredSenderCAIsNeverTrusted(t *testing.T) {
+	t.Parallel()
 	var p, senders *nodeconfigtest.PKI
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		var err error
@@ -579,6 +590,7 @@ func TestExpiredSenderCAIsNeverTrusted(t *testing.T) {
 // the target has not confirmed, the quota fills, and every alarm is raised
 // in order, with no silent prune (item 7). Evidence class: simulated.
 func TestHeldRequiredTargetPastItsQuota(t *testing.T) {
+	t.Parallel()
 	const quota = 64 << 10
 	nc, _, _ := forwardConfigValid(t, 9, nodeconfigtest.Validity{Client: expired()}, func(nc *nodeconfigtest.Config) {
 		nc.Store.Quotas["platform"] = quota
@@ -680,6 +692,7 @@ func TestHeldRequiredTargetPastItsQuota(t *testing.T) {
 // whose name is not the target's permitted_peer still stops the node (item
 // 2), and so does one whose key does not match.
 func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
+	t.Parallel()
 	nc, _, dir := forwardConfigValid(t, 9, nodeconfigtest.Validity{Client: expired()}, func(nc *nodeconfigtest.Config) {
 		nc.Targets[0]["durable_ack"].(map[string]any)["permitted_peer"] = "site-b-node1"
 	})
@@ -695,6 +708,7 @@ func TestExpiredCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
 // server authentication is no period fault alone, so the node stops at start
 // and does not hold the listener back (B3 on #290).
 func TestExpiredListenerCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
 		if err != nil {
@@ -719,6 +733,7 @@ func TestExpiredListenerCertWithAnotherFaultStillStopsTheNode(t *testing.T) {
 // bound: the node's last Publish at shutdown must not open a socket that
 // nothing serves or closes (B6 on #290).
 func TestHeldListenerIsNotBoundAfterRun(t *testing.T) {
+	t.Parallel()
 	notYetRun(t, func(period nodeconfigtest.Period, w window) bool {
 		addr := freeAddr(t)
 		nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {

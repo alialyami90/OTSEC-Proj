@@ -46,6 +46,7 @@ func pastEnd() time.Time { return time.Now().Add(-30 * time.Minute) }
 // starts, the forwarder is not run, nothing is dialled, and the alarm names
 // the target.
 func TestKeyRegisterExpiredClientHoldsItsTarget(t *testing.T) {
+	t.Parallel()
 	nc, p, _, dir := keyConfigValid(t, nodeconfigtest.Validity{}, "", pastEnd())
 	srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
 	if err != nil {
@@ -60,7 +61,7 @@ func TestKeyRegisterExpiredClientHoldsItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an expired client key in the register stopped the node: %v", err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	fw.Check(bg)
 	if got := st.Snapshot("x").Targets["central"]; got.HeldBack != "expired" || got.LastErr != "" {
 		t.Fatalf("target: held back %q, last error %q", got.HeldBack, got.LastErr)
@@ -77,6 +78,7 @@ func TestKeyRegisterExpiredClientHoldsItsTarget(t *testing.T) {
 // An expired listener key holds back its listener: it binds nothing, and
 // the node and its other listeners run.
 func TestKeyRegisterExpiredListenerKeyHoldsItsListener(t *testing.T) {
+	t.Parallel()
 	nc, _, _, dir := keyConfigValid(t, nodeconfigtest.Validity{}, "127.0.0.1", pastEnd())
 	nc.AddSyslogSender(relayID, "syslog-tls-out", "syslog-tls", "127.0.0.1", 0)
 	nc.AddSyslogSender(relayID, "syslog-udp-out", "syslog-udp", "127.0.0.1", 0)
@@ -107,6 +109,7 @@ func TestKeyRegisterExpiredListenerKeyHoldsItsListener(t *testing.T) {
 // An expired key that is also missing its private key is no period fault
 // alone: the node stops, as it does for a lab file with another fault.
 func TestKeyRegisterExpiredWithAnotherFaultStillStopsTheNode(t *testing.T) {
+	t.Parallel()
 	nc, _, _, dir := keyConfigValid(t, nodeconfigtest.Validity{}, "", pastEnd())
 	if err := os.Remove(filepath.Join(nc.TLSDir, "otsec-"+nodeconfigtest.ClientKeyRef+"-v1.p8")); err != nil {
 		t.Fatal(err)
@@ -124,6 +127,7 @@ func TestKeyRegisterExpiredWithAnotherFaultStillStopsTheNode(t *testing.T) {
 // node starts, and its TLS configuration refuses a collector that chains to
 // it, with the expiry named.
 func TestKeyRegisterExpiredAnchorIsNeverTrusted(t *testing.T) {
+	t.Parallel()
 	nc, p, _, _ := keyConfigValid(t, nodeconfigtest.Validity{CA: expired()}, "", time.Now().Add(time.Hour))
 	lockTLS(t, nc)
 	c := parse(t, nc)
@@ -161,6 +165,7 @@ func TestKeyRegisterExpiredAnchorIsNeverTrusted(t *testing.T) {
 // nothing. An expired sender CA is a refused peer, not a period fault of the
 // listener (B6 on #302; mutant: the strict TrustAnchors for SenderCARef).
 func TestKeyRegisterExpiredSenderCAIsNeverTrusted(t *testing.T) {
+	t.Parallel()
 	nc, p, reg, dir := keyConfigValid(t, nodeconfigtest.Validity{}, "127.0.0.1", time.Now().Add(time.Hour))
 	senders, err := nc.WritePKIValid("127.0.0.1", "sender-ca", "sender-client", nodeconfigtest.Validity{CA: expired()})
 	if err != nil {

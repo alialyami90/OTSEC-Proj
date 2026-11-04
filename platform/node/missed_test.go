@@ -39,6 +39,7 @@ func missedRecords(t *testing.T, r *Runtime) (missed []map[string]string, types 
 // collection.missed, once for the whole outage however many runs fail;
 // a stored read ends the outage, and the next failure writes a new one.
 func TestMissedRunRecordedOncePerOutage(t *testing.T) {
+	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -88,6 +89,7 @@ func TestMissedRunRecordedOncePerOutage(t *testing.T) {
 // stored through its collection.run, and a refusal through its
 // collection.refused.
 func TestStoredRunsAreNotMissed(t *testing.T) {
+	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -115,6 +117,7 @@ func TestStoredRunsAreNotMissed(t *testing.T) {
 // not a missed run: no decision, an outcome that did not arrive, and a
 // quarantined outcome.
 func TestRecordedFailuresAreNotMissed(t *testing.T) {
+	t.Parallel()
 	for name, answer := range map[string]func(req *authz.CollectorRequest) (collectorclient.Response, error){
 		"no decision": func(*authz.CollectorRequest) (collectorclient.Response, error) {
 			return collectorclient.Response{}, fmt.Errorf("%w: status %q", collectorclient.ErrProtocol, "maybe")
@@ -145,6 +148,7 @@ func TestRecordedFailuresAreNotMissed(t *testing.T) {
 // collector is held) is missed too: one record for the run of skips, with
 // no request ID, since none was made.
 func TestSkippedRunsAreMissed(t *testing.T) {
+	t.Parallel()
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["audit"] = 600 })
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -211,6 +215,7 @@ func TestMissedRunWrittenWhenTheStoreAccepts(t *testing.T) {
 // has room, the record is stored before the next run's request, with the
 // first slot's time, alarm and request ID. Evidence class: simulated.
 func TestMissedSeriesHoldsRunsUntilStored(t *testing.T) {
+	t.Parallel()
 	const quota = 64 << 10
 	r, st, c, _ := pruneNode(t, 1<<30, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["platform"] = quota })
 	var seq uint64

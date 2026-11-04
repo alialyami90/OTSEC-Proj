@@ -64,6 +64,7 @@ func configNode(t *testing.T, mod func(*nodeconfigtest.Config)) (*Config, string
 // no forwarding target consumes it; without, the layout is the one a node
 // had before C5 0.4.
 func TestConfigDatabaseIsOptedIntoByItsQuota(t *testing.T) {
+	t.Parallel()
 	with, _ := configNode(t, func(nc *nodeconfigtest.Config) {
 		nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
 	})
@@ -112,6 +113,7 @@ func TestConfigDatabaseIsOptedIntoByItsQuota(t *testing.T) {
 // A configuration quota below the record cap cannot hold one snapshot: the
 // node does not load.
 func TestConfigQuotaBelowTheRecordCap(t *testing.T) {
+	t.Parallel()
 	for n, ok := range map[int64]bool{ConfigRecordBytes - 1: false, ConfigRecordBytes: true} {
 		nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["configuration"] = n })
 		_, err := ParseConfig(nc.Bytes())
@@ -128,6 +130,7 @@ func TestConfigQuotaBelowTheRecordCap(t *testing.T) {
 // no configuration collection loads: a C10 baseline is stored for such an
 // asset too.
 func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
+	t.Parallel()
 	const secondID = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
 	add := func(nc *nodeconfigtest.Config, asset string) {
 		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg-" + asset, AssetID: asset, Endpoint: "port1-telnet",
@@ -192,6 +195,7 @@ func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
 // is one record at the cap (C5 0.5), and stores C9 and C10 documents byte
 // for byte under the node's document check.
 func TestConfigDatabaseStoresDocuments(t *testing.T) {
+	t.Parallel()
 	c, dir := configNode(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -249,6 +253,7 @@ func canonicalBaseline(t *testing.T) []byte {
 // beside a capture it was not read from, and a capture where there is none;
 // a record over the cap, or two in one batch, never commits.
 func TestConfigDatabaseRefusals(t *testing.T) {
+	t.Parallel()
 	c, dir := configNode(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -305,6 +310,7 @@ func TestConfigDatabaseRefusals(t *testing.T) {
 // that the bound says fits could be refused here, or a cap could be left
 // larger than its bound. Change both together (B6 on #301).
 func TestConfigRecordBytesIsTheDerivedCap(t *testing.T) {
+	t.Parallel()
 	if ConfigRecordBytes != 3<<19 {
 		t.Fatalf("ConfigRecordBytes is %d, not the 3<<19 (1.5 MiB) that contracts/config/bound_test.go derives the record bound against", ConfigRecordBytes)
 	}
@@ -314,6 +320,7 @@ func TestConfigRecordBytesIsTheDerivedCap(t *testing.T) {
 // closed table, with C9's own kind names, and no C9 or C10 document is
 // working state. Evidence class: desk.
 func TestConfigDocumentsSeries(t *testing.T) {
+	t.Parallel()
 	if config.KindSnapshot != c5.SeriesConfigSnapshot || config.KindDifference != c5.SeriesConfigDifference {
 		t.Fatalf("C9's kinds %q %q are not C5's series", config.KindSnapshot, config.KindDifference)
 	}

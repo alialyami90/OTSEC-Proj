@@ -29,6 +29,7 @@ func setTargets(t *testing.T, c *Config, class asset.EvidenceClass) {
 }
 
 func TestLabOnly(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	cfg := q.s.rt.cfg
 	if !cfg.LabOnly() {
@@ -63,6 +64,7 @@ func TestLabOnly(t *testing.T) {
 // code, once, and nothing is removed; on the lab node it is acted on, the
 // audit record says the file was unsigned, and an alarm names it.
 func TestUnsignedQuarantineClearRefusedOffLab(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(2, false)
 	q.export()
@@ -97,6 +99,7 @@ func TestUnsignedQuarantineClearRefusedOffLab(t *testing.T) {
 
 // Off-lab, the signed request still works, so the administrator has a way.
 func TestSignedQuarantineClearWorksOffLab(t *testing.T) {
+	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	setTargets(t, q.s.rt.cfg, asset.DeviceObserved)
 	q.signedClear("admin-request-clear.json", 1, manifest)
@@ -109,6 +112,7 @@ func TestSignedQuarantineClearWorksOffLab(t *testing.T) {
 // A signed request and an unsigned file for the same clear: only the signed
 // one is acted on, whichever the node meets first.
 func TestSignedQuarantineClearWinsOverTheUnsignedFile(t *testing.T) {
+	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	q.signedClear("admin-request-clear.json", 1, manifest)
 	q.clearFile(manifest, "")
@@ -128,6 +132,7 @@ func TestSignedQuarantineClearWinsOverTheUnsignedFile(t *testing.T) {
 }
 
 func TestUnsignedFileIgnoredWhileASignedRequestNamesIt(t *testing.T) {
+	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	q.signedClear("admin-request-clear.json", 1, manifest)
 	// The signed file is in admin_dir but not yet sent: the collector holds.
@@ -148,6 +153,7 @@ func TestUnsignedFileIgnoredWhileASignedRequestNamesIt(t *testing.T) {
 // saw the signed file, and the wants a scan left behind are stale. The signed
 // request is acted on, once, and the unsigned file never is.
 func TestUnsignedClearNeverBeatsASignedOneWhicheverRunsFirst(t *testing.T) {
+	t.Parallel()
 	t.Run("tick before any relay scan", func(t *testing.T) {
 		q, _, manifest := signedQuarantineNode(t)
 		q.signedClear("admin-request-clear.json", 1, manifest)
@@ -179,6 +185,7 @@ func TestUnsignedClearNeverBeatsASignedOneWhicheverRunsFirst(t *testing.T) {
 // A signed request the collector refused is never acted on, so it does not
 // withhold the unsigned file (B6 on #347, finding 2).
 func TestRefusedSignedRequestDoesNotSupersede(t *testing.T) {
+	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	_, sum := q.signedClear("admin-request-clear.json", 1, manifest)
 	q.s.mu.Lock()
@@ -199,6 +206,7 @@ func TestRefusedSignedRequestDoesNotSupersede(t *testing.T) {
 // and an audit record that names it unsigned, and the signed acknowledgement
 // keeps working.
 func TestUnsignedSeqResetAck(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(1, false)
 	if err := q.nc.WriteInstallKey("ik_test_second"); err != nil {
@@ -237,6 +245,7 @@ func TestUnsignedSeqResetAck(t *testing.T) {
 // notice; the unsigned file naming another key is not superseded (it is
 // refused as any other key is). The signed one is then acted on.
 func TestSignedSeqResetAckWinsOverTheUnsignedFile(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -295,6 +304,7 @@ func TestSignedSeqResetAckWinsOverTheUnsignedFile(t *testing.T) {
 // would refuse it, and an unverified payload may withhold the unsigned file
 // only when it plainly asks for the same clear (B3 on #347).
 func TestUnsignedWantsReadOnlyAPayloadOfTheFilesKind(t *testing.T) {
+	t.Parallel()
 	want := func(kind authz.RequestKind, p authz.AdminRequest) unsignedWants {
 		t.Helper()
 		b, err := json.Marshal(p)

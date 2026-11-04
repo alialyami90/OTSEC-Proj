@@ -156,6 +156,7 @@ func (n *signedCfgNode) part(name string) AdminRequestStatus {
 // again, and after a restart, nothing more is recorded. Evidence class:
 // simulated.
 func TestSignedConfigurationAcknowledgement(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -194,6 +195,7 @@ func TestSignedConfigurationAcknowledgement(t *testing.T) {
 // new baseline and moves the old one to superseded; one of the baseline
 // already acknowledged records nothing. Evidence class: simulated.
 func TestSignedConfigurationAcknowledgementSucceeds(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	base, next := n.snapshotOf("ok"), n.snapshotOf("ok-all-present")
 	n.read("ok")
@@ -236,6 +238,7 @@ func holdsBaseline(h map[c5.Seq]c5.HoldCode) bool {
 // second relay nor a new scheduler records them again. Evidence class:
 // simulated.
 func TestSignedConfigurationDenials(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -272,6 +275,7 @@ func TestSignedConfigurationDenials(t *testing.T) {
 // A signed approval against the acknowledged baseline is recorded, and the
 // change a later read finds is approved by it. Evidence class: simulated.
 func TestSignedChangeApproval(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -292,6 +296,7 @@ func TestSignedChangeApproval(t *testing.T) {
 // Without the kind in the key's list the collector refuses at authority,
 // and the node records nothing of its own. Evidence class: simulated.
 func TestSignedConfigurationKindNotPinned(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	n.mux.admin.kinds = nil
 	base := n.snapshotOf("ok")
@@ -399,6 +404,7 @@ func TestSignedAcknowledgementNotWritten(t *testing.T) {
 // (repeat_of), not the repeat's own number, and the decision is recorded
 // once. Evidence class: simulated.
 func TestSignedConfigurationRepeatAnswer(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	n.mux.admin.repeat, n.mux.admin.lose = true, true
 	base := n.snapshotOf("ok")
@@ -448,6 +454,7 @@ func (n *signedCfgNode) configPart(edit func(*authz.AdminRequest)) adminPart {
 // acceptance for another key is refused for good, and one while a reset is
 // open waits, and neither records anything. Evidence class: simulated.
 func TestSignedConfigurationInstallKeyGates(t *testing.T) {
+	t.Parallel()
 	n := newSignedCfgNode(t, nil)
 	n.read("ok")
 	if p := n.configPart(func(p *authz.AdminRequest) { p.InstallKeyID = kid("other-install-key") }); p.state != partRefused || !strings.Contains(p.detail, "not the key the node trusts") {

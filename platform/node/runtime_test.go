@@ -105,6 +105,7 @@ func count[T comparable](xs []T, x T) int {
 // A new node starts every database collecting, starts its audit chain once,
 // records each database's mode as audit and health, and writes status.
 func TestStartNewNodeAndRestart(t *testing.T) {
+	t.Parallel()
 	c, dir := runtimeConfig(t)
 	r, st, _ := start(t, c, dir)
 	if !r.Collecting() {
@@ -141,6 +142,7 @@ func TestStartNewNodeAndRestart(t *testing.T) {
 // status and the OS log although that database cannot store them
 // (C5-A3-5). The other databases still record what they can.
 func TestFailedAuditDatabaseIsObservable(t *testing.T) {
+	t.Parallel()
 	c, dir := runtimeConfig(t)
 	r, _, _ := start(t, c, dir)
 	r.Close()
@@ -176,6 +178,7 @@ func TestFailedAuditDatabaseIsObservable(t *testing.T) {
 
 // Store alarms raised while running become health events at the next Tick.
 func TestRunningAlarmBecomesHealthEvent(t *testing.T) {
+	t.Parallel()
 	c, dir := runtimeConfig(t)
 	c.Store.Quotas["adapter-evidence"] = 4000
 	r, st, _ := start(t, c, dir)

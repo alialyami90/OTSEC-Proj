@@ -175,6 +175,7 @@ func seqRange(first, last uint64) []uint64 {
 // and records added after the export stay with their captures; a second
 // file naming the same export is recorded as stale and removes nothing.
 func TestQuarantineExportAndClear(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(9, false) // seqs 1 to 18
 	m := q.export()
@@ -258,6 +259,7 @@ func TestQuarantineExportAndClear(t *testing.T) {
 // The export is the stream's records byte for byte, and the CLI refuses a
 // directory that exists (A3-5).
 func TestQuarantineExportFiles(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(1, false)
 	dir := filepath.Join(t.TempDir(), "export")
@@ -298,6 +300,7 @@ func TestQuarantineExportFiles(t *testing.T) {
 // A manifest copy that does not match the stream both ways is not
 // recorded, and a clear naming it removes nothing (A3-1).
 func TestQuarantineManifestRefused(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		edit func(m *QuarantineManifest)
 		raw  func(b []byte) []byte
@@ -351,6 +354,7 @@ func TestQuarantineManifestRefused(t *testing.T) {
 // after it was recorded, an audit database that takes no record (A3-3),
 // and a file that is not a clear.
 func TestQuarantineClearRefusals(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*quarantineNode, string) {
 		q := newQuarantineNode(t)
 		q.runs(2, false)
@@ -424,6 +428,7 @@ func TestQuarantineClearRefusals(t *testing.T) {
 // admin files gone. An unauthorized-line halt ends only once the whole
 // range is gone.
 func TestQuarantineClearResumesFromTheRecord(t *testing.T) {
+	t.Parallel()
 	for _, between := range []bool{false, true} {
 		t.Run(map[bool]string{false: "kill before the first step", true: "kill between steps"}[between], func(t *testing.T) {
 			q := newQuarantineNode(t)
@@ -487,6 +492,7 @@ func TestQuarantineClearResumesFromTheRecord(t *testing.T) {
 // A halt whose unauthorized-line quarantine is outside the cleared range
 // stays when the clear is done.
 func TestQuarantineClearKeepsHaltOutsideRange(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(1, false)
 	q.export() // seqs 1 and 2
@@ -505,6 +511,7 @@ func TestQuarantineClearKeepsHaltOutsideRange(t *testing.T) {
 // The checkpoint holds the recorded exports, so a start that reads the
 // audit stream only after the checkpoint still knows them.
 func TestQuarantineCheckpointHoldsExports(t *testing.T) {
+	t.Parallel()
 	q := newQuarantineNode(t)
 	q.runs(1, false)
 	q.export()
@@ -527,6 +534,7 @@ func TestQuarantineCheckpointHoldsExports(t *testing.T) {
 // One Discard step per tick across every recorded clear (A1 (c)): with
 // two assets' clears recorded, one tick removes 16 seqs in all.
 func TestQuarantineOneStepPerTick(t *testing.T) {
+	t.Parallel()
 	const other = "3c8e5f21-9d4a-4b6c-8f32-8d5e1e7b9c24"
 	var nc *nodeconfigtest.Config
 	c, dir := schedConfig(t, func(n *nodeconfigtest.Config) {

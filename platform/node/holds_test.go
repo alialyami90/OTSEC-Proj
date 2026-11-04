@@ -70,6 +70,7 @@ func digests(ws []wantHold) []string {
 // What C8 justifies: an acknowledged baseline of each kind, and a change no
 // approval covered, until a return to the baseline or a new baseline ends it.
 func TestFoldHolds(t *testing.T) {
+	t.Parallel()
 	cfg, ev := authz.BaselineConfiguration, authz.BaselineEvent
 	for name, tc := range map[string]struct {
 		recs []*audit.Record
@@ -250,6 +251,7 @@ func reconciled(alarms []StatusAlarm) (n int) {
 // (audit before act, section 2 of the C5 0.4 proposal); a second start finds
 // nothing to correct.
 func TestHoldsAreRebuiltFromAuditAtStart(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	var ackCfg, ackEv, det c5.Seq
 	got, alarms, r := h.restart(func(r *Runtime) {
@@ -291,6 +293,7 @@ func TestHoldsAreRebuiltFromAuditAtStart(t *testing.T) {
 // A hold no C8 record justifies is released, one with the wrong reason is
 // corrected, and each is an alarm; the records that justify the rest stay.
 func TestUnjustifiedHoldsAreReleasedAtStart(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	stream := ConfigStream(relayID)
 	var ack, det c5.Seq
@@ -335,6 +338,7 @@ func TestUnjustifiedHoldsAreReleasedAtStart(t *testing.T) {
 // nothing. An approval accepted afterwards would not have ended the alarm
 // (audit.VerifyConfig), so the fold ignores it.
 func TestReturnToBaselineKeepsTheDifference(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	var det c5.Seq
 	_, _, _ = h.restart(func(r *Runtime) {
@@ -360,6 +364,7 @@ func TestReturnToBaselineKeepsTheDifference(t *testing.T) {
 // An acknowledged baseline the node cannot find is an alarm for the asset,
 // and holds nothing.
 func TestAcknowledgedBaselineNotStored(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	got, alarms, _ := h.restart(func(r *Runtime) {
 		putAudit(t, r, ackRec(authz.BaselineConfiguration, hBase))
@@ -382,6 +387,7 @@ func TestAcknowledgedBaselineNotStored(t *testing.T) {
 // the evidence it has left: the old baseline stays held, with the alarm
 // (B6 on #305).
 func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	var ackA c5.Seq
 	got, alarms, r := h.restart(func(r *Runtime) {
@@ -412,6 +418,7 @@ func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
 // held as superseded-baseline with the new acknowledgement as Ref (C5 0.7),
 // and a second start corrects nothing (B6 on #305).
 func TestAcknowledgedDifferenceStaysHeld(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	var det, ackB c5.Seq
 	got, _, r := h.restart(func(r *Runtime) {
@@ -448,6 +455,7 @@ func TestAcknowledgedDifferenceStaysHeld(t *testing.T) {
 // A hold of a code this node does not know is kept as it is, whatever the
 // records say (C5 0.6): not released, not given a new reason, not added over.
 func TestUnknownHoldCodeIsKept(t *testing.T) {
+	t.Parallel()
 	node := c5.NodeID("n")
 	ref := func(seq c5.Seq) c5.Key { return c5.Key{NodeID: node, Stream: AuditStream, Seq: seq} }
 	have := []c5.HeldRecord{
@@ -467,6 +475,7 @@ func TestUnknownHoldCodeIsKept(t *testing.T) {
 // releases and corrects nothing (B6 on #305). Fails without the pruned check:
 // all three holds are released as unjustified.
 func TestPrunedAuditKeepsEveryHold(t *testing.T) {
+	t.Parallel()
 	h := newHoldsNode(t)
 	h.restart(func(r *Runtime) {
 		putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.snap1)))

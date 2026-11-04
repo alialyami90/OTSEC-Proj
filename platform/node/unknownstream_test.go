@@ -20,6 +20,7 @@ const unknownQuota = 256 << 10
 // listener's own stream. What the unknown stream holds never passes the
 // class quota, however many datagrams arrive.
 func TestUnknownClassFullDoesNotStopKnownSenders(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0")
 		nc.Store.Quotas["syslog-unknown"] = unknownQuota
@@ -93,6 +94,7 @@ func waitKnown(t *testing.T, ls *Listening, st *Status, r *Runtime, id string, n
 // A node with a listener and no syslog-unknown quota does not start, and
 // the error names the class (the layout needs one, as for any class).
 func TestListenerNeedsAnUnknownQuota(t *testing.T) {
+	t.Parallel()
 	nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0")
 		delete(nc.Store.Quotas, "syslog-unknown")

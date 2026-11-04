@@ -44,6 +44,7 @@ func bigConfigSnapshot(t *testing.T, n int, v string) (config.Snapshot, c5.Captu
 // larger snapshot is refused by C9, so by ConfigDocuments, and nothing is
 // stored.
 func TestLargestConfigRecordIsStored(t *testing.T) {
+	t.Parallel()
 	lo, hi := 1, 400
 	for lo < hi {
 		mid := (lo + hi + 1) / 2

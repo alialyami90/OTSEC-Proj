@@ -185,6 +185,7 @@ func learnerRun(t *testing.T, between func(g *runRig, round int)) []byte {
 // from its checkpoint and the streams from its positions, and passes no
 // message twice and none not at all. Evidence class: simulated.
 func TestEventRunRestartAtEveryStep(t *testing.T) {
+	t.Parallel()
 	straight := learnerRun(t, func(*runRig, int) {})
 	restarted := learnerRun(t, func(g *runRig, _ int) { g.restart(true) })
 	if !bytes.Equal(straight, restarted) {
@@ -198,6 +199,7 @@ func TestEventRunRestartAtEveryStep(t *testing.T) {
 // messages stored after the checkpoint (they are read again, once).
 // Evidence class: simulated.
 func TestEventRunCrashBeforeAndAfterTheCursor(t *testing.T) {
+	t.Parallel()
 	straight := learnerRun(t, func(*runRig, int) {})
 	crashed := learnerRun(t, func(g *runRig, round int) {
 		switch round % 3 {
@@ -247,6 +249,7 @@ func lateMessages(g *runRig) {
 // saved after it; the cursor, on a stream a target consumes, is the restart
 // point. Evidence class: simulated.
 func TestEventRunCheckpointsAndRemoves(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", false)
 	})
@@ -290,6 +293,7 @@ func TestEventRunCheckpointsAndRemoves(t *testing.T) {
 // version 1); one whose stored snapshot is changed is corrupt. Neither is a
 // silent restart, and the chain still verifies. Evidence class: simulated.
 func TestEventRunCheckpointNotRestored(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	at := runT0
 	for i := range 3 {
@@ -379,6 +383,7 @@ func notRestored(t *testing.T, r *Runtime) []*audit.Record {
 // raises the alarm again from the checkpoint when restored; the alarm is not
 // stored a second time. Evidence class: simulated.
 func TestEventRunRestoredDetectorStoresNoAlarmTwice(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	at := runT0
 	for i := range 12 {
@@ -428,6 +433,7 @@ func TestEventRunRestoredDetectorStoresNoAlarmTwice(t *testing.T) {
 // health event, once; the next checkpoint that fits is stored. Evidence
 // class: simulated.
 func TestEventRunRefusedCheckpointKeepsTheLast(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", false)
 	})
@@ -556,6 +562,7 @@ func TestEventRunUnwrittenNotRestoredRecordIsRetried(t *testing.T) {
 // half starts again, and an older good one is not tried (D4-36). Evidence
 // class: simulated.
 func TestEventRunNoFallbackToAnOlderCheckpoint(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	seq, at := learnerCheckpointed(t, g)
 	// A copy of the good checkpoint, as a newer record of the series.
@@ -641,6 +648,7 @@ func TestEventRunIncompleteReadIsRetried(t *testing.T) {
 // forwarding target the listener stream has none, so it stays unprunable.
 // Evidence class: desk.
 func TestEventRunConsumerOnlyBesideAnother(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	if len(g.e.consumed) != 0 {
 		t.Fatalf("consumers on %v", g.e.consumed)
@@ -727,6 +735,7 @@ func TestReadCheckpointReasons(t *testing.T) {
 // a detector whose baseline came from a hold is never stale by time.
 // Evidence class: desk.
 func TestCheckpointStale(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	a := g.e.life.assets[relayID]
 	a.version, a.activeFrom = 2, runT0
@@ -748,6 +757,7 @@ func TestCheckpointStale(t *testing.T) {
 // A restore error outside the ErrSnapshot family is refused; each of the
 // family has its own code. Evidence class: desk.
 func TestRestoreReason(t *testing.T) {
+	t.Parallel()
 	for err, want := range map[error]string{
 		eventbaseline.ErrSnapshotVersion:  audit.ReasonCheckpointVersion,
 		eventbaseline.ErrSnapshotMismatch: audit.ReasonCheckpointMismatch,
@@ -764,6 +774,7 @@ func TestRestoreReason(t *testing.T) {
 // acknowledged baseline, and its record names that baseline (C8 0.9).
 // Evidence class: simulated.
 func TestEventRunDetectorNotRestoredNamesItsBaseline(t *testing.T) {
+	t.Parallel()
 	g := newRunRig(t, nil)
 	at := runT0
 	for range 12 {

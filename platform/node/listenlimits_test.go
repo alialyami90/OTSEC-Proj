@@ -34,6 +34,7 @@ func sizingConfig(stream, datagram int64, hours int, transports ...string) *Conf
 // quota from unknown senders over the planned outage, and no listener more
 // than A4's 1 MiB an hour. The bound is what the node shows.
 func TestListenerSizings(t *testing.T) {
+	t.Parallel()
 	const mib = 1 << 20
 	for _, tc := range []struct {
 		name       string
@@ -69,6 +70,7 @@ func TestListenerSizings(t *testing.T) {
 // stream quota that cannot hold one whole batch beside their share, is
 // refused, and so is the configuration that names it (HR-11, D3-3).
 func TestListenerSizingsRefused(t *testing.T) {
+	t.Parallel()
 	const mib = 1 << 20
 	for _, tc := range []struct {
 		name string
@@ -100,6 +102,7 @@ func TestListenerSizingsRefused(t *testing.T) {
 // The loader checks syslog_outage_hours and refuses a quota the listeners
 // cannot be sized from; without listeners, any quota loads.
 func TestOutageHoursConfig(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		mod  func(*nodeconfigtest.Config)
@@ -137,6 +140,7 @@ func TestOutageHoursConfig(t *testing.T) {
 // are dropped as unknown-budget well before A4's 1 MiB default would drop
 // them, and status shows the budget, the bound and the bytes stored.
 func TestListenerUsesSizedBudget(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 		nc.Store.Quotas["syslog-stream"] = MinUnknownBytes * 25 * UnknownQuotaShare
@@ -180,6 +184,7 @@ func TestListenerUsesSizedBudget(t *testing.T) {
 // raises syslog-listener-certificate-expiring once when it comes within 30
 // days and once more when it has passed.
 func TestListenerCertExpiry(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
 		if err != nil {
@@ -236,6 +241,7 @@ func TestListenerCertExpiry(t *testing.T) {
 // received message's text whole is warned about at start; one sized at
 // RecommendedTargetOctets is not, and without listeners nothing is raised.
 func TestTargetSmallForListeners(t *testing.T) {
+	t.Parallel()
 	// A4's worst case on #169, an 8147-byte RTAC frame, renders at 21161.
 	if RecommendedTargetOctets != 22528 || RecommendedTargetOctets < 21161 {
 		t.Fatalf("RecommendedTargetOctets %d", RecommendedTargetOctets)
@@ -283,6 +289,7 @@ func TestTargetSmallForListeners(t *testing.T) {
 // the truncated flag a listener adds. A4's normalize TestSyslogSizeBounds
 // covers more shapes at 8192.
 func TestReceivedRecordBound(t *testing.T) {
+	t.Parallel()
 	const (
 		h3164 = "<13>Oct 26 12:00:00 host app: "
 		h5424 = "<13>1 2026-10-26T12:00:00Z host app - - "
@@ -420,6 +427,7 @@ func streamBytes(t *testing.T, r *Runtime, stream c5.StreamID) int64 {
 // passes it to the listener, so a flood after a restart gets only what is
 // left of the hour's budget, not a fresh one.
 func TestUnknownBudgetAcrossRestart(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 		nc.Store.Quotas["syslog-stream"] = MinUnknownBytes * 25 * UnknownQuotaShare
@@ -465,6 +473,7 @@ func TestUnknownBudgetAcrossRestart(t *testing.T) {
 // time that does not parse would count as inside, but C4 refuses such an
 // event at commit, so no stored record has one.
 func TestUnknownSpentWindow(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 	})
@@ -503,6 +512,7 @@ func TestUnknownSpentWindow(t *testing.T) {
 // If the stream cannot be read at start, the budget starts empty (fail
 // closed), the node says why, and known senders are not affected.
 func TestUnknownSpentUncountedFailsClosed(t *testing.T) {
+	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 	})

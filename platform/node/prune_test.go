@@ -59,6 +59,7 @@ func confirmStream(t *testing.T, r *Runtime, c *Config, stream c5.StreamID, seq 
 // and start again once they are, without a restart or an operator: the
 // node prunes the confirmed events, and nothing past the cursor.
 func TestRunsResumeOnceConfirmed(t *testing.T) {
+	t.Parallel()
 	r, st, c, s := pruneNode(t, 1024)
 	stream := SERStream(relayID)
 	if rep := s.RunOnce(bg, 0); rep.Outcome != "ok" || rep.Events == 0 {
@@ -98,6 +99,7 @@ func TestRunsResumeOnceConfirmed(t *testing.T) {
 // Tick prunes a class above its runtime target too, so the room is there
 // before the next run asks for it.
 func TestTickPrunesConfirmed(t *testing.T) {
+	t.Parallel()
 	r, _, c, s := pruneNode(t, 1024)
 	stream := SERStream(relayID)
 	s.RunOnce(bg, 0)
@@ -121,6 +123,7 @@ func TestTickPrunesConfirmed(t *testing.T) {
 // the room holds one run's evidence and a tenth, so the first run lands in
 // the warning band while runs still go.
 func TestQuarantineRoomLowWarnsFirst(t *testing.T) {
+	t.Parallel()
 	r, _, _, s := pruneNode(t, 1<<20)
 	s.RunOnce(bg, 0)
 	one, err := r.Store(HealthStream).ClassBytes(bg, c5.ClassAdapterEvidence)
@@ -143,6 +146,7 @@ func TestQuarantineRoomLowWarnsFirst(t *testing.T) {
 // A drain-only database is pruned too: there, pruning confirmed events is
 // how it frees room (A6 on #135).
 func TestPruneDrainOnly(t *testing.T) {
+	t.Parallel()
 	r, _, c, s := pruneNode(t, 1024)
 	stream := SERStream(relayID)
 	s.RunOnce(bg, 0)
@@ -165,6 +169,7 @@ func TestPruneDrainOnly(t *testing.T) {
 // A class over its target is pruned when an earlier class is under its own:
 // here platform is over and adapter-evidence, sorted first, is not.
 func TestPruneSecondClass(t *testing.T) {
+	t.Parallel()
 	const quota = 64 << 10
 	r, _, c, _ := pruneNode(t, 1<<30, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["platform"] = quota })
 	db := r.Store(HealthStream)
@@ -193,6 +198,7 @@ func TestPruneSecondClass(t *testing.T) {
 // A prune that fails raises store-prune-failed once for the condition, not
 // at every Tick.
 func TestPruneFailureRaisedOnce(t *testing.T) {
+	t.Parallel()
 	r, st, _, _ := pruneNode(t, 1024)
 	d := r.find(EvidenceDB)
 	r.state.RLock()

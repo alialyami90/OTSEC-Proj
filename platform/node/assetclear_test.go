@@ -58,6 +58,7 @@ func clearRequests(t *testing.T, r *Runtime) []*audit.Record {
 // before it is sent and with the collector's decision after; only then
 // does the asset run again.
 func TestClearReachesCollector(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -112,6 +113,7 @@ func TestClearReachesCollector(t *testing.T) {
 // restart and a rebuild from the chain; the next run sends it again, and a
 // collector that already lifted the suspension accepts it (A3 #117).
 func TestLostClearReplyRetried(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	col, m := clearingCollector(t)
@@ -177,6 +179,7 @@ func TestLostClearReplyRetried(t *testing.T) {
 // owed, with the asset's runs held; without a clear-suspension.json naming
 // it, nothing is sent at all, since the collector checks the same file.
 func TestRefusedClearHolds(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -240,6 +243,7 @@ func TestRefusedClearHolds(t *testing.T) {
 // acknowledged, like every request, and is then accepted by the new
 // collector, which holds no suspension (A3 #117).
 func TestOwedClearAcrossCollectorReinstall(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -272,6 +276,7 @@ func TestOwedClearAcrossCollectorReinstall(t *testing.T) {
 // allowed request for the asset, a denied clear, or an accepted clear of
 // another ref leaves it owed.
 func TestApplyCollectorClear(t *testing.T) {
+	t.Parallel()
 	node := authz.Principal{Type: authz.PrincipalNode, ID: "site-a-node1"}
 	sched := authz.Principal{Type: authz.PrincipalSchedule, ID: "relay-ser"}
 	req := func(p authz.Principal, outcome audit.Outcome, id string) *audit.Record {

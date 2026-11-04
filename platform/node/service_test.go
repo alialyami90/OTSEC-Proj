@@ -14,6 +14,7 @@ import (
 // Run starts the node, writes status, and stops cleanly when ctx ends,
 // with service.start and service.stop in the chain.
 func TestRunStartsAndStops(t *testing.T) {
+	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	// Stop once status says the node is collecting, not after a fixed time:
 	// opening the stores can take longer than any short period on a slow
@@ -63,6 +64,7 @@ func TestRunStartsAndStops(t *testing.T) {
 // links are held back in status with their alarms, and it stops cleanly
 // (HR-13, D4-11).
 func TestRunStartsWithExpiredLinks(t *testing.T) {
+	t.Parallel()
 	var nc *nodeconfigtest.Config
 	c, _ := schedConfig(t, func(n *nodeconfigtest.Config) {
 		nc = n

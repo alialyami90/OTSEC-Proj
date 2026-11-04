@@ -173,6 +173,7 @@ func (r *feedRig) step(t *testing.T, at time.Time) {
 // The relay's streams are its SER stream, the health stream (for its
 // collection outcomes) and its listener's stream.
 func TestFeedStreamsOfAnAsset(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	var got []c5.StreamID
 	for _, s := range r.f.assets[relayID].streams {
@@ -187,6 +188,7 @@ func TestFeedStreamsOfAnAsset(t *testing.T) {
 // Two streams interleave by received time, whatever their commit order,
 // and nothing is passed until the watermark is past it.
 func TestFeedMergesStreamsByReceivedTime(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	// The Syslog stream commits its two messages before the SER read
@@ -222,6 +224,7 @@ func TestFeedMergesStreamsByReceivedTime(t *testing.T) {
 // included, as one that committed at once. Past FeedLateness it is late:
 // counted and not passed.
 func TestFeedDelayedCommitChangesNothing(t *testing.T) {
+	t.Parallel()
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	steps := []time.Time{sec(30), sec(90), sec(150), sec(200), sec(260), sec(400)}
 	run := func(delay time.Duration) *feedRig {
@@ -266,6 +269,7 @@ func TestFeedDelayedCommitChangesNothing(t *testing.T) {
 // A failed SER collection opens a gap; the next read closes it, and its
 // rows, and only its rows, are AfterFailure.
 func TestFeedFailureGivesGapAndAfterFailure(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser, h := SERStream(relayID), HealthStream
@@ -306,6 +310,7 @@ func TestFeedFailureGivesGapAndAfterFailure(t *testing.T) {
 // A run that fails and is followed by a successful read with no rows
 // closes the gap at that run.
 func TestFeedGapClosedByARunWithNoRows(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	r.st.add(t, HealthStream, sec(60), runHealth(relayID, HealthCollectionRefused, "", sec(60)), nil)
@@ -330,6 +335,7 @@ func TestFeedGapClosedByARunWithNoRows(t *testing.T) {
 // A possible duplicate whose alignment key the previous read still held is
 // not counted (D4-4 item 3); one whose key it did not hold is.
 func TestFeedPossibleDuplicatesNotCounted(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser := SERStream(relayID)
@@ -353,6 +359,7 @@ func TestFeedPossibleDuplicatesNotCounted(t *testing.T) {
 // A read split across two reads of the stream is held until its last row
 // is read, so its rows are passed together and compared together.
 func TestFeedHoldsAReadUntilItsLastRow(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	r.f.batch = 2
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
@@ -391,6 +398,7 @@ func TestFeedHoldsAReadUntilItsLastRow(t *testing.T) {
 // Syslog from an unknown sender counts at site level; another asset's
 // events are not passed; a pruned range is counted.
 func TestFeedUnresolvedAndSkipped(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	l := ListenerStream(feedListener)
 	r.st.add(t, l, feedT0, syslogMsg("", feedT0), nil)
@@ -419,6 +427,7 @@ func TestFeedUnresolvedAndSkipped(t *testing.T) {
 // the last record read, not by the clock: its unread records may be older
 // than what the other streams hold.
 func TestFeedUnreadRecordsHoldTheWatermark(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	r.f.batch = 2
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
@@ -444,6 +453,7 @@ func TestFeedUnreadRecordsHoldTheWatermark(t *testing.T) {
 
 // The watermark never goes back, even when the node's clock does.
 func TestFeedWatermarkNeverGoesBack(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	r.st.add(t, ListenerStream(feedListener), feedT0, syslogMsg(relayID, feedT0), nil)
 	r.step(t, feedT0.Add(FeedLateness+time.Minute))
@@ -469,6 +479,7 @@ func TestFeedWatermarkNeverGoesBack(t *testing.T) {
 // last row carried no alignment state; each read is compared with the
 // state the feeder last had.
 func TestFeedReadsAreComparedApart(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser := SERStream(relayID)
@@ -485,6 +496,7 @@ func TestFeedReadsAreComparedApart(t *testing.T) {
 // Which collection outcomes open a gap and which close one. A wrong entry
 // makes a read type-only that should be learned in full, or the reverse.
 func TestFeedOutcomeTable(t *testing.T) {
+	t.Parallel()
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	for _, c := range []struct {
 		typ, status string
@@ -550,6 +562,7 @@ func TestFeedOutcomeTable(t *testing.T) {
 
 // An event received exactly at the watermark already passed is late.
 func TestFeedEventAtTheWatermarkIsLate(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	r.step(t, feedT0.Add(FeedLateness))
 	r.st.add(t, ListenerStream(feedListener), feedT0.Add(FeedLateness), syslogMsg(relayID, feedT0), nil)
@@ -564,6 +577,7 @@ func TestFeedEventAtTheWatermarkIsLate(t *testing.T) {
 // says so, the asset is held, and nothing after it is lost. Once the record
 // reads, the stream goes on from it.
 func TestFeedUndecodableEventStopsItsStream(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	l := ListenerStream(feedListener)
@@ -597,6 +611,7 @@ func TestFeedUndecodableEventStopsItsStream(t *testing.T) {
 // A SER row whose alignment state does not decode stops the stream before
 // it changes anything, so the read is taken once, whole, when it reads.
 func TestFeedUndecodableStateStopsItsStream(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser := SERStream(relayID)
@@ -636,6 +651,7 @@ func TestFeedUndecodableStateStopsItsStream(t *testing.T) {
 // gap never starts before one already sent; a late success closes nothing.
 // Both are counted late.
 func TestFeedLateOutcomes(t *testing.T) {
+	t.Parallel()
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	nonTick := func(r *feedRig) []string {
 		var got []string
@@ -693,6 +709,7 @@ func TestFeedLateOutcomes(t *testing.T) {
 // series began, so the outage is not collected time; never before the
 // watermark or the last gap's end.
 func TestFeedMissedGapStartsAtItsSeries(t *testing.T) {
+	t.Parallel()
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	missed := func(first, at time.Time) event.Event {
 		e := runHealth(relayID, HealthCollectionMissed, "", at)
@@ -761,6 +778,7 @@ func TestFeedMissedGapStartsAtItsSeries(t *testing.T) {
 // were pending and are taken, and nothing is late (slice 1c). Evidence
 // class: simulated.
 func TestFeedResumeSkipsWhatWasTaken(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	l := ListenerStream(feedListener)
@@ -799,6 +817,7 @@ func TestFeedResumeSkipsWhatWasTaken(t *testing.T) {
 // pending restarts before it, with the alignment state it was compared with.
 // Evidence class: simulated.
 func TestFeedRestartIsAGap(t *testing.T) {
+	t.Parallel()
 	r := newFeedRig(t)
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser := SERStream(relayID)
@@ -841,6 +860,7 @@ func TestFeedRestartIsAGap(t *testing.T) {
 // closes, the same however the steps fall, and across a restart that
 // restores the gap from the checkpoint (D4-45). Evidence class: simulated.
 func TestFeedPassesTheOpenGap(t *testing.T) {
+	t.Parallel()
 	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
 	ser, h, lst := SERStream(relayID), HealthStream, ListenerStream(feedListener)
 	fill := func(r *feedRig) {

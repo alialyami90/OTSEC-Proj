@@ -81,6 +81,7 @@ func adoptedRecord(t *testing.T, r *Runtime, ref string) {
 // node adopts it, sends nothing more for the asset, and the
 // administrator's file naming it clears it at both ends.
 func TestAdoptLostSuspension(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -113,6 +114,7 @@ func TestAdoptLostSuspension(t *testing.T) {
 // node adopts Y and keeps X owed, and the file naming Y then clears Y at
 // both ends. The fold replacing the owed ref is what lets it through.
 func TestAdoptOnMismatch(t *testing.T) {
+	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -145,6 +147,7 @@ func TestAdoptOnMismatch(t *testing.T) {
 // A named suspension the node cannot adopt changes nothing and is raised
 // once, without quoting the reply.
 func TestAdoptRefused(t *testing.T) {
+	t.Parallel()
 	c, dir, _ := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -216,6 +219,7 @@ func TestAdoptRefused(t *testing.T) {
 // is kept as adopted in the checkpoint, so the record written at the next
 // start still says where it came from.
 func TestUnauditedAdoptionSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	s := newScheduler(t, r, &fakeCollector{})
