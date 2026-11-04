@@ -189,3 +189,13 @@ def test_bytes_are_the_sent_ones_in_order(run):
         sent = _datagram(e)
         assert ev["native"]["record_sha256"] == hashlib.sha256(sent).hexdigest(), (e["id"], ev["native"])
         assert ev["native"]["record_length"] == len(sent)
+
+
+def test_type_key_fields_are_the_series(run):
+    # The detector's type key is built from pri and msg (C4 on #402), so a
+    # parse change shows here, not as wrong alarms in the alarm half.
+    got = _gtinj(run)
+    for e, ev in zip(run["events"], got):
+        fields = {f["name"]: f["value"] for f in ev["native"].get("fields", [])}
+        assert fields.get("pri") == str(e["facility"] * 8 + e["severity"]), (e["id"], fields)
+        assert fields.get("msg") == e["msg"], (e["id"], fields)

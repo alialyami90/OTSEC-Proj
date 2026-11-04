@@ -679,7 +679,13 @@ func gtinjAsset(nc *nodeconfigtest.Config, l *Layout, events string) error {
 	}
 	// Port 1 is never dialled: the record has no schedule.
 	nc.AddSEL751(gtinjAssetID, "127.0.0.1", 1, 60)
-	nc.Schedule = nc.Schedule[:len(nc.Schedule)-1]
+	sched := nc.Schedule[:0]
+	for _, c := range nc.Schedule {
+		if c.AssetID != gtinjAssetID {
+			sched = append(sched, c)
+		}
+	}
+	nc.Schedule = sched
 	setSerial(nc.Assets[len(nc.Assets)-1], gtinjSerial)
 	nc.AddSyslogSender(gtinjAssetID, "syslog-udp-gtinj", "syslog-udp", gtinjSender, 0)
 	nc.EventBaselines = append(nc.EventBaselines, nodeconfigtest.EventBaseline{AssetID: gtinjAssetID, Params: f.Params})
