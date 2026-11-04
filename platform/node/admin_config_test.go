@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,50 @@ func TestSignedEventAcknowledgement(t *testing.T) {
 	again := n.ackSigned(authz.BaselineEvent, h)
 	if p := n.part(again); p.NodePart != partNothing || len(n.decisions(audit.ActionConfigBaselineAcknowledge)) != 2 {
 		t.Fatalf("part %+v", p)
+	}
+}
+
+// An acknowledgement whose record is not written is not done: the part
+// stays pending, no hold is taken and nothing is activated, and the next
+// relay writes the record once (C6 on #406). Evidence class: simulated.
+func TestSignedAcknowledgementNotWritten(t *testing.T) {
+	n := newSignedCfgNode(t, func(nc *nodeconfigtest.Config) { nc.AddEventBaseline(relayID) })
+	l := n.s.events.life
+	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, n.r)[0].Config.BaselineDigest
+	appendFault = func() error { return errors.New("forced fault") }
+	t.Cleanup(func() { appendFault = nil })
+	name := n.ackSigned(authz.BaselineEvent, h)
+	if p := n.part(name); p.NodePart != partPending || !strings.Contains(p.Detail, "forced fault") {
+		t.Fatalf("part %+v", p)
+	}
+	if acks := n.decisions(audit.ActionConfigBaselineAcknowledge); len(acks) != 0 {
+		t.Fatalf("acknowledgements %+v", acks)
+	}
+	if hs := n.holds(); holdsBaseline(hs) {
+		t.Fatalf("holds %v", hs)
+	}
+	if _, d := l.half(relayID); d != nil {
+		t.Fatal("the baseline is active with no acknowledgement in the chain")
+	}
+
+	appendFault = nil
+	n.s.relayAdmin(bg)
+	if acks := n.decisions(audit.ActionConfigBaselineAcknowledge); len(acks) != 1 || acks[0].Outcome != audit.OutcomeSucceeded {
+		t.Fatalf("acknowledgements %+v", acks)
+	}
+	if p := n.part(name); p.NodePart != partDone {
+		t.Fatalf("part %+v", p)
+	}
+	if hs := n.holds(); !holdsBaseline(hs) {
+		t.Fatalf("holds %v", hs)
+	}
+	if _, d := l.half(relayID); d == nil {
+		t.Fatal("the baseline is not active")
+	}
+	n.s.relayAdmin(bg)
+	if acks := n.decisions(audit.ActionConfigBaselineAcknowledge); len(acks) != 1 {
+		t.Fatalf("%d acknowledgements after another relay", len(acks))
 	}
 }
 
