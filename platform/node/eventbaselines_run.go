@@ -75,7 +75,19 @@ const (
 	// AlarmEventBaselineCursor: EventBaselineConsumer's cursor was not
 	// saved, so the stream is pruned less and no checkpoint is removed.
 	AlarmEventBaselineCursor = "event-baseline-cursor-not-saved"
+	// AlarmEventBaselineNotAudited: a half did not restore and its
+	// config.checkpoint_not_restored was not written. The node writes it at
+	// each pass until it is, and until then keeps the half's checkpoint as
+	// it is, so the one that did not restore is not superseded (C3 on #405).
+	AlarmEventBaselineNotAudited = "event-baseline-not-audited"
 )
+
+// eventRunFaults are test seams, nil in a node: a fault in place of the
+// audit append of config.checkpoint_not_restored, and of the read of a
+// checkpoint's capture.
+var eventRunFaults struct {
+	audit, capture func() error
+}
 
 // Health types the runner writes.
 const (
@@ -149,6 +161,9 @@ type runAsset struct {
 	// first, by C5 series; remove those a newer one superseded.
 	series map[string][]c5.Seq
 	remove map[string][]c5.Seq
+	// unaudited are the config.checkpoint_not_restored records not yet
+	// written, by half; that half is not checkpointed until its is.
+	unaudited map[string]*audit.Record
 	// Counts for status.
 	Written, Removed, Refused int64
 }
@@ -197,7 +212,7 @@ func newEventRun(ctx context.Context, rt *Runtime) (*eventRun, error) {
 	}
 	for id, fa := range e.feed.assets {
 		e.assets[id] = &runAsset{id: id, fa: fa, halves: map[string]*runHalf{}, durable: map[c5.StreamID]c5.Seq{},
-			series: map[string][]c5.Seq{}, remove: map[string][]c5.Seq{}}
+			series: map[string][]c5.Seq{}, remove: map[string][]c5.Seq{}, unaudited: map[string]*audit.Record{}}
 	}
 	e.restore(ctx)
 	return e, nil
@@ -249,6 +264,7 @@ func (e *eventRun) step(ctx context.Context) {
 	}
 	e.stuckStreams()
 	e.life.publish(e.feed, e.rt.opt.Now(), err)
+	e.writeUnaudited(ctx)
 	e.checkpoint(ctx, false)
 	e.publish()
 }
@@ -336,6 +352,11 @@ func (e *eventRun) checkpoint(ctx context.Context, final bool) {
 			st := ra.halves[half]
 			changed := st == nil || st.ident != h.ident
 			switch {
+			case ra.unaudited[half] != nil:
+				// The checkpoint that did not restore stays the newest
+				// until its record is written.
+				all = false
+				continue
 			case !changed && st.gen == ra.gen && slices.Equal(st.pos, pos):
 				// Nothing since its checkpoint.
 				continue
@@ -765,6 +786,9 @@ func (e *eventRun) readCheckpoint(ctx context.Context, assetID, half string, sc 
 		return nil, errors.New("the configuration database is not open")
 	}
 	cp, err := db.ReadCapture(ctx, sc.st.EvidenceRef)
+	if f := eventRunFaults.capture; f != nil && err == nil {
+		err = f()
+	}
 	switch {
 	case errors.Is(err, &c5.Error{Code: c5.CodeInvalid}):
 		return bad(audit.ReasonCheckpointCorrupt, err)
@@ -809,9 +833,10 @@ func restoreReason(err error) string {
 
 // auditNotRestored writes config.checkpoint_not_restored (C8 0.9, D4-32):
 // for a learner, the re-learn it starts; for a detector, the acknowledged
-// baseline it is rebuilt from. A record not written is alarmed; the next
-// start finds the same checkpoint and writes it then, unless a newer one
-// has superseded it.
+// baseline it is rebuilt from. A record not written stays pending: it is
+// alarmed, written at the next pass, and until then the half is not
+// checkpointed, so a crash before it is written finds the same checkpoint
+// at the next start and writes it then.
 func (e *eventRun) auditNotRestored(ctx context.Context, assetID, half string, seq c5.Seq, reason string) {
 	a := e.life.assets[assetID]
 	if a == nil {
@@ -830,17 +855,52 @@ func (e *eventRun) auditNotRestored(ctx context.Context, assetID, half string, s
 		}
 		c.BaselineVersion, c.PreviousDigest = v, prev
 	}
-	rec := audit.Record{Contract: audit.ContractID, NodeID: string(e.rt.cfg.NodeID), Time: e.rt.received(),
+	rec := &audit.Record{Contract: audit.ContractID, NodeID: string(e.rt.cfg.NodeID),
 		Actor:  audit.Actor{Type: authz.PrincipalNode, ID: string(e.rt.cfg.NodeID)},
 		Action: audit.ActionConfigCheckpointNotRestored, Outcome: audit.OutcomeWarning, ReasonCode: reason,
 		Target: &audit.Target{AssetID: assetID}, CorrelationID: audit.CheckpointCorrelationID(half, uint64(seq)), Config: c}
-	err := e.appendAudit(ctx, rec)
-	if err != nil {
-		e.life.raise(a, AlarmEventBaselineNotRestored, fmt.Sprintf("%s: checkpoint %d did not restore (%s), and config.checkpoint_not_restored was not written: %v", half, seq, reason, err))
+	e.assets[assetID].unaudited[half] = rec
+	e.writeAudited(ctx, e.assets[assetID], half)
+}
+
+// writeUnaudited writes the config.checkpoint_not_restored records not yet
+// written.
+func (e *eventRun) writeUnaudited(ctx context.Context) {
+	for _, id := range slices.Sorted(maps.Keys(e.assets)) {
+		ra := e.assets[id]
+		for _, half := range slices.Sorted(maps.Keys(ra.unaudited)) {
+			e.writeAudited(ctx, ra, half)
+		}
+	}
+}
+
+// writeAudited writes the half's pending record, at the time it is
+// written. One not written raises AlarmEventBaselineNotAudited, once, and
+// stays pending.
+func (e *eventRun) writeAudited(ctx context.Context, ra *runAsset, half string) {
+	rec := ra.unaudited[half]
+	a := e.life.assets[ra.id]
+	if rec == nil || a == nil {
+		return
+	}
+	rec.Time = e.rt.received()
+	if err := e.appendAudit(ctx, *rec); err != nil {
+		e.life.raise(a, AlarmEventBaselineNotAudited, fmt.Sprintf("%s: checkpoint %d did not restore (%s), and config.checkpoint_not_restored was not written: %v; the node writes it at the next pass and keeps that checkpoint until then",
+			half, rec.Config.CheckpointSeq, rec.ReasonCode, err))
+		return
+	}
+	delete(ra.unaudited, half)
+	if len(ra.unaudited) == 0 {
+		a.clear(AlarmEventBaselineNotAudited)
 	}
 }
 
 func (e *eventRun) appendAudit(ctx context.Context, rec audit.Record) error {
+	if f := eventRunFaults.audit; f != nil {
+		if err := f(); err != nil {
+			return err
+		}
+	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -892,7 +952,9 @@ func (e *eventRun) repeatsSince(ctx context.Context, a *lifeAsset, since time.Ti
 		}
 	}
 	if err != nil {
-		e.life.raise(a, AlarmEventBaselineNotRestored, "the alarms stored before the restart were not read, so the detector may store some of them again: "+err.Error())
+		// Not life.raise: the half's own not-restored alarm may be raised
+		// already, and this one must show too (C3 on #405).
+		e.rt.opt.Status.Raise(a.id, AlarmEventBaselineNotRestored, "the alarms stored before the restart were not read, so the detector may store some of them again: "+err.Error())
 	}
 }
 
