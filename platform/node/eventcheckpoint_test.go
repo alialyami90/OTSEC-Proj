@@ -1,9 +1,12 @@
 package node
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,7 +102,9 @@ func TestEventCheckpointRefusals(t *testing.T) {
 		"previous form":        func(c *eventCheckpoint) { c.Version, c.Previous = 2, "sha256:XYZ" },
 		"watermark":            func(c *eventCheckpoint) { c.Watermark = "2026-11-01 10:00:00" },
 		"watermark not utc":    func(c *eventCheckpoint) { c.Watermark = "2026-11-01T10:00:00+01:00" },
-		"no streams":           func(c *eventCheckpoint) { c.Streams = nil },
+		// Go parses +00:00 as UTC, so only the trailing-Z check refuses it.
+		"watermark +00:00": func(c *eventCheckpoint) { c.Watermark = "2026-11-01T10:00:00+00:00" },
+		"no streams":       func(c *eventCheckpoint) { c.Streams = nil },
 		"too many streams": func(c *eventCheckpoint) {
 			for i := len(c.Streams); i <= MaxCheckpointStreams; i++ {
 				c.Streams = append(c.Streams, checkpointStream{Stream: fmt.Sprintf("syslog/l%d", i)})
@@ -132,13 +137,20 @@ func TestEventCheckpointRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := snapCapture([]byte("other bytes"))
+	// The same length as the snapshot: only the digest comparison refuses
+	// it (C6 on #376).
+	sameLength := snapCapture([]byte("snapshot bytez"))
 	for name, tc := range map[string]struct {
 		doc     string
 		capture *c5.Capture
 	}{
-		"no capture":     {string(b), nil},
-		"other capture":  {string(b), &other},
-		"bad capture":    {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("x")}},
+		"no capture":                       {string(b), nil},
+		"other capture":                    {string(b), &other},
+		"bad capture":                      {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("x")}},
+		"other capture of the same length": {string(b), &sameLength},
+		// The document's digest and length, over other bytes: only the
+		// capture's own Validate refuses it.
+		"a capture whose bytes are not its digest": {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("snapshot bytez")}},
 		"not canonical":  {" " + string(b), &capture},
 		"unknown field":  {strings.Replace(string(b), `{"schema"`, `{"extra":1,"schema"`, 1), &capture},
 		"trailing data":  {string(b) + "{}", &capture},
@@ -191,5 +203,49 @@ func TestWidestEventCheckpointIsStored(t *testing.T) {
 	got, err := r.Store(ConfigStream(relayID)).Read(bg, ConfigStream(relayID), 0, 1)
 	if err != nil || len(got) != 1 || string(got[0].Event) != string(doc) {
 		t.Fatalf("read back: %v, %d records", err, len(got))
+	}
+}
+
+// The checkpoint's bytes are what today's encoder writes, and decode refuses
+// anything else. Two committed documents must decode and re-encode byte for
+// byte, so a toolchain whose encoding/json output differs fails here, in CI,
+// not at a site's first restore after an upgrade (C6 on #376). Evidence
+// class: desk.
+func TestEventCheckpointGolden(t *testing.T) {
+	for _, name := range []string{"eventcheckpoint-learner.json", "eventcheckpoint-detector.json"} {
+		b, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp, err := decodeCheckpoint(b)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		again, err := encodeCheckpoint(cp)
+		if err != nil || !bytes.Equal(again, b) {
+			t.Fatalf("%s: re-encoded %v\n%s\nwant\n%s", name, err, again, b)
+		}
+	}
+}
+
+// The node configuration holds an observed asset to MaxCheckpointStreams
+// feeder streams at load, so a checkpoint can always name them all (C6 on
+// #376). The relay's SER read gives two (its SER and the health stream), and
+// each listener that takes its Syslog gives one more.
+func TestEventBaselineStreamsHeldAtLoad(t *testing.T) {
+	if MaxCheckpointStreams != eventbaseline.MaxStreams {
+		t.Fatalf("MaxCheckpointStreams %d, eventbaseline.MaxStreams %d", MaxCheckpointStreams, eventbaseline.MaxStreams)
+	}
+	for listeners, ok := range map[int]bool{MaxCheckpointStreams - 2: true, MaxCheckpointStreams - 1: false} {
+		_, err := ParseConfig(ebConfig(t, func(nc *nodeconfigtest.Config) {
+			nc.AddEventBaseline(relayID).AddSyslogSender(relayID, "syslog", "syslog-udp", "127.0.0.2", 0)
+			nc.Store.Quotas["syslog-datagram"] = 1 << 30 // HR-11's room for unknown senders per listener
+			for i := 0; i < listeners; i++ {
+				nc.AddListener(fmt.Sprintf("udp%d", i), "syslog-udp", fmt.Sprintf("127.0.0.1:%d", 5514+i))
+			}
+		}))
+		if ok != (err == nil) || (!ok && !strings.Contains(err.Error(), fmt.Sprintf("at most %d", MaxCheckpointStreams))) {
+			t.Errorf("%d listeners: %v", listeners, err)
+		}
 	}
 }

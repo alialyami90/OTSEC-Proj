@@ -94,6 +94,11 @@ func (c *Config) checkEventBaselines(fail func(format string, args ...any)) {
 		if err := checkEventBaselineParams(e.Params); err != nil {
 			fail("%s.params: %v", p, err)
 		}
+		// A checkpoint names every stream the feeder reads for the asset
+		// (MaxCheckpointStreams), so more would fail every checkpoint.
+		if ids, err := c.feedStreams(a.AssetID); err == nil && len(ids) > MaxCheckpointStreams {
+			fail("%s: asset %s is read from %d streams (its SER and health streams and its listeners), at most %d", p, a.AssetID, len(ids), MaxCheckpointStreams)
+		}
 	}
 	if len(c.EventBaselines) > 0 {
 		if _, ok := c.Store.Quotas["configuration"]; !ok {

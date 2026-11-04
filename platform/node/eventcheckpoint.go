@@ -32,7 +32,9 @@ const (
 
 // MaxCheckpointStreams bounds the streams a checkpoint names: an asset's
 // SER and health streams and the listener streams that can carry its Syslog.
-const MaxCheckpointStreams = 16
+// It is the detector's own bound on the streams its held events name, and
+// the node configuration is held to it at load (checkEventBaselines).
+const MaxCheckpointStreams = eventbaseline.MaxStreams
 
 // MaxCheckpointDocBytes bounds a checkpoint document: MaxAlignRows
 // alignment keys at 74 bytes each (a 71-byte key, its quotes and a comma),
