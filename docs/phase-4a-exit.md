@@ -34,7 +34,7 @@ Contract versions on `main`:
 | Contract | Phase 3 exit | Now | What Phase 4 added |
 | --- | --- | --- | --- |
 | C1 | `otsec.asset/0.2` | `0.2` | Unchanged. |
-| C2 | `otsec.adapter/0.5` | `0.6` | `config.read`: a run is all or nothing, and "Invalid Command" is never a language refusal (D4-23). |
+| C2 | `otsec.adapter/0.5` | `0.6` | `config.read`: a run is all or nothing, and "Invalid Command" is never a language refusal (D4-23); `failed.config_unparsable`: a reply the rule cannot read, or a read too big for one C9 snapshot, ends the run with no record (D4-25). |
 | C3 | `otsec.register/0.2` | `0.3` | `runs` and `limits`; a pre-0.3 package carrying either is refused (D4-13, D4-16). SEL-751 content revision 5. |
 | C4 | `otsec.event/0.2` | `0.2` | Unchanged. |
 | C5 | `otsec.store/0.3` | `0.7` | The configuration class, held records, `syslog-unknown`, the commit cap (0.4); the per-record WAL term and `events` as a rowid table (0.5, D4-14); hold code `acknowledged-difference` (0.6, D4-18); the last hold codes, document series and a bounded remover; the class also holds event-baseline checkpoints (0.7, D4-32, D4-39). |
@@ -106,11 +106,11 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 
 Everything in the Phase 2 and Phase 3 lists still stands. Phase 4 adds:
 
-- **The configuration run's replies.** The simulator answers `SHO L`, `P F`, `R` and `F` with SYNTHESIZED placeholders; that the relay echoes each line but a password, and answers "Invalid Command" for a form it lacks, are H-13 assumptions (F-022).
+- **The configuration run's replies.** The simulator answers `SHO L`, `P F`, `R` and `F` with SYNTHESIZED placeholders; that the relay echoes each line but a password, and answers "Invalid Command" for a form it lacks, are H-13 assumptions (F-022). The layout the rule reads (S22 Figure 7.43) is itself `documented-untested` (H-13): STX and ETX framing with the prompt after ETX, the continuation of a wrapped value (S22 prints no example), the header not repeating within a reply, and which classes a relay can lack. A relay that prints otherwise fails closed with `failed.config_unparsable` and the bytes kept, so it gets no baseline rather than a wrong one (C2).
+- **The size bounds are not measurements.** `MaxSettings` is S22's 8,734 plus an assumed 25%; the run's 512 KiB total and 300 s deadline are set from the manual; D4-42's worst-case difference is computed from the settings sheets' widths (`difference_max.py`). None is from a capture (C2).
 - **Revision 5's read-only classification** of each `SHO` form on real firmware waits on H-16.
 - **Retrieval sees a real change** made with the vendor tool (R3.1, R3.5).
 - **The real false-positive rate** of the event-behaviour rules needs a real device's history over at least one observation period.
-- **OUT101's effect.** The register says `sel.session.acc` "closes the alarm contact"; OUT101 is fail-safe by default, so the effect depends on site wiring. The next register revision must fix the wording (C2, #395).
 
 ## Architectural decisions
 
@@ -141,6 +141,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 - **The tagged test-clock build.** In an `otsec_testclock` build, whoever can write the clock file controls the node's and the collector's time. CI pins that release builds refuse it (#407, `tests/security/testclock_c6_test.go`). A tagged build must never be deployed (C3).
 - **F-016:** Windows store flushes stall on the hosted runner's disk.
 - **C10's 512-type ceiling and the SEL-400 series.** A 400-series relay can have about 507 types, just under the 512 ceiling (D4-38, `documented-untested`). Revisit before a 400-series adapter is briefed; until then `counts.types_overflow` shows a partly baselined asset.
+- **Register text that approvers read is wrong about OUT101.** `sel.session.acc`'s `side_effects` say that SALARM's 1 s pulse (three wrong passwords, or a Level 2 or C access) "closes the alarm contact" through the default `OUT101 := HALARM OR SALARM`. OUT101 is fail-safe by default (`OUT101FS := Y`), so its coil de-energizes, and whether a contact opens or closes depends on the site's wiring (S22 Table 4.83, p. 2.31). `device-capabilities.md` is already correct (#388). The next register revision must fix the register's text (C2, #395).
 - **Carried:** residual SER loss with repeated keys (D1-17), plaintext Telnet to the relay (lab only, ADR-0005), PEN 32473, the 31-minute floor on a flaky link, a port-server path refused until H-13.
 
 ## Limitations recorded in Phase 4
@@ -166,7 +167,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 | --- | --- | --- |
 | 1.1 Asset management and monitoring | Unchanged from Phase 3. | Phase 4, item 3 (R1.8, with R9). |
 | 1.2 Secure engineering and remote access | Not built. | Phase 4, item 5. |
-| 1.3 Configuration and baseline monitoring | SEL-751 configuration read by command line (rung 3), versioned snapshots, semantic difference, prior-approval alarms and evidence holds, end to end on the real binaries, `simulated`. | Other families, and `config.reads_removed`. |
+| 1.3 Configuration and baseline monitoring | SEL-751 configuration read by command line (rung 3), versioned snapshots, semantic difference, prior-approval alarms and evidence holds, end to end on the real binaries, `simulated`. | Other families, and `config.reads_removed`. Not covered: the 175 touchscreen settings, which no `SHO` form prints (owner, 2026-10-28: not required). |
 | 1.4 Syslog and SER collection | Event-behaviour baselines with explained departure alarms for Syslog; SER pending. | V-M4's SER half. |
 | 1.5 Custom IED command framework | C3 0.3 runs and limits; revision 5. | Each new family extends it. |
 | 1.6 Intrusion detection | Not built. | Phase 4, item 4. |
