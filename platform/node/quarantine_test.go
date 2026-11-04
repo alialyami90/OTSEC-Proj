@@ -296,54 +296,64 @@ func TestQuarantineExportFiles(t *testing.T) {
 }
 
 // A manifest copy that does not match the stream both ways is not
-// recorded, and a clear naming it removes nothing (A3-1).
+// recorded, and a clear naming it removes nothing (A3-1). The cases share
+// one node, since none records or removes anything, and each must raise
+// alarms of its own: the alarms before it are set aside, so an earlier
+// case's refusal cannot pass a later one.
 func TestQuarantineManifestRefused(t *testing.T) {
-	for name, tc := range map[string]struct {
+	q := newQuarantineNode(t)
+	q.runs(2, false)
+	for _, tc := range []struct {
+		name string
 		edit func(m *QuarantineManifest)
 		raw  func(b []byte) []byte
 	}{
-		"changed event hash":   {edit: func(m *QuarantineManifest) { m.Items[1].EventSHA256 = strings.Repeat("0", 64) }},
-		"changed capture hash": {edit: func(m *QuarantineManifest) { m.Items[0].CaptureSHA256 = strings.Repeat("0", 64) }},
-		"stored seq unlisted":  {edit: func(m *QuarantineManifest) { m.Items = slices.Delete(m.Items, 1, 2) }},
-		"seq listed, not stored": {edit: func(m *QuarantineManifest) {
+		{name: "changed event hash", edit: func(m *QuarantineManifest) { m.Items[1].EventSHA256 = strings.Repeat("0", 64) }},
+		{name: "changed capture hash", edit: func(m *QuarantineManifest) { m.Items[0].CaptureSHA256 = strings.Repeat("0", 64) }},
+		{name: "stored seq unlisted", edit: func(m *QuarantineManifest) { m.Items = slices.Delete(m.Items, 1, 2) }},
+		{name: "seq listed, not stored", edit: func(m *QuarantineManifest) {
 			m.Items = append(m.Items, QuarantineItem{Seq: 99, EventSHA256: m.Items[0].EventSHA256})
 		}},
-		"other node":     {edit: func(m *QuarantineManifest) { m.NodeID = "site-b-node1" }},
-		"other asset":    {edit: func(m *QuarantineManifest) { m.AssetID = "9b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13" }},
-		"unknown field":  {raw: func(b []byte) []byte { return bytes.Replace(b, []byte(`"schema"`), []byte(`"extra":1,"schema"`), 1) }},
-		"trailing data":  {raw: func(b []byte) []byte { return append(b, []byte(`{}`)...) }},
-		"seqs unordered": {edit: func(m *QuarantineManifest) { m.Items[0], m.Items[1] = m.Items[1], m.Items[0] }},
-		"too large":      {raw: func(b []byte) []byte { return append(b, bytes.Repeat([]byte(" "), MaxQuarantineManifestBytes)...) }},
+		{name: "other node", edit: func(m *QuarantineManifest) { m.NodeID = "site-b-node1" }},
+		{name: "other asset", edit: func(m *QuarantineManifest) { m.AssetID = "9b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13" }},
+		{name: "unknown field", raw: func(b []byte) []byte { return bytes.Replace(b, []byte(`"schema"`), []byte(`"extra":1,"schema"`), 1) }},
+		{name: "trailing data", raw: func(b []byte) []byte { return append(b, []byte(`{}`)...) }},
+		{name: "seqs unordered", edit: func(m *QuarantineManifest) { m.Items[0], m.Items[1] = m.Items[1], m.Items[0] }},
+		{name: "too large", raw: func(b []byte) []byte { return append(b, bytes.Repeat([]byte(" "), MaxQuarantineManifestBytes)...) }},
 	} {
-		t.Run(name, func(t *testing.T) {
-			q := newQuarantineNode(t)
-			q.runs(2, false)
-			m := q.export()
-			if tc.edit != nil {
-				tc.edit(&m)
-			}
-			b, _ := json.Marshal(m)
-			if tc.raw != nil {
-				b = tc.raw(b)
-			}
-			q.adminFile(QuarantineExportFileName(relayID), b)
-			q.s.QuarantineTick(bg)
-			if n := len(q.records(audit.ActionQuarantineExported)); n != 0 {
-				t.Fatalf("%d quarantine.exported records for a bad manifest", n)
-			}
-			if !slices.ContainsFunc(q.st.Snapshot("x").Alarms, func(a StatusAlarm) bool { return a.Code == AlarmQuarantineExportRefused }) {
-				t.Fatal("no quarantine-export-refused alarm")
-			}
-			q.clearFile(sha256Of(b), "")
-			q.s.QuarantineTick(bg)
-			if got := q.seqs(); !slices.Equal(got, seqRange(1, 4)) || len(q.records(audit.ActionQuarantineCleared)) != 0 {
-				t.Fatalf("a clear of an unrecorded manifest: stream %v", got)
-			}
-			if !q.hasAlarm(AlarmQuarantineClearRefused, "no quarantine.exported record") {
-				t.Fatal("no quarantine-clear-refused alarm")
-			}
-		})
+		m := q.export()
+		if tc.edit != nil {
+			tc.edit(&m)
+		}
+		b, _ := json.Marshal(m)
+		if tc.raw != nil {
+			b = tc.raw(b)
+		}
+		before := len(q.st.Snapshot("x").Alarms)
+		q.adminFile(QuarantineExportFileName(relayID), b)
+		q.s.QuarantineTick(bg)
+		if n := len(q.records(audit.ActionQuarantineExported)); n != 0 {
+			t.Fatalf("%s: %d quarantine.exported records for a bad manifest", tc.name, n)
+		}
+		if !newAlarm(q, before, AlarmQuarantineExportRefused, "") {
+			t.Fatalf("%s: no quarantine-export-refused alarm", tc.name)
+		}
+		before = len(q.st.Snapshot("x").Alarms)
+		q.clearFile(sha256Of(b), "")
+		q.s.QuarantineTick(bg)
+		if got := q.seqs(); !slices.Equal(got, seqRange(1, 4)) || len(q.records(audit.ActionQuarantineCleared)) != 0 {
+			t.Fatalf("%s: a clear of an unrecorded manifest: stream %v", tc.name, got)
+		}
+		if !newAlarm(q, before, AlarmQuarantineClearRefused, "no quarantine.exported record") {
+			t.Fatalf("%s: no quarantine-clear-refused alarm", tc.name)
+		}
 	}
+}
+
+// newAlarm reports whether an alarm with code and a detail holding part was
+// raised after the first before alarms.
+func newAlarm(q *quarantineNode, before int, code, part string) bool {
+	return slices.ContainsFunc(q.st.Snapshot("x").Alarms[before:], func(a StatusAlarm) bool { return a.Code == code && strings.Contains(a.Detail, part) })
 }
 
 // The clear's own checks, each of which removes nothing and records no
