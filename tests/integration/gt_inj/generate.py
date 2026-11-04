@@ -3,7 +3,7 @@ changes, R3.6) and V-M4 (event-behaviour departures, R4.8).
 
 Run from the repository root:  python3 -I tests/integration/gt_inj/generate.py
 
-It writes three files next to itself:
+It writes four files next to itself:
 
   config.json          V-M2's seven cases, three changes of each, one asset
                        per change, with the approval each change gets and
@@ -17,6 +17,9 @@ It writes three files next to itself:
                        seed, as long as the observation period, starting at
                        the acknowledgement, to replay from it: it must raise
                        nothing.
+  events-ser60.json    events.json's SER rows moved onto reads at least
+                       60 s apart, the read floor (D4-47), under a new
+                       asset name, with their expected alarms re-derived.
 
 docs/verification.md defines GT-INJ: written from a fixed seed before the
 implementation exists, and committed before the test first runs against the
@@ -616,6 +619,86 @@ def heldout_series(ack):
     return events
 
 
+# The SER series on the read floor (D4-47). For SER, the received time is
+# the read time, and the node and the collector keep SER sessions at least
+# MIN_READ_S apart (node MinIntervalSeconds, collector min_interval_ms), so
+# events.json's gt-inj-ser, with gaps down to 1 s, describes reads no node
+# makes. events-ser60.json moves its rows onto reads: a read is at the later
+# of the earliest unread row's time and the previous read plus MIN_READ_S,
+# and it takes every row received by then. Rows, order, types, alignments
+# and departures are events.json's; the received times, and so the
+# expected alarms, are the reads'.
+MIN_READ_S = 60
+SER60 = "gt-inj-ser60"
+
+
+def on_reads(rows):
+    """rows (SER events with t, in id order) moved onto their reads, as new
+    events of asset SER60, and the read times."""
+    out, reads, i = [], [], 0
+    while i < len(rows):
+        at = rows[i]["t"] if not reads else max(rows[i]["t"], reads[-1] + MIN_READ_S)
+        while i < len(rows) and rows[i]["t"] <= at:
+            out.append(dict(rows[i], asset=SER60, received_utc=iso(at), t=at))
+            i += 1
+        reads.append(at)
+    return out, reads
+
+
+def ser60_series(ev):
+    """events-ser60.json from events.json's document ev, whose events carry
+    t, with its own checks."""
+    p = ev["period"]
+    secs = lambda ts: int((dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt.timezone.utc) - START).total_seconds())
+    period_end, ack, end = secs(p["end"]), secs(p["baseline_ack"]), secs(p["test_end"])
+    rows, reads = on_reads([e for e in ev["events"] if e["asset"] == "gt-inj-ser"])
+    # Each catch-up backlog is a read of its own: the device's whole first
+    # read, and a read that shares nothing with the one before.
+    for al in CATCH_UP:
+        ts = {e["t"] for e in rows if e.get("alignment") == al}
+        assert len(ts) == 1 and all(e.get("alignment") == al for e in rows if e["t"] in ts), al
+    assert rows[0]["t"] == secs(p["first_event"]["gt-inj-ser"]) and not any(e["t"] == period_end for e in rows)
+    by_id = {e["id"]: e for e in rows}
+    departures = []
+    for d in ev["departures"]:
+        if d["asset"] == "gt-inj-ser":
+            departures.append(dict(d, asset=SER60, at=by_id[d["events"][0]]["received_utc"]))
+    controls = [dict(c, events=[i for i in c["events"] if i in by_id]) for c in ev["controls"] if c.get("alignment")]
+    base = baseline([e for e in rows if e["t"] < period_end])
+    alarms = evaluate(base, [e for e in rows if e["t"] >= ack], ack, end)
+    pre = evaluate(base, [e for e in rows if period_end <= e["t"] < ack], period_end, ack)
+    for d in departures:
+        if not d.get("before_ack"):
+            d["expect_rules"] = sorted({a["rule"] for a in alarms if set(a["events"]) & set(d["events"])})
+            assert d["kind"] in d["expect_rules"], d
+    assert all(any(set(a["events"]) & set(d["events"]) for d in departures) for a in alarms), alarms
+    assert any(a["rule"] == "new" for a in pre), pre
+    for c in controls:
+        assert not any(set(a["events"]) & set(c["events"]) for a in alarms + pre), c["what"]
+    lost, extra = catch_up_counterfactual(rows, period_end, ack, end, departures)
+    assert {d["kind"] for d in lost} & {"repeats", "rate"}, lost
+    assert {a["rule"] for a in extra if set(a["events"]) & set(controls[1]["events"])} == {"repeats", "rate", "time"}, extra
+    for e in rows:
+        e.pop("t")
+    for a in alarms:
+        a["at"] = iso(a["at"])
+    return {
+        "schema": SCHEMA, "series": "events-ser60", "seed": EVENTS_SEED, "evidence": "synthetic (simulated)",
+        "derived_from": "events.json's gt-inj-ser rows, moved onto reads at least MIN_READ_S apart (D4-47)",
+        "min_read_s": MIN_READ_S, "reads": len(reads),
+        "params": ev["params"],
+        "type_key": "SER: element and state",
+        "clock": "received_utc, the read time: the platform's receive time of the read that returned the row",
+        "period": {"first_event": {SER60: rows[0]["received_utc"]}, "end": p["end"],
+                   "baseline_ack": p["baseline_ack"], "test_end": p["test_end"]},
+        "pass": ev["pass"],
+        "departures": departures,
+        "controls": controls,
+        "expected_alarms": alarms,
+        "events": rows,
+    }
+
+
 def main():
     cfg = config_series()
     ev = event_series()
@@ -635,11 +718,12 @@ def main():
     assert not ho_alarms, ho_alarms[:3]
     for e in ho:
         e.pop("t")
+    ser60 = ser60_series(ev_full)
     held = {"schema": SCHEMA, "series": "events-heldout", "seed": HELDOUT_SEED, "evidence": "synthetic (simulated)",
             "params": PARAMS, "replay": "from events.json's baseline_ack, in place of its test period; absence is armed at baseline_ack (D4-15)",
             "pass": "departure alarms per asset-day at most 0 (proposed bound for synthetic series)",
             "expected_alarms": [], "events": ho}
-    for name, doc in (("config.json", cfg), ("events.json", ev), ("events-heldout.json", held)):
+    for name, doc in (("config.json", cfg), ("events.json", ev), ("events-heldout.json", held), ("events-ser60.json", ser60)):
         with open(os.path.join(HERE, name), "w", newline="\n") as f:
             json.dump(doc, f, indent=1)
             f.write("\n")
