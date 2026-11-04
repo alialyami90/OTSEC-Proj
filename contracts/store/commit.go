@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 )
@@ -48,7 +49,8 @@ type Record struct {
 	// commit transaction and keeps the sealed bytes exactly (C5-A3-1).
 	//
 	// For class configuration (0.4), Event is a typed document (a C9
-	// snapshot or difference, or a C10 baseline) that the store's injected
+	// snapshot or difference, a C10 baseline, or since 0.7 a node
+	// checkpoint) that the store's injected
 	// DocumentValidator accepts. The store keeps its bytes exactly, with no
 	// seq written in, so a digest over the stored bytes is stable.
 	Event []byte
@@ -85,7 +87,73 @@ func (r Record) Bytes() int64 {
 // stored (0.4). It sees the capture as well as the document, so a C9
 // snapshot can be bound to the transcript it names (B2 on #246). The
 // writer injects it, so C5 imports neither C9 nor C10.
-type DocumentValidator func(document []byte, capture *Capture) error
+//
+// Changed in 0.7: it also returns the record's DocumentInfo, which the
+// store keeps beside the record (D4-32 item 1). This is a change of an
+// in-process hook's signature, made because the store and the node that
+// injects it are built into one binary (D4-39 item 1). It is not a
+// precedent for identified messages or stored records, whose compatibility
+// rule is in contracts/README.md. What crosses versions is the stored
+// data, and that change is additive.
+type DocumentValidator func(document []byte, capture *Capture) (DocumentInfo, error)
+
+// DocumentKind is what a configuration-class record is (0.7). Closed set.
+type DocumentKind string
+
+const (
+	// DocumentEvidence: a C9 snapshot or difference, or a C10 baseline,
+	// which R3.5 and R3.6 keep.
+	DocumentEvidence DocumentKind = "evidence"
+	// DocumentWorkingState: the node's otsec.eventcheckpoint/0.1. It is
+	// not evidence and is not in the audit chain (D4-32).
+	DocumentWorkingState DocumentKind = "working-state"
+)
+
+// The series of configuration-class records (0.7). A series is per stream,
+// and so per asset. DocumentInfo.Validate pairs each with its one kind. A
+// configuration baseline is an acknowledged C9 snapshot in
+// SeriesConfigSnapshot, kept by its baseline hold, so there is no
+// baseline.configuration series.
+const (
+	// SeriesConfigSnapshot is C9's config.KindSnapshot.
+	SeriesConfigSnapshot = "config.snapshot"
+	// SeriesConfigDifference is C9's config.KindDifference.
+	SeriesConfigDifference = "config.difference"
+	// SeriesBaselineEvent is a C10 event baseline.
+	SeriesBaselineEvent = "baseline.event"
+	// SeriesCheckpointLearner is the learner half of a checkpoint.
+	SeriesCheckpointLearner = "eventcheckpoint.learner"
+	// SeriesCheckpointDetector is the detector half of a checkpoint.
+	SeriesCheckpointDetector = "eventcheckpoint.detector"
+)
+
+// DocumentInfo is what DocumentValidator says a configuration record is
+// (0.7).
+type DocumentInfo struct {
+	Kind   DocumentKind
+	Series string
+}
+
+// Validate checks the pair against the closed table: evidence with
+// config.snapshot, config.difference or baseline.event, and working-state
+// with eventcheckpoint.learner or eventcheckpoint.detector. Any other pair
+// is refused, so a checkpoint can never name an evidence series and make
+// the real newest record of that series look superseded.
+func (i DocumentInfo) Validate() error {
+	var series []string
+	switch i.Kind {
+	case DocumentEvidence:
+		series = []string{SeriesConfigSnapshot, SeriesConfigDifference, SeriesBaselineEvent}
+	case DocumentWorkingState:
+		series = []string{SeriesCheckpointLearner, SeriesCheckpointDetector}
+	default:
+		return errf(CodeInvalid, nil, "unknown document kind %q", i.Kind)
+	}
+	if !slices.Contains(series, i.Series) {
+		return errf(CodeInvalid, nil, "document kind %s has no series %q", i.Kind, i.Series)
+	}
+	return nil
+}
 
 // MaxHoldsPerRecord (0.5) bounds Record.Holds. A held difference holds its
 // two snapshots and itself, so 16 is generous; each hold is one small row,

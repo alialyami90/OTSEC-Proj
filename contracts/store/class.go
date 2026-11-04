@@ -30,9 +30,13 @@ const (
 	// accepting new ones and keeps the alarm in node status.
 	ClassPlatform StreamClass = "platform"
 	// ClassConfiguration (0.4): configuration snapshots and differences
-	// (C9) and baselines (C10), each a typed document, not a C4 event. At
-	// its quota configuration reads stop (StopCollecting). Its records may
-	// be held (Holder), and its quota requires a MaxRecordBytes.
+	// (C9) and baselines (C10), each a typed document, not a C4 event.
+	// Since 0.7 it also holds the node's event-baseline checkpoints
+	// (otsec.eventcheckpoint/0.1), which are working state, not evidence
+	// (DocumentInfo, D4-32). At its quota configuration reads stop
+	// (StopCollecting). Its records may be held (Holder), removed in
+	// bounded steps (ConfigRemover), and its quota requires a
+	// MaxRecordBytes.
 	ClassConfiguration StreamClass = "configuration"
 	// ClassSyslogUnknown (0.4): Syslog from senders that resolve to no
 	// asset, on every transport (HR-11). At its quota their messages are

@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"slices"
+)
 
 // HoldCode is why a record is held (0.4). Closed set.
 type HoldCode string
@@ -25,7 +28,23 @@ const (
 	// separate code, so the holds table shows how each alarm ended. Ref is
 	// the config.change_detected C8 record. Nothing ends the hold either.
 	HoldRestoredDifference HoldCode = "restored-difference"
+	// HoldApprovedDifference (0.7, D4-20 rule 1): the snapshot and
+	// difference of a change that an approval covered. Ref is the
+	// config.change_detected C8 record.
+	HoldApprovedDifference HoldCode = "approved-difference"
+	// HoldSupersededBaseline (0.7, D4-20 rule 2): a baseline record, of
+	// either kind, that a newer acknowledgement of the same kind replaced.
+	// Ref is that newer config.baseline_acknowledged C8 record.
+	HoldSupersededBaseline HoldCode = "superseded-baseline"
 )
+
+// HoldPriority (0.7) is the closed HoldCode set in priority order: a record
+// wanted for two reasons is held for the first. The node's fold and the
+// tests use this one list. It returns a new slice on each call.
+func HoldPriority() []HoldCode {
+	return []HoldCode{HoldBaseline, HoldUnapprovedDifference, HoldApprovedDifference,
+		HoldAcknowledgedDifference, HoldRestoredDifference, HoldSupersededBaseline}
+}
 
 // HoldReason names the C8 record that justifies a hold, never free text
 // (B3 on #246), so a reviewer or the node's start-up reconcile can check
@@ -38,7 +57,7 @@ type HoldReason struct {
 
 // Validate checks the reason.
 func (r HoldReason) Validate() error {
-	if r.Code != HoldBaseline && r.Code != HoldUnapprovedDifference && r.Code != HoldAcknowledgedDifference && r.Code != HoldRestoredDifference {
+	if !slices.Contains(HoldPriority(), r.Code) {
 		return errf(CodeInvalid, nil, "unknown hold code %q", r.Code)
 	}
 	if !r.Ref.NodeID.Valid() || !r.Ref.Stream.Valid() || r.Ref.Seq == 0 {

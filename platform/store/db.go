@@ -444,7 +444,10 @@ func (d *DB) load(ctx context.Context) error {
 			return err
 		}
 	}
-	return d.ensureHolds(ctx)
+	if err := d.ensureHolds(ctx); err != nil {
+		return err
+	}
+	return d.ensureSeries(ctx)
 }
 
 // tx runs f in one BEGIN IMMEDIATE transaction on the connection. The
