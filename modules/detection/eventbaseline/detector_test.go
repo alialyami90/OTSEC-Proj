@@ -33,7 +33,13 @@ func activeB(t *testing.T, activeS int) *eventbaseline.Detector {
 
 func build(t *testing.T, activeS int, mut func(*baseline.Params), withB bool) *eventbaseline.Detector {
 	t.Helper()
-	l := learner(t, mut)
+	// The period runs to 2000 s, so every event below is in it (D4-45).
+	l := learner(t, func(p *baseline.Params) {
+		p.MinDurationS = 2000
+		if mut != nil {
+			mut(p)
+		}
+	})
 	observe(t, l, ser("A", "Asserted", at(0), ""))
 	if withB {
 		for s := 1600; s <= 2000; s += 100 {
@@ -144,7 +150,7 @@ func TestDetectorRepeats(t *testing.T) {
 // TestDetectorRepeatsOffWhenTheBaselineSawN: where the baseline's maximum
 // reached repeats_n, a burst of that size is normal.
 func TestDetectorRepeatsOffWhenTheBaselineSawN(t *testing.T) {
-	l := learner(t, func(p *baseline.Params) { p.RepeatsWindowS = 100; p.RateMin = 100 })
+	l := learner(t, func(p *baseline.Params) { p.RepeatsWindowS = 100; p.RateMin = 100; p.MinDurationS = 2000 })
 	observe(t, l, ser("A", "Asserted", at(0), ""), ser("A", "Asserted", at(1), ""), ser("A", "Asserted", at(2), ""), ser("A", "Asserted", at(1900), ""))
 	r, err := l.Finish(at(2000))
 	if err != nil {

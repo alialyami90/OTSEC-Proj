@@ -95,17 +95,29 @@ func state(t *testing.T, keys ...string) []byte {
 	return b
 }
 
-// feedLog is what a sink was given, one line each.
-type feedLog struct{ lines []string }
+// feedLog is what a sink was given, one line each, and in opens the open
+// gap's start each Observe and Tick carried.
+type feedLog struct{ lines, opens []string }
 
-func (l *feedLog) Observe(a string, o eventbaseline.Obs) {
+func (l *feedLog) open(kind string, at, open time.Time) {
+	o := "none"
+	if !open.IsZero() {
+		o = open.Format(time.RFC3339)
+	}
+	l.opens = append(l.opens, kind+" "+at.Format(time.RFC3339)+" open "+o)
+}
+
+func (l *feedLog) Observe(a string, o eventbaseline.Obs, open time.Time) {
 	l.lines = append(l.lines, fmt.Sprintf("obs %s %s %s af=%v nc=%v", a, o.Event.Kind, o.Event.Received.UTC, o.AfterFailure, o.NotCounted))
+	at, _ := time.Parse(time.RFC3339Nano, o.Event.Received.UTC)
+	l.open("obs", at, open)
 }
 func (l *feedLog) Gap(a string, from, to time.Time, reason string) {
 	l.lines = append(l.lines, fmt.Sprintf("gap %s %s %s %s", a, from.Format(time.RFC3339), to.Format(time.RFC3339), reason))
 }
-func (l *feedLog) Tick(a string, at time.Time) {
+func (l *feedLog) Tick(a string, at, open time.Time) {
 	l.lines = append(l.lines, fmt.Sprintf("tick %s %s", a, at.Format(time.RFC3339Nano)))
+	l.open("tick", at, open)
 }
 
 func (l *feedLog) observed() []string {
@@ -822,5 +834,82 @@ func TestFeedRestartIsAGap(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Observe and Tick carry the start of the gap still open, zero once it
+// closes, the same however the steps fall, and across a restart that
+// restores the gap from the checkpoint (D4-45). Evidence class: simulated.
+func TestFeedPassesTheOpenGap(t *testing.T) {
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	ser, h, lst := SERStream(relayID), HealthStream, ListenerStream(feedListener)
+	fill := func(r *feedRig) {
+		r.st.add(t, ser, sec(1), feedSER(relayID, "inv1", sec(1), k("a"), event.AlignFirstRead), state(t, k("a")))
+		r.st.add(t, h, sec(60), runHealth(relayID, HealthCollectionRun, "failed", sec(60)), nil)
+		r.st.add(t, lst, sec(90), syslogMsg(relayID, sec(90)), nil)
+		r.st.add(t, lst, sec(150), syslogMsg(relayID, sec(150)), nil)
+		r.st.add(t, ser, sec(180), feedSER(relayID, "inv2", sec(180), k("b"), event.AlignOK), state(t, k("a"), k("b")))
+		r.st.add(t, lst, sec(200), syslogMsg(relayID, sec(200)), nil)
+	}
+	obs := func(l *feedLog) []string {
+		var out []string
+		for _, s := range l.opens {
+			if strings.HasPrefix(s, "obs ") {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	want := []string{
+		"obs 2026-10-28T10:00:01Z open none",
+		"obs 2026-10-28T10:01:30Z open 2026-10-28T10:01:00Z",
+		"obs 2026-10-28T10:02:30Z open 2026-10-28T10:01:00Z",
+		"obs 2026-10-28T10:03:00Z open none", // the read closes the gap first
+		"obs 2026-10-28T10:03:20Z open none",
+	}
+
+	one := newFeedRig(t)
+	fill(one)
+	one.step(t, sec(300).Add(FeedLateness))
+	if got := obs(one.log); !slices.Equal(got, want) {
+		t.Fatalf("one step: got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	many := newFeedRig(t)
+	fill(many)
+	for _, s := range []int{70, 100} {
+		many.step(t, sec(s).Add(FeedLateness))
+	}
+	ticks := []string{"tick 2026-10-28T10:01:10Z open 2026-10-28T10:01:00Z", "tick 2026-10-28T10:01:40Z open 2026-10-28T10:01:00Z"}
+	var gotTicks []string
+	for _, s := range many.log.opens {
+		if strings.HasPrefix(s, "tick ") {
+			gotTicks = append(gotTicks, s)
+		}
+	}
+	if !slices.Equal(gotTicks, ticks) {
+		t.Fatalf("ticks in the gap: got\n%s\nwant\n%s", strings.Join(gotTicks, "\n"), strings.Join(ticks, "\n"))
+	}
+
+	// A restart in the gap: the checkpoint keeps its start.
+	a := many.f.assets[relayID]
+	c := &eventCheckpoint{Watermark: a.wm.Format(time.RFC3339Nano), Streams: many.f.positions(a), PrevKeys: a.prevKeys(),
+		Gap: &checkpointGap{From: a.failedAt.Format(time.RFC3339Nano), Reason: a.failReason}}
+	after := newFeedRig(t)
+	after.st = many.st
+	a2 := after.f.assets[relayID]
+	if err := after.f.resume(a2, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	after.f.start()
+	after.f.restarted(a2, sec(120))
+	for _, s := range []int{160, 300} {
+		after.step(t, sec(s).Add(FeedLateness))
+	}
+	if got := append(obs(many.log), obs(after.log)...); !slices.Equal(got, want) {
+		t.Fatalf("steps and a restart: got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if last := after.log.opens[len(after.log.opens)-1]; last != "tick 2026-10-28T10:05:00Z open none" {
+		t.Fatalf("last tick %q", last)
 	}
 }

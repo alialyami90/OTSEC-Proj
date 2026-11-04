@@ -109,7 +109,7 @@ func TestLearnerWindowIsHalfOpen(t *testing.T) {
 // TestLearnerBucketsRunFromTheEpoch: three events in one clock hour, two in
 // the next.
 func TestLearnerBucketsRunFromTheEpoch(t *testing.T) {
-	l := learner(t, nil)
+	l := learner(t, func(p *baseline.Params) { p.MinDurationS = 3990 }) // the period runs to 4000 s
 	observe(t, l, ser("A", "Asserted", at(10), ""), ser("A", "Asserted", at(20), ""), ser("A", "Asserted", at(30), ""),
 		ser("A", "Asserted", at(3600), ""), ser("A", "Asserted", at(3700), ""))
 	ty := typeOf(t, finish2(t, l, 4000), "A", "Asserted")

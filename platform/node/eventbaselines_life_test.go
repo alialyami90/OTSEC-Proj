@@ -55,10 +55,10 @@ func lifeSER(elem, state string, at time.Time) eventbaseline.Obs {
 func learnOnce(t *testing.T, l *eventLife, t0 time.Time) time.Time {
 	t.Helper()
 	for i := range 11 {
-		l.Observe(relayID, lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second)))
+		l.Observe(relayID, lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second)), time.Time{})
 	}
 	end := t0.Add(4400 * time.Second)
-	l.Tick(relayID, end)
+	l.Tick(relayID, end, time.Time{})
 	return end
 }
 
@@ -152,8 +152,8 @@ func TestLifeRecordsAFinishedBaseline(t *testing.T) {
 	}
 	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	// Before both minima nothing is finished.
-	l.Observe(relayID, lifeSER("IN101", "Asserted", t0))
-	l.Tick(relayID, t0.Add(2*time.Hour))
+	l.Observe(relayID, lifeSER("IN101", "Asserted", t0), time.Time{})
+	l.Tick(relayID, t0.Add(2*time.Hour), time.Time{})
 	if got := rawStream(t, r, ConfigStream(relayID)); len(got) != 0 {
 		t.Fatalf("%d records before the minima", len(got))
 	}
@@ -184,8 +184,8 @@ func TestLifeRecordsAFinishedBaseline(t *testing.T) {
 		t.Fatal("not awaiting acknowledgement")
 	}
 	// Awaiting, events go nowhere and nothing more is stored.
-	l.Observe(relayID, lifeSER("IN102", "Asserted", t0.Add(3*time.Hour)))
-	l.Tick(relayID, t0.Add(4*time.Hour))
+	l.Observe(relayID, lifeSER("IN102", "Asserted", t0.Add(3*time.Hour)), time.Time{})
+	l.Tick(relayID, t0.Add(4*time.Hour), time.Time{})
 	if len(rawStream(t, r, ConfigStream(relayID))) != 1 || len(recordedOf(t, r)) != 1 {
 		t.Fatal("something stored while awaiting")
 	}
@@ -209,8 +209,8 @@ func TestLifeAcknowledgedBaselineAlarms(t *testing.T) {
 
 	ackAt := end.Add(time.Hour)
 	l.acknowledged(relayID, h, ackAt)
-	l.Observe(relayID, lifeSER("IN109", "Asserted", ackAt.Add(-time.Minute)))
-	l.Tick(relayID, ackAt.Add(-time.Second)) // the watermark trails the chain time
+	l.Observe(relayID, lifeSER("IN109", "Asserted", ackAt.Add(-time.Minute)), time.Time{})
+	l.Tick(relayID, ackAt.Add(-time.Second), time.Time{}) // the watermark trails the chain time
 	if _, d := l.half(relayID); d == nil {
 		t.Fatal("not active after the acknowledgement")
 	}
@@ -218,7 +218,7 @@ func TestLifeAcknowledgedBaselineAlarms(t *testing.T) {
 		t.Fatalf("an event before the acknowledgement reached the detector: alarms %+v, refused %d", got, l.assets[relayID].Refused)
 	}
 	o := lifeSER("IN109", "Asserted", ackAt.Add(time.Minute))
-	l.Observe(relayID, o)
+	l.Observe(relayID, o, time.Time{})
 	got := healthOf(t, r, baseline.HealthDeparture)
 	if len(got) != 1 {
 		t.Fatalf("%d departures, want one new-type alarm", len(got))
@@ -353,7 +353,8 @@ func storeBaselineAt(t *testing.T, r *Runtime, c *Config, asset string, version 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range 11 {
+	// Ten rows meet both minima at the tenth, where the period ends (D4-45).
+	for i := range 10 {
 		o := lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second))
 		o.Event.Source.Asset.ID = asset
 		if err := ln.Observe(o); err != nil {
@@ -434,7 +435,7 @@ func TestLifeRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
-	l.Observe(relayID, lifeSER("IN101", "Asserted", t0))
+	l.Observe(relayID, lifeSER("IN101", "Asserted", t0), time.Time{})
 	lr, _ := l.half(relayID)
 	snap, err := lr.Snapshot(0)
 	if err != nil {
@@ -524,7 +525,7 @@ func TestLifePublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
-	l.Observe(relayID, lifeSER("IN101", "Asserted", t0))
+	l.Observe(relayID, lifeSER("IN101", "Asserted", t0), time.Time{})
 	l.publish(f, t0.Add(time.Minute), nil)
 	got := st.Snapshot("n")
 	eb := got.EventBaselines[relayID]
@@ -557,7 +558,7 @@ func TestLifePublish(t *testing.T) {
 	}
 
 	l.acknowledged(relayID, h, end)
-	l.Tick(relayID, end.Add(time.Minute))
+	l.Tick(relayID, end.Add(time.Minute), time.Time{})
 	l.publish(f, end.Add(time.Minute), nil)
 	eb = st.Snapshot("n").EventBaselines[relayID]
 	if eb.Phase != "active" || eb.Recorded != nil || eb.Active == nil || eb.Active.Hash != h || !eb.ActiveFrom.Equal(end) {
@@ -744,17 +745,17 @@ func TestLifeRetriesStoreAndRecording(t *testing.T) {
 	}
 	setMode(r, ConfigDB, c5.ModeCollecting)
 	setMode(r, AuditDB, c5.ModeBlocked)
-	l.Tick(relayID, end.Add(time.Minute))
+	l.Tick(relayID, end.Add(time.Minute), time.Time{})
 	a := l.assets[relayID]
 	if a.learner != nil || len(rawStream(t, r, ConfigStream(relayID))) != 1 || !a.unrecorded || len(recordedOf(t, r)) != 0 {
 		t.Fatalf("learner %v, unrecorded %v", a.learner, a.unrecorded)
 	}
-	l.Tick(relayID, end.Add(2*time.Minute))
+	l.Tick(relayID, end.Add(2*time.Minute), time.Time{})
 	if !a.unrecorded {
 		t.Fatal("recorded with the audit database blocked")
 	}
 	setMode(r, AuditDB, c5.ModeCollecting)
-	l.Tick(relayID, end.Add(3*time.Minute))
+	l.Tick(relayID, end.Add(3*time.Minute), time.Time{})
 	if a.unrecorded || len(recordedOf(t, r)) != 1 || a.raised[AlarmEventBaselineNotRecorded] {
 		t.Fatalf("unrecorded %v, alarm held %v", a.unrecorded, a.raised[AlarmEventBaselineNotRecorded])
 	}
@@ -776,9 +777,9 @@ func TestLifePartialBaseline(t *testing.T) {
 	}
 	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	for i := range 12 {
-		l.Observe(relayID, lifeSER(fmt.Sprintf("IN10%d", i%3+1), "Asserted", t0.Add(time.Duration(i)*400*time.Second)))
+		l.Observe(relayID, lifeSER(fmt.Sprintf("IN10%d", i%3+1), "Asserted", t0.Add(time.Duration(i)*400*time.Second)), time.Time{})
 	}
-	l.Tick(relayID, t0.Add(4800*time.Second))
+	l.Tick(relayID, t0.Add(4800*time.Second), time.Time{})
 	hs := healthOf(t, r, HealthEventBaselineRecorded)
 	if len(hs) != 1 || hs[0].Details["types_overflow"] != "1" || hs[0].Details["types"] != "2" {
 		t.Fatalf("recorded health %+v", hs)
@@ -808,7 +809,7 @@ func TestLifeKeepsTheLearnerWhenTheAppendFails(t *testing.T) {
 		t.Fatalf("learner %v after a refused append", lr)
 	}
 	l.ctx = bg
-	l.Tick(relayID, end.Add(time.Minute))
+	l.Tick(relayID, end.Add(time.Minute), time.Time{})
 	if lr, _ := l.half(relayID); lr != nil || len(rawStream(t, r, ConfigStream(relayID))) != 1 || len(recordedOf(t, r)) != 1 {
 		t.Fatalf("learner %v after the store took the baseline: %d stored, %d recorded", lr, len(rawStream(t, r, ConfigStream(relayID))), len(recordedOf(t, r)))
 	}
@@ -904,7 +905,7 @@ func TestLifePrunedPastTheRecording(t *testing.T) {
 	appendAck(t, r, h)
 	ackAt := end.Add(time.Hour)
 	l.acknowledged(relayID, h, ackAt)
-	l.Tick(relayID, ackAt)
+	l.Tick(relayID, ackAt, time.Time{})
 	_, d := l.half(relayID)
 	good, err := d.Snapshot(0)
 	if err != nil {
@@ -1191,7 +1192,7 @@ func TestLifeHeldRestoreSaysActiveFrom(t *testing.T) {
 	appendAck(t, r, h)
 	ackAt := end.Add(time.Hour)
 	l.acknowledged(relayID, h, ackAt)
-	l.Tick(relayID, ackAt)
+	l.Tick(relayID, ackAt, time.Time{})
 	_, d := l.half(relayID)
 	good, err := d.Snapshot(0)
 	if err != nil {
@@ -1222,6 +1223,109 @@ func TestLifeHeldRestoreSaysActiveFrom(t *testing.T) {
 			hs := healthOf(t, r, HealthEventBaselineActive)
 			if len(hs) == 0 || hs[len(hs)-1].Details["active_from"] != tc.from.UTC().Format(time.RFC3339Nano) {
 				t.Fatalf("health %+v, want the last active_from %s", hs, tc.from.UTC().Format(time.RFC3339Nano))
+			}
+		})
+	}
+}
+
+// TestLifePeriodEndDoesNotDependOnTheTick: the same events and gaps, ticked
+// at three cadences, store the same baseline bytes, and its period ends
+// where both minima first hold, not at a watermark (D4-45; C6's F-020). The
+// test minima are an hour and ten events. Evidence class: simulated.
+func TestLifePeriodEndDoesNotDependOnTheTick(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	s := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Second) }
+	type item struct {
+		o     eventbaseline.Obs
+		gap   [2]time.Time // a gap fed instead of an event
+		open  time.Time
+		at    time.Time
+		isGap bool
+		tick  bool // a watermark with no event: always ticked
+	}
+	ev := func(n int, open time.Time) item {
+		return item{o: lifeSER("IN101", "Asserted", s(n)), open: open, at: s(n)}
+	}
+	// Ten events 400 s apart from 0 s meet both minima at 3600 s, with one
+	// more at 3600 s, which counts, and one after, which does not.
+	var plain []item
+	for i := range 10 {
+		plain = append(plain, ev(i*400, time.Time{}))
+	}
+	plain = append(plain, ev(3600, time.Time{}), ev(3700, time.Time{}), ev(5000, time.Time{}))
+	// The same, with a gap open from 3000 s to 3800 s: the duration is not
+	// met before it, so the events in it count and the end moves to 4400 s.
+	var gapped []item
+	for i := range 8 {
+		gapped = append(gapped, ev(i*400, time.Time{}))
+	}
+	open := s(3000)
+	// The watermark passes 3700 s while the gap is open; were the gap not
+	// counted, the end would be there.
+	gapped = append(gapped, ev(3200, open), ev(3600, open), ev(3700, open),
+		item{tick: true, at: s(3790), open: open},
+		item{isGap: true, gap: [2]time.Time{open, s(3800)}, at: s(3800)},
+		ev(4400, time.Time{}), ev(4401, time.Time{}), ev(6000, time.Time{}))
+
+	run := func(t *testing.T, items []item, tickAt func(i int, it item) bool) []byte {
+		t.Helper()
+		c, dir := lifeNode(t)
+		r, _, _ := start(t, c, dir)
+		defer r.Close()
+		l, err := newEventLife(bg, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var lastOpen time.Time
+		for i, it := range items {
+			if it.tick {
+				l.Tick(relayID, it.at, it.open)
+				continue
+			}
+			if it.isGap {
+				l.Gap(relayID, it.gap[0], it.gap[1], "failed.timeout")
+				lastOpen = time.Time{}
+			} else {
+				l.Observe(relayID, it.o, it.open)
+				lastOpen = it.open
+			}
+			if tickAt(i, it) {
+				l.Tick(relayID, it.at, lastOpen)
+			}
+		}
+		l.Tick(relayID, s(86400), time.Time{})
+		docs := rawStream(t, r, ConfigStream(relayID))
+		if len(docs) != 1 {
+			t.Fatalf("%d configuration records, want the baseline", len(docs))
+		}
+		return docs[0]
+	}
+	cadences := map[string]func(int, item) bool{
+		"after every event": func(int, item) bool { return true },
+		"every third":       func(i int, _ item) bool { return i%3 == 2 },
+		"only at the end":   func(int, item) bool { return false },
+	}
+	for name, tc := range map[string]struct {
+		items  []item
+		end    time.Time
+		events int64
+	}{"no gap": {plain, s(3600), 11}, "a gap open across the end": {gapped, s(4400), 12}} {
+		t.Run(name, func(t *testing.T) {
+			var want []byte
+			for cn, tick := range cadences {
+				got := run(t, tc.items, tick)
+				b, err := baseline.Decode(got)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if e := tc.end.Format(time.RFC3339Nano); b.Period.EndUTC != e || b.RecordedUTC != e || b.Counts.Events != tc.events {
+					t.Fatalf("%s: period ends %s, recorded %s, %d events; want %s and %d events", cn, b.Period.EndUTC, b.RecordedUTC, b.Counts.Events, e, tc.events)
+				}
+				if want == nil {
+					want = got
+				} else if !bytes.Equal(got, want) {
+					t.Fatalf("%s: other baseline bytes than the first cadence", cn)
+				}
 			}
 		})
 	}

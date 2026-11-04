@@ -17,7 +17,7 @@ import (
 // records (baseline.Learner).
 const (
 	LearnerName    = "otsec-eventbaseline"
-	LearnerVersion = "0.1"
+	LearnerVersion = "0.2"
 )
 
 // LearnerConfig is everything a Learner is built from.
@@ -132,6 +132,9 @@ func (l *Learner) Observe(o Obs) error {
 	}
 	if l.started && t < l.lastNS {
 		return fmt.Errorf("%w: %s is before %s", ErrOrder, fmtNS(t), fmtNS(l.lastNS))
+	}
+	if end, ok := l.endNS(o.OpenGapFrom); ok && t > end {
+		return fmt.Errorf("%w: %s is after its end %s", ErrPeriodEnded, fmtNS(t), fmtNS(end))
 	}
 	if !l.started {
 		l.started, l.startNS = true, t
@@ -339,11 +342,65 @@ func (l *Learner) collected(endNS int64) (int64, []baseline.Gap) {
 	return (endNS - l.startNS - gapNS) / int64(time.Second), gaps
 }
 
+// End returns the period's end, T: the first instant at which both minima
+// hold, given the events and gaps taken so far and the start of a gap still
+// open (zero: none). It is false until T is final, which is when both
+// minima hold and no gap that began at or before T is open (D4-45). An
+// event after T is refused (ErrPeriodEnded), and Finish ends the period at
+// T however late it is called.
+func (l *Learner) End(openGapFrom time.Time) (time.Time, bool) {
+	end, ok := l.endNS(openGapFrom)
+	if !ok || (!openGapFrom.IsZero() && openGapFrom.UnixNano() <= end) {
+		return time.Time{}, false
+	}
+	return time.Unix(0, end).UTC(), true
+}
+
+// endNS is T, and false while it is not known: while the events minimum is
+// not met, or the duration minimum is not met before the open gap's start.
+// No event after T is taken, so lastNS is never after it: T is the time of
+// the event that met the events minimum, or the instant the collected time
+// reached the duration minimum, whichever is later.
+func (l *Learner) endNS(openGapFrom time.Time) (int64, bool) {
+	if !l.started || l.events < l.p.MinEvents {
+		return 0, false
+	}
+	d := l.durationNS()
+	if !openGapFrom.IsZero() && openGapFrom.UnixNano() < d {
+		return 0, false
+	}
+	return max(l.lastNS, d), true
+}
+
+// durationNS is the instant the collected time reaches MinDurationS: the
+// start, plus the minimum, plus the gaps that begin before that instant.
+func (l *Learner) durationNS() int64 {
+	need := l.p.MinDurationS * int64(time.Second)
+	at := l.startNS
+	for _, g := range l.gaps {
+		f, t := max(gapStart(g).UnixNano(), at), gapEnd(g).UnixNano()
+		if t <= f {
+			continue
+		}
+		if f-at >= need {
+			break
+		}
+		need -= f - at
+		at = t
+	}
+	return at + need
+}
+
 // Excluded returns the events that belong to no asset's baseline, by why.
 func (l *Learner) Excluded() map[baseline.Exclusion]int64 { return maps.Clone(l.excluded) }
 
 // ErrNotDone: Finish was called before both minima were met.
 var ErrNotDone = errors.New("eventbaseline: the observation period has not ended")
+
+// ErrPeriodEnded: Observe was given an event after the period's end, the
+// first instant at which both minima hold (D4-45). It is not taken, and is
+// in no baseline.
+var ErrPeriodEnded = errors.New("eventbaseline: the observation period has ended")
 
 // Result is a finished baseline, the bytes it is stored as and their hash.
 type Result struct {
@@ -375,8 +432,11 @@ func gapEnd(g baseline.Gap) time.Time {
 	return t
 }
 
-// Finish ends the period at now and records the baseline. It refuses before
-// both minima are met (ErrNotDone). Of the types held it keeps the
+// Finish records the baseline. Its period ends at the first instant at which
+// both minima held, not at now, so the same events and gaps give the same
+// bytes however late Finish is called (D4-45). It refuses before both
+// minima are met at now (ErrNotDone). It knows no open gap, so a caller
+// fed one finishes only once End says T is final. Of the types held it keeps the
 // Params.MaxTypes with the highest count (ties by key), then leaves out the
 // lowest count (ties by key) until the record fits the byte cap. Every type
 // left out is counted in Counts.TypesOverflow, as are those never held.
@@ -384,10 +444,10 @@ func (l *Learner) Finish(now time.Time) (*Result, error) {
 	if pr := l.Progress(now); !pr.Started || !pr.Done {
 		return nil, fmt.Errorf("%w: %d s collected of %d, %d events of %d", ErrNotDone, pr.CollectedS, l.p.MinDurationS, pr.Events, l.p.MinEvents)
 	}
-	endNS := now.UnixNano()
-	if endNS < l.lastNS {
-		return nil, fmt.Errorf("%w: finishing at %s, before the last event taken at %s", ErrOrder, fmtNS(endNS), fmtNS(l.lastNS))
+	if now.UnixNano() < l.lastNS {
+		return nil, fmt.Errorf("%w: finishing at %s, before the last event taken at %s", ErrOrder, fmtNS(now.UnixNano()), fmtNS(l.lastNS))
 	}
+	endNS, _ := l.endNS(time.Time{})
 	collected, gaps := l.collected(endNS)
 	b := &baseline.Baseline{
 		Schema: baseline.Identifier, NodeID: l.cfg.Node, AssetID: l.cfg.AssetID,
