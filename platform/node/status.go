@@ -48,6 +48,7 @@ type Status struct {
 	labTLSRefs  []string
 	eventBases  map[string]EventBaselineStatus
 	eventFeed   *EventFeedStatus
+	eventCkpts  map[string]EventCheckpointStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -130,6 +131,9 @@ type StatusFile struct {
 	// EventFeed the feeder's node-wide counts (eventbaselines_life.go).
 	EventBaselines map[string]EventBaselineStatus `json:"event_baselines,omitempty"`
 	EventFeed      *EventFeedStatus               `json:"event_feed,omitempty"`
+	// EventCheckpoints is each observed asset's checkpoint counts
+	// (eventbaselines_run.go).
+	EventCheckpoints map[string]EventCheckpointStatus `json:"event_checkpoints,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -326,6 +330,14 @@ func (s *Status) SetEventBaselines(m map[string]EventBaselineStatus, f *EventFee
 	s.mu.Unlock()
 }
 
+// SetEventCheckpoints records the observed assets' checkpoint counts. The
+// caller must not change m afterwards.
+func (s *Status) SetEventCheckpoints(m map[string]EventCheckpointStatus) {
+	s.mu.Lock()
+	s.eventCkpts = m
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -425,6 +437,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	}
 	if len(s.eventBases) > 0 {
 		f.EventBaselines = maps.Clone(s.eventBases)
+	}
+	if len(s.eventCkpts) > 0 {
+		f.EventCheckpoints = maps.Clone(s.eventCkpts)
 	}
 	if s.eventFeed != nil {
 		ef := *s.eventFeed

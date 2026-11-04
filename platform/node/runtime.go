@@ -104,6 +104,9 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		return nil, err
 	}
 	consumers = pruneConsumers(consumers)
+	if consumers, err = eventBaselineConsumers(cfg, consumers); err != nil {
+		return nil, err
+	}
 	r := &Runtime{cfg: cfg, layout: layout, opt: opt}
 	specs := append([]c5.Database{}, layout.Databases...)
 	sort.SliceStable(specs, func(i, j int) bool { return specs[i].ID == AuditDB && specs[j].ID != AuditDB })

@@ -98,6 +98,9 @@ type Scheduler struct {
 	// missed: schedule entry ID: the slots it missed since its last stored
 	// run (missed.go). Kept in memory only.
 	missed map[string]*missedRun
+	// events is the event-baseline feeder and lifecycle, nil when none is
+	// set or it did not start (eventbaselines_run.go). Run steps it.
+	events *eventRun
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -142,6 +145,11 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	s.refreshQuarantine(ctx)
 	s.publishHold()
 	s.raiseOpenChanges(ctx)
+	ev, err := newEventRun(ctx, rt)
+	if err != nil {
+		rt.opt.Status.Raise("", AlarmEventBaselineState, "no event baseline is learnt or watched: "+err.Error())
+	}
+	s.events = ev
 	return s, nil
 }
 
@@ -197,13 +205,23 @@ func newRequestID() string {
 // is not repeated to catch up. However the schedule is written, a device
 // gets at least MinIntervalSeconds between the end of one session and the
 // start of the next (plan). Between runs, and before each, it relays the
-// administrator's signed requests every RelayEverySeconds (adminrelay.go).
+// administrator's signed requests every RelayEverySeconds (adminrelay.go),
+// and steps the event-baseline feeder (eventbaselines_run.go), whose
+// changed halves it checkpoints when ctx ends.
 func (s *Scheduler) Run(ctx context.Context) error {
 	var p *plan
 	if sched := s.rt.cfg.Schedule; len(sched) > 0 {
 		p = newPlan(sched, s.now())
 	}
+	if s.events != nil {
+		defer func() {
+			stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopCheckpointTimeout)
+			defer cancel()
+			s.events.stop(stop)
+		}()
+	}
 	s.relayAdmin(ctx)
+	s.stepEvents(ctx)
 	for {
 		wait, run := RelayEverySeconds*time.Second, -1
 		if p != nil {
@@ -223,6 +241,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return err
 		}
 		s.relayAdmin(ctx)
+		s.stepEvents(ctx)
 		if run < 0 {
 			continue
 		}

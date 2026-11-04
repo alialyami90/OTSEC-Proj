@@ -601,8 +601,9 @@ func TestFeedUndecodableStateStopsItsStream(t *testing.T) {
 	if a := r.f.assets[relayID]; len(a.open) != 1 || len(r.log.lines) != 0 {
 		t.Fatalf("open %d rows, passed %v", len(a.open), r.log.lines)
 	}
-	// The other streams are still read.
-	if s := r.f.streams[len(r.f.streams)-1]; s.id != ListenerStream(feedListener) || s.after != 1 {
+	// The listener's stream is not read while the only asset that reads it
+	// is held (C6 on #365), and the stuck stream is read again each Step.
+	if s := r.f.streams[len(r.f.streams)-1]; s.id != ListenerStream(feedListener) || s.after != 0 {
 		t.Fatalf("stream %s at %d", s.id, s.after)
 	}
 	r.st.recs[ser][2].SourceCursor = state(t, k("a"), k("a"), k("b"))
@@ -739,5 +740,87 @@ func TestFeedMissedGapStartsAtItsSeries(t *testing.T) {
 	}
 	if got := gaps(r); !slices.Equal(got, want) {
 		t.Fatalf("gaps\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A restart resumes each stream from the checkpoint's restart point: of the
+// records read again, those at or before its read-through seq and its
+// watermark were passed before and are skipped, those after the watermark
+// were pending and are taken, and nothing is late (slice 1c). Evidence
+// class: simulated.
+func TestFeedResumeSkipsWhatWasTaken(t *testing.T) {
+	r := newFeedRig(t)
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	l := ListenerStream(feedListener)
+	for _, n := range []int{10, 30, 20, 40} {
+		r.st.add(t, l, sec(n), syslogMsg(relayID, sec(n)), nil)
+	}
+	// Before the restart: seq 1 and 3 (10 s and 20 s) passed at a watermark
+	// of 25 s; seq 2 and 4 read and pending.
+	a := r.f.assets[relayID]
+	c := &eventCheckpoint{Watermark: sec(25).Format(time.RFC3339Nano), Streams: []checkpointStream{{Stream: string(l), RestartAfter: 1, ReadThrough: 3}}}
+	for _, s := range a.streams {
+		if s.id != l {
+			c.Streams = append(c.Streams, checkpointStream{Stream: string(s.id)})
+		}
+	}
+	if err := r.f.resume(a, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.f.start()
+	r.step(t, sec(100).Add(FeedLateness))
+	want := []string{
+		"obs " + relayID + " syslog 2026-10-28T10:00:30.000000Z af=false nc=false",
+		"obs " + relayID + " syslog 2026-10-28T10:00:40.000000Z af=false nc=false",
+	}
+	if got := r.log.observed(); !slices.Equal(got, want) || a.Late != 0 {
+		t.Fatalf("late %d, got\n%s", a.Late, strings.Join(got, "\n"))
+	}
+	if p := r.f.positions(a); p[len(p)-1] != (checkpointStream{Stream: string(l), RestartAfter: 4, ReadThrough: 4}) {
+		t.Fatalf("positions %+v", p)
+	}
+}
+
+// A node restart opens a gap at the restored watermark for an asset whose
+// SER the node reads: the first successful read after it closes it and its
+// rows are AfterFailure (C1 on #372). A checkpoint taken while a read is
+// pending restarts before it, with the alignment state it was compared with.
+// Evidence class: simulated.
+func TestFeedRestartIsAGap(t *testing.T) {
+	r := newFeedRig(t)
+	sec := func(n int) time.Time { return feedT0.Add(time.Duration(n) * time.Second) }
+	ser := SERStream(relayID)
+	r.st.add(t, ser, sec(10), feedSER(relayID, "inv1", sec(10), k("a"), event.AlignFirstRead), state(t, k("a")))
+	r.step(t, sec(15).Add(FeedLateness))
+	r.st.add(t, ser, sec(20), feedSER(relayID, "inv2", sec(20), k("b"), event.AlignOK), state(t, k("a"), k("b")))
+	r.step(t, sec(16).Add(FeedLateness))
+	a := r.f.assets[relayID]
+	pos := r.f.positions(a)
+	if pos[0] != (checkpointStream{Stream: string(ser), RestartAfter: 1, ReadThrough: 2}) || !slices.Equal(a.prevKeys(), []string{k("a")}) {
+		t.Fatalf("positions %+v, prev %v", pos, a.prevKeys())
+	}
+	c := &eventCheckpoint{Watermark: a.wm.Format(time.RFC3339Nano), Streams: pos, PrevKeys: a.prevKeys()}
+
+	r2 := newFeedRig(t)
+	r2.st = r.st
+	a2 := r2.f.assets[relayID]
+	if err := r2.f.resume(a2, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	r2.f.start()
+	r2.f.restarted(a2, sec(60))
+	r2.step(t, sec(100).Add(FeedLateness))
+	want := []string{
+		"gap " + relayID + " 2026-10-28T10:00:16Z 2026-10-28T10:00:20Z " + ReasonNodeRestart,
+		"obs " + relayID + " ser 2026-10-28T10:00:20.000000Z af=true nc=false",
+	}
+	var got []string
+	for _, s := range r2.log.lines {
+		if !strings.HasPrefix(s, "tick ") {
+			got = append(got, s)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
