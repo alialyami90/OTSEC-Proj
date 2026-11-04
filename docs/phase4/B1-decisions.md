@@ -673,3 +673,14 @@ Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-ne
    4. Status shows that start-up verification ran from the prune point.
 
    Option (b), skipping the check on a pruned stream and raising an alarm, is refused as weaker. C3 adds it to the C8 0.9 draft, and C6 tests it. C3's B2, a version-1 recording repeated after recordings are pruned, is C4's to fix in #384.
+
+## D4-41: the active event baseline after its acknowledgement is pruned (C4 on #387)
+
+Date: 2026-11-04. C1, on C4's question on #387.
+
+- **The fact.** The node prunes its audit stream (`Runtime.Prune` passes over every open database, the audit database included). It prunes only a class above its target, and only records its consumers have confirmed upstream (`platform/node/prune.go`). So a prune can remove an asset's last succeeded event acknowledgement while its later `config.baseline_recorded` stays. The node then cannot tell from the audit view which baseline is active, and the asset would restart awaiting acknowledgement with its detector off.
+- **The ruling.** The node finds the active baseline of each kind from the configuration store's `baseline` hold (C5 0.7, D4-39: the fold holds each kind's acknowledged baseline with `baseline`, and `Ref` is its `config.baseline_acknowledged`). The configuration class is never pruned of a held record, so the hold outlives the audit prune.
+  - When that `Ref` lies before the audit view's prune point, it is unknown, not broken, under D4-40 item 8.
+  - When it lies inside the view, the record it names must be a succeeded acknowledgement of that asset, kind and digest, or start-up verification fails.
+- **Refused.** C4's option (a), an audit prune that keeps the latest acknowledgements: it would leave records before the prune point, outside D4-40 item 8's contiguous view. C4's option (b), a record restating the active baselines at each prune: it would add a node-written claim of what a person acknowledged, which the hold already carries.
+- **Who.** C4 reads the hold in #384's start-up fold. C5 confirms that the 0.7 fold sets `baseline` on the event baseline with that `Ref`. C6 tests a prune that removes the acknowledgement while the detector stays active after a restart.
