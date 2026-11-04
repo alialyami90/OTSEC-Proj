@@ -16,7 +16,7 @@ From B1 to C1, 2026-10-28. `main` at `26d8e78` when this was written (checks bel
 | Event-baseline feeder in the node | not built: design #340, slice 1a #343 | desk | D4-26 |
 | HR-11 absolute bound (unknown-sender quota, the quarter cap, the fill across an outage) | working; the HR-11 row is still to be closed in B3's doc | simulated, CI-Windows | #291, #296, #316, #317, #321; D4-21 |
 | UDP `read_buffer_bytes` with a short-buffer alarm (Linux capped-then-doubled grant) | working | simulated, CI-Linux, CI-Windows | #297 `96fbbae`, #335 |
-| Windows CI time budget (`-timeout 20m`, 35-minute job, a 12-minute `platform/node` budget) | working | CI-Windows | #327; D4-22 |
+| Windows CI time budget (`-timeout 30m`, 45-minute job, a 12-minute `platform/node` budget) | working; the 12-minute budget is breached (815 s at f4ae324), C5's finding under F-016 | CI-Windows | #327, #409; D4-22, D4-44 |
 | Any hardware result | none exists | — | No device has been contacted (B-01) |
 
 ## 2. Work in flight
