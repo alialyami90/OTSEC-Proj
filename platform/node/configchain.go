@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
@@ -177,11 +178,12 @@ func (ch *configChain) unchanged(assetID, op string, readSeq uint64) (seq uint64
 }
 
 // raiseOpenChanges raises AlarmUnapprovedChange at start for each change the
-// chain shows still open, on a node that reads configuration. A chain that
-// cannot be read now is folded at the first read instead, and its open
-// changes are raised as they are found again.
+// chain shows still open, on a node whose schedule reads configuration,
+// including one whose register copy is refused, so its reads are held (C6
+// on #390). A chain that cannot be read now is folded at the first read
+// instead, and its open changes are raised as they are found again.
 func (s *Scheduler) raiseOpenChanges(ctx context.Context) {
-	if s.rt.commands == nil {
+	if !slices.ContainsFunc(s.rt.cfg.Schedule, Collection.ReadsConfiguration) {
 		return
 	}
 	ch := s.configChain()

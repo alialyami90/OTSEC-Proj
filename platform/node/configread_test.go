@@ -378,6 +378,17 @@ func TestConfigReadHoldsAfterRestart(t *testing.T) {
 	if countAlarms(st, AlarmUnapprovedChange) != 1 {
 		t.Fatalf("the open change is not raised at start: %+v", st.Snapshot("x").Alarms)
 	}
+	r.Close()
+
+	// With the register copy refused, reads are held, and the open change
+	// is still raised at start (C6 on #390).
+	c.RegisterVersion = 4
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	newScheduler(t, r, n.f)
+	if r.commands != nil || countAlarms(st, AlarmUnapprovedChange) != 1 {
+		t.Fatalf("register refused: commands %v, alarms %+v", r.commands, st.Snapshot("x").Alarms)
+	}
 }
 
 // A result the snapshot refuses is kept as quarantine, and nothing is stored
