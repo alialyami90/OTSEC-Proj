@@ -46,6 +46,8 @@ type Status struct {
 	adminReqs   []AdminRequestStatus
 	labTLS      bool
 	labTLSRefs  []string
+	eventBases  map[string]EventBaselineStatus
+	eventFeed   *EventFeedStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -124,6 +126,10 @@ type StatusFile struct {
 	// (nodekeys.go, B3 on #176).
 	LabTLSFiles    bool     `json:"lab_tls_files,omitempty"`
 	LabTLSFileRefs []string `json:"lab_tls_file_refs,omitempty"`
+	// EventBaselines is each observed asset's event baseline, and
+	// EventFeed the feeder's node-wide counts (eventbaselines_life.go).
+	EventBaselines map[string]EventBaselineStatus `json:"event_baselines,omitempty"`
+	EventFeed      *EventFeedStatus               `json:"event_feed,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -312,6 +318,14 @@ func (s *Status) SetLabTLSFiles(refs []string) {
 	s.mu.Unlock()
 }
 
+// SetEventBaselines records the observed assets' event baselines and the
+// feeder's counts.
+func (s *Status) SetEventBaselines(m map[string]EventBaselineStatus, f *EventFeedStatus) {
+	s.mu.Lock()
+	s.eventBases, s.eventFeed = m, f
+	s.mu.Unlock()
+}
+
 // SetAssetResults records each asset's last sent run.
 func (s *Status) SetAssetResults(m map[string]AssetResult) {
 	s.mu.Lock()
@@ -408,6 +422,13 @@ func (s *Status) Snapshot(node string) StatusFile {
 	f.LabTLSFiles, f.LabTLSFileRefs = s.labTLS, slices.Clone(s.labTLSRefs)
 	if len(s.adminReqs) > 0 {
 		f.AdminRequests = slices.Clone(s.adminReqs)
+	}
+	if len(s.eventBases) > 0 {
+		f.EventBaselines = maps.Clone(s.eventBases)
+	}
+	if s.eventFeed != nil {
+		ef := *s.eventFeed
+		f.EventFeed = &ef
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
