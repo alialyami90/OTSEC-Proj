@@ -169,10 +169,31 @@ func TestParseConfig(t *testing.T) {
 		"admin principal": edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["principal"] = "" }),
 		"admin status":    edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["status"] = "maybe" }),
 		"admin extra":     edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["private_key"] = "x" }),
-		"trailing data":   append(marshal(t, good), '{', '}'),
+		"admin kind not admin": edit(func(d map[string]any) {
+			d["admin_keys"].([]any)[0].(map[string]any)["kinds"] = []any{"run"}
+		}),
+		"admin kind twice": edit(func(d map[string]any) {
+			d["admin_keys"].([]any)[0].(map[string]any)["kinds"] = []any{"node.baseline_ack", "node.baseline_ack"}
+		}),
+		"trailing data": append(marshal(t, good), '{', '}'),
 	} {
 		if _, err := parseConfig(b); err == nil {
 			t.Errorf("%s accepted", name)
+		}
+	}
+	// A key's kinds (C7 0.6): absent keeps the 0.5 kinds, a list is kept
+	// as given, and an empty list allows nothing.
+	if c.AdminKeys[0].Kinds != nil || c.AdminKeys[0].Allows(authz.KindNodeChangeApproval) || !c.AdminKeys[0].Allows(authz.KindCredentialInstall) {
+		t.Errorf("a key with no kinds: %v", c.AdminKeys[0].Kinds)
+	}
+	for _, kinds := range [][]any{{"node.change_approval", "node.baseline_ack"}, {}} {
+		c, err := parseConfig(edit(func(d map[string]any) { d["admin_keys"].([]any)[0].(map[string]any)["kinds"] = kinds }))
+		if err != nil {
+			t.Fatalf("kinds %v: %v", kinds, err)
+		}
+		k := c.AdminKeys[0]
+		if k.Kinds == nil || len(k.Kinds) != len(kinds) || k.Allows(authz.KindCredentialInstall) || k.Allows(authz.KindNodeBaselineAck) != (len(kinds) > 0) {
+			t.Errorf("kinds %v loaded as %v", kinds, k.Kinds)
 		}
 	}
 	if runtime.GOOS != "windows" {
