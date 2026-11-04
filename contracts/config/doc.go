@@ -163,9 +163,12 @@
 // be more than twice the size of either snapshot. Measured against the
 // SEL-751's settings sheets, a read in which every setting changes can make
 // a difference over the bound while both snapshots fit
-// (docs/phase4/C2-c9-0.4.md). Validate refuses such a difference, wrapping
-// ErrTooLarge, and Compare returns it with that error, so the caller still
-// knows the change and can name it. 0.3 differences had no bound.
+// (docs/phase4/C2-c9-0.4.md). Validate refuses such a difference with
+// ErrDifferenceTooLarge, which wraps ErrTooLarge, and Compare returns it with
+// that error, so the caller still knows the change and can name it. A caller
+// keys on ErrDifferenceTooLarge: a stored snapshot over its own bound wraps
+// ErrTooLarge too, and Compare then returns no difference. 0.3 differences
+// had no bound.
 //
 // # Compatibility
 //

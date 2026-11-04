@@ -282,7 +282,7 @@ func TestDifferenceSizeBound(t *testing.T) {
 	// difference of every value changed is about 2 MB.
 	from, to := pair(3000, 290)
 	d, err := Compare(from, to)
-	if !errors.Is(err, ErrTooLarge) {
+	if !errors.Is(err, ErrDifferenceTooLarge) || !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("an oversize difference: %v", err)
 	}
 	if len(d.Changes) != 3000 || d.ChangesDigest() == "" {
@@ -291,8 +291,26 @@ func TestDifferenceSizeBound(t *testing.T) {
 	if b, _ := d.Encode(); len(b) <= MaxDifferenceBytes {
 		t.Fatalf("the oversize case encodes to %d bytes, within the bound", len(b))
 	}
-	if !errors.Is(d.Validate(), ErrTooLarge) {
+	if !errors.Is(d.Validate(), ErrDifferenceTooLarge) {
 		t.Fatal("Validate accepts the oversize difference")
+	}
+
+	// A stored snapshot over its own bound is refused by Compare with
+	// ErrTooLarge, but not ErrDifferenceTooLarge, and no difference: the
+	// caller must not take that for an oversize change (C5 on #392).
+	big, _ := bigSnapshot(t, 3000, strings.Repeat("V", 400))
+	if !errors.Is(big.Validate(), ErrTooLarge) {
+		t.Fatal("the oversize snapshot validates")
+	}
+	bigBytes, err := big.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, args := range map[string][2][]byte{"from": {bigBytes, to}, "to": {from, bigBytes}} {
+		d, err := Compare(args[0], args[1])
+		if !errors.Is(err, ErrTooLarge) || errors.Is(err, ErrDifferenceTooLarge) || d.Changes != nil {
+			t.Errorf("an oversize %s snapshot: %v, %d changes", name, err, len(d.Changes))
+		}
 	}
 
 	// 8,500 settings of 30 characters, every one changed: it fits.

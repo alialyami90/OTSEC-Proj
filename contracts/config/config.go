@@ -294,6 +294,13 @@ const (
 // read that is too big for a snapshot from one that is malformed.
 var ErrTooLarge = errors.New("a snapshot or difference is bounded in size")
 
+// ErrDifferenceTooLarge is the refusal of a valid difference over
+// MaxDifferenceBytes, and nothing else (0.4). It wraps ErrTooLarge. Compare
+// returns it only with the difference itself, so a caller keys on it, not
+// on ErrTooLarge, which a stored snapshot over its own bound also wraps and
+// for which Compare returns no difference (C5 on #392).
+var ErrDifferenceTooLarge = fmt.Errorf("a difference is bounded to %d bytes: %w", MaxDifferenceBytes, ErrTooLarge)
+
 // Encode is the snapshot's one stored form: compact UTF-8 JSON in the order
 // of the struct, with no HTML escaping and no trailing newline. MaxSnapshotBytes
 // bounds its length.

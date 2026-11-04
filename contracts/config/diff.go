@@ -81,8 +81,9 @@ var ErrNotComparable = errors.New("config: snapshots are not comparable")
 // Difference. It takes the stored bytes, not the decoded snapshots, so that
 // the digests it records are always over the bytes as stored. When the
 // difference is valid but over MaxDifferenceBytes, Compare returns it with an
-// error wrapping ErrTooLarge (0.4): the change is real, and the caller can
-// still name it (ChangesDigest), but it cannot be stored as one record.
+// error wrapping ErrDifferenceTooLarge (0.4): the change is real, and the
+// caller can still name it (ChangesDigest), but it cannot be stored as one
+// record. Any other error comes with a zero Difference.
 func Compare(from, to []byte) (Difference, error) {
 	a, err := DecodeSnapshot(from)
 	if err != nil {
@@ -300,7 +301,7 @@ func (d Difference) checkSize() error {
 		return fmt.Errorf("config: difference: %w", err)
 	}
 	if len(b) > MaxDifferenceBytes {
-		return fmt.Errorf("config: difference: %d bytes encoded, more than %d: %w", len(b), MaxDifferenceBytes, ErrTooLarge)
+		return fmt.Errorf("config: difference: %d bytes encoded: %w", len(b), ErrDifferenceTooLarge)
 	}
 	return nil
 }

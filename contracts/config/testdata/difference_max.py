@@ -2,6 +2,11 @@
 
 Run: python3 -I difference_max.py ../../register/testdata/count_settings.py <751_IM_20260910.txt>
 
+The text is the owner-supplied PDF of S22 (751_IM_20260910.pdf) extracted with
+`pdftotext -layout 751_IM_20260910.pdf 751_IM_20260910.txt`. That gives the
+same bytes as the project's extract in phase0/manuals-SEL/text/ (checked by C2,
+2026-11-04).
+
 It counts the settings of the 24 SHO forms from S22's settings sheets with
 count_settings.py, and takes each setting's value width from there (384
 characters for an equation, 64 for any other value). The worst difference is
