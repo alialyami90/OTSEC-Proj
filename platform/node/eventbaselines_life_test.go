@@ -1,15 +1,20 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
@@ -1086,5 +1091,138 @@ func TestLifePrunedStoredUnplaced(t *testing.T) {
 	}
 	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
 		t.Fatal("no alarm")
+	}
+}
+
+// C6's probe Q2 on #384: a broken hash link in the retained audit stream, in a record that
+// VerifyConfigFrom does not read, stops every observed asset. Evidence
+// class: simulated.
+func TestLifeBrokenLinkStopsEveryAsset(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	appendAudit(t, r, filler)
+	r.Close()
+	// Change one byte of the filler record, in the audit database itself.
+	paths, _ := filepath.Glob(filepath.Join(c.Store.Dir, "*.db"))
+	changed := 0
+	for _, p := range paths {
+		db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(p))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		var ev []byte
+		if err := db.QueryRow(`SELECT id, event FROM events WHERE stream = 'audit' AND instr(event, 'req-filler') > 0`).Scan(&id, &ev); err == nil {
+			if _, err := db.Exec(`UPDATE events SET event = ? WHERE id = ?`, bytes.Replace(ev, []byte("req-filler"), []byte("req-fillex"), 1), id); err != nil {
+				t.Fatal(err)
+			}
+			changed++
+		}
+		db.Close()
+	}
+	if changed != 1 {
+		t.Fatalf("changed %d audit records", changed)
+	}
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err = newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr, d := l.half(relayID); lr != nil || d != nil {
+		t.Fatalf("learner %v, detector %v after a broken link", lr, d)
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+		t.Fatal("no alarm")
+	}
+}
+
+// C6's probe Q8 on #384: the asset's configuration stream also holds C9 snapshots, and the
+// configuration baseline is held as baseline too (D4-41). A C9 baseline
+// hold with the newest Ref is passed over: the event baseline is the
+// newest-Ref C10 one. Evidence class: simulated.
+func TestLifeHeldBaselineSkipsAConfigurationBaseline(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	v1 := storeBaseline(t, r, c, relayID, 1, "")
+	v2 := storeBaseline(t, r, c, relayID, 2, v1.Hash)
+	snap, capture := configRead(t, "1")
+	cs := ConfigStream(relayID)
+	if _, err := r.Log(cs).Append(bg, c5.Record{Stream: cs, Class: c5.ClassConfiguration, Event: snap, Capture: &capture}); err != nil {
+		t.Fatal(err)
+	}
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := l.storedBaselines(bg, relayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for seq, ref := range map[c5.Seq]c5.Seq{1: 3, 2: 5, 3: 7} {
+		if err := r.Store(cs).Hold(bg, c5.Hold{Stream: cs, Seq: seq, Reason: c5.HoldReason{Code: c5.HoldBaseline,
+			Ref: c5.Key{NodeID: r.cfg.NodeID, Stream: AuditStream, Seq: ref}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.first = 10
+	if got, err := l.heldBaseline(bg, relayID, stored); err != nil || got != v2.Hash {
+		t.Fatalf("%q, %v; want v2 %q", got, err, v2.Hash)
+	}
+}
+
+// C6's probe Q15 on #384: once restore settles a baseline taken from a hold, the health
+// stream says when it is active from. Evidence class: simulated.
+func TestLifeHeldRestoreSaysActiveFrom(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, r)[0].Config.BaselineDigest
+	appendAck(t, r, h)
+	ackAt := end.Add(time.Hour)
+	l.acknowledged(relayID, h, ackAt)
+	l.Tick(relayID, ackAt)
+	_, d := l.half(relayID)
+	good, err := d.Snapshot(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := auditHead(t, r)
+	r.Close()
+	r, _, _ = start(t, c, dir)
+	appendAudit(t, r, filler)
+	pruneLifeAudit(t, r, ack)
+	r.Close()
+	wm := ackAt.Add(time.Hour)
+	for _, tc := range []struct {
+		name string
+		snap []byte
+		from time.Time
+	}{{"the checkpoint's time", good, ackAt}, {"no snapshot", nil, wm}} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _, _ := start(t, c, dir)
+			defer r.Close()
+			l, err := newEventLife(bg, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, derr := l.restore(relayID, nil, tc.snap, wm); derr != nil {
+				t.Fatal(derr)
+			}
+			hs := healthOf(t, r, HealthEventBaselineActive)
+			if len(hs) == 0 || hs[len(hs)-1].Details["active_from"] != tc.from.UTC().Format(time.RFC3339Nano) {
+				t.Fatalf("health %+v, want the last active_from %s", hs, tc.from.UTC().Format(time.RFC3339Nano))
+			}
+		})
 	}
 }
