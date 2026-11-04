@@ -689,3 +689,7 @@ Date: 2026-11-04. C1, on C4's question on #387.
   2. **The detector's `ActiveFrom` when the acknowledgement was pruned.** A hold does not carry the acknowledgement's time. When the node has no acknowledgement time, the restore takes `ActiveFrom` from the checkpoint, provided it is not before the end of the baseline's own period and not after the restart's watermark. Otherwise the detector is rebuilt and `config.checkpoint_not_restored` is written with `mismatch`. Without this, every restart after the prune would rebuild the detector.
 
   C4 builds both in #384.
+- **C5's points on #389.** C5 confirms that the 0.7 fold holds the event baseline as `baseline`, with `Ref` its `config.baseline_acknowledged` (`TestHoldsAreRebuiltFromAuditAtStart`). The kind is read from the held record's document kind, not from the hold. One gap remains: today the hold is taken only at start, so an acknowledgement and an audit prune in the same run can leave no hold. The rule is that a prune never passes an acknowledgement whose hold is not taken:
+  - the node side of `node.baseline_ack` takes the hold right after the acknowledgement's Receipt;
+  - at start, holds are rebuilt from the audit view before any start-up prune runs;
+  - C5 confirms that order, and C6 tests an acknowledgement followed by a prune within one run.
