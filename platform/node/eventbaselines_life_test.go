@@ -1330,3 +1330,80 @@ func TestLifePeriodEndDoesNotDependOnTheTick(t *testing.T) {
 		})
 	}
 }
+
+// D4-45's restart between the period's end and the record: the finish
+// fails to store, the node restarts from the learner's snapshot with the
+// gap a restart opens at the checkpoint's watermark, and the baseline then
+// stored has the same bytes as without the restart. The checkpoint's
+// watermark is past the end, or at it with the end set by the events
+// minimum. Evidence class: simulated.
+func TestLifeRestartBeforeTheRecordKeepsTheBytes(t *testing.T) {
+	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	s := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Second) }
+	// Ten rows 400 s apart meet both minima at 3600 s, the tenth row.
+	feed := func(l *eventLife) {
+		lifeSeq = 0
+		for i := range 10 {
+			l.Observe(relayID, lifeSER("IN101", "Asserted", s(i*400)), time.Time{})
+		}
+	}
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed(l)
+	l.Observe(relayID, lifeSER("IN101", "Asserted", s(3700)), time.Time{})
+	l.Tick(relayID, s(3700), time.Time{})
+	want := rawStream(t, r, ConfigStream(relayID))
+	r.Close()
+	if len(want) != 1 {
+		t.Fatalf("%d records without a restart", len(want))
+	}
+
+	for _, wm := range []int{3700, 3600} {
+		t.Run(fmt.Sprintf("checkpoint at %d s", wm), func(t *testing.T) {
+			c, dir := lifeNode(t)
+			r, _, _ := start(t, c, dir)
+			l, err := newEventLife(bg, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			feed(l)
+			setMode(r, ConfigDB, c5.ModeBlocked)
+			l.Tick(relayID, s(wm), time.Time{})
+			l.Tick(relayID, s(3700), time.Time{})
+			lr, _ := l.half(relayID)
+			if lr == nil || len(rawStream(t, r, ConfigStream(relayID))) != 0 {
+				t.Fatal("the baseline was stored with the configuration database blocked")
+			}
+			snap, err := lr.Snapshot(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Close()
+
+			r2, _, _ := start(t, c, dir)
+			defer r2.Close()
+			l2, err := newEventLife(bg, r2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lerr, derr := l2.restore(relayID, snap, nil, s(wm)); lerr != nil || derr != nil {
+				t.Fatalf("restore: %v, %v", lerr, derr)
+			}
+			// The restart's gap is open from the checkpoint's watermark
+			// until the next SER read closes it, at 3900 s.
+			open := s(wm)
+			l2.Observe(relayID, lifeSER("IN101", "Asserted", s(3800)), open)
+			l2.Tick(relayID, s(3850), open)
+			l2.Gap(relayID, open, s(3900), ReasonNodeRestart)
+			l2.Observe(relayID, lifeSER("IN101", "Asserted", s(3900)), time.Time{})
+			l2.Tick(relayID, s(4000), time.Time{})
+			if got := rawStream(t, r2, ConfigStream(relayID)); len(got) != 1 || !bytes.Equal(got[0], want[0]) {
+				t.Fatalf("%d records; the bytes after the restart differ:\n%s\nwant\n%s", len(got), got, want)
+			}
+		})
+	}
+}
