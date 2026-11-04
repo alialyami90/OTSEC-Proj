@@ -2,8 +2,8 @@ package node
 
 import (
 	"encoding/json"
-	"fmt"
-	"slices"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -539,20 +539,107 @@ func TestConfigReadBaselineNotStored(t *testing.T) {
 	}
 }
 
-// After a prune that took the acknowledgement, a read is stored and not
-// compared, with the alarm: the baseline hold shows that one was made.
+// pruneAudit prunes the audit stream through seq, as the runtime does once
+// the forwarder has confirmed it.
+// A record must follow through: the stream is never pruned empty.
+func (n *cfgNode) pruneAudit(through c5.Seq) {
+	n.t.Helper()
+	db := n.r.Store(AuditStream)
+	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
+	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
+		// The suspension checkpoint may be past through already.
+		if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: through}); err != nil && !errors.Is(err, &c5.Error{Code: c5.CodeCursorRegress}) {
+			n.t.Fatal(err)
+		}
+	}
+	b, err := c5.ComputeBoundary(bg, db, db, pruneConsumers([]c5.Consumer{fwd}), AuditStream, c5.ClassAudit, time.Now())
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	if k, err := db.PruneStep(bg, b, 1000); err != nil || k == 0 {
+		n.t.Fatalf("pruned %d: %v", k, err)
+	}
+	if first, err := db.FirstRetained(bg, AuditStream); err != nil || first != through+1 {
+		n.t.Fatalf("first retained %d, want %d: %v", first, through+1, err)
+	}
+}
+
+// pruned are the configuration read results in a pruned chain, which
+// audit.VerifyConfig cannot check from its start.
+func (n *cfgNode) pruned() []*audit.Record {
+	n.t.Helper()
+	var out []*audit.Record
+	for _, r := range auditRecords(n.t, n.r) {
+		switch r.Action {
+		case audit.ActionConfigReadCompared, audit.ActionConfigChangeDetected, audit.ActionConfigBaselineRestored:
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// After a prune that took the acknowledgement, the node finds the baseline
+// from the store's baseline hold and compares against it (D4-41).
 func TestConfigReadPrunedAcknowledgement(t *testing.T) {
 	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
 	n.read("ok")
-	db := n.r.Store(ConfigStream(relayID))
-	if err := db.Hold(bg, c5.Hold{Stream: ConfigStream(relayID), Seq: 1, Reason: reasonAt(n.r, 2, c5.HoldBaseline)}); err != nil {
-		t.Fatal(err)
+	ack := n.ack(base, "")
+	n.read("ok")
+	n.pruneAudit(ack)
+	n.s.chain = nil // the fold at the next start
+	n.read("ok-all-present")
+	res := n.pruned()
+	if len(res) != 2 || res[0].ReasonCode != audit.ReasonNoDifference || res[1].ReasonCode != audit.ReasonUnapprovedChange ||
+		res[0].Config.BaselineDigest != base || res[1].Config.BaselineDigest != base {
+		t.Fatalf("%+v", res)
 	}
-	// The fold as a pruned stream leaves it: records before 1000 are gone.
-	n.s.chain = &configChain{pruned: true, first: 1000, through: 999,
-		runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{}, assets: map[string]*chainAsset{}}
-	if rep := n.read("ok-all-present"); rep.Alarm != AlarmConfigNotCompared || n.stored() != 2 {
-		t.Fatalf("%+v", rep)
+}
+
+// Records pruned between two syncs of the fold are not skipped as though
+// nothing were missing (C3 on #390, B1): the acknowledgement of the changed
+// read, pruned before the fold saw it, is found from its hold, and the read
+// again is no_difference against it, not a change against the replaced
+// baseline.
+func TestConfigChainPrunedBetweenSyncs(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	changed := n.snapshotOf("ok-all-present")
+	ack := n.ack(changed, base)
+	// A record after the acknowledgement: the request record of a run not
+	// sent.
+	n.inject(&audit.Record{Actor: audit.Actor{Type: authz.PrincipalSchedule, ID: "sch-cfg", Role: authz.RoleCollector},
+		Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeInfo, PolicyVersion: 3, CorrelationID: "req-filler"})
+	n.pruneAudit(ack)
+	n.read("ok-all-present")
+	res := n.pruned()
+	if len(res) != 1 || res[0].ReasonCode != audit.ReasonNoDifference || res[0].Config.BaselineDigest != changed {
+		t.Fatalf("%+v", res)
+	}
+	if c := countAlarms(n.st, AlarmUnapprovedChange); c != 1 {
+		t.Fatalf("%d unapproved-change alarms, want only the first change's", c)
+	}
+}
+
+// An approval whose decision is not an approval's silences nothing (C3 on
+// #390): here it names the acknowledgement's decision, so the change it
+// would otherwise cover is unapproved.
+func TestConfigReadApprovalNeedsItsDecision(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	now := time.Now().UTC()
+	n.inject(&audit.Record{Actor: audit.Actor{Type: authz.PrincipalHuman, ID: "admin@site-a", Role: authz.RoleAdmin},
+		Action: audit.ActionConfigChangeApproved, Outcome: audit.OutcomeSucceeded, CorrelationID: "req-none", Target: &audit.Target{AssetID: relayID},
+		Config: &audit.Config{DecisionSeq: n.seq, PayloadSHA256: strings.Repeat("ab", 32), BaselineDigest: base,
+			WindowStart: now.Add(-time.Hour).Format(time.RFC3339), WindowEnd: now.Add(time.Hour).Format(time.RFC3339), Reason: "no decision"}})
+	n.read("ok-all-present")
+	if res := n.pruned(); len(res) != 1 || res[0].ReasonCode != audit.ReasonUnapprovedChange {
+		t.Fatalf("%+v", res)
 	}
 }
 
@@ -836,38 +923,99 @@ func TestConfigReadNamesTheNewestApproval(t *testing.T) {
 }
 
 // A stream pruned past the acknowledgement but not past an open change keeps
-// the change open: it is raised at start, and a read is not compared (C6 on
-// #390, G2).
+// the change open against the held baseline: it is raised at start, and a
+// read of it again is the same change (C6 on #390, G2; D4-41).
 func TestConfigChainPrunedPastTheAcknowledgement(t *testing.T) {
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
 	ack := n.ack(base, "")
 	n.read("ok-all-present")
-	if err := n.s.configChain().sync(bg, n.r.Store(AuditStream)); err != nil {
-		t.Fatal(err)
+	n.pruneAudit(ack)
+	n.s = newScheduler(t, n.r, n.f)
+	a := n.s.configChain().assets[relayID]
+	if a == nil || len(a.open) != 1 || a.baseline != base || !a.held {
+		t.Fatalf("pruned fold %+v, want one open change against %s", a, base)
 	}
-	full := n.s.configChain().assets[relayID].open
-	if len(full) != 1 {
-		t.Fatalf("open %v", full)
-	}
-	// The fold as a stream whose first retained record is the one after the
-	// acknowledgement leaves it.
-	pruned := &configChain{pruned: true, first: ack + 1, through: ack,
-		runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{}, assets: map[string]*chainAsset{}}
-	if err := pruned.sync(bg, n.r.Store(AuditStream)); err != nil {
-		t.Fatal(err)
-	}
-	if got := pruned.assets[relayID]; got == nil || !slices.Equal(got.open, full) || got.baseline != base {
-		t.Fatalf("pruned fold %+v, want open %v against %s", got, full, base)
-	}
-	n.s.chain = pruned
-	n.s.clearQuietKey(fmt.Sprintf("unapproved %s %d", relayID, full[0]))
-	n.s.raiseOpenChanges(bg)
 	if c := countAlarms(n.st, AlarmUnapprovedChange); c != 2 {
-		t.Fatalf("%d unapproved-change alarms, want the open change raised again", c)
+		t.Fatalf("%d unapproved-change alarms, want the open change raised again at start", c)
 	}
-	if rep := n.read("ok-all-present"); rep.Alarm != AlarmConfigNotCompared {
+	n.read("ok-all-present")
+	if res := n.pruned(); len(res) != 2 || res[1].ReasonCode != audit.ReasonSameChange || res[1].Config.ChangeSeq != uint64(a.open[0]) {
+		t.Fatalf("%+v", res)
+	}
+}
+
+// Nothing of the node's register copy reaches the collector (C3 on #390,
+// #383 condition A1): no request of a configuration read holds the
+// envelope's payload digest, a byte of the envelope's payload, or a line of
+// the run the register renders. The collector renders from its own copy.
+func TestConfigReadSendsNothingOfTheRegister(t *testing.T) {
+	n := newCfgNode(t)
+	var sent []string
+	answer := n.f.answer
+	n.f.answer = func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		b, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent = append(sent, string(b))
+		return answer(req)
+	}
+	n.read("ok")
+	lines, err := n.r.commands.RenderRun("sel.config.read_all")
+	if err != nil || len(lines) == 0 {
+		t.Fatalf("rendered %v: %v", lines, err)
+	}
+	env, err := os.ReadFile(n.r.cfg.Register.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e struct {
+		Payload string `json:"payload"`
+	}
+	if err := json.Unmarshal(env, &e); err != nil || e.Payload == "" {
+		t.Fatalf("envelope payload: %v", err)
+	}
+	if len(sent) == 0 {
+		t.Fatal("no request sent")
+	}
+	for _, req := range sent {
+		for _, bad := range append([]string{n.r.cfg.Register.PayloadSHA256, e.Payload}, lines...) {
+			if strings.Contains(req, bad) {
+				t.Fatalf("a request holds %q of the register: %s", bad, req)
+			}
+		}
+	}
+}
+
+// In a pruned fold the configuration baseline is the newest held baseline
+// whose document is a C9 snapshot: an event baseline held under a newer
+// acknowledgement is not taken for it (D4-41: the kind is the document's).
+func TestConfigChainPrunedHeldBaselineKind(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	stream := ConfigStream(relayID)
+	eb := canonicalBaseline(t)
+	seq, err := n.s.storeConfig(bg, stream, eb, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := n.decide(authz.KindNodeBaselineAck, &audit.Record{Action: audit.ActionConfigBaselineAcknowledge,
+		Config: &audit.Config{Kind: authz.BaselineEvent, BaselineDigest: config.Digest(eb)}})
+	if err := n.r.Store(stream).Hold(bg, c5.Hold{Stream: stream, Seq: seq, Reason: reasonAt(n.r, ev, c5.HoldBaseline)}); err != nil {
+		t.Fatal(err)
+	}
+	n.read("ok")
+	n.pruneAudit(ev)
+	n.s.chain = nil
+	if rep := n.read("ok"); rep.Alarm != "" {
 		t.Fatalf("%+v", rep)
+	}
+	res := n.pruned()
+	if last := res[len(res)-1]; last.ReasonCode != audit.ReasonNoDifference || last.Config.BaselineDigest != base {
+		t.Fatalf("%+v", last)
 	}
 }

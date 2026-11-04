@@ -154,24 +154,10 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	stream := ConfigStream(col.AssetID)
 	cdb := s.rt.Store(stream)
 	st := ch.asset(col.AssetID)
-	if st.inferred {
-		return notCompared("pruned", fmt.Sprintf("the acknowledgement of baseline %s was pruned from the audit stream", st.baseline))
+	if err := ch.findBaseline(ctx, st, col.AssetID); err != nil {
+		return notCompared("holds", err.Error())
 	}
 	if st.baseline == "" {
-		if ch.pruned {
-			// The acknowledgement may be before the retained chain: a
-			// baseline hold from before it says so (C8 0.9 makes the rest of
-			// the pruned case checkable).
-			held, err := cdb.Held(ctx, stream)
-			if err != nil {
-				return notCompared("holds", err.Error())
-			}
-			for _, h := range held {
-				if h.Reason.Code == c5.HoldBaseline && h.Reason.Ref.Seq < ch.first {
-					return notCompared("pruned", fmt.Sprintf("the acknowledgement of the baseline (audit record %d) was pruned from the audit stream", h.Reason.Ref.Seq))
-				}
-			}
-		}
 		return rep // the snapshot awaits an acknowledgement
 	}
 	if !ch.hasRun(col.AssetID, col.Operation, readSeq) {

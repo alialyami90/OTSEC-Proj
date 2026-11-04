@@ -175,11 +175,13 @@ Everything the record names comes from the audit chain. The node folds it from t
 
 A difference over the record cap (`ConfigRecordBytes`) is not stored, since C9 0.3 does not bound it. The change is still recorded from the comparison the node holds: `config.change_detected` names its digest, the snapshot is held, and the alarm says the difference was not stored (`config-unapproved-change`, or `collection-evidence-not-stored` for an approved change). The start-up reconcile then finds that difference missing, so it releases nothing in that stream. C9 0.4 is to bound the difference.
 
+**A pruned audit stream (D4-41).** The fold starts again from the first retained record whenever records before it were pruned, at the first sync or between two (C3 on #390), so it never carries on as though nothing were missing. In such a fold, an asset with no acknowledgement in the view takes its configuration baseline from the store: of its records held `baseline`, the one with the newest Ref whose document is a C9 snapshot. Reads compare against it. Its changes in the view stay open until a restore or a configuration acknowledgement in the view ends them, as in the full fold. An approval counts only with its decision (an allowed, verified `collector.request` of `node.change_approval`) in the same epoch of the view, so one before the prune covers nothing and the change is alarmed.
+
 Every document and record is committed with `AppendBatch`, so an error never leaves behind a record that committed anyway.
 
 **Alarms**, all level 0, named by asset:
 - `config-unapproved-change`: raised once for each unapproved change, and again at start for each change the chain shows still open.
-- `config-not-compared`: the snapshot is stored and not compared. It is raised once per asset and cause, and a comparison that succeeds clears it, so a cause that returns raises it again. The baseline or the snapshot does not compare, nothing retained in the chain bounds the change, or the audit stream was pruned past the acknowledgement. That last case is known from a `baseline` hold whose Ref is below the first retained audit record.
+- `config-not-compared`: the snapshot is stored and not compared. It is raised once per asset and cause, and a comparison that succeeds clears it, so a cause that returns raises it again. The baseline or the snapshot does not compare, nothing retained in the chain bounds the change, or the configuration store's holds cannot be read.
 - `config-baseline-not-stored`: the acknowledged baseline is not in the stream.
 - `collection-audit-unavailable`: the read's decision is not in the chain, or the result could not be written. The stored records stay unheld, and the next read compares again.
 
@@ -188,7 +190,6 @@ A crash between the record and a hold is repaired by the start-up reconcile. Its
 **Not yet:**
 - The node side of `node.baseline_ack` and `node.change_approval`. Until it is built, no acknowledgement or approval reaches the chain on a real node, so every read awaits an acknowledgement.
 - Rule 3's remover of compared reads.
-- Comparison across a pruned audit stream beyond the acknowledgement check above (C8 0.9's `VerifyConfigFrom`).
 
 ## Slow commits (B6 #294, B1's question)
 

@@ -2,12 +2,15 @@ package node
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/config"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/store"
 )
@@ -19,10 +22,9 @@ import (
 // after that from where it stopped, before each comparison.
 type configChain struct {
 	through c5.Seq // the last audit seq folded
-	// pruned: the stream began past seq 1 when it was first folded, at
-	// first. Records before first may set state this fold cannot see.
+	// pruned: records before the first one folded were pruned, so this
+	// fold cannot see what they set (restart).
 	pruned bool
-	first  c5.Seq
 	// resetAt is the time of the collector.seq_reset that began this
 	// epoch, "" in the first.
 	resetAt string
@@ -30,9 +32,15 @@ type configChain struct {
 	// in chain order.
 	runs map[assetOp][]chainRun
 	// approvals are each asset's succeeded config.change_approved records
-	// of this epoch, in chain order.
+	// of this epoch whose decision is in it, in chain order.
 	approvals map[string][]*audit.Record
+	// decisions are this epoch's allowed, verified collector.request
+	// records: the kind of each, by collector_seq.
+	decisions map[uint64]authz.RequestKind
 	assets    map[string]*chainAsset
+	// held finds an asset's configuration baseline from the store's
+	// baseline hold, for a pruned fold (D4-41): "" when none is held.
+	held func(ctx context.Context, assetID string) (string, error)
 }
 
 type assetOp struct{ asset, op string }
@@ -55,11 +63,11 @@ type chainAsset struct {
 	alarmed bool
 	// open are the audit seqs of the open unapproved changes.
 	open []c5.Seq
-	// inferred: the stream was pruned past the acknowledgement, and baseline
-	// is the one the first retained change or restore of the asset names.
-	// Its changes are still open and raised (C6 on #390), and a read is not
-	// compared against it until D4-41's rule is built.
-	inferred bool
+	// held: the fold is pruned and no acknowledgement of the asset is in
+	// it, so baseline is the one the store holds as baseline (D4-41). Its
+	// changes in the fold stay open (C6 on #390), and reads compare
+	// against it.
+	held bool
 }
 
 type chainChange struct {
@@ -69,9 +77,21 @@ type chainChange struct {
 
 func (s *Scheduler) configChain() *configChain {
 	if s.chain == nil {
-		s.chain = &configChain{runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{}, assets: map[string]*chainAsset{}}
+		s.chain = newChain(s.heldBaseline)
 	}
 	return s.chain
+}
+
+func newChain(held func(context.Context, string) (string, error)) *configChain {
+	return &configChain{runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{},
+		decisions: map[uint64]authz.RequestKind{}, assets: map[string]*chainAsset{}, held: held}
+}
+
+// restart begins the fold again as a pruned one at first, the first
+// retained record: what the records before it set is not known.
+func (ch *configChain) restart(first c5.Seq) {
+	*ch = *newChain(ch.held)
+	ch.pruned, ch.through = true, first-1
 }
 
 func (ch *configChain) asset(id string) *chainAsset {
@@ -88,15 +108,6 @@ func (ch *configChain) sync(ctx context.Context, db *store.DB) error {
 	if db == nil {
 		return fmt.Errorf("audit database not open")
 	}
-	if ch.through == 0 {
-		first, err := db.FirstRetained(ctx, AuditStream)
-		if err != nil {
-			return err
-		}
-		if first > 1 {
-			ch.pruned, ch.first, ch.through = true, first, first-1
-		}
-	}
 	for {
 		got, err := db.Read(ctx, AuditStream, ch.through, 500)
 		if err != nil {
@@ -106,10 +117,25 @@ func (ch *configChain) sync(ctx context.Context, db *store.DB) error {
 			return nil
 		}
 		for _, st := range got {
+			if st.Key.Seq != ch.through+1 {
+				// Records were pruned before they were folded, at the first
+				// sync or between two (C3 on #390): the fold starts again
+				// from the first one retained.
+				ch.restart(st.Key.Seq)
+			}
 			if folded(st.Event) {
 				rec, err := audit.ParseRecord(st.Event)
 				if err != nil {
 					return badRecord{st.Key.Seq, err}
+				}
+				if rec.Target != nil && (rec.Action == audit.ActionConfigChangeDetected || rec.Action == audit.ActionConfigBaselineRestored) {
+					if err := ch.findBaseline(ctx, ch.asset(rec.Target.AssetID), rec.Target.AssetID); err != nil && rec.Config != nil {
+						// The store cannot be read: the record's own
+						// baseline, which the node wrote it against, keeps
+						// the change open.
+						a := ch.asset(rec.Target.AssetID)
+						a.baseline, a.held = rec.Config.BaselineDigest, true
+					}
 				}
 				ch.apply(st.Key.Seq, rec)
 			}
@@ -130,19 +156,24 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 	switch {
 	case r.Action == audit.ActionCollectorSeqReset:
 		ch.resetAt = r.Time.UTC
-		ch.runs, ch.approvals = map[assetOp][]chainRun{}, map[string][]*audit.Record{}
+		ch.runs, ch.approvals, ch.decisions = map[assetOp][]chainRun{}, map[string][]*audit.Record{}, map[uint64]authz.RequestKind{}
+	case r.Action == audit.ActionCollectorRequest && r.Outcome == audit.OutcomeAllowed && r.Verified != nil:
+		ch.decisions[r.CollectorSeq] = r.Verified.Kind
 	case r.Action == audit.ActionCollectorRequest && r.Outcome == audit.OutcomeAllowed && r.Verified == nil && r.OperationID != "" && r.Target != nil:
 		k := assetOp{r.Target.AssetID, r.OperationID}
 		ch.runs[k] = append(ch.runs[k], chainRun{r.CollectorSeq, r.Time.UTC})
 	case c == nil || r.Target == nil:
 	case r.Action == audit.ActionConfigChangeApproved && r.Outcome == audit.OutcomeSucceeded:
-		ch.approvals[r.Target.AssetID] = append(ch.approvals[r.Target.AssetID], r)
+		// Only with its decision, as audit.VerifyConfig checks (C3 on #390):
+		// an approval whose decision is not in the epoch silences nothing.
+		if ch.decisions[c.DecisionSeq] == authz.KindNodeChangeApproval {
+			ch.approvals[r.Target.AssetID] = append(ch.approvals[r.Target.AssetID], r)
+		}
 	case r.Action == audit.ActionConfigBaselineAcknowledge && r.Outcome == audit.OutcomeSucceeded && c.Kind == authz.BaselineConfiguration:
 		// D4-18: the acknowledgement ends every open change of the asset.
 		*ch.asset(r.Target.AssetID) = chainAsset{baseline: c.BaselineDigest}
 	case r.Action == audit.ActionConfigChangeDetected:
 		a := ch.asset(r.Target.AssetID)
-		ch.infer(a, c.BaselineDigest)
 		if c.BaselineDigest != a.baseline {
 			return
 		}
@@ -152,21 +183,57 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 		}
 	case r.Action == audit.ActionConfigBaselineRestored:
 		a := ch.asset(r.Target.AssetID)
-		ch.infer(a, c.BaselineDigest)
 		if c.BaselineDigest == a.baseline {
 			a.last, a.alarmed, a.open = nil, false, nil
 		}
 	}
 }
 
-// infer takes digest as the asset's baseline in a pruned stream with no
-// acknowledgement of the asset before it: the node writes a change or a
-// restore only against its acknowledged baseline, and a later baseline
-// needs an acknowledgement, which would be retained.
-func (ch *configChain) infer(a *chainAsset, digest string) {
-	if ch.pruned && a.baseline == "" {
-		a.baseline, a.inferred = digest, true
+// findBaseline sets the asset's baseline, in a pruned fold with no
+// acknowledgement of it, to the one the store holds as baseline (D4-41).
+// It looks once; a later acknowledgement in the fold replaces it.
+func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID string) error {
+	if !ch.pruned || a.baseline != "" || a.held || ch.held == nil {
+		return nil
 	}
+	d, err := ch.held(ctx, assetID)
+	if err != nil {
+		return err
+	}
+	a.baseline, a.held = d, true
+	return nil
+}
+
+// heldBaseline is the asset's configuration baseline as the store holds it
+// (D4-41): of the records held as baseline, the one whose Ref is newest and
+// whose document is a C9 snapshot (the kind is the document's, as an event
+// baseline is held the same way). "" when none is.
+func (s *Scheduler) heldBaseline(ctx context.Context, assetID string) (string, error) {
+	stream := ConfigStream(assetID)
+	db := s.rt.Store(stream)
+	if db == nil {
+		return "", errors.New("configuration database not open")
+	}
+	held, err := db.Held(ctx, stream)
+	if err != nil {
+		return "", err
+	}
+	slices.SortFunc(held, func(a, b c5.HeldRecord) int { return cmp.Compare(b.Reason.Ref.Seq, a.Reason.Ref.Seq) })
+	for _, h := range held {
+		if h.Reason.Code != c5.HoldBaseline {
+			continue
+		}
+		got, err := db.Read(ctx, stream, h.Seq-1, 1)
+		if err != nil {
+			return "", err
+		}
+		if len(got) == 1 && got[0].Key.Seq == h.Seq {
+			if _, err := config.DecodeSnapshot(got[0].Event); err == nil {
+				return config.Digest(got[0].Event), nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // hasRun reports whether the decision readSeq is an allowed run of op on the
