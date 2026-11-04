@@ -39,8 +39,10 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -48,7 +50,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import SERVICE, Slice
+from slicerun import CHECK, SERVICE, Slice
 from test_slice_gtinj_feed_e2e import Clock, _query, _stamp, _status
 
 CONFIG = os.path.join(harness.REPO, "tests", "integration", "gt_inj", "config.json")
@@ -200,6 +202,7 @@ class _Run:
             s.layout["store_dir"], "SELECT event FROM events WHERE stream = ? ORDER BY seq", "audit")]
         out["slicehelper"] = s.exe("slicehelper")
         out["sim"] = [harness.read_log(log) for log in s.sim_logs]
+        out["sim_logs"] = list(s.sim_logs)
         with open(s.layout["node_config"], encoding="utf-8") as f:
             out["node_config"] = json.load(f)
         return out
@@ -396,11 +399,37 @@ def test_v_m3_the_configuration_is_read_by_sho_over_telnet_only(runs, cid):
             elif r["event"] in ("exec", "break", "device_effect"):
                 other.append(r)
     assert not other, other
-    assert len(sessions) == len(_results(o)) + 1, sorted(sessions)  # R0, Rm, R1 and one more
+    # One session per read: R0 (no result record: its snapshot awaits the
+    # acknowledgement), Rm, R1 and R1 + 75.
+    assert len(sessions) == len(_results(o)) + 1, sorted(sessions)
     for key, got in sessions.items():
         assert got == ["QUI", "ID", "ACC", *run, "QUI"], (key, got)
     (asset,) = [a for a in o["node_config"]["assets"] if a["asset_id"] == o["layout"]["asset_id"]]
     assert [e["transport"] for e in asset["endpoints"]] == ["telnet"], asset["endpoints"]
+
+
+@pytest.mark.parametrize("cid", IDS)
+def test_v_s7_check_py_passes_every_recording_with_the_revision_5_lines(runs, cid):
+    # V-S7 (b) with the register revision 5 lines (the Phase 4 first exit
+    # gate): check.py over every recording, against a register built from
+    # the signed register itself, its operations and session lines read-only
+    # and its denied patterns state-changing. So no line outside it, none
+    # before a prompt, none non-printable, no second password and no device
+    # effect.
+    o = _of(runs, cid)
+    reg = _register()
+    commands = [{"id": e["id"], "pattern": re.escape(e["line"]), "classification": "read-only"}
+                for e in reg["operations"] + reg["session_control"]]
+    commands += [{"id": e["id"], "pattern": e["pattern"], "classification": "state-changing"} for e in reg["denied"]]
+    path = os.path.join(o["layout"]["root"], "check-register.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"commands": commands}, f)
+    assert o["sim_logs"], o["sim_logs"]
+    for log in o["sim_logs"]:
+        out = subprocess.run([sys.executable, CHECK, "--log", log, "--register", path], capture_output=True, text=True)
+        report = json.loads(out.stdout)
+        assert out.returncode == 0 and report["pass"] and not report["violations"], (log, report)
+        assert report["commands_received"] > 0, (log, report)
 
 
 def test_v_m3_the_node_binary_refuses_a_chosen_method_at_start(tmp_path):
