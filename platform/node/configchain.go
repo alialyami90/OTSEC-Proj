@@ -45,12 +45,13 @@ type configChain struct {
 }
 
 // heldConfig is an asset's configuration state as the store's holds keep
-// it: the baseline held as baseline ("" when none is), and the unapproved
-// changes against it that are still open.
+// it: the baseline held as baseline ("" when none is), the unapproved
+// changes against it that are still open, the approved ones no return has
+// ended, and the newest of both.
 type heldConfig struct {
-	baseline string
-	open     []c5.Seq
-	last     *chainChange
+	baseline       string
+	open, approved []c5.Seq
+	last           *chainChange
 }
 
 type assetOp struct{ asset, op string }
@@ -71,8 +72,10 @@ type chainAsset struct {
 	// alarmed: an unapproved change against the baseline is open, so no
 	// approval silences a later one.
 	alarmed bool
-	// open are the audit seqs of the open unapproved changes.
-	open []c5.Seq
+	// open are the audit seqs of the open unapproved changes, approved
+	// those of the approved changes since the baseline, which a return
+	// ends too (D4-43).
+	open, approved []c5.Seq
 	// held: the fold is pruned and no acknowledgement of the asset is in
 	// it, so baseline, and the changes open against it before the fold,
 	// are the ones the store holds (D4-41; C3 on #390, B3). Its changes in
@@ -190,11 +193,13 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 		a.last = &chainChange{seq, c.ChangesDigest}
 		if c.ApprovalSeq == 0 {
 			a.alarmed, a.open = true, append(a.open, seq)
+		} else {
+			a.approved = append(a.approved, seq)
 		}
 	case r.Action == audit.ActionConfigBaselineRestored:
 		a := ch.asset(r.Target.AssetID)
 		if c.BaselineDigest == a.baseline {
-			a.last, a.alarmed, a.open = nil, false, nil
+			a.last, a.alarmed, a.open, a.approved = nil, false, nil, nil
 		}
 	}
 }
@@ -212,7 +217,7 @@ func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID 
 	if err != nil {
 		return err
 	}
-	a.baseline, a.held, a.open, a.last, a.alarmed = h.baseline, true, h.open, h.last, len(h.open) > 0
+	a.baseline, a.held, a.open, a.approved, a.last, a.alarmed = h.baseline, true, h.open, h.approved, h.last, len(h.open) > 0
 	return nil
 }
 
@@ -221,12 +226,13 @@ func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID 
 // baseline, the one whose Ref is newest and whose document is a C9
 // snapshot (the kind is the document's, as an event baseline is held the
 // same way). The open changes are the Refs of the records held as
-// unapproved-difference between that acknowledgement and first: a restore
-// moves them to restored-difference when it is written, and one before
-// the acknowledgement was a change against an earlier baseline. The newest
-// is the last change; its changes digest is its held difference's, or ""
-// when that was not stored, so a read of the same change is recorded as a
-// new one, which the alarm keeps unapproved.
+// unapproved-difference between that acknowledgement and first, and the
+// approved ones those held as approved-difference: a restore moves both to
+// restored-difference when it is written (D4-43), and one before the
+// acknowledgement was a change against an earlier baseline. The newest of
+// both is the last change; its changes digest is its held difference's,
+// or "" when that was not stored, so a read of the same change is recorded
+// as a new one, which an open alarm keeps unapproved.
 func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error) {
 	var out heldConfig
 	stream := ConfigStream(assetID)
@@ -265,11 +271,17 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 	}
 	for _, h := range held {
 		ref := h.Reason.Ref.Seq
-		if h.Reason.Code != c5.HoldUnapprovedDifference || ref <= acked || ref >= first {
+		list := &out.open
+		switch {
+		case ref <= acked || ref >= first:
+			continue
+		case h.Reason.Code == c5.HoldApprovedDifference:
+			list = &out.approved
+		case h.Reason.Code != c5.HoldUnapprovedDifference:
 			continue
 		}
-		if !slices.Contains(out.open, ref) {
-			out.open = append(out.open, ref)
+		if !slices.Contains(*list, ref) {
+			*list = append(*list, ref)
 		}
 		if out.last == nil {
 			out.last = &chainChange{seq: ref}
@@ -285,6 +297,7 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 		}
 	}
 	slices.Reverse(out.open)
+	slices.Reverse(out.approved)
 	return out, nil
 }
 

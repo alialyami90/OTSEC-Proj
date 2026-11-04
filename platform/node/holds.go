@@ -36,7 +36,9 @@ import (
 //     stay held as HoldAcknowledgedDifference, same Ref, until a retention
 //     rule for configuration evidence says otherwise. A return to the
 //     baseline ends the alarm the same way, under HoldRestoredDifference
-//     (D4-19).
+//     (D4-19), and moves the approved changes since the baseline's
+//     acknowledgement there too (D4-43), so a pruned fold can tell a
+//     change that is still the last one from one a return ended.
 //
 // A record is held for one reason. When one is wanted for two, the baseline
 // wins, as the acknowledgement that made it the baseline is the later word.
@@ -83,8 +85,11 @@ type assetHolds struct {
 	// returned are the changes whose alarm a return to the baseline ended
 	// (D4-19): held the same way, under their own code.
 	returned []openDifference
-	// approved are the changes an approval covered (C5 0.7).
+	// approved are the changes an approval covered (C5 0.7). Those from
+	// since on are against the current configuration baseline, until a
+	// return moves them to returned (D4-43).
 	approved []openDifference
+	since    int
 	// superseded are the baselines a newer acknowledgement of the same kind
 	// replaced, with that acknowledgement's seq as ref (C5 0.7).
 	superseded []ackedBaseline
@@ -121,7 +126,7 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 			a.baseline[c.Kind] = ackedBaseline{c.BaselineDigest, s.seq}
 			if c.Kind == authz.BaselineConfiguration {
 				a.ended = append(a.ended, a.open...) // D4-18: the alarm ends, the evidence stays held
-				a.open = nil
+				a.open, a.since = nil, len(a.approved)
 			}
 		case audit.ActionConfigChangeDetected:
 			a := of(r)
@@ -143,6 +148,10 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 				}
 			}
 			a.open = slices.DeleteFunc(a.open, func(o openDifference) bool { return o.baseline == c.BaselineDigest })
+			if b, ok := a.baseline[authz.BaselineConfiguration]; ok && b.digest == c.BaselineDigest {
+				a.returned = append(a.returned, a.approved[a.since:]...)
+				a.approved = a.approved[:a.since]
+			}
 		}
 	}
 	return out

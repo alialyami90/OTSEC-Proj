@@ -187,7 +187,7 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 		if _, err := s.writeConfigRecord(ctx, rep, col, audit.ActionConfigBaselineRestored, audit.OutcomeInfo, "", c); err != nil {
 			return s.recorded(ctx, rep, col, err)
 		}
-		s.restoreHolds(ctx, col.AssetID, st.open)
+		s.restoreHolds(ctx, col.AssetID, append(slices.Clone(st.open), st.approved...))
 		for _, ref := range st.open {
 			s.clearQuietKey(fmt.Sprintf("unapproved %s %d", col.AssetID, ref))
 		}
@@ -333,8 +333,9 @@ func (s *Scheduler) holdConfig(ctx context.Context, assetID string, stream c5.St
 	}
 }
 
-// restoreHolds moves the holds of the open unapproved changes, refs, to
-// restored-difference, keeping each one's ref (D4-19).
+// restoreHolds moves the holds of the changes a return to the baseline
+// ends, refs, to restored-difference, keeping each one's ref: the open
+// unapproved ones (D4-19) and the approved ones (D4-43).
 func (s *Scheduler) restoreHolds(ctx context.Context, assetID string, refs []c5.Seq) {
 	stream := ConfigStream(assetID)
 	db := s.rt.Store(stream)
@@ -344,7 +345,7 @@ func (s *Scheduler) restoreHolds(ctx context.Context, assetID string, refs []c5.
 		return
 	}
 	for _, h := range held {
-		if h.Reason.Code == c5.HoldUnapprovedDifference && slices.Contains(refs, h.Reason.Ref.Seq) {
+		if (h.Reason.Code == c5.HoldUnapprovedDifference || h.Reason.Code == c5.HoldApprovedDifference) && slices.Contains(refs, h.Reason.Ref.Seq) {
 			s.holdConfig(ctx, assetID, stream, h.Seq, c5.HoldRestoredDifference, h.Reason.Ref.Seq)
 		}
 	}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1135,5 +1137,139 @@ func TestConfigChainPrunedHoldsUnreadable(t *testing.T) {
 	}
 	if a := ch.assets[relayID]; a == nil || len(a.open) != 1 || !a.alarmed || a.baseline != base {
 		t.Fatalf("fold %+v, want one open change against %s", a, base)
+	}
+}
+
+// A pruned fold takes the last change from the newest held difference of
+// either code (D4-43): after a prune past an approved change, a return to
+// the baseline is a restore, and it moves the approved change's holds to
+// restored-difference. The whole chain, with the pruned records kept aside,
+// verifies.
+func TestConfigChainPrunedApprovedChange(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present")
+	before := n.results()
+	change := before[len(before)-1]
+	if change.ReasonCode != audit.ReasonApprovedChange {
+		t.Fatalf("%+v", change)
+	}
+	n.read("failed.timeout-in-run")
+	full := auditRecords(t, n.r)
+	n.pruneAudit(c5.Seq(change.Seq))
+	n.s = newScheduler(t, n.r, n.f)
+	n.read("ok")
+	for _, r := range auditRecords(t, n.r) {
+		if r.Seq > full[len(full)-1].Seq {
+			full = append(full, r)
+		}
+	}
+	if err := audit.VerifyConfig(full); err != nil {
+		t.Fatalf("the whole chain does not verify: %v", err)
+	}
+	if res := n.pruned(); len(res) != 1 || res[0].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	for seq, code := range n.holds() {
+		if code == c5.HoldApprovedDifference {
+			t.Errorf("record %d still held as %s after the restore", seq, code)
+		}
+	}
+}
+
+// A return to the baseline moves an approved change's holds to
+// restored-difference (D4-43), and the reconcile at the next start wants
+// the same, so it corrects nothing.
+func TestConfigReadRestoreEndsApprovedChange(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present")
+	n.read("ok")
+	if res := n.results(); len(res) != 2 || res[0].ReasonCode != audit.ReasonApprovedChange || res[1].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	held := n.holds()
+	var restored int
+	for _, code := range held {
+		if code == c5.HoldApprovedDifference {
+			t.Fatalf("holds %v: the approved change is still held as approved", held)
+		}
+		if code == c5.HoldRestoredDifference {
+			restored++
+		}
+	}
+	if restored != 2 {
+		t.Fatalf("holds %v, want the change's snapshot and difference restored-difference", held)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	n.r = r
+	if reconciled(st.Snapshot("x").Alarms) != 0 {
+		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
+	}
+	if got := n.holds(); !maps.Equal(got, held) {
+		t.Fatalf("holds %v after restart, before %v", got, held)
+	}
+}
+
+// cfgNodeOn is newCfgNode on a runtime the test started, so it can restart
+// it.
+func cfgNodeOn(t *testing.T, r *Runtime, st *Status) *cfgNode {
+	n := &cfgNode{t: t, r: r, st: st, seq: 10}
+	n.f = &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		n.seq++
+		raw, _ := json.Marshal(n.next)
+		return collectorclient.Response{Reply: accepted(req, n.seq), Outcome: &collectorclient.Outcome{InvocationID: okInvocation, Result: n.next, ResultJSON: raw}}, nil
+	}}
+	n.s = newScheduler(t, r, n.f)
+	return n
+}
+
+// A return ends only the approved changes since the baseline's
+// acknowledgement (D4-43): one approved against an earlier baseline stays
+// approved-difference, in the writer and in the reconcile at the next
+// start.
+func TestConfigReadRestoreLeavesEarlierApprovals(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base, changed := n.snapshotOf("ok"), n.snapshotOf("ok-all-present")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present") // approved, against base
+	ack := n.ack(changed, base)
+	// The node side of node.baseline_ack, not built yet, will re-code the
+	// replaced baseline's hold as the reconcile does.
+	stream := ConfigStream(relayID)
+	if err := n.r.Store(stream).Hold(bg, c5.Hold{Stream: stream, Seq: 1, Reason: reasonAt(n.r, ack, c5.HoldSupersededBaseline)}); err != nil {
+		t.Fatal(err)
+	}
+	n.compareDoc(n.changed("X9")) // unapproved, against changed
+	n.read("ok-all-present")
+	res := n.results()
+	if len(res) != 3 || res[0].ReasonCode != audit.ReasonApprovedChange || res[1].ReasonCode != audit.ReasonUnapprovedChange ||
+		res[2].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	held := n.holds()
+	if !slices.Contains(slices.Collect(maps.Values(held)), c5.HoldApprovedDifference) {
+		t.Fatalf("holds %v: the earlier approved change is no longer approved-difference", held)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	n.r = r
+	if reconciled(st.Snapshot("x").Alarms) != 0 {
+		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
 	}
 }
