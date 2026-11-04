@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.8: the audit record every module
+// Package audit is contract C8, otsec.audit/0.9: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -339,6 +339,49 @@
 // A record stamped 0.7 or earlier cannot carry config.baseline_recorded or
 // baseline_version.
 //
+// # Checkpoints that do not restore (0.9)
+//
+// The node checkpoints each half of an asset's event baseline, the learner
+// and the detector, as working state in the asset's configuration stream
+// (D4-32). A checkpoint is not evidence and no record names it while it
+// restores. When the newest committed checkpoint of a half does not restore
+// (D4-36 item 2), the node raises an alarm and writes
+// config.checkpoint_not_restored, and never falls back to an older one:
+//
+//   - warning, written by the node, with a target asset; the reason code is
+//     why: corrupt, version, mismatch or refused (a closed set);
+//   - kind event, checkpoint_half (learner or detector) and checkpoint_seq,
+//     the checkpoint record's seq in the asset's configuration stream;
+//   - correlation_id eventcheckpoint.<half>:<checkpoint_seq>, the C5 series
+//     and seq of the record, the same when a restart finds it again;
+//   - for a learner, which starts the audited re-learn of D4-26: the
+//     baseline_version it will record and, from version 2, previous_digest,
+//     the baseline it will replace; no baseline_digest;
+//   - for a detector, which is rebuilt from the acknowledged baseline:
+//     baseline_digest of that baseline, and no version or previous_digest.
+//
+// VerifyConfig checks a learner's against the latest config.baseline_recorded
+// of its asset before it in recs (the next version, replacing that digest),
+// or holds it to version 1 when recs has the asset's version-1 recording
+// after it; and a detector's against the event baseline the latest
+// succeeded acknowledgement before it set. With neither in recs, nothing is
+// checked. A record stamped 0.8 or earlier cannot carry the action,
+// checkpoint_half or checkpoint_seq.
+//
+// # A pruned chain (0.9)
+//
+// A node prunes its audit stream once its records are forwarded, so the
+// records it holds start after the chain's first. VerifyConfig on such a
+// view finds references to records that are gone and fails.
+// VerifyConfigFrom(recs, first) checks the view from seq first, the record
+// after the node's recorded prune point. A reference to what came before
+// the view (a chain seq below first, a decision below the lowest that the
+// view's first epoch records, or state the view has not yet shown) is
+// unknown, and every other reference must resolve (D4-40 item 8). That the
+// view is the retained chain, linked in full from the prune point's
+// checkpoint, is checked by VerifyChain; the full chain stays verifiable
+// upstream.
+//
 // # What it leaves out
 //
 //   - Secrets, full configurations and raw device output. Values that need
@@ -403,6 +446,6 @@
 //
 // # Requirements and threat-model entries served
 //
-// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4, R4.8 (the event baseline, 0.8),
+// R2.4 (session auditing), R3.4 and R3.6 (approved changes, 0.5), R4.4, R4.8 (the event baseline, 0.8, and its checkpoints, 0.9),
 // AP-2, AP-14, AP-15, AP-17, HR-3, SC-12, V-S8, V-S11 and V-M2.
 package audit
