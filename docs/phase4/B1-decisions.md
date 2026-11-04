@@ -695,6 +695,12 @@ Date: 2026-11-04. C1, on C4's question on #387.
   - **the fix (C5's): a node-local required consumer on the audit stream, `HoldsConsumer`,** on the `SuspensionConsumer` precedent (`pruneConsumers`). Its cursor is the last audit seq through which every hold the fold wants is taken. The live path advances it after each hold, and reconcile advances it once nothing is missing. Neither the start-up prune nor the runtime prune passes it, and no C5 contract change is needed. A hold that cannot be taken, for example because its baseline document is missing, stops audit pruning and raises an alarm, as `AlarmSuspensionNotDurable` does;
   - C5 builds it with the node side of `node.baseline_ack`. C6 tests both cases: an acknowledgement followed by a prune within one run, and a crash between the Receipt and the hold followed by a start-up prune.
 
+- **C6's G2 on #390: the same rule holds for the configuration baseline.** A prune can remove the acknowledgement of configuration baseline X and keep a later unapproved `config.change_detected` against X. The writer's chain fold then has no baseline, drops the change, and after a restart its `config-unapproved-change` alarm is not raised again. The ruling:
+  - In a fold whose view starts after the acknowledgement, the configuration baseline is the one the store holds as `baseline` for that asset. The kind is read from the held record's document kind, and when two are held, the highest `Ref.Seq` wins, as in C4's point 1 above.
+  - A `config.change_detected` in the view against that baseline's digest stays open until a record in the view ends it: a restore, a configuration acknowledgement, or an approval that covers it.
+  - A change in the view against any other digest is not open. Its baseline was replaced by an acknowledgement that the prune removed.
+  - C5 builds this in #390's chain fold, using the same baseline lookup as `compareConfig`'s pruned check. C6's G2 probe becomes its test: `open` must be the same for the full fold and the pruned fold.
+
 ## D4-42: an oversize configuration difference is recorded without a stored difference (C2 on #392)
 
 Date: 2026-11-04. C1, on section 4 of `docs/phase4/C2-c9-0.4.md` (C9 0.4, #392).
