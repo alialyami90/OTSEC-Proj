@@ -21,6 +21,9 @@ package contract
 // mutated one way. Evidence class: desk. No device.
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -254,5 +257,50 @@ func TestC6C2V06ARunIsNeverPartial(t *testing.T) {
 	r.Records = nil
 	if err := c6Accepts(t, r); err == nil {
 		t.Fatal("a run reported partial.read_rows_exceeded with no record was accepted")
+	}
+}
+
+// c6Resend rewrites, in place, the operate sends of from as the lines in
+// to, which have the same lengths, so every segment and span stays valid,
+// and recomputes the transcript hash.
+func c6Resend(t *testing.T, r *adapter.Result, from, to []string) {
+	t.Helper()
+	d := bytes.Clone(r.Transcript.Data)
+	k := 0
+	for _, s := range r.Transcript.Segments {
+		if s.Dir != "tx" || s.Phase != adapter.PhaseOperate || k == len(from) {
+			continue
+		}
+		if string(d[s.Offset:s.Offset+s.Length]) == from[k]+"\r\n" {
+			copy(d[s.Offset:], to[k]+"\r\n")
+			k++
+		}
+	}
+	if k != len(from) {
+		t.Fatalf("found %d of the sends %v", k, from)
+	}
+	r.Transcript.Data = d
+	sum := sha256.Sum256(d)
+	r.Transcript.SHA256 = hex.EncodeToString(sum[:])
+}
+
+func TestC6C2V06AFailedRunSentAPrefixOfItsSteps(t *testing.T) {
+	// A failed run has no record, so only its sent lines say what it did:
+	// they must be a prefix of the steps, each once and in order (C2 on
+	// #423). Two sends swapped, and one step sent twice, are refused.
+	cases := map[string][]string{
+		"two steps swapped": {"SHO 4", "SHO 3"},
+		"a step sent twice": {"SHO 3", "SHO 3"},
+	}
+	for _, n := range []string{"failed.timeout-in-run", "failed.config_unparsable"} {
+		for name, to := range cases {
+			t.Run(n+"/"+name, func(t *testing.T) {
+				r := c6ConfigResult(t, n)
+				c6Resend(t, &r, []string{"SHO 3", "SHO 4"}, to)
+				if err := c6Accepts(t, r); err == nil {
+					t.Fatalf("%s with %s was accepted", n, name)
+				}
+			})
+		}
 	}
 }
