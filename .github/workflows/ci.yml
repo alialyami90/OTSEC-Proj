@@ -38,7 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # 45 minutes on Windows, so a package that starts late in the go test
     # step still reaches its own -timeout below (B1 and B6, #252; D4-44).
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 15 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 75 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -76,7 +76,13 @@ jobs:
         run: go test ./...
       - if: runner.os == 'Windows'
         shell: bash
-        run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
+        # MEASUREMENT ONLY, NOT FOR MERGE (C5, D4-44): the same platform/node
+        # on the same runner, parallel, serial, parallel.
+        run: |
+          for p in 4 1 4; do
+            echo "== platform/node with -parallel $p"
+            go test -count=1 -timeout 30m -parallel $p ./platform/node 2>&1 | tail -n 3
+          done
       # The platform/node budget is 720 s on a green Windows run (D4-22,
       # D4-44). This prints the package's time and its ten slowest tests, and
       # warns when it is over the budget. It never fails the job.
