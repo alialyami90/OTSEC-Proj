@@ -32,7 +32,8 @@ type Collector interface {
 
 // Health event types the scheduler writes. Each run ends with exactly one
 // of them on platform/health; a quarantine also goes to the asset's
-// quarantine stream.
+// quarantine stream. collection.missed is the exception: it is written once
+// for a series of slots that stored none of the others (missed.go).
 const (
 	HealthCollectionRun            = "collection.run"
 	HealthCollectionRefused        = "collection.refused"
@@ -91,6 +92,9 @@ type Scheduler struct {
 	// could not be read, the evidence database not being open; reload
 	// reads it once it is (P3-A5).
 	haltUnread map[string]bool
+	// missed: schedule entry ID: the slots it missed since its last stored
+	// run (missed.go). Kept in memory only.
+	missed map[string]*missedRun
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -100,7 +104,7 @@ type Scheduler struct {
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
-		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}}
+		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -288,13 +292,21 @@ type Report struct {
 	// Detail is the error detail of an outcome that passed its checks:
 	// the collector's own words, never device text (C2).
 	Detail string
+	// stored is true when the run stored its SER rows or one of the
+	// collection.* records above (missed.go).
+	stored bool
 }
 
 // RunOnce runs schedule entry i once. Calls must not overlap: the node
 // runs its schedule from one goroutine (Run), and a run's suspension
 // decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
+	// A missed series is written before the next run's records, so the
+	// read that ends it comes after its gap.
+	s.writeMissed(ctx)
 	rep := s.runOnce(ctx, i)
+	s.noteMissed(i, rep)
+	s.writeMissed(ctx)
 	s.publishHold()
 	if rep.Sent {
 		// The run's records are in the audit stream now. Fold them, so that
@@ -339,6 +351,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		s.raiseOnce(col.AssetID, code, detail)
 		return Report{Alarm: code}
 	}
+	if s.heldMissed(col.ID) {
+		return Report{Alarm: AlarmEvidenceNotStored} // writeMissed raised it
+	}
 	s.clearQuiet(col.AssetID)
 
 	rep := Report{RequestID: s.newID()}
@@ -363,7 +378,7 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	case resp.Reply.Status == "":
 		// No decision was read. If the collector made one, its
 		// collector_seq shows as a gap in the chain (VerifyCollectorSeq).
-		s.health(ctx, HealthCollectionNoDecision, col, rep.RequestID, "", nil)
+		rep.stored = s.health(ctx, HealthCollectionNoDecision, col, rep.RequestID, "", nil)
 		return s.alarm(ctx, rep, col.AssetID, AlarmNoDecision, noDecisionDetail(doErr))
 	case !resp.Reply.Accepted():
 		code := string(authz.RefuseUnknown)
@@ -376,7 +391,7 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		} else {
 			s.rt.opt.Status.Raise(col.AssetID, AlarmAuditUnavailable, "collector.request denied record: "+err.Error())
 		}
-		s.health(ctx, HealthCollectionRefused, col, rep.RequestID, "", map[string]string{"refusal": code})
+		rep.stored = s.health(ctx, HealthCollectionRefused, col, rep.RequestID, "", map[string]string{"refusal": code})
 		if s.adopt(ctx, col.AssetID, resp.Reply) {
 			rep.Alarm = AlarmAssetSuspended
 			return rep
@@ -423,7 +438,7 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 			code = AlarmUnauthorizedLine
 		}
 		s.quarantine(ctx, rep, col, inv, q.Raw, q.Reason, code == AlarmUnauthorizedLine)
-		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, inv, map[string]string{"quarantined": "true"})
+		rep.stored = s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, inv, map[string]string{"quarantined": "true"})
 		if code == AlarmUnauthorizedLine {
 			s.halt(col.AssetID)
 			return s.alarm(ctx, rep, col.AssetID, code, "the outcome holds a line the node's register does not permit for this run; outcome quarantined, collection from this asset stopped")
@@ -431,7 +446,7 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		return s.alarm(ctx, rep, col.AssetID, code, "the outcome failed verification and was quarantined")
 	case resp.Outcome == nil:
 		rep.Outcome = "unknown"
-		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, inv, nil)
+		rep.stored = s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, inv, nil)
 		return s.alarm(ctx, rep, col.AssetID, AlarmOutcomeUnknown, "no outcome arrived for the accepted run")
 	}
 	rep.Outcome = "ok"
@@ -469,7 +484,7 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 		// A refused result is kept as quarantine, never as events.
 		rep.Outcome = "quarantined"
 		s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, err.Error(), false)
-		s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
+		rep.stored = s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
 		return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the normalizer refused the result; kept as quarantine")
 	}
 	// The detail is kept only once the result has passed every check,
@@ -512,16 +527,18 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 				// fault, so the outcome is kept as quarantine (D4-9).
 				rep.Outcome = "quarantined"
 				s.quarantine(ctx, rep, col, o.InvocationID, o.ResultJSON, "the read's events are over the evidence database's commit cap: "+err.Error(), false)
-				s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
+				rep.stored = s.health(ctx, HealthCollectionOutcomeUnknown, col, rep.RequestID, o.InvocationID, map[string]string{"quarantined": "true"})
 				return s.alarm(ctx, rep, col.AssetID, AlarmResultRefused, "the read is over the commit cap; kept as quarantine, nothing stored as events")
 			}
 			return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "SER events: "+err.Error())
 		}
 		rep.Events = len(ser)
+		rep.stored = true
 	}
 	if _, err := log.AppendBatch(ctx, hl); err != nil {
 		return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "health events: "+err.Error())
 	}
+	rep.stored = true
 	if len(ser) == 0 && out.StateChanged {
 		b, err := normalize.EncodeState(out.State)
 		if err == nil {
@@ -587,15 +604,19 @@ func (s *Scheduler) runRecord(stream c5.StreamID, typ string, col Collection, re
 }
 
 // health commits a run health event, best effort: a failure is a store
-// alarm, which status already holds.
-func (s *Scheduler) health(ctx context.Context, typ string, col Collection, requestID, invocationID string, extra map[string]string) {
+// alarm, which status already holds. It reports whether the event was
+// stored.
+func (s *Scheduler) health(ctx context.Context, typ string, col Collection, requestID, invocationID string, extra map[string]string) bool {
 	rec, err := s.runRecord(HealthStream, typ, col, requestID, invocationID, extra)
-	if log := s.rt.Log(HealthStream); err == nil && log != nil {
+	log := s.rt.Log(HealthStream)
+	if err == nil && log != nil {
 		_, err = log.Append(ctx, rec)
 	}
 	if err != nil {
 		s.rt.opt.Status.Raise(col.AssetID, AlarmEvidenceNotStored, typ+": "+err.Error())
+		return false
 	}
+	return log != nil
 }
 
 // requestRecord is the C8 collector.request record of req, a run or an
