@@ -774,3 +774,15 @@ Date: 2026-11-04. C1, on C6's F-020 (`docs/verification.md`, #411).
 - **Two limitations, accepted (C5 on #414, C6's F-021).** Both arise only from a fault (a restart, or a late collection record), and through that fault the end can depend on timing. Without such a fault the end is fixed by the input. The record still states the period it learnt. *(Worded on C5's review of #416.)*
   - **A restart's gap.** It starts at the checkpoint's watermark (`restarted`, #372). When T is set by the duration minimum, a restart after T whose last checkpoint lies before T moves the end later, so the bytes depend on where the last checkpoint fell. The learner really did not durably see that interval, so the gap is part of the input. `restarted` stays as it is.
   - **A late `collection.missed` (F-021).** A record committed more than `FeedLateness` after its series' `first_at` has its gap start clamped to the watermark. Its start then depends on the cadence, and events after the old T may be refused before the gap would have moved T later. Neither `Late` nor `Refused` counts it. The sign is the `evidence.not_stored` alarm raised while the record was not stored (D4-37). *(Corrected on C6's review of #416.)* It stays a limitation unless a measurement shows it happens outside a fault.
+
+## D4-46: a non-semantic configuration change stores both snapshots and no difference (C6 on V-M2)
+
+Date: 2026-11-04. C1, on C6's first V-M2 run on the real binaries.
+
+- **The fact.** For the three non-semantic changes in V-M2's series (a SHO layout change only), the node writes `config.read_compared` with `no_difference`. It stores both snapshots, and it writes no difference record. `tests/integration/gt_inj/config.json` lists "difference R0 to R1" under `expect.stored` for those three, and V-M2's pass condition says the difference is stored in every case.
+- **The ruling: the product is right, and the test reads the oracle that way.**
+  - Under R3.3, a change of layout alone is no difference. C9's `Compare` returns none, so there is no difference to store. Storing an empty difference would record that a change happened when none did.
+  - The evidence of what changed is kept anyway. Both snapshots are stored, and they differ byte for byte, so the layout change can be recovered from them (§1.3).
+  - For a non-semantic change, the V-M2 test therefore requires all of the following: both snapshots stored, the two snapshots' bytes different, `no_difference` in `config.read_compared`, and no difference record. That is how C1 reads "the difference is stored" when there is none.
+- **`config.json` is not edited.** The GT-INJ README says a series changed after a product run is a new series. Changing an `expect` field to match the product's output would be fitting the oracle to the product. This ruling is therefore an interpretation, recorded here and not in the file, and the exit report lists it as made after a product run.
+- **Who.** C6 builds the test this way and cites D4-46. C6 may add the V-M2 leg to the `integration-long` matrix in `ci.yml`, a one-line edit in C1's file that this ruling authorizes. C1 reviews it as the owner.
