@@ -107,8 +107,8 @@ EVENT_SOURCES = r"SYSTEM\CurrentControlSet\Services\EventLog\Application"
 STOPPED, START_PENDING, STOP_PENDING, RUNNING = 1, 2, 3, 4
 
 
-def _go_build(out, pkg):
-    subprocess.run(["go", "build", "-o", out, pkg], cwd=harness.REPO, check=True)
+def _go_build(out, pkg, tags=()):
+    subprocess.run(["go", "build", *(("-tags", ",".join(tags)) if tags else ()), "-o", out, pkg], cwd=harness.REPO, check=True)
 
 
 def check_service_mode():
@@ -430,6 +430,10 @@ class Slice:
         self.start_envs = {}
         self.sim_extra = ()
         self.sim_password = CANARY
+        # The node's build tags and extra arguments: otsec_testclock and
+        # -test-clock for a run on the stepped clock (D4-40, V-M4).
+        self.node_tags = ()
+        self.node_args = ()
         self.service = None
         if SERVICE:
             check_service_mode()
@@ -438,7 +442,7 @@ class Slice:
         return os.path.join(self.bin, name + (".exe" if os.name == "nt" else ""))
 
     def build(self):
-        _go_build(self.exe("otsec"), "./cmd/otsec")
+        _go_build(self.exe("otsec"), "./cmd/otsec", self.node_tags)
         _go_build(self.exe("otsec-collector"), "./cmd/otsec-collector")
         _go_build(self.exe("slicehelper"), "./tests/integration/slice/slicehelper")
 
@@ -512,7 +516,7 @@ class Slice:
         key = os.path.join(self.layout["public_dir"], "install-key.json")
         assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
             "the collector did not publish its install key and socket:\n" + self.text("collector")
-        self.spawn("node", [self.exe("otsec"), "node", "-config", self.layout["node_config"]])
+        self.spawn("node", [self.exe("otsec"), "node", "-config", self.layout["node_config"], *self.node_args])
         # The administrator's signed credential.install goes through the
         # node, which relays it within 15 s, well before its first run
         # (60 s after start); install-credential waits for the decision.

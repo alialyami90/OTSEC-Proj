@@ -122,6 +122,10 @@ type Layout struct {
 	SyslogTLS    string `json:"syslog_tls,omitempty"`
 	SenderCert   string `json:"sender_cert,omitempty"`
 	SenderKey    string `json:"sender_key,omitempty"`
+	// The GT-INJ Syslog asset (V-M4), when -gtinj-events is set: it sends
+	// from GTINJSender to the syslog-udp listener.
+	GTINJAsset  string `json:"gtinj_asset,omitempty"`
+	GTINJSender string `json:"gtinj_sender,omitempty"`
 }
 
 // leaveAdminFile writes an administrator's file into admin_dir as one
@@ -161,6 +165,7 @@ func main() {
 	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
+	gtinj := fs.String("gtinj-events", "", "setup: add the GT-INJ Syslog asset, sending from 127.0.0.4 to the syslog-udp listener, with an event baseline whose params are this events.json's (V-M4)")
 	kind := fs.String("kind", "install", "admin-file: install or revoke")
 	name := fs.String("name", "", "admin-file: the file's name, or the <name> in admin-request-<name>.json")
 	expires := fs.Duration("expires", 10*time.Minute, "admin-file: the request's lifetime from now (negative: already expired)")
@@ -172,7 +177,7 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj)
 	case "install-credential":
 		err = installCredential(*root)
 	case "admin-file":
@@ -186,7 +191,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData string) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj string) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -246,6 +251,9 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	// In the installed layout the listener's credential is staged with
 	// the rest, and reaches config\tls the same way.
 	if err := listeners(nc, pki, &l, syslogUDP, syslogTLS); err != nil {
+		return err
+	}
+	if err := gtinjAsset(nc, &l, gtinj); err != nil {
 		return err
 	}
 	if installed {
@@ -640,6 +648,53 @@ func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad 
 
 // syslogSender is the asset's address as the node's listeners see it.
 const syslogSender = "127.0.0.2"
+
+// The GT-INJ Syslog asset (V-M4): a second SEL-751 record with no schedule,
+// so only the Syslog it sends from gtinjSender reaches its event baseline.
+const (
+	gtinjAssetID = "6c0e2f4a-1b3d-4e5f-8a7b-9c0d1e2f3a4b"
+	gtinjSerial  = "2007GTINJSYSLOG"
+	gtinjSender  = "127.0.0.4"
+)
+
+// gtinjAsset adds the GT-INJ Syslog asset when events names a GT-INJ
+// events.json: its event baseline takes that file's params, which decode
+// strictly into C10's (tests/integration/gt_inj/README.md).
+func gtinjAsset(nc *nodeconfigtest.Config, l *Layout, events string) error {
+	if events == "" {
+		return nil
+	}
+	if l.SyslogUDP == "" {
+		return errors.New("-gtinj-events needs -syslog-udp")
+	}
+	b, err := os.ReadFile(events)
+	if err != nil {
+		return err
+	}
+	var f struct {
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil || len(f.Params) == 0 {
+		return fmt.Errorf("%s: no params: %v", events, err)
+	}
+	// Port 1 is never dialled: the record has no schedule.
+	nc.AddSEL751(gtinjAssetID, "127.0.0.1", 1, 60)
+	sched := nc.Schedule[:0]
+	for _, c := range nc.Schedule {
+		if c.AssetID != gtinjAssetID {
+			sched = append(sched, c)
+		}
+	}
+	nc.Schedule = sched
+	setSerial(nc.Assets[len(nc.Assets)-1], gtinjSerial)
+	nc.AddSyslogSender(gtinjAssetID, "syslog-udp-gtinj", "syslog-udp", gtinjSender, 0)
+	nc.EventBaselines = append(nc.EventBaselines, nodeconfigtest.EventBaseline{AssetID: gtinjAssetID, Params: f.Params})
+	// The baseline and the learner's checkpoints are stored in the asset's
+	// configuration stream, as in platform/node's own event-baseline tests.
+	nc.Store.Quotas["configuration"] = 32 << 20
+	l.GTINJAsset, l.GTINJSender = gtinjAssetID, gtinjSender
+	return nil
+}
 
 // listeners adds the Syslog listeners asked for (#154): the asset sends
 // from syslogSender on each; the TLS listener's certificate and the
