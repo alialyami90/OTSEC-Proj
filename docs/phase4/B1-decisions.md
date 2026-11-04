@@ -666,3 +666,10 @@ Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-ne
    4. A read whose record count, or any line, does not match the rendered run fails the read, with no partial snapshot. A node test pins this.
    5. On a version mismatch between node and collector, the collector refuses the run, and a test pins that too.
    6. The node refuses a result whose `register_version` is not the revision it loaded (C2).
+8. **`VerifyConfig` on a pruned audit stream (C3's B1 on #384): option (a).** The node prunes its audit stream once records are forwarded upstream. So at start it holds only a retained view, and `VerifyConfig` on that view fails, which would stop every observed asset after the first prune. C8 0.9 adds `VerifyConfigFrom`, which treats a reference to a record before the view as unknown, not broken. This is the same reading the D4-26 amendment gives recordings. The conditions:
+   1. The view starts at the node's recorded prune point, not at whichever record happens to be first. Inside the view the hash chain is checked in full, so a record deleted or edited inside the view is still caught.
+   2. Only a reference to a seq before the prune point is unknown. A reference into the view that does not resolve is broken.
+   3. The full chain stays verifiable upstream, where the records were forwarded before the prune.
+   4. Status shows that start-up verification ran from the prune point.
+
+   Option (b), skipping the check on a pruned stream and raising an alarm, is refused as weaker. C3 adds it to the C8 0.9 draft, and C6 tests it. C3's B2, a version-1 recording repeated after recordings are pruned, is C4's to fix in #384.
