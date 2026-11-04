@@ -360,3 +360,33 @@ func TestDifferenceEncode(t *testing.T) {
 		t.Fatal("Encode is not encodeCompact")
 	}
 }
+
+// A difference of exactly MaxDifferenceBytes is accepted, and one byte more is
+// refused (C6 on #392: without it, > as >= and the bound plus one survive).
+func TestDifferenceAtTheBound(t *testing.T) {
+	d, err := DecodeDifference(read(t, "valid/difference-1-3.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := *d.Changes[0].To
+	set := func(n int) int {
+		v := base + strings.Repeat("A", n)
+		d.Changes[0].To = &v
+		b, err := d.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(b)
+	}
+	pad := MaxDifferenceBytes - set(0)
+	if got := set(pad); got != MaxDifferenceBytes {
+		t.Fatalf("built %d bytes, want %d", got, MaxDifferenceBytes)
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("at the bound: %v", err)
+	}
+	set(pad + 1)
+	if err := d.Validate(); !errors.Is(err, ErrDifferenceTooLarge) {
+		t.Fatalf("one byte over: %v, want ErrDifferenceTooLarge", err)
+	}
+}
