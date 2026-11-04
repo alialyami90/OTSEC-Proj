@@ -248,13 +248,12 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	if diffSeq != 0 {
 		s.holdConfig(ctx, col.AssetID, stream, diffSeq, code, seq)
 	}
-	switch {
-	case c.ApprovalSeq == 0:
+	// An approved change raises nothing, too large or not: no evidence is
+	// lost, as the difference is Compare of the two held snapshots (D4-42,
+	// #399).
+	if c.ApprovalSeq == 0 {
 		s.raiseOnceKey(fmt.Sprintf("unapproved %s %d", col.AssetID, seq), col.AssetID, AlarmUnapprovedChange,
 			fmt.Sprintf("the configuration differs from baseline %s and no approval covers it: %s, audit record %d", st.baseline, what, seq))
-	case tooLarge:
-		s.raiseOnceKey(fmt.Sprintf("difference %s %d", col.AssetID, seq), col.AssetID, AlarmEvidenceNotStored,
-			fmt.Sprintf("the approved change of audit record %d (approval %d): %s", seq, c.ApprovalSeq, what))
 	}
 	return s.recorded(ctx, rep, col, nil)
 }

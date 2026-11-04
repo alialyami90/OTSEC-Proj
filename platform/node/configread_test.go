@@ -855,8 +855,9 @@ func TestConfigReadDifferenceTooLarge(t *testing.T) {
 	}
 }
 
-// An approved change whose difference is too large is approved, and still
-// raises evidence-not-stored once, so the missing difference shows.
+// An approved change whose difference is too large is approved and raises
+// no alarm: no evidence is lost, as the difference is Compare of the two
+// held snapshots (D4-42, #399).
 func TestConfigReadApprovedDifferenceTooLarge(t *testing.T) {
 	n := newCfgNode(t)
 	n.read("ok")
@@ -868,8 +869,8 @@ func TestConfigReadApprovedDifferenceTooLarge(t *testing.T) {
 	if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonApprovedChange || !res[0].Config.DifferenceTooLarge {
 		t.Fatalf("%+v", res)
 	}
-	if c := countAlarms(n.st, AlarmEvidenceNotStored); c != 1 {
-		t.Fatalf("%d evidence-not-stored alarms, want 1", c)
+	if a := n.st.Snapshot("x").Alarms; len(a) != 0 {
+		t.Fatalf("alarms %+v, want none", a)
 	}
 }
 
