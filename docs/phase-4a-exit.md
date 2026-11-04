@@ -42,7 +42,7 @@ Contract versions on `main`:
 | C7 | `otsec.authz/0.5` | `0.7` | Change approvals, baseline acknowledgements and the approver role (0.6, D4-2); a run request may name a register run, its limits from the signed register only (0.7, D4-27). |
 | C8 | `otsec.audit/0.4` | `0.10` | Approval and acknowledgement records (0.5); an acknowledgement ends open configuration alarms (0.6, D4-18); `config.read_compared` and `config.reads_removed` (0.7); `config.baseline_recorded` (0.8); `config.checkpoint_not_restored` and `VerifyConfigFrom` (0.9); `difference_too_large` (0.10, D4-42). |
 | C9 | none | `otsec.config/0.4` | New: the configuration snapshot and its semantic difference, bounded in settings and bytes (D4-25, D4-42). |
-| C10 | none | `otsec.baseline/0.2` | New: the event-behaviour baseline of one asset; a checkpoint at every configured ceiling fits one record (D4-30). Learner 0.2 ends the period where both minima first hold (D4-45). |
+| C10 | none | `otsec.baseline/0.2` | New: the event-behaviour baseline of one asset; a checkpoint at every configured ceiling fits one record (D4-30). Learner 0.2 ends the period where both minima first hold (D4-45), and refuses a 0.1 checkpoint, so a node upgraded mid-period relearns from the start. |
 
 Every change bumped the minor, kept a reader for the previous version, and had the A6 role's contract tests before merge.
 
@@ -54,7 +54,7 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 | --- | --- |
 | **V-M2** (R3.6) on the real binaries | **Pass**, `simulated` (F-022, #420). All 21 changes of `gt_inj/config.json`, 169 of 169 checks, on the tagged node and collector, locally and in the `integration-long` leg. An alarm is raised exactly for the 15 changes with no valid prior approval (none, another device, an ended window, backdated, a non-approver); the 3 approved changes raise none and link their approval; the 3 non-approver approvals are refused and recorded. Deleting or editing an approval fails audit-chain verification. 4 of 4 product mutants in `configread.go` killed. The non-semantic changes are read under D4-46. |
 | **V-M3** (R3.7) for the SEL-751 | **Pass**, `desk` and `simulated` (#394, F-022). Every matrix cell checked against S22, with three findings fixed in #388. On the binaries, every session is exactly the signed register's `sel.config.read_all` over Telnet; the untagged node refuses at start a configuration naming a method, a rung or an FTP endpoint. |
-| **V-M4** (R4.8), Syslog half | **Pass**, `simulated` (F-019, F-020, #402, #410, #411, #417). Exactly the 10 expected alarms (recall 10 of 10 per kind, precision 10 of 10), none before the acknowledgement. The held-out series raises none. Three runs store the same baseline bytes, and the repeat raises the same alarms in every field. Release builds refuse the test clock. |
+| **V-M4** (R4.8), Syslog half | **Pass**, `simulated` (F-019, F-020, #402, #410, #411, #417). Exactly the 10 expected alarms (recall 10 of 10, every kind in full: repeats 3, absence 3, rate 2, new 1, time 1; precision 10 of 10), none before the acknowledgement. The held-out series raises none. Three runs store the same baseline bytes, whose period ends at the series' T, 2026-11-16T00:00:08Z, with 773 events, and the repeat raises the same alarms in every field. Release builds refuse the test clock. |
 | **V-M4**, short case on the untagged node | **Pass**, `simulated` (F-023, #423). Recorded, active only on the acknowledgement, then exactly the new-type and repeats alarms, plus a time alarm when the burst falls in an hour the period never saw. |
 | **V-M4**, SER half | **Not run yet.** The series `events-ser60.json` (913 reads at least 60 s apart, 6 expected alarms) is merged (#426, C4 accepted, no alarm difference). The harness that serves the rows at the series' read times is C6's next PR (D4-47). |
 | **V-S7** with revision 5 | **Pass** (#304, F-023). The deny corpus runs against revision 5 with no line skipped: exactly the 24 `SHO` forms approved, 699 variants refused. `check.py` passes every V-M2 recording against the signed revision 5, and four injected controls fail. |
@@ -86,7 +86,7 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 | C9, C10, C2 0.6, C5 0.4, C7 0.6 and C8 0.5 merged, with reviewers' records and the A6 role's contract tests | **Met.** |
 | V-S7 still passes with the new register lines, and the deny corpus covers every `SHO` form added | **Met.** |
 | #176 and relay PR 2 merged; HR-11's absolute bound merged, or recorded as the open condition before any `device-observed` listener | **Met.** The threat model's HR-11 row is not yet updated (#352, C3). |
-| No safety or security objection open | **None open** from C6. To be confirmed by C3 before the gate is decided. |
+| No safety or security objection open | **None open.** C6 has none (#423). C3 has none against items 1 and 2 (#429), on the condition that the SER harness changes only test harness and CI; if it touches `cmd/`, `modules/`, `platform/`, `contracts/` or the release-build test-clock refusal, C3 reviews it before the gate. |
 
 ## Owner decisions needed
 
@@ -135,8 +135,12 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 - **A flapping device fills the configuration class** under D4-19, and configuration monitoring then stops; the node says so.
 - **The SER buffer can wrap during a hold.**
 - **Rollback below C8 0.10.** Once a node has written `difference_too_large`, rolling back below 0.10 makes start-up verification fail closed. Readers must be upgraded before writers.
+- **A stuck event-baseline feeder holds collection's pruning.** `node-eventbaseline` is a `Required` consumer on the Syslog and SER streams it reads (#405), so a feeder that stays not started or stuck on a record holds their pruning, and at the quota D4-19's stop rule applies to collection. It fails safe and visible (the consumer's lag in health, `event-baseline-not-started`, `event-baseline-stream-stuck`), but a detection fault can, at the quota, stop intake. `node-holds` is the other new `Required` consumer, on the audit stream; it holds the prune only behind an existing delivery cursor and never makes an unforwarded record prunable (#408) (C3).
+- **Late events are not baselined.** An event committed behind the feeder's watermark is counted as `Late` and not fed to the learner or detector, so a departure carried only by late events is not alarmed. The count is in status (C3).
+- **The admin request's replay window.** A signed request can be replayed to the collector only within `MaxAdminLifetime` (15 minutes), and the collector spends its nonce. After an audit prune past both acceptances, a restart and a resend within those 15 minutes, a second record can be written for one request, and `VerifyConfig` accepts it. It adds no authority beyond what was signed; the one change is that a denial can become a success if the baseline it names became the acknowledged one meanwhile (C3 on #406).
+- **The tagged test-clock build.** In an `otsec_testclock` build, whoever can write the clock file controls the node's and the collector's time. CI pins that release builds refuse it (#407, `tests/security/testclock_c6_test.go`). A tagged build must never be deployed (C3).
 - **F-016:** Windows store flushes stall on the hosted runner's disk.
-- **C10's 512-type ceiling and the SEL-400 series.** A 400-series relay can have about 507 types, at the ceiling (D4-38, `documented-untested`). Revisit before a 400-series adapter is briefed; until then `counts.types_overflow` shows a partly baselined asset.
+- **C10's 512-type ceiling and the SEL-400 series.** A 400-series relay can have about 507 types, just under the 512 ceiling (D4-38, `documented-untested`). Revisit before a 400-series adapter is briefed; until then `counts.types_overflow` shows a partly baselined asset.
 - **Carried:** residual SER loss with repeated keys (D1-17), plaintext Telnet to the relay (lab only, ADR-0005), PEN 32473, the 31-minute floor on a flaky link, a port-server path refused until H-13.
 
 ## Limitations recorded in Phase 4
@@ -144,7 +148,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 - **A restart's gap starts at the checkpoint's watermark**, so a restart after T with the last checkpoint before T moves the end later (D4-45; the record states its period).
 - **A late `collection.missed` is clamped to the watermark** (F-021).
 - **A recorded baseline awaiting acknowledgement is forgotten in a cut view**; the guard then refuses that acknowledgement, so the node fails closed (C3 on #384).
-- **The configuration fold trusts the node's own audit stream** without `VerifyChain`; the full chain upstream catches a forgery (C3 on #390).
+- **The configuration fold trusts the node's own audit stream** without `VerifyChain`, and on a pruned view it also trusts the configuration store's holds (D4-41, #408), so a tampered hold table is read as state. The full chain upstream catches a forged audit record; it does not catch a tampered hold, but the reconcile at start corrects a hold against the records in view (C3 on #390 and #429).
 - **D4-46 was ruled after a product run**: V-M2 reads `config.json`'s "difference R0 to R1" for a non-semantic change as both snapshots stored and different, `no_difference`, and no difference record. `config.json` was not edited.
 - **Which gate runs used the `otsec_testclock` build:** V-M2 and V-M4's GT-INJ feed. The V-M4 short case and V-M3's start case run untagged.
 
