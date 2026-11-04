@@ -20,7 +20,11 @@ import (
 // is taken. advanceHolds moves it at start, after the reconcile, and before
 // each runtime prune of the audit database, so one check covers every path
 // that takes a hold: an acknowledgement, the writer's differences and a
-// restore. pruneConsumers adds it beside SuspensionConsumer.
+// restore (D4-41, as amended by C1 on #408). The start-up prune runs
+// before the reconcile and before any check of this run, so it is bounded
+// by the cursor the last check persisted, in an earlier run: the cursor is
+// only ever saved by advanceHolds, never ahead of a hold not taken.
+// pruneConsumers adds it beside SuspensionConsumer.
 const HoldsConsumer c5.ConsumerID = "node-holds"
 
 // AlarmHoldsNotTaken: a hold the C8 records want is not taken, or could not
