@@ -1273,3 +1273,48 @@ func TestConfigReadRestoreLeavesEarlierApprovals(t *testing.T) {
 		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
 	}
 }
+
+// A read that repeats a document already stored is stored again, with its
+// own transcript, and the writer holds that record. The reconcile at the
+// next start keeps the hold there, and does not move it to the first copy
+// (C1 on #397). Here the device returns to a replaced baseline, so the
+// change's snapshot has the replaced baseline's digest, and both copies
+// stay held, each for its own reason.
+func TestConfigReadRevertToReplacedBaseline(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base, changed := n.snapshotOf("ok"), n.snapshotOf("ok-all-present")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	ack := n.ack(changed, base)
+	// The node side of node.baseline_ack, not built yet, will re-code the
+	// replaced baseline's hold as the reconcile does.
+	stream := ConfigStream(relayID)
+	first := n.results()[0]
+	for seq, reason := range map[c5.Seq]c5.HoldReason{1: reasonAt(n.r, ack, c5.HoldSupersededBaseline),
+		3: reasonAt(n.r, c5.Seq(first.Seq), c5.HoldAcknowledgedDifference)} {
+		if err := n.r.Store(stream).Hold(bg, c5.Hold{Stream: stream, Seq: seq, Reason: reason}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.read("ok") // a change against changed, with base's digest
+	n.read("ok-all-present")
+	res := n.results()
+	if len(res) != 3 || res[1].ReasonCode != audit.ReasonUnapprovedChange || res[1].Config.SnapshotDigest != base ||
+		res[2].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	held := n.holds()
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	n.r = r
+	if reconciled(st.Snapshot("x").Alarms) != 0 {
+		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
+	}
+	if got := n.holds(); !maps.Equal(got, held) || got[1] != c5.HoldSupersededBaseline {
+		t.Fatalf("holds %v after restart, before %v", got, held)
+	}
+}
