@@ -456,7 +456,7 @@ func TestUnknownHoldCodeIsKept(t *testing.T) {
 		{Seq: 3, Reason: c5.HoldReason{Code: c5.HoldBaseline, Ref: ref(9)}}, // not wanted: released
 	}
 	wants := []wantHold{{digest: "d1", code: c5.HoldBaseline, ref: 4}}
-	p := planHolds(node, wants, map[string]c5.Seq{"d1": 1}, have)
+	p := planHolds(node, wants, nil, map[string][]c5.Seq{"d1": {1}}, have)
 	if len(p.unknown) != 2 || len(p.add) != 0 || len(p.replace) != 0 || len(p.release) != 1 || p.release[0].Seq != 3 {
 		t.Fatalf("plan %+v", p)
 	}
