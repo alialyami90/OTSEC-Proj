@@ -121,3 +121,57 @@ def test_another_health_type_fails(series):
     failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
     assert any("not a departure" in f for f in failures), failures
     assert any(f.startswith("missing new gt-inj-syslog") for f in failures), failures
+
+
+# C6 on #403: an assets map that names no asset of the series wants
+# nothing, so it would pass a node that raised nothing.
+@pytest.mark.parametrize("assets", [{}, {"7c4b2d3e-ac9a-4f8b-9d7e-2a3f4e5d6c7b": "gt-inj-syslg"},
+                                    {"a": "gt-inj-syslog", "b": "gt-inj-syslog"}])
+def test_a_wrong_assets_map_fails(series, assets):
+    failures, _ = oracle.check(series, [], ids_of(series), assets)
+    assert failures and "must name each of the series' assets" in failures[0], failures
+
+
+def test_a_duplicate_alarm_fails(series):
+    hs = expected(series)
+    hs.append(copy.deepcopy(hs[0]))
+    failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert failures == [f for f in failures if f.startswith("unexpected new gt-inj-syslog")] and len(failures) == 1, failures
+
+
+def test_an_alarm_citing_another_event_fails(series):
+    hs = expected(series)
+    n = next(i for i, x in enumerate(series["expected_alarms"]) if x["rule"] == "new" and x["asset"] == "gt-inj-syslog")
+    own = series["expected_alarms"][n]["events"][0]
+    other = next(e["id"] for e in series["events"] if e["asset"] == "gt-inj-syslog" and e["id"] != own)
+    hs[n]["related"] = [eid(other)]
+    failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert any(f.startswith("missing new gt-inj-syslog") for f in failures), failures
+    assert any(f.startswith("unexpected new gt-inj-syslog") for f in failures), failures
+    assert any("dep-02" in f and "no alarm of its kind" in f for f in failures), failures
+
+
+def test_an_alarm_of_another_rule_fails(series):
+    hs = expected(series)
+    n = next(i for i, x in enumerate(series["expected_alarms"]) if x["rule"] == "repeats")
+    hs[n]["details"]["rule"] = "rate"
+    failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert any(f.startswith("missing repeats") for f in failures), failures
+    assert any("dep-03" in f and "no alarm of its kind" in f for f in failures), failures
+
+
+def test_a_ser_key_that_is_not_its_text_fails(series):
+    hs = expected(series)
+    n = next(i for i, x in enumerate(series["expected_alarms"]) if x["asset"] == "gt-inj-ser")
+    hs[n]["details"]["key_text"] = "TRIP Deasserted"
+    failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert any("is not the type of its text" in f for f in failures), failures
+
+
+@pytest.mark.parametrize("change", [lambda d: d.pop("at_utc"), lambda d: d.update(key=d["key"].replace("syslog|4|", "syslog|x|", 1))])
+def test_a_malformed_alarm_is_reported(series, change):
+    hs = expected(series)
+    change(hs[0]["details"])
+    failures, report = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert any("malformed" in f for f in failures), failures
+    assert report["alarms"] == len(hs) - 1

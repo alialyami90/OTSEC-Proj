@@ -18,7 +18,9 @@ half can run before gt-inj-ser does.
 check() returns (failures, report). The run passes when failures is empty.
 These are the failures:
 
-- an alarm that is not a well-formed departure;
+- an assets map that is empty, or names something other than the
+  series' assets;
+- an alarm that is not a well-formed departure, or does not read as one;
 - an alarm citing an event the harness did not send;
 - an alarm whose key differs from its text;
 - a departure alarm before the acknowledgement;
@@ -65,6 +67,8 @@ def _type(key, text):
     [facility, severity, template] for Syslog. Returns (type, error)."""
     parts = [p.replace("%7C", "|").replace("%25", "%") for p in key.split("|")]
     if parts[0] == "ser" and len(parts) == 3:
+        if text != f"{parts[1]} {parts[2]}":
+            return None, f"key {key} is not the type of its text {text!r}"
         return [parts[1], parts[2]], None
     if parts[0] == "syslog" and len(parts) == 5 and parts[3] == "template":
         want = "sha256:" + hashlib.sha256(text.encode()).hexdigest()
@@ -79,24 +83,33 @@ def read(alarms, ids, assets):
     them."""
     out, failures = [], []
     for n, h in enumerate(alarms):
-        d = h.get("details") or {}
-        where = f"alarm {n} ({d.get('rule')} at {d.get('at_utc')})"
-        if h.get("type") != DEPARTURE or d.get("rule") not in RULES or d.get("asset_id") not in assets:
-            failures.append(f"{where}: not a departure of a GT-INJ asset in the run: {h.get('type')} {d.get('asset_id')}")
-            continue
-        typ, err = _type(d.get("key", ""), d.get("key_text", ""))
-        if err:
-            failures.append(f"{where}: {err}")
-            continue
-        cited = []
-        for e in h.get("related") or []:
-            if _id(e) not in ids:
-                failures.append(f"{where}: cites {_id(e)}, which the harness did not send")
-            else:
-                cited.append(ids[_id(e)])
-        out.append({"rule": d["rule"], "asset": assets[d["asset_id"]], "type": typ,
-                    "at": _utc(d["at_utc"]), "events": sorted(cited)})
+        try:
+            a, errs = _read1(n, h, ids, assets)
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            a, errs = None, [f"alarm {n}: malformed: {e!r}"]
+        failures += errs
+        if a is not None:
+            out.append(a)
     return out, failures
+
+
+def _read1(n, h, ids, assets):
+    """One alarm in events.json's form, or None, and its failures."""
+    d = h.get("details") or {}
+    where = f"alarm {n} ({d.get('rule')} at {d.get('at_utc')})"
+    if h.get("type") != DEPARTURE or d.get("rule") not in RULES or d.get("asset_id") not in assets:
+        return None, [f"{where}: not a departure of a GT-INJ asset in the run: {h.get('type')} {d.get('asset_id')}"]
+    typ, err = _type(d.get("key", ""), d.get("key_text", ""))
+    if err:
+        return None, [f"{where}: {err}"]
+    failures, cited = [], []
+    for e in h.get("related") or []:
+        if _id(e) not in ids:
+            failures.append(f"{where}: cites {_id(e)}, which the harness did not send")
+        else:
+            cited.append(ids[_id(e)])
+    return {"rule": d["rule"], "asset": assets[d["asset_id"]], "type": typ,
+            "at": _utc(d["at_utc"]), "events": sorted(cited)}, failures
 
 
 def _gap_end(series, dep):
@@ -139,8 +152,13 @@ def _key(a):
 
 
 def check(series, alarms, ids, assets):
-    got, failures = read(alarms, ids, assets)
+    # A map naming no asset of the series would want nothing and pass with
+    # no alarms (C6 on #403).
+    known = set(series["period"]["first_event"])
     names = set(assets.values())
+    if not names or names - known or len(names) != len(assets):
+        return [f"assets {assets} must name each of the series' assets {sorted(known)} at most once, and at least one"], {}
+    got, failures = read(alarms, ids, assets)
     ack = _utc(series["period"]["baseline_ack"])
     for a in got:
         if a["at"] < ack:
