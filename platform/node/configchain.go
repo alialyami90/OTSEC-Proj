@@ -55,6 +55,11 @@ type chainAsset struct {
 	alarmed bool
 	// open are the audit seqs of the open unapproved changes.
 	open []c5.Seq
+	// inferred: the stream was pruned past the acknowledgement, and baseline
+	// is the one the first retained change or restore of the asset names.
+	// Its changes are still open and raised (C6 on #390), and a read is not
+	// compared against it until D4-41's rule is built.
+	inferred bool
 }
 
 type chainChange struct {
@@ -101,9 +106,7 @@ func (ch *configChain) sync(ctx context.Context, db *store.DB) error {
 			return nil
 		}
 		for _, st := range got {
-			// The bytes select the records to parse; one with an escape is
-			// parsed too, as its action may be spelt with one (C3 on #384).
-			if bytes.Contains(st.Event, []byte(`"config.`)) || bytes.Contains(st.Event, []byte(`"collector.`)) || bytes.Contains(st.Event, []byte(`\u`)) {
+			if folded(st.Event) {
 				rec, err := audit.ParseRecord(st.Event)
 				if err != nil {
 					return badRecord{st.Key.Seq, err}
@@ -113,6 +116,13 @@ func (ch *configChain) sync(ctx context.Context, db *store.DB) error {
 			ch.through = st.Key.Seq
 		}
 	}
+}
+
+// folded reports whether a record's bytes may hold an action the fold
+// applies. One with an escape is parsed too, as its action may be spelt
+// with one (C3 on #384).
+func folded(event []byte) bool {
+	return bytes.Contains(event, []byte(`"config.`)) || bytes.Contains(event, []byte(`"collector.`)) || bytes.Contains(event, []byte(`\u`))
 }
 
 func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
@@ -132,6 +142,7 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 		*ch.asset(r.Target.AssetID) = chainAsset{baseline: c.BaselineDigest}
 	case r.Action == audit.ActionConfigChangeDetected:
 		a := ch.asset(r.Target.AssetID)
+		ch.infer(a, c.BaselineDigest)
 		if c.BaselineDigest != a.baseline {
 			return
 		}
@@ -141,9 +152,20 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 		}
 	case r.Action == audit.ActionConfigBaselineRestored:
 		a := ch.asset(r.Target.AssetID)
+		ch.infer(a, c.BaselineDigest)
 		if c.BaselineDigest == a.baseline {
 			a.last, a.alarmed, a.open = nil, false, nil
 		}
+	}
+}
+
+// infer takes digest as the asset's baseline in a pruned stream with no
+// acknowledgement of the asset before it: the node writes a change or a
+// restore only against its acknowledged baseline, and a later baseline
+// needs an acknowledgement, which would be retained.
+func (ch *configChain) infer(a *chainAsset, digest string) {
+	if ch.pruned && a.baseline == "" {
+		a.baseline, a.inferred = digest, true
 	}
 }
 

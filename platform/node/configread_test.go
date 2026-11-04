@@ -2,6 +2,8 @@ package node
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +99,19 @@ func (n *cfgNode) encode(s config.Snapshot) []byte {
 	return b
 }
 
+// compareDoc is a read whose snapshot is doc, a changed snapshot of the
+// fixture "ok": the node's record of the collector's acceptance of the run,
+// the stored snapshot, then the comparison.
+func (n *cfgNode) compareDoc(doc []byte) (Report, c5.Seq) {
+	n.t.Helper()
+	n.seq++
+	n.inject(&audit.Record{Actor: audit.Actor{Type: authz.PrincipalSchedule, ID: "sch-cfg", Role: authz.RoleCollector},
+		Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, PolicyVersion: 3, CorrelationID: "req-doc",
+		CollectorSeq: n.seq, OperationID: "sel.config.read_all", Target: &audit.Target{AssetID: relayID, CredentialRef: nodeconfigtest.TestCredentialRef}})
+	snap := n.storeDoc(doc)
+	return n.s.compareConfig(bg, Report{RequestID: "req-doc"}, n.r.cfg.Schedule[1], n.seq, doc, snap, config.Digest(doc)), snap
+}
+
 // storeDoc stores doc, a snapshot of the fixture "ok", in the relay's
 // configuration stream, with that read's transcript as the capture.
 func (n *cfgNode) storeDoc(doc []byte) c5.Seq {
@@ -148,7 +163,7 @@ func (n *cfgNode) inject(recs ...*audit.Record) []c5.Seq {
 
 // ack acknowledges digest as the baseline and holds it, as the node side of
 // node.baseline_ack will.
-func (n *cfgNode) ack(digest, previous string) {
+func (n *cfgNode) ack(digest, previous string) c5.Seq {
 	n.t.Helper()
 	ref := n.decide(authz.KindNodeBaselineAck, &audit.Record{Action: audit.ActionConfigBaselineAcknowledge,
 		Config: &audit.Config{Kind: authz.BaselineConfiguration, BaselineDigest: digest, PreviousDigest: previous}})
@@ -161,6 +176,7 @@ func (n *cfgNode) ack(digest, previous string) {
 	if err := db.Hold(bg, c5.Hold{Stream: stream, Seq: found[digest], Reason: reasonAt(n.r, ref, c5.HoldBaseline)}); err != nil {
 		n.t.Fatal(err)
 	}
+	return ref
 }
 
 func (n *cfgNode) approve(baseline string) {
@@ -695,21 +711,14 @@ func TestConfigReadDifferenceTooLarge(t *testing.T) {
 	base, doc := big("A"), big("B")
 	n.storeDoc(base)
 	n.ack(config.Digest(base), "")
-	// The run the read was: the node's record of the collector's acceptance.
-	n.seq++
-	n.inject(&audit.Record{Actor: audit.Actor{Type: authz.PrincipalSchedule, ID: "sch-cfg", Role: authz.RoleCollector},
-		Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, PolicyVersion: 3, CorrelationID: "req-big",
-		CollectorSeq: n.seq, OperationID: "sel.config.read_all", Target: &audit.Target{AssetID: relayID, CredentialRef: nodeconfigtest.TestCredentialRef}})
-	snap := n.storeDoc(doc)
-	before := n.stored()
-	rep := n.s.compareConfig(bg, Report{RequestID: "req-big"}, n.r.cfg.Schedule[1], n.seq, doc, snap, config.Digest(doc))
+	rep, snap := n.compareDoc(doc)
 	res := n.results()
 	if len(res) != 1 || res[0].Action != audit.ActionConfigChangeDetected || res[0].ReasonCode != audit.ReasonUnapprovedChange ||
 		res[0].Config.DifferenceDigest == "" || rep.Alarm != "" {
 		t.Fatalf("%+v, results %+v", rep, res)
 	}
-	if n.stored() != before {
-		t.Fatal("the difference was stored")
+	if got := n.stored(); got != 3 {
+		t.Fatalf("stored %d, want 3: the first read, the baseline and the read, and no difference", got)
 	}
 	if h := n.holds(); h[snap] != c5.HoldUnapprovedDifference {
 		t.Fatalf("holds %v", h)
@@ -720,5 +729,145 @@ func TestConfigReadDifferenceTooLarge(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no unapproved-change alarm naming the unstored difference: %+v", n.st.Snapshot("x").Alarms)
+	}
+}
+
+// changed is the snapshot of the fixture "ok" with its first setting set to
+// v: a change against "ok" that no fixture reads.
+func (n *cfgNode) changed(v string) []byte {
+	n.t.Helper()
+	s := n.snapshot("ok", relayID)
+	for i := range s.Sections {
+		if s.Sections[i].State == config.Present {
+			s.Sections[i].Settings[0].Value = v
+			break
+		}
+	}
+	return n.encode(s)
+}
+
+// An acknowledgement ends the open changes (D4-18): the acknowledged read
+// read again is no_difference, not a restore, and an approval then covers
+// a new change (C6 on #390, A4).
+func TestConfigReadAcknowledgementEndsOpenChanges(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	changed := n.snapshotOf("ok-all-present")
+	n.ack(changed, base)
+	n.read("ok-all-present")
+	n.approve(changed)
+	n.compareDoc(n.changed("X9"))
+	res := n.results()
+	if len(res) != 3 || res[0].ReasonCode != audit.ReasonUnapprovedChange || res[1].ReasonCode != audit.ReasonNoDifference ||
+		res[2].ReasonCode != audit.ReasonApprovedChange {
+		t.Fatalf("%+v", res)
+	}
+}
+
+// An approved change is not open: a second change under a covering approval
+// is approved too, and a restart raises no unapproved change (C6 on #390,
+// A5).
+func TestConfigReadApprovedChangeIsNotOpen(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present")
+	n.compareDoc(n.changed("X9"))
+	res := n.results()
+	if len(res) != 2 || res[0].ReasonCode != audit.ReasonApprovedChange || res[1].ReasonCode != audit.ReasonApprovedChange {
+		t.Fatalf("%+v", res)
+	}
+	newScheduler(t, n.r, n.f)
+	if c := countAlarms(n.st, AlarmUnapprovedChange); c != 0 {
+		t.Fatalf("%d unapproved-change alarms at start", c)
+	}
+}
+
+// An event-kind acknowledgement in the same stream leaves the configuration
+// baseline alone (C6 on #390, A7; D4-41).
+func TestConfigReadEventAcknowledgementLeavesTheConfigurationBaseline(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.decide(authz.KindNodeBaselineAck, &audit.Record{Action: audit.ActionConfigBaselineAcknowledge,
+		Config: &audit.Config{Kind: authz.BaselineEvent, BaselineDigest: "sha256:" + strings.Repeat("1", 64)}})
+	if rep := n.read("ok"); rep.Alarm != "" {
+		t.Fatalf("%+v", rep)
+	}
+	if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonNoDifference || res[0].Config.BaselineDigest != base {
+		t.Fatalf("%+v", res)
+	}
+}
+
+// A record whose action is spelt with an escape is parsed by the fold too
+// (C3 on #384; C6 on #390, A8). The node's own log writes no escape, so
+// this is the selection by bytes alone.
+func TestConfigChainFoldsEscapedActions(t *testing.T) {
+	for _, b := range []string{`{"action":"\u0063onfig.change_approved"}`, `{"action":"\u0063ollector.seq_reset"}`, `{"action":"config.change_detected"}`} {
+		if !folded([]byte(b)) {
+			t.Errorf("%s is not folded", b)
+		}
+	}
+	if folded([]byte(`{"action":"syslog.forwarded"}`)) {
+		t.Error("a record with no configuration or collector action is parsed")
+	}
+}
+
+// Of two approvals that cover a change, the newest is named (C6 on #390,
+// W4).
+func TestConfigReadNamesTheNewestApproval(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.approve(base)
+	newest := n.seq
+	n.read("ok-all-present")
+	if res := n.results(); len(res) != 1 || res[0].Config.ApprovalSeq != newest {
+		t.Fatalf("approval %d named, want %d: %+v", res[0].Config.ApprovalSeq, newest, res)
+	}
+}
+
+// A stream pruned past the acknowledgement but not past an open change keeps
+// the change open: it is raised at start, and a read is not compared (C6 on
+// #390, G2).
+func TestConfigChainPrunedPastTheAcknowledgement(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	ack := n.ack(base, "")
+	n.read("ok-all-present")
+	if err := n.s.configChain().sync(bg, n.r.Store(AuditStream)); err != nil {
+		t.Fatal(err)
+	}
+	full := n.s.configChain().assets[relayID].open
+	if len(full) != 1 {
+		t.Fatalf("open %v", full)
+	}
+	// The fold as a stream whose first retained record is the one after the
+	// acknowledgement leaves it.
+	pruned := &configChain{pruned: true, first: ack + 1, through: ack,
+		runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{}, assets: map[string]*chainAsset{}}
+	if err := pruned.sync(bg, n.r.Store(AuditStream)); err != nil {
+		t.Fatal(err)
+	}
+	if got := pruned.assets[relayID]; got == nil || !slices.Equal(got.open, full) || got.baseline != base {
+		t.Fatalf("pruned fold %+v, want open %v against %s", got, full, base)
+	}
+	n.s.chain = pruned
+	n.s.clearQuietKey(fmt.Sprintf("unapproved %s %d", relayID, full[0]))
+	n.s.raiseOpenChanges(bg)
+	if c := countAlarms(n.st, AlarmUnapprovedChange); c != 2 {
+		t.Fatalf("%d unapproved-change alarms, want the open change raised again", c)
+	}
+	if rep := n.read("ok-all-present"); rep.Alarm != AlarmConfigNotCompared {
+		t.Fatalf("%+v", rep)
 	}
 }

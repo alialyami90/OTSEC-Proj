@@ -154,6 +154,9 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	stream := ConfigStream(col.AssetID)
 	cdb := s.rt.Store(stream)
 	st := ch.asset(col.AssetID)
+	if st.inferred {
+		return notCompared("pruned", fmt.Sprintf("the acknowledgement of baseline %s was pruned from the audit stream", st.baseline))
+	}
 	if st.baseline == "" {
 		if ch.pruned {
 			// The acknowledgement may be before the retained chain: a
