@@ -730,3 +730,15 @@ Date: 2026-11-04. C1, on the residual C3 found and C5 sized on #390. This amends
   - In a pruned fold, when no later change is in the view, the writer takes the last change from the asset's held differences in B3's window: after the held baseline's acknowledgement and before the fold's first record. The last change is the newest such hold of either code, `approved-difference` or `unapproved-difference`, taken by `Ref` (C3 on #397).
   - A restore re-codes the `approved-difference` holds of the changes approved since the baseline's acknowledgement as `restored-difference` (C5 on #397). An approved change against an earlier baseline keeps its code, even when that baseline had the same digest (acknowledge X, then Y, then X again). The re-coding happens in the writer and in the start-up reconcile's `returned`. This extends D4-19, which re-codes only unapproved ones. The evidence stays held, as D4-19 requires. The holds table then shows that the change ended in a restore, and the chain still shows that it was approved.
 - **Who.** C5 builds it in #390, with a test that prunes past an approved change, reverts, and checks that the result is `config.baseline_restored` and that `VerifyConfig` accepts the full chain. C6 adds the case to the re-check. C3 reviews it.
+
+## D4-44: the Windows package timeout is 30 minutes, and the 12-minute budget is breached (C5 on #406)
+
+Date: 2026-11-04. C1, on C5's report from #406 at 7df03de (CI-Windows runs 41866643125 and 41865420446).
+
+- **What failed.** `go (windows-latest)` failed because `platform/node` reached the step's `-timeout 20m` at 1200 s. No test failed. The goroutine that was running sat in SQLite's `FlushFileBuffers`, the same place as F-016 and D4-22. On that runner, packages the PR does not touch slowed by about 2×: `platform/store` took 333 s, against 150 s on the previous head, and the collector took 447 s, against 236 s. So the cause is the runner's disk, as in D4-22.
+- **The budget was already breached.** D4-22 set 12 minutes (720 s) as the budget for `platform/node` on a green Windows run. A normal run at f4ae324 took 815 s, already over that budget, and the gate PRs (#405, #406, #408) add tests on top. D4-22's 720 s warning step was never built.
+- **Decision.**
+  1. The Windows `go test ./...` step runs with `-timeout 30m`, and the Windows job limit goes from 35 to 45 minutes. As in D4-22, `go test` starts about 3.5 minutes into the job, so a hang dumps its stacks at about 34 minutes, with room for a late start. Linux is unchanged. This replaces D4-22 item 1's 20 minutes and 35-minute job limit.
+  2. **The 12-minute budget stands, and the breach is a finding for C5 under F-016.** After the three gate pieces, C5 reports the ten slowest `platform/node` tests on Windows and cuts their fixture time until a green run is back under 720 s. C5 also builds D4-22's warning step. The exit report lists the breach as open until then.
+  3. D4-22 item 4 still holds. A run that reaches 30 minutes is real, never a flake.
+- **Owners.** C1 makes the `ci.yml` change in this PR, and C5 and C6 review it. C5 owns item 2.
