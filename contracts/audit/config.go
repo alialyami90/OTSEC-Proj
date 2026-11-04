@@ -996,7 +996,7 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 			recorded[r.Target.AssetID] = r
 		case r.Action == ActionConfigCheckpointNotRestored:
 			if err := checkpointNotRestored(r, recorded[r.Target.AssetID], firstIn[r.Target.AssetID],
-				active[kindOf{r.Target.AssetID, authz.BaselineEvent}]); err != nil {
+				active[kindOf{r.Target.AssetID, authz.BaselineEvent}], cut); err != nil {
 				return err
 			}
 		case r.Action == ActionConfigReadCompared:
@@ -1066,11 +1066,18 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 // holds the asset's version-1 recording, and acked the event baseline the
 // latest succeeded acknowledgement before it set ("" when none). A learner's
 // re-learn records the next version, replacing the latest recorded
-// baseline; a detector is rebuilt from the acknowledged baseline.
-func checkpointNotRestored(r, last *Record, first bool, acked string) error {
+// baseline; a detector is rebuilt from the acknowledged baseline. cut says
+// recs is a view that starts after seq 1 (VerifyConfigFrom): only there can
+// a recording or an acknowledgement be missing because it is before the
+// view, and not even there once recs holds the asset's version-1 recording,
+// since everything of the asset comes after it (C6 on #387).
+func checkpointNotRestored(r, last *Record, first bool, acked string, cut bool) error {
 	c := r.Config
 	if c.CheckpointHalf == CheckpointDetector {
-		if acked != "" && c.BaselineDigest != acked {
+		switch {
+		case acked == "" && (!cut || first):
+			return broken("record %d rebuilds the detector of asset %s from %s, but no acknowledgement of an event baseline of the asset comes before it", r.Seq, r.Target.AssetID, c.BaselineDigest)
+		case acked != "" && c.BaselineDigest != acked:
 			return broken("record %d rebuilds the detector of asset %s from %s, but the acknowledged event baseline is %s", r.Seq, r.Target.AssetID, c.BaselineDigest, acked)
 		}
 		return nil
@@ -1079,8 +1086,8 @@ func checkpointNotRestored(r, last *Record, first bool, acked string) error {
 	case last != nil && (c.BaselineVersion != last.Config.BaselineVersion+1 || c.PreviousDigest != last.Config.BaselineDigest):
 		return broken("record %d starts a re-learn of asset %s as version %d replacing %q, but record %d recorded version %d, %s",
 			r.Seq, r.Target.AssetID, c.BaselineVersion, c.PreviousDigest, last.Seq, last.Config.BaselineVersion, last.Config.BaselineDigest)
-	case last == nil && first && c.BaselineVersion != 1:
-		return broken("record %d starts a re-learn of asset %s as version %d, but its version-1 recording comes later", r.Seq, r.Target.AssetID, c.BaselineVersion)
+	case last == nil && (!cut || first) && c.BaselineVersion != 1:
+		return broken("record %d starts a re-learn of asset %s as version %d, but no recording of the asset comes before it", r.Seq, r.Target.AssetID, c.BaselineVersion)
 	}
 	return nil
 }

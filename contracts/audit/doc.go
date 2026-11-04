@@ -362,10 +362,12 @@
 //
 // VerifyConfig checks a learner's against the latest config.baseline_recorded
 // of its asset before it in recs (the next version, replacing that digest),
-// or holds it to version 1 when recs has the asset's version-1 recording
-// after it; and a detector's against the event baseline the latest
-// succeeded acknowledgement before it set. With neither in recs, nothing is
-// checked. A record stamped 0.8 or earlier cannot carry the action,
+// and holds it to version 1 when none comes before it; and a detector's
+// against the event baseline the latest succeeded acknowledgement before it
+// set, refusing one that none came before. In a view that VerifyConfigFrom
+// checks from after seq 1, that recording or acknowledgement may be before
+// the view, so its absence is refused only when the view holds the asset's
+// version-1 recording. A record stamped 0.8 or earlier cannot carry the action,
 // checkpoint_half or checkpoint_seq.
 //
 // # A pruned chain (0.9)

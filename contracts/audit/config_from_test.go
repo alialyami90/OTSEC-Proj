@@ -69,6 +69,18 @@ func TestVerifyConfigFromRefusals(t *testing.T) {
 			r.Seq, r.Config.DecisionSeq = 95, 12 // 12 is a run, not an acceptance
 			return append(view(), r), first
 		},
+		"the view's lowest decision, which is a run": func() ([]*Record, uint64) {
+			r := clone(approved)
+			r.Seq, r.Config.DecisionSeq = 95, 8 // the run at 13, in the view
+			return append(view(), r), first
+		},
+		"a repeat of the view's first record, which is not a change": func() ([]*Record, uint64) {
+			v := append([]*Record(nil), c[at(24):]...)
+			r := clone(bySeq(v, 25))
+			r.Config.ChangeSeq = 24 // the run that begins the view
+			v[at(25)-at(24)] = r
+			return v, 24
+		},
 		"a decision above the view's lowest that is not in it": func() ([]*Record, uint64) {
 			r := clone(approved)
 			r.Seq, r.Config.DecisionSeq = 95, 9

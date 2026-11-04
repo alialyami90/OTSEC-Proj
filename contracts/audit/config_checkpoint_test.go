@@ -155,14 +155,12 @@ func TestCheckpointNotRestoredInAChain(t *testing.T) {
 	}
 
 	ok := map[string][]*Record{
-		"a learner's first, then recorded":           join(rec(learnerNotRestored(1, 1, ""), v1)),
-		"a re-learn after the first":                 join(rec(v1, learnerNotRestored(5, 2, testEventV1))),
-		"a re-learn after two":                       join(rec(v1, v2, learnerNotRestored(5, 3, testEventV2))),
-		"twice, then recorded":                       join(rec(v1, learnerNotRestored(5, 2, testEventV1), learnerNotRestored(6, 2, testEventV1), v2)),
-		"a window that starts after the recording":   join(rec(learnerNotRestored(5, 4, testEventV3))),
-		"each asset's own recordings":                join(rec(v1, v2, otherV1, onOther(learnerNotRestored(5, 2, testEventV1)))),
-		"a detector after the acknowledgement":       join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(detectorNotRestored(90, testEventV1))),
-		"a detector with no acknowledgement in recs": join(rec(detectorNotRestored(5, testEventV2))),
+		"a learner's first, then recorded":     join(rec(learnerNotRestored(1, 1, ""), v1)),
+		"a re-learn after the first":           join(rec(v1, learnerNotRestored(5, 2, testEventV1))),
+		"a re-learn after two":                 join(rec(v1, v2, learnerNotRestored(5, 3, testEventV2))),
+		"twice, then recorded":                 join(rec(v1, learnerNotRestored(5, 2, testEventV1), learnerNotRestored(6, 2, testEventV1), v2)),
+		"each asset's own recordings":          join(rec(v1, v2, otherV1, onOther(learnerNotRestored(5, 2, testEventV1)))),
+		"a detector after the acknowledgement": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(detectorNotRestored(90, testEventV1))),
 		"a detector after a denied acknowledgement": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded),
 			rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeDenied), rec(detectorNotRestored(90, testEventV1))),
 		"a detector after a re-acknowledgement": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded),
@@ -174,18 +172,45 @@ func TestCheckpointNotRestoredInAChain(t *testing.T) {
 		}
 	}
 	bad := map[string][]*Record{
-		"a re-learn that skips a version":       join(rec(v1, learnerNotRestored(5, 3, testEventV1))),
-		"a re-learn that repeats a version":     join(rec(v1, v2, learnerNotRestored(5, 2, testEventV1))),
-		"a re-learn replacing an older one":     join(rec(v1, v2, learnerNotRestored(5, 3, testEventV1))),
-		"a first after a recording":             join(rec(v1, learnerNotRestored(5, 1, ""))),
-		"a re-learn before the first":           join(rec(learnerNotRestored(1, 2, testEventV3), v1)),
-		"another asset's recording":             join(rec(otherV1, learnerNotRestored(5, 2, testEventV1), v1)),
-		"a detector of another baseline":        join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(detectorNotRestored(90, testEventV2))),
-		"a detector of a replaced baseline":     join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeSucceeded), rec(detectorNotRestored(90, testEventV1))),
-		"a detector of a recorded, unacked one": join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2, detectorNotRestored(90, testEventV2))),
+		// In a full chain nothing is before recs, so each names nothing.
+		"a detector with no acknowledgement in the chain": join(rec(detectorNotRestored(5, testEventV2))),
+		"a detector with only a recording in the chain":   join(rec(v1, detectorNotRestored(5, testEventV1))),
+		"a re-learn with no recording in the chain":       join(rec(learnerNotRestored(5, 2, testEventV1))),
+		"a re-learn that skips a version":                 join(rec(v1, learnerNotRestored(5, 3, testEventV1))),
+		"a re-learn that repeats a version":               join(rec(v1, v2, learnerNotRestored(5, 2, testEventV1))),
+		"a re-learn replacing an older one":               join(rec(v1, v2, learnerNotRestored(5, 3, testEventV1))),
+		"a first after a recording":                       join(rec(v1, learnerNotRestored(5, 1, ""))),
+		"a re-learn before the first":                     join(rec(learnerNotRestored(1, 2, testEventV3), v1)),
+		"another asset's recording":                       join(rec(otherV1, learnerNotRestored(5, 2, testEventV1), v1)),
+		"a detector of another baseline":                  join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(detectorNotRestored(90, testEventV2))),
+		"a detector of a replaced baseline":               join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2), ack08(testAsset, 31, testEventV2, testEventV1, OutcomeSucceeded), rec(detectorNotRestored(90, testEventV1))),
+		"a detector of a recorded, unacked one":           join(rec(v1), ack08(testAsset, 30, testEventV1, "", OutcomeSucceeded), rec(v2, detectorNotRestored(90, testEventV2))),
 	}
 	for name, recs := range bad {
 		if err := VerifyConfig(recs); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	// A view that starts after seq 1 (VerifyConfigFrom from the first
+	// record): a recording or acknowledgement may be before it, unless the
+	// view holds the asset's version-1 recording (C6 on #387).
+	inView := map[string][]*Record{
+		"a re-learn after a recording before the view":        join(rec(learnerNotRestored(5, 4, testEventV3))),
+		"a detector after an acknowledgement before the view": join(rec(detectorNotRestored(5, testEventV2))),
+	}
+	for name, recs := range inView {
+		if err := VerifyConfigFrom(recs, recs[0].Seq); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	v1At3 := recordedRec(3, authz.BaselineEvent, testEventV1, "", 1)
+	notInView := map[string][]*Record{
+		"a detector after the view's first recording, with no acknowledgement": join(rec(v1At3, detectorNotRestored(5, testEventV1))),
+		"a re-learn before the view's first recording":                         join(rec(learnerNotRestored(2, 2, testEventV3), v1At3)),
+	}
+	for name, recs := range notInView {
+		if err := VerifyConfigFrom(recs, recs[0].Seq); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
