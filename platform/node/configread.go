@@ -348,6 +348,9 @@ func (s *Scheduler) restoreHolds(ctx context.Context, assetID string, refs []c5.
 	stream := ConfigStream(assetID)
 	db := s.rt.Store(stream)
 	held, err := db.Held(ctx, stream)
+	if err == nil {
+		err = holdFault(holdFaults.restore)
+	}
 	if err != nil {
 		s.rt.opt.Status.Raise(assetID, AlarmEvidenceNotStored, fmt.Sprintf("%s holds not read, so the restored change keeps its hold code until the next start's reconcile: %v", stream, err))
 		return

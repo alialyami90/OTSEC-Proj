@@ -54,6 +54,21 @@ func pruneTarget(q c5.Quota, target float64) float64 {
 // passes, so a Tick waiting to resume a database, and the readers queued
 // behind it, wait for one pass at most (A3 on #135).
 func (r *Runtime) pruneDB(ctx context.Context, d *database) error {
+	if d.spec.ID == AuditDB {
+		// Before the pass, outside the state lock that advanceHolds takes:
+		// only when the audit class is over its target, since it reads the
+		// whole stream.
+		db, _, _ := r.view(d)
+		if db != nil {
+			over, err := r.overTarget(ctx, d, db)
+			if err != nil {
+				return err
+			}
+			if over {
+				r.advanceHolds(ctx)
+			}
+		}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -74,16 +89,8 @@ func (r *Runtime) pruneDB(ctx context.Context, d *database) error {
 // prunePass is one pass of pruneDB: one step per stream, if a class is
 // above its target. It reports whether another pass may be needed.
 func (r *Runtime) prunePass(ctx context.Context, d *database, db *store.DB) (bool, error) {
-	over := false
-	for _, q := range d.spec.Quotas {
-		used, err := db.ClassBytes(ctx, q.Class)
-		if err != nil {
-			return false, err
-		}
-		over = over || float64(used) > pruneTarget(q, d.policy.PruneTarget)
-	}
-	if !over {
-		return false, nil
+	if over, err := r.overTarget(ctx, d, db); err != nil || !over {
+		return false, err
 	}
 	pass := 0
 	for _, s := range d.spec.Streams {
@@ -101,6 +108,20 @@ func (r *Runtime) prunePass(ctx context.Context, d *database, db *store.DB) (boo
 		pass += n
 	}
 	return pass > 0, nil
+}
+
+// overTarget reports whether a class of d holds more than its prune target.
+func (r *Runtime) overTarget(ctx context.Context, d *database, db *store.DB) (bool, error) {
+	for _, q := range d.spec.Quotas {
+		used, err := db.ClassBytes(ctx, q.Class)
+		if err != nil {
+			return false, err
+		}
+		if float64(used) > pruneTarget(q, d.policy.PruneTarget) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // quiet records whether the condition k holds and reports whether it has
