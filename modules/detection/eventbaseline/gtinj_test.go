@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -178,7 +179,7 @@ func learn(t testing.TB, s gtSeries, tweak func(*baseline.Params)) map[string]*e
 		if !ts(t, e.Received).Before(end) {
 			continue
 		}
-		if err := ls[e.Asset].Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil {
+		if err := ls[e.Asset].Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 			t.Fatalf("%s: %v", e.ID, err)
 		}
 	}
