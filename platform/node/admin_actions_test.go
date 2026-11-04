@@ -232,36 +232,41 @@ func TestSignedQuarantineClearResumesFromTheChain(t *testing.T) {
 }
 
 // A reply that accepts a request but does not name it as verified is
-// recorded without verified, and the node does nothing on it.
+// recorded without verified, and the node does nothing on it. The cases
+// share one node, each with a request file of its own, and each must raise
+// an alarm of its own, so an earlier case cannot pass a later one.
 func TestSignedQuarantineClearNeedsTheVerifiedGroup(t *testing.T) {
-	for name, edit := range map[string]func(*authz.CollectorReply){
-		"no admin":    func(r *authz.CollectorReply) { r.Admin = nil },
-		"other bytes": func(r *authz.CollectorReply) { r.Admin.PayloadSHA256 = strings.Repeat("0", 64) },
-		"other person": func(r *authz.CollectorReply) {
+	q, mux, manifest := signedQuarantineNode(t)
+	for i, tc := range []struct {
+		name string
+		edit func(*authz.CollectorReply)
+	}{
+		{"no admin", func(r *authz.CollectorReply) { r.Admin = nil }},
+		{"other bytes", func(r *authz.CollectorReply) { r.Admin.PayloadSHA256 = strings.Repeat("0", 64) }},
+		{"other person", func(r *authz.CollectorReply) {
 			r.Admin.Principal = authz.Principal{Type: authz.PrincipalHuman, ID: "someone@else"}
-		},
-		"other key":     func(r *authz.CollectorReply) { r.Admin.AdminKeyID = "ed25519-0000000000000000" },
-		"another nonce": func(r *authz.CollectorReply) { r.Admin.Nonce = strings.Repeat("A", 22) },
+		}},
+		{"other key", func(r *authz.CollectorReply) { r.Admin.AdminKeyID = "ed25519-0000000000000000" }},
+		{"another nonce", func(r *authz.CollectorReply) { r.Admin.Nonce = strings.Repeat("A", 22) }},
 	} {
-		t.Run(name, func(t *testing.T) {
-			q, mux, manifest := signedQuarantineNode(t)
-			mux.admin.edit = edit
-			_, sum := q.signedClear("admin-request-clear.json", 1, manifest)
-			q.s.relayAdmin(bg)
-			if n := len(clearRecords(q)); n != 0 {
-				t.Fatalf("%d cleared records on an acceptance that does not name the request", n)
-			}
-			recs := requestRecords(auditRecords(t, q.r), adminRequestID(sum))
-			if len(recs) != 2 || recs[1].Outcome != audit.OutcomeAllowed || recs[1].Verified != nil || recs[1].Actor.Type != authz.PrincipalNode {
-				t.Fatalf("relay records %+v", recs)
-			}
-			if countAlarms(q.st, AlarmAdminAcceptanceInvalid) != 1 {
-				t.Fatal("no admin-request-acceptance-invalid alarm")
-			}
-			if got := adminShown(q.st); len(got) != 1 || got[0].NodePart != "pending" {
-				t.Fatalf("status %+v", got)
-			}
-		})
+		mux.admin.edit = tc.edit
+		alarms := countAlarms(q.st, AlarmAdminAcceptanceInvalid)
+		name := fmt.Sprintf("admin-request-clear-%d.json", i)
+		_, sum := q.signedClear(name, i+1, manifest)
+		q.s.relayAdmin(bg)
+		if n := len(clearRecords(q)); n != 0 {
+			t.Fatalf("%s: %d cleared records on an acceptance that does not name the request", tc.name, n)
+		}
+		recs := requestRecords(auditRecords(t, q.r), adminRequestID(sum))
+		if len(recs) != 2 || recs[1].Outcome != audit.OutcomeAllowed || recs[1].Verified != nil || recs[1].Actor.Type != authz.PrincipalNode {
+			t.Fatalf("%s: relay records %+v", tc.name, recs)
+		}
+		if countAlarms(q.st, AlarmAdminAcceptanceInvalid) != alarms+1 {
+			t.Fatalf("%s: no admin-request-acceptance-invalid alarm of its own", tc.name)
+		}
+		if got := adminShown(q.st); !slices.ContainsFunc(got, func(a AdminRequestStatus) bool { return a.File == name && a.NodePart == "pending" }) {
+			t.Fatalf("%s: status %+v", tc.name, got)
+		}
 	}
 }
 
