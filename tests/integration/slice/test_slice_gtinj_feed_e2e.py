@@ -50,10 +50,21 @@ def _stamp(t):
     return t.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _parse(s):
+    # Go's RFC 3339 with up to nine fractional digits; Python keeps six.
+    s = s.strip().replace("Z", "+00:00")
+    if "." in s:
+        head, rest = s.split(".", 1)
+        i = rest.index("+")
+        s = f"{head}.{rest[:i][:6]}{rest[i:]}"
+    return datetime.datetime.fromisoformat(s)
+
+
 class Clock:
     """The node's test clock file, stepped by write then rename. On Windows
     the rename is refused while the node is reading the file, so it is
-    retried (UseTestClock)."""
+    retried (UseTestClock). The node writes the time it has moved to in
+    path.seen, which reached() reads."""
 
     def __init__(self, path, at):
         self.path, self.at = path, at
@@ -73,6 +84,14 @@ class Clock:
                     raise
                 time.sleep(0.001)
         self.at = at
+
+    def reached(self):
+        """Whether the node's clock is at the last step."""
+        try:
+            with open(self.path + ".seen") as f:
+                return _parse(f.read()) == self.at
+        except (OSError, ValueError):
+            return False  # not written yet, or read mid-write
 
 
 def _datagram(e):
@@ -147,11 +166,13 @@ def run(tmp_path_factory):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((layout["gtinj_sender"], 0))
         try:
-            # Each datagram is stored before the next step, so none can
-            # be stamped with a later event's time.
+            # The node's clock is at each step before its datagram is sent
+            # (C5 on #405), and each datagram is stored before the next
+            # step, so none can be stamped with another event's time.
             for i, e in enumerate(events, 1):
                 clock.set(_utc(e["received_utc"]))
-                time.sleep(0.03)  # three of the node's 10 ms polls
+                if not harness.wait_for(clock.reached, 10, step=0.002):
+                    raise AssertionError(f"the node's clock did not reach {e['received_utc']} ({e['id']})")
                 sock.sendto(_datagram(e), (host, int(port)))
                 if not harness.wait_for(lambda: _count(layout["store_dir"]) >= i, 10, step=0.002):
                     break
