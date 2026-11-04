@@ -620,3 +620,29 @@ Date: 2026-11-04. C1, approving C5's proposal `docs/phase4/C5-c5-0.7.md` at `243
 1. **Changing `DocumentValidator`'s signature is acceptable in 0.7.** The compatibility rule in `contracts/README.md` protects what one binary reads from another: identified messages and stored records. `DocumentValidator` is an in-process hook, and the store and the node that inject it are built into one binary. Its only implementation is the node's `ConfigDocuments`. What crosses versions is the stored data, and that change is additive: two new columns, empty on a pre-0.7 record, which the remover refuses. The conditions are that the 0.7 doc comment states the change, so it is not read as a precedent for messages, and that C6's cross-version test pins section 4 of the proposal, including the rollback note.
 2. **D4-20 rule 3 goes into C5 0.7 with the checkpoint, and both land before the Phase 4a gate.** Without them, every scheduled read and every checkpoint stays in the configuration class until its quota fills (R1.8). The PRs follow the order in section 6 of the proposal. Slice 1c's node work does not wait for rule 3. If rule 3 is slower, the checkpoint writer, restore and removal go first.
 3. **What the reviews narrowed.** `RemoveConfig` takes one series and accepts only `RemovableSeries`: `config.snapshot`, `eventcheckpoint.learner` and `eventcheckpoint.detector`. So no difference and no baseline of either kind can be removed through it (C3, C4). Kind and series form a closed table that `DocumentInfo.Validate` enforces (C3). A configuration baseline is a C9 snapshot held by its `baseline` hold, so `baseline.configuration` is never written (C2). A finished learner's last checkpoint is the newest of its series and stays until the next re-learn (C4). At start, the node replays each asset's last `config.reads_removed` (C3).
+
+## D4-40: what the first gate still needs, who builds it, and the V-M3 and V-M4 rulings
+
+Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-needs.md`, checked against `main` at `68e3d57`).
+
+1. **The finding.** The contracts for items 1 and 2 are merged, but the binaries do not yet do what V-M2 and V-M4 test:
+   - no scheduled configuration read stores a C9 snapshot or difference;
+   - the node writes none of C8's configuration records;
+   - no code outside `contracts/` handles the signed kinds `node.change_approval` and `node.baseline_ack`;
+   - no learner ends in a recorded baseline that is acknowledged and then activated;
+   - no detector runs in the node.
+
+   The gate waits for these. Nothing here changes the gate's criteria.
+2. **Who builds what.** C5 holds most of this path, so part of the node work moves, by C1's explicit authorization under brief 5.3. C5 stays the reviewer of every change under `platform/`.
+   - **C5 (P4-A5).** C5 0.7, store and node (D4-39). The configuration-read writer: a scheduled `sel.config.read_all` stores its C9 snapshot with the transcript as capture, compares it with the acknowledged baseline, and stores the difference. The node's C8 configuration records, the `unapproved_change` alarm and the hold fold. The node side of the two signed kinds. Feeder slice 1c.
+   - **C3 (P4-A3).** The collector side of the two signed kinds: verify, cap the window, assign `collector_seq`, and refuse a non-approver. Also the relay's widening for those kinds in `modules/security`. C3 agrees the node interface with C5 before either side is built.
+   - **C4 (P4-A4), authorized for `platform/node`.** The event-baseline lifecycle and the detector in the node: the learner's end in a C10 baseline and its `config.baseline_recorded`, activation once its `node.baseline_ack` is recorded, and the detector's alarms to the health stream with rule, baseline value, parameters, observation and event IDs. This goes in new files beside `eventbaselines_feed.go`. C5 reviews as owner of `platform/`, C6 for reliability and C3 for the trust boundary. Slice 1d's status and health counts are C4's here too.
+   - **C2.** Reviews the configuration-read writer as C9's owner.
+   - **C6.** The V-M3 desk half now, the test clock below, and the gate runs.
+3. **V-M3 for the SEL-751.** Rung 3 (`SHO` over Telnet) is the SEL-751's only built rung. Rung 1 is absent, and rung 2 waits for hardware test Q3 (ADR-0008 decision 4). So no lower rung exists to name, and no rung-selection code is built now. That code is built with the second rung, not before (simplicity). The "refused at start" case is recorded as vacuous for the SEL-751, with one test that is not vacuous: a node configuration that tries to choose a configuration method, for example FTP, is refused at start, because the node configuration has no such field and refuses fields it does not know. C6's desk check of every SEL-751 matrix cell against its citation stands as the other half.
+4. **V-M4's clock: C6's option (a), with a short untagged case.**
+   - **The test clock.** It is test-only and lives behind a build tag (`otsec_testclock`), so a build without the tag has no code path to it. The harness drives it, the simulator stamps on it, and the whole GT-INJ series runs with every rule.
+   - **A check on the release build.** CI checks that a build without the tag refuses the clock's control (the flag or variable is unknown), so a production binary cannot be driven.
+   - **The untagged binary.** A short-period case on the untagged binary covers the lifecycle and the event-driven rules, so the untagged binary is shown too.
+   - **The record.** The exit report says which runs used the tagged build.
+   - **Who builds it.** C6, by C1's authorization for `cmd/otsec` and `platform/node` limited to the tagged file and its hook, with C5 reviewing as owner and C3 for the trust boundary.
