@@ -48,7 +48,10 @@ type Config struct {
 	Assets            []json.RawMessage `json:"assets"`
 	Targets           []json.RawMessage `json:"targets"`
 	Schedule          []Collection      `json:"schedule"`
-	CollectorPipe     string            `json:"collector_pipe"`
+	// EventBaselines are the assets whose event behaviour is learnt and
+	// watched (R4.8; eventbaselines.go).
+	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
+	CollectorPipe  string          `json:"collector_pipe"`
 	// CollectorPeer is the identity the collector must hold (collectorwire
 	// Endpoint.Peer). On Windows it may be empty, which means the
 	// otsec-collector service SID; on Linux it is the collector's uid.
@@ -417,6 +420,7 @@ func (c *Config) check() error {
 			fail("%s.every_seconds %d below %d", p, s.EverySeconds, MinIntervalSeconds)
 		}
 	}
+	c.checkEventBaselines(fail)
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
