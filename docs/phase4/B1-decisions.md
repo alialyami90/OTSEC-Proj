@@ -657,3 +657,11 @@ Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-ne
    - for a learner, the version and previous digest of the re-learn it starts.
 
    C3 drafts it as C8's owner. C5 and C4 review as writers, and C6 writes the contract tests. Until it merges, slice 1c raises the alarm and the health event only, and does not claim D4-32's audit. The first gate needs the record.
+
+   In C3's draft, the error class is the `reason_code`, with outcome `warning`. The detector half also carries `baseline_digest`, so that `VerifyConfig` can check that the checkpoint was of the acknowledged event baseline. C1 accepts both.
+7. **How the node gets the register that `config.FromResult` renders from: option (a) of #383.** The node loads and verifies the signed register envelope it was commissioned with, against anchors in its own configuration. Option (b), lines taken from the rule's classes, is refused: a register revision that reorders the run would then label records with the wrong class instead of failing. Option (c), the snapshot built in the collector, is refused because it adds parsing to the privileged process. C3 passes (a) on the trust boundary. Its conditions:
+   1. The node refuses at start an envelope that fails verification, and a register whose version is not the commissioned `register_version`.
+   2. The node pins the payload's SHA-256 in its configuration and refuses any other bytes, because a revision number does not identify the bytes (C3's A2; C1 chose the pin over a status display, because the pin fails closed).
+   3. The node uses its copy only to build snapshots. One direction only: the package and its anchors come from the node's own configuration, never from the collector, and nothing derived from them goes to the collector (C3's A1).
+   4. A read whose record count, or any line, does not match the rendered run fails the read, with no partial snapshot. A node test pins this.
+   5. On a version mismatch between node and collector, the collector refuses the run, and a test pins that too.
