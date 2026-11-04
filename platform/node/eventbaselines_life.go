@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,7 +161,9 @@ func newEventLife(ctx context.Context, rt *Runtime) (*eventLife, error) {
 	}
 	if err := audit.VerifyConfig(all); err != nil {
 		for _, e := range rt.cfg.EventBaselines {
-			rt.opt.Status.Raise(e.AssetID, AlarmEventBaselineState, "the audit chain's configuration records do not verify, so no event baseline is learnt or watched: "+err.Error())
+			a := &lifeAsset{id: e.AssetID, p: e.Params, raised: map[string]bool{}}
+			l.assets[e.AssetID] = a
+			l.raise(a, AlarmEventBaselineState, "the audit chain's configuration records do not verify, so no event baseline is learnt or watched: "+err.Error())
 		}
 		return l, nil
 	}
@@ -169,10 +172,10 @@ func newEventLife(ctx context.Context, rt *Runtime) (*eventLife, error) {
 		a := &lifeAsset{id: e.AssetID, p: e.Params, raised: map[string]bool{}}
 		l.assets[e.AssetID] = a
 		stored, err := l.storedBaselines(ctx, e.AssetID)
-		if err != nil {
-			return nil, fmt.Errorf("event baselines: asset %s: %w", e.AssetID, err)
+		if err == nil {
+			err = l.start(a, chain[e.AssetID], stored)
 		}
-		if err := l.start(a, chain[e.AssetID], stored); err != nil {
+		if err != nil {
 			l.raise(a, AlarmEventBaselineState, err.Error())
 		}
 	}
@@ -202,14 +205,19 @@ func chainRecords(ctx context.Context, db *store.DB) ([]auditRec, error) {
 		}
 		for _, st := range got {
 			after = st.Key.Seq
-			if !bytes.Contains(st.Event, []byte(`"config.`)) && !bytes.Contains(st.Event, []byte(`"collector.`)) {
+			// The bytes select the records to parse; a record with an
+			// escape is parsed too, as its action may be spelt with one
+			// (C3 on #384). The parsed action decides.
+			if !bytes.Contains(st.Event, []byte(`"config.`)) && !bytes.Contains(st.Event, []byte(`"collector.`)) && !bytes.Contains(st.Event, []byte(`\u`)) {
 				continue
 			}
 			rec, err := audit.ParseRecord(st.Event)
 			if err != nil {
 				return nil, badRecord{st.Key.Seq, err}
 			}
-			out = append(out, auditRec{st.Key.Seq, rec})
+			if act := string(rec.Action); strings.HasPrefix(act, "config.") || strings.HasPrefix(act, "collector.") {
+				out = append(out, auditRec{st.Key.Seq, rec})
+			}
 		}
 	}
 	return out, nil
@@ -276,6 +284,9 @@ func (l *eventLife) storedBaselines(ctx context.Context, assetID string) (map[st
 			if err != nil {
 				return nil, fmt.Errorf("record %d: %w", st.Key.Seq, err)
 			}
+			if b.AssetID != assetID {
+				return nil, fmt.Errorf("record %d is a baseline of asset %s", st.Key.Seq, b.AssetID)
+			}
 			out[baseline.Hash(st.Event)] = b
 		}
 	}
@@ -291,17 +302,28 @@ func (l *eventLife) start(a *lifeAsset, c *eventChain, stored map[string]*baseli
 		last = c.recorded[n-1]
 	}
 	// A baseline stored after the last recording, whose record a crash left
-	// out: it replaces the last recorded one (or none), at the next version.
+	// out: it replaces the last recorded one at the next version. With no
+	// recording in the chain, only the asset's first can be one, and only
+	// when the stream holds nothing else: more means the chain was pruned
+	// past its recordings, and nothing is guessed (C3 on #384). The
+	// candidates are found without depending on map order.
+	var cands []string
 	for h, b := range stored {
+		if last == nil || b.Version == last.Config.BaselineVersion+1 {
+			cands = append(cands, h)
+		}
+	}
+	slices.Sort(cands)
+	switch {
+	case len(cands) > 1:
+		return fmt.Errorf("%d stored baselines (%s) could each be the one whose recording is missing", len(cands), strings.Join(cands, ", "))
+	case len(cands) == 1:
+		h := cands[0]
+		b := stored[h]
 		switch {
-		case last != nil && b.Version != last.Config.BaselineVersion+1:
-			continue
 		case last != nil && b.Previous != last.Config.BaselineDigest:
 			return fmt.Errorf("stored baseline %s, version %d, replaces %q, not the last recorded %s", h, b.Version, b.Previous, last.Config.BaselineDigest)
 		case last == nil && (b.Version != 1 || b.Previous != ""):
-			// With no recording in the chain, only a first baseline can be
-			// one whose record is missing; a later one means the chain
-			// was pruned past its recordings, and nothing is guessed.
 			return fmt.Errorf("stored baseline %s is version %d, and the chain records none of the asset's baselines", h, b.Version)
 		}
 		a.recorded, a.recordedHash, a.unrecorded = b, h, true
@@ -610,9 +632,10 @@ func (l *eventLife) half(assetID string) (*eventbaseline.Learner, *eventbaseline
 	return a.learner, a.detector
 }
 
-// awaiting reports whether the asset's events go nowhere: its baseline
-// awaits acknowledgement, and nothing learns or watches. The feeder's
-// cursor still moves past them (1c).
+// awaiting reports whether the asset's events go nowhere: nothing learns
+// or watches, because its baseline awaits acknowledgement or the asset is
+// stopped (its event-baseline-state alarm says why). The feeder's cursor
+// still moves past them (1c).
 func (l *eventLife) awaiting(assetID string) bool {
 	a := l.asset(assetID)
 	return a != nil && a.learner == nil && a.detector == nil

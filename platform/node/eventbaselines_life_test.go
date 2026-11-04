@@ -287,7 +287,7 @@ func TestLifeUnverifiedChainStopsEveryAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lr, d := l.half(relayID); lr != nil || d != nil || l.awaiting(relayID) {
+	if lr, d := l.half(relayID); lr != nil || d != nil || !l.awaiting(relayID) {
 		t.Fatalf("learner %v, detector %v, awaiting %v", lr, d, l.awaiting(relayID))
 	}
 	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
@@ -305,24 +305,7 @@ func TestLifeUnverifiedChainStopsEveryAsset(t *testing.T) {
 func TestLifeStartRecordsAStoredBaseline(t *testing.T) {
 	c, dir := lifeNode(t)
 	r, _, _ := start(t, c, dir)
-	e, _ := c.EventBaselineFor(relayID)
-	ln, err := eventbaseline.NewLearner(eventbaseline.LearnerConfig{Node: c.NodeID, AssetID: relayID, Params: e.Params, Version: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
-	for i := range 11 {
-		if err := ln.Observe(lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	res, err := ln.Finish(t0.Add(4400 * time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.Log(ConfigStream(relayID)).Append(bg, c5.Record{Stream: ConfigStream(relayID), Class: c5.ClassConfiguration, Event: res.Bytes}); err != nil {
-		t.Fatal(err)
-	}
+	res := storeBaseline(t, r, c, relayID, 1, "")
 	r.Close()
 
 	r, _, _ = start(t, c, dir)
@@ -337,6 +320,84 @@ func TestLifeStartRecordsAStoredBaseline(t *testing.T) {
 	}
 	if !l.awaiting(relayID) {
 		t.Fatal("not awaiting acknowledgement")
+	}
+}
+
+// storeBaseline finishes a learner of asset at version, replacing
+// previous, and appends its baseline to the relay's configuration stream
+// with no recording: what a crash between the two leaves.
+func storeBaseline(t *testing.T, r *Runtime, c *Config, asset string, version int, previous string) *eventbaseline.Result {
+	t.Helper()
+	e, _ := c.EventBaselineFor(relayID)
+	ln, err := eventbaseline.NewLearner(eventbaseline.LearnerConfig{Node: c.NodeID, AssetID: asset, Params: e.Params, Version: version, Previous: previous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC).Add(time.Duration(version) * 24 * time.Hour)
+	for i := range 11 {
+		o := lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second))
+		o.Event.Source.Asset.ID = asset
+		if err := ln.Observe(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := ln.Finish(t0.Add(4400 * time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Log(ConfigStream(relayID)).Append(bg, c5.Record{Stream: ConfigStream(relayID), Class: c5.ClassConfiguration, Event: res.Bytes}); err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// C3's B2 on #384: with no recording in the chain (none written, or pruned)
+// and two baselines stored, either could be the one a crash left
+// unrecorded. The node picks neither, whatever order it finds them in: the
+// asset is stopped with its alarm and nothing is recorded. Evidence class:
+// simulated.
+func TestLifeStartRefusesAnAmbiguousRepair(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	v1 := storeBaseline(t, r, c, relayID, 1, "")
+	storeBaseline(t, r, c, relayID, 2, v1.Hash)
+	// Map order varies from run to run; one start per run would not show
+	// a dependence on it, so start the lifecycle many times.
+	for range 50 {
+		l, err := newEventLife(bg, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lr, d := l.half(relayID); lr != nil || d != nil || l.assets[relayID].recorded != nil {
+			t.Fatalf("learner %v, detector %v, recorded %v", lr, d, l.assets[relayID].recorded)
+		}
+	}
+	if got := recordedOf(t, r); len(got) != 0 {
+		t.Fatalf("%d recordings", len(got))
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+		t.Fatal("no alarm")
+	}
+}
+
+// A baseline of another asset in the relay's configuration stream is not
+// taken, even though its hash would identify it: the asset is stopped with
+// its alarm (C3 on #384). Evidence class: simulated.
+func TestLifeStartRefusesAnotherAssetsBaseline(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	storeBaseline(t, r, c, "9c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", 1, "")
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr, d := l.half(relayID); lr != nil || d != nil || len(recordedOf(t, r)) != 0 {
+		t.Fatalf("learner %v, detector %v", lr, d)
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+		t.Fatal("no alarm")
 	}
 }
 
