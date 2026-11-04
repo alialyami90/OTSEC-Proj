@@ -620,3 +620,56 @@ Date: 2026-11-04. C1, approving C5's proposal `docs/phase4/C5-c5-0.7.md` at `243
 1. **Changing `DocumentValidator`'s signature is acceptable in 0.7.** The compatibility rule in `contracts/README.md` protects what one binary reads from another: identified messages and stored records. `DocumentValidator` is an in-process hook, and the store and the node that inject it are built into one binary. Its only implementation is the node's `ConfigDocuments`. What crosses versions is the stored data, and that change is additive: two new columns, empty on a pre-0.7 record, which the remover refuses. The conditions are that the 0.7 doc comment states the change, so it is not read as a precedent for messages, and that C6's cross-version test pins section 4 of the proposal, including the rollback note.
 2. **D4-20 rule 3 goes into C5 0.7 with the checkpoint, and both land before the Phase 4a gate.** Without them, every scheduled read and every checkpoint stays in the configuration class until its quota fills (R1.8). The PRs follow the order in section 6 of the proposal. Slice 1c's node work does not wait for rule 3. If rule 3 is slower, the checkpoint writer, restore and removal go first.
 3. **What the reviews narrowed.** `RemoveConfig` takes one series and accepts only `RemovableSeries`: `config.snapshot`, `eventcheckpoint.learner` and `eventcheckpoint.detector`. So no difference and no baseline of either kind can be removed through it (C3, C4). Kind and series form a closed table that `DocumentInfo.Validate` enforces (C3). A configuration baseline is a C9 snapshot held by its `baseline` hold, so `baseline.configuration` is never written (C2). A finished learner's last checkpoint is the newest of its series and stays until the next re-learn (C4). At start, the node replays each asset's last `config.reads_removed` (C3).
+
+## D4-40: what the first gate still needs, who builds it, and the V-M3 and V-M4 rulings
+
+Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-needs.md`, checked against `main` at `68e3d57`).
+
+1. **The finding.** The contracts for items 1 and 2 are merged, but the binaries do not yet do what V-M2 and V-M4 test:
+   - no scheduled configuration read stores a C9 snapshot or difference;
+   - the node writes none of C8's configuration records;
+   - no code outside `contracts/` handles the signed kinds `node.change_approval` and `node.baseline_ack`;
+   - no learner ends in a recorded baseline that is acknowledged and then activated;
+   - no detector runs in the node.
+
+   The gate waits for these. Nothing here changes the gate's criteria.
+2. **Who builds what.** C5 holds most of this path, so part of the node work moves, by C1's explicit authorization under brief 5.3. C5 stays the reviewer of every change under `platform/`.
+   - **C5 (P4-A5).** C5 0.7, store and node (D4-39). The configuration-read writer: a scheduled `sel.config.read_all` stores its C9 snapshot with the transcript as capture, compares it with the acknowledged baseline, and stores the difference. The node's C8 configuration records, the `unapproved_change` alarm and the hold fold. The node side of the two signed kinds. Feeder slice 1c.
+   - **C3 (P4-A3).** The collector side of the two signed kinds: verify, cap the window, assign `collector_seq`, and refuse a non-approver. C3 agrees the node interface with C5 before either side is built. The relay's widening for those kinds (`relayKinds` and `nodeActKinds` in `platform/node/adminrelay.go`) is C5's, with the node side (C3 on #380).
+   - **C4 (P4-A4), authorized for `platform/node`.** The event-baseline lifecycle and the detector in the node: the learner's end in a C10 baseline and its `config.baseline_recorded`, activation once its `node.baseline_ack` is recorded, and the detector's alarms to the health stream with rule, baseline value, parameters, observation and event IDs. This goes in new files beside `eventbaselines_feed.go`. C5 reviews as owner of `platform/`, C6 for reliability and C3 for the trust boundary. Slice 1d's status and health counts are C4's here too.
+   - **C2.** Reviews the configuration-read writer as C9's owner.
+   - **C6.** The V-M3 desk half now, the test clock below, and the gate runs.
+3. **V-M3 for the SEL-751.** Rung 3 (`SHO` over Telnet) is the SEL-751's only built rung. Rung 1 is absent, and rung 2 waits for hardware test Q3 (ADR-0008 decision 4). So no lower rung exists to name, and no rung-selection code is built now. That code is built with the second rung, not before (simplicity). The "refused at start" case is recorded as vacuous for the SEL-751, with one test that is not vacuous: a node configuration that tries to choose a configuration method, for example FTP, is refused at start, because the node configuration has no such field and refuses fields it does not know. C6's desk check of every SEL-751 matrix cell against its citation stands as the other half.
+4. **V-M4's clock: C6's option (a), with a short untagged case.**
+   - **The test clock.** It is test-only and lives behind a build tag (`otsec_testclock`), so a build without the tag has no code path to it. The harness drives it, the simulator stamps on it, and the whole GT-INJ series runs with every rule.
+   - **A check on the release build.** CI checks that a build without the tag refuses the clock's control (the flag or variable is unknown), so a production binary cannot be driven.
+   - **The untagged binary.** A short-period case on the untagged binary covers the lifecycle and the event-driven rules, so the untagged binary is shown too.
+   - **The record.** The exit report says which runs used the tagged build.
+   - **Who builds it.** C6, by C1's authorization. It is limited to one tagged file and its hook in `cmd/otsec` and `platform/node`, with C5 reviewing as owner, and one tagged file and its hook in `cmd/otsec-collector`, with C3 reviewing as owner. The collector needs it because SER received time is stamped there (`modules/security/collector/runner_sel751.go`, the runner's `Now`). No `modules/` change is authorized. The clock is stepped, not scaled, so the D4-24 and `run_deadline_ms` deadlines do not fire falsely. The release-build check covers both binaries.
+5. **On C5's review of #380.**
+   - **The seam.** C4 owns the per-asset learner and detector state. Slice 1c snapshots and restores through C4's interface and holds no copy of its own. C4 and C5 agree that seam before either side builds it.
+   - **The clock.** The test clock drives everything that waits, not only `Now`: the scheduler's timer, the service tickers and any deadline the GT-INJ series crosses.
+   - **C5's order.** First the C5 0.7 store, then the configuration-read writer with the C8 records, alarm and fold. Slice 1c follows, then the node side of the signed kinds, and rule 3 last.
+6. **The audit record D4-32 names for a checkpoint that does not restore: C8 0.9 adds `config.checkpoint_not_restored`** (C5 and C4, 2026-11-04). It is node-written, its Target is the asset, and its kind is `event`. It carries:
+   - the half (`learner` or `detector`);
+   - an error class from a closed set (`corrupt`, `version`, `mismatch`, `refused`);
+   - the checkpoint's seq;
+   - for a learner, the version and previous digest of the re-learn it starts.
+
+   C3 drafts it as C8's owner. C5 and C4 review as writers, and C6 writes the contract tests. Until it merges, slice 1c raises the alarm and the health event only, and does not claim D4-32's audit. The first gate needs the record.
+
+   In C3's draft, the error class is the `reason_code`, with outcome `warning`. The detector half also carries `baseline_digest`, which names the acknowledged event baseline the detector is rebuilt from. It is not read from the failed checkpoint, which may not decode. `VerifyConfig` checks it against the asset's latest succeeded event acknowledgement, and a checkpoint that decodes but names another baseline gets the reason code `mismatch` (C3). C1 accepts both.
+7. **How the node gets the register that `config.FromResult` renders from: option (a) of #383.** The node loads and verifies the signed register envelope it was commissioned with, against anchors in its own configuration. Option (b), lines taken from the rule's classes, is refused. It needs a C9 change, and it drops the check that the run is the register's: the rule would restate the register's order. A reordered run would still fail closed, not mislabel, because `CheckAgainst` requires each section's command before its span (C2 on #383, correcting C1). Option (c), the snapshot built in the collector, is refused because it adds parsing to the privileged process. C3 passes (a) on the trust boundary. Its conditions:
+   1. The node refuses at start an envelope that fails verification, and a register whose version is not the commissioned `register_version`.
+   2. The node pins the payload's SHA-256 in its configuration and refuses any other bytes, because a revision number does not identify the bytes (C3's A2; C1 chose the pin over a status display, because the pin fails closed).
+   3. The node uses its copy only to build snapshots. One direction only: the package and its anchors come from the node's own configuration, never from the collector, and nothing derived from them goes to the collector (C3's A1).
+   4. A read whose record count, or any line, does not match the rendered run fails the read, with no partial snapshot. A node test pins this.
+   5. On a version mismatch between node and collector, the collector refuses the run, and a test pins that too.
+   6. The node refuses a result whose `register_version` is not the revision it loaded (C2).
+8. **`VerifyConfig` on a pruned audit stream (C3's B1 on #384): option (a).** The node prunes its audit stream once records are forwarded upstream. So at start it holds only a retained view, and `VerifyConfig` on that view fails, which would stop every observed asset after the first prune. C8 0.9 adds `VerifyConfigFrom`, which treats a reference to a record before the view as unknown, not broken. This is the same reading the D4-26 amendment gives recordings. The conditions:
+   1. The view starts at the node's recorded prune point, not at whichever record happens to be first. Inside the view the hash chain is checked in full, so a record deleted or edited inside the view is still caught.
+   2. Only a reference to a seq before the prune point is unknown. A reference into the view that does not resolve is broken.
+   3. The full chain stays verifiable upstream, where the records were forwarded before the prune.
+   4. Status shows that start-up verification ran from the prune point.
+
+   Option (b), skipping the check on a pruned stream and raising an alarm, is refused as weaker. C3 adds it to the C8 0.9 draft, and C6 tests it. C3's B2, a version-1 recording repeated after recordings are pruned, is C4's to fix in #384.
