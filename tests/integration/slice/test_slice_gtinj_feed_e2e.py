@@ -22,6 +22,11 @@ alarms the node stored (platform/health, baseline.departure) are checked
 by tests/integration/gt_inj/alarms.py's check() against events.json, for
 the gt-inj-syslog asset only: gt-inj-ser needs the SER half.
 
+Two more nodes run (V-M4's other two measures): one fed the same series,
+whose alarms must equal the first's, and one fed events-heldout.json in
+place of the test period (its "replay"), which must raise no departure
+alarm.
+
 Evidence class: simulated. The series is synthetic (GT-INJ), and the
 sender is a test socket on loopback.
 """
@@ -179,13 +184,21 @@ def _acknowledge(s, clock, at, until):
     return _baseline(s)
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory):
+def _series(name):
+    with open(os.path.join(GTINJ, name)) as f:
+        return json.load(f)
+
+
+def _syslog(series):
+    return [e for e in series["events"] if e["asset"] == "gt-inj-syslog"]
+
+
+def _run(tmp_path_factory, events, end):
+    """One node fed events on the stepped clock, acknowledged at
+    events.json's baseline_ack, and stepped on to end."""
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
     need(os.name != "nt" and not SERVICE, "loopback senders other than 127.0.0.1 are a Linux runner's")
-    with open(EVENTS) as f:
-        series = json.load(f)
-    events = [e for e in series["events"] if e["asset"] == "gt-inj-syslog"]
+    series = _series("events.json")
     assert events and _utc(events[0]["received_utc"]) > T0
     d = str(tmp_path_factory.mktemp("slice-gtinj"))
     clock = Clock(os.path.join(d, "clock"), T0)
@@ -236,9 +249,8 @@ def run(tmp_path_factory):
         finally:
             sock.close()
         out["arrived"] = _count(layout["store_dir"]) >= len(events)
-        # To the end of the test period, and past the feeder's lateness, so
-        # every event and absence deadline in it reaches the detector.
-        end = _utc(series["period"]["test_end"])
+        # To the end, and past the feeder's lateness, so every event and
+        # absence deadline before it reaches the detector.
         clock.set(end)
         harness.wait_for(clock.reached, 10, step=0.002)
         _nudge(clock, end + datetime.timedelta(minutes=10), lambda: clock.at >= end + datetime.timedelta(minutes=3), "")
@@ -249,6 +261,32 @@ def run(tmp_path_factory):
     out["stored"] = _stored(s.layout["store_dir"])
     out["health"] = _stored(s.layout["store_dir"], HEALTH)
     return out
+
+
+@pytest.fixture(scope="module")
+def run(tmp_path_factory):
+    series = _series("events.json")
+    return _run(tmp_path_factory, _syslog(series), _utc(series["period"]["test_end"]))
+
+
+@pytest.fixture(scope="module")
+def repeat(tmp_path_factory):
+    """A second node fed the same series (V-M4: the same input gives the
+    same alarms)."""
+    series = _series("events.json")
+    return _run(tmp_path_factory, _syslog(series), _utc(series["period"]["test_end"]))
+
+
+@pytest.fixture(scope="module")
+def heldout(tmp_path_factory):
+    """events.json up to the acknowledgement, then events-heldout.json in
+    place of the test period (its "replay"), to its last event."""
+    series, ho = _series("events.json"), _series("events-heldout.json")
+    ack = _utc(series["period"]["baseline_ack"])
+    later = _syslog(ho)
+    assert ack < _utc(later[0]["received_utc"])
+    events = [e for e in _syslog(series) if _utc(e["received_utc"]) <= ack] + later
+    return _run(tmp_path_factory, events, _utc(later[-1]["received_utc"]))
 
 
 def _gtinj(run):
@@ -300,12 +338,48 @@ def test_the_baseline_is_acknowledged_at_baseline_ack(run):
     assert ack <= _parse(b["active_from"]) < ack + datetime.timedelta(minutes=2), b
 
 
-def test_departure_alarms_are_the_expected_ones(run):
-    m = _alarms()
+def _ids(run):
+    """Each stored event's EventID, as alarms cite it, to its series id."""
     got = _gtinj(run)
     assert len(got) == len(run["events"]), "the feed is incomplete, so the alarms are not checked"
-    ids = {f"{ev['id']['node_id']}:{ev['id']['stream']}:{ev['id']['seq']}": e["id"] for e, ev in zip(run["events"], got)}
-    alarms = [ev["health"] for ev in run["health"] if (ev.get("health") or {}).get("type") == m.DEPARTURE]
+    return {f"{ev['id']['node_id']}:{ev['id']['stream']}:{ev['id']['seq']}": e["id"] for e, ev in zip(run["events"], got)}
+
+
+def _departures(run):
+    return [ev["health"] for ev in run["health"] if (ev.get("health") or {}).get("type") == "baseline.departure"]
+
+
+def test_departure_alarms_are_the_expected_ones(run):
+    m = _alarms()
+    assert m.DEPARTURE == "baseline.departure"
+    ids = _ids(run)
+    alarms = _departures(run)
     failures, report = m.check(run["series"], alarms, ids, {run["layout"]["gtinj_asset"]: "gt-inj-syslog"})
     print(json.dumps(report, indent=1, default=str))
     assert not failures, "\n".join(failures)
+
+
+def test_a_second_run_raises_the_same_alarms(run, repeat):
+    # Every field of every alarm, and the events it cites, but the baseline
+    # hash: each run's learner ends at the watermark of the feeder step that
+    # first finds its minima met, so the two baselines' periods and counts
+    # differ (F-020). Each alarm must cite its own run's active baseline.
+    def norm(r):
+        ids, active = _ids(r), r["baseline"]["active"]["hash"]
+        out = []
+        for h in _departures(r):
+            d = dict(h["details"])
+            assert d.pop("baseline") == active, (d, active)
+            out.append((d, sorted(ids.get(f"{e['node_id']}:{e['stream']}:{e['seq']}", "?") for e in h.get("related") or [])))
+        return out
+    first = norm(run)
+    assert first, "no alarms to compare"
+    assert norm(repeat) == first
+
+
+def test_the_heldout_series_raises_no_departure(heldout):
+    # events-heldout.json "pass": at most 0 departure alarms per asset-day.
+    assert heldout["arrived"] and len(_gtinj(heldout)) == len(heldout["events"])
+    assert (heldout.get("baseline") or {}).get("phase") == "active", heldout.get("baseline")
+    alarms = _departures(heldout)
+    assert not alarms, json.dumps(alarms, indent=1)
