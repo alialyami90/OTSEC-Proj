@@ -70,8 +70,34 @@ jobs:
       # dumps its goroutine stacks when it passes 30m; the 45-minute job
       # limit leaves room for packages that start late on a slow runner (B1,
       # #230, #252, D4-22 and D4-44). A green platform/node over 12m is
-      # still a finding (D4-22, D4-44).
-      - run: go test ${{ runner.os == 'Windows' && '-timeout 30m' || '' }} ./...
+      # still a finding (D4-22, D4-44). On Windows -v gives each test's time
+      # to the budget step below, and tee keeps the log for it.
+      - if: runner.os == 'Linux'
+        run: go test ./...
+      - if: runner.os == 'Windows'
+        shell: bash
+        run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
+      # The platform/node budget is 720 s on a green Windows run (D4-22,
+      # D4-44). This prints the package's time and its ten slowest tests, and
+      # warns when it is over the budget. It never fails the job.
+      - name: platform/node time budget (C5)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: bash
+        run: |
+          awk -F'\t' -v pkg=otsec.local/otsec/platform/node '
+            /^--- (PASS|FAIL): / { split($0, f, " "); d = f[4]; gsub(/[()s]/, "", d); t[n++] = d " " f[3]; next }
+            /^(ok|FAIL|\?)[ \t]/ { if ($2 == pkg) { for (i = 0; i < n; i++) print t[i] > "node-tests.txt"; print $3 > "node-total.txt" } n = 0 }
+          ' gotest.txt
+          if [ ! -s node-total.txt ]; then
+            echo "::warning::platform/node has no time in the go test log"
+            exit 0
+          fi
+          total=$(tr -d 's\r\n' < node-total.txt)
+          echo "platform/node took ${total} s on Windows. Its ten slowest tests, in seconds:"
+          sort -rn node-tests.txt | head -n 10
+          if awk -v t="$total" 'BEGIN { exit !(t + 0 > 720) }'; then
+            echo "::warning::platform/node took ${total} s on Windows, over its 720 s budget (D4-22, D4-44)"
+          fi
       # The test clock's own tests compile only with its tag (D4-40, V-M4).
       # The release build's refusal of the clock runs in the step above
       # (tests/security, TestC6ReleaseBuildsRefuseTheTestClock).
