@@ -72,6 +72,12 @@ jobs:
       # #230, #252 and D4-22). A green platform/node over 12m is still a
       # finding (D4-22).
       - run: go test ${{ runner.os == 'Windows' && '-timeout 20m' || '' }} ./...
+      # The test clock's own tests compile only with its tag (D4-40, V-M4).
+      # The release build's refusal of the clock runs in the step above
+      # (tests/security, TestC6ReleaseBuildsRefuseTheTestClock).
+      - name: test clock (C6)
+        if: ${{ !cancelled() }}
+        run: go test -count=1 -tags otsec_testclock -run TestTestClock ./platform/node ./cmd/...
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 15

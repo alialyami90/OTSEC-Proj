@@ -26,7 +26,7 @@ const TickInterval = 60 * time.Second
 // quarantine export and clear (Scheduler.QuarantineTick). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
 func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
-	st := NewStatus(StatusPath(cfg), oslog, nil)
+	st := NewStatus(StatusPath(cfg), oslog, nodeClock.Now)
 	// No status file is written until each target and listener has been
 	// judged against its certificate's period (below), so the first one
 	// never says the node is collecting without showing a link held back
@@ -74,13 +74,13 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t := time.NewTicker(TickInterval)
-		defer t.Stop()
+		c, stop := nodeClock.NewTicker(TickInterval)
+		defer stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-t.C:
+			case <-c:
 				rt.Tick(ctx)
 				sched.QuarantineTick(ctx)
 			}
