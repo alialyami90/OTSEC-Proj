@@ -43,7 +43,16 @@ The difference has no capture. Its two snapshots are the baseline, already held 
 - **(b) C9 takes the run's lines from the snapshot rule.** `FromResult` gains a form that takes the lines from `Rules[ruleID].Classes`. The rule already names each class's command, so the register is not needed to know them. This is a C9 change (C2's). It drops the check that the run read exactly what the register's run renders, which the register's version gives today.
 - **(c) The collector builds the snapshot.** This would move C9 into the privileged binary and add a field to the outcome (C7). I don't recommend it.
 
-**I recommend (a).** It keeps C9 unchanged and keeps the check on the register's run. It is also the copy of the register that `collectorclient` was written to take. The rule ID per asset is a node table keyed by profile, with one entry: SEL-751 → `sel-751-sho/2`. A configuration read on an asset whose profile has no rule is refused at start.
+**Ruled: (a)** (C1 on #383, D4-40 item 7). (b) and (c) are refused. The conditions:
+
+1. The node verifies the envelope against anchors in its own configuration. At start it refuses an envelope that fails verification, and any register whose version is not the commissioned `register_version`.
+2. The node's copy is used only to build snapshots. Nothing on the node uses it to decide what may be sent.
+3. A read whose record count, or any line, does not match the rendered run fails the read, and never yields a partial snapshot (`FromResult` enforces this). A node test pins it.
+4. After a register update, a node and a collector on different versions fail closed. The node refuses at start, and that shows in status.
+5. One direction only (C3). The register package and its anchors come from the node's own configuration, never from the collector, and nothing derived from them goes to the collector.
+6. The node's configuration pins the SHA-256 of the register payload, and the node refuses any other bytes at start (C3, chosen by C1 over a status display).
+
+The note's original reasoning for (a): It keeps C9 unchanged and keeps the check on the register's run. It is also the copy of the register that `collectorclient` was written to take. The rule ID per asset is a node table keyed by profile, with one entry: SEL-751 → `sel-751-sho/2`. A configuration read on an asset whose profile has no rule is refused at start.
 
 ## 3. Tests (simulated)
 
@@ -55,7 +64,8 @@ The difference has no capture. Its two snapshots are the baseline, already held 
 - **Cross-version cases.** A baseline acknowledged before the read, an approval accepted before and after the read (`ApprovalCovers`), a restore after a change, and a re-acknowledgement.
 - **Crashes**, at each step of section 1. After restart, the holds match the chain, and no result names a read that is not stored.
 - **Refused snapshots.** A `FromResult` or `CheckAgainst` refusal is quarantined, and nothing is stored in `config/<asset>`.
-- **Register refusals.** For (a), a register envelope that does not verify, or one of another version, is refused at start.
+- **Register refusals** (conditions 1, 4 and 6). At start the node refuses an envelope that does not verify, a register of another version, and a payload whose SHA-256 is not the pinned one. A read whose lines differ from the rendered run fails whole (condition 3).
+- **The collector's side** (C3's ask). A run that names another `register_version` is refused. That test is in `modules/security/collector`, owned by C3.
 
 ## 4. Not in this PR
 
