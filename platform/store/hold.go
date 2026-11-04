@@ -50,6 +50,44 @@ func (d *DB) ensureHolds(ctx context.Context) error {
 	})
 }
 
+// seriesSchema (C5 0.7, D4-32 item 1) adds each configuration record's
+// DocumentInfo beside it, and the index the remover's newest-of-series
+// check uses. The columns are nullable with no default: a record committed
+// before 0.7, or by a binary rolled back below it, has NULL in both. The
+// index is partial, so on a 0.6 store it is empty when created and the
+// migration rewrites no rows.
+var seriesSchema = []string{
+	`ALTER TABLE events ADD COLUMN doc_kind TEXT`,
+	`ALTER TABLE events ADD COLUMN doc_series TEXT`,
+	`CREATE INDEX events_by_series ON events (stream, doc_series, seq) WHERE doc_series IS NOT NULL`,
+}
+
+// ensureSeries runs seriesSchema, in one transaction, in a database whose
+// layout holds the configuration class and whose events table has no
+// doc_kind yet. A crash leaves all of it or none, and a second open finds
+// doc_kind and does nothing. The format stays Format, so a 0.6 binary still
+// opens the store. The caller holds d.mu, or is open.
+func (d *DB) ensureSeries(ctx context.Context) error {
+	if !holdable(d.opt.Database) || d.readOnly {
+		return nil
+	}
+	var n int
+	if err := d.conn.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('events') WHERE name = 'doc_kind'`).Scan(&n); err != nil {
+		return fmt.Errorf("read the events columns: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	return d.tx(ctx, "series", func() error {
+		for _, q := range seriesSchema {
+			if _, err := d.conn.ExecContext(ctx, q); err != nil {
+				return fmt.Errorf("%s: %w", q, err)
+			}
+		}
+		return nil
+	})
+}
+
 // hasHolds reports whether the holds table exists. A database that never
 // held the configuration class has none, and nothing in it is held.
 func (d *DB) hasHolds(ctx context.Context) (bool, error) {

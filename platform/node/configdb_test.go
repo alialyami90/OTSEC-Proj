@@ -299,3 +299,33 @@ func TestConfigRecordBytesIsTheDerivedCap(t *testing.T) {
 		t.Fatalf("ConfigRecordBytes is %d, not the 3<<19 (1.5 MiB) that contracts/config/bound_test.go derives the record bound against", ConfigRecordBytes)
 	}
 }
+
+// C5 0.7: ConfigDocuments names each document's kind and series from the
+// closed table, with C9's own kind names, and no C9 or C10 document is
+// working state. Evidence class: desk.
+func TestConfigDocumentsSeries(t *testing.T) {
+	if config.KindSnapshot != c5.SeriesConfigSnapshot || config.KindDifference != c5.SeriesConfigDifference {
+		t.Fatalf("C9's kinds %q %q are not C5's series", config.KindSnapshot, config.KindDifference)
+	}
+	snap, cp := configRead(t, "1")
+	for name, c := range map[string]struct {
+		doc  []byte
+		cp   *c5.Capture
+		want c5.DocumentInfo
+	}{
+		"a snapshot":   {snap, &cp, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigSnapshot}},
+		"a difference": {contractFile(t, "config/testdata/valid/difference-1-2.json"), nil, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigDifference}},
+		"a baseline":   {canonicalBaseline(t), nil, c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesBaselineEvent}},
+	} {
+		got, err := ConfigDocuments(c.doc, c.cp)
+		if err != nil || got != c.want {
+			t.Errorf("%s: %+v %v, want %+v", name, got, err, c.want)
+		}
+		if err := got.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got, err := ConfigDocuments([]byte("SHO 1"), nil); err == nil || got != (c5.DocumentInfo{}) {
+		t.Errorf("a refused document: %+v %v", got, err)
+	}
+}

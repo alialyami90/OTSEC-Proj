@@ -78,6 +78,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		first := c5.Seq(last) + 1
 
 		payload := make([][]byte, len(recs))
+		var info []c5.DocumentInfo
 		var head c5.ChainLink
 		if class == c5.ClassAudit {
 			prev := c5.GenesisLink(d.opt.Node)
@@ -96,12 +97,19 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		} else if class == c5.ClassConfiguration {
 			// A typed document, kept exactly: no seq is written in, so a
 			// digest over the stored bytes is stable (C9, C10).
+			info = make([]c5.DocumentInfo, len(recs))
 			for i, r := range recs {
-				if err := d.opt.Documents(r.Event, r.Capture); err != nil {
+				di, err := d.opt.Documents(r.Event, r.Capture)
+				if err == nil {
+					// The store keeps only a pair from the closed table
+					// (C5 0.7), whatever the validator returned.
+					err = di.Validate()
+				}
+				if err != nil {
 					refusal = invalid("record %d: %v", i, err)
 					return refusal
 				}
-				payload[i] = r.Event
+				payload[i], info[i] = r.Event, di
 			}
 		} else {
 			for i, r := range recs {
@@ -151,8 +159,13 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 					delete(newCaptures, r.Capture.SHA256)
 				}
 			}
-			if _, err := d.conn.ExecContext(ctx, `INSERT INTO events (stream, seq, event, capture, source_cursor, committed_at) VALUES (?, ?, ?, ?, ?, ?)`,
-				string(stream), int64(first)+int64(i), payload[i], capture, nullBytes(r.SourceCursor), at); err != nil {
+			q := `INSERT INTO events (stream, seq, event, capture, source_cursor, committed_at) VALUES (?, ?, ?, ?, ?, ?)`
+			args := []any{string(stream), int64(first) + int64(i), payload[i], capture, nullBytes(r.SourceCursor), at}
+			if info != nil {
+				q = `INSERT INTO events (stream, seq, event, capture, source_cursor, committed_at, doc_kind, doc_series) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+				args = append(args, string(info[i].Kind), info[i].Series)
+			}
+			if _, err := d.conn.ExecContext(ctx, q, args...); err != nil {
 				return fmt.Errorf("insert event: %w", err)
 			}
 		}

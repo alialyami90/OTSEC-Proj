@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.6: how a site node keeps,
+// Package store is contract C5, otsec.store/0.7: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
@@ -62,6 +62,16 @@
 //     class at its warning level raises store-quota-warning, as the runtime
 //     would at its next commit. Pages are the store's PageBytes and stay
 //     bounded by DiskBytesPerQuotaByte.
+//   - Since 0.7 (D4-20, D4-32, D4-36, D4-39,
+//     docs/phase4/C5-c5-0.7.md): the hold codes HoldApprovedDifference and
+//     HoldSupersededBaseline, and HoldPriority, the order a record wanted
+//     for two reasons is held in. DocumentValidator also returns the
+//     record's DocumentInfo, a kind (evidence or working-state) and a
+//     series from a closed table, which the store keeps beside the record;
+//     the configuration class now holds the node's event-baseline
+//     checkpoints as working state. ConfigRemover removes unheld records of
+//     RemovableSeries in steps of RemoveConfigStep, never the newest record
+//     of its series and never a record with no series, all or nothing.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -84,4 +94,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.6"
+const Identifier = "otsec.store/0.7"

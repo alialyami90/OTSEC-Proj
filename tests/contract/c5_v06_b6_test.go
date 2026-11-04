@@ -20,7 +20,7 @@ import (
 var c5v6Codes = []store.HoldCode{store.HoldBaseline, store.HoldUnapprovedDifference, "acknowledged-difference", "restored-difference"}
 
 func TestC5v06Identifier(t *testing.T) {
-	if store.Identifier != "otsec.store/0.6" {
+	if store.Identifier != "otsec.store/0.7" {
 		t.Errorf("identifier %q", store.Identifier)
 	}
 	if store.HoldAcknowledgedDifference != "acknowledged-difference" || store.HoldRestoredDifference != "restored-difference" {
@@ -41,7 +41,7 @@ func TestC5v06HoldCodes(t *testing.T) {
 	}
 	for _, code := range []store.HoldCode{"", "acknowledged", "restored", "acknowledged_difference", "restored_difference",
 		"Acknowledged-difference", "RESTORED-DIFFERENCE", " restored-difference", "restored-difference ", "acknowledged-difference\x00",
-		"restored-differences", "unapproved-difference-restored", "approved-difference", "released"} {
+		"restored-differences", "unapproved-difference-restored", "released"} {
 		if err := (store.HoldReason{Code: code, Ref: ref}).Validate(); !c5vIs(err, store.CodeInvalid) {
 			t.Errorf("code %q: %v", code, err)
 		}
