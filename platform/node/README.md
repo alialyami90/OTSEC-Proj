@@ -52,6 +52,7 @@ Host names are refused, `localhost` included, so the check never depends on name
 | `admin_dir` | Where an administrator leaves Phase 2 interim files such as `clear-suspension.json` (D2-15), and signed `admin-request-*.json` files the node relays (P3-A5) | absolute; optional. Without it no suspension can be cleared. The installer requires `OTSEC\config\admin`, which the node and the collector both read and neither writes |
 | `collector_public_dir` | Where the collector publishes `install-key.json` (A3 #106); the node reads it before every request (D2-15) | absolute; required when anything is scheduled. The installer requires `OTSEC\collector\public` |
 | `key_register` | The node key register, `register.json` (A3's `nodekey`, credential design section 9). With it, every TLS reference resolves from the register | absolute. Every TLS reference must then be a `nodekey_` reference. The installer requires `OTSEC\config\tls\register.json`. See "Node keys" |
+| `register` | The node's own copy of the signed command register (D4-40 item 7, `docs/phase4/C5-config-writer.md`): `envelope` (the signed envelope, the same file the collector is given), `payload_sha256` (the pin) and `trust_anchors[]` (`key_id`, `public_key` in standard base64, `status` `active` or `revoked`). It comes from this file only, never from the collector, nothing derived from it goes to the collector, and it is used only to render a run's lines when the node builds a C9 snapshot | required when the schedule reads configuration, optional otherwise. `envelope` absolute; `payload_sha256` 64 lowercase hex digits; at least one anchor, each 32 bytes. At start the node pins the payload, verifies the signature against these anchors and requires the revision to be `register_version`. A copy that fails any of these raises `config-register-refused` (level 0) and every configuration read is held; the asset's other collections run |
 | `lab_tls_files` | The lab flag for private keys in files: the D2-12 files, or the register's `lab-files` keys | `tls_dir` needs it and it needs `tls_dir` |
 | `tls_dir` | Without `key_register`, the directory holding the files the TLS references name (D2-12, lab only). With it, the `lab-files` keys | absolute; needs `lab_tls_files`. A TLS reference needs `key_register`, or `tls_dir` with `lab_tls_files`. See "TLS references" |
 | `policy_version`, `register_version` | Named in every run request; the collector refuses a request whose versions are not its own | each at least 1 |
@@ -64,7 +65,8 @@ A `schedule[]` entry is checked as follows:
 - the asset is collected by this node (D1-3);
 - the endpoint exists and is not inbound Syslog;
 - the operation is well formed;
-- the interval is at least 60 s.
+- the interval is at least 60 s;
+- a configuration read's asset has a profile with a C9 rule (`ConfigRules`: `sel-751-ascii` reads under `sel-751-sho/2`).
 
 The collector checks the operation itself against the signed register. The node only names it.
 
@@ -148,6 +150,46 @@ Each schedule entry's series of such slots gets one `collection.missed` health e
 While the event is not stored, no run of that entry is sent (D4-37). A read sent then would store its rows ahead of the event, and its own `collection.run` would be refused too, so the node would contact the device without a record of what it did. This happens whenever the `platform` class is at its quota and `adapter-evidence` is not, since the two have separate quotas (C6 on #372). Each held slot joins the series, so `first_at` stays the first slot's time. The node tries the write again before each run, and runs resume once the event is stored. The hold shows as one `collection-evidence-not-stored` alarm per series, naming the schedule entry; it is raised again if a later series is held. Like `collection-no-quarantine-room`, the hold leaves the device's SER buffer unread: a hold longer than the buffer takes to fill can let it wrap, and the oldest rows are then lost (`documented-untested`). A read that finds no new rows is a stored run, through its `collection.run`. The event-baseline feeder opens a gap at a stored failure, so the read after an outage is `AfterFailure` and its backlog is not learned in full (V-S12). The series is kept in memory only, so a restart before the event is written loses it. The feeder opens a gap across every node restart, which covers that (feeder slice 1c).
 
 **A long read holds the scheduler.** The scheduler is one goroutine, so a `sel.config.read_all` of up to 310 s (C3 0.3 limits, D4-13) holds back every other schedule entry, the 15-second admin relay and the held-run checks until it ends. A signed request lives at most 15 minutes (C7 sets no minimum), so one signed with a short life can expire while a read holds the scheduler, and two reads back to back could take most of even the longest window. It fails closed: the collector refuses it as expired, the node records the refusal, and the administrator signs again. The configuration read is scheduled at most hourly per asset, and never in the same session as a SER read (P4-A5), which bounds the effect; a node that needs the relay during a read needs it in its own goroutine, which is not built. Under C7 0.7 `collectorclient.Do` bounds the outcome wait at the run's own deadline plus 10 s (B3, #341), and nothing in this package waits for less: the scheduler's context has no deadline, and an accepted run without an outcome is recorded as `outcome-unknown`, whether the cause was a timeout or a closed pipe.
+
+## Configuration reads (D4-40 item 2)
+
+The design is `docs/phase4/C5-config-writer.md`. An accepted configuration read (`sel.config.read_all`) whose outcome passed the client's checks does not go to the SER normalizer. Instead, the node does the following, in order:
+
+1. **Snapshot.** C9 `FromResult` renders the run from the node's own register copy (`register`), `CheckAgainst` checks the snapshot against the transcript, and `Encode` writes it. A refusal keeps the outcome as quarantine and raises `collection-result-refused`. Nothing is stored in `config/<asset>`, and a read whose records or lines differ from the rendered run fails whole.
+2. **Store.** The snapshot goes to `config/<asset>` with the transcript as its capture, unheld. Then the run health event follows, naming `snapshot_seq` and `snapshot_digest`. A failed read stores no snapshot. Its run health event keeps the transcript, and it is still a run that bounds the next change.
+3. **Compare.** The snapshot is compared with the asset's acknowledged configuration baseline (the last succeeded configuration-kind `config.baseline_acknowledged`). The result is one C8 record, followed by its holds once that record has its Receipt:
+
+| Comparison | Record | Holds and alarm |
+| --- | --- | --- |
+| no baseline | none: the snapshot awaits an acknowledgement | none |
+| no changes, no change open | `config.read_compared` `no_difference` | none |
+| no changes after a recorded change | `config.baseline_restored` | the open unapproved changes move to `restored-difference` |
+| the newest recorded change again (`changes_digest`) | `config.read_compared` `same_change` | none |
+| other changes, an approval covers them (`audit.ApprovalCovers`) | the difference is stored, then `config.change_detected` info `approved_change` | snapshot and difference `approved-difference` |
+| other changes, no approval covers them | the difference is stored, then `config.change_detected` warning `unapproved_change` | snapshot and difference `unapproved-difference`, and `config-unapproved-change` |
+
+Everything the record names comes from the audit chain. The node folds it from the retained stream at the first read and before each comparison (`configchain.go`), by the rules `audit.VerifyConfig` checks:
+- `read_seq` is the run's `collector_seq`;
+- `unchanged_read_seq` and `unchanged_at` are the asset's last run of the operation before it in the epoch, or the epoch's `collector.seq_reset` time;
+- `approval_seq` is the newest succeeded approval of the epoch that covers the change. None is used while an unapproved change is open.
+
+A difference over C9's `MaxDifferenceBytes` (C9 0.4: `Compare` returns it with `ErrDifferenceTooLarge`) is not stored (D4-42). The change is still recorded: `config.change_detected` has `difference_too_large` and no `difference_digest` (C8 0.10), and its `changes_digest` is that of the difference, which is C9's `Compare` of the held baseline and the held snapshot. An unapproved change's `config-unapproved-change` says "difference not stored: too large". An approved one raises nothing, because no evidence is lost (#399). The start-up reconcile wants no hold for a difference that was never stored. Every stored difference is the bytes of C9's `Difference.Encode`.
+
+**A pruned audit stream (D4-41).** The fold starts again from the first retained record whenever records before it were pruned, at the first sync or between two (C3 on #390), so it never carries on as though nothing were missing. In such a fold, an asset with no acknowledgement in the view takes its configuration baseline from the store: of its records held `baseline`, the one with the newest Ref whose document is a C9 snapshot. It also takes the unapproved changes still open against that baseline from before the view: the Refs of its records held `unapproved-difference` that come after the baseline's acknowledgement and before the view (C3 on #390, B3). So an approval made after their alarm silences nothing, the changes are raised again at start, and a return to the baseline is recorded as a restore. The newest is the last change, with the changes digest of its held difference. Reads compare against the held baseline. Its changes in the view stay open until a restore or a configuration acknowledgement in the view ends them, as in the full fold. An approval counts only with its decision (an allowed, verified `collector.request` of `node.change_approval`) in the same epoch of the view, so one before the prune covers nothing and the change is alarmed. The last change is the newest held difference of either code in that window (D4-43): a return to the baseline moves the approved changes since the baseline's acknowledgement to `restored-difference` as well as the open ones, in the writer and in the start-up reconcile, so an approved change still held `approved-difference` there has not been reverted.
+
+Every document and record is committed with `AppendBatch`, so an error never leaves behind a record that committed anyway.
+
+**Alarms**, all level 0, named by asset:
+- `config-unapproved-change`: raised once for each unapproved change, and again at start for each change the chain shows still open.
+- `config-not-compared`: the snapshot is stored and not compared. It is raised once per asset and cause, and a comparison that succeeds clears it, so a cause that returns raises it again. The baseline or the snapshot does not compare, nothing retained in the chain bounds the change, or the configuration store's holds cannot be read.
+- `config-baseline-not-stored`: the acknowledged baseline is not in the stream.
+- `collection-audit-unavailable`: the read's decision is not in the chain, or the result could not be written. The stored records stay unheld, and the next read compares again.
+
+A crash between the record and a hold is repaired by the start-up reconcile. Its fold holds approved changes as `approved-difference` and replaced baselines as `superseded-baseline`, and it picks a record's single reason by `c5.HoldPriority` (C5 0.7).
+
+**Not yet:**
+- The node side of `node.baseline_ack` and `node.change_approval`. Until it is built, no acknowledgement or approval reaches the chain on a real node, so every read awaits an acknowledgement.
+- Rule 3's remover of compared reads.
 
 ## Slow commits (B6 #294, B1's question)
 

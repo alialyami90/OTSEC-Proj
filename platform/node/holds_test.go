@@ -87,24 +87,24 @@ func TestFoldHolds(t *testing.T) {
 		"an unapproved change holds its snapshot and difference": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false)},
 			[]string{"baseline " + hBase[7:13] + " ref 0", "unapproved-difference " + hSnap[7:13] + " ref 1", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
-		"an approved change holds nothing more": {
+		"an approved change holds its snapshot and difference as approved (C5 0.7)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, true)},
-			[]string{"baseline " + hBase[7:13] + " ref 0"}},
+			[]string{"baseline " + hBase[7:13] + " ref 0", "approved-difference " + hSnap[7:13] + " ref 1", "approved-difference " + hDiff[7:13] + " ref 1"}},
 		"a return to the baseline ends the alarm and keeps the evidence (D4-19)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 0", "restored-difference " + hSnap[7:13] + " ref 1", "restored-difference " + hDiff[7:13] + " ref 1"}},
 		"a new baseline ends the alarm, is the one held, and the difference stays held (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hSnap)},
-			[]string{"baseline " + hSnap[7:13] + " ref 2", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+			[]string{"baseline " + hSnap[7:13] + " ref 2", "acknowledged-difference " + hDiff[7:13] + " ref 1", "superseded-baseline " + hBase[7:13] + " ref 2"}},
 		"another baseline ends the alarm and both documents stay held (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent)},
-			[]string{"baseline " + hEvent[7:13] + " ref 2", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+			[]string{"baseline " + hEvent[7:13] + " ref 2", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1", "superseded-baseline " + hBase[7:13] + " ref 2"}},
 		"a second acknowledgement of the same baseline ends the alarm too (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 2", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
 		"going to another baseline and back does not bring the alarm back (D4-18)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), ackRec(cfg, hEvent), ackRec(cfg, hBase)},
-			[]string{"baseline " + hBase[7:13] + " ref 3", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1"}},
+			[]string{"baseline " + hBase[7:13] + " ref 3", "acknowledged-difference " + hSnap[7:13] + " ref 1", "acknowledged-difference " + hDiff[7:13] + " ref 1", "superseded-baseline " + hEvent[7:13] + " ref 3"}},
 		"a restored change stays restored after a later acknowledgement (D4-19)": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hSnap, hDiff, false), restoredRec(hBase), ackRec(cfg, hBase)},
 			[]string{"baseline " + hBase[7:13] + " ref 3", "restored-difference " + hSnap[7:13] + " ref 1", "restored-difference " + hDiff[7:13] + " ref 1"}},
@@ -114,6 +114,9 @@ func TestFoldHolds(t *testing.T) {
 		"a change against a baseline that is not the active one is not held": {
 			[]*audit.Record{ackRec(cfg, hSnap), detectedRec(hBase, hEvent, hDiff, false)},
 			[]string{"baseline " + hSnap[7:13] + " ref 0"}},
+		"a superseded baseline that is an open change's snapshot is held for the change (HoldPriority)": {
+			[]*audit.Record{ackRec(cfg, hBase), ackRec(cfg, hEvent), detectedRec(hEvent, hBase, hDiff, false)},
+			[]string{"baseline " + hEvent[7:13] + " ref 1", "unapproved-difference " + hBase[7:13] + " ref 2", "unapproved-difference " + hDiff[7:13] + " ref 2"}},
 		"a record wanted twice is held once, as the baseline": {
 			[]*audit.Record{ackRec(cfg, hBase), detectedRec(hBase, hEvent, hDiff, false), ackRec(ev, hEvent)},
 			[]string{"baseline " + hBase[7:13] + " ref 0", "baseline " + hEvent[7:13] + " ref 2", "unapproved-difference " + hDiff[7:13] + " ref 1"}},
@@ -387,11 +390,12 @@ func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
 	if len(got) != 1 || got[1] != reasonAt(r, ackA, c5.HoldBaseline) {
 		t.Fatalf("holds %+v", got)
 	}
+	var ackB c5.Seq
 	got, alarms, r = h.restart(func(r *Runtime) {
-		putAudit(t, r, ackRec(authz.BaselineConfiguration, hBase)) // B, never stored
+		ackB = putAudit(t, r, ackRec(authz.BaselineConfiguration, hBase)) // B, never stored
 	})
-	if len(got) != 1 || got[1] != reasonAt(r, ackA, c5.HoldBaseline) {
-		t.Fatalf("after the acknowledgement of a baseline that is not stored, holds %+v: the old baseline must stay", got)
+	if len(got) != 1 || got[1] != reasonAt(r, ackB, c5.HoldSupersededBaseline) {
+		t.Fatalf("after the acknowledgement of a baseline that is not stored, holds %+v: the old baseline must stay, superseded (C5 0.7)", got)
 	}
 	var seen bool
 	for _, a := range alarms {
@@ -405,7 +409,8 @@ func TestMissingBaselineKeepsTheOtherHolds(t *testing.T) {
 // A configuration acknowledgement ends an alarm and not the evidence
 // (D4-18): the snapshot and the difference stay held as
 // acknowledged-difference with the change record as Ref, the old baseline is
-// released, and a second start corrects nothing (B6 on #305).
+// held as superseded-baseline with the new acknowledgement as Ref (C5 0.7),
+// and a second start corrects nothing (B6 on #305).
 func TestAcknowledgedDifferenceStaysHeld(t *testing.T) {
 	h := newHoldsNode(t)
 	var det, ackB c5.Seq
@@ -421,6 +426,7 @@ func TestAcknowledgedDifferenceStaysHeld(t *testing.T) {
 		ackB = putAudit(t, r, ackRec(authz.BaselineConfiguration, config.Digest(h.baseline)))
 	})
 	want := map[c5.Seq]c5.HoldReason{
+		1: reasonAt(r, ackB, c5.HoldSupersededBaseline),
 		2: reasonAt(r, det, c5.HoldAcknowledgedDifference),
 		3: reasonAt(r, det, c5.HoldAcknowledgedDifference),
 		4: reasonAt(r, ackB, c5.HoldBaseline),
