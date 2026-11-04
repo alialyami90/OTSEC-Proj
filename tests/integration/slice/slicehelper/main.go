@@ -321,7 +321,11 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 		// with no kinds may not (C7 0.6), and which the collector accepts
 		// only for an asset it enrols.
 		adminKey["kinds"] = append(slices.Clone(authz.DefaultAdminKinds), authz.KindNodeBaselineAck)
-		assets = append(assets, nc.Assets[len(nc.Assets)-1])
+		for _, a := range nc.Assets {
+			if a["asset_id"] == gtinjAssetID {
+				assets = append(assets, a) // by ID, not position (C3 on #410)
+			}
+		}
 	}
 	collectorConfig := func(peer string) ([]byte, error) {
 		return json.MarshalIndent(map[string]any{
