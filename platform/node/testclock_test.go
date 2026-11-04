@@ -32,7 +32,15 @@ func useClock(t *testing.T, t0 time.Time) func(time.Time) {
 		if err := os.WriteFile(tmp, []byte(at.Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Rename(tmp, path); err != nil {
+		// On Windows a rename over the file is refused while the clock
+		// is reading it (C5 on #400), so it is retried for a moment.
+		var err error
+		for end := time.Now().Add(time.Second); ; time.Sleep(time.Millisecond) {
+			if err = os.Rename(tmp, path); err == nil || time.Now().After(end) {
+				break
+			}
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
