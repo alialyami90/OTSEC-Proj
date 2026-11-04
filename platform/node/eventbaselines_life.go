@@ -529,7 +529,9 @@ func (l *eventLife) asset(assetID string) *lifeAsset {
 }
 
 // Observe is feedSink's: the event goes to the asset's learner or detector.
-func (l *eventLife) Observe(assetID string, o eventbaseline.Obs) {
+// open is the start of the asset's collection gap still open, zero when
+// none is (D4-45; the learner's use of it is C4's).
+func (l *eventLife) Observe(assetID string, o eventbaseline.Obs, open time.Time) {
 	a := l.asset(assetID)
 	if a == nil {
 		return
@@ -562,8 +564,8 @@ func (l *eventLife) Gap(assetID string, from, to time.Time, reason string) {
 }
 
 // Tick is feedSink's: the watermark finishes a learner whose minima are met,
-// and moves a detector's time.
-func (l *eventLife) Tick(assetID string, at time.Time) {
+// and moves a detector's time. open is as for Observe.
+func (l *eventLife) Tick(assetID string, at, open time.Time) {
 	a := l.asset(assetID)
 	if a == nil {
 		return

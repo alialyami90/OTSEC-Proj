@@ -48,10 +48,16 @@ type streamReader interface {
 // feedSink takes what the feeder passes on for one asset: its events in
 // received order, the collection gaps, and the watermark as the clock.
 // Feeder slices 1c and 1d put the learner and the detector behind it.
+//
+// A gap is passed when it closes, and the watermark does not wait for that,
+// so Observe and Tick also carry the start of the asset's gap still open
+// (zero when none is): from it on, nothing is collected until the gap
+// closes, so the learner can tell where its period ends from its input
+// alone (D4-45).
 type feedSink interface {
-	Observe(assetID string, o eventbaseline.Obs)
+	Observe(assetID string, o eventbaseline.Obs, open time.Time)
 	Gap(assetID string, from, to time.Time, reason string)
-	Tick(assetID string, at time.Time)
+	Tick(assetID string, at, open time.Time)
 }
 
 // eventFeed reads the streams that carry the observed assets' events and
@@ -487,13 +493,13 @@ func (f *eventFeed) pass(a *feedAsset) {
 				}
 				it.afterFailure = afterFailure
 			}
-			f.sink.Observe(a.id, eventbaseline.Obs{Event: it.ev, AfterFailure: it.afterFailure, NotCounted: it.notCounted})
+			f.sink.Observe(a.id, eventbaseline.Obs{Event: it.ev, AfterFailure: it.afterFailure, NotCounted: it.notCounted}, a.failedAt)
 		}
 	}
 	a.pending = slices.Delete(a.pending, 0, n)
 	if wm.After(a.wm) {
 		a.wm = wm
-		f.sink.Tick(a.id, wm)
+		f.sink.Tick(a.id, wm, a.failedAt)
 	}
 }
 
