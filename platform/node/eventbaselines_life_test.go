@@ -255,8 +255,8 @@ func TestLifeStartsActiveFromTheChain(t *testing.T) {
 	if lr, d := l.half(relayID); lr != nil || d == nil {
 		t.Fatalf("after the restart: learner %v, detector %v; alarms %+v", lr, d, st.Snapshot("n").Alarms)
 	}
-	if a := l.assets[relayID]; a.active != h || a.activeFrom.IsZero() {
-		t.Fatalf("active %q from %v", a.active, a.activeFrom)
+	if a := l.assets[relayID]; a.active != h || a.activeFrom.IsZero() || a.recorded != nil || a.recordedHash != "" {
+		t.Fatalf("active %q from %v, recorded %q", a.active, a.activeFrom, a.recordedHash)
 	}
 	if len(recordedOf(t, r)) != 1 {
 		t.Fatal("a restart recorded the baseline again")
@@ -269,13 +269,20 @@ func TestLifeStartsActiveFromTheChain(t *testing.T) {
 // class: simulated.
 func TestLifeUnverifiedChainStopsEveryAsset(t *testing.T) {
 	c, dir := lifeNode(t)
-	r, st, _ := start(t, c, dir)
-	defer r.Close()
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, r)[0].Config.BaselineDigest
+	// The acknowledgement names the recorded baseline, so only the chain
+	// check stops the asset from going active (C6 on #384).
 	rec := audit.Record{Contract: audit.ContractID, NodeID: string(r.cfg.NodeID), Time: r.received(),
 		Actor:  audit.Actor{Type: authz.PrincipalHuman, ID: "admin@site-a", Role: authz.RoleAdmin},
 		Action: audit.ActionConfigBaselineAcknowledge, Outcome: audit.OutcomeSucceeded, Target: &audit.Target{AssetID: relayID},
 		CorrelationID: "req-ack-9",
-		Config:        &audit.Config{DecisionSeq: 9, PayloadSHA256: strings.Repeat("a", 64), Kind: authz.BaselineEvent, BaselineDigest: "sha256:" + strings.Repeat("b", 64)}}
+		Config:        &audit.Config{DecisionSeq: 9, PayloadSHA256: strings.Repeat("a", 64), Kind: authz.BaselineEvent, BaselineDigest: h}}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		t.Fatal(err)
@@ -283,16 +290,16 @@ func TestLifeUnverifiedChainStopsEveryAsset(t *testing.T) {
 	if _, err := r.Log(AuditStream).Append(bg, c5.Record{Stream: AuditStream, Class: c5.ClassAudit, Event: b}); err != nil {
 		t.Fatal(err)
 	}
-	l, err := newEventLife(bg, r)
+	r.Close()
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err = newEventLife(bg, r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lr, d := l.half(relayID); lr != nil || d != nil || !l.awaiting(relayID) {
 		t.Fatalf("learner %v, detector %v, awaiting %v", lr, d, l.awaiting(relayID))
-	}
-	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
-	if len(rawStream(t, r, ConfigStream(relayID))) != 0 {
-		t.Fatal("a baseline was stored")
 	}
 	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
 		t.Fatal("no alarm")
@@ -443,9 +450,32 @@ func TestLifeRestore(t *testing.T) {
 	if lerr, derr := l.restore(relayID, snap, snap, end); lerr != nil || derr != nil {
 		t.Fatalf("snapshots of halves the asset no longer has: %v, %v", lerr, derr)
 	}
+	if lr, d := l.half(relayID); lr != nil || d != nil {
+		t.Fatalf("a stale snapshot brought back a half: learner %v, detector %v", lr, d)
+	}
 	h := recordedOf(t, r)[0].Config.BaselineDigest
 	l.acknowledged(relayID, h, end)
 	_, d := l.half(relayID)
+	dsnap, err := d.Snapshot(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, derr := l.restore(relayID, nil, dsnap, end); derr != nil {
+		t.Fatalf("a good detector snapshot: %v", derr)
+	}
+	if _, nd := l.half(relayID); nd == nil || nd == d {
+		t.Fatal("the detector was not restored")
+	}
+	_, d = l.half(relayID)
+	// A restart soon after the acknowledgement: the watermark trails
+	// ActiveFrom, and the rebuilt detector still starts at ActiveFrom.
+	if _, derr := l.restore(relayID, nil, bad, end.Add(-time.Minute)); !errors.Is(derr, eventbaseline.ErrSnapshot) {
+		t.Fatalf("a detector snapshot that is not one: %v", derr)
+	}
+	if _, nd := l.half(relayID); nd == nil || nd == d || !l.assets[relayID].activeFrom.Equal(end) {
+		t.Fatalf("rebuilt from %v, want ActiveFrom %v", l.assets[relayID].activeFrom, end)
+	}
+	_, d = l.half(relayID)
 	wm := end.Add(time.Hour)
 	if _, derr := l.restore(relayID, nil, bad, wm); !errors.Is(derr, eventbaseline.ErrSnapshot) {
 		t.Fatalf("a detector snapshot that is not one: %v", derr)
@@ -546,5 +576,202 @@ func TestLifeRefusedGapIsVisible(t *testing.T) {
 	hs := healthOf(t, r, HealthEventBaselineRefused)
 	if len(hs) != 1 || hs[0].Details["asset_id"] != relayID || !strings.Contains(hs[0].Details["error"], "ends before it starts") {
 		t.Fatalf("refused health %+v", hs)
+	}
+}
+
+// setMode puts database id in mode m, as a store alarm would, so that the
+// lifecycle's writes to it are refused until it is set back.
+func setMode(r *Runtime, id c5.DatabaseID, m c5.Mode) {
+	d := r.find(id)
+	r.state.Lock()
+	d.report.Mode = m
+	r.state.Unlock()
+}
+
+// C6's case 1 on #384: a crash between storing a re-learnt v2 and recording
+// it. At the restart v2 is recorded at version 2, replacing v1, which stays
+// active while v2 awaits its own acknowledgement. Evidence class:
+// simulated.
+func TestLifeStartRecordsAStoredRelearn(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learnOnce(t, l, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	v1 := recordedOf(t, r)[0].Config.BaselineDigest
+	appendAck(t, r, v1)
+	v2 := storeBaseline(t, r, c, relayID, 2, v1)
+	r.Close()
+
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	l, err = newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs := recordedOf(t, r)
+	if len(recs) != 2 || recs[1].Config.BaselineDigest != v2.Hash || recs[1].Config.BaselineVersion != 2 || recs[1].Config.PreviousDigest != v1 {
+		t.Fatalf("recordings %+v", recs)
+	}
+	a := l.assets[relayID]
+	if a.detector == nil || a.active != v1 || a.recordedHash != v2.Hash || a.unrecorded {
+		t.Fatalf("active %q, recorded %q", a.active, a.recordedHash)
+	}
+}
+
+// C6's case 2 on #384: the repairs start refuses. Each stops the asset with
+// its alarm, records nothing more and starts no learner. Evidence class:
+// simulated.
+func TestLifeStartRefusals(t *testing.T) {
+	other := "sha256:" + strings.Repeat("c", 64)
+	cases := map[string]func(t *testing.T, r *Runtime, c *Config){
+		"a stored v2 that replaces another baseline": func(t *testing.T, r *Runtime, c *Config) {
+			l, err := newEventLife(bg, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			learnOnce(t, l, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+			storeBaseline(t, r, c, relayID, 2, other)
+		},
+		"no recording, and a stored v2": func(t *testing.T, r *Runtime, c *Config) {
+			storeBaseline(t, r, c, relayID, 2, other)
+		},
+		"a recording whose baseline is not stored": func(t *testing.T, r *Runtime, c *Config) {
+			l, err := newEventLife(bg, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := &lifeAsset{id: relayID, raised: map[string]bool{}, recorded: &baseline.Baseline{Version: 1}, recordedHash: other}
+			if err := l.record(a); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, dir := lifeNode(t)
+			r, _, _ := start(t, c, dir)
+			setup(t, r, c)
+			n := len(recordedOf(t, r))
+			r.Close()
+
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			l, err := newEventLife(bg, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lr, d := l.half(relayID); lr != nil || d != nil || len(recordedOf(t, r)) != n {
+				t.Fatalf("learner %v, detector %v, %d recordings, want %d", lr, d, len(recordedOf(t, r)), n)
+			}
+			if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+				t.Fatal("no alarm")
+			}
+		})
+	}
+}
+
+// C6's case 4 on #384: an acknowledgement of another digest, or of a
+// baseline whose recording is not yet written, activates nothing and raises
+// the alarm. Evidence class: simulated.
+func TestLifeAcknowledgementGuard(t *testing.T) {
+	t.Run("another digest", func(t *testing.T) {
+		c, dir := lifeNode(t)
+		r, st, _ := start(t, c, dir)
+		defer r.Close()
+		l, err := newEventLife(bg, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+		l.acknowledged(relayID, "sha256:"+strings.Repeat("c", 64), end)
+		if _, d := l.half(relayID); d != nil || !hasAlarm(st, relayID, AlarmEventBaselineState) {
+			t.Fatalf("detector %v", d)
+		}
+	})
+	t.Run("not yet recorded", func(t *testing.T) {
+		c, dir := lifeNode(t)
+		r, st, _ := start(t, c, dir)
+		defer r.Close()
+		l, err := newEventLife(bg, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setMode(r, AuditDB, c5.ModeBlocked)
+		end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+		a := l.assets[relayID]
+		if !a.unrecorded {
+			t.Fatal("recorded with the audit database blocked")
+		}
+		l.acknowledged(relayID, a.recordedHash, end)
+		if _, d := l.half(relayID); d != nil || !hasAlarm(st, relayID, AlarmEventBaselineState) {
+			t.Fatalf("detector %v", d)
+		}
+	})
+}
+
+// C6's case 5 on #384: a baseline that cannot be stored keeps its learner,
+// which finishes at the next watermark once the configuration database
+// takes events again; a recording that cannot be written is written at the
+// next watermark once the audit database does. Each raises the alarm while
+// it waits, and the recording clears it. Evidence class: simulated.
+func TestLifeRetriesStoreAndRecording(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setMode(r, ConfigDB, c5.ModeBlocked)
+	end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	if lr, _ := l.half(relayID); lr == nil || len(rawStream(t, r, ConfigStream(relayID))) != 0 || !hasAlarm(st, relayID, AlarmEventBaselineNotRecorded) {
+		t.Fatalf("learner %v after a refused store", lr)
+	}
+	setMode(r, ConfigDB, c5.ModeCollecting)
+	setMode(r, AuditDB, c5.ModeBlocked)
+	l.Tick(relayID, end.Add(time.Minute))
+	a := l.assets[relayID]
+	if a.learner != nil || len(rawStream(t, r, ConfigStream(relayID))) != 1 || !a.unrecorded || len(recordedOf(t, r)) != 0 {
+		t.Fatalf("learner %v, unrecorded %v", a.learner, a.unrecorded)
+	}
+	l.Tick(relayID, end.Add(2*time.Minute))
+	if !a.unrecorded {
+		t.Fatal("recorded with the audit database blocked")
+	}
+	setMode(r, AuditDB, c5.ModeCollecting)
+	l.Tick(relayID, end.Add(3*time.Minute))
+	if a.unrecorded || len(recordedOf(t, r)) != 1 || a.raised[AlarmEventBaselineNotRecorded] {
+		t.Fatalf("unrecorded %v, alarm held %v", a.unrecorded, a.raised[AlarmEventBaselineNotRecorded])
+	}
+}
+
+// C6's case 7 on #384 (C1's condition 4): a baseline that left types out
+// raises event-baseline-partial, and its recorded health event carries the
+// count. Evidence class: simulated.
+func TestLifePartialBaseline(t *testing.T) {
+	c, dir := configNode(t, func(nc *nodeconfigtest.Config) {
+		nc.AddEventBaseline(relayID)
+		nc.EventBaselines[0].Params["max_types"] = 2
+	})
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	for i := range 12 {
+		l.Observe(relayID, lifeSER(fmt.Sprintf("IN10%d", i%3+1), "Asserted", t0.Add(time.Duration(i)*400*time.Second)))
+	}
+	l.Tick(relayID, t0.Add(4800*time.Second))
+	hs := healthOf(t, r, HealthEventBaselineRecorded)
+	if len(hs) != 1 || hs[0].Details["types_overflow"] != "1" || hs[0].Details["types"] != "2" {
+		t.Fatalf("recorded health %+v", hs)
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselinePartial) {
+		t.Fatal("no partial alarm")
 	}
 }
