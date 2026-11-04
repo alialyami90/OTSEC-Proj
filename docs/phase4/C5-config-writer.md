@@ -31,7 +31,7 @@ After an accepted `sel.config.read_all` run whose outcome passed the client's ch
 5. **Holds, after the C8 record.** A hold's `Ref` is the C8 record, so the hold is taken only once that record has its Receipt (`Holder.Hold`, each in one transaction).
    - A crash between the record and the hold is repaired by the start-up reconcile, which rebuilds the holds from C8 already.
    - A crash between storing the snapshot and the record leaves a stored snapshot that has no result. The next read compares again. `VerifyConfig` requires only that a result names a real read.
-6. **Store failures.** A failure to store the snapshot or the difference raises `evidence-not-stored`, and the read has no result. A failure to write the C8 record raises `audit-unavailable`. The stored records stay unheld, and the next read compares again. Neither failure stops the asset's other collections.
+6. **Store failures.** A failure to store the snapshot or the difference raises `collection-evidence-not-stored`, and the read has no result. A failure to write the C8 record raises `collection-audit-unavailable`. The stored records stay unheld, and the next read compares again. Neither failure stops the asset's other collections.
 
 The difference has no capture. Its two snapshots are the baseline, already held `baseline`, and this read's snapshot.
 
