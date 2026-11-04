@@ -96,14 +96,18 @@ func statusAlarms(st *Status, code, target string) []StatusAlarm {
 	return out
 }
 
-// runForwarding runs fw until the test ends.
-func runForwarding(t *testing.T, fw *Forwarding) {
+// runForwarding runs fw until stop is called or the test ends. Callers
+// defer stop after the runtime's Close, so the forwarder ends before the
+// databases close, as in Serve.
+func runForwarding(t *testing.T, fw *Forwarding) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(bg)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); fw.Run(ctx) }()
-	t.Cleanup(func() { cancel(); wg.Wait() })
+	stop = func() { cancel(); wg.Wait() }
+	t.Cleanup(stop)
+	return stop
 }
 
 // A client certificate outside its period holds back its own target: the
@@ -136,7 +140,7 @@ func TestExpiredClientCertHoldsOnlyItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an expired client certificate stopped the node: %v", err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	deadline := time.Now().Add(15 * time.Second)
 	for len(otherSrv.Acked()) == 0 && time.Now().Before(deadline) {
 		fw.Check(bg)
@@ -190,7 +194,7 @@ func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
 		if !w.open() {
 			return true
 		}
-		runForwarding(t, fw)
+		defer runForwarding(t, fw)()
 		end := time.Now().Add(1500 * time.Millisecond)
 		for time.Now().Before(end) && w.open() {
 			fw.Check(bg)
@@ -331,7 +335,7 @@ func TestExpiredTrustAnchorIsNeverTrusted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runForwarding(t, fw)
+	defer runForwarding(t, fw)()
 	deadline := time.Now().Add(10 * time.Second)
 	for fw.targets[0].f.Status().LastErr == nil && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
