@@ -36,6 +36,8 @@ def ids_of(series):
 
 
 def health(rule, asset, typ, at, events):
+    # rule is the series' kind; the alarm carries C10's name for it.
+    rule = {"new": "new-type"}.get(rule, rule)
     if len(typ) == 2:
         key, text = f"ser|{typ[0]}|{typ[1]}", f"{typ[0]} {typ[1]}"
     else:
@@ -158,6 +160,16 @@ def test_an_alarm_of_another_rule_fails(series):
     failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
     assert any(f.startswith("missing repeats") for f in failures), failures
     assert any("dep-03" in f and "no alarm of its kind" in f for f in failures), failures
+
+
+def test_the_series_name_new_is_not_a_c10_rule(series):
+    # C10 names the rule new-type (contracts/baseline RuleNewType); an alarm
+    # with the series' kind name instead is not a departure (V-M4 run).
+    hs = expected(series)
+    n = next(i for i, x in enumerate(series["expected_alarms"]) if x["rule"] == "new")
+    hs[n]["details"]["rule"] = "new"
+    failures, _ = oracle.check(series, hs, ids_of(series), ASSETS)
+    assert any("not a departure of a GT-INJ asset" in f for f in failures), failures
 
 
 def test_a_ser_key_that_is_not_its_text_fails(series):
