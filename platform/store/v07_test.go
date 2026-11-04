@@ -299,6 +299,47 @@ func TestRemoveConfigAtQuota(t *testing.T) {
 	checkCounted(t, db, "at the quota")
 }
 
+// The class fills, the remover frees it, and it fills again: the second
+// quota-reached is raised too, so a second fill after a removal is not
+// silent (C6 on #382, mutant R9).
+func TestRemoveConfigReArmsTheQuotaAlarm(t *testing.T) {
+	d := withQuota(configDB, c5.ClassConfiguration, 256<<10)
+	a := &alarms{}
+	db := openConfig(t, storeDir(t), d, a)
+	l := configLog(t, db, d)
+	big := strings.Repeat("x", 60<<10)
+	fill := func(from int) int {
+		for n := from; ; n++ {
+			_, err := l.Append(bg, c5.Record{Stream: cfgA, Class: c5.ClassConfiguration, Event: fmt.Appendf(nil, `{"doc":%d,"pad":%q}`, n, big)})
+			if isCode(err, c5.CodeQuotaReached) {
+				return n
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	count := func() (k int) {
+		for _, x := range a.got {
+			if x.Code == c5.AlarmQuotaReached {
+				k++
+			}
+		}
+		return
+	}
+	n := fill(0)
+	if count() != 1 {
+		t.Fatalf("first fill: %d", count())
+	}
+	if r, err := db.RemoveConfig(bg, cfgA, c5.SeriesConfigSnapshot, []c5.Seq{1, 2}); err != nil || r.Records != 2 {
+		t.Fatalf("remove: %+v %v", r, err)
+	}
+	fill(n + 1)
+	if count() != 2 {
+		t.Fatalf("the class filled again after a removal and raised %d quota-reached alarms, want 2", count())
+	}
+}
+
 // noReserve is the store's Env with reserves that cannot be recreated, so
 // startup ends drain-only.
 type noReserve struct{ *Env }
