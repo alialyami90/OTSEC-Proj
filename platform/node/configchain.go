@@ -22,9 +22,10 @@ import (
 // after that from where it stopped, before each comparison.
 type configChain struct {
 	through c5.Seq // the last audit seq folded
-	// pruned: records before the first one folded were pruned, so this
-	// fold cannot see what they set (restart).
+	// pruned: records before first, the first one folded, were pruned, so
+	// this fold cannot see what they set (restart).
 	pruned bool
+	first  c5.Seq
 	// resetAt is the time of the collector.seq_reset that began this
 	// epoch, "" in the first.
 	resetAt string
@@ -38,9 +39,18 @@ type configChain struct {
 	// records: the kind of each, by collector_seq.
 	decisions map[uint64]authz.RequestKind
 	assets    map[string]*chainAsset
-	// held finds an asset's configuration baseline from the store's
-	// baseline hold, for a pruned fold (D4-41): "" when none is held.
-	held func(ctx context.Context, assetID string) (string, error)
+	// held finds what the store's holds keep of an asset's configuration
+	// state from before first, for a pruned fold (D4-41).
+	held func(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error)
+}
+
+// heldConfig is an asset's configuration state as the store's holds keep
+// it: the baseline held as baseline ("" when none is), and the unapproved
+// changes against it that are still open.
+type heldConfig struct {
+	baseline string
+	open     []c5.Seq
+	last     *chainChange
 }
 
 type assetOp struct{ asset, op string }
@@ -64,9 +74,9 @@ type chainAsset struct {
 	// open are the audit seqs of the open unapproved changes.
 	open []c5.Seq
 	// held: the fold is pruned and no acknowledgement of the asset is in
-	// it, so baseline is the one the store holds as baseline (D4-41). Its
-	// changes in the fold stay open (C6 on #390), and reads compare
-	// against it.
+	// it, so baseline, and the changes open against it before the fold,
+	// are the ones the store holds (D4-41; C3 on #390, B3). Its changes in
+	// the fold stay open too (C6 on #390), and reads compare against it.
 	held bool
 }
 
@@ -82,7 +92,7 @@ func (s *Scheduler) configChain() *configChain {
 	return s.chain
 }
 
-func newChain(held func(context.Context, string) (string, error)) *configChain {
+func newChain(held func(context.Context, string, c5.Seq) (heldConfig, error)) *configChain {
 	return &configChain{runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{},
 		decisions: map[uint64]authz.RequestKind{}, assets: map[string]*chainAsset{}, held: held}
 }
@@ -91,7 +101,7 @@ func newChain(held func(context.Context, string) (string, error)) *configChain {
 // retained record: what the records before it set is not known.
 func (ch *configChain) restart(first c5.Seq) {
 	*ch = *newChain(ch.held)
-	ch.pruned, ch.through = true, first-1
+	ch.pruned, ch.first, ch.through = true, first, first-1
 }
 
 func (ch *configChain) asset(id string) *chainAsset {
@@ -189,51 +199,93 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 	}
 }
 
-// findBaseline sets the asset's baseline, in a pruned fold with no
-// acknowledgement of it, to the one the store holds as baseline (D4-41).
-// It looks once; a later acknowledgement in the fold replaces it.
+// findBaseline sets the asset's state, in a pruned fold with no
+// acknowledgement of it, to the one the store holds (D4-41): its baseline,
+// and the unapproved changes still open against it, so an approval made
+// after their alarm silences nothing (C3 on #390, B3). It looks once; a
+// later acknowledgement in the fold replaces it.
 func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID string) error {
 	if !ch.pruned || a.baseline != "" || a.held || ch.held == nil {
 		return nil
 	}
-	d, err := ch.held(ctx, assetID)
+	h, err := ch.held(ctx, assetID, ch.first)
 	if err != nil {
 		return err
 	}
-	a.baseline, a.held = d, true
+	a.baseline, a.held, a.open, a.last, a.alarmed = h.baseline, true, h.open, h.last, len(h.open) > 0
 	return nil
 }
 
-// heldBaseline is the asset's configuration baseline as the store holds it
-// (D4-41): of the records held as baseline, the one whose Ref is newest and
-// whose document is a C9 snapshot (the kind is the document's, as an event
-// baseline is held the same way). "" when none is.
-func (s *Scheduler) heldBaseline(ctx context.Context, assetID string) (string, error) {
+// heldBaseline is the asset's configuration state from before first as the
+// store holds it (D4-41). The baseline is, of the records held as
+// baseline, the one whose Ref is newest and whose document is a C9
+// snapshot (the kind is the document's, as an event baseline is held the
+// same way). The open changes are the Refs of the records held as
+// unapproved-difference between that acknowledgement and first: a restore
+// moves them to restored-difference when it is written, and one before
+// the acknowledgement was a change against an earlier baseline. The newest
+// is the last change; its changes digest is its held difference's, or ""
+// when that was not stored, so a read of the same change is recorded as a
+// new one, which the alarm keeps unapproved.
+func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error) {
+	var out heldConfig
 	stream := ConfigStream(assetID)
 	db := s.rt.Store(stream)
 	if db == nil {
-		return "", errors.New("configuration database not open")
+		return out, errors.New("configuration database not open")
 	}
 	held, err := db.Held(ctx, stream)
 	if err != nil {
-		return "", err
+		return out, err
+	}
+	doc := func(seq c5.Seq) ([]byte, error) {
+		got, err := db.Read(ctx, stream, seq-1, 1)
+		if err != nil || len(got) != 1 || got[0].Key.Seq != seq {
+			return nil, err
+		}
+		return got[0].Event, nil
 	}
 	slices.SortFunc(held, func(a, b c5.HeldRecord) int { return cmp.Compare(b.Reason.Ref.Seq, a.Reason.Ref.Seq) })
+	var acked c5.Seq
 	for _, h := range held {
 		if h.Reason.Code != c5.HoldBaseline {
 			continue
 		}
-		got, err := db.Read(ctx, stream, h.Seq-1, 1)
+		b, err := doc(h.Seq)
 		if err != nil {
-			return "", err
+			return out, err
 		}
-		if len(got) == 1 && got[0].Key.Seq == h.Seq {
-			if _, err := config.DecodeSnapshot(got[0].Event); err == nil {
-				return config.Digest(got[0].Event), nil
+		if _, err := config.DecodeSnapshot(b); b != nil && err == nil {
+			out.baseline, acked = config.Digest(b), h.Reason.Ref.Seq
+			break
+		}
+	}
+	if out.baseline == "" {
+		return out, nil
+	}
+	for _, h := range held {
+		ref := h.Reason.Ref.Seq
+		if h.Reason.Code != c5.HoldUnapprovedDifference || ref <= acked || ref >= first {
+			continue
+		}
+		if !slices.Contains(out.open, ref) {
+			out.open = append(out.open, ref)
+		}
+		if out.last == nil {
+			out.last = &chainChange{seq: ref}
+		}
+		if ref == out.last.seq && out.last.changes == "" {
+			b, err := doc(h.Seq)
+			if err != nil {
+				return out, err
+			}
+			if d, err := config.DecodeDifference(b); b != nil && err == nil {
+				out.last.changes = d.ChangesDigest()
 			}
 		}
 	}
-	return "", nil
+	slices.Reverse(out.open)
+	return out, nil
 }
 
 // hasRun reports whether the decision readSeq is an allowed run of op on the
@@ -278,6 +330,14 @@ func (s *Scheduler) raiseOpenChanges(ctx context.Context) {
 	ch := s.configChain()
 	if ch.sync(ctx, s.rt.Store(AuditStream)) != nil {
 		return
+	}
+	for _, col := range s.rt.cfg.Schedule {
+		if col.ReadsConfiguration() {
+			// A pruned fold may hold no record of the asset; its open
+			// changes from before the fold are in the store's holds. One
+			// that cannot be read now is found at the first read.
+			_ = ch.findBaseline(ctx, ch.asset(col.AssetID), col.AssetID)
+		}
 	}
 	for id, a := range ch.assets {
 		for _, ref := range a.open {

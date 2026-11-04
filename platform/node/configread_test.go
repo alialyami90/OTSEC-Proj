@@ -1019,3 +1019,48 @@ func TestConfigChainPrunedHeldBaselineKind(t *testing.T) {
 		t.Fatalf("%+v", last)
 	}
 }
+
+// A pruned fold takes an asset's open unapproved changes from the store's
+// holds, as it takes the baseline (C3 on #390, B3; D4-41). After a prune
+// past an open change, an approval made after its alarm silences neither
+// the change read again nor a later one, the change is raised again at
+// start, and a return to the baseline is a restore. The whole chain, with
+// the pruned records kept aside, verifies.
+func TestConfigChainPrunedOpenChange(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	before := n.results()
+	change := before[len(before)-1]
+	n.approve(base)
+	full := auditRecords(t, n.r)
+	n.pruneAudit(c5.Seq(change.Seq))
+	n.s = newScheduler(t, n.r, n.f)
+	if c := countAlarms(n.st, AlarmUnapprovedChange); c != 2 {
+		t.Fatalf("%d unapproved-change alarms, want the open change raised again at start", c)
+	}
+	n.read("failed.timeout-in-run")
+	n.read("ok-all-present")
+	n.compareDoc(n.changed("X9"))
+	n.read("ok")
+	for _, r := range auditRecords(t, n.r) {
+		if r.Seq > full[len(full)-1].Seq {
+			full = append(full, r)
+		}
+	}
+	if err := audit.VerifyConfig(full); err != nil {
+		t.Fatalf("the whole chain does not verify: %v", err)
+	}
+	res := n.pruned()
+	if len(res) != 3 || res[0].ReasonCode != audit.ReasonSameChange || res[0].Config.ChangeSeq != change.Seq ||
+		res[1].ReasonCode != audit.ReasonUnapprovedChange || res[2].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	for seq, code := range n.holds() {
+		if code == c5.HoldUnapprovedDifference {
+			t.Errorf("record %d still held as %s after the restore", seq, code)
+		}
+	}
+}
