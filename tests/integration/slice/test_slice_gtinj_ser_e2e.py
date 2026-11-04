@@ -147,11 +147,16 @@ class _Run:
                              capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         self.jump(ack)
-        while (self.baseline().get("active") or {}).get("hash") != digest:
+
+        def active():
+            return (self.baseline().get("active") or {}).get("hash") == digest
+
+        # Up to a second of wall time a step: the node's work takes wall
+        # time, so a clock stepped faster than it works passes until first.
+        while not harness.wait_for(active, 1, step=0.01):
             if self.clock.at + SEC >= until:
                 raise AssertionError(f"baseline {digest} not active by {_stamp(self.clock.at)}: {self.baseline()}; "
                                      f"admin requests {_status(self.s).get('admin_requests')}")
-            time.sleep(0.05)
             self.jump(self.clock.at + SEC)
         return self.baseline()
 
