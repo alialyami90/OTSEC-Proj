@@ -194,3 +194,49 @@ func TestC6ProbePrunedWriterHoldNotTaken(t *testing.T) {
 		}
 	}
 }
+
+// C6's re-check probe on #408 at 1d85c13 (N4c), adopted as written.
+// P6: TestHoldsCursorPrunedRestoreReCode for an unapproved change (D4-19):
+// on a pruned view, a return whose re-code of an open change fails, with
+// the change's detection already pruned. The cursor does not pass the
+// return, and the next start's reconcile moves the change to
+// restored-difference.
+func TestC6ProbePrunedRestoreReCodeUnapproved(t *testing.T) {
+	n := newCursorNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ackSigned(authz.BaselineConfiguration, base)
+	n.fill()
+	n.r.Prune(bg)
+	n.read("ok")
+	n.read("ok-all-present")
+	det := n.lastSeq(audit.ActionConfigChangeDetected)
+	open := n.c6Unapproved(t)
+	n.fill()
+	n.r.Prune(bg)
+	if f := n.firstAudit(); f <= det {
+		t.Fatalf("first retained %d: the detection at %d is not pruned", f, det)
+	}
+	holdFaults.restore = func() error { return errFault }
+	n.read("ok")
+	restored := n.lastSeq(audit.ActionConfigBaselineRestored)
+	holdFaults.restore = nil
+	for _, s := range open {
+		if h := n.holds(); h[s] != c5.HoldUnapprovedDifference {
+			t.Fatalf("holds %v: the fault did not stop the re-code", h)
+		}
+	}
+	n.r.advanceHolds(bg)
+	if c := n.holdsCursor(); c >= restored {
+		t.Fatalf("holds cursor %d at or past the return at %d whose re-code failed", c, restored)
+	}
+	n.restart()
+	for _, s := range open {
+		if h := n.holds(); h[s] != c5.HoldRestoredDifference {
+			t.Fatalf("holds %v: the reconcile did not move %d to restored-difference", h, s)
+		}
+	}
+	if c := n.holdsCursor(); c < restored {
+		t.Fatalf("holds cursor %d not past the return at %d", c, restored)
+	}
+}
