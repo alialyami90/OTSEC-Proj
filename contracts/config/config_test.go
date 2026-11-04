@@ -32,7 +32,7 @@ var invalidWant = map[string]string{
 	"snapshot-value-two-spaces":            "no two spaces together",
 	"snapshot-value-holds-assign":          "no :=",
 	"snapshot-ref-not-transcript":          `ref "sha256:" + sha256`,
-	"snapshot-other-major":                 "not readable as otsec.config/0.3",
+	"snapshot-other-major":                 "not readable as otsec.config/0.4",
 	"snapshot-unknown-field-in-own-minor":  `key "zz_new" is not a field name`,
 	"snapshot-wrong-kind":                  `kind "config.baseline" is not "config.snapshot"`,
 	"snapshot-without-register-version":    "register_version is required",
@@ -210,6 +210,33 @@ func TestSameConfigurationOtherBytesIsNoChange(t *testing.T) {
 	}
 	if d.From.SnapshotDigest == d.To.SnapshotDigest || d.From.SnapshotDigest != Digest(b1) {
 		t.Errorf("digests %s and %s", d.From.SnapshotDigest, d.To.SnapshotDigest)
+	}
+}
+
+// A minor bump changes a snapshot's digest, never its comparison (doc.go,
+// Compatibility; C6 on #392): a node's baseline stored under 0.3 compares
+// to the same read under this minor with no changes, both ways.
+func TestEarlierMinorBaselineIsNoChange(t *testing.T) {
+	s, cur := snapshot(t, "1")
+	s.Schema = "otsec.config/0.3"
+	old, err := s.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Digest(old) == Digest(cur) {
+		t.Fatal("the 0.3 bytes have the 0.4 digest, so the case tests nothing")
+	}
+	for _, p := range [][2][]byte{{old, cur}, {cur, old}} {
+		d, err := Compare(p[0], p[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Changes) != 0 {
+			t.Errorf("changes %+v", d.Changes)
+		}
+		if d.Schema != Contract || d.From.SnapshotDigest != Digest(p[0]) || d.To.SnapshotDigest != Digest(p[1]) {
+			t.Errorf("difference %s from %s to %s", d.Schema, d.From.SnapshotDigest, d.To.SnapshotDigest)
+		}
 	}
 }
 

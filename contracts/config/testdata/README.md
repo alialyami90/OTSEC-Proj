@@ -30,7 +30,7 @@ Coverage: a snapshot holds what `SHO` prints. The touchscreen display settings (
 | `valid/snapshot-read-3.json` | The snapshot of read 3. |
 | `valid/difference-1-2.json` | Read 1 to read 2: no changes. The header's time, columns, order and wrapping are not semantic (P4-A2's acceptance case). |
 | `valid/difference-1-3.json` | Read 1 to read 3: one changed, one removed, Port 2 appeared with its settings added, and DNP map 1 disappeared with its settings removed. |
-| `valid/later-minor-snapshot.json` | A 0.3 snapshot with a field 0.2 does not know: a 0.2 reader accepts it and ignores the field. |
+| `valid/later-minor-snapshot.json` | A 0.5 snapshot with a field 0.4 does not know: a 0.4 reader accepts it and ignores the field. |
 
 ## Invalid
 
@@ -60,3 +60,7 @@ Coverage: a snapshot holds what `SHO` prints. The touchscreen display settings (
 | `invalid/difference-without-changes.json` | `changes` is required; an empty list is how no change is said. |
 | `invalid/difference-digest-without-prefix.json` | A snapshot digest is `sha256:<hex>`. |
 | `invalid/difference-sensitive-unmarked.json` | A change in a port section carries the port's sensitive mark. |
+
+## Size
+
+`difference_max.py` bounds the largest difference a SEL-751 read can make, from S22's settings sheets and the run's 512 KiB (C9 0.4). Its result is in `docs/phase4/C2-c9-0.4.md`.
