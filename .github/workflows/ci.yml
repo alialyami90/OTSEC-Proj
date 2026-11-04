@@ -36,9 +36,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # 30 minutes on Windows, so a package that starts late in the go test
-    # step still reaches its own -timeout below (B1 and B6, #252). 45 since
-    # D4-44, with the 30m package timeout.
+    # 45 minutes on Windows, so a package that starts late in the go test
+    # step still reaches its own -timeout below (B1 and B6, #252; D4-44).
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 15 }}
     steps:
       - uses: actions/checkout@v4
@@ -67,11 +66,11 @@ jobs:
         if: runner.os == 'Windows' && !cancelled()
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
       # -timeout applies to each package's test binary from its own start,
-      # not to the step. On Windows it is 20m, so a slow or hung package
-      # dumps its goroutine stacks when it passes 20m; the 35-minute job
+      # not to the step. On Windows it is 30m, so a slow or hung package
+      # dumps its goroutine stacks when it passes 30m; the 45-minute job
       # limit leaves room for packages that start late on a slow runner (B1,
-      # #230, #252 and D4-22). 30m since D4-44, on a slow runner's disk. A
-      # green platform/node over 12m is still a finding (D4-22, D4-44).
+      # #230, #252, D4-22 and D4-44). A green platform/node over 12m is
+      # still a finding (D4-22, D4-44).
       - run: go test ${{ runner.os == 'Windows' && '-timeout 30m' || '' }} ./...
       # The test clock's own tests compile only with its tag (D4-40, V-M4).
       # The release build's refusal of the clock runs in the step above
