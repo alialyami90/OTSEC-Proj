@@ -86,8 +86,15 @@ type feedSink interface {
 // state without an event, so the feeder does not see it; the next read is
 // then compared with the older state.
 //
-// Positions are in memory: slice 1c keeps them, and the learner and
-// detector state, in a checkpoint, behind a required consumer.
+// Positions are kept in each half's checkpoint (eventbaselines_run.go,
+// slice 1c): positions gives an asset's, and resume restores them.
+//
+// A stream that cannot be read past (its read fails, or a record does not
+// decode) holds every asset that reads it. A stream whose assets are all
+// held is not read, and neither is any stream of a held asset whose pending
+// events reach FeedHeldPending: the feeder then waits, failing closed,
+// rather than hold more or drop any (C6 on #365). The stuck stream itself is
+// read again at every Step, so it is taken up again once it can be.
 type eventFeed struct {
 	now     func() time.Time
 	reader  func(c5.StreamID) streamReader
@@ -104,7 +111,10 @@ type eventFeed struct {
 type feedStream struct {
 	id     c5.StreamID
 	health bool
+	assets []*feedAsset // the assets that read it
 	after  c5.Seq
+	// err is why the last read did not get past a record, nil when it did.
+	err error
 	// bound is the stream's part of the watermark after the last step.
 	bound time.Time
 	// Skipped counts records pruned before the feeder read them.
@@ -126,6 +136,11 @@ type feedAsset struct {
 
 	// Late counts events that arrived behind the watermark (FeedLateness).
 	Late int64
+
+	// skip is, per stream, the position resume restored: a record at or
+	// before RestartAfter, or at or before ReadThrough and received at or
+	// before the watermark, was taken before the restart (slice 1c).
+	skip map[c5.StreamID]checkpointStream
 }
 
 type feedItem struct {
@@ -142,6 +157,10 @@ type feedItem struct {
 	// from, on a collection.missed, is when its series began: the record
 	// is written once the health stream takes it, which can be long after.
 	from time.Time
+	// prev, on the first row of a SER read, is the alignment state its
+	// rows were compared with, so a checkpoint taken while the read is
+	// pending restarts with it (slice 1c).
+	prev []string
 }
 
 // health is 1 for a collection outcome and 0 for an event of the asset.
@@ -176,7 +195,9 @@ func newEventFeed(c *Config, reader func(c5.StreamID) streamReader, now func() t
 			return nil, err
 		}
 		for _, id := range ids {
-			a.streams = append(a.streams, stream(id))
+			s := stream(id)
+			a.streams = append(a.streams, s)
+			s.assets = append(s.assets, a)
 		}
 	}
 	return f, nil
@@ -221,19 +242,54 @@ func (c *Config) feedStreams(assetID string) ([]c5.StreamID, error) {
 // not decode) stops its stream there and fails closed: the stream does not
 // move past it and its bound does not rise, so the assets that read it are
 // held, every Step returns the error, and nothing is discarded. The other
-// streams, and the assets that do not read the stream, go on.
+// streams, and the assets that do not read the stream, go on, except as
+// blocked says.
 func (f *eventFeed) Step(ctx context.Context) error {
 	now := f.now()
 	var errs []error
 	for _, s := range f.streams {
-		if err := f.read(ctx, s, now); err != nil {
-			errs = append(errs, err)
+		if s.err == nil && f.blocked(s) {
+			continue
+		}
+		s.err = f.read(ctx, s, now)
+		if s.err != nil {
+			errs = append(errs, s.err)
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(f.assets)) {
 		f.pass(f.assets[id])
 	}
 	return errors.Join(errs...)
+}
+
+// FeedHeldPending is how many events a held asset (one that reads a stuck
+// stream) may have read and not passed before the feeder stops reading its
+// other streams too.
+const FeedHeldPending = 4 * FeedBatch
+
+// held reports whether the asset reads a stream the feeder is stuck on.
+func (a *feedAsset) held() bool {
+	for _, s := range a.streams {
+		if s.err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// blocked reports whether a stream that can be read is not read this Step:
+// every asset that reads it is held, or one of them has FeedHeldPending
+// events pending.
+func (f *eventFeed) blocked(s *feedStream) bool {
+	all := true
+	for _, a := range s.assets {
+		h := a.held()
+		if h && len(a.pending)+len(a.open) >= FeedHeldPending {
+			return true
+		}
+		all = all && h
+	}
+	return all
 }
 
 func (f *eventFeed) read(ctx context.Context, s *feedStream, now time.Time) error {
@@ -284,7 +340,7 @@ func (f *eventFeed) take(s *feedStream, rec c5.Stored, ev *event.Event, at time.
 		return nil
 	}
 	a, ok := f.assets[ev.Source.Asset.ID]
-	if !ok {
+	if !ok || a.taken(it) {
 		return nil
 	}
 	if ev.Kind != event.KindSER {
@@ -335,6 +391,7 @@ func closeRead(a *feedAsset) {
 	for i := range a.open {
 		a.open[i].notCounted = !counts[i]
 	}
+	a.open[0].prev = a.prev
 	a.pending = append(a.pending, a.open...)
 	a.open = nil
 }
@@ -347,7 +404,7 @@ func (f *eventFeed) takeHealth(it feedItem) {
 		return
 	}
 	a, ok := f.assets[h.Details["asset_id"]]
-	if !ok || !serReadOperation(h.Details["operation"]) {
+	if !ok || !serReadOperation(h.Details["operation"]) || a.taken(it) {
 		return
 	}
 	switch h.Type {
@@ -446,4 +503,135 @@ func (f *eventFeed) closeGap(a *feedAsset, at time.Time) {
 	}
 	f.sink.Gap(a.id, a.failedAt, at, a.failReason)
 	a.failedAt, a.failReason, a.lastEnd = time.Time{}, "", at
+}
+
+// taken reports whether a record re-read after a restart was taken before
+// it, by the position resume restored.
+func (a *feedAsset) taken(it feedItem) bool {
+	p, ok := a.skip[it.stream]
+	return ok && (uint64(it.seq) <= p.RestartAfter || uint64(it.seq) <= p.ReadThrough && !it.at.After(a.wm))
+}
+
+// positions is the asset's place in each of its streams, for its
+// checkpoint: every record at or before RestartAfter was passed or is not
+// the asset's, and the stream was read through ReadThrough. Records after
+// RestartAfter are read again after a restart, and those at or before
+// ReadThrough that were passed (received at or before the watermark) are
+// skipped then (taken).
+func (f *eventFeed) positions(a *feedAsset) []checkpointStream {
+	out := make([]checkpointStream, 0, len(a.streams))
+	for _, s := range a.streams {
+		p := checkpointStream{Stream: string(s.id), RestartAfter: uint64(s.after), ReadThrough: uint64(s.after)}
+		if old, ok := a.skip[s.id]; ok {
+			// Re-read from a lower point for another asset: what this one
+			// took before the restart is still taken.
+			p.RestartAfter, p.ReadThrough = max(p.RestartAfter, old.RestartAfter), max(p.ReadThrough, old.ReadThrough)
+		}
+		for _, items := range [][]feedItem{a.pending, a.open} {
+			for _, it := range items {
+				if it.stream == s.id && uint64(it.seq) <= p.RestartAfter {
+					p.RestartAfter = uint64(it.seq) - 1
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// prevKeys is the alignment state the asset's first SER read not yet passed
+// is compared with: the state a restart from positions resumes with.
+func (a *feedAsset) prevKeys() []string {
+	first := -1
+	for i, it := range a.pending {
+		if it.ev != nil && it.ev.Kind == event.KindSER && (first < 0 || it.seq < a.pending[first].seq) {
+			first = i
+		}
+	}
+	if first >= 0 {
+		return a.pending[first].prev
+	}
+	return a.prev
+}
+
+// resume restores the asset's state from its checkpoint, and at, from
+// cursor, the stream the checkpoint does not name (slice 1c). It is called
+// before the first Step, then start sets each stream's position.
+func (f *eventFeed) resume(a *feedAsset, c *eventCheckpoint, cursor map[c5.StreamID]c5.Seq) error {
+	a.skip = map[c5.StreamID]checkpointStream{}
+	for _, s := range a.streams {
+		a.skip[s.id] = checkpointStream{Stream: string(s.id), RestartAfter: uint64(cursor[s.id]), ReadThrough: uint64(cursor[s.id])}
+	}
+	if c == nil {
+		return nil
+	}
+	parse := func(v string) (time.Time, error) {
+		if v == "" {
+			return time.Time{}, nil
+		}
+		return time.Parse(time.RFC3339Nano, v)
+	}
+	wm, err := parse(c.Watermark)
+	if err != nil {
+		return err
+	}
+	end, err := parse(c.LastGapEnd)
+	if err != nil {
+		return err
+	}
+	var from time.Time
+	var reason string
+	if c.Gap != nil {
+		if from, err = parse(c.Gap.From); err != nil {
+			return err
+		}
+		reason = c.Gap.Reason
+	}
+	for _, p := range c.Streams {
+		id := c5.StreamID(p.Stream)
+		if old, ok := a.skip[id]; ok {
+			// The later of the checkpoint's and the cursor's (D4-26).
+			p.RestartAfter, p.ReadThrough = max(p.RestartAfter, old.RestartAfter), max(p.ReadThrough, old.ReadThrough)
+			a.skip[id] = p
+		}
+	}
+	a.wm, a.prev, a.failedAt, a.failReason, a.lastEnd, a.Late = wm, c.PrevKeys, from, reason, end, c.Late
+	return nil
+}
+
+// start sets each stream's position after resume: the lowest restart point
+// of the assets that read it.
+func (f *eventFeed) start() {
+	for _, s := range f.streams {
+		for i, a := range s.assets {
+			if p := c5.Seq(a.skip[s.id].RestartAfter); i == 0 || p < s.after {
+				s.after = p
+			}
+		}
+	}
+}
+
+// restarted opens the gap of a node restart for the asset, from its
+// watermark (C1 on #372): the next successful SER read closes it, as a
+// failure's would, and its rows are AfterFailure. An asset with no SER
+// stream gets it closed at at, the node's start, since its Syslog was not
+// received while the node was down. A gap already open stays as it is.
+func (f *eventFeed) restarted(a *feedAsset, at time.Time) {
+	if a.wm.IsZero() || !a.failedAt.IsZero() {
+		return
+	}
+	for _, s := range a.streams {
+		if s.id == SERStream(a.id) {
+			a.failedAt, a.failReason = a.wm, ReasonNodeRestart
+			return
+		}
+	}
+	from := a.wm
+	if a.lastEnd.After(from) {
+		from = a.lastEnd
+	}
+	if at.After(from) {
+		f.sink.Gap(a.id, from, at, ReasonNodeRestart)
+		a.lastEnd = at
+	}
 }
