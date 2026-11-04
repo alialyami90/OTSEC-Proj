@@ -256,17 +256,12 @@ func (s *Scheduler) holdAcknowledged(ctx context.Context, assetID string, ref c5
 		fail(err)
 		return
 	}
-	recs, err := configAuditRecords(ctx, adb)
+	folded, pruned, err := foldView(ctx, adb, cdb, []string{assetID})
 	if err != nil {
 		fail(err)
 		return
 	}
-	pruned, err := auditPruned(ctx, adb)
-	if err != nil {
-		fail(err)
-		return
-	}
-	p, err := s.rt.planStream(ctx, cdb, stream, foldHolds(recs)[assetID])
+	p, err := s.rt.planStream(ctx, cdb, stream, folded[assetID])
 	if err != nil {
 		fail(err)
 		return

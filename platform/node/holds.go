@@ -96,10 +96,14 @@ type assetHolds struct {
 }
 
 // foldHolds reads the configuration records of the node's audit stream, in
-// chain order, into what each asset should hold. Records of other actions
-// are ignored.
-func foldHolds(recs []auditRec) map[string]*assetHolds {
-	out := map[string]*assetHolds{}
+// chain order, into what each asset should hold, starting from seed (nil
+// for a view that begins at the first record; foldView). Records of other
+// actions are ignored.
+func foldHolds(recs []auditRec, seed map[string]*assetHolds) map[string]*assetHolds {
+	out := seed
+	if out == nil {
+		out = map[string]*assetHolds{}
+	}
 	of := func(r *audit.Record) *assetHolds {
 		a := out[r.Target.AssetID]
 		if a == nil {
@@ -157,6 +161,62 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 	return out
 }
 
+// foldView folds the audit stream's configuration records into what each
+// of assets should hold, and reports whether the view is pruned. On a
+// pruned view each asset's fold starts from what its holds keep from
+// before the view (heldConfigState, as the chain's findBaseline does): the
+// baseline, and the open and approved changes against it (C1 on #408). A
+// change in the view against that baseline is then wanted, so the writer's
+// holds are counted and taken (C6 on #408, F1), and a return in the view
+// wants the changes it ends moved to restored-difference, though their
+// detections are pruned (C3 on #408, B1). First is read after the records,
+// so a prune between the two can only fold a change twice, never miss it.
+func foldView(ctx context.Context, adb, cdb *store.DB, assets []string) (map[string]*assetHolds, bool, error) {
+	recs, err := configAuditRecords(ctx, adb)
+	if err != nil {
+		return nil, false, err
+	}
+	pruned, err := auditPruned(ctx, adb)
+	if err != nil || !pruned {
+		return foldHolds(recs, nil), false, err
+	}
+	first, err := adb.FirstRetained(ctx, AuditStream)
+	if err != nil {
+		return nil, true, err
+	}
+	seed := map[string]*assetHolds{}
+	for _, id := range assets {
+		h, err := heldConfigState(ctx, cdb, ConfigStream(id), first)
+		if err != nil {
+			return nil, true, fmt.Errorf("%s: %w", ConfigStream(id), err)
+		}
+		seed[id] = seedHolds(h)
+	}
+	return foldHolds(recs, seed), true, nil
+}
+
+// seedHolds is an asset's fold before a pruned view, from its holds.
+func seedHolds(h heldConfig) *assetHolds {
+	a := &assetHolds{baseline: map[authz.BaselineKind]ackedBaseline{}}
+	if h.baseline == "" {
+		return a
+	}
+	a.baseline[authz.BaselineConfiguration] = ackedBaseline{h.baseline, h.acked}
+	diff := func(refs []c5.Seq) []openDifference {
+		var out []openDifference
+		for _, ref := range refs {
+			d := h.docs[ref]
+			if d == nil {
+				d = &heldChange{}
+			}
+			out = append(out, openDifference{h.baseline, d.snapshot, d.difference, ref})
+		}
+		return out
+	}
+	a.open, a.approved = diff(h.open), diff(h.approved)
+	return a
+}
+
 // wants lists an asset's holds: the baselines, then each change's
 // snapshot and difference, then the superseded baselines. A digest wanted
 // for two reasons is wanted once, for the reason first in c5.HoldPriority
@@ -196,7 +256,9 @@ func (a *assetHolds) wantsAll() ([]wantHold, map[string][]wantHold) {
 	}
 	diff := func(os []openDifference, code c5.HoldCode, why string) {
 		for _, o := range os {
-			add(wantHold{o.snapshot, code, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d%s", o.ref, why)})
+			if o.snapshot != "" { // "" when seeded from a hold whose record is not read
+				add(wantHold{o.snapshot, code, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d%s", o.ref, why)})
+			}
 			if o.difference != "" { // "" when it was too large to store (C8 0.10, D4-42)
 				add(wantHold{o.difference, code, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d%s", o.ref, why)})
 			}
@@ -427,28 +489,27 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		fail(fmt.Errorf("configuration database %s, audit database open: %t", mode, adb != nil))
 		return
 	}
-	recs, err := configAuditRecords(ctx, adb)
-	if err != nil {
-		fail(err)
-		return
-	}
 	// A pruned audit stream no longer shows the acknowledgements and
-	// detections the holds came from, so what is wanted is only what the
-	// retained records show. The reconcile then adds what they justify and
-	// corrects and releases nothing but a baseline's reason
-	// (prunedReplace): a hold is never taken away on a view that begins
+	// detections the holds came from, so what is wanted is what the
+	// retained records show, folded from the holds' state before them
+	// (foldView). The reconcile then adds what they justify, corrects a
+	// reason only to baseline or restored-difference (prunedReplace), and
+	// releases nothing: a hold is never taken away on a view that begins
 	// after the record that justified it (as the suspension rebuild refuses
 	// a pruned prefix).
-	pruned, err := auditPruned(ctx, adb)
+	assets := make([]string, 0, len(d.spec.Streams))
+	for _, spec := range d.spec.Streams {
+		assets = append(assets, strings.TrimPrefix(string(spec.ID), "config/"))
+	}
+	folded, pruned, err := foldView(ctx, adb, cdb, assets)
 	if err != nil {
 		fail(err)
 		return
 	}
 	if pruned {
 		r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: c5.AlarmHoldsReconciled, At: r.opt.Now(),
-			Detail: "the audit stream has been pruned, so the C8 records for some holds may be gone: holds are added from the records that remain and none is corrected or released"})
+			Detail: "the audit stream has been pruned, so the C8 records for some holds may be gone: holds are added from the records that remain, a reason is corrected only to baseline or restored-difference, and none is released"})
 	}
-	folded := foldHolds(recs)
 	var added, replaced, released, failed int
 	for _, spec := range d.spec.Streams {
 		assetID := strings.TrimPrefix(string(spec.ID), "config/")
@@ -497,17 +558,23 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 }
 
 // prunedReplace is the part of a plan's replace that a pruned view still
-// applies: a record the fold wants as the baseline. The newest succeeded
-// acknowledgement of a kind is in any view that holds one, so the fold's
-// baseline is right on a pruned view too, and once the prune passes the
-// acknowledgement the node finds the active baseline by that hold (D4-41).
-// Without it, a snapshot held as an unapproved difference and then
-// acknowledged would keep that reason, and the older baseline would be
-// taken as active.
+// applies: a record the fold wants as the baseline, or as restored-
+// difference. The newest succeeded acknowledgement of a kind is in any view
+// that holds one, so the fold's baseline is right on a pruned view too, and
+// once the prune passes the acknowledgement the node finds the active
+// baseline by that hold (D4-41). Without it, a snapshot held as an
+// unapproved difference and then acknowledged would keep that reason, and
+// the older baseline would be taken as active. A return is in the view
+// with every record after it, as a prune removes a prefix, and the fold
+// starts from the holds' state before the view, so the changes it ends are
+// right too (C1 on #408). Without it, a re-code that failed when the
+// return was written would leave an approved change in force once the
+// prune passes the return, and its repeat would be read as the same
+// approved change (C3 on #408, B1).
 func prunedReplace(ps []planned) []planned {
 	var out []planned
 	for _, pl := range ps {
-		if pl.w.code == c5.HoldBaseline {
+		if pl.w.code == c5.HoldBaseline || pl.w.code == c5.HoldRestoredDifference {
 			out = append(out, pl)
 		}
 	}

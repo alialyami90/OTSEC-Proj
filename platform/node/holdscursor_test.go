@@ -24,7 +24,7 @@ func newCursorNode(t *testing.T) *signedCfgNode {
 		nc.AddRELPTarget("central", "127.0.0.1", 2514, "test-ca", "test-client", "test/durable-ack", true)
 		nc.Store.Quotas["audit"] = holdsAuditQuota
 	})
-	t.Cleanup(func() { holdFaults.ack, holdFaults.reconcile = nil, nil })
+	t.Cleanup(func() { holdFaults.ack, holdFaults.reconcile, holdFaults.restore = nil, nil, nil })
 	return n
 }
 
@@ -258,6 +258,8 @@ func TestHoldsCursorPrunedReconcileTakesTheBaseline(t *testing.T) {
 	if h := n.holds(); h[3] != c5.HoldUnapprovedDifference {
 		t.Fatalf("holds %v", h)
 	}
+	// The cursor's own check counts the baseline's reason (C3 on #408).
+	n.r.advanceHolds(bg)
 	if c := n.holdsCursor(); c >= ack {
 		t.Fatalf("holds cursor %d at or past the acknowledgement at %d", c, ack)
 	}
@@ -268,5 +270,105 @@ func TestHoldsCursorPrunedReconcileTakesTheBaseline(t *testing.T) {
 	}
 	if c := n.holdsCursor(); c <= ack {
 		t.Fatalf("holds cursor %d not past the acknowledgement at %d", c, ack)
+	}
+}
+
+// On a pruned view, a return to the baseline whose re-code of an approved
+// change fails, with the change's detection already pruned (C3 on #408,
+// B1): the cursor does not pass the return, the next start's reconcile
+// moves the change to restored-difference, and once the prune passes the
+// return a repeat of the change is not read as the same approved change.
+func TestHoldsCursorPrunedRestoreReCode(t *testing.T) {
+	n := newCursorNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ackSigned(authz.BaselineConfiguration, base)
+	n.fill()
+	n.r.Prune(bg)
+	n.read("ok") // a read in the retained chain bounds the change
+	n.approveSigned(base)
+	n.read("ok-all-present")
+	det := n.lastSeq(audit.ActionConfigChangeDetected)
+	var approved []c5.Seq
+	for s, c := range n.holds() {
+		if c == c5.HoldApprovedDifference {
+			approved = append(approved, s)
+		}
+	}
+	if len(approved) == 0 {
+		t.Fatalf("holds %v: the change is not held as approved", n.holds())
+	}
+	n.fill()
+	n.r.Prune(bg)
+	if f := n.firstAudit(); f <= det {
+		t.Fatalf("first retained %d: the detection at %d is not pruned", f, det)
+	}
+
+	holdFaults.restore = func() error { return errFault }
+	n.read("ok")
+	restored := n.lastSeq(audit.ActionConfigBaselineRestored)
+	holdFaults.restore = nil
+	for _, s := range approved {
+		if h := n.holds(); h[s] != c5.HoldApprovedDifference {
+			t.Fatalf("holds %v: the fault did not stop the re-code", h)
+		}
+	}
+	n.r.advanceHolds(bg)
+	if c := n.holdsCursor(); c >= restored {
+		t.Fatalf("holds cursor %d at or past the return at %d whose re-code failed", c, restored)
+	}
+	n.fill()
+	n.r.Prune(bg)
+	if f := n.firstAudit(); f > restored {
+		t.Fatalf("first retained %d: the prune passed the return at %d", f, restored)
+	}
+
+	n.restart()
+	for _, s := range approved {
+		if h := n.holds(); h[s] != c5.HoldRestoredDifference {
+			t.Fatalf("holds %v: the reconcile did not move %d to restored-difference", h, s)
+		}
+	}
+	if c := n.holdsCursor(); c < restored {
+		t.Fatalf("holds cursor %d not past the return at %d", c, restored)
+	}
+	n.fill()
+	n.r.Prune(bg)
+	if f := n.firstAudit(); f <= restored {
+		t.Fatalf("first retained %d: the return at %d is still kept", f, restored)
+	}
+	n.restart()
+	n.read("ok-all-present")
+	if res := n.pruned(); len(res) > 0 && res[len(res)-1].ReasonCode == audit.ReasonSameChange {
+		t.Fatalf("last result %+v: the repeat was read as the same approved change", res[len(res)-1])
+	}
+}
+
+// C6's F1 with a reconcile that can take the holds: the cursor passes the
+// change record only after the restart's reconcile takes them (C6 on #408).
+func TestHoldsCursorPrunedWriterHoldReconciled(t *testing.T) {
+	n := newCursorNode(t)
+	c6PrunedView(t, n)
+	n.read("ok-all-present")
+	writer := n.lastSeq(audit.ActionConfigChangeDetected)
+	held := n.c6Unapproved(t)
+	for _, s := range held {
+		if err := n.r.Store(ConfigStream(relayID)).Release(bg, ConfigStream(relayID), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.r.advanceHolds(bg)
+	if c := n.holdsCursor(); c >= writer {
+		t.Fatalf("holds cursor %d passed the change record %d", c, writer)
+	}
+	n.restart()
+	h := n.holds()
+	for _, s := range held {
+		if h[s] != c5.HoldUnapprovedDifference {
+			t.Fatalf("holds %v: the reconcile did not take %d", h, s)
+		}
+	}
+	if c := n.holdsCursor(); c < writer {
+		t.Fatalf("holds cursor %d not past the change record %d once its holds are taken", c, writer)
 	}
 }

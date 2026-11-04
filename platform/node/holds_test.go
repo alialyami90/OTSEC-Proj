@@ -52,7 +52,7 @@ func chain(recs ...*audit.Record) []auditRec {
 
 func wantsOf(t *testing.T, recs ...*audit.Record) []wantHold {
 	t.Helper()
-	a := foldHolds(chain(recs...))[relayID]
+	a := foldHolds(chain(recs...), nil)[relayID]
 	if a == nil {
 		return nil
 	}
