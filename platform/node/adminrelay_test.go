@@ -51,6 +51,9 @@ type adminCollector struct {
 	// accepted with the repeat answer (C7 0.5), as the real one does; off,
 	// it refuses them as a replay, as a 0.4 collector did.
 	repeat bool
+	// kinds is the pinned key's list of kinds (AdminKey.Kinds); nil is
+	// the 0.5 kinds.
+	kinds  []authz.RequestKind
 	sent   []*authz.CollectorRequest
 	runs   int
 	lose   bool
@@ -82,7 +85,7 @@ func (c *adminCollector) Do(ctx context.Context, req *authz.CollectorRequest) (c
 	c.seq++
 	reply := authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID, CollectorSeq: c.seq, Status: authz.ReplyAccepted}
 	keys := []authz.AdminKey{{KeyID: authz.AdminKeyID(relayAdminPriv.Public().(ed25519.PublicKey)),
-		PublicKey: relayAdminPriv.Public().(ed25519.PublicKey), Principal: relayAdmin.ID, Status: authz.KeyActive}}
+		PublicKey: relayAdminPriv.Public().(ed25519.PublicKey), Principal: relayAdmin.ID, Status: authz.KeyActive, Kinds: c.kinds}}
 	p, err := authz.VerifyAdminRequest(req, keys, authz.AdminBinding{NodeID: "site-a-node1", InstallKeyID: c.boundKey()}, time.Now())
 	sum := ""
 	if err == nil {

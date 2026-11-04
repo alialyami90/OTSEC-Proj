@@ -70,6 +70,6 @@ The note's original reasoning for (a): It keeps C9 unchanged and keeps the check
 ## 4. Not in this PR
 
 - Rule 3's remover, which comes after the writer.
-- The node side of `node.change_approval` and `node.baseline_ack`, which follows, on C3's #381.
+- The node side of `node.change_approval` and `node.baseline_ack`, on C3's #381, is `platform/node/admin_config.go` (see the node README, "The configuration kinds").
 - Wiring `collectorclient.Register`.
 - Any rung other than `SHO` (D4-40 item 3).
