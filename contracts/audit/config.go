@@ -109,12 +109,14 @@ func CheckpointCorrelationID(half string, seq uint64) string {
 // configRecordedSince the one that added config.baseline_recorded and
 // Config.BaselineVersion; configCheckpointSince the one that added
 // config.checkpoint_not_restored, Config.CheckpointHalf and
-// Config.CheckpointSeq.
+// Config.CheckpointSeq; configTooLargeSince the one that added
+// Config.DifferenceTooLarge.
 const (
 	configSince           = 5
 	configReadsSince      = 7
 	configRecordedSince   = 8
 	configCheckpointSince = 9
+	configTooLargeSince   = 10
 )
 
 // EmptyChangesDigest is C9's ChangesDigest of a difference with no changes:
@@ -213,6 +215,13 @@ type Config struct {
 	Reason           string `json:"reason,omitempty"`
 	SnapshotDigest   string `json:"snapshot_digest,omitempty"`
 	DifferenceDigest string `json:"difference_digest,omitempty"`
+	// DifferenceTooLarge (0.10) says that the difference config.change_detected
+	// found was over C9's MaxDifferenceBytes, so it was not stored and the
+	// record has no difference_digest (D4-42). The change is still named by
+	// changes_digest, and the difference is C9's Compare of the baseline and
+	// the read's snapshot, both held. On config.change_detected only, and
+	// there exactly when difference_digest is absent.
+	DifferenceTooLarge bool `json:"difference_too_large,omitempty"`
 	// ReadSeq is the collector_seq of the collector's decision on the
 	// configuration read that first found the difference (its allowed
 	// collector.request record).
@@ -317,6 +326,9 @@ func (r *Record) validateConfig(minor int) error {
 	if r.CorrelationID == "" {
 		return fmt.Errorf("audit: %s needs a correlation_id", r.Action)
 	}
+	if c.DifferenceTooLarge && !detected {
+		return fmt.Errorf("audit: difference_too_large belongs on config.change_detected, not %s", r.Action)
+	}
 	if notRestored {
 		return r.validateCheckpointNotRestored()
 	}
@@ -374,8 +386,12 @@ func (r *Record) validateConfig(minor int) error {
 		return errors.New("audit: config.change_detected needs changes_digest sha256:<hex> from 0.7")
 	case c.ChangesDigest == EmptyChangesDigest:
 		return errors.New("audit: config.change_detected has changes, so changes_digest is not the digest of none")
-	case !digestPattern.MatchString(c.DifferenceDigest):
-		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>")
+	case c.DifferenceTooLarge && minor < configTooLargeSince:
+		return fmt.Errorf("audit: difference_too_large is new in 0.%d, so a 0.%d record cannot carry it", configTooLargeSince, minor)
+	case c.DifferenceTooLarge && c.DifferenceDigest != "":
+		return errors.New("audit: config.change_detected with difference_too_large stored no difference, so it has no difference_digest")
+	case !c.DifferenceTooLarge && !digestPattern.MatchString(c.DifferenceDigest):
+		return errors.New("audit: config.change_detected needs difference_digest sha256:<hex>, or difference_too_large from 0.10")
 	case c.SnapshotDigest == c.BaselineDigest:
 		return errors.New("audit: config.change_detected names its baseline as the new snapshot")
 	case c.ApprovalSeq >= c.ReadSeq:

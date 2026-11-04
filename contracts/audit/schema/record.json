@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.9/record",
+  "$id": "otsec.audit/0.10/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -1024,6 +1024,11 @@
                   "required": [
                     "checkpoint_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1165,6 +1170,11 @@
                   "required": [
                     "checkpoint_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1196,7 +1206,6 @@
             "required": [
               "baseline_digest",
               "snapshot_digest",
-              "difference_digest",
               "read_seq",
               "unchanged_at"
             ],
@@ -1287,6 +1296,28 @@
                     "checkpoint_seq"
                   ]
                 }
+              ]
+            },
+            "if": {
+              "properties": {
+                "difference_too_large": {
+                  "const": true
+                }
+              },
+              "required": [
+                "difference_too_large"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "difference_digest"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "difference_digest"
               ]
             }
           }
@@ -1529,6 +1560,11 @@
                   "required": [
                     "checkpoint_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -1670,6 +1706,11 @@
                 {
                   "required": [
                     "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
                   ]
                 }
               ]
@@ -1853,6 +1894,11 @@
                   "required": [
                     "checkpoint_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             }
@@ -2002,6 +2048,11 @@
                 {
                   "required": [
                     "checkpoint_seq"
+                  ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
                   ]
                 }
               ]
@@ -2195,6 +2246,11 @@
                   "required": [
                     "snapshot_seq"
                   ]
+                },
+                {
+                  "required": [
+                    "difference_too_large"
+                  ]
                 }
               ]
             },
@@ -2383,6 +2439,31 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.change_detected"
+          },
+          "config": {
+            "required": [
+              "difference_too_large"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "config"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.([1-9][0-9]{1,3})$"
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -2484,7 +2565,11 @@
         "difference_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "The C9 difference from the baseline (detected only)"
+          "description": "The C9 difference from the baseline (detected only; absent from 0.10 exactly when difference_too_large is set)"
+        },
+        "difference_too_large": {
+          "const": true,
+          "description": "0.10: the difference was over C9's MaxDifferenceBytes and was not stored, so difference_digest is absent (change_detected only, D4-42)"
         },
         "read_seq": {
           "type": "integer",
