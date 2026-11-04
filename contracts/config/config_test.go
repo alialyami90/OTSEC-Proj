@@ -213,6 +213,33 @@ func TestSameConfigurationOtherBytesIsNoChange(t *testing.T) {
 	}
 }
 
+// A minor bump changes a snapshot's digest, never its comparison (doc.go,
+// Compatibility; C6 on #392): a node's baseline stored under 0.3 compares
+// to the same read under this minor with no changes, both ways.
+func TestEarlierMinorBaselineIsNoChange(t *testing.T) {
+	s, cur := snapshot(t, "1")
+	s.Schema = "otsec.config/0.3"
+	old, err := s.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Digest(old) == Digest(cur) {
+		t.Fatal("the 0.3 bytes have the 0.4 digest, so the case tests nothing")
+	}
+	for _, p := range [][2][]byte{{old, cur}, {cur, old}} {
+		d, err := Compare(p[0], p[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Changes) != 0 {
+			t.Errorf("changes %+v", d.Changes)
+		}
+		if d.Schema != Contract || d.From.SnapshotDigest != Digest(p[0]) || d.To.SnapshotDigest != Digest(p[1]) {
+			t.Errorf("difference %s from %s to %s", d.Schema, d.From.SnapshotDigest, d.To.SnapshotDigest)
+		}
+	}
+}
+
 // SameChanges (D4-20): a change that stays is one change however many reads
 // show it. Another end snapshot of the same changes is the same; another
 // baseline, other changes, or another asset is not.
