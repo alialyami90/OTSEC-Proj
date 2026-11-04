@@ -305,3 +305,57 @@ def test_events_catch_up_is_not_vacuous(ev):
     assert {d["kind"] for d in lost} & {"repeats", "rate"} and all(d["asset"] == "gt-inj-ser" for d in lost), lost
     (gap,) = [c for c in ev["controls"] if c.get("alignment") == "gap-before"]
     assert {a["rule"] for a in extra if set(a["events"]) & set(gap["events"])} == {"repeats", "rate", "time"}, extra
+
+
+@pytest.fixture(scope="module")
+def s60():
+    d = load("events-ser60.json")
+    for e in d["events"]:
+        e["t"] = seconds(e["received_utc"])
+    return d
+
+
+def test_ser60_is_the_ser_rows_on_reads_60_s_apart(ev, s60):
+    """D4-47: events.json's gt-inj-ser rows, in their order and with their
+    types and alignments, each received at the first read that could
+    return it. Reads are at least 60 s apart, none waits longer than the
+    floor makes it, and none returns a row the read before it could have
+    returned."""
+    old = [e for e in ev["events"] if e["asset"] == "gt-inj-ser"]
+    new = s60["events"]
+    keep = lambda e: (e["id"], e["source"], e["element"], e["state"], e.get("alignment"))
+    assert [keep(e) for e in new] == [keep(e) for e in old] and {e["asset"] for e in new} == {g.SER60}
+    reads = sorted({e["t"] for e in new})
+    assert s60["reads"] == len(reads) and [e["t"] for e in new] == sorted(e["t"] for e in new)
+    assert all(b - a >= g.MIN_READ_S for a, b in zip(reads, reads[1:]))
+    prev = {b: a for a, b in zip(reads, reads[1:])}
+    first = {}
+    for o, n in zip(old, new):
+        assert n["t"] >= o["t"] and (n["t"] not in prev or prev[n["t"]] < o["t"]), (o, n)
+        first.setdefault(n["t"], o["t"])
+    for r, t in first.items():
+        assert r == (t if r not in prev else max(t, prev[r] + g.MIN_READ_S)), r
+
+
+def test_ser60_expected_alarms_follow_from_the_events(s60):
+    end, ack, test_end = (seconds(s60["period"][k]) for k in ("end", "baseline_ack", "test_end"))
+    assert _alarms(s60, [e for e in s60["events"] if e["t"] >= ack], ack, test_end) == s60["expected_alarms"]
+    pre = _alarms(s60, [e for e in s60["events"] if end <= e["t"] < ack], end, ack)
+    (d,) = [d for d in s60["departures"] if d.get("before_ack")]
+    assert any(a["rule"] == "new" and a["events"] == d["events"] for a in pre)
+
+
+def test_ser60_alarms_are_its_departures_and_catch_up_reads_stand_alone(s60):
+    deps, controls = s60["departures"], s60["controls"]
+    for a in s60["expected_alarms"]:
+        assert any(set(a["events"]) <= set(d["events"]) and a["rule"] == d["kind"] for d in deps), a
+    for d in deps:
+        assert d.get("before_ack") or d["kind"] in d["expect_rules"], d
+    by_id = {e["id"]: e for e in s60["events"]}
+    assert [c["alignment"] for c in controls] == list(g.CATCH_UP)
+    for c in controls:
+        assert not any(set(a["events"]) & set(c["events"]) for a in s60["expected_alarms"])
+        # A backlog is the whole of its read: the first read, and a read
+        # that shares nothing with the one before.
+        (t,) = {by_id[i]["t"] for i in c["events"]}
+        assert {e["id"] for e in s60["events"] if e["t"] == t} - set(c["events"]) <= {i for d in deps if d.get("catch_up") for i in d["events"]}
