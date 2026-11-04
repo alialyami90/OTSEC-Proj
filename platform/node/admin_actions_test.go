@@ -565,76 +565,88 @@ func TestSignedSeqResetAckOfAnotherKey(t *testing.T) {
 // the node would read after a restart, so a field that differs is a chain
 // record that differs (A3 on #339). The control, with nothing differing,
 // clears.
+//
+// The cases share one node, since building it is most of the test's time on
+// Windows (D4-44). Each case is its own request in its own file, so its alarm
+// is found by the file's name, and the control runs last because it clears.
 func TestApplyAdminPartGates(t *testing.T) {
-	for name, tc := range map[string]struct {
+	q, _, manifest := signedQuarantineNode(t)
+	for i, tc := range []struct {
+		name  string
 		edit  func(*authz.AdminRequest) // the signed payload
 		entry func(*relayEntry)         // the folded acceptance
 		file  func(*adminFile)          // what the node read
 		want  string                    // "" for the control
 	}{
-		"control": {},
-		"payload hash": {
+		{
+			name:  "payload hash",
 			entry: func(e *relayEntry) { e.Verified.PayloadSHA256 = strings.Repeat("0", 64) },
 			want:  "other signed bytes",
 		},
-		"verified person": {
+		{
+			name:  "verified person",
 			entry: func(e *relayEntry) { e.Verified.Principal = "someone@else" },
 			want:  "other signed bytes",
 		},
-		"verified kind": {
+		{
+			name:  "verified kind",
 			entry: func(e *relayEntry) { e.Verified.Kind = authz.KindNodeSeqResetAck },
 			want:  "other signed bytes",
 		},
-		"node ID": {
+		{
+			name: "node ID",
 			edit: func(p *authz.AdminRequest) { p.NodeID = "site-b-node9" },
 			want: "bound to another node",
 		},
-		"payload kind": {
+		{
+			name:  "payload kind",
 			file:  func(f *adminFile) { f.kind = authz.KindNodeSeqResetAck },
 			entry: func(e *relayEntry) { e.Verified.Kind = authz.KindNodeSeqResetAck },
 			want:  "kind or person is not the file's",
 		},
-		"payload person": {
+		{
+			name:  "payload person",
 			file:  func(f *adminFile) { f.claims.Principal.ID = "someone@else" },
 			entry: func(e *relayEntry) { e.Verified.Principal = "someone@else" },
 			want:  "kind or person is not the file's",
 		},
+		{name: "control"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			q, _, manifest := signedQuarantineNode(t)
-			env := signN(t, authz.KindNodeQuarantineClear, 1, func(p *authz.AdminRequest) {
-				p.NodeQuarantineClear.ManifestSHA256, p.InstallKeyID = manifest, kid(testInstallKey)
-				if tc.edit != nil {
-					tc.edit(p)
-				}
-			})
-			f := &adminFile{name: "admin-request-gate.json", sum: strings.Repeat("ab", 32), kind: authz.KindNodeQuarantineClear, signed: env,
-				claims: adminClaims{Kind: authz.KindNodeQuarantineClear, Principal: relayAdmin}}
-			f.id = adminRequestID(f.sum)
-			e := relayEntry{Outcome: audit.OutcomeAllowed, CollectorSeq: 5, Verified: &audit.Admin{
-				AdminKeyID: env.KeyID, Principal: relayAdmin.ID, Nonce: strings.Repeat("A", 22), PayloadSHA256: authz.AdminPayloadSHA256(env), Kind: authz.KindNodeQuarantineClear}}
-			if tc.entry != nil {
-				tc.entry(&e)
-			}
-			if tc.file != nil {
-				tc.file(f)
-			}
-			q.s.mu.Lock()
-			q.s.relayed[f.id] = e
-			q.s.mu.Unlock()
-			parts := q.s.applyAdminParts(bg, []*adminFile{f})
-			if tc.want == "" {
-				if parts[f.id].state != partDone || len(clearRecords(q)) != 1 {
-					t.Fatalf("the control did not clear: %+v, %d records", parts[f.id], len(clearRecords(q)))
-				}
-				return
-			}
-			if n := len(clearRecords(q)); n != 0 {
-				t.Fatalf("%d cleared records", n)
-			}
-			if p := parts[f.id]; p.state == partDone || !strings.Contains(p.detail, tc.want) || !q.hasAlarm(AlarmAdminRequestNotApplied, tc.want) {
-				t.Fatalf("part %+v; no alarm naming %q", p, tc.want)
+		env := signN(t, authz.KindNodeQuarantineClear, i+1, func(p *authz.AdminRequest) {
+			p.NodeQuarantineClear.ManifestSHA256, p.InstallKeyID = manifest, kid(testInstallKey)
+			if tc.edit != nil {
+				tc.edit(p)
 			}
 		})
+		f := &adminFile{name: fmt.Sprintf("admin-request-gate-%d.json", i), sum: strings.Repeat(fmt.Sprintf("%02x", 0xa0+i), 32), kind: authz.KindNodeQuarantineClear, signed: env,
+			claims: adminClaims{Kind: authz.KindNodeQuarantineClear, Principal: relayAdmin}}
+		f.id = adminRequestID(f.sum)
+		e := relayEntry{Outcome: audit.OutcomeAllowed, CollectorSeq: uint64(5 + i), Verified: &audit.Admin{
+			AdminKeyID: env.KeyID, Principal: relayAdmin.ID, Nonce: strings.Repeat("A", 22), PayloadSHA256: authz.AdminPayloadSHA256(env), Kind: authz.KindNodeQuarantineClear}}
+		if tc.entry != nil {
+			tc.entry(&e)
+		}
+		if tc.file != nil {
+			tc.file(f)
+		}
+		q.s.mu.Lock()
+		q.s.relayed[f.id] = e
+		q.s.mu.Unlock()
+		parts := q.s.applyAdminParts(bg, []*adminFile{f})
+		if tc.want == "" {
+			if parts[f.id].state != partDone || len(clearRecords(q)) != 1 {
+				t.Fatalf("%s: the control did not clear: %+v, %d records", tc.name, parts[f.id], len(clearRecords(q)))
+			}
+			continue
+		}
+		if n := len(clearRecords(q)); n != 0 {
+			t.Fatalf("%s: %d cleared records", tc.name, n)
+		}
+		alarmed := slices.ContainsFunc(q.st.Snapshot("x").Alarms, func(a StatusAlarm) bool {
+			return a.Code == AlarmAdminRequestNotApplied && strings.Contains(a.Detail, f.name) && strings.Contains(a.Detail, tc.want)
+		})
+		if p := parts[f.id]; p.state == partDone || !strings.Contains(p.detail, tc.want) || !alarmed {
+			t.Fatalf("%s: part %+v; no alarm for %s naming %q", tc.name, p, f.name, tc.want)
+		}
 	}
 }
