@@ -265,9 +265,11 @@ func TestPruneStopsAtCheckpoint(t *testing.T) {
 		t.Fatalf("best-effort only: %+v", got)
 	}
 	consumers := pruneConsumers([]c5.Consumer{fwd})
-	if len(consumers) != 2 || consumers[1].ID != SuspensionConsumer {
+	if len(consumers) != 3 || consumers[1].ID != SuspensionConsumer || consumers[2].ID != HoldsConsumer {
 		t.Fatalf("consumers %+v", consumers)
 	}
+	// The holds cursor has its own tests (holdscursor_test.go).
+	consumers = consumers[:2]
 	// A node whose audit stream is forwarded holds pruning at its
 	// checkpoint from the first startup prune.
 	ac, adir := schedConfig(t, func(nc *nodeconfigtest.Config) {
@@ -613,8 +615,10 @@ func TestPrunedPastCheckpointHoldsAtLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SaveCursor(bg, c5.Cursor{Consumer: fwd.ID, Stream: AuditStream, Through: last}); err != nil {
-		t.Fatal(err)
+	for _, id := range []c5.ConsumerID{fwd.ID, HoldsConsumer} {
+		if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: last}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	b, err := c5.ComputeBoundary(bg, db, db, pruneConsumers([]c5.Consumer{fwd}), AuditStream, c5.ClassAudit, time.Now())
 	if err != nil {
