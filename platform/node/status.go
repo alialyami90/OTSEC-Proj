@@ -319,7 +319,7 @@ func (s *Status) SetLabTLSFiles(refs []string) {
 }
 
 // SetEventBaselines records the observed assets' event baselines and the
-// feeder's counts.
+// feeder's counts. The caller must not change m or f afterwards.
 func (s *Status) SetEventBaselines(m map[string]EventBaselineStatus, f *EventFeedStatus) {
 	s.mu.Lock()
 	s.eventBases, s.eventFeed = m, f

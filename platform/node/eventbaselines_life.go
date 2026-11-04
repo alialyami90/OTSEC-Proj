@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -93,6 +94,9 @@ const (
 type eventLife struct {
 	rt  *Runtime
 	ctx context.Context
+	// first is the first audit seq of the view start-up verified, after
+	// the node's prune point (1 when nothing was pruned).
+	first c5.Seq
 
 	mu   sync.Mutex
 	acks []lifeAck // queued by acknowledged, applied on the feeder's goroutine
@@ -128,6 +132,11 @@ type lifeAsset struct {
 	activeBaseline *baseline.Baseline
 	active         string
 	activeFrom     time.Time
+	// fromHold: the active baseline came from the configuration store's
+	// baseline hold, as its acknowledgement was pruned from the audit
+	// stream (D4-41), so activeFrom is provisional until a checkpoint
+	// gives it (restore).
+	fromHold bool
 
 	raised map[string]bool
 	// Counts for status.
@@ -147,19 +156,32 @@ func newEventLife(ctx context.Context, rt *Runtime) (*eventLife, error) {
 	if adb == nil {
 		return nil, errors.New("event baselines: the audit database is not open")
 	}
-	recs, err := chainRecords(ctx, adb)
+	recs, raw, err := chainRecords(ctx, adb)
 	if err != nil {
 		return nil, fmt.Errorf("event baselines: %w", err)
 	}
-	// chainRecords validated each record (ParseRecord); together they must
-	// also verify (C3 on #346). If they do not, no asset learns, records or
-	// detects, since anything written would extend a chain the node cannot
-	// vouch for. Each asset's alarm says why.
+	// The view is the retained stream from the node's prune point (D4-40
+	// item 8): its hash chain is checked in full from the anchor, the link
+	// of the last record pruned, and its configuration records with
+	// VerifyConfigFrom, under which a reference to before the view is
+	// unknown, not broken. chainRecords validated each record (ParseRecord);
+	// together they must also verify (C3 on #346). If they do not, no asset
+	// learns, records or detects, since anything written would extend a
+	// chain the node cannot vouch for. Each asset's alarm says why.
+	anchor, err := adb.ChainAnchor(ctx, AuditStream)
+	if err != nil {
+		return nil, fmt.Errorf("event baselines: %w", err)
+	}
+	l.first = c5.Seq(anchor.Seq + 1)
 	all := make([]*audit.Record, len(recs))
 	for i, ar := range recs {
 		all[i] = ar.rec
 	}
-	if err := audit.VerifyConfig(all); err != nil {
+	err = audit.VerifyChain(string(rt.cfg.NodeID), raw, &anchor, nil)
+	if err == nil {
+		err = audit.VerifyConfigFrom(all, uint64(l.first))
+	}
+	if err != nil {
 		for _, e := range rt.cfg.EventBaselines {
 			a := &lifeAsset{id: e.AssetID, p: e.Params, raised: map[string]bool{}}
 			l.assets[e.AssetID] = a
@@ -173,7 +195,7 @@ func newEventLife(ctx context.Context, rt *Runtime) (*eventLife, error) {
 		l.assets[e.AssetID] = a
 		stored, err := l.storedBaselines(ctx, e.AssetID)
 		if err == nil {
-			err = l.start(a, chain[e.AssetID], stored)
+			err = l.start(ctx, a, chain[e.AssetID], stored)
 		}
 		if err != nil {
 			l.raise(a, AlarmEventBaselineState, err.Error())
@@ -182,29 +204,32 @@ func newEventLife(ctx context.Context, rt *Runtime) (*eventLife, error) {
 	return l, nil
 }
 
-// chainRecords reads the audit records audit.VerifyConfig reads: the
+// chainRecords reads the retained audit stream: every record's bytes, for
+// audit.VerifyChain, and parsed, the records audit.VerifyConfig reads: the
 // configuration records, and the collector's request and numbering-reset
 // records that acceptances and epochs come from. configAuditRecords
 // (holds.go) reads only the first.
-func chainRecords(ctx context.Context, db *store.DB) ([]auditRec, error) {
+func chainRecords(ctx context.Context, db *store.DB) ([]auditRec, [][]byte, error) {
 	last, err := db.LastCommitted(ctx, AuditStream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var (
 		out   []auditRec
+		raw   [][]byte
 		after c5.Seq
 	)
 	for after < last {
 		got, err := db.Read(ctx, AuditStream, after, 500)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(got) == 0 {
-			return nil, fmt.Errorf("audit stream ends at %d, before its last committed seq %d", after, last)
+			return nil, nil, fmt.Errorf("audit stream ends at %d, before its last committed seq %d", after, last)
 		}
 		for _, st := range got {
 			after = st.Key.Seq
+			raw = append(raw, st.Event)
 			// The bytes select the records to parse; a record with an
 			// escape is parsed too, as its action may be spelt with one
 			// (C3 on #384). The parsed action decides.
@@ -213,14 +238,14 @@ func chainRecords(ctx context.Context, db *store.DB) ([]auditRec, error) {
 			}
 			rec, err := audit.ParseRecord(st.Event)
 			if err != nil {
-				return nil, badRecord{st.Key.Seq, err}
+				return nil, nil, badRecord{st.Key.Seq, err}
 			}
 			if act := string(rec.Action); strings.HasPrefix(act, "config.") || strings.HasPrefix(act, "collector.") {
 				out = append(out, auditRec{st.Key.Seq, rec})
 			}
 		}
 	}
-	return out, nil
+	return out, raw, nil
 }
 
 // eventChain is what the chain says about one asset's event baselines: the
@@ -293,10 +318,11 @@ func (l *eventLife) storedBaselines(ctx context.Context, assetID string) (map[st
 }
 
 // start sets the asset's phase from the chain and the stored baselines.
-func (l *eventLife) start(a *lifeAsset, c *eventChain, stored map[string]*baseline.Baseline) error {
+func (l *eventLife) start(ctx context.Context, a *lifeAsset, c *eventChain, stored map[string]*baseline.Baseline) error {
 	if c == nil {
 		c = &eventChain{}
 	}
+	cut := l.first > 1
 	var last *audit.Record
 	if n := len(c.recorded); n > 0 {
 		last = c.recorded[n-1]
@@ -304,12 +330,15 @@ func (l *eventLife) start(a *lifeAsset, c *eventChain, stored map[string]*baseli
 	// A baseline stored after the last recording, whose record a crash left
 	// out: it replaces the last recorded one at the next version. With no
 	// recording in the chain, only the asset's first can be one, and only
-	// when the stream holds nothing else: more means the chain was pruned
-	// past its recordings, and nothing is guessed (C3 on #384). The
-	// candidates are found without depending on map order.
+	// when the stream holds nothing else (C3 on #384). In a view cut by a
+	// prune, no recording in it does not mean none was written, so there
+	// the repair runs only after a recording in the view: any recording
+	// after that one is in the view too, so a candidate at its next version
+	// cannot repeat one (C3's condition on #384). The candidates are found
+	// without depending on map order.
 	var cands []string
 	for h, b := range stored {
-		if last == nil || b.Version == last.Config.BaselineVersion+1 {
+		if (last == nil && !cut) || (last != nil && b.Version == last.Config.BaselineVersion+1) {
 			cands = append(cands, h)
 		}
 	}
@@ -331,7 +360,7 @@ func (l *eventLife) start(a *lifeAsset, c *eventChain, stored map[string]*baseli
 		if err := l.record(a); err != nil {
 			l.raise(a, AlarmEventBaselineNotRecorded, err.Error())
 		}
-		return l.startFrom(a, c.ack, stored)
+		return l.startFrom(ctx, a, c.ack, stored)
 	}
 	if last != nil {
 		h := last.Config.BaselineDigest
@@ -342,15 +371,20 @@ func (l *eventLife) start(a *lifeAsset, c *eventChain, stored map[string]*baseli
 		a.recorded, a.recordedHash = b, h
 		a.version, a.previous = last.Config.BaselineVersion, last.Config.PreviousDigest
 	}
-	return l.startFrom(a, c.ack, stored)
+	return l.startFrom(ctx, a, c.ack, stored)
 }
 
 // startFrom finishes start. The last succeeded acknowledgement names the
 // active baseline: the recorded one, which it activates, or an earlier one,
-// which stays active while the recorded one awaits its own. With none
-// recorded the asset observes for its first.
-func (l *eventLife) startFrom(a *lifeAsset, ack *audit.Record, stored map[string]*baseline.Baseline) error {
-	if ack != nil {
+// which stays active while the recorded one awaits its own. In a view cut
+// by a prune with no acknowledgement of the asset in it, the active
+// baseline is the one the configuration store holds as baseline (D4-41).
+// With nothing recorded or active the asset observes for its first, unless
+// the cut view leaves stored baselines it cannot place.
+func (l *eventLife) startFrom(ctx context.Context, a *lifeAsset, ack *audit.Record, stored map[string]*baseline.Baseline) error {
+	cut := l.first > 1
+	switch {
+	case ack != nil:
 		at, err := time.Parse(time.RFC3339Nano, ack.Time.UTC)
 		if err != nil {
 			return fmt.Errorf("acknowledgement %d: time %q: %w", ack.Seq, ack.Time.UTC, err)
@@ -363,14 +397,71 @@ func (l *eventLife) startFrom(a *lifeAsset, ack *audit.Record, stored map[string
 		if err := l.activate(a, b, h, at); err != nil {
 			return err
 		}
-		if h == a.recordedHash {
-			a.recorded, a.recordedHash = nil, ""
+	case cut:
+		h, err := l.heldBaseline(ctx, a.id, stored)
+		if err != nil {
+			return err
+		}
+		if h != "" {
+			// No acknowledgement time: watched from now until a checkpoint
+			// gives the time, or the restart's watermark does (restore).
+			if err := l.activate(a, stored[h], h, l.rt.opt.Now()); err != nil {
+				return err
+			}
+			a.fromHold = true
 		}
 	}
-	if a.recordedHash == "" && a.detector == nil {
-		return l.observe(a, 1, "")
+	if a.recordedHash != "" && a.recordedHash == a.active {
+		a.recorded, a.recordedHash = nil, ""
 	}
-	return nil
+	switch {
+	case a.recordedHash != "" || a.detector != nil:
+		return nil
+	case cut && len(stored) > 0:
+		return fmt.Errorf("the audit stream is pruned before seq %d, and neither it nor the configuration store's holds say which of the %d stored baselines is recorded or active", l.first, len(stored))
+	}
+	return l.observe(a, 1, "")
+}
+
+// heldBaseline is the asset's event baseline that the configuration store
+// holds as baseline, for a view with no acknowledgement of it (D4-41): of
+// the records held as baseline that are C10 baselines, the one whose Ref is
+// newest. That Ref must be before the view: one in it would be an
+// acknowledgement the view holds. "" when none is held.
+func (l *eventLife) heldBaseline(ctx context.Context, assetID string, stored map[string]*baseline.Baseline) (string, error) {
+	stream := ConfigStream(assetID)
+	db := l.rt.Store(stream)
+	if db == nil {
+		return "", errors.New("the configuration database is not open")
+	}
+	held, err := db.Held(ctx, stream)
+	if err != nil {
+		return "", err
+	}
+	// Newest Ref first: of the baseline holds, the first that is a C10
+	// baseline is the one the latest acknowledgement set.
+	slices.SortFunc(held, func(x, y c5.HeldRecord) int { return cmp.Compare(y.Reason.Ref.Seq, x.Reason.Ref.Seq) })
+	for _, hr := range held {
+		if hr.Reason.Code != c5.HoldBaseline {
+			continue
+		}
+		got, err := db.Read(ctx, stream, hr.Seq-1, 1)
+		if err != nil {
+			return "", err
+		}
+		if len(got) != 1 || got[0].Key.Seq != hr.Seq || !bytes.HasPrefix(got[0].Event, []byte(`{"schema":"otsec.baseline/`)) {
+			continue // a configuration baseline (C9), or not readable as one
+		}
+		if hr.Reason.Ref.Seq >= l.first {
+			return "", fmt.Errorf("%s seq %d is held as baseline by audit record %d, which is in the view and is not an acknowledgement of it", stream, hr.Seq, hr.Reason.Ref.Seq)
+		}
+		h := baseline.Hash(got[0].Event)
+		if stored[h] == nil {
+			return "", fmt.Errorf("%s seq %d is held as baseline and is not a stored baseline of the asset", stream, hr.Seq)
+		}
+		return h, nil
+	}
+	return "", nil
 }
 
 func (l *eventLife) observe(a *lifeAsset, version int, previous string) error {
@@ -665,6 +756,9 @@ func (l *eventLife) relearning(assetID string) (version int, previous string, ok
 // watermark, so a periodic type gets a whole interval from the restart, not
 // a false absence (C4 on #340). A snapshot of a half the asset no longer has
 // is ignored: the baseline was stored, or activated, after it was taken.
+// An active baseline that came from a hold (fromHold) takes its activation
+// time from the snapshot, bounded by heldFrom, and is otherwise rebuilt
+// from wm, with or without a snapshot (D4-41).
 func (l *eventLife) restore(assetID string, lsnap, dsnap []byte, wm time.Time) (lerr, derr error) {
 	a := l.asset(assetID)
 	if a == nil {
@@ -679,28 +773,76 @@ func (l *eventLife) restore(assetID string, lsnap, dsnap []byte, wm time.Time) (
 			a.learner = r
 		}
 	}
-	if a.detector != nil && dsnap != nil {
-		r, err := eventbaseline.RestoreDetector(eventbaseline.DetectorConfig{Baseline: a.activeBaseline, Hash: a.active, ActiveFrom: a.activeFrom}, dsnap)
-		switch {
-		case err == nil:
-			a.detector = r
-		default:
-			derr = err
-			from := a.activeFrom
-			if wm.After(from) {
-				from = wm
+	if a.detector == nil || (dsnap == nil && !a.fromHold) {
+		return lerr, nil
+	}
+	from, held := a.activeFrom, a.fromHold
+	a.fromHold = false
+	if held {
+		// D4-41: the acknowledgement time was pruned, so the checkpoint's
+		// activation time is taken if it is bounded; otherwise watching
+		// starts at the watermark.
+		from = wm
+		if dsnap != nil {
+			at, err := heldFrom(a, dsnap, wm)
+			if err != nil {
+				derr = err
+			} else {
+				from = at
 			}
-			d, nerr := eventbaseline.NewDetector(eventbaseline.DetectorConfig{Baseline: a.activeBaseline, Hash: a.active, ActiveFrom: from})
-			if nerr != nil {
-				l.raise(a, AlarmEventBaselineNotRestored, "detector: "+err.Error()+"; not rebuilt: "+nerr.Error())
-				a.detector = nil
-				break
-			}
-			a.detector, a.activeFrom = d, from
-			l.raise(a, AlarmEventBaselineNotRestored, "detector: "+err.Error()+"; rebuilt, watching from "+from.UTC().Format(time.RFC3339Nano)+", so its alarms differ from those the lost state would have raised")
 		}
 	}
+	if dsnap != nil && derr == nil {
+		r, err := eventbaseline.RestoreDetector(eventbaseline.DetectorConfig{Baseline: a.activeBaseline, Hash: a.active, ActiveFrom: from}, dsnap)
+		if err == nil {
+			a.detector, a.activeFrom = r, from
+			if held {
+				l.health(a, HealthEventBaselineActive, map[string]string{"asset_id": a.id, "baseline": a.active, "active_from": from.UTC().Format(time.RFC3339Nano)})
+			}
+			return lerr, nil
+		}
+		derr = err
+		if wm.After(from) {
+			from = wm
+		}
+	}
+	d, err := eventbaseline.NewDetector(eventbaseline.DetectorConfig{Baseline: a.activeBaseline, Hash: a.active, ActiveFrom: from})
+	if err != nil {
+		l.raise(a, AlarmEventBaselineNotRestored, "detector: not rebuilt: "+err.Error())
+		a.detector = nil
+		return lerr, derr
+	}
+	a.detector, a.activeFrom = d, from
+	if held {
+		l.health(a, HealthEventBaselineActive, map[string]string{"asset_id": a.id, "baseline": a.active, "active_from": from.UTC().Format(time.RFC3339Nano)})
+	}
+	if derr != nil {
+		l.raise(a, AlarmEventBaselineNotRestored, "detector: "+derr.Error()+"; rebuilt, watching from "+from.UTC().Format(time.RFC3339Nano)+", so its alarms differ from those the lost state would have raised")
+	}
 	return lerr, derr
+}
+
+// heldFrom is the activation time a detector snapshot gives an asset whose
+// active baseline came from a hold (D4-41). It must be no earlier than the
+// end of the baseline's own period and no later than the watermark;
+// otherwise the snapshot does not belong to this activation, and the error
+// wraps eventbaseline.ErrSnapshotMismatch.
+func heldFrom(a *lifeAsset, snap []byte, wm time.Time) (time.Time, error) {
+	at, err := eventbaseline.DetectorActiveFrom(snap, a.active)
+	if err != nil {
+		return time.Time{}, err
+	}
+	end, err := time.Parse(time.RFC3339Nano, a.activeBaseline.Period.EndUTC)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the baseline period's end: %w", err)
+	}
+	switch {
+	case at.Before(end):
+		return time.Time{}, fmt.Errorf("%w: its activation time %s is before the baseline period's end %s", eventbaseline.ErrSnapshotMismatch, at.Format(time.RFC3339Nano), a.activeBaseline.Period.EndUTC)
+	case at.After(wm):
+		return time.Time{}, fmt.Errorf("%w: its activation time %s is after the watermark %s", eventbaseline.ErrSnapshotMismatch, at.Format(time.RFC3339Nano), wm.UTC().Format(time.RFC3339Nano))
+	}
+	return at, nil
 }
 
 // EventBaselineStatus is one observed asset's event baseline as node status

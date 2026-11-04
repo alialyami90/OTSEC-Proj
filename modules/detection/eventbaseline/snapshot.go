@@ -739,6 +739,25 @@ func (d *Detector) Snapshot(maxBytes int) ([]byte, error) {
 
 var knownRules = []baseline.Rule{baseline.RuleNewType, baseline.RuleRepeats, baseline.RuleRate, baseline.RuleTime, baseline.RuleAbsence}
 
+// DetectorActiveFrom returns the activation time a detector snapshot was
+// made with, after checking the snapshot's seal, and that it was made for
+// the baseline with hash h. A node that knows its active baseline but not
+// when it was acknowledged, because the acknowledgement was pruned from its
+// audit stream, restores with it (D4-41); the caller bounds it.
+func DetectorActiveFrom(snap []byte, h string) (time.Time, error) {
+	d, err := open(snap, kindDetector)
+	if err != nil {
+		return time.Time{}, err
+	}
+	d.match("the baseline hash", h, 256)
+	d.s(256) // the asset, which RestoreDetector checks
+	v := d.i()
+	if d.err != nil {
+		return time.Time{}, d.err
+	}
+	return time.Unix(0, v).UTC(), nil
+}
+
 // RestoreDetector builds the detector a snapshot was taken of. c is the
 // configuration the detector runs with; its baseline hash, asset, number of
 // types and activation time must be those the snapshot was made with, or the

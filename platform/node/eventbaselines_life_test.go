@@ -85,7 +85,7 @@ func healthOf(t *testing.T, r *Runtime, typ string) []*event.Health {
 // checking that the records VerifyConfig reads pass it.
 func recordedOf(t *testing.T, r *Runtime) []*audit.Record {
 	t.Helper()
-	recs, err := chainRecords(bg, r.Store(AuditStream))
+	recs, _, err := chainRecords(bg, r.Store(AuditStream))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,12 +336,18 @@ func TestLifeStartRecordsAStoredBaseline(t *testing.T) {
 // with no recording: what a crash between the two leaves.
 func storeBaseline(t *testing.T, r *Runtime, c *Config, asset string, version int, previous string) *eventbaseline.Result {
 	t.Helper()
+	return storeBaselineAt(t, r, c, asset, version, previous, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC).Add(time.Duration(version)*24*time.Hour))
+}
+
+// storeBaselineAt is storeBaseline learned from t0, so two baselines of one
+// version can differ.
+func storeBaselineAt(t *testing.T, r *Runtime, c *Config, asset string, version int, previous string, t0 time.Time) *eventbaseline.Result {
+	t.Helper()
 	e, _ := c.EventBaselineFor(relayID)
 	ln, err := eventbaseline.NewLearner(eventbaseline.LearnerConfig{Node: c.NodeID, AssetID: asset, Params: e.Params, Version: version, Previous: previous})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t0 := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC).Add(time.Duration(version) * 24 * time.Hour)
 	for i := range 11 {
 		o := lifeSER("IN101", "Asserted", t0.Add(time.Duration(i)*400*time.Second))
 		o.Event.Source.Asset.ID = asset
@@ -800,5 +806,285 @@ func TestLifeKeepsTheLearnerWhenTheAppendFails(t *testing.T) {
 	l.Tick(relayID, end.Add(time.Minute))
 	if lr, _ := l.half(relayID); lr != nil || len(rawStream(t, r, ConfigStream(relayID))) != 1 || len(recordedOf(t, r)) != 1 {
 		t.Fatalf("learner %v after the store took the baseline: %d stored, %d recorded", lr, len(rawStream(t, r, ConfigStream(relayID))), len(recordedOf(t, r)))
+	}
+}
+
+// appendAudit appends rec to the node's audit stream and returns its seq.
+func appendAudit(t *testing.T, r *Runtime, rec audit.Record) c5.Seq {
+	t.Helper()
+	rec.Contract, rec.NodeID, rec.Time = audit.ContractID, string(r.cfg.NodeID), r.received()
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Log(AuditStream).Append(bg, c5.Record{Stream: AuditStream, Class: c5.ClassAudit, Event: b}); err != nil {
+		t.Fatal(err)
+	}
+	return auditHead(t, r)
+}
+
+func auditHead(t *testing.T, r *Runtime) c5.Seq {
+	t.Helper()
+	got, err := r.Store(AuditStream).Read(bg, AuditStream, 0, 10000)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("%d audit records: %v", len(got), err)
+	}
+	return got[len(got)-1].Key.Seq
+}
+
+// pruneLifeAudit prunes the node's audit stream through through, as
+// cfgNode.pruneAudit does. A record must follow through.
+func pruneLifeAudit(t *testing.T, r *Runtime, through c5.Seq) {
+	t.Helper()
+	db := r.Store(AuditStream)
+	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
+	for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
+		if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: through}); err != nil && !errors.Is(err, &c5.Error{Code: c5.CodeCursorRegress}) {
+			t.Fatal(err)
+		}
+	}
+	b, err := c5.ComputeBoundary(bg, db, db, pruneConsumers([]c5.Consumer{fwd}), AuditStream, c5.ClassAudit, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, err := db.PruneStep(bg, b, 1000); err != nil || k == 0 {
+		t.Fatalf("pruned %d: %v", k, err)
+	}
+	if first, err := db.FirstRetained(bg, AuditStream); err != nil || first != through+1 {
+		t.Fatalf("first retained %d, want %d: %v", first, through+1, err)
+	}
+}
+
+// filler is an audit record that is not a configuration record, so a prune
+// through the record before it can run.
+var filler = audit.Record{Actor: audit.Actor{Type: authz.PrincipalSchedule, ID: "sch-cfg", Role: authz.RoleCollector},
+	Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeInfo, PolicyVersion: 3, CorrelationID: "req-filler"}
+
+// recordingsIn counts the config.baseline_recorded records in the node's
+// audit view, pruned or not.
+func recordingsIn(t *testing.T, r *Runtime) int {
+	t.Helper()
+	recs, _, err := chainRecords(bg, r.Store(AuditStream))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, ar := range recs {
+		if ar.rec.Action == audit.ActionConfigBaselineRecorded {
+			n++
+		}
+	}
+	return n
+}
+
+// C3's condition on #384 and D4-41: v1 is learned, recorded and
+// acknowledged, and the audit stream is pruned past its recording and its
+// acknowledgement. At the next start nothing is repaired or recorded: the
+// active baseline is v1, found from the configuration store's baseline
+// hold, and its activation time is provisional. restore then takes the
+// checkpoint's activation time when it is no earlier than the baseline
+// period's end and no later than the watermark, and otherwise rebuilds
+// the detector from the watermark with the alarm and an error that wraps
+// ErrSnapshotMismatch. With no snapshot it is rebuilt from the watermark,
+// with no alarm, as nothing was lost. Evidence class: simulated.
+func TestLifePrunedPastTheRecording(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, r)[0].Config.BaselineDigest
+	appendAck(t, r, h)
+	ackAt := end.Add(time.Hour)
+	l.acknowledged(relayID, h, ackAt)
+	l.Tick(relayID, ackAt)
+	_, d := l.half(relayID)
+	good, err := d.Snapshot(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := l.assets[relayID].activeBaseline
+	periodEnd, err := time.Parse(time.RFC3339Nano, b.Period.EndUTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	early, err := eventbaseline.NewDetector(eventbaseline.DetectorConfig{Baseline: b, Hash: h, ActiveFrom: periodEnd.Add(-time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooEarly, err := early.Snapshot(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := auditHead(t, r)
+	r.Close()
+
+	// The restart's reconcile holds v1 as baseline; the prune then takes
+	// the recording and the acknowledgement.
+	r, _, _ = start(t, c, dir)
+	held, err := r.Store(ConfigStream(relayID)).Held(bg, ConfigStream(relayID))
+	if err != nil || len(held) != 1 || held[0].Reason.Code != c5.HoldBaseline || held[0].Reason.Ref.Seq != ack {
+		t.Fatalf("holds %+v: %v", held, err)
+	}
+	appendAudit(t, r, filler)
+	pruneLifeAudit(t, r, ack)
+	r.Close()
+
+	restart := func(t *testing.T) (*Runtime, *Status, *eventLife) {
+		t.Helper()
+		r, st, _ := start(t, c, dir)
+		t.Cleanup(func() { r.Close() })
+		l, err := newEventLife(bg, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := l.assets[relayID]
+		if lr, d := l.half(relayID); lr != nil || d == nil || a.active != h || !a.fromHold || a.recorded != nil {
+			t.Fatalf("after the prune: learner %v, detector %v, active %q, from hold %v, recorded %v; alarms %+v", lr, d, a.active, a.fromHold, a.recorded, st.Snapshot("n").Alarms)
+		}
+		if l.first != ack+1 || recordingsIn(t, r) != 0 || len(rawStream(t, r, ConfigStream(relayID))) != 1 {
+			t.Fatalf("first %d, %d recordings, %d configuration records", l.first, recordingsIn(t, r), len(rawStream(t, r, ConfigStream(relayID))))
+		}
+		return r, st, l
+	}
+	wm := ackAt.Add(time.Hour)
+	for _, tc := range []struct {
+		name     string
+		snap     []byte
+		wm, from time.Time
+		mismatch bool
+	}{
+		{"the checkpoint's time", good, wm, ackAt, false},
+		{"at the watermark", good, ackAt, ackAt, false},
+		{"before the period's end", tooEarly, wm, wm, true},
+		{"after the watermark", good, ackAt.Add(-time.Minute), ackAt.Add(-time.Minute), true},
+		{"no snapshot", nil, wm, wm, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, st, l := restart(t)
+			_, d := l.half(relayID)
+			_, derr := l.restore(relayID, nil, tc.snap, tc.wm)
+			a := l.assets[relayID]
+			if errors.Is(derr, eventbaseline.ErrSnapshotMismatch) != tc.mismatch || (!tc.mismatch && derr != nil) {
+				t.Fatalf("restore: %v", derr)
+			}
+			if _, nd := l.half(relayID); nd == nil || nd == d || a.fromHold || !a.activeFrom.Equal(tc.from) {
+				t.Fatalf("detector %v (was %v), from hold %v, active from %v, want %v", nd, d, a.fromHold, a.activeFrom, tc.from)
+			}
+			if hasAlarm(st, relayID, AlarmEventBaselineNotRestored) != tc.mismatch {
+				t.Fatalf("alarm %v", !tc.mismatch)
+			}
+			// Settled, a second restore is the ordinary one.
+			if _, derr := l.restore(relayID, nil, nil, tc.wm.Add(time.Hour)); derr != nil || !a.activeFrom.Equal(tc.from) {
+				t.Fatalf("again: %v, from %v", derr, a.activeFrom)
+			}
+		})
+	}
+}
+
+// D4-41: of the records the configuration store holds as baseline, the one
+// whose Ref is the highest seq is the active baseline, whatever their order
+// in the stream; a hold whose Ref is in the view is refused, as the view
+// would hold that acknowledgement. Evidence class: simulated.
+func TestLifeHeldBaselineHighestRef(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	v1 := storeBaseline(t, r, c, relayID, 1, "")
+	v2 := storeBaseline(t, r, c, relayID, 2, v1.Hash)
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := l.storedBaselines(bg, relayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := ConfigStream(relayID)
+	hold := func(seq c5.Seq, ref c5.Seq) {
+		t.Helper()
+		if err := r.Store(cs).Hold(bg, c5.Hold{Stream: cs, Seq: seq, Reason: c5.HoldReason{Code: c5.HoldBaseline,
+			Ref: c5.Key{NodeID: r.cfg.NodeID, Stream: AuditStream, Seq: ref}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.first = 10
+	for _, tc := range []struct {
+		r1, r2 c5.Seq
+		want   string
+	}{{3, 5, v2.Hash}, {5, 3, v1.Hash}} {
+		hold(1, tc.r1)
+		hold(2, tc.r2)
+		if got, err := l.heldBaseline(bg, relayID, stored); err != nil || got != tc.want {
+			t.Fatalf("refs %d, %d: %q, %v; want %q", tc.r1, tc.r2, got, err, tc.want)
+		}
+	}
+	hold(1, 10)
+	if got, err := l.heldBaseline(bg, relayID, stored); err == nil {
+		t.Fatalf("a Ref in the view: %q", got)
+	}
+}
+
+// C3 on #384: with v1's recording in the view and two v2 baselines stored
+// after it, either could be the one whose recording a crash left out. The
+// node picks neither: the asset is stopped with its alarm and nothing is
+// recorded. Evidence class: simulated.
+func TestLifeStartRefusesTwoNextVersions(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, r)[0].Config.BaselineDigest
+	t2 := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	a := storeBaselineAt(t, r, c, relayID, 2, h, t2)
+	b := storeBaselineAt(t, r, c, relayID, 2, h, t2.Add(time.Hour))
+	if a.Hash == b.Hash {
+		t.Fatal("the two v2 baselines are one")
+	}
+	l, err = newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr, d := l.half(relayID); lr != nil || d != nil || l.assets[relayID].recordedHash != "" {
+		t.Fatalf("learner %v, detector %v, recorded %q", lr, d, l.assets[relayID].recordedHash)
+	}
+	if got := recordedOf(t, r); len(got) != 1 {
+		t.Fatalf("%d recordings", len(got))
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+		t.Fatal("no alarm")
+	}
+}
+
+// In a view cut by a prune, a stored baseline that no recording in the view
+// and no baseline hold places could be recorded, acknowledged or neither:
+// the node does not learn a first baseline over it, and stops the asset
+// with its alarm (D4-41). Evidence class: simulated.
+func TestLifePrunedStoredUnplaced(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, _, _ := start(t, c, dir)
+	storeBaseline(t, r, c, relayID, 1, "")
+	through := appendAudit(t, r, filler)
+	appendAudit(t, r, filler)
+	pruneLifeAudit(t, r, through)
+	r.Close()
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	l, err := newEventLife(bg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr, d := l.half(relayID); lr != nil || d != nil || recordingsIn(t, r) != 0 {
+		t.Fatalf("learner %v, detector %v, %d recordings", lr, d, recordingsIn(t, r))
+	}
+	if !hasAlarm(st, relayID, AlarmEventBaselineState) {
+		t.Fatal("no alarm")
 	}
 }
