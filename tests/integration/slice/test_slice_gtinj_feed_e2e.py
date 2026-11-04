@@ -373,6 +373,15 @@ def test_the_three_runs_learn_the_same_baseline(run, repeat, heldout):
         assert r["baseline"]["active"]["hash"] == run["baseline"]["active"]["hash"], (r["baseline"], run["baseline"])
     p = json.loads(run["config"][0])
     print("baseline", run["baseline"]["active"]["hash"], "period", p["period"], "events", p["counts"]["events"])
+    # T computed from the series: no gaps, so the later of the event that
+    # meets min_events and the first event plus min_duration_s; every event
+    # at or before T counts (C4 on #417). Learner 0.1 ended at a watermark,
+    # after T, whatever the cadence.
+    par, times = run["series"]["params"], [_utc(e["received_utc"]) for e in run["events"]]
+    end = max(times[par["min_events"] - 1], times[0] + datetime.timedelta(seconds=par["min_duration_s"]))
+    got = (_parse(p["period"]["start_utc"]), _parse(p["period"]["end_utc"]), p["period"]["collected_s"])
+    assert got == (times[0], end, int((end - times[0]).total_seconds())) and not p["period"].get("gaps"), (p["period"], end)
+    assert p["counts"]["events"] == sum(t <= end for t in times), (p["counts"], end)
     assert repeat["config"][0] == run["config"][0]
     assert heldout["config"][0] == run["config"][0]
 
@@ -410,4 +419,4 @@ def test_the_heldout_series_raises_no_departure(heldout):
     # No event was refused or late, so the input the learner and the
     # detector took is the series (C4 on #411).
     st = heldout["status"]
-    assert st.get("refused", 0) == 0 and st.get("late", 0) == 0, st
+    assert st.get("phase") == "active" and st.get("refused", 0) == 0 and st.get("late", 0) == 0, st

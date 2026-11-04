@@ -457,7 +457,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
 - **Closed (D4-45).** C1 ruled that the period ends at the first instant both minima hold (D4-45). C5's feeder change (#413) and C4's learner 0.2 (#414) implement it.
   - **The re-run.** `test_slice_gtinj_feed_e2e.py` ran locally on #414's `10f8fb8` merged with main. All three nodes stored the same baseline bytes, `sha256:09791190feed0281764c1208acfb34f33b4c7ce53601a3382043cd96f2dfde91`, whose period runs from 2026-11-02T00:00:08Z to 2026-11-16T00:00:08Z, 1,209,600 s collected, with 773 events. The 14-day duration minimum set the end, at the instant it was met.
   - **The other checks.** The repeat's alarms are equal to the first run's in every field, the baseline included. The repeat also passes the oracle on its own. In the held-out run, status shows no refused and no late events.
-  - **Checks added:** `test_the_three_runs_learn_the_same_baseline` and `test_the_repeat_run_raises_the_expected_alarms`, plus the zero counts in the held-out test.
+  - **Checks added:** `test_the_three_runs_learn_the_same_baseline` (the same bytes in all three runs, and a period whose end is the T computed from the series and its params, with no gaps and every event at or before T counted, which learner 0.1 fails at any cadence; C4 on #417) and `test_the_repeat_run_raises_the_expected_alarms`. The held-out test adds phase `active` with no refused and no late events.
 - **Evidence class:** `simulated`. The series is synthetic, and the sender is a loopback socket. The run was local, on Linux.
 
 ### F-019 — 2026-11-04 — V-M4's first alarm run (Syslog half): the node raised exactly the expected alarms; the oracle, not the node, misread a rule name
