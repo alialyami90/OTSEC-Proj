@@ -13,6 +13,7 @@ import (
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/register"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/store"
 )
@@ -43,6 +44,10 @@ type Runtime struct {
 	layout   c5.Layout
 	opt      RuntimeOptions
 	dbs      []*database
+	// commands is the node's verified copy of the command register, used
+	// only to build C9 snapshots (register.go). Nil when there is no copy or
+	// it was refused at start (AlarmRegisterRefused).
+	commands *register.Matcher
 
 	mu      sync.Mutex
 	pending []queued                    // store alarms raised during a commit, for Tick
@@ -109,6 +114,13 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 			return nil, err
 		}
 		r.dbs = append(r.dbs, d)
+	}
+	if cfg.Register != nil {
+		if m, err := cfg.loadRegister(); err != nil {
+			opt.Status.Raise("", AlarmRegisterRefused, "configuration reads are held: "+err.Error())
+		} else {
+			r.commands = m
+		}
 	}
 	r.recordStart(ctx)
 	r.reconcileHolds(ctx)

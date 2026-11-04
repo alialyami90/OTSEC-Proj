@@ -36,7 +36,9 @@ import (
 //     stay held as HoldAcknowledgedDifference, same Ref, until a retention
 //     rule for configuration evidence says otherwise. A return to the
 //     baseline ends the alarm the same way, under HoldRestoredDifference
-//     (D4-19).
+//     (D4-19), and moves the approved changes since the baseline's
+//     acknowledgement there too (D4-43), so a pruned fold can tell a
+//     change that is still the last one from one a return ended.
 //
 // A record is held for one reason. When one is wanted for two, the baseline
 // wins, as the acknowledgement that made it the baseline is the later word.
@@ -83,6 +85,14 @@ type assetHolds struct {
 	// returned are the changes whose alarm a return to the baseline ended
 	// (D4-19): held the same way, under their own code.
 	returned []openDifference
+	// approved are the changes an approval covered (C5 0.7). Those from
+	// since on are against the current configuration baseline, until a
+	// return moves them to returned (D4-43).
+	approved []openDifference
+	since    int
+	// superseded are the baselines a newer acknowledgement of the same kind
+	// replaced, with that acknowledgement's seq as ref (C5 0.7).
+	superseded []ackedBaseline
 }
 
 // foldHolds reads the configuration records of the node's audit stream, in
@@ -110,18 +120,25 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 				continue
 			}
 			a := of(r)
+			if prev, ok := a.baseline[c.Kind]; ok && prev.digest != c.BaselineDigest {
+				a.superseded = append(a.superseded, ackedBaseline{prev.digest, s.seq})
+			}
 			a.baseline[c.Kind] = ackedBaseline{c.BaselineDigest, s.seq}
 			if c.Kind == authz.BaselineConfiguration {
 				a.ended = append(a.ended, a.open...) // D4-18: the alarm ends, the evidence stays held
-				a.open = nil
+				a.open, a.since = nil, len(a.approved)
 			}
 		case audit.ActionConfigChangeDetected:
-			if c.ApprovalSeq != 0 {
+			a := of(r)
+			b, ok := a.baseline[authz.BaselineConfiguration]
+			if !ok || b.digest != c.BaselineDigest {
 				continue
 			}
-			a := of(r)
-			if b, ok := a.baseline[authz.BaselineConfiguration]; ok && b.digest == c.BaselineDigest {
-				a.open = append(a.open, openDifference{c.BaselineDigest, c.SnapshotDigest, c.DifferenceDigest, s.seq})
+			o := openDifference{c.BaselineDigest, c.SnapshotDigest, c.DifferenceDigest, s.seq}
+			if c.ApprovalSeq != 0 {
+				a.approved = append(a.approved, o)
+			} else {
+				a.open = append(a.open, o)
 			}
 		case audit.ActionConfigBaselineRestored:
 			a := of(r)
@@ -131,21 +148,45 @@ func foldHolds(recs []auditRec) map[string]*assetHolds {
 				}
 			}
 			a.open = slices.DeleteFunc(a.open, func(o openDifference) bool { return o.baseline == c.BaselineDigest })
+			if b, ok := a.baseline[authz.BaselineConfiguration]; ok && b.digest == c.BaselineDigest {
+				a.returned = append(a.returned, a.approved[a.since:]...)
+				a.approved = a.approved[:a.since]
+			}
 		}
 	}
 	return out
 }
 
-// wants lists an asset's holds in a fixed order: the baselines, then each
-// open difference's snapshot and difference. A digest already wanted is not
-// wanted twice.
+// wants lists an asset's holds: the baselines, then each change's
+// snapshot and difference, then the superseded baselines. A digest wanted
+// for two reasons is wanted once, for the reason first in c5.HoldPriority
+// (C5 0.7), keeping the place of its first mention.
 func (a *assetHolds) wants() []wantHold {
+	out, _ := a.wantsAll()
+	return out
+}
+
+// wantsAll is wants, and for each digest the other reasons it is wanted
+// for, in c5.HoldPriority order. A stream may store a document twice, as a
+// read that repeats an earlier document is stored with its own transcript,
+// and the writer holds the record it stored, so each copy can hold one of
+// the reasons (planHolds).
+func (a *assetHolds) wantsAll() ([]wantHold, map[string][]wantHold) {
 	var out []wantHold
-	seen := map[string]bool{}
+	at := map[string]int{}
+	also := map[string][]wantHold{}
+	rank := func(c c5.HoldCode) int { return slices.Index(c5.HoldPriority(), c) }
 	add := func(w wantHold) {
-		if !seen[w.digest] {
-			seen[w.digest] = true
+		i, ok := at[w.digest]
+		switch {
+		case !ok:
+			at[w.digest] = len(out)
 			out = append(out, w)
+		case rank(w.code) < rank(out[i].code):
+			also[w.digest] = append(also[w.digest], out[i])
+			out[i] = w
+		default:
+			also[w.digest] = append(also[w.digest], w)
 		}
 	}
 	for _, k := range []authz.BaselineKind{authz.BaselineConfiguration, authz.BaselineEvent} {
@@ -153,19 +194,25 @@ func (a *assetHolds) wants() []wantHold {
 			add(wantHold{b.digest, c5.HoldBaseline, b.ref, fmt.Sprintf("the %s baseline acknowledged in audit record %d", k, b.ref)})
 		}
 	}
-	for _, o := range a.open {
-		add(wantHold{o.snapshot, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d", o.ref)})
-		add(wantHold{o.difference, c5.HoldUnapprovedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d", o.ref)})
+	diff := func(os []openDifference, code c5.HoldCode, why string) {
+		for _, o := range os {
+			add(wantHold{o.snapshot, code, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d%s", o.ref, why)})
+			if o.difference != "" { // "" when it was too large to store (C8 0.10, D4-42)
+				add(wantHold{o.difference, code, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d%s", o.ref, why)})
+			}
+		}
 	}
-	for _, o := range a.ended {
-		add(wantHold{o.snapshot, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
-		add(wantHold{o.difference, c5.HoldAcknowledgedDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by an acknowledgement", o.ref)})
+	diff(a.open, c5.HoldUnapprovedDifference, "")
+	diff(a.approved, c5.HoldApprovedDifference, ", which an approval covered")
+	diff(a.ended, c5.HoldAcknowledgedDifference, ", its alarm ended by an acknowledgement")
+	diff(a.returned, c5.HoldRestoredDifference, ", its alarm ended by a return to the baseline")
+	for _, b := range a.superseded {
+		add(wantHold{b.digest, c5.HoldSupersededBaseline, b.ref, fmt.Sprintf("a baseline superseded by the acknowledgement in audit record %d", b.ref)})
 	}
-	for _, o := range a.returned {
-		add(wantHold{o.snapshot, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
-		add(wantHold{o.difference, c5.HoldRestoredDifference, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d, its alarm ended by a return to the baseline", o.ref)})
+	for _, ws := range also {
+		slices.SortStableFunc(ws, func(x, y wantHold) int { return rank(x.code) - rank(y.code) })
 	}
-	return out
+	return out, also
 }
 
 // holdPlan is what to change in one stream so that its holds are the ones
@@ -179,35 +226,62 @@ type holdPlan struct {
 	unknown []c5.HeldRecord
 }
 
-func knownCode(c c5.HoldCode) bool {
-	return c == c5.HoldBaseline || c == c5.HoldUnapprovedDifference || c == c5.HoldAcknowledgedDifference || c == c5.HoldRestoredDifference
-}
+func knownCode(c c5.HoldCode) bool { return slices.Contains(c5.HoldPriority(), c) }
 
 type planned struct {
 	seq c5.Seq
 	w   wantHold
 }
 
-// planHolds compares what is wanted, located by digest in found, with what
-// the stream holds.
-func planHolds(node c5.NodeID, wants []wantHold, found map[string]c5.Seq, have []c5.HeldRecord) holdPlan {
+// planHolds compares what is wanted, located by digest in found (every
+// record with the digest, in stream order), with what the stream holds. A
+// digest wanted for one reason, w, and for others, also[w.digest], is
+// held on as many of its records as the writer held: a record already held
+// for one of the reasons keeps it, so a hold on a later copy of a document
+// is never moved to its first copy. Each reason, in priority order, takes
+// the record held for it, else a record held for no reason of the digest;
+// the first reason, when neither is there, takes the first record not
+// taken, as one record held for the reason first in priority is all C8
+// needs.
+func planHolds(node c5.NodeID, wants []wantHold, also map[string][]wantHold, found map[string][]c5.Seq, have []c5.HeldRecord) holdPlan {
 	var p holdPlan
-	want := map[c5.Seq]wantHold{}
-	for _, w := range wants {
-		seq, ok := found[w.digest]
-		if !ok {
-			p.missing = append(p.missing, w)
-			continue
-		}
-		want[seq] = w
-	}
 	held := map[c5.Seq]c5.HeldRecord{}
+	unknown := map[c5.Seq]bool{}
 	for _, h := range have {
 		if !knownCode(h.Reason.Code) {
 			p.unknown = append(p.unknown, h)
+			unknown[h.Seq] = true
 			continue
 		}
 		held[h.Seq] = h
+	}
+	want := map[c5.Seq]wantHold{}
+	for _, w := range wants {
+		cands := found[w.digest]
+		if len(cands) == 0 {
+			p.missing = append(p.missing, w)
+			continue
+		}
+		ws := append([]wantHold{w}, also[w.digest]...)
+		free := func(s c5.Seq) bool { _, taken := want[s]; return !taken && !unknown[s] }
+		for i, x := range ws {
+			pick := slices.IndexFunc(cands, func(s c5.Seq) bool {
+				h, ok := held[s]
+				return free(s) && ok && h.Reason == reasonOf(node, x)
+			})
+			if pick < 0 {
+				pick = slices.IndexFunc(cands, func(s c5.Seq) bool {
+					h, ok := held[s]
+					return free(s) && ok && !slices.ContainsFunc(ws[i+1:], func(y wantHold) bool { return h.Reason == reasonOf(node, y) })
+				})
+			}
+			if pick < 0 && i == 0 {
+				pick = slices.IndexFunc(cands, free)
+			}
+			if pick >= 0 {
+				want[cands[pick]] = x
+			}
+		}
 	}
 	seqs := make([]c5.Seq, 0, len(want))
 	for s := range want {
@@ -217,9 +291,6 @@ func planHolds(node c5.NodeID, wants []wantHold, found map[string]c5.Seq, have [
 	for _, s := range seqs {
 		w := want[s]
 		h, ok := held[s]
-		if slices.ContainsFunc(p.unknown, func(u c5.HeldRecord) bool { return u.Seq == s }) {
-			continue
-		}
 		switch {
 		case !ok:
 			p.add = append(p.add, planned{s, w})
@@ -242,11 +313,25 @@ func reasonOf(node c5.NodeID, w wantHold) c5.HoldReason {
 	return c5.HoldReason{Code: w.code, Ref: c5.Key{NodeID: node, Stream: AuditStream, Seq: w.ref}}
 }
 
-// locate finds, in a configuration stream, the stored records whose bytes
-// have the digests in want. It reads the whole retained stream, a page at a
-// time: records are at most ConfigRecordBytes.
+// locate finds, in a configuration stream, the first stored record whose
+// bytes have each digest in want.
 func locate(ctx context.Context, db *store.DB, stream c5.StreamID, want map[string]bool) (map[string]c5.Seq, error) {
+	all, err := locateAll(ctx, db, stream, want)
+	if err != nil {
+		return nil, err
+	}
 	found := map[string]c5.Seq{}
+	for d, seqs := range all {
+		found[d] = seqs[0]
+	}
+	return found, nil
+}
+
+// locateAll finds, in a configuration stream, every stored record whose
+// bytes have a digest in want, in stream order. It reads the whole retained
+// stream, a page at a time: records are at most ConfigRecordBytes.
+func locateAll(ctx context.Context, db *store.DB, stream c5.StreamID, want map[string]bool) (map[string][]c5.Seq, error) {
+	found := map[string][]c5.Seq{}
 	if len(want) == 0 {
 		return found, nil
 	}
@@ -261,9 +346,7 @@ func locate(ctx context.Context, db *store.DB, stream c5.StreamID, want map[stri
 		}
 		for _, st := range got {
 			if d := config.Digest(st.Event); want[d] {
-				if _, ok := found[d]; !ok {
-					found[d] = st.Key.Seq
-				}
+				found[d] = append(found[d], st.Key.Seq)
 			}
 			after = st.Key.Seq
 		}
@@ -374,8 +457,9 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 			continue
 		}
 		var wants []wantHold
+		var also map[string][]wantHold
 		if a := folded[assetID]; a != nil {
-			wants = a.wants()
+			wants, also = a.wantsAll()
 		}
 		if len(wants) == 0 && len(have) == 0 {
 			continue
@@ -384,18 +468,18 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		for _, w := range wants {
 			digests[w.digest] = true
 		}
-		found, err := locate(ctx, cdb, spec.ID, digests)
+		found, err := locateAll(ctx, cdb, spec.ID, digests)
 		if err != nil {
 			fail(err)
 			continue
 		}
-		p := planHolds(r.cfg.NodeID, wants, found, have)
+		p := planHolds(r.cfg.NodeID, wants, also, found, have)
 		for _, w := range p.missing {
 			r.opt.Status.Raise(assetID, AlarmBaselineNotStored, fmt.Sprintf("%s (%s) is not in stream %s, so nothing holds it; the stream's other holds are kept", w.why, w.digest, spec.ID))
 		}
 		for _, h := range p.unknown {
 			r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: c5.AlarmHoldsReconciled, At: r.opt.Now(), Stream: spec.ID,
-				Detail: fmt.Sprintf("%s seq %d: hold code %q is not known to this node (C5 0.6); kept as it is", spec.ID, h.Seq, h.Reason.Code)})
+				Detail: fmt.Sprintf("%s seq %d: hold code %q is not known to this node (C5 0.7); kept as it is", spec.ID, h.Seq, h.Reason.Code)})
 		}
 		apply := func(ps []planned, verb string, n *int) {
 			for _, pl := range ps {

@@ -18,6 +18,9 @@ import (
 // A timer or ticker fires when the clock reaches its time, so between steps
 // nothing that waits on this clock moves. Only a build tagged
 // otsec_testclock has this function; it must be called before Start.
+//
+// On Windows the rename is refused while the clock is reading the file
+// (C5 on #400), so a harness retries it.
 func UseTestClock(path string) error {
 	at, err := readTestClock(path)
 	if err != nil {

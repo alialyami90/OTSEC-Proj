@@ -20,6 +20,15 @@ import (
 )
 
 // C9 and C10 fixtures are the contracts' own.
+// addRegister gives nc the signed SEL-751 register, revision 5, which a
+// scheduled configuration read requires (D4-40 item 7).
+func addRegister(t *testing.T, nc *nodeconfigtest.Config) {
+	t.Helper()
+	if err := nc.WriteCommandRegister(t.TempDir(), contractFile(t, "register/testdata/sel-751.json"), 5); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func contractFile(t *testing.T, rel string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", rel))
@@ -123,6 +132,7 @@ func TestConfigQuotaFloorForConfigurationCollection(t *testing.T) {
 	add := func(nc *nodeconfigtest.Config, asset string) {
 		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg-" + asset, AssetID: asset, Endpoint: "port1-telnet",
 			Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600})
+		addRegister(t, nc)
 	}
 	floor := ConfigQuotaFloorRecords * ConfigRecordBytes
 	for _, c := range []struct {

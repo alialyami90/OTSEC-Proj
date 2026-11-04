@@ -83,6 +83,9 @@ type Scheduler struct {
 	quar      map[string]*quarantineEntry // manifest SHA-256: a recorded export (quarantine.go)
 	quarDone  map[string]bool             // manifest SHA-256: its range stores nothing now
 	relayed   map[string]relayEntry       // request ID: the collector's decision on a relayed admin request (adminrelay.go)
+	// chain is the audit chain as the configuration-read writer needs it
+	// (configchain.go), nil until the first configuration read.
+	chain *configChain
 	// adminShown is the admin-request files as status last showed them.
 	adminShown []AdminRequestStatus
 	// reloadSusp: the suspensions were not loaded because the audit
@@ -138,6 +141,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	// ticks finish it from the chain's record (quarantine.go).
 	s.refreshQuarantine(ctx)
 	s.publishHold()
+	s.raiseOpenChanges(ctx)
 	return s, nil
 }
 
@@ -354,6 +358,11 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	if s.heldMissed(col.ID) {
 		return Report{Alarm: AlarmEvidenceNotStored} // writeMissed raised it
 	}
+	if col.ReadsConfiguration() && s.rt.commands == nil {
+		// No snapshot is built from a register the node was not
+		// commissioned with (D4-40 item 7); Start raised the alarm.
+		return Report{Alarm: AlarmRegisterRefused}
+	}
 	s.clearQuiet(col.AssetID)
 
 	rep := Report{RequestID: s.newID()}
@@ -450,6 +459,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		return s.alarm(ctx, rep, col.AssetID, AlarmOutcomeUnknown, "no outcome arrived for the accepted run")
 	}
 	rep.Outcome = "ok"
+	if col.ReadsConfiguration() {
+		return s.commitConfigRead(ctx, rep, col, resp.Outcome, resp.Reply.CollectorSeq)
+	}
 	return s.commitResult(ctx, rep, col, resp.Outcome)
 }
 

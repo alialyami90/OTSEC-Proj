@@ -67,6 +67,7 @@ func TestEventBaselinesLoad(t *testing.T) {
 		nc.Store.Quotas["configuration"] = 32 << 20
 		nc.Schedule = append(nc.Schedule, nodeconfigtest.Collection{ID: "sch-cfg", AssetID: relayID, Endpoint: "port1-telnet",
 			Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600})
+		addRegister(t, nc)
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +100,7 @@ func TestEventBaselinesRefused(t *testing.T) {
 		"only a configuration read": {func(nc *nodeconfigtest.Config) {
 			nc.Schedule = []nodeconfigtest.Collection{{ID: "sch-cfg", AssetID: relayID, Endpoint: "port1-telnet",
 				Operation: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef, EverySeconds: 3600}}
+			addRegister(t, nc)
 			nc.AddEventBaseline(relayID)
 		}, "no events to observe"},
 		"only a state-changing operation": {func(nc *nodeconfigtest.Config) {
