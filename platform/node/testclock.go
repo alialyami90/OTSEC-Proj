@@ -21,6 +21,10 @@ import (
 //
 // On Windows the rename is refused while the clock is reading the file
 // (C5 on #400), so a harness retries it.
+//
+// Each time the clock moves, it writes the time it is at to path+".seen",
+// so a harness can wait until the node has taken a step before it acts on
+// it (C5 on #405). A read of a partial write does not parse; read again.
 func UseTestClock(path string) error {
 	at, err := readTestClock(path)
 	if err != nil {
@@ -64,9 +68,13 @@ type clockWait struct {
 }
 
 func (c *fileClock) poll() {
+	var seen time.Time
 	for range time.Tick(TestClockPoll) {
 		if at, err := readTestClock(c.path); err == nil {
 			c.set(at)
+		}
+		if now := c.Now(); !now.Equal(seen) && os.WriteFile(c.path+".seen", []byte(now.Format(time.RFC3339Nano)+"\n"), 0o600) == nil {
+			seen = now
 		}
 	}
 }
