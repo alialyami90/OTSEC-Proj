@@ -73,10 +73,10 @@ func TestSnapshotLearnerRestoredAtEveryStep(t *testing.T) {
 			ev := toEvent(t, e)
 			af, nc := flags(i)
 			o := eventbaseline.Obs{Event: ev, AfterFailure: af, NotCounted: nc}
-			if err := a.Observe(o); err != nil {
+			if err := a.Observe(o); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 				t.Fatal(err)
 			}
-			if err := b.Observe(o); err != nil {
+			if err := b.Observe(o); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 				t.Fatal(err)
 			}
 			if steps%200 == 100 {
@@ -215,7 +215,7 @@ func TestSnapshotSameStateSameBytes(t *testing.T) {
 		}
 		for _, e := range s.Events {
 			if e.Asset == "gt-inj-syslog" && ts(t, e.Received).Before(end) {
-				if err := l.Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil {
+				if err := l.Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 					t.Fatal(err)
 				}
 			}
@@ -236,7 +236,7 @@ func TestSnapshotSameStateSameBytes(t *testing.T) {
 // breaks and possible duplicates.
 func busyDetector(t *testing.T) (*eventbaseline.Detector, eventbaseline.DetectorConfig) {
 	t.Helper()
-	l := learner(t, nil)
+	l := learner(t, func(p *baseline.Params) { p.MinDurationS = 2000 }) // the period runs to 2000 s
 	observe(t, l, ser("A", "Asserted", at(0), ""))
 	for s := 1600; s <= 2000; s += 100 {
 		observe(t, l, ser("B", "Asserted", at(s), ""))
@@ -893,7 +893,7 @@ func TestSnapshotSizes(t *testing.T) {
 		}
 		for _, e := range s.Events {
 			if e.Asset == asset && ts(t, e.Received).Before(end) {
-				if err := l.Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil {
+				if err := l.Observe(eventbaseline.Obs{Event: toEvent(t, e)}); err != nil && !errors.Is(err, eventbaseline.ErrPeriodEnded) {
 					t.Fatal(err)
 				}
 			}
@@ -948,7 +948,10 @@ func TestSnapshotSizes(t *testing.T) {
 		observe1(t, win, mk("W", "Dense", start.Add(time.Duration(j)*time.Second)))
 	}
 	wb := mustSnap(t, win.Snapshot)
-	gaps, err := eventbaseline.NewLearner(cfg)
+	// Its period ends at its last event, so every one is taken (D4-45).
+	gcfg := cfg
+	gcfg.Params.MinEvents = 4097
+	gaps, err := eventbaseline.NewLearner(gcfg)
 	if err != nil {
 		t.Fatal(err)
 	}

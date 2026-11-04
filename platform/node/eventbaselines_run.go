@@ -232,9 +232,9 @@ func (e *eventRun) touch(assetID string) {
 }
 
 // Observe, Gap and Tick are feedSink's.
-func (e *eventRun) Observe(assetID string, o eventbaseline.Obs) {
+func (e *eventRun) Observe(assetID string, o eventbaseline.Obs, open time.Time) {
 	e.touch(assetID)
-	e.life.Observe(assetID, o)
+	e.life.Observe(assetID, o, open)
 }
 
 func (e *eventRun) Gap(assetID string, from, to time.Time, reason string) {
@@ -242,9 +242,9 @@ func (e *eventRun) Gap(assetID string, from, to time.Time, reason string) {
 	e.life.Gap(assetID, from, to, reason)
 }
 
-func (e *eventRun) Tick(assetID string, at time.Time) {
+func (e *eventRun) Tick(assetID string, at, open time.Time) {
 	e.touch(assetID)
-	e.life.Tick(assetID, at)
+	e.life.Tick(assetID, at, open)
 }
 
 // step feeds what the streams hold, for at most FeedBudget, publishes the

@@ -52,7 +52,7 @@ func chain(recs ...*audit.Record) []auditRec {
 
 func wantsOf(t *testing.T, recs ...*audit.Record) []wantHold {
 	t.Helper()
-	a := foldHolds(chain(recs...))[relayID]
+	a := foldHolds(chain(recs...), nil)[relayID]
 	if a == nil {
 		return nil
 	}
@@ -484,8 +484,9 @@ func TestPrunedAuditKeepsEveryHold(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The forwarder has confirmed the whole stream, and the suspension
-		// checkpoint (which pruneConsumers adds) has reached it.
-		for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer} {
+		// checkpoint and the holds cursor (which pruneConsumers adds) have
+		// reached it.
+		for _, id := range []c5.ConsumerID{fwd.ID, SuspensionConsumer, HoldsConsumer} {
 			if err := db.SaveCursor(bg, c5.Cursor{Consumer: id, Stream: AuditStream, Through: last}); err != nil {
 				t.Fatal(err)
 			}

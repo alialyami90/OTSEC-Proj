@@ -54,9 +54,17 @@ type configChain struct {
 // ended, and the newest of both.
 type heldConfig struct {
 	baseline       string
+	acked          c5.Seq // the Ref of the baseline's hold
 	open, approved []c5.Seq
 	last           *chainChange
+	// docs are the digests of the records held for each change in open
+	// and approved, for a pruned fold of the holds (C1 on #408).
+	docs map[c5.Seq]*heldChange
 }
+
+// heldChange is what one change's holds keep: its snapshot's digest, and
+// its difference's, "" when that was not stored (D4-42).
+type heldChange struct{ snapshot, difference string }
 
 type assetOp struct{ asset, op string }
 
@@ -232,8 +240,19 @@ func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID 
 }
 
 // heldBaseline is the asset's configuration state from before first as the
-// store holds it (D4-41). The baseline is, of the records held as
-// baseline, the one whose Ref is newest and whose document is a C9
+// store holds it (D4-41): heldConfigState of its configuration stream.
+func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error) {
+	stream := ConfigStream(assetID)
+	db := s.rt.Store(stream)
+	if db == nil {
+		return heldConfig{}, errors.New("configuration database not open")
+	}
+	return heldConfigState(ctx, db, stream, first)
+}
+
+// heldConfigState is a configuration stream's state from before first as its
+// holds keep it. The baseline is, of the records held as baseline with a
+// Ref before first, the one whose Ref is newest and whose document is a C9
 // snapshot (the kind is the document's, as an event baseline is held the
 // same way). The open changes are the Refs of the records held as
 // unapproved-difference between that acknowledgement and first, and the
@@ -243,13 +262,8 @@ func (ch *configChain) findBaseline(ctx context.Context, a *chainAsset, assetID 
 // both is the last change; its changes digest is its held difference's,
 // or "" when that was not stored, so a read of the same change is recorded
 // as a new one, which an open alarm keeps unapproved.
-func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error) {
-	var out heldConfig
-	stream := ConfigStream(assetID)
-	db := s.rt.Store(stream)
-	if db == nil {
-		return out, errors.New("configuration database not open")
-	}
+func heldConfigState(ctx context.Context, db *store.DB, stream c5.StreamID, first c5.Seq) (heldConfig, error) {
+	out := heldConfig{docs: map[c5.Seq]*heldChange{}}
 	held, err := db.Held(ctx, stream)
 	if err != nil {
 		return out, err
@@ -262,9 +276,8 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 		return got[0].Event, nil
 	}
 	slices.SortFunc(held, func(a, b c5.HeldRecord) int { return cmp.Compare(b.Reason.Ref.Seq, a.Reason.Ref.Seq) })
-	var acked c5.Seq
 	for _, h := range held {
-		if h.Reason.Code != c5.HoldBaseline {
+		if h.Reason.Code != c5.HoldBaseline || h.Reason.Ref.Seq >= first {
 			continue
 		}
 		b, err := doc(h.Seq)
@@ -272,7 +285,7 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 			return out, err
 		}
 		if _, err := config.DecodeSnapshot(b); b != nil && err == nil {
-			out.baseline, acked = config.Digest(b), h.Reason.Ref.Seq
+			out.baseline, out.acked = config.Digest(b), h.Reason.Ref.Seq
 			break
 		}
 	}
@@ -283,7 +296,7 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 		ref := h.Reason.Ref.Seq
 		list := &out.open
 		switch {
-		case ref <= acked || ref >= first:
+		case ref <= out.acked || ref >= first:
 			continue
 		case h.Reason.Code == c5.HoldApprovedDifference:
 			list = &out.approved
@@ -296,14 +309,29 @@ func (s *Scheduler) heldBaseline(ctx context.Context, assetID string, first c5.S
 		if out.last == nil {
 			out.last = &chainChange{seq: ref}
 		}
+		b, err := doc(h.Seq)
+		if err != nil {
+			return out, err
+		}
+		if b == nil {
+			continue
+		}
+		hc := out.docs[ref]
+		if hc == nil {
+			hc = &heldChange{}
+			out.docs[ref] = hc
+		}
+		if _, err := config.DecodeSnapshot(b); err == nil {
+			hc.snapshot = config.Digest(b)
+			continue
+		}
+		d, err := config.DecodeDifference(b)
+		if err != nil {
+			continue
+		}
+		hc.difference = config.Digest(b)
 		if ref == out.last.seq && out.last.changes == "" {
-			b, err := doc(h.Seq)
-			if err != nil {
-				return out, err
-			}
-			if d, err := config.DecodeDifference(b); b != nil && err == nil {
-				out.last.changes = d.ChangesDigest()
-			}
+			out.last.changes = d.ChangesDigest()
 		}
 	}
 	slices.Reverse(out.open)
