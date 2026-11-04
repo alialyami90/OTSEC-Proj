@@ -13,7 +13,6 @@ import (
 // receiver reads them back (C5 0.4, 0.5; B1 on #281). Datagram and stream
 // listeners alike.
 func TestListenerReceiversGetTheSyslogLogsCommitCaps(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		group c5.GroupOptions

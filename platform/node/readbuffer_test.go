@@ -10,7 +10,6 @@ import (
 // read_buffer_bytes is for a syslog-udp listener only, and within the
 // receiver's own bounds, so the loader refuses what receive.New would.
 func TestReadBufferConfig(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		transport string
@@ -49,7 +48,6 @@ func TestReadBufferConfig(t *testing.T) {
 // the receiver the node builds accepts the value (nothing is bound, so no
 // large buffer is allocated).
 func TestReadBufferBoundsAreTheReceivers(t *testing.T) {
-	t.Parallel()
 	for _, n := range []int{MinReadBuffer, MaxReadBuffer} {
 		nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 			nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0")
@@ -67,7 +65,6 @@ func TestReadBufferBoundsAreTheReceivers(t *testing.T) {
 // what was asked, and raises AlarmReadBufferShort only when the grant fell
 // short.
 func TestReadBufferIsAppliedAndShown(t *testing.T) {
-	t.Parallel()
 	const asked = 1 << 20
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0")
@@ -98,7 +95,6 @@ func TestReadBufferIsAppliedAndShown(t *testing.T) {
 // what 8 MiB should get, while a request the cap leaves alone is reported
 // as twice its size.
 func TestReadBufferShort(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name                 string
 		goos                 string

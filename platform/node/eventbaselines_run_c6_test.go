@@ -56,7 +56,6 @@ func withTarget(nc *nodeconfigtest.Config) {
 
 // R17: a half that changed is checkpointed at most every CheckpointEvery.
 func TestC6ProbeCheckpointAtMostEvery(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -74,7 +73,6 @@ func TestC6ProbeCheckpointAtMostEvery(t *testing.T) {
 // R8: a superseded checkpoint is not removed while the cursor after its
 // successor is not saved; the cursor alarm is raised.
 func TestC6ProbeNoRemovalWithoutTheCursor(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -101,7 +99,6 @@ func TestC6ProbeNoRemovalWithoutTheCursor(t *testing.T) {
 // R10: superseded checkpoints found at a restart (a crash before the
 // cursor) are removed once the restarted node saves the cursor.
 func TestC6ProbeRestartRemovesSuperseded(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -128,7 +125,6 @@ func TestC6ProbeRestartRemovesSuperseded(t *testing.T) {
 // R19: a newest checkpoint record whose half does not read is not passed
 // over for an older one: it is reported as corrupt.
 func TestC6ProbeUnreadableNewestIsReported(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -162,7 +158,6 @@ func TestC6ProbeUnreadableNewestIsReported(t *testing.T) {
 // R25: a checkpoint in the asset's stream naming another asset is not
 // restored.
 func TestC6ProbeOtherAssetsCheckpoint(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -184,7 +179,6 @@ func TestC6ProbeOtherAssetsCheckpoint(t *testing.T) {
 
 // R21: a stuck stream raises its alarm and its health record once.
 func TestC6ProbeStuckStreamOnce(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)
@@ -208,7 +202,6 @@ func TestC6ProbeStuckStreamOnce(t *testing.T) {
 // R6: a stream two assets read keeps its cursor at the lower of their
 // restart points.
 func TestC6ProbeCursorIsTheLowerOfTwoAssets(t *testing.T) {
-	t.Parallel()
 	const second = "3c8e5f21-9d40-4b6c-8f32-8d5e1e7b9c24"
 	g := newRunRig(t, func(nc *nodeconfigtest.Config) {
 		withTarget(nc)
@@ -243,7 +236,6 @@ func TestC6ProbeCursorIsTheLowerOfTwoAssets(t *testing.T) {
 // A checkpoint read that does not complete restores nothing and feeds no
 // asset; the alarm says why (C1 on #387).
 func TestC6ProbeUnreadCheckpointsFeedNothing(t *testing.T) {
-	t.Parallel()
 	g := newRunRig(t, withTarget)
 	at := runT0.Add(time.Minute)
 	g.syslog("door 0 opened", at)

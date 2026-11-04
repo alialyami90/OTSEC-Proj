@@ -37,7 +37,6 @@ func anchor(nc *nodeconfigtest.Config) map[string]any {
 // pin and is register_version loads at start, with no alarm, and the
 // configuration read is sent.
 func TestRegisterCopyLoads(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -61,7 +60,6 @@ func TestRegisterCopyLoads(t *testing.T) {
 // configuration read is then held without reaching the collector, while the
 // asset's SER read still runs.
 func TestRegisterCopyRefusedHoldsConfigurationReads(t *testing.T) {
-	t.Parallel()
 	other := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
 	for name, tc := range map[string]struct {
 		mod  func(nc *nodeconfigtest.Config)
@@ -114,7 +112,6 @@ func TestRegisterCopyRefusedHoldsConfigurationReads(t *testing.T) {
 // The register section is required when a configuration read is scheduled,
 // and its fields' forms are checked at load.
 func TestRegisterCopyChecks(t *testing.T) {
-	t.Parallel()
 	for name, tc := range map[string]struct {
 		mod  func(nc *nodeconfigtest.Config)
 		want string

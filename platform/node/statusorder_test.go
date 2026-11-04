@@ -16,7 +16,6 @@ import (
 // report of it. The reader below takes every status the node writes while it
 // starts, and none may have Collecting true with the two links not yet held.
 func TestStatusNeverCollectsBeforeLinksAreHeldBack(t *testing.T) {
-	t.Parallel()
 	var nc *nodeconfigtest.Config
 	c, _ := schedConfig(t, func(n *nodeconfigtest.Config) {
 		nc = n
@@ -69,7 +68,6 @@ func TestStatusNeverCollectsBeforeLinksAreHeldBack(t *testing.T) {
 
 // Defer holds status writes back until Resume.
 func TestStatusDeferWritesNothing(t *testing.T) {
-	t.Parallel()
 	path := t.TempDir() + "/status.json"
 	s := NewStatus(path, nil, nil)
 	s.Defer()

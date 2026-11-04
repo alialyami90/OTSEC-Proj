@@ -33,7 +33,6 @@ func ebConfig(t *testing.T, mod func(*nodeconfigtest.Config)) []byte {
 // asset a configuration stream, and counts toward the configuration quota
 // floor only for an asset whose configuration is not also read.
 func TestEventBaselinesLoad(t *testing.T) {
-	t.Parallel()
 	c, err := ParseConfig(ebConfig(t, func(nc *nodeconfigtest.Config) { nc.AddEventBaseline(relayID) }))
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +78,6 @@ func TestEventBaselinesLoad(t *testing.T) {
 }
 
 func TestEventBaselinesRefused(t *testing.T) {
-	t.Parallel()
 	const other = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
 	for name, tc := range map[string]struct {
 		mod  func(*nodeconfigtest.Config)
@@ -134,7 +132,6 @@ func TestEventBaselinesRefused(t *testing.T) {
 
 // A syslog-only asset has events to observe too.
 func TestEventBaselineForASyslogSender(t *testing.T) {
-	t.Parallel()
 	nc, _ := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.Schedule = nil
 		nc.Store.Quotas["configuration"] = 16 << 20
@@ -149,7 +146,6 @@ func TestEventBaselineForASyslogSender(t *testing.T) {
 // baseline's own parameters (a 0.1 record, so its max_types is brought to
 // 0.2's ceiling) pass, and a max_types above that ceiling is refused.
 func TestEventBaselineParamsUseC10(t *testing.T) {
-	t.Parallel()
 	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "baseline", "testdata", "valid", "baseline-synthetic.json"))
 	if err != nil {
 		t.Fatal(err)

@@ -237,7 +237,6 @@ func (n *cfgNode) stored() int {
 // Without an acknowledged baseline a read is stored, with its transcript as
 // the capture, and has no result: it awaits an acknowledgement.
 func TestConfigReadAwaitsAcknowledgement(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	if rep := n.read("ok"); rep.Alarm != "" || !rep.stored {
 		t.Fatalf("%+v", rep)
@@ -257,7 +256,6 @@ func TestConfigReadAwaitsAcknowledgement(t *testing.T) {
 
 // Each row of the design note's table, in one chain that verifies.
 func TestConfigReadResults(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok") // seq 1, the baseline
@@ -322,7 +320,6 @@ func TestConfigReadResults(t *testing.T) {
 // approval, and held approved-difference with no alarm. After an
 // unapproved one is open, a later approval silences nothing.
 func TestConfigReadApprovedChange(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -343,7 +340,6 @@ func TestConfigReadApprovedChange(t *testing.T) {
 }
 
 func TestConfigReadApprovalAfterTheAlarm(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -372,7 +368,6 @@ func TestConfigReadApprovalAfterTheAlarm(t *testing.T) {
 // The writer's holds and the start-up reconcile agree, and an open change's
 // alarm is raised again at start.
 func TestConfigReadHoldsAfterRestart(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, _, _ := start(t, c, dir)
 	n := &cfgNode{t: t, r: r, seq: 10}
@@ -419,7 +414,6 @@ func TestConfigReadHoldsAfterRestart(t *testing.T) {
 // in config/<asset> (condition 3: a read whose lines differ from the run
 // fails whole).
 func TestConfigReadRefusedSnapshot(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	r := cfgResult(t, "ok")
 	r.Records = r.Records[:len(r.Records)-1]
@@ -443,7 +437,6 @@ func TestConfigReadRefusedSnapshot(t *testing.T) {
 // A failed read stores no snapshot, and is still a run that bounds the next
 // change.
 func TestConfigReadFailedRun(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -462,7 +455,6 @@ func TestConfigReadFailedRun(t *testing.T) {
 // change; with none in the epoch, the reset that began it does; a reset
 // also ends the epoch's runs and approvals.
 func TestConfigChainUnchanged(t *testing.T) {
-	t.Parallel()
 	ch := newChain(nil)
 	run := func(seq uint64, op, at string) *audit.Record {
 		return &audit.Record{Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, CollectorSeq: seq, OperationID: op,
@@ -491,7 +483,6 @@ func TestConfigChainUnchanged(t *testing.T) {
 // A snapshot stored without its result (a crash between the two) leaves a
 // chain that verifies, and the next read compares again.
 func TestConfigReadSnapshotWithoutResult(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -509,7 +500,6 @@ func TestConfigReadSnapshotWithoutResult(t *testing.T) {
 // A hold the writer did not take (a crash between the record and the hold)
 // is taken by the reconcile at the next start, with the same code.
 func TestConfigReadHoldRepairedAtStart(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, _, _ := start(t, c, dir)
 	n := &cfgNode{t: t, r: r, seq: 10}
@@ -542,7 +532,6 @@ func TestConfigReadHoldRepairedAtStart(t *testing.T) {
 // An acknowledged baseline that is not stored: the read is stored, has no
 // result, and the alarm names the baseline.
 func TestConfigReadBaselineNotStored(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	missing := "sha256:" + strings.Repeat("0", 64)
 	n.read("ok")
@@ -596,7 +585,6 @@ func (n *cfgNode) pruned() []*audit.Record {
 // After a prune that took the acknowledgement, the node finds the baseline
 // from the store's baseline hold and compares against it (D4-41).
 func TestConfigReadPrunedAcknowledgement(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -618,7 +606,6 @@ func TestConfigReadPrunedAcknowledgement(t *testing.T) {
 // again is no_difference against it, not a change against the replaced
 // baseline.
 func TestConfigChainPrunedBetweenSyncs(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -645,7 +632,6 @@ func TestConfigChainPrunedBetweenSyncs(t *testing.T) {
 // #390): here it names the acknowledgement's decision, so the change it
 // would otherwise cover is unapproved.
 func TestConfigReadApprovalNeedsItsDecision(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -677,7 +663,6 @@ func TestConfigReadNeedsARule(t *testing.T) {
 // Once an unapproved change is open against the baseline, an approval
 // accepted after it silences no other change either (audit.VerifyConfig).
 func TestConfigReadOpenAlarmBlocksApproval(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -707,7 +692,6 @@ func TestConfigReadOpenAlarmBlocksApproval(t *testing.T) {
 // A read whose decision is not in the chain (its allowed record was not
 // written) is stored without a result.
 func TestConfigReadDecisionNotInChain(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -725,7 +709,6 @@ func TestConfigReadDecisionNotInChain(t *testing.T) {
 // An approval whose window ended before the last unchanged read covers
 // nothing: the change is unapproved.
 func TestConfigReadApprovalWindowEnded(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -740,7 +723,6 @@ func TestConfigReadApprovalWindowEnded(t *testing.T) {
 // An approved change read again is the same change: one snapshot more, no
 // new difference and no new hold (C2 on #390; D4-20).
 func TestConfigReadApprovedChangeReadAgain(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -768,7 +750,6 @@ func TestConfigReadApprovedChangeReadAgain(t *testing.T) {
 // comparison that succeeds clears it, so the cause returning raises it
 // again.
 func TestConfigReadNotComparable(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	other := n.encode(n.snapshot("ok", "7c4f0d6a-8b13-4a5b-9e21-2b7d4e108c3f"))
 	n.storeDoc(other)
@@ -823,7 +804,6 @@ func (n *cfgNode) big(v string) []byte {
 // reconcile wants no hold for the difference that was never stored, so it
 // raises nothing (C3 on #393).
 func TestConfigReadDifferenceTooLarge(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := &cfgNode{t: t, r: r, st: st, seq: 10}
@@ -880,7 +860,6 @@ func TestConfigReadDifferenceTooLarge(t *testing.T) {
 // no alarm: no evidence is lost, as the difference is Compare of the two
 // held snapshots (D4-42, #399).
 func TestConfigReadApprovedDifferenceTooLarge(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	n.read("ok")
 	base, doc := n.big("A"), n.big("B")
@@ -914,7 +893,6 @@ func (n *cfgNode) changed(v string) []byte {
 // read again is no_difference, not a restore, and an approval then covers
 // a new change (C6 on #390, A4).
 func TestConfigReadAcknowledgementEndsOpenChanges(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -936,7 +914,6 @@ func TestConfigReadAcknowledgementEndsOpenChanges(t *testing.T) {
 // is approved too, and a restart raises no unapproved change (C6 on #390,
 // A5).
 func TestConfigReadApprovedChangeIsNotOpen(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -957,7 +934,6 @@ func TestConfigReadApprovedChangeIsNotOpen(t *testing.T) {
 // An event-kind acknowledgement in the same stream leaves the configuration
 // baseline alone (C6 on #390, A7; D4-41).
 func TestConfigReadEventAcknowledgementLeavesTheConfigurationBaseline(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -976,7 +952,6 @@ func TestConfigReadEventAcknowledgementLeavesTheConfigurationBaseline(t *testing
 // (C3 on #384; C6 on #390, A8). The node's own log writes no escape, so
 // this is the selection by bytes alone.
 func TestConfigChainFoldsEscapedActions(t *testing.T) {
-	t.Parallel()
 	for _, b := range []string{`{"action":"\u0063onfig.change_approved"}`, `{"action":"\u0063ollector.seq_reset"}`, `{"action":"config.change_detected"}`} {
 		if !folded([]byte(b)) {
 			t.Errorf("%s is not folded", b)
@@ -990,7 +965,6 @@ func TestConfigChainFoldsEscapedActions(t *testing.T) {
 // Of two approvals that cover a change, the newest is named (C6 on #390,
 // W4).
 func TestConfigReadNamesTheNewestApproval(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1008,7 +982,6 @@ func TestConfigReadNamesTheNewestApproval(t *testing.T) {
 // the change open against the held baseline: it is raised at start, and a
 // read of it again is the same change (C6 on #390, G2; D4-41).
 func TestConfigChainPrunedPastTheAcknowledgement(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1034,7 +1007,6 @@ func TestConfigChainPrunedPastTheAcknowledgement(t *testing.T) {
 // envelope's payload digest, a byte of the envelope's payload, or a line of
 // the run the register renders. The collector renders from its own copy.
 func TestConfigReadSendsNothingOfTheRegister(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	var sent []string
 	answer := n.f.answer
@@ -1077,7 +1049,6 @@ func TestConfigReadSendsNothingOfTheRegister(t *testing.T) {
 // whose document is a C9 snapshot: an event baseline held under a newer
 // acknowledgement is not taken for it (D4-41: the kind is the document's).
 func TestConfigChainPrunedHeldBaselineKind(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1112,7 +1083,6 @@ func TestConfigChainPrunedHeldBaselineKind(t *testing.T) {
 // start, and a return to the baseline is a restore. The whole chain, with
 // the pruned records kept aside, verifies.
 func TestConfigChainPrunedOpenChange(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1155,7 +1125,6 @@ func TestConfigChainPrunedOpenChange(t *testing.T) {
 // the view stays open against the baseline its record names, so its alarm
 // is not dropped (C6 on #390, N7).
 func TestConfigChainPrunedHoldsUnreadable(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1179,7 +1148,6 @@ func TestConfigChainPrunedHoldsUnreadable(t *testing.T) {
 // restored-difference. The whole chain, with the pruned records kept aside,
 // verifies.
 func TestConfigChainPrunedApprovedChange(t *testing.T) {
-	t.Parallel()
 	n := newCfgNode(t)
 	base := n.snapshotOf("ok")
 	n.read("ok")
@@ -1218,7 +1186,6 @@ func TestConfigChainPrunedApprovedChange(t *testing.T) {
 // restored-difference (D4-43), and the reconcile at the next start wants
 // the same, so it corrects nothing.
 func TestConfigReadRestoreEndsApprovedChange(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := cfgNodeOn(t, r, st)
@@ -1274,7 +1241,6 @@ func cfgNodeOn(t *testing.T, r *Runtime, st *Status) *cfgNode {
 // approved-difference, in the writer and in the reconcile at the next
 // start.
 func TestConfigReadRestoreLeavesEarlierApprovals(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := cfgNodeOn(t, r, st)
@@ -1339,7 +1305,6 @@ func (n *cfgNode) restartOn(c *Config, dir string) {
 // unapproved-change alarm for it: a held approved-difference is not open
 // (C6 on #390, D11).
 func TestConfigChainPrunedApprovedChangeNotRaised(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := cfgNodeOn(t, r, st)
@@ -1364,7 +1329,6 @@ func TestConfigChainPrunedApprovedChangeNotRaised(t *testing.T) {
 // raises nothing, and the next read of the baseline is no_difference (C6
 // on #390, B7).
 func TestConfigChainPrunedRestoreNotOpen(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := cfgNodeOn(t, r, st)
@@ -1394,7 +1358,6 @@ func TestConfigChainPrunedRestoreNotOpen(t *testing.T) {
 // change's snapshot has the replaced baseline's digest, and both copies
 // stay held, each for its own reason.
 func TestConfigReadRevertToReplacedBaseline(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, withConfigRead(t, nil))
 	r, st, _ := start(t, c, dir)
 	n := cfgNodeOn(t, r, st)
@@ -1440,7 +1403,6 @@ func TestConfigReadRevertToReplacedBaseline(t *testing.T) {
 // is: the holds after the restart are the writer's, with one correction
 // (C6 on #400).
 func TestConfigReadReconcileRecodesTheCopyInPlace(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []string{"change snapshot held unapproved", "replaced baseline still held baseline"} {
 		t.Run(tc, func(t *testing.T) {
 			c, dir := schedConfig(t, withConfigRead(t, nil))

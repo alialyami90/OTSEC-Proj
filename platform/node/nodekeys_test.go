@@ -58,7 +58,6 @@ func keyRecords(t *testing.T, r *Runtime) []string {
 // call or a restart, again when its record of them is lost, and a rotated
 // key's new and retired versions when they appear.
 func TestKeyRegisterForwardsAndRecords(t *testing.T) {
-	t.Parallel()
 	nc, p, reg, dir := keyConfig(t, "", time.Now().Add(24*time.Hour))
 	srv, err := relptest.Start(p.ServerTLS("site-a-node1"), nil)
 	if err != nil {
@@ -197,7 +196,6 @@ func TestKeyRecordRetried(t *testing.T) {
 // A syslog-tls listener takes its certificate and its senders' CA set from
 // the register.
 func TestKeyRegisterListener(t *testing.T) {
-	t.Parallel()
 	nc, p, _, dir := keyConfig(t, "127.0.0.1", time.Now().Add(24*time.Hour))
 	nc.AddSyslogSender(relayID, "syslog-tls-out", "syslog-tls", "127.0.0.1", 0)
 	nc.AddListener("lab-tls", "syslog-tls", "127.0.0.1:0")
@@ -229,7 +227,6 @@ func TestKeyRegisterListener(t *testing.T) {
 // key without the lab flag, and references that are not node key
 // references.
 func TestKeyRegisterRefusals(t *testing.T) {
-	t.Parallel()
 	t.Run("tampered register", func(t *testing.T) {
 		nc, _, reg, dir := keyConfig(t, "", time.Now().Add(24*time.Hour))
 		b, err := reg.Marshal()
@@ -305,7 +302,6 @@ func TestKeyRegisterRefusals(t *testing.T) {
 // An entry whose certificate comes within 30 days of expiry is shown in
 // status and alarmed once, and alarmed again once it has expired.
 func TestNodeKeyExpiry(t *testing.T) {
-	t.Parallel()
 	notAfter := time.Now().Add(20 * 24 * time.Hour).UTC().Truncate(time.Second)
 	nc, _, _, dir := keyConfig(t, "", notAfter)
 	lockTLS(t, nc)
@@ -364,7 +360,6 @@ func postureRecords(t *testing.T, r *Runtime, reason string) []string {
 // in status, naming the references whose private key is in a file, as a
 // plaintext listener does (B3 on #176). Without the flag it says nothing.
 func TestLabTLSFilesPosture(t *testing.T) {
-	t.Parallel()
 	nc, _, _, dir := keyConfig(t, "", time.Now().Add(24*time.Hour))
 	lockTLS(t, nc)
 	for run := 1; run <= 2; run++ {

@@ -86,7 +86,6 @@ func verifySeq(t *testing.T, r *Runtime, through uint64) {
 // The trusted install key is in the chain before the first request, once
 // (A6 on #105), and node status shows it.
 func TestInstallKeyBeforeFirstRequest(t *testing.T) {
-	t.Parallel()
 	c, dir, _ := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	n := &numbering{next: 1}
@@ -124,7 +123,6 @@ func TestInstallKeyBeforeFirstRequest(t *testing.T) {
 // malformed, another schema, a link, too large. It resumes once the file
 // is good again.
 func TestUnreadableInstallKeyHolds(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -176,7 +174,6 @@ func TestUnreadableInstallKeyHolds(t *testing.T) {
 // the new key. A file naming another key changes nothing. The chain then
 // verifies under C8 0.2's rules.
 func TestReinstallHoldsUntilAcknowledged(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	n := &numbering{next: 1}
@@ -249,7 +246,6 @@ func TestReinstallHoldsUntilAcknowledged(t *testing.T) {
 // neither does a file a service outside AdminReaders may read; the right
 // file in the shared layout does.
 func TestAckFromSharedAdminDir(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -303,7 +299,6 @@ func TestAckFromSharedAdminDir(t *testing.T) {
 // and on a second acknowledgement. Here the run's own settle has not
 // applied them, as when its fold could not read the stream.
 func TestCommittedResetNotWrittenTwice(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -353,7 +348,6 @@ func TestCommittedResetNotWrittenTwice(t *testing.T) {
 // acknowledgement of the open reset is refused while the collector is on
 // another key. The chain verifies throughout.
 func TestReusedKeyIsNotAReset(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -420,7 +414,6 @@ func TestReusedKeyIsNotAReset(t *testing.T) {
 // Either way it is a restore: held, no reset written for it, nothing sent
 // after the acknowledgement, and the chain verifies.
 func TestEarlierEpochKeyIsRestore(t *testing.T) {
-	t.Parallel()
 	for _, back := range []string{"ik_test_second", testInstallKey} {
 		t.Run(back, func(t *testing.T) {
 			c, dir, nc := suspendConfig(t)
@@ -471,7 +464,6 @@ func TestEarlierEpochKeyIsRestore(t *testing.T) {
 // A reset record repeating a used key, which the node never writes, is a
 // record the state cannot be rebuilt past, so it holds every run.
 func TestEarlierKeyAtTheBackstop(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -521,7 +513,6 @@ func TestEarlierKeyAtTheBackstop(t *testing.T) {
 // key is a restore: nothing more is sent, an acknowledgement does not lift
 // it, and it holds across a restart, from the stream alone.
 func TestSeqBackUnderSameKeyIsRestore(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	n := &numbering{next: 5}
@@ -559,7 +550,6 @@ func TestSeqBackUnderSameKeyIsRestore(t *testing.T) {
 // is numbered below the high. The reset goes first in the reply's batch,
 // with first_seen, and the chain verifies once acknowledged.
 func TestReplyBelowHighWithNewKeyIsReset(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()

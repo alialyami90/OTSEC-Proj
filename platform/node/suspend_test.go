@@ -104,7 +104,6 @@ func suspensionRecords(t *testing.T, r *Runtime) (suspends, clears []*audit.Reco
 // status, whether the outcome passed its checks or was quarantined (A1:
 // a result that fails validation still suspends).
 func TestOutcomeCodeSuspends(t *testing.T) {
-	t.Parallel()
 	for _, quarantined := range []bool{false, true} {
 		c, dir := schedConfig(t, nil)
 		r, st, _ := start(t, c, dir)
@@ -139,7 +138,6 @@ func TestOutcomeCodeSuspends(t *testing.T) {
 // A code that suspends nothing (the ok.json read) leaves the asset
 // collecting.
 func TestOKOutcomeDoesNotSuspend(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -154,7 +152,6 @@ func TestOKOutcomeDoesNotSuspend(t *testing.T) {
 // A suspension survives a restart from the checkpoint; with the checkpoint
 // removed or corrupt, it is rebuilt from the audit stream.
 func TestSuspensionSurvivesRestart(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	s := newScheduler(t, r, suspendingCollector(t, false))
@@ -181,7 +178,6 @@ func TestSuspensionSurvivesRestart(t *testing.T) {
 // asset (A1, D2-15). A checkpoint that claims more of the audit stream
 // than the stream holds is one such case.
 func TestUnknownSuspensionsHoldEverything(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -202,7 +198,6 @@ func TestUnknownSuspensionsHoldEverything(t *testing.T) {
 // all collection on the node until it is, whether or not the checkpoint
 // was written (A1, D2-15 at 0ef6641).
 func TestUnauditedSuspensionHoldsTheNode(t *testing.T) {
-	t.Parallel()
 	for _, fileWritable := range []bool{true, false} {
 		c, dir := schedConfig(t, nil)
 		r, _, _ := start(t, c, dir)
@@ -262,7 +257,6 @@ func TestUnauditedSuspensionHoldsTheNode(t *testing.T) {
 // boundary stays at the checkpoint while the checkpoint is behind, and
 // follows it once it is written.
 func TestPruneStopsAtCheckpoint(t *testing.T) {
-	t.Parallel()
 	fwd := c5.Consumer{ID: "fwd", Stream: AuditStream, Delivery: c5.Required}
 	if got := pruneConsumers(nil); len(got) != 0 {
 		t.Fatalf("no audit consumer: %+v", got)
@@ -350,7 +344,6 @@ func TestPruneStopsAtCheckpoint(t *testing.T) {
 // stream before the asset's next collector.request, and the clear holds
 // across a restart. A mismatched or stale file changes nothing.
 func TestClearSuspension(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	col := suspendingCollector(t, false)
@@ -423,7 +416,6 @@ func TestClearSuspension(t *testing.T) {
 // A clear for an asset with no suspension, or a file that is not a clear,
 // changes nothing and is raised once.
 func TestBadClearFileChangesNothing(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -483,7 +475,6 @@ func writeShared(t *testing.T, nc *nodeconfigtest.Config, name string, body []by
 // and on Windows a read entry for a service not in AdminReaders is
 // refused, as it is by the collector.
 func TestAdminDirSharedWithCollector(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -516,7 +507,6 @@ func TestAdminDirSharedWithCollector(t *testing.T) {
 // the object clears nothing, even when it names the held suspension, so
 // the node never clears what the collector would refuse.
 func TestClearFileDecodedStrictly(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -547,7 +537,6 @@ func TestClearFileDecodedStrictly(t *testing.T) {
 // would name a suspension the chain does not hold, and the node's next
 // settle would hold every asset as unknown, for good.
 func TestClearOfUnauditedSuspensionWaits(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -613,7 +602,6 @@ func TestClearOfUnauditedSuspensionWaits(t *testing.T) {
 // that its cursor allowed, and the asset's suspension is only in the
 // pruned part of the stream.
 func TestPrunedPastCheckpointHoldsAtLoad(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	s := newScheduler(t, r, suspendingCollector(t, false))
@@ -660,7 +648,6 @@ func TestPrunedPastCheckpointHoldsAtLoad(t *testing.T) {
 // another account, could have written the file. A matching clear in such a
 // directory changes nothing and is raised once.
 func TestClearNeedsProtectedAdminDir(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{"writable", "link"} {
 		t.Run(name, func(t *testing.T) {
 			c, dir, nc := suspendConfig(t)
@@ -706,7 +693,6 @@ func TestClearNeedsProtectedAdminDir(t *testing.T) {
 // or, without one, from the chain: the rebuild applies the clear after the
 // suspension, in chain order (A1, D2-15).
 func TestClearSurvivesRestart(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	s := newScheduler(t, r, suspendingCollector(t, false))
@@ -741,7 +727,6 @@ func TestClearSurvivesRestart(t *testing.T) {
 // stopped is in the checkpoint as unaudited: the next start holds the node,
 // writes the record once the audit stream accepts it, and then resumes.
 func TestUnauditedSuspensionSurvivesRestart(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	s := newScheduler(t, r, suspendingCollector(t, false))
@@ -778,7 +763,6 @@ func TestUnauditedSuspensionSurvivesRestart(t *testing.T) {
 // in the stream and not written again: C8 0.2 breaks the chain on a
 // duplicate suspend.
 func TestCommittedSuspensionNotWrittenTwice(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -808,7 +792,6 @@ func TestCommittedSuspensionNotWrittenTwice(t *testing.T) {
 // C8 0.2 breaks the chain on a second clear. Here the run's own settle has
 // not applied it, as when its fold could not read the stream.
 func TestCommittedClearNotWrittenTwice(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -836,7 +819,6 @@ func TestCommittedClearNotWrittenTwice(t *testing.T) {
 // suspension that is not open breaks C8 0.2's rules, and a second
 // suspension of an asset already suspended breaks the node's one per asset.
 func TestBadSuspensionRecordHoldsEverything(t *testing.T) {
-	t.Parallel()
 	for name, write := range map[string]func(*Scheduler) error{
 		"orphan clear": func(s *Scheduler) error {
 			sp := asset.Suspension{Reason: asset.SuspendAuthFailed, Ref: "inv-never-opened"}

@@ -278,7 +278,6 @@ func newScheduler(t *testing.T, r *Runtime, c Collector) *Scheduler {
 // rows are committed with their capture and alignment state; and a second
 // read of the same rows adds no event but still keeps its transcript.
 func TestRunCommitsThroughTheClient(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -354,7 +353,6 @@ func TestRunCommitsThroughTheClient(t *testing.T) {
 // leaves the node, the alarm is raised, and received Syslog is unaffected
 // (the store tests cover that half).
 func TestAuditFullSendsNothing(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["audit"] = 600 })
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -391,7 +389,6 @@ func countAlarms(st *Status, code string) int {
 // missing decision leaves only the info record, so a decision the
 // collector made shows as a gap.
 func TestRefusalAndNoDecision(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -431,7 +428,6 @@ func TestRefusalAndNoDecision(t *testing.T) {
 // An accepted run whose outcome never arrived is audited as allowed and
 // recorded as outcome unknown; nothing is normalized.
 func TestOutcomeLost(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -455,7 +451,6 @@ func TestOutcomeLost(t *testing.T) {
 // the chain, the alarm is raised without quoting the line, and collection
 // from the asset stops, across a restart (A6).
 func TestUnauthorizedLineQuarantinedAndHaltedDurably(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddRELPTarget("central", "127.0.0.1", 2514, "test-ca", "test-client", "test/durable-ack", true)
 	})
@@ -538,7 +533,6 @@ func TestUnauthorizedLineQuarantinedAndHaltedDurably(t *testing.T) {
 // A quarantine that fails a check other than the lines is kept, recorded as
 // outcome unknown, and does not halt the asset.
 func TestQuarantineWithoutUnauthorizedLine(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -561,7 +555,6 @@ func TestQuarantineWithoutUnauthorizedLine(t *testing.T) {
 // A result A4's normalizer refuses is quarantined and, like every run,
 // ends with exactly one collection health event (A6 #92 nit 4).
 func TestNormalizerRefusalEndsWithOneHealthEvent(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -592,7 +585,6 @@ func TestNormalizerRefusalEndsWithOneHealthEvent(t *testing.T) {
 // With less than QuarantineRoom left in adapter-evidence, no run is sent,
 // and the alarm is raised once for the condition, not once per run (A6).
 func TestNoQuarantineRoomSendsNothing(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["adapter-evidence"] = QuarantineRoom - 1 })
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -612,7 +604,6 @@ func TestNoQuarantineRoomSendsNothing(t *testing.T) {
 
 // A quarantine the store refuses stops every run on the node, level 0 included.
 func TestQuarantineNotStoredStopsTheNode(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) { nc.Store.Quotas["adapter-evidence"] = QuarantineRoom + 1024 })
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -640,7 +631,6 @@ func TestQuarantineNotStoredStopsTheNode(t *testing.T) {
 
 // Run waits MinIntervalSeconds before the first run and stops with ctx.
 func TestRunWaitsBeforeTheFirstRun(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -660,7 +650,6 @@ func TestRunWaitsBeforeTheFirstRun(t *testing.T) {
 
 // Tick and the scheduler share the runtime (run under -race).
 func TestTickAlongsideRuns(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -685,7 +674,6 @@ func TestTickAlongsideRuns(t *testing.T) {
 // leave the device MinIntervalSeconds between sessions; another asset is
 // not held back by it (A6 review of #92).
 func TestPlanSpacesSessionsPerAsset(t *testing.T) {
-	t.Parallel()
 	const a, b = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", "7f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f"
 	sched := []Collection{
 		{ID: "x1", AssetID: a, EverySeconds: 60},
@@ -731,7 +719,6 @@ func TestPlanSpacesSessionsPerAsset(t *testing.T) {
 // A refused peer's alarm keeps the node's own reason and says "refused"
 // once (A3 on #182).
 func TestNoDecisionDetailPeerRefused(t *testing.T) {
-	t.Parallel()
 	err := fmt.Errorf("%w: %v", collectorwire.ErrPeerRefused, "pipe server runs as S-1-5-80-1, want S-1-5-80-2")
 	got := noDecisionDetail(fmt.Errorf("collectorclient: %w", err))
 	if want := "the collector's identity was refused: pipe server runs as S-1-5-80-1, want S-1-5-80-2"; got != want {

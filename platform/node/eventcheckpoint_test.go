@@ -46,7 +46,6 @@ func widestKeys(t *testing.T) []string {
 // The checkpoint document round-trips through its encoder, and the
 // configuration validator accepts it with its snapshot as the capture.
 func TestEventCheckpointRoundTrip(t *testing.T) {
-	t.Parallel()
 	snap := []byte("snapshot bytes")
 	for name, cp := range map[string]eventCheckpoint{
 		"learner": testCheckpoint(snap),
@@ -96,7 +95,6 @@ func TestEventCheckpointRoundTrip(t *testing.T) {
 // validator, and the validator refuses a capture that is not the snapshot,
 // bytes the encoder would not write, and unknown or trailing data.
 func TestEventCheckpointRefusals(t *testing.T) {
-	t.Parallel()
 	snap := []byte("snapshot bytes")
 	capture := snapCapture(snap)
 	for name, mut := range map[string]func(*eventCheckpoint){
@@ -191,7 +189,6 @@ func TestEventCheckpointRefusals(t *testing.T) {
 // widest) is stored by the real configuration database, and its document is
 // within the allowance D4-38 counts for it. Evidence class: simulated.
 func TestWidestEventCheckpointIsStored(t *testing.T) {
-	t.Parallel()
 	snap := make([]byte, eventbaseline.MaxSnapshotBytes)
 	for i := range snap {
 		snap[i] = byte(i * 7)
@@ -235,7 +232,6 @@ func TestWidestEventCheckpointIsStored(t *testing.T) {
 // not at a site's first restore after an upgrade (C6 on #376). Evidence
 // class: desk.
 func TestEventCheckpointGolden(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{"eventcheckpoint-learner.json", "eventcheckpoint-detector.json"} {
 		b, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
@@ -257,7 +253,6 @@ func TestEventCheckpointGolden(t *testing.T) {
 // #376). The relay's SER read gives two (its SER and the health stream), and
 // each listener that takes its Syslog gives one more.
 func TestEventBaselineStreamsHeldAtLoad(t *testing.T) {
-	t.Parallel()
 	if MaxCheckpointStreams != eventbaseline.MaxStreams {
 		t.Fatalf("MaxCheckpointStreams %d, eventbaseline.MaxStreams %d", MaxCheckpointStreams, eventbaseline.MaxStreams)
 	}

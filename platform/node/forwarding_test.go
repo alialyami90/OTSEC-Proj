@@ -84,7 +84,6 @@ func parse(t *testing.T, nc *nodeconfigtest.Config) *Config {
 // collector that permits only this node's name, and status shows each
 // stream's cursor at its last committed seq.
 func TestNodeForwardsEveryStream(t *testing.T) {
-	t.Parallel()
 	// The receiver needs the PKI and the target needs the receiver's port,
 	// so the port is set after the receiver starts.
 	nc, p, dir := forwardConfig(t, 1, nil)
@@ -155,7 +154,6 @@ func TestNodeForwardsEveryStream(t *testing.T) {
 // falls back to another reference (D2-12). Each case changes the files
 // before tls_dir is locked, or loosens them after.
 func TestBadTLSReferenceStopsTheNode(t *testing.T) {
-	t.Parallel()
 	type change func(t *testing.T, nc *nodeconfigtest.Config)
 	type tlsCase struct{ before, after change }
 	loosen := func(name string) change {
@@ -282,7 +280,6 @@ func TestBadTLSReferenceStopsTheNode(t *testing.T) {
 // A TLS reference is a file name in tls_dir, never a path; and a reference
 // needs tls_dir.
 func TestTLSReferenceIsAName(t *testing.T) {
-	t.Parallel()
 	for name, mutate := range map[string]func(nc *nodeconfigtest.Config){
 		"path in reference": func(nc *nodeconfigtest.Config) {
 			nc.Targets[0]["tls"].(map[string]any)["client_credential_ref"] = "../store/evidence"
@@ -306,7 +303,6 @@ func TestTLSReferenceIsAName(t *testing.T) {
 // UnreachableAfter raises forward-unreachable once per outage, with a
 // forward.unreachable health event.
 func TestUnreachableRaisedOncePerOutage(t *testing.T) {
-	t.Parallel()
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
 	lockTLS(t, nc)
 	c := parse(t, nc)
@@ -355,7 +351,6 @@ func TestUnreachableRaisedOncePerOutage(t *testing.T) {
 // A stream the forwarder holds raises forward-held once per reason, and its
 // waiting events do not make the target unreachable (A4 #98).
 func TestHeldStreamIsNotUnreachable(t *testing.T) {
-	t.Parallel()
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
 	lockTLS(t, nc)
 	c := parse(t, nc)
@@ -417,7 +412,6 @@ func TestHeldStreamIsNotUnreachable(t *testing.T) {
 // The forwarder's health events follow Runtime.health's rule: nothing is
 // appended unless the health database accepts events (A4 #98).
 func TestHealthSinkRefusesOutsideCollecting(t *testing.T) {
-	t.Parallel()
 	nc, _, dir := forwardConfig(t, 9, nil)
 	r, _, _ := start(t, parse(t, nc), dir)
 	defer r.Close()
@@ -445,7 +439,6 @@ func TestHealthSinkRefusesOutsideCollecting(t *testing.T) {
 // unreachable even with nothing waiting; an open, idle session is not
 // (A4 #94: Status.Open).
 func TestNoSessionOpenIsUnreachable(t *testing.T) {
-	t.Parallel()
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
 	lockTLS(t, nc)
 	c := parse(t, nc)
@@ -516,7 +509,6 @@ func TestNoSessionOpenIsUnreachable(t *testing.T) {
 // forwards what was committed inside its replay window (A4 #94: a
 // best-effort target needs Stream.Index).
 func TestBestEffortTargetForwards(t *testing.T) {
-	t.Parallel()
 	nc, p, dir := forwardConfig(t, 1, func(nc *nodeconfigtest.Config) {
 		tg := nc.Targets[0]
 		delete(tg, "durable_ack")
@@ -562,7 +554,6 @@ func TestBestEffortTargetForwards(t *testing.T) {
 // with its cursor held back for an owed report: no forward-unreachable
 // after UnreachableAfter (A6 and A4 on #102, A4 #103).
 func TestOwedReportIsNotWaiting(t *testing.T) {
-	t.Parallel()
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
 	lockTLS(t, nc)
 	c := parse(t, nc)

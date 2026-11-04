@@ -118,7 +118,6 @@ func clearRecords(q *quarantineNode) []*audit.Record { return q.records(audit.Ac
 // and the removal steps follow as for the unsigned file. Relayed again, it
 // changes nothing.
 func TestSignedQuarantineClear(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	b, sum := q.signedClear("admin-request-clear.json", 1, manifest)
 	q.s.relayAdmin(bg)
@@ -165,7 +164,6 @@ func TestSignedQuarantineClear(t *testing.T) {
 // replaced while the request is with the collector is another request, and
 // the clear is of the manifest the original named.
 func TestSignedQuarantineClearActsOnTheBytesSent(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	_, sum := q.signedClear("admin-request-clear.json", 1, manifest)
 	other := strings.Repeat("ab", 32)
@@ -198,7 +196,6 @@ func TestSignedQuarantineClearActsOnTheBytesSent(t *testing.T) {
 // a later tick, after a restart, without sending the request again, and
 // only once.
 func TestSignedQuarantineClearResumesFromTheChain(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	copyName := QuarantineExportFileName(relayID)
 	copyBytes, err := os.ReadFile(filepath.Join(q.nc.AdminDir, copyName))
@@ -237,7 +234,6 @@ func TestSignedQuarantineClearResumesFromTheChain(t *testing.T) {
 // A reply that accepts a request but does not name it as verified is
 // recorded without verified, and the node does nothing on it.
 func TestSignedQuarantineClearNeedsTheVerifiedGroup(t *testing.T) {
-	t.Parallel()
 	for name, edit := range map[string]func(*authz.CollectorReply){
 		"no admin":    func(r *authz.CollectorReply) { r.Admin = nil },
 		"other bytes": func(r *authz.CollectorReply) { r.Admin.PayloadSHA256 = strings.Repeat("0", 64) },
@@ -273,7 +269,6 @@ func TestSignedQuarantineClearNeedsTheVerifiedGroup(t *testing.T) {
 // collector held as restored, and the node does its part on nothing it
 // decided (A3 on #181, item 3).
 func TestSignedQuarantineClearNotAppliedOnARestoredCollector(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	q.signedClear("admin-request-clear.json", 1, manifest)
 	mux.force = 1 // below every number the runs got
@@ -293,7 +288,6 @@ func TestSignedQuarantineClearNotAppliedOnARestoredCollector(t *testing.T) {
 // back from acting on it, and acts on it again once the hold is gone: only
 // an acceptance numbered at or below the high mark is tainted for good.
 func TestSignedQuarantineClearWaitsOutALaterRestoreHold(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	copyName := QuarantineExportFileName(relayID)
 	copyBytes, err := os.ReadFile(filepath.Join(q.nc.AdminDir, copyName))
@@ -337,7 +331,6 @@ func reinstall(t *testing.T, q *quarantineNode, name string) {
 // on after the collector is reinstalled and the reset acknowledged, now or
 // after a restart; the entry is refused and says to sign again.
 func TestSignedQuarantineClearAcceptedWhileRestoredStaysRefused(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	q.signedClear("admin-request-clear.json", 1, manifest)
 	mux.force = 1
@@ -362,7 +355,6 @@ func TestSignedQuarantineClearAcceptedWhileRestoredStaysRefused(t *testing.T) {
 // then replaces is refused, though the collector was never held as
 // restored.
 func TestSignedQuarantineClearRetiredByAReinstall(t *testing.T) {
-	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	copyName := QuarantineExportFileName(relayID)
 	copyBytes, err := os.ReadFile(filepath.Join(q.nc.AdminDir, copyName))
@@ -402,7 +394,6 @@ func TestSignedQuarantineClearRetiredByAReinstall(t *testing.T) {
 // The reply to a resend of bytes the collector already accepted is the
 // repeat answer: recorded with repeat_of, and the node's part is done once.
 func TestSignedQuarantineClearRepeatAnswer(t *testing.T) {
-	t.Parallel()
 	q, mux, manifest := signedQuarantineNode(t)
 	mux.admin.repeat = true
 	mux.admin.lose = true
@@ -434,7 +425,6 @@ func TestSignedQuarantineClearRepeatAnswer(t *testing.T) {
 // then applied by the node: the reset is acknowledged and the old key stays
 // distinct from the new one.
 func TestSignedSeqResetAck(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -500,7 +490,6 @@ func TestSignedSeqResetAck(t *testing.T) {
 // A signed acknowledgement with no reset open does nothing: for the key
 // already trusted it says so, and for another it is refused.
 func TestSignedSeqResetAckWithNoResetOpen(t *testing.T) {
-	t.Parallel()
 	for name, tc := range map[string]struct {
 		key, part, detail string
 	}{
@@ -532,7 +521,6 @@ func TestSignedSeqResetAckWithNoResetOpen(t *testing.T) {
 // reached through a collector that accepts the mismatched one (A6 on #339):
 // nothing is acknowledged, and the entry is refused.
 func TestSignedSeqResetAckOfAnotherKey(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -582,7 +570,6 @@ func TestSignedSeqResetAckOfAnotherKey(t *testing.T) {
 // Windows (D4-44). Each case is its own request in its own file, so its alarm
 // is found by the file's name, and the control runs last because it clears.
 func TestApplyAdminPartGates(t *testing.T) {
-	t.Parallel()
 	q, _, manifest := signedQuarantineNode(t)
 	for i, tc := range []struct {
 		name  string

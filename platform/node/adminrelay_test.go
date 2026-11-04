@@ -212,7 +212,6 @@ func adminShown(st *Status) []AdminRequestStatus { return st.Snapshot("x").Admin
 // restart, or after a restart whose checkpoint is lost: the chain holds
 // the decision.
 func TestRelaySendsOnce(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -265,7 +264,6 @@ func TestRelaySendsOnce(t *testing.T) {
 // The checkpoint holds the decided set: a restart whose checkpoint was
 // written after the decision reads it there, not from the stream.
 func TestRelayedSetInCheckpoint(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -287,7 +285,6 @@ func TestRelayedSetInCheckpoint(t *testing.T) {
 // check named; the node records the refusal as denied with the node as
 // actor, raises the alarm and does not send it again.
 func TestRelayAlteredPayloadRefused(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -317,7 +314,6 @@ func TestRelayAlteredPayloadRefused(t *testing.T) {
 // A file the node itself could have written is no administrator's: it is
 // never read, so nothing is sent or recorded, and the alarm says why.
 func TestRelayNeedsAnAdministratorsFile(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -348,7 +344,6 @@ func TestRelayNeedsAnAdministratorsFile(t *testing.T) {
 // another kind, a principal that is not a person, an unknown key in the
 // file, and a misnamed file. Each raises the unread alarm once.
 func TestRelayRefusesWhatItCannotRelay(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -398,7 +393,6 @@ func TestRelayRefusesWhatItCannotRelay(t *testing.T) {
 // The node keeps the info record of each send, so the chain shows every
 // attempt.
 func TestRelayRetriedWithoutDecision(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -433,7 +427,6 @@ func TestRelayRetriedWithoutDecision(t *testing.T) {
 // retry. For the credential kinds the collector's part was the whole
 // operation, so nothing is lost (#181, B2).
 func TestRelayLostReplyIsAReplay(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -463,7 +456,6 @@ func TestRelayLostReplyIsAReplay(t *testing.T) {
 // Nothing is relayed while the collector is held: here a reinstall the
 // administrator has not acknowledged.
 func TestRelayHeldWithTheCollector(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -493,7 +485,6 @@ func TestRelayHeldWithTheCollector(t *testing.T) {
 // small as admin_dir. A file put back is sent again and refused as a
 // replay, which changes nothing.
 func TestRelayForgetsRemovedFiles(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -522,7 +513,6 @@ func TestRelayForgetsRemovedFiles(t *testing.T) {
 // The record's detail fits C8's 512 bytes at the longest claims the
 // patterns allow.
 func TestRelayRecordFits(t *testing.T) {
-	t.Parallel()
 	c, dir, _ := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -601,7 +591,6 @@ func TestRunRelaysBetweenRuns(t *testing.T) {
 // Through the real client and the collector's strict decoder: a relayed
 // file is a valid C7 request on the wire.
 func TestRelayOverTheWire(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -639,7 +628,6 @@ func TestRelayOverTheWire(t *testing.T) {
 // its decision, resent after expiry, must not be re-signed blindly (A3 on
 // #189).
 func TestRelayExpiredSaysCheckFirst(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -697,7 +685,6 @@ func signNonce(t *testing.T, i int) *authz.AdminSigned {
 // unrelated record never stops a file from being sent (A6 on #189, N1
 // and N3).
 func TestRelayFoldsOnlyItsDecisions(t *testing.T) {
-	t.Parallel()
 	const id = "admin-0123456789abcdef"
 	for name, rec := range map[string]*audit.Record{
 		"action":  {Action: audit.ActionPolicyApply, Outcome: audit.OutcomeAllowed, CorrelationID: id},
@@ -746,7 +733,6 @@ func TestRelayFoldsOnlyItsDecisions(t *testing.T) {
 // recorded as decided, the no-decision alarm is raised, and the file is
 // sent again on the next tick (A6 on #189, N18).
 func TestRelayRefusalWithoutSeqRetried(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -783,7 +769,6 @@ func TestRelayRefusalWithoutSeqRetried(t *testing.T) {
 // A refusal check the node does not know is shown as unknown, never as
 // the collector wrote it (A6 on #189, N21).
 func TestRelayUnknownCheckNotEchoed(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -810,7 +795,6 @@ func TestRelayUnknownCheckNotEchoed(t *testing.T) {
 // Sixteen files are all read; a seventeenth is not, and says so (A6 on
 // #189, N24).
 func TestRelayFileCapBoundary(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -842,7 +826,6 @@ func TestRelayFileCapBoundary(t *testing.T) {
 // although the file is under its own cap: the collector would refuse it
 // too, and the node does not send it (A6 on #189, N27).
 func TestRelayPayloadCap(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -868,7 +851,6 @@ func TestRelayPayloadCap(t *testing.T) {
 // a name that is not read is not forgotten: renamed back, it is not sent
 // again (A6 on #189, N9).
 func TestRelayMisnamedKeepsDecided(t *testing.T) {
-	t.Parallel()
 	c, dir, nc := suspendConfig(t)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()

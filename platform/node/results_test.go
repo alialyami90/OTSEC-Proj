@@ -17,7 +17,6 @@ import (
 // as soon as a run ends, not only before the next run (A6 on #118: health
 // showed collector_seq high 0 a run after 8 rows were delivered).
 func TestStatusAfterRun(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
@@ -57,7 +56,6 @@ func (s *switchCollector) Do(ctx context.Context, req *authz.CollectorRequest) (
 // the last code and the count, the repeated-failure alarm is raised once
 // at RepeatedFailureAfter, and a good run resets both (D2-17).
 func TestRepeatedFailureShows(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -107,7 +105,6 @@ func TestRepeatedFailureShows(t *testing.T) {
 // A run that is not sent (here, held by the audit stream being full)
 // changes no result: nothing reached the device.
 func TestHeldRunIsNoResult(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -130,7 +127,6 @@ func TestHeldRunIsNoResult(t *testing.T) {
 // so health is one check behind, not one tick (A6 on #118), and does not
 // rewrite it when nothing changed.
 func TestCheckWritesStatusOnChange(t *testing.T) {
-	t.Parallel()
 	nc, _, _ := forwardConfig(t, 9, nil) // the forwarder is never run
 	lockTLS(t, nc)
 	c := parse(t, nc)
@@ -178,7 +174,6 @@ func TestCheckWritesStatusOnChange(t *testing.T) {
 // failed.unknown (a quarantined outcome is unverified), the run's alarm
 // when there is no outcome code, and ok otherwise.
 func TestResultCode(t *testing.T) {
-	t.Parallel()
 	for _, c := range []struct {
 		rep  Report
 		want string
@@ -197,7 +192,6 @@ func TestResultCode(t *testing.T) {
 // A partial result counts as a failure (A3 and A6 on #126): C2 gives every
 // partial result a partial.* code, so none reads as ok.
 func TestPartialIsAFailure(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -213,7 +207,6 @@ func TestPartialIsAFailure(t *testing.T) {
 // and never one from a quarantined or refused outcome, one not yet judged,
 // or one C2 does not allow.
 func TestResultDetail(t *testing.T) {
-	t.Parallel()
 	for _, c := range []struct {
 		quarantine, badState  bool
 		detail, want, outcome string

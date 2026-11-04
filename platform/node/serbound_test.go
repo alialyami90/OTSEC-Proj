@@ -178,7 +178,6 @@ func serTable(n, elem int) []serRow {
 // fit through two single-row reads of different lengths, then F is raised
 // by what a worst-case event adds that the fixture does not have.
 func TestSERBoundConstants(t *testing.T) {
-	t.Parallel()
 	small := serNormalize(t, serTable(1, 4), nil)
 	big := serNormalize(t, serTable(1, 100000), nil)
 	k := float64(big.maxEvent-small.maxEvent) / float64(big.rowBytes-small.rowBytes)
@@ -206,7 +205,6 @@ func TestSERBoundConstants(t *testing.T) {
 // rises past the cap fails here, and a cap that outgrows its bound by a
 // MiB or more is loose, which would size the reserve for nothing.
 func TestSERCommitCapHoldsTheBound(t *testing.T) {
-	t.Parallel()
 	if SERReadBound > SERCommitBytes {
 		t.Fatalf("an SER read can reach %d bytes, over SERCommitBytes %d", int64(SERReadBound), SERCommitBytes)
 	}
@@ -224,7 +222,6 @@ func TestSERCommitCapHoldsTheBound(t *testing.T) {
 // allow, normalized by the real normalizer, all fall under the bound.
 // B2's two measurements on #246 (6.06 MB and 4.03 MB) are the first two.
 func TestSERReadsFallUnderTheBound(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name string
 		rows []serRow
@@ -282,7 +279,6 @@ func startCapped(t *testing.T, cap int64, rows int) (*Runtime, *Status, *Schedul
 // outcome is unknown, and the alarm is raised. The same read under the
 // node's cap is stored, so it is the cap that refused it.
 func TestReadOverTheCommitCapIsQuarantined(t *testing.T) {
-	t.Parallel()
 	const rows = 150
 	r, st, s := startCapped(t, 256<<10, rows)
 	rep := s.RunOnce(bg, 0)
@@ -315,7 +311,6 @@ func TestReadOverTheCommitCapIsQuarantined(t *testing.T) {
 // Each database's recovery reserve covers its largest commit: the evidence
 // database's cap is the SER bound, the others keep 1 MiB (C5 0.4, D4-9).
 func TestStartupPolicyReserveFollowsTheCommitCap(t *testing.T) {
-	t.Parallel()
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
 	defer r.Close()

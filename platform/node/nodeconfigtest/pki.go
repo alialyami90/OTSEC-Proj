@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sync"
 	"time"
 
 	"otsec.local/otsec/platform/store"
@@ -102,19 +101,7 @@ func (c *Config) WritePKIValid(serverName, trustAnchor, clientCredential string,
 	return p, nil
 }
 
-// serial numbers the certificates every PKI issues. Tests that run in
-// parallel issue at once, so it is taken under serialMu.
-var (
-	serialMu sync.Mutex
-	serial   = big.NewInt(100)
-)
-
-func nextSerial() *big.Int {
-	serialMu.Lock()
-	defer serialMu.Unlock()
-	serial.Add(serial, big.NewInt(1))
-	return new(big.Int).Set(serial)
-}
+var serial = big.NewInt(100)
 
 // Issue signs a certificate named name (CN, and a SAN: an IP address for an
 // IP literal, a DNS name otherwise) for usage.
@@ -129,7 +116,8 @@ func (p *PKI) IssueValid(name string, usage x509.ExtKeyUsage, per Period) (tls.C
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	tmpl := &x509.Certificate{SerialNumber: nextSerial(), Subject: pkix.Name{CommonName: name},
+	serial.Add(serial, big.NewInt(1))
+	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: name},
 		NotBefore: nb, NotAfter: na,
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
 	if ip := net.ParseIP(name); ip != nil {
@@ -155,8 +143,9 @@ func (p *PKI) Sign(csrDER []byte, usage x509.ExtKeyUsage, notAfter time.Time) ([
 	if err := csr.CheckSignature(); err != nil {
 		return nil, err
 	}
+	serial.Add(serial, big.NewInt(1))
 	name := csr.Subject.CommonName
-	tmpl := &x509.Certificate{SerialNumber: nextSerial(), Subject: pkix.Name{CommonName: name},
+	tmpl := &x509.Certificate{SerialNumber: new(big.Int).Set(serial), Subject: pkix.Name{CommonName: name},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: notAfter,
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
 	if ip := net.ParseIP(name); ip != nil {

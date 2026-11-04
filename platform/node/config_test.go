@@ -24,7 +24,6 @@ func sample(t *testing.T) *nodeconfigtest.Config {
 }
 
 func TestLoadSample(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "node.json")
 	if err := sample(t).Write(path); err != nil {
 		t.Fatal(err)
@@ -76,7 +75,6 @@ func TestLoadSample(t *testing.T) {
 
 // D2-4: a device-observed endpoint or listener refuses the whole file.
 func TestDeviceObservedRefused(t *testing.T) {
-	t.Parallel()
 	endpoint := sample(t).SetEndpointTarget(relayID, "device-observed")
 	listener := sample(t)
 	listener.Listeners[0].Target = "device-observed"
@@ -101,7 +99,6 @@ func TestDeviceObservedRefused(t *testing.T) {
 // D2-10: a collection endpoint or a listener off loopback refuses the whole
 // file, whatever its target label says. Forwarding targets are exempt.
 func TestNotLoopbackRefused(t *testing.T) {
-	t.Parallel()
 	host := func(h string) *nodeconfigtest.Config {
 		c := sample(t)
 		c.Assets[0]["endpoints"].([]any)[0].(map[string]any)["host"] = h
@@ -140,7 +137,6 @@ func TestNotLoopbackRefused(t *testing.T) {
 }
 
 func TestStrictDecoding(t *testing.T) {
-	t.Parallel()
 	good := sample(t).Bytes()
 	cases := map[string][]byte{
 		"unknown field":  bytes.Replace(good, []byte(`"node_id"`), []byte(`"nodes":1,"node_id"`), 1),
@@ -162,7 +158,6 @@ func TestStrictDecoding(t *testing.T) {
 }
 
 func TestChecks(t *testing.T) {
-	t.Parallel()
 	cases := map[string]func(c *nodeconfigtest.Config){
 		"bad node":         func(c *nodeconfigtest.Config) { c.NodeID = "Site-A" },
 		"relative store":   func(c *nodeconfigtest.Config) { c.Store.Dir = "store" },
@@ -209,7 +204,6 @@ func TestChecks(t *testing.T) {
 }
 
 func TestLoadConfigBounds(t *testing.T) {
-	t.Parallel()
 	path := filepath.Join(t.TempDir(), "big.json")
 	if err := os.WriteFile(path, bytes.Repeat([]byte(" "), MaxConfigBytes+1), 0o600); err != nil {
 		t.Fatal(err)

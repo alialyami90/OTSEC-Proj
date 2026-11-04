@@ -110,7 +110,6 @@ func dialFrom(t *testing.T, network, local string, to net.Addr) net.Conn {
 // sends from is kept, unattributed, and alarmed on the health stream; and
 // status shows each listener's counts.
 func TestListenersStoreAndAttribute(t *testing.T) {
-	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		nc.AddListener("lab-udp", "syslog-udp", "127.0.0.1:0").AddListener("lab-tcp", "syslog-tcp", "127.0.0.1:0")
 	})
@@ -180,7 +179,6 @@ func TestListenersStoreAndAttribute(t *testing.T) {
 // certificate from that CA is stored as tls-mutual, and one with none is
 // refused at the handshake with nothing stored.
 func TestTLSListenerFromReferences(t *testing.T) {
-	t.Parallel()
 	var p *nodeconfigtest.PKI
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		var err error
@@ -243,7 +241,6 @@ func TestTLSListenerFromReferences(t *testing.T) {
 // A TLS listener whose reference names a missing key stops the node before
 // anything listens; nothing falls back to plaintext.
 func TestTLSListenerBadReferenceStops(t *testing.T) {
-	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {
 		p, err := nc.WritePKI("127.0.0.1", "test-ca", "test-client")
 		if err != nil {
@@ -300,7 +297,6 @@ func TestListenFailureReleasesBound(t *testing.T) {
 // The listener's Log refuses, writing nothing, while its stream's database
 // is not open; the receiver then holds or drops as its class says.
 func TestLiveLogRefusesWithoutDatabase(t *testing.T) {
-	t.Parallel()
 	nc, dir := listenConfig(t, func(nc *nodeconfigtest.Config) {})
 	r, _, _ := start(t, parse(t, nc), dir)
 	defer r.Close()
@@ -312,7 +308,6 @@ func TestLiveLogRefusesWithoutDatabase(t *testing.T) {
 // The loader's listener rules: plaintext only behind the lab flag, TLS only
 // with references, and no flag or section on the wrong transport.
 func TestListenerConfigRules(t *testing.T) {
-	t.Parallel()
 	for name, c := range map[string]struct {
 		mod  func(*nodeconfigtest.Listener)
 		want string
