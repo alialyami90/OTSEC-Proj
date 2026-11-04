@@ -430,6 +430,14 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-021 — 2026-11-04 — A `collection.missed` committed late gets a gap start that depends on the feeder's cadence, and can move a baseline's end past events already refused
+
+- **What ran.** C6's review of #414 (learner 0.2, D4-45) at `8c9899b`, with the probe `TestC6ProbeLateGapStartMovesTheEnd` (`/mnt/project-files/c6/probes/c6probe414_test.go`).
+- **The case.** A `collection.missed` is written once the health stream takes it (D4-37). When it is committed more than `FeedLateness` after its series' `first_at`, the feeder clamps the gap's start to its watermark (`TestFeedMissedGapStartsAtItsSeries`), so the start depends on how far the steps had come. Events between the old T and the record are refused as `ErrPeriodEnded` before the gap arrives. The gap can then move T later.
+- **Result.** Same records, 1000 s minimum. A gap from 900 s gives T at 1400 s, and a gap from 1250 s gives T at 1000 s. In both, the event at 1100 s is refused. Neither `Late` nor `Refused` counts the case. The sign is the scheduler's `evidence.not_stored` alarm.
+- **Ruling.** C1 accepted it as a limitation of D4-45, together with C5's restart-gap residual (#416). Both need a fault.
+- **Evidence class:** `simulated` (unit probe).
+
 ### F-020 — 2026-11-04 — V-M4's held-out series raises nothing, and a repeat run raises the same alarms; but the two runs learnt different baselines from the same series
 
 - **What ran.** `test_slice_gtinj_feed_e2e.py` on main `9138c4b`, now with three nodes.
@@ -446,6 +454,10 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
   - **On a real clock,** steps come every `RelayEverySeconds`, so the end would drift by at most about one step plus `FeedLateness`. That is a reading of the code, not measured.
   - **Effect on alarms.** On this series the drift changed no alarm. But a baseline that depends on scheduling is not "the same input gives the same baseline", and with other data a different end could change what is learnt.
 - **Open question for C4 and C1.** Should the period end at the instant both minima were first met (deterministic in the input), rather than at the step that noticed it? V-M4's determinism criterion names the alarms, not the baseline, so the test checks the alarms and requires each alarm to cite its own run's active baseline. The baseline difference stays open here until C1 rules.
+- **Closed (D4-45).** C1 ruled that the period ends at the first instant both minima hold (D4-45). C5's feeder change (#413) and C4's learner 0.2 (#414) implement it.
+  - **The re-run.** `test_slice_gtinj_feed_e2e.py` ran locally on #414's `10f8fb8` merged with main. All three nodes stored the same baseline bytes, `sha256:09791190feed0281764c1208acfb34f33b4c7ce53601a3382043cd96f2dfde91`, whose period runs from 2026-11-02T00:00:08Z to 2026-11-16T00:00:08Z, 1,209,600 s collected, with 773 events. The 14-day duration minimum set the end, at the instant it was met.
+  - **The other checks.** The repeat's alarms are equal to the first run's in every field, the baseline included. The repeat also passes the oracle on its own. In the held-out run, status shows no refused and no late events.
+  - **Checks added:** `test_the_three_runs_learn_the_same_baseline` (the same bytes in all three runs, and a period whose end is the T computed from the series and its params, with no gaps and every event at or before T counted, which learner 0.1 fails at any cadence; C4 on #417) and `test_the_repeat_run_raises_the_expected_alarms`. The held-out test adds phase `active` with no refused and no late events.
 - **Evidence class:** `simulated`. The series is synthetic, and the sender is a loopback socket. The run was local, on Linux.
 
 ### F-019 — 2026-11-04 — V-M4's first alarm run (Syslog half): the node raised exactly the expected alarms; the oracle, not the node, misread a rule name
