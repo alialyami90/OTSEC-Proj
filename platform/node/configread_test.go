@@ -1349,3 +1349,116 @@ func TestConfigChainPrunedRestoreNotOpen(t *testing.T) {
 		t.Fatalf("the read of the baseline after the restore: %s %s", last.Action, last.ReasonCode)
 	}
 }
+
+// A read that repeats a document already stored is stored again, with its
+// own transcript, and the writer holds that record. The reconcile at the
+// next start keeps the hold there, and does not move it to the first copy
+// (C1 on #397). Here the device returns to a replaced baseline, so the
+// change's snapshot has the replaced baseline's digest, and both copies
+// stay held, each for its own reason.
+func TestConfigReadRevertToReplacedBaseline(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := cfgNodeOn(t, r, st)
+	base, changed := n.snapshotOf("ok"), n.snapshotOf("ok-all-present")
+	n.read("ok")
+	n.ack(base, "")
+	n.read("ok-all-present")
+	ack := n.ack(changed, base)
+	// The node side of node.baseline_ack, not built yet, will re-code the
+	// replaced baseline's hold as the reconcile does.
+	stream := ConfigStream(relayID)
+	first := n.results()[0]
+	for seq, reason := range map[c5.Seq]c5.HoldReason{1: reasonAt(n.r, ack, c5.HoldSupersededBaseline),
+		3: reasonAt(n.r, c5.Seq(first.Seq), c5.HoldAcknowledgedDifference)} {
+		if err := n.r.Store(stream).Hold(bg, c5.Hold{Stream: stream, Seq: seq, Reason: reason}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n.read("ok") // a change against changed, with base's digest
+	n.read("ok-all-present")
+	res := n.results()
+	if len(res) != 3 || res[1].ReasonCode != audit.ReasonUnapprovedChange || res[1].Config.SnapshotDigest != base ||
+		res[2].Action != audit.ActionConfigBaselineRestored {
+		t.Fatalf("%+v", res)
+	}
+	held := n.holds()
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	n.r = r
+	if reconciled(st.Snapshot("x").Alarms) != 0 {
+		t.Fatalf("the reconcile corrected the writer's holds: %+v", st.Snapshot("x").Alarms)
+	}
+	if got := n.holds(); !maps.Equal(got, held) || got[1] != c5.HoldSupersededBaseline {
+		t.Fatalf("holds %v after restart, before %v", got, held)
+	}
+}
+
+// TestConfigReadRevertToReplacedBaseline's chain, with one of the two
+// copies of base's digest held for an outdated reason before the restart,
+// as a crash between a record and its re-code leaves it. The reconcile
+// re-codes that copy in place and leaves the other copy's hold where it
+// is: the holds after the restart are the writer's, with one correction
+// (C6 on #400).
+func TestConfigReadReconcileRecodesTheCopyInPlace(t *testing.T) {
+	for _, tc := range []string{"change snapshot held unapproved", "replaced baseline still held baseline"} {
+		t.Run(tc, func(t *testing.T) {
+			c, dir := schedConfig(t, withConfigRead(t, nil))
+			r, st, _ := start(t, c, dir)
+			n := cfgNodeOn(t, r, st)
+			base, changed := n.snapshotOf("ok"), n.snapshotOf("ok-all-present")
+			n.read("ok")
+			ack0 := n.ack(base, "")
+			n.read("ok-all-present")
+			ack := n.ack(changed, base)
+			stream := ConfigStream(relayID)
+			first := n.results()[0]
+			for seq, reason := range map[c5.Seq]c5.HoldReason{1: reasonAt(n.r, ack, c5.HoldSupersededBaseline),
+				3: reasonAt(n.r, c5.Seq(first.Seq), c5.HoldAcknowledgedDifference)} {
+				if err := n.r.Store(stream).Hold(bg, c5.Hold{Stream: stream, Seq: seq, Reason: reason}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n.read("ok")
+			n.read("ok-all-present")
+			res := n.results()
+			if len(res) != 3 || res[1].Config.SnapshotDigest != base || res[2].Action != audit.ActionConfigBaselineRestored {
+				t.Fatalf("%+v", res)
+			}
+			held := n.holds()
+			var second c5.Seq
+			for seq := range held {
+				got, err := n.r.Store(stream).Read(bg, stream, seq-1, 1)
+				if err != nil || len(got) != 1 {
+					t.Fatal(err)
+				}
+				if seq != 1 && config.Digest(got[0].Event) == base {
+					second = seq
+				}
+			}
+			if held[1] != c5.HoldSupersededBaseline || held[second] != c5.HoldRestoredDifference {
+				t.Fatalf("holds %v, second copy %d", held, second)
+			}
+			// The replaced baseline as before the acknowledgement re-coded
+			// it, or the change's snapshot as before the restore did.
+			tamper := c5.Hold{Stream: stream, Seq: 1, Reason: reasonAt(n.r, ack0, c5.HoldBaseline)}
+			if tc == "change snapshot held unapproved" {
+				tamper = c5.Hold{Stream: stream, Seq: second, Reason: reasonAt(n.r, c5.Seq(res[1].Seq), c5.HoldUnapprovedDifference)}
+			}
+			if err := n.r.Store(stream).Hold(bg, tamper); err != nil {
+				t.Fatal(err)
+			}
+			r.Close()
+			r, st, _ = start(t, c, dir)
+			defer r.Close()
+			n.r = r
+			if got := n.holds(); !maps.Equal(got, held) {
+				t.Fatalf("holds %v after restart, want the writer's %v", got, held)
+			}
+			if reconciled(st.Snapshot("x").Alarms) != 1 {
+				t.Fatalf("the reconcile alarms: %+v", st.Snapshot("x").Alarms)
+			}
+		})
+	}
+}
