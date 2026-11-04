@@ -840,9 +840,14 @@ func TestUnknownSendersCannotDisplaceDevices(t *testing.T) {
 	// unknown sender's are stored or dropped, while either moves: the
 	// store serializes commits, so on a slow store the known sender waits
 	// behind the unknown sender's commits in flight, which the budget
-	// bounds (#187, job 121862674585: known 0 after a fixed 3 s).
+	// bounds (#187, job 121862674585: known 0 after a fixed 3 s). Nothing
+	// moving ends the wait only when no message read is still in flight to
+	// the store: a commit held in FlushFileBuffers is the store's (F-016,
+	// #315), while a listener that stops reading the known sender is this
+	// test's failure (A3 F1; job 126728488246 stopped at 7 of 20 with the
+	// cause not logged).
 	var known, unknown int
-	var unknownBytes int64
+	var unknownBytes, inFlight int64
 	var st receive.Status
 	moved, was := time.Now(), -1
 	for limit := time.Now().Add(2 * time.Minute); ; time.Sleep(50 * time.Millisecond) {
@@ -857,16 +862,24 @@ func TestUnknownSendersCannotDisplaceDevices(t *testing.T) {
 		}
 		st = g.r.Status()
 		progress := known + unknown + int(st.Dropped[receive.DropUnknownBudget])
+		inFlight = st.Received - st.Stored
+		for _, n := range st.Dropped {
+			inFlight -= n
+		}
 		if progress != was {
 			was, moved = progress, time.Now()
 		}
-		if progress == 220 || time.Since(moved) > 10*time.Second || time.Now().After(limit) {
+		if progress == 220 || (time.Since(moved) > 10*time.Second && inFlight == 0) || time.Now().After(limit) {
 			break
 		}
 	}
-	t.Logf("known %d, unknown %d (%d record bytes), dropped %+v", known, unknown, unknownBytes, st.Dropped)
+	t.Logf("known %d, unknown %d (%d record bytes), dropped %+v; the listener read %d, stored %d, %d in flight, held %v, last error %q",
+		known, unknown, unknownBytes, st.Dropped, st.Received, st.Stored, inFlight, st.Held, st.LastErr)
 	if known != 20 {
-		t.Errorf("known sender: %d of 20 stored", known)
+		// Read 20 or more and not stored: the known writer or the store;
+		// read 7: the known reader (C4 on job 126728488246).
+		t.Errorf("known sender: %d of 20 stored; write lock: %s\nreceiver goroutines:\n%s\ncommit trail:\n%s",
+			known, g.writeLock(), receiverStacks(), g.commitTrail())
 	}
 	if unknown == 0 || unknown == 200 || st.Dropped[receive.DropUnknownBudget] != int64(200-unknown) {
 		t.Errorf("unknown: %d stored, dropped %+v", unknown, st.Dropped)

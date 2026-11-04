@@ -32,13 +32,14 @@ type EventBaseline struct {
 const EventBaselineQuotaRecords = 4
 
 // EventCheckpointRecords is how many checkpoints the quota must hold for each
-// event-baseline asset: the learner and detector snapshot the node commits
-// with its position (feeder slice 1c), and room for the next while the last
-// is still held. A checkpoint is a record of the asset's configuration
-// stream, so it is bounded by the class's record cap, ConfigRecordBytes: the
+// event-baseline asset: the newest of each half, the learner's and the
+// detector's, that the node commits with its position (feeder slice 1c), and
+// room for the next of each before the one it supersedes is removed. A
+// checkpoint is a record of the asset's configuration stream, so it is
+// bounded by the class's record cap, ConfigRecordBytes: the
 // node refuses a snapshot above it and keeps the last checkpoint (the object
 // goes on, and the refusal is a health event; B4 on #343).
-const EventCheckpointRecords = 2
+const EventCheckpointRecords = 4
 
 // EventBaselineQuotaFloor is the bytes a node's configuration quota must
 // hold for its event baselines: EventBaselineQuotaRecords x baseline.MaxBytes

@@ -39,6 +39,10 @@ type configChain struct {
 	// records: the kind of each, by collector_seq.
 	decisions map[uint64]authz.RequestKind
 	assets    map[string]*chainAsset
+	// parts are the outcomes of the node's config.change_approved and
+	// config.baseline_acknowledged records, by the payload_sha256 of the
+	// request each records, so the node acts on a request once.
+	parts map[string]audit.Outcome
 	// held finds what the store's holds keep of an asset's configuration
 	// state from before first, for a pruned fold (D4-41).
 	held func(ctx context.Context, assetID string, first c5.Seq) (heldConfig, error)
@@ -97,7 +101,7 @@ func (s *Scheduler) configChain() *configChain {
 
 func newChain(held func(context.Context, string, c5.Seq) (heldConfig, error)) *configChain {
 	return &configChain{runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{},
-		decisions: map[uint64]authz.RequestKind{}, assets: map[string]*chainAsset{}, held: held}
+		decisions: map[uint64]authz.RequestKind{}, assets: map[string]*chainAsset{}, parts: map[string]audit.Outcome{}, held: held}
 }
 
 // restart begins the fold again as a pruned one at first, the first
@@ -176,13 +180,19 @@ func (ch *configChain) apply(seq c5.Seq, r *audit.Record) {
 		k := assetOp{r.Target.AssetID, r.OperationID}
 		ch.runs[k] = append(ch.runs[k], chainRun{r.CollectorSeq, r.Time.UTC})
 	case c == nil || r.Target == nil:
+	case (r.Action == audit.ActionConfigChangeApproved || r.Action == audit.ActionConfigBaselineAcknowledge) && r.Outcome == audit.OutcomeDenied:
+		ch.parts[c.PayloadSHA256] = r.Outcome
 	case r.Action == audit.ActionConfigChangeApproved && r.Outcome == audit.OutcomeSucceeded:
+		ch.parts[c.PayloadSHA256] = r.Outcome
 		// Only with its decision, as audit.VerifyConfig checks (C3 on #390):
 		// an approval whose decision is not in the epoch silences nothing.
 		if ch.decisions[c.DecisionSeq] == authz.KindNodeChangeApproval {
 			ch.approvals[r.Target.AssetID] = append(ch.approvals[r.Target.AssetID], r)
 		}
-	case r.Action == audit.ActionConfigBaselineAcknowledge && r.Outcome == audit.OutcomeSucceeded && c.Kind == authz.BaselineConfiguration:
+	case r.Action == audit.ActionConfigBaselineAcknowledge && r.Outcome == audit.OutcomeSucceeded && c.Kind != authz.BaselineConfiguration:
+		ch.parts[c.PayloadSHA256] = r.Outcome
+	case r.Action == audit.ActionConfigBaselineAcknowledge && r.Outcome == audit.OutcomeSucceeded:
+		ch.parts[c.PayloadSHA256] = r.Outcome
 		// D4-18: the acknowledgement ends every open change of the asset.
 		*ch.asset(r.Target.AssetID) = chainAsset{baseline: c.BaselineDigest}
 	case r.Action == audit.ActionConfigChangeDetected:

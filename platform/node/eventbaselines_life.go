@@ -102,6 +102,9 @@ type eventLife struct {
 	acks []lifeAck // queued by acknowledged, applied on the feeder's goroutine
 
 	assets map[string]*lifeAsset
+	// repeats: departure alarms stored before a restart that the restored
+	// detector raises again, by alarmKey (eventbaselines_run.go, slice 1c).
+	repeats map[string]bool
 }
 
 type lifeAck struct {
@@ -660,6 +663,9 @@ func (l *eventLife) record(a *lifeAsset) error {
 // emit stores the detector's alarms and held notice in platform/health.
 func (l *eventLife) emit(a *lifeAsset, out eventbaseline.Output) {
 	for _, al := range out.Alarms {
+		if l.repeated(al) {
+			continue
+		}
 		a.Alarms++
 		h, err := al.Health()
 		if err == nil {
