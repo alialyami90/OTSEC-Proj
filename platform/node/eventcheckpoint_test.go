@@ -102,7 +102,8 @@ func TestEventCheckpointRefusals(t *testing.T) {
 		"previous form":        func(c *eventCheckpoint) { c.Version, c.Previous = 2, "sha256:XYZ" },
 		"watermark":            func(c *eventCheckpoint) { c.Watermark = "2026-11-01 10:00:00" },
 		"watermark not utc":    func(c *eventCheckpoint) { c.Watermark = "2026-11-01T10:00:00+01:00" },
-		// Go parses +00:00 as UTC, so only the trailing-Z check refuses it.
+		// time.Parse never gives time.UTC for an explicit offset, so the
+		// location check refuses it (C6 on #376).
 		"watermark +00:00": func(c *eventCheckpoint) { c.Watermark = "2026-11-01T10:00:00+00:00" },
 		"no streams":       func(c *eventCheckpoint) { c.Streams = nil },
 		"too many streams": func(c *eventCheckpoint) {
@@ -140,14 +141,23 @@ func TestEventCheckpointRefusals(t *testing.T) {
 	// The same length as the snapshot: only the digest comparison refuses
 	// it (C6 on #376).
 	sameLength := snapCapture([]byte("snapshot bytez"))
+	// The right digest with another length: only the length comparison
+	// refuses it (C6 on #376).
+	long := testCheckpoint(snap)
+	long.Snapshot.Length++
+	lb, err := encodeCheckpoint(long)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, tc := range map[string]struct {
 		doc     string
 		capture *c5.Capture
 	}{
-		"no capture":                       {string(b), nil},
-		"other capture":                    {string(b), &other},
-		"bad capture":                      {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("x")}},
-		"other capture of the same length": {string(b), &sameLength},
+		"no capture":                         {string(b), nil},
+		"other capture":                      {string(b), &other},
+		"bad capture":                        {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("x")}},
+		"other capture of the same length":   {string(b), &sameLength},
+		"a length that is not the capture's": {string(lb), &capture},
 		// The document's digest and length, over other bytes: only the
 		// capture's own Validate refuses it.
 		"a capture whose bytes are not its digest": {string(b), &c5.Capture{SHA256: capture.SHA256, Bytes: []byte("snapshot bytez")}},
