@@ -749,3 +749,20 @@ Date: 2026-11-04. C1, on C5's report from #406 at 7df03de (CI-Windows runs 41866
   2. **The 12-minute budget stands, and the breach is a finding for C5 under F-016.** After the three gate pieces, C5 reports the ten slowest `platform/node` tests on Windows and cuts their fixture time until a green run is back under 720 s. C5 also builds D4-22's warning step. The exit report lists the breach as open until then.
   3. D4-22 item 4 still holds. A run that reaches 30 minutes is real, never a flake.
 - **Owners.** C1 makes the `ci.yml` change in this PR, and C5 and C6 review it. C5 owns item 2.
+
+## D4-45: an event baseline's period ends at a point fixed by its input (C6's F-020 on #411)
+
+Date: 2026-11-04. C1, on C6's F-020 (`docs/verification.md`, #411).
+
+- **The fact.** Two V-M4 runs fed the same `gt-inj-syslog` series and learnt different baselines. One period ended at 00:58:12Z with 774 events, the other at 04:03:10Z with 780. The cause is in `eventLife.Tick`: the learner finishes at the watermark of the first feeder step that finds both minima met (`Learner.Finish(at)`). When that step runs depends on the scheduler, not only on the events.
+  - On the test clock, the step can come hours late.
+  - On a real clock, C6 reads the drift as about one step plus `FeedLateness` (15 s + 2 min). That is a reading of the code, not a measurement.
+  - No alarm changed in this series. The record states the period and counts it actually learnt, so an acknowledgement still names exactly what it accepts.
+- **The ruling.** The same input, meaning the same events and the same gaps in the same order, gives the same baseline bytes. The period's end is a function of that input, never of when the scheduler runs (principle 6). It is a gate item for Phase 4 items 1 and 2, because V-M4 measures this detector.
+  - **The shape (C4 and C5 choose the code).** The period ends at the first instant at which both minima hold, given the events and gaps fed so far. Nothing fed after that instant is counted in the baseline. The feeder already releases events and gaps in order up to its watermark, so the instant can be found when the first event past it is released, or when the watermark passes it with no such event.
+  - **The learner's version.** It changes what a learnt baseline covers, so `LearnerVersion` goes up and C10's learner field carries it. No other C10 change is expected. If one is needed, C4 brings it to C1 first.
+- **Who.**
+  - C4 changes `modules/detection/eventbaseline`.
+  - C5 changes the feeder's call in `platform/node`.
+  - C6 extends the repeat run in `test_slice_gtinj_feed_e2e.py` to compare the two baselines byte for byte, as well as the alarms, and closes F-020 on that.
+  - If C4 and C5 cost the change at more than one small PR each, they say so before building, and C1 decides again.
