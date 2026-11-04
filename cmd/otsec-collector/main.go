@@ -38,10 +38,20 @@ func main() {
 	}
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	data := fs.String("data", defaultDataDir(), "the platform's data directory")
+	var useTestFlags func() error
+	if testFlags != nil {
+		useTestFlags = testFlags(fs)
+	}
 	fs.Parse(os.Args[2:])
 	if fs.NArg() != 0 || *data == "" {
 		fmt.Fprintln(os.Stderr, "usage: otsec-collector run -data <dir>")
 		os.Exit(2)
+	}
+	if useTestFlags != nil {
+		if err := useTestFlags(); err != nil {
+			fmt.Fprintf(os.Stderr, "otsec-collector: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	// T-5: no crash dump or core file may hold a secret. This runs before
 	// anything reads a store.
@@ -51,6 +61,15 @@ func main() {
 	}
 	os.Exit(serve(*data))
 }
+
+// testFlags adds a test build's flags to the flag set and returns what to
+// do with them once parsed, and testNow is the clock a test build sets. Both
+// are nil except in a build tagged otsec_testclock (testclock.go, D4-40), so
+// a release build has no such flag and runs on the wall clock.
+var (
+	testFlags func(fs *flag.FlagSet) func() error
+	testNow   func() time.Time
+)
 
 // running is a started collector.
 type running struct {
@@ -86,7 +105,7 @@ func start(data string, log *slog.Logger) (*running, error) {
 	if err != nil {
 		return nil, err
 	}
-	state, err := collector.OpenState(l.state, nil)
+	state, err := collector.OpenState(l.state, testNow)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +147,7 @@ func start(data string, log *slog.Logger) (*running, error) {
 	}
 	pipe, err := collector.NewPipeline(collector.PipelineConfig{
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
-		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm},
+		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm, Now: testNow}, Now: testNow,
 		AdminKeys: cfg.AdminKeys, InstallLimit: cfg.InstallLimit, Alarm: alarm,
 		ReadClearFile: clearFileReader(l.admin, []string{cfg.Endpoint.Peer, collectorwire.ServiceSID(collectorwire.CollectorService)}),
 	})

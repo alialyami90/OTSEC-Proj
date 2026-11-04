@@ -162,7 +162,7 @@ func TestParseAuditRefusesDisagreement(t *testing.T) {
 // too-large error is unreachable on a valid audit target.
 func TestAuditFitsLargestRecord(t *testing.T) {
 	node := strings.Repeat("n", 63)
-	rec := `{"contract":"otsec.audit/0.9","node_id":"` + node + `","seq":18446744073709551615,"prev_hash":"` + strings.Repeat("a", 64) +
+	rec := `{"contract":"otsec.audit/0.10","node_id":"` + node + `","seq":18446744073709551615,"prev_hash":"` + strings.Repeat("a", 64) +
 		`","time":{"utc":"2026-10-24T11:40:00.123456789Z","resolution_ns":1,"clock":{"sync":"synchronized","source":"ntp"}},"actor":{"type":"system","id":"collector"},"action":"service.start","outcome":"info","later_minor_field":"`
 	rec += strings.Repeat("x", audit.MaxRecordBytes-len(rec)-2) + `"}`
 	if len(rec) != audit.MaxRecordBytes {

@@ -212,12 +212,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			}
 		}
 		if wait > 0 {
-			t := time.NewTimer(wait)
+			c, stop := nodeClock.NewTimer(wait)
 			select {
 			case <-ctx.Done():
-				t.Stop()
+				stop()
 				return ctx.Err()
-			case <-t.C:
+			case <-c:
 			}
 		} else if err := ctx.Err(); err != nil {
 			return err

@@ -15,7 +15,7 @@ import (
 // ConfigDocuments is the C5 DocumentValidator of the configuration class
 // (C5 0.4): the store runs it on every record of the class before it is
 // stored, as it runs C8's seal on audit records, so C5 imports neither C9 nor
-// C10. It accepts three documents and nothing else:
+// C10. It accepts four documents and nothing else:
 //
 //   - a C9 snapshot (otsec.config, kind config.snapshot) that decodes and
 //     validates, with a capture that is the transcript it names: the same
@@ -28,11 +28,16 @@ import (
 //     no capture. It names its two snapshots by digest;
 //   - a C10 baseline (otsec.baseline) that decodes and validates, with no
 //     capture, in the compact bytes baseline.Encode produces, so that the
-//     stored bytes hash to the baseline's Hash (B4 on #299).
+//     stored bytes hash to the baseline's Hash (B4 on #299);
+//   - the node's event-baseline checkpoint (otsec.eventcheckpoint, feeder
+//     slice 1c), in the bytes its encoder writes, with a capture that is the
+//     snapshot it names. It is working state, not evidence (D4-32).
 //
-// It returns each document's C5 0.7 DocumentInfo: all three are evidence,
-// in the series config.snapshot or config.difference (C9's own kind names)
-// or baseline.event.
+// It returns each document's C5 0.7 DocumentInfo. The first three are
+// evidence, in the series config.snapshot or config.difference (C9's own
+// kind names) or baseline.event. A checkpoint is working state, in the
+// series of its half, eventcheckpoint.learner or eventcheckpoint.detector,
+// taken from the decoded document (C3 on #376).
 //
 // The validator cannot see the record's stream. The writer, which builds the
 // record for config/<asset>, must give it the asset's own document; the
@@ -91,6 +96,8 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 			return c5.DocumentInfo{}, errors.New("configuration document: a baseline must be stored as baseline.Encode's bytes")
 		}
 		return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesBaselineEvent}, nil
+	case head.Schema == EventCheckpointSchema:
+		return checkCheckpointRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference or a C10 baseline", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline or an event checkpoint", head.Schema, head.Kind)
 }

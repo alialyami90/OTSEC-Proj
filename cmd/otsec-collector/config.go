@@ -95,6 +95,11 @@ type adminKeyConfig struct {
 	PublicKey string `json:"public_key"` // standard base64, 32 bytes
 	Principal string `json:"principal"`  // the human principal ID it speaks for
 	Status    string `json:"status"`     // active or revoked
+	// Kinds are the admin kinds the key may sign (C7 0.6). Absent means
+	// the 0.5 kinds (authz.DefaultAdminKinds), so no key approves a change
+	// or acknowledges a baseline until its list names those kinds (D4-2).
+	// An empty list allows nothing.
+	Kinds []authz.RequestKind `json:"kinds,omitempty"`
 }
 
 // config is the checked configuration.
@@ -212,7 +217,10 @@ func parseConfig(b []byte) (config, error) {
 		if st != authz.KeyActive && st != authz.KeyRevoked {
 			return config{}, fmt.Errorf("collector config: admin_keys[%d]: status %q", i, k.Status)
 		}
-		c.AdminKeys = append(c.AdminKeys, authz.AdminKey{KeyID: k.KeyID, PublicKey: ed25519.PublicKey(pub), Principal: k.Principal, Status: st})
+		if err := authz.ValidateAdminKinds(k.Kinds); err != nil {
+			return config{}, fmt.Errorf("collector config: admin_keys[%d]: kinds: %v", i, err)
+		}
+		c.AdminKeys = append(c.AdminKeys, authz.AdminKey{KeyID: k.KeyID, PublicKey: ed25519.PublicKey(pub), Principal: k.Principal, Status: st, Kinds: k.Kinds})
 	}
 	for _, r := range fc.Registers {
 		c.Registers = append(c.Registers, []byte(r))

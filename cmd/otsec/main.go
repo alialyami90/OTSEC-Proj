@@ -76,8 +76,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "events: print the stored C4 events as JSON lines")
 	collectorExe := fs.String("collector-exe", "", "install: the collector binary; empty installs the node service only")
 	collectorConfig := fs.String("collector-config", "", "install: the collector's configuration, required with -collector-exe")
+	var useTestFlags func() error
+	if testFlags != nil {
+		useTestFlags = testFlags(fs)
+	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
+	}
+	if useTestFlags != nil {
+		if err := useTestFlags(); err != nil {
+			return report(stderr, err)
+		}
 	}
 	if args[0] == "uninstall" && *configPath == "" && fs.NArg() == 0 {
 		return report(stderr, winsvc.Uninstall())
@@ -142,6 +151,12 @@ func quarantine(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fmt.Fprintf(stdout, "manifest copied to admin_dir as %s; the node records it as quarantine.exported once it has checked it against its stream (otsec health)\n", node.QuarantineExportFileName(assetID))
 	return 0
 }
+
+// testFlags adds a test build's flags to a command's flag set and returns
+// what to do with them once parsed. It is nil except in a build tagged
+// otsec_testclock (testclock.go, D4-40), so a release build has no such
+// flag and refuses one.
+var testFlags func(fs *flag.FlagSet) func() error
 
 func report(stderr io.Writer, err error) int {
 	if err != nil {
