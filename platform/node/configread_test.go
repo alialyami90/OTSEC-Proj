@@ -73,18 +73,40 @@ func (n *cfgNode) read(name string) Report {
 // snapshotOf is the stored snapshot digest the fixture's read gives.
 func (n *cfgNode) snapshotOf(name string) string {
 	n.t.Helper()
-	m := n.r.commands
-	inv := adapter.Invocation{InvocationID: okInvocation, PrincipalRef: "sch-cfg", AssetID: relayID, EndpointID: "port1-telnet",
+	return config.Digest(n.encode(n.snapshot(name, relayID)))
+}
+
+// snapshot is the snapshot the fixture's read of asset gives.
+func (n *cfgNode) snapshot(name, asset string) config.Snapshot {
+	n.t.Helper()
+	inv := adapter.Invocation{InvocationID: okInvocation, PrincipalRef: "sch-cfg", AssetID: asset, EndpointID: "port1-telnet",
 		ProfileID: "sel-751-ascii", OperationID: "sel.config.read_all", CredentialRef: nodeconfigtest.TestCredentialRef}
-	s, err := config.FromResult(config.RuleSEL751SHO.ID, m, inv, cfgResult(n.t, name))
+	s, err := config.FromResult(config.RuleSEL751SHO.ID, n.r.commands, inv, cfgResult(n.t, name))
 	if err != nil {
 		n.t.Fatal(err)
 	}
+	return s
+}
+
+func (n *cfgNode) encode(s config.Snapshot) []byte {
+	n.t.Helper()
 	b, err := s.Encode()
 	if err != nil {
 		n.t.Fatal(err)
 	}
-	return config.Digest(b)
+	return b
+}
+
+// storeDoc stores doc, a snapshot of the fixture "ok", in the relay's
+// configuration stream, with that read's transcript as the capture.
+func (n *cfgNode) storeDoc(doc []byte) c5.Seq {
+	n.t.Helper()
+	tr := cfgResult(n.t, "ok").Transcript
+	seq, err := n.s.storeConfig(bg, ConfigStream(relayID), doc, &c5.Capture{SHA256: tr.SHA256, Bytes: tr.Data})
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	return seq
 }
 
 // decide puts a person's decision in the chain: the collector's acceptance,
@@ -577,5 +599,115 @@ func TestConfigReadApprovalWindowEnded(t *testing.T) {
 	n.read("ok-all-present")
 	if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonUnapprovedChange || res[0].Config.ApprovalSeq != 0 {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// An approved change read again is the same change: one snapshot more, no
+// new difference and no new hold (C2 on #390; D4-20).
+func TestConfigReadApprovedChangeReadAgain(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	n.ack(base, "")
+	n.approve(base)
+	n.read("ok-all-present")
+	held, stored := n.holds(), n.stored()
+	n.read("ok-all-present")
+	res := n.results()
+	if len(res) != 2 || res[1].Action != audit.ActionConfigReadCompared || res[1].ReasonCode != audit.ReasonSameChange ||
+		res[1].Config.ChangeSeq == 0 || res[1].Config.ChangesDigest != res[0].Config.ChangesDigest {
+		t.Fatalf("read again: %+v", res)
+	}
+	if got := n.stored(); got != stored+1 {
+		t.Fatalf("stored %d, want %d: only the snapshot", got, stored+1)
+	}
+	if h := n.holds(); len(h) != len(held) {
+		t.Fatalf("holds %v, want %v", h, held)
+	}
+}
+
+// A baseline that does not compare with the read (another asset) leaves the
+// snapshot stored and unheld, with no C8 result, and raises
+// config-not-compared once per cause, not at every read (C4 on #390). A
+// comparison that succeeds clears it, so the cause returning raises it
+// again.
+func TestConfigReadNotComparable(t *testing.T) {
+	n := newCfgNode(t)
+	other := n.encode(n.snapshot("ok", "7c4f0d6a-8b13-4a5b-9e21-2b7d4e108c3f"))
+	n.storeDoc(other)
+	n.ack(config.Digest(other), "")
+	for i := 0; i < 2; i++ {
+		if rep := n.read("ok"); rep.Alarm != AlarmConfigNotCompared {
+			t.Fatalf("read %d: %+v", i, rep)
+		}
+	}
+	if len(n.results()) != 0 || countAlarms(n.st, AlarmConfigNotCompared) != 1 {
+		t.Fatalf("results %+v, %d alarms", n.results(), countAlarms(n.st, AlarmConfigNotCompared))
+	}
+	if h := n.holds(); len(h) != 1 || h[1] != c5.HoldBaseline {
+		t.Fatalf("holds %v: the snapshots stay unheld", h)
+	}
+	base := n.snapshotOf("ok")
+	n.ack(base, config.Digest(other))
+	if rep := n.read("ok"); rep.Alarm != "" {
+		t.Fatalf("compared: %+v", rep)
+	}
+	n.ack(config.Digest(other), base)
+	n.read("ok")
+	if got := countAlarms(n.st, AlarmConfigNotCompared); got != 2 {
+		t.Fatalf("%d alarms after the cause returned, want 2", got)
+	}
+}
+
+// A difference over the record cap is not stored, and the change is still
+// recorded and alarmed (C1 and C2 on #390): its config.change_detected names
+// the difference digest, the snapshot is held, and the alarm says the
+// difference was not stored.
+func TestConfigReadDifferenceTooLarge(t *testing.T) {
+	n := newCfgNode(t)
+	n.read("ok")
+	big := func(v string) []byte {
+		s := n.snapshot("ok", relayID)
+		for i := range s.Sections {
+			if s.Sections[i].State == config.Present {
+				s.Sections[i].Settings = nil
+				for k := 0; k < 3000; k++ {
+					const d = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+					s.Sections[i].Settings = append(s.Sections[i].Settings,
+						config.Setting{Name: string([]byte{d[k/1296%36], d[k/36%36], d[k%36]}), Value: strings.Repeat(v, 280)})
+				}
+				break
+			}
+		}
+		return n.encode(s)
+	}
+	base, doc := big("A"), big("B")
+	n.storeDoc(base)
+	n.ack(config.Digest(base), "")
+	// The run the read was: the node's record of the collector's acceptance.
+	n.seq++
+	n.inject(&audit.Record{Actor: audit.Actor{Type: authz.PrincipalSchedule, ID: "sch-cfg", Role: authz.RoleCollector},
+		Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, PolicyVersion: 3, CorrelationID: "req-big",
+		CollectorSeq: n.seq, OperationID: "sel.config.read_all", Target: &audit.Target{AssetID: relayID, CredentialRef: nodeconfigtest.TestCredentialRef}})
+	snap := n.storeDoc(doc)
+	before := n.stored()
+	rep := n.s.compareConfig(bg, Report{RequestID: "req-big"}, n.r.cfg.Schedule[1], n.seq, doc, snap, config.Digest(doc))
+	res := n.results()
+	if len(res) != 1 || res[0].Action != audit.ActionConfigChangeDetected || res[0].ReasonCode != audit.ReasonUnapprovedChange ||
+		res[0].Config.DifferenceDigest == "" || rep.Alarm != "" {
+		t.Fatalf("%+v, results %+v", rep, res)
+	}
+	if n.stored() != before {
+		t.Fatal("the difference was stored")
+	}
+	if h := n.holds(); h[snap] != c5.HoldUnapprovedDifference {
+		t.Fatalf("holds %v", h)
+	}
+	var found bool
+	for _, a := range n.st.Snapshot("x").Alarms {
+		found = found || a.Code == AlarmUnapprovedChange && strings.Contains(a.Detail, "difference not stored: too large")
+	}
+	if !found {
+		t.Fatalf("no unapproved-change alarm naming the unstored difference: %+v", n.st.Snapshot("x").Alarms)
 	}
 }

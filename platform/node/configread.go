@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/audit"
@@ -138,12 +139,17 @@ func (s *Scheduler) storeConfig(ctx context.Context, stream c5.StreamID, doc []b
 // compareConfig compares a stored snapshot with the asset's acknowledged
 // baseline and writes the result (the design note's table, section 1).
 func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collection, readSeq uint64, doc []byte, snapSeq c5.Seq, snapDigest string) Report {
-	notCompared := func(why string) Report {
-		return s.alarm(ctx, rep, col.AssetID, AlarmConfigNotCompared, "snapshot "+snapDigest+" stored and not compared: "+why)
+	// notCompared raises AlarmConfigNotCompared once per asset and cause
+	// (C4 on #390): a cause that persists would raise it at every read and
+	// push older alarms out of status. A comparison that succeeds clears it.
+	notCompared := func(cause, why string) Report {
+		rep.Alarm = AlarmConfigNotCompared
+		s.raiseOnceKey(notComparedKey(col.AssetID, cause), col.AssetID, AlarmConfigNotCompared, "snapshot "+snapDigest+" stored and not compared: "+why)
+		return rep
 	}
 	ch := s.configChain()
 	if err := ch.sync(ctx, s.rt.Store(AuditStream)); err != nil {
-		return notCompared("the audit chain could not be read: " + err.Error())
+		return notCompared("chain", "the audit chain could not be read: "+err.Error())
 	}
 	stream := ConfigStream(col.AssetID)
 	cdb := s.rt.Store(stream)
@@ -155,11 +161,11 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 			// the pruned case checkable).
 			held, err := cdb.Held(ctx, stream)
 			if err != nil {
-				return notCompared(err.Error())
+				return notCompared("holds", err.Error())
 			}
 			for _, h := range held {
 				if h.Reason.Code == c5.HoldBaseline && h.Reason.Ref.Seq < ch.first {
-					return notCompared(fmt.Sprintf("the acknowledgement of the baseline (audit record %d) was pruned from the audit stream", h.Reason.Ref.Seq))
+					return notCompared("pruned", fmt.Sprintf("the acknowledgement of the baseline (audit record %d) was pruned from the audit stream", h.Reason.Ref.Seq))
 				}
 			}
 		}
@@ -170,14 +176,14 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	}
 	base, err := readDigest(ctx, cdb, stream, st.baseline)
 	if err != nil {
-		return notCompared(err.Error())
+		return notCompared("baseline", err.Error())
 	}
 	if base == nil {
 		return s.alarm(ctx, rep, col.AssetID, AlarmBaselineNotStored, fmt.Sprintf("the acknowledged baseline %s is not in stream %s; snapshot %s stored and not compared", st.baseline, stream, snapDigest))
 	}
 	d, err := config.Compare(base, doc)
 	if err != nil {
-		return notCompared(err.Error())
+		return notCompared("compare", err.Error())
 	}
 	c := &audit.Config{BaselineDigest: st.baseline, SnapshotDigest: snapDigest, ReadSeq: readSeq}
 	switch {
@@ -193,7 +199,7 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 		for _, ref := range st.open {
 			s.clearQuietKey(fmt.Sprintf("unapproved %s %d", col.AssetID, ref))
 		}
-		return rep
+		return s.recorded(ctx, rep, col, nil)
 	case st.last != nil && d.ChangesDigest() == st.last.changes:
 		c.SnapshotSeq, c.ChangeSeq, c.ChangesDigest = uint64(snapSeq), uint64(st.last.seq), st.last.changes
 		_, err = s.writeConfigRecord(ctx, rep, col, audit.ActionConfigReadCompared, audit.OutcomeInfo, audit.ReasonSameChange, c)
@@ -201,14 +207,21 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	}
 	prior, at, ok := ch.unchanged(col.AssetID, col.Operation, readSeq)
 	if !ok {
-		return notCompared("neither an earlier run of the operation nor a collector reset in the retained chain bounds the change")
+		return notCompared("unbounded", "neither an earlier run of the operation nor a collector reset in the retained chain bounds the change")
 	}
 	diff, err := encodeDifference(d)
 	if err != nil {
-		return notCompared(err.Error())
+		return notCompared("encode", err.Error())
 	}
-	diffSeq, err := s.storeConfig(ctx, stream, diff, nil)
-	if err != nil {
+	// A difference over the record cap cannot be stored (C9 0.3 does not
+	// bound it; C2 on #390). The change is still recorded, from the
+	// comparison held here, so it is never hidden behind a storage alarm
+	// (C1 on #390); its digest names bytes the node could not keep.
+	var diffSeq c5.Seq
+	tooLarge := ""
+	if int64(len(diff)) > ConfigRecordBytes {
+		tooLarge = fmt.Sprintf("; difference not stored: too large (%d bytes, the record cap is %d)", len(diff), ConfigRecordBytes)
+	} else if diffSeq, err = s.storeConfig(ctx, stream, diff, nil); err != nil {
 		return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "configuration difference: "+err.Error())
 	}
 	c.DifferenceDigest, c.ChangesDigest, c.UnchangedReadSeq, c.UnchangedAt = config.Digest(diff), d.ChangesDigest(), prior, at
@@ -233,22 +246,43 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	if c.ApprovalSeq == 0 {
 		code = c5.HoldUnapprovedDifference
 	}
-	for _, held := range []c5.Seq{snapSeq, diffSeq} {
-		s.holdConfig(ctx, col.AssetID, stream, held, code, seq)
+	s.holdConfig(ctx, col.AssetID, stream, snapSeq, code, seq)
+	if diffSeq != 0 {
+		s.holdConfig(ctx, col.AssetID, stream, diffSeq, code, seq)
 	}
-	if c.ApprovalSeq == 0 {
+	switch {
+	case c.ApprovalSeq == 0:
 		s.raiseOnceKey(fmt.Sprintf("unapproved %s %d", col.AssetID, seq), col.AssetID, AlarmUnapprovedChange,
-			fmt.Sprintf("the configuration differs from baseline %s and no approval covers it: difference %s, audit record %d", st.baseline, c.DifferenceDigest, seq))
+			fmt.Sprintf("the configuration differs from baseline %s and no approval covers it: difference %s, audit record %d%s", st.baseline, c.DifferenceDigest, seq, tooLarge))
+	case tooLarge != "":
+		s.raiseOnceKey(fmt.Sprintf("difference %s %d", col.AssetID, seq), col.AssetID, AlarmEvidenceNotStored,
+			fmt.Sprintf("the approved change of audit record %d (approval %d) has difference %s%s", seq, c.ApprovalSeq, c.DifferenceDigest, tooLarge))
 	}
-	return rep
+	return s.recorded(ctx, rep, col, nil)
+}
+
+func notComparedKey(assetID, cause string) string { return "not-compared " + assetID + " " + cause }
+
+// clearNotCompared ends every config-not-compared cause of the asset, so
+// one that returns is raised again.
+func (s *Scheduler) clearNotCompared(assetID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.quiet {
+		if strings.HasPrefix(k, notComparedKey(assetID, "")) {
+			delete(s.quiet, k)
+		}
+	}
 }
 
 // recorded reports a result record that could not be written. The stored
-// records stay unheld, and the next read compares again.
+// records stay unheld, and the next read compares again. A result written
+// ends the asset's config-not-compared causes.
 func (s *Scheduler) recorded(ctx context.Context, rep Report, col Collection, err error) Report {
 	if err != nil {
 		return s.alarm(ctx, rep, col.AssetID, AlarmAuditUnavailable, "configuration read result not written: "+err.Error())
 	}
+	s.clearNotCompared(col.AssetID)
 	return rep
 }
 

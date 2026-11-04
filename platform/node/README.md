@@ -173,11 +173,13 @@ Everything the record names comes from the audit chain. The node folds it from t
 - `unchanged_read_seq` and `unchanged_at` are the asset's last run of the operation before it in the epoch, or the epoch's `collector.seq_reset` time;
 - `approval_seq` is the newest succeeded approval of the epoch that covers the change. None is used while an unapproved change is open.
 
+A difference over the record cap (`ConfigRecordBytes`) is not stored, since C9 0.3 does not bound it. The change is still recorded from the comparison the node holds: `config.change_detected` names its digest, the snapshot is held, and the alarm says the difference was not stored (`config-unapproved-change`, or `collection-evidence-not-stored` for an approved change). The start-up reconcile then finds that difference missing, so it releases nothing in that stream. C9 0.4 is to bound the difference.
+
 Every document and record is committed with `AppendBatch`, so an error never leaves behind a record that committed anyway.
 
 **Alarms**, all level 0, named by asset:
 - `config-unapproved-change`: raised once for each unapproved change, and again at start for each change the chain shows still open.
-- `config-not-compared`: the snapshot is stored and not compared. The baseline or the snapshot does not compare, nothing retained in the chain bounds the change, or the audit stream was pruned past the acknowledgement. That last case is known from a `baseline` hold whose Ref is below the first retained audit record.
+- `config-not-compared`: the snapshot is stored and not compared. It is raised once per asset and cause, and a comparison that succeeds clears it, so a cause that returns raises it again. The baseline or the snapshot does not compare, nothing retained in the chain bounds the change, or the audit stream was pruned past the acknowledgement. That last case is known from a `baseline` hold whose Ref is below the first retained audit record.
 - `config-baseline-not-stored`: the acknowledged baseline is not in the stream.
 - `collection-audit-unavailable`: the read's decision is not in the chain, or the result could not be written. The stored records stay unheld, and the next read compares again.
 
