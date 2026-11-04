@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -171,7 +170,11 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 		return s.alarm(ctx, rep, col.AssetID, AlarmBaselineNotStored, fmt.Sprintf("the acknowledged baseline %s is not in stream %s; snapshot %s stored and not compared", st.baseline, stream, snapDigest))
 	}
 	d, err := config.Compare(base, doc)
-	if err != nil {
+	// A valid difference over C9's MaxDifferenceBytes comes back with
+	// ErrDifferenceTooLarge (C9 0.4): the change is real, and is recorded
+	// without its difference (D4-42).
+	tooLarge := errors.Is(err, config.ErrDifferenceTooLarge)
+	if err != nil && !tooLarge {
 		return notCompared("compare", err.Error())
 	}
 	c := &audit.Config{BaselineDigest: st.baseline, SnapshotDigest: snapDigest, ReadSeq: readSeq}
@@ -198,22 +201,28 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	if !ok {
 		return notCompared("unbounded", "neither an earlier run of the operation nor a collector reset in the retained chain bounds the change")
 	}
-	diff, err := encodeDifference(d)
-	if err != nil {
-		return notCompared("encode", err.Error())
-	}
-	// A difference over the record cap cannot be stored (C9 0.3 does not
-	// bound it; C2 on #390). The change is still recorded, from the
-	// comparison held here, so it is never hidden behind a storage alarm
-	// (C1 on #390); its digest names bytes the node could not keep.
+	// A difference too large to store is not stored, and the record says so
+	// with no difference_digest (C8 0.10, D4-42). The change is still
+	// recorded and alarmed, never hidden behind a storage alarm (C1 on
+	// #390), and the read's snapshot is held, so the difference is C9's
+	// Compare of the held baseline and snapshot.
 	var diffSeq c5.Seq
-	tooLarge := ""
-	if int64(len(diff)) > ConfigRecordBytes {
-		tooLarge = fmt.Sprintf("; difference not stored: too large (%d bytes, the record cap is %d)", len(diff), ConfigRecordBytes)
-	} else if diffSeq, err = s.storeConfig(ctx, stream, diff, nil); err != nil {
-		return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "configuration difference: "+err.Error())
+	what := ""
+	if tooLarge {
+		c.DifferenceTooLarge = true
+		what = fmt.Sprintf("difference not stored: too large (over %d bytes)", config.MaxDifferenceBytes)
+	} else {
+		diff, err := d.Encode()
+		if err != nil {
+			return notCompared("encode", err.Error())
+		}
+		if diffSeq, err = s.storeConfig(ctx, stream, diff, nil); err != nil {
+			return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, "configuration difference: "+err.Error())
+		}
+		c.DifferenceDigest = config.Digest(diff)
+		what = "difference " + c.DifferenceDigest
 	}
-	c.DifferenceDigest, c.ChangesDigest, c.UnchangedReadSeq, c.UnchangedAt = config.Digest(diff), d.ChangesDigest(), prior, at
+	c.ChangesDigest, c.UnchangedReadSeq, c.UnchangedAt = d.ChangesDigest(), prior, at
 	rec := s.configRecord(col.AssetID, rep.RequestID, audit.ActionConfigChangeDetected, audit.OutcomeWarning, audit.ReasonUnapprovedChange, c)
 	if !st.alarmed {
 		// Once an unapproved difference is open against this baseline, no
@@ -242,10 +251,10 @@ func (s *Scheduler) compareConfig(ctx context.Context, rep Report, col Collectio
 	switch {
 	case c.ApprovalSeq == 0:
 		s.raiseOnceKey(fmt.Sprintf("unapproved %s %d", col.AssetID, seq), col.AssetID, AlarmUnapprovedChange,
-			fmt.Sprintf("the configuration differs from baseline %s and no approval covers it: difference %s, audit record %d%s", st.baseline, c.DifferenceDigest, seq, tooLarge))
-	case tooLarge != "":
+			fmt.Sprintf("the configuration differs from baseline %s and no approval covers it: %s, audit record %d", st.baseline, what, seq))
+	case tooLarge:
 		s.raiseOnceKey(fmt.Sprintf("difference %s %d", col.AssetID, seq), col.AssetID, AlarmEvidenceNotStored,
-			fmt.Sprintf("the approved change of audit record %d (approval %d) has difference %s%s", seq, c.ApprovalSeq, c.DifferenceDigest, tooLarge))
+			fmt.Sprintf("the approved change of audit record %d (approval %d): %s", seq, c.ApprovalSeq, what))
 	}
 	return s.recorded(ctx, rep, col, nil)
 }
@@ -339,18 +348,6 @@ func (s *Scheduler) restoreHolds(ctx context.Context, assetID string, refs []c5.
 			s.holdConfig(ctx, assetID, stream, h.Seq, c5.HoldRestoredDifference, h.Reason.Ref.Seq)
 		}
 	}
-}
-
-// encodeDifference is a difference's stored form, written as C9 writes a
-// snapshot: compact JSON in struct order, no HTML escaping, no newline.
-func encodeDifference(d config.Difference) ([]byte, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(d); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
 // readDigest returns the stored bytes in stream whose digest is digest, or

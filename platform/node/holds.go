@@ -174,7 +174,9 @@ func (a *assetHolds) wants() []wantHold {
 	diff := func(os []openDifference, code c5.HoldCode, why string) {
 		for _, o := range os {
 			add(wantHold{o.snapshot, code, o.ref, fmt.Sprintf("the snapshot of the change detected in audit record %d%s", o.ref, why)})
-			add(wantHold{o.difference, code, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d%s", o.ref, why)})
+			if o.difference != "" { // "" when it was too large to store (C8 0.10, D4-42)
+				add(wantHold{o.difference, code, o.ref, fmt.Sprintf("the difference of the change detected in audit record %d%s", o.ref, why)})
+			}
 		}
 	}
 	diff(a.open, c5.HoldUnapprovedDifference, "")

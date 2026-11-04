@@ -774,49 +774,100 @@ func TestConfigReadNotComparable(t *testing.T) {
 	}
 }
 
-// A difference over the record cap is not stored, and the change is still
-// recorded and alarmed (C1 and C2 on #390): its config.change_detected names
-// the difference digest, the snapshot is held, and the alarm says the
-// difference was not stored.
-func TestConfigReadDifferenceTooLarge(t *testing.T) {
-	n := newCfgNode(t)
-	n.read("ok")
-	big := func(v string) []byte {
-		s := n.snapshot("ok", relayID)
-		for i := range s.Sections {
-			if s.Sections[i].State == config.Present {
-				s.Sections[i].Settings = nil
-				for k := 0; k < 3000; k++ {
-					const d = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-					s.Sections[i].Settings = append(s.Sections[i].Settings,
-						config.Setting{Name: string([]byte{d[k/1296%36], d[k/36%36], d[k%36]}), Value: strings.Repeat(v, 280)})
-				}
-				break
+// big is a valid snapshot of the fixture "ok" with 3,000 settings of 280
+// bytes, each v repeated: two of them differ by more than C9's
+// MaxDifferenceBytes.
+func (n *cfgNode) big(v string) []byte {
+	n.t.Helper()
+	s := n.snapshot("ok", relayID)
+	for i := range s.Sections {
+		if s.Sections[i].State == config.Present {
+			s.Sections[i].Settings = nil
+			for k := 0; k < 3000; k++ {
+				const d = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+				s.Sections[i].Settings = append(s.Sections[i].Settings,
+					config.Setting{Name: string([]byte{d[k/1296%36], d[k/36%36], d[k%36]}), Value: strings.Repeat(v, 280)})
 			}
+			break
 		}
-		return n.encode(s)
 	}
-	base, doc := big("A"), big("B")
+	return n.encode(s)
+}
+
+// A difference over C9's MaxDifferenceBytes is not stored (D4-42): the
+// change is recorded with difference_too_large and no difference_digest
+// (C8 0.10), its changes_digest is Compare's of the held baseline and
+// snapshot, it is alarmed, and the snapshot is held. At the next start the
+// reconcile wants no hold for the difference that was never stored, so it
+// raises nothing (C3 on #393).
+func TestConfigReadDifferenceTooLarge(t *testing.T) {
+	c, dir := schedConfig(t, withConfigRead(t, nil))
+	r, st, _ := start(t, c, dir)
+	n := &cfgNode{t: t, r: r, st: st, seq: 10}
+	n.f = &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		n.seq++
+		raw, _ := json.Marshal(n.next)
+		return collectorclient.Response{Reply: accepted(req, n.seq), Outcome: &collectorclient.Outcome{InvocationID: okInvocation, Result: n.next, ResultJSON: raw}}, nil
+	}}
+	n.s = newScheduler(t, r, n.f)
+	n.read("ok")
+	base, doc := n.big("A"), n.big("B")
+	if _, err := config.Compare(base, doc); !errors.Is(err, config.ErrDifferenceTooLarge) {
+		t.Fatalf("compare: %v", err)
+	}
 	n.storeDoc(base)
 	n.ack(config.Digest(base), "")
 	rep, snap := n.compareDoc(doc)
 	res := n.results()
 	if len(res) != 1 || res[0].Action != audit.ActionConfigChangeDetected || res[0].ReasonCode != audit.ReasonUnapprovedChange ||
-		res[0].Config.DifferenceDigest == "" || rep.Alarm != "" {
+		!res[0].Config.DifferenceTooLarge || res[0].Config.DifferenceDigest != "" || rep.Alarm != "" {
 		t.Fatalf("%+v, results %+v", rep, res)
+	}
+	if d, _ := config.Compare(base, doc); res[0].Config.ChangesDigest != d.ChangesDigest() {
+		t.Fatalf("changes_digest %s, Compare gives %s", res[0].Config.ChangesDigest, d.ChangesDigest())
 	}
 	if got := n.stored(); got != 3 {
 		t.Fatalf("stored %d, want 3: the first read, the baseline and the read, and no difference", got)
 	}
-	if h := n.holds(); h[snap] != c5.HoldUnapprovedDifference {
-		t.Fatalf("holds %v", h)
+	before := n.holds()
+	if before[snap] != c5.HoldUnapprovedDifference {
+		t.Fatalf("holds %v", before)
 	}
 	var found bool
-	for _, a := range n.st.Snapshot("x").Alarms {
+	for _, a := range st.Snapshot("x").Alarms {
 		found = found || a.Code == AlarmUnapprovedChange && strings.Contains(a.Detail, "difference not stored: too large")
 	}
 	if !found {
-		t.Fatalf("no unapproved-change alarm naming the unstored difference: %+v", n.st.Snapshot("x").Alarms)
+		t.Fatalf("no unapproved-change alarm naming the unstored difference: %+v", st.Snapshot("x").Alarms)
+	}
+	r.Close()
+
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	n.r, n.st = r, st
+	if alarms := st.Snapshot("x").Alarms; reconciled(alarms) != 0 || countAlarms(st, AlarmBaselineNotStored) != 0 {
+		t.Fatalf("the reconcile raised an alarm: %+v", alarms)
+	}
+	if got := n.holds(); len(got) != len(before) || got[snap] != c5.HoldUnapprovedDifference {
+		t.Fatalf("holds %v, before %v", got, before)
+	}
+}
+
+// An approved change whose difference is too large is approved, and still
+// raises evidence-not-stored once, so the missing difference shows.
+func TestConfigReadApprovedDifferenceTooLarge(t *testing.T) {
+	n := newCfgNode(t)
+	n.read("ok")
+	base, doc := n.big("A"), n.big("B")
+	n.storeDoc(base)
+	n.ack(config.Digest(base), "")
+	n.approve(config.Digest(base))
+	n.compareDoc(doc)
+	if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonApprovedChange || !res[0].Config.DifferenceTooLarge {
+		t.Fatalf("%+v", res)
+	}
+	if c := countAlarms(n.st, AlarmEvidenceNotStored); c != 1 {
+		t.Fatalf("%d evidence-not-stored alarms, want 1", c)
 	}
 }
 
