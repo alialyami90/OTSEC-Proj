@@ -56,6 +56,7 @@ import (
 	"strings"
 	"time"
 
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/collector"
@@ -127,6 +128,11 @@ type Layout struct {
 	// from GTINJSender to the syslog-udp listener.
 	GTINJAsset  string `json:"gtinj_asset,omitempty"`
 	GTINJSender string `json:"gtinj_sender,omitempty"`
+	// V-M2, when -config-every is set: the asset another device's
+	// approval names, and the seed of a second administrator's key that
+	// may not sign node.change_approval.
+	OtherAsset  string `json:"other_asset,omitempty"`
+	OperatorKey string `json:"operator_key,omitempty"`
 }
 
 // leaveAdminFile writes an administrator's file into admin_dir as one
@@ -148,12 +154,16 @@ func leaveAdminFile(dir, name string, b []byte) error {
 	return err
 }
 
-// adminPrincipal is the person the test administrator's key speaks for.
-var adminPrincipal = authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site-a"}
+// adminPrincipal is the person the test administrator's key speaks for,
+// and operatorPrincipal the second key's (V-M2), who is not an approver.
+var (
+	adminPrincipal    = authz.Principal{Type: authz.PrincipalHuman, ID: "admin@site-a"}
+	operatorPrincipal = authz.Principal{Type: authz.PrincipalHuman, ID: "operator@site-a"}
+)
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file ...")
+		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|verify-audit ...")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -167,23 +177,46 @@ func main() {
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
 	gtinj := fs.String("gtinj-events", "", "setup: add the GT-INJ Syslog asset, sending from 127.0.0.4 to the syslog-udp listener, with an event baseline whose params are this events.json's (V-M4)")
-	kind := fs.String("kind", "install", "admin-file: install, revoke or baseline-ack")
+	kind := fs.String("kind", "install", "admin-file: install, revoke, baseline-ack or change-approval")
 	name := fs.String("name", "", "admin-file: the file's name, or the <name> in admin-request-<name>.json")
 	expires := fs.Duration("expires", 10*time.Minute, "admin-file: the request's lifetime from now (negative: already expired)")
 	tamper := fs.Bool("tamper", false, "admin-file: change one payload byte after signing")
 	mode := fs.Uint("mode", 0o440, "admin-file: the file's mode")
 	bad := fs.String("bad", "", "admin-file: a claim to malform and sign anyway: nonce (21 characters) or key (the envelope's key ID)")
 	version := fs.Uint("version", 1, "admin-file: an install's credential version (2 rotates the first)")
-	digest := fs.String("digest", "", "admin-file: the GT-INJ asset's event baseline a baseline-ack acknowledges (V-M4)")
+	digest := fs.String("digest", "", "admin-file: the baseline a baseline-ack acknowledges, or a change-approval is against (V-M4, V-M2)")
+	configEvery := fs.Int("config-every", 0, "setup: read the asset's configuration (sel.config.read_all) every this many seconds instead of its SER (V-M2)")
+	baselineKind := fs.String("baseline-kind", "event", "admin-file: a baseline-ack's kind, event (the GT-INJ asset) or configuration (the slice's asset)")
+	device := fs.String("device", "self", "admin-file: a change-approval's asset, self (the slice's) or other (V-M2)")
+	window := fs.String("window", "", "admin-file: a change-approval's window, start,end in RFC 3339")
+	issued := fs.String("issued", "", "admin-file: the request's issued_at in RFC 3339, its expiry -expires after it (default: now)")
+	in := fs.String("in", "", "verify-audit: a file of the audit stream's stored records, one base64 line each, in seq order")
+	operator := fs.Bool("operator", false, "admin-file: sign with the second administrator's key, which may not sign node.change_approval (V-M2)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *configEvery)
 	case "install-credential":
 		err = installCredential(*root)
+	case "verify-audit":
+		err = verifyAudit(*in)
 	case "admin-file":
-		err = adminFile(*root, *kind, *name, *expires, *tamper, *bad, os.FileMode(*mode), uint32(*version), *digest)
+		r := request{expires: *expires, version: uint32(*version), digest: *digest, baselineKind: authz.BaselineKind(*baselineKind), device: *device, operator: *operator}
+		if *window != "" {
+			w := strings.Split(*window, ",")
+			if len(w) != 2 {
+				err = fmt.Errorf("-window %q: want start,end", *window)
+				break
+			}
+			r.window = [2]string{w[0], w[1]}
+		}
+		if *issued != "" {
+			if r.issued, err = time.Parse(time.RFC3339, *issued); err != nil {
+				break
+			}
+		}
+		err = adminFile(*root, *kind, *name, r, *tamper, *bad, os.FileMode(*mode))
 	default:
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
@@ -193,7 +226,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj string) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj string, configEvery int) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -258,6 +291,9 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err := gtinjAsset(nc, &l, gtinj); err != nil {
 		return err
 	}
+	if err := configReads(nc, &l, payload, reg.Revision, configEvery); err != nil {
+		return err
+	}
 	if installed {
 		nc.TLSDir = l.TLSDir
 		if err := nc.Write(l.NodeConfigSource); err != nil {
@@ -293,7 +329,13 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 
 	// The collector: the same asset record, the C1 profile, and the C3
 	// register on main, signed by a release key made for this run.
-	profile, err := os.ReadFile(filepath.Join(repo, "cmd", "otsec-collector", "testdata", "profile-sel-751-ascii.json"))
+	// V-M2 takes the profile that lists sel.config.read_all, which the
+	// collector's own tests use; the slice's lists none.
+	profileFile := filepath.Join(repo, "cmd", "otsec-collector", "testdata", "profile-sel-751-ascii.json")
+	if configEvery != 0 {
+		profileFile = filepath.Join(repo, "modules", "security", "collector", "testdata", "profile-sel-751-ascii.json")
+	}
+	profile, err := os.ReadFile(profileFile)
 	if err != nil {
 		return err
 	}
@@ -316,6 +358,30 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	adminKey := map[string]any{"key_id": authz.AdminKeyID(adminPub),
 		"public_key": base64.StdEncoding.EncodeToString(adminPub), "principal": adminPrincipal.ID, "status": "active"}
 	assets := []any{nc.Assets[0]}
+	admins := []any{adminKey}
+	if configEvery != 0 {
+		// V-M2: the administrator approves changes and acknowledges
+		// configuration baselines; a second one, the operator, may
+		// acknowledge but not approve. The other device is enrolled, so an
+		// approval for it is accepted for it, and covers nothing here.
+		adminKey["kinds"] = append(slices.Clone(authz.DefaultAdminKinds), authz.KindNodeChangeApproval, authz.KindNodeBaselineAck)
+		opPub, opPriv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return err
+		}
+		l.OperatorKey = filepath.Join(root, "operator-test-key.seed")
+		if err := os.WriteFile(l.OperatorKey, []byte(base64.StdEncoding.EncodeToString(opPriv.Seed())), 0o600); err != nil {
+			return err
+		}
+		admins = append(admins, map[string]any{"key_id": authz.AdminKeyID(opPub),
+			"public_key": base64.StdEncoding.EncodeToString(opPub), "principal": operatorPrincipal.ID, "status": "active",
+			"kinds": append(slices.Clone(authz.DefaultAdminKinds), authz.KindNodeBaselineAck)})
+		for _, a := range nc.Assets {
+			if a["asset_id"] == otherAssetID {
+				assets = append(assets, a)
+			}
+		}
+	}
 	if gtinj != "" {
 		// V-M4 acknowledges the GT-INJ asset's event baseline, which a key
 		// with no kinds may not (C7 0.6), and which the collector accepts
@@ -335,7 +401,7 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 			"profiles":      []any{json.RawMessage(profile)},
 			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
 			"registers":     []any{env},
-			"admin_keys":    []any{adminKey},
+			"admin_keys":    admins,
 		}, "", "  ")
 	}
 	b, err := collectorConfig(l.NodePeer)
@@ -455,10 +521,27 @@ type adminContext struct {
 		PublicKey   string `json:"public_key"`
 		Fingerprint string `json:"fingerprint"`
 	}
-	priv ed25519.PrivateKey
+	priv      ed25519.PrivateKey
+	principal authz.Principal
 }
 
-func loadAdmin(root string) (*adminContext, error) {
+// request is what one signed request says besides its kind: it expires
+// after expires (negative: already expired) from issued (zero: now); an
+// install names credential version; a baseline-ack names digest, of
+// baselineKind; a change-approval names device's configuration baseline
+// digest and window (V-M2).
+type request struct {
+	expires      time.Duration
+	issued       time.Time
+	version      uint32
+	digest       string
+	baselineKind authz.BaselineKind
+	device       string
+	window       [2]string
+	operator     bool
+}
+
+func loadAdmin(root string, operator bool) (*adminContext, error) {
 	b, err := os.ReadFile(filepath.Join(root, "layout.json"))
 	if err != nil {
 		return nil, err
@@ -474,7 +557,15 @@ func loadAdmin(root string) (*adminContext, error) {
 	if err := json.Unmarshal(kb, &a.key); err != nil {
 		return nil, err
 	}
-	seed, err := os.ReadFile(a.l.AdminKey)
+	a.principal = adminPrincipal
+	keyFile := a.l.AdminKey
+	if operator {
+		if a.l.OperatorKey == "" {
+			return nil, errors.New("-operator: setup made no operator key (it needs -config-every)")
+		}
+		a.principal, keyFile = operatorPrincipal, a.l.OperatorKey
+	}
+	seed, err := os.ReadFile(keyFile)
 	if err != nil {
 		return nil, err
 	}
@@ -486,18 +577,22 @@ func loadAdmin(root string) (*adminContext, error) {
 	return a, nil
 }
 
-// sign makes a signed request of kind, issued now and expiring after
-// expires (negative: already expired), with a fresh nonce. An install
-// seals OTSEC_SLICE_SECRET to the install key as the reference's version;
-// a revoke names the run's credential reference; a baseline acknowledgement
-// names the GT-INJ asset's event baseline digest.
-func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, version uint32, digest string) (*authz.AdminSigned, []byte, error) {
-	admin := adminPrincipal
+// sign makes a signed request of kind as r says, with a fresh nonce. An
+// install seals OTSEC_SLICE_SECRET to the install key as the reference's
+// version; a revoke names the run's credential reference; an event
+// baseline acknowledgement names the GT-INJ asset, a configuration one
+// and a change approval the slice's asset (or, for an approval, the other
+// device).
+func (a *adminContext) sign(kind authz.RequestKind, r request) (*authz.AdminSigned, []byte, error) {
+	admin, expires, version, digest := a.principal, r.expires, r.version, r.digest
 	nonce := make([]byte, authz.AdminNonceLen)
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, nil, err
 	}
 	now := time.Now().UTC()
+	if !r.issued.IsZero() {
+		now = r.issued.UTC()
+	}
 	issued := now
 	if expires < 0 {
 		issued = now.Add(expires - time.Minute)
@@ -531,23 +626,34 @@ func (a *adminContext) sign(kind authz.RequestKind, expires time.Duration, versi
 	case authz.KindCredentialRevoke:
 		p.CredentialRevoke = &authz.CredentialRevokeBody{RefID: a.l.CredentialRef, Reason: authz.RevokeRotated}
 	case authz.KindNodeBaselineAck:
-		p.NodeBaselineAck = &authz.NodeBaselineAckBody{AssetID: gtinjAssetID, Kind: authz.BaselineEvent, BaselineDigest: digest}
+		asset := gtinjAssetID
+		if r.baselineKind == authz.BaselineConfiguration {
+			asset = a.l.AssetID
+		}
+		p.NodeBaselineAck = &authz.NodeBaselineAckBody{AssetID: asset, Kind: r.baselineKind, BaselineDigest: digest}
+	case authz.KindNodeChangeApproval:
+		asset := map[string]string{"self": a.l.AssetID, "other": a.l.OtherAsset}[r.device]
+		if asset == "" {
+			return nil, nil, fmt.Errorf("-device %q: self, or other with -config-every", r.device)
+		}
+		p.NodeChangeApproval = &authz.NodeChangeApprovalBody{AssetID: asset, BaselineDigest: digest,
+			WindowStart: r.window[0], WindowEnd: r.window[1], Reason: "V-M2 test change"}
 	default:
-		return nil, nil, fmt.Errorf("kind %q: only install, revoke and baseline-ack", kind)
+		return nil, nil, fmt.Errorf("kind %q: only install, revoke, baseline-ack and change-approval", kind)
 	}
 	signed, err := authz.SignAdminRequest(a.priv, p)
 	return signed, nonce, err
 }
 
 func installCredential(root string) error {
-	a, err := loadAdmin(root)
+	a, err := loadAdmin(root, false)
 	if err != nil {
 		return err
 	}
 	l := a.l
 	// Under the 15-minute maximum less the 2-minute skew allowance, so a
 	// collector clock a little ahead still accepts it (A1 on #146).
-	signed, nonce, err := a.sign(authz.KindCredentialInstall, 10*time.Minute, 1, "")
+	signed, nonce, err := a.sign(authz.KindCredentialInstall, request{expires: 10 * time.Minute, version: 1})
 	if err != nil {
 		return err
 	}
@@ -594,13 +700,14 @@ func installCredential(root string) error {
 // digest (V-M4). It prints the file's name,
 // its request ID as the node derives it from the bytes (admin- and 16 hex
 // digits of their SHA-256) and the nonce.
-func adminFile(root, kind, name string, expires time.Duration, tamper bool, bad string, mode os.FileMode, version uint32, digest string) error {
-	a, err := loadAdmin(root)
+func adminFile(root, kind, name string, r request, tamper bool, bad string, mode os.FileMode) error {
+	a, err := loadAdmin(root, r.operator)
 	if err != nil {
 		return err
 	}
-	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke, "baseline-ack": authz.KindNodeBaselineAck}[kind]
-	signed, _, err := a.sign(k, expires, version, digest)
+	k := map[string]authz.RequestKind{"install": authz.KindCredentialInstall, "revoke": authz.KindCredentialRevoke,
+		"baseline-ack": authz.KindNodeBaselineAck, "change-approval": authz.KindNodeChangeApproval}[kind]
+	signed, _, err := a.sign(k, r)
 	if err != nil {
 		return err
 	}
@@ -712,6 +819,69 @@ func gtinjAsset(nc *nodeconfigtest.Config, l *Layout, events string) error {
 	// configuration stream, as in platform/node's own event-baseline tests.
 	nc.Store.Quotas["configuration"] = 32 << 20
 	l.GTINJAsset, l.GTINJSender = gtinjAssetID, gtinjSender
+	return nil
+}
+
+// verifyAudit checks a node's audit stream from its genesis record, as an
+// upstream verifier would (V-M2: a deleted or edited approval record is
+// detected): the hash chain (C8 VerifyChain), then the configuration and
+// collector records (VerifyConfig).
+func verifyAudit(in string) error {
+	b, err := os.ReadFile(in)
+	if err != nil {
+		return err
+	}
+	var stored [][]byte
+	var recs []*audit.Record
+	for _, line := range strings.Fields(string(b)) {
+		r, err := base64.StdEncoding.DecodeString(line)
+		if err != nil {
+			return err
+		}
+		stored = append(stored, r)
+		if rec, err := audit.ParseRecord(r); err == nil {
+			recs = append(recs, rec)
+		}
+	}
+	if err := audit.VerifyChain(nodeID, stored, nil, nil); err != nil {
+		return err
+	}
+	if err := audit.VerifyConfig(recs); err != nil {
+		return err
+	}
+	fmt.Printf("{\"records\":%d}\n", len(stored))
+	return nil
+}
+
+// The other device of V-M2's approvals: enrolled, never read.
+const (
+	otherAssetID = "8d1f3b5c-2e4a-4f6b-9c8d-0e1f2a3b4c5d"
+	otherSerial  = "2007GTINJCFGOTH"
+)
+
+// configReads, when every is set (V-M2), reads the slice's asset with
+// sel.config.read_all every that many seconds instead of its SER. The node
+// renders snapshots from its own copy of the command register, signed with
+// the test register key (D4-40 item 7). The other device's record has no
+// schedule.
+func configReads(nc *nodeconfigtest.Config, l *Layout, payload []byte, revision uint64, every int) error {
+	if every == 0 {
+		return nil
+	}
+	for i, c := range nc.Schedule {
+		if c.AssetID == assetID {
+			nc.Schedule[i].ID, nc.Schedule[i].Operation, nc.Schedule[i].EverySeconds = "sch-cfg-"+assetID[:8], "sel.config.read_all", every
+		}
+	}
+	if err := nc.WriteCommandRegister(l.Root, payload, revision); err != nil {
+		return err
+	}
+	// Port 1 is never dialled: the record has no schedule.
+	nc.AddSEL751(otherAssetID, "127.0.0.1", 1, 60)
+	nc.Schedule = slices.DeleteFunc(nc.Schedule, func(c nodeconfigtest.Collection) bool { return c.AssetID == otherAssetID })
+	setSerial(nc.Assets[len(nc.Assets)-1], otherSerial)
+	nc.Store.Quotas["configuration"] = 32 << 20
+	l.OtherAsset = otherAssetID
 	return nil
 }
 

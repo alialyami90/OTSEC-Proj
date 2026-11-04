@@ -420,6 +420,8 @@ def main():
                     help="sel-751-doc: SHO layout; one-per-line is SYNTHESIZED (see profile_sel751)")
     ap.add_argument("--profile-sho-fault", choices=("none", "hang", "duplicate"), default="none",
                     help="sel-751-doc: SYNTHESIZED SHO n fault (see profile_sel751)")
+    ap.add_argument("--profile-config-run", action="store_true",
+                    help="sel-751-doc: SYNTHESIZED answers to the configuration run's SHO forms the manual does not print (see profile_sel751)")
     ap.add_argument("--max-sessions", type=int, help="tcp only: refuse connections beyond this count")
     ap.add_argument("--response-delay", type=float, default=0.0,
                     help="seconds before answering; lines sent meanwhile are before_prompt")
@@ -445,6 +447,7 @@ def main():
             stx_etx=args.profile_stx_etx, ser=args.profile_ser, relay=relay, date_f=args.profile_date_f,
             settings_file=args.profile_settings, sho_layout=args.profile_sho_layout,
             sho_fault=None if args.profile_sho_fault == "none" else args.profile_sho_fault,
+            config_run=args.profile_config_run,
             growth=profile_sel751.SerGrowth(args.profile_ser_state,
                                             1 if args.profile_ser == "script" else args.profile_ser_grow)
             if args.profile_ser in ("grow", "script") else None)
