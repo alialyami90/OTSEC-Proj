@@ -434,6 +434,8 @@ class Slice:
         # -test-clock for a run on the stepped clock (D4-40, V-M4).
         self.node_tags = ()
         self.node_args = ()
+        self.collector_tags = ()
+        self.collector_args = ()
         self.service = None
         if SERVICE:
             check_service_mode()
@@ -443,7 +445,7 @@ class Slice:
 
     def build(self):
         _go_build(self.exe("otsec"), "./cmd/otsec", self.node_tags)
-        _go_build(self.exe("otsec-collector"), "./cmd/otsec-collector")
+        _go_build(self.exe("otsec-collector"), "./cmd/otsec-collector", self.collector_tags)
         _go_build(self.exe("slicehelper"), "./tests/integration/slice/slicehelper")
 
     def spawn(self, name, argv, env=None):
@@ -512,7 +514,7 @@ class Slice:
         if SERVICE:
             self._start_services()
             return
-        self.spawn("collector", [self.exe("otsec-collector"), "run", "-data", self.layout["collector_data"]])
+        self.spawn("collector", [self.exe("otsec-collector"), "run", "-data", self.layout["collector_data"], *self.collector_args])
         key = os.path.join(self.layout["public_dir"], "install-key.json")
         assert harness.wait_for(lambda: os.path.exists(key) and os.path.exists(self.layout["socket"]), 15), \
             "the collector did not publish its install key and socket:\n" + self.text("collector")
