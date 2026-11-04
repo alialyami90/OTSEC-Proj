@@ -347,3 +347,92 @@ func TestSignedEventAcknowledgement(t *testing.T) {
 		t.Fatalf("part %+v", p)
 	}
 }
+
+// A repeat answer's record names the first acceptance as decision_seq
+// (repeat_of), not the repeat's own number, and the decision is recorded
+// once. Evidence class: simulated.
+func TestSignedConfigurationRepeatAnswer(t *testing.T) {
+	n := newSignedCfgNode(t, nil)
+	n.mux.admin.repeat, n.mux.admin.lose = true, true
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	name := n.ackSigned(authz.BaselineConfiguration, base) // decided, reply lost
+	if got := n.decisions(audit.ActionConfigBaselineAcknowledge); len(got) != 0 {
+		t.Fatalf("recorded before any reply: %+v", got)
+	}
+	n.mux.admin.mu.Lock()
+	n.mux.admin.lose = false
+	n.mux.admin.mu.Unlock()
+	n.s.relayAdmin(bg)
+	acc := n.acceptance(name)
+	if acc.RepeatOf == 0 || acc.RepeatOf == acc.CollectorSeq {
+		t.Fatalf("not a repeat answer: %+v", acc)
+	}
+	acks := n.decisions(audit.ActionConfigBaselineAcknowledge)
+	if len(acks) != 1 || acks[0].Outcome != audit.OutcomeSucceeded || acks[0].Config.DecisionSeq != acc.RepeatOf {
+		t.Fatalf("acknowledgements %+v, want decision_seq %d", acks, acc.RepeatOf)
+	}
+}
+
+// configPart is the node's part of an accepted configuration request
+// built by hand: the entry is the folded acceptance, as in
+// TestApplyAdminPartGates.
+func (n *signedCfgNode) configPart(edit func(*authz.AdminRequest)) adminPart {
+	n.t.Helper()
+	n.files++
+	env := signN(n.t, authz.KindNodeBaselineAck, n.files, func(p *authz.AdminRequest) {
+		p.InstallKeyID = kid(testInstallKey)
+		p.NodeBaselineAck = &authz.NodeBaselineAckBody{AssetID: relayID, Kind: authz.BaselineConfiguration, BaselineDigest: n.snapshotOf("ok")}
+		if edit != nil {
+			edit(p)
+		}
+	})
+	f := &adminFile{name: "admin-request-gate.json", sum: strings.Repeat("cd", 32), kind: authz.KindNodeBaselineAck, signed: env,
+		claims: adminClaims{Kind: authz.KindNodeBaselineAck, Principal: relayAdmin}}
+	f.id = adminRequestID(f.sum)
+	n.s.mu.Lock()
+	n.s.relayed[f.id] = relayEntry{Outcome: audit.OutcomeAllowed, CollectorSeq: 5, Verified: &audit.Admin{AdminKeyID: env.KeyID,
+		Principal: relayAdmin.ID, Nonce: strings.Repeat("A", 22), PayloadSHA256: authz.AdminPayloadSHA256(env), Kind: authz.KindNodeBaselineAck}}
+	n.s.mu.Unlock()
+	return n.s.applyAdminParts(bg, []*adminFile{f})[f.id]
+}
+
+// The configuration kinds are bound to the install key the node trusts: an
+// acceptance for another key is refused for good, and one while a reset is
+// open waits, and neither records anything. Evidence class: simulated.
+func TestSignedConfigurationInstallKeyGates(t *testing.T) {
+	n := newSignedCfgNode(t, nil)
+	n.read("ok")
+	if p := n.configPart(func(p *authz.AdminRequest) { p.InstallKeyID = kid("other-install-key") }); p.state != partRefused || !strings.Contains(p.detail, "not the key the node trusts") {
+		t.Fatalf("another key: %+v", p)
+	}
+	n.s.mu.Lock()
+	n.s.cs.OpenResetKey = kid("new-install-key")
+	n.s.mu.Unlock()
+	if p := n.configPart(nil); p.state != partPending || !strings.Contains(p.detail, "not acknowledged yet") {
+		t.Fatalf("an open reset: %+v", p)
+	}
+	if got := n.decisions(audit.ActionConfigBaselineAcknowledge); len(got) != 0 {
+		t.Fatalf("recorded: %+v", got)
+	}
+}
+
+// A configuration acknowledgement of a stored C10 baseline is denied
+// baseline_not_held: the record with the digest is not a snapshot.
+// Evidence class: simulated.
+func TestSignedConfigurationAckOfAnEventBaseline(t *testing.T) {
+	n := newSignedCfgNode(t, func(nc *nodeconfigtest.Config) { nc.AddEventBaseline(relayID) })
+	learnOnce(t, n.s.events.life, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	h := recordedOf(t, n.r)[0].Config.BaselineDigest
+	name := n.ackSigned(authz.BaselineConfiguration, h)
+	acks := n.decisions(audit.ActionConfigBaselineAcknowledge)
+	if len(acks) != 1 || acks[0].Outcome != audit.OutcomeDenied || acks[0].ReasonCode != ReasonBaselineNotHeld {
+		t.Fatalf("acknowledgements %+v", acks)
+	}
+	if p := n.part(name); p.NodePart != partRefused {
+		t.Fatalf("part %+v", p)
+	}
+	if _, d := n.s.events.life.half(relayID); d != nil {
+		t.Fatal("the event baseline was activated")
+	}
+}
