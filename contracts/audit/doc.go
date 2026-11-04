@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.9: the audit record every module
+// Package audit is contract C8, otsec.audit/0.10: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -383,6 +383,20 @@
 // view is the retained chain, linked in full from the prune point's
 // checkpoint, is checked by VerifyChain; the full chain stays verifiable
 // upstream.
+//
+// # A difference too large to store (0.10)
+//
+// A difference names both values of every changed setting, so two snapshots
+// that each fit can make a difference over C9's MaxDifferenceBytes (C9 0.4,
+// D4-42). The node then stores no difference and writes config.change_detected
+// with difference_too_large set and no difference_digest. The change is still
+// named by changes_digest, it is alarmed or approved like any other, and the
+// read's snapshot is held as the difference would have been, so the
+// difference is C9's Compare of the held baseline and snapshot. From 0.10,
+// a detection has difference_digest exactly when difference_too_large is not
+// set, and no other action carries the field. VerifyConfig is unchanged: it
+// reads the chain, not stored documents, and no chain rule names a
+// difference_digest.
 //
 // # What it leaves out
 //

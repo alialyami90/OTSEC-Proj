@@ -82,3 +82,17 @@ The digests reuse the 0.8 test values (`sha256:111…`, `sha256:222…`), which 
 | `invalid/config-baseline-recorded-with-checkpoint-seq.json` | `checkpoint_seq` on another action. |
 
 The chain rules (a learner's re-learn follows the latest recorded baseline; a detector is rebuilt from the acknowledged one) are in `TestCheckpointNotRestoredInAChain`.
+
+## 0.10: a difference too large to store
+
+The digests reuse the 0.7 test values.
+
+| File | What it shows |
+| --- | --- |
+| `valid/config-change-detected-difference-too-large.json` | An unapproved change whose difference was over C9's `MaxDifferenceBytes`: `difference_too_large`, `changes_digest`, and no `difference_digest` (D4-42). |
+| `invalid/config-change-detected-too-large-with-difference.json` | `difference_too_large` with a `difference_digest`. |
+| `invalid/config-change-detected-without-difference.json` | Neither a `difference_digest` nor `difference_too_large`. |
+| `invalid/config-change-detected-too-large-stamped-0.9.json` | The field on a record stamped 0.9. |
+| `invalid/config-read-compared-with-difference-too-large.json` | The field on another action. |
+
+The chain case (a too-large detection, then reads of the same change that name it) is in `TestDifferenceTooLargeInAChain`.
