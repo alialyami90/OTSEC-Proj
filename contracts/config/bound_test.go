@@ -253,3 +253,92 @@ func TestLargestAcceptedSnapshotFitsTheCap(t *testing.T) {
 		t.Errorf("the largest accepted snapshot makes a record of %d bytes, over %d", got, RecordCap-RecordHeadroom)
 	}
 }
+
+// A difference is bounded (0.4). It names both values of each changed
+// setting, so two snapshots that each fit can make a difference that does
+// not: Validate refuses it with ErrTooLarge, and Compare still returns it, so
+// the caller knows the change. A realistic difference fits, and a difference
+// at the bound is a record under the cap less the headroom.
+func TestDifferenceSizeBound(t *testing.T) {
+	if MaxDifferenceBytes != RecordCap-RecordHeadroom {
+		t.Fatalf("MaxDifferenceBytes is %d, not RecordCap less RecordHeadroom", MaxDifferenceBytes)
+	}
+	pair := func(n, v int) ([]byte, []byte) {
+		a, _ := bigSnapshot(t, n, strings.Repeat("V", v))
+		b, _ := bigSnapshot(t, n, strings.Repeat("W", v))
+		b.InvocationID = "00000000-0000-4000-8000-000000000002"
+		ab, err := a.Encode()
+		if err != nil || a.Validate() != nil {
+			t.Fatalf("%d x %d: from does not validate: %v", n, v, a.Validate())
+		}
+		bb, err := b.Encode()
+		if err != nil || b.Validate() != nil {
+			t.Fatalf("%d x %d: to does not validate: %v", n, v, b.Validate())
+		}
+		return ab, bb
+	}
+
+	// The largest valid snapshots of 3,000 settings: each fits, and the
+	// difference of every value changed is about 2 MB.
+	from, to := pair(3000, 290)
+	d, err := Compare(from, to)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("an oversize difference: %v", err)
+	}
+	if len(d.Changes) != 3000 || d.ChangesDigest() == "" {
+		t.Fatalf("Compare did not return the oversize difference: %d changes", len(d.Changes))
+	}
+	if b, _ := d.Encode(); len(b) <= MaxDifferenceBytes {
+		t.Fatalf("the oversize case encodes to %d bytes, within the bound", len(b))
+	}
+	if !errors.Is(d.Validate(), ErrTooLarge) {
+		t.Fatal("Validate accepts the oversize difference")
+	}
+
+	// 8,500 settings of 30 characters, every one changed: it fits.
+	from, to = pair(8500, 30)
+	d, err = Compare(from, to)
+	if err != nil {
+		t.Fatalf("a realistic difference: %v", err)
+	}
+	b, err := d.Encode()
+	if err != nil || len(b) > MaxDifferenceBytes {
+		t.Fatalf("a realistic difference encodes to %d bytes: %v", len(b), err)
+	}
+	got, err := DecodeDifference(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := got.Encode(); string(again) != string(b) {
+		t.Fatal("Encode of the decoded difference is not the stored bytes")
+	}
+
+	// A difference at the bound is a record under the cap less the
+	// headroom: it has no capture.
+	rec := store.Record{Event: make([]byte, MaxDifferenceBytes)}
+	if rec.Bytes() > RecordCap {
+		t.Errorf("a difference at the bound makes a record of %d bytes, over %d", rec.Bytes(), RecordCap)
+	}
+}
+
+// Encode writes a difference as Snapshot.Encode writes a snapshot: compact,
+// no HTML escaping, no trailing newline. "<" in a SELOGIC value stays as it
+// is.
+func TestDifferenceEncode(t *testing.T) {
+	d, err := DecodeDifference(read(t, "valid/difference-1-3.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := "IN101 AND NOT <X>"
+	d.Changes[0].To = &v
+	b, err := d.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(b); strings.Contains(s, "\n") || strings.Contains(s, `\u003c`) || !strings.Contains(s, "<X>") {
+		t.Fatalf("not the compact form: %.200s", s)
+	}
+	if got, err := encodeCompact(d); err != nil || string(got) != string(b) {
+		t.Fatal("Encode is not encodeCompact")
+	}
+}

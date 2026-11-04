@@ -79,7 +79,10 @@ var ErrNotComparable = errors.New("config: snapshots are not comparable")
 
 // Compare decodes two stored snapshots, from and to, and returns their
 // Difference. It takes the stored bytes, not the decoded snapshots, so that
-// the digests it records are always over the bytes as stored.
+// the digests it records are always over the bytes as stored. When the
+// difference is valid but over MaxDifferenceBytes, Compare returns it with an
+// error wrapping ErrTooLarge (0.4): the change is real, and the caller can
+// still name it (ChangesDigest), but it cannot be stored as one record.
 func Compare(from, to []byte) (Difference, error) {
 	a, err := DecodeSnapshot(from)
 	if err != nil {
@@ -144,6 +147,14 @@ func values(s Section) map[string]string {
 		m[st.Name] = st.Value
 	}
 	return m
+}
+
+// Encode is the difference's one stored form, as Snapshot.Encode is the
+// snapshot's: compact UTF-8 JSON in the order of the struct, with no HTML
+// escaping and no trailing newline (0.4). MaxDifferenceBytes bounds its
+// length, and Digest over these bytes is the difference_digest C8 records.
+func (d Difference) Encode() ([]byte, error) {
+	return encodeCompact(d)
 }
 
 // DecodeDifference parses and validates a difference, with DecodeSnapshot's
@@ -275,5 +286,21 @@ func (d Difference) Validate() error {
 		}
 		prev, prevName = key, ch.Name
 	}
-	return c.err("difference")
+	if err := c.err("difference"); err != nil {
+		return err
+	}
+	return d.checkSize()
+}
+
+// checkSize holds a difference that is otherwise valid to MaxDifferenceBytes
+// (0.4).
+func (d Difference) checkSize() error {
+	b, err := d.Encode()
+	if err != nil {
+		return fmt.Errorf("config: difference: %w", err)
+	}
+	if len(b) > MaxDifferenceBytes {
+		return fmt.Errorf("config: difference: %d bytes encoded, more than %d: %w", len(b), MaxDifferenceBytes, ErrTooLarge)
+	}
+	return nil
 }

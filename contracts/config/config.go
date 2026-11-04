@@ -17,9 +17,9 @@ import (
 )
 
 // Contract is this package's identifier.
-const Contract = "otsec.config/0.3"
+const Contract = "otsec.config/0.4"
 
-var self = version.ID{Name: "config", Major: 0, Minor: 3}
+var self = version.ID{Name: "config", Major: 0, Minor: 4}
 
 // Kinds of document. A document's kind says which of the two it is, so one
 // reader can tell them apart.
@@ -281,11 +281,18 @@ const (
 	// settings: the header, the transcript reference and the 24 sections'
 	// own fields. B5 measured 5.3 KB for the golden snapshot.
 	SnapshotFixedMax = 16 << 10
+	// MaxDifferenceBytes bounds a difference's Encode output (0.4): a
+	// difference is stored alone, with no capture, so it may use the record
+	// cap less the headroom. A difference names both values of every changed
+	// setting, so it can be more than twice the size of its snapshots, and
+	// the largest the SEL-751's settings sheets allow does not fit
+	// (docs/phase4/C2-c9-0.4.md).
+	MaxDifferenceBytes = RecordCap - RecordHeadroom
 )
 
 // ErrTooLarge is wrapped by every refusal for size, so a caller can tell a
 // read that is too big for a snapshot from one that is malformed.
-var ErrTooLarge = errors.New("a snapshot is bounded in settings and bytes")
+var ErrTooLarge = errors.New("a snapshot or difference is bounded in size")
 
 // Encode is the snapshot's one stored form: compact UTF-8 JSON in the order
 // of the struct, with no HTML escaping and no trailing newline. MaxSnapshotBytes
