@@ -296,6 +296,10 @@ func (s *Scheduler) writeConfigRecord(ctx context.Context, rep Report, col Colle
 	return s.appendConfigRecord(ctx, s.configRecord(col.AssetID, rep.RequestID, action, outcome, reason, c))
 }
 
+// appendFault is a test seam (C6 on #406), nil in a node: an error from it
+// fails appendConfigRecord before the append.
+var appendFault func() error
+
 // appendConfigRecord validates and commits one C8 record and returns its
 // seq in the audit stream. AppendBatch, so an error is never a record that
 // committed anyway (C4 on #384).
@@ -306,6 +310,11 @@ func (s *Scheduler) appendConfigRecord(ctx context.Context, rec *audit.Record) (
 	}
 	if _, err := audit.ValidatePending(b); err != nil {
 		return 0, err
+	}
+	if appendFault != nil {
+		if err := appendFault(); err != nil {
+			return 0, err
+		}
 	}
 	log := s.rt.Log(AuditStream)
 	if log == nil {

@@ -97,18 +97,21 @@ var (
 )
 
 // relayKinds are the kinds this node relays. The credential kinds are the
-// collector's whole operation. The two node kinds (since C7 0.5) are the
+// collector's whole operation. The node kinds (C7 0.5 and 0.6) are the
 // node's too: after the collector accepts one, the node does its part, from
 // the payload it sent (admin_actions.go).
 var relayKinds = map[authz.RequestKind]bool{
 	authz.KindCredentialInstall: true, authz.KindCredentialRevoke: true, authz.KindCredentialClearSusp: true,
 	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
+	authz.KindNodeChangeApproval: true, authz.KindNodeBaselineAck: true,
 }
 
 // nodeActKinds are the relayed kinds whose node part follows the
-// acceptance.
+// acceptance: the 0.5 node kinds, and since C7 0.6 the two configuration
+// kinds (admin_config.go).
 var nodeActKinds = map[authz.RequestKind]bool{
 	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
+	authz.KindNodeChangeApproval: true, authz.KindNodeBaselineAck: true,
 }
 
 // adminRequestFile is an admin-request file as the client writes it.

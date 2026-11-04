@@ -83,6 +83,9 @@ type Scheduler struct {
 	quar      map[string]*quarantineEntry // manifest SHA-256: a recorded export (quarantine.go)
 	quarDone  map[string]bool             // manifest SHA-256: its range stores nothing now
 	relayed   map[string]relayEntry       // request ID: the collector's decision on a relayed admin request (adminrelay.go)
+	// configParts are the outcomes of the configuration records the node
+	// wrote this run, by payload SHA-256, beside the chain's (admin_config.go).
+	configParts map[string]audit.Outcome
 	// chain is the audit chain as the configuration-read writer needs it
 	// (configchain.go), nil until the first configuration read.
 	chain *configChain
@@ -110,7 +113,8 @@ type Scheduler struct {
 func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, error) {
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
-		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{}}
+		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{},
+		configParts: map[string]audit.Outcome{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown

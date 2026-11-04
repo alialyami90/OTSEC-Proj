@@ -455,7 +455,7 @@ func TestConfigReadFailedRun(t *testing.T) {
 // change; with none in the epoch, the reset that began it does; a reset
 // also ends the epoch's runs and approvals.
 func TestConfigChainUnchanged(t *testing.T) {
-	ch := &configChain{runs: map[assetOp][]chainRun{}, approvals: map[string][]*audit.Record{}, assets: map[string]*chainAsset{}}
+	ch := newChain(nil)
 	run := func(seq uint64, op, at string) *audit.Record {
 		return &audit.Record{Action: audit.ActionCollectorRequest, Outcome: audit.OutcomeAllowed, CollectorSeq: seq, OperationID: op,
 			Target: &audit.Target{AssetID: relayID}, Time: audit.Time{UTC: at}}

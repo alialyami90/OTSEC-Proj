@@ -451,29 +451,11 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 	var added, replaced, released, failed int
 	for _, spec := range d.spec.Streams {
 		assetID := strings.TrimPrefix(string(spec.ID), "config/")
-		have, err := cdb.Held(ctx, spec.ID)
+		p, err := r.planStream(ctx, cdb, spec.ID, folded[assetID])
 		if err != nil {
 			fail(err)
 			continue
 		}
-		var wants []wantHold
-		var also map[string][]wantHold
-		if a := folded[assetID]; a != nil {
-			wants, also = a.wantsAll()
-		}
-		if len(wants) == 0 && len(have) == 0 {
-			continue
-		}
-		digests := map[string]bool{}
-		for _, w := range wants {
-			digests[w.digest] = true
-		}
-		found, err := locateAll(ctx, cdb, spec.ID, digests)
-		if err != nil {
-			fail(err)
-			continue
-		}
-		p := planHolds(r.cfg.NodeID, wants, also, found, have)
 		for _, w := range p.missing {
 			r.opt.Status.Raise(assetID, AlarmBaselineNotStored, fmt.Sprintf("%s (%s) is not in stream %s, so nothing holds it; the stream's other holds are kept", w.why, w.digest, spec.ID))
 		}
@@ -507,6 +489,32 @@ func (r *Runtime) reconcileHolds(ctx context.Context) {
 		r.audit(ctx, audit.ActionStorageAlarm, audit.OutcomeWarning, "holds_reconciled",
 			fmt.Sprintf("configuration holds corrected at start: %d added, %d reason corrected, %d released, %d not done; each is a %s alarm", added, replaced, released, failed, c5.AlarmHoldsReconciled))
 	}
+}
+
+// planStream is planHolds for one configuration stream, given what the C8
+// records say of its asset (nil for nothing).
+func (r *Runtime) planStream(ctx context.Context, cdb *store.DB, stream c5.StreamID, a *assetHolds) (holdPlan, error) {
+	have, err := cdb.Held(ctx, stream)
+	if err != nil {
+		return holdPlan{}, err
+	}
+	var wants []wantHold
+	var also map[string][]wantHold
+	if a != nil {
+		wants, also = a.wantsAll()
+	}
+	if len(wants) == 0 && len(have) == 0 {
+		return holdPlan{}, nil
+	}
+	digests := map[string]bool{}
+	for _, w := range wants {
+		digests[w.digest] = true
+	}
+	found, err := locateAll(ctx, cdb, stream, digests)
+	if err != nil {
+		return holdPlan{}, err
+	}
+	return planHolds(r.cfg.NodeID, wants, also, found, have), nil
 }
 
 // reconciled raises the alarm for one correction, or the alarm that it
