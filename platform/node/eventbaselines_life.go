@@ -508,7 +508,10 @@ func (l *eventLife) finish(a *lifeAsset, at time.Time) {
 		l.raise(a, AlarmEventBaselineNotRecorded, fmt.Sprintf("the finished baseline is not stored: configuration database %s", l.rt.Mode(ConfigDB)))
 		return
 	}
-	if _, err := log.Append(l.ctx, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: res.Bytes}); err != nil {
+	// AppendBatch, not Append: its error means nothing was committed. An
+	// Append whose context ends can still commit, and the retry at the next
+	// watermark would then store a second baseline (C6 on #384).
+	if _, err := log.AppendBatch(l.ctx, []c5.Record{{Stream: stream, Class: c5.ClassConfiguration, Event: res.Bytes}}); err != nil {
 		l.raise(a, AlarmEventBaselineNotRecorded, "the finished baseline is not stored: "+err.Error())
 		return
 	}
@@ -553,7 +556,9 @@ func (l *eventLife) record(a *lifeAsset) error {
 	if log == nil || !mode.AcceptsEvents() {
 		return fmt.Errorf("config.baseline_recorded not written: audit database %s", l.rt.Mode(AuditDB))
 	}
-	if _, err := log.Append(l.ctx, c5.Record{Stream: AuditStream, Class: c5.ClassAudit, Event: b}); err != nil {
+	// AppendBatch, as in finish: a recording retried after an Append that
+	// committed anyway would repeat its digest, which breaks the chain.
+	if _, err := log.AppendBatch(l.ctx, []c5.Record{{Stream: AuditStream, Class: c5.ClassAudit, Event: b}}); err != nil {
 		return fmt.Errorf("config.baseline_recorded not written: %w", err)
 	}
 	a.unrecorded = false

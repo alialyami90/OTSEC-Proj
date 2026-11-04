@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -773,5 +774,31 @@ func TestLifePartialBaseline(t *testing.T) {
 	}
 	if !hasAlarm(st, relayID, AlarmEventBaselinePartial) {
 		t.Fatal("no partial alarm")
+	}
+}
+
+// A store that refuses the finished baseline's append (here a context ended
+// before the commit was queued; a database at its quota takes the same
+// branch) keeps the learner, which finishes at the next watermark once the
+// store takes it, and only one baseline is stored (C6's M24 on #384).
+// Evidence class: simulated.
+func TestLifeKeepsTheLearnerWhenTheAppendFails(t *testing.T) {
+	c, dir := lifeNode(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	ctx, cancel := context.WithCancel(bg)
+	l, err := newEventLife(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	end := learnOnce(t, l, time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC))
+	if lr, _ := l.half(relayID); lr == nil || len(rawStream(t, r, ConfigStream(relayID))) != 0 || !hasAlarm(st, relayID, AlarmEventBaselineNotRecorded) {
+		t.Fatalf("learner %v after a refused append", lr)
+	}
+	l.ctx = bg
+	l.Tick(relayID, end.Add(time.Minute))
+	if lr, _ := l.half(relayID); lr != nil || len(rawStream(t, r, ConfigStream(relayID))) != 1 || len(recordedOf(t, r)) != 1 {
+		t.Fatalf("learner %v after the store took the baseline: %d stored, %d recorded", lr, len(rawStream(t, r, ConfigStream(relayID))), len(recordedOf(t, r)))
 	}
 }
