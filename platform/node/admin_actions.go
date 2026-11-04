@@ -179,6 +179,17 @@ func (s *Scheduler) applyAdminPart(ctx context.Context, f *adminFile) adminPart 
 			return adminPart{state: partPending, detail: why}
 		}
 		return adminPart{state: partDone}
+	case authz.KindNodeChangeApproval, authz.KindNodeBaselineAck:
+		// Bound to an install key as a clear is: a reinstall retires the
+		// acceptances of the old key, and its decision_seq is of the old
+		// epoch.
+		switch {
+		case open != "":
+			return s.notApplied(f, "the collector was reinstalled and the reset on install key "+open+" is not acknowledged yet; the request is bound to install key "+p.InstallKeyID)
+		case p.InstallKeyID != trusted:
+			return s.neverApplied(f, "accepted for install key "+p.InstallKeyID+", which is not the key the node trusts ("+keyOrNone(trusted)+"): a reinstall retired it. Sign the request again")
+		}
+		return s.applyConfigPart(ctx, f, e, &p)
 	}
 	return s.notApplied(f, "the node does no part of "+string(p.Kind))
 }
