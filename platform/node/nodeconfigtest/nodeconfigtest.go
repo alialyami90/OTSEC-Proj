@@ -6,6 +6,7 @@ package nodeconfigtest
 
 import (
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"runtime"
 	"strconv"
 
+	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/modules/security/seal"
 )
 
@@ -43,6 +46,8 @@ type Config struct {
 	AdminDir    string `json:"admin_dir,omitempty"`
 	// CollectorPublicDir holds install-key.json (WriteInstallKey).
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
+	// Register is the node's command register copy (WriteCommandRegister).
+	Register map[string]any `json:"register,omitempty"`
 }
 
 // EventBaseline is one event_baselines entry: an asset and a whole C10
@@ -324,3 +329,37 @@ func (c *Config) Bytes() []byte {
 
 // Write writes the file to path, readable by its owner only.
 func (c *Config) Write(path string) error { return os.WriteFile(path, c.Bytes(), 0o600) }
+
+// RegisterKeyID names the test register signing key. Its private key is
+// derived from a fixed test seed (RegisterKey); it signs nothing but test
+// fixtures.
+const RegisterKeyID = "release-test-1"
+
+// RegisterKey is the test register signing key.
+func RegisterKey() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("otsec test register signing key"))
+	return ed25519.NewKeyFromSeed(seed[:])
+}
+
+// WriteCommandRegister signs payload, a command register package's JSON, with the test
+// register key, writes the envelope to dir, and points the register section
+// at it with the payload pinned, the test key as the one trust anchor, and
+// register_version set to revision (D4-40 item 7).
+func (c *Config) WriteCommandRegister(dir string, payload []byte, revision uint64) error {
+	priv := RegisterKey()
+	b, err := json.Marshal(register.Envelope{Contract: register.ContractID, Algorithm: "ed25519", KeyID: RegisterKeyID,
+		Payload: payload, Signature: ed25519.Sign(priv, authz.RegisterSigningInput(payload))})
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "register-envelope.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(payload)
+	c.Register = map[string]any{"envelope": path, "payload_sha256": fmt.Sprintf("%x", sum),
+		"trust_anchors": []any{map[string]any{"key_id": RegisterKeyID,
+			"public_key": base64.StdEncoding.EncodeToString(priv.Public().(ed25519.PublicKey)), "status": "active"}}}
+	c.RegisterVersion = revision
+	return nil
+}

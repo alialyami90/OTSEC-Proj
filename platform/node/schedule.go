@@ -354,6 +354,11 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	if s.heldMissed(col.ID) {
 		return Report{Alarm: AlarmEvidenceNotStored} // writeMissed raised it
 	}
+	if col.ReadsConfiguration() && s.rt.commands == nil {
+		// No snapshot is built from a register the node was not
+		// commissioned with (D4-40 item 7); Start raised the alarm.
+		return Report{Alarm: AlarmRegisterRefused}
+	}
 	s.clearQuiet(col.AssetID)
 
 	rep := Report{RequestID: s.newID()}

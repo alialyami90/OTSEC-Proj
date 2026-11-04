@@ -66,6 +66,11 @@ type Config struct {
 	// credential design section 9; see "Node keys" in the README). With it,
 	// every TLS reference is a nodekey_ reference resolved from it.
 	KeyRegister string `json:"key_register,omitempty"`
+	// Register is the node's own copy of the signed command register
+	// (D4-40 item 7). Required when the schedule reads a configuration:
+	// the node renders the run's lines from it to build each C9 snapshot,
+	// and uses it for nothing else.
+	Register *RegisterCopy `json:"register,omitempty"`
 	// LabTLSFiles is the lab flag for private keys in files: the D2-12
 	// files in tls_dir, or, with key_register, the lab-files provider's
 	// keys in tls_dir. Without it tls_dir is refused.
@@ -369,6 +374,7 @@ func (c *Config) check() error {
 	case c.LabTLSFiles && c.TLSDir == "":
 		fail("lab_tls_files is set, so tls_dir is required")
 	}
+	c.checkRegister(fail)
 	if c.KeyRegister != "" && !filepath.IsAbs(c.KeyRegister) {
 		fail("key_register %q is not an absolute path", c.KeyRegister)
 	}
