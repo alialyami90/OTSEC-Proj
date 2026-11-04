@@ -77,8 +77,14 @@ const (
 //     another asset, a learner whose version or previous baseline is not the
 //     asset's next re-learn, or a detector whose baseline is not the
 //     acknowledged one.
-//   - refused: the store would not return it, or the half refused the
+//   - refused: the checkpoint was read in full and decodes, and the node's
+//     own check of its content refused it: the half would not take the
 //     snapshot it holds.
+//
+// A read that did not complete (the database not open or busy, or a read
+// error) is not a restore outcome and is not a reason for this record: the
+// node keeps the half unstarted, alarms, retries, and writes no record (C1
+// on #387).
 const (
 	ReasonCheckpointCorrupt  = "corrupt"
 	ReasonCheckpointVersion  = "version"
