@@ -171,30 +171,47 @@ func newEventFeed(c *Config, reader func(c5.StreamID) streamReader, now func() t
 	for _, e := range c.EventBaselines {
 		a := &feedAsset{id: e.AssetID}
 		f.assets[e.AssetID] = a
-		for _, s := range c.Schedule {
-			if s.AssetID == e.AssetID && serReadOperation(s.Operation) {
-				a.streams = append(a.streams, stream(SERStream(e.AssetID)), stream(HealthStream))
-				break
-			}
+		ids, err := c.feedStreams(e.AssetID)
+		if err != nil {
+			return nil, err
 		}
-		for _, l := range c.Listeners {
-			ap, err := netip.ParseAddrPort(l.Address)
-			if err != nil {
-				return nil, fmt.Errorf("listener %s: address %q: %w", l.ID, l.Address, err)
-			}
-			senders, err := receive.SendersFor(c.assets, l.Transport, int(ap.Port()))
-			if err != nil {
-				return nil, fmt.Errorf("listener %s: %w", l.ID, err)
-			}
-			for _, src := range senders {
-				if src.AssetID == e.AssetID {
-					a.streams = append(a.streams, stream(ListenerStream(l.ID)))
-					break
-				}
-			}
+		for _, id := range ids {
+			a.streams = append(a.streams, stream(id))
 		}
 	}
 	return f, nil
+}
+
+// feedStreams are the streams the feeder reads for an asset: its SER
+// stream and the health stream, when the schedule reads its SER, and the
+// stream of every listener that takes Syslog from one of its endpoints.
+// checkEventBaselines holds their number to eventbaseline.MaxStreams at
+// load, so a checkpoint of the asset can always name them all.
+func (c *Config) feedStreams(assetID string) ([]c5.StreamID, error) {
+	var out []c5.StreamID
+	for _, s := range c.Schedule {
+		if s.AssetID == assetID && serReadOperation(s.Operation) {
+			out = append(out, SERStream(assetID), HealthStream)
+			break
+		}
+	}
+	for _, l := range c.Listeners {
+		ap, err := netip.ParseAddrPort(l.Address)
+		if err != nil {
+			return nil, fmt.Errorf("listener %s: address %q: %w", l.ID, l.Address, err)
+		}
+		senders, err := receive.SendersFor(c.assets, l.Transport, int(ap.Port()))
+		if err != nil {
+			return nil, fmt.Errorf("listener %s: %w", l.ID, err)
+		}
+		for _, src := range senders {
+			if src.AssetID == assetID {
+				out = append(out, ListenerStream(l.ID))
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // Step reads what the streams hold, up to FeedBatch records each, and
