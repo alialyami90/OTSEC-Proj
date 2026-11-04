@@ -76,7 +76,18 @@ jobs:
         run: go test ./...
       - if: runner.os == 'Windows'
         shell: bash
-        run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
+        # MEASUREMENT ONLY, NOT FOR MERGE (C5, D4-44): where five
+        # platform/node tests spend their blocking time on Windows.
+        run: |
+          go test -c -o node.test ./platform/node
+          cd platform/node
+          ../../node.test -test.count=1 -test.v -test.trace=../../trace.out \
+            -test.run '^(TestAuditFullSendsNothing|TestConfigReadRefusedSnapshot|TestConfigReadApprovalWindowEnded|TestEventRunCrashBeforeAndAfterTheCursor|TestBadTLSReferenceStopsTheNode)$' \
+            | grep -E '^(--- |ok|PASS|FAIL)'
+          cd ../..
+          go tool trace -pprof=syscall trace.out > sys.pprof
+          go tool pprof -top -nodecount=40 sys.pprof
+          go tool pprof -top -cum -nodecount=80 -focus=otsec.local sys.pprof
       # The platform/node budget is 720 s on a green Windows run (D4-22,
       # D4-44). This prints the package's time and its ten slowest tests, and
       # warns when it is over the budget. It never fails the job.
