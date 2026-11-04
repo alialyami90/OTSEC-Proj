@@ -646,3 +646,7 @@ Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-ne
    - **The untagged binary.** A short-period case on the untagged binary covers the lifecycle and the event-driven rules, so the untagged binary is shown too.
    - **The record.** The exit report says which runs used the tagged build.
    - **Who builds it.** C6, by C1's authorization for `cmd/otsec` and `platform/node` limited to the tagged file and its hook, with C5 reviewing as owner and C3 for the trust boundary.
+5. **On C5's review of #380.**
+   - **The seam.** C4 owns the per-asset learner and detector state. Slice 1c snapshots and restores through C4's interface and holds no copy of its own. C4 and C5 agree that seam before either side builds it.
+   - **The clock.** The test clock drives everything that waits, not only `Now`: the scheduler's timer, the service tickers and any deadline the GT-INJ series crosses.
+   - **C5's order.** First the C5 0.7 store, then the configuration-read writer with the C8 records, alarm and fold. Slice 1c follows, then the node side of the signed kinds, and rule 3 last.
