@@ -1342,7 +1342,7 @@ func TestLifeRestartBeforeTheRecordKeepsTheBytes(t *testing.T) {
 	s := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Second) }
 	// Ten rows 400 s apart meet both minima at 3600 s, the tenth row.
 	feed := func(l *eventLife) {
-		lifeSeq = 0
+		lifeSeq = 0 // the rows' bytes carry it, so each run feeds the same rows
 		for i := range 10 {
 			l.Observe(relayID, lifeSER("IN101", "Asserted", s(i*400)), time.Time{})
 		}
