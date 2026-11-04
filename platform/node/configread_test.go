@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -1062,5 +1063,26 @@ func TestConfigChainPrunedOpenChange(t *testing.T) {
 		if code == c5.HoldUnapprovedDifference {
 			t.Errorf("record %d still held as %s after the restore", seq, code)
 		}
+	}
+}
+
+// When the store's holds cannot be read during a pruned fold, a change in
+// the view stays open against the baseline its record names, so its alarm
+// is not dropped (C6 on #390, N7).
+func TestConfigChainPrunedHoldsUnreadable(t *testing.T) {
+	n := newCfgNode(t)
+	base := n.snapshotOf("ok")
+	n.read("ok")
+	ack := n.ack(base, "")
+	n.read("ok-all-present")
+	n.pruneAudit(ack)
+	ch := newChain(func(context.Context, string, c5.Seq) (heldConfig, error) {
+		return heldConfig{}, errors.New("holds not readable")
+	})
+	if err := ch.sync(bg, n.r.Store(AuditStream)); err != nil {
+		t.Fatal(err)
+	}
+	if a := ch.assets[relayID]; a == nil || len(a.open) != 1 || !a.alarmed || a.baseline != base {
+		t.Fatalf("fold %+v, want one open change against %s", a, base)
 	}
 }
