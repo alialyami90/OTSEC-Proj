@@ -126,6 +126,18 @@ join, one blank line; the SHO forms Table 7.67 lists that are not modelled
 here (SHO L n, SHO P n other than 1, SHO R, SHO F, SHO I, SHO M, SHO E m,
 SHO DNP m) and an n outside the table's range get the placeholder, as does
 SHO n s.
+
+SYNTHESIZED configuration run (switch config_run, off by default; V-M2): the
+SHO forms of the register's sel.config.read_all that the manual prints no
+example of are answered so that a whole run completes on the simulator.
+SHO L n (n = 1 to 4), SHO P F, SHO R and SHO F print a placeholder class,
+"Class <c>" then two invented settings, as the C2 configuration goldens do
+(contracts/adapter/testdata/config); the forms a relay may lack (SHO P 2 to
+4, SHO M, SHO I, SHO E m, SHO DNP m) answer "Invalid Command", as the
+adapter reads an absent form (H-13: how a real relay answers is untested).
+Every line but a password is echoed, then CRLF, before its reply, as in
+those goldens (where a section's span starts right after the echo and STX).
+None of it is device evidence.
 """
 
 import datetime
@@ -422,13 +434,14 @@ class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
                  fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None,
-                 date_f="MDY", settings_file=None, sho_layout="figure", sho_fault=None):
+                 date_f="MDY", settings_file=None, sho_layout="figure", sho_fault=None, config_run=False):
         if date_f not in DATE_FORMATS:
             raise ValueError(f"date_f {date_f!r}: want one of {DATE_FORMATS}")
         if sho_layout not in ("figure", "one-per-line") or sho_fault not in (None, "hang", "duplicate"):
             raise ValueError(f"sho_layout {sho_layout!r}, sho_fault {sho_fault!r}")
         self.date_f = date_f
         self.settings_file, self.sho_layout, self.sho_fault = settings_file, sho_layout, sho_fault
+        self.config_run = config_run
         with open(os.path.join(DOC, "sho-group-fig-7-43.txt"), encoding="utf-8") as f:
             self.group = Printed(f.read().rstrip("\n"))
         self.password = password          # None models "Level 1 password disabled"
@@ -593,6 +606,7 @@ class SEL751DocResponder:
     def handle(self, line):
         inherited, self.inherited = self.inherited, False
         start_level, prompt_inherited = self.level, inherited and self.awaiting is not None
+        echo = self.config_run and self.awaiting is None  # never a password
         reply = self._handle(line)
         if inherited:
             what = ("its first line was read as a password at a 'Password: ?' prompt"
@@ -604,6 +618,8 @@ class SEL751DocResponder:
             reply.effects = list(reply.effects) + [self._exposure()]
         if self.stx_etx and not getattr(reply, "unframed", False):
             reply.out = self._frame(reply.out)
+        if echo:
+            reply.out = line.rstrip(b"\r\n") + CRLF + reply.out
         return reply
 
     def _frame(self, out):
@@ -686,6 +702,13 @@ class SEL751DocResponder:
                 reply.unframed = True
                 return reply
             return Reply(out + self._prompt(), notes=[note])
+        if self.config_run:
+            placeholder = re.fullmatch(r"SHO (?:L ([1-4])|(P F)|(R)|(F))", text)
+            if placeholder:
+                c = "L" + placeholder.group(1) if placeholder.group(1) else "".join(g for g in placeholder.groups()[1:] if g).replace(" ", "")
+                return Reply(CRLF + f"Class {c}\r\n\r\nS{c}A := 10  S{c}B := VALUE {c}\r\nS{c}D := N\r\n".encode() + self._prompt())
+            if re.fullmatch(r"SHO (?:P [2-4]|M|I|E [1-3]|DNP [1-3])", text):
+                return Reply(CRLF + b"Invalid Command" + self._prompt())
         if text == "SER":
             if self.ser is not None and self.growth is not None:
                 self.ser = grown_ser(self.growth.read())

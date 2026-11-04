@@ -430,6 +430,27 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-022 — 2026-11-04 — V-M2 passes on the real binaries for all 21 changes of the GT-INJ configuration series
+
+- **What ran.** `tests/integration/slice/test_slice_config_changes_e2e.py` on main `691e8f4`, Linux. Each change of `tests/integration/gt_inj/config.json` runs on its own node and simulator, with the node and the collector both on the stepped test clock (D4-40). The simulator answers the configuration run's SHO forms that the manual does not print with SYNTHESIZED placeholders (`--profile-config-run`).
+- **Result.** 147 of 147 checks pass (7 per change), in about 3.5 min.
+  - An alarm (`config-unapproved-change` and an `unapproved_change` record) is raised at R1 exactly for the 15 changes whose `expect.alarm` is true. That covers no approval, another device, a window that has ended, a backdated approval and a non-approver. None is raised at Rm.
+  - The 3 approved changes raise none. Each R1 record links the approval's seq, which comes before it in the audit chain.
+  - The 3 non-approver approvals are refused, and each refusal is recorded as a `collector.request` denial naming the approval file's digest.
+  - The 3 backdated approvals are accepted but come after R1 in the chain, so they silence nothing. Prior means chain order.
+  - Both snapshots and the difference are stored, and the difference's changes equal `expect_changes`.
+  - **The non-semantic changes, as D4-46 reads the oracle.** All three reads give `no_difference` with no change held, and there is no difference record. Of the snapshot sections, only the four group sections' hashes differ. The R1 snapshot is checked while its read is retained, because D4-20 rule 3 will remove it once `config.reads_removed` is built.
+  - `slicehelper verify-audit` verifies each audit chain with `audit.VerifyChain` and `audit.VerifyConfig`. It fails the chain when the approval record is deleted or edited.
+- **The checks can fail.** Four product mutants in `platform/node/configread.go` were run on six changes (cfg-01, 03, 05, 08, 11 and 13); the unmutated run passed. All four were killed:
+  - Any approval covers: killed by the alarm, link and audit-chain checks on cfg-01.
+  - No approval links: killed on cfg-05.
+  - The difference is not stored: killed on five changes.
+  - An approved change still alarms: killed on cfg-05.
+
+  The simulator's configuration run has its own self-test (`test_sel751_settings.py`, `ConfigRun`), which killed 5 of 5 mutants.
+- **Limits.** The device side is the simulator, and the SHO L, P F, R and F replies are invented. Retrieval of a real change made with the vendor tool remains hardware-dependent (R3.1, R3.5). The approvals are test-signed with test keys.
+- **Evidence class:** `simulated`.
+
 ### F-021 — 2026-11-04 — A `collection.missed` committed late gets a gap start that depends on the feeder's cadence, and can move a baseline's end past events already refused
 
 - **What ran.** C6's review of #414 (learner 0.2, D4-45) at `8c9899b`, with the probe `TestC6ProbeLateGapStartMovesTheEnd` (`/mnt/project-files/c6/probes/c6probe414_test.go`).

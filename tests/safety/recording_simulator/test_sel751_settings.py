@@ -248,5 +248,34 @@ class Recording(unittest.TestCase):
         self.assertEqual(second["51AP"], "7.25")
 
 
+class ConfigRun(unittest.TestCase):
+    """The SYNTHESIZED configuration run (config_run; V-M2)."""
+
+    def test_off_by_default_the_extra_forms_are_not_modelled(self):
+        r = responder()
+        for line in (b"SHO L 1", b"SHO P F", b"SHO P 2", b"SHO M"):
+            self.assertEqual(r.handle(line).out, b"\r\n" + profile_sel751.UNMODELLED + b"\r\n=>", line)
+        self.assertEqual(r.handle(b"SHO 1").out, FIGURE_BYTES)
+
+    def test_each_form_is_echoed_then_answered(self):
+        r = responder(config_run=True)
+        for line, c in ((b"SHO L 1", "L1"), (b"SHO L 4", "L4"), (b"SHO P F", "PF"), (b"SHO R", "R"), (b"SHO F", "F")):
+            want = f"\r\n\r\nClass {c}\r\n\r\nS{c}A := 10  S{c}B := VALUE {c}\r\nS{c}D := N\r\n\r\n=>".encode()
+            self.assertEqual(r.handle(line).out, line + want)
+        for line in (b"SHO P 2", b"SHO P 4", b"SHO M", b"SHO I", b"SHO E 3", b"SHO DNP 1"):
+            self.assertEqual(r.handle(line).out, line + b"\r\n\r\nInvalid Command\r\n=>")
+        # The modelled forms keep their replies, after the echo; a form
+        # outside the table's range is still not modelled.
+        self.assertEqual(r.handle(b"SHO 1").out, b"SHO 1\r\n" + FIGURE_BYTES)
+        self.assertEqual(r.handle(b"SHO L 5").out, b"SHO L 5\r\n\r\n" + profile_sel751.UNMODELLED + b"\r\n=>")
+
+    def test_a_password_is_never_echoed(self):
+        r = profile_sel751.SEL751DocResponder(None, password=PASSWORD, config_run=True)
+        self.assertTrue(r.handle(b"ACC").out.startswith(b"ACC\r\n"))
+        reply = r.handle(PASSWORD)
+        self.assertTrue(reply.secret and reply.accepted)
+        self.assertNotIn(PASSWORD, reply.out)
+
+
 if __name__ == "__main__":
     unittest.main()
