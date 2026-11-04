@@ -131,7 +131,7 @@ SYNTHESIZED configuration run (switch config_run, off by default; V-M2): the
 SHO forms of the register's sel.config.read_all that the manual prints no
 example of are answered so that a whole run completes on the simulator.
 SHO L n (n = 1 to 4), SHO P F, SHO R and SHO F print a placeholder class,
-"Class <c>" then two invented settings, as the C2 configuration goldens do
+"Class <c>" then three invented settings, as the C2 configuration goldens do
 (contracts/adapter/testdata/config); the forms a relay may lack (SHO P 2 to
 4, SHO M, SHO I, SHO E m, SHO DNP m) answer "Invalid Command", as the
 adapter reads an absent form (H-13: how a real relay answers is untested).

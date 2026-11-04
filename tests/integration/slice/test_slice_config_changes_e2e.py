@@ -68,12 +68,11 @@ class _Run:
 
     def __init__(self, d, change):
         self.d, self.change = d, change
-        t0 = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0)
-        self.clock = Clock(os.path.join(d, "clock"), t0)
+        self.clock_path = os.path.join(d, "clock")
         self.settings = os.path.join(d, "settings.json")
         s = self.s = Slice(d)
         s.node_tags = s.collector_tags = ("otsec_testclock",)
-        s.node_args = s.collector_args = ("-test-clock", self.clock.path)
+        s.node_args = s.collector_args = ("-test-clock", self.clock_path)
 
     def jump(self, at):
         """The clock to at in one step."""
@@ -138,13 +137,24 @@ class _Run:
     def run(self):
         ch, tl, s = self.change, _series()["timeline"], self.s
         s.build()
+        # The clock starts here, after the build and once a worker has taken
+        # the run, never when the run was queued: the credential install is
+        # signed at wall-clock time, and the collector refuses an issued_at
+        # more than MaxAdminClockSkew ahead of its clock (CI on #420).
+        t0 = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0)
+        self.clock = Clock(self.clock_path, t0)
         starting = threading.Event()
         starting.set()
 
-        def tick():  # the node's tickers wait on the clock while it starts
+        def tick():
+            # The node's tickers wait on the clock while it starts. It moves
+            # at the wall clock's rate, so it stays up to a minute ahead of
+            # the wall clock: the credential install's issued_at is not in
+            # its future, and its 10-minute expiry is not passed however
+            # long a slow runner takes to start.
             while starting.is_set():
                 self.clock.set(self.clock.at + SEC)
-                time.sleep(0.1)
+                time.sleep(1.0)
 
         stepper = threading.Thread(target=tick, daemon=True)
         stepper.start()
@@ -189,6 +199,9 @@ class _Run:
         out["audit_raw"] = [bytes(e) if not isinstance(e, str) else e.encode() for (e,) in _query(
             s.layout["store_dir"], "SELECT event FROM events WHERE stream = ? ORDER BY seq", "audit")]
         out["slicehelper"] = s.exe("slicehelper")
+        out["sim"] = [harness.read_log(log) for log in s.sim_logs]
+        with open(s.layout["node_config"], encoding="utf-8") as f:
+            out["node_config"] = json.load(f)
         return out
 
 
@@ -282,8 +295,11 @@ def test_an_approval_is_refused_exactly_when_expected_and_recorded(runs, cid):
     if not a:
         return
     sha = a["request_id"].removeprefix("admin-")
+    # Refused at the authority check, for the operator's key, and not at
+    # the key, the window or any other check (C3 on #420).
     denied = [r for r in o["audit"] if r.get("action") == "collector.request" and r.get("outcome") == "denied"
-              and "node.change_approval" in r.get("detail", "") and f"file sha256 {sha}" in r.get("detail", "")]
+              and r.get("reason_code") == "admin_unverified" and "node.change_approval" in r.get("detail", "")
+              and "check authority" in r.get("detail", "") and f"file sha256 {sha}" in r.get("detail", "")]
     if ch["expect"]["approval_refused"]:
         assert a["state"] == "refused" and len(denied) == 1 and _approved(o) is None, (a, denied)
     else:
@@ -348,8 +364,90 @@ def test_the_audit_chain_verifies_and_detects_a_deleted_or_edited_approval(runs,
     if not i:
         return
     i = i[0]
+    assert i < len(raw) - 1, "the approval is the last record, so deleting it leaves no link to break"
     deleted = _verify(o, raw[:i] + raw[i + 1:])
     edited = _verify(o, raw[:i] + [raw[i].replace(b"V-M2 test change", b"V-M2 test chanGe")] + raw[i + 1:])
     assert raw[i] != raw[i].replace(b"V-M2 test change", b"V-M2 test chanGe")
     assert deleted.returncode != 0 and "chain broken" in deleted.stderr, deleted.stderr
     assert edited.returncode != 0 and "chain broken" in edited.stderr, edited.stderr
+
+
+def _register():
+    with open(os.path.join(harness.REPO, "contracts", "register", "testdata", "sel-751.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+@pytest.mark.parametrize("cid", IDS)
+def test_v_m3_the_configuration_is_read_by_sho_over_telnet_only(runs, cid):
+    # V-M3 (R3.7) for the SEL-751: rung 3, SHO over Telnet, is its one built
+    # rung (D4-40 point 3). Every session the device saw is the signed
+    # register's sel.config.read_all, one per read, over the asset's only
+    # endpoint, a Telnet one; nothing else reached the device.
+    o = _of(runs, cid)
+    reg = _register()
+    line = {op["id"]: op["line"] for op in reg["operations"]}
+    run = [line[st] for st in next(r for r in reg["runs"] if r["id"] == "sel.config.read_all")["steps"]]
+    assert len(run) == 24, run
+    sessions, other = {}, []
+    for k, log in enumerate(o["sim"]):
+        for r in log:
+            if r["event"] == "line" and r["text"].strip():
+                sessions.setdefault((k, r["session"]), []).append(r["text"])
+            elif r["event"] in ("exec", "break", "device_effect"):
+                other.append(r)
+    assert not other, other
+    assert len(sessions) == len(_results(o)) + 1, sorted(sessions)  # R0, Rm, R1 and one more
+    for key, got in sessions.items():
+        assert got == ["QUI", "ID", "ACC", *run, "QUI"], (key, got)
+    (asset,) = [a for a in o["node_config"]["assets"] if a["asset_id"] == o["layout"]["asset_id"]]
+    assert [e["transport"] for e in asset["endpoints"]] == ["telnet"], asset["endpoints"]
+
+
+def test_v_m3_the_node_binary_refuses_a_chosen_method_at_start(tmp_path):
+    # V-M3's start case on the binary (D4-40 point 3): a node configuration
+    # cannot choose another configuration method. The desk cases are
+    # tests/safety/rung; this runs the untagged otsec node on each.
+    need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
+    need(os.name != "nt" and not SERVICE, "a Linux runner's")
+    s = Slice(str(tmp_path))
+    s.build()
+    out = subprocess.run([s.exe("slicehelper"), "setup", "-root", s.root, "-sim-port", "1", "-relp-port", "1",
+                          "-repo", harness.REPO, "-config-every", str(EVERY)], check=True, capture_output=True)
+    path = json.loads(out.stdout)["node_config"]
+    with open(path, encoding="utf-8") as f:
+        base = json.load(f)
+
+    def start(m, name):
+        p = os.path.join(str(tmp_path), name + ".json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(m, f)
+        return subprocess.Popen([s.exe("otsec"), "node", "-config", p], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, errors="replace")
+
+    # The control: the configuration as written starts (it is still up
+    # after 3 s), so a refusal below is the case's own.
+    control = start(base, "control")
+    try:
+        assert control.wait(3) is None
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        control.kill()
+        control.wait()
+    cases = []
+    for place in ("top level", "schedule entry", "endpoint"):
+        for field in ("method", "config_method", "rung"):
+            m = json.loads(json.dumps(base))
+            {"top level": m, "schedule entry": m["schedule"][0],
+             "endpoint": m["assets"][0]["endpoints"][0]}[place][field] = "ftp"
+            cases.append((f"{place} {field}", m, f'"{field}"'))
+    m = json.loads(json.dumps(base))
+    m["assets"][0]["endpoints"][0].update(transport="ftp", port=21)
+    cases.append(("endpoint transport ftp", m, 'transport "ftp"'))
+    for k, (what, m, want) in enumerate(cases):
+        p = start(m, f"case{k}")
+        try:
+            text, _ = p.communicate(timeout=30)
+        finally:
+            p.kill()
+        assert p.returncode != 0 and want in text, (what, p.returncode, text)

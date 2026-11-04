@@ -269,6 +269,13 @@ class ConfigRun(unittest.TestCase):
         self.assertEqual(r.handle(b"SHO 1").out, b"SHO 1\r\n" + FIGURE_BYTES)
         self.assertEqual(r.handle(b"SHO L 5").out, b"SHO L 5\r\n\r\n" + profile_sel751.UNMODELLED + b"\r\n=>")
 
+    def test_framed_the_echo_comes_before_stx(self):
+        # The bytes the adapter reads in the slice, which runs framed (C2 on #420).
+        r = responder(config_run=True, stx_etx=True)
+        self.assertEqual(r.handle(b"SHO P 2").out, b"SHO P 2\r\n\x02Invalid Command\r\n\x03=>")
+        self.assertEqual(r.handle(b"SHO L 1").out,
+                         b"SHO L 1\r\n\x02Class L1\r\n\r\nSL1A := 10  SL1B := VALUE L1\r\nSL1D := N\r\n\r\n\x03=>")
+
     def test_a_password_is_never_echoed(self):
         r = profile_sel751.SEL751DocResponder(None, password=PASSWORD, config_run=True)
         self.assertTrue(r.handle(b"ACC").out.startswith(b"ACC\r\n"))

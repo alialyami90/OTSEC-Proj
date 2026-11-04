@@ -878,7 +878,7 @@ func configReads(nc *nodeconfigtest.Config, l *Layout, payload []byte, revision 
 	}
 	// Port 1 is never dialled: the record has no schedule.
 	nc.AddSEL751(otherAssetID, "127.0.0.1", 1, 60)
-	nc.Schedule = nc.Schedule[:len(nc.Schedule)-1]
+	nc.Schedule = slices.DeleteFunc(nc.Schedule, func(c nodeconfigtest.Collection) bool { return c.AssetID == otherAssetID })
 	setSerial(nc.Assets[len(nc.Assets)-1], otherSerial)
 	nc.Store.Quotas["configuration"] = 32 << 20
 	l.OtherAsset = otherAssetID
