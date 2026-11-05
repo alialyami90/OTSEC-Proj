@@ -17,7 +17,7 @@ Device contact stays where it is today. The node sends a signed invocation to th
 **The switches.** These are two top-level node config sections, and an absent section means the feature is disabled. This follows the pattern `event_baselines` set: no section, no work.
 
 - `asset` turns on the asset module's side of the node. It has no required fields at first. Its only field would be the per-family SNMP defaults if C3 0.4 needs any.
-- `applicability` turns on R9. Its fields are the advisory set's verification key (the public key C11 names, pinned here as the register's anchor is pinned), and the set's file name in `admin_dir`.
+- `applicability` turns on R9. Its one field is the list of advisory anchors (C11 section 1.6). They are a separate trust root, installed as the register's anchors are, at enrollment or by a signed release, and never by central policy.
 
 **What each one owns, and so what does not happen when it is off:**
 
@@ -84,29 +84,37 @@ The figures follow from C11's and C1 0.3's bounds once they exist. A configurati
 
 ## 3. Replacing the set atomically
 
-The administrator writes the signed set file to `admin_dir`. That is the locked, administrator-only directory admin requests already use (D2-12). The node reads it at most once per node tick, bounded by C11's size cap. A set takes one of three paths: refused, installed, or the same set.
+**The drop path.** The administrator writes the signed set file to `admin_dir`, under one fixed name, `advisory-set.json`. That is the locked, administrator-only directory the relay files already use (D2-12), with the same lock rules. The admin-request scanner reads only `admin-request-*` names, so it never reads or reports this file.
 
-**1. Refused.** The node refuses the set when any of these holds:
-- the signature fails against the pinned key, or the set is unsigned;
-- it does not decode strictly, or it is truncated;
-- its version is not above the set in use (an equal version that is not the same set, or an older one);
-- an entry has no source;
-- an entry is `test-only` and the node is a release build.
+The node reads the file at most once per node tick. It refuses anything over C11's envelope bound (twice `MaxSetPayload`) before parsing. A set takes one of three paths: refused, installed, or the same set.
 
-On refusal nothing is stored, and the set in use stays in use. The node writes the refusal to the audit chain (C3's C8 addition) with the file's SHA-256 and the reason. It also raises `advisory-set-refused` with the same reason, keyed by the file's hash, so a file left in place is reported once and not at every tick.
+**1. Refused.** The node runs C11's checks in C11's order (C3's draft on #437, section 1.5), and stops at the first failure:
+1. size and envelope (`malformed`);
+2. the key, against the advisory anchors pinned on this node (`unknown_key`, `revoked_key`);
+3. the signature (`bad_signature`);
+4. the payload and its `Validate` (`invalid`);
+5. the set ID (`wrong_set`);
+6. the order against the floor (`same_version_differs`, `older_version`);
+7. the purpose, where a release build refuses a `test` set (`test_set`).
+
+On refusal nothing is stored, and the set in use stays in use, untouched. The node writes `advisory.set_refused` to the audit chain (C3's C8 addition) with the reason code and the file's SHA-256. It also raises `advisory-set-refused`, keyed by the file's hash, so a file left in place is reported once and not at every tick.
 
 If the audit stream cannot take the record, the set is still not installed, and the alarm says the refusal was not recorded. Privileged changes fail closed, as audit does today.
 
-**2. Accepted.** The node appends the file's exact bytes as one configuration record on `advisory`. One commit is atomic: after a crash the record is either there whole or not at all. Then the node writes the audit record of the installation.
+**2. Accepted.** The node appends the envelope's exact bytes, signature included, as one configuration record on `advisory`. The set can then be verified again from the store alone. With `MaxSetPayload` at 1 MiB, the envelope's base64 payload is at most about 1.40 MB, which is within the 1.5 MiB record cap.
+
+One commit is atomic: after a crash the record is either there whole or not at all. Then the node writes `advisory.set_installed`.
 
 A set is in use only once its audit record is in the chain. At start, the node folds the chain. It writes any missing installation record for a stored set, and only then decides which set is in use. This is the order `config.baseline_recorded` already follows (D4-26). The cases split this way:
 - a crash before the commit leaves the file in `admin_dir`, and it is tried again;
 - a crash between the commit and the audit record is repaired at start;
 - a crash after both leaves only the evaluation to run, at the next pass.
 
-**3. The same set again** (same digest). Nothing is done, and nothing is raised.
+**3. The same set again** (the same version and payload SHA-256). Nothing is recorded, and nothing is raised.
 
-**The set in use** is the newest `advisory` record whose installation record is in the chain. Its version, date and digest go into every finding written under it, and into status (R9.3).
+**The set in use and the floor.** The set in use is the newest `advisory` record whose installation record is in the chain. C11's floor, (`version`, payload SHA-256), is that record's, and it is not stored anywhere else. It is derived at start from the store and the chain, so it survives a restart and cannot disagree with the set in use. A restart therefore cannot reopen an older set.
+
+The set's version, date and digest go into every finding written under it, and into status (R9.3).
 
 ## 4. Running the matcher
 
@@ -130,7 +138,9 @@ An SNMP poll is an ordinary schedule entry: an asset, one of C3 0.4's SNMP opera
 - **The register's operation limits** (C3 0.4): the named OIDs, the number of requests, `max-repetitions` for `GETBULK`, timeouts and the deadline. The adapter in the collector enforces them, so they bound each poll's load on the device. The node only passes the operation ID.
 - **Runs are serial.** The node runs its schedule from one goroutine, so it never polls two devices at once. The cost is head-of-line delay: an SNMP poll that times out holds the next run for up to its deadline. Status already shows each asset's last run time, so a lagging schedule is visible. If measured polls show this matters, a later change can bound it. This note does not propose one.
 
-No SNMPv1 or v2c entry is accepted without C3's approval record (V-M1 (d)). The node checks for it at load, from the audit chain, and the collector checks it again at run time. Without it, the entry is refused with the reason.
+No SNMPv1 or v2c entry runs without C3's approval record (V-M1 (d)). Under ADR-0002 the collector decides each run: it refuses with `legacy_snmp_unapproved` before the credential is resolved (C3's draft on #437, section 4). The node also checks the chain at load and at each fold, so an entry without a live approval shows in status as refused, and is not tried every interval.
+
+**The approval's lapse alarm is the node's.** C11's companion rule raises an alarm 14 days before an approval's `not_after`. The node already folds the audit chain and owns status and `platform/health`. It raises `legacy-snmp-approval-lapsing` 14 days before, once per approval, and `legacy-snmp-approval-lapsed` at the lapse. This follows the pattern of the node key expiry lines (`node_keys_expiring`). The collector only refuses at the lapse, as C3's draft says, and raises nothing ahead of time.
 
 ## 6. Health and status
 
@@ -152,6 +162,7 @@ No SNMPv1 or v2c entry is accepted without C3's approval record (V-M1 (d)). The 
 - **SNMP run failures** (V-M1 (c)): a refusal of a weaker USM level, a wrong user, wrong keys or a wrong engine ID shows as the run's code in `assets[<id>]`. It also raises the existing collection-failure alarm with that code. The codes are C2's to name, in C3 0.4.
 - **`advisory-set-refused`** (R9), as in section 3.
 - **`applicability-no-set`** (R9): R9 is on and no set is in use yet. It is raised once, not at every tick.
+- **`legacy-snmp-approval-lapsing`** and **`legacy-snmp-approval-lapsed`** (asset), as in section 5.
 - **`finding-changed`** (R9): a finding appeared or changed class, with the asset, the advisory and both classes. Its wording follows C12, and no field states exploitability (R9.2).
 
 ## What C5 0.8 would need
@@ -168,5 +179,5 @@ These are the inputs for a separate proposal, not changes made here:
 1. **C1: does "independently" allow `applicability` without `asset`?** I propose refusing that config, since R9 has no identity without the asset module. The other three combinations are each a supported configuration.
 2. **C3: where do the SNMPv3 USM keys live?** The brief's threat-model row says "the node key register". This design keeps them in the collector as C7 credentials, like the SEL-751 password, so the node never holds a device secret. If "node key register" means something else, this note changes.
 3. **C6 and C1: does V-M8's "same flows" count the RELP flow?** The R9-on run sends `finding-changed` and the set events to the upstream target, on a RELP flow the R9-off run also has, but with more packets on it. I read V-M8's "no flow the other lacks" and "same flows to every device address" as allowing that, because the upstream target is not a device. If it does not, R9's events would go to status only, and R9.1's report would need another path upstream.
-4. **C3: will C11 bound a set's size below `ConfigRecordBytes`?** A set has to be one record for the atomic replacement above. If a set can exceed 1.5 MiB, the replacement needs another design, and I would bring that back before any proposal.
+4. **C3: the envelope's bound.** Answered on #437: `MaxSetPayload` is 1 MiB, so the stored envelope is at most about 1.40 MB, within the 1.5 MiB record cap. C11's envelope bound, twice `MaxSetPayload`, is above the cap. The node refuses anything over the cap as well, which a valid set never reaches. I ask that C11 keep `MaxSetPayload` at or below 1 MiB while C5 stores the set as one record.
 5. **C2: are the SEL-751's identity attributes in C1 0.3 exactly the `Observations` the adapter already returns?** Today those are the FID, the CID and the serial number, on an `ok` or `partial` run (`modules/ied/sel751/run.go`). The model and the firmware version would come from the FID string. If C1 0.3 adds an attribute the run does not read today, R9 on the SEL-751 needs a register change, not only node work.
