@@ -121,7 +121,7 @@ It is the register's pattern (C3 and C7's `VerifyRegisterPackage`), so there is 
 | `MaxSetPayload` | 1 MiB (1,048,576 B) | The node stores the whole signed file as one configuration-class record on a node-level `advisory` stream (C5, #438), so the bound below must fit that record. |
 | `MaxEnvelopeBytes` | 1,399,128 B: the base64 length of `MaxSetPayload` (1,398,104 B) plus 1,024 B for the envelope's other fields and any whitespace | A file over it is `malformed` at step 1, whatever it holds. It is under the node's record cap `ConfigRecordBytes` (1,572,864 B, `platform/node/layout.go`, equal to C9's `RecordCap`) less C9's `RecordHeadroom` (65,536 B), which is 1,507,328 B. So **a set that passes step 1 always fits one record**, with 108,200 B to spare for C5's record framing. A contract test pins `MaxEnvelopeBytes` ≤ `config.RecordCap` − `config.RecordHeadroom`, as D4-25 pinned C9's `RecordsFit`. A contract imports only other contracts, and `TestConfigRecordBytesIsTheDerivedCap` already pins the node's cap to `RecordCap`. `MaxSetPayload` stays at 1 MiB or less while the set is one record (C5). |
 | `MaxEntries` | 2048 | |
-| Per entry | 16 sources, 64 products, 64 ranges and 256 versions per product, 32 preconditions, 32 mitigations, 64 values per item | Bounds the matcher's work and the hostile-input surface (TB10's rule applies to a file from a USB stick too). |
+| Per entry | 16 sources, 64 products, 64 ranges and 256 versions per product, 32 preconditions, 16 mitigations, 64 values per item | Bounds the matcher's work and the hostile-input surface (TB10's rule applies to a file from a USB stick too). |
 | Strings | `title` at most 256 bytes; `ref`, `key` and each value at most 128 bytes; `url` at most 512 bytes and `https` only | |
 
 These are proposals. C4 and C5 may ask for others, with a reason.
@@ -160,6 +160,25 @@ The floor is the in-use set's (`version`, payload SHA-256), derived at start fro
   - **One source of test keys (C6 on #437).** A scan of key files would miss a key built from a fixed seed in code (`ed25519.NewKeyFromSeed` over a constant, or a Python generator with a fixed seed), and that key is just as public. So every advisory test key comes from one helper, `advisorytest.Key(n)`, over a published list of seeds, and `TestKeyIDs` is generated from that list. GT-ADV's signer uses the same seeds.
   - **The contract test** checks that `TestKeyIDs` equals the helper's key IDs. It fails on any `NewKeyFromSeed`, `ed25519.GenerateKey` with a fixed reader, or private-key literal in a Go or Python file under the repository that also signs an advisory set (it names `AdvisorySigningInput` or the signer), other than the helper.
   - **What this cannot catch:** a key generated and committed outside the repository's conventions by someone set on it. That is the anchor's custody, HR-18: anchors arrive only at enrollment or by signed release, never by a configuration file edited at a site.
+
+### 1.7 Where the text was silent, and what the code does (P4-3-C3)
+
+The code follows 1.1 to 1.6 and 2.1. These points were not settled by the text, and the code settles them as follows, for C1 and the reviewers to confirm on the contract PR:
+
+- **`exact` ranges.** `exact` compares strings and has no order, so a range under it may only be the empty one, which covers every version. A range with an endpoint under `exact` makes the set `invalid`.
+- **`present` and `absent` take no `values`.** An item with those ops and values makes the set `invalid`, as for `control`.
+- **A `sel-fid` `versions` item is a full FID** in the form `SEL-<model>-R<nnn>-V<n>-Z<nnnnnn>-D<yyyymmdd>`, which every FID in the project's sources has.
+- **`vendor`, `product` and an `exact` version** are required and non-empty. An `exact` version is at most 128 bytes, the bound for a value.
+- **The refusal's fields.** `Refusal` carries `key_id` only once it is in its form, and `set_id` and `version` only after step 4, so `advisory.set_refused` never holds unchecked bytes from the file.
+- **An `snmpv3` credential has no access level** (`access_level` is empty). SNMP has none: the register names the OIDs, and the device's view bounds the user.
+- **The localized keys are the sealed secret**: the authentication key, then the 16-byte AES-128 key, 48 or 80 bytes. `MaxSealedLen` is 80, while a password stays at most `MaxSecretLen` (64). The seal's AAD also names the user, both protocols and the engine ID, so keys cannot be moved to another engine ID. Telnet and SSH keep their AAD unchanged.
+- **The sole-password attestation** is the field `usm.sole_device_attested`, which must be `true`.
+- **An `snmpv3` install needs a request stamped `otsec.authz/0.8` or later**, in the clear or admin-signed (D4-16's rule).
+
+C1 confirmed every point above on #446. C1 also adopted C6's proposal there, which tightens 1.3:
+
+- **Under `sel-fid`, `product` must match `^SEL-[0-9A-Z]+$`, and every `versions` FID must start with `product` followed by `-R`.** A set that breaks either rule is `invalid`. The matcher compares `product` with the device-read `model` exactly, so a typo would otherwise give every device `not-applicable` with no warning. C2 confirmed that the SEL-751 and SEL-2731M/2741M parses print `model` in this form.
+- **A `kind: attribute` key must be a C1 attribute name** (`asset.ValidAttributeName`: a known name or a vendor-prefixed one), as 1.3 says. `BFID` and `configVersion` are not C1 names, so they are refused by this rule (C4 on #446).
 
 ## 2. C7 0.8: SNMP credentials and the legacy SNMP approval
 

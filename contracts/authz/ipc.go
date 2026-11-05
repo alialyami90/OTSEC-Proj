@@ -55,6 +55,11 @@ var (
 var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince,
 	KindNodeChangeApproval: configKindsSince, KindNodeBaselineAck: configKindsSince}
 
+// snmpv3Since is the minor that added the snmpv3 transport and
+// CredentialRef.USM. A request stamped with an earlier minor cannot install
+// such a credential, in the clear or admin-signed.
+const snmpv3Since = 8
+
 // nodeKindsSince is the minor that added the node kinds, the repeat answer
 // and CollectorReply.Admin.
 const nodeKindsSince = 5
@@ -574,6 +579,9 @@ func (r *CollectorRequest) Validate() error {
 	got, _ := version.Parse(r.Contract)
 	if since, ok := kindSince[r.Kind]; ok && got.Minor < since {
 		return refuse(RefuseInvalid, "kind %q needs otsec.authz/0.%d or later", r.Kind, since)
+	}
+	if r.CredentialInstall != nil && r.CredentialInstall.Ref.Transport == TransportSNMPv3 && got.Minor < snmpv3Since {
+		return refuse(RefuseInvalid, "transport %s needs otsec.authz/0.%d or later", TransportSNMPv3, snmpv3Since)
 	}
 	if r.AdminSigned != nil {
 		// The envelope's contents are VerifyAdminRequest's to check, so

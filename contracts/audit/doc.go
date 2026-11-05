@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.10: the audit record every module
+// Package audit is contract C8, otsec.audit/0.11: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -397,6 +397,20 @@
 // set, and no other action carries the field. VerifyConfig is unchanged: it
 // reads the chain, not stored documents, and no chain rule names a
 // difference_digest.
+//
+// # Advisory sets (0.11)
+//
+// The node's record of the C11 advisory set (docs/phase4/C3-c11-advisory.md,
+// section 3; contracts/advisory). advisory.set_installed (succeeded) names the
+// set it installed by set_id, version, issued_at, payload SHA-256 and signing
+// key, and the version it replaced (previous_version, absent on a node's first
+// set). advisory.set_refused (denied, reason_code a C11 code) names the refused
+// file's SHA-256, and set_id, version and key_id only when C11's verifier had
+// checked them first. The actor is the node, and the node writes one refusal
+// per file hash. A set is in use only once its set_installed record is in the
+// chain. VerifyConfig is unchanged: these actions are outside the
+// configuration chain's rules. A 0.10 reader refuses these actions as unknown,
+// so readers are upgraded before a node writes one.
 //
 // # What it leaves out
 //

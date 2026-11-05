@@ -20,7 +20,7 @@ import (
 )
 
 // ContractID is the identifier every audit record carries.
-const ContractID = "otsec.audit/0.10"
+const ContractID = "otsec.audit/0.11"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -155,6 +155,7 @@ func init() {
 		ActionConfigChangeApproved, ActionConfigChangeDetected, ActionConfigBaselineAcknowledge, ActionConfigBaselineRestored,
 		ActionConfigReadCompared, ActionConfigReadsRemoved, ActionConfigBaselineRecorded,
 		ActionConfigCheckpointNotRestored,
+		ActionAdvisorySetInstalled, ActionAdvisorySetRefused,
 	} {
 		actions[a] = true
 	}
@@ -170,6 +171,7 @@ var actionSince = map[Action]int{
 	ActionConfigReadCompared:     configReadsSince, ActionConfigReadsRemoved: configReadsSince,
 	ActionConfigBaselineRecorded:      configRecordedSince,
 	ActionConfigCheckpointNotRestored: configCheckpointSince,
+	ActionAdvisorySetInstalled:        advisorySince, ActionAdvisorySetRefused: advisorySince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -265,6 +267,9 @@ type Record struct {
 
 	// Config is on the configuration actions only (0.5): config.go.
 	Config *Config `json:"config,omitempty"`
+
+	// Advisory is on the advisory actions only (0.11): advisory.go.
+	Advisory *Advisory `json:"advisory,omitempty"`
 }
 
 // Admin names one admin-signed request (C7 AdminAccepted): the signing
@@ -437,6 +442,9 @@ func (r *Record) Validate() error {
 		return err
 	}
 	if err := r.validateConfig(got.Minor); err != nil {
+		return err
+	}
+	if err := r.validateAdvisory(got.Minor); err != nil {
 		return err
 	}
 	switch r.Outcome {
