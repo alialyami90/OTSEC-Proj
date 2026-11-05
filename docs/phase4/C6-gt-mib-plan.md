@@ -12,8 +12,8 @@ C6, 2026-11-05. This is part 2 of P4-3-A6 (#435). GT-MIB is a test-only SNMPv3 a
   - p. 75 says the FID is in the Entity MIB;
   - Tables A.3 and A.4 on p. 62 list the FIDs.
 - **Drafts:**
-  - C2's family note and contract drafts (#439 at 9efbc17);
-  - C3's §4 rules (#437 at 43137f6).
+  - C2's family note and contract drafts (#439 at 92026c9, with D4-53);
+  - C3's §4 rules (#437 at 1c9e479).
 - **RFCs:** RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860. **Their text is not in the project files, and this container cannot fetch it** (the proxy refuses www.rfc-editor.org). C1 has asked the owner to add RFC 3411, 3418 and 6933. Until they are added, every column number and object layout below that comes from an RFC is marked **unconfirmed**, because I wrote it from memory. GT-MIB checks them against the text, and fixes them if needed, before its first commit of agent code.
 
 ## 1. What GT-MIB is
@@ -100,12 +100,17 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | U14 | a credential that names MD5, SHA-1, DES or AES-256 | refused when the credential is decoded, because the enums cannot name them (#437 §2.1) | 0 datagrams |
 | U15 | a forged noAuthNoPriv `usmStatsWrongDigests` Report with the outstanding `msgID` | the run fails with `failed.usm_wrong_digest`, and suspends neither the credential nor the asset: the next run succeeds (C6 on #439) | 1 |
 | U16 | the same Report with another `msgID`, or from another source port | discarded, recorded as received, and the run succeeds | 1 |
+| U17 | answers an authPriv request with an authNoPriv Response carrying a valid digest | discarded unparsed (#437 rule 1). `failed.timeout`. The agent's log and the transcript show no plaintext Response parsed. | 2 |
+| U18 | discovery returns the pinned engine ID, and a later Response carries another `msgAuthoritativeEngineID` | discarded before its digest is checked (#437 rule 2). `failed.timeout`. | 2 |
+| U19a | a second `usmStatsUnknownEngineIDs` Report, after an authenticated exchange | the session ends (#437 rule 1, Report order) | 1 |
+| U19b | a `usmStatsNotInTimeWindows` Report before discovery's Report | the session ends, and its boots and time are not adopted | 0 |
+| U20 | after the one adoption, an authenticated Response with lower boots, or with time outside the 150-second window; then a Report claiming lower boots | the Response is discarded, the Report is not adopted, and the client's engine boots never move backwards (#437 rule 3). `failed.timeout`. | 2 |
 
 ### 2.4 The walk and its bounds (V-M1 (b), AP-28)
 
 | ID | Agent behaviour | Expected |
 | --- | --- | --- |
-| W1 | returns an OID outside `entPhysicalTable` in the middle of a response | the walk ends there. No later request carries that OID or anything after it (steered walk, #437 rule 5). |
+| W1 | returns an OID outside `entPhysicalTable` in the middle of a response | `ok`. The walk ends there. The varbinds after that OID in the same response are kept in the bytes but never parsed into attributes, and no later request carries that OID or anything after it (steered walk, #437 rule 5). |
 | W2 | returns the same OID again (a loop) | `failed.snmp_walk_not_increasing` after 1 request |
 | W3 | returns an earlier OID inside the subtree | `failed.snmp_walk_not_increasing` after 1 request |
 | W4 | 40 rows × 17 columns (RFC 4133's accessible columns 2 to 18, unconfirmed; RFC 6933 adds a 19th) = 680 varbinds, more than `max_varbinds` 512 | `failed.response_too_large`, every byte kept, no identity attribute presented as complete (C2's question 5) |
@@ -135,7 +140,11 @@ Every request in W1 to W9 is checked in the agent's log for these things:
 
 ### 2.6 Hostile responses (the BER parser, TB10)
 
-Malformed messages are written into the agent's replies. The collector must fail the run cleanly, keep the bytes, never panic, and never read past the datagram. The corpus is:
+Malformed messages are written into the agent's replies. The collector must fail the run cleanly, keep the bytes, never panic, and never read past the datagram. The corpus runs at two layers (C3 on #441):
+- **the outer message**, which is parsed before authentication, so any host on the station LAN can reach that parser. This layer is the one that matters for AP-28;
+- **the `ScopedPDU`**, which is parsed only after decryption, so only a key holder can reach it.
+
+The corpus is:
 - truncated messages;
 - a length longer than the datagram;
 - indefinite-length encoding;
@@ -146,7 +155,11 @@ Malformed messages are written into the agent's replies. The collector must fail
 - an empty OID;
 - an OCTET STRING longer than its message;
 - a non-minimal length encoding;
-- trailing bytes after the message.
+- trailing bytes after the message;
+- a non-minimal OID arc (a leading `0x80`);
+- `msgAuthenticationParameters` of the wrong length for the algorithm (not 24 bytes for HMAC-SHA-256, or not 48 for SHA-512), which is discarded before any HMAC is computed;
+- `msgPrivacyParameters` that is not 8 bytes;
+- an inbound PDU of a type a client never accepts (SetRequest, Trap or Inform), which is discarded.
 
 The same corpus seeds a Go fuzz target on the client's decoder. That target is C2's to add, and GT-MIB supplies the seeds.
 
@@ -161,16 +174,24 @@ These are unit cases fed straight to C3's egress check, with no agent involved. 
 - `max-repetitions` other than the register's;
 - `non-repeaters` other than 0.
 
-It also holds the seven near misses of the discovery shape, each with one field off:
-1. a user name;
-2. one varbind;
-3. a non-empty authoritative engine ID;
-4. non-zero boots or time;
-5. a context name;
-6. a GetNextRequest;
-7. the reportable flag cleared.
+It also holds one community-based v1 `GetRequest` and one v2c `GetRequest`, as whole messages (HR-17). Item 3 has no path that builds them, but the check must still refuse them.
 
-There is also one discovery message sent after the engine ID is known. The exact discovery shape before the engine ID is known is the one message admitted. Each refused case names the rule that refused it.
+It also holds thirteen near misses of the discovery shape, one per field (#437 rule 4 at 1c9e479), each with that field off:
+1. `msgVersion` 1 (a v2c message);
+2. a `msgSecurityModel` other than 3;
+3. the reportable flag cleared;
+4. a nonempty authoritative engine ID;
+5. nonzero boots;
+6. nonzero time;
+7. a user name;
+8. nonempty authentication parameters;
+9. nonempty privacy parameters;
+10. a nonempty `contextEngineID`;
+11. a context name;
+12. a `GetNextRequest`;
+13. one varbind.
+
+There is also one discovery message sent after the engine ID is known. The exact discovery shape before the engine ID is known is the one message admitted. Each refused case names the rule that refused it, by the stable rule names C3's check will return (for example `pdu_type`, `security_level`, `version`, `discovery_shape.user_name`, `oid_not_named`, `oid_outside_subtree`, `max_repetitions`, `non_repeaters`).
 
 ### 2.8 Module off, and the transcript
 
@@ -178,7 +199,7 @@ There is also one discovery message sent after the engine ID is known. The exact
 | --- | --- | --- |
 | M1 | `asset` off, with an SNMP schedule entry | the entry is refused at load, and the agent receives 0 datagrams over a full schedule period (V-M1 (a)) |
 | M2 | `asset` off, `applicability` on | the configuration is refused (D4-50) |
-| M3 | any `ok` run | every segment's `msgAuthenticationParameters` is zero bytes of the right length, with a `usm-digest` redaction. The test then searches the transcript for three things: the test password, its localized SHA-256 and SHA-512 keys, and the AES key. None may appear. |
+| M3 | any `ok` run | every segment's `msgAuthenticationParameters` is zero bytes of the right length, with a `usm-digest` redaction. The test then searches for key material (C3 on #441): the test password; the master key Ku and the localized keys for each algorithm; and the AES key, which is the first 16 bytes of the localized privacy key. Each is searched as raw bytes, as hex in both cases, and as base64. The search covers the transcript, C8's audit records for the run, the health lines, the collector's log, and the node's store and configuration. Under D4-50 the node holds no USM material at all, so any hit anywhere fails the test. |
 
 ## 3. What it depends on, and the order of work
 
