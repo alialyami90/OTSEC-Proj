@@ -92,6 +92,14 @@ the buffer cleared with two new rows; one more row; a middle row removed
 and one more; four rows of repeating chatter; and the chatter again, which
 overlaps the previous read at two offsets.
 
+SYNTHESIZED buffer file, not documented (V-M4, D4-47): ser="file" serves, at
+each SER read, the rows in --profile-ser-file as it is then (JSON: "now", the
+report's date and time, and "rows", oldest first, each [date, time, element,
+state] in MDY), in Figure 10.16's layout, renumbered so row 1 is the newest,
+and "No Data Available" when it holds no row. The harness writes the file
+before each read, so the buffer is whatever the test series says; the rows
+are test data and support only `simulated` claims.
+
 SYNTHESIZED fault cases, not documented (V-S12): ser="hang" sends the
 figure's header and its first four rows, then nothing more for that SER (no
 prompt; later lines are answered as usual); ser="malformed" sends the figure
@@ -407,6 +415,23 @@ def script_ser(n):
     return CRLF.join(head + [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)])
 
 
+def file_ser(path):
+    """The SER reply for ser="file" (SYNTHESIZED, see the module
+    documentation), or None for an empty buffer."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    if not doc["rows"]:
+        return None
+    date, now = (x.encode() for x in doc["now"])
+    head = []
+    for line in _load("ser-fig-10-16.txt").split(CRLF):
+        if SER_ROW.match(line):
+            break
+        head.append(line.replace(b"Date: 02/28/2007   Time: 16:34:28", b"Date: " + date + b"   Time: " + now))
+    rows = [tuple(x.encode() for x in r) for r in doc["rows"]]
+    return CRLF.join(head + [ser_row(len(rows) - i, *r) for i, r in enumerate(rows)])
+
+
 class SerGrowth:
     """The count of synthesized rows, kept in a file so that it survives a
     simulator restart (the device's buffer does). Each SER read adds `step`."""
@@ -434,7 +459,8 @@ class SEL751DocResponder:
     def __init__(self, cfg, password=None, ser="example", rid=b"751", tid=b"FEEDER RELAY",
                  port1=None, spanish_accepts_english=False, quit_reply=None,
                  fid=None, fid_checksum_ok=True, vulnerable=None, relay=None, stx_etx=False, growth=None,
-                 date_f="MDY", settings_file=None, sho_layout="figure", sho_fault=None, config_run=False):
+                 date_f="MDY", settings_file=None, sho_layout="figure", sho_fault=None, config_run=False,
+                 ser_file=None):
         if date_f not in DATE_FORMATS:
             raise ValueError(f"date_f {date_f!r}: want one of {DATE_FORMATS}")
         if sho_layout not in ("figure", "one-per-line") or sho_fault not in (None, "hang", "duplicate"):
@@ -462,6 +488,9 @@ class SEL751DocResponder:
         if ser == "malformed":
             self.ser = self.ser.replace(b"5     02/28/2007   13:54:10.003", b"5     02/28/2007   13:5X:10.003")
         self.growth = growth if ser == "grow" else None
+        if (ser == "file") != (ser_file is not None):
+            raise ValueError("ser=\"file\" needs ser_file, and only it takes one")
+        self.ser_file = ser_file
         self.id = _load("id-fig-7-38.txt")
         if fid is not None:
             self.id = _replace_id_field(self.id, b"FID=" + fid, fid_checksum_ok)
@@ -714,6 +743,8 @@ class SEL751DocResponder:
                 self.ser = grown_ser(self.growth.read())
             if self.script is not None:
                 self.ser = script_ser(self.script.read() - 1)
+            if self.ser_file is not None:
+                self.ser = file_ser(self.ser_file)
             if self.hang:
                 lines = self.ser.split(CRLF)
                 cut = next(i for i, l in enumerate(lines) if SER_ROW.match(l)) + 4
