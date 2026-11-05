@@ -123,6 +123,10 @@ func TestInvalidFindings(t *testing.T) {
 			f.Class, f.Reason = NotApplicable, PreconditionNotMet
 			f.Preconditions[0] = Precondition{Name: "web-server-enabled", State: NotMet, Evidence: []Evidence{{Source: DeviceRead, ID: cfgRead.ID, Stale: true}}}
 		}, CodeConflict},
+		"operator-attested reckoned over stale evidence too": {func(f *Finding) {
+			f.Class = Mitigated
+			f.Mitigations = []Mitigation{{Name: "web-server-disabled", Evidence: []Evidence{{Source: DeviceRead, ID: cfgRead.ID, Stale: true}, entered}}}
+		}, CodeConflict},
 		"device-read evidence citing an audit record": {func(f *Finding) {
 			f.Identity.Evidence = []Evidence{{Source: DeviceRead, ID: entered.ID}}
 		}, CodeForm},

@@ -123,8 +123,8 @@ type Precondition struct {
 
 // Mitigation is one of the entry's mitigations in the signed set (C11), by
 // its name there, that is evidenced. A mitigation the set does not list is
-// never applied. OperatorAttested is true when every piece
-// of its evidence was entered by an operator.
+// never applied. OperatorAttested is true when every current piece of its
+// evidence was entered by an operator.
 type Mitigation struct {
 	Name             string     `json:"name"`
 	OperatorAttested bool       `json:"operator_attested"`
@@ -374,8 +374,8 @@ func (f *Finding) Validate() error {
 		if len(m.Evidence) > 0 && !current(m.Evidence) {
 			c.fail(CodeConflict, field+".evidence", "a mitigation holds only on current evidence")
 		}
-		if len(m.Evidence) > 0 && m.OperatorAttested != all(m.Evidence, Operator) {
-			c.fail(CodeConflict, field+".operator_attested", "true exactly when every piece of evidence is an operator's")
+		if len(m.Evidence) > 0 && m.OperatorAttested != all(currentOnly(m.Evidence), Operator) {
+			c.fail(CodeConflict, field+".operator_attested", "true exactly when every current piece of evidence is an operator's")
 		}
 	}
 
@@ -459,6 +459,17 @@ func anyStale(ev []Evidence) bool {
 		}
 	}
 	return false
+}
+
+// currentOnly returns the pieces of ev that are not stale.
+func currentOnly(ev []Evidence) []Evidence {
+	var out []Evidence
+	for _, e := range ev {
+		if !e.Stale {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // current reports whether some piece of ev is current.
