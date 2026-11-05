@@ -325,6 +325,15 @@ func TestValidate(t *testing.T) {
 		{"attribute on configVersion", func(s *advisory.Set) {
 			s.Entries[0].Preconditions[0] = advisory.Item{Name: "cv", Kind: advisory.KindAttribute, Key: "configVersion", Op: advisory.OpPresent}
 		}, false},
+		{"attribute on a C1 name", func(s *advisory.Set) {
+			s.Entries[0].Preconditions[0] = advisory.Item{Name: "named", Kind: advisory.KindAttribute, Key: "part_number", Op: advisory.OpPresent}
+		}, true},
+		{"attribute on a vendor-prefixed C1 name", func(s *advisory.Set) {
+			s.Entries[0].Preconditions[0] = advisory.Item{Name: "named", Kind: advisory.KindAttribute, Key: "sel.cid", Op: advisory.OpPresent}
+		}, true},
+		{"attribute on an unknown name", func(s *advisory.Set) {
+			s.Entries[0].Preconditions[0] = advisory.Item{Name: "named", Kind: advisory.KindAttribute, Key: "serial", Op: advisory.OpPresent}
+		}, false},
 		{"control as a precondition", func(s *advisory.Set) {
 			s.Entries[0].Preconditions[0] = advisory.Item{Name: "web-blocked", Kind: advisory.KindControl, Key: "tcp/80", Op: advisory.OpPresent}
 		}, false},

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/internal/strictjson"
 )
 
@@ -163,10 +164,6 @@ var (
 	selProductRe = regexp.MustCompile(`^SEL-[0-9A-Z]+$`)
 	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
-
-// unreadAttributes are identity attributes the matcher reads but does not
-// compare in 0.1, so an entry may not key an attribute item on them.
-var unreadAttributes = map[string]bool{"BFID": true, "configVersion": true}
 
 // ErrInvalid wraps every Validate and Decode failure. Its text names the
 // rule and, for an entry, the entry's id, and nothing else from the file
@@ -433,8 +430,11 @@ func (it Item) validate(mitigation bool, names map[string]bool) error {
 	switch it.Kind {
 	case KindSetting, KindService:
 	case KindAttribute:
-		if unreadAttributes[it.Key] {
-			return errors.New("the matcher does not compare this attribute in 0.1")
+		// An attribute is a C1 identity attribute (1.3). BFID and the IEC
+		// 61850 configVersion, which the matcher reads but does not compare
+		// in 0.1, are not C1 names, so they are refused here too (C4 on #446).
+		if !asset.ValidAttributeName(it.Key) {
+			return errors.New("attribute key is not a C1 attribute name")
 		}
 	case KindControl:
 		if !mitigation {

@@ -178,6 +178,7 @@ The code follows 1.1 to 1.6 and 2.1. These points were not settled by the text, 
 C1 confirmed every point above on #446. C1 also adopted C6's proposal there, which tightens 1.3:
 
 - **Under `sel-fid`, `product` must match `^SEL-[0-9A-Z]+$`, and every `versions` FID must start with `product` followed by `-R`.** A set that breaks either rule is `invalid`. The matcher compares `product` with the device-read `model` exactly, so a typo would otherwise give every device `not-applicable` with no warning. C2 confirmed that the SEL-751 and SEL-2731M/2741M parses print `model` in this form.
+- **A `kind: attribute` key must be a C1 attribute name** (`asset.ValidAttributeName`: a known name or a vendor-prefixed one), as 1.3 says. `BFID` and `configVersion` are not C1 names, so they are refused by this rule (C4 on #446).
 
 ## 2. C7 0.8: SNMP credentials and the legacy SNMP approval
 
