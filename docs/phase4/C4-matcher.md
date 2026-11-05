@@ -26,7 +26,7 @@ The ownership table in `README.md` is C1's, so the new row is C1's to add on app
 ## 2. Inputs and output
 
 `Evaluate(identity, evidence, set, previous) → []finding.Finding`, one finding per entry. The inputs are:
-- the asset's identity attributes under C1 0.3, each with its kind (`device-read`, `passive` or `operator`), its read path and its evidence ID (D4-49 Q4);
+- the asset's identity attributes under C1 0.3 (C2's draft, #439, §1.5): the device-read `firmware_id`, `model` and `firmware_version`, each with its kind (`device-read`, `passive` or `operator`), its read path and its evidence ID (D4-49 Q4), and the operator-declared `vendor`;
 - the asset's evidence records: its C9 snapshots and, later, its R6.7 observations;
 - the set in use;
 - the asset's latest finding per entry, so that a change becomes a new revision.
@@ -61,8 +61,11 @@ A FID is parsed with one anchored expression:
 
 It gives the product (`SEL-751`), the branch (`301`) and the version number (`2`). The Z and D fields are kept as read and take no part in the comparison.
 
-- **Product.** The device's `product` is the FID's product part. It is matched exactly against C11's `affected[].product`. For the SEL-751, `DEVID` in the same reply must agree. `SEL-751A` is a different product, with its own manual and FIDs (the allowlist's `not_covered`).
-- **SNMPv3 families.** Their product and FID come from the Entity MIB. The project has not yet read that string form (section 3.1).
+C1 0.3 already splits the FID into two device-read attributes, each a sub-span of the FID's bytes (#439 §1.5): `model`, the product part as printed (`SEL-751`), and `firmware_version`, the R (or X) and V parts as printed (`R301-V2`). The matcher uses them as follows:
+
+- **Product.** C11's `affected[].product` is compared with the device-read `model`, as a whole string, with no mapping table. `SEL-751A` is a different product, with its own manual and FIDs (the allowlist's `not_covered`). In the same way, `SEL-2731M` is not `SEL-2731`, so an entry that affects both lists both. The device prints no vendor field, so `vendor` stays operator-declared (#439 §1.5). The matcher does not use it to decide a class. The class rests on `model` and `firmware_version`, both device-read. So `confirmed` needs no operator value, and no operator value can hide an entry or lower a class.
+- **Version.** Branch and V come from `firmware_version`, which must match `^R([0-9]{3})-V([0-9]+)$`. C11's exact `versions` are compared with the whole `firmware_id`. The matcher checks that `firmware_id` parses with the expression above and that its parts equal `model` and `firmware_version`. If they do not, the FID cannot be placed.
+- **SNMPv3 families.** C2 reads their FID as the one value in the Entity MIB, or in `sysDescr.0`, that matches the FID grammar (section 3.1).
 
 ### Comparison: within one branch, never across
 
@@ -89,7 +92,7 @@ It is outside when the product is named and none of these holds. That includes t
 
 These FIDs can be neither inside nor outside:
 - a FID that does not parse, including the `X` branch;
-- a FID whose product differs from the `DEVID` in the same reply;
+- a `firmware_version` with the `X` letter, or one whose parts do not equal the parsed `firmware_id`;
 - a FID of a family whose form the project has not read.
 
 Such a FID is never `not-applicable`. If the entry names the product, the finding is `applicable-by-version` with the precondition `firmware-version` listed as unread. That name is reserved in C11. A range with no endpoint still places such a FID inside. So an unplaceable FID can only keep an advisory visible, never hide it.
@@ -204,9 +207,12 @@ Which findings the node stores, and in which C5 class, is for C5's note (P4-3-A5
 
 The rest of C11's §1.3 is enough for the matcher and for GT-ADV's cells. C12 carries no severity or CVSS, matching C11.
 
-**Of C1 0.3:**
-- one evidence ID on every attribute. The draft takes an evidence ID as either the `event.EventID` of a stored record or `audit:<node_id>:<seq>` for an operator entry in the C8 chain;
-- if C1 0.3 stores operator entries some other way, C12 follows it.
+**Of C1 0.3 (answered on #439):**
+- **Evidence IDs.** A device-read observation's evidence ID is its `ref`, the C2 invocation ID, which is a lowercase UUID. C5's identity record is keyed by that ID, so it outlives the store's sequence numbers (#439 §1.2, Q3). C12 therefore takes three forms of evidence ID:
+  - an invocation ID, for a device read;
+  - an `event.EventID`, for a stored record such as a later R6.7 observation;
+  - `audit:<node_id>:<seq>`, for an operator entry in the C8 chain.
+- **Attributes.** `model` and `firmware_version` are read and kept as printed, and the matcher does the mapping (section 3, #439 Q4).
 
 **How R6.7 plugs in later.** A passive observation becomes a stored record, and a finding cites it as evidence with source `passive`. C12 does not change. C11's `service` kind already exists. What remains is R6.7's own observation record and the matcher reading it. V-M7's rule that passive evidence never confirms an identity is already in `Validate`, because `confirmed` needs a device-read identity.
 

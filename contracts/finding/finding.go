@@ -70,8 +70,9 @@ const (
 
 func (s Source) valid() bool { return s == DeviceRead || s == Passive || s == Operator }
 
-// Evidence is one stored record a finding rests on. ID is an event.EventID
-// string for a stored record, or audit:<node_id>:<seq> for an audit record.
+// Evidence is one record a finding rests on. ID is a C2 invocation ID (a
+// lowercase UUID) for a device read, an event.EventID string for a stored
+// record, or audit:<node_id>:<seq> for an audit record.
 // Stale marks evidence that is no longer current (docs/verification.md, "R9
 // classes", point 3): a finding that fell from confirmed names it (D4-49 Q6
 // (ii)).
@@ -206,6 +207,8 @@ var (
 	nameForm  = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 	idForm    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	setID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`) // C11 set_id
+	// invocationID is a C2 invocation ID, a lowercase UUID (contracts/adapter).
+	invocationID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 func (c *checker) utc(field, s string) {
@@ -234,8 +237,8 @@ func (c *checker) evidence(field string, ev []Evidence, need bool) {
 		if !e.Source.valid() {
 			c.fail(CodeForm, f+".source", "%q is not a source", e.Source)
 		}
-		if _, err := event.ParseEventID(e.ID); err != nil && !validAuditRef(e.ID) {
-			c.fail(CodeForm, f+".id", "%q is neither an event ID nor audit:<node_id>:<seq>", e.ID)
+		if _, err := event.ParseEventID(e.ID); err != nil && !validAuditRef(e.ID) && !invocationID.MatchString(e.ID) {
+			c.fail(CodeForm, f+".id", "%q is not an invocation ID, an event ID or audit:<node_id>:<seq>", e.ID)
 		}
 	}
 }

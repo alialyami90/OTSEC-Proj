@@ -25,10 +25,14 @@
 //   - Every mitigation the advisory names that is evidenced, with its
 //     evidence, and whether it is operator-attested.
 //
-// An evidence ID is a stored record: the event.EventID string
-// (<node_id>:<stream>:<seq>) of an identity read, a configuration snapshot
-// (C9) or, later, a passive observation (R6.7); or an audit record of the
-// chain (C8), audit:<node_id>:<seq>, for an operator entry. Each carries its
+// An evidence ID takes one of three forms:
+//   - the C2 invocation ID (a lowercase UUID) of a device read, which is
+//     C1 0.3's observation ref and keys the identity record C5 keeps (#439);
+//   - the event.EventID string (<node_id>:<stream>:<seq>) of a stored
+//     record, such as a passive observation later (R6.7);
+//   - audit:<node_id>:<seq>, an audit record of the chain (C8), for an
+//     operator entry. Each carries its
+//
 // source, so R6.7's observations plug in as new records with source passive
 // and no change to this contract. Evidence that is no longer current is
 // kept and marked stale, so a finding that fell from confirmed names it

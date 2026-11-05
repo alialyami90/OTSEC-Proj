@@ -11,8 +11,8 @@ import (
 const testAsset = "5e3a1c2d-9b8f-4e7a-8c6d-1f2e3d4c5b6a"
 
 var (
-	idRead  = Evidence{Source: DeviceRead, ID: "site-a-node1:sel751-feeder1/identity:7"}
-	cfgRead = Evidence{Source: DeviceRead, ID: "site-a-node1:sel751-feeder1/config:3"}
+	idRead  = Evidence{Source: DeviceRead, ID: "0b6c2f1e-7d3a-4c5b-9e8f-1a2b3c4d5e6f"} // a C2 invocation ID
+	cfgRead = Evidence{Source: DeviceRead, ID: "9f8e7d6c-5b4a-4321-8fed-cba987654321"}
 	seen    = Evidence{Source: Passive, ID: "site-a-node1:passive/services:12"}
 	entered = Evidence{Source: Operator, ID: "audit:site-a-node1:40"}
 )
@@ -105,6 +105,7 @@ func TestInvalidFindings(t *testing.T) {
 		"identity with no evidence":           {func(f *Finding) { f.Identity.Evidence = nil }, CodeMissing},
 		"an evidence ID of no form":           {func(f *Finding) { f.Identity.Evidence[0].ID = "the relay said so" }, CodeForm},
 		"an audit reference to no node ID":    {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:Not A Node:4" }, CodeForm},
+		"an invocation ID in upper case":      {func(f *Finding) { f.Identity.Evidence[0].ID = "0B6C2F1E-7D3A-4C5B-9E8F-1A2B3C4D5E6F" }, CodeForm},
 		"an audit reference to seq 0":         {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:site-a-node1:0" }, CodeForm},
 		"identity evidence of another source": {func(f *Finding) { f.Identity.Evidence[0].Source = Operator }, CodeConflict},
 		"confirmed on an operator identity": {func(f *Finding) {
