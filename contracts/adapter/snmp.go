@@ -32,11 +32,12 @@ func (c *check) snmpSession(r Result, code Code) {
 	if n.EngineID != "" && !engineIDPattern.MatchString(n.EngineID) {
 		c.fail("session.snmp.engine_id %q is not 5 to 32 octets in lowercase hex", n.EngineID)
 	}
-	sent, keyed := false, false // a datagram sent; an auth or operate message sent
+	sent, keyed, received := false, false, false // a datagram sent; an auth or operate message sent; a datagram received
 	for i, sg := range t.Segments {
 		if sg.Phase == PhaseClose {
 			c.fail("transcript.segments[%d]: an SNMP session has no close phase", i)
 		}
+		received = received || sg.Dir == Received
 		if sg.Dir == Sent {
 			sent = true
 			keyed = keyed || sg.Phase == PhaseAuth || sg.Phase == PhaseOperate
@@ -115,6 +116,13 @@ func (c *check) snmpSession(r Result, code Code) {
 	}
 	if code == "" && !n.Authenticated {
 		c.fail("status ok needs an authenticated SNMP session")
+	}
+	// The 0.8 codes each answer a message that arrived (D4-54).
+	if code == FailedSNMPUnexpectedReport && !received {
+		c.fail("error %s answers a Report, so a message was received", code)
+	}
+	if code == FailedSNMPScopedPDUUnreadable && !answered {
+		c.fail("error %s answers an authenticated message, so a received auth or operate message carried a digest", code)
 	}
 }
 
