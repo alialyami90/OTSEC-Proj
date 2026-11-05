@@ -25,7 +25,8 @@
 //   - Every mitigation the advisory names that is evidenced, with its
 //     evidence, and whether it is operator-attested.
 //
-// An evidence ID takes one of three forms:
+// An evidence ID takes one of three forms, each tied to its source, so an
+// operator's entry can never stand as a device read:
 //   - the C2 invocation ID (a lowercase UUID) of a device read, which is
 //     C1 0.3's observation ref and keys the identity record C5 keeps (#439);
 //   - the event.EventID string (<node_id>:<stream>:<seq>) of a stored

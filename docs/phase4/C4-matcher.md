@@ -146,10 +146,11 @@ For one asset and one entry:
 2. **FID not placeable:** `applicable-by-version`, with `firmware-version` listed as unread (section 3).
 3. **Outside every range:** the class by kind as in step 1, with reason `outside-range`.
 4. **Inside a range.** The preconditions and mitigations are read as in section 4. Then the first rule that applies sets the class:
-   - **a.** If any mitigation holds, the class is `mitigated` (D4-49 Q6 (i)), and the precondition results are kept. This covers D4-49 Q5's case where the advisory names a setting both as a precondition and as its mitigation: the precondition does not hold and the mitigation holds. A mitigation whose only evidence is an operator's entry is marked `operator_attested`.
-   - **b.** If any precondition does not hold, the class depends on the identity (D4-49 Q5):
-     - with a device-read identity, `not-applicable` with reason `precondition-not-met`, citing the settings read;
+   - **a.** If any precondition does not hold on current evidence, D4-49 Q5 decides, ahead of any other mitigation:
+     - if a mitigation that holds is a `setting` item on the same `key` as a precondition that does not hold, the class is `mitigated` (the advisory names that setting as its mitigation);
+     - otherwise, with a device-read identity, `not-applicable` with reason `precondition-not-met`, citing the settings read. The device's own setting outranks an operator's attestation, for example a recorded control (C6 on #440, GT-ADV cell TEST-ADV-03 × D10);
      - otherwise, `applicable-by-version`, with that precondition shown as `not-met`.
+   - **b.** If any mitigation holds, the class is `mitigated` (D4-49 Q6 (i)), and the precondition results are kept. A mitigation holds only on current evidence. A mitigation whose only evidence is an operator's entry is marked `operator_attested`.
    - **c.** The class is `confirmed` when all of these are true:
      - the identity is device-read and current;
      - every precondition holds on current device-read or passive evidence.
@@ -157,19 +158,24 @@ For one asset and one entry:
      An entry with no preconditions is `confirmed` on a current device-read FID alone (D4-49 Q6 (iv)).
    - **d.** Otherwise the class is `applicable-by-version`. Each unread precondition is named. Any evidence that would have made the finding `confirmed` but is stale is kept and marked `stale` (D4-49 Q6 (ii)).
 
-`contracts/finding` checks every rule above that holds on one record. It cannot check currency, because currency depends on records stored after the evidence. Currency is the matcher's rule, and GT-ADV tests it.
+`contracts/finding` checks every rule above that holds on one record. That includes that the evidence a lowering class rests on is not marked stale: a `mitigated` finding's mitigations, and a `precondition-not-met` finding's precondition. It cannot decide currency, because currency depends on records stored after the evidence. Deciding it is the matcher's rule, and GT-ADV tests it. Each evidence ID's form is tied to its source:
+- a device read is cited by its invocation ID;
+- a passive observation is cited by its event ID;
+- an operator entry is cited by its audit reference.
+
+So an operator's entry cannot stand as a device read.
 
 ## 6. Evidence currency
 
 Point 3 of "what `confirmed` needs" says evidence is current when no later read contradicts it and no configuration change has been retrieved since. D4-49 Q6 (iv) makes the second half asset-wide. For each record the matcher cites:
 
-- **Identity.** C5 writes a new identity record only when a value changes. The record is keyed by the invocation ID of the run that first read the value. A later run that reads the same value appears in status only, as the latest confirming invocation ID and time (#438). From that, the identity is current only while both of these hold:
+- **Identity.** C5 writes a new identity record only when a value changes. The record is keyed by the invocation ID of the run that first read the value. A later run that reads the same value is recorded only as a small `identity.read` record in `config/<asset>`, holding its invocation ID and time. The newest one is never removed (#438 at `4be03fe`, C5 0.7). From that, the identity is current only while both of these hold:
   - its record is the asset's latest identity record, so no later read has contradicted it;
   - the latest read of the same value is later than the latest configuration change retrieved for the asset (D4-49 Q6 (iv)).
 
   A finding cites the record's invocation ID as its evidence, because C5 keeps those bytes. It shows the latest confirming read as `identity.latest_read`, so the currency check can be seen. `confirmed` requires that field. The SEL-751 reads `ID` at Level 0 on every run (the FID gate), so after a change the next run makes the identity current again. A later read with another value contradicts the record and starts a new one, and the matcher evaluates on the new value. That includes a `refused.identity_mismatch`, whose observed FID is a device read.
 
-  **Two conditions on C5 and the node for this to hold:**
+  **Two conditions on C5 and the node for this to hold** (both met by #438 at `4be03fe`, and C1 confirmed the second as an extension of D4-49 Q7):
   - The latest confirming read must survive a restart. If it is lost, every `confirmed` finding falls to `applicable-by-version` at start and comes back at the next read. Each such fall is a recorded revision, and none of them would be real.
   - Evaluation must also run after an identity read that commits no record (section 7). Otherwise a finding made stale by a change never becomes `confirmed` again.
 - **Settings.** A C9 snapshot is current while it is the asset's latest snapshot and no change has been retrieved after it.

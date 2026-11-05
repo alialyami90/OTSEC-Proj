@@ -13,7 +13,7 @@ const testAsset = "5e3a1c2d-9b8f-4e7a-8c6d-1f2e3d4c5b6a"
 var (
 	idRead  = Evidence{Source: DeviceRead, ID: "0b6c2f1e-7d3a-4c5b-9e8f-1a2b3c4d5e6f"} // a C2 invocation ID
 	cfgRead = Evidence{Source: DeviceRead, ID: "9f8e7d6c-5b4a-4321-8fed-cba987654321"}
-	seen    = Evidence{Source: Passive, ID: "site-a-node1:passive/services:12"}
+	seen    = Evidence{Source: Passive, ID: "site-a-node1:passive/services:12"} // a stored event
 	entered = Evidence{Source: Operator, ID: "audit:site-a-node1:40"}
 )
 
@@ -105,14 +105,37 @@ func TestInvalidFindings(t *testing.T) {
 		"a later revision that names nothing": {func(f *Finding) { f.Revision = 2 }, CodeMissing},
 		"identity with no evidence":           {func(f *Finding) { f.Identity.Evidence = nil }, CodeMissing},
 		"an evidence ID of no form":           {func(f *Finding) { f.Identity.Evidence[0].ID = "the relay said so" }, CodeForm},
-		"an audit reference to no node ID":    {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:Not A Node:4" }, CodeForm},
-		"an invocation ID in upper case":      {func(f *Finding) { f.Identity.Evidence[0].ID = "0B6C2F1E-7D3A-4C5B-9E8F-1A2B3C4D5E6F" }, CodeForm},
-		"confirmed with no latest read":       {func(f *Finding) { f.Identity.LatestRead = nil }, CodeMissing},
-		"a latest read of no invocation ID":   {func(f *Finding) { f.Identity.LatestRead.ID = "site-a-node1:x:1" }, CodeForm},
+		"an audit reference to no node ID": {func(f *Finding) {
+			f.Mitigations, f.Class = []Mitigation{{Name: "x", OperatorAttested: true, Evidence: []Evidence{{Source: Operator, ID: "audit:Not A Node:4"}}}}, Mitigated
+		}, CodeForm},
+		"an invocation ID in upper case":    {func(f *Finding) { f.Identity.Evidence[0].ID = "0B6C2F1E-7D3A-4C5B-9E8F-1A2B3C4D5E6F" }, CodeForm},
+		"confirmed with no latest read":     {func(f *Finding) { f.Identity.LatestRead = nil }, CodeMissing},
+		"a latest read of no invocation ID": {func(f *Finding) { f.Identity.LatestRead.ID = "site-a-node1:x:1" }, CodeForm},
 		"a latest read on an operator identity": {func(f *Finding) {
 			f.Class, f.Identity.Source, f.Identity.Evidence = ApplicableByVersion, Operator, []Evidence{entered}
 		}, CodeConflict},
-		"an audit reference to seq 0":         {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:site-a-node1:0" }, CodeForm},
+		// C6's probes on #440.
+		"mitigated on stale mitigation evidence": {func(f *Finding) {
+			f.Class = Mitigated
+			f.Mitigations = []Mitigation{{Name: "web-server-disabled", Evidence: []Evidence{{Source: DeviceRead, ID: cfgRead.ID, Stale: true}}}}
+		}, CodeConflict},
+		"precondition-not-met on stale evidence": {func(f *Finding) {
+			f.Class, f.Reason = NotApplicable, PreconditionNotMet
+			f.Preconditions[0] = Precondition{Name: "web-server-enabled", State: NotMet, Evidence: []Evidence{{Source: DeviceRead, ID: cfgRead.ID, Stale: true}}}
+		}, CodeConflict},
+		"device-read evidence citing an audit record": {func(f *Finding) {
+			f.Identity.Evidence = []Evidence{{Source: DeviceRead, ID: entered.ID}}
+		}, CodeForm},
+		"operator evidence citing a device read": {func(f *Finding) {
+			f.Class = ApplicableByVersion
+			f.Identity.Source, f.Identity.Evidence, f.Identity.LatestRead = Operator, []Evidence{{Source: Operator, ID: idRead.ID}}, nil
+		}, CodeForm},
+		"passive evidence citing an invocation": {func(f *Finding) {
+			f.Preconditions[1].Evidence = []Evidence{{Source: Passive, ID: cfgRead.ID}}
+		}, CodeForm},
+		"an audit reference to seq 0": {func(f *Finding) {
+			f.Mitigations, f.Class = []Mitigation{{Name: "x", OperatorAttested: true, Evidence: []Evidence{{Source: Operator, ID: "audit:site-a-node1:0"}}}}, Mitigated
+		}, CodeForm},
 		"identity evidence of another source": {func(f *Finding) { f.Identity.Evidence[0].Source = Operator }, CodeConflict},
 		"confirmed on an operator identity": {func(f *Finding) {
 			f.Identity.Source, f.Identity.Evidence = Operator, []Evidence{entered}

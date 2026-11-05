@@ -250,8 +250,16 @@ func (c *checker) evidence(field string, ev []Evidence, need bool) {
 		if !e.Source.valid() {
 			c.fail(CodeForm, f+".source", "%q is not a source", e.Source)
 		}
-		if _, err := event.ParseEventID(e.ID); err != nil && !validAuditRef(e.ID) && !invocationID.MatchString(e.ID) {
-			c.fail(CodeForm, f+".id", "%q is not an invocation ID, an event ID or audit:<node_id>:<seq>", e.ID)
+		// The form of the ID is tied to the source, so an operator's entry
+		// cannot stand as a device read (C6 on #440).
+		_, err := event.ParseEventID(e.ID)
+		switch {
+		case e.Source == DeviceRead && !invocationID.MatchString(e.ID):
+			c.fail(CodeForm, f+".id", "%q: a device read is cited by its invocation ID", e.ID)
+		case e.Source == Passive && err != nil:
+			c.fail(CodeForm, f+".id", "%q: a passive observation is cited by its event ID", e.ID)
+		case e.Source == Operator && !validAuditRef(e.ID):
+			c.fail(CodeForm, f+".id", "%q: an operator entry is cited as audit:<node_id>:<seq>", e.ID)
 		}
 	}
 }
@@ -335,7 +343,7 @@ func (f *Finding) Validate() error {
 			unread++
 		case NotMet:
 			notMet++
-			if all(p.Evidence, DeviceRead) {
+			if all(p.Evidence, DeviceRead) && !anyStale(p.Evidence) {
 				notMetRead++
 			}
 		case Evidenced:
@@ -363,6 +371,9 @@ func (f *Finding) Validate() error {
 		}
 		seen[m.Name] = true
 		c.evidence(field+".evidence", m.Evidence, true)
+		if len(m.Evidence) > 0 && !current(m.Evidence) {
+			c.fail(CodeConflict, field+".evidence", "a mitigation holds only on current evidence")
+		}
 		if len(m.Evidence) > 0 && m.OperatorAttested != all(m.Evidence, Operator) {
 			c.fail(CodeConflict, field+".operator_attested", "true exactly when every piece of evidence is an operator's")
 		}
@@ -421,7 +432,7 @@ func (f *Finding) Validate() error {
 	case "", OutsideRange, ProductNotNamed:
 	case PreconditionNotMet:
 		if notMetRead == 0 || f.Class != NotApplicable {
-			c.fail(CodeConflict, "reason", "precondition-not-met needs a device-read identity and a precondition shown not met by a device read")
+			c.fail(CodeConflict, "reason", "precondition-not-met needs a device-read identity and a precondition shown not met by a current device read")
 		}
 	default:
 		c.fail(CodeForm, "reason", "%q is not a reason", f.Reason)
@@ -438,6 +449,26 @@ func validAuditRef(s string) bool {
 	}
 	seq, err := strconv.ParseUint(parts[2], 10, 64)
 	return err == nil && seq > 0 && strconv.FormatUint(seq, 10) == parts[2]
+}
+
+// anyStale reports whether any piece of ev is stale.
+func anyStale(ev []Evidence) bool {
+	for _, e := range ev {
+		if e.Stale {
+			return true
+		}
+	}
+	return false
+}
+
+// current reports whether some piece of ev is current.
+func current(ev []Evidence) bool {
+	for _, e := range ev {
+		if !e.Stale {
+			return true
+		}
+	}
+	return false
 }
 
 func all(ev []Evidence, s Source) bool {
