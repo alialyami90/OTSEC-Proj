@@ -107,6 +107,13 @@ def derive(ident, adv, mutant=None):
     stale = src == "device-read" and ident["stale"] and mutant != "ignore-stale"
 
     held = [n for n, s in mit.items() if s == "holds"]
+    # D4-49 Q5: a precondition read false on a device-read identity gives
+    # not-applicable, unless a mitigation that holds is that same setting.
+    keys = {c["name"]: c.get("key") for c in adv["preconditions"] + adv["mitigations"]}
+    false_keys = {keys[n] for n, s in pre.items() if s == "not-met" and kinds[n] == "setting"}
+    if src == "device-read" and false_keys and mutant not in ("mitigation-first", "q5-reversed"):
+        if not any(kinds[n] == "setting" and keys[n] in false_keys for n in held):
+            return {"class": na, "reason": "precondition-not-met", "evidence": evidence}
     if held and mutant != "confirmed-beats-mitigated":
         if mutant == "mitigated-needs-all-read" and unread:
             pass
@@ -117,8 +124,6 @@ def derive(ident, adv, mutant=None):
                 cell["attested"] = True
             return cell
     not_met = any(s == "not-met" for s in pre.values())
-    if not_met and src == "device-read" and mutant != "q5-reversed":
-        return {"class": na, "reason": "precondition-not-met", "evidence": evidence}
     if not not_met and (src == "device-read" or mutant == "operator-confirms") and not stale and not unread:
         return {"class": "confirmed", "evidence": evidence}
     cell = {"class": "applicable-by-version", "evidence": evidence, "unread": unread}
@@ -247,6 +252,7 @@ MUTANTS = [
     "confirmed-beats-mitigated",  # D4-49 Q6 (i) reversed
     "mitigated-needs-all-read",   # D4-52 read strictly
     "q5-reversed",                # a precondition read false leaves it applicable
+    "mitigation-first",           # any mitigation beats a precondition read false (Q5)
     "operator-confirms",          # an operator identity confirmed
     "unplaced-is-na",             # an unplaceable FID hidden
 ]
