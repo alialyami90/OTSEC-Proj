@@ -62,21 +62,22 @@ A new class would need its own full action and its own quota rules for no gain. 
 | --- | --- | --- | --- | --- |
 | Identity record (C1 0.3) | `config/<asset>` | at the asset's first identity, and when any attribute's value or source changes | small: the attributes, plus a capture of only the bytes the observations point to | `identity` (evidence) |
 | Advisory set (C11) | `advisory`, a new node-level stream in the configuration database, present only with `applicability` | when a set is accepted | C11 must bound it below the record cap (Questions, item 4) | `advisory.set` (evidence) |
+| Latest identity read | `config/<asset>` | after every successful identity read | tens of bytes: invocation ID and time | `identity.read` (not held) |
 | Finding (C12) | `config/<asset>` | when a finding first appears and when its class changes, never on an unchanged evaluation | small | `finding` (evidence) |
 
 **An identity record carries its own evidence.** For the SEL-751, the attributes come from the `ID` exchange at Level 0 in every collection run. Today the FID, CID and serial number are already in the adapter's `Result.Observations`, each with its span in the transcript, and they need no extra read.
 
-The record's capture is the bytes those spans cover, so the record still holds device bytes after `ser/<asset>` is pruned. Its evidence ID, the one C12 lists, is the C2 invocation ID of the run that first read it (C2's §4 Q3 on #439). That ID is already in the collector's audit records and outlives pruning, while the stream and seq only say where the record sits; the node finds a record by its invocation ID. Because a record is written only on change, a later run that reads the same identity confirms it without a new record, and status shows that run's invocation ID as the last confirmation. An SNMP poll's `Result` has the same shape, and its identity takes the same path.
+The record's capture is the bytes those spans cover, so the record still holds device bytes after `ser/<asset>` is pruned. Its evidence ID, the one C12 lists, is the C2 invocation ID of the run that first read it (C2's §4 Q3 on #439). That ID is already in the collector's audit records and outlives pruning, while the stream and seq only say where the record sits; the node finds a record by its invocation ID. Because a record is written only on change, a later run that reads the same identity confirms it without a new identity record. That latest read (C12's `identity.latest_read`) must survive a restart (C4, confirmed by C1), or every confirmed finding would fall back at start and return at the next read, each time as a recorded revision that is not real. So after every successful identity read the node writes a small `identity.read` record in `config/<asset>`: the invocation ID and the time, nothing else. It is not held, and older ones go first under the D4-32 rule, but the newest is never removed (C5 0.7), so the latest read is in the store at every start. A run that stores a new identity record writes `identity.read` too. An SNMP poll's `Result` has the same shape, and its identity takes the same path.
 
 An `operator` identity comes from the asset's declaration in the node config. A `passive` one (R6.7) comes later, through the same writer and with no change here. The writer stores only a change, so a run that reads the same identity stores nothing new.
 
 **What holds what.**
-- A finding names its set by digest and its identity records by evidence ID (the invocation ID that first read each), whose bytes the node holds. It also states, as a separate field, the latest confirming invocation ID and time from status, so currency is visible without new captures. The node builds an identity record from the observation that first carried each value, never from C1's observation `ref` once a newer run has moved it. The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
+- A finding names its set by digest and its identity records by evidence ID (the invocation ID that first read each), whose bytes the node holds. It also states, as a separate field, the latest confirming invocation ID and time from the newest `identity.read`, so currency is visible without new captures. The node builds an identity record from the observation that first carried each value, never from C1's observation `ref` once a newer run has moved it. The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
 - The newest record of each series is never removed, as C5 0.7 already rules for every series.
 - Older identity records and findings are evidence of a change (V-M7: "records the change"). They are removed only under the D4-32 rule, oldest first, and never while held.
 
 **The quota floor** (D4-20) grows by:
-- for each asset with `asset` on, room for the newest identity record and one change;
+- for each asset with `asset` on, room for the newest identity record and one change, and for the newest `identity.read`;
 - for each asset with `applicability` on, room for its findings at the set's bounded advisory count;
 - once per node with `applicability` on, two sets at C11's bound: the one in use and the one being installed.
 
@@ -121,7 +122,7 @@ The set's version, date and digest go into every finding written under it, and i
 The matcher runs in the scheduler's goroutine between collection runs, with a time budget, as the event-baseline feeder does. A large evaluation therefore cannot delay a collection run.
 
 **When an asset is evaluated:**
-- after a new identity record for it is stored;
+- after every successful identity read for it, including one that stores no new identity record (C4's condition, confirmed by C1, extending D4-49 Q7's triggers). Without it, a finding made stale by a configuration change would never become confirmed again. Such a run usually records nothing, because a change to the latest read alone is not a revision (C12);
 - after a new set comes into use, when every asset is evaluated;
 - at start, for every asset;
 - at the interval C4's note sets for evidence currency ("R9 classes and what `confirmed` needs", point 3).
@@ -170,7 +171,7 @@ No SNMPv1 or v2c entry runs without C3's approval record (V-M1 (d)). Under ADR-0
 
 These are the inputs for a separate proposal, not changes made here:
 
-- **Three evidence series** in `DocumentInfo`'s closed table: `identity`, `finding` and `advisory.set`. `ConfigDocuments` would accept the three documents by their contracts' own validators, in the bytes their encoders write.
+- **Four series** in `DocumentInfo`'s closed table: `identity`, `finding` and `advisory.set` as evidence, and `identity.read`. `ConfigDocuments` would accept the first three by their contracts' own validators, in the bytes their encoders write. `identity.read` is the node's own two-field document, so its validator is the node's.
 - **Holds:** a finding holds its set and its identity records while it is the newest for its (asset, advisory).
 - **The `advisory` stream:** a node-level stream in the configuration database. Its name is the node's layout, not a contract matter. The class rules for it are the contract matter.
 - **The quota floor terms** in section 2.
