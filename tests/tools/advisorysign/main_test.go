@@ -35,6 +35,21 @@ func TestSignsAVerifiableSet(t *testing.T) {
 	}
 }
 
+// TestRefusesAReleaseSet: the tool will not put a test key on a release set.
+func TestRefusesAReleaseSet(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "advisorysign")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	set := `{"contract":"otsec.advisory/0.1","set_id":"otsec-test","version":1,"issued_at":"2026-11-05T00:00:00Z","purpose":"release","publisher":"advisorysign test","entries":[]}`
+	cmd := exec.Command(bin, "-key", "0")
+	cmd.Stdin = strings.NewReader(set)
+	out, err := cmd.Output()
+	if err == nil || len(out) != 0 {
+		t.Fatalf("signed a release set: err %v, %d bytes out", err, len(out))
+	}
+}
+
 // TestNotInEitherBinary: neither product binary links the test keys or this
 // tool.
 func TestNotInEitherBinary(t *testing.T) {

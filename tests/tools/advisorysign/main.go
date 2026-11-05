@@ -12,7 +12,10 @@
 //
 // The first form reads the set's payload bytes as they are and writes the
 // signed envelope. It signs the bytes it is given, valid or not, so a test
-// can build invalid sets on purpose; it does not validate them. The second
+// can build invalid sets on purpose; it does not validate them. The one thing
+// it refuses is a payload whose purpose is release: a test key has no
+// business on one, and refusing it means nobody makes one by mistake. A Go
+// test that needs such a set on purpose calls advisorytest.Sign. The second
 // prints test key n's key ID and public key in base64, for a test node's
 // anchors.
 package main
@@ -20,6 +23,7 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -46,6 +50,13 @@ func main() {
 	payload, err := io.ReadAll(io.LimitReader(os.Stdin, advisory.MaxSetPayload+1))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "advisorysign: %v\n", err)
+		os.Exit(1)
+	}
+	var head struct {
+		Purpose advisory.Purpose `json:"purpose"`
+	}
+	if json.Unmarshal(payload, &head) == nil && head.Purpose == advisory.PurposeRelease {
+		fmt.Fprintln(os.Stderr, "advisorysign: refusing to sign a release set with a test key")
 		os.Exit(1)
 	}
 	os.Stdout.Write(advisorytest.Sign(priv, payload))
