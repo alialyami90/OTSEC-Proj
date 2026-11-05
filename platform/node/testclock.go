@@ -140,6 +140,23 @@ func (c *fileClock) NewTimer(d time.Duration) (<-chan time.Time, func() bool) {
 	return w.c, func() bool { return c.stop(w) }
 }
 
+// NewTimerAt fires when the clock reaches at, at once if it already has
+// (C6 on #447).
+func (c *fileClock) NewTimerAt(at time.Time) (<-chan time.Time, func() bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w := &clockWait{at: at, c: make(chan time.Time, 1)}
+	if !c.now.Before(at) {
+		w.c <- c.now
+		return w.c, func() bool { return false }
+	}
+	if c.waits == nil {
+		c.waits = map[*clockWait]bool{}
+	}
+	c.waits[w] = true
+	return w.c, func() bool { return c.stop(w) }
+}
+
 func (c *fileClock) NewTicker(d time.Duration) (<-chan time.Time, func()) {
 	w := c.add(d, d)
 	return w.c, func() { c.stop(w) }
