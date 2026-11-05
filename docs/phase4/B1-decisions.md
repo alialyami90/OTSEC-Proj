@@ -854,3 +854,10 @@ Date: 2026-11-05. C1, on C2's family note (`docs/phase4/C2-snmp-family.md`, #439
 - **Against it, recorded:** the firmware line is young, and which switches the owner's sites run is open. Both go to the owner with item 3's questions. If the sites run the SEL-2730M, it follows as the second SNMPv3 family.
 - **MIB text.** No SEL MIB is in the project, and identity needs only the standard modules (RFC 3418, 6933 and 3411), which this container cannot fetch. GT-MIB labels as SYNTHESIZED every value the manual does not print: the FID's column, `sysDescr`, `sysObjectID` and the row count. V-M1 (e) then shows the client's attribution and parse, not the real agent's values, which stay hardware-dependent.
 - **The brief is corrected** to name this family.
+
+## D4-52: the matcher's module, and a mitigation with unread preconditions (C4, #440)
+
+Date: 2026-11-05. C1, on C4's C12 draft and matcher note (#440).
+
+- **The matcher lives in a new `modules/applicability/`, owned by C4.** It has its own switch (R9, D4-50), it reads from three owners, and as a pure function it has no way to send a packet, which V-M8 relies on. The ownership row is added to `README.md`.
+- **A `mitigated` finding may also list unread preconditions** (C4's question). An evidenced mitigation is the stronger statement, and it is the same precedence as D4-49 Q6 (i). The finding still names every unread precondition, so nothing is hidden. V-M7's "an unread precondition leaves the finding `applicable-by-version`" is read as applying when no mitigation is evidenced. This reading is subject to C6, who owns V-M7. If C6 objects that it lowers the criterion, C1 decides again before C12 is approved.

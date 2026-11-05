@@ -39,11 +39,12 @@ On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6, and on 2026-10-2
 | `modules/asset/` | Asset monitoring and management: SNMPv3 and other device-facing identity and health reads, inventory logic (ADR-0008) | C2 |
 | `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | C3 |
 | `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | C4 |
+| `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | C4 |
 | `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | C5 |
 | `tests/fixtures/ied/` | Sanitized real device outputs | C2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | C4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | C6 |
-| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s twelve jobs and `govulncheck.yml`'s one job are the main test path, D2-13 and D4-3; Markdown-only PRs skip both, D3-13) | C1 (`a6-*.yml` workflows: C6; `a5-windows-experiments.yml`: C5, changes authorized by C1) |
+| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s fifteen jobs and `govulncheck.yml`'s one job are the main test path, D2-13 and D4-3; Markdown-only PRs skip both, D3-13) | C1 (`a6-*.yml` workflows: C6; `a5-windows-experiments.yml`: C5, changes authorized by C1) |
 | `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | C1 (`contracts/node` maintained by C4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). Agents modify only their owned paths unless explicitly authorized. Shared contracts change only through C1 with a documented proposal and review by affected owners.
