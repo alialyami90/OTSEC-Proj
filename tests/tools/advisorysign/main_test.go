@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,13 +12,24 @@ import (
 	"otsec.local/otsec/contracts/advisory/advisorytest"
 )
 
-// TestSignsAVerifiableSet runs the tool on a minimal test set and checks that
-// the envelope verifies under test key 0, and under no other anchor.
-func TestSignsAVerifiableSet(t *testing.T) {
+// buildTool builds the tool into a temporary directory. Windows runs only a
+// file named .exe.
+func buildTool(t *testing.T) string {
+	t.Helper()
 	bin := filepath.Join(t.TempDir(), "advisorysign")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
+	return bin
+}
+
+// TestSignsAVerifiableSet runs the tool on a minimal test set and checks that
+// the envelope verifies under test key 0, and under no other anchor.
+func TestSignsAVerifiableSet(t *testing.T) {
+	bin := buildTool(t)
 	set := `{"contract":"otsec.advisory/0.1","set_id":"otsec-test","version":1,"issued_at":"2026-11-05T00:00:00Z","purpose":"test","publisher":"advisorysign test","entries":[]}`
 	cmd := exec.Command(bin, "-key", "0")
 	cmd.Stdin = strings.NewReader(set)
@@ -37,10 +49,7 @@ func TestSignsAVerifiableSet(t *testing.T) {
 
 // TestRefusesAReleaseSet: the tool will not put a test key on a release set.
 func TestRefusesAReleaseSet(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "advisorysign")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	bin := buildTool(t)
 	set := `{"contract":"otsec.advisory/0.1","set_id":"otsec-test","version":1,"issued_at":"2026-11-05T00:00:00Z","purpose":"release","publisher":"advisorysign test","entries":[]}`
 	cmd := exec.Command(bin, "-key", "0")
 	cmd.Stdin = strings.NewReader(set)
