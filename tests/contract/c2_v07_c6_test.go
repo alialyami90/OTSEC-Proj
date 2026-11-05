@@ -123,6 +123,28 @@ func TestC2V07SNMPResult(t *testing.T) {
 			c2Obs(m, "snmp_engine_id")["read"] = map[string]any{"operation": "sel27x1.snmp.system", "oid": "1.3.6.1.6.3.10.2.1.1.0"}
 		}, false},
 		{"an observation without read", "ok.json", func(m map[string]any) { delete(c2Obs(m, "hostname"), "read") }, false},
+
+		// failed.snmp_fid_unreadable (C1 on #445, D4-54): after
+		// authentication, the engine ID alone, and nothing cut from a FID.
+		{"FID unreadable", "failed.snmp_fid_unreadable.json", nil, true},
+		{"FID unreadable, two FIDs", "failed.snmp_fid_unreadable.two-fids.json", nil, true},
+		{"FID unreadable, not authenticated", "failed.snmp_fid_unreadable.json", func(m map[string]any) {
+			m["session"].(map[string]any)["snmp"].(map[string]any)["authenticated"] = false
+		}, false},
+		{"FID unreadable with a model", "failed.snmp_fid_unreadable.json", func(m map[string]any) {
+			c2Obs(m, "hostname")["name"] = "model"
+		}, false},
+		{"FID unreadable with a firmware version", "failed.snmp_fid_unreadable.json", func(m map[string]any) {
+			c2Obs(m, "hostname")["name"] = "firmware_version"
+		}, false},
+		{"FID unreadable with the engine ID differing", "failed.snmp_fid_unreadable.json", func(m map[string]any) {
+			id := m["identity"].(map[string]any)
+			id["result"] = "mismatch"
+			id["items"].([]any)[0].(map[string]any)["expected"] = "80007c4f03020000273102"
+		}, false},
+		{"FID unreadable with no identity item", "failed.snmp_fid_unreadable.json", func(m map[string]any) {
+			m["identity"].(map[string]any)["items"] = []any{}
+		}, false},
 	} {
 		_, err := adapter.DecodeResult(c2SNMPResult(t, c.file, c.edit))
 		if c.ok != (err == nil) {
