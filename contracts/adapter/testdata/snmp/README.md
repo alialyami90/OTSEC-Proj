@@ -22,6 +22,8 @@ The session has three phases. `probe` is discovery: an unauthenticated request, 
 - `results/valid/failed.usm_not_in_time_window.json`: as above, `usmStatsNotInTimeWindows`, which does not authenticate, so it ends the run.
 - `results/valid/failed.snmp_error_status.json`: the get's authenticated Response has error-status 16 (`authorizationError`).
 - `results/valid/failed.snmp_walk_not_increasing.json`: the walk's third OID is not greater than the second.
+- `results/valid/failed.snmp_fid_unreadable.json`: the authenticated walk of `entPhysicalTable` holds no `entPhysicalSoftwareRev`. The identity holds only the engine-ID item, and the observations are the engine ID and `hostname`, with no FID, model or firmware version (C1 on #445).
+- `results/valid/failed.snmp_fid_unreadable.two-fids.json`: as above, but the walk holds two different `entPhysicalSoftwareRev` values, so neither is taken.
 - `results/valid/failed.identity_mismatch.json`: an authenticated FID that differs from the declared one. The asset is suspended and the credential is not (`Result.SuspendsCredential`).
 - `results/valid/failed.timeout.json`: the first authenticated request has no answer.
 - `results/valid/refused.credential_unavailable.json`: refused before anything is sent: no transcript, no engine ID.
@@ -50,6 +52,8 @@ The session has three phases. `probe` is discovery: an unauthenticated request, 
 - `results/invalid/sent-digest-20-octets.json`: a sent digest of 20 octets, which neither allowed algorithm produces.
 - `results/invalid/digest-not-zeroed.json`: a `usm-digest` redaction over bytes that are not all zero.
 - `results/invalid/snmp-close-phase.json`: an SNMP segment in a close phase.
+- `results/invalid/fid-unreadable-with-fid-item.json`: `failed.snmp_fid_unreadable` on a result that compared a FID.
+- `results/invalid/fid-unreadable-with-fid-observation.json`: `failed.snmp_fid_unreadable` reporting a `firmware_id` observation.
 - `results/invalid/not-connected-with-engine-id.json`: a refusal before connecting that claims an engine ID.
 - `results/invalid/keyed-send-without-digest-redaction.json`: the time-synchronization request's digest is not redacted, so a live HMAC would be stored (C3 on #445).
 - `results/invalid/value-from-message-without-digest.json`: the first Response carries no digest redaction, so nothing may be read from it.

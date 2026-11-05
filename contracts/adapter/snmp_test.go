@@ -43,6 +43,8 @@ var snmpWant = map[string]string{
 	"keyed-send-without-digest-redaction":        "an authenticated message sent holds exactly one usm-digest redaction, not 0",
 	"value-from-message-without-digest":          "observations[0]: snmp_engine_id is read only from a received operate message that carried a digest",
 	"authenticated-without-authenticated-answer": "authenticated needs a received auth or operate message that carried a digest",
+	"fid-unreadable-with-fid-item":               "failed.snmp_fid_unreadable: the identity holds only the matching snmp_engine_id item",
+	"fid-unreadable-with-fid-observation":        "failed.snmp_fid_unreadable reports no firmware_id",
 }
 
 func snmpFixtures(t *testing.T) (*register.Package, Invocation) {

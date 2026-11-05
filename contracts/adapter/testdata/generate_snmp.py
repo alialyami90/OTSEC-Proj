@@ -48,6 +48,7 @@ SYS_NAME = "1.3.6.1.2.1.1.5.0"
 ENT_TREE = "1.3.6.1.2.1.47.1.1.1"
 ENT_DESCR_1 = "1.3.6.1.2.1.47.1.1.1.1.2.1"
 ENT_SW_REV_1 = "1.3.6.1.2.1.47.1.1.1.1.10.1"
+ENT_SW_REV_2 = "1.3.6.1.2.1.47.1.1.1.1.10.2"  # a second entity's software revision
 ENT_OUTSIDE = "1.3.6.1.2.1.47.1.2.1.1.2.1"  # entLogicalDescr.1: past the subtree, so the walk ends
 USM_STATS = "1.3.6.1.6.3.15.1.1.%d.0"  # usmStats: 1 unsupported sec level ... 6 decryption errors
 UNSUPPORTED, NOT_IN_TIME, UNKNOWN_USER, UNKNOWN_ENGINE, WRONG_DIGEST, DECRYPTION = 1, 2, 3, 4, 5, 6
@@ -206,6 +207,14 @@ class SNMP(g.Session):
         self.obs.append({"name": "firmware_version", "value": version,
                          "span": {"offset": sp["offset"] + len(model) + 1, "length": len(version)}, "read": read})
 
+    def entity_unreadable(self, fids):
+        """The walk returns these entPhysicalSoftwareRev values: none, or two
+        that differ. No FID is compared or reported."""
+        self.send("operate", AUTH | PRIV | REPORTABLE, ENGINE, 1, 3601,
+                  lambda r: tlv(GETBULK, integer(r) + integer(0) + integer(16) + seq(seq(oid(ENT_TREE), NULL))))
+        vbs = [(ENT_DESCR_1, octets("SEL-2731M"))] + [(o, octets(f)) for o, f in zip([ENT_SW_REV_1, ENT_SW_REV_2], fids)]
+        self.recv("operate", AUTH | PRIV, ENGINE, 1, 3601, pdu(RESPONSE, self.req, vbs + [(ENT_OUTSIDE, octets("x"))]))
+
     def identity(self):
         if not self.items:
             return {"result": "not-checked"}
@@ -261,6 +270,14 @@ def results():
     s.system()
     s.entity(increasing=False)
     out["failed.snmp_walk_not_increasing"] = s.result("failed", "failed.snmp_walk_not_increasing")
+
+    for name, fids in [("", []), (".two-fids", [FID, FID_OTHER])]:
+        s = SNMP()
+        s.discover()
+        s.time_sync()
+        s.system()
+        s.entity_unreadable(fids)
+        out["failed.snmp_fid_unreadable" + name] = s.result("failed", "failed.snmp_fid_unreadable")
 
     s = SNMP()
     s.discover()
@@ -343,6 +360,10 @@ def invalid_results(good):
     mut("value-from-message-without-digest", "ok", drop_redaction("rx", "operate"))
     mut("authenticated-without-authenticated-answer", "failed.usm_unknown_user",
         lambda r: r["session"]["snmp"].update(authenticated=True))
+
+    mut("fid-unreadable-with-fid-item", "ok", code("failed.snmp_fid_unreadable"))
+    mut("fid-unreadable-with-fid-observation", "failed.snmp_fid_unreadable",
+        lambda r: r["observations"].append(dict(r["observations"][1], name="firmware_id")))
 
     mut("not-connected-with-engine-id", "refused.credential_unavailable",
         lambda r: r["session"]["snmp"].update(engine_id=ENGINE.hex()))

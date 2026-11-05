@@ -1,6 +1,6 @@
 # C2 0.7: what an SNMP result must say (C2, P4-3-C2)
 
-**Status:** approved by C1 on #445, 2026-11-05, as part of C2 0.7, with §2.2's question settled: the asset is suspended, not the credential (`Result.SuspendsCredential`). Coded in `contracts/adapter` (`snmp.go`). It was a proposal to C1 first. It completes C2 0.7, which `docs/phase4/C2-c1-0.3-c3-0.4.md` §2.4 approved (D4-53) as eight codes, the SNMP transcript form and the `usm-digest` redaction. Coding that text showed it is not enough to write a valid SNMP result. Apart from the cap in §4 item 3, nothing here changes C1 0.3 or C3 0.4.
+**Status:** approved by C1 on #445, 2026-11-05, as part of C2 0.7, with §2.2's question settled: the asset is suspended, not the credential (`Result.SuspendsCredential`). Coded in `contracts/adapter` (`snmp.go`). It was a proposal to C1 first. It completes C2 0.7, which `docs/phase4/C2-c1-0.3-c3-0.4.md` §2.4 approved (D4-53) as eight codes (a ninth, `failed.snmp_fid_unreadable`, was added on #445), the SNMP transcript form and the `usm-digest` redaction. Coding that text showed it is not enough to write a valid SNMP result. Apart from the cap in §4 item 3, nothing here changes C1 0.3 or C3 0.4.
 
 ## 1. The gap
 

@@ -177,6 +177,18 @@ func (c *check) snmpIdentity(r Result, code Code) {
 	if code == RefusedEngineIDMismatch && !(first && items[0].Expected != items[0].Observed) {
 		c.fail("%s needs the %s item to differ", code, asset.AttrSNMPEngineID)
 	}
+	// No FID was read, so nothing but the engine ID was compared, and no
+	// FID or value cut from one is reported (C1 on #445).
+	if code == FailedSNMPFIDUnreadable {
+		if !first || len(items) != 1 {
+			c.fail("%s: the identity holds only the matching %s item", code, asset.AttrSNMPEngineID)
+		}
+		for i, o := range r.Observations {
+			if o.Name == asset.AttrFirmwareID || o.Name == asset.AttrModel || o.Name == asset.AttrFirmwareVersion {
+				c.fail("observations[%d]: %s reports no %s", i, code, o.Name)
+			}
+		}
+	}
 }
 
 // read checks an observation's read path (0.7).

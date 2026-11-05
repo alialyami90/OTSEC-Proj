@@ -137,6 +137,12 @@ const (
 	// FailedSNMPWalkNotIncreasing: a walk returned an OID not greater than
 	// the one before it (RFC 3416's order). The bytes are kept.
 	FailedSNMPWalkNotIncreasing Code = "failed.snmp_walk_not_increasing"
+	// FailedSNMPFIDUnreadable: the identity walk, authenticated from the
+	// pinned engine ID, found no FID or two different ones (C1 on #445,
+	// D4-54). The bytes are kept, the identity holds only the matching
+	// engine-ID item, and no FID, model or firmware version is reported, so
+	// nothing is guessed. The run is not a confirming read.
+	FailedSNMPFIDUnreadable Code = "failed.snmp_fid_unreadable"
 
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
 	// PartialReadRowsExceeded: the read has more rows than the profile's
@@ -216,6 +222,7 @@ var codes = map[Code]codeInfo{
 	FailedUSMNotInTimeWindow:       {StageAuth, 7, "", "", snmpOnly},
 	FailedSNMPErrorStatus:          {StageAfterAuth, 7, "", "", snmpOnly},
 	FailedSNMPWalkNotIncreasing:    {StageAfterAuth, 7, "", "", snmpOnly},
+	FailedSNMPFIDUnreadable:        {StageAfterAuth, 7, "", "", snmpOnly},
 }
 
 // Codes lists every code in the taxonomy of this package's minor.
