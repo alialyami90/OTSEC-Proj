@@ -918,9 +918,9 @@ Items 1 and 2 passed their gate with conditions, and the owner accepted them (`d
 
 **What item 3 must show at its gate**, to be fixed in the implementation briefs once the contracts are approved:
 
-- **R9 on the SEL-751,** from the identity it already reads (`ID` at Level 0). It is a device-read identity, so V-M7 can reach every class. It needs no SNMP and is the first end-to-end path.
+- **R9 on the SEL-751,** from the identity it already reads (`ID` at Level 0). It needs no SNMP and is the first end-to-end path. On allowlisted FIDs (R400 to R501) the identity is device-read, so V-M7 can reach every class. A denied branch (R302 and older) gets no session at all, not even for `ID`, so its identity is `operator` only and it can never be `confirmed` (D4-49, F1).
 - **R1.8 on one SNMPv3 SEL family,** read only, at `authPriv` only, on a new simulator profile (V-M1).
-- **V-M7 and V-M8** over GT-ADV, and **V-M1** over GT-MIB, on the real binaries, `simulated`. These criteria are fixed (#144). A brief may not lower them.
+- **V-M7 and V-M8** over GT-ADV, and **V-M1** over GT-MIB, on the real binaries, `simulated`. These criteria are fixed (#144). A brief may not lower them. D4-49 answers C6's testability questions on them (#436), and V-M1 (d) is shown for the refusal alone.
 
 **The first SNMPv3 family: SEL-2730M, unless C2's evidence says otherwise.** Its matrix row has SNMPv3 read-only with the FID in the Entity MIB (`documented-untested`, pp. 83 to 84, 155 and 156). The alternatives are the SEL-2731 and SEL-2741 in RSTP mode (S29) and the SEL-2488 (S26, whose model and firmware OIDs are `unknown`). SNMPv1 and v2c are never used without the owner's per-device approval (R1.8).
 

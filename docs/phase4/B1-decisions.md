@@ -809,3 +809,25 @@ Date: 2026-11-05. The owner, on C1's decision card after `docs/phase-4a-exit.md`
 - **The acceptance.** The owner chose "Accept, start item 3" at 04:01Z. Items 1 and 2 are accepted with the conditions in `docs/phase-4a-exit.md`, which carry into item 3 as recorded there.
 - **Item 3 is issued** as Stage A (investigation and contract drafts), in `docs/agent-handoffs.md` ("Phase 4 item 3: Stage A briefs"). Its implementation briefs and its exit gate follow C1's approval of the contracts, under §5.4 and the common rules for every Phase 4 brief.
 - **D4-34 stands.** Work stops at the end of item 3 for the owner's check.
+
+## D4-49: answers to C6's item 3 testability questions, and F1 (C6, #436)
+
+Date: 2026-11-05. C1, on `docs/phase4/C6-item3-testability.md` (#436), before any item 3 contract is approved. The thresholds of V-M1, V-M7 and V-M8 are not changed. Every answer below is C6's proposed reading, accepted unless stated otherwise. The contract drafts (C1 0.3, C3 0.4, C11, C12) carry them.
+
+- **Q1. The engine ID is pinned.** It is part of a device's SNMPv3 credential. A discovered engine ID that differs is refused with its own health code, and the client never re-localizes keys to it (C2 in C3 0.4, C3 in the key register row).
+- **Q2. No algorithm fallback.** The client uses only the algorithms configured for the device. C3 rules which algorithms may be configured at all. Unless C3 shows a reason otherwise, DES and MD5 are refused. GT-MIB offers the refused algorithms as negative cases.
+- **Q3. No v1 or v2c path in item 3.** V-M1 (d) is shown for the refusal alone, and the item 3 gate says so, as D4-40 point 3 did for V-M3.
+- **Q4. One source vocabulary.** C1 0.3 stores a kind (`device-read`, `passive` or `operator`) and, for `device-read`, the read path (`snmpv3`, `sel.id`, ...) and an evidence ID. V-M1 (e) checks the path, and V-M7 checks the kind.
+- **Q5. A precondition read as false:**
+  - with a device-read identity, `not-applicable`, citing the settings read;
+  - `mitigated` only when the advisory itself names that setting as a mitigation;
+  - with an operator or passive identity, `applicable-by-version`, with the precondition shown as evidenced false.
+- **Q6. Precedence and staleness:**
+  - (i) All preconditions hold and a mitigation is evidenced: `mitigated`.
+  - (ii) A `confirmed` finding whose evidence is no longer current falls to `applicable-by-version` and names the stale evidence.
+  - (iii) A passive identity out of range gives `not-applicable (passive)`, a label C12 allows.
+  - (iv) An advisory with no preconditions is `confirmed` on a current device-read version. Any configuration change retrieved for the asset makes every `confirmed` finding on it stale until the next identity read.
+- **Q7. When evaluation runs.** Evaluation runs after each commit of an identity, settings or configuration record for the asset, and after each set replacement. The finding's change is stored before the asset's next scheduled read starts.
+- **Q8 to Q11** as proposed. A same-version set is refused unless byte-identical, and a byte-identical one is a no-op. An entry with no published source refuses the whole set.
+- **Q12** as proposed: the ports are fixed for the paired runs, and the comparison covers every destination. C6 runs an A/A pair first. If packet counts differ between identical runs, C6 brings C1 the measured difference before anything changes.
+- **F1. No `ID` session on a denied SEL-751 branch.** The firmware gate (ADR-0005, F-009) refuses every session on a firmware line not on the allowlist, because communications access is where the restart defect lies. A session that only reads `ID` is still a session. So R302 and older stay `operator` identity only, and can never be `confirmed`. This is recorded as an item 3 limitation, and GT-ADV pins it with denied-branch rows. The item 3 brief is corrected: V-M7 reaches every class on the SEL-751 only for allowlisted FIDs.
