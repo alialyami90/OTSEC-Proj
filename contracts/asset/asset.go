@@ -698,6 +698,21 @@ func (a Asset) Effective() Asset {
 		}
 		out.Attributes[i] = at
 	}
+	// A derived device-read observation stays device-read only while its
+	// inputs are backed as this reader reads them (C6's review of #445).
+	byName := map[string]Attribute{}
+	for _, at := range out.Attributes {
+		byName[at.Name] = at
+	}
+	for _, at := range out.Attributes {
+		for j, ob := range at.Observations {
+			if ob.Source.Method == Derived && ob.Source.Kind == DeviceRead {
+				if _, ok := derivedBacked(byName, ob, Observation.EffectiveKind); !ok {
+					at.Observations[j].Source.Kind = FallbackSourceKind
+				}
+			}
+		}
+	}
 	out.Endpoints = append([]Endpoint(nil), a.Endpoints...)
 	for i := range out.Endpoints {
 		if !contains(SecurityLevels, out.Endpoints[i].DownstreamSecurity.Level) {
@@ -1045,30 +1060,46 @@ func (v *validator) read(p string, r Read) {
 
 // derivedKinds checks that a rule cannot raise its inputs to device-read: a
 // derived observation is device-read only when every attribute its ref names
-// (comma-separated) carries a device-read observation equal to that
-// attribute's value.
+// (comma-separated) is backed (derivedBacked). The record's own kinds are
+// used, so a later minor's device-read method still backs an input here;
+// Effective then reads that input with this reader's fallback and lowers the
+// derived observation with it.
 func (v *validator) derivedKinds(attrs map[string]Attribute) {
 	if v.minor < 3 {
 		return
 	}
+	stated := func(o Observation) SourceKind { return o.Source.Kind }
 	for _, at := range attrs {
 		for j, ob := range at.Observations {
 			if ob.Source.Method != Derived || ob.Source.Kind != DeviceRead {
 				continue
 			}
-			for _, name := range strings.Split(ob.Source.Ref, ",") {
-				name = strings.TrimSpace(name)
-				in, ok := attrs[name]
-				backed := false
-				for _, io := range in.Observations {
-					backed = backed || (io.Source.Kind == DeviceRead && io.Value == in.Value)
-				}
-				if !ok || !backed {
-					v.fail("attribute %s observations[%d]: a derived observation is device-read only when every input is; %q is not", at.Name, j, name)
-				}
+			if name, ok := derivedBacked(attrs, ob, stated); !ok {
+				v.fail("attribute %s observations[%d]: a derived observation is device-read only when every input is; %q is not", at.Name, j, name)
 			}
 		}
 	}
+}
+
+// derivedBacked reports whether every attribute a derived observation's ref
+// names has a non-derived observation of kind device-read, by kind, equal to
+// that attribute's value (C1 0.3 §1.1, C6's review of #445). Only a
+// non-derived observation counts, so a derived value cannot back itself, and
+// two derived values cannot back each other. It returns the first input that
+// is not backed.
+func derivedBacked(attrs map[string]Attribute, ob Observation, kind func(Observation) SourceKind) (string, bool) {
+	for _, name := range strings.Split(ob.Source.Ref, ",") {
+		name = strings.TrimSpace(name)
+		in, ok := attrs[name]
+		backed := false
+		for _, io := range in.Observations {
+			backed = backed || (io.Source.Method != Derived && kind(io) == DeviceRead && io.Value == in.Value)
+		}
+		if !ok || !backed {
+			return name, false
+		}
+	}
+	return "", true
 }
 
 func (v *validator) endpoint(i int, ep Endpoint) {

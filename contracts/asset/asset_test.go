@@ -532,6 +532,47 @@ func TestDerivedDeviceReadFromDeviceReadInputs(t *testing.T) {
 	}
 }
 
+// A derived value never backs itself or another derived value, and a reader
+// lowers a derived observation with the inputs it lowers (C6's review of
+// #445).
+func TestDerivedCannotBackDerived(t *testing.T) {
+	derived := func(name, value, ref string) Attribute {
+		return Attribute{Name: name, Value: value, Confidence: SingleSource,
+			Observations: []Observation{{Value: value, EvidenceClass: Inferred,
+				Source: Source{Method: Derived, Ref: ref, ObservedAt: "2026-11-05T09:30:00Z", Kind: DeviceRead}}}}
+	}
+	for name, add := range map[string][]Attribute{
+		"names itself":     {derived("sel.mode", "M", "sel.mode")},
+		"name each other":  {derived("sel.mode", "M", "sel.port"), derived("sel.port", "P", "sel.mode")},
+		"an operator pair": {derived("sel.mode", "M", "model, sel.port"), derived("sel.port", "P", "ip_address")},
+	} {
+		a := load(t, "sel-2731m-snmpv3.json")
+		a.Attributes = append(a.Attributes, add...)
+		if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "a derived observation is device-read only when every input is") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A later minor's device-read method backs an input at validation, and
+	// Effective reads it as the fallback and lowers what it derives.
+	a := load(t, "sel-2731m-snmpv3.json")
+	a.Schema = "otsec.asset/0.4"
+	for i := range a.Attributes {
+		if a.Attributes[i].Name == AttrModel {
+			a.Attributes[i].Observations[0].Source.Method = "snmp-trap-later"
+			a.Attributes[i].Observations[0].EvidenceClass = "attested-later"
+		}
+	}
+	a.Attributes = append(a.Attributes, derived("sel.mode", "M", "model"))
+	if err := a.Validate(); err != nil {
+		t.Fatalf("later minor: %v", err)
+	}
+	for _, at := range a.Effective().Attributes {
+		if at.Name == "sel.mode" && at.Observations[0].Source.Kind != FallbackSourceKind {
+			t.Errorf("derived over a lowered input reads as %s", at.Observations[0].Source.Kind)
+		}
+	}
+}
+
 // An snmpv3 asset's binding is pinned-key, so it gets a credential, and its
 // endpoint takes a direct path like any other session.
 func TestSNMPv3AssetGetsACredential(t *testing.T) {

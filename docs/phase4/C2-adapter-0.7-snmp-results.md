@@ -73,6 +73,7 @@ The SEL-only codes are those that need a prompt or a SEL line: `refused.session_
 
 - **`operation`** is the C3 operation that read the bytes, the run's step (C1 0.3 §1.2). For the SEL-751 it is `sel.id`, or the SER read for the serial number.
 - **`oid` or `header`**, exactly one, on an SNMP result only, with C1 0.3's values. `header` is `msgAuthoritativeEngineID`, for `snmp_engine_id`, whose value is then the hex of its span.
+- **Checked against the register** (C3's review of #445): with the verified C3 package, `operation` is a step of the invoked run, and an `oid` is one of that operation's `oids` for a `get`, or inside its `subtree` (`register.InSubtree`) for a walk.
 - `modules/asset` copies `read` into C1 `Source.read` and adds the transport from the endpoint. It never parses the transcript.
 - A result below 0.7 has no `read`, and `modules/asset` reads a SEL-751 0.6 observation as `sel.id`, except the serial number, which is the SER read. This is the only inference, and it ends when the adapter writes 0.7.
 
@@ -85,4 +86,5 @@ The SEL-only codes are those that need a prompt or a SEL line: `refused.session_
 ## 4. What I ask C1
 
 1. Approve 2.1 to 2.3 as part of C2 0.7, coded in the same contract PR as C1 0.3 and C3 0.4. C3 and C6 review it there. The alternative is a C2 0.8 after the SNMPv3 client is written, which leaves 0.7's eight codes with no valid example until then.
-2. Rule on the credential suspension in 2.2.
+2. Rule on the credential suspension in 2.2. C3's view (review of #445) is the asset only: SNMPv3 keys never cross the wire, so suspending the credential protects nothing. I agree.
+3. C3's note on #445: cap an SNMP operation's `max_reply_bytes` at 65,507, the largest UDP payload over IPv4, instead of 0.3's 1 MiB. A larger value would advertise a `msgMaxSize` no datagram can carry. This changes C3 0.4's text, so it needs your approval. I recommend it.
