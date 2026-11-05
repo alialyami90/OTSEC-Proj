@@ -282,8 +282,11 @@ func checkAuthPriv(h header, op Op, s Session) Rule {
 	copy(iv[8:], h.privP)
 	plain := make([]byte, len(enc))
 	cipher.NewCFBDecrypter(block, iv).XORKeyStream(plain, enc) //nolint:staticcheck // RFC 3826 fixes CFB128
-	scoped, _, err := expect(plain, tagSequence)               // RFC 3826 allows padding after the scoped PDU
-	if err != nil {
+	// CFB needs no padding, and our client writes none, so nothing may
+	// follow the scoped PDU: a second scoped PDU hidden there would leave
+	// unchecked (C6 on #449).
+	scoped, rest, err := expect(plain, tagSequence)
+	if err != nil || len(rest) != 0 {
 		return RuleBER
 	}
 	ctxEngine, scoped, err := expect(scoped, tagOctetString)

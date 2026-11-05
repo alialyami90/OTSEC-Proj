@@ -88,6 +88,7 @@ type msg struct {
 	oids        []string
 	value       []byte // a varbind's value; NULL when nil
 	plain       bool   // send the scoped PDU unencrypted whatever the flags say
+	afterScoped []byte // bytes after the scoped PDU, inside the encryption
 }
 
 func (m msg) bytes() []byte {
@@ -103,7 +104,7 @@ func (m msg) bytes() []byte {
 	if m.community != "" {
 		return enc(0x30, encInt(m.version), octets([]byte(m.community)), pdu)
 	}
-	scoped := enc(0x30, octets(m.ctxEngine), octets([]byte(m.ctxName)), pdu)
+	scoped := append(enc(0x30, octets(m.ctxEngine), octets([]byte(m.ctxName)), pdu), m.afterScoped...)
 	data := scoped
 	if m.flags&flagPriv != 0 && !m.plain {
 		block, _ := aes.NewCipher(testPriv)
@@ -245,6 +246,12 @@ func TestDenyCorpus(t *testing.T) {
 		"discovery: a GetNextRequest":    {with(d, func(m *msg) { m.pduTag = tagGetNext }), getOp, before(), "discovery_shape.pdu_type"},
 		"discovery: one varbind":         {with(d, func(m *msg) { m.oids = []string{sysDescr} }), getOp, before(), "discovery_shape.varbinds"},
 		"discovery: a SetRequest":        {with(d, func(m *msg) { m.pduTag = 0xa3 }), getOp, before(), "discovery_shape.pdu_type"},
+		// A second scoped PDU hidden after the first, inside the encryption
+		// (C6 on #449). CFB needs no padding, so any byte there is refused.
+		"a SetRequest after the scoped PDU": {with(read(getOp), func(m *msg) {
+			m.afterScoped = enc(0x30, octets(testEngine), octets(nil), enc(0xa3, encInt(5), encInt(0), encInt(0), enc(0x30, enc(0x30, encOID(sysName), encInt(1)))))
+		}), getOp, after(), RuleBER},
+		"one byte after the scoped PDU": {with(read(getOp), func(m *msg) { m.afterScoped = []byte{0} }), getOp, after(), RuleBER},
 	}
 	for name, c := range cases {
 		if r := Check(c.m.bytes(), c.op, c.s); r != c.rule {
