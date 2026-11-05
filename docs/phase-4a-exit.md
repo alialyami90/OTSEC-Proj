@@ -48,7 +48,7 @@ Every change bumped the minor, kept a reader for the previous version, and had t
 
 ## Independently verified
 
-C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` are the record. C6 wrote each test from the rule text and the GT-INJ schedules, which were committed before the product first ran against them, and mutated the code under test.
+C6's gate table and the findings log (F-016 to F-024) in `docs/verification.md` are the record. C6 wrote each test from the rule text and the GT-INJ schedules, which were committed before the product first ran against them, and mutated the code under test.
 
 | Check | Result |
 | --- | --- |
@@ -178,7 +178,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 
 ## Next coordinated tasks
 
-1. **After the gate:** C6's gate-table PR with #431's run ID, and a test-only PR for C5's two non-blocking points on #431 (the 20 ms `read()` race, and refusing `-gtinj` with `-gtinj-ser` in `slicehelper`).
+1. **After the gate:** C6's gate-table PR with #431's run ID, and a test-only PR refusing `-gtinj` with `-gtinj-ser` in `slicehelper` (C5 on #431). The harness's 20 ms `read()` wait is a timing assumption that fails loudly, never falsely, so it is not work unless it fails.
 2. C3 closes #352 and writes a fresh HR-11 row from `main`; `config.reads_removed` in the node; the Windows budget stays tracked under C1's ruling.
 3. **Phase 4 item 3**, after the owner's check (D4-34).
 
