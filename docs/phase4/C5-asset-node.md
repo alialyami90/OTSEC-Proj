@@ -123,9 +123,10 @@ The set's version, date and digest go into every finding written under it, and i
 
 The matcher runs in the scheduler's goroutine between collection runs, with a time budget, as the event-baseline feeder does. A large evaluation therefore cannot delay a collection run.
 
-**When an asset is evaluated** (D4-49 Q7):
-- after each commit of an identity, settings or configuration record for the asset. The SEL-751 reads `ID` before its settings, so evaluating only on the identity read would use the old snapshot (C6 on #438);
-- after every successful identity read for it, including one that stores no new identity record (C4's condition, confirmed by C1, extending D4-49 Q7's triggers). Without it, a finding made stale by a configuration change would never become confirmed again. Such a run usually records nothing, because a change to the latest read alone is not a revision (C12);
+**When an asset is evaluated** (D4-49 Q7, as C1 rules in D4-53):
+- once per collection run for it, at the end of the run: after the run's last commit, or after the run if it commits nothing. Within a run, `identity.read` commits before the SEL-751's settings snapshot, so evaluating after each commit would record a transient finding against the old snapshot, with an alarm, for a state the device was never in during that run. Every run ends in an evaluation, including one that stores no new identity record or commits nothing, so a finding made stale by a configuration change becomes confirmed again (C4's condition, extending D4-49 Q7's triggers). Such an evaluation usually records nothing, because a change to the latest read alone is not a revision (C12);
+- after a commit made outside a collection run for the asset;
+- if a run is cut off by a restart, the evaluation at start covers it;
 - after a new set comes into use, when every asset is evaluated;
 - at start, for every asset;
 - at the interval C4's note sets for evidence currency ("R9 classes and what `confirmed` needs", point 3).
