@@ -11,7 +11,7 @@ import (
 // clock was stepped between the scheduler's read of now and the arming,
 // which a duration from the earlier read does not (C6 on #447). Evidence
 // class: simulated.
-func TestTimerAtFiresAtItsTimeAfterAStepBeforeArming(t *testing.T) {
+func TestTestClockTimerAtFiresAtItsTimeAfterAStepBeforeArming(t *testing.T) {
 	step := useClock(t, clockT0)
 	at := clockT0.Add(time.Minute)
 	wait := at.Sub(nodeClock.Now()) // the scheduler's read of now
@@ -40,7 +40,7 @@ func TestTimerAtFiresAtItsTimeAfterAStepBeforeArming(t *testing.T) {
 
 // A timer armed at a time the clock has already reached fires at once, and
 // a stopped one never fires.
-func TestTimerAtPastAndStopped(t *testing.T) {
+func TestTestClockTimerAtPastAndStopped(t *testing.T) {
 	step := useClock(t, clockT0)
 	c, _ := timerAt(clockT0, time.Second)
 	select {
