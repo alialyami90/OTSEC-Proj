@@ -61,9 +61,9 @@ A new class would need its own full action and its own quota rules for no gain. 
 | What | Stream | Written when | Size bound | Proposed series |
 | --- | --- | --- | --- | --- |
 | Identity record (C1 0.3) | `config/<asset>` | at the asset's first identity, and when any attribute's value or source changes | small: the attributes, plus a capture of only the bytes the observations point to | `identity` (evidence) |
-| Advisory set (C11) | `advisory`, a new node-level stream in the configuration database, present only with `applicability` | when a set is accepted | C11 must bound it below the record cap (Questions, item 4) | `advisory.set` (evidence) |
+| Advisory set (C11) | `advisory`, a new node-level stream in the configuration database, present only with `applicability` | when a set is accepted | at most C11's `MaxEnvelopeBytes`, 1,399,128 B, within one record (Questions, item 4) | `advisory.set` (evidence) |
 | Latest identity read | `config/<asset>` | after every successful identity read | tens of bytes: invocation ID and time | `identity.read` (not held) |
-| Finding (C12) | `config/<asset>` | when a finding first appears and when its class changes, never on an unchanged evaluation | small | `finding` (evidence) |
+| Finding (C12) | `config/<asset>` | when a finding first appears and on any change C12 §7 lists (class or reason, identity, a precondition, mitigation, evidence or its `stale` mark, or the set), never on an unchanged evaluation or a change to `identity.latest_read` alone | small | `finding` (evidence) |
 
 **An identity record carries its own evidence.** For the SEL-751, the attributes come from the `ID` exchange at Level 0 in every collection run. Today the FID, CID and serial number are already in the adapter's `Result.Observations`, each with its span in the transcript, and they need no extra read.
 
@@ -87,7 +87,7 @@ The figures follow from C11's and C1 0.3's bounds once they exist. A configurati
 
 **The drop path.** The administrator writes the signed set file to `admin_dir`, under one fixed name, `advisory-set.json`. That is the locked, administrator-only directory the relay files already use (D2-12), with the same lock rules. The admin-request scanner reads only `admin-request-*` names, so it never reads or reports this file.
 
-The node reads the file at most once per node tick. It refuses anything over C11's envelope bound (twice `MaxSetPayload`) before parsing. A set takes one of three paths: refused, installed, or the same set.
+The node reads the file at most once per node tick. The read is bounded: it reads at most C11's `MaxEnvelopeBytes` (1,399,128 B) plus one byte, and a file that yields more is refused as `malformed` at step 1 before anything parses it, without reading the rest. A set takes one of three paths: refused, installed, or the same set.
 
 **1. Refused.** The node runs C11's checks in C11's order (C3's draft on #437, section 1.5), and stops at the first failure:
 1. size and envelope (`malformed`);
@@ -102,7 +102,7 @@ On refusal nothing is stored, and the set in use stays in use, untouched. The no
 
 If the audit stream cannot take the record, the set is still not installed, and the alarm says the refusal was not recorded. Privileged changes fail closed, as audit does today.
 
-**2. Accepted.** The node appends the envelope's exact bytes, signature included, as one configuration record on `advisory`. The set can then be verified again from the store alone. With `MaxSetPayload` at 1 MiB, the envelope's base64 payload is at most about 1.40 MB, which is within the 1.5 MiB record cap.
+**2. Accepted.** The node appends the envelope's exact bytes, signature included, as one configuration record on `advisory`. The set can then be verified again from the store alone. A file that passed step 1 is at most `MaxEnvelopeBytes`, which C11 pins below `ConfigRecordBytes` less C9's `RecordHeadroom`, so an accepted set always fits one record.
 
 One commit is atomic: after a crash the record is either there whole or not at all. Then the node writes `advisory.set_installed`.
 
@@ -113,7 +113,9 @@ A set is in use only once its audit record is in the chain. At start, the node f
 
 **3. The same set again** (the same version and payload SHA-256). Nothing is recorded, and nothing is raised.
 
-**The set in use and the floor.** The set in use is the newest `advisory` record whose installation record is in the chain. C11's floor, (`version`, payload SHA-256), is that record's, and it is not stored anywhere else. It is derived at start from the store and the chain, so it survives a restart and cannot disagree with the set in use. A restart therefore cannot reopen an older set.
+**The set in use and the floor.** The newest installed set is the newest `advisory` record whose installation record is in the chain. C11's floor, (`version`, payload SHA-256), is that record's, and it is not stored anywhere else.
+
+**The stored set is verified again** (C3 on #437, C11 §1.5). At every start, and whenever the advisory anchors change, the node checks the newest installed set's key and signature (C11 steps 2 and 3) against the anchors pinned now. It is in use only if it passes. If its key is now revoked or no longer pinned, no set is in use: the matcher does not run, the node raises `advisory-set-refused` with `revoked_key` or `unknown_key`, and `applicability-no-set` stands until a valid set arrives. The floor stays where it was, so the next accepted set must still be newer, and an older stored set is never used in its place. Stored findings are not rewritten; each still names the set it was made under. A start that repairs a missing `advisory.set_installed` verifies the set the same way before it writes the record. It is derived at start from the store and the chain, so it survives a restart and cannot disagree with the stored sets. A restart therefore cannot reopen an older set.
 
 The set's version, date and digest go into every finding written under it, and into status (R9.3).
 
@@ -121,13 +123,14 @@ The set's version, date and digest go into every finding written under it, and i
 
 The matcher runs in the scheduler's goroutine between collection runs, with a time budget, as the event-baseline feeder does. A large evaluation therefore cannot delay a collection run.
 
-**When an asset is evaluated:**
+**When an asset is evaluated** (D4-49 Q7):
+- after each commit of an identity, settings or configuration record for the asset. The SEL-751 reads `ID` before its settings, so evaluating only on the identity read would use the old snapshot (C6 on #438);
 - after every successful identity read for it, including one that stores no new identity record (C4's condition, confirmed by C1, extending D4-49 Q7's triggers). Without it, a finding made stale by a configuration change would never become confirmed again. Such a run usually records nothing, because a change to the latest read alone is not a revision (C12);
 - after a new set comes into use, when every asset is evaluated;
 - at start, for every asset;
 - at the interval C4's note sets for evidence currency ("R9 classes and what `confirmed` needs", point 3).
 
-Each evaluation compares the matcher's output with the newest stored finding for each (asset, advisory). It writes only the differences, so evaluations are idempotent across restarts. A reclassification is a new record that names the one it supersedes, never an overwrite (V-M7). With `applicability` off, none of this runs.
+Each evaluation compares the matcher's output with the newest stored finding for each (asset, advisory). It writes only the differences, so evaluations are idempotent across restarts. Any difference C12 §7 lists is a new revision, not only a change of class: a new `stale` mark or changed evidence under the same class is recorded too, or V-M7 could not see it (C6 on #438). A revision is a new record that names the one it supersedes, never an overwrite (V-M7). With `applicability` off, none of this runs.
 
 ## 5. SNMP poll scheduling under the register's limits
 
@@ -139,9 +142,7 @@ An SNMP poll is an ordinary schedule entry: an asset, one of C3 0.4's SNMP opera
 - **The register's operation limits** (C3 0.4): the named OIDs, the number of requests, `max-repetitions` for `GETBULK`, timeouts and the deadline. The adapter in the collector enforces them, so they bound each poll's load on the device. The node only passes the operation ID.
 - **Runs are serial.** The node runs its schedule from one goroutine, so it never polls two devices at once. The cost is head-of-line delay: an SNMP poll that times out holds the next run for up to its deadline. Status already shows each asset's last run time, so a lagging schedule is visible. If measured polls show this matters, a later change can bound it. This note does not propose one.
 
-No SNMPv1 or v2c entry runs without C3's approval record (V-M1 (d)). Under ADR-0002 the collector decides each run: it refuses with `legacy_snmp_unapproved` before the credential is resolved (C3's draft on #437, section 4). The node also checks the chain at load and at each fold, so an entry without a live approval shows in status as refused, and is not tried every interval.
-
-**The approval's lapse alarm is the node's.** C11's companion rule raises an alarm 14 days before an approval's `not_after`. The node already folds the audit chain and owns status and `platform/health`. It raises `legacy-snmp-approval-lapsing` 14 days before, once per approval, and `legacy-snmp-approval-lapsed` at the lapse. This follows the pattern of the node key expiry lines (`node_keys_expiring`). The collector only refuses at the lapse, as C3's draft says, and raises nothing ahead of time.
+Item 3 has no SNMPv1 or v2c path (D4-49 Q3), so every poll here is SNMPv3.
 
 ## 6. Health and status
 
@@ -164,8 +165,7 @@ No SNMPv1 or v2c entry runs without C3's approval record (V-M1 (d)). Under ADR-0
 - **SNMP run failures** (V-M1 (c)): a refusal of a weaker USM level, a wrong user, wrong keys or a wrong engine ID shows as the run's code in `assets[<id>]`. It also raises the existing collection-failure alarm with that code. The codes are C2's to name, in C3 0.4.
 - **`advisory-set-refused`** (R9), as in section 3.
 - **`applicability-no-set`** (R9): R9 is on and no set is in use yet. It is raised once, not at every tick.
-- **`legacy-snmp-approval-lapsing`** and **`legacy-snmp-approval-lapsed`** (asset), as in section 5.
-- **`finding-changed`** (R9): a finding appeared or changed class, with the asset, the advisory and both classes. Its wording follows C12, and no field states exploitability (R9.2).
+- **`finding-changed`** (R9): a finding appeared or a new revision was recorded, with the asset, the advisory and both classes. Its wording follows C12, and no field states exploitability (R9.2).
 
 ## What C5 0.8 would need
 
@@ -181,5 +181,5 @@ These are the inputs for a separate proposal, not changes made here:
 1. **C1: does "independently" allow `applicability` without `asset`?** Answered in D4-50 (#435): no. That config is refused at load, which leaves three supported combinations, and V-M1 (a) runs with `asset` off.
 2. **C3: where do the SNMPv3 USM keys live?** The brief's threat-model row says "the node key register". This design keeps them in the collector as C7 credentials, like the SEL-751 password, so the node never holds a device secret. If "node key register" means something else, this note changes.
 3. **C6 and C1: does V-M8's "same flows" count the RELP flow?** Answered in D4-50 and D4-49 Q12 (#435): the RELP flow exists in both runs and may differ in volume. The comparison is per collection session to every device address, and the R9 run has no flow the other lacks. R9's health events therefore go to `platform/health`, as section 6 says.
-4. **C3: the envelope's bound.** Answered on #437: `MaxSetPayload` is 1 MiB, so the stored envelope is at most about 1.40 MB, within the 1.5 MiB record cap. C11's envelope bound, twice `MaxSetPayload`, is above the cap. The node refuses anything over the cap as well, which a valid set never reaches. I ask that C11 keep `MaxSetPayload` at or below 1 MiB while C5 stores the set as one record.
+4. **C3: the envelope's bound.** Answered on #437: C11's `MaxEnvelopeBytes` is 1,399,128 B, and a contract test pins it below the node's record cap less headroom, so a set that passes step 1 always fits one record. `MaxSetPayload` stays at 1 MiB or less while the set is one record.
 5. **Answered by C2 (#439, §1.5 of `docs/phase4/C2-c1-0.3-c3-0.4.md`).** The SEL-751 needs no new read and no register revision. The FID, CID and serial number stay as they are, and the adapter adds the model and the firmware version as their own observations, each with a sub-span of the FID's bytes, so the capture above still covers them. C2's §4 Q3 is answered in §2: the evidence ID is the C2 invocation ID.
