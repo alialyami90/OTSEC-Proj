@@ -98,7 +98,7 @@ The node reads the file at most once per node tick. The read is bounded: it read
 6. the order against the floor (`same_version_differs`, `older_version`);
 7. the purpose, where a release build refuses a `test` set (`test_set`).
 
-On refusal nothing is stored, and the set in use stays in use, untouched. The node writes `advisory.set_refused` to the audit chain (C3's C8 addition) with the reason code and the file's SHA-256. It also raises `advisory-set-refused`, keyed by the file's hash, so a file left in place is reported once and not at every tick.
+On refusal nothing is stored, and the set in use stays in use, untouched. The node writes `advisory.set_refused` to the audit chain (C3's C8 addition) with the reason code and the file's SHA-256. It also raises `advisory-set-refused`, keyed by the file's hash. Both the audit record and the alarm are written once per file hash, as C11 says, so a file left in place is reported once and not at every tick.
 
 If the audit stream cannot take the record, the set is still not installed, and the alarm says the refusal was not recorded. Privileged changes fail closed, as audit does today.
 
