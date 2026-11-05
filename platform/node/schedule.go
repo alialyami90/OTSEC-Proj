@@ -227,14 +227,15 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	s.relayAdmin(ctx)
 	s.stepEvents(ctx)
 	for {
-		wait, run := RelayEverySeconds*time.Second, -1
+		now := s.now()
+		next, run := now.Add(RelayEverySeconds*time.Second), -1
 		if p != nil {
-			if i, at := p.due(); at.Sub(s.now()) <= wait {
-				wait, run = at.Sub(s.now()), i
+			if i, at := p.due(); !at.After(next) {
+				next, run = at, i
 			}
 		}
-		if wait > 0 {
-			c, stop := nodeClock.NewTimer(wait)
+		if wait := next.Sub(now); wait > 0 {
+			c, stop := timerAt(next, wait)
 			select {
 			case <-ctx.Done():
 				stop()
@@ -250,8 +251,8 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			continue
 		}
 		began := s.now()
-		s.RunOnce(ctx, run)
-		p.done(run, began, s.now())
+		_, ended := s.runOnceEnded(ctx, run)
+		p.done(run, began, ended)
 	}
 }
 
@@ -328,10 +329,20 @@ type Report struct {
 // runs its schedule from one goroutine (Run), and a run's suspension
 // decisions assume the state no other run is changing.
 func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
+	rep, _ := s.runOnceEnded(ctx, i)
+	return rep
+}
+
+// runOnceEnded is RunOnce, and also returns when the run ended. That time is
+// taken before status is written, so a harness that steps the test clock
+// once it sees the run in status cannot move the end, and with it the
+// asset's quiet window, past its step (C6 on #447).
+func (s *Scheduler) runOnceEnded(ctx context.Context, i int) (Report, time.Time) {
 	// A missed series is written before the next run's records, so the
 	// read that ends it comes after its gap.
 	s.writeMissed(ctx)
 	rep := s.runOnce(ctx, i)
+	ended := s.now()
 	s.noteMissed(i, rep)
 	s.writeMissed(ctx)
 	s.publishHold()
@@ -343,7 +354,7 @@ func (s *Scheduler) RunOnce(ctx context.Context, i int) Report {
 		s.recordResult(s.rt.cfg.Schedule[i].AssetID, rep)
 		s.rt.opt.Status.Write(string(s.rt.cfg.NodeID))
 	}
-	return rep
+	return rep, ended
 }
 
 func (s *Scheduler) runOnce(ctx context.Context, i int) Report {

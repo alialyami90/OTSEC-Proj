@@ -31,6 +31,17 @@ func c1Record(t *testing.T, schema, transport, path string) []byte {
 		t.Fatal(err)
 	}
 	m["schema"] = schema
+	if schema == "otsec.asset/0.1" || schema == "otsec.asset/0.2" {
+		// source.kind and source.read are 0.3 fields (C2, D4-53): an
+		// older record does not carry them.
+		for _, at := range m["attributes"].([]any) {
+			for _, o := range at.(map[string]any)["observations"].([]any) {
+				src := o.(map[string]any)["source"].(map[string]any)
+				delete(src, "kind")
+				delete(src, "read")
+			}
+		}
+	}
 	ep := m["endpoints"].([]any)[0].(map[string]any)
 	delete(ep, "path")
 	if path != "-" {
@@ -91,11 +102,11 @@ func TestC1PathReading(t *testing.T) {
 		{"0.2 path on syslog", "otsec.asset/0.2", "syslog-udp", "direct", false, false},
 		{"0.1 no path", "otsec.asset/0.1", "", "-", true, false},
 		{"0.1 with path", "otsec.asset/0.1", "", "direct", false, false},
-		{"0.3 unknown path", "otsec.asset/0.3", "", "jump-host", true, false},
+		{"0.4 unknown path", "otsec.asset/0.4", "", "jump-host", true, false},
 		{"0.3 direct", "otsec.asset/0.3", "", "direct", true, true},
 		{"0.3 path on syslog", "otsec.asset/0.3", "syslog-tls", "direct", false, false},
 		{"0.3 upper-case path", "otsec.asset/0.3", "", "DIRECT", false, false},
-		{"0.3 unknown transport, direct", "otsec.asset/0.3", "syslog-relp", "direct", true, false},
+		{"0.4 unknown transport, direct", "otsec.asset/0.4", "syslog-relp", "direct", true, false},
 	} {
 		a, err := asset.Decode(c1Record(t, c.schema, c.transport, c.path))
 		if c.valid != (err == nil) {
