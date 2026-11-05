@@ -13,11 +13,13 @@ import (
 const RemoveConfigStep = 4
 
 // RemovableSeries (0.7) are the only series RemoveConfig takes:
-// config.snapshot, for D4-20 rule 3's compared reads, and the two checkpoint
-// halves, for D4-32 item 2. No difference and no baseline of either kind
-// can be removed through it. It returns a new slice on each call.
+// config.snapshot, for D4-20 rule 3's compared reads, the two checkpoint
+// halves, for D4-32 item 2, and since 0.8 identity.read, of which the node
+// keeps only the newest per asset. No difference, no baseline of either
+// kind, and no identity record, finding or advisory set can be removed
+// through it. It returns a new slice on each call.
 func RemovableSeries() []string {
-	return []string{SeriesConfigSnapshot, SeriesCheckpointLearner, SeriesCheckpointDetector}
+	return []string{SeriesConfigSnapshot, SeriesCheckpointLearner, SeriesCheckpointDetector, SeriesIdentityRead}
 }
 
 // Removed is what one RemoveConfig call removed.

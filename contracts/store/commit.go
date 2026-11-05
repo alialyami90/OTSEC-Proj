@@ -109,8 +109,9 @@ const (
 	DocumentWorkingState DocumentKind = "working-state"
 )
 
-// The series of configuration-class records (0.7). A series is per stream,
-// and so per asset. DocumentInfo.Validate pairs each with its one kind. A
+// The series of configuration-class records (0.7, four added in 0.8). A
+// series is per stream, and so per asset, or per node for advisory.set.
+// DocumentInfo.Validate pairs each with its one kind. A
 // configuration baseline is an acknowledged C9 snapshot in
 // SeriesConfigSnapshot, kept by its baseline hold, so there is no
 // baseline.configuration series.
@@ -125,6 +126,19 @@ const (
 	SeriesCheckpointLearner = "eventcheckpoint.learner"
 	// SeriesCheckpointDetector is the detector half of a checkpoint.
 	SeriesCheckpointDetector = "eventcheckpoint.detector"
+	// SeriesIdentity (0.8) is the node's identity record of an asset
+	// (otsec.identity/0.1), written only when an attribute's value or
+	// source changes, with a capture of the bytes its spans cover.
+	SeriesIdentity = "identity"
+	// SeriesFinding (0.8) is a C12 finding, one record per revision.
+	SeriesFinding = "finding"
+	// SeriesAdvisorySet (0.8) is a C11 envelope as installed, signature
+	// included, on the node's advisory stream.
+	SeriesAdvisorySet = "advisory.set"
+	// SeriesIdentityRead (0.8) is the node's latest-read record of an asset
+	// (otsec.identityread/0.1): an invocation ID and a time. It is working
+	// state; a finding copies the value it relies on.
+	SeriesIdentityRead = "identity.read"
 )
 
 // DocumentInfo is what DocumentValidator says a configuration record is
@@ -135,17 +149,20 @@ type DocumentInfo struct {
 }
 
 // Validate checks the pair against the closed table: evidence with
-// config.snapshot, config.difference or baseline.event, and working-state
-// with eventcheckpoint.learner or eventcheckpoint.detector. Any other pair
-// is refused, so a checkpoint can never name an evidence series and make
-// the real newest record of that series look superseded.
+// config.snapshot, config.difference, baseline.event, and since 0.8
+// identity, finding or advisory.set; working-state with
+// eventcheckpoint.learner, eventcheckpoint.detector, and since 0.8
+// identity.read. Any other pair is refused, so a working-state record can
+// never name an evidence series and make the real newest record of that
+// series look superseded.
 func (i DocumentInfo) Validate() error {
 	var series []string
 	switch i.Kind {
 	case DocumentEvidence:
-		series = []string{SeriesConfigSnapshot, SeriesConfigDifference, SeriesBaselineEvent}
+		series = []string{SeriesConfigSnapshot, SeriesConfigDifference, SeriesBaselineEvent,
+			SeriesIdentity, SeriesFinding, SeriesAdvisorySet}
 	case DocumentWorkingState:
-		series = []string{SeriesCheckpointLearner, SeriesCheckpointDetector}
+		series = []string{SeriesCheckpointLearner, SeriesCheckpointDetector, SeriesIdentityRead}
 	default:
 		return errf(CodeInvalid, nil, "unknown document kind %q", i.Kind)
 	}

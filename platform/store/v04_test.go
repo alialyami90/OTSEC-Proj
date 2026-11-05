@@ -40,7 +40,7 @@ func testDocs(doc []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
 	info := c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesConfigSnapshot}
 	if _, after, ok := bytes.Cut(doc, []byte(`"series":"`)); ok {
 		info.Series, _, _ = strings.Cut(string(after), `"`)
-		if strings.HasPrefix(info.Series, "eventcheckpoint.") {
+		if strings.HasPrefix(info.Series, "eventcheckpoint.") || info.Series == c5.SeriesIdentityRead {
 			info.Kind = c5.DocumentWorkingState
 		}
 	}
