@@ -175,6 +175,10 @@ The code follows 1.1 to 1.6 and 2.1. These points were not settled by the text, 
 - **The sole-password attestation** is the field `usm.sole_device_attested`, which must be `true`.
 - **An `snmpv3` install needs a request stamped `otsec.authz/0.8` or later**, in the clear or admin-signed (D4-16's rule).
 
+C1 confirmed every point above on #446. C1 also adopted C6's proposal there, which tightens 1.3:
+
+- **Under `sel-fid`, `product` must match `^SEL-[0-9A-Z]+$`, and every `versions` FID must start with `product` followed by `-R`.** A set that breaks either rule is `invalid`. The matcher compares `product` with the device-read `model` exactly, so a typo would otherwise give every device `not-applicable` with no warning. C2 confirmed that the SEL-751 and SEL-2731M/2741M parses print `model` in this form.
+
 ## 2. C7 0.8: SNMP credentials and the legacy SNMP approval
 
 ### 2.1 Credentials

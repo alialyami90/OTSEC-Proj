@@ -290,6 +290,19 @@ func TestValidate(t *testing.T) {
 			s.Entries[0].Affected[0].Ranges = []advisory.Range{{Introduced: "R300-V3", Fixed: "R300-V3"}}
 		}, false},
 		{"sel-fid version is not a full FID", func(s *advisory.Set) { s.Entries[0].Affected[0].Versions = []string{"R301-V2"} }, false},
+		{"sel-fid product in lower case", func(s *advisory.Set) { s.Entries[0].Affected[0].Product = "sel-751" }, false},
+		{"sel-fid product with a trailing space", func(s *advisory.Set) { s.Entries[0].Affected[0].Product = "SEL-751 " }, false},
+		{"sel-fid product without SEL-", func(s *advisory.Set) { s.Entries[0].Affected[0].Product = "751" }, false},
+		{"sel-fid product with a letter suffix", func(s *advisory.Set) {
+			s.Entries[0].Affected[0].Product = "SEL-2731M"
+			s.Entries[0].Affected[0].Versions = []string{"SEL-2731M-R100-V1-Z001001-D20240101"}
+		}, true},
+		{"sel-fid version of another product", func(s *advisory.Set) {
+			s.Entries[0].Affected[0].Versions = []string{"SEL-751A-R301-V2-Z009005-D20220607"}
+		}, false},
+		{"sel-fid version on an X branch", func(s *advisory.Set) {
+			s.Entries[0].Affected[0].Versions = []string{"SEL-751-X397-V0-Z007003-D20170305"}
+		}, false},
 		{"exact range with an endpoint", func(s *advisory.Set) {
 			s.Entries[0].Affected[0] = advisory.Affected{Vendor: "SEL", Product: "X", Scheme: advisory.SchemeExact, Ranges: []advisory.Range{{Fixed: "2"}}}
 		}, false},

@@ -158,7 +158,10 @@ var (
 	controlRe  = regexp.MustCompile(`^(tcp|udp)/([1-9][0-9]{0,4})$`)
 	selVRe     = regexp.MustCompile(`^R([0-9]{3})-V([0-9]+)$`)
 	selFIDRe   = regexp.MustCompile(`^SEL-[0-9A-Z]+-R[0-9]{3}-V[0-9]+-Z[0-9]{6}-D[0-9]{8}$`)
-	sha256Re   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// selProductRe is a FID's product, as the device-read model prints it
+	// (C1 on #446, C6's proposal).
+	selProductRe = regexp.MustCompile(`^SEL-[0-9A-Z]+$`)
+	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // unreadAttributes are identity attributes the matcher reads but does not
@@ -318,6 +321,12 @@ func (a Affected) validate() error {
 	}
 	switch a.Scheme {
 	case SchemeSELFID:
+		// The matcher compares product with the device-read model exactly,
+		// so a typo here would make every device not-applicable without a
+		// word. It is refused at load instead (C1 on #446).
+		if !selProductRe.MatchString(a.Product) {
+			return errors.New("sel-fid product is not SEL-<model>")
+		}
 		for i, r := range a.Ranges {
 			if err := r.validateSELFID(); err != nil {
 				return fmt.Errorf("range %d: %s", i, err)
@@ -326,6 +335,9 @@ func (a Affected) validate() error {
 		for i, v := range a.Versions {
 			if !selFIDRe.MatchString(v) {
 				return fmt.Errorf("version %d is not a full FID", i)
+			}
+			if !strings.HasPrefix(v, a.Product+"-R") {
+				return fmt.Errorf("version %d is a FID of another product", i)
 			}
 		}
 	case SchemeExact:

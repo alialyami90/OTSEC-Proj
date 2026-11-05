@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "otsec.advisory/0.1",
   "title": "otsec.advisory/0.1 signed advisory set (C11)",
-  "description": "Structural schema only. The file a node reads is the envelope; its payload, once the signature verifies, is a set. Cross-field rules (unique entry ids and item names, no test_only entry in a release set, sel-fid ranges on one branch with introduced below fixed, exact ranges without endpoints, control items as mitigations only with op present, values only for in and not-in, the reserved name firmware-version, attributes BFID and configVersion refused, the payload at most 1 MiB and the file at most MaxEnvelopeBytes) are enforced by Set.Validate and Verify in contracts/advisory.",
+  "description": "Structural schema only. The file a node reads is the envelope; its payload, once the signature verifies, is a set. Cross-field rules (unique entry ids and item names, no test_only entry in a release set, sel-fid ranges on one branch with introduced below fixed, a sel-fid product of the form SEL-<model> with every versions item a FID of that product, exact ranges without endpoints, control items as mitigations only with op present, values only for in and not-in, the reserved name firmware-version, attributes BFID and configVersion refused, the payload at most 1 MiB and the file at most MaxEnvelopeBytes) are enforced by Set.Validate and Verify in contracts/advisory.",
   "$defs": {
     "envelope": {
       "type": "object", "additionalProperties": false,
