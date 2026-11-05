@@ -910,3 +910,73 @@ Taken here, as ADR-0008 requires, on A2's FTP assessment (#183): **the SEL-751 s
 - V-S7 still passes with the new register lines, and the deny corpus covers every `SHO` form added.
 - #176 and relay PR 2 are merged; HR-11's absolute bound is merged or recorded as the open condition before any `device-observed` listener.
 - No safety or security objection is open.
+
+
+### Phase 4 item 3: Stage A briefs (issued 2026-11-05, D4-48)
+
+Items 1 and 2 passed their gate with conditions, and the owner accepted them (`docs/phase-4a-exit.md`, D4-48). Item 3 is **vulnerability applicability with the asset module** (R9, R1.8). This stage is investigation and contract drafts only (CLAUDE.md §5.1, stages A and B). No product code merges until C1 approves the contracts. The common rules for every Phase 4 brief apply. Nothing contacts a device, and no advisory feed is fetched from a site node (R9.3).
+
+**What item 3 must show at its gate**, to be fixed in the implementation briefs once the contracts are approved:
+
+- **R9 on the SEL-751,** from the identity it already reads (`ID` at Level 0). It needs no SNMP and is the first end-to-end path. On allowlisted FIDs (R400 to R501) the identity is device-read, so V-M7 can reach every class. A denied branch (R302 and older) gets no session at all, not even for `ID`, so its identity is `operator` only and it can never be `confirmed` (D4-49, F1).
+- **R1.8 on one SNMPv3 SEL family,** read only, at `authPriv` only, on a new simulator profile (V-M1).
+- **V-M7 and V-M8** over GT-ADV, and **V-M1** over GT-MIB, on the real binaries, `simulated`. These criteria are fixed (#144). A brief may not lower them. D4-49 answers C6's testability questions on them (#436), and V-M1 (d) is shown for the refusal alone.
+
+**The first SNMPv3 family: the SEL-2731 and SEL-2741 in RSTP mode (D4-51, on C2's evidence; it replaces the SEL-2730M first proposed here).** Its matrix row has SNMPv3 read-only with the FID in the Entity MIB (`documented-untested`, pp. 83 to 84, 155 and 156). The alternatives are the SEL-2731 and SEL-2741 in RSTP mode (S29) and the SEL-2488 (S26, whose model and firmware OIDs are `unknown`). SNMPv1 and v2c are never used without the owner's per-device approval (R1.8).
+
+#### P4-3-A2 (C2): the asset module, the SNMPv3 family and identity attributes
+
+- **Objective.** Define how an asset's identity attributes are read and recorded with their source, and choose the first SNMPv3 family on evidence.
+- **Deliverables.**
+  - A desk note `docs/phase4/C2-snmp-family.md` that confirms or replaces SEL-2730M. It lists, with citations, each identity attribute the device offers over SNMPv3 (vendor, model, firmware and FID), the OIDs, the USM levels and algorithms the device supports, and whether the SEL MIB text the simulator needs is available to the project. If it is not available, say so: GT-MIB cannot be built from an assumption.
+  - **Contract drafts:** C1 0.3, identity attributes each with a source (`device-read` with its read path and evidence ID, `passive`, or `operator`; V-M1 (e), R9 classes); and C3 0.4, an SNMP read operation in the register: `GET`, `GETNEXT` and `GETBULK` on named OIDs only, never `SET` (V-M1 (b)).
+  - The boundary of `modules/asset/`, independently enabled and disabled (R1.8, V-M1 (a)).
+- **May change:** `modules/asset/` (new), `contracts/asset`, `contracts/register` (drafts only, in a PR for review), `docs/device-capabilities.md`, `docs/phase4/C2-*.md`.
+- **Exclusions:** no SNMP code merged in this stage, and no v1 or v2c path.
+- **Reviewers:** C6 and C3; C1 approves the contracts.
+
+#### P4-3-A3 (C3): the signed offline advisory set, and SNMP's threat model
+
+- **Objective.** Define the advisory set's format and its update path (R9.3, V-M8), and the trust boundary for SNMPv3 credentials.
+- **Deliverables.**
+  - **Contract draft C11 `otsec.advisory/0.1`:** a signed, versioned, offline set. Each entry has its source citation, the affected products and version ranges, and its named preconditions and mitigations, in a form V-M7's classes can evaluate. Refusal of an unsigned, wrongly signed, truncated or older set keeps the set in use, and the refusal is audited (C8 addition). Test advisories are marked `test-only` and refused in a shipped set.
+  - **The approval record for a v1 or v2c device** (V-M1 (d)), as a C7 and C8 addition, refused without the owner's approval.
+  - **Threat-model rows:** SNMPv3 USM keys held by the privileged collector with the other device credentials (ADR-0002, D4-50), no downgrade, and the asset module as a new path to devices. Also the signing key's custody, and who may publish a set.
+- **May change:** `contracts/authz`, `contracts/audit`, a new `contracts/advisory` (drafts only, in a PR), `docs/threat-model.md`, `modules/security/`.
+- **Reviewers:** C6 and C2, with C4 for the fields the matcher reads; C1 approves.
+
+#### P4-3-A4 (C4): the applicability finding and the matcher's design
+
+- **Objective.** Define the finding that R9.1 and R9.2 report, and how identity is matched against C11.
+- **Deliverables.**
+  - **Contract draft C12 `otsec.finding/0.1`:** one finding per asset and advisory. It holds the class (`applicable-by-version`, `confirmed`, `mitigated`, `not-applicable`, or `not-applicable (operator)`), the evidence IDs, each unread precondition by name, and the set's version and date. A reclassification is recorded as a change, not an overwrite (V-M7). No field states exploitability.
+  - **A design note** for a deterministic matcher, `docs/phase4/C4-matcher.md`: the version-range comparison per SEL firmware string form (cite the FID formats the project already reads), and what makes evidence current under "R9 classes and what `confirmed` needs" (point 3). It also covers how R6.7's passive evidence will plug in later without a contract change.
+- **May change:** `modules/detection/` or a new `modules/applicability/` (C4 chooses and says why), and `contracts/` drafts only.
+- **Reviewers:** C6 and C2; C1 approves.
+
+#### P4-3-A5 (C5): the node's side
+
+- **Objective.** A design note, `docs/phase4/C5-asset-node.md`, covering the following.
+  - Enabling and disabling the asset module and R9 independently. With either disabled, nothing it owns runs and nothing else changes (V-M1 (a), V-M8's paired runs).
+  - Where the advisory set, identity records and findings are stored (C5 class and quota), and how the set is replaced atomically, with the old one kept in use on refusal.
+  - SNMP poll scheduling under the register's limits.
+  - Health and status lines for each.
+- **Exclusions:** no store contract change without its own proposal.
+- **Reviewers:** C6 and C3; C1 approves.
+
+#### P4-3-A6 (C6): ground truth before the product
+
+- **Objective.** Fix the ground truth before any product test runs.
+- **Deliverables.**
+  - **GT-ADV:** a truth table of identities, with their sources and a SEL-751 FID set from the fixtures already held, crossed with `test-only` advisories, each cell the class it must get. It is committed before the matcher exists.
+  - **A GT-MIB plan** for the chosen family, built from the vendor MIB and manual only, with what it serves and how it records every PDU. If C2 finds the MIB is not available, the plan says what can still be shown.
+  - A check that V-M1, V-M7 and V-M8 are testable as written, with any ambiguity raised to C1 before the contracts are approved. The thresholds are not changed.
+- **May change:** `tests/`, `docs/verification.md`.
+- **Reviewers:** C1, and the owners of what each item covers.
+
+#### Order
+
+1. C2's family note comes first. C6's GT-MIB plan depends on it.
+2. C2, C3 and C4 draft their contracts at once. Each consumer reviews them, then C1 approves them together (§5.4).
+3. C5's note and C6's GT-ADV run beside the drafts.
+4. The implementation briefs and the item 3 gate follow the approval.

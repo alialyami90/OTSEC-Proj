@@ -801,3 +801,63 @@ Date: 2026-11-04. C1, on C6's finding while building V-M4's SER half.
   - C4 reviews the new series and its expected alarms, and re-runs `gtinj_test` on it. Any difference between the generator's alarms and the detector's goes to C1 before the harness is built on top.
 - **Refused.** Option (b), a test-build-only lower minimum interval in the node and the collector, would put a test switch on the OT safety floor of how often a device is read. The floor is the safety property here, not an obstacle. Option (c), leaving the SER half open, would leave recall for `new`, `time` and `rate` unshown on the slice's main device path.
 - **Order.** Two PRs, both C6's: first the new series with its README entry, reviewed by C4; then the SER harness (a file-driven SER buffer in the simulator, a `slicehelper` flag for the slice asset's event baseline, the collector on the test clock, and signed requests stamped `-issued` at clock time), reviewed by C4 and C5. The SER leg goes into `ci.yml` under this ruling, and C1 reviews that line.
+
+## D4-48: the owner accepts Phase 4 items 1 and 2, and item 3 is issued (owner, 2026-11-05)
+
+Date: 2026-11-05. The owner, on C1's decision card after `docs/phase-4a-exit.md` merged (#429).
+
+- **The acceptance.** The owner chose "Accept, start item 3" at 04:01Z. Items 1 and 2 are accepted with the conditions in `docs/phase-4a-exit.md`, which carry into item 3 as recorded there.
+- **Item 3 is issued** as Stage A (investigation and contract drafts), in `docs/agent-handoffs.md` ("Phase 4 item 3: Stage A briefs"). Its implementation briefs and its exit gate follow C1's approval of the contracts, under §5.4 and the common rules for every Phase 4 brief.
+- **D4-34 stands.** Work stops at the end of item 3 for the owner's check.
+
+## D4-49: answers to C6's item 3 testability questions, and F1 (C6, #436)
+
+Date: 2026-11-05. C1, on `docs/phase4/C6-item3-testability.md` (#436), before any item 3 contract is approved. The thresholds of V-M1, V-M7 and V-M8 are not changed. Every answer below is C6's proposed reading, accepted unless stated otherwise. The contract drafts (C1 0.3, C3 0.4, C11, C12) carry them.
+
+- **Q1. The engine ID is pinned.** It is part of a device's SNMPv3 credential. A discovered engine ID that differs is refused with its own health code, and the client never re-localizes keys to it (C2 in C3 0.4, C3 in the key register row).
+- **Q2. No algorithm fallback.** The client uses only the algorithms configured for the device. C3 rules which algorithms may be configured at all. Unless C3 shows a reason otherwise, DES and MD5 are refused. GT-MIB offers the refused algorithms as negative cases.
+- **Q3. No v1 or v2c path in item 3.** V-M1 (d) is shown for the refusal alone, and the item 3 gate says so, as D4-40 point 3 did for V-M3.
+- **Q4. One source vocabulary.** C1 0.3 stores a kind (`device-read`, `passive` or `operator`) and, for `device-read`, the read path (`snmpv3`, `sel.id`, ...) and an evidence ID. V-M1 (e) checks the path, and V-M7 checks the kind.
+- **Q5. A precondition read as false:**
+  - with a device-read identity, `not-applicable`, citing the settings read;
+  - `mitigated` only when the advisory itself names that setting as a mitigation;
+  - with an operator or passive identity, `applicable-by-version`, with the precondition shown as evidenced false.
+- **Q6. Precedence and staleness:**
+  - (i) All preconditions hold and a mitigation is evidenced: `mitigated`.
+  - (ii) A `confirmed` finding whose evidence is no longer current falls to `applicable-by-version` and names the stale evidence.
+  - (iii) A passive identity out of range gives `not-applicable (passive)`, a label C12 allows.
+  - (iv) An advisory with no preconditions is `confirmed` on a current device-read version. Any configuration change retrieved for the asset makes every `confirmed` finding on it stale until the next identity read.
+- **Q7. When evaluation runs.** Evaluation runs after each commit of an identity, settings or configuration record for the asset, and after each set replacement. The finding's change is stored before the asset's next scheduled read starts.
+- **Q8 to Q11** as proposed. A same-version set is refused unless byte-identical, and a byte-identical one is a no-op. An entry with no published source refuses the whole set.
+- **Q12** as proposed: the ports are fixed for the paired runs, and the comparison covers every destination. C6 runs an A/A pair first. If packet counts differ between identical runs, C6 brings C1 the measured difference before anything changes.
+- **F1. No `ID` session on a denied SEL-751 branch.** The firmware gate (ADR-0005, F-009) refuses every session on a firmware line not on the allowlist, because communications access is where the restart defect lies. A session that only reads `ID` is still a session. So R302 and older stay `operator` identity only, and can never be `confirmed`. This is recorded as an item 3 limitation, and GT-ADV pins it with denied-branch rows. The item 3 brief is corrected: V-M7 reaches every class on the SEL-751 only for allowlisted FIDs.
+
+## D4-50: SNMPv3 runs in the collector; the module combinations; V-M8's upstream flow (C3 on #435, C5 on #438)
+
+Date: 2026-11-05. C1.
+
+- **USM keys and the SNMP session belong to the privileged collector** (C3), as every device credential and device session does (ADR-0002). The node's asset module schedules reads and records identities, and opens no SNMP socket. The collector executes the read under the register's limits. D4-49 Q1's pinned engine ID is held with the collector's credential. The P4-3-A3 brief is corrected to match.
+- **Applicability needs the asset module** (C5's proposal on #438). A node configuration that enables applicability without the asset module is refused at load. "Independently enabled" (R1.8) therefore means three supported combinations: both off, asset alone, and both on. V-M1 (a) is tested with the asset module off, which turns applicability off too.
+- **V-M8's flows** (C5 and C6). The upstream forwarder's flow exists in both paired runs. Its volume may differ, because the R9 run forwards its own health and finding events. The comparison is the one D4-49 Q12 states: same flows and packet counts per collection session to every device address, and no flow in the R9 run that the other lacks, over every destination.
+
+## D4-51: the first SNMPv3 family is the SEL-2731 and SEL-2741 in RSTP mode (C2, #439)
+
+Date: 2026-11-05. C1, on C2's family note (`docs/phase4/C2-snmp-family.md`, #439).
+
+- **The ruling: C2's recommendation, which replaces the SEL-2730M proposed in the brief.** The evidence is all `documented-untested`, from S29:
+  - the device cannot be set below `authPriv` (p. 43);
+  - it offers SHA-256 and SHA-512 authentication (Table 4.13, p. 45), where the SEL-2730M's best is SHA-1;
+  - S29 lists every OID the agent serves (pp. 46 to 47), so GT-MIB can serve exactly that set;
+  - the FID's letter shows the mode.
+
+  Only RSTP mode is in scope. OT SDN mode, configured through the SEL-5056, is not.
+- **Against it, recorded:** the firmware line is young, and which switches the owner's sites run is open. Both go to the owner with item 3's questions. If the sites run the SEL-2730M, it follows as the second SNMPv3 family.
+- **MIB text.** No SEL MIB is in the project, and identity needs only the standard modules (RFC 3418, 6933 and 3411), which this container cannot fetch. GT-MIB labels as SYNTHESIZED every value the manual does not print: the FID's column, `sysDescr`, `sysObjectID` and the row count. V-M1 (e) then shows the client's attribution and parse, not the real agent's values, which stay hardware-dependent.
+- **The brief is corrected** to name this family.
+
+## D4-52: the matcher's module, and a mitigation with unread preconditions (C4, #440)
+
+Date: 2026-11-05. C1, on C4's C12 draft and matcher note (#440).
+
+- **The matcher lives in a new `modules/applicability/`, owned by C4.** It has its own switch (R9, D4-50), it reads from three owners, and as a pure function it has no way to send a packet, which V-M8 relies on. The ownership row is added to `README.md`.
+- **A `mitigated` finding may also list unread preconditions** (C4's question). An evidenced mitigation is the stronger statement, and it is the same precedence as D4-49 Q6 (i). The finding still names every unread precondition, so nothing is hidden. V-M7's "an unread precondition leaves the finding `applicable-by-version`" is read as applying when no mitigation is evidenced. This reading is subject to C6, who owns V-M7. If C6 objects that it lowers the criterion, C1 decides again before C12 is approved.

@@ -1,6 +1,6 @@
 # Phase 4 first exit report (items 1 and 2)
 
-Owner: C1 (the A1 role). Date: 2026-11-05. Status: **the gate passed with conditions (C1, 2026-11-05). The owner's acceptance is pending (D4-34).** Every gate item is met on `main`, as C6's gate table in `docs/verification.md` records ("Phase 4 first exit gate status"). The last item, V-M4's SER half, passed in CI on #431 (run 41934354061).
+Owner: C1 (the A1 role). Date: 2026-11-05. Status: **the gate passed with conditions (C1, 2026-11-05), and the owner accepted it on 2026-11-05 (D4-48).** Every gate item is met on `main`, as C6's gate table in `docs/verification.md` records ("Phase 4 first exit gate status"). The last item, V-M4's SER half, passed in CI on #431 (run 41934354061).
 
 This report closes the first two items of Phase 4: configuration retrieval, its baseline and prior approval (item 1, R3.6 and R3.7), and the event-behaviour baseline (item 2, R4.8). The owner ruled that the two finish together and that work stops at the end of each Phase 4 item for the owner's check (D4-34). It follows the milestone format in `CLAUDE.md` §9 and mirrors `docs/phase-3-exit.md`. No device was contacted. Every result is `desk` (Go and Python tests on a CI runner or an agent's container) or `simulated` (the real binaries against C6's recording simulator, on loopback). No result is `hardware-verified` (B-01). The owner's PC was not used in Phase 4 (D4-12), so GitHub Actions was the only shared test path.
 
@@ -184,4 +184,4 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 
 ## Owner sign-off
 
-Pending.
+Given on 2026-11-05 at 04:01Z. The owner chose "Accept, start item 3" on C1's decision card, "Accept Phase 4 items 1 and 2 and start item 3?". The conditions above carry into item 3 (D4-48).
