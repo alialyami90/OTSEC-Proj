@@ -34,7 +34,7 @@ const (
 	MaxRanges        = 64
 	MaxVersions      = 256
 	MaxPreconditions = 32
-	MaxMitigations   = 32
+	MaxMitigations   = 16
 	MaxValues        = 64
 
 	MaxTitleBytes     = 256

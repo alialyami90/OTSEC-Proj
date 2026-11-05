@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -47,6 +48,15 @@ func validSet() advisory.Set {
 			},
 		}},
 	}
+}
+
+// mitigations returns n distinct, valid control mitigations.
+func mitigations(n int) []advisory.Item {
+	var m []advisory.Item
+	for i := range n {
+		m = append(m, advisory.Item{Name: fmt.Sprintf("blocked-%d", i), Kind: advisory.KindControl, Key: fmt.Sprintf("tcp/%d", 1000+i), Op: advisory.OpPresent})
+	}
+	return m
 }
 
 func payloadOf(t *testing.T, s advisory.Set) []byte {
@@ -286,6 +296,8 @@ func TestValidate(t *testing.T) {
 		{"bad item name", func(s *advisory.Set) { s.Entries[0].Preconditions[0].Name = "Telnet" }, false},
 		{"reserved name", func(s *advisory.Set) { s.Entries[0].Preconditions[0].Name = advisory.ReservedFirmwareVersion }, false},
 		{"name in a precondition and a mitigation", func(s *advisory.Set) { s.Entries[0].Mitigations[0].Name = "telnet-enabled" }, false},
+		{"mitigations at the limit", func(s *advisory.Set) { s.Entries[0].Mitigations = mitigations(advisory.MaxMitigations) }, true},
+		{"one mitigation past the limit", func(s *advisory.Set) { s.Entries[0].Mitigations = mitigations(advisory.MaxMitigations + 1) }, false},
 		{"unknown kind", func(s *advisory.Set) { s.Entries[0].Preconditions[0].Kind = "register" }, false},
 		{"unknown op", func(s *advisory.Set) { s.Entries[0].Preconditions[0].Op = "eq" }, false},
 		{"in with no values", func(s *advisory.Set) { s.Entries[0].Preconditions[0].Values = nil }, false},
