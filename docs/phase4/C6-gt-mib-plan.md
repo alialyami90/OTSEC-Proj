@@ -98,6 +98,8 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | U12 | v2c only, no v3 | `failed.timeout` after discovery and its one retransmission: the agent receives 2 datagrams. The client sends no v2c packet: the agent's log shows no community-based message. | 0 |
 | U13 | endpoint transport `snmpv2c` in the asset record | the record is refused at load (V-M1 (d), C1 0.3) | 0 datagrams |
 | U14 | a credential that names MD5, SHA-1, DES or AES-256 | refused when the credential is decoded, because the enums cannot name them (#437 §2.1) | 0 datagrams |
+| U15 | a forged noAuthNoPriv `usmStatsWrongDigests` Report with the outstanding `msgID` | the run fails with `failed.usm_wrong_digest`, and suspends neither the credential nor the asset: the next run succeeds (C6 on #439) | 1 |
+| U16 | the same Report with another `msgID`, or from another source port | discarded, recorded as received, and the run succeeds | 1 |
 
 ### 2.4 The walk and its bounds (V-M1 (b), AP-28)
 
