@@ -39,6 +39,10 @@ const (
 	TransportTelnet Transport = "telnet"
 	TransportSerial Transport = "serial"
 	TransportSSH    Transport = "ssh"
+	// TransportSNMPv3 (0.8) is SNMPv3 with USM at authPriv. Its credential
+	// carries USM, and its secret is the localized keys (USMSecretLen). v1
+	// and v2c are not transports in 0.8 (D4-49 Q3).
+	TransportSNMPv3 Transport = "snmpv3"
 )
 
 // Plaintext reports whether the transport carries the credential in clear.
@@ -85,6 +89,7 @@ type CredentialRef struct {
 	AccessLevel        string             `json:"access_level"` // the register's access level token the credential reaches, e.g. "1" for SEL Level 1 (C7-A2-4); never "0"
 	DownstreamSecurity DownstreamSecurity `json:"downstream_security"`
 	PlaintextScope     PlaintextScope     `json:"plaintext_scope,omitempty"` // required when the transport is plaintext
+	USM                *USM               `json:"usm,omitempty"`             // 0.8: required for snmpv3, and only there
 	Version            uint32             `json:"version"`                   // 1 on install, +1 on every replacement
 	CreatedBy          Principal          `json:"created_by"`
 	CreatedAt          string             `json:"created_at"` // RFC 3339 UTC with Z
@@ -108,6 +113,16 @@ func (c CredentialRef) Validate() error {
 	}
 	switch c.Transport {
 	case TransportTelnet, TransportSSH:
+		if c.USM != nil {
+			return fmt.Errorf("authz: usm is only for transport %s", TransportSNMPv3)
+		}
+	case TransportSNMPv3:
+		if c.USM == nil {
+			return fmt.Errorf("authz: transport %s needs usm", TransportSNMPv3)
+		}
+		if err := c.USM.Validate(); err != nil {
+			return err
+		}
 	case TransportSerial:
 		// A serial port keeps its session state and nothing closes it, so
 		// serial credentials wait for a lab capture of the port's behaviour
@@ -119,7 +134,16 @@ func (c CredentialRef) Validate() error {
 	if c.Purpose != PurposeCollectReadOnly {
 		return fmt.Errorf("authz: purpose %q is not allowed in %s", c.Purpose, ContractID)
 	}
-	if !accessLevelPattern.MatchString(c.AccessLevel) || c.AccessLevel == register.ProbeAccessLevel {
+	if c.Transport == TransportSNMPv3 {
+		// SNMP has no access levels: what the USM user may read is the
+		// device's view, and the register names the OIDs (0.8).
+		if c.AccessLevel != "" {
+			return fmt.Errorf("authz: an %s credential has no access level", TransportSNMPv3)
+		}
+		if c.DownstreamSecurity != DownstreamEncryptedAuthenticated {
+			return fmt.Errorf("authz: transport %s must be labelled %s", TransportSNMPv3, DownstreamEncryptedAuthenticated)
+		}
+	} else if !accessLevelPattern.MatchString(c.AccessLevel) || c.AccessLevel == register.ProbeAccessLevel {
 		return fmt.Errorf("authz: access level %q is not valid; a level 0 operation needs no credential", c.AccessLevel)
 	}
 	switch c.DownstreamSecurity {
@@ -285,9 +309,14 @@ type SealedSecret struct {
 // SealAlg is the only sealing algorithm in 0.1.
 const SealAlg = "x25519-hkdf-sha256-aes256gcm"
 
-// MaxSecretLen bounds a sealed secret's plaintext length for every family.
-// A family's register entry may set a lower bound (12 on the SEL-751, Table 7.54).
+// MaxSecretLen bounds a line-based family's secret (a password). A family's
+// register entry may set a lower bound (12 on the SEL-751, Table 7.54).
 const MaxSecretLen = 64
+
+// MaxSealedLen bounds a sealed secret's plaintext for every transport: a
+// password, or an snmpv3 credential's localized keys, at most
+// USMSecretLen's 80 bytes (0.8).
+const MaxSealedLen = 80
 
 // Validate checks the envelope's shape. It cannot check the plaintext.
 func (s SealedSecret) Validate() error {
@@ -304,7 +333,7 @@ func (s SealedSecret) Validate() error {
 	}{
 		{"ephemeral_public_key", s.EphemeralPublicKey, 32, 32},
 		{"nonce", s.Nonce, 12, 12},
-		{"ciphertext", s.Ciphertext, 1 + 16, MaxSecretLen + 16},
+		{"ciphertext", s.Ciphertext, 1 + 16, MaxSealedLen + 16},
 	} {
 		b, err := base64.StdEncoding.Strict().DecodeString(f.value)
 		if err != nil {
@@ -327,7 +356,20 @@ func SealAAD(ref CredentialRef) []byte {
 		"node=" + ref.NodeID + "\n" +
 		"endpoint=" + ref.EndpointID + "\n" +
 		"transport=" + string(ref.Transport) + "\n" +
-		"access_level=" + ref.AccessLevel + "\n")
+		"access_level=" + ref.AccessLevel + "\n" + usmAAD(ref.USM))
+}
+
+// usmAAD binds an snmpv3 secret to its user, protocols and pinned engine ID,
+// so localized keys cannot be replayed onto another engine ID or algorithm.
+// It is empty for every other transport, so their AAD is unchanged.
+func usmAAD(u *USM) string {
+	if u == nil {
+		return ""
+	}
+	return "usm_user=" + u.UserName + "\n" +
+		"usm_auth=" + string(u.Auth) + "\n" +
+		"usm_priv=" + string(u.Priv) + "\n" +
+		"usm_engine_id=" + u.EngineID + "\n"
 }
 
 // SecretPolicy is the write-time rule for a decrypted secret, applied inside

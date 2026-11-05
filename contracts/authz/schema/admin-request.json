@@ -129,7 +129,7 @@
               "type": "string",
               "contentEncoding": "base64",
               "minLength": 24,
-              "maxLength": 108
+              "maxLength": 128
             }
           }
         }

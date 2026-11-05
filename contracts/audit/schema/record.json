@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.10/record",
+  "$id": "otsec.audit/0.11/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -171,7 +171,9 @@
         "config.read_compared",
         "config.reads_removed",
         "config.baseline_recorded",
-        "config.checkpoint_not_restored"
+        "config.checkpoint_not_restored",
+        "advisory.set_installed",
+        "advisory.set_refused"
       ]
     },
     "outcome": {
@@ -380,6 +382,41 @@
     },
     "config": {
       "$ref": "#/$defs/config"
+    },
+    "advisory": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "0.11: on advisory.set_installed and advisory.set_refused only, required there (contracts/audit/advisory.go). On set_installed: set_id, version, issued_at, payload_sha256 and key_id, and previous_version except on a node's first set. On set_refused: file_sha256, and set_id with version and key_id only when C11's verifier checked them before the refusal.",
+      "properties": {
+        "set_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "issued_at": {
+          "type": "string",
+          "pattern": "Z$"
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^ed25519-[0-9a-f]{16}$"
+        },
+        "previous_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "file_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     }
   },
   "allOf": [
@@ -2461,6 +2498,134 @@
         "properties": {
           "contract": {
             "pattern": "^otsec\\.audit/0\\.([1-9][0-9]{1,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "advisory.set_installed",
+              "advisory.set_refused"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "advisory"
+        ],
+        "properties": {
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "advisory"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "advisory.set_installed"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "const": "succeeded"
+          },
+          "advisory": {
+            "required": [
+              "set_id",
+              "version",
+              "issued_at",
+              "payload_sha256",
+              "key_id"
+            ],
+            "not": {
+              "required": [
+                "file_sha256"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "advisory.set_refused"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "reason_code"
+        ],
+        "properties": {
+          "outcome": {
+            "const": "denied"
+          },
+          "reason_code": {
+            "enum": [
+              "malformed",
+              "unknown_key",
+              "revoked_key",
+              "bad_signature",
+              "invalid",
+              "wrong_set",
+              "same_version_differs",
+              "older_version",
+              "test_set"
+            ]
+          },
+          "advisory": {
+            "required": [
+              "file_sha256"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "payload_sha256"
+                  ]
+                },
+                {
+                  "required": [
+                    "issued_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "previous_version"
+                  ]
+                }
+              ]
+            }
           }
         }
       }
