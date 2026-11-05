@@ -61,8 +61,8 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 
 | ID | Agent setup | Expected |
 | --- | --- | --- |
-| I1 | default, SEL-2731M R102-V1 | `ok`. `firmware_id`, `model` `SEL-2731M`, `firmware_version` `R102-V1`, `hostname`, `snmp_engine_id`. Each is `device-read`, with `read.transport` `snmpv3`, the operation that read it, and the `oid` the agent served it under. The `model` and `firmware_version` spans lie inside the FID's span. |
-| I2 | SEL-2741M | the same, for the other model |
+| I1 | default, SEL-2731M R102-V1 | `ok`. `firmware_id`, `model` `SEL-2731M`, `firmware_version` `R102-V1`, `hostname`, `snmp_engine_id`. Each is `device-read`, with `read.transport` `snmpv3` and the operation that read it. Each carries the `oid` the agent served it under, except `snmp_engine_id`, which carries `"header": "msgAuthoritativeEngineID"` (C1 0.3, #439 at cb6ffdf). The `model` and `firmware_version` spans lie inside the FID's span. |
+| I2 | SEL-2741M | the same as I1, for the other model, with the engine ID cited by `header` |
 | I3 | FID moved to `entPhysicalDescr` of row 3 | `ok`. The `oid` names that column and row. This is the FID found by its form. |
 | I4 | the same FID in `sysDescr.0` and in the table | `ok`. Equal values count as one match. |
 | I5 | `sysName.0` answers `noSuchObject` | `ok`, with no `hostname`. The transcript shows the exception, and it is not an error. |
@@ -84,17 +84,18 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | ID | Agent behaviour | Expected | Authenticated requests |
 | --- | --- | --- | --- |
 | U1 | discovery returns another engine ID | `refused.engine_id_mismatch` | 0 |
-| U2 | wrong digest (another password) | `failed.usm_wrong_digest` | 1, or 2 with the retransmission |
-| U3 | unknown user | `failed.usm_unknown_user` | 1 to 2 |
-| U4 | configured for SHA-1 only. The client's SHA-256 is answered with a `usmStatsWrongDigests` Report, or with silence. | `failed.usm_wrong_digest` or `failed.timeout`. No request at SHA-1 or MD5, and none at a lower level. | 1 to 2 |
-| U5 | `usmStatsUnsupportedSecLevels` | `failed.usm_unsupported_sec_level`. No retry below authPriv. | 1 |
-| U6 | `usmStatsDecryptionErrors` | `failed.usm_decryption_error` | 1 |
-| U7 | one authenticated time-window Report, then normal | `ok`. The request is sent again once. | 2 |
+| U2 | wrong digest (another password), Report sent noAuthNoPriv as a real agent sends it | `failed.usm_wrong_digest`. No retransmission after a failure Report. | 1 |
+| U3 | unknown user, Report sent noAuthNoPriv | `failed.usm_unknown_user` | 1 |
+| U4 | configured for SHA-1 only. The client's SHA-256 is answered with a `usmStatsWrongDigests` Report (noAuthNoPriv), or with silence. | `failed.usm_wrong_digest` (1 authenticated request) or `failed.timeout` (2). No request at SHA-1 or MD5, and none at a lower level. | 1 or 2 |
+| U5 | `usmStatsUnsupportedSecLevels`, sent noAuthNoPriv | `failed.usm_unsupported_sec_level`. No retry below authPriv. | 1 |
+| U6 | `usmStatsDecryptionErrors`, sent noAuthNoPriv | `failed.usm_decryption_error` | 1 |
+| U7 | one authenticated time-window Report, then normal | `ok`. The request is sent again with the corrected boots and time. That resend is not the retransmission (#439 §2.3). | 2 |
+| U7b | an authenticated time-window Report, then the corrected request is dropped, then its retransmission is answered | `ok` | 3 |
 | U8 | a time-window Report twice | `failed.usm_not_in_time_window` | 2 |
-| U9 | an unauthenticated time-window Report | the session ends. The Report must authenticate (#437 rule 1). | 1 |
+| U9 | an unauthenticated time-window Report | `failed.usm_not_in_time_window`. Its boots and time are never adopted (#437 rule 1, #439 §2.3 step 3). | 1 |
 | U10 | answers an authPriv request with a noAuthNoPriv Response | the Response is discarded, not parsed. `failed.timeout`. | 2 |
 | U11 | a Response with a bad digest, then silence | discarded, `failed.timeout` | 2 |
-| U12 | v2c only, no v3 | `failed.timeout` after discovery. The client sends no v2c packet: the agent's log shows no community-based message. | 0 |
+| U12 | v2c only, no v3 | `failed.timeout` after discovery and its one retransmission: the agent receives 2 datagrams. The client sends no v2c packet: the agent's log shows no community-based message. | 0 |
 | U13 | endpoint transport `snmpv2c` in the asset record | the record is refused at load (V-M1 (d), C1 0.3) | 0 datagrams |
 | U14 | a credential that names MD5, SHA-1, DES or AES-256 | refused when the credential is decoded, because the enums cannot name them (#437 §2.1) | 0 datagrams |
 
@@ -105,7 +106,7 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | W1 | returns an OID outside `entPhysicalTable` in the middle of a response | the walk ends there. No later request carries that OID or anything after it (steered walk, #437 rule 5). |
 | W2 | returns the same OID again (a loop) | `failed.snmp_walk_not_increasing` after 1 request |
 | W3 | returns an earlier OID inside the subtree | `failed.snmp_walk_not_increasing` after 1 request |
-| W4 | 40 rows × 17 columns = 680 varbinds, more than `max_varbinds` 512 | `failed.response_too_large`, every byte kept, no identity attribute presented as complete (C2's question 5) |
+| W4 | 40 rows × 17 columns (RFC 4133's accessible columns 2 to 18, unconfirmed; RFC 6933 adds a 19th) = 680 varbinds, more than `max_varbinds` 512 | `failed.response_too_large`, every byte kept, no identity attribute presented as complete (C2's question 5) |
 | W5 | answers 1 varbind per GetBulk, whatever `max_repetitions` says | `failed.response_too_large` at `max_requests` (32), with 32 requests counted |
 | W6 | honours `msgMaxSize`, which equals `max_reply_bytes` 1472, with 16 repetitions | `ok`. Each response is at most 1472 bytes. |
 | W7 | ignores `msgMaxSize` and sends 4000 bytes | `failed.response_too_large`, bytes kept |
@@ -137,7 +138,7 @@ Malformed messages are written into the agent's replies. The collector must fail
 - a length longer than the datagram;
 - indefinite-length encoding;
 - nesting deeper than 64;
-- an INTEGER over 64 bits;
+- an INTEGER or `Counter64` over 9 octets, or a 9-octet `Counter64` without the leading 0x00. A valid 9-octet `Counter64` (2^63 or more, with the 0x00 lead) is a positive case, because UCD-SNMP and `ifXTable` serve such values;
 - an OID arc of 2^32 or more;
 - an OID with 129 arcs;
 - an empty OID;
