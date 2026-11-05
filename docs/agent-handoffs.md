@@ -980,3 +980,85 @@ Items 1 and 2 passed their gate with conditions, and the owner accepted them (`d
 2. C2, C3 and C4 draft their contracts at once. Each consumer reviews them, then C1 approves them together (§5.4).
 3. C5's note and C6's GT-ADV run beside the drafts.
 4. The implementation briefs and the item 3 gate follow the approval.
+
+### Phase 4 item 3: implementation briefs (issued 2026-11-05, D4-53)
+
+C1 approved the item 3 contracts together in D4-53 (#442), at the heads named there. The approved texts are `docs/phase4/C2-c1-0.3-c3-0.4.md` (C1 0.3, C3 0.4, C2 0.7), `docs/phase4/C3-c11-advisory.md` (C11 0.1, C7 0.8, C8 0.11), C12 in `contracts/finding` with `docs/phase4/C4-matcher.md`, and `docs/phase4/C5-asset-node.md`. D4-49 to D4-53 refine them, and where they differ, the decision wins. The common rules for every Phase 4 brief apply. Nothing contacts a device, every advisory is `test_only`, and no real advisory is entered until the owner answers who publishes the set and holds its key (HR-18).
+
+**A contract that was approved as text is coded exactly as approved.** If code shows that the text is wrong or incomplete, the owner raises it with C1 before merging, and the change goes to the same reviewers.
+
+#### P4-3-C2 (C2): the contract code, the SEL-751 identity observations, `modules/asset/` and the SNMPv3 client
+
+- **Objective.** Code C1 0.3, C3 0.4 and C2 0.7. Give the SEL-751's identity its model and firmware as device-read observations. Build the node-side asset module and the collector-side SNMPv3 client for the SEL-2731/2741 in RSTP mode.
+- **Deliverables, in this order:**
+  1. **Contract code:** `contracts/asset` (C1 0.3, keeping a reader for 0.2), `contracts/register` (C3 0.4, `get`, `getnext` and `getbulk` only, and refusal of `set` at load), and `contracts/adapter` (C2 0.7 codes). Each has C6's contract tests before it merges.
+  2. **The SEL-751's model and firmware**, as their own observations with sub-spans of the FID's bytes (#438 question 5). This needs no new read and no register revision.
+  3. **`modules/asset/`**, as §3 of the approved text describes. It includes the import test that fails on any network, `syscall`, `os/exec` or `modules/ied/...` import.
+  4. **`modules/ied/snmpv3/`**, linked only into `otsec-collector`. It has the USM session at `authPriv` with the pinned engine ID, the BER decoder with a fuzz target, each family's identity parse, and the transcript that stores every full message (GT-MIB plan §4). Algorithms are `hmac-sha-256`, `hmac-sha-512` and `aes-128` only, with no fallback. The rules for Reports and Responses follow D4-53. A new module dependency (an SNMP or crypto library) is named in the PR with its reason, and C3 and C6 review it.
+- **May change:** `contracts/asset`, `contracts/register`, `contracts/adapter`, `modules/asset/`, `modules/ied/`, `tests/fixtures/ied/`, `docs/device-capabilities.md`, `docs/phase4/C2-*.md`.
+- **Acceptance (C6, independent):** V-M1 (b), (c), (e) and (f) over GT-MIB on the real binaries, and V-M1 (a) with C5. The SEL-751 FID goldens still parse. Each family parse is mutation-tested.
+- **Exclusions:** no v1 or v2c path, no `set`, and no SDN-mode SEL-2731/2741.
+- **Reviewers:** C6 for correctness and device safety. C3 for the USM session, the decoder and the egress check's placement. C5 for what the node calls.
+
+#### P4-3-C3 (C3): the advisory set, the SNMP credentials and the egress check
+
+- **Objective.** Code C11 0.1, C7 0.8 and C8 0.11, and the collector's egress check for SNMP messages.
+- **Deliverables:**
+  1. **`contracts/advisory`:** the envelope, the set and its entries, the limits (including the `MaxEnvelopeBytes` test against the node's record cap), the verifier, and the advisory anchors. A shipped set refuses a `test_only` entry.
+  2. **C7 0.8**, with the `snmpv3` credential and its pinned engine ID held by the collector, and **C8 0.11**, with its records. The v1/v2c approval stays a design and is not built (D4-49 Q3).
+  3. **The egress check**, a separate package from the encoder. It takes one encoded message and returns the rule that refused it (GT-MIB plan §4), and it refuses `SetRequest` and any OID outside the operation.
+  4. **A test-only signing tool** under `tests/`, with a key held by the tests only (V-M8), so that C6 can build sets. It is not linked into either binary.
+- **May change:** `contracts/advisory`, `contracts/authz`, `contracts/audit`, `modules/security/`, `docs/threat-model.md`, `docs/phase4/C3-*.md`, and the signing tool's directory under `tests/` (agreed with C6).
+- **Acceptance (C6, independent):** V-M8's set cases (unsigned, wrongly signed, truncated, older and same-version sets, an entry with no source, a shipped set holding a `test_only` entry), each refused with the set in use unchanged, the refusal in health and the chain. GT-MIB §2.7's egress deny corpus, case by case.
+- **Reviewers:** C6, C2 for the egress check's place in the client, and C5 for the verifier's use at the node.
+
+#### P4-3-C4 (C4): the matcher
+
+- **Objective.** Build the deterministic matcher in `modules/applicability/` as `docs/phase4/C4-matcher.md` describes, as a pure function of identity records and the set, producing C12 findings.
+- **Deliverables:** the `sel-fid` parse and comparison (within one branch, never across), preconditions and mitigations, classification in the note's §5 order (with Q5 first, D4-53), evidence currency, and the revision rule (a finding is written on any C12 §7 change, D4-53). A fuzz target on the FID parse. An import test that fails on any network, `os/exec`, store or `modules/ied/...` import.
+- **May change:** `modules/applicability/`, `contracts/finding` (only through C1, as above), `docs/phase4/C4-*.md`.
+- **Acceptance (C6, independent):** GT-ADV, all 128 cells, first as a unit run on the matcher and then on the real binaries (V-M7). Mutation of each classification step is caught.
+- **Reviewers:** C6, C2 for the FID forms, and C5 for the call from the node.
+
+#### P4-3-C5 (C5): C5 0.8 and the node's side
+
+- **Objective.** Store identity records, the set and findings. Replace the set atomically. Run the matcher once per collection run. Schedule SNMP reads through the collector, with the module switches and health.
+- **Deliverables:**
+  1. **A C5 0.8 proposal first**, from the note's "What C5 0.8 would need". It covers the four series, the holds, the `advisory` stream and the quota floor terms. C4 and C6 review it, C1 approves it, and C6 adds its contract tests.
+  2. **The node**, as the approved note describes. The `asset` and `applicability` switches, with `applicability` without `asset` refused at load (D4-50). The set taken under C11 §1.5 and D4-53 (a bounded read, re-verification at start and on an anchor change, and never an older set). Evaluation once per collection run (D4-53). SNMP schedule entries under the register's limits. Health and `otsec` status lines.
+  3. **For C6's runner:** a way to start the collector with a schedule that has one SNMP entry, on the test clock (GT-MIB plan §4).
+- **May change:** `contracts/store` (after approval), `platform/`, `cmd/otsec/`, `docs/phase4/C5-*.md`.
+- **Acceptance (C6, independent):** V-M1 (a) for all three supported combinations. V-M8's paired runs (D4-49 Q12, D4-50). No identity record, set or finding is lost across a SIGKILL at each commit point. A set refused at start leaves no set in use, and the floor holds.
+- **Reviewers:** C6 for reliability, and C3 for the trust boundary (R9 code holds no `Collector` and no network handle).
+
+#### P4-3-C6 (C6): GT-MIB, and the item 3 runs
+
+- **Objective.** Build the ground truth's remaining parts before the products' tests first run, then verify V-M1, V-M7 and V-M8 on the real binaries.
+- **Deliverables:**
+  1. **GT-MIB's `cases.json`**, committed before the agent. Its codes are final now that C3 0.4 and C2 0.7 are approved.
+  2. **The GT-MIB agent**, built from S29 and the RFC texts, as the plan says. **It waits for the RFC texts** (the owner question). Until they are in the project, the agent is not built, and no V-M1 run counts. The egress deny corpus and the import checks can run as soon as C3's egress check exists.
+  3. **R9 on the SEL-751 end to end** over GT-ADV, which needs no SNMP and is the first path to run (V-M7, including the denied-branch rows under F1).
+  4. **V-M8's paired runs**, with the A/A pair first (D4-49 Q12).
+  5. **A new H item for the SEL-2731/2741**, prepared only: its OIDs, its engine-ID behaviour and its load at the poll rate (V-M1's hardware column).
+  6. **The root cause of the Windows `TestUnknownSendersAreKeptAndAlarmedOnce` failure** (#441's CI note): done in #447. A fixed wait read a slow store as a lost datagram, and the same work found the SER leg's scheduler race, which C5 fixed in #448.
+- **May change:** `tests/`, `docs/verification.md`, and `.github/workflows/ci.yml` for a new leg, with C1 reviewing that line. The same change fixes the `gtinj_ser` leg's comment, which says about 30 minutes where the run takes about 33 since #448.
+- **Reviewers:** C1, and the owner of what each case covers. C2 reviews GT-MIB's values against S29.
+
+#### Order
+
+1. The contract code (C2's three, C3's, and C5's C5 0.8 proposal) comes first, each with C6's contract tests. #440 (C12) and #441 (GT-ADV and the GT-MIB plan) are merged.
+2. Then, in parallel: C4's matcher, C5's node, C2's SEL-751 observations and `modules/asset/`, and C3's egress check and signing tool.
+3. R9 on the SEL-751 runs end to end as soon as the matcher and the node are in. It does not wait for SNMP.
+4. C2's SNMPv3 client may start beside step 2. GT-MIB's agent and every V-M1 run wait for the RFC texts.
+
+#### Phase 4 item 3 exit gate (C1 decides)
+
+- **V-M7** passes per cell over GT-ADV on the real binaries, `simulated`, for the SEL-751 path. That covers the allowlisted FIDs and the denied-branch rows, where the identity is `operator` only and never `confirmed` (F1).
+- **V-M8** passes: every set refusal case, and the paired runs with no flow in the R9 run that the other lacks.
+- **V-M1** (a) to (c), (e) and (f) pass over GT-MIB for the SEL-2731/2741 in RSTP mode, and (d) is shown for the refusal alone (D4-49 Q3). If the RFC texts are still missing when everything else has passed, C1 puts the choice to the owner. The gate never counts a GT-MIB built from memory.
+- C1 0.3, C3 0.4, C2 0.7, C5 0.8, C7 0.8, C8 0.11, C11 0.1 and C12 0.1 are merged, with their reviewers' records and C6's contract tests.
+- V-S7 still passes, and the egress deny corpus refuses every SNMP write form.
+- No real advisory is in any set, and the gate says which owner questions are still open.
+- No safety or security objection is open.
+
+Work then stops for the owner's check (D4-34).

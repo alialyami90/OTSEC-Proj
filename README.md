@@ -36,7 +36,7 @@ On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6, and on 2026-10-2
 | `cmd/otsec/` | The site node binary (composition root) | C5 |
 | `cmd/otsec-collector/` | The privileged collector binary | C3 |
 | `modules/ied/` | IED adapters, device identification, native output parsers | C2 |
-| `modules/asset/` | Asset monitoring and management: SNMPv3 and other device-facing identity and health reads, inventory logic (ADR-0008) | C2 |
+| `modules/asset/` | Asset identity (R1.8): turns collector observations into C1 0.3 attributes with their source; node-side, opens no connection, and is switched by the node's `asset` setting (D4-50, P4-3-C2) | C2 |
 | `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | C3 |
 | `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | C4 |
 | `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | C4 |
