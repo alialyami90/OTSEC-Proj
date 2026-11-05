@@ -381,6 +381,31 @@ func (g *rig) waitStatus(ok func(receive.Status) bool, d time.Duration) receive.
 	}
 }
 
+// waitSettled polls the receiver's status until ok holds, or until the
+// messages it has settled (stored, dropped or empty) stop moving for idle.
+// A slow store keeps moving and is waited for; a message read and never
+// settled stops it. It returns the last status read and the time waited.
+// (#441, job 127047375899: 25 read, 19 stored and 20 in the database when a
+// fixed 10 s wait ended on a loaded Windows runner, the last five still
+// queued behind the commits.)
+func (g *rig) waitSettled(ok func(receive.Status) bool, idle time.Duration) (receive.Status, time.Duration) {
+	g.t.Helper()
+	start := time.Now()
+	last, moved := int64(-1), start
+	for {
+		st := g.r.Status()
+		if ok(st) {
+			return st, time.Since(start)
+		}
+		if n := st.Stored + sumMap(st.Dropped) + st.Empty; n != last {
+			last, moved = n, time.Now()
+		} else if time.Since(moved) > idle {
+			return st, time.Since(start)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func sum(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
