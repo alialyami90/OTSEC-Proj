@@ -28,7 +28,8 @@ func confirmed() *Finding {
 		Class:        Confirmed,
 		EvaluatedUTC: "2026-11-05T06:00:00Z",
 		Matcher:      Matcher{Name: "otsec-applicability", Version: "0.1"},
-		Identity:     Identity{Product: "SEL-751", Version: "SEL-751-R301-V2-Z009005-D20220607", Source: DeviceRead, Evidence: []Evidence{idRead}},
+		Identity: Identity{Product: "SEL-751", Version: "SEL-751-R301-V2-Z009005-D20220607", Source: DeviceRead, Evidence: []Evidence{idRead},
+			LatestRead: &Read{ID: "4d2e6a10-3b7c-4f9e-8a1d-2c3b4a5f6e7d", AtUTC: "2026-11-05T05:59:00Z"}},
 		Preconditions: []Precondition{
 			{Name: "web-server-enabled", State: Evidenced, Evidence: []Evidence{cfgRead}},
 			{Name: "http-reachable", State: Evidenced, Evidence: []Evidence{seen}},
@@ -45,7 +46,7 @@ func TestValidFindings(t *testing.T) {
 		},
 		"applicable-by-version, operator identity": func(f *Finding) {
 			f.Class = ApplicableByVersion
-			f.Identity.Source, f.Identity.Evidence = Operator, []Evidence{entered}
+			f.Identity.Source, f.Identity.Evidence, f.Identity.LatestRead = Operator, []Evidence{entered}, nil
 		},
 		"mitigated, operator-attested": func(f *Finding) {
 			f.Class = Mitigated
@@ -60,7 +61,7 @@ func TestValidFindings(t *testing.T) {
 		},
 		"not-applicable-passive": func(f *Finding) {
 			f.Class, f.Reason, f.Preconditions = NotApplicablePassive, OutsideRange, nil
-			f.Identity.Source, f.Identity.Evidence = Passive, []Evidence{seen}
+			f.Identity.Source, f.Identity.Evidence, f.Identity.LatestRead = Passive, []Evidence{seen}, nil
 		},
 		"applicable-by-version, stale evidence named": func(f *Finding) {
 			f.Class = ApplicableByVersion
@@ -68,7 +69,7 @@ func TestValidFindings(t *testing.T) {
 		},
 		"applicable-by-version, operator identity, a precondition not met": func(f *Finding) {
 			f.Class, f.Preconditions[0].State = ApplicableByVersion, NotMet
-			f.Identity.Source, f.Identity.Evidence = Operator, []Evidence{entered}
+			f.Identity.Source, f.Identity.Evidence, f.Identity.LatestRead = Operator, []Evidence{entered}, nil
 		},
 		"mitigated, the precondition's setting named as the mitigation": func(f *Finding) {
 			f.Class, f.Preconditions[0].State = Mitigated, NotMet
@@ -76,7 +77,7 @@ func TestValidFindings(t *testing.T) {
 		},
 		"not-applicable-operator": func(f *Finding) {
 			f.Class, f.Reason, f.Preconditions = NotApplicableOperator, ProductNotNamed, nil
-			f.Identity.Source, f.Identity.Evidence = Operator, []Evidence{entered}
+			f.Identity.Source, f.Identity.Evidence, f.Identity.LatestRead = Operator, []Evidence{entered}, nil
 		},
 		"a later revision": func(f *Finding) {
 			f.Revision, f.Previous, f.From = 2, Hash([]byte("revision 1")), ApplicableByVersion
@@ -106,6 +107,11 @@ func TestInvalidFindings(t *testing.T) {
 		"an evidence ID of no form":           {func(f *Finding) { f.Identity.Evidence[0].ID = "the relay said so" }, CodeForm},
 		"an audit reference to no node ID":    {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:Not A Node:4" }, CodeForm},
 		"an invocation ID in upper case":      {func(f *Finding) { f.Identity.Evidence[0].ID = "0B6C2F1E-7D3A-4C5B-9E8F-1A2B3C4D5E6F" }, CodeForm},
+		"confirmed with no latest read":       {func(f *Finding) { f.Identity.LatestRead = nil }, CodeMissing},
+		"a latest read of no invocation ID":   {func(f *Finding) { f.Identity.LatestRead.ID = "site-a-node1:x:1" }, CodeForm},
+		"a latest read on an operator identity": {func(f *Finding) {
+			f.Class, f.Identity.Source, f.Identity.Evidence = ApplicableByVersion, Operator, []Evidence{entered}
+		}, CodeConflict},
 		"an audit reference to seq 0":         {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:site-a-node1:0" }, CodeForm},
 		"identity evidence of another source": {func(f *Finding) { f.Identity.Evidence[0].Source = Operator }, CodeConflict},
 		"confirmed on an operator identity": {func(f *Finding) {

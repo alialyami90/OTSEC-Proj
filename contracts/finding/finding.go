@@ -84,11 +84,24 @@ type Evidence struct {
 
 // Identity is the identity a finding was decided on: the product and the
 // version exactly as read (for a SEL device, the product and the full FID).
+// Evidence cites the identity record, by the invocation ID of the run that
+// first read the value (C5 keeps its bytes). LatestRead is the latest run
+// that read the same value. It shows the identity was current when this
+// revision was decided. A later run that only confirms the value again
+// records no new revision.
 type Identity struct {
-	Product  string     `json:"product"`
-	Version  string     `json:"version"`
-	Source   Source     `json:"source"`
-	Evidence []Evidence `json:"evidence"`
+	Product    string     `json:"product"`
+	Version    string     `json:"version"`
+	Source     Source     `json:"source"`
+	Evidence   []Evidence `json:"evidence"`
+	LatestRead *Read      `json:"latest_read,omitempty"`
+}
+
+// Read is one run that read a value from the device: its C2 invocation ID
+// and when it read it.
+type Read struct {
+	ID    string `json:"id"`
+	AtUTC string `json:"at_utc"`
 }
 
 // State is a precondition's state. Closed list.
@@ -286,6 +299,15 @@ func (f *Finding) Validate() error {
 		c.fail(CodeForm, "identity.source", "%q is not a source", id.Source)
 	}
 	c.evidence("identity.evidence", id.Evidence, true)
+	if r := id.LatestRead; r != nil {
+		if id.Source != DeviceRead {
+			c.fail(CodeConflict, "identity.latest_read", "only a device-read identity has a read")
+		}
+		if !invocationID.MatchString(r.ID) {
+			c.fail(CodeForm, "identity.latest_read.id", "%q is not an invocation ID", r.ID)
+		}
+		c.utc("identity.latest_read.at_utc", r.AtUTC)
+	}
 	for i, e := range id.Evidence {
 		if e.Source != id.Source {
 			c.fail(CodeConflict, fmt.Sprintf("identity.evidence[%d].source", i), "%s evidence for a %s identity", e.Source, id.Source)
@@ -368,6 +390,9 @@ func (f *Finding) Validate() error {
 	case Confirmed:
 		if id.Source != DeviceRead {
 			c.fail(CodeConflict, "class", "confirmed needs a device-read identity, not %s", id.Source)
+		}
+		if id.LatestRead == nil {
+			c.fail(CodeMissing, "identity.latest_read", "confirmed shows the read that made the identity current")
 		}
 		if weak > 0 {
 			c.fail(CodeConflict, "class", "confirmed needs every precondition evidenced by a device read or a passive observation")

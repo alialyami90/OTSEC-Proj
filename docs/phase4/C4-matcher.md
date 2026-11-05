@@ -163,11 +163,15 @@ For one asset and one entry:
 
 Point 3 of "what `confirmed` needs" says evidence is current when no later read contradicts it and no configuration change has been retrieved since. D4-49 Q6 (iv) makes the second half asset-wide. For each record the matcher cites:
 
-- **Identity.** The identity is current only while both hold:
-  - it is the asset's latest successful identity read;
-  - no configuration change has been retrieved for the asset since that read.
+- **Identity.** C5 writes a new identity record only when a value changes. The record is keyed by the invocation ID of the run that first read the value. A later run that reads the same value appears in status only, as the latest confirming invocation ID and time (#438). From that, the identity is current only while both of these hold:
+  - its record is the asset's latest identity record, so no later read has contradicted it;
+  - the latest read of the same value is later than the latest configuration change retrieved for the asset (D4-49 Q6 (iv)).
 
-  The SEL-751 reads `ID` at Level 0 on every run (the FID gate), so the next run makes it current again. A later read with another value contradicts it, and the matcher evaluates on the new value. That includes a `refused.identity_mismatch`, whose observed FID is a device read.
+  A finding cites the record's invocation ID as its evidence, because C5 keeps those bytes. It shows the latest confirming read as `identity.latest_read`, so the currency check can be seen. `confirmed` requires that field. The SEL-751 reads `ID` at Level 0 on every run (the FID gate), so after a change the next run makes the identity current again. A later read with another value contradicts the record and starts a new one, and the matcher evaluates on the new value. That includes a `refused.identity_mismatch`, whose observed FID is a device read.
+
+  **Two conditions on C5 and the node for this to hold:**
+  - The latest confirming read must survive a restart. If it is lost, every `confirmed` finding falls to `applicable-by-version` at start and comes back at the next read. Each such fall is a recorded revision, and none of them would be real.
+  - Evaluation must also run after an identity read that commits no record (section 7). Otherwise a finding made stale by a change never becomes `confirmed` again.
 - **Settings.** A C9 snapshot is current while it is the asset's latest snapshot and no change has been retrieved after it.
 - **Passive observations (R6.7).** An observation is current until one of two things happens: a configuration change is retrieved after it, or a device-read setting contradicts it.
 - **Operator entries.** An operator entry is current until it is replaced. It never supports `confirmed`, and it never makes a precondition `not-met` on a device-read identity.
@@ -176,9 +180,9 @@ A failed read contradicts nothing and leaves the evidence as it was. Only a succ
 
 ## 7. When it runs, and how a change is recorded
 
-D4-49 Q7 sets when evaluation runs. The node runs it after each commit of an identity, settings or configuration record for the asset, and after each set replacement. The finding's change is stored before the asset's next scheduled read starts. With R6.7, the commit of a passive observation for the asset is one more trigger. V-M7's "at the next evaluation" is therefore the first of these after the read that contradicted the evidence.
+D4-49 Q7 sets when evaluation runs. The node runs it after each commit of an identity, settings or configuration record for the asset, and after each set replacement. Because C5 commits no record for an identity read that only confirms the value, the node also runs it after every successful identity read (section 6). That run usually changes nothing, and so records nothing. The finding's change is stored before the asset's next scheduled read starts. With R6.7, the commit of a passive observation for the asset is one more trigger. V-M7's "at the next evaluation" is therefore the first of these after the read that contradicted the evidence.
 
-A finding is never edited. An evaluation may differ from the asset's latest finding for that entry in any of these:
+A finding is never edited. An evaluation may differ from the asset's latest finding for that entry in any of the following. `identity.latest_read` is not one of them: a run that only confirms the identity again records no revision.
 - the class or reason;
 - the identity;
 - a precondition, a mitigation, or any evidence or its `stale` mark;
