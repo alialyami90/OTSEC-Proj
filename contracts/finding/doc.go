@@ -47,7 +47,10 @@
 // No field states exploitability, risk or severity, and none is free text
 // a matcher writes. confirmed means the advisory's stated conditions hold on
 // this device with current evidence, never that exploitation was tested or
-// is possible (P10, R9.2). Nothing is probed to reach any class (R9.4).
+// is possible (P10, R9.2). It means the conditions hold on what the device
+// reported: a compromised or spoofed device can misreport its FID, and no
+// platform control detects that (AP-29). Nothing is probed to reach any
+// class (R9.4).
 // TestNoFieldStatesExploitability holds the field names to that.
 //
 // # What Validate checks, and what it cannot

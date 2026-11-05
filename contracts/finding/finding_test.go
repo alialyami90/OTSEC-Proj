@@ -104,6 +104,8 @@ func TestInvalidFindings(t *testing.T) {
 		"a later revision that names nothing": {func(f *Finding) { f.Revision = 2 }, CodeMissing},
 		"identity with no evidence":           {func(f *Finding) { f.Identity.Evidence = nil }, CodeMissing},
 		"an evidence ID of no form":           {func(f *Finding) { f.Identity.Evidence[0].ID = "the relay said so" }, CodeForm},
+		"an audit reference to no node ID":    {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:Not A Node:4" }, CodeForm},
+		"an audit reference to seq 0":         {func(f *Finding) { f.Identity.Evidence[0].ID = "audit:site-a-node1:0" }, CodeForm},
 		"identity evidence of another source": {func(f *Finding) { f.Identity.Evidence[0].Source = Operator }, CodeConflict},
 		"confirmed on an operator identity": {func(f *Finding) {
 			f.Identity.Source, f.Identity.Evidence = Operator, []Evidence{entered}

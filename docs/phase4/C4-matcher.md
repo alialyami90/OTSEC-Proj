@@ -126,6 +126,11 @@ What it reads depends on the kind:
 - **`service`:**
   - **Before R6.7,** only a device-read value counts.
   - **With R6.7,** a passive observation of the service in the device's own traffic, citing its packets, also shows `present` or `in`. Traffic that was not seen never shows `absent` or `not-in`, so those stay unread unless a device read shows them.
+- **`control`** (mitigations only, C11 at `7ae6c0b`): a recorded network control that blocks `key` (`<tcp|udp>/<port>`) for this asset, with `op` `present` only.
+  - The matcher reads it only from a recorded control. That is an operator entry, so its evidence is `audit:<node_id>:<seq>` and the mitigation is `operator_attested`. Where the record lives is for C1 0.3, settled with C2. C12 only cites it.
+  - The absence of a recorded control shows nothing. The mitigation is then simply not evidenced, and C12 lists only evidenced mitigations.
+
+Every mitigation the matcher applies is one of the entry's `mitigations`, by its name in the signed set. A mitigation the set does not list is never applied, so a finding cannot be lowered to `mitigated` on grounds the set does not vouch for (C3 on #440).
 
 ## 5. Classification, step by step
 

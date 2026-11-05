@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/contracts/version"
 )
 
@@ -104,8 +107,9 @@ type Precondition struct {
 	Evidence []Evidence `json:"evidence,omitempty"`
 }
 
-// Mitigation is one mitigation the advisory or the vendor names, by its name
-// in the set, that is evidenced. OperatorAttested is true when every piece
+// Mitigation is one of the entry's mitigations in the signed set (C11), by
+// its name there, that is evidenced. A mitigation the set does not list is
+// never applied. OperatorAttested is true when every piece
 // of its evidence was entered by an operator.
 type Mitigation struct {
 	Name             string     `json:"name"`
@@ -201,7 +205,6 @@ var (
 	utcForm   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$`)
 	nameForm  = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 	idForm    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	auditRef  = regexp.MustCompile(`^audit:[^:]+:[1-9][0-9]*$`)
 	setID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`) // C11 set_id
 )
 
@@ -231,7 +234,7 @@ func (c *checker) evidence(field string, ev []Evidence, need bool) {
 		if !e.Source.valid() {
 			c.fail(CodeForm, f+".source", "%q is not a source", e.Source)
 		}
-		if _, err := event.ParseEventID(e.ID); err != nil && !auditRef.MatchString(e.ID) {
+		if _, err := event.ParseEventID(e.ID); err != nil && !validAuditRef(e.ID) {
 			c.fail(CodeForm, f+".id", "%q is neither an event ID nor audit:<node_id>:<seq>", e.ID)
 		}
 	}
@@ -396,6 +399,17 @@ func (f *Finding) Validate() error {
 		c.fail(CodeForm, "reason", "%q is not a reason", f.Reason)
 	}
 	return errors.Join(c.errs...)
+}
+
+// validAuditRef reports whether s is audit:<node_id>:<seq>, with a valid
+// node ID (contracts/node) and a seq of 1 or more.
+func validAuditRef(s string) bool {
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 || parts[0] != "audit" || !node.ID(parts[1]).Valid() {
+		return false
+	}
+	seq, err := strconv.ParseUint(parts[2], 10, 64)
+	return err == nil && seq > 0 && strconv.FormatUint(seq, 10) == parts[2]
 }
 
 func all(ev []Evidence, s Source) bool {
