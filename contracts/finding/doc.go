@@ -55,8 +55,8 @@
 // Validate checks the rules that hold on one record: confirmed only on a
 // device-read identity with every precondition evidenced by current
 // device-read or passive evidence; an unread precondition only on
-// applicable-by-version, or on mitigated (an open question in the design
-// note); a precondition not met only as D4-49 Q5 allows; mitigated exactly
+// applicable-by-version, or on mitigated (D4-52, subject to C6); a
+// precondition not met only as D4-49 Q5 allows; mitigated exactly
 // when a mitigation is evidenced; and each not-applicable class only on its
 // identity source (device-read, operator, passive). Whether the evidence
 // was current (point 3 of "what confirmed needs") depends on records stored

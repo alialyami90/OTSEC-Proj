@@ -6,7 +6,7 @@ This note covers how an asset's identity is matched against an entry of the sign
 - the set is C11, `otsec.advisory/0.1` (C3's draft, `docs/phase4/C3-c11-advisory.md`, #437);
 - the finding is C12, `otsec.finding/0.1` (`contracts/finding`, drafted beside this note).
 
-The classes are fixed by `docs/verification.md` ("R9 classes and what `confirmed` needs", V-M7 and V-M8) and by C1's answers in D4-49. This note does not change them. One question is still open (section 8).
+The classes are fixed by `docs/verification.md` ("R9 classes and what `confirmed` needs", V-M7 and V-M8) and by C1's answers in D4-49. This note does not change them. C1 settled the one question it raised in D4-52, subject to C6 (section 8).
 
 ## 1. Where the matcher lives: a new `modules/applicability/`
 
@@ -180,11 +180,11 @@ Then it records a new finding with `revision` + 1, with `previous` set to the ha
 
 Which findings the node stores, and in which C5 class, is for C5's note (P4-3-A5). My suggestion is to store every finding whose entry names the asset's product. A `product-not-named` finding follows from the product and the set, so storing one for every asset and every entry adds nothing.
 
-## 8. Open question for C1, and what the draft does now
+## 8. Unread preconditions on a mitigated finding (D4-52)
 
 **Unread preconditions on a mitigated finding.** V-M7 says an unread precondition "leaves the finding `applicable-by-version`". D4-49 Q6 (i) covers the case where every precondition holds. Read strictly, V-M7 would hide an evidenced mitigation whenever another precondition is unread.
 
-**What the draft does:** a `mitigated` finding may list unread preconditions, so both the mitigation and what was not read are shown. If C1 reads V-M7 strictly, the change is one line in `Validate` and step 4a.
+**C1's ruling (D4-52, subject to C6, since V-M7 is C6's):** a `mitigated` finding may list unread preconditions, by the same precedence as D4-49 Q6 (i), and it still names each one. The draft does this.
 
 **The tokens.** The class tokens `not-applicable-operator` and `not-applicable-passive` stand for "not-applicable (operator)" and "not-applicable (passive)". GT-ADV (C6) should use the same tokens.
 
