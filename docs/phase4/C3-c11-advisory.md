@@ -161,6 +161,20 @@ The floor is the in-use set's (`version`, payload SHA-256), derived at start fro
   - **The contract test** checks that `TestKeyIDs` equals the helper's key IDs. It fails on any `NewKeyFromSeed`, `ed25519.GenerateKey` with a fixed reader, or private-key literal in a Go or Python file under the repository that also signs an advisory set (it names `AdvisorySigningInput` or the signer), other than the helper.
   - **What this cannot catch:** a key generated and committed outside the repository's conventions by someone set on it. That is the anchor's custody, HR-18: anchors arrive only at enrollment or by signed release, never by a configuration file edited at a site.
 
+### 1.7 Where the text was silent, and what the code does (P4-3-C3)
+
+The code follows 1.1 to 1.6 and 2.1. These points were not settled by the text, and the code settles them as follows, for C1 and the reviewers to confirm on the contract PR:
+
+- **`exact` ranges.** `exact` compares strings and has no order, so a range under it may only be the empty one, which covers every version. A range with an endpoint under `exact` makes the set `invalid`.
+- **`present` and `absent` take no `values`.** An item with those ops and values makes the set `invalid`, as for `control`.
+- **A `sel-fid` `versions` item is a full FID** in the form `SEL-<model>-R<nnn>-V<n>-Z<nnnnnn>-D<yyyymmdd>`, which every FID in the project's sources has.
+- **`vendor`, `product` and an `exact` version** are required and non-empty. An `exact` version is at most 128 bytes, the bound for a value.
+- **The refusal's fields.** `Refusal` carries `key_id` only once it is in its form, and `set_id` and `version` only after step 4, so `advisory.set_refused` never holds unchecked bytes from the file.
+- **An `snmpv3` credential has no access level** (`access_level` is empty). SNMP has none: the register names the OIDs, and the device's view bounds the user.
+- **The localized keys are the sealed secret**: the authentication key, then the 16-byte AES-128 key, 48 or 80 bytes. `MaxSealedLen` is 80, while a password stays at most `MaxSecretLen` (64). The seal's AAD also names the user, both protocols and the engine ID, so keys cannot be moved to another engine ID. Telnet and SSH keep their AAD unchanged.
+- **The sole-password attestation** is the field `usm.sole_device_attested`, which must be `true`.
+- **An `snmpv3` install needs a request stamped `otsec.authz/0.8` or later**, in the clear or admin-signed (D4-16's rule).
+
 ## 2. C7 0.8: SNMP credentials and the legacy SNMP approval
 
 ### 2.1 Credentials
