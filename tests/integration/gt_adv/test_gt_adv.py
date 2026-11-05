@@ -107,13 +107,16 @@ def derive(ident, adv, mutant=None):
     stale = src == "device-read" and ident["stale"] and mutant != "ignore-stale"
 
     held = [n for n, s in mit.items() if s == "holds"]
-    # D4-49 Q5: a precondition read false on a device-read identity gives
-    # not-applicable, unless a mitigation that holds is that same setting.
+    # D4-49 Q5: a precondition read false decides ahead of any other
+    # mitigation. Unless a mitigation that holds is that same setting, a
+    # device-read identity is not-applicable and any other stays applicable.
     keys = {c["name"]: c.get("key") for c in adv["preconditions"] + adv["mitigations"]}
     false_keys = {keys[n] for n, s in pre.items() if s == "not-met" and kinds[n] == "setting"}
-    if src == "device-read" and false_keys and mutant not in ("mitigation-first", "q5-reversed"):
+    if false_keys and mutant not in ("mitigation-first", "q5-reversed"):
         if not any(kinds[n] == "setting" and keys[n] in false_keys for n in held):
-            return {"class": na, "reason": "precondition-not-met", "evidence": evidence}
+            if src == "device-read":
+                return {"class": na, "reason": "precondition-not-met", "evidence": evidence}
+            return {"class": "applicable-by-version", "evidence": evidence, "unread": unread}
     if held and mutant != "confirmed-beats-mitigated":
         if mutant == "mitigated-needs-all-read" and unread:
             pass
