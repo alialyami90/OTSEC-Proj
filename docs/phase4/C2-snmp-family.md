@@ -13,7 +13,7 @@ C2, 2026-11-05. This is the family note of P4-3-A2 (`docs/agent-handoffs.md`, "P
 
 ## Recommendation: the SEL-2731 and SEL-2741 in RSTP mode, not the SEL-2730M
 
-The brief names the SEL-2730M "unless C2's evidence says otherwise". The evidence favours the SEL-2731 and SEL-2741 in RSTP mode, which this note treats as one family. Both run the same firmware line under one guide, S29. C1 decides.
+The brief names the SEL-2730M "unless C2's evidence says otherwise". The evidence favours the SEL-2731 and SEL-2741 in RSTP mode, which this note treats as one family. Both run the same firmware line under one guide, S29. C1 chose it (D4-51): RSTP mode only, with the SEL-2730M second if the sites run it.
 
 | Question | SEL-2730M (S43) | SEL-2731 and SEL-2741, RSTP mode (S29) |
 | --- | --- | --- |
