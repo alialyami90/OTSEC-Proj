@@ -831,3 +831,11 @@ Date: 2026-11-05. C1, on `docs/phase4/C6-item3-testability.md` (#436), before an
 - **Q8 to Q11** as proposed. A same-version set is refused unless byte-identical, and a byte-identical one is a no-op. An entry with no published source refuses the whole set.
 - **Q12** as proposed: the ports are fixed for the paired runs, and the comparison covers every destination. C6 runs an A/A pair first. If packet counts differ between identical runs, C6 brings C1 the measured difference before anything changes.
 - **F1. No `ID` session on a denied SEL-751 branch.** The firmware gate (ADR-0005, F-009) refuses every session on a firmware line not on the allowlist, because communications access is where the restart defect lies. A session that only reads `ID` is still a session. So R302 and older stay `operator` identity only, and can never be `confirmed`. This is recorded as an item 3 limitation, and GT-ADV pins it with denied-branch rows. The item 3 brief is corrected: V-M7 reaches every class on the SEL-751 only for allowlisted FIDs.
+
+## D4-50: SNMPv3 runs in the collector; the module combinations; V-M8's upstream flow (C3 on #435, C5 on #438)
+
+Date: 2026-11-05. C1.
+
+- **USM keys and the SNMP session belong to the privileged collector** (C3), as every device credential and device session does (ADR-0002). The node's asset module schedules reads and records identities, and opens no SNMP socket. The collector executes the read under the register's limits. D4-49 Q1's pinned engine ID is held with the collector's credential. The P4-3-A3 brief is corrected to match.
+- **Applicability needs the asset module** (C5's proposal on #438). A node configuration that enables applicability without the asset module is refused at load. "Independently enabled" (R1.8) therefore means three supported combinations: both off, asset alone, and both on. V-M1 (a) is tested with the asset module off, which turns applicability off too.
+- **V-M8's flows** (C5 and C6). The upstream forwarder's flow exists in both paired runs. Its volume may differ, because the R9 run forwards its own health and finding events. The comparison is the one D4-49 Q12 states: same flows and packet counts per collection session to every device address, and no flow in the R9 run that the other lacks, over every destination.

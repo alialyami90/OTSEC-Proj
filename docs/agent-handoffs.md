@@ -941,7 +941,7 @@ Items 1 and 2 passed their gate with conditions, and the owner accepted them (`d
 - **Deliverables.**
   - **Contract draft C11 `otsec.advisory/0.1`:** a signed, versioned, offline set. Each entry has its source citation, the affected products and version ranges, and its named preconditions and mitigations, in a form V-M7's classes can evaluate. Refusal of an unsigned, wrongly signed, truncated or older set keeps the set in use, and the refusal is audited (C8 addition). Test advisories are marked `test-only` and refused in a shipped set.
   - **The approval record for a v1 or v2c device** (V-M1 (d)), as a C7 and C8 addition, refused without the owner's approval.
-  - **Threat-model rows:** SNMPv3 USM keys in the node key register, no downgrade, and the asset module as a new path to devices. Also the signing key's custody, and who may publish a set.
+  - **Threat-model rows:** SNMPv3 USM keys held by the privileged collector with the other device credentials (ADR-0002, D4-50), no downgrade, and the asset module as a new path to devices. Also the signing key's custody, and who may publish a set.
 - **May change:** `contracts/authz`, `contracts/audit`, a new `contracts/advisory` (drafts only, in a PR), `docs/threat-model.md`, `modules/security/`.
 - **Reviewers:** C6 and C2, with C4 for the fields the matcher reads; C1 approves.
 
