@@ -861,3 +861,24 @@ Date: 2026-11-05. C1, on C4's C12 draft and matcher note (#440).
 
 - **The matcher lives in a new `modules/applicability/`, owned by C4.** It has its own switch (R9, D4-50), it reads from three owners, and as a pure function it has no way to send a packet, which V-M8 relies on. The ownership row is added to `README.md`.
 - **A `mitigated` finding may also list unread preconditions** (C4's question). An evidenced mitigation is the stronger statement, and it is the same precedence as D4-49 Q6 (i). The finding still names every unread precondition, so nothing is hidden. V-M7's "an unread precondition leaves the finding `applicable-by-version`" is read as applying when no mitigation is evidenced. This reading is subject to C6, who owns V-M7. If C6 objects that it lowers the criterion, C1 decides again before C12 is approved.
+
+## D4-53: the item 3 contracts are approved together, with the rulings made in review (C1, 2026-11-05)
+
+Date: 2026-11-05. C1, under §5.4, after every draft had its reviewers' acceptance at the head named below. Evidence class: desk. No device was read.
+
+- **Approved together:**
+  - C1 0.3 (identity attributes with their source), C3 0.4 (SNMP reads) and C2 0.7 (codes), in C2's drafts on #439 at `92026c9`. C3 and C4 accepted them, and C6 passed them.
+  - C11 `otsec.advisory/0.1`, C7 0.8 and C8 0.11, in C3's drafts on #437 at `1c9e479`. C2, C4 and C5 reviewed them, and C6 passed them.
+  - C12 `otsec.finding/0.1` (`contracts/finding`) and the matcher note, on #440 at `1730ee1`. C3 accepted them, and C6 passed them.
+  - The node's side of item 3, C5's note on #438 at `23c2e7c`. C3 accepted it, and C6 passed it.
+
+  GT-ADV and the GT-MIB plan (#441, C6) are test material, not contracts. They carry C4's pass on GT-ADV and C2's and C3's acceptances of the plan, at `cf23cea`, and merge when CI is green.
+- **D4-49 Q7, as it now reads.** The finding is evaluated once per collection run, at the end of the run: after the run's last commit, or after the run if it commits nothing. An identity read that confirms an unchanged identity therefore still re-evaluates. A commit made outside a collection run (a set replacement, an operator entry) triggers its own evaluation. If a restart cuts a run off, the evaluation at start covers it, and the latest confirming read survives the restart. This replaces "after each commit", which on an SEL-751 run (identity, then settings) would record a transient `confirmed` against the old snapshot (C6 on #438).
+- **A finding is written on any C12 §7 change,** including a new stale mark or changed evidence under the same class, and not only when the class changes (C6 on #438). Without this, V-M7's evidence is lost.
+- **Algorithms.** SHA-1 stays out for the SEL-2731/2741 (D4-51). The credential can name only `hmac-sha-256`, `hmac-sha-512` and `aes-128`, so MD5, SHA-1, DES and AES-256 are refused, and GT-MIB offers them as negative cases (C3 on #437, after C2).
+- **What an unauthenticated message can do** (C6 on #439, GT-MIB U15 and U16):
+  - A Report or a Response counts only when it matches the outstanding `msgID` and comes from the endpoint's address and port. Anything else is discarded.
+  - Nothing an unauthenticated message can cause suspends the asset or its credential. The four Report failure codes and `refused.engine_id_mismatch` fail the run and show in health, and suspend nothing.
+  - C11 §4 rule 1 (a Response below `authPriv` is discarded unparsed, even with a valid digest) and HR-16 are read with this ruling (C6's cross-reference on #437).
+- **Advisory set loading** (C3 on #438). The node reads at most `MaxEnvelopeBytes` (1,399,128 B) + 1 and refuses a larger file before parsing. It verifies the newest installed set again against the current anchors at start and on every anchor change. If that fails, no set is in use, and an older set never takes its place. `advisory.set_refused` is written once per file hash, as the alarm is.
+- **Still with the owner** (`docs/agent-handoffs.md`, item 3): who publishes the advisory set and holds its key (HR-18), the severity scores, which SEL switches the sites run, the RFC texts (RFC 3411, 3418 and 6933), and the approval key for a later v1 or v2c path. No real advisory goes into a set until the publisher and key are answered. The implementation can be built and verified on GT-ADV's test sets without them.
