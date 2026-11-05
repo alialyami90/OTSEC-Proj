@@ -231,6 +231,11 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
+	if gtinj != "" && gtinjSER != "" {
+		// An event baseline-ack names one asset: the GT-INJ one under
+		// -gtinj-events, the slice's under -gtinj-ser (sign).
+		return errors.New("-gtinj-events and -gtinj-ser cannot be used together")
+	}
 	l := Layout{Root: root, NodeID: nodeID, AssetID: assetID, FID: simFID, Serial: simSerial,
 		CredentialRef: nodeconfigtest.TestCredentialRef}
 	installed := programData != ""
