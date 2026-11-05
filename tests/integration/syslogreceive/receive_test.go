@@ -622,14 +622,17 @@ func TestUnknownSendersAreKeptAndAlarmedOnce(t *testing.T) {
 			want++
 		}
 	}
-	st := g.waitStatus(func(s receive.Status) bool { return s.Received == s.Stored+sumMap(s.Dropped)+s.Empty }, 10*time.Second)
+	// Every datagram read must settle. The wait ends when they all have, or
+	// when none has settled for 30 s: a loaded runner's store is slow, but
+	// it keeps moving.
+	st, waited := g.waitSettled(func(s receive.Status) bool { return s.Received == s.Stored+sumMap(s.Dropped)+s.Empty }, 30*time.Second)
 	ev := g.events()
 	perSender := map[string]int{}
 	for _, s := range ev {
 		perSender[s.Sender]++
 	}
-	t.Logf("%d datagrams, %d sent again; receiver read %d, stored %d, dropped %v, empty %d, last error %q; stored by sender %v",
-		want, again, st.Received, st.Stored, st.Dropped, st.Empty, st.LastErr, perSender)
+	t.Logf("%d datagrams, %d sent again; after %v the receiver read %d, stored %d, dropped %v, empty %d, last error %q; stored by sender %v",
+		want, again, waited.Round(time.Millisecond), st.Received, st.Stored, st.Dropped, st.Empty, st.LastErr, perSender)
 	if sumMap(st.Dropped) != 0 || st.Empty != 0 || st.Received != st.Stored || int64(len(ev)) != st.Stored {
 		t.Fatalf("the receiver lost datagrams it read: read %d, stored %d (%d in the database), dropped %v, empty %d, last error %q",
 			st.Received, st.Stored, len(ev), st.Dropped, st.Empty, st.LastErr)

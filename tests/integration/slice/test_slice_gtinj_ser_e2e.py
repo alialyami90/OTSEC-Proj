@@ -135,7 +135,9 @@ class _Run:
         ok = harness.wait_for(lambda: self.count() >= want and (self.result_at()[0] or at - SEC) >= at, 60, step=0.005)
         if not ok:
             raise AssertionError(f"the read at {_stamp(at)}: {self.count()} of {want} rows stored, result {self.result_at()}")
-        time.sleep(0.02)  # the scheduler records the run's end right after status
+        # No wait after this: the node takes the run's end before it writes
+        # status and arms its next timer at the due time (#448), so the next
+        # jump can follow at once.
 
     def acknowledge(self, ack, until):
         """At ack, the recorded baseline acknowledged; active before until."""
