@@ -1,4 +1,4 @@
-// Package asset is contract C1, otsec.asset/0.2: how the platform identifies
+// Package asset is contract C1, otsec.asset/0.3: how the platform identifies
 // a device, what it knows about it and how well, how it reaches it, and which
 // capability profile applies.
 //
@@ -9,10 +9,15 @@
 //   - Every descriptive fact as an Attribute: a resolved value, a confidence,
 //     and one or more observations, each with its evidence source and
 //     evidence class. Device class, vendor and product family (ADR-0006) are
-//     attributes like any other, so their provenance is visible too.
+//     attributes like any other, so their provenance is visible too. From
+//     0.3 each observation also says its kind, device-read, passive or
+//     operator (D4-49 Q4), and a device read from a session says its read
+//     path; see "Source kinds" below.
 //   - Endpoints, each with its transport and its downstream_security label
 //     (A3 §4.5). Telnet, serial and Syslog without TLS are always
-//     plaintext-unauthenticated. Only a pinned-key binding makes a link
+//     plaintext-unauthenticated. An snmpv3 endpoint (0.3) is authPriv with
+//     the engine ID pinned, so it is encrypted-authenticated and sits on a
+//     pinned-key binding. Only a pinned-key binding makes a link
 //     encrypted-authenticated. Anything less needs a recorded per-device
 //     acknowledgement with its scope, and is labelled insecure wherever it
 //     appears.
@@ -109,6 +114,39 @@
 // with its history, so events never mix two physical devices under one ID
 // (C1-A4-3).
 //
+// # Source kinds (0.3)
+//
+// Source.Kind is KindOf(Source.Method): adapter-session and
+// simulator-session are device-read (the evidence class still says which is
+// a simulator), syslog-received and passive-network are passive, and
+// operator-entry and document are operator. A derived observation takes the
+// kind its inputs warrant, and Validate refuses device-read unless every
+// attribute its ref names (comma-separated) carries a device-read
+// observation equal to that attribute's value, so a rule cannot raise its
+// inputs. A value cut from device bytes, such as the model and firmware
+// version inside a FID, is not derived: it is its own session observation
+// whose span covers only its part of the bytes, with the same ref.
+//
+// Source.Read, required on a device read from a session and absent
+// otherwise, gives the endpoint's transport, the C3 operation (the run's
+// step, not the run) and, for snmpv3, exactly one of the varbind OID or the
+// header field (msgAuthoritativeEngineID, for snmp_engine_id). V-M1 (e)
+// checks the transport and V-M7 the kind. The evidence ID of a device read
+// is Source.Ref, the C2 invocation ID, with the span.
+//
+// # SNMPv3 (0.3)
+//
+// An snmpv3 endpoint's binding is pinned-key, and its pre_credential is
+// exactly snmp_engine_id: the engine ID the device's USM keys are localized
+// to, declared at commissioning from the device itself (its settings or its
+// MAC label), never from a network discovery. Discovery's engine ID is
+// compared with it before anything authenticated is sent; after that, a
+// response verifies only if the responder holds a key localized to it
+// (RFC 3414 §2.6). The FID may be a binding attribute, compared after
+// authentication. The key is per device only if the USM password is, which
+// is a commissioning rule (C3, #437). There is no v1 or v2c transport
+// (D4-49 Q3).
+//
 // # Versions
 //
 //   - 0.1 (#32): the record, endpoints with target (D1-24), the binding,
@@ -117,6 +155,14 @@
 //     endpoints have no path, so CheckPath refuses a session to them. A 0.1
 //     record that carries a path is invalid. Capability profiles are
 //     unchanged and may stay at 0.1.
+//   - 0.3 (D4-53, C1 0.3 in docs/phase4/C2-c1-0.3-c3-0.4.md): Source.kind
+//     and Source.read, the snmpv3 transport, the snmp_engine_id attribute,
+//     and pinned-key's SNMPv3 meaning. A 0.2 record is still read; its
+//     observations have no kind, and Observation.EffectiveKind gives them
+//     their method's (a derived one reads as operator). A 0.2 record that
+//     carries kind, read or an snmpv3 endpoint is invalid. A 0.2 node
+//     refuses a 0.3 record with an snmpv3 endpoint, and with it the asset,
+//     so a node is upgraded before an SNMP endpoint is added.
 //
 // # What it leaves out
 //

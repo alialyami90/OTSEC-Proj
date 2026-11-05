@@ -1,6 +1,6 @@
 # C1 golden examples
 
-Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device. Transcript spans (FID at offset 127, CID at 224) point into the invented C2 example transcript of the same invocation, `contracts/adapter/testdata/results/valid/ok.json`; C2's tests check each span selects its value. Every endpoint has `target` `simulated` (D1-24): no example describes a real device behind an endpoint. Records are `otsec.asset/0.2` and every session endpoint has `path` `direct` (D2-16), except where a line says otherwise; capability profiles are unchanged and stay at 0.1.
+Written by `generate.py` (run `python3 -I generate.py` here). Device values are taken from the SEL-751 instruction manual (S22, date code 20260910) and are `documented-example` values, not device captures. Serial numbers, addresses, operators, IDs and times are invented. No example was captured from a device. Transcript spans (FID at offset 127, CID at 224) point into the invented C2 example transcript of the same invocation, `contracts/adapter/testdata/results/valid/ok.json`; C2's tests check each span selects its value. Every endpoint has `target` `simulated` (D1-24): no example describes a real device behind an endpoint. Records are `otsec.asset/0.3` and every session endpoint has `path` `direct` (D2-16), except where a line says otherwise; capability profiles are unchanged and stay at 0.1. From 0.3 every observation carries its `kind`, and a device read from a session its `read` path (C1 0.3, D4-49 Q4): the SEL-751 examples' reads are `telnet` and `sel.id`. The SEL-2731M example's FID is verbatim from the RSTP user's guide (S29 Table A.4 p. 62), and its engine ID has S29 p. 42's form with a locally administered MAC (`02:00:00:27:31:01`), so it is no real unit's; its invocation ID, spans and OIDs are invented, no transcript backs them, and the FID's column in `entPhysicalTable` is not documented (`docs/phase4/C2-snmp-family.md`). The later-minor examples are `otsec.asset/0.4`.
 
 ## Valid
 
@@ -12,14 +12,18 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `valid/sel-rtac-syslog.json` | An RTAC heard only through Syslog over UDP: plaintext, acknowledged, bound by address only. |
 | `valid/sel-751-address-only.json` | A valid SEL-751 record whose binding is `address-only`: nothing is compared before a password would be sent, so `CredentialAllowed` refuses it (A6 C1 re-check R-1). |
 | `valid/sel-751-at-0.1.json` | The simulated SEL-751 as a 0.1 record, with no `path`: still read, and `CheckPath` refuses a session to it ("endpoint has no path") until an administrator sets one (D2-16). |
+| `valid/sel-751-at-0.2.json` | The simulated SEL-751 as a 0.2 record, with no `kind` and no `read`: still read, and each observation takes its method's kind (`Observation.EffectiveKind`). |
+| `valid/sel-751-model-and-firmware.json` | The SEL-751 with `model` `SEL-751` and `firmware_version` `R501-V0`, each its own device-read observation whose span lies inside the FID's span, with the same `ref` (C1 0.3 section 1.5). |
+| `valid/sel-2731m-snmpv3.json` | An SEL-2731M over `snmpv3` (D4-51): `encrypted-authenticated` on a `pinned-key` binding whose `pre_credential` is `snmp_engine_id`; the FID is compared after authentication. Each device read names its `oid`, and the engine ID its `header` (`msgAuthoritativeEngineID`). |
+| `valid/later-minor-unknown-source-kind.json` | A 0.4 kind `witnessed`: a 0.3 reader reads `operator`, which never yields `confirmed`. |
 | `valid/sel-751-port-server.json` | A valid record whose endpoint is behind a port server: `CheckPath` refuses a session to it until port-server timeouts have evidence (H-13). |
-| `valid/later-minor-unknown-path.json` | A 0.3 path `jump-host`: a 0.2 reader reads `port-server`, which gets no session. |
-| `valid/later-minor.json` | A 0.3 record with a device class and a field 0.2 does not know: a 0.2 reader accepts it and reads the class as `unknown`. |
-| `valid/later-minor-unknown-binding-method.json` | A 0.3 binding method `tpm-attested` claiming `cryptographic`: a 0.2 reader reads `spoofable`. |
-| `valid/later-minor-binding-without-pre-credential.json` | A 0.3 binding method 0.2 does not know, with no `pre_credential`. It reads as `address-only` and gets no credential (R-1). |
-| `valid/later-minor-unknown-source-method.json` | A 0.3 source method `simulator-replay` labelled `device-observed`: a 0.2 reader reads `inferred`, never a device observation. |
-| `valid/later-minor-unknown-confidence.json` | A 0.3 confidence `verified`: a 0.2 reader recomputes it (`corroborated`). |
-| `valid/later-minor-unknown-evidence-class.json` | A 0.3 evidence class `hardware-verified`: a 0.2 reader reads `inferred`. |
+| `valid/later-minor-unknown-path.json` | A 0.4 path `jump-host`: a 0.3 reader reads `port-server`, which gets no session. |
+| `valid/later-minor.json` | A 0.4 record with a device class and a field 0.3 does not know: a 0.3 reader accepts it and reads the class as `unknown`. |
+| `valid/later-minor-unknown-binding-method.json` | A 0.4 binding method `tpm-attested` claiming `cryptographic`: a 0.3 reader reads `spoofable`. |
+| `valid/later-minor-binding-without-pre-credential.json` | A 0.4 binding method 0.3 does not know, with no `pre_credential`. It reads as `address-only` and gets no credential (R-1). |
+| `valid/later-minor-unknown-source-method.json` | A 0.4 source method `simulator-replay` labelled `device-observed` and `device-read`: a 0.3 reader reads `inferred` and `operator`, never a device observation or a device read. |
+| `valid/later-minor-unknown-confidence.json` | A 0.4 confidence `verified`: a 0.3 reader recomputes it (`corroborated`). |
+| `valid/later-minor-unknown-evidence-class.json` | A 0.4 evidence class `hardware-verified`: a 0.3 reader reads `inferred`. |
 | `valid/profile-sel-751-ascii.json` | SEL-751 capability profile: identification and SER `simulated`, time quality `documented-untested`, Syslog `unsupported`, configuration `unknown`. `max_read_rows` 1,024, the session limits of D1-18 and the secret policy of D1-19, cited to S22. |
 | `valid/profile-sel-rtac-syslog.json` | RTAC profile: Syslog push only, no adapter operations, so no firmware allowlist, no session limits and no `max_read_rows`. |
 
@@ -28,7 +32,7 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | File | What it shows |
 | --- | --- |
 | `invalid/observation-without-evidence-class.json` | An observation with no evidence class is rejected. |
-| `invalid/unknown-field-in-own-minor.json` | A 0.2 record with a field 0.2 does not define: read strictly, because only a later minor may add fields (A6 C1 re-check S-1). |
+| `invalid/unknown-field-in-own-minor.json` | A 0.3 record with a field 0.3 does not define: read strictly, because only a later minor may add fields (A6 C1 re-check S-1). |
 | `invalid/attribute-without-observations.json` | An attribute with no observations, and so no evidence class, is rejected. |
 | `invalid/corroborated-by-one-class.json` | Two device claims (session and Syslog) do not corroborate each other: one evidence class. |
 | `invalid/conflicting-value-not-declared.json` | A conflicting attribute must keep the operator-declared value, never the device's claim. |
@@ -56,7 +60,7 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/address-only-with-pre-credential.json` | An address-only binding with a pre-credential attribute. |
 | `invalid/endpoint-without-target.json` | An endpoint that does not say whether a device or a simulator is behind it (D1-24). |
 | `invalid/endpoint-target-documented.json` | An endpoint target of `documented`: only `device-observed` and `simulated` describe a far end. |
-| `invalid/later-minor-endpoint-target-unknown.json` | A 0.3 record with an endpoint target 0.2 does not know. It is refused, not read as either value (D1-24). |
+| `invalid/later-minor-endpoint-target-unknown.json` | A 0.4 record with an endpoint target 0.3 does not know. It is refused, not read as either value (D1-24). |
 | `invalid/device-value-without-device-endpoint.json` | A `device-observed` value from an adapter session on an asset whose only endpoint is a simulator. |
 | `invalid/simulator-value-without-simulated-endpoint.json` | The relay example with its endpoint relabelled `device-observed`, while its values come from a simulator session. |
 | `invalid/profile-pre-credential-operator-only.json` | A profile claiming the family reports `ip_address` before authentication. |
@@ -76,5 +80,20 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/profile-secret-policy-zero-mnemonic.json` | A secret policy with neither `mnemonic_len` nor `whole_word`: zero is not a mode (D1-19). |
 | `invalid/profile-secret-policy-both-modes.json` | A secret policy with both `mnemonic_len` and `whole_word`. |
 | `invalid/path-at-0.1.json` | A 0.1 record that carries `path`: 0.1 has no such field (D2-16). |
-| `invalid/unknown-path-in-own-minor.json` | A 0.2 record with a path 0.2 does not know. |
+| `invalid/unknown-path-in-own-minor.json` | A 0.3 record with a path 0.3 does not know. |
 | `invalid/path-on-syslog-endpoint.json` | A path on a Syslog endpoint, which the node never connects to. |
+| `invalid/kind-at-0.2.json` | A 0.2 record that carries `kind` and `read`: they were added in 0.3. |
+| `invalid/kind-missing.json` | A 0.3 observation with no `kind`. |
+| `invalid/kind-not-the-methods.json` | An `operator-entry` observation labelled `device-read`: the kind follows the method. |
+| `invalid/device-read-without-read-path.json` | A device read from a session with no `read` path (D4-49 Q4). |
+| `invalid/read-path-on-operator-entry.json` | A `read` path on an operator entry: only a device read from a session has one. |
+| `invalid/derived-device-read-from-operator-input.json` | A derived observation labelled `device-read` whose input, `vendor`, is operator-declared: a rule cannot raise its inputs. |
+| `invalid/snmpv3-read-without-oid-or-header.json` | An `snmpv3` read that names neither `oid` nor `header`. |
+| `invalid/snmpv3-read-with-oid-and-header.json` | An `snmpv3` read that names both. |
+| `invalid/snmpv3-read-oid-outside-internet.json` | An `snmpv3` read whose `oid` is not under 1.3.6.1. |
+| `invalid/telnet-read-with-oid.json` | A Telnet read that names an `oid`: only `snmpv3` has one. |
+| `invalid/snmpv3-at-0.2.json` | A 0.2 record with an `snmpv3` endpoint: the transport was added in 0.3. |
+| `invalid/snmpv3-device-reported.json` | An `snmpv3` endpoint on a `device-reported` binding: it must be `pinned-key` on the engine ID. |
+| `invalid/snmpv3-pre-credential-firmware.json` | A pinned-key `snmpv3` binding whose `pre_credential` is `firmware_id`: the FID comes back only after authentication. |
+| `invalid/snmpv3-encrypted-weak.json` | An `snmpv3` endpoint labelled `encrypted-weak` with an acknowledgement: there is no lower level to acknowledge. |
+| `invalid/engine-id-not-hex.json` | An `snmp_engine_id` written with colons: it is 5 to 32 octets in lowercase hex. |

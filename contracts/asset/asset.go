@@ -13,15 +13,16 @@ import (
 
 	"otsec.local/otsec/contracts/internal/strictjson"
 	"otsec.local/otsec/contracts/node"
+	"otsec.local/otsec/contracts/register"
 	"otsec.local/otsec/contracts/version"
 )
 
 // Contract is this package's identifier. Readers accept every 0.x minor
 // (contracts/version) and ignore fields they do not know, but reject case
 // variants and duplicate keys (strictjson.Forward, D1-10).
-const Contract = "otsec.asset/0.2"
+const Contract = "otsec.asset/0.3"
 
-var self = version.ID{Name: "asset", Major: 0, Minor: 2}
+var self = version.ID{Name: "asset", Major: 0, Minor: 3}
 
 // Asset is one device the platform knows about.
 type Asset struct {
@@ -71,7 +72,32 @@ type Source struct {
 	Span *Span `json:"span,omitempty"`
 	// ObservedAt is a platform time, RFC 3339 UTC with Z. TODO(C4): timestamp model.
 	ObservedAt string `json:"observed_at"`
+	// Kind is device-read, passive or operator (0.3, D4-49 Q4). It is
+	// KindOf(Method), except that a derived observation carries the kind
+	// its inputs warrant and is device-read only when every input is.
+	// Required from 0.3; a 0.2 record has none, and Observation.EffectiveKind
+	// reads it from the method.
+	Kind SourceKind `json:"kind,omitempty"`
+	// Read is the path a device read took (0.3). It is required when Kind
+	// is device-read and Method is adapter-session or simulator-session,
+	// and absent otherwise.
+	Read *Read `json:"read,omitempty"`
 }
+
+// Read is the path of a device read (0.3): the transport of the endpoint
+// the C2 invocation used, the C3 operation (the run's step, not the run)
+// that read the bytes, and for snmpv3 exactly one of the varbind OID or the
+// SNMPv3 header field that holds them. V-M1 (e) checks Transport.
+type Read struct {
+	Transport Transport `json:"transport"`
+	Operation string    `json:"operation"`
+	OID       string    `json:"oid,omitempty"`
+	Header    string    `json:"header,omitempty"`
+}
+
+// HeaderEngineID is the one Read.Header value of 0.3: the SNMPv3
+// msgAuthoritativeEngineID, which holds snmp_engine_id.
+const HeaderEngineID = "msgAuthoritativeEngineID"
 
 // Span is a byte range in a transcript or other raw evidence object.
 type Span struct {
@@ -307,6 +333,51 @@ const (
 	SimulatorRun   SourceMethod = "simulator-session" // a session with a simulator
 )
 
+// SourceKind is what kind of evidence an observation is (0.3, D4-49 Q4).
+// V-M7 checks it: only device-read evidence can yield a confirmed finding.
+type SourceKind string
+
+const (
+	DeviceRead SourceKind = "device-read" // read from the device by a C2 invocation
+	Passive    SourceKind = "passive"     // heard without asking: received Syslog, traffic
+	Operator   SourceKind = "operator"    // entered by a person, from records or a document
+)
+
+// KindOf is the kind a source method implies. Derived has none: its kind
+// follows its inputs (see Source.Kind), and ok is false.
+func KindOf(m SourceMethod) (k SourceKind, ok bool) {
+	switch m {
+	case AdapterSession, SimulatorRun:
+		return DeviceRead, true
+	case SyslogReceived, PassiveNetwork:
+		return Passive, true
+	case OperatorEntry, DocumentSource:
+		return Operator, true
+	}
+	return "", false
+}
+
+// EffectiveKind is the kind a 0.3 reader acts on. A 0.2 observation has no
+// kind and takes its method's; a derived one, or one whose method or kind
+// this reader does not know, reads as FallbackSourceKind. A device-read kind
+// on a method this reader does not know also reads as the fallback, as a
+// device-observed class does (effectiveClass).
+func (o Observation) EffectiveKind() SourceKind {
+	implied, ok := KindOf(o.Source.Method)
+	switch {
+	case o.Source.Kind == "":
+		if ok {
+			return implied
+		}
+		return FallbackSourceKind
+	case !contains(SourceKinds, o.Source.Kind):
+		return FallbackSourceKind
+	case o.Source.Kind == DeviceRead && !contains(SourceMethods, o.Source.Method):
+		return FallbackSourceKind
+	}
+	return o.Source.Kind
+}
+
 // Transport is how an endpoint is reached or heard.
 type Transport string
 
@@ -317,6 +388,10 @@ const (
 	SyslogUDP Transport = "syslog-udp"
 	SyslogTCP Transport = "syslog-tcp"
 	SyslogTLS Transport = "syslog-tls"
+	// SNMPv3 (0.3): authPriv only, with the engine ID pinned. An snmpv3
+	// endpoint sits on a pinned-key binding (see IdentityBinding). There is
+	// no v1 or v2c transport (D4-49 Q3).
+	SNMPv3 Transport = "snmpv3"
 )
 
 // SecurityLevel is A3 §4.5's downstream_security value. Its fallback is the
@@ -340,7 +415,10 @@ const (
 	// sender. Spoofable.
 	AddressOnly BindingMethod = "address-only"
 	// PinnedKey compares a host key or certificate pinned at commissioning
-	// (A3 §4.5, V-S14). Not used by any slice-1 device.
+	// (A3 §4.5, V-S14), or, for an snmpv3 endpoint (0.3), the authoritative
+	// engine ID that the device's USM keys are localized to: the proof is
+	// that the device's responses verify under a key localized to that
+	// engine ID (RFC 3414 §2.6).
 	PinnedKey BindingMethod = "pinned-key"
 )
 
@@ -399,7 +477,8 @@ var (
 	Confidences       = []Confidence{SingleSource, Corroborated, Conflicting}
 	EvidenceClasses   = []EvidenceClass{DeviceObserved, Simulated, OperatorDeclared, Documented, Inferred}
 	SourceMethods     = []SourceMethod{AdapterSession, SyslogReceived, PassiveNetwork, OperatorEntry, DocumentSource, Derived, SimulatorRun}
-	Transports        = []Transport{Telnet, SSH, Serial, SyslogUDP, SyslogTCP, SyslogTLS}
+	SourceKinds       = []SourceKind{DeviceRead, Passive, Operator}
+	Transports        = []Transport{Telnet, SSH, Serial, SyslogUDP, SyslogTCP, SyslogTLS, SNMPv3}
 	Paths             = []Path{Direct, PortServer}
 	SecurityLevels    = []SecurityLevel{EncryptedAuthenticated, EncryptedWeak, PlaintextUnauthenticated}
 	BindingMethods    = []BindingMethod{DeviceReported, AddressOnly, PinnedKey}
@@ -431,6 +510,10 @@ const (
 	// FallbackPath is how a 0.2 reader reads a path it does not know: as a
 	// port server, which gets no session (CheckPath).
 	FallbackPath = PortServer
+	// FallbackSourceKind is how a 0.3 reader reads a kind it does not know,
+	// and a derived observation from a 0.2 record: as operator, which never
+	// yields a confirmed finding.
+	FallbackSourceKind = Operator
 )
 
 // StrengthOf is the strength a binding method implies.
@@ -468,11 +551,16 @@ const (
 	AttrOSVersion       = "os_version"
 	AttrHardwareModel   = "hardware_model"
 	AttrDriveModel      = "drive_model"
+	// AttrSNMPEngineID (0.3) is the SNMPv3 authoritative engine ID in
+	// lowercase hex, 5 to 32 octets (RFC 3411 SnmpEngineID). A pinned-key
+	// binding on an snmpv3 endpoint compares it before anything
+	// authenticated is sent.
+	AttrSNMPEngineID = "snmp_engine_id"
 )
 
 var AttributeNames = []string{AttrDeviceClass, AttrVendor, AttrProductFamily, AttrModel, AttrPartNumber,
 	AttrSerialNumber, AttrFirmwareID, AttrFirmwareVersion, AttrDeviceName, AttrHostname, AttrIPAddress,
-	AttrMACAddress, AttrLocation, AttrOSName, AttrOSVersion, AttrHardwareModel, AttrDriveModel}
+	AttrMACAddress, AttrLocation, AttrOSName, AttrOSVersion, AttrHardwareModel, AttrDriveModel, AttrSNMPEngineID}
 
 // Vendor and product family values are lowercase tokens ("sel", "sel-751",
 // "sel-3355-2"), so that a C3 register package's family names the same
@@ -502,6 +590,9 @@ var (
 	// familyPattern is the shape of vendor and product family values. C3
 	// names a register package's family with the same token ("sel-751").
 	familyPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	// engineIDPattern is an SnmpEngineID in lowercase hex: 5 to 32 octets
+	// (RFC 3411).
+	engineIDPattern = regexp.MustCompile(`^([0-9a-f]{2}){5,32}$`)
 )
 
 // MaxValueBytes bounds an attribute value. Values are UTF-8 text with no
@@ -583,7 +674,10 @@ func Decode(b []byte) (Asset, error) {
 //     FallbackSecurityLevel;
 //   - an endpoint path 0.2 does not know reads as FallbackPath, so it gets
 //     no session. No path stays no path, which CheckPath refuses with its
-//     own reason.
+//     own reason;
+//   - a source kind 0.3 does not know, and a device-read kind on a source
+//     method 0.3 does not know, reads as FallbackSourceKind. A 0.2
+//     observation keeps no kind; read it with Observation.EffectiveKind.
 //
 // For a valid record of this minor or an earlier one, Effective returns it
 // unchanged. Device
@@ -595,6 +689,9 @@ func (a Asset) Effective() Asset {
 		at.Observations = append([]Observation(nil), at.Observations...)
 		for j := range at.Observations {
 			at.Observations[j].EvidenceClass = effectiveClass(at.Observations[j])
+			if k := at.Observations[j].Source.Kind; k != "" && k != at.Observations[j].EffectiveKind() {
+				at.Observations[j].Source.Kind = FallbackSourceKind
+			}
 		}
 		if !contains(Confidences, at.Confidence) {
 			at.Confidence = DeriveConfidence(at.Value, at.Observations)
@@ -738,6 +835,7 @@ func (a Asset) Validate() error {
 		}
 	}
 
+	v.derivedKinds(attrs)
 	v.binding(a, attrs)
 
 	if a.Profile != nil {
@@ -822,6 +920,7 @@ func (v *validator) attribute(i int, at Attribute) {
 		if (ob.Source.Method == AdapterSession || ob.Source.Method == SimulatorRun) && ob.Source.Span == nil {
 			v.fail("%s: an observation from a session needs the transcript span (EP-2)", q)
 		}
+		v.source(q, ob)
 		if (ob.EvidenceClass == Simulated) != (ob.Source.Method == SimulatorRun) {
 			v.fail("%s: evidence class simulated and method simulator-session go together, never one without the other", q)
 		}
@@ -885,6 +984,90 @@ func (v *validator) value(path, name, val string) {
 		if _, err := net.ParseMAC(val); err != nil {
 			v.fail("%s: %q is not a MAC address", path, val)
 		}
+	case AttrSNMPEngineID:
+		if !engineIDPattern.MatchString(val) {
+			v.fail("%s: %q is not an engine ID: 5 to 32 octets in lowercase hex", path, val)
+		}
+	}
+}
+
+// source checks an observation's kind and read path (0.3). Derived
+// observations' device-read kind is checked against their inputs in
+// derivedKinds, which sees the whole record.
+func (v *validator) source(q string, ob Observation) {
+	src := ob.Source
+	if v.minor < 3 {
+		if src.Kind != "" || src.Read != nil {
+			v.fail("%s.source: kind and read are not in otsec.asset/0.%d; they were added in 0.3", q, v.minor)
+		}
+		return
+	}
+	v.enum(q+".source.kind", string(src.Kind), SourceKinds)
+	if implied, ok := KindOf(src.Method); ok && src.Kind != "" && contains(SourceKinds, src.Kind) && src.Kind != implied {
+		v.fail("%s.source.kind %q: method %s implies %s", q, src.Kind, src.Method, implied)
+	}
+	needRead := src.Kind == DeviceRead && (src.Method == AdapterSession || src.Method == SimulatorRun)
+	switch {
+	case needRead && src.Read == nil:
+		v.fail("%s.source.read is required for a device read from a session (D4-49 Q4)", q)
+	case !needRead && src.Read != nil:
+		if !v.later {
+			v.fail("%s.source.read is only for a device read from a session", q)
+		}
+	case needRead:
+		v.read(q+".source.read", *src.Read)
+	}
+}
+
+func (v *validator) read(p string, r Read) {
+	v.enum(p+".transport", string(r.Transport), Transports)
+	if r.Transport.Inbound() {
+		v.fail("%s.transport %s is heard, not read", p, r.Transport)
+	}
+	if !ValidOperationID(r.Operation) {
+		v.fail("%s.operation %q is not a register operation ID", p, r.Operation)
+	}
+	if r.Transport != SNMPv3 {
+		if r.OID != "" || r.Header != "" {
+			v.fail("%s: oid and header are only for snmpv3", p)
+		}
+		return
+	}
+	switch {
+	case (r.OID == "") == (r.Header == ""):
+		v.fail("%s: an snmpv3 read names exactly one of oid and header", p)
+	case r.OID != "" && !register.ValidOID(r.OID):
+		v.fail("%s.oid %q is not a dotted-decimal OID under 1.3.6.1", p, r.OID)
+	case r.Header != "" && r.Header != HeaderEngineID:
+		v.fail("%s.header %q is not %s", p, r.Header, HeaderEngineID)
+	}
+}
+
+// derivedKinds checks that a rule cannot raise its inputs to device-read: a
+// derived observation is device-read only when every attribute its ref names
+// (comma-separated) carries a device-read observation equal to that
+// attribute's value.
+func (v *validator) derivedKinds(attrs map[string]Attribute) {
+	if v.minor < 3 {
+		return
+	}
+	for _, at := range attrs {
+		for j, ob := range at.Observations {
+			if ob.Source.Method != Derived || ob.Source.Kind != DeviceRead {
+				continue
+			}
+			for _, name := range strings.Split(ob.Source.Ref, ",") {
+				name = strings.TrimSpace(name)
+				in, ok := attrs[name]
+				backed := false
+				for _, io := range in.Observations {
+					backed = backed || (io.Source.Kind == DeviceRead && io.Value == in.Value)
+				}
+				if !ok || !backed {
+					v.fail("attribute %s observations[%d]: a derived observation is device-read only when every input is; %q is not", at.Name, j, name)
+				}
+			}
+		}
 	}
 }
 
@@ -894,6 +1077,12 @@ func (v *validator) endpoint(i int, ep Endpoint) {
 		v.fail("%s.id %q is not a token", p, ep.ID)
 	}
 	v.enum(p+".transport", string(ep.Transport), Transports)
+	if ep.Transport == SNMPv3 && v.minor < 3 {
+		v.fail("%s.transport snmpv3 is not in otsec.asset/0.%d; it was added in 0.3", p, v.minor)
+	}
+	if ep.Transport == SNMPv3 && ep.DownstreamSecurity.Level != EncryptedAuthenticated {
+		v.fail("%s: snmpv3 is authPriv with a pinned engine ID, so it is encrypted-authenticated; there is no lower level to acknowledge", p)
+	}
 	if ep.Transport == Serial {
 		if ep.SerialDevice == "" || ep.Host != "" {
 			v.fail("%s: a serial endpoint names serial_device and no host", p)
@@ -1001,6 +1190,11 @@ func (v *validator) binding(a Asset, attrs map[string]Attribute) {
 		// encrypted-weak, with its acknowledgement.
 		if ep.DownstreamSecurity.Level == EncryptedAuthenticated && b.Method != PinnedKey {
 			v.fail("endpoints: %s is labelled encrypted-authenticated but the binding is %q; only pinned-key authenticates the device", ep.ID, b.Method)
+		}
+	}
+	for _, ep := range a.Endpoints {
+		if ep.Transport == SNMPv3 && (b.Method != PinnedKey || !slices.Equal(b.PreCredential, []string{AttrSNMPEngineID})) {
+			v.fail("identity_binding: endpoint %s is snmpv3, so the binding is pinned-key with pre_credential exactly [%q]", ep.ID, AttrSNMPEngineID)
 		}
 	}
 	if b.Method == DeviceReported && len(b.Attributes) == 0 {
@@ -1132,6 +1326,8 @@ func enumContains(allowed any, val string) bool {
 		return contains(xs, EvidenceClass(val))
 	case []SourceMethod:
 		return contains(xs, SourceMethod(val))
+	case []SourceKind:
+		return contains(xs, SourceKind(val))
 	case []Transport:
 		return contains(xs, Transport(val))
 	case []Path:

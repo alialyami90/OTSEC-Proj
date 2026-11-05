@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.register/0.3",
-  "title": "otsec.register/0.3 command register package (C3)",
-  "description": "Structural schema only. Cross-field rules (unique IDs, citations naming a listed source, templates using exactly their declared parameters, no approved line matching a deny rule, every known firmware branch having a rule, preconditions read by an operation, context only in 0.2 and later and read at no higher a level than the operations it is for; limits and runs only in 0.3, a run's steps literal, read-only, in operate, at access level 1 or lower, each with limits within the run's totals and C2's ceilings, led by the gate reads and holding the warning and context reads) are enforced by Package.Validate in contracts/register.",
+  "$id": "otsec.register/0.4",
+  "title": "otsec.register/0.4 command register package (C3)",
+  "description": "Structural schema only. Cross-field rules (unique IDs, citations naming a listed source, templates using exactly their declared parameters, no approved line matching a deny rule, every known firmware branch having a rule, preconditions read by an operation, context only in 0.2 and later and read at no higher a level than the operations it is for; limits and runs only in 0.3, a run's steps literal, read-only, in operate, at access level 1 or lower, each with limits within the run's totals and C2's ceilings, led by the gate reads and holding the warning and context reads; snmp_operations only in 0.4, at least one operation of either kind, a get naming 1 to 16 OIDs and no walk, a getnext or getbulk naming one subtree and a walk and no OIDs, getbulk max_repetitions 1 to 32 and none on getnext, every OID literal dotted decimal under 1.3.6.1 with at most 128 arcs each below 2^32 and no leading zeros, a run all SNMP or all line steps) are enforced by Package.Validate in contracts/register.",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract", "family", "revision", "issued", "owner", "sources", "preconditions", "operations", "session_control", "denied", "firmware"],
   "properties": {
-    "contract": {"enum": ["otsec.register/0.1", "otsec.register/0.2", "otsec.register/0.3"]},
+    "contract": {"enum": ["otsec.register/0.1", "otsec.register/0.2", "otsec.register/0.3", "otsec.register/0.4"]},
     "family": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
     "revision": {"type": "integer", "minimum": 1},
     "issued": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
@@ -16,7 +16,8 @@
     "preconditions": {"type": "array", "items": {"$ref": "#/$defs/settingCheck"}},
     "warnings": {"type": "array", "items": {"$ref": "#/$defs/postureWarning"}},
     "context": {"type": "array", "items": {"$ref": "#/$defs/contextRead"}},
-    "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/operation"}},
+    "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+    "snmp_operations": {"type": "array", "items": {"$ref": "#/$defs/snmpOperation"}},
     "runs": {"type": "array", "items": {"$ref": "#/$defs/run"}},
     "session_control": {"type": "array", "items": {"$ref": "#/$defs/sessionLine"}},
     "denied": {"type": "array", "items": {"$ref": "#/$defs/denyRule"}},
@@ -74,6 +75,31 @@
         "notes": {"type": "string"}
       }
     },
+    "oid": {"type": "string", "pattern": "^1\\.3\\.6\\.1(\\.(0|[1-9][0-9]{0,9}))+$"},
+    "snmpOperation": {
+      "description": "Added in 0.4 (C3 0.4): one SNMPv3 read. Read-only by construction: pdu is closed, every OID is literal, and there is no classification, access level or value. Every request advertises msgMaxSize equal to limits.max_reply_bytes.",
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "pdu", "limits", "citations", "evidence", "side_effects"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "pdu": {"enum": ["get", "getnext", "getbulk"]},
+        "oids": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/oid"}},
+        "subtree": {"$ref": "#/$defs/oid"},
+        "max_repetitions": {"type": "integer", "minimum": 1, "maximum": 32},
+        "walk": {
+          "type": "object", "additionalProperties": false, "required": ["max_varbinds", "max_requests"],
+          "properties": {
+            "max_varbinds": {"type": "integer", "minimum": 1, "maximum": 2048},
+            "max_requests": {"type": "integer", "minimum": 1, "maximum": 64}
+          }
+        },
+        "limits": {"allOf": [{"$ref": "#/$defs/limits"}, {"properties": {"max_reply_bytes": {"minimum": 484}}}]},
+        "citations": {"$ref": "#/$defs/citations"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "side_effects": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"}
+      }
+    },
     "limits": {
       "description": "Added in 0.3: the bounds on the reply to one line. At most C2's invocation ceilings: 1 MiB and 60 s.",
       "type": "object", "additionalProperties": false, "required": ["max_reply_bytes", "timeout_ms"],
@@ -83,7 +109,7 @@
       }
     },
     "run": {
-      "description": "Added in 0.3 (P4-A2): a named, ordered list of operations sent in one session; the run fails as a whole. Its ID shares the namespace of operation IDs.",
+      "description": "Added in 0.3 (P4-A2): a named, ordered list of operations sent in one session; the run fails as a whole. Its ID shares the namespace of operation IDs. From 0.4 its steps may be SNMP operations, all of them or none.",
       "type": "object", "additionalProperties": false,
       "required": ["id", "steps", "max_total_bytes", "deadline_ms", "citations", "evidence", "side_effects"],
       "properties": {
@@ -187,10 +213,10 @@
       }
     },
     "envelope": {
-      "description": "Signed package. The signature is over the bytes of \"otsec.register/0.1 package\\n\" followed by payload (SigningDomain, A3 C3-A3-1); that tag is fixed and does not follow the minor. The envelope may carry any contract this reader decodes (0.1, 0.2 or 0.3, D3-4); the contract is a label, and the signed payload names its own. Verification rules are C7's.",
+      "description": "Signed package. The signature is over the bytes of \"otsec.register/0.1 package\\n\" followed by payload (SigningDomain, A3 C3-A3-1); that tag is fixed and does not follow the minor. The envelope may carry any contract this reader decodes (0.1, 0.2, 0.3 or 0.4, D3-4); the contract is a label, and the signed payload names its own. Verification rules are C7's.",
       "type": "object", "additionalProperties": false, "required": ["contract", "algorithm", "key_id", "payload", "signature"],
       "properties": {
-        "contract": {"enum": ["otsec.register/0.1", "otsec.register/0.2", "otsec.register/0.3"]},
+        "contract": {"enum": ["otsec.register/0.1", "otsec.register/0.2", "otsec.register/0.3", "otsec.register/0.4"]},
         "algorithm": {"enum": ["ed25519"]},
         "key_id": {"type": "string", "minLength": 1},
         "payload": {"type": "string", "contentEncoding": "base64"},

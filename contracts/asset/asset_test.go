@@ -25,15 +25,15 @@ var invalidWant = map[string]string{
 	"binding-attribute-not-declared":              `"sel.cid" has no operator-declared value`,
 	"platform-node-on-relay":                      "platform_node is allowed only",
 	"os-out-of-support-without-condition":         "needs the standing condition",
-	"unknown-device-class-at-0.1":                 "is not one of the 0.2 values",
+	"unknown-device-class-at-0.1":                 "is not one of the 0.3 values",
 	"path-at-0.1":                                 "path is not in otsec.asset/0.1",
-	"unknown-path-in-own-minor":                   `path "jump-host" is not one of the 0.2 values`,
+	"unknown-path-in-own-minor":                   `path "jump-host" is not one of the 0.3 values`,
 	"path-on-syslog-endpoint":                     "path is set on a syslog-udp endpoint",
 	"unprefixed-unknown-attribute":                `name "cid" is neither`,
 	"simulator-value-labelled-device":             "go together",
 	"session-observation-without-span":            "needs the transcript span",
 	"missing-vendor":                              `required attribute "vendor"`,
-	"other-major":                                 "not readable as otsec.asset/0.2",
+	"other-major":                                 "not readable as otsec.asset/0.3",
 	"asset-id-from-device-content":                "is not a lowercase UUID",
 	"serial-labelled-encrypted":                   "serial is plaintext-unauthenticated",
 	"ssh-authenticated-without-pinned-key":        "only pinned-key authenticates the device",
@@ -65,6 +65,22 @@ var invalidWant = map[string]string{
 	"profile-read-rows-over-ceiling":              "outside 0..2048",
 	"profile-syslog-with-session-limits":          "session_limits are only for",
 	"profile-syslog-with-max-read-rows":           "max_read_rows is only for",
+	// C1 0.3.
+	"kind-at-0.2":                             "kind and read are not in otsec.asset/0.2",
+	"kind-missing":                            "source.kind is required",
+	"kind-not-the-methods":                    "method operator-entry implies operator",
+	"device-read-without-read-path":           "source.read is required for a device read",
+	"read-path-on-operator-entry":             "source.read is only for a device read from a session",
+	"derived-device-read-from-operator-input": `device-read only when every input is; "vendor" is not`,
+	"snmpv3-read-without-oid-or-header":       "names exactly one of oid and header",
+	"snmpv3-read-with-oid-and-header":         "names exactly one of oid and header",
+	"snmpv3-read-oid-outside-internet":        `oid "2.5.4.3" is not a dotted-decimal OID`,
+	"telnet-read-with-oid":                    "oid and header are only for snmpv3",
+	"snmpv3-at-0.2":                           "snmpv3 is not in otsec.asset/0.2",
+	"snmpv3-device-reported":                  "so the binding is pinned-key",
+	"snmpv3-pre-credential-firmware":          "so the binding is pinned-key",
+	"snmpv3-encrypted-weak":                   "there is no lower level to acknowledge",
+	"engine-id-not-hex":                       "is not an engine ID",
 }
 
 func decodeAny(b []byte) error {
@@ -297,8 +313,17 @@ func TestLaterMinorReadsDown(t *testing.T) {
 	if a := load(t, "later-minor-unknown-path.json"); a.Endpoints[0].Path != FallbackPath || a.Endpoints[0].CheckPath() == nil {
 		t.Errorf("unknown path read as %q", a.Endpoints[0].Path)
 	}
+	// C1 0.3: an unknown kind, and a device-read kind on an unknown method,
+	// read as operator, which never yields confirmed.
+	if at, _ := load(t, "later-minor-unknown-source-kind.json").Attribute("sel.cid"); at.Observations[0].Source.Kind != FallbackSourceKind ||
+		at.Observations[0].EffectiveKind() != Operator {
+		t.Errorf("unknown kind read as %q", at.Observations[0].Source.Kind)
+	}
+	if k := fid(load(t, "later-minor-unknown-source-method.json")).Observations[1].EffectiveKind(); k != FallbackSourceKind {
+		t.Errorf("device-read kind on an unknown method read as %q", k)
+	}
 	// A valid record of this minor or an earlier one reads unchanged.
-	for _, name := range []string{"sel-751-simulated.json", "sel-751-at-0.1.json"} {
+	for _, name := range []string{"sel-751-simulated.json", "sel-751-at-0.1.json", "sel-751-at-0.2.json", "sel-2731m-snmpv3.json"} {
 		b, _ := os.ReadFile(filepath.Join("testdata", "valid", name))
 		var raw Asset
 		if err := json.Unmarshal(b, &raw); err != nil {
@@ -395,7 +420,7 @@ func TestOwnMinorIsStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	m["zz_new"] = 1
-	for schema, ok := range map[string]bool{"otsec.asset/0.2": false, "otsec.asset/0.1": false, "otsec.asset/0.0": false, "otsec.asset/0.3": true} {
+	for schema, ok := range map[string]bool{"otsec.asset/0.3": false, "otsec.asset/0.1": false, "otsec.asset/0.0": false, "otsec.asset/0.4": true} {
 		m["schema"] = schema
 		b, _ := json.Marshal(m)
 		if _, err := Decode(b); (err == nil) != ok {
@@ -452,5 +477,72 @@ func TestCheckProfile(t *testing.T) {
 	p.ProfileID = "other"
 	if err := a.CheckProfile(p); err == nil {
 		t.Fatal("a profile the asset does not name accepted")
+	}
+}
+
+// C1 0.3: the kind each method implies, and how a reader reads a kind it
+// does not have or does not know (D4-49 Q4).
+func TestKindOf(t *testing.T) {
+	for m, want := range map[SourceMethod]SourceKind{
+		AdapterSession: DeviceRead, SimulatorRun: DeviceRead, SyslogReceived: Passive, PassiveNetwork: Passive,
+		OperatorEntry: Operator, DocumentSource: Operator,
+	} {
+		if got, ok := KindOf(m); !ok || got != want {
+			t.Errorf("KindOf(%s) = %q, %v; want %q", m, got, ok, want)
+		}
+	}
+	for _, m := range []SourceMethod{Derived, "simulator-replay", ""} {
+		if _, ok := KindOf(m); ok {
+			t.Errorf("KindOf(%q) implies a kind", m)
+		}
+	}
+	ob := func(m SourceMethod, k SourceKind) Observation {
+		return Observation{Source: Source{Method: m, Kind: k}}
+	}
+	for _, c := range []struct {
+		ob   Observation
+		want SourceKind
+	}{
+		{ob(AdapterSession, ""), DeviceRead},  // a 0.2 observation takes its method's kind
+		{ob(SyslogReceived, ""), Passive},     //
+		{ob(Derived, ""), FallbackSourceKind}, // a 0.2 derived observation
+		{ob(Derived, DeviceRead), DeviceRead}, // Validate has checked its inputs
+		{ob(AdapterSession, "witnessed"), FallbackSourceKind},
+		{ob("simulator-replay", DeviceRead), FallbackSourceKind},
+		{ob("simulator-replay", ""), FallbackSourceKind},
+	} {
+		if got := c.ob.EffectiveKind(); got != c.want {
+			t.Errorf("EffectiveKind(%+v) = %q, want %q", c.ob.Source, got, c.want)
+		}
+	}
+}
+
+// A derived observation may be device-read when every input is.
+func TestDerivedDeviceReadFromDeviceReadInputs(t *testing.T) {
+	a := load(t, "sel-2731m-snmpv3.json")
+	a.Attributes = append(a.Attributes, Attribute{Name: "sel.mode", Value: "M", Confidence: SingleSource,
+		Observations: []Observation{{Value: "M", EvidenceClass: Inferred,
+			Source: Source{Method: Derived, Ref: "model, firmware_id", ObservedAt: "2026-11-05T09:30:00Z", Kind: DeviceRead}}}})
+	if err := a.Validate(); err != nil {
+		t.Fatalf("derived from two device-read inputs refused: %v", err)
+	}
+	a.Attributes[len(a.Attributes)-1].Observations[0].Source.Ref = "model, ip_address"
+	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), `"ip_address" is not`) {
+		t.Fatalf("derived from an operator input accepted: %v", err)
+	}
+}
+
+// An snmpv3 asset's binding is pinned-key, so it gets a credential, and its
+// endpoint takes a direct path like any other session.
+func TestSNMPv3AssetGetsACredential(t *testing.T) {
+	a := load(t, "sel-2731m-snmpv3.json")
+	if err := a.CredentialAllowed(CapabilityProfile{}); err != nil {
+		t.Fatalf("pinned-key snmpv3 asset refused: %v", err)
+	}
+	if err := a.Endpoints[0].CheckPath(); err != nil {
+		t.Fatalf("direct snmpv3 endpoint refused: %v", err)
+	}
+	if AlwaysPlaintext(SNMPv3) || SNMPv3.Inbound() {
+		t.Fatal("snmpv3 read as plaintext or inbound")
 	}
 }

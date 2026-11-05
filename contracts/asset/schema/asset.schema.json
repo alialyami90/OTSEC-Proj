@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.asset/0.2",
-  "title": "otsec.asset/0.2 asset record (C1)",
-  "description": "Structural schema only. Not strict: readers ignore unknown fields and accept every 0.x minor, reading an enum value added in a later minor as that enum's fallback. Cross-field rules (confidence derived from observations, at most one observation per evidence class and method, simulated values only from simulator sessions, session observations carrying a transcript span, Telnet, serial and plain Syslog always plaintext-unauthenticated, encrypted-authenticated only with a pinned-key binding, an acknowledgement with scope for every level below encrypted-authenticated, binding strength implied by method, binding attributes having an operator-declared value, platform_node only on class server, os-out-of-support needing a condition, path only from 0.2 and never on a Syslog endpoint) are enforced by Asset.Validate in contracts/asset. The enum lists here are checked against the Go lists by schema_test.go.",
+  "$id": "otsec.asset/0.3",
+  "title": "otsec.asset/0.3 asset record (C1)",
+  "description": "Structural schema only. Not strict: readers ignore unknown fields and accept every 0.x minor, reading an enum value added in a later minor as that enum's fallback. Cross-field rules (confidence derived from observations, at most one observation per evidence class and method, simulated values only from simulator sessions, session observations carrying a transcript span, Telnet, serial and plain Syslog always plaintext-unauthenticated, encrypted-authenticated only with a pinned-key binding, an acknowledgement with scope for every level below encrypted-authenticated, binding strength implied by method, binding attributes having an operator-declared value, platform_node only on class server, os-out-of-support needing a condition, path only from 0.2 and never on a Syslog endpoint; from 0.3, kind required and equal to the method's except for derived, a derived device-read only from device-read inputs, read on exactly the device reads from a session, an snmpv3 read naming one of oid and header, an snmpv3 endpoint encrypted-authenticated on a pinned-key binding whose pre_credential is snmp_engine_id) are enforced by Asset.Validate in contracts/asset. The enum lists here are checked against the Go lists by schema_test.go.",
   "type": "object",
   "required": ["schema", "asset_id", "node_id", "attributes", "identity_binding"],
   "properties": {
@@ -37,7 +37,7 @@
     "attributeName": {
       "type": "string",
       "anyOf": [
-        {"enum": ["device_class", "vendor", "product_family", "model", "part_number", "serial_number", "firmware_id", "firmware_version", "device_name", "hostname", "ip_address", "mac_address", "location", "os_name", "os_version", "hardware_model", "drive_model"]},
+        {"enum": ["device_class", "vendor", "product_family", "model", "part_number", "serial_number", "firmware_id", "firmware_version", "device_name", "hostname", "ip_address", "mac_address", "location", "os_name", "os_version", "hardware_model", "drive_model", "snmp_engine_id"]},
         {"pattern": "^[a-z][a-z0-9]{1,15}\\.[a-z][a-z0-9_]{0,63}$"}
       ]
     },
@@ -61,9 +61,20 @@
             "method": {"$ref": "#/$defs/sourceMethod"},
             "ref": {"type": "string", "minLength": 1},
             "span": {"$ref": "#/$defs/span"},
-            "observed_at": {"$ref": "#/$defs/time"}
+            "observed_at": {"$ref": "#/$defs/time"},
+            "kind": {"$ref": "#/$defs/sourceKind", "description": "Added in 0.3 (D4-49 Q4), required from 0.3."},
+            "read": {"$ref": "#/$defs/read", "description": "Added in 0.3: the path of a device read from a session."}
           }
         }
+      }
+    },
+    "read": {
+      "type": "object", "required": ["transport", "operation"],
+      "properties": {
+        "transport": {"$ref": "#/$defs/transport"},
+        "operation": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$"},
+        "oid": {"type": "string", "pattern": "^1\\.3\\.6\\.1(\\.(0|[1-9][0-9]{0,9}))+$"},
+        "header": {"enum": ["msgAuthoritativeEngineID"]}
       }
     },
     "span": {
@@ -121,7 +132,8 @@
     "confidence": {"enum": ["single-source", "corroborated", "conflicting"]},
     "evidenceClass": {"enum": ["device-observed", "simulated", "operator-declared", "documented", "inferred"]},
     "sourceMethod": {"enum": ["adapter-session", "syslog-received", "passive-network", "operator-entry", "document", "derived", "simulator-session"]},
-    "transport": {"enum": ["telnet", "ssh", "serial", "syslog-udp", "syslog-tcp", "syslog-tls"]},
+    "transport": {"enum": ["telnet", "ssh", "serial", "syslog-udp", "syslog-tcp", "syslog-tls", "snmpv3"]},
+    "sourceKind": {"enum": ["device-read", "passive", "operator"]},
     "path": {"enum": ["direct", "port-server"]},
     "securityLevel": {"enum": ["encrypted-authenticated", "encrypted-weak", "plaintext-unauthenticated"]},
     "bindingMethod": {"enum": ["device-reported", "address-only", "pinned-key"]},
