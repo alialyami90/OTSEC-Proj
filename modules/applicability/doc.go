@@ -15,7 +15,9 @@
 //     parts that disagree with model and firmware_version):
 //     applicable-by-version, with firmware-version unread. Such a FID is
 //     never not-applicable, unless the product is not named. A range with no
-//     endpoint still covers it.
+//     endpoint still covers it. A FID that a later identity mismatch
+//     contradicts gives the same, with the identity marked stale and the
+//     mismatch cited, whatever the ranges.
 //  3. Outside every range: not-applicable, by source, with reason
 //     outside-range. Branches are never ordered.
 //  4. Inside: (a) a precondition read false decides first (D4-49 Q5);

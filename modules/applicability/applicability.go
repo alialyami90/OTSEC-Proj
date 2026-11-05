@@ -130,6 +130,9 @@ func Evaluate(in Input, set *advisory.Set, prev map[string]Previous) ([]finding.
 	if e.current, e.contradicting, err = identityCurrent(in); err != nil {
 		return nil, err
 	}
+	if m := in.LatestMismatch; m != nil {
+		e.mismatched = slices.Contains(e.contradicting, *m)
+	}
 	if e.settingsCurrent, err = settingsCurrent(in); err != nil {
 		return nil, err
 	}
@@ -210,6 +213,7 @@ type evaluator struct {
 	fid             fid
 	current         bool
 	contradicting   []finding.Read
+	mismatched      bool // a mismatch later than the latest read contradicts the FID
 	settingsCurrent bool
 }
 
@@ -272,9 +276,13 @@ func (e *evaluator) entry(entry advisory.Entry) finding.Finding {
 	switch {
 	case !named:
 		return na(finding.ProductNotNamed)
-	case !inside && unplaceable:
+	case e.mismatched || !inside && unplaceable:
+		// A FID the scheme cannot place, or one a later mismatch read
+		// contradicts (C6 on #451), can make the asset neither outside a
+		// range nor clear of a precondition.
 		f.Class = finding.ApplicableByVersion
 		f.Preconditions = []finding.Precondition{{Name: advisory.ReservedFirmwareVersion, State: finding.Unread}}
+		e.markStale(&f)
 		return f
 	case !inside:
 		return na(finding.OutsideRange)
@@ -346,16 +354,23 @@ func (e *evaluator) inside(f finding.Finding, entry advisory.Entry) finding.Find
 		f.Class, f.Preconditions = finding.Confirmed, pres
 	default:
 		f.Class, f.Preconditions = finding.ApplicableByVersion, pres
-		if deviceRead && !e.current {
-			f.Identity.Evidence[0].Stale = true
-			for _, r := range e.contradicting {
-				if r.ID != e.in.Identity.Evidence {
-					f.Identity.Evidence = append(f.Identity.Evidence, finding.Evidence{Source: finding.DeviceRead, ID: r.ID})
-				}
-			}
-		}
+		e.markStale(&f)
 	}
 	return f
+}
+
+// markStale marks a device-read identity that is not current stale, and
+// cites each read that made it so.
+func (e *evaluator) markStale(f *finding.Finding) {
+	if e.in.Identity.Source != finding.DeviceRead || e.current {
+		return
+	}
+	f.Identity.Evidence[0].Stale = true
+	for _, r := range e.contradicting {
+		if r.ID != e.in.Identity.Evidence {
+			f.Identity.Evidence = append(f.Identity.Evidence, finding.Evidence{Source: finding.DeviceRead, ID: r.ID})
+		}
+	}
 }
 
 // read gives one precondition or mitigation its state from current
