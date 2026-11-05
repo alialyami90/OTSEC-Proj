@@ -104,6 +104,10 @@ type Scheduler struct {
 	// events is the event-baseline feeder and lifecycle, nil when none is
 	// set or it did not start (eventbaselines_run.go). Run steps it.
 	events *eventRun
+	// item3 is the item 3 ceiling's state (item3store.go), and adv the
+	// advisory set's, nil with applicability off (advisoryset.go).
+	item3 item3Store
+	adv   *advisoryRun
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -114,7 +118,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
 		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{},
-		configParts: map[string]audit.Outcome{}}
+		configParts: map[string]audit.Outcome{}, item3: item3Store{refused: map[string]uint64{}}, adv: newAdvisoryRun(rt.cfg)}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -154,6 +158,8 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 		rt.opt.Status.Raise("", AlarmEventBaselineState, "no event baseline is learnt or watched: "+err.Error())
 	}
 	s.events = ev
+	s.publishAssetStore()
+	s.startAdvisory(ctx)
 	return s, nil
 }
 
@@ -225,6 +231,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		}()
 	}
 	s.relayAdmin(ctx)
+	s.stepAdvisory(ctx)
 	s.stepEvents(ctx)
 	for {
 		now := s.now()
@@ -246,6 +253,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return err
 		}
 		s.relayAdmin(ctx)
+		s.stepAdvisory(ctx)
 		s.stepEvents(ctx)
 		if run < 0 {
 			continue

@@ -31,7 +31,9 @@ import (
 //     stored bytes hash to the baseline's Hash (B4 on #299);
 //   - the node's event-baseline checkpoint (otsec.eventcheckpoint, feeder
 //     slice 1c), in the bytes its encoder writes, with a capture that is the
-//     snapshot it names. It is working state, not evidence (D4-32).
+//     snapshot it names. It is working state, not evidence (D4-32);
+//   - since C5 0.8, a C11 advisory set envelope, signature included, in the
+//     series advisory.set (checkAdvisorySetRecord).
 //
 // It returns each document's C5 0.7 DocumentInfo. The first three are
 // evidence, in the series config.snapshot or config.difference (C9's own
@@ -44,8 +46,9 @@ import (
 // document names the asset it is about.
 func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
 	var head struct {
-		Schema string `json:"schema"`
-		Kind   string `json:"kind"`
+		Schema   string `json:"schema"`
+		Kind     string `json:"kind"`
+		Contract string `json:"contract"`
 	}
 	if err := json.Unmarshal(document, &head); err != nil {
 		return c5.DocumentInfo{}, fmt.Errorf("configuration document: %w", err)
@@ -98,6 +101,8 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return c5.DocumentInfo{Kind: c5.DocumentEvidence, Series: c5.SeriesBaselineEvent}, nil
 	case head.Schema == EventCheckpointSchema:
 		return checkCheckpointRecord(document, capture)
+	case head.Schema == "" && strings.HasPrefix(head.Contract, "otsec.advisory/"):
+		return checkAdvisorySetRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline or an event checkpoint", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint or a C11 set", head.Schema, head.Kind)
 }

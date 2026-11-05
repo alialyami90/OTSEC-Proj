@@ -33,11 +33,14 @@ type Config struct {
 	Targets           []map[string]any `json:"targets"`
 	Schedule          []Collection     `json:"schedule"`
 	// EventBaselines is the event_baselines section (AddEventBaseline).
-	EventBaselines  []EventBaseline `json:"event_baselines,omitempty"`
-	CollectorPipe   string          `json:"collector_pipe"`
-	CollectorPeer   string          `json:"collector_peer,omitempty"`
-	PolicyVersion   uint64          `json:"policy_version"`
-	RegisterVersion uint64          `json:"register_version"`
+	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
+	// Asset and Applicability are the item 3 switches; nil is off.
+	Asset           *struct{}      `json:"asset,omitempty"`
+	Applicability   *Applicability `json:"applicability,omitempty"`
+	CollectorPipe   string         `json:"collector_pipe"`
+	CollectorPeer   string         `json:"collector_peer,omitempty"`
+	PolicyVersion   uint64         `json:"policy_version"`
+	RegisterVersion uint64         `json:"register_version"`
 	// LabTLSFiles is the lab flag tls_dir needs (D2-12); New sets it.
 	LabTLSFiles bool   `json:"lab_tls_files,omitempty"`
 	TLSDir      string `json:"tls_dir,omitempty"`
@@ -48,6 +51,18 @@ type Config struct {
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 	// Register is the node's command register copy (WriteCommandRegister).
 	Register map[string]any `json:"register,omitempty"`
+}
+
+// Applicability is the applicability section.
+type Applicability struct {
+	Anchors []AdvisoryAnchor `json:"anchors"`
+}
+
+// AdvisoryAnchor is one advisory signing key.
+type AdvisoryAnchor struct {
+	KeyID     string `json:"key_id"`
+	PublicKey string `json:"public_key"`
+	Status    string `json:"status"`
 }
 
 // EventBaseline is one event_baselines entry: an asset and a whole C10

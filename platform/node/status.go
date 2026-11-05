@@ -49,6 +49,8 @@ type Status struct {
 	eventBases  map[string]EventBaselineStatus
 	eventFeed   *EventFeedStatus
 	eventCkpts  map[string]EventCheckpointStatus
+	assetStore  *AssetStoreStatus
+	applic      *ApplicabilityStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -134,6 +136,11 @@ type StatusFile struct {
 	// EventCheckpoints is each observed asset's checkpoint counts
 	// (eventbaselines_run.go).
 	EventCheckpoints map[string]EventCheckpointStatus `json:"event_checkpoints,omitempty"`
+	// AssetStore is the item 3 ceiling and the writes it refused, with
+	// asset on, and Applicability the advisory set's state, with
+	// applicability on (item3status.go).
+	AssetStore    *AssetStoreStatus    `json:"asset_store,omitempty"`
+	Applicability *ApplicabilityStatus `json:"applicability,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -444,6 +451,15 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if s.eventFeed != nil {
 		ef := *s.eventFeed
 		f.EventFeed = &ef
+	}
+	if s.assetStore != nil {
+		a := *s.assetStore
+		a.Refused = maps.Clone(a.Refused)
+		f.AssetStore = &a
+	}
+	if s.applic != nil {
+		a := *s.applic
+		f.Applicability = &a
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}
