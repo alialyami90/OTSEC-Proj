@@ -157,16 +157,18 @@ def _baseline(s):
     return (_status(s).get("event_baselines") or {}).get(s.layout["gtinj_asset"]) or {}
 
 
-def _nudge(clock, until, done, what):
+def _nudge(clock, until, done, what, grace=0.05):
     """Moves the node's clock a second at a time, no further than until,
-    until done() holds."""
+    until done() holds. After each step it waits up to grace seconds of
+    wall time for done(): the node's runs and commits take wall time, so a
+    clock stepped faster than the node works can pass until first."""
     while not done():
         if clock.at + datetime.timedelta(seconds=1) >= until:
             raise AssertionError(f"{what} by {_stamp(clock.at)}, before the next event at {_stamp(until)}")
         clock.set(clock.at + datetime.timedelta(seconds=1))
         if not harness.wait_for(clock.reached, 10, step=0.002):
             raise AssertionError(f"the node's clock did not reach {_stamp(clock.at)}")
-        time.sleep(0.05)
+        harness.wait_for(done, grace, step=0.01)
 
 
 def _acknowledge(s, clock, at, until):
@@ -176,13 +178,13 @@ def _acknowledge(s, clock, at, until):
     clock.set(at)
     if not harness.wait_for(clock.reached, 10, step=0.002):
         raise AssertionError(f"the node's clock did not reach {_stamp(at)}")
-    _nudge(clock, until, lambda: _baseline(s).get("phase") == "awaiting", f"no baseline recorded ({_baseline(s)})")
+    _nudge(clock, until, lambda: _baseline(s).get("phase") == "awaiting", f"no baseline recorded ({_baseline(s)})", grace=1)
     digest = _baseline(s)["recorded"]["hash"]
     out = subprocess.run([s.exe("slicehelper"), "admin-file", "-root", s.root, "-kind", "baseline-ack",
                           "-name", "gtinj-baseline-ack", "-digest", digest], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     try:
-        _nudge(clock, until, lambda: (_baseline(s).get("active") or {}).get("hash") == digest, f"baseline {digest} not active")
+        _nudge(clock, until, lambda: (_baseline(s).get("active") or {}).get("hash") == digest, f"baseline {digest} not active", grace=1)
     except AssertionError as e:
         raise AssertionError(f"{e}: {_baseline(s)}; admin requests {_status(s).get('admin_requests')}") from None
     return _baseline(s)

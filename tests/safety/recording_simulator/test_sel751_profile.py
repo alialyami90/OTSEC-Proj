@@ -291,6 +291,37 @@ class ScriptSer(unittest.TestCase):
         self.assertEqual(seen[8], seen[6])
 
 
+class FileSer(unittest.TestCase):
+    """ser="file": the SYNTHESIZED V-M4 buffer, the file as it is at each SER."""
+
+    def test_each_read_serves_the_file_as_it_is_then(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "ser.json")
+            r = profile_sel751.SEL751DocResponder(sim.Config(telnet=True), password=PASSWORD, ser="file", ser_file=path)
+            r.level = 1
+            a = ["11/02/2026", "06:33:08.000", "52A", "Asserted"]
+            b = ["11/02/2026", "06:34:08.000", "LOP", "Asserted"]
+            seen = []
+            for now, rows in ((["11/02/2026", "06:34:08"], [a, b]), (["11/02/2026", "06:35:08"], [b]),
+                              (["11/02/2026", "06:36:08"], [])):
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"now": now, "rows": rows}, f)
+                out = r.handle(b"SER").out
+                got = [m.groups() for m in (profile_sel751.SER_ROW.match(l) for l in out.split(b"\r\n")) if m]
+                seen.append((out, got))
+        (o1, r1), (o2, r2), (o3, r3) = seen
+        self.assertEqual(r1, [(b"2", *map(str.encode, a)), (b"1", *map(str.encode, b))])
+        self.assertIn(b"Date: 11/02/2026   Time: 06:34:08", o1)
+        self.assertEqual(r2, [(b"1", *map(str.encode, b))])
+        self.assertEqual((r3, b"No Data Available" in o3), ([], True))
+
+    def test_file_and_only_file_takes_a_file(self):
+        with self.assertRaises(ValueError):
+            profile_sel751.SEL751DocResponder(None, ser="file")
+        with self.assertRaises(ValueError):
+            profile_sel751.SEL751DocResponder(None, ser="example", ser_file="x")
+
+
 if __name__ == "__main__":
     unittest.main()
 

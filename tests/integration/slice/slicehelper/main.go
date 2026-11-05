@@ -185,6 +185,7 @@ func main() {
 	bad := fs.String("bad", "", "admin-file: a claim to malform and sign anyway: nonce (21 characters) or key (the envelope's key ID)")
 	version := fs.Uint("version", 1, "admin-file: an install's credential version (2 rotates the first)")
 	digest := fs.String("digest", "", "admin-file: the baseline a baseline-ack acknowledges, or a change-approval is against (V-M4, V-M2)")
+	gtinjSER := fs.String("gtinj-ser", "", "setup: give the slice's asset an event baseline whose params are this series' (V-M4's SER half, D4-47)")
 	configEvery := fs.Int("config-every", 0, "setup: read the asset's configuration (sel.config.read_all) every this many seconds instead of its SER (V-M2)")
 	baselineKind := fs.String("baseline-kind", "event", "admin-file: a baseline-ack's kind, event (the GT-INJ asset) or configuration (the slice's asset)")
 	device := fs.String("device", "self", "admin-file: a change-approval's asset, self (the slice's) or other (V-M2)")
@@ -196,7 +197,7 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *configEvery)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery)
 	case "install-credential":
 		err = installCredential(*root)
 	case "verify-audit":
@@ -226,7 +227,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj string, configEvery int) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery int) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -290,6 +291,14 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	if err := gtinjAsset(nc, &l, gtinj); err != nil {
 		return err
+	}
+	if gtinjSER != "" {
+		params, err := seriesParams(gtinjSER)
+		if err != nil {
+			return err
+		}
+		nc.EventBaselines = append(nc.EventBaselines, nodeconfigtest.EventBaseline{AssetID: assetID, Params: params})
+		nc.Store.Quotas["configuration"] = 32 << 20
 	}
 	if err := configReads(nc, &l, payload, reg.Revision, configEvery); err != nil {
 		return err
@@ -381,6 +390,10 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 				assets = append(assets, a)
 			}
 		}
+	}
+	if gtinjSER != "" {
+		// V-M4's SER half acknowledges the slice asset's event baseline.
+		adminKey["kinds"] = append(slices.Clone(authz.DefaultAdminKinds), authz.KindNodeBaselineAck)
 	}
 	if gtinj != "" {
 		// V-M4 acknowledges the GT-INJ asset's event baseline, which a key
@@ -627,7 +640,9 @@ func (a *adminContext) sign(kind authz.RequestKind, r request) (*authz.AdminSign
 		p.CredentialRevoke = &authz.CredentialRevokeBody{RefID: a.l.CredentialRef, Reason: authz.RevokeRotated}
 	case authz.KindNodeBaselineAck:
 		asset := gtinjAssetID
-		if r.baselineKind == authz.BaselineConfiguration {
+		// Without the GT-INJ Syslog asset, an event baseline is the slice
+		// asset's (-gtinj-ser).
+		if r.baselineKind == authz.BaselineConfiguration || a.l.GTINJAsset == "" {
 			asset = a.l.AssetID
 		}
 		p.NodeBaselineAck = &authz.NodeBaselineAckBody{AssetID: asset, Kind: r.baselineKind, BaselineDigest: digest}
@@ -793,15 +808,9 @@ func gtinjAsset(nc *nodeconfigtest.Config, l *Layout, events string) error {
 	if l.SyslogUDP == "" {
 		return errors.New("-gtinj-events needs -syslog-udp")
 	}
-	b, err := os.ReadFile(events)
+	params, err := seriesParams(events)
 	if err != nil {
 		return err
-	}
-	var f struct {
-		Params map[string]any `json:"params"`
-	}
-	if err := json.Unmarshal(b, &f); err != nil || len(f.Params) == 0 {
-		return fmt.Errorf("%s: no params: %v", events, err)
 	}
 	// Port 1 is never dialled: the record has no schedule.
 	nc.AddSEL751(gtinjAssetID, "127.0.0.1", 1, 60)
@@ -814,12 +823,27 @@ func gtinjAsset(nc *nodeconfigtest.Config, l *Layout, events string) error {
 	nc.Schedule = sched
 	setSerial(nc.Assets[len(nc.Assets)-1], gtinjSerial)
 	nc.AddSyslogSender(gtinjAssetID, "syslog-udp-gtinj", "syslog-udp", gtinjSender, 0)
-	nc.EventBaselines = append(nc.EventBaselines, nodeconfigtest.EventBaseline{AssetID: gtinjAssetID, Params: f.Params})
+	nc.EventBaselines = append(nc.EventBaselines, nodeconfigtest.EventBaseline{AssetID: gtinjAssetID, Params: params})
 	// The baseline and the learner's checkpoints are stored in the asset's
 	// configuration stream, as in platform/node's own event-baseline tests.
 	nc.Store.Quotas["configuration"] = 32 << 20
 	l.GTINJAsset, l.GTINJSender = gtinjAssetID, gtinjSender
 	return nil
+}
+
+// seriesParams reads a GT-INJ series' params.
+func seriesParams(series string) (map[string]any, error) {
+	b, err := os.ReadFile(series)
+	if err != nil {
+		return nil, err
+	}
+	var f struct {
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil || len(f.Params) == 0 {
+		return nil, fmt.Errorf("%s: no params: %v", series, err)
+	}
+	return f.Params, nil
 }
 
 // verifyAudit checks a node's audit stream from its genesis record, as an
