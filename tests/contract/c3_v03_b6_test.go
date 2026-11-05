@@ -90,7 +90,7 @@ func TestC3V03Versions(t *testing.T) {
 			}
 			p["runs"] = []any{c3Run(p)}
 		}, false},
-		{"0.4", func(p map[string]any) { p["contract"] = "otsec.register/0.4" }, false},
+		{"0.5", func(p map[string]any) { p["contract"] = "otsec.register/0.5" }, false},
 	} {
 		b, err := c3Rev4(t, c.edit)
 		if err != nil {
