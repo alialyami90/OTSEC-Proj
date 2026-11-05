@@ -592,7 +592,7 @@ func TestLevel0ID(t *testing.T) {
 	for _, o := range got.Observations {
 		names = append(names, o.Name)
 	}
-	if strings.Join(names, ",") != "firmware_id,sel.cid" || len(got.Identity.Items) != 1 {
+	if strings.Join(names, ",") != "firmware_id,model,firmware_version,sel.cid" || len(got.Identity.Items) != 1 {
 		t.Errorf("observations %v, identity %+v", names, got.Identity)
 	}
 }

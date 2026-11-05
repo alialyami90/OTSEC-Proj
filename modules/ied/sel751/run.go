@@ -98,6 +98,10 @@ const (
 	attrFID    = "firmware_id"   // ID at Level 0, before ACC
 	attrSerial = "serial_number" // the SER header, at Level 1
 	attrCID    = "sel.cid"       // ID; observed, never compared
+	// The FID's product and version parts, as sub-spans of its bytes (C1
+	// 0.3 §1.5); observed, never compared.
+	attrModel   = asset.AttrModel
+	attrVersion = asset.AttrFirmwareVersion
 )
 
 var (
@@ -1331,6 +1335,9 @@ func (s *session) result(code adapter.Code) adapter.Result {
 	switch {
 	case r.Status == adapter.StatusOK || r.Status == adapter.StatusPartial:
 		obs(attrFID, s.fid)
+		model, version := fidParts(s.fid)
+		obs(attrModel, model)
+		obs(attrVersion, version)
 		obs(attrCID, s.cid)
 		obs(attrSerial, s.serial)
 		r.Settings = s.settings

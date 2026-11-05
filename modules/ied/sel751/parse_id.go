@@ -70,3 +70,27 @@ func (r idReport) field(key string) (idField, bool) {
 	}
 	return idField{}, false
 }
+
+// fidGrammar is the SEL-751 FID as S22 Appendix A prints it, for example
+// SEL-751-R501-V0-Z104101-D20260910: the product, the R (or X) and V parts,
+// the Z part and the date code.
+var fidGrammar = regexp.MustCompile(`^(SEL-[0-9A-Z]+)-([RX][0-9]{3}-V[0-9]+)-Z[0-9]{6}-D[0-9]{8}$`)
+
+// fidParts cuts the model (the product part, "SEL-751") and the firmware
+// version (the R or X and V parts, "R501-V0") out of a FID, each as a
+// sub-span of the FID's own bytes, so each is its own device read (C1 0.3
+// §1.1 and §1.5). Values are kept as printed and nothing is mapped. A FID
+// outside the grammar gives neither: it is never guessed.
+func fidParts(f *found) (model, version *found) {
+	if f == nil {
+		return nil, nil
+	}
+	g := fidGrammar.FindStringSubmatchIndex(f.value)
+	if g == nil {
+		return nil, nil
+	}
+	cut := func(a, b int) *found {
+		return &found{f.value[a:b], adapter.Span{Offset: f.span.Offset + int64(a), Length: int64(b - a)}}
+	}
+	return cut(g[2], g[3]), cut(g[4], g[5])
+}
