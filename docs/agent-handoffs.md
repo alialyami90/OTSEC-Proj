@@ -1040,13 +1040,13 @@ C1 approved the item 3 contracts together in D4-53 (#442), at the heads named th
   3. **R9 on the SEL-751 end to end** over GT-ADV, which needs no SNMP and is the first path to run (V-M7, including the denied-branch rows under F1).
   4. **V-M8's paired runs**, with the A/A pair first (D4-49 Q12).
   5. **A new H item for the SEL-2731/2741**, prepared only: its OIDs, its engine-ID behaviour and its load at the poll rate (V-M1's hardware column).
-  6. **The root cause of the Windows `TestUnknownSendersAreKeptAndAlarmedOnce` failure** (#441's CI note), in its own PR.
-- **May change:** `tests/`, `docs/verification.md`, and `.github/workflows/ci.yml` for a new leg, with C1 reviewing that line. The same change fixes the `gtinj_ser` leg's comment, which says about 30 minutes where the run took about 37.
+  6. **The root cause of the Windows `TestUnknownSendersAreKeptAndAlarmedOnce` failure** (#441's CI note): done in #447. A fixed wait read a slow store as a lost datagram, and the same work found the SER leg's scheduler race, which C5 fixed in #448.
+- **May change:** `tests/`, `docs/verification.md`, and `.github/workflows/ci.yml` for a new leg, with C1 reviewing that line. The same change fixes the `gtinj_ser` leg's comment, which says about 30 minutes where the run takes about 33 since #448.
 - **Reviewers:** C1, and the owner of what each case covers. C2 reviews GT-MIB's values against S29.
 
 #### Order
 
-1. The contract code (C2's three, C3's, and C5's C5 0.8 proposal) comes first, each with C6's contract tests. #440 (C12) merges when its CI is green, and #441 (GT-ADV and the GT-MIB plan) when its CI is green.
+1. The contract code (C2's three, C3's, and C5's C5 0.8 proposal) comes first, each with C6's contract tests. #440 (C12) and #441 (GT-ADV and the GT-MIB plan) are merged.
 2. Then, in parallel: C4's matcher, C5's node, C2's SEL-751 observations and `modules/asset/`, and C3's egress check and signing tool.
 3. R9 on the SEL-751 runs end to end as soon as the matcher and the node are in. It does not wait for SNMP.
 4. C2's SNMPv3 client may start beside step 2. GT-MIB's agent and every V-M1 run wait for the RFC texts.
