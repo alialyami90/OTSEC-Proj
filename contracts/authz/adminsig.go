@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
+	"otsec.local/otsec/contracts/version"
 )
 
 // Admin-signed requests (0.4, D2-11). From 0.4 the collector accepts a
@@ -297,6 +298,11 @@ func VerifyAdminRequest(req *CollectorRequest, keys []AdminKey, bind AdminBindin
 		return nil, adminReject(AdminCheckBinding, "signed for node %s", p.NodeID)
 	case p.InstallKeyID != bind.InstallKeyID:
 		return nil, adminReject(AdminCheckBinding, "signed for install key %s", p.InstallKeyID)
+	}
+	if p.CredentialInstall != nil && p.CredentialInstall.Ref.Transport == TransportSNMPv3 {
+		if got, _ := version.Parse(req.Contract); got.Minor < snmpv3Since {
+			return nil, adminReject(AdminCheckPayload, "transport %s needs otsec.authz/0.%d or later", TransportSNMPv3, snmpv3Since)
+		}
 	}
 	if !key.Allows(p.Kind) {
 		return nil, adminReject(AdminCheckAuthority, "key %q may not sign %s", key.KeyID, p.Kind)
