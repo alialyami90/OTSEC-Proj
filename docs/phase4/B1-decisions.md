@@ -839,3 +839,18 @@ Date: 2026-11-05. C1.
 - **USM keys and the SNMP session belong to the privileged collector** (C3), as every device credential and device session does (ADR-0002). The node's asset module schedules reads and records identities, and opens no SNMP socket. The collector executes the read under the register's limits. D4-49 Q1's pinned engine ID is held with the collector's credential. The P4-3-A3 brief is corrected to match.
 - **Applicability needs the asset module** (C5's proposal on #438). A node configuration that enables applicability without the asset module is refused at load. "Independently enabled" (R1.8) therefore means three supported combinations: both off, asset alone, and both on. V-M1 (a) is tested with the asset module off, which turns applicability off too.
 - **V-M8's flows** (C5 and C6). The upstream forwarder's flow exists in both paired runs. Its volume may differ, because the R9 run forwards its own health and finding events. The comparison is the one D4-49 Q12 states: same flows and packet counts per collection session to every device address, and no flow in the R9 run that the other lacks, over every destination.
+
+## D4-51: the first SNMPv3 family is the SEL-2731 and SEL-2741 in RSTP mode (C2, #439)
+
+Date: 2026-11-05. C1, on C2's family note (`docs/phase4/C2-snmp-family.md`, #439).
+
+- **The ruling: C2's recommendation, which replaces the SEL-2730M proposed in the brief.** The evidence is all `documented-untested`, from S29:
+  - the device cannot be set below `authPriv` (p. 43);
+  - it offers SHA-256 and SHA-512 authentication (Table 4.13, p. 45), where the SEL-2730M's best is SHA-1;
+  - S29 lists every OID the agent serves (pp. 46 to 47), so GT-MIB can serve exactly that set;
+  - the FID's letter shows the mode.
+
+  Only RSTP mode is in scope. OT SDN mode, configured through the SEL-5056, is not.
+- **Against it, recorded:** the firmware line is young, and which switches the owner's sites run is open. Both go to the owner with item 3's questions. If the sites run the SEL-2730M, it follows as the second SNMPv3 family.
+- **MIB text.** No SEL MIB is in the project, and identity needs only the standard modules (RFC 3418, 6933 and 3411), which this container cannot fetch. GT-MIB labels as SYNTHESIZED every value the manual does not print: the FID's column, `sysDescr`, `sysObjectID` and the row count. V-M1 (e) then shows the client's attribution and parse, not the real agent's values, which stay hardware-dependent.
+- **The brief is corrected** to name this family.
