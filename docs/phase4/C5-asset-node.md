@@ -10,7 +10,7 @@ C5, 2026-11-05. This is the design note for brief P4-3-A5 (`docs/agent-handoffs.
 - **The matcher** is C4's (C12, P4-3-A4). It is a pure function from the identity records and the set to findings. It has no clock, store or network.
 - **The node** decides what runs and when. It schedules SNMP polls through the collector, as it schedules SER today. It stores identity records, the advisory set and findings, replaces the set atomically, runs the matcher, and reports health. This note covers that part.
 
-Device contact stays where it is today. The node sends a signed invocation to the collector. The collector holds the credentials (C7) and opens the session. That includes SNMPv3 USM keys, which this design keeps in the collector and never in the node (Questions, item 2). R9 code in the node gets no `Collector` and no network handle. It reads only stored records, so it cannot probe a device (R9.4).
+Device contact stays where it is today (ADR-0002). The node schedules and records, and it never opens an SNMP socket (AP-28). The node sends a signed invocation to the collector. The collector holds the credentials (C7) and opens the session. That includes SNMPv3 USM keys, which this design keeps in the collector and never in the node (Questions, item 2). R9 code in the node gets no `Collector` and no network handle. It reads only stored records, so it cannot probe a device (R9.4).
 
 ## 1. Enabling and disabling each one, independently
 
@@ -37,13 +37,13 @@ Device contact stays where it is today. The node sends a signed invocation to th
 - both on;
 - `applicability` alone, which is refused.
 
-This is the reading I propose for "independently". It is Questions, item 1, for C1.
+C1 ruled this reading of "independently" in D4-50 (Questions, item 1).
 
 **Turning one off later.** Stored identity records, sets and findings stay where they are. Nothing deletes or rewrites them, and they still count against the configuration quota. Turning the switch on again resumes from them: the newest set in use, then the matcher over the newest identity of each asset.
 
 **How the paired runs see it.** V-M1 (a) needs "`asset` disabled: GT-MIB receives zero PDUs". The load-time refusal gives that on the node's side. It is tested both by config tests and on the binaries. The collector's register gate is a second line, because the collector refuses an operation the node did not schedule.
 
-V-M8 compares two runs with the same schedule, one with `applicability` on and one with it off. R9 adds no schedule entry and no collector request, and it opens no socket. So the device flows must match by construction, and the paired capture tests that. Questions, item 3, covers the one flow difference I expect: the upstream target's RELP flow carries R9's health events.
+V-M8 compares two runs with the same schedule, one with `applicability` on and one with it off. R9 adds no schedule entry and no collector request, and it opens no socket. So the device flows must match by construction, and the paired capture tests that. The upstream target's RELP flow carries R9's health events in the R9 run only, which D4-50 allows (Questions, item 3).
 
 ## 2. Where everything is stored
 
@@ -176,8 +176,8 @@ These are the inputs for a separate proposal, not changes made here:
 
 ## Questions
 
-1. **C1: does "independently" allow `applicability` without `asset`?** I propose refusing that config, since R9 has no identity without the asset module. The other three combinations are each a supported configuration.
+1. **C1: does "independently" allow `applicability` without `asset`?** Answered in D4-50 (#435): no. That config is refused at load, which leaves three supported combinations, and V-M1 (a) runs with `asset` off.
 2. **C3: where do the SNMPv3 USM keys live?** The brief's threat-model row says "the node key register". This design keeps them in the collector as C7 credentials, like the SEL-751 password, so the node never holds a device secret. If "node key register" means something else, this note changes.
-3. **C6 and C1: does V-M8's "same flows" count the RELP flow?** The R9-on run sends `finding-changed` and the set events to the upstream target, on a RELP flow the R9-off run also has, but with more packets on it. I read V-M8's "no flow the other lacks" and "same flows to every device address" as allowing that, because the upstream target is not a device. If it does not, R9's events would go to status only, and R9.1's report would need another path upstream.
+3. **C6 and C1: does V-M8's "same flows" count the RELP flow?** Answered in D4-50 and D4-49 Q12 (#435): the RELP flow exists in both runs and may differ in volume. The comparison is per collection session to every device address, and the R9 run has no flow the other lacks. R9's health events therefore go to `platform/health`, as section 6 says.
 4. **C3: the envelope's bound.** Answered on #437: `MaxSetPayload` is 1 MiB, so the stored envelope is at most about 1.40 MB, within the 1.5 MiB record cap. C11's envelope bound, twice `MaxSetPayload`, is above the cap. The node refuses anything over the cap as well, which a valid set never reaches. I ask that C11 keep `MaxSetPayload` at or below 1 MiB while C5 stores the set as one record.
 5. **C2: are the SEL-751's identity attributes in C1 0.3 exactly the `Observations` the adapter already returns?** Today those are the FID, the CID and the serial number, on an `ok` or `partial` run (`modules/ied/sel751/run.go`). The model and the firmware version would come from the FID string. If C1 0.3 adds an attribute the run does not read today, R9 on the SEL-751 needs a register change, not only node work.
