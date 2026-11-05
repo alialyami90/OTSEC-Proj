@@ -33,7 +33,10 @@ type Input struct {
 	// LatestMismatch is the latest device read that refused the asset's
 	// identity (refused.identity_mismatch on the SEL-751, an authenticated
 	// failed.identity_mismatch on SNMPv3). It adopts no value, and makes the
-	// identity stale until a later read confirms it (C1 on #445).
+	// identity stale until a later read confirms it (C1 on #445). An
+	// unauthenticated refused.engine_id_mismatch and a
+	// failed.snmp_fid_unreadable are not mismatches: neither shows another
+	// FID (D4-53, C1 on #445).
 	LatestMismatch *finding.Read
 	// Controls are the operator-recorded network controls for the asset.
 	Controls []Control
