@@ -71,7 +71,7 @@ The record's capture is the bytes those spans cover, so the record still holds d
 An `operator` identity comes from the asset's declaration in the node config. A `passive` one (R6.7) comes later, through the same writer and with no change here. The writer stores only a change, so a run that reads the same identity stores nothing new.
 
 **What holds what.**
-- A finding names its set by digest and its identity records by evidence ID (the invocation ID that first read each). The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
+- A finding names its set by digest and its identity records by evidence ID (the invocation ID that first read each), whose bytes the node holds. It also states, as a separate field, the latest confirming invocation ID and time from status, so currency is visible without new captures. The node builds an identity record from the observation that first carried each value, never from C1's observation `ref` once a newer run has moved it. The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
 - The newest record of each series is never removed, as C5 0.7 already rules for every series.
 - Older identity records and findings are evidence of a change (V-M7: "records the change"). They are removed only under the D4-32 rule, oldest first, and never while held.
 
