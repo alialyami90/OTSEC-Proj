@@ -139,7 +139,7 @@ func TestSNMPEdgesValid(t *testing.T) {
 			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": 484, "timeout_ms": 1}
 		},
 		"limits at the ceilings": func(m map[string]any) {
-			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": MaxSessionBytes, "timeout_ms": MaxStepMS}
+			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": MaxSNMPMessageBytes, "timeout_ms": MaxStepMS}
 			snmpRunOf(m)["max_total_bytes"], snmpRunOf(m)["deadline_ms"] = MaxSessionBytes, MaxDeadlineMS
 		},
 		"getnext": func(m map[string]any) {
@@ -256,8 +256,11 @@ func TestSNMPInvalid(t *testing.T) {
 		"max_reply_bytes 483": func(m map[string]any) {
 			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": 483, "timeout_ms": 3000}
 		},
-		"max_reply_bytes 1 MiB+1": func(m map[string]any) {
-			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": MaxSessionBytes + 1, "timeout_ms": 3000}
+		"max_reply_bytes 65,508": func(m map[string]any) {
+			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": MaxSNMPMessageBytes + 1, "timeout_ms": 3000}
+		},
+		"max_reply_bytes 1 MiB": func(m map[string]any) {
+			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": MaxSessionBytes, "timeout_ms": 3000}
 		},
 		"timeout_ms 0": func(m map[string]any) {
 			snmpOp(m, 0)["limits"] = map[string]any{"max_reply_bytes": 1472, "timeout_ms": 0}
@@ -394,6 +397,9 @@ func TestSchemaSNMPBounds(t *testing.T) {
 					OIDs           bound `json:"oids"`
 					MaxRepetitions bound `json:"max_repetitions"`
 					Walk           struct{ Properties map[string]bound }
+					Limits         struct {
+						AllOf []struct{ Properties map[string]bound } `json:"allOf"`
+					}
 				}
 			} `json:"snmpOperation"`
 		} `json:"$defs"`
@@ -406,5 +412,9 @@ func TestSchemaSNMPBounds(t *testing.T) {
 		p.OIDs.MaxItems != MaxGetOIDs || p.MaxRepetitions.Maximum != MaxRepetitionsCeiling ||
 		p.Walk.Properties["max_varbinds"].Maximum != MaxWalkVarbinds || p.Walk.Properties["max_requests"].Maximum != MaxWalkRequests {
 		t.Errorf("the schema's SNMP bounds %+v are not the constants", p)
+	}
+	if a := p.Limits.AllOf; len(a) != 2 || a[1].Properties["max_reply_bytes"].Minimum != MinSNMPMessageBytes ||
+		a[1].Properties["max_reply_bytes"].Maximum != MaxSNMPMessageBytes {
+		t.Errorf("the schema's SNMP max_reply_bytes %+v is not %d..%d", a, MinSNMPMessageBytes, MaxSNMPMessageBytes)
 	}
 }

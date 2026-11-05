@@ -158,8 +158,9 @@ type Operation struct {
 //     (1 to MaxRepetitionsCeiling) with non-repeaters 0; getnext has none.
 //   - Limits is required. MaxReplyBytes bounds each response and is the
 //     msgMaxSize every request advertises, so it is at least
-//     MinSNMPMessageBytes (RFC 3412). TimeoutMS bounds the wait for each
-//     response.
+//     MinSNMPMessageBytes (RFC 3412) and at most MaxSNMPMessageBytes, the
+//     largest UDP payload over IPv4: a larger msgMaxSize could never arrive
+//     (C1 on #445). TimeoutMS bounds the wait for each response.
 type SNMPOperation struct {
 	ID             string     `json:"id"`
 	PDU            SNMPPDU    `json:"pdu"`
@@ -201,6 +202,9 @@ const (
 	MaxWalkRequests = 64
 	// MinSNMPMessageBytes is RFC 3412's smallest msgMaxSize.
 	MinSNMPMessageBytes = 484
+	// MaxSNMPMessageBytes is the largest UDP payload over IPv4: 65,535
+	// less the 20-octet IP and 8-octet UDP headers.
+	MaxSNMPMessageBytes = 65_507
 	maxOIDArcs          = 128
 )
 
@@ -1029,8 +1033,8 @@ func (o *SNMPOperation) validate(sources map[string]bool) error {
 		}
 		seen[oid] = true
 	}
-	if l := o.Limits; l == nil || l.MaxReplyBytes < MinSNMPMessageBytes || l.MaxReplyBytes > MaxSessionBytes || l.TimeoutMS < 1 || l.TimeoutMS > MaxStepMS {
-		return fmt.Errorf("register: snmp operation %s needs limits with max_reply_bytes %d..%d and timeout_ms 1..%d", o.ID, MinSNMPMessageBytes, MaxSessionBytes, MaxStepMS)
+	if l := o.Limits; l == nil || l.MaxReplyBytes < MinSNMPMessageBytes || l.MaxReplyBytes > MaxSNMPMessageBytes || l.TimeoutMS < 1 || l.TimeoutMS > MaxStepMS {
+		return fmt.Errorf("register: snmp operation %s needs limits with max_reply_bytes %d..%d and timeout_ms 1..%d", o.ID, MinSNMPMessageBytes, MaxSNMPMessageBytes, MaxStepMS)
 	}
 	return checkCommon(o.ID, "", o.Citations, o.Evidence, o.SideEffects, sources, false)
 }

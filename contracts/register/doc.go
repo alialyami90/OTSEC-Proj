@@ -57,8 +57,9 @@
 //     and every OID is literal dotted decimal under 1.3.6.1. A get names 1 to
 //     16 OIDs; a getnext or getbulk walks one subtree within its walk bounds
 //     (at most 2048 varbinds and 64 requests), getbulk with max_repetitions
-//     1 to 32. Limits are required, and max_reply_bytes, at least 484, is
-//     the msgMaxSize every request advertises. A run is all SNMP steps or all
+//     1 to 32. Limits are required, and max_reply_bytes, 484 to 65,507 (the
+//     largest UDP payload over IPv4; C1 on #445), is the msgMaxSize every
+//     request advertises. A run is all SNMP steps or all
 //     line steps, because one run is one session on one transport, and an
 //     SNMP run has no gate, warning or context reads. SNMP operations never
 //     reach Matcher: they are not lines, so Render and RenderRun refuse

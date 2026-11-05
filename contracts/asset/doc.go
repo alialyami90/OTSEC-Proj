@@ -162,7 +162,9 @@
 //     their method's (a derived one reads as operator). A 0.2 record that
 //     carries kind, read or an snmpv3 endpoint is invalid. A 0.2 node
 //     refuses a 0.3 record with an snmpv3 endpoint, and with it the asset,
-//     so a node is upgraded before an SNMP endpoint is added.
+//     so a node is upgraded before an SNMP endpoint is added. A 0.3
+//     capability profile may list its family's models, as printed
+//     (CapabilityProfile.Models, C1 on #445); absent means no family check.
 //
 // # What it leaves out
 //

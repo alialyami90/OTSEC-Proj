@@ -480,6 +480,39 @@ func TestCheckProfile(t *testing.T) {
 	}
 }
 
+// C1 0.3: a profile may list its family's models, as printed, once each,
+// and only from 0.3. Absent is valid at every minor.
+func TestProfileModels(t *testing.T) {
+	b, _ := os.ReadFile(filepath.Join("testdata", "valid", "profile-sel-751-ascii.json"))
+	p, err := DecodeProfile(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Schema = "otsec.asset/0.3"
+	if err := p.Validate(); err != nil {
+		t.Fatalf("0.3 with no models: %v", err)
+	}
+	p.Models = []string{"SEL-2731M", "SEL-2741M"}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("0.3 with models: %v", err)
+	}
+	for name, ms := range map[string][]string{
+		"empty":    {""},
+		"twice":    {"SEL-751", "SEL-751"},
+		"control":  {"SEL-751\n"},
+		"too long": {strings.Repeat("M", MaxValueBytes+1)},
+	} {
+		p.Models = ms
+		if err := p.Validate(); err == nil {
+			t.Errorf("%s: models %q accepted", name, ms)
+		}
+	}
+	p.Schema, p.Models = "otsec.asset/0.2", []string{"SEL-751"}
+	if err := p.Validate(); err == nil {
+		t.Error("models accepted at 0.2")
+	}
+}
+
 // C1 0.3: the kind each method implies, and how a reader reads a kind it
 // does not have or does not know (D4-49 Q4).
 func TestKindOf(t *testing.T) {
