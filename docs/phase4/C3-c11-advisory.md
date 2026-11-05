@@ -84,19 +84,22 @@ It is the register's pattern (C3 and C7's `VerifyRegisterPackage`), so there is 
 }
 ```
 
+- **`id`** matches `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` and is unique in the set (C4, because C12 repeats it).
 - **`sources`** must hold at least one citation. A set with an entry that cites nothing is refused whole (V-M8: "an entry with no published source is refused"). `kind` is a closed enum: `vendor-advisory`, `cve`, `national-advisory` (for example a CISA ICS advisory), `other`. `ref` is required. `published` is required, as a date. `url`, `retrieved` and `sha256` are optional. `sha256` lets a reviewer show that the entry was written from the document cited.
 - **`affected`** must hold at least one product.
   - `vendor` and `product` are compared exactly with the identity attributes C1 0.3 defines (C2's draft). C4's matcher note says how a device's model string maps to `product`.
   - `scheme` is a closed enum that names how versions compare. 0.1 has `sel-fid` (the SEL firmware ID string forms the project already reads) and `exact` (string equality only). The comparison rules are C4's (`docs/phase4/C4-matcher.md`), and C11 only names them. A reader that meets an unknown scheme refuses the set, because a set the node cannot evaluate is not one it can claim to use.
   - `ranges` are half-open: `introduced` is inclusive and may be absent ("from the first version"), and `fixed` is exclusive and may be absent ("no fix"). `versions` lists exact affected versions. At least one range or one version is required.
-  - **`sel-fid` ranges are per branch (C6 on #437).** SEL firmware branches are parallel lines, not one order: R302-V9 (D20260831) is newer than R400-V0 (D20230315), and fixes are listed per branch. So for `sel-fid`, a version is the token `R<branch digits>-V<digits>` (C4's note confirms the form against the FIDs the project reads), and `Validate` requires:
-    - `introduced` and `fixed`, when both are present, name the same branch (the same `R` part);
-    - at least one of the two is present, so a range always names its branch;
-    - an absent `introduced` means V0 of the `fixed` branch, and an absent `fixed` means every V of the `introduced` branch from that one on, and nothing on another branch.
+  - **`sel-fid` ranges are per branch (C6 and C4 on #437).** SEL firmware branches are parallel lines, not one order. R302-V9 (D20260831) is newer than R400-V0 (D20230315), and Appendix A lists fix F1 on both R112-V2 and R200-V3, dated the same day. So the matcher compares only within one branch, on V, and never orders two branches. For `scheme: sel-fid`, `Validate` requires:
+    - each endpoint is `R<branch>-V<n>` (`^R[0-9]{3}-V[0-9]+$`), never a full FID, because Z and D are not compared;
+    - a range with both endpoints has them on the same branch, with `introduced`'s V below `fixed`'s V;
+    - a range with one endpoint covers that branch only: an absent `introduced` means V0 of the `fixed` branch, and an absent `fixed` means every V of the `introduced` branch from that one on, so "no fix" never reaches a later branch;
+    - a range with no endpoint covers every version of the product, on every branch (for example, an advisory about the hardware);
+    - each `versions` item is a full FID, compared as a whole string.
 
-    An advisory that affects several branches has one range per branch. Versions on a branch the entry does not name are not affected by that entry. C4's matcher note states the same rule, and GT-ADV states its ranges per branch.
+    **An entry must list every affected branch.** An advisory published as "R302 and earlier" is written as one range per branch, each citing the publisher. A FID on a branch the entry has no range for is outside the entry (`outside-range` in C12). C4's matcher note (#440, §3 and §4) states the same rule, and GT-ADV states its ranges per branch. A FID the matcher cannot place at all gives `applicable-by-version`, with the reserved precondition `firmware-version` named as unread (below).
 - **`preconditions`** name what must hold for the advisory to apply beyond the version. **`mitigations`** name what, when read, makes it `mitigated`. Each one has:
-  - a `name`, unique within the entry, which the finding repeats when the item was not read (V-M7: "that precondition named as unread");
+  - a `name`, unique within the entry, matching `^[a-z][a-z0-9._-]{0,63}$`, which the finding repeats when the item was not read (V-M7: "that precondition named as unread"). The name `firmware-version` is reserved for the matcher's unplaced-FID case (C4), and `Validate` refuses an entry that uses it;
   - a `kind`, a closed enum: `setting` (a C9 setting name), `service` (a service seen on the asset, for R6.7's passive evidence later), `attribute` (a C1 0.3 identity attribute) or `control` (a recorded network control, mitigations only);
   - a `key`;
   - an `op`, a closed enum: `in`, `not-in`, `present` or `absent`;
@@ -104,7 +107,10 @@ It is the register's pattern (C3 and C7's `VerifyRegisterPackage`), so there is 
 
   **`control` (C6 on #437).** "R9 classes and what `confirmed` needs" allows `mitigated` on a recorded network control, labelled `operator-attested` when an operator entered it. A `control` item names what the control blocks. Its `key` is `<protocol>/<port>` in 0.1 (`^(tcp|udp)/[1-9][0-9]{0,4}$`, port 65535 or less), its `op` is `present`, and it has no `values`. For example, `tcp/80` for a rule that blocks the device's web server. `Validate` refuses a `control` item among the preconditions, or with another `op` or with values. C11 fixes only how an entry names a control. Where a control is recorded, and by whom, is C1 0.3's or C12's: C2 and C4 settle it, and C11 needs no change either way.
 
-  C11 defines only the shape. Whether a read is current enough to count is C12's and C4's ("R9 classes and what `confirmed` needs", point 3).
+  C11 defines only the shape. Whether a read is current enough to count is C12's and C4's ("R9 classes and what `confirmed` needs", point 3). Three further rules (C4 on #437):
+  - **Comparison is byte for byte.** `in` and `not-in` compare the value as stored, with no case folding. So a condition on one position of a value (for example one character of `PARTNO`) cannot be written in 0.1. That is fine for GT-ADV, and a 0.2 question for real advisories.
+  - **Passive evidence never shows absence.** Under `kind: service`, a passive observation (R6.7, later) can show `present` or `in`, but never `absent` or `not-in`, because traffic that was not seen proves nothing. Those ops on a service stay unread unless a device read shows them.
+  - **Attributes the matcher cannot compare are refused.** The matcher reads `BFID` and `configVersion` but compares neither in 0.1. So `Validate` refuses a `kind: attribute` item keyed on either, rather than let an entry the matcher cannot evaluate sit in the set and match nothing.
 - **`test_only`** marks an entry written for tests (GT-ADV). A set whose `purpose` is `release` must not hold one, and is refused whole if it does. This is checked in `Validate`, so it holds whatever build reads it.
 - **What an entry deliberately leaves out.** It has no severity, no CVSS and no exploitability field. R9.2 forbids stating exploitability without evidence, and a copied score reads as one. A reader who wants the publisher's score follows the citation. If the owner wants scores shown, it is a 0.2 field labelled as the publisher's, never as the platform's finding.
 
