@@ -109,6 +109,35 @@ const (
 	// made (D4-13). A single read keeps partial.parse_errors.
 	FailedConfigUnparsable Code = "failed.config_unparsable"
 
+	// The SNMPv3 codes (0.7, C3 0.4, D4-53; docs/phase4/C2-c1-0.3-c3-0.4.md
+	// §2.3 and §2.4). Each is distinct so health shows which failure it
+	// was. None is retried at a lower security level, as another user or
+	// over another SNMP version (#437 §4 rule 1). None suspends the asset or
+	// the credential, because the message that causes it may not
+	// authenticate: a Report for an unknown user, a wrong digest or a
+	// decryption error cannot, and a forged one could otherwise suspend an
+	// asset at will (D4-53). Repeats show in health.
+
+	// RefusedEngineIDMismatch: discovery's msgAuthoritativeEngineID differs
+	// from the pinned snmp_engine_id. Nothing authenticated was sent, and the
+	// keys are never localized to the new value (D4-49 Q1).
+	RefusedEngineIDMismatch Code = "refused.engine_id_mismatch"
+	// The four failure Reports end the run with their code even when they do
+	// not authenticate (§2.3 step 3).
+	FailedUSMUnsupportedSecLevel Code = "failed.usm_unsupported_sec_level" // a usmStatsUnsupportedSecLevels Report
+	FailedUSMUnknownUser         Code = "failed.usm_unknown_user"          // a usmStatsUnknownUserNames Report
+	FailedUSMWrongDigest         Code = "failed.usm_wrong_digest"          // a usmStatsWrongDigests Report
+	FailedUSMDecryptionError     Code = "failed.usm_decryption_error"      // a usmStatsDecryptionErrors Report
+	// FailedUSMNotInTimeWindow: a second usmStatsNotInTimeWindows Report in
+	// one session, or one that does not authenticate.
+	FailedUSMNotInTimeWindow Code = "failed.usm_not_in_time_window"
+	// FailedSNMPErrorStatus: an authenticated Response with a non-zero
+	// error-status, for example authorizationError. The bytes are kept.
+	FailedSNMPErrorStatus Code = "failed.snmp_error_status"
+	// FailedSNMPWalkNotIncreasing: a walk returned an OID not greater than
+	// the one before it (RFC 3416's order). The bytes are kept.
+	FailedSNMPWalkNotIncreasing Code = "failed.snmp_walk_not_increasing"
+
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
 	// PartialReadRowsExceeded: the read has more rows than the profile's
 	// max_read_rows (D1-12). The bytes are kept and nothing from the read is
@@ -127,46 +156,66 @@ type codeInfo struct {
 	// if any. C7 uses C1's names. Only codes where the password was sent set
 	// one (C7 design section 7).
 	credential asset.SuspensionReason
+	// session is the kind of session the code can end (0.7): a line session
+	// (SEL ASCII), an SNMPv3 session, or either ("").
+	session sessionKind
 }
 
+// sessionKind says which sessions a code applies to (0.7). A line-only code
+// needs a prompt or a SEL line; an SNMP-only code needs USM or a PDU.
+type sessionKind string
+
+const (
+	lineOnly sessionKind = "line"
+	snmpOnly sessionKind = "snmp"
+)
+
 var codes = map[Code]codeInfo{
-	RefusedNotInvocable:            {StageBeforeConnect, 1, "", ""},
-	RefusedInvalidParams:           {StageBeforeConnect, 1, "", ""},
-	RefusedLimits:                  {StageBeforeConnect, 1, "", ""},
-	RefusedRegisterUnverified:      {StageBeforeConnect, 1, "", ""},
-	RefusedFirmwareUndeclared:      {StageBeforeConnect, 1, "", ""},
-	RefusedFirmwareNotAllowed:      {StageBeforeConnect, 1, "", ""},
-	RefusedAssetSuspended:          {StageBeforeConnect, 1, "", ""},
-	RefusedCredentialUnavailable:   {StageBeforeConnect, 1, "", ""},
-	RefusedPlaintextNotAcked:       {StageBeforeConnect, 1, "", ""},
-	RefusedSessionBusy:             {StageBeforeConnect, 1, "", ""},
-	RefusedRateLimited:             {StageBeforeConnect, 1, "", ""},
-	FailedConnect:                  {StageBeforeConnect, 1, "", ""},
-	RefusedEndpointPath:            {StageBeforeConnect, 5, "", ""},
-	RefusedSessionElevated:         {StageBeforeAuth, 1, "", ""}, // TIDLE clears it; retried no sooner than TIDLE
-	RefusedSessionPendingPassword:  {StageBeforeAuth, 1, "", ""}, // as elevated: TIDLE clears it
-	RefusedInvocationMismatch:      {StageBeforeConnect, 1, "", ""},
-	RefusedLanguageProbe:           {StageBeforeAuth, 1, asset.SuspendLanguageNotEnglish, ""},
-	RefusedIdentityMismatch:        {StageBeforeAuth, 1, asset.SuspendIdentityMismatch, ""},
-	FailedIdentityUnreadable:       {StageBeforeAuth, 3, "", ""},
-	RefusedPasswordPromptAbsent:    {StageAuth, 1, asset.SuspendPasswordPromptAbsent, ""}, // no password sent (C7-A2 change 3)
-	FailedAuthRejected:             {StageAuth, 1, asset.SuspendAuthFailed, asset.SuspendAuthFailed},
-	FailedUnexpectedLevel:          {StageAuth, 1, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel},
-	RefusedLanguageNotEnglish:      {StageAfterAuth, 1, asset.SuspendLanguageNotEnglish, ""},
-	RefusedFirmwareCondition:       {StageAfterAuth, 1, asset.SuspendFirmwareNotAllowed, ""},
-	FailedIdentityMismatchLate:     {StageAfterAuth, 1, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch},
-	FailedAccessLevelDropped:       {StageAfterAuth, 1, "", ""},
-	FailedDeviceError:              {StageAfterAuth, 1, "", ""},
-	FailedConfigUnparsable:         {StageAfterAuth, 6, "", ""},
-	FailedUnexpectedPasswordPrompt: {StageAfterAuth, 2, asset.SuspendUnexpectedLevel, ""},
-	FailedTimeout:                  {StageAny, 1, "", ""},
-	FailedTransportClosed:          {StageAny, 1, "", ""},
-	FailedResponseTooLarge:         {StageAny, 1, "", ""},
-	FailedEgressViolation:          {StageAny, 1, "", ""},
-	FailedInternal:                 {StageAny, 1, "", ""},
-	FailedUnknown:                  {StageAny, 1, "", ""},
-	PartialParseErrors:             {StageAfterAuth, 1, "", ""},
-	PartialReadRowsExceeded:        {StageAfterAuth, 1, "", ""},
+	RefusedNotInvocable:            {StageBeforeConnect, 1, "", "", ""},
+	RefusedInvalidParams:           {StageBeforeConnect, 1, "", "", ""},
+	RefusedLimits:                  {StageBeforeConnect, 1, "", "", ""},
+	RefusedRegisterUnverified:      {StageBeforeConnect, 1, "", "", ""},
+	RefusedFirmwareUndeclared:      {StageBeforeConnect, 1, "", "", ""},
+	RefusedFirmwareNotAllowed:      {StageBeforeConnect, 1, "", "", ""},
+	RefusedAssetSuspended:          {StageBeforeConnect, 1, "", "", ""},
+	RefusedCredentialUnavailable:   {StageBeforeConnect, 1, "", "", ""},
+	RefusedPlaintextNotAcked:       {StageBeforeConnect, 1, "", "", ""},
+	RefusedSessionBusy:             {StageBeforeConnect, 1, "", "", ""},
+	RefusedRateLimited:             {StageBeforeConnect, 1, "", "", ""},
+	FailedConnect:                  {StageBeforeConnect, 1, "", "", ""},
+	RefusedEndpointPath:            {StageBeforeConnect, 5, "", "", ""},
+	RefusedSessionElevated:         {StageBeforeAuth, 1, "", "", lineOnly}, // TIDLE clears it; retried no sooner than TIDLE
+	RefusedSessionPendingPassword:  {StageBeforeAuth, 1, "", "", lineOnly}, // as elevated: TIDLE clears it
+	RefusedInvocationMismatch:      {StageBeforeConnect, 1, "", "", ""},
+	RefusedLanguageProbe:           {StageBeforeAuth, 1, asset.SuspendLanguageNotEnglish, "", lineOnly},
+	RefusedIdentityMismatch:        {StageBeforeAuth, 1, asset.SuspendIdentityMismatch, "", lineOnly},
+	FailedIdentityUnreadable:       {StageBeforeAuth, 3, "", "", lineOnly},
+	RefusedPasswordPromptAbsent:    {StageAuth, 1, asset.SuspendPasswordPromptAbsent, "", lineOnly}, // no password sent (C7-A2 change 3)
+	FailedAuthRejected:             {StageAuth, 1, asset.SuspendAuthFailed, asset.SuspendAuthFailed, lineOnly},
+	FailedUnexpectedLevel:          {StageAuth, 1, asset.SuspendUnexpectedLevel, asset.SuspendUnexpectedLevel, lineOnly},
+	RefusedLanguageNotEnglish:      {StageAfterAuth, 1, asset.SuspendLanguageNotEnglish, "", lineOnly},
+	RefusedFirmwareCondition:       {StageAfterAuth, 1, asset.SuspendFirmwareNotAllowed, "", lineOnly},
+	FailedIdentityMismatchLate:     {StageAfterAuth, 1, asset.SuspendIdentityMismatch, asset.SuspendIdentityMismatch, ""},
+	FailedAccessLevelDropped:       {StageAfterAuth, 1, "", "", lineOnly},
+	FailedDeviceError:              {StageAfterAuth, 1, "", "", lineOnly},
+	FailedConfigUnparsable:         {StageAfterAuth, 6, "", "", lineOnly},
+	FailedUnexpectedPasswordPrompt: {StageAfterAuth, 2, asset.SuspendUnexpectedLevel, "", lineOnly},
+	FailedTimeout:                  {StageAny, 1, "", "", ""},
+	FailedTransportClosed:          {StageAny, 1, "", "", ""},
+	FailedResponseTooLarge:         {StageAny, 1, "", "", ""},
+	FailedEgressViolation:          {StageAny, 1, "", "", ""},
+	FailedInternal:                 {StageAny, 1, "", "", ""},
+	FailedUnknown:                  {StageAny, 1, "", "", ""},
+	PartialParseErrors:             {StageAfterAuth, 1, "", "", ""},
+	PartialReadRowsExceeded:        {StageAfterAuth, 1, "", "", ""},
+	RefusedEngineIDMismatch:        {StageBeforeAuth, 7, "", "", snmpOnly},
+	FailedUSMUnsupportedSecLevel:   {StageAuth, 7, "", "", snmpOnly},
+	FailedUSMUnknownUser:           {StageAuth, 7, "", "", snmpOnly},
+	FailedUSMWrongDigest:           {StageAuth, 7, "", "", snmpOnly},
+	FailedUSMDecryptionError:       {StageAuth, 7, "", "", snmpOnly},
+	FailedUSMNotInTimeWindow:       {StageAuth, 7, "", "", snmpOnly},
+	FailedSNMPErrorStatus:          {StageAfterAuth, 7, "", "", snmpOnly},
+	FailedSNMPWalkNotIncreasing:    {StageAfterAuth, 7, "", "", snmpOnly},
 }
 
 // Codes lists every code in the taxonomy of this package's minor.
@@ -217,8 +266,9 @@ func (c Code) Stage() Stage { return codes[c.Effective()].stage }
 func (c Code) Suspends() asset.SuspensionReason { return codes[c.Effective()].suspends }
 
 // SuspendsCredential is the C7 suspension reason the collector sets on the
-// credential for this code, or "". It is set only for codes where the
-// password was sent, so the credential may be exposed or wrong: a rejected
+// credential for this code in a line session, or "". A collector reads it
+// through Result.SuspendsCredential, which also knows the session (0.7). It
+// is set only for codes where the password was sent, so the credential may be exposed or wrong: a rejected
 // password, a wrong level after a password, and an identity mismatch after
 // authentication (C1-A3-5).
 //
@@ -229,3 +279,17 @@ func (c Code) Suspends() asset.SuspensionReason { return codes[c.Effective()].su
 // (D1-20 as amended), so the next session waits it out (A6 C2 review changes 8
 // and 14).
 func (c Code) SuspendsCredential() asset.SuspensionReason { return codes[c.Effective()].credential }
+
+// SuspendsCredential is the C7 suspension reason the collector sets on the
+// credential for this result: the code's, except on an SNMPv3 result, which
+// suspends no credential (0.7, C1 on #445). Under USM the keys never cross
+// the wire: a response that authenticates against the pinned engine ID came
+// from an agent that already holds them, so suspending them protects
+// nothing. An authenticated FID mismatch still suspends the asset
+// (Code.Suspends) until an operator reviews it.
+func (r Result) SuspendsCredential() asset.SuspensionReason {
+	if r.Error == nil || r.Session.SNMP != nil {
+		return ""
+	}
+	return r.Error.Code.SuspendsCredential()
+}

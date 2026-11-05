@@ -1327,9 +1327,16 @@ func (s *session) result(code adapter.Code) adapter.Result {
 			r.Identity.Result = adapter.IdentityMismatch
 		}
 	}
+	// Each observation names the operation that printed it (C2 0.7): the
+	// serial number is in the SER report's header, and everything else is in
+	// the ID reply.
 	obs := func(name string, f *found) {
 		if f != nil && f.value != "" {
-			r.Observations = append(r.Observations, adapter.Observation{Name: name, Value: f.value, Span: f.span})
+			read := &adapter.Read{Operation: opID}
+			if name == attrSerial {
+				read.Operation = opSER
+			}
+			r.Observations = append(r.Observations, adapter.Observation{Name: name, Value: f.value, Span: f.span, Read: read})
 		}
 	}
 	switch {

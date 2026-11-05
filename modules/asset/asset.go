@@ -86,7 +86,7 @@ func Apply(rec c1.Asset, res adapter.Result, endpointID string) (c1.Asset, []Cha
 		if slices.Contains(c1.OperatorOnlyAttributes, o.Name) {
 			return rec, nil, fmt.Errorf("asset: a device does not report %s about itself", o.Name)
 		}
-		op, err := operation(res, ep, o)
+		read, err := readOf(res, ep, o)
 		if err != nil {
 			return rec, nil, err
 		}
@@ -97,7 +97,7 @@ func Apply(rec c1.Asset, res adapter.Result, endpointID string) (c1.Asset, []Cha
 		}
 		ob := c1.Observation{Value: o.Value, EvidenceClass: res.Target, Source: c1.Source{
 			Method: method, Ref: res.InvocationID, Span: &sp, ObservedAt: at, Kind: c1.DeviceRead,
-			Read: &c1.Read{Transport: ep.Transport, Operation: op},
+			Read: read,
 		}}
 		if c, ok := merge(&out, o.Name, ob); ok {
 			changes = append(changes, c)
@@ -138,20 +138,28 @@ func merge(a *c1.Asset, name string, ob c1.Observation) (Change, bool) {
 	return Change{Name: name, Old: old, New: at.Value}, true
 }
 
-// operation is the C3 operation that read an observation's bytes. A C2 0.6
-// result does not say, so for the SEL-751's own reads it is inferred: the
-// serial number comes from the SER header, read by the invoked operation,
-// and every other attribute from the ID reply (sel.id). No other inference
-// is made: an SNMPv3 observation needs its OID or header, which a 0.6 result
-// cannot carry, and is refused.
-func operation(res adapter.Result, ep c1.Endpoint, o adapter.Observation) (string, error) {
+// readOf is C1's read path for an observation: the endpoint's transport and
+// the result's read (C2 0.7), copied, never parsed from the transcript. The
+// caller has checked the read against the register (CheckLines or
+// CheckSNMP). A C2 0.6 result has no read, so for the SEL-751's own reads
+// the operation is inferred: the serial number comes from the SER header,
+// read by the invoked operation, and every other attribute from the ID
+// reply (sel.id). No other inference is made: an SNMPv3 observation needs
+// its OID or header, which a 0.6 result cannot carry, and is refused.
+func readOf(res adapter.Result, ep c1.Endpoint, o adapter.Observation) (*c1.Read, error) {
+	if (ep.Transport == c1.SNMPv3) != (res.Session.SNMP != nil) {
+		return nil, fmt.Errorf("asset: endpoint %s is %s, and the result is not a session of that transport", ep.ID, ep.Transport)
+	}
+	if r := o.Read; r != nil {
+		return &c1.Read{Transport: ep.Transport, Operation: r.Operation, OID: r.OID, Header: r.Header}, nil
+	}
 	if ep.Transport == c1.SNMPv3 {
-		return "", fmt.Errorf("asset: %s from an snmpv3 result has no read path in %s", o.Name, res.Schema)
+		return nil, fmt.Errorf("asset: %s from an snmpv3 result has no read path in %s", o.Name, res.Schema)
 	}
 	if o.Name == c1.AttrSerialNumber {
-		return res.OperationID, nil
+		return &c1.Read{Transport: ep.Transport, Operation: res.OperationID}, nil
 	}
-	return "sel.id", nil
+	return &c1.Read{Transport: ep.Transport, Operation: "sel.id"}, nil
 }
 
 // upgrade writes a record as 0.3. Every observation takes the kind its

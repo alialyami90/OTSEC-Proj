@@ -1,0 +1,66 @@
+{
+  "schema": "otsec.adapter/0.7",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel27x1.snmp.identity",
+  "adapter": {
+    "id": "sel-27x1-snmpv3",
+    "version": "0.1.0-example"
+  },
+  "register_version": 1,
+  "target": "simulated",
+  "status": "refused",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.2Z",
+  "transcript": {
+    "data": "MDcCAQMwDQIBAQICBcAEAQQCAQMEEDAOBAACAQACAQAEAAQABAAwEQQABACgCwIBAQIBAAIBADAAMF8CAQMwDQIBAQICBcAEAQACAQMEHDAaBAuAAHxPAwIAACcxAgIBAQICDhAEAAQABAAwLQQLgAB8TwMCAAAnMQIEAKgcAgEBAgEAAgEAMBEwDwYKKwYBBgMPAQEEAEEBAQ==",
+    "sha256": "b719ec2cefb2e82e71c9447e74442c10e13885f3d60d45ed8738eb92994be4c4",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 57,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 57,
+        "length": 97,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      }
+    ],
+    "redactions": []
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": false,
+    "language_probe": "not-run",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "",
+    "quit_sent": false,
+    "snmp": {
+      "engine_id": "80007c4f03020000273102",
+      "authenticated": true
+    }
+  },
+  "identity": {
+    "result": "mismatch",
+    "items": [
+      {
+        "name": "snmp_engine_id",
+        "expected": "80007c4f03020000273101",
+        "observed": "80007c4f03020000273102",
+        "span": {
+          "offset": 83,
+          "length": 11
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "refused.engine_id_mismatch"
+  }
+}

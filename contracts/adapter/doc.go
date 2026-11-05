@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.6: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.7: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -93,8 +93,9 @@
 //     until a capture shows the SEL-751 does not echo).
 //   - access_level is the highest level the received prompts showed.
 //   - The credential is suspended (C7) only for codes where the password was
-//     sent: Code.SuspendsCredential. The asset is suspended (C1) by
-//     Code.Suspends.
+//     sent: Result.SuspendsCredential, which is Code.SuspendsCredential on a
+//     line session and nothing on an SNMP one (0.7). The asset is suspended
+//     (C1) by Code.Suspends.
 //   - A session that reached Level 1 ends with QUI in the close phase (V-S13,
 //     D18), and the close phase sends nothing else. The exceptions are a
 //     closed connection, a level that already dropped, a port that is not
@@ -147,6 +148,26 @@
 //     snapshot (config.RecordsFit, D4-25), ends the run with the new
 //     failed.config_unparsable (QUI, bytes kept, no record, no snapshot); SER
 //     keeps partial.parse_errors. Earlier results read unchanged.
+//   - 0.7 (D4-53; docs/phase4/C2-c1-0.3-c3-0.4.md §2.4 and
+//     docs/phase4/C2-adapter-0.7-snmp-results.md, approved by C1 on #445):
+//     the SNMPv3 session (snmp.go). session.snmp {engine_id, authenticated}
+//     marks one, and its rules replace the SEL ones: the SEL facts are
+//     fixed, there is no dialogue, QUI, close phase or STX and ETX rule, and
+//     each segment is one SNMPv3 message in its stored form, with the digest
+//     zeroed in place under the new usm-digest redaction (24 or 48 octets
+//     when sent). Eight SNMP codes, none of which suspends anything (D4-53),
+//     and the codes that need a prompt or a SEL line are refused on an SNMP
+//     result, and the SNMP codes on a line result. The identity starts with
+//     snmp_engine_id, read at discovery, and an auth or operate message is
+//     sent only after it matched (AP-27 for SNMP); the FID is compared after
+//     authentication, and failed.identity_mismatch then suspends the asset
+//     but not the credential (C1 on #445). Every observation of a 0.7 result
+//     carries read {operation, oid|header}, which modules/asset copies into
+//     C1 0.3's Source.read: CheckLines finds a line read in the reply to its
+//     operation's line, and CheckSNMP, which takes CheckLines' place for an
+//     SNMP result, finds an SNMP read in an operation the invocation ran and
+//     its OID in that operation's oids or subtree. Earlier results read
+//     unchanged.
 //
 // # For the consumers of a result
 //
@@ -181,6 +202,6 @@
 //
 // # Serves
 //
-// R5.1 to R5.7, R4.2, R4.4, P1, P2, P5; A3 §8.3, HR-3, AP-23, AP-27;
+// R5.1 to R5.7, R4.2, R4.4, R1.8, P1, P2, P5; A3 §8.3, HR-3, AP-23, AP-27;
 // A4 EP-1 to EP-4; A6 C-17, C-19, V-S7, V-S8, V-S10, V-S13; C-A2-1, C-A2-3.
 package adapter

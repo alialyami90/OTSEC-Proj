@@ -153,6 +153,56 @@ func TestApplyDifferentValues(t *testing.T) {
 	}
 }
 
+// An SNMP result's reads are copied as they are: the operation, and the OID
+// or the header (C2 0.7). Nothing is inferred.
+func TestApplySNMP(t *testing.T) {
+	rec := record(t, "sel-2731m-snmpv3.json")
+	// The two binding attributes keep only their declared value, so the
+	// result's reads of them are the ones the record holds afterwards.
+	for i, at := range rec.Attributes {
+		if at.Name == c1.AttrSNMPEngineID || at.Name == c1.AttrFirmwareID {
+			rec.Attributes[i].Observations = slices.DeleteFunc(slices.Clone(at.Observations), func(o c1.Observation) bool {
+				return o.Source.Method == c1.SimulatorRun
+			})
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "contracts", "adapter", "testdata", "snmp", "results", "valid", "ok.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := adapter.DecodeResult(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, changes, err := Apply(rec, res, "mgmt-snmpv3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(changes); got != "firmware_id,hostname,snmp_engine_id" {
+		t.Errorf("changes %s", got)
+	}
+	want := map[string]c1.Read{
+		c1.AttrSNMPEngineID: {Transport: c1.SNMPv3, Operation: "sel27x1.snmp.system", Header: c1.HeaderEngineID},
+		c1.AttrHostname:     {Transport: c1.SNMPv3, Operation: "sel27x1.snmp.system", OID: "1.3.6.1.2.1.1.5.0"},
+		c1.AttrFirmwareID:   {Transport: c1.SNMPv3, Operation: "sel27x1.snmp.entity", OID: "1.3.6.1.2.1.47.1.1.1.1.10.1"},
+		c1.AttrModel:        {Transport: c1.SNMPv3, Operation: "sel27x1.snmp.entity", OID: "1.3.6.1.2.1.47.1.1.1.1.10.1"},
+	}
+	for name, w := range want {
+		at := attr(t, out, name)
+		i := slices.IndexFunc(at.Observations, func(o c1.Observation) bool { return o.Source.Method == c1.SimulatorRun })
+		if i < 0 || at.Observations[i].Source.Read == nil || *at.Observations[i].Source.Read != w {
+			t.Errorf("%s: %+v", name, at.Observations)
+		}
+	}
+	if at := attr(t, out, c1.AttrHostname); at.Value != "sw-bay-1" {
+		t.Errorf("hostname %q", at.Value)
+	}
+	if _, _, err := Apply(record(t, "sel-751-simulated.json"), res, ep); err == nil ||
+		!strings.Contains(err.Error(), "endpoint port1-telnet is telnet, and the result is not a session of that transport") {
+		t.Errorf("an SNMP result on a Telnet endpoint: %v", err)
+	}
+}
+
 func TestApplyRefuses(t *testing.T) {
 	rec, ok := record(t, "sel-751-simulated.json"), result(t, "ok")
 	for name, c := range map[string]struct {
@@ -172,9 +222,9 @@ func TestApplyRefuses(t *testing.T) {
 		"a later minor record": {rec: func(a *c1.Asset) { a.Schema = "otsec.asset/0.4" }, want: "is not one this module writes"},
 		"another contract":     {rec: func(a *c1.Asset) { a.Schema = "otsec.adapter/0.3" }, want: "is not one this module writes"},
 		"an invalid result":    {res: func(r *adapter.Result) { r.Transcript.SHA256 = strings.Repeat("0", 64) }, want: "sha256"},
-		"an snmpv3 endpoint, with no read path in a 0.6 result": {rec: func(a *c1.Asset) {
+		"a line result on an snmpv3 endpoint": {rec: func(a *c1.Asset) {
 			a.Endpoints[0].Transport = c1.SNMPv3
-		}, want: "has no read path"},
+		}, want: "endpoint port1-telnet is snmpv3, and the result is not a session of that transport"},
 	} {
 		r, res, e := rec, ok, ep
 		r.Endpoints = slices.Clone(rec.Endpoints)
