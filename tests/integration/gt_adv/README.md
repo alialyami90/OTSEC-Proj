@@ -2,13 +2,13 @@
 
 `gt_adv.json` gives the class each identity must get for each test advisory. It was written by hand before the matcher existed, as the brief for P4-3-A6 requires. The matcher's acceptance test (C4, `modules/applicability/`) reads this file, and the matcher must produce every cell.
 
-**Nothing here is real advisory data.** All eight advisories are invented, marked `test_only`, and named `TEST-ADV-*`. None may go into a release set (C11, R9). The FIDs are real. Fourteen come from S22 Appendix A, as register revision 5 lists them (`contracts/register/testdata/sel-751.json`). The fifteenth, O5, is the example in S22 Figure 3.20 (`tests/fixtures/ied/sel/751/documented-example/id-response-fig3-20.txt`). No device was contacted.
+**Nothing here is real advisory data.** All eight advisories are invented, marked `test_only`, and named `TEST-ADV-*`. None may go into a release set (C11, R9). The FIDs are real. Fifteen come from S22 Appendix A, as register revision 5 lists them (`contracts/register/testdata/sel-751.json`). The sixteenth, O5, is the example in S22 Figure 3.20 (`tests/fixtures/ied/sel/751/documented-example/id-response-fig3-20.txt`). No device was contacted.
 
 ## The rules it follows
 
 The rules are in `docs/verification.md`, "R9 classes and what `confirmed` needs". They are read together with D4-49 (Q5, Q6 and F1 in `docs/phase4/C6-item3-testability.md`) and D4-52. The class and reason tokens are C12's (#440). For one identity and one advisory, the first step that applies decides the cell:
 
-1. **The advisory does not name the product:** `not-applicable`, `not-applicable-operator` or `not-applicable-passive`, according to the identity's source. The reason is `product-not-named`.
+1. **The advisory does not name the product**, compared with the device-read model, never a declared `product_family` (C2 on #439): `not-applicable`, `not-applicable-operator` or `not-applicable-passive`, according to the identity's source. The reason is `product-not-named`.
 2. **The FID cannot be placed on a branch** (O5's `X397`): `applicable-by-version`, with `firmware-version` named as unread. Such a FID is never not-applicable.
 3. **The FID is outside every range:** the source's not-applicable class, with reason `outside-range`. Ranges are per branch: a FID on a branch the advisory does not list is outside, whatever its date.
 4. **A precondition was read false** (D4-49 Q5, ahead of any other mitigation): on a device-read identity, `not-applicable` with reason `precondition-not-met`; on any other identity, `applicable-by-version`. The one exception is a mitigation that holds on that same setting, which gives `mitigated`. Any other mitigation, such as a recorded control, does not outrank the device's own setting (D10).
@@ -30,6 +30,7 @@ The rules are in `docs/verification.md`, "R9 classes and what `confirmed` needs"
 | D8 | R500-V0 | device-read | Y | a recorded control blocks tcp/80 |
 | D9 | R501-V0 | device-read | unread | a recorded control blocks tcp/80 |
 | D10 | R501-V0 | device-read | N | a recorded control blocks tcp/80 |
+| D11 | R501-V0 | device-read | Y | declared `product_family` SEL-2730M: the read model decides, so its cells equal D1's |
 | O1 | R302-V9 | operator | | denied branch (D4-49 F1) |
 | O2 | R301-V2 | operator | | denied branch |
 | O3 | R400-V3 | operator | | below the branch's minimum V |
@@ -48,19 +49,20 @@ The rules are in `docs/verification.md`, "R9 classes and what `confirmed` needs"
 
 ## How the file is checked
 
-`test_gt_adv.py` derives every cell again from the rules above and compares the result with the hand-written table, which has 120 cells. It also checks four other things:
+`test_gt_adv.py` derives every cell again from the rules above and compares the result with the hand-written table, which has 128 cells. It also checks four other things:
 - Every FID is real.
 - The gate agrees with the sources.
 - Every class and reason is reached, except `not-applicable-passive`.
-- Each rule is pinned. Eight mutants each break one rule, and every one of them changes at least one cell:
+- Each rule is pinned. Nine mutants each break one rule, and every one of them changes at least one cell:
   1. ordering branches as one line;
   2. ignoring staleness;
   3. confirmed beating mitigated;
   4. reading D4-52 strictly;
   5. reversing Q5;
   6. letting any mitigation outrank a precondition read false;
-  7. confirming an operator identity;
-  8. hiding an unplaceable FID.
+  7. matching on the declared product family;
+  8. confirming an operator identity;
+  9. hiding an unplaceable FID.
 
 The test was also checked against the table itself. A one-field edit to five different cells (a class, a stale mark, evidence and a reason) made the test fail each time.
 

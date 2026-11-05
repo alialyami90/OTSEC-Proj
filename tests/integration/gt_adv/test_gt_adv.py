@@ -87,7 +87,12 @@ def read(cond, ident):
 def derive(ident, adv, mutant=None):
     src = ident["source"]
     na = NA[src]
-    if adv["product"] != product(ident["fid"]):
+    # The product match uses the device-read model, never a declared
+    # product_family (C2 on #439); a disagreement is a health conflict.
+    model = product(ident["fid"])
+    if mutant == "declared-family":
+        model = ident.get("declared_product_family", model)
+    if adv["product"] != model:
         return {"class": na, "reason": "product-not-named", "evidence": ["identity"]}
     at = place(ident["fid"])
     if at is None:
@@ -256,6 +261,7 @@ MUTANTS = [
     "mitigated-needs-all-read",   # D4-52 read strictly
     "q5-reversed",                # a precondition read false leaves it applicable
     "mitigation-first",           # any mitigation beats a precondition read false (Q5)
+    "declared-family",            # the declared product_family decides the match
     "operator-confirms",          # an operator identity confirmed
     "unplaced-is-na",             # an unplaceable FID hidden
 ]
