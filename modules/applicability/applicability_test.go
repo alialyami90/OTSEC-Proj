@@ -303,3 +303,37 @@ func FuzzFID(f *testing.F) {
 		}
 	})
 }
+
+// Under a mismatch, an entry naming the model the mismatch read reported is
+// not product-not-named; one naming neither model is, and so is every entry
+// when the mismatch FID does not parse (C1 on #451).
+func TestMismatchModel(t *testing.T) {
+	r400 := []advisory.Range{{Introduced: "R400-V0", Fixed: "R400-V7"}}
+	for _, c := range []struct {
+		fid, product string
+		class        finding.Class
+	}{
+		{"SEL-751A-R100-V1-Z000000-D20250101", "SEL-751A", finding.ApplicableByVersion},
+		{"SEL-751A-R100-V1-Z000000-D20250101", "SEL-2730M", finding.NotApplicable},
+		{"not a FID", "SEL-751A", finding.NotApplicable},
+	} {
+		in := deviceRead("SEL-751-R400-V3-Z100100-D20240930", "SEL-751", "R400-V3")
+		in.LatestMismatch = &finding.Read{ID: mismatchID, AtUTC: afterRead}
+		in.MismatchFID = c.fid
+		f := eval(t, in, oneEntry(c.product, advisory.SchemeSELFID, r400, nil), nil)[0]
+		if f.Class != c.class || f.Identity.Product != "SEL-751" {
+			t.Errorf("%s against %s: %s %s, product %s", c.fid, c.product, f.Class, f.Reason, f.Identity.Product)
+		}
+		if f.Class == finding.ApplicableByVersion && (!f.Identity.Evidence[0].Stale || f.Identity.Evidence[1].ID != mismatchID) {
+			t.Errorf("%s: evidence %+v", c.fid, f.Identity.Evidence)
+		}
+	}
+	// With the mismatch older than the latest read, its model counts for
+	// nothing.
+	in := deviceRead("SEL-751-R400-V3-Z100100-D20240930", "SEL-751", "R400-V3")
+	in.LatestMismatch = &finding.Read{ID: mismatchID, AtUTC: beforeRead}
+	in.MismatchFID = "SEL-751A-R100-V1-Z000000-D20250101"
+	if f := eval(t, in, oneEntry("SEL-751A", advisory.SchemeSELFID, r400, nil), nil)[0]; f.Reason != finding.ProductNotNamed {
+		t.Errorf("an old mismatch: %s %s", f.Class, f.Reason)
+	}
+}

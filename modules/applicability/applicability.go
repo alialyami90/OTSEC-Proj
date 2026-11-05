@@ -38,6 +38,10 @@ type Input struct {
 	// failed.snmp_fid_unreadable are not mismatches: neither shows another
 	// FID (D4-53, C1 on #445).
 	LatestMismatch *finding.Read
+	// MismatchFID is the FID the latest mismatch read reported. It is never
+	// adopted, but an entry naming its model cannot be product-not-named
+	// while the mismatch stands (C1 on #451).
+	MismatchFID string
 	// Controls are the operator-recorded network controls for the asset.
 	Controls []Control
 }
@@ -133,6 +137,9 @@ func Evaluate(in Input, set *advisory.Set, prev map[string]Previous) ([]finding.
 	if m := in.LatestMismatch; m != nil {
 		e.mismatched = slices.Contains(e.contradicting, *m)
 	}
+	if mm := fidRe.FindStringSubmatch(in.MismatchFID); e.mismatched && mm != nil {
+		e.mismatchProduct = mm[1]
+	}
 	if e.settingsCurrent, err = settingsCurrent(in); err != nil {
 		return nil, err
 	}
@@ -213,7 +220,8 @@ type evaluator struct {
 	fid             fid
 	current         bool
 	contradicting   []finding.Read
-	mismatched      bool // a mismatch later than the latest read contradicts the FID
+	mismatched      bool   // a mismatch later than the latest read contradicts the FID
+	mismatchProduct string // the model that mismatch read reported, if it parses
 	settingsCurrent bool
 }
 
@@ -253,8 +261,11 @@ func (e *evaluator) entry(entry advisory.Entry) finding.Finding {
 		f.Class, f.Reason = notApplicable[e.in.Identity.Source], r
 		return f
 	}
-	named, inside, unplaceable := false, false, false
+	named, namesMismatch, inside, unplaceable := false, false, false, false
 	for _, a := range entry.Affected {
+		if e.mismatchProduct != "" && a.Product == e.mismatchProduct {
+			namesMismatch = true
+		}
 		if a.Product != e.fid.product {
 			continue
 		}
@@ -274,7 +285,7 @@ func (e *evaluator) entry(entry advisory.Entry) finding.Finding {
 		}
 	}
 	switch {
-	case !named:
+	case !named && !namesMismatch:
 		return na(finding.ProductNotNamed)
 	case e.mismatched || !inside && unplaceable:
 		// A FID the scheme cannot place, or one a later mismatch read

@@ -9,8 +9,9 @@
 //
 // For each entry, the first step that applies decides the class (note §5):
 //
-//  1. The entry does not name the identity's product: not-applicable, by the
-//     identity's source, with reason product-not-named.
+//  1. The entry does not name the identity's product, nor the model a later
+//     identity mismatch read reported: not-applicable, by the identity's
+//     source, with reason product-not-named.
 //  2. The FID cannot be placed on a branch (an X branch, a form not read, or
 //     parts that disagree with model and firmware_version):
 //     applicable-by-version, with firmware-version unread. Such a FID is
