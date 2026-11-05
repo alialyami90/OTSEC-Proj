@@ -66,12 +66,12 @@ A new class would need its own full action and its own quota rules for no gain. 
 
 **An identity record carries its own evidence.** For the SEL-751, the attributes come from the `ID` exchange at Level 0 in every collection run. Today the FID, CID and serial number are already in the adapter's `Result.Observations`, each with its span in the transcript, and they need no extra read.
 
-The record's capture is the bytes those spans cover, so the record's evidence ID (its stream and seq) still points at device bytes after `ser/<asset>` is pruned. An SNMP poll's `Result` has the same shape, and its identity takes the same path.
+The record's capture is the bytes those spans cover, so the record still holds device bytes after `ser/<asset>` is pruned. Its evidence ID, the one C12 lists, is the C2 invocation ID of the run that first read it (C2's §4 Q3 on #439). That ID is already in the collector's audit records and outlives pruning, while the stream and seq only say where the record sits; the node finds a record by its invocation ID. Because a record is written only on change, a later run that reads the same identity confirms it without a new record, and status shows that run's invocation ID as the last confirmation. An SNMP poll's `Result` has the same shape, and its identity takes the same path.
 
 An `operator` identity comes from the asset's declaration in the node config. A `passive` one (R6.7) comes later, through the same writer and with no change here. The writer stores only a change, so a run that reads the same identity stores nothing new.
 
 **What holds what.**
-- A finding names its set by digest and its identity records by evidence ID. The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
+- A finding names its set by digest and its identity records by evidence ID (the invocation ID that first read each). The set and the identity records stay held while a finding that is the newest for its (asset, advisory) names them.
 - The newest record of each series is never removed, as C5 0.7 already rules for every series.
 - Older identity records and findings are evidence of a change (V-M7: "records the change"). They are removed only under the D4-32 rule, oldest first, and never while held.
 
@@ -148,8 +148,9 @@ No SNMPv1 or v2c entry runs without C3's approval record (V-M1 (d)). Under ADR-0
 
 - **`assets[<id>]`**, as today: the last run's time and code, for an SNMP poll as for SER. With `asset` on it also gains `identity`, which holds:
   - each attribute's value and source;
-  - the evidence ID;
-  - the time the record was stored.
+  - the evidence ID (the invocation ID that first read it);
+  - the time the record was stored;
+  - the invocation ID and time of the last run that confirmed it.
 - **`applicability`**, with `applicability` on. It holds:
   - the set in use: version, date and digest, and when it came into use;
   - the last refusal, if any: the file's hash, the reason, and when;
@@ -180,4 +181,4 @@ These are the inputs for a separate proposal, not changes made here:
 2. **C3: where do the SNMPv3 USM keys live?** The brief's threat-model row says "the node key register". This design keeps them in the collector as C7 credentials, like the SEL-751 password, so the node never holds a device secret. If "node key register" means something else, this note changes.
 3. **C6 and C1: does V-M8's "same flows" count the RELP flow?** Answered in D4-50 and D4-49 Q12 (#435): the RELP flow exists in both runs and may differ in volume. The comparison is per collection session to every device address, and the R9 run has no flow the other lacks. R9's health events therefore go to `platform/health`, as section 6 says.
 4. **C3: the envelope's bound.** Answered on #437: `MaxSetPayload` is 1 MiB, so the stored envelope is at most about 1.40 MB, within the 1.5 MiB record cap. C11's envelope bound, twice `MaxSetPayload`, is above the cap. The node refuses anything over the cap as well, which a valid set never reaches. I ask that C11 keep `MaxSetPayload` at or below 1 MiB while C5 stores the set as one record.
-5. **C2: are the SEL-751's identity attributes in C1 0.3 exactly the `Observations` the adapter already returns?** Today those are the FID, the CID and the serial number, on an `ok` or `partial` run (`modules/ied/sel751/run.go`). The model and the firmware version would come from the FID string. If C1 0.3 adds an attribute the run does not read today, R9 on the SEL-751 needs a register change, not only node work.
+5. **Answered by C2 (#439, §1.5 of `docs/phase4/C2-c1-0.3-c3-0.4.md`).** The SEL-751 needs no new read and no register revision. The FID, CID and serial number stay as they are, and the adapter adds the model and the firmware version as their own observations, each with a sub-span of the FID's bytes, so the capture above still covers them. C2's §4 Q3 is answered in §2: the evidence ID is the C2 invocation ID.
