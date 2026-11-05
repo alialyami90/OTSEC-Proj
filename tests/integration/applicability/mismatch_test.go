@@ -4,6 +4,7 @@
 package applicability
 
 import (
+	"strconv"
 	"testing"
 
 	"otsec.local/otsec/contracts/advisory"
@@ -126,4 +127,74 @@ func TestMismatchHidesNoAdvisory(t *testing.T) {
 			t.Errorf("%s %s after a confirming read: %s, want %s", c.row, c.entry, f.Class, c.before)
 		}
 	}
+}
+
+// C1's narrower ruling on #451: the mismatch read is never adopted, but it
+// is device-read evidence of what answered. An entry that names the model
+// that read reported cannot be product-not-named while the mismatch stands.
+// An entry that names neither model still is, and so is every such entry
+// when the mismatch read's FID does not parse.
+func TestMismatchModelIsNotHidden(t *testing.T) {
+	other := func(id, product string) advisory.Entry {
+		e := entry(id, []advisory.Range{{Introduced: "R100-V0"}}, nil)
+		e.Affected[0].Product = product
+		return e
+	}
+	s := set(t)
+	s.Entries = append(s.Entries, other("E1-751A", "SEL-751A"), other("E2-2731M", "SEL-2731M"))
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	const fid751A = "SEL-751A-R100-V1-Z000000-D20250101" // a FID of the shape S22 gives; the SEL-751A is not covered
+	type want struct {
+		class  finding.Class
+		reason finding.Reason // checked only when not empty
+	}
+	pnn := want{finding.NotApplicable, finding.ProductNotNamed}
+	abv := want{class: finding.ApplicableByVersion}
+	check := func(step string, in applicability.Input, wants map[string]want) {
+		t.Helper()
+		got := byID(t, in, s)
+		for id, w := range wants {
+			f := got[id]
+			if f.Class != w.class || (w.reason != "" && f.Reason != w.reason) {
+				t.Errorf("%s: %s is %s (%s), want %s (%s)", step, id, f.Class, f.Reason, w.class, w.reason)
+				continue
+			}
+			if f.Identity.Version != fid501 {
+				t.Errorf("%s: %s: the mismatch was adopted: %q", step, id, f.Identity.Version)
+			}
+			if f.Class != finding.ApplicableByVersion {
+				continue
+			}
+			ev := f.Identity.Evidence
+			if len(ev) != 2 || ev[0].ID != record || !ev[0].Stale || ev[1].ID != mismatch || ev[1].Source != finding.DeviceRead {
+				t.Errorf("%s: %s: identity evidence %+v, want the record marked stale, then the mismatch", step, id, ev)
+			}
+			if len(f.Preconditions) != 1 || f.Preconditions[0].Name != advisory.ReservedFirmwareVersion || f.Preconditions[0].State != finding.Unread {
+				t.Errorf("%s: %s: firmware-version is not unread: %+v", step, id, f.Preconditions)
+			}
+		}
+	}
+
+	// (a) No mismatch: GT-ADV's D1.
+	in := input("Y")
+	check("(a) no mismatch", in, map[string]want{"E1-751A": pnn, "E2-2731M": pnn, "TEST-ADV-07": {class: finding.Confirmed}})
+
+	// (b) A later mismatch read that reports a SEL-751A.
+	in.LatestMismatch = &finding.Read{ID: mismatch, AtUTC: "2026-11-05T10:05:00Z"}
+	in.MismatchFID = fid751A
+	check("(b) mismatch reports SEL-751A", in, map[string]want{"E1-751A": abv, "E2-2731M": pnn, "TEST-ADV-07": abv})
+
+	// (d) The same mismatch, with a FID that does not parse: no model is used.
+	for _, bad := range []string{"", "SEL-751A", "garbage", fid751A + "X"} {
+		in.MismatchFID = bad
+		check("(d) mismatch FID "+strconv.Quote(bad), in, map[string]want{"E1-751A": pnn, "E2-2731M": pnn, "TEST-ADV-07": abv})
+	}
+
+	// (c) A confirming read after the mismatch: back to (a), whatever the
+	// mismatch read reported.
+	in.MismatchFID = fid751A
+	in.Identity.LatestRead = &finding.Read{ID: confirming, AtUTC: "2026-11-05T10:06:00Z"}
+	check("(c) confirming read", in, map[string]want{"E1-751A": pnn, "E2-2731M": pnn, "TEST-ADV-07": {class: finding.Confirmed}})
 }
