@@ -135,15 +135,9 @@ class _Run:
         ok = harness.wait_for(lambda: self.count() >= want and (self.result_at()[0] or at - SEC) >= at, 60, step=0.005)
         if not ok:
             raise AssertionError(f"the read at {_stamp(at)}: {self.count()} of {want} rows stored, result {self.result_at()}")
-        # The scheduler reads the clock for the run's end after it writes
-        # status, and arms its next timer from the clock too. A jump before
-        # then puts the next read a minute of test clock after the jump,
-        # which never comes: the read at 06:35:02 on #446's c391a44 (861 of
-        # 862 rows), and every time with 50 ms between the two in C6's
-        # reproduction. Nothing the node writes says it is past that point,
-        # so this wait narrows the race but does not close it; it goes when
-        # the node takes the end before status (C5).
-        time.sleep(0.25)
+        # No wait after this: the node takes the run's end before it writes
+        # status and arms its next timer at the due time (#448), so the next
+        # jump can follow at once.
 
     def acknowledge(self, ack, until):
         """At ack, the recorded baseline acknowledged; active before until."""
