@@ -801,3 +801,11 @@ Date: 2026-11-04. C1, on C6's finding while building V-M4's SER half.
   - C4 reviews the new series and its expected alarms, and re-runs `gtinj_test` on it. Any difference between the generator's alarms and the detector's goes to C1 before the harness is built on top.
 - **Refused.** Option (b), a test-build-only lower minimum interval in the node and the collector, would put a test switch on the OT safety floor of how often a device is read. The floor is the safety property here, not an obstacle. Option (c), leaving the SER half open, would leave recall for `new`, `time` and `rate` unshown on the slice's main device path.
 - **Order.** Two PRs, both C6's: first the new series with its README entry, reviewed by C4; then the SER harness (a file-driven SER buffer in the simulator, a `slicehelper` flag for the slice asset's event baseline, the collector on the test clock, and signed requests stamped `-issued` at clock time), reviewed by C4 and C5. The SER leg goes into `ci.yml` under this ruling, and C1 reviews that line.
+
+## D4-48: the owner accepts Phase 4 items 1 and 2, and item 3 is issued (owner, 2026-11-05)
+
+Date: 2026-11-05. The owner, on C1's decision card after `docs/phase-4a-exit.md` merged (#429).
+
+- **The acceptance.** The owner chose "Accept, start item 3" at 04:01Z. Items 1 and 2 are accepted with the conditions in `docs/phase-4a-exit.md`, which carry into item 3 as recorded there.
+- **Item 3 is issued** as Stage A (investigation and contract drafts), in `docs/agent-handoffs.md` ("Phase 4 item 3: Stage A briefs"). Its implementation briefs and its exit gate follow C1's approval of the contracts, under §5.4 and the common rules for every Phase 4 brief.
+- **D4-34 stands.** Work stops at the end of item 3 for the owner's check.
