@@ -155,7 +155,10 @@
 //     fixed, there is no dialogue, QUI, close phase or STX and ETX rule, and
 //     each segment is one SNMPv3 message in its stored form, with the digest
 //     zeroed in place under the new usm-digest redaction (24 or 48 octets
-//     when sent). Eight SNMP codes, none of which suspends anything (D4-53),
+//     when sent). Every authenticated message sent carries exactly one,
+//     discovery none, and authenticated needs an answer that carried one.
+//     Every value but the discovery engine ID is read from a received
+//     operate message that carried one (C3 and C6 on #445). Eight SNMP codes, none of which suspends anything (D4-53),
 //     and the codes that need a prompt or a SEL line are refused on an SNMP
 //     result, and the SNMP codes on a line result. The identity starts with
 //     snmp_engine_id, read at discovery, and an auth or operate message is

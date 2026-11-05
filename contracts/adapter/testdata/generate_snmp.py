@@ -332,6 +332,18 @@ def invalid_results(good):
         r["transcript"]["segments"][-1]["phase"] = "close"
     mut("snmp-close-phase", "ok", close_phase)
 
+    def drop_redaction(dir, phase):
+        def f(r):
+            reds = r["transcript"]["redactions"]
+            i = next(i for i, x in enumerate(reds)
+                     if segment_of(r, x["offset"])["dir"] == dir and segment_of(r, x["offset"])["phase"] == phase)
+            del reds[i]
+        return f
+    mut("keyed-send-without-digest-redaction", "ok", drop_redaction("tx", "auth"))
+    mut("value-from-message-without-digest", "ok", drop_redaction("rx", "operate"))
+    mut("authenticated-without-authenticated-answer", "failed.usm_unknown_user",
+        lambda r: r["session"]["snmp"].update(authenticated=True))
+
     mut("not-connected-with-engine-id", "refused.credential_unavailable",
         lambda r: r["session"]["snmp"].update(engine_id=ENGINE.hex()))
 

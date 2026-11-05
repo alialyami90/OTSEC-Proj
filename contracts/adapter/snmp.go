@@ -53,6 +53,48 @@ func (c *check) snmpSession(r Result, code Code) {
 	if n.Authenticated && (n.EngineID == "" || !keyed) {
 		c.fail("session: authenticated needs a discovered engine ID and an auth or operate message sent")
 	}
+	// Every keyed message is stored with its digest zeroed, so no live HMAC
+	// is kept to test a password guess against (C3 on #445). Discovery is
+	// noAuthNoPriv and has none. This counts redactions; it cannot show,
+	// without parsing BER, that one covers the digest field.
+	digests := digestsBySegment(t)
+	answered := false
+	for i, sg := range t.Segments {
+		switch d := digests[i]; {
+		case sg.Phase == PhaseProbe && d != 0:
+			c.fail("transcript.segments[%d]: discovery is not authenticated, so it holds no usm-digest redaction", i)
+		case sg.Phase != PhaseProbe && sg.Dir == Sent && d != 1:
+			c.fail("transcript.segments[%d]: an authenticated message sent holds exactly one usm-digest redaction, not %d", i, d)
+		case sg.Dir == Received && d > 1:
+			c.fail("transcript.segments[%d]: a message holds at most one usm-digest redaction, not %d", i, d)
+		case sg.Dir == Received && d == 1:
+			answered = true
+		}
+	}
+	if n.Authenticated && !answered {
+		c.fail("session: authenticated needs a received auth or operate message that carried a digest")
+	}
+	// A value is read only from an authenticated Response: anything below
+	// authPriv is discarded unparsed (C3's #437 §4 rule 1). The one
+	// exception is the engine ID, read at discovery (snmpIdentity).
+	inAnswer := func(sp Span) bool {
+		for i, sg := range t.Segments {
+			if sp.Offset >= sg.Offset && sp.Length > 0 && sp.Offset+sp.Length <= sg.Offset+sg.Length {
+				return sg.Dir == Received && sg.Phase == PhaseOperate && digests[i] == 1
+			}
+		}
+		return false
+	}
+	for i, o := range r.Observations {
+		if !inAnswer(o.Span) {
+			c.fail("observations[%d]: %s is read only from a received operate message that carried a digest", i, o.Name)
+		}
+	}
+	for i, it := range r.Identity.Items {
+		if it.Name != asset.AttrSNMPEngineID && !inAnswer(it.Span) {
+			c.fail("identity.items[%d]: %s is read only from a received operate message that carried a digest", i, it.Name)
+		}
+	}
 	switch code.Stage() {
 	case StageBeforeConnect:
 		if code != "" && s.Connected {
@@ -74,6 +116,19 @@ func (c *check) snmpSession(r Result, code Code) {
 	if code == "" && !n.Authenticated {
 		c.fail("status ok needs an authenticated SNMP session")
 	}
+}
+
+// digestsBySegment counts the usm-digest redactions in each segment.
+func digestsBySegment(t Transcript) []int {
+	n := make([]int, len(t.Segments))
+	for _, rd := range t.Redactions {
+		for i, sg := range t.Segments {
+			if rd.Reason == RedactUSMDigest && rd.Offset >= sg.Offset && rd.Offset < sg.Offset+sg.Length {
+				n[i]++
+			}
+		}
+	}
+	return n
 }
 
 // snmpIdentity checks the SNMP identity items and AP-27 for SNMP: the engine

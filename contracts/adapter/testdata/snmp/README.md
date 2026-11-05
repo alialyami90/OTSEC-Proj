@@ -51,3 +51,6 @@ The session has three phases. `probe` is discovery: an unauthenticated request, 
 - `results/invalid/digest-not-zeroed.json`: a `usm-digest` redaction over bytes that are not all zero.
 - `results/invalid/snmp-close-phase.json`: an SNMP segment in a close phase.
 - `results/invalid/not-connected-with-engine-id.json`: a refusal before connecting that claims an engine ID.
+- `results/invalid/keyed-send-without-digest-redaction.json`: the time-synchronization request's digest is not redacted, so a live HMAC would be stored (C3 on #445).
+- `results/invalid/value-from-message-without-digest.json`: the first Response carries no digest redaction, so nothing may be read from it.
+- `results/invalid/authenticated-without-authenticated-answer.json`: `authenticated` when the only answer after discovery was an unauthenticated Report.
