@@ -1,6 +1,6 @@
 # Phase 4 first exit report (items 1 and 2)
 
-Owner: C1 (the A1 role). Date: 2026-11-04. Status: **draft. The gate is not yet decided: the SER half of V-M4 has not run (D4-47).** Every other gate item is met on `main`, as C6's gate table in `docs/verification.md` records ("Phase 4 first exit gate status").
+Owner: C1 (the A1 role). Date: 2026-11-05. Status: **the gate passed with conditions (C1, 2026-11-05). The owner's acceptance is pending (D4-34).** Every gate item is met on `main`, as C6's gate table in `docs/verification.md` records ("Phase 4 first exit gate status"). The last item, V-M4's SER half, passed in CI on #431 (run 41934354061).
 
 This report closes the first two items of Phase 4: configuration retrieval, its baseline and prior approval (item 1, R3.6 and R3.7), and the event-behaviour baseline (item 2, R4.8). The owner ruled that the two finish together and that work stops at the end of each Phase 4 item for the owner's check (D4-34). It follows the milestone format in `CLAUDE.md` §9 and mirrors `docs/phase-3-exit.md`. No device was contacted. Every result is `desk` (Go and Python tests on a CI runner or an agent's container) or `simulated` (the real binaries against C6's recording simulator, on loopback). No result is `hardware-verified` (B-01). The owner's PC was not used in Phase 4 (D4-12), so GitHub Actions was the only shared test path.
 
@@ -23,8 +23,8 @@ In older records A*n* and B*n* mean the role that C*n* now holds (D3-12, D4-28).
 | C9 0.1 to 0.4 (snapshot, semantic difference, size bounds, `Difference.Encode`); C3 0.3 (operation limits and runs); SEL-751 register revision 5 (24 `SHO` forms and the run `sel.config.read_all`); C2 0.6 `config.read` and the SEL-751 configuration read; the measured maximal result; capability-matrix citations after C6's V-M3 desk check | A2 role (B2, C2) | #247, #279, #293, #301, #331, #338, #345, #363, #378, #388, #392, #395 | A6 role, A3 role, A5 role |
 | C7 0.6 and 0.7 (change approvals, baseline acknowledgements, the approver role, a run request naming a register run); C8 0.5 to 0.10; the collector accepting `node.change_approval` and `node.baseline_ack`; the collector's POSIX-semantics state replace; `govulncheck`; HR-11 and HR-13 to HR-15 in the threat model | A3 role (B3, C3) | #250, #257, #258, #259, #269, #272, #298, #300, #309, #318, #322, #326, #332, #334, #341, #346, #381, #387, #393 | A6 role, A2 role, A5 role |
 | C10 0.1 and 0.2; the event-behaviour learner and detector, alarm identity, measures, snapshot and restore, the lifecycle, learner 0.2 (D4-45); V-M4's alarm oracle draft; the receiver's batch split, unknown-sender stream, unknown queue share and UDP read buffer | A4 role (B4, C4) | #254, #274, #284, #287, #291, #303, #317, #330, #335, #364, #369, #384, #403, #414 | A6 role, A2 role, A5 role |
-| C5 0.4 to 0.7 in the SQLite store (configuration class, holds, `syslog-unknown`, the commit cap, the per-record WAL term, document series, the bounded remover); the node's configuration database, holds, configuration-read writer, reconcile and `HoldsConsumer`; the event-baseline feeder (slices 1a to 1c), its checkpoint, and the restart and open-gap handling (D4-45); HR-13 in the node; relay PR 2a and 2b; the Windows CI budget step | A5 role (B5, C5) | #246, #262, #264, #273, #281, #282, #290, #296, #297, #299, #302, #305, #308, #311, #313, #320, #324, #328, #339, #343, #347, #365, #372, #375, #376, #382, #390, #400, #405, #406, #408, #413, #415, #418 | A6 role, A3 role, A4 role |
-| The simulator's `SHO` forms and settings-change injector; the GT-INJ schedules (V-M2, V-M4, and the 60 s SER series); contract tests for every new contract version; the Phase 3 carried checks on hosted Windows; the stepped test clock and its release-build refusal; V-M2, V-M3 and V-M4 on the real binaries; the gate table | A6 role (B6, C6) | #241, #242, #245, #248, #249, #251, #253, #256, #261, #263, #266, #268, #270, #275, #283, #288, #292, #304, #307, #321, #373, #379, #391, #394, #398, #401, #402, #407, #410, #411, #417, #420, #423, #426 | A1 role, and the owners of what each test covers |
+| C5 0.4 to 0.7 in the SQLite store (configuration class, holds, `syslog-unknown`, the commit cap, the per-record WAL term, document series, the bounded remover); the node's configuration database, holds, configuration-read writer, reconcile and `HoldsConsumer`; the event-baseline feeder (slices 1a to 1c), its checkpoint, and the restart and open-gap handling (D4-45); HR-13 in the node; relay PR 2a and 2b; the Windows CI budget step | A5 role (B5, C5) | #246, #262, #264, #273, #281, #282, #290, #296, #297, #299, #302, #305, #308, #311, #313, #320, #324, #328, #339, #343, #347, #365, #372, #375, #376, #382, #390, #400, #405, #406, #408, #413, #415, #418, #421, #425, #430 | A6 role, A3 role, A4 role |
+| The simulator's `SHO` forms and settings-change injector; the GT-INJ schedules (V-M2, V-M4, and the 60 s SER series); contract tests for every new contract version; the Phase 3 carried checks on hosted Windows; the stepped test clock and its release-build refusal; V-M2, V-M3 and V-M4 on the real binaries; the gate table | A6 role (B6, C6) | #241, #242, #245, #248, #249, #251, #253, #256, #261, #263, #266, #268, #270, #275, #283, #288, #292, #304, #307, #321, #373, #379, #391, #394, #398, #401, #402, #407, #410, #411, #417, #420, #423, #426, #431 | A1 role, and the owners of what each test covers |
 | D4-1 to D4-47; Go 1.27.3; CI timeouts and legs; the C-team handoff | A1 role (B1, C1) | #238, #239, #277, #289, #306, #310, #319, #323, #327, #333, #337, #362, #367, #371, #374, #377, #380, #389, #397, #399, #409, #412, #416, #419, #424 | Affected owners for each ruling |
 
 #176 (the node reading its TLS keys from the key register) merged on 2026-10-28.
@@ -56,7 +56,7 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 | **V-M3** (R3.7) for the SEL-751 | **Pass**, `desk` and `simulated` (#394, F-022). Every matrix cell checked against S22, with three findings fixed in #388. On the binaries, every session is exactly the signed register's `sel.config.read_all` over Telnet; the untagged node refuses at start a configuration naming a method, a rung or an FTP endpoint. |
 | **V-M4** (R4.8), Syslog half | **Pass**, `simulated` (F-019, F-020, #402, #410, #411, #417). Exactly the 10 expected alarms (recall 10 of 10, every kind in full: repeats 3, absence 3, rate 2, new 1, time 1; precision 10 of 10), none before the acknowledgement. The held-out series raises none. Three runs store the same baseline bytes, whose period ends at the series' T, 2026-11-16T00:00:08Z, with 773 events, and the repeat raises the same alarms in every field. Release builds refuse the test clock. |
 | **V-M4**, short case on the untagged node | **Pass**, `simulated` (F-023, #423). Recorded, active only on the acknowledgement, then exactly the new-type and repeats alarms, plus a time alarm when the burst falls in an hour the period never saw. |
-| **V-M4**, SER half | **Not run yet.** The series `events-ser60.json` (913 reads at least 60 s apart, 6 expected alarms) is merged (#426, C4 accepted, no alarm difference). The harness that serves the rows at the series' read times is C6's next PR (D4-47). |
+| **V-M4**, SER half | **Pass**, `simulated` (F-024, #431; CI run 41934354061, about 37 min). On the tagged node and collector, all 1,105 rows of `events-ser60.json` are stored once, in order, at their read times, with the series' alignment (913 reads: 42 first-read, 8 gap-before). The period ends at 2026-11-16T06:34:08Z with 769 rows, and the baseline is active only on the acknowledgement. Exactly the 6 expected alarms are raised (recall: new 3/3, time 2/2, rate 1/1; precision 6/6). A `catchUp` mutant in `contracts/baseline` loses the rate alarm and is killed. With both halves, every R4.8 kind has at least 3 detected departures on the binaries. |
 | **V-S7** with revision 5 | **Pass** (#304, F-023). The deny corpus runs against revision 5 with no line skipped: exactly the 24 `SHO` forms approved, 699 variants refused. `check.py` passes every V-M2 recording against the signed revision 5, and four injected controls fail. |
 | **Contract tests** | C9, C10, C5 0.4 and 0.5, C7 0.6, C8 0.5, C3 0.3 (#249, #253, #256, #268, #283, #292, #304); C2 0.6, 9 of 11 mutants killed, both survivors equivalent (F-023). |
 | **HR-11's absolute bound** | **Pass**, `simulated` (#321). An unknown flood across an upstream outage, over UDP and TLS, fills only its class while a known device is still stored and forwarded. |
@@ -75,7 +75,7 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 
 ### Where tests ran
 
-- **CI** is the main test path (D2-13). It now has **fourteen `ci.yml` jobs**: Go on Linux and Windows, pytest, `integration`, and ten `integration-long` legs, plus `govulncheck` on Linux and Windows targets (D4-3). Every merge was checked by the A1 role against green checks on the PR's head, with the merged result checked when `main` had moved.
+- **CI** is the main test path (D2-13). It now has **fifteen `ci.yml` jobs**: Go on Linux and Windows, pytest, `integration`, and eleven `integration-long` legs (V-M4's SER leg alone has a 50-minute limit), plus `govulncheck` on Linux and Windows targets (D4-3). Every merge was checked by the A1 role against green checks on the PR's head, with the merged result checked when `main` had moved.
 - **The owner's PC** was not used (D4-12).
 - **Agents' Linux containers.** C6's gate runs were also run locally on Linux, as each finding states.
 
@@ -83,11 +83,11 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 
 | Gate item (`docs/agent-handoffs.md`, "Phase 4 first exit gate") | State |
 | --- | --- |
-| V-M2, V-M3 (for the SEL-751) and V-M4 pass on the real binaries, `simulated` | **Open: V-M4's SER half.** V-M2 and V-M3 met. V-M4's Syslog half and short case met. The SER half waits on C6's harness (D4-47). |
+| V-M2, V-M3 (for the SEL-751) and V-M4 pass on the real binaries, `simulated` | **Met, with conditions.** V-M2 (F-022), V-M3 for the SEL-751 (#394, F-022; the lower-rung case is vacuous, D4-40 point 3), and V-M4's Syslog half, short case and SER half (F-019, F-020, F-023, F-024). The conditions are the limitations below, D4-46's reading of the oracle, and the H-13 assumptions under the simulator's replies. |
 | C9, C10, C2 0.6, C5 0.4, C7 0.6 and C8 0.5 merged, with reviewers' records and the A6 role's contract tests | **Met.** |
 | V-S7 still passes with the new register lines, and the deny corpus covers every `SHO` form added | **Met.** |
 | #176 and relay PR 2 merged; HR-11's absolute bound merged, or recorded as the open condition before any `device-observed` listener | **Met.** The threat model's HR-11 row is not yet updated (#352, C3). |
-| No safety or security objection open | **None open.** C6 has none (#423). C3 has none against items 1 and 2 (#429), on the condition that the SER harness changes only test harness and CI; if it touches `cmd/`, `modules/`, `platform/`, `contracts/` or the release-build test-clock refusal, C3 reviews it before the gate. |
+| No safety or security objection open | **None open.** C6 has none (#423). C3 has none against items 1 and 2 (#429), on the condition that the SER harness changes only test harness and CI. #431 touches only `tests/`, `docs/verification.md` and one `ci.yml` leg, so the condition holds. |
 
 ## Owner decisions needed
 
@@ -96,7 +96,6 @@ C6's gate table and the findings log (F-016 to F-023) in `docs/verification.md` 
 
 ## Failed or incomplete
 
-- **V-M4's SER half** (above).
 - **The Windows `platform/node` time budget** (D4-22's 720 s) is breached on five of ten green runs (815, 1526, 720.5, 743 and 731 s; the others 622, 558, 652, 629 and 586 s), and 1526 s is 85% of the 30-minute package timeout under a 45-minute job (D4-44). One runner can take 2.5 times as long as another. Running the tests in parallel saved nothing on one runner (#427: parallel 652 and 743 s, serial 629 s). A profile on the hosted Windows runner (#428, closed unmerged) put 8.48 s of 18.97 s of blocking in five node tests in recreating the recovery reserve (about 20 MB with a flush) at each runtime start, F-013's design; 6.79 s went to commit syncs and 1.78 s to close checkpoints. C5 cut the starts per test where no case depends on a fresh one (#421, #425, #430): about 5% of the package's fsyncs on desk (29,164 to 27,816). The remaining cost is starts the tests need, and a Windows-only wait not yet identified: four of the slowest tests (`ConfigReadHoldsAfterRestart` and three relay tests) take 0.13 to 0.49 s on desk and 10 to 47 s on Windows, which is neither flushes nor starts (C5). **Ruling (C1):** the 720 s figure stays a warning, and the hard guard is the 30-minute timeout. Options, store-side ones with C3, come back if a green run passes 1620 s (90%) or any run times out.
 - **One unexplained Windows failure** of `TestUnknownSendersCannotDisplaceDevices` (a known sender stored 7 of 20, job 126728488246). It passed on re-run. It is not classed as a flake; #410 added diagnostics.
 - **`config.reads_removed`** (D4-20 rule 3) is contract only: it is defined in C8 0.7 (`contracts/audit/config.go`) and used in `contracts/store/remove.go`, but nothing in `platform/`, `modules/` or `cmd/` writes it, so retained reads are not removed.
@@ -153,7 +152,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 - **The configuration fold trusts the node's own audit stream** without `VerifyChain`, and on a pruned view it also trusts the configuration store's holds (D4-41, #408), so a tampered hold table is read as state. The full chain upstream catches a forged audit record; it does not catch a tampered hold, but the reconcile at start corrects a hold against the records in view (C3 on #390 and #429).
 - **D4-46 was ruled after a product run**: V-M2 reads `config.json`'s "difference R0 to R1" for a non-semantic change as both snapshots stored and different, `no_difference`, and no difference record. `config.json` was not edited.
 - **The default quota holds only a few days of SER transcripts at the minimum interval.** Each SER read keeps the whole buffer as adapter evidence; at one read a minute over the 7-day series that was about 45 MB, and the default 64 MiB quota pruned the first 50 rows' transcripts. The pruning was visible (the run failed), not silent. Sizing the quota for SER is a deployment item (C6).
-- **Which gate runs used the `otsec_testclock` build:** V-M2 and V-M4's GT-INJ feed. The V-M4 short case and V-M3's start case run untagged.
+- **Which gate runs used the `otsec_testclock` build:** V-M2, and V-M4's Syslog feed and SER half (node and collector). The V-M4 short case and V-M3's start case run untagged.
 
 ## Lessons
 
@@ -161,6 +160,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 - **The oracle is code too.** F-019's defect was in the A6 role's oracle; a product run found it, because the oracle's self-tests used its own names.
 - **Measure before optimizing.** Parallel tests looked like the cure for the Windows budget; a paired run on one runner showed no saving.
 - **Rulings get reviewed like code.** Three of the A1 role's rulings (D4-41, D4-45 and D4-46) needed corrections from C5 and C6.
+- **A harness's clock can outrun the node.** Main went red in the Syslog feed leg because the harness stepped the test clock faster than the node's wall-time work, so a 70 s window passed before the acknowledgement was relayed. The fix waits on the node after each step, and a baseline that never becomes active still fails (#431).
 - **Safety floors are not test knobs.** The 60 s SER floor shaped the test series, not the other way round (D4-47); a test-only fsync skip was refused for the same reason.
 
 ## Where the eight capabilities stand
@@ -170,7 +170,7 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 | 1.1 Asset management and monitoring | Unchanged from Phase 3. | Phase 4, item 3 (R1.8, with R9). |
 | 1.2 Secure engineering and remote access | Not built. | Phase 4, item 5. |
 | 1.3 Configuration and baseline monitoring | SEL-751 configuration read by command line (rung 3), versioned snapshots, semantic difference, prior-approval alarms and evidence holds, end to end on the real binaries, `simulated`. | Other families, and `config.reads_removed`. Not covered: the 175 touchscreen settings, which no `SHO` form prints (owner, 2026-10-28: not required). |
-| 1.4 Syslog and SER collection | Event-behaviour baselines with explained departure alarms for Syslog; SER pending. | V-M4's SER half. |
+| 1.4 Syslog and SER collection | Event-behaviour baselines with explained departure alarms for Syslog and SER, end to end on the real binaries, `simulated`. | Other families' event layouts. |
 | 1.5 Custom IED command framework | C3 0.3 runs and limits; revision 5. | Each new family extends it. |
 | 1.6 Intrusion detection | Not built. | Phase 4, item 4. |
 | 1.7 Modular and additive architecture | Every contract change was additive, with readers for earlier minors. | — |
@@ -178,8 +178,8 @@ D4-1 to D4-47 are in `docs/phase4/B1-decisions.md`. These matter most for later 
 
 ## Next coordinated tasks
 
-1. **Before the gate:** C6's V-M4 SER harness (reviewed by C4 and C5, its `ci.yml` leg by C1); C3's confirmation that no objection is open.
-2. **After the gate:** C3 closes #352 and writes a fresh HR-11 row from `main`; C5's #421 and #425 and the fixture-time work on the Windows budget; `config.reads_removed` in the node.
+1. **After the gate:** C6's gate-table PR with #431's run ID, and a test-only PR for C5's two non-blocking points on #431 (the 20 ms `read()` race, and refusing `-gtinj` with `-gtinj-ser` in `slicehelper`).
+2. C3 closes #352 and writes a fresh HR-11 row from `main`; `config.reads_removed` in the node; the Windows budget stays tracked under C1's ruling.
 3. **Phase 4 item 3**, after the owner's check (D4-34).
 
 ## Owner sign-off
