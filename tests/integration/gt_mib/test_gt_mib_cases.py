@@ -1,12 +1,13 @@
-"""Checks on GT-MIB's case table itself (C6, P4-3-C6 deliverable 1), not on
-the product.
+"""Checks on GT-MIB's case table itself (C6, then D6; P4-3-C6 deliverable
+1), not on the product.
 
-cases.json is written by hand before any agent code exists. This file checks
-that it covers every case of the plan (docs/phase4/C6-gt-mib-plan.md section
-2), that each expected code is one C2 0.7 defines and may end an SNMP run,
-that each egress rule is one C3's check returns, and that the values it
-expects are consistent with what the agent serves. The client is not tested
-here, and the agent does not exist yet: it waits for the RFC texts.
+cases.json was written by hand before any agent code existed. This file
+checks that it covers every case of the plan (docs/phase4/C6-gt-mib-plan.md
+section 2), that each expected code is one C2 defines and may end an SNMP
+run, that each egress rule is one C3's check returns, that the values it
+expects are consistent with what the agent serves, and that every layout it
+takes from an RFC is confirmed against the texts (D4-58). The client is not
+tested here; the agent's own tests are in agent/.
 """
 import json
 import os
@@ -127,14 +128,30 @@ def test_hostile_corpus():
         assert set(h.get("layers", GT["hostile"]["layers"])) <= {"outer", "scoped"}, h["id"]
 
 
-def test_rfc_items_stay_marked_until_the_texts_are_in():
-    # The agent waits for the RFC texts. Until then, every RFC-derived layout
-    # in this table is listed as unconfirmed, and each names where to check it.
-    assert GT["unconfirmed"]
-    for u in GT["unconfirmed"]:
-        assert u["what"] and re.match(r"^RFC [0-9]+", u["check_in"]), u
+def test_every_rfc_item_is_confirmed_against_the_texts():
+    # The RFC texts are in the project (D4-58). Every RFC-derived layout in
+    # this table names the RFC and section it was checked against, and
+    # nothing is left unconfirmed.
+    assert "unconfirmed" not in GT
+    assert GT["confirmed"]
+    for u in GT["confirmed"]:
+        assert u["what"] and re.match(r"^RFC [0-9]+ sections? [0-9]", u["rfc"]), u
     oids = {a["oid"] for c in CASES for a in c["expect"].get("attributes", {}).values() if "oid" in a}
-    listed = " ".join(u["what"] for u in GT["unconfirmed"])
+    listed = " ".join(u["what"] for u in GT["confirmed"])
     for o in oids:
         column = o.rsplit(".", 1)[0] if o.startswith(OPS["entity"]["subtree"]) else o
-        assert column in listed, f"{o} is RFC-derived but not listed as unconfirmed"
+        assert column in listed, f"{o} is RFC-derived but has no confirmed citation"
+
+
+def test_h12_is_positive():
+    # RFC 3417 section 8 (1): a long-form length may use more octets than it
+    # needs, so a non-minimal length is not hostile (D6-handoff fix (a)).
+    assert "H12" not in [h["id"] for h in GT["hostile"]["corpus"]]
+    h12 = [h for h in GT["hostile"]["positive"] if h["id"] == "H12"]
+    assert h12 and h12[0]["expect"]["code"] == "ok" and set(h12[0]["layers"]) == {"outer", "scoped"}
+
+
+def test_w4_counts_rfc_6933_columns():
+    # RFC 6933 section 4: entPhysicalEntry's accessible columns are 2 to 19.
+    w4 = [c for c in CASES if c["id"] == "W4"][0]
+    assert "720" in w4["setup"] and "680" not in w4["setup"]

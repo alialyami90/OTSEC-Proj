@@ -1,9 +1,9 @@
 {
   "gt": "GT-MIB",
   "version": 1,
-  "owner": "C6",
-  "date": "2026-11-05",
-  "status": "Written by hand before any agent code exists (P4-3-C6 deliverable 1), from docs/phase4/C6-gt-mib-plan.md section 2. No switch has been contacted. Every result over GT-MIB is simulated. The agent that serves these cases waits for the RFC texts; until they are in the project, no V-M1 run counts.",
+  "owner": "C6, then D6",
+  "date": "2026-11-06",
+  "status": "Written by hand before any agent code (P4-3-C6 deliverable 1), from docs/phase4/C6-gt-mib-plan.md section 2, and corrected against the RFC texts on 2026-11-06 (D6): H12 is a positive case and W4 is 720 varbinds. No switch has been contacted. Every result over GT-MIB is simulated.",
   "plan": "docs/phase4/C6-gt-mib-plan.md",
   "codes_from": "contracts/adapter (C2 0.7, D4-53, with failed.snmp_fid_unreadable from D4-54; C2 0.8 adds failed.snmp_unexpected_report and failed.snmp_scoped_pdu_unreadable, D4-54)",
   "family": "SEL-2731M and SEL-2741M in RSTP mode (D4-51), register family sel-27x1-rstp",
@@ -27,42 +27,107 @@
       "max_reply_bytes": 1472
     }
   },
-  "unconfirmed": [
+  "rfc_texts": "/mnt/project-files/rfc/ (D4-58), twelve texts with SHA256SUMS; line numbers are lines of those files. Checked by D6 on 2026-11-06 (desk), and by D2 independently (/mnt/project-files/d2/gt-mib-points-2026-11-06.md).",
+  "confirmed": [
     {
       "what": "entPhysicalSoftwareRev is column 10 of entPhysicalEntry (1.3.6.1.2.1.47.1.1.1.1.10)",
-      "check_in": "RFC 6933"
+      "rfc": "RFC 6933 section 4",
+      "lines": "1477 to 1493"
     },
     {
       "what": "entPhysicalDescr is column 2 of entPhysicalEntry (1.3.6.1.2.1.47.1.1.1.1.2)",
-      "check_in": "RFC 6933"
+      "rfc": "RFC 6933 section 4",
+      "lines": "1253 to 1263"
     },
     {
-      "what": "entPhysicalEntry's accessible columns are 2 to 18 in RFC 4133, and RFC 6933 adds a 19th",
-      "check_in": "RFC 6933"
+      "what": "entPhysicalTable is 1.3.6.1.2.1.47.1.1.1: entityMIB is mib-2 47, entityMIBObjects entityMIB 1, entityPhysical entityMIBObjects 1, entPhysicalTable entityPhysical 1, entPhysicalEntry entPhysicalTable 1",
+      "rfc": "RFC 6933 section 4",
+      "lines": "999 to 1212"
     },
     {
-      "what": "sysDescr.0 is 1.3.6.1.2.1.1.1.0 and sysName.0 is 1.3.6.1.2.1.1.5.0",
-      "check_in": "RFC 3418"
+      "what": "entPhysicalEntry's index (column 1) is not accessible, and its accessible columns are 2 to 19: 18 columns",
+      "rfc": "RFC 6933 section 4",
+      "lines": "1245 to 1747"
     },
     {
-      "what": "the msgGlobalData and USM security parameter layouts, the discovery message, the Report OIDs and the 150-second time window",
-      "check_in": "RFC 3412 and RFC 3414"
+      "what": "mib-2 is 1.3.6.1.2.1 and snmpModules is 1.3.6.1.6.3",
+      "rfc": "RFC 2578 section 2",
+      "lines": "202 to 226"
     },
     {
-      "what": "the PDU tags and the GetBulk fields",
-      "check_in": "RFC 3416"
+      "what": "sysDescr.0 is 1.3.6.1.2.1.1.1.0 and sysName.0 is 1.3.6.1.2.1.1.5.0 (system is mib-2 1, sysDescr system 1, sysName system 5)",
+      "rfc": "RFC 3418 section 2",
+      "lines": "193 to 260"
     },
     {
-      "what": "AES-128-CFB with the IV from engine boots, engine time and the 8-byte salt, and no padding",
-      "check_in": "RFC 3826"
+      "what": "snmpEngineID is 1.3.6.1.6.3.10.2.1.1 (snmpFrameworkMIB is snmpModules 10, snmpEngine snmpFrameworkMIBObjects 1)",
+      "rfc": "RFC 3411 section 5",
+      "lines": "2284 to 2705"
     },
     {
-      "what": "HMAC-SHA-256-192 and HMAC-SHA-512-384 digests of 24 and 48 octets",
-      "check_in": "RFC 7860"
+      "what": "the SNMPv3Message and HeaderData layouts (msgID, msgMaxSize, msgFlags of one octet with auth 0x01, priv 0x02 and reportable 0x04, msgSecurityModel) and the ScopedPDU",
+      "rfc": "RFC 3412 section 6",
+      "lines": "1046 to 1101"
     },
     {
-      "what": "the agent's order of checks on an incoming message (RFC 3414 section 3.2): the security level, user and digest before the time window (step 7), and the time window before decryption (step 8). U2 to U6's counts rest on it, and so does whether the time-window Report comes first",
-      "check_in": "RFC 3414"
+      "what": "UsmSecurityParameters: engine ID, boots, time, user name, authentication parameters, privacy parameters",
+      "rfc": "RFC 3414 section 2.4",
+      "lines": "872 to 903"
+    },
+    {
+      "what": "the discovery message (noAuthNoPriv, a zero-length user name and engine ID, an empty varbind list) and the usmStatsUnknownEngineIDs Report",
+      "rfc": "RFC 3414 section 4",
+      "lines": "1722 to 1749"
+    },
+    {
+      "what": "the usmStats Report OIDs, with their .0 instance: usmStats is 1.3.6.1.6.3.15.1.1 (snmpUsmMIB is snmpModules 15), and the six counters are usmStats 1 to 6",
+      "rfc": "RFC 3414 section 5",
+      "lines": "1858 to 2152"
+    },
+    {
+      "what": "the 150-second time window; and an agent's boots at 2147483647, a boots mismatch or a time more than 150 s off puts a message outside it",
+      "rfc": "RFC 3414 sections 2.2.3 and 3.2 step 7a",
+      "lines": "819 onwards"
+    },
+    {
+      "what": "the agent's order of checks on an incoming message: engine ID (step 3), user (4), security level (5), digest (6), time window (7), decryption (8). U2 to U6's counts rest on it, and the time-window Report comes before decryption, so its request-id is 0 (RFC 3412 section 7.1 step 3c)",
+      "rfc": "RFC 3414 section 3.2",
+      "lines": "1423 onwards"
+    },
+    {
+      "what": "the time-window Report goes at authNoPriv, and every other Report at noAuthNoPriv; a Report answers a readable Confirmed Class PDU, or an unreadable one with the reportable flag set",
+      "rfc": "RFC 3414 section 3.2 step 7a; RFC 3412 section 7.1 steps 3b and 3d; RFC 3411 section 2.8",
+      "lines": "RFC 3412 1515 to 1552"
+    },
+    {
+      "what": "the PDU tags ([0] GetRequest to [8] Report) and the BulkPDU's non-repeaters and max-repetitions",
+      "rfc": "RFC 3416 section 3",
+      "lines": "310 to 444"
+    },
+    {
+      "what": "GetBulk drops trailing varbinds to fit msgMaxSize and never answers tooBig",
+      "rfc": "RFC 3416 section 4.2.3",
+      "lines": "767 onwards"
+    },
+    {
+      "what": "AES-128-CFB with the first 16 octets of the localized privacy key, the IV boots, time and the 8-octet salt, most significant octet first, and no padding; privacy parameters not of 8 octets are a decryption error",
+      "rfc": "RFC 3826 sections 1.2, 3.1.2.1, 3.1.3 and 3.3.2",
+      "lines": "119, 360 to 412, 645"
+    },
+    {
+      "what": "HMAC-SHA-256 and HMAC-SHA-512 MACs of 24 and 48 octets over the whole message with the MAC field zeroed, keys of 32 and 64 octets, localized as RFC 3414 section 2.6 with the same hash",
+      "rfc": "RFC 7860 sections 4.1, 4.2 and 5",
+      "lines": "206 to 360"
+    },
+    {
+      "what": "a long-form length may use more octets than it needs, so H12 is a positive case",
+      "rfc": "RFC 3417 section 8 (1)",
+      "lines": "630 to 638"
+    },
+    {
+      "what": "an OID has at most 128 sub-identifiers, each at most 2^32-1",
+      "rfc": "RFC 2578 section 3.5",
+      "lines": "839 to 844"
     }
   ],
   "agent": {
@@ -790,7 +855,7 @@
       "id": "W4",
       "section": "2.4",
       "vm": "b",
-      "setup": "40 rows x 17 columns = 680 varbinds, more than max_varbinds 512",
+      "setup": "40 rows x 18 columns (entPhysicalEntry's accessible columns 2 to 19, RFC 6933 section 4) = 720 varbinds, more than max_varbinds 512",
       "expect": {
         "code": "failed.response_too_large",
         "bytes_kept": true,
@@ -1035,10 +1100,6 @@
         "defect": "an OCTET STRING longer than its message"
       },
       {
-        "id": "H12",
-        "defect": "a non-minimal length encoding"
-      },
-      {
         "id": "H13",
         "defect": "trailing bytes after the message"
       },
@@ -1065,7 +1126,7 @@
       },
       {
         "id": "H17",
-        "defect": "an inbound SetRequest, Trap or Inform PDU",
+        "defect": "an inbound SetRequest, SNMPv2-Trap and InformRequest PDU, each in place of the Response",
         "layers": [
           "scoped"
         ],
@@ -1081,9 +1142,22 @@
         "expect": {
           "code": "ok"
         }
+      },
+      {
+        "id": "H12",
+        "case": "a long-form length with more octets than it needs (four, for the outermost element), which RFC 3417 section 8 (1) permits",
+        "layers": [
+          "outer",
+          "scoped"
+        ],
+        "expect": {
+          "code": "ok"
+        }
       }
     ],
-    "fuzz": "the same corpus seeds C2's Go fuzz target on the client's decoder"
+    "fuzz": "the same corpus seeds C2's Go fuzz target on the client's decoder",
+    "outer_where": "the discovery Report: noAuthNoPriv with a plaintext ScopedPDU (RFC 3414 section 4), which the client parses before any authentication. ScopedPDU-shaped defects (H4, H6 to H10, H14) sit in that ScopedPDU; message-shaped ones (H1 to H3, H5, H11, H13) are cut into the whole message. H15 and H16 are fields of an authenticated message, so they go on the Responses after the time-window round.",
+    "scoped_where": "the ScopedPDU of every authPriv Response after the time-window round, encrypted and authenticated with the user's keys"
   },
   "egress": {
     "section": "2.7",

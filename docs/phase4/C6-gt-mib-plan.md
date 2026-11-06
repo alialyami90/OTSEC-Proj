@@ -14,7 +14,7 @@ C6, 2026-11-05. This is part 2 of P4-3-A6 (#435). GT-MIB is a test-only SNMPv3 a
 - **Drafts:**
   - C2's family note and contract drafts (#439 at 92026c9, with D4-53);
   - C3's §4 rules (#437 at 1c9e479).
-- **RFCs:** RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860. **Their text is not in the project files, and this container cannot fetch it** (the proxy refuses www.rfc-editor.org). C1 has asked the owner to add RFC 3411, 3418 and 6933. Until they are added, every column number and object layout below that comes from an RFC is marked **unconfirmed**, because I wrote it from memory. GT-MIB checks them against the text, and fixes them if needed, before its first commit of agent code.
+- **RFCs:** RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860, plus RFC 2578 (the OID roots `mib-2` and `snmpModules`, §2; the OID bounds, §3.5), RFC 3417 (BER, §8), RFC 1157 and RFC 1901 (the v1 and v2c layouts). All twelve texts are in `/mnt/project-files/rfc/` with `SHA256SUMS` (D4-58). This plan was first written from memory, before the texts were in. On 2026-11-06 D6 checked every RFC-derived layout against them, and D2 checked them independently. Each is now listed under `confirmed` in `cases.json`, with its RFC, section and lines. Two corrections followed: W4 is 720 varbinds, not 680 (RFC 6933 has 18 accessible columns), and H12 is a positive case (RFC 3417 §8 (1)).
 
 ## 1. What GT-MIB is
 
@@ -35,7 +35,7 @@ C6, 2026-11-05. This is part 2 of P4-3-A6 (#435). GT-MIB is a test-only SNMPv3 a
 | Object | Value | Label |
 | --- | --- | --- |
 | FID | real FIDs from S29 p. 62: `SEL-2731M-R102-V1-Z003001-D20260408`, `SEL-2741M-R102-V1-Z003001-D20260408` and `SEL-2731M-R100-V0-Z001001-D20231120` | documented |
-| The FID's column and row in `entPhysicalTable` | by default `entPhysicalSoftwareRev` (column 10, unconfirmed) of row 1, the chassis. Cases move it. | SYNTHESIZED |
+| The FID's column and row in `entPhysicalTable` | by default `entPhysicalSoftwareRev` (column 10, RFC 6933 §4) of row 1, the chassis. Cases move it. | SYNTHESIZED |
 | The number of `entPhysicalTable` rows | 6 by default: chassis, power supply, and four port modules | SYNTHESIZED |
 | Every other `entPhysicalTable` cell | plausible text that never matches the FID grammar, unless a case needs it to | SYNTHESIZED |
 | `sysDescr.0`, `sysObjectID.0` | `sysDescr` holds no FID by default. `sysObjectID` is under SEL's enterprise arc `1.3.6.1.4.1.31823` (the arc S29 prints for the power-supply MIB), at a made-up branch. | SYNTHESIZED |
@@ -113,7 +113,7 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | W1 | returns an OID outside `entPhysicalTable` in the middle of a response | `ok`. The walk ends there. The varbinds after that OID in the same response are kept in the bytes but never parsed into attributes, and no later request carries that OID or anything after it (steered walk, #437 rule 5). |
 | W2 | returns the same OID again (a loop) | `failed.snmp_walk_not_increasing` after 1 request |
 | W3 | returns an earlier OID inside the subtree | `failed.snmp_walk_not_increasing` after 1 request |
-| W4 | 40 rows × 17 columns (RFC 4133's accessible columns 2 to 18, unconfirmed; RFC 6933 adds a 19th) = 680 varbinds, more than `max_varbinds` 512 | `failed.response_too_large`, every byte kept, no identity attribute presented as complete (C2's question 5) |
+| W4 | 40 rows × 18 columns (RFC 6933 §4: entPhysicalEntry's accessible columns are 2 to 19) = 720 varbinds, more than `max_varbinds` 512 | `failed.response_too_large`, every byte kept, no identity attribute presented as complete (C2's question 5) |
 | W5 | answers 1 varbind per GetBulk, whatever `max_repetitions` says | `failed.response_too_large` at `max_requests` (32), with 32 requests counted |
 | W6 | honours `msgMaxSize`, which equals `max_reply_bytes` 1472, with 16 repetitions | `ok`. Each response is at most 1472 bytes. |
 | W7 | ignores `msgMaxSize` and sends 4000 bytes | `failed.response_too_large`, bytes kept |
@@ -154,7 +154,7 @@ The corpus is:
 - an OID with 129 arcs;
 - an empty OID;
 - an OCTET STRING longer than its message;
-- a non-minimal length encoding;
+- ~~a non-minimal length encoding~~ (H12). RFC 3417 §8 (1) permits a long form with more length octets than needed, so H12 is a positive case at both layers (D6, 2026-11-06). Our own egress check still refuses the form on outbound messages, as policy;
 - trailing bytes after the message;
 - a non-minimal OID arc (a leading `0x80`);
 - `msgAuthenticationParameters` of the wrong length for the algorithm (not 24 bytes for HMAC-SHA-256, or not 48 for SHA-512), which is discarded before any HMAC is computed;
@@ -203,7 +203,7 @@ There is also one discovery message sent after the engine ID is known. The exact
 
 ## 3. What it depends on, and the order of work
 
-1. **Before any agent code:** the RFC text (C1's request to the owner). Without it, the column numbers stay unconfirmed and the agent is built against memory. I do not want that for a ground truth.
+1. **Before any agent code:** the RFC text (C1's request to the owner). Without it, the column numbers stay unconfirmed and the agent is built against memory. I do not want that for a ground truth. *Done: the texts arrived on 2026-11-06 (D4-58), and the table's layouts are confirmed against them.*
 2. C3 0.4 and C2 0.7 must be approved (#439), and C3's §4 rules (#437). Then the case table's codes are final.
 3. The case table, `cases.json`, is committed first, before the agent, as GT-ADV was.
 4. Then the agent and its import check, the served-list check, and the deny corpus, which can run as soon as C3's egress check exists.
@@ -219,4 +219,4 @@ There is also one discovery message sent after the engine ID is known. The exact
 - **C5:**
   - a way for the runner to start the collector with a schedule that has one SNMP entry, on the test clock.
 - **The owner, through C1:**
-  - RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 in the project files, or access to www.rfc-editor.org.
+  - RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 in the project files, or access to www.rfc-editor.org. *Done (D4-58).*
