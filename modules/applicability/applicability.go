@@ -33,7 +33,9 @@ type Input struct {
 	// LatestMismatch is the latest device read that refused the asset's
 	// identity (refused.identity_mismatch on the SEL-751, an authenticated
 	// failed.identity_mismatch on SNMPv3). It adopts no value, and makes the
-	// identity stale until a later read confirms it (C1 on #445). An
+	// identity stale until a later read confirms it (C1 on #445). On an
+	// operator or passive identity it stands until the node clears it, when
+	// a read confirms the identity or the declaration changes (C1 on #458). An
 	// unauthenticated refused.engine_id_mismatch and a
 	// failed.snmp_fid_unreadable are not mismatches: neither shows another
 	// FID (D4-53, C1 on #445).
@@ -164,10 +166,19 @@ func Evaluate(in Input, set *advisory.Set, prev map[string]Previous) ([]finding.
 
 // identityCurrent reports whether a device-read identity is current: its
 // latest read is later than the latest change retrieved and the latest
-// mismatch (note §6). It also returns the reads that made it stale.
+// mismatch (note §6). It also returns the reads that made it stale. Any
+// other identity has no read to be current by, so only a mismatch
+// contradicts it, until the node clears the mismatch (C1 on #458).
 func identityCurrent(in Input) (bool, []finding.Read, error) {
 	if in.Identity.Source != finding.DeviceRead {
-		return true, nil, nil
+		m := in.LatestMismatch
+		if m == nil {
+			return true, nil, nil
+		}
+		if _, err := parseUTC(m.AtUTC); err != nil {
+			return false, nil, err
+		}
+		return true, []finding.Read{*m}, nil
 	}
 	var read time.Time
 	if r := in.Identity.LatestRead; r != nil {
@@ -371,9 +382,15 @@ func (e *evaluator) inside(f finding.Finding, entry advisory.Entry) finding.Find
 }
 
 // markStale marks a device-read identity that is not current stale, and
-// cites each read that made it so.
+// cites each read that made it so. Another identity contradicted by a
+// mismatch is marked stale too, but the mismatch is not cited: C12 0.1 lets
+// an identity cite only evidence of its own source.
 func (e *evaluator) markStale(f *finding.Finding) {
-	if e.in.Identity.Source != finding.DeviceRead || e.current {
+	if e.in.Identity.Source != finding.DeviceRead {
+		f.Identity.Evidence[0].Stale = e.mismatched
+		return
+	}
+	if e.current {
 		return
 	}
 	f.Identity.Evidence[0].Stale = true
