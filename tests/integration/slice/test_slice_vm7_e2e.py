@@ -37,17 +37,19 @@ dict), from the node's own status and store, and from the audit chain:
     the identity, the newest snapshot's run, and the run that retrieved a
     change after the first one.
 
+A row with controls (D8, D9 and D10: tcp/80) has them as its asset's
+asset_controls entry (D4-56). The node records them with a policy.apply
+asset_controls_declared record, and a mitigation they hold cites that
+record, so the control evidence is that record's audit:<node>:<seq>.
+
 vm7.check then decides each of the 128 cells, and each failing cell is
-reported with its reasons. GT-ADV's two control cells (D8 and D9 on
-TEST-ADV-03) cannot pass on these binaries: no control record exists
-(C1 0.3), so the node gives the matcher no control. They are V-M7 FAILs,
-and test_the_control_cells_fail_only_for_want_of_a_control pins that they
-fail for that reason alone.
+reported with its reasons.
 
 Evidence class: simulated. No device is contacted.
 """
 
 import concurrent.futures
+import hashlib
 import json
 import os
 import shutil
@@ -67,10 +69,11 @@ GT = vm7.load_gt()
 DEVICE_ROWS = [r for r in GT["identities"] if r["source"] == "device-read"]
 OPERATOR_ROWS = [r["id"] for r in GT["identities"] if r["source"] == "operator"]
 EVERY = 60
-# The row whose node is restarted (with the operator rows), and the row
-# whose device then answers with another FID (#451, D4-54): the FID's build
-# date changed, so the collector refuses it as identity_mismatch.
-RESTART_ROW, MISMATCH_ROW = "D1", "D2"
+# The rows whose nodes are restarted (D1's with the operator rows, D8's with
+# its recorded control), and the row whose device then answers with another
+# FID (#451, D4-54): the FID's build date changed, so the collector refuses
+# it as identity_mismatch.
+RESTART_ROWS, MISMATCH_ROW = ("D1", "D8"), "D2"
 MISMATCH_FID = "SEL-751-R501-V0-Z104101-D20260911"
 # The first read is a minute after the node starts; a run takes seconds.
 FIRST = 150
@@ -155,7 +158,7 @@ class _Run:
                 self.wait(lambda: self.evaluated(s.layout["gtadv_assets"][o]), f"no evaluation of {o}", 30)
             # The cells are decided on this state, before any scenario.
             out["cells"] = self.collect()
-            if row["id"] == RESTART_ROW:
+            if row["id"] in RESTART_ROWS:
                 self.restart()
                 out["restarted"] = self.collect()
             if row["id"] == MISMATCH_ROW:
@@ -199,6 +202,15 @@ def _declared_ref(o, asset):
     return refs[-1] if refs else None
 
 
+def _controls_ref(o, asset):
+    """The newest policy.apply asset_controls_declared record of the asset,
+    as a mitigation it holds cites it (D4-56)."""
+    node = o["layout"]["node_id"]
+    refs = [f"audit:{node}:{r['seq']}" for r in o["audit"] if r.get("action") == "policy.apply"
+            and r.get("reason_code") == "asset_controls_declared" and f"asset {asset} " in (r.get("detail") or "")]
+    return refs[-1] if refs else None
+
+
 def _first_read(config):
     """The run that first read the identity: the first identity record's."""
     recs = [e for e in config if _schema(e).startswith(IDENTITY)]
@@ -233,6 +245,8 @@ def _observe(o, row):
     changed = [b for a, b in zip(snaps, snaps[1:]) if a.get("sections") != b.get("sections")]
     if changed:
         evidence["config-change"] = changed[-1].get("invocation_id")
+    if _controls_ref(o, asset):
+        evidence["control"] = _controls_ref(o, asset)
     return {
         "identity": {"source": "device-read" if device else "operator",
                      "evidence_id": ident.get("evidence_id") if device else _declared_ref(o, asset)},
@@ -298,30 +312,28 @@ def test_every_row_has_its_source(observed):
 
 
 ROWS = [r["id"] for r in GT["identities"]]
-# GT-ADV's cells whose class rests on a recorded control (D8 and D9 on
-# TEST-ADV-03). No control record exists yet (C1 0.3), so the node gives the
-# matcher no control, and these cells get the class GT-ADV's rules give
-# without rule 5: D8's EHTTP Y on R500-V0 is confirmed, and D9's unread EHTTP
-# leaves it applicable-by-version. They are V-M7 FAILs on these binaries.
-CONTROL_CELLS = {(row, adv) for adv, rows in GT["cells"].items() for row, c in rows.items() if "control" in c.get("evidence", [])}
-WITHOUT_CONTROL = {("D8", "TEST-ADV-03"): "confirmed", ("D9", "TEST-ADV-03"): "applicable-by-version"}
 
 
 @pytest.mark.parametrize("row", ROWS)
 def test_each_cell_of_the_row(observed, row):
     got = vm7.check(GT, observed)
-    bad = {adv: why for (r, adv), why in sorted(got.items()) if r == row and why and (r, adv) not in CONTROL_CELLS}
+    bad = {adv: why for (r, adv), why in sorted(got.items()) if r == row and why}
     assert not bad, json.dumps(bad, indent=1)
 
 
-def test_the_control_cells_fail_only_for_want_of_a_control(observed):
-    # When a control record lands, this fails: the cells then go back to
-    # test_each_cell_of_the_row.
-    assert CONTROL_CELLS == set(WITHOUT_CONTROL), CONTROL_CELLS
-    got = vm7.check(GT, observed)
-    for cell, cls in WITHOUT_CONTROL.items():
-        want = {f"class {cls}, want mitigated", "the run made no control evidence to cite", "operator-attested False, want True"}
-        assert set(got[cell]) == want, (cell, got[cell])
+CONTROL_ROWS = [r["id"] for r in DEVICE_ROWS if r["controls"]]
+
+
+@pytest.mark.parametrize("row", CONTROL_ROWS)
+def test_the_controls_record_names_its_keys_and_their_hash(runs, row):
+    # D4-56: detail "asset <id> controls sha256:<hex> keys <k1,k2>", the
+    # hash over the keys sorted in byte order, each followed by one LF.
+    (o,) = _scenario(runs, row, "cells")
+    keys = sorted(next(r for r in GT["identities"] if r["id"] == row)["controls"])
+    asset = o["layout"]["gtadv_assets"][row]
+    recs = [r for r in o["audit"] if r.get("action") == "policy.apply" and r.get("reason_code") == "asset_controls_declared"]
+    sha = hashlib.sha256("".join(k + "\n" for k in keys).encode()).hexdigest()
+    assert [r["detail"] for r in recs] == [f"asset {asset} controls sha256:{sha} keys {','.join(keys)}"], recs
 
 
 def _scenario(runs, row, *keys):
@@ -336,11 +348,16 @@ def _all(state):
     return {"assets": {row: _observe(state, row) for row in state["layout"]["gtadv_assets"]}}
 
 
-def test_a_restart_changes_no_finding_and_no_evidence(runs):
+@pytest.mark.parametrize("row", RESTART_ROWS)
+def test_a_restart_changes_no_finding_and_no_evidence(runs, row):
     # D1's node holds D1 and the five operator rows, so each operator row
-    # must still cite the same policy.apply record (D4-54).
-    cells, restarted = _scenario(runs, RESTART_ROW, "cells", "restarted")
-    assert vm7.check_restart(_all(cells), _all(restarted)) == []
+    # must still cite the same policy.apply record (D4-54); D8's mitigated
+    # finding must still cite the same controls record (D4-56).
+    cells, restarted = _scenario(runs, row, "cells", "restarted")
+    before, after = _all(cells), _all(restarted)
+    assert vm7.check_restart(before, after) == []
+    assert {r: a["evidence"].get("control") for r, a in before["assets"].items()} == \
+        {r: a["evidence"].get("control") for r, a in after["assets"].items()}
 
 
 ADVISORIES_OF_THE_751 = [a["id"] for a in GT["advisories"] if a["product"] == "SEL-751"]
