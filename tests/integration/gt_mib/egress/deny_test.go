@@ -8,10 +8,11 @@
 // being refused for some other reason.
 //
 // The message layout follows RFC 3412 (msgGlobalData), RFC 3414 (USM and the
-// discovery message), RFC 3416 (the PDUs) and RFC 3826 (AES-128-CFB). Those
-// texts are not in the project yet (the owner question), so the layout is
-// written from memory and is unconfirmed until they are. A layout error
-// here would make the valid messages fail, which the positive cases catch.
+// discovery message), RFC 3416 (the PDUs), RFC 3826 (AES-128-CFB) and RFC
+// 2578 section 3.5 (at most 128 sub-identifiers). It was first written from
+// memory; D6 checked it against the texts in /mnt/project-files/rfc/ on
+// 2026-11-06 (D4-58), and it holds. A layout error here would make the
+// valid messages fail, which the positive cases catch.
 //
 // Evidence class: simulated. No agent or device is contacted.
 package egress
@@ -238,6 +239,9 @@ func corpus() []tcase {
 	add("oid: a walk continuation outside the subtree", with(continuation(), func(m *msg) { m.oids = []string{"1.3.6.1.2.1.47.1.2.1"} }), opBulk, after, "oid_outside_subtree")
 	add("oid: a walk OID that shares the subtree's text but not its arcs", with(continuation(), func(m *msg) { m.oids = []string{entity + "0.1"} }), opBulk, after, "oid_outside_subtree")
 	add("oid: a walk OID above the subtree", with(continuation(), func(m *msg) { m.oids = []string{"1.3.6.1.2.1.47.1.1"} }), opBulk, after, "oid_outside_subtree")
+	// RFC 2578 section 3.5: at most 128 sub-identifiers. entity has 10 arcs.
+	add("allowed: a walk continuation of 128 arcs", with(continuation(), func(m *msg) { m.oids = []string{entity + strings.Repeat(".1", 118)} }), opBulk, after, snmpegress.Allowed)
+	add("ber: a walk continuation of 129 arcs inside the subtree", with(continuation(), func(m *msg) { m.oids = []string{entity + strings.Repeat(".1", 119)} }), opBulk, after, "ber")
 	add("bulk: max-repetitions other than the register's", with(bulk(), func(m *msg) { m.f2 = 17 }), opBulk, after, "max_repetitions")
 	add("bulk: non-repeaters other than 0", with(bulk(), func(m *msg) { m.f1 = 1 }), opBulk, after, "non_repeaters")
 

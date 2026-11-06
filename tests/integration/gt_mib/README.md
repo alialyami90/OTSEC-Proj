@@ -4,7 +4,9 @@
 
 **Nothing here has touched a switch.** The FIDs are real (S29 p. 62). Every other served value is labelled SYNTHESIZED in the plan, including the engine ID's MAC part, `sysName` and the table's other cells. Every result over GT-MIB will be `simulated`.
 
-**The agent is not built yet.** It waits for the RFC texts (RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860), which are not in the project. Until they are, no V-M1 run counts. Every layout in the table that comes from an RFC is listed under `unconfirmed`, with the RFC to check it against. The agent's first commit checks each one and fixes the table if the text differs.
+**The agent is in `agent/`** (D6, 2026-11-06). It is built from the RFC texts in `/mnt/project-files/rfc/` (D4-58), imports only the Go standard library, and listens on loopback only. `agent/cmd/gtmib` runs one case: `-case <ID>`, with the USM password from `GTMIB_PASSWORD`, never from argv. Every layout in the table that comes from an RFC is listed under `confirmed`, with its RFC, section and lines. Checking them against the texts changed two things: W4 is 720 varbinds (RFC 6933 §4 has 18 accessible columns, not 17), and H12 is a positive case, because RFC 3417 §8 (1) permits a long-form length with more octets than needed.
+
+`go test ./tests/integration/gt_mib/agent` checks the agent on its own: the served list against S29, the RFC 3414 A.3.2 key vector, one loopback round as a manager sees it, the report rule of RFC 3412 §7.1 step 3b, each case's behaviour, and each hostile entry decoded by a strict reader. The V-M1 runner, which runs the real binaries against it, is still to come.
 
 ## What the table holds
 
@@ -16,7 +18,7 @@
   The counts depend on whether the agent answers the client's first authPriv request with the authenticated time-window Report, as a real agent does, so each such case says so in `time_window_first` and in its setup (C2 on #457). A whole-run count of authPriv requests is given only for runs that end before the walk; an ok run gives the requests of one operation (`requests_of`).
   The plan's U4 and F5 each hold two behaviours, so the table splits them into U4a and U4b, and F5a and F5b.
 - `every_run`: what the agent's own decoded log and the transcript must show in every case, as V-M1 (b) requires.
-- `hostile`: section 2.6's malformed messages, at the outer layer, which is parsed before authentication, and at the scoped layer, which is parsed after decryption.
+- `hostile`: section 2.6's malformed messages, at the outer layer, which is parsed before authentication, and at the scoped layer, which is parsed after decryption. `positive` holds H12, which the client must accept at both layers.
 - `egress`: section 2.7's deny corpus, by the rule each message must be refused under. The test that feeds it to C3's check is `egress/deny_test.go`, which came in with #449.
 
 ## Codes from C2 0.8
@@ -41,4 +43,5 @@ Both codes are SNMP-only, suspend nothing, and keep the bytes. C2 0.8 is on main
 - the engine ID is cited by its header;
 - `failed.snmp_fid_unreadable` reports nothing cut from a FID;
 - each egress rule is one `snmpegress` returns, and all thirteen near misses are present;
-- every RFC-derived OID is still marked unconfirmed.
+- every RFC-derived item is listed under `confirmed` with its RFC, section and lines;
+- H12 is positive, and W4 counts RFC 6933's 18 columns.
