@@ -167,7 +167,7 @@ var (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|verify-audit ...")
+		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|advisory-file|verify-audit ...")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -200,12 +200,18 @@ func main() {
 	in := fs.String("in", "", "verify-audit: a file of the audit stream's stored records, one base64 line each, in seq order")
 	operator := fs.Bool("operator", false, "admin-file: sign with the second administrator's key, which may not sign node.change_approval (V-M2)")
 	gtadvRow := fs.String("gtadv-row", "", "setup: make the asset GT-ADV's device-read row of this name, with R9 on and GT-ADV's set in admin_dir (V-M7)")
+	assetOn := fs.Bool("asset", false, "setup: the asset module on, R9 off (V-M8's paired run without R9)")
+	vm8On := fs.Bool("vm8", false, "setup: R9 on with advisory test key 0 pinned active and test key 2 pinned revoked, and no set (V-M8)")
+	setCase := fs.String("case", "valid", "advisory-file: which set file to leave (see advisoryFile)")
+	setVersion := fs.Uint64("set-version", 2, "advisory-file: the set's version")
 	gtadvOperators := fs.Bool("gtadv-operators", false, "setup: add GT-ADV's operator rows as assets with no schedule, with R9 on and GT-ADV's set in admin_dir (V-M7)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn)
+	case "advisory-file":
+		err = advisoryFile(*root, *repo, *setCase, *setVersion)
 	case "install-credential":
 		err = installCredential(*root)
 	case "verify-audit":
@@ -235,7 +241,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators bool) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -322,6 +328,13 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	if err := gtADV(nc, &l, repo, gtadvRow, gtadvOperators); err != nil {
 		return err
+	}
+	if vm8On {
+		vm8(nc)
+	}
+	if assetOn {
+		nc.Asset = &struct{}{}
+		nc.Store.Quotas["configuration"] = 64 << 20
 	}
 	if installed {
 		nc.TLSDir = l.TLSDir
