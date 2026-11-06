@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 // an identity conflict (§1.5 of docs/phase4/C2-c1-0.3-c3-0.4.md, D4-53;
 // GT-MIB case F6). The run is ok and the read model is kept; status shows
 // the conflict on the asset's identity, the identity-family-conflict alarm
-// is raised once, and one identity.family-conflict health event is
+// is raised once per family and model, and one identity.family-conflict health event is
 // committed; neither names the model, which is device text. A family that
 // covers the read model shows none.
 func TestIdentityFamilyConflict(t *testing.T) {
@@ -95,6 +96,38 @@ func TestIdentityFamilyConflict(t *testing.T) {
 			}
 			if len(events) != 1 || events[0]["asset_id"] != id || events[0]["product_family"] != tc.family || events[0]["evidence_id"] != res.InvocationID {
 				t.Fatalf("health events %v", events)
+			}
+
+			// A model that alternates between runs raises each model once,
+			// not once per run (D3 on #499), so it cannot crowd other
+			// alarms out of status.
+			ist := s.identityOf(bg, id)
+			read := *ist.doc
+			for _, model := range []string{"SEL-751", "SEL-2731M", "SEL-751", "SEL-2731M"} {
+				d := read
+				d.Asset.Attributes = slices.Clone(read.Asset.Attributes)
+				for i, at := range d.Asset.Attributes {
+					if at.Name == c1.AttrModel {
+						at.Observations = slices.Clone(at.Observations)
+						for j := range at.Observations {
+							if at.Observations[j].EffectiveKind() == c1.DeviceRead {
+								at.Observations[j].Value = model
+							}
+						}
+						d.Asset.Attributes[i] = at
+					}
+				}
+				ist.doc = &d
+				s.familyConflict(bg, id, ist)
+			}
+			n := 0
+			for _, a := range st.Snapshot("x").Alarms {
+				if a.Code == AlarmIdentityFamilyConflict {
+					n++
+				}
+			}
+			if n != 2 {
+				t.Fatalf("%d family conflict alarms after SEL-751 and SEL-2731M alternated, want 2 (one per model)", n)
 			}
 		})
 	}

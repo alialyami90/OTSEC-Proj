@@ -303,7 +303,9 @@ type identityState struct {
 	// would evaluate without what the run read (C6 on #458).
 	unstored bool
 	removed  uint64 // identity.read records removed in this process
-	conflict string // the model whose family conflict this process raised
+	// conflicts are the family and model pairs whose conflict this
+	// process raised, so a model that alternates raises each pair once.
+	conflicts map[[2]string]bool
 }
 
 // identityOf returns the asset's state, reading its stream the first time.
@@ -589,17 +591,17 @@ func (s *Scheduler) identityChanged(ctx context.Context, assetID string, prev, n
 
 // familyConflict raises AlarmIdentityFamilyConflict and its health event
 // when the stored identity's device-read model is outside the models its
-// declared product_family covers, once per model in this process. Neither
-// names the model, which is device text: status holds it.
+// declared product_family covers, once per family and model in this
+// process. Neither names the model, which is device text: status holds it.
 func (s *Scheduler) familyConflict(ctx context.Context, assetID string, st *identityState) {
 	family, model := familyConflict(st.doc.Asset)
-	if model == st.conflict {
+	if model == "" || st.conflicts[[2]string{family, model}] {
 		return
 	}
-	st.conflict = model
-	if model == "" {
-		return
+	if st.conflicts == nil {
+		st.conflicts = map[[2]string]bool{}
 	}
+	st.conflicts[[2]string{family, model}] = true
 	s.rt.opt.Status.Raise(assetID, AlarmIdentityFamilyConflict, fmt.Sprintf("record %s: the device-read model is not one product_family %s covers; an administrator settles it, and it is never a match input", st.doc.InvocationID, family))
 	s.rt.health(ctx, HealthIdentityFamilyConflict, map[string]string{"asset_id": assetID, "product_family": family, "evidence_id": st.doc.InvocationID})
 }
