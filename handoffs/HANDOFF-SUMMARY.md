@@ -95,6 +95,8 @@ After the ack, each agent's NEXT ACTION is:
 - ~~Role 5: refusing `clear-suspension.json` off-lab.~~ Queued for right after the item 3 gate by D4-59, with the Windows node start stall; no longer STALLED.
 - Role 4: IDS (item 4) is untouched by design. It waits on the owner's protocols.
 
+**Open, not STALLED (D4-59):** the real-store test of D4-21's byte share (HR-11), role 6's test against role 4's receiver. It gates the first `device-observed` listener, not item 3.
+
 ## How the D team works
 
 - Each D agent runs in its own thread, named for it, on its own branch, and opens PRs against `main`.
