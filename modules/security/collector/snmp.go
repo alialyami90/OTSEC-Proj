@@ -188,7 +188,7 @@ func (r *SNMPRunner) session(ctx context.Context, plan RunPlan, now func() time.
 			return err
 		}
 		s := snmpv3.Session{
-			Conn: &udpConn{ctx: ctx, c: nc, buf: make([]byte, 65535)},
+			Conn: &udpConn{ctx: ctx, c: nc, now: now, buf: make([]byte, 65535)},
 			Keys: snmpv3.Keys{User: usm.UserName, Auth: snmpv3.AuthProto(usm.Auth), AuthKey: authKey,
 				Priv: snmpv3.PrivProto(usm.Priv), PrivKey: privKey},
 			EngineID: engine,
@@ -226,10 +226,13 @@ func egressPermit(pkg *register.Package, engine []byte, user string, privKey []b
 
 // udpConn is snmpv3.Conn over a connected UDP socket, so Read returns only
 // datagrams from the endpoint's address and port (D4-53). A read never
-// outlives the run's context.
+// outlives the run's context. The client's deadline is on the session clock
+// now, which a test build steps (C5 on #461): the socket waits the same
+// length of real time.
 type udpConn struct {
 	ctx context.Context
 	c   net.Conn
+	now func() time.Time
 	buf []byte
 }
 
@@ -239,6 +242,7 @@ func (u *udpConn) Write(b []byte) error {
 }
 
 func (u *udpConn) Read(deadline time.Time) ([]byte, error) {
+	deadline = time.Now().Add(deadline.Sub(u.now()))
 	if d, ok := u.ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}

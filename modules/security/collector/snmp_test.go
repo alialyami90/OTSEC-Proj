@@ -291,15 +291,23 @@ func TestSNMPRunRefusals(t *testing.T) {
 
 // Discovery with no answer: two unauthenticated requests, each one the
 // egress check allows, and failed.timeout, which suspends nothing. The
-// runner's clock is an hour behind, so every read times out at once.
+// runner's clock is stepped, an hour behind the wall clock, and does not
+// move: each read still waits its full step timeout in real time (C5 and C1
+// on #461). Before the fix every read timed out at once.
 func TestSNMPRunDiscoveryTimeout(t *testing.T) {
-	r := &SNMPRunner{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0"}, Now: func() time.Time { return time.Now().Add(-time.Hour) }}
+	stepped := time.Now().Add(-time.Hour)
+	r := &SNMPRunner{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0"}, Now: func() time.Time { return stepped }}
 	f := newSNMPPipeline(t, r)
 	r.Alarm = f.pipe.cfg.Alarm
 	ch := f.serve(func([]byte) []byte { return nil })
+	start := time.Now()
 	reply, o := f.run(t, f.runReq(f.ref.ID))
 	if !reply.Accepted() {
 		t.Fatalf("refused: %+v", reply)
+	}
+	// Two reads of the 3000 ms step timeout, less a margin for the timer.
+	if waited := time.Since(start); waited < 5500*time.Millisecond {
+		t.Fatalf("the reads waited %v in all, want about 6s", waited)
 	}
 	for _, m := range received(t, ch, 2) {
 		egressAllows(t, f, "sel27x1.snmp.system", false, m)
@@ -339,12 +347,12 @@ func TestSNMPRunEngineMismatch(t *testing.T) {
 
 // Discovery answered with the pinned engine ID: the next message is the
 // authPriv request, encrypted with the installed key, which the egress check
-// allows. It gets no answer: failed.timeout, nothing suspended. The runner's
-// clock is two seconds behind, so each step read waits one second.
+// allows. It gets no answer: failed.timeout, nothing suspended. The runner
+// has the pipeline's test clock.
 func TestSNMPRunAuthPrivThroughEgress(t *testing.T) {
-	r := &SNMPRunner{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0"}, Now: func() time.Time { return time.Now().Add(-2 * time.Second) }}
+	r := &SNMPRunner{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0"}}
 	f := newSNMPPipeline(t, r)
-	r.Alarm = f.pipe.cfg.Alarm
+	r.Alarm, r.Now = f.pipe.cfg.Alarm, f.clock.now
 	engine := mustHexT(t, snmpEngine)
 	first := true
 	ch := f.serve(func(req []byte) []byte {
