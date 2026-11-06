@@ -115,8 +115,14 @@ type Agent struct {
 	done  chan struct{}
 }
 
-// Start listens on addr ("127.0.0.1:0" for any port).
+// Start listens on addr ("127.0.0.1:0" for any port), which must be a
+// loopback IP literal: GT-MIB never listens beyond this host (D2-10; D3
+// on #496). Both sockets bind that address.
 func Start(addr string, cfg Config) (*Agent, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("gt-mib: listen address %q: a loopback IP literal only", addr)
+	}
 	if cfg.MaxSize == 0 {
 		cfg.MaxSize = 65507
 	}

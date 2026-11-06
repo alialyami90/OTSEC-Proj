@@ -472,3 +472,37 @@ func TestReportRule(t *testing.T) {
 		}
 	}
 }
+
+// TestStartListensOnLoopbackOnly: Start itself refuses every address that
+// is not a loopback IP literal, before either socket binds (D3 on #496).
+func TestStartListensOnLoopbackOnly(t *testing.T) {
+	cfg, err := NewCase("I1", Spec{EngineID: testEngine, User: "gt-mib", Auth: AuthSHA256, Password: testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, addr := range []string{"0.0.0.0:0", ":0", "localhost:0", "[::]:0", "192.0.2.1:0", "127.0.0.1"} {
+		if a, err := Start(addr, cfg); err == nil {
+			a.Close()
+			t.Errorf("Start(%q) listened on %v", addr, a.Addr())
+		}
+	}
+	for _, addr := range []string{"127.0.0.1:0", "[::1]:0"} {
+		if addr == "[::1]:0" {
+			c, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback})
+			if err != nil {
+				t.Logf("not started at %s: this host has no IPv6 loopback (%v)", addr, err)
+				continue
+			}
+			c.Close()
+		}
+		a, err := Start(addr, cfg)
+		if err != nil {
+			t.Errorf("Start(%q): %v", addr, err)
+			continue
+		}
+		if !a.Addr().IP.IsLoopback() || !a.alt.LocalAddr().(*net.UDPAddr).IP.IsLoopback() {
+			t.Errorf("Start(%q) bound %v and %v", addr, a.Addr(), a.alt.LocalAddr())
+		}
+		a.Close()
+	}
+}

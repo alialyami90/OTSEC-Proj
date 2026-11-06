@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -62,10 +61,7 @@ func run() error {
 		fmt.Println(hex.EncodeToString(append(append([]byte(nil), u.AuthKey...), u.PrivKey[:16]...)))
 		return nil
 	}
-	host, _, err := net.SplitHostPort(*listen)
-	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("-listen %q: a loopback IP literal only (D2-10)", *listen)
-	}
+	// agent.Start refuses any address that is not a loopback IP literal.
 	cfg, err := agent.NewCase(*id, agent.Spec{EngineID: engine, User: *user, Auth: a, Password: password, LogPath: *logPath})
 	if err != nil {
 		return err
