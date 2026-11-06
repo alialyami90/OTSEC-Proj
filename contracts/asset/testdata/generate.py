@@ -249,6 +249,12 @@ def switch():
     }
 
 
+def set_engine_id(a, value):
+    for o in attr(a, "snmp_engine_id")["observations"]:
+        o["value"] = value
+    attr(a, "snmp_engine_id")["value"] = value
+
+
 def port_server():
     # D2-16, H-13: a valid record whose endpoint is behind a port server, so
     # CheckPath refuses a session to it.
@@ -448,6 +454,9 @@ INVALID = {
         level="encrypted-weak", acknowledgement={"by": "admin:lab-admin", "at": T0, "reason": "test", "scope": "lab-only"})),
     "engine-id-not-hex": (switch, lambda a: [o.update(value="80:00:7c:4f:03") for o in attr(a, "snmp_engine_id")["observations"]]
                           and attr(a, "snmp_engine_id").update(value="80:00:7c:4f:03")),
+    # RFC 3411 section 5: an SnmpEngineID is never all zeros or all 'ff'H.
+    "engine-id-all-zeros": (switch, lambda a: set_engine_id(a, "00" * 5)),
+    "engine-id-all-ff": (switch, lambda a: set_engine_id(a, "ff" * 32)),
 }
 
 INVALID_PROFILES = {

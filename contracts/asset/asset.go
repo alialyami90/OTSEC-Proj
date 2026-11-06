@@ -591,7 +591,7 @@ var (
 	// names a register package's family with the same token ("sel-751").
 	familyPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	// engineIDPattern is an SnmpEngineID in lowercase hex: 5 to 32 octets
-	// (RFC 3411).
+	// (RFC 3411). Validate also refuses all zeros and all ff (RFC 3411 §5).
 	engineIDPattern = regexp.MustCompile(`^([0-9a-f]{2}){5,32}$`)
 )
 
@@ -1002,6 +1002,10 @@ func (v *validator) value(path, name, val string) {
 	case AttrSNMPEngineID:
 		if !engineIDPattern.MatchString(val) {
 			v.fail("%s: %q is not an engine ID: 5 to 32 octets in lowercase hex", path, val)
+		} else if strings.Trim(val, "0") == "" || strings.Trim(val, "f") == "" {
+			// RFC 3411 section 5. The pattern makes val even-length hex, so
+			// all "0" is all zero octets and all "f" all 'ff'H octets.
+			v.fail("%s: %q is all zeros or all ff, which RFC 3411 section 5 forbids for an engine ID", path, val)
 		}
 	}
 }
