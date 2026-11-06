@@ -37,6 +37,15 @@ dict), from the node's own status and store, and from the audit chain:
     the identity, the newest snapshot's run, and the run that retrieved a
     change after the first one.
 
+One more node is an operator-only mismatch (D1 on #504, D4-61, P4-H3
+step 3): D2's asset declares D2's FID, and its simulator serves
+MISMATCH_FID from the first read, so no read ever confirms the identity.
+The run is refused as identity_mismatch, the identity stays the operator's,
+and identity.read holds the mismatch alone. The finding must be
+applicable-by-version with firmware-version unread and the declaration
+stale, before and after a restart (vm7.check_mismatch with no confirming
+read). Its cells are not GT-ADV's and are not checked.
+
 A row with controls (D8, D9 and D10: tcp/80) has them as its asset's
 asset_controls entry (D4-56). The node records them with a policy.apply
 asset_controls_declared record, and a mitigation they hold cites that
@@ -75,6 +84,8 @@ EVERY = 60
 # it as identity_mismatch.
 RESTART_ROWS, MISMATCH_ROW = ("D1", "D8"), "D2"
 MISMATCH_FID = "SEL-751-R501-V0-Z104101-D20260911"
+# The operator-only mismatch's run, on MISMATCH_ROW's asset.
+OP_MISMATCH = "op-mismatch"
 # The first read is a minute after the node starts; a run takes seconds.
 FIRST = 150
 FINDING = "otsec.finding/"
@@ -98,12 +109,12 @@ def _schema(d):
 class _Run:
     """One device-read row's node and simulator."""
 
-    def __init__(self, d, row, bin_dir, operators):
-        self.d, self.row, self.operators = d, row, operators
+    def __init__(self, d, row, bin_dir, operators, op_mismatch=False):
+        self.d, self.row, self.operators, self.op_mismatch = d, row, operators, op_mismatch
         self.s = Slice(d, bin_dir=bin_dir)
         self.s.node_tags = ("otsec_testclock",)
         self.settings = os.path.join(d, "settings.json")
-        self.config_reads = bool(row["settings"]) or row["stale"]
+        self.config_reads = (bool(row["settings"]) or row["stale"]) and not op_mismatch
 
     def asset(self):
         return self.s.layout["asset_id"]
@@ -140,7 +151,9 @@ class _Run:
             setup_extra += ("-config-every", str(EVERY))
         if self.operators:
             setup_extra += ("-gtadv-operators",)
-        out = {"row": row["id"]}
+        out = {"row": OP_MISMATCH if self.op_mismatch else row["id"]}
+        if self.op_mismatch:
+            return self.run_op_mismatch(out, setup_extra)
         try:
             s.start(fid=row["fid"], sim_extra=sim_extra, setup_extra=setup_extra)
             out["layout"] = s.layout
@@ -171,6 +184,26 @@ class _Run:
                 out["mismatched"] = self.collect()
                 self.restart()
                 out["mismatched_restarted"] = self.collect()
+        finally:
+            s.stop()
+            out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
+        return out
+
+    def run_op_mismatch(self, out, setup_extra):
+        """The operator-only mismatch: the declared FID is the row's, and the
+        simulator serves MISMATCH_FID from the first read."""
+        s = self.s
+        ident = lambda: (_status(s).get("identity") or {}).get(self.asset()) or {}  # noqa: E731
+        try:
+            s.start(fid=MISMATCH_FID, setup_extra=setup_extra)
+            out["layout"] = s.layout
+            self.wait(lambda: ident().get("mismatch") and (self.evaluated(self.asset()) or {}).get("at")
+                      and _parse(self.evaluated(self.asset())["at"]) >= _parse(ident()["mismatch"]["at"]),
+                      "no evaluation after the mismatch read", FIRST)
+            out["mismatch"] = ident()["mismatch"]["invocation_id"]
+            out["mismatched"] = self.collect()
+            self.restart()
+            out["mismatched_restarted"] = self.collect()
         finally:
             s.stop()
             out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
@@ -269,9 +302,12 @@ def runs(tmp_path_factory):
     only = os.environ.get("OTSEC_VM7_ROWS")  # a comma list of device-read rows, for a local look at a few
     if only:
         rows = [r for r in rows if r["id"] in only.split(",")]
-    with concurrent.futures.ThreadPoolExecutor(len(rows)) as pool:
+    with concurrent.futures.ThreadPoolExecutor(len(rows) + 1) as pool:
         futures = {r["id"]: pool.submit(_Run(str(tmp_path_factory.mktemp(r["id"])), r, builder.bin, r["id"] == "D1").run)
                    for r in rows}
+        mm = next((r for r in rows if r["id"] == MISMATCH_ROW), None)
+        if mm:
+            futures[OP_MISMATCH] = pool.submit(_Run(str(tmp_path_factory.mktemp(OP_MISMATCH)), mm, builder.bin, False, True).run)
         out = {}
         for i, f in futures.items():
             # One row's failure is that row's, not every row's.
@@ -284,7 +320,7 @@ def runs(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def observed(runs):
-    runs = {i: o for i, o in runs.items() if "error" not in o}
+    runs = {i: o for i, o in runs.items() if "error" not in o and i != OP_MISMATCH}
     assert runs, "no row's node ran"
     sets = {i: (o["cells"]["status"].get("applicability") or {}).get("set_in_use") for i, o in runs.items()}
     first = next(iter(sets.values()))
@@ -372,7 +408,28 @@ def test_a_later_mismatch_is_kept_apart_and_hides_no_advisory(runs, when):
     assert bad == [], bad
 
 
-@pytest.mark.parametrize("row", [r["id"] for r in DEVICE_ROWS])
+@pytest.mark.parametrize("when", ["mismatched", "mismatched_restarted"])
+def test_an_operator_only_mismatch_is_kept_apart_and_hides_no_advisory(runs, when):
+    # No read ever confirmed the identity, so it stays the operator's, the
+    # identity.read document holds the mismatch alone, and every SEL-751
+    # advisory is applicable-by-version with the declaration stale. Under
+    # C12 0.1 the operator finding cannot cite the read (a C12 0.2 item).
+    state, mismatch = _scenario(runs, OP_MISMATCH, when, "mismatch")
+    asset = _observe(state, MISMATCH_ROW)
+    assert asset["identity"]["source"] == "operator" and (asset["identity"]["evidence_id"] or "").startswith("audit:"), asset["identity"]
+    bad = [b for adv in ADVISORIES_OF_THE_751 for b in vm7.check_mismatch(asset, adv, mismatch, MISMATCH_FID, None)]
+    # Each finding rests on the declaration's policy.apply record.
+    bad += [f"{adv}: identity evidence {asset['findings'][adv][-1]['identity']['evidence']}" for adv in ADVISORIES_OF_THE_751
+            if asset["findings"].get(adv) and asset["findings"][adv][-1]["identity"]["evidence"][0]["id"] != asset["identity"]["evidence_id"]]
+    assert bad == [], bad
+
+
+def test_an_operator_only_mismatch_survives_a_restart(runs):
+    before, after = _scenario(runs, OP_MISMATCH, "mismatched", "mismatched_restarted")
+    assert vm7.check_restart(_all(before), _all(after)) == []
+
+
+@pytest.mark.parametrize("row", [r["id"] for r in DEVICE_ROWS] + [OP_MISMATCH])
 def test_v_s7_only_read_only_register_lines_reached_the_device(runs, row):
     # V-S7 (b) over this row's recordings, the mismatch's replacement
     # simulator included: every line is a revision 5 read-only line, none
