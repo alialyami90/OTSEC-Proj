@@ -22,6 +22,12 @@ tick (15 s).
      set in use is version 2, and version 1's refusal is not recorded again
      (once per file hash, across restarts).
   5. Version 3, valid: installed, naming previous version 2.
+  6. Test key 0, which signed every set the node took, revoked in the
+     node's configuration, and the node restarted: version 3 is dropped at
+     start (C11 1.5, D4-53), no older set is used in its place, the
+     advisory-set-refused alarm names the stored set's SHA-256 with
+     revoked_key, the file still in admin_dir is refused and recorded with
+     revoked_key, and no finding is stored after the restart.
 Every finding the node stored names the set it was made under, by ID,
 version and issued_at, each a set the node installed (every report
 carries the set's version and date).
@@ -29,6 +35,7 @@ carries the set's version and date).
 Evidence class: simulated. No device is contacted; every key is a test key.
 """
 
+import datetime
 import json
 import os
 import shutil
@@ -114,10 +121,8 @@ def run(tmp_path_factory):
         _leave(s, "valid", 1)
         harness.wait_for(lambda: False, TICK + 2, step=1.0)
         n = len(_advisory_records(s))
-        s.kill("node")
-        s.respawn("node")
-        _wait(s, lambda: _in_use(s) and _status(s).get("applicability", {}).get("set_in_use", {}).get("in_use_since") != out["in_use_v2"]["in_use_since"],
-              "no set in use after the restart")
+        _restart(s)
+        _wait(s, lambda: _in_use(s), "no set in use after the restart")
         harness.wait_for(lambda: False, 2 * TICK + 2, step=1.0)
         out["restarted"] = {"in_use": _in_use(s), "records": _advisory_records(s)[n:]}
 
@@ -128,9 +133,39 @@ def run(tmp_path_factory):
         _wait(s, lambda: any(f["set"]["version"] == 3 for f in _findings(s)), "no finding under version 3")
         out["records"] = _advisory_records(s)
         out["findings"] = _findings(s)
+
+        # 6. Test key 0 revoked in the configuration, and a restart: version
+        # 3, signed with it, is dropped at start, and no older set is used.
+        _restart(s, revoke=out["v3"]["key_id"])
+        harness.wait_for(lambda: False, 2 * TICK + 2, step=1.0)
+        out["revoked"] = {"status": _status(s), "records": _advisory_records(s)[len(out["records"]):],
+                          "findings": _findings(s)[len(out["findings"]):]}
     finally:
         s.stop()
     return out
+
+
+def _written(s):
+    w = _status(s).get("written")
+    return datetime.datetime.fromisoformat(w.replace("Z", "+00:00")) if w else None
+
+
+def _restart(s, revoke=None):
+    """Kill the node, optionally mark the anchor revoke (a key ID) revoked
+    in its configuration, start it again, and wait until it has written
+    status since."""
+    s.kill("node")
+    killed = datetime.datetime.now(datetime.timezone.utc)
+    if revoke:
+        with open(s.layout["node_config"], "r+", encoding="utf-8") as f:
+            nc = json.load(f)
+            (a,) = [a for a in nc["applicability"]["anchors"] if a["key_id"] == revoke]
+            a["status"] = "revoked"
+            f.seek(0)
+            json.dump(nc, f, indent=2)
+            f.truncate()
+    s.respawn("node")
+    _wait(s, lambda: (_written(s) or killed) > killed and "applicability" in _status(s), "no status written after the restart")
 
 
 def _findings(s):
@@ -187,3 +222,16 @@ def test_every_finding_names_an_installed_set_by_version_and_date(run):
     for f in run["findings"]:
         key = (f["set"]["id"], f["set"]["version"])
         assert key in installed and f["set"]["issued_at"] == installed[key], (f["set"], installed)
+
+
+def test_a_revoked_key_drops_the_set_in_use_at_start(run):
+    r, v3 = run["revoked"], run["v3"]
+    app = r["status"]["applicability"]
+    assert not app.get("set_in_use"), app
+    alarms = [a for a in r["status"].get("alarms") or [] if a.get("code") == "advisory-set-refused"
+              and v3["file_sha256"] in (a.get("message") or a.get("detail") or "") and "revoked_key" in (a.get("message") or a.get("detail") or "")]
+    assert alarms, r["status"].get("alarms")
+    assert [(x["action"], x.get("outcome"), x.get("reason_code"), x["advisory"]["file_sha256"]) for x in r["records"]] == \
+        [("advisory.set_refused", "denied", "revoked_key", v3["file_sha256"])], r["records"]
+    assert (app["last_refusal"]["file_sha256"], app["last_refusal"]["code"]) == (v3["file_sha256"], "revoked_key"), app["last_refusal"]
+    assert r["findings"] == [], r["findings"]

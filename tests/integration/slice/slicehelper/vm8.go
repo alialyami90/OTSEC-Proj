@@ -32,10 +32,10 @@ func vm8(nc *nodeconfigtest.Config) {
 }
 
 // advisoryFile leaves one of V-M8's set files in admin_dir as
-// advisory-set.json, replacing any there, and prints its SHA-256 and the
-// code a node must give it ("" for a set it must take). Every case but
-// valid is built from GT-ADV's set at version, signed with test key 0,
-// with one thing wrong:
+// advisory-set.json, replacing any there, and prints its SHA-256, the ID of
+// the key that signed it and the code a node must give it ("" for a set it
+// must take). Every case but valid is built from GT-ADV's set at version,
+// signed with test key 0, with one thing wrong:
 //
 //	valid               nothing
 //	unsigned            the envelope has no signature (malformed, "no signature")
@@ -121,7 +121,8 @@ func advisoryFile(root, repo, kind string, version uint64) error {
 	if err := replaceAdminFile(a.l.AdminDir, "advisory-set.json", file); err != nil {
 		return err
 	}
-	out, err := json.Marshal(map[string]any{"file_sha256": sha256Hex(file), "code": code, "payload_sha256": sha256Hex(payload)})
+	out, err := json.Marshal(map[string]any{"file_sha256": sha256Hex(file), "code": code, "payload_sha256": sha256Hex(payload),
+		"key_id": advisory.KeyID(key.Public().(ed25519.PublicKey))})
 	if err != nil {
 		return err
 	}

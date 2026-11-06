@@ -8,9 +8,17 @@ so every packet any process of the run sends is on one of two interfaces:
     to any other address is routed there and read by this module instead
     of failing with "network unreachable" before it is sent.
 
-setup() brings lo up and makes d0; Capture records what is sent on both.
-Both need root, which the namespace's creator has. Nothing here sends a
-packet. Evidence class: simulated.
+d0 holds the IPv4 default route and, where the kernel has IPv6, the IPv6
+default route too (C3 on #470), so an attempt to reach any address of
+either family becomes a packet on d0 rather than an error before any
+packet exists. Where the kernel has no IPv6, no process can open an IPv6
+socket at all, and probe() records that.
+
+setup() brings lo up and makes d0; Capture records what is sent on both;
+probe() checks that a datagram to an outside address of each family is
+read from d0. All three need root, which the namespace's creator has. The
+only packets this module sends are probe()'s, into d0, which only this
+module reads. Evidence class: simulated.
 """
 
 import fcntl
@@ -19,6 +27,7 @@ import socket
 import struct
 import subprocess
 import threading
+import time
 
 ETH_P_ALL = 0x0003
 PACKET_OUTGOING = 4
@@ -32,16 +41,57 @@ def interfaces():
     return sorted(name for _, name in socket.if_nameindex())
 
 
+def ipv6():
+    """Whether this kernel lets a process open an IPv6 socket."""
+    try:
+        socket.socket(socket.AF_INET6, socket.SOCK_DGRAM).close()
+        return True
+    except OSError:
+        return False
+
+
 def setup():
-    """lo up, and d0 holding the default route. Returns d0's file
-    descriptor, which Capture reads; d0 lives while it is open."""
+    """lo up, and d0 holding the default route of each family. Returns d0's
+    file descriptor, which Capture reads; d0 lives while it is open."""
     subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
     fd = os.open("/dev/net/tun", os.O_RDWR)
     fcntl.ioctl(fd, TUNSETIFF, struct.pack("16sH", TUN.encode(), IFF_TUN | IFF_NO_PI))
-    for argv in (["ip", "addr", "add", "10.99.0.1/24", "dev", TUN], ["ip", "link", "set", TUN, "up"],
-                 ["ip", "route", "add", "default", "dev", TUN]):
+    steps = [["ip", "addr", "add", "10.99.0.1/24", "dev", TUN]]
+    if ipv6():
+        # No link-local address and no router solicitation, so the kernel
+        # itself sends as little as it can on d0; probe() drains the rest.
+        for name, value in (("addr_gen_mode", "1"), ("accept_ra", "0"), ("router_solicitations", "0")):
+            with open(f"/proc/sys/net/ipv6/conf/{TUN}/{name}", "w") as f:
+                f.write(value)
+        steps.append(["ip", "-6", "addr", "add", "fd99::1/64", "dev", TUN, "nodad"])
+    steps.append(["ip", "link", "set", TUN, "up"])
+    steps.append(["ip", "route", "add", "default", "dev", TUN])
+    if ipv6():
+        steps.append(["ip", "-6", "route", "add", "default", "dev", TUN])
+    for argv in steps:
         subprocess.run(argv, check=True)
     return fd
+
+
+PROBES = {4: ("192.0.2.1", 9), 6: ("2001:db8::1", 9)}  # documentation addresses
+
+
+def probe(tun_fd, settle=3.0):
+    """Send one UDP datagram to an outside address of each family the
+    kernel has, and read d0 for settle seconds. Returns {"seen": {family:
+    bool}, "ipv6": bool, "other": [packets on d0 that were not a probe]}.
+    The kernel's own packets at d0's start (IPv6 multicast reports) are
+    read here, so a run's capture does not hold them."""
+    fams = [4, 6] if ipv6() else [4]
+    c = Capture(tun_fd)
+    for v in fams:
+        with socket.socket(socket.AF_INET if v == 4 else socket.AF_INET6, socket.SOCK_DGRAM) as sock:
+            sock.sendto(b"otsec-vm8-probe", PROBES[v])
+    time.sleep(settle)
+    _, ext = c.stop()
+    seen = {v: any(p[0] == v and (p[4], p[5]) == PROBES[v] for p in ext if p[0] != "other") for v in fams}
+    other = [p for p in ext if p[0] == "other" or (p[4], p[5]) not in PROBES.values()]
+    return {"seen": seen, "ipv6": ipv6(), "other": other}
 
 
 def parse_ip(b):

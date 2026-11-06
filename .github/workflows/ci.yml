@@ -198,4 +198,4 @@ jobs:
           go build -tags otsec_testclock -o "$bin/otsec" ./cmd/otsec
           go build -o "$bin/otsec-collector" ./cmd/otsec-collector
           go build -o "$bin/slicehelper" ./tests/integration/slice/slicehelper
-          sudo env "PATH=$PATH" OTSEC_SLICE_REQUIRED=1 OTSEC_VM8_BIN="$bin" unshare -n python -m pytest -q -rs -p no:cacheprovider tests/integration/slice/test_slice_vm8_paired_e2e.py
+          sudo env "PATH=$PATH" OTSEC_SLICE_REQUIRED=1 OTSEC_VM8_BIN="$bin" unshare -n python -m pytest -q -rA -p no:cacheprovider tests/integration/slice/test_slice_vm8_paired_e2e.py

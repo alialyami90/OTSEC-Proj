@@ -24,7 +24,11 @@ Pass (V-M8, D4-49 Q12, D4-50), for A1 against A2 and for A1 against B:
     simulator's port), in order, with the same packet count each;
   - no flow in the second run that the first lacks, over every
     destination, servers named by role (device, upstream);
-  - nothing at all routed to d0, in any run.
+  - nothing at all routed to d0, in any run; before the runs, a datagram
+    to an outside address of each family the kernel has is read from d0,
+    and where the kernel has no IPv6, no IPv6 socket can be opened.
+B against A1 measures R9 together with GT-ADV's declared identity (C5 on
+#470), which is what a real R9 install configures.
 The upstream RELP flow exists in every run; its volume may differ,
 because the R9 run forwards its own health and finding events (D4-50).
 If the A/A pair's packet counts differ, the difference is brought to C1
@@ -35,6 +39,7 @@ Evidence class: simulated. No device is contacted.
 
 import os
 import shutil
+import socket
 
 import pytest
 
@@ -49,6 +54,7 @@ SESSIONS = 2
 # The first session is a minute after the node starts, the next a minute
 # later; a session takes seconds.
 LIMIT = 60 * SESSIONS + 90
+PROBE = {}  # netcapture.probe()'s result, before the first run
 
 
 def _closed(log):
@@ -106,6 +112,7 @@ def runs(tmp_path_factory):
          "the paired runs need root in a network namespace of their own: sudo unshare -n python -m pytest ...")
     tun = netcapture.setup()
     try:
+        PROBE.update(netcapture.probe(tun))
         # No network in the namespace, so the module cache cannot be filled
         # here: CI builds the binaries before it enters (OTSEC_VM8_BIN:
         # otsec tagged otsec_testclock, otsec-collector and slicehelper).
@@ -119,6 +126,19 @@ def runs(tmp_path_factory):
                 for name, r9 in (("A1", False), ("A2", False), ("B", True))}
     finally:
         os.close(tun)
+
+
+def test_the_capture_sees_a_packet_to_an_outside_address(runs):
+    # d0 takes what is routed off the host, in each family the kernel has.
+    # A kernel with no IPv6 lets no process open an IPv6 socket, so nothing
+    # can leave by IPv6 (C3 on #470); the test says which case it ran.
+    assert PROBE["seen"].get(4), PROBE
+    if PROBE["ipv6"]:
+        assert PROBE["seen"].get(6), PROBE
+    else:
+        with pytest.raises(OSError):
+            socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    print("IPv6 in the namespace:", PROBE["ipv6"], "; kernel packets on d0 at its start:", PROBE["other"])
 
 
 def test_each_run_made_its_sessions_and_b_ran_r9(runs):
