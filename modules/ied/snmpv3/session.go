@@ -37,8 +37,8 @@
 //
 // The client cannot write a SET: requestPDU has no encoder for one, and the
 // steps come from a validated C3 0.4 package, whose PDU enum has none. Every
-// outgoing scoped PDU also passes Permit, the egress check, before it is
-// encrypted (C3's #437 §4 rule 4).
+// outgoing message also passes Permit, the egress check, as it will leave:
+// encoded, encrypted and signed, just before it is written (C11 §4 rule 4).
 package snmpv3
 
 import (
@@ -95,9 +95,12 @@ type Session struct {
 	// snmp_engine_id, which the collector has checked equals the
 	// credential's (C1 0.3 §1.4).
 	EngineID []byte
-	// Permit is the egress check over every outgoing scoped PDU, before
-	// encryption. Required: a session without it sends nothing.
-	Permit func(scopedPDU []byte) error
+	// Permit is the egress check over every outgoing message, given the
+	// final wire bytes just before they are written. step is the register
+	// operation the message is sent for (discovery's is the run's first
+	// step, whose max_reply_bytes it advertises), and engineKnown is false
+	// only for discovery. Required: a session without it sends nothing.
+	Permit func(step string, engineKnown bool, msg []byte) error
 	Now    func() time.Time
 }
 
@@ -212,16 +215,13 @@ func newID() int64 {
 	return int64(binary.BigEndian.Uint32(b[:]) & 0x7FFFFFFF)
 }
 
-// send encodes, checks, protects and writes one request. secure false is
-// discovery's noAuthNoPriv message.
-func (st *state) send(ph adapter.Phase, secure bool, maxSize int64, reqPDU []byte) (msgID int64, err error) {
+// send encodes, protects, checks and writes one request for step. secure
+// false is discovery's noAuthNoPriv message.
+func (st *state) send(ph adapter.Phase, step string, secure bool, maxSize int64, reqPDU []byte) (msgID int64, err error) {
 	msgID = newID()
 	sc := scopedOf(st.s.EngineID, nil, reqPDU)
 	if !secure {
 		sc = scopedOf(nil, nil, reqPDU)
-	}
-	if err := st.s.Permit(sc); err != nil {
-		return 0, st.end(adapter.FailedEgressViolation, "the egress check refused a request: %v", err)
 	}
 	u := usmParams{}
 	flags := byte(flagReportable)
@@ -246,6 +246,9 @@ func (st *state) send(ph adapter.Phase, secure bool, maxSize int64, reqPDU []byt
 	}
 	if secure {
 		st.s.Keys.sign(wire, m)
+	}
+	if err := st.s.Permit(step, secure, wire); err != nil {
+		return 0, st.end(adapter.FailedEgressViolation, "the egress check refused a request: %v", err)
 	}
 	st.record(adapter.Sent, ph, wire, m, sc)
 	if err := st.s.Conn.Write(wire); err != nil {
@@ -338,6 +341,15 @@ func (st *state) accept(ph adapter.Phase, b []byte, msgID int64) (*reply, bool) 
 	m, err := decodeMessage(b)
 	if err != nil {
 		st.record(adapter.Received, ph, b, nil, nil)
+		return nil, false
+	}
+	// With privacy msgData is the encryptedPDU, and without it the
+	// plaintext ScopedPDU (RFC 3412 §7.2). A message whose privacy flag
+	// disagrees with its msgData is kept as received, digest zeroed, and
+	// discarded: it is never stored or read as a decrypted one (C3, C6 on
+	// #453).
+	if (m.Flags&flagPriv != 0) != m.encrypted() {
+		st.record(adapter.Received, ph, b, m, nil)
 		return nil, false
 	}
 	authed := false
@@ -453,7 +465,7 @@ func (st *state) discover(p *register.Package) error {
 		return st.end(adapter.FailedInternal, "%v", err)
 	}
 	for range 2 {
-		id, err := st.send(adapter.PhaseProbe, false, lim.MaxReplyBytes, req)
+		id, err := st.send(adapter.PhaseProbe, st.run.Steps[0], false, lim.MaxReplyBytes, req)
 		if err != nil {
 			return err
 		}
@@ -495,7 +507,7 @@ func (st *state) exchange(op *register.SNMPOperation, tag byte, a, b int64, oids
 		if !st.synced {
 			ph = adapter.PhaseAuth
 		}
-		id, err := st.send(ph, true, op.Limits.MaxReplyBytes, pdu)
+		id, err := st.send(ph, op.ID, true, op.Limits.MaxReplyBytes, pdu)
 		if err != nil {
 			return nil, sends, err
 		}

@@ -14,7 +14,7 @@ import (
 const runID = "sel27x1.snmp.identity"
 
 func session(a *agent) *Session {
-	return &Session{Conn: a, Keys: testKeys, EngineID: testEngine, Permit: func([]byte) error { return nil }, Now: time.Now}
+	return &Session{Conn: a, Keys: testKeys, EngineID: testEngine, Permit: func(string, bool, []byte) error { return nil }, Now: time.Now}
 }
 
 func run(t *testing.T, a *agent, edit func(p *register.Package)) Outcome {
@@ -369,10 +369,64 @@ func TestUnauthenticatedResponsesDiscarded(t *testing.T) {
 	}
 }
 
+// Permit sees each message exactly as it is written: encoded, encrypted and
+// signed. Discovery goes for the run's first step with the engine unknown,
+// and every later message for its own step with the engine known (C3 on
+// #453).
+func TestPermitSeesTheWire(t *testing.T) {
+	a := newAgent(t)
+	s := session(a)
+	type call struct {
+		step  string
+		known bool
+		msg   []byte
+	}
+	var calls []call
+	s.Permit = func(step string, known bool, msg []byte) error {
+		calls = append(calls, call{step, known, append([]byte(nil), msg...)})
+		return nil
+	}
+	if o := s.Run(identityPackage(t, nil), runID); o.Code != "" {
+		t.Fatalf("%s %s", o.Code, o.Detail)
+	}
+	if len(calls) != len(a.sent) || len(calls) < 3 {
+		t.Fatalf("%d checked, %d sent", len(calls), len(a.sent))
+	}
+	steps := map[string]bool{}
+	for i, c := range calls {
+		if !bytes.Equal(c.msg, a.sent[i]) {
+			t.Errorf("message %d: checked bytes are not the bytes written", i)
+		}
+		m, err := decodeMessage(c.msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secure := m.Flags&flagAuth != 0; c.known != secure {
+			t.Errorf("message %d: engine known %v, authenticated %v", i, c.known, secure)
+		}
+		if c.known && (!m.encrypted() || allZero(m.USM.AuthParams)) {
+			t.Errorf("message %d: checked before it was encrypted and signed", i)
+		}
+		steps[c.step] = true
+	}
+	if calls[0].known || calls[0].step != "sel27x1.snmp.system" || !steps["sel27x1.snmp.entity"] {
+		t.Errorf("steps %v, first %+v", steps, calls[0].step)
+	}
+}
+
+func allZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func TestRefusesBeforeSending(t *testing.T) {
 	a := newAgent(t)
 	s := session(a)
-	s.Permit = func([]byte) error { return errors.New("refused") }
+	s.Permit = func(string, bool, []byte) error { return errors.New("refused") }
 	if o := s.Run(identityPackage(t, nil), runID); o.Code != adapter.FailedEgressViolation || len(a.sent) != 0 {
 		t.Errorf("egress: %s, %d sent", o.Code, len(a.sent))
 	}
