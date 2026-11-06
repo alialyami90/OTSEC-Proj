@@ -114,7 +114,7 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 | C1 0.3, C3 0.4, C2 0.7, C5 0.8, C7 0.8, C8 0.11, C11 0.1 and C12 0.1 merged, with reviewers' records and C6's contract tests | **Met for six of the eight.** C7 0.8 and C12 0.1 are met once #475 merges. |
 | V-S7 still passes, and the egress deny corpus refuses every SNMP write form | **Met for the corpus and the SEL path.** The recordings are met once #475 merges. |
 | No real advisory is in any set, and the gate says which owner questions are open | **Met.** The questions are listed below. |
-| No safety or security objection open | **None open from C6.** F-025 is closed once #476 and #477 merge. C3: *(to confirm before the gate)*. |
+| No safety or security objection open | **None open.** C6 has none, and F-025 is closed once #476 and #477 merge. C3 has none against item 3 as it will stand once #466, #474, #475, #476 and #477 merge, provided they merge at the heads reviewed (C3, 2026-11-06). C3 names two standing limits, which are not objections. No real advisory is entered until the owner decides HR-18. The SNMPv3 path is not pointed at any real device until V-M1 has run and the owner approves device contact. |
 
 ## Owner decisions needed
 
@@ -122,7 +122,7 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
    - allow `www.rfc-editor.org` in the environment's network policy;
    - upload RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860;
    - or close item 3 with V-M1 open as a condition.
-2. **Who publishes the advisory set and holds its signing key** (HR-18). No real advisory is entered until this is answered. C3 recommends an offline Ed25519 key on a dedicated device, with one curator signing and a second person checking each set's citations.
+2. **Who publishes the advisory set and holds its signing key** (HR-18). No real advisory is entered until this is answered. C3 recommends an offline Ed25519 key on a dedicated device, never on central, a node or CI, and never the release key (TB9). One curator would sign, and a second person would check each set's citations.
 3. **Whether reports show publisher severity scores** (C3, #437 §5).
 4. **Whose key may sign a v1 or v2c per-device approval**, if a v1 or v2c path is ever added (HR-17). Item 3 builds none.
 5. **Which SEL switches the sites run.** D4-51 picks the SEL-2731/2741 in RSTP mode on the evidence. The SEL-2730M would follow if the sites run it, with its own ruling on SHA-1.
