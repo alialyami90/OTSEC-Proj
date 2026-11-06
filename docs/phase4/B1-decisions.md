@@ -1004,3 +1004,17 @@ D1, on the D3 (#488) and D5 (#487) acknowledgements.
 - **The real-store test of D4-21's byte share (HR-11)** is role 6's test against role 4's receiver. It gates the first `device-observed` listener, not item 3. It is carried as an open item in the summary until it is briefed.
 - **#486 needs no post-merge review.** Role 6 (C6) passed it at `c81b9e3`, the head that merged. #480's C12 part, checked by D4 on `main`, is recorded in D4's ack only.
 - **`govulncheck` on `main`.** D1 dispatches the workflow on `main` before deciding the item 3 gate, so the decision cites a run on the code it accepts. The weekly run stays as it is (D4-3).
+
+## D4-60: rulings made while V-M1 ran (D1, 2026-11-06)
+
+D1, on #495, #496, #497 and #498, with each owner's and reviewer's word through the coordinator (D4-58).
+
+- **An empty `noError` GetNext Response** (D2's #495, the one point left open). RFC 3416 §4.2.2 never allows a Response to a GetNext with fewer varbinds than the request, but the client still ends such a walk as complete, because no C2 0.8 code names that violation.
+  - The next C2 revision adds a `failed.*` code for it. It does not suspend anything, like the other SNMP protocol codes (D4-54).
+  - Until that revision merges, no signed register may declare a `GETNEXT` walk. Every SNMP operation in a register is a `GET` or a `GETBULK` walk. C2's test package already is, and D6's runner walks with GetBulk only.
+  - This is a recorded item 3 limitation, not a gate item.
+- **The C1 engine-ID rule ships within `otsec.asset/0.3`, with no version bump** (D2's #498, merged as `aae3eb6`). RFC 3411 §5 says an SnmpEngineID may not be all zeros or all `ff`. `Asset.Validate` now refuses such an `snmp_engine_id`. No minor bump, because no valid record changes meaning. Such an asset could never get a credential, since the collector requires the credential's engine ID to equal the asset's. A stored record that already holds such an ID fails closed. None exists in the repository.
+- **C7 0.9 is a minor bump** (D3's #497). It refuses the same engine-ID form in a `snmpv3` credential at install. It was opened under D4-59 and merges after V-M1's counted run, with D2's review and D6's contract tests at its head.
+- **The V-M1 leg** (D6's #496, merged as `73ab7b6`). D1 authorized a new `integration-long` leg for `test_slice_vm1_e2e.py`, with the matrix's 20-minute limit, about twice the measured 9.4 minutes. The step pipes the run's output to `vm1_keysearch.py`, so the CI log itself is searched for the test keys. `ci.yml` now has nineteen jobs, fifteen of them `integration-long` legs.
+- **V-M1 (f) needs its own check on the V-M1 run.** V-M7's runs show the SEL-751's identity read over telnet, but they are other runs and do not show that the SEL-751 receives no SNMP. D6 adds a check to the asset-alone run: a UDP socket on the SEL-751's address and port gets no datagram, its configuration has no SNMP entry, and its identity is device-read over telnet. The gate counts (f) only from that check, green in CI.
+- **F6 was a product defect, not a test error** (D6 on #496). GT-MIB plan §2.2 says a case whose read model belongs to another family shows `identity.family_conflict` in health. `modules/asset.FamilyConflict` existed, but nothing on the node called it. D5 fixed it in #499, and #496's F6 check passed on the binaries only after that.
