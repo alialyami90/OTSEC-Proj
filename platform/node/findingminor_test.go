@@ -78,7 +78,7 @@ func appendUnchecked(t *testing.T, c *Config, stream c5.StreamID, doc []byte) {
 func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
 	const secondID = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
 	for name, tc := range map[string]struct{ schema, shown string }{
-		"0.2":       {"otsec.finding/0.2", `"otsec.finding/0.2"`},
+		"0.3":       {"otsec.finding/0.3", `"otsec.finding/0.3"`}, // 0.2 is known once C12 0.2 lands
 		"0.10":      {"otsec.finding/0.10", `"otsec.finding/0.10"`},
 		"oversized": {"otsec.finding/0." + strings.Repeat("9", 200), `"otsec.finding/0.` + strings.Repeat("9", 64-len("otsec.finding/0.")) + `"`},
 		"control":   {"otsec.finding/0.2\n\x1b[2Jforged", `"otsec.finding/0.2??[2Jforged"`},
