@@ -962,3 +962,27 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
 - **C12 (C4, #476).** `finding.Validate` refuses passive evidence whose ID starts with `audit:`. A device read's ID must now be a lowercase UUID of version 1 to 8 with the RFC variant, the same form as `contracts/adapter`'s invocation ID, so a finding can cite only an ID that C2 would issue. The DRAFT note in `contracts/finding/doc.go` is removed, because C12 0.1 was approved under D4-53. The C12 version does not change: the change only refuses findings that no conforming node writes.
 - **Node IDs (C3, #477).** `node.ID.Valid` refuses `audit`, so the node configuration, the collector configuration, enrollment and the credential store all refuse it. Names that only contain the word, such as `audit1`, stay valid. `contracts/authz` and `contracts/audit` still match `node.IDPattern` directly. They are left as they are, because no configuration can produce a node named `audit`.
 - **Verification (C6).** C6 reviews both changes and adds the pair to `tests/contract/c12_c6_test.go`.
+
+## D4-58: the RFC texts, message routing through the coordinator, and the C-to-D handoff (owner and C1, 2026-11-06)
+
+- **The RFC texts (owner, 11:41Z).**
+  - The owner chose "Allow www.rfc-editor.org" on C1's V-M1 decision card.
+  - C1 added that one host to the cloud environment's allowed hosts. C1 then fetched RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 into the project files (`/mnt/project-files/rfc/`, with `SHA256SUMS`).
+  - Role 6 also needed RFC 2578 (the MIB roots), 3417 (the transport and BER rules), 1157 and 1901. C1 fetched them from the same host. Each matches role 6's own copy byte for byte, and `SHA256SUMS` covers all twelve.
+  - V-M1 is unblocked. GT-MIB may be built only from these texts. The item 3 gate still never counts a GT-MIB built from memory.
+- **Messages between agents go through the coordinator (owner, 11:43Z).** "New rule. All messages run through you the coordinator."
+  - An agent sends a message meant for another agent to the coordinator, which relays it. This replaces direct thread-to-thread messages.
+  - What an agent posts in its own thread, and on its own PRs, is unchanged.
+- **The C team hands off to the D team (owner, 11:55Z).** The owner asked every agent to run a generation checkpoint.
+  - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #484, and C6's). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
+  - Roles, owned paths and rules stay with the number. Wherever a record says A*n*, B*n* or C*n*, read it as the role D*n* now holds.
+  - Phase 4's decision file stays `docs/phase4/B1-decisions.md`, and its numbering continues at D4-59.
+  - Cutover happens once D1 has confirmed all six acks.
+- **Socket waits use the wall clock under a test clock** (C1's ruling on #461, recorded here at C3's request).
+  - The collector's SNMP socket deadlines are taken from the wall clock. The transcript's times come from the session clock.
+  - With the session clock held an hour behind, deadlines taken from it expired at once (fixed by `163a9f9`; `TestSNMPRunDiscoveryTimeout` pins it).
+  - The rule holds for any socket wait in a build with the test clock.
+- **The Windows node start can stall for more than 12 s, and this is an open reliability item** (C5, #471).
+  - The cause is unknown. The CI logs do not show which step of the start stalls.
+  - The lead is #428's profile: recreating the recovery reserve with a flush at every start (F-013). It is unverified.
+  - Investigating it needs role 1's brief. It is not briefed yet.

@@ -24,28 +24,28 @@ Every result is `desk` or `simulated`. No device has been contacted, and no SEL 
 
 ## Team
 
-On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6, and on 2026-10-28 B1 to B6 with C1 to C6 ([GENERATIONS.md](handoffs/GENERATIONS.md)). The roles and scope are unchanged; only the names changed. In older records, "A*n*" and "B*n*" mean the role that C*n* now holds. Start with [handoffs/HANDOFF-SUMMARY.md](handoffs/HANDOFF-SUMMARY.md), which has the agent map and the cross-agent dependencies. Each agent's own handoff is `handoffs/C{n}-handoff.md`.
+On 2026-10-27 the owner replaced agents A1 to A6 with B1 to B6, on 2026-10-28 B1 to B6 with C1 to C6, and on 2026-11-06 C1 to C6 with D1 to D6 ([GENERATIONS.md](handoffs/GENERATIONS.md), D4-58). The roles and scope are unchanged; only the names changed. In older records, "A*n*", "B*n*" and "C*n*" mean the role that D*n* now holds. Start with [handoffs/HANDOFF-SUMMARY.md](handoffs/HANDOFF-SUMMARY.md), which has the agent map and the cross-agent dependencies. Each agent's own handoff is `handoffs/D{n}-handoff.md`.
 
 ## Layout and ownership
 
 | Path | Purpose | Owner |
 | --- | --- | --- |
-| `docs/` | Requirements, architecture, threat model, device capabilities, verification, handoffs, decision records | C1 (shared); C6 owns `docs/verification.md`, C3 `docs/threat-model.md`, C2 `docs/device-capabilities.md` (C1 reviews both) |
-| `handoffs/` | The team handoffs: the summary, the generation log, one handoff and one acknowledgement per agent per generation | C1 (summary and `GENERATIONS.md`); each agent its own files |
-| `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | C1 (each contract drafted by its owner) |
-| `cmd/otsec/` | The site node binary (composition root) | C5 |
-| `cmd/otsec-collector/` | The privileged collector binary | C3 |
-| `modules/ied/` | IED adapters, device identification, native output parsers | C2 |
-| `modules/asset/` | Asset identity (R1.8): turns collector observations into C1 0.3 attributes with their source; node-side, opens no connection, and is switched by the node's `asset` setting (D4-50, P4-3-C2) | C2 |
-| `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | C3 |
-| `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | C4 |
-| `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | C4 |
-| `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | C5 |
-| `tests/fixtures/ied/` | Sanitized real device outputs | C2 |
-| `tests/fixtures/network/` | Sanitized captures and labeled traffic | C4 |
-| `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | C6 |
-| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s fifteen jobs and `govulncheck.yml`'s one job are the main test path, D2-13 and D4-3; Markdown-only PRs skip both, D3-13) | C1 (`a6-*.yml` workflows: C6; `a5-windows-experiments.yml`: C5, changes authorized by C1) |
-| `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | C1 (`contracts/node` maintained by C4) |
+| `docs/` | Requirements, architecture, threat model, device capabilities, verification, handoffs, decision records | D1 (shared); D6 owns `docs/verification.md`, D3 `docs/threat-model.md`, D2 `docs/device-capabilities.md` (D1 reviews both) |
+| `handoffs/` | The team handoffs: the summary, the generation log, one handoff and one acknowledgement per agent per generation | D1 (summary and `GENERATIONS.md`); each agent its own files |
+| `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | D1 (each contract drafted by its owner) |
+| `cmd/otsec/` | The site node binary (composition root) | D5 |
+| `cmd/otsec-collector/` | The privileged collector binary | D3 |
+| `modules/ied/` | IED adapters, device identification, native output parsers | D2 |
+| `modules/asset/` | Asset identity (R1.8): turns collector observations into C1 0.3 attributes with their source; node-side, opens no connection, and is switched by the node's `asset` setting (D4-50, P4-3-C2) | D2 |
+| `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | D3 |
+| `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | D4 |
+| `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | D4 |
+| `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | D5 |
+| `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
+| `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
+| `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |
+| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s eighteen jobs and `govulncheck.yml`'s one job are the main test path, D2-13 and D4-3; Markdown-only PRs skip both, D3-13) | D1 (`a6-*.yml` workflows: D6; `a5-windows-experiments.yml`: D5, changes authorized by D1) |
+| `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | D1 (`contracts/node` maintained by D4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). Agents modify only their owned paths unless explicitly authorized. Shared contracts change only through C1 with a documented proposal and review by affected owners.
 
