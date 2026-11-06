@@ -127,9 +127,11 @@ type findingsState struct {
 }
 
 // LastEvaluationStatus is an asset's last completed evaluation: every
-// finding it returned was stored (D4-54). IdentityEvidenceID is the newest
-// identity record it read, empty when it read none, so status shows it
-// against status.identity's evidence_id.
+// finding it returned was stored (D4-54). IdentityEvidenceID is what it
+// read: the newest identity record's evidence ID, as status.identity's
+// evidence_id shows it, or for an operator identity the declaration's
+// audit reference, as its findings cite it (C1 on #458). It is dropped
+// when a run's identity outcome is not stored (C6 on #458).
 type LastEvaluationStatus struct {
 	SetID              string    `json:"set_id"`
 	Version            uint64    `json:"version"`
@@ -239,6 +241,18 @@ func (fs *findingsState) fold(r c5.Stored) error {
 // notEvaluated raises AlarmNotEvaluated once for the asset and cause.
 func (s *Scheduler) notEvaluated(assetID, cause, why string) {
 	s.raiseOnceKey("not-evaluated "+assetID+" "+cause, assetID, AlarmNotEvaluated, "no finding is computed for this asset until it is fixed: "+why)
+}
+
+// forgetEvaluation drops the asset's last completed evaluation when a run's
+// identity outcome, a record, a read or a mismatch, was not stored (C6 on
+// #458). The evaluation may then describe an identity the device no longer
+// shows, so status must not read it as current; the next completed
+// evaluation sets it again.
+func (s *Scheduler) forgetEvaluation(assetID string) {
+	if fs := s.finds[assetID]; fs != nil && fs.last != nil {
+		fs.last = nil
+		s.publishApplicability()
+	}
 }
 
 // evaluateAll evaluates every declared asset.
@@ -351,6 +365,9 @@ func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findin
 	if !s.declared[assetID].At.After(st.lastAt) {
 		mismatchInput(&in, st)
 	}
+	// The evaluation read the declaration, so status names its record
+	// (C1 on #458).
+	evidence = ref
 	in.Identity = applicability.Identity{Source: finding.Operator, Evidence: ref, FirmwareID: operatorValue(declared, c1.AttrFirmwareID),
 		Model: operatorValue(declared, c1.AttrModel), FirmwareVersion: operatorValue(declared, c1.AttrFirmwareVersion)}
 	return in, evidence, nil

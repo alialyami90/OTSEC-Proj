@@ -130,7 +130,7 @@ func TestFindingsFollowTheIdentity(t *testing.T) {
 		t.Fatalf("operator findings %+v", fs)
 	}
 	st := n.assetFindings()
-	if l := st.LastEvaluation; l == nil || l.Version != 1 || l.SetID != "otsec-sel" || l.IdentityEvidenceID != "" {
+	if l := st.LastEvaluation; l == nil || l.Version != 1 || l.SetID != "otsec-sel" || l.IdentityEvidenceID != fs[0].Identity.Evidence[0].ID {
 		t.Fatalf("last evaluation %+v", l)
 	}
 

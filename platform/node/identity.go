@@ -402,6 +402,7 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 	}
 	st := s.identityOf(ctx, col.AssetID)
 	if st == nil {
+		s.forgetEvaluation(col.AssetID)
 		return
 	}
 	if s.mismatchRead(col, res) {
@@ -409,6 +410,7 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 		return
 	}
 	notStored := func(err error) {
+		s.forgetEvaluation(col.AssetID)
 		s.raiseOnceKey("identity "+col.AssetID, col.AssetID, AlarmIdentityNotStored, "run "+res.InvocationID+" read an identity that was not stored: "+err.Error())
 	}
 	declared, _ := s.rt.cfg.Asset(col.AssetID)
@@ -436,6 +438,7 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 			if !errors.As(err, &ce) {
 				notStored(err)
 			}
+			s.forgetEvaluation(col.AssetID)
 			return
 		}
 		prev := st.doc
@@ -503,6 +506,7 @@ func (s *Scheduler) storeRead(ctx context.Context, assetID string, st *identityS
 			return
 		}
 	}
+	s.forgetEvaluation(assetID)
 	var ce *ceilingError
 	if !errors.As(err, &ce) {
 		s.raiseOnceKey("identity "+assetID, assetID, AlarmIdentityNotStored, what+err.Error())
