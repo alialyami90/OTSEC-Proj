@@ -3,7 +3,10 @@ package authz
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -49,6 +52,8 @@ func TestSNMPv3Credential(t *testing.T) {
 		"engine id of 33 octets":  func(r *CredentialRef) { r.USM.EngineID = strings.Repeat("ab", 33) },
 		"engine id odd length":    func(r *CredentialRef) { r.USM.EngineID = "80007c4f030" },
 		"engine id upper case":    func(r *CredentialRef) { r.USM.EngineID = "80007C4F03020000273101" },
+		"engine id all zeros":     func(r *CredentialRef) { r.USM.EngineID = "0000000000" },
+		"engine id all ff":        func(r *CredentialRef) { r.USM.EngineID = strings.Repeat("ff", 32) },
 		"no attestation":          func(r *CredentialRef) { r.USM.SoleDeviceAttested = false },
 		"snmpv2c is no transport": func(r *CredentialRef) { r.Transport = "snmpv2c" },
 		"snmpv1 is no transport":  func(r *CredentialRef) { r.Transport = "snmpv1" },
@@ -58,6 +63,11 @@ func TestSNMPv3Credential(t *testing.T) {
 		if err := b.Ref.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	near := snmpInstall(t)
+	near.Ref.USM.EngineID = "00000000ff" // neither all zeros nor all ff
+	if err := near.Ref.Validate(); err != nil {
+		t.Errorf("engine id 00000000ff: %v", err)
 	}
 	telnet := installBody(t)
 	telnet.Ref.USM = testUSM()
@@ -150,5 +160,46 @@ func TestSNMPv3NeedsZeroPointEight(t *testing.T) {
 	req.Contract = "otsec.authz/0.7"
 	if _, err := VerifyAdminRequest(roundTrip(t, req), testAdminKeys(), testAdminBind, testAdminNow); err == nil {
 		t.Fatal("an admin-signed snmpv3 install stamped 0.7 accepted")
+	}
+}
+
+// TestSchemaEngineID keeps credential-ref.json's engine_id rule, its pattern
+// and its "not" pattern (0.9), equal to what USM.Validate enforces (D2 on
+// #497).
+func TestSchemaEngineID(t *testing.T) {
+	b, err := os.ReadFile("schema/credential-ref.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties struct {
+			USM struct {
+				Properties struct {
+					EngineID struct {
+						Pattern string
+						Not     struct{ Pattern string }
+					} `json:"engine_id"`
+				}
+			} `json:"usm"`
+		}
+	}
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+	e := s.Properties.USM.Properties.EngineID
+	if e.Pattern != usmEngineIDPattern.String() {
+		t.Errorf("schema pattern %q, code %q", e.Pattern, usmEngineIDPattern.String())
+	}
+	pattern, not := regexp.MustCompile(e.Pattern), regexp.MustCompile(e.Not.Pattern)
+	for _, id := range []string{
+		"80007c4f03020000273101", "0000000000", "00000000ff", "ffffffffff", "ff00000000",
+		strings.Repeat("00", 32), strings.Repeat("ff", 32), "80007c4f", strings.Repeat("ab", 33), "80007C4F03",
+	} {
+		u := testUSM()
+		u.EngineID = id
+		schemaOK := pattern.MatchString(id) && !not.MatchString(id)
+		if codeOK := u.Validate() == nil; schemaOK != codeOK {
+			t.Errorf("engine_id %s: schema accepts %v, code %v", id, schemaOK, codeOK)
+		}
 	}
 }
