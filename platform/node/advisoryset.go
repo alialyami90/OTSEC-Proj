@@ -210,7 +210,7 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	installed := map[string]*audit.Advisory{}
+	installed := map[string]*audit.Record{}
 	var newest *audit.Advisory
 	var firstRetained time.Time
 	for after := c5.Seq(0); ; {
@@ -232,7 +232,7 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 			}
 			switch {
 			case rec.Action == audit.ActionAdvisorySetInstalled && rec.Advisory != nil:
-				installed[rec.Advisory.PayloadSHA256] = rec.Advisory
+				installed[rec.Advisory.PayloadSHA256] = rec
 				newest = rec.Advisory
 			case rec.Action == audit.ActionAdvisorySetRefused && rec.Advisory != nil:
 				if sum, err := hex.DecodeString(rec.Advisory.FileSHA256); err == nil && len(sum) == 32 {
@@ -306,8 +306,23 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 		s.noSet(ctx, fmt.Sprintf("the newest stored set (%s version %d) no longer verifies: %s", set.SetID, set.Version, ref.Code))
 		return nil
 	}
-	s.useSet(ctx, v, n.CommittedAt)
+	// In use since its installation record, as at install, so a restart
+	// does not move it. A set whose record was pruned has only its commit.
+	s.useSet(ctx, v, installedAt(rec, n.CommittedAt))
 	return nil
+}
+
+// installedAt is when rec, a set's advisory.set_installed, was written, or
+// fallback without one.
+func installedAt(rec *audit.Record, fallback time.Time) time.Time {
+	if rec == nil {
+		return fallback
+	}
+	t, err := time.Parse(time.RFC3339Nano, rec.Time.UTC)
+	if err != nil {
+		return fallback
+	}
+	return t
 }
 
 // storedSetsSizes returns each stored set's size, oldest first.
@@ -422,7 +437,7 @@ func (s *Scheduler) writeInstalled(ctx context.Context) {
 	a.floor = advisory.Floor{SetID: v.Set.SetID, Version: v.Set.Version, PayloadSHA256: v.PayloadSHA256}
 	s.rt.health(ctx, HealthAdvisorySetInstalled, map[string]string{"set_id": v.Set.SetID, "version": strconv.FormatUint(v.Set.Version, 10),
 		"payload_sha256": hex.EncodeToString(v.PayloadSHA256[:])})
-	s.useSet(ctx, v, s.now())
+	s.useSet(ctx, v, installedAt(rec, s.now()))
 }
 
 // useSet makes v the set in use.
