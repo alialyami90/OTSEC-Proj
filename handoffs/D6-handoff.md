@@ -94,13 +94,8 @@ Classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows`. Nothing is hardware-veri
 
 ## 4. Blockers and risks
 
-- **B-01:** no hardware.
-- **D4-12:** the owner's PC is paused.
-- **H-17:** the SEL-2731/2741 hardware item, prepared only.
-- **HR-16:** the engine-ID pin, which V-M1 (c) tests.
-- **HR-17:** whether a v1 or v2c path is ever added; V-M1 (d) covers the refusal only.
-- **HR-18:** who holds the advisory key.
-- **F-016:** Windows flush stalls.
+- **B-01** (no hardware), **D4-12** (the owner's PC is paused), **H-17** (the SEL-2731/2741 hardware item, prepared only), **F-016** (Windows flush stalls).
+- **HR-16** (the engine-ID pin, which V-M1 (c) tests), **HR-17** (whether a v1 or v2c path is ever added; V-M1 (d) covers the refusal only), **HR-18** (who holds the advisory key).
 
 All of these are listed in `docs/verification.md` and `docs/threat-model.md`.
 
@@ -113,11 +108,7 @@ All of these are listed in `docs/verification.md` and `docs/threat-model.md`.
 
 ## 5. Decisions and lessons
 
-**Decisions:** [B1-decisions.md](../docs/phase4/B1-decisions.md), especially:
-- D4-49 to D4-51 (SNMPv3 in the collector, the family);
-- D4-53 to D4-57;
-- D4-12;
-- D4-22 (Windows budgets).
+**Decisions:** [B1-decisions.md](../docs/phase4/B1-decisions.md), especially D4-49 to D4-51 (SNMPv3 in the collector, the family), D4-53 to D4-57, D4-12 and D4-22 (Windows budgets).
 
 ADR-0008 orders the collection methods.
 
