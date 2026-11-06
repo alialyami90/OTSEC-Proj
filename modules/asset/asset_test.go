@@ -325,7 +325,6 @@ func TestFamilyConflict(t *testing.T) {
 	}
 }
 
-// The module writes the minor contracts/asset defines.
 // Upgrade refuses at load what Apply could not write as 0.3: a record of a
 // later minor, and an attribute whose only observation was a 0.2 session
 // read.
@@ -393,6 +392,7 @@ func TestModels(t *testing.T) {
 	}
 }
 
+// The module writes the minor contracts/asset defines.
 func TestSelfMinor(t *testing.T) {
 	if c1.Contract != "otsec.asset/0.3" || selfMinor != 3 {
 		t.Fatalf("contracts/asset is %s; move selfMinor and the upgrade with it", c1.Contract)
