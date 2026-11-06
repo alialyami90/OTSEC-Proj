@@ -1,6 +1,6 @@
 # D1 acknowledgement: Principal Architect and team lead
 
-D1's acknowledgement, with questions for C1, 2026-11-06. `main` at `a774a97` (#486, which carries the C-to-D summary, every D handoff and D4-58). I read [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [D1-handoff.md](D1-handoff.md), [GENERATIONS.md](GENERATIONS.md), [C1-ack.md](C1-ack.md), D4-58 in [B1-decisions.md](../docs/phase4/B1-decisions.md), C6's review of #486, the end of `/mnt/project-files/c1/phase-4a-open-items.md`, and `/mnt/project-files/c6-wip/README.md`. I checked the open PR list, the remote branches and the `govulncheck` runs on GitHub at about 13:00Z.
+D1's acknowledgement, with questions for C1, 2026-11-06. `main` at `a774a97` (#486, which carries the C-to-D summary, every D handoff and D4-58). I read [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [D1-handoff.md](D1-handoff.md), [GENERATIONS.md](GENERATIONS.md), [C1-ack.md](C1-ack.md), D4-58 in [B1-decisions.md](../docs/phase4/B1-decisions.md), C6's review of #486, the end of `/mnt/project-files/c1/phase-4a-open-items.md`, and `/mnt/project-files/c6-wip/README.md`. I checked the open PR list, the remote branches and the `govulncheck` runs on GitHub at about 12:50Z.
 
 ## My understanding of my scope
 
@@ -16,7 +16,7 @@ I hold the role CLAUDE.md §4 calls A1. I coordinate, review, integrate and rule
 
 **Where things stand.** Phase 4, item 3 is built and merged. V-M1 (SNMPv3 over GT-MIB) is its only open gate item, and role 6's GT-MIB agent is a WIP patch in `/mnt/project-files/c6-wip/`. Every result is `desk` or `simulated`, and no device has been contacted (B-01). The owner's PC stays off limits while D4-12 holds, so GitHub Actions is the only test path. Phase 4 decisions continue at D4-59.
 
-**State I checked (desk, 2026-11-06 about 13:00Z).** No PR is open on GitHub. `main` is `a774a97`. The last `govulncheck` run on `main` is the weekly scheduled one of 2026-11-02 ([run 41453799611](https://github.com/alialyami90/OTSEC-Proj/actions/runs/41453799611), success). The workflow is weekly by design (D4-3), so the next scheduled run is due 2026-11-09; it passed on every PR head since. I ran no Go or Python tests: this PR is Markdown only.
+**State I checked (desk, 2026-11-06 about 12:50Z).** No PR is open on GitHub. `main` is `a774a97`. The last `govulncheck` run on `main` is the weekly scheduled one of 2026-11-02 ([run 41453799611](https://github.com/alialyami90/OTSEC-Proj/actions/runs/41453799611), success). The workflow is weekly by design (D4-3), so the next scheduled run is due 2026-11-09; it passed on every PR head since. I ran no Go or Python tests: this PR is Markdown only.
 
 ## C6's three notes on #486, carried here
 
@@ -43,3 +43,11 @@ C1's integration review of #486 sent these to this PR. None of them blocked #486
 ## Answers I gave the D2, D3 and D5 acks
 
 Recorded as [D4-59](../docs/phase4/B1-decisions.md) in this PR. D3 starts its `snmpegress` RFC check now (item 3 verification). A client or egress fix the RFC texts call for merges before V-M1's counted run (D2's question 1). New notes use `D{n}-` names (D2's question 2). D4-20 rule 4 is deferred past Phase 4 (D3's question 2). The off-lab `clear-suspension.json` refusal and the Windows start stall are queued for right after the item 3 gate, with the owner's go (D3's question 3, D5's questions 1 and 3). I dispatch `govulncheck` on `main` before deciding the gate (D5's question 2). Both items leave the summary's STALLED list. For D4 and D6: D4 drafts C12 0.2 as a document now; D6 builds GT-MIB and the runner now and proposes its `ci.yml` leg in its PR; HR-11's real-store byte-share test is carried as an open item; #486 needs no post-merge review (C6 passed its merged head).
+
+## C1's answers (12:55Z, through the coordinator)
+
+1. **The branch cleanup.** Nothing records that `delete-merged-branches-2026-10-31.ps1` was handed to the owner or run, so the whole list is owed, not only the four mutant branches. I re-checked it against the remote at 12:58Z: 150 of the 151 "To delete" branches are still at their recorded tips, and one (`claude/project-thread-8k5430`, C3's reused branch) has moved, so it is off the list. The four mutant branches are on the list's "Kept" side, because they hold unmerged commits. The summary's owed line is corrected, and I ask the owner once, through the coordinator.
+2. **The Windows node start stall.** C1 planned no brief. D4-59's "after the gate" stands.
+3. **C1's running log.** Nothing in it is still open that the handoff does not carry.
+
+No question in this ack is still open. All six acks are on `main` (#487 to #492), and cutover is confirmed.

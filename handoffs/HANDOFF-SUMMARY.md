@@ -58,7 +58,7 @@ The contracts are listed in [contracts/README.md](../contracts/README.md); the i
 - **The sites' protocols,** before IDS (item 4) is briefed (D4-33).
 - **Authorization for any device contact.** This covers a lab relay or switch before any H-test or Q3, and any SNMPv3 contact after V-M1.
 - **Resuming test runs on their PC** (D4-12).
-- **Deleting the leftover branches** `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. They were still present on 2026-11-06. **STALLED.**
+- **Deleting the leftover branches.** The 2026-10-31 cleanup list (`/mnt/project-files/a1/branch-cleanup-2026-10-31.md`) was never handed to the owner (C1, 2026-11-06). On 2026-11-06, 150 of its 151 merged branches were still at their recorded tips, each restorable from its merged PR; `claude/project-thread-8k5430` has moved and is off the list. Also owed: the four unmerged branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 asks the owner once. **STALLED.**
 
 ## Open PRs at the checkpoint
 
