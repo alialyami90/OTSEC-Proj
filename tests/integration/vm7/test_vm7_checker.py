@@ -59,9 +59,7 @@ def perfect():
     assets = {}
     for seq, row in enumerate(IDENT, 1):
         ev = evidence_ids(row, seq)
-        op = IDENT[row]["source"] == "operator"
-        assets[row] = {"identity": {"source": IDENT[row]["source"], "evidence_id": "" if op else ev["identity"],
-                                    "declared_at": "2026-11-06T10:00:05.1Z" if op else None},
+        assets[row] = {"identity": {"source": IDENT[row]["source"], "evidence_id": ev["identity"]},
                        "last_evaluation": {"set_id": SET["id"], "version": SET["version"], "at": EVALUATED,
                                            "identity_evidence_id": ev["identity"]},
                        "evidence": ev, "findings": {}}
@@ -137,8 +135,8 @@ MUTANTS = [
      lambda o, a, f: a["last_evaluation"].update({"set_id": "other"}), "set other"),
     ("pnn, evaluation on an older identity record", lambda r, c: c.get("reason") == "product-not-named" and r.startswith("D"),
      lambda o, a, f: a["identity"].update({"evidence_id": inv("newer")}), "not the newest"),
-    ("pnn, evaluation before the declaration", lambda r, c: c.get("reason") == "product-not-named" and r.startswith("O"),
-     lambda o, a, f: a["identity"].update({"declared_at": "2026-11-06T10:00:05.10001Z"}), "earlier than the declared"),
+    ("pnn, evaluation on an older declaration", lambda r, c: c.get("reason") == "product-not-named" and r.startswith("O"),
+     lambda o, a, f: a["identity"].update({"evidence_id": "audit:node-1:900"}), "not the newest"),
 ]
 
 
@@ -287,10 +285,3 @@ def test_operator_mismatch_mutants_fail(name, fn, phrase):
     bad = vm7.check_mismatch(a, "TEST-ADV-01", OP_MISMATCH_ID, OP_MISMATCH_FID, None)
     assert any(phrase in b for b in bad), bad
 
-
-def test_utc_orders_across_fraction_lengths():
-    assert vm7.utc("2026-11-06T10:00:05.1Z") == vm7.utc("2026-11-06T10:00:05.100000000Z")
-    assert vm7.utc("2026-11-06T10:00:05.09Z") < vm7.utc("2026-11-06T10:00:05.1Z")
-    assert vm7.utc("2026-11-06T10:00:05Z") < vm7.utc("2026-11-06T10:00:05.000000001Z")
-    with pytest.raises(ValueError):
-        vm7.utc("2026-11-06T10:00:05+00:00")

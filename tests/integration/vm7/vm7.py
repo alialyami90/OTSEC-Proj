@@ -22,9 +22,9 @@ identity record. "Later" is read as C5 proposed on #458: the evaluation
 names the newest identity record's evidence ID. The node evaluates after
 storing the identity, so on the test clock the two times can be equal, and
 RFC 3339 strings with different fraction lengths do not compare in order.
-An operator-only asset has no identity record, so there (C1, after C4 on
-#459) the evaluation must be no earlier than the declared identity's
-policy.apply record, compared as times parsed to the nanosecond.
+An operator-only asset has no identity record, so there the evaluation
+names the declared identity's policy.apply record (`audit:<node>:<seq>`)
+instead, and the IDs are matched the same way (C1, after C4 on #459).
 
 The observed dict, one per run under one set (field names from C5 on #458):
 
@@ -32,8 +32,8 @@ The observed dict, one per run under one set (field names from C5 on #458):
       "set": {"id": str, "version": int, "issued_at": str},
       "assets": {
         "<row id>": {
-          "identity": {"source": str, "evidence_id": str,   # status.identity: the newest record
-                       "declared_at": str},                # operator rows: the policy.apply record's time
+          "identity": {"source": str, "evidence_id": str},  # status.identity's newest record, or
+                                                            # an operator row's policy.apply ref
           "last_evaluation": {"set_id": str, "version": int, "at": str,
                               "identity_evidence_id": str} | None,  # status.applicability
           "evidence": {                                     # the IDs the run made
@@ -64,18 +64,6 @@ ID_FORM = {
     "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
     "operator": re.compile(r"^audit:[^:]+:[0-9]+$"),
 }
-
-
-UTC = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$")
-
-
-def utc(s):
-    """An RFC 3339 UTC time as a comparable (seconds, nanoseconds) pair, so
-    fraction lengths do not change the order."""
-    m = UTC.match(s)
-    if not m:
-        raise ValueError(f"{s!r} is not RFC 3339 UTC with Z")
-    return m.group(1), int((m.group(2) or "").ljust(9, "0"))
 
 
 def load_gt(path=GT_ADV):
@@ -125,10 +113,7 @@ def check_cell(row, adv, cell, asset, set_):
         bad = []
         if ev["version"] != set_["version"] or ev["set_id"] != set_["id"]:
             bad.append(f"the last completed evaluation ran under set {ev['set_id']} version {ev['version']}, not the set in use")
-        if asset["identity"]["source"] == "operator":
-            if utc(ev["at"]) < utc(asset["identity"]["declared_at"]):
-                bad.append(f"the last completed evaluation ({ev['at']}) is earlier than the declared identity's record ({asset['identity']['declared_at']})")
-        elif ev["identity_evidence_id"] != asset["identity"]["evidence_id"]:
+        if ev["identity_evidence_id"] != asset["identity"]["evidence_id"]:
             bad.append(f"the last completed evaluation ran on identity record {ev['identity_evidence_id']}, not the newest, {asset['identity']['evidence_id']}")
         return bad
     if not revs:
