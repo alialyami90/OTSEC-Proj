@@ -168,3 +168,40 @@ func TestC6RefusedMismatchIsNotReadAsNotNamed(t *testing.T) {
 		t.Fatalf("after a mismatch that was neither stored nor evaluated, status still reads adv-other as product-not-named: last evaluation %+v, identity %s", l, idEv)
 	}
 }
+
+// An operator-only asset with a stored mismatch, then the chain pruned and
+// declared-identities.json lost: the declaration is unchanged, so the
+// mismatch must still count. D4-55 says a lost file costs at most a new
+// record and one revision per operator finding, "never a wrong class".
+func TestC6LostFileKeepsAnOperatorMismatch(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.startWith(answering(mismatchRun(t, invB)))
+	n.put(k.sign(findPayload(t, 1)))
+	n.step()
+	n.s.RunOnce(bg, 0)
+	classes := func() map[string]finding.Class {
+		m := map[string]finding.Class{}
+		for _, f := range n.findings() {
+			m[f.Advisory] = f.Class
+		}
+		return m
+	}
+	before := classes()
+	if before["adv-in"] != finding.ApplicableByVersion || before["adv-out"] != finding.ApplicableByVersion {
+		t.Fatalf("setup: the operator mismatch did not take: %v", before)
+	}
+
+	n.pruneThrough(n.lastAuditSeq())
+	if err := os.Remove(filepath.Join(n.cfg.Store.Dir, DeclaredIdentitiesFileName)); err != nil {
+		t.Fatal(err)
+	}
+	n.startWith(nil)
+	n.step()
+	after := classes()
+	for adv, c := range before {
+		if after[adv] != c {
+			t.Fatalf("%s went from %s to %s when only the file was lost, with the declaration unchanged", adv, c, after[adv])
+		}
+	}
+}
