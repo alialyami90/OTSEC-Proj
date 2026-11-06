@@ -129,7 +129,7 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 ## Failed or incomplete
 
 - **V-M1 is not run** (above). The egress corpus's message layout is written from memory of RFC 3412, 3414, 3416 and 3826, so it is unconfirmed until those texts are in the project. A layout error would make the valid messages fail, which the positive cases would catch. No SNMP message has gone over a socket to a real or simulated agent beyond the Go-level fake.
-- **The Windows node start can stall for more than 12 s, and nobody yet knows why.** #471 made the certificate-period test survive it: #471's own run had a late try with a 6 s margin that took 12.47 s and recovered. The cause on the hosted Windows runner is not found. The `platform/node` Windows budget warning (743 s against 720 s) stays a warning under D4-44's ruling.
+- **The Windows node start can stall for more than 12 s, and nobody yet knows why.** #471 made the certificate-period test survive it: #471's own run had a late try with a 6 s margin that took 12.47 s and recovered. The cause on the hosted Windows runner is not found, and the CI logs do not show which step of the start stalls (C5). The `platform/node` Windows budget warning (743 s against 720 s) stays a warning under D4-44's ruling.
 - **Carried from the first exit:** `config.reads_removed` is contract only; V-S7's 24-hour soak, (c) and (d); V-S6, V-S9, V-S15, V-S18 and V-S20.
 
 ## Unverified assumptions
