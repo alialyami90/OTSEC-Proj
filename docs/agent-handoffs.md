@@ -1062,3 +1062,50 @@ C1 approved the item 3 contracts together in D4-53 (#442), at the heads named th
 - No safety or security objection is open.
 
 Work then stops for the owner's check (D4-34).
+
+## After item 3: hardening briefs (issued 2026-11-06, D4-62)
+
+The owner accepted item 3 on 2026-11-06 and chose to have the two hardening items D4-59 queued done before the next item. D1 issues them here, with C12 0.2's code (D4-61) after them. The common rules for every Phase 4 brief apply. Nothing contacts a device. The configuration loader refuses a `device-observed` target in this phase (D2-4), so a test of an off-lab path sets the target after loading, as `platform/node/unsigned_test.go` does, and the binaries can only be run lab-only. When all three are merged, D1 reports to the owner and asks for the next item.
+
+#### P4-H1 (D3, then D5): refuse `clear-suspension.json` off-lab
+
+- **Objective.** An asset suspension on a node with any endpoint that is not `simulated` can be lifted only by an administrator's signed `asset.clear_suspension`, never by the unsigned `clear-suspension.json`. This closes the last unsigned administrator file (`platform/node/unsigned.go`; C7 0.4 `doc.go`, "Admin-signed requests").
+- **Deliverables, in this order:**
+  1. **D3, the collector.** It accepts `asset.clear_suspension` as an admin-signed request relayed by the node, with the checks every admin-signed request has: signature, key, nonce spent before any decision, and expiry. The signed body and the collector's own record must name the same asset and invocation, or it is `suspension_mismatch`. For an asset with any endpoint that is not `simulated` in the collector's configuration, the collector refuses the unsigned path, and the file alone lifts nothing. A lab-only asset keeps the file path. If this needs a new refusal code or a C8 field, D3 proposes the C7 or C8 minor first, and D1 approves it after its consumers have reviewed it and D6's contract tests pass.
+  2. **D5, the node.** It relays the signed request through the admin relay and records `asset.suspension_clear` from it, naming the person and that the request was signed. It refuses `clear-suspension.json` on a node that is not lab-only, through `unsigned.go`'s alarms. Those are `unsigned-admin-file-refused` once per file content, `-accepted` on a lab-only node, and `-ignored` when a signed request names the same clear. The `otsec health` line that names the file changes to match.
+- **May change:** D3: `modules/security/`, `cmd/otsec-collector/`, and `docs/phase4/D3-*.md`, plus a contract proposal if one is needed. D5: `platform/node/`, `cmd/otsec/`, and `docs/phase4/D5-*.md`.
+- **Acceptance (D6, independent):**
+  - On the binaries, on a lab-only node, the file still clears a suspension and raises `unsigned-admin-file-accepted`, and a signed request clears it too.
+  - In Go tests at the node and the collector, with an endpoint that is not `simulated`:
+    - the file alone clears nothing at the node or the collector, and raises `unsigned-admin-file-refused` once;
+    - a signed request clears both, with one record each;
+    - a replayed, expired or wrongly signed request, or one naming another invocation, is refused, and nothing changes.
+  - A mutant that drops the off-lab check fails a test.
+  - The credential suspension path does not change.
+- **Reviewers:** D3's part by D6 and D2. D5's part by D6 and D3.
+- **Exclusions:** no change to `credential.clear_suspension`, no change to `clear-quarantine.json` or `seq-reset-ack.json` (#347 covers them), and no UI.
+
+#### P4-H2 (D5): find the Windows node start stall
+
+- **Objective.** Find which step of the node's start takes more than 12 s on the hosted Windows runner (#471, D4-58), before anyone tries a fix. #428's lead, recreating the recovery reserve with a flush at every start (F-013), is unverified until the numbers show it.
+- **Deliverables:**
+  1. The node logs one line at the end of its start with the time each start phase took (for example: configuration, store open and recovery, the reserve, the key register, listeners, and the first collector connection). The line holds no path to a secret, no key and no device text. A test pins its format.
+  2. The Windows CI jobs that start a node keep that line in their output. D5 then collects at least 20 Windows starts from CI runs, and at least 3 that take over 6 s if any occur. D5 writes `docs/phase4/D5-windows-start.md` with the numbers, the run links and the phase that dominates.
+  3. **No fix in this PR.** D1 briefs the fix from the numbers. Its proving test is the platform budget step's numbers before and after.
+- **May change:** `platform/node/`, `cmd/otsec/`, `docs/phase4/D5-*.md`, and, with D1's authorization of the line, `.github/workflows/ci.yml` if a job must keep more output.
+- **Acceptance:** both workflows green on Linux and Windows. The timing line appears for each node start in the Windows `go` job and the `service` job. The note's numbers link to the runs they came from.
+- **Reviewers:** D6 and D3.
+
+#### P4-H3 (D5, D4, D6): C12 0.2, as D4-61 approved it
+
+In the order of `docs/phase4/D4-c12-0.2.md` §8 and §10:
+
+1. **D5's fail-closed `fold`.** The node refuses any `otsec.finding/` minor that `finding.Known` does not name. The refusal is per asset, through the not-evaluated alarm. The alarm names the schema, bounded to 64 bytes of printable ASCII and quoted. This PR carries D5's tests (ii), the refusal half of (iii), and the 0.1 regression.
+2. **D4's PR:** `contracts/finding` 0.2 with rules 1 to 5 and `Known`, and `modules/applicability`, with the §7 tests. D6's `c12_v02_d6_test.go` must pass before it merges. D5's reader for both minors ships in the same release.
+3. **D6:** V-M7's checker resolves `identity.mismatch.id` to its stored `identity.read`, and an operator-only mismatch scenario joins the V-M7 leg, checked across a restart.
+
+- **Reviewers:** a contract by D1 and every consumer, with D6's contract tests. D4's code by D6 and D2. D5's code by D6 and D3.
+
+#### Order
+
+P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touch different paths. P4-H1's D5 part follows D3's part, and P4-H3's step 2 follows its step 1. P4-H2 uses Windows CI time, so a V-M1-length leg is not added while it runs.
