@@ -49,6 +49,8 @@ func TestSNMPv3Credential(t *testing.T) {
 		"engine id of 33 octets":  func(r *CredentialRef) { r.USM.EngineID = strings.Repeat("ab", 33) },
 		"engine id odd length":    func(r *CredentialRef) { r.USM.EngineID = "80007c4f030" },
 		"engine id upper case":    func(r *CredentialRef) { r.USM.EngineID = "80007C4F03020000273101" },
+		"engine id all zeros":     func(r *CredentialRef) { r.USM.EngineID = "0000000000" },
+		"engine id all ff":        func(r *CredentialRef) { r.USM.EngineID = strings.Repeat("ff", 32) },
 		"no attestation":          func(r *CredentialRef) { r.USM.SoleDeviceAttested = false },
 		"snmpv2c is no transport": func(r *CredentialRef) { r.Transport = "snmpv2c" },
 		"snmpv1 is no transport":  func(r *CredentialRef) { r.Transport = "snmpv1" },
@@ -58,6 +60,11 @@ func TestSNMPv3Credential(t *testing.T) {
 		if err := b.Ref.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	near := snmpInstall(t)
+	near.Ref.USM.EngineID = "00000000ff" // neither all zeros nor all ff
+	if err := near.Ref.Validate(); err != nil {
+		t.Errorf("engine id 00000000ff: %v", err)
 	}
 	telnet := installBody(t)
 	telnet.Ref.USM = testUSM()
