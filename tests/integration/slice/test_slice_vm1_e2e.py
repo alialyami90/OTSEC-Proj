@@ -331,7 +331,9 @@ def test_f6_health_shows_the_family_conflict(vm1):
     C5 on #445)."""
     got, reads = _device_reads(vm1, "F6", "model")
     assert vm1.first["F6"]["code"] == "ok" and got == "SEL-2741M" and reads, (vm1.first["F6"], got)
-    assert "family_conflict" in vm1.health_text or "family_conflict" in json.dumps(vm1.status), vm1.health_text
+    f6 = vm1.agents["F6"].asset
+    assert "family_conflict" in vm1.health_text or "family_conflict" in json.dumps(vm1.status), \
+        [line for line in vm1.health_text.splitlines() if f6 in line]
 
 
 def test_every_run(vm1):
@@ -367,22 +369,24 @@ def test_every_run(vm1):
 
 
 def test_m3_no_key_anywhere(vm1):
-    """M3: no password, Ku, localized key or AES key, raw, hex or base64,
-    in the store, the node's configuration, health, or either log."""
-    needles = []
-    for a in vm1.agents.values():
-        for k in a.keys:
-            needles += [k, k.hex().encode(), k.hex().upper().encode(), base64.b64encode(k)]
+    """M3: no password, Ku, localized key or AES key, raw, hex in either
+    case or base64, anywhere in the run's folder (the node's store and
+    configuration, the collector's data with its credential store and
+    state, every log, every agent's log) or in health. The binaries are
+    left out. A hit names the case, the key and the form, never the key."""
+    forms = {"raw": lambda k: k, "hex": lambda k: k.hex().encode(), "HEX": lambda k: k.hex().upper().encode(),
+             "base64": base64.b64encode}
+    names = ("password", "Ku", "localized key", "AES key")
     hay = {"health": vm1.health_text.encode()}
-    for name in ("node", "collector"):
-        hay[name + ".log"] = vm1.text(name).encode()
-    roots = [vm1.layout["store_dir"], os.path.dirname(vm1.layout["node_config"])]
-    for root in roots:
-        for d, _, files in os.walk(root):
-            for f in files:
-                with open(os.path.join(d, f), "rb") as fh:
-                    hay[os.path.join(d, f)] = fh.read()
-    found = [(where, n[:6]) for where, b in hay.items() for n in needles if n in b]
+    for d, dirs, files in os.walk(vm1.d):
+        if d == vm1.d:
+            dirs[:] = [x for x in dirs if os.path.join(d, x) != vm1.bin]
+        for f in files:
+            with open(os.path.join(d, f), "rb") as fh:
+                hay[os.path.join(d, f)] = fh.read()
+    assert any(p.startswith(vm1.layout["collector_data"]) for p in hay), "the collector's data was not searched"
+    found = [(where, c, names[i], form) for c, a in vm1.agents.items() for i, k in enumerate(a.keys)
+             for form, enc in forms.items() for where, b in hay.items() if enc(k) in b]
     assert not found, found
 
 
