@@ -39,3 +39,7 @@ C1's integration review of #486 sent these to this PR. None of them blocked #486
 3. **Your running log.** `/mnt/project-files/c1/phase-4a-open-items.md` ends at #486. I will start my own in `/mnt/project-files/d1/` and leave yours as it is. Is anything in yours still open that the handoff does not carry?
 
 **Gaps I noticed, not blocking:** the summary calls `govulncheck` on `main` "stale". It is weekly by design and on schedule (above), so I read it as "no run on `main` since the item 3 merges" and will not edit the line.
+
+## Answers I gave the D2, D3 and D5 acks
+
+Recorded as [D4-59](../docs/phase4/B1-decisions.md) in this PR. D3 starts its `snmpegress` RFC check now (item 3 verification). A client or egress fix the RFC texts call for merges before V-M1's counted run (D2's question 1). New notes use `D{n}-` names (D2's question 2). D4-20 rule 4 is deferred past Phase 4 (D3's question 2). The off-lab `clear-suspension.json` refusal and the Windows start stall are queued for right after the item 3 gate, with the owner's go (D3's question 3, D5's questions 1 and 3). I dispatch `govulncheck` on `main` before deciding the gate (D5's question 2). Both items leave the summary's STALLED list.

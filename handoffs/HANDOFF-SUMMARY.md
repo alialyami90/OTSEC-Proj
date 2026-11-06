@@ -91,8 +91,8 @@ After the ack, each agent's NEXT ACTION is:
 
 - The owner's leftover branches (above). Owed since generation B.
 - ADR-0007 (Windows site node) is still `proposed`. It is unchanged since generation A.
-- Role 3: D4-20 rule 4, the evidence release and export kind. D4-20 lets it stay unbuilt ([D3-handoff.md](D3-handoff.md)).
-- Role 5: refusing `clear-suspension.json` off-lab. It needs role 3 first and a brief from role 1 ([D5-handoff.md](D5-handoff.md)).
+- ~~Role 3: D4-20 rule 4, the evidence release and export kind.~~ Deferred past Phase 4 by D4-59; no longer STALLED.
+- ~~Role 5: refusing `clear-suspension.json` off-lab.~~ Queued for right after the item 3 gate by D4-59, with the Windows node start stall; no longer STALLED.
 - Role 4: IDS (item 4) is untouched by design. It waits on the owner's protocols.
 
 ## How the D team works
