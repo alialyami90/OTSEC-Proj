@@ -1,0 +1,1199 @@
+{
+  "gt": "GT-MIB",
+  "version": 1,
+  "owner": "C6",
+  "date": "2026-11-05",
+  "status": "Written by hand before any agent code exists (P4-3-C6 deliverable 1), from docs/phase4/C6-gt-mib-plan.md section 2. No switch has been contacted. Every result over GT-MIB is simulated. The agent that serves these cases waits for the RFC texts; until they are in the project, no V-M1 run counts.",
+  "plan": "docs/phase4/C6-gt-mib-plan.md",
+  "codes_from": "contracts/adapter (C2 0.7, D4-53, with failed.snmp_fid_unreadable from D4-54; C2 0.8 adds failed.snmp_unexpected_report and failed.snmp_scoped_pdu_unreadable, D4-54)",
+  "family": "SEL-2731M and SEL-2741M in RSTP mode (D4-51), register family sel-27x1-rstp",
+  "operations": {
+    "system": {
+      "id": "sel27x1.snmp.system",
+      "pdu": "get",
+      "oids": [
+        "1.3.6.1.2.1.1.1.0",
+        "1.3.6.1.2.1.1.5.0"
+      ],
+      "max_reply_bytes": 1472
+    },
+    "entity": {
+      "id": "sel27x1.snmp.entity",
+      "pdu": "getbulk",
+      "subtree": "1.3.6.1.2.1.47.1.1.1",
+      "max_repetitions": 16,
+      "max_varbinds": 512,
+      "max_requests": 32,
+      "max_reply_bytes": 1472
+    }
+  },
+  "unconfirmed": [
+    {
+      "what": "entPhysicalSoftwareRev is column 10 of entPhysicalEntry (1.3.6.1.2.1.47.1.1.1.1.10)",
+      "check_in": "RFC 6933"
+    },
+    {
+      "what": "entPhysicalDescr is column 2 of entPhysicalEntry (1.3.6.1.2.1.47.1.1.1.1.2)",
+      "check_in": "RFC 6933"
+    },
+    {
+      "what": "entPhysicalEntry's accessible columns are 2 to 18 in RFC 4133, and RFC 6933 adds a 19th",
+      "check_in": "RFC 6933"
+    },
+    {
+      "what": "sysDescr.0 is 1.3.6.1.2.1.1.1.0 and sysName.0 is 1.3.6.1.2.1.1.5.0",
+      "check_in": "RFC 3418"
+    },
+    {
+      "what": "the msgGlobalData and USM security parameter layouts, the discovery message, the Report OIDs and the 150-second time window",
+      "check_in": "RFC 3412 and RFC 3414"
+    },
+    {
+      "what": "the PDU tags and the GetBulk fields",
+      "check_in": "RFC 3416"
+    },
+    {
+      "what": "AES-128-CFB with the IV from engine boots, engine time and the 8-byte salt, and no padding",
+      "check_in": "RFC 3826"
+    },
+    {
+      "what": "HMAC-SHA-256-192 and HMAC-SHA-512-384 digests of 24 and 48 octets",
+      "check_in": "RFC 7860"
+    },
+    {
+      "what": "the agent's order of checks on an incoming message (RFC 3414 section 3.2): the security level, user and digest before the time window (step 7), and the time window before decryption (step 8). U2 to U6's counts rest on it, and so does whether the time-window Report comes first",
+      "check_in": "RFC 3414"
+    }
+  ],
+  "agent": {
+    "engine_id": "80007c4f03020000273101",
+    "engine_id_label": "form documented (S29 p. 42), MAC 02:00:00:27:31:01 SYNTHESIZED and locally administered",
+    "user": "gt-mib",
+    "auth": [
+      "hmac-sha-256",
+      "hmac-sha-512"
+    ],
+    "priv": "aes-128",
+    "password": "a test-only password from a published seed list, as advisorytest.Key",
+    "sysName": "gt-mib-sw1",
+    "sysDescr": "SYNTHESIZED text that holds no FID by default",
+    "entity_rows": 6,
+    "fid_cell": "1.3.6.1.2.1.47.1.1.1.1.10.1",
+    "other_cells": "SYNTHESIZED text that never matches the FID grammar",
+    "fids": {
+      "SEL-2731M": "SEL-2731M-R102-V1-Z003001-D20260408",
+      "SEL-2741M": "SEL-2741M-R102-V1-Z003001-D20260408",
+      "SEL-2731M-R100": "SEL-2731M-R100-V0-Z001001-D20231120"
+    },
+    "fids_source": "S29 p. 62, Tables A.3 and A.4 (documented)",
+    "serves": "exactly S29's list (pp. 46 to 47), as a data file with the page cited per line; anything else gets noSuchObject, and a GETNEXT past the last object gets endOfMibView",
+    "time_window_first": "the agent answers the client's first authPriv request, which carries boots and time 0, with an authenticated usmStatsNotInTimeWindows Report, as a real agent does, and the client sends the request again with the adopted values. Each case with authPriv requests states whether its agent does (time_window_first), because the counts depend on it (C2 on #457)"
+  },
+  "counts": {
+    "datagrams": "datagrams the agent received in the run, discovery included",
+    "authenticated_requests": "authPriv requests the agent received in the whole run, the time-window round included; given only for runs that end before the walk, since an ok run's walk adds its GetBulk requests",
+    "requests": "requests of one operation the agent received: requests_of where the case names it, otherwise the walk's sel27x1.snmp.entity (section 2.4); the time-window round is included"
+  },
+  "every_run": [
+    "every PDU the agent receives is GetRequest or GetBulkRequest as the operation names, never SetRequest (V-M1 (b)), in the agent's own decoded log",
+    "a get names only the operation's OIDs; a walk request lies inside the subtree",
+    "max-repetitions is 16 and non-repeaters is 0",
+    "msgMaxSize is 1472",
+    "msgFlags is authPriv on every message but discovery's, at most two (U12, T3)",
+    "the collector's transcript holds every message sent and received, and C8's transcript_sha256 matches it (bytes kept)",
+    "no community-based (v1 or v2c) message is ever received",
+    "the collector does not panic and reads no byte past a datagram"
+  ],
+  "cases": [
+    {
+      "id": "I1",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "default, SEL-2731M R102-V1",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "snmp_engine_id": {
+            "value": "80007c4f03020000273101",
+            "operation": "sel27x1.snmp.system",
+            "header": "msgAuthoritativeEngineID"
+          },
+          "hostname": {
+            "value": "gt-mib-sw1",
+            "operation": "sel27x1.snmp.system",
+            "oid": "1.3.6.1.2.1.1.5.0"
+          },
+          "firmware_id": {
+            "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          },
+          "model": {
+            "value": "SEL-2731M",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          },
+          "firmware_version": {
+            "value": "R102-V1",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          }
+        },
+        "source": "device-read",
+        "transport": "snmpv3",
+        "checks": [
+          "the model and firmware_version spans lie inside the firmware_id span",
+          "snmp_engine_id is the first identity item and matches"
+        ]
+      }
+    },
+    {
+      "id": "I2",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "SEL-2741M R102-V1",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "snmp_engine_id": {
+            "value": "80007c4f03020000273101",
+            "operation": "sel27x1.snmp.system",
+            "header": "msgAuthoritativeEngineID"
+          },
+          "hostname": {
+            "value": "gt-mib-sw1",
+            "operation": "sel27x1.snmp.system",
+            "oid": "1.3.6.1.2.1.1.5.0"
+          },
+          "firmware_id": {
+            "value": "SEL-2741M-R102-V1-Z003001-D20260408",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          },
+          "model": {
+            "value": "SEL-2741M",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          },
+          "firmware_version": {
+            "value": "R102-V1",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+          }
+        },
+        "source": "device-read",
+        "transport": "snmpv3",
+        "checks": [
+          "the model and firmware_version spans lie inside the firmware_id span"
+        ]
+      }
+    },
+    {
+      "id": "I3",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "the FID moved to entPhysicalDescr of row 3; row 1's software revision holds SYNTHESIZED non-FID text",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "firmware_id": {
+            "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.2.3"
+          },
+          "model": {
+            "value": "SEL-2731M",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.2.3"
+          },
+          "firmware_version": {
+            "value": "R102-V1",
+            "operation": "sel27x1.snmp.entity",
+            "oid": "1.3.6.1.2.1.47.1.1.1.1.2.3"
+          }
+        },
+        "source": "device-read",
+        "transport": "snmpv3",
+        "checks": [
+          "the FID is found by its form wherever it is served"
+        ]
+      }
+    },
+    {
+      "id": "I4",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "the same FID in sysDescr.0 and in row 1's software revision",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "firmware_id": {
+            "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+            "operation": "sel27x1.snmp.system",
+            "oid": "1.3.6.1.2.1.1.1.0"
+          }
+        },
+        "checks": [
+          "equal values count as one match, not as two FIDs",
+          "reported from its first occurrence in read order: sysDescr.0, since the get runs before the walk (C2 on #457)"
+        ]
+      }
+    },
+    {
+      "id": "I5",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "sysName.0 answers noSuchObject",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "absent": [
+          "hostname"
+        ],
+        "attributes": {
+          "firmware_id": {
+            "value": "SEL-2731M-R102-V1-Z003001-D20260408"
+          }
+        },
+        "checks": [
+          "the transcript shows the noSuchObject exception, and it is not an error"
+        ]
+      }
+    },
+    {
+      "id": "I6",
+      "section": "2.1",
+      "vm": "e",
+      "setup": "the R100-V0 FID",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "firmware_id": {
+            "value": "SEL-2731M-R100-V0-Z001001-D20231120"
+          },
+          "model": {
+            "value": "SEL-2731M"
+          },
+          "firmware_version": {
+            "value": "R100-V0"
+          }
+        },
+        "checks": [
+          "placing the version on a branch is the matcher's job (GT-ADV's rule), not the client's"
+        ]
+      }
+    },
+    {
+      "id": "F1",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "no served value matches the FID grammar",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true,
+        "attributes": {
+          "snmp_engine_id": {
+            "value": "80007c4f03020000273101"
+          },
+          "hostname": {
+            "value": "gt-mib-sw1"
+          }
+        },
+        "checks": [
+          "the identity holds only the matching snmp_engine_id item",
+          "the asset and the credential are not suspended"
+        ]
+      }
+    },
+    {
+      "id": "F2",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "two different matching FIDs, in rows 1 and 3",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true,
+        "checks": [
+          "never the first match"
+        ]
+      }
+    },
+    {
+      "id": "F3",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "an OT SDN FID, SEL-2731S-R102-V1-Z003001-D20260408 (SYNTHESIZED from the S29 form, S for SDN)",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true,
+        "checks": [
+          "the grammar requires the M of RSTP mode"
+        ]
+      }
+    },
+    {
+      "id": "F4",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "SEL-2743M-R102-V1-Z003001-D20260424, a real FID (S29 Table A.2) outside the family",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true,
+        "checks": [
+          "the grammar admits only 2731 and 2741"
+        ]
+      }
+    },
+    {
+      "id": "F5a",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "the FID followed by trailing bytes in its cell: SEL-2731M-R102-V1-Z003001-D20260408X",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "F5b",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "the FID with one non-ASCII byte (0xc3) in place of its V",
+      "expect": {
+        "code": "failed.snmp_fid_unreadable",
+        "authenticated": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "F6",
+      "section": "2.2",
+      "vm": "e",
+      "setup": "the asset record declares product_family sel-2731, whose models are [SEL-2731M] (asset.Models, D4-54); the agent serves the SEL-2741M FID",
+      "expect": {
+        "code": "ok",
+        "authenticated": true,
+        "attributes": {
+          "model": {
+            "value": "SEL-2741M"
+          }
+        },
+        "health": [
+          "identity.family_conflict"
+        ],
+        "checks": [
+          "the conflict is raised by modules/asset on the node, not as an adapter code (C2, D4-53)",
+          "the applicability match uses the read model (GT-ADV D11)"
+        ]
+      }
+    },
+    {
+      "id": "U1",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "discovery returns another engine ID, 80007c4f03020000273102",
+      "expect": {
+        "code": "refused.engine_id_mismatch",
+        "authenticated": false,
+        "authenticated_requests": 0
+      }
+    },
+    {
+      "id": "U2",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "the agent holds another password; it answers with a usmStatsWrongDigests Report sent noAuthNoPriv; the agent does not send the time-window Report first (the digest is checked before the time window)",
+      "expect": {
+        "code": "failed.usm_wrong_digest",
+        "authenticated_requests": 1,
+        "checks": [
+          "no retransmission after a failure Report"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U3",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "unknown user; usmStatsUnknownUserNames Report sent noAuthNoPriv; the agent does not send the time-window Report first (the user is checked before the time window)",
+      "expect": {
+        "code": "failed.usm_unknown_user",
+        "authenticated_requests": 1
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U4a",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "the agent is configured for SHA-1 only and answers the client's SHA-256 with a usmStatsWrongDigests Report (noAuthNoPriv); the agent does not send the time-window Report first (the digest is checked before the time window)",
+      "expect": {
+        "code": "failed.usm_wrong_digest",
+        "authenticated_requests": 1,
+        "checks": [
+          "no request at SHA-1 or MD5",
+          "no request at a lower level"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U4b",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "the agent is configured for SHA-1 only and stays silent; the agent does not send the time-window Report first (the agent is silent)",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 2,
+        "checks": [
+          "no request at SHA-1 or MD5",
+          "no request at a lower level"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U5",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "usmStatsUnsupportedSecLevels Report, sent noAuthNoPriv; the agent does not send the time-window Report first (the security level is checked before the time window)",
+      "expect": {
+        "code": "failed.usm_unsupported_sec_level",
+        "authenticated_requests": 1,
+        "checks": [
+          "no retry below authPriv"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U6",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "usmStatsDecryptionErrors Report, sent noAuthNoPriv; the agent sends the time-window Report first (the time window is checked before decryption, so the decryption error answers the resend)",
+      "expect": {
+        "code": "failed.usm_decryption_error",
+        "authenticated_requests": 2
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U7",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "one authenticated usmStatsNotInTimeWindows Report, then normal; that Report is the agent's answer to the first authPriv request",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the request is sent again with the corrected boots and time",
+          "that resend is not the retransmission"
+        ],
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 2
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U7b",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "an authenticated time-window Report, then the corrected request is dropped, then its retransmission is answered; that Report is the agent's answer to the first authPriv request",
+      "expect": {
+        "code": "ok",
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 3
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U8",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "an authenticated time-window Report, twice; the agent sends the time-window Report first (the second time-window Report answers the resend)",
+      "expect": {
+        "code": "failed.usm_not_in_time_window",
+        "authenticated_requests": 2
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U9",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "an unauthenticated time-window Report; the agent does not send the time-window Report first (the agent's first answer is the unauthenticated time-window Report itself)",
+      "expect": {
+        "code": "failed.usm_not_in_time_window",
+        "authenticated_requests": 1,
+        "checks": [
+          "its boots and time are never adopted"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U10",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "answers an authPriv request with a noAuthNoPriv Response; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 3,
+        "checks": [
+          "the Response is discarded, not parsed"
+        ]
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U11",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "a Response with a bad digest, then silence; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 3,
+        "checks": [
+          "the Response is discarded"
+        ]
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U12",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "the agent speaks v2c only and ignores v3",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 0,
+        "datagrams": 2,
+        "checks": [
+          "discovery and its one retransmission only",
+          "no community-based message in the agent's log"
+        ]
+      }
+    },
+    {
+      "id": "U13",
+      "section": "2.3",
+      "vm": "d",
+      "setup": "the asset record's endpoint transport is snmpv2c",
+      "expect": {
+        "code": null,
+        "refused_at": "load",
+        "datagrams": 0,
+        "checks": [
+          "the asset record is refused at load (C1 0.3)"
+        ]
+      }
+    },
+    {
+      "id": "U14",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "a credential that names MD5, SHA-1, DES or AES-256",
+      "expect": {
+        "code": null,
+        "refused_at": "credential decode",
+        "datagrams": 0,
+        "checks": [
+          "C7 0.8's enums cannot name them"
+        ]
+      }
+    },
+    {
+      "id": "U15",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "a forged noAuthNoPriv usmStatsWrongDigests Report carrying the outstanding msgID; the agent does not send the time-window Report first (the forged Report arrives before the agent's answer to the first authPriv request)",
+      "expect": {
+        "code": "failed.usm_wrong_digest",
+        "authenticated_requests": 1,
+        "checks": [
+          "neither the credential nor the asset is suspended",
+          "the next run succeeds"
+        ]
+      },
+      "time_window_first": false
+    },
+    {
+      "id": "U16",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "the same forged Report with another msgID, or from another source port; the agent then sends the time-window Report, and the run goes on as normal",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the Report is discarded and recorded as received"
+        ],
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 2
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U17",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "answers an authPriv request with an authNoPriv Response carrying a valid digest; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 3,
+        "checks": [
+          "discarded unparsed",
+          "no plaintext Response parsed in the agent's log or the transcript"
+        ]
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U18",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "discovery returns the pinned engine ID; a later Response carries another msgAuthoritativeEngineID; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
+      "expect": {
+        "code": "failed.timeout",
+        "authenticated_requests": 3,
+        "checks": [
+          "discarded before its digest is checked"
+        ]
+      },
+      "time_window_first": true
+    },
+    {
+      "id": "U19a",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "a second usmStatsUnknownEngineIDs Report, after an authenticated exchange; the agent sends the time-window Report first (the authenticated exchange is the time-window round; the second unknownEngineIDs Report answers the resend)",
+      "expect": {
+        "code": "failed.snmp_unexpected_report",
+        "authenticated_requests": 2,
+        "checks": [
+          "the session ends",
+          "nothing suspended, and the bytes kept"
+        ]
+      },
+      "code_from": "D4-54 (C2 0.8)",
+      "time_window_first": true
+    },
+    {
+      "id": "U19b",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "a usmStatsNotInTimeWindows Report before discovery's Report",
+      "expect": {
+        "code": "failed.snmp_unexpected_report",
+        "authenticated_requests": 0,
+        "checks": [
+          "the session ends",
+          "its boots and time are not adopted",
+          "nothing suspended, and the bytes kept"
+        ]
+      },
+      "code_from": "D4-54 (C2 0.8)"
+    },
+    {
+      "id": "U20",
+      "section": "2.3",
+      "vm": "c",
+      "setup": "after the one adoption, an authenticated Response with lower boots or with time outside the 150-second window, then a Report claiming lower boots; the agent sends the time-window Report first (the one adoption is the time-window round)",
+      "expect": {
+        "code": "failed.usm_not_in_time_window",
+        "authenticated_requests": 2,
+        "checks": [
+          "the Response is discarded",
+          "the Report is not adopted, and it ends the run",
+          "the client's engine boots never move backwards"
+        ]
+      },
+      "time_window_first": true,
+      "code_from": "C2 on #457: any time-window Report after the adopted one ends the run (#437 section 4 rule 1)"
+    },
+    {
+      "id": "W1",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "returns an OID outside entPhysicalTable in the middle of a response",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the walk ends there",
+          "the varbinds after that OID are kept in the bytes but never parsed into attributes",
+          "no later request carries that OID or anything after it"
+        ]
+      }
+    },
+    {
+      "id": "W2",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "returns the same OID again (a loop)",
+      "expect": {
+        "code": "failed.snmp_walk_not_increasing",
+        "requests": 1,
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "W3",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "returns an earlier OID inside the subtree",
+      "expect": {
+        "code": "failed.snmp_walk_not_increasing",
+        "requests": 1,
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "W4",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "40 rows x 17 columns = 680 varbinds, more than max_varbinds 512",
+      "expect": {
+        "code": "failed.response_too_large",
+        "bytes_kept": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "checks": [
+          "no identity attribute is presented as complete"
+        ]
+      }
+    },
+    {
+      "id": "W5",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "answers 1 varbind per GetBulk, whatever max-repetitions says",
+      "expect": {
+        "code": "failed.response_too_large",
+        "requests": 32,
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "W6",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "honours msgMaxSize 1472 with 16 repetitions",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "each response is at most 1472 bytes"
+        ]
+      }
+    },
+    {
+      "id": "W7",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "ignores msgMaxSize and sends a 4000-byte response",
+      "expect": {
+        "code": "failed.response_too_large",
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "W8",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "a Response with error-status authorizationError",
+      "expect": {
+        "code": "failed.snmp_error_status",
+        "bytes_kept": true
+      }
+    },
+    {
+      "id": "W9",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "endOfMibView inside the table",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the walk ends normally"
+        ]
+      }
+    },
+    {
+      "id": "T1",
+      "section": "2.5",
+      "vm": "b",
+      "setup": "drops the first copy of one request",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "sent again once, with a fresh msgID"
+        ]
+      }
+    },
+    {
+      "id": "T2",
+      "section": "2.5",
+      "vm": "b",
+      "setup": "drops both copies of one request",
+      "expect": {
+        "code": "failed.timeout",
+        "checks": [
+          "exactly 2 copies sent"
+        ]
+      }
+    },
+    {
+      "id": "T3",
+      "section": "2.5",
+      "vm": "b",
+      "setup": "silent from the start, as for a node not on the Permitted Hosts list",
+      "expect": {
+        "code": "failed.timeout",
+        "datagrams": 2,
+        "authenticated_requests": 0,
+        "checks": [
+          "health reports a timeout, not an identity result"
+        ]
+      }
+    },
+    {
+      "id": "T4",
+      "section": "2.5",
+      "vm": "b",
+      "setup": "a Response with another msgID or request-id, then the right one",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the wrong Response is discarded"
+        ]
+      }
+    },
+    {
+      "id": "T5",
+      "section": "2.5",
+      "vm": "b",
+      "setup": "a Response from another source port or address, then the right one",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "the wrong Response is discarded"
+        ]
+      }
+    },
+    {
+      "id": "M1",
+      "section": "2.8",
+      "vm": "a",
+      "setup": "asset off, with an SNMP schedule entry",
+      "expect": {
+        "code": null,
+        "refused_at": "load",
+        "datagrams": 0,
+        "checks": [
+          "the agent receives 0 datagrams over a full schedule period"
+        ]
+      }
+    },
+    {
+      "id": "M2",
+      "section": "2.8",
+      "vm": "a",
+      "setup": "asset off, applicability on",
+      "expect": {
+        "code": null,
+        "refused_at": "load",
+        "datagrams": 0,
+        "checks": [
+          "the configuration is refused (D4-50)"
+        ]
+      }
+    },
+    {
+      "id": "M3",
+      "section": "2.8",
+      "vm": "c",
+      "setup": "any ok run (I1)",
+      "expect": {
+        "code": "ok",
+        "checks": [
+          "every segment's msgAuthenticationParameters is zero bytes of the right length, with a usm-digest redaction",
+          "every received message's msgAuthenticationParameters is zero in the stored transcript",
+          "none of the test password, Ku, each localized key and the AES key (the first 16 bytes of the localized privacy key) appears, as raw bytes, as hex in either case or as base64, in the transcript, C8's audit records for the run, the health lines, the collector's log, or the node's store and configuration"
+        ]
+      }
+    }
+  ],
+  "hostile": {
+    "section": "2.6",
+    "expect_outer": {
+      "code": "failed.timeout",
+      "checks": [
+        "each malformed message is discarded before authentication",
+        "no panic",
+        "no read past the datagram",
+        "bytes kept"
+      ]
+    },
+    "expect_scoped": {
+      "code": "failed.snmp_scoped_pdu_unreadable",
+      "checks": [
+        "the run fails cleanly",
+        "nothing suspended",
+        "no panic",
+        "bytes kept"
+      ],
+      "code_from": "D4-54 (C2 0.8)"
+    },
+    "layers": [
+      "outer",
+      "scoped"
+    ],
+    "corpus": [
+      {
+        "id": "H1",
+        "defect": "a truncated message"
+      },
+      {
+        "id": "H2",
+        "defect": "a length longer than the datagram"
+      },
+      {
+        "id": "H3",
+        "defect": "an indefinite length"
+      },
+      {
+        "id": "H4",
+        "defect": "nesting deeper than 64"
+      },
+      {
+        "id": "H5",
+        "defect": "an INTEGER over 9 octets"
+      },
+      {
+        "id": "H6",
+        "defect": "a Counter64 over 9 octets"
+      },
+      {
+        "id": "H7",
+        "defect": "a 9-octet Counter64 without the leading 0x00"
+      },
+      {
+        "id": "H8",
+        "defect": "an OID arc of 2^32 or more"
+      },
+      {
+        "id": "H9",
+        "defect": "an OID with 129 arcs"
+      },
+      {
+        "id": "H10",
+        "defect": "an empty OID"
+      },
+      {
+        "id": "H11",
+        "defect": "an OCTET STRING longer than its message"
+      },
+      {
+        "id": "H12",
+        "defect": "a non-minimal length encoding"
+      },
+      {
+        "id": "H13",
+        "defect": "trailing bytes after the message"
+      },
+      {
+        "id": "H14",
+        "defect": "a non-minimal OID arc (a leading 0x80)"
+      },
+      {
+        "id": "H15",
+        "defect": "msgAuthenticationParameters of the wrong length for the algorithm (not 24 for HMAC-SHA-256, not 48 for HMAC-SHA-512)",
+        "layers": [
+          "outer"
+        ],
+        "checks": [
+          "discarded before any HMAC is computed"
+        ]
+      },
+      {
+        "id": "H16",
+        "defect": "msgPrivacyParameters that is not 8 bytes",
+        "layers": [
+          "outer"
+        ]
+      },
+      {
+        "id": "H17",
+        "defect": "an inbound SetRequest, Trap or Inform PDU",
+        "layers": [
+          "scoped"
+        ],
+        "checks": [
+          "discarded"
+        ]
+      }
+    ],
+    "positive": [
+      {
+        "id": "H0",
+        "case": "a valid 9-octet Counter64 of 2^63 or more, with the 0x00 lead, as UCD-SNMP and ifXTable serve",
+        "expect": {
+          "code": "ok"
+        }
+      }
+    ],
+    "fuzz": "the same corpus seeds C2's Go fuzz target on the client's decoder"
+  },
+  "egress": {
+    "section": "2.7",
+    "test": "tests/integration/gt_mib/egress/deny_test.go (from #449)",
+    "rules": {
+      "pdu_type": [
+        "SetRequest",
+        "InformRequest",
+        "SNMPv2-Trap",
+        "Report",
+        "GetResponse",
+        "a GetNext for a get operation",
+        "a Get for the walk"
+      ],
+      "security_level": [
+        "authNoPriv",
+        "noAuthNoPriv that is not discovery",
+        "priv without auth",
+        "the discovery message after the engine ID is known"
+      ],
+      "oid_not_named": [
+        "an OID the get does not name",
+        "an OID that only extends a named one"
+      ],
+      "oid_outside_subtree": [
+        "a walk continuation outside the subtree",
+        "an OID sharing the subtree's text but not its arcs",
+        "the subtree's parent"
+      ],
+      "max_repetitions": [
+        "17, not the register's 16"
+      ],
+      "non_repeaters": [
+        "1"
+      ],
+      "version": [
+        "a v1 GetRequest",
+        "a v2c GetRequest",
+        "near miss 1: msgVersion 1"
+      ],
+      "security_model": [
+        "near miss 2: msgSecurityModel 2"
+      ],
+      "discovery_shape.reportable": [
+        "near miss 3"
+      ],
+      "discovery_shape.engine_id": [
+        "near miss 4"
+      ],
+      "discovery_shape.boots": [
+        "near miss 5"
+      ],
+      "discovery_shape.time": [
+        "near miss 6"
+      ],
+      "discovery_shape.user_name": [
+        "near miss 7"
+      ],
+      "discovery_shape.auth_params": [
+        "near miss 8"
+      ],
+      "discovery_shape.priv_params": [
+        "near miss 9"
+      ],
+      "discovery_shape.context_engine_id": [
+        "near miss 10"
+      ],
+      "discovery_shape.context_name": [
+        "near miss 11"
+      ],
+      "discovery_shape.pdu_type": [
+        "near miss 12: a GetNextRequest"
+      ],
+      "discovery_shape.varbinds": [
+        "near miss 13: one varbind"
+      ],
+      "engine_id": [
+        "another engine ID",
+        "authPriv before discovery"
+      ],
+      "user_name": [
+        "another user"
+      ],
+      "max_size": [
+        "msgMaxSize not the register's"
+      ],
+      "context": [
+        "a context name",
+        "another contextEngineID"
+      ],
+      "varbind_value": [
+        "a value that is not NULL"
+      ],
+      "varbind_count": [
+        "a get with no varbind",
+        "a walk request with two"
+      ],
+      "pdu_fields": [
+        "a Get with error-status set"
+      ],
+      "ber": [
+        "bytes after the message",
+        "a second scoped PDU after the first inside the encryption",
+        "a long-form length that fits the short form",
+        "a long-form length with a leading zero octet",
+        "an indefinite length",
+        "a length past the datagram",
+        "a truncated message",
+        "an empty message"
+      ]
+    }
+  }
+}
