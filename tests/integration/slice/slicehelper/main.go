@@ -48,6 +48,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -135,6 +136,13 @@ type Layout struct {
 	OperatorKey string `json:"operator_key,omitempty"`
 	// The mixed node (#466), when -snmp-port is set: the SEL-2731M.
 	SNMPAsset string `json:"snmp_asset,omitempty"`
+	// V-M1, with -gtmib: each GT-MIB case's asset, by case ID.
+	GTMIBAssets map[string]string `json:"gtmib_assets,omitempty"`
+	// GTMIBNodeConfig is the node configuration with the GT-MIB entries
+	// scheduled. node_config leaves them out, so that the credentials can
+	// all be installed before any of them runs, and the run restarts the
+	// node on this one.
+	GTMIBNodeConfig string `json:"gtmib_node_config,omitempty"`
 	// V-M7, with -gtadv-row or -gtadv-operators: each GT-ADV row's asset.
 	GTADVAssets map[string]string `json:"gtadv_assets,omitempty"`
 }
@@ -167,7 +175,7 @@ var (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|advisory-file|verify-audit ...")
+		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|install-gtmib|admin-file|advisory-file|verify-audit ...")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -192,6 +200,14 @@ func main() {
 	gtinjSER := fs.String("gtinj-ser", "", "setup: give the slice's asset an event baseline whose params are this series' (V-M4's SER half, D4-47)")
 	configEvery := fs.Int("config-every", 0, "setup: read the asset's configuration (sel.config.read_all) every this many seconds instead of its SER (V-M2)")
 	snmpPort := fs.Int("snmp-port", 0, "setup: add a SEL-2731M polled over SNMPv3 at this port of 127.0.0.1, under its own register package (the mixed node, #466)")
+	gtmibFile := fs.String("gtmib", "", "setup: add one SEL-2731M or SEL-2741M per entry of this JSON file, each polled over SNMPv3 at its own GT-MIB agent; install-gtmib: install each entry's credential (V-M1; see gtmib.go)")
+	gtmibEvery := fs.Int("gtmib-every", 3600, "setup: with -gtmib, each entry's every_seconds")
+	snmpAsset := fs.String("snmp-asset", "", "install-credential: install an snmpv3 credential for this asset instead of the SEL-751's Telnet one; the keys come hex-encoded from OTSEC_SLICE_SECRET_HEX (V-M1)")
+	snmpRef := fs.String("snmp-ref", "", "install-credential: with -snmp-asset, the credential reference ID")
+	usmEngine := fs.String("usm-engine-id", "", "install-credential: with -snmp-asset, the pinned engine ID in hex")
+	usmUser := fs.String("usm-user", "gt-mib", "install-credential: with -snmp-asset, the USM user name")
+	usmAuth := fs.String("usm-auth", string(authz.USMAuthHMACSHA256), "install-credential: with -snmp-asset, the USM authentication protocol")
+	usmPriv := fs.String("usm-priv", string(authz.USMPrivAES128), "install-credential: with -snmp-asset, the USM privacy protocol")
 	snmpUnlisted := fs.Bool("snmp-unlisted", false, "setup: with -snmp-port, leave the SEL-2731M's profile out of register_versions, so its run names the SEL-751's revision")
 	baselineKind := fs.String("baseline-kind", "event", "admin-file: a baseline-ack's kind, event (the GT-INJ asset) or configuration (the slice's asset)")
 	device := fs.String("device", "self", "admin-file: a change-approval's asset, self (the slice's) or other (V-M2)")
@@ -209,11 +225,18 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn, *gtmibFile, *gtmibEvery)
 	case "advisory-file":
 		err = advisoryFile(*root, *repo, *setCase, *setVersion)
 	case "install-credential":
-		err = installCredential(*root)
+		var usm *usmInstall
+		if *snmpAsset != "" {
+			usm = &usmInstall{asset: *snmpAsset, ref: *snmpRef, usm: authz.USM{UserName: *usmUser, Auth: authz.USMAuth(*usmAuth),
+				Priv: authz.USMPriv(*usmPriv), EngineID: *usmEngine, SoleDeviceAttested: true}}
+		}
+		err = installCredential(*root, usm)
+	case "install-gtmib":
+		err = installGTMIB(*root, *gtmibFile, *usmAuth)
 	case "verify-audit":
 		err = verifyAudit(*in)
 	case "admin-file":
@@ -241,7 +264,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool, gtmibFile string, gtmibEvery int) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -326,6 +349,11 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	if err != nil {
 		return err
 	}
+	if gtmibFile != "" {
+		if snmpProfile, snmpPayload, err = gtmibAssets(nc, &l, repo, gtmibFile, gtmibEvery, snmpProfile, snmpPayload); err != nil {
+			return err
+		}
+	}
 	if err := gtADV(nc, &l, repo, gtadvRow, gtadvOperators); err != nil {
 		return err
 	}
@@ -344,6 +372,20 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	} else {
 		if err := nc.LockTLS(); err != nil {
 			return err
+		}
+		if len(l.GTMIBAssets) > 0 {
+			l.GTMIBNodeConfig = l.NodeConfig + ".gtmib"
+			if err := nc.Write(l.GTMIBNodeConfig); err != nil {
+				return err
+			}
+			nc.Schedule = slices.DeleteFunc(nc.Schedule, func(c nodeconfigtest.Collection) bool {
+				return slices.Contains(slices.Collect(maps.Values(l.GTMIBAssets)), c.AssetID)
+			})
+			if snmpPort == 0 {
+				// No scheduled asset uses the profile now, and the loader
+				// refuses a revision for none.
+				delete(nc.RegisterVersions, nodeconfigtest.TestSNMPProfile)
+			}
 		}
 		if err := nc.Write(l.NodeConfig); err != nil {
 			return err
@@ -440,7 +482,7 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 		}
 	}
 	profiles, registers := []any{json.RawMessage(profile)}, []any{env}
-	if snmpPort != 0 {
+	if snmpPayload != nil {
 		// The SEL-2731M's profile and package, signed by the same release
 		// key: the collector selects the package by the profile's firmware
 		// allowlist (C3 on #461).
@@ -448,13 +490,13 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 		registers = append(registers, register.Envelope{Contract: register.ContractID, Algorithm: "ed25519", KeyID: "a6-slice-release",
 			Payload: snmpPayload, Signature: ed25519.Sign(priv, authz.RegisterSigningInput(snmpPayload))})
 		for _, a := range nc.Assets {
-			if a["asset_id"] == snmpAssetID {
+			if id, _ := a["asset_id"].(string); id == snmpAssetID || slices.Contains(slices.Collect(maps.Values(l.GTMIBAssets)), id) {
 				assets = append(assets, a)
 			}
 		}
 	}
 	collectorConfig := func(peer string) ([]byte, error) {
-		return json.MarshalIndent(map[string]any{
+		m := map[string]any{
 			"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
 			"ipc":           map[string]any{"address": l.Socket, "node_peer": peer},
 			"assets":        assets,
@@ -462,7 +504,13 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
 			"registers":     registers,
 			"admin_keys":    admins,
-		}, "", "  ")
+		}
+		if len(l.GTMIBAssets) > 0 {
+			// One install per GT-MIB asset, and room for the refused
+			// ones (U14), which count against the budget too (D3's notes).
+			m["install_limit"] = 2*len(l.GTMIBAssets) + 10
+		}
+		return json.MarshalIndent(m, "", "  ")
 	}
 	b, err := collectorConfig(l.NodePeer)
 	if err != nil {
@@ -598,6 +646,7 @@ type request struct {
 	baselineKind authz.BaselineKind
 	device       string
 	window       [2]string
+	usm          *usmInstall
 	operator     bool
 }
 
@@ -665,6 +714,18 @@ func (a *adminContext) sign(kind authz.RequestKind, r request) (*authz.AdminSign
 	}
 	switch kind {
 	case authz.KindCredentialInstall:
+		if r.usm != nil {
+			ref, secret, err := r.usm.build(a.l.NodeID, version, admin, now)
+			if err != nil {
+				return nil, nil, err
+			}
+			sealed, err := seal.Seal(seal.InstallKey{KeyID: a.key.KeyID, PublicKey: a.key.PublicKey}, a.key.Fingerprint, ref, secret, nil)
+			if err != nil {
+				return nil, nil, err
+			}
+			p.CredentialInstall = &authz.CredentialInstallBody{Ref: ref, Sealed: sealed}
+			break
+		}
 		secret := []byte(os.Getenv("OTSEC_SLICE_SECRET"))
 		if len(secret) == 0 {
 			return nil, nil, errors.New("OTSEC_SLICE_SECRET is not set")
@@ -707,7 +768,7 @@ func (a *adminContext) sign(kind authz.RequestKind, r request) (*authz.AdminSign
 	return signed, nonce, err
 }
 
-func installCredential(root string) error {
+func installCredential(root string, usm *usmInstall) error {
 	a, err := loadAdmin(root, false)
 	if err != nil {
 		return err
@@ -715,7 +776,7 @@ func installCredential(root string) error {
 	l := a.l
 	// Under the 15-minute maximum less the 2-minute skew allowance, so a
 	// collector clock a little ahead still accepts it (A1 on #146).
-	signed, nonce, err := a.sign(authz.KindCredentialInstall, request{expires: 10 * time.Minute, version: 1})
+	signed, nonce, err := a.sign(authz.KindCredentialInstall, request{expires: 10 * time.Minute, version: 1, usm: usm})
 	if err != nil {
 		return err
 	}
@@ -748,6 +809,13 @@ func installCredential(root string) error {
 	}
 	if decided.State != "accepted" {
 		return fmt.Errorf("credential.install %s: %s (%s)", name, decided.State, decided.Detail)
+	}
+	if usm != nil {
+		// The node reads only the first 16 files in admin_dir, so a
+		// relayed one is removed, as health asks an administrator to.
+		if err := removeAdminFile(l.AdminDir, name); err != nil {
+			return err
+		}
 	}
 	fmt.Println(`{"event":"credential-installed","collector_seq":` + strconv.FormatUint(decided.CollectorSeq, 10) + `}`)
 	return nil
