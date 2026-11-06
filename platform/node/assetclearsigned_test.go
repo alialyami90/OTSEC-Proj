@@ -11,6 +11,7 @@ import (
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collectorclient"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
 
 // uuidSuspending is suspendingCollector with C2 invocation IDs, which a
@@ -38,6 +39,7 @@ type signedClearNode struct {
 	s   *Scheduler
 	r   *Runtime
 	st  *Status
+	nc  *nodeconfigtest.Config
 	run *fakeCollector
 	mux *adminMux
 	ref string
@@ -58,13 +60,18 @@ func newSignedClearNode(t *testing.T, target asset.EvidenceClass) (*signedClearN
 	if ref == "" {
 		t.Fatal("the run did not suspend the asset")
 	}
-	sign := func(name string, n int, ref string) {
-		env := signN(t, authz.KindAssetClearSusp, n, func(p *authz.AdminRequest) {
-			p.AssetClearSusp.Ref, p.InstallKeyID = ref, kid(testInstallKey)
-		})
-		writeAdminFile(t, nc, name, authz.KindAssetClearSusp, env)
-	}
-	return &signedClearNode{t: t, s: s, r: r, st: st, run: run, mux: mux, ref: ref}, sign
+	n := &signedClearNode{t: t, s: s, r: r, st: st, nc: nc, run: run, mux: mux, ref: ref}
+	return n, func(name string, i int, ref string) { n.signFor(name, i, ref, kid(testInstallKey)) }
+}
+
+// signFor leaves in admin_dir a signed clear of ref bound to install key
+// ID key.
+func (n *signedClearNode) signFor(name string, i int, ref, key string) {
+	n.t.Helper()
+	env := signN(n.t, authz.KindAssetClearSusp, i, func(p *authz.AdminRequest) {
+		p.AssetClearSusp.Ref, p.InstallKeyID = ref, key
+	})
+	writeAdminFile(n.t, n.nc, name, authz.KindAssetClearSusp, env)
 }
 
 func (n *signedClearNode) clears() []*audit.Record {
@@ -125,6 +132,95 @@ func TestSignedAssetClearOfAnotherRef(t *testing.T) {
 	}
 	if _, held := n.s.Suspensions()[relayID]; !held {
 		t.Fatal("the asset is no longer suspended")
+	}
+}
+
+// A signed clear the collector accepted for an install key the node does
+// not trust is refused at the node, whatever the collector said: nothing is
+// cleared, the asset stays suspended, and the entry says to sign again
+// (D6 on #514).
+func TestSignedAssetClearForAnUntrustedKey(t *testing.T) {
+	n, _ := newSignedClearNode(t, asset.DeviceObserved)
+	n.mux.admin.installKey = kid("ik_test_other")
+	n.signFor("admin-request-clear.json", 1, n.ref, kid("ik_test_other"))
+	for range 2 {
+		n.s.relayAdmin(bg)
+		if shown := adminShown(n.st); len(shown) != 1 || shown[0].State != "accepted" || shown[0].NodePart != partRefused ||
+			!strings.Contains(shown[0].Detail, "Sign the request again") {
+			t.Fatalf("admin requests in status %+v", shown)
+		}
+		if len(n.clears()) != 0 {
+			t.Fatalf("a clear for an untrusted key was recorded: %+v", n.clears())
+		}
+		if _, held := n.s.Suspensions()[relayID]; !held {
+			t.Fatal("the asset is no longer suspended")
+		}
+	}
+	notApplied := 0
+	for _, a := range n.st.Snapshot("x").Alarms {
+		if a.Code == AlarmAdminRequestNotApplied {
+			notApplied++
+		}
+	}
+	if notApplied != 1 {
+		t.Fatalf("%d admin-request-not-applied alarms", notApplied)
+	}
+}
+
+// A signed clear the collector accepted for its new install key, which the
+// node finds accepted while that key's reset is open, waits: nothing is
+// cleared until the acknowledgement, and then the clear applies once (D6
+// on #514). The relay sends nothing but an acknowledgement while a reset is
+// open, so the acceptance is put in the fold as TestApplyAdminPartGates
+// does: the node stopped between the collector's answer and its own part,
+// and found the new key on starting again.
+func TestSignedAssetClearWaitsForTheReset(t *testing.T) {
+	// Lab-only, so the unsigned seq-reset-ack.json acknowledges the reset.
+	n, _ := newSignedClearNode(t, asset.Simulated)
+	if err := n.nc.WriteInstallKey("ik_test_second"); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := n.s.collectorHold(bg); code != AlarmCollectorReset {
+		t.Fatalf("hold %q, want the reset", code)
+	}
+	env := signN(t, authz.KindAssetClearSusp, 1, func(p *authz.AdminRequest) {
+		p.AssetClearSusp.Ref, p.InstallKeyID = n.ref, kid("ik_test_second")
+	})
+	f := &adminFile{name: "admin-request-clear.json", sum: strings.Repeat("c1", 32), kind: authz.KindAssetClearSusp, signed: env,
+		claims: adminClaims{Kind: authz.KindAssetClearSusp, Principal: relayAdmin}}
+	f.id = adminRequestID(f.sum)
+	n.s.mu.Lock()
+	n.s.relayed[f.id] = relayEntry{Outcome: audit.OutcomeAllowed, CollectorSeq: 5, Verified: &audit.Admin{
+		AdminKeyID: env.KeyID, Principal: relayAdmin.ID, Nonce: strings.Repeat("A", 22), PayloadSHA256: authz.AdminPayloadSHA256(env), Kind: authz.KindAssetClearSusp}}
+	n.s.mu.Unlock()
+	for range 2 {
+		if part := n.s.applyAdminParts(bg, []*adminFile{f})[f.id]; part.state != partPending || !strings.Contains(part.detail, "not acknowledged yet") {
+			t.Fatalf("the part during the open reset %+v", part)
+		}
+		if len(n.clears()) != 0 {
+			t.Fatalf("a clear was recorded during the open reset: %+v", n.clears())
+		}
+		if _, held := n.s.Suspensions()[relayID]; !held {
+			t.Fatal("the asset is no longer suspended during the open reset")
+		}
+	}
+
+	writeAck(t, n.nc, "ik_test_second")
+	n.s.checkAck(bg)
+	n.s.mu.Lock()
+	cs := n.s.cs
+	n.s.mu.Unlock()
+	if cs.OpenResetKey != "" || cs.TrustedKey != kid("ik_test_second") {
+		t.Fatalf("reset not acknowledged: %+v", cs)
+	}
+	if part := n.s.applyAdminParts(bg, []*adminFile{f})[f.id]; part.state != partDone {
+		t.Fatalf("the part after the acknowledgement %+v", part)
+	}
+	if cl := n.clears(); len(cl) != 1 || cl[0].CorrelationID != n.ref || !strings.Contains(cl[0].Detail, "signed by "+relayAdmin.ID) {
+		t.Fatalf("clear records after the acknowledgement %+v", cl)
+	}
+	if _, held := n.s.Suspensions()[relayID]; held {
+		t.Fatal("the asset is still suspended after the acknowledgement")
 	}
 }
 
