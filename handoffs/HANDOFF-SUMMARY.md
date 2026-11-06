@@ -58,7 +58,7 @@ The contracts are listed in [contracts/README.md](../contracts/README.md); the i
 - **The sites' protocols,** before IDS (item 4) is briefed (D4-33).
 - **Authorization for any device contact.** This covers a lab relay or switch before any H-test or Q3, and any SNMPv3 contact after V-M1.
 - **Resuming test runs on their PC** (D4-12).
-- **Deleting the leftover branches.** The 2026-10-31 cleanup list (`/mnt/project-files/a1/branch-cleanup-2026-10-31.md`) was never handed to the owner (C1, 2026-11-06). On 2026-11-06, 150 of its 151 merged branches were still at their recorded tips, each restorable from its merged PR; `claude/project-thread-8k5430` has moved and is off the list. Also owed: the four unmerged branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 asks the owner once. **STALLED.**
+- **Deleting the leftover branches.** The 2026-10-31 cleanup list (`/mnt/project-files/a1/branch-cleanup-2026-10-31.md`) was never handed to the owner (C1, 2026-11-06). On 2026-11-06, 150 of its 151 merged branches were still at their recorded tips, each restorable from its merged PR; `claude/project-thread-8k5430` has moved and is off the list. Also owed: the four unmerged branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. The owner approved deleting the 150 on 2026-11-06 (D4-62). This session cannot delete a branch, so D1 gave the owner `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1`, with each delete leased to its recorded SHA. It waits for the owner to run it. The four unmerged branches are kept.
 
 ## Open PRs at the checkpoint
 
@@ -92,7 +92,7 @@ After the ack, each agent's NEXT ACTION is:
 - The owner's leftover branches (above). Owed since generation B.
 - ADR-0007 (Windows site node) is still `proposed`. It is unchanged since generation A.
 - ~~Role 3: D4-20 rule 4, the evidence release and export kind.~~ Deferred past Phase 4 by D4-59; no longer STALLED.
-- ~~Role 5: refusing `clear-suspension.json` off-lab.~~ Queued for right after the item 3 gate by D4-59, with the Windows node start stall; no longer STALLED.
+- ~~Role 5: refusing `clear-suspension.json` off-lab.~~ Queued for right after the item 3 gate by D4-59, with the Windows node start stall; no longer STALLED. Issued as P4-H1 and P4-H2 on 2026-11-06 (D4-62).
 - Role 4: IDS (item 4) is untouched by design. It waits on the owner's protocols.
 
 **Open, not STALLED (D4-59):** the real-store test of D4-21's byte share (HR-11), role 6's test against role 4's receiver. It gates the first `device-observed` listener, not item 3.

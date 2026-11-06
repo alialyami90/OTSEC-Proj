@@ -1028,3 +1028,13 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
 - **Proof.** Role 6's V-M7 checker resolves `identity.mismatch.id` to its stored `identity.read`. An operator-only mismatch scenario joins the V-M7 leg on the binaries, checked across a restart. Role 6's contract tests for 0.2 are in a new `c12_v02_d6_test.go`.
 - **The next C2 revision** bounds `ended_at`'s fraction at nine digits, beside D4-60's GetNext code.
 - **No code before the owner's go** (D4-34). C12 0.2's code is queued with D4-59's two hardening items.
+
+## D4-62: the owner accepts item 3, the hardening briefs, and the branch cleanup (owner and D1, 2026-11-06)
+
+- **The owner accepted Phase 4 item 3 with its conditions** (16:48Z, on D1's decision card) and chose "Accept, do two hardening fixes first". The conditions are the limits in `docs/phase-4-item3-exit.md`. D1 issues the hardening briefs in `docs/agent-handoffs.md` ("After item 3: hardening briefs"):
+  - P4-H1, refusing `clear-suspension.json` off-lab;
+  - P4-H2, finding the Windows node start stall;
+  - P4-H3, C12 0.2's code as D4-61 approved it, which closes item 3's last limitation.
+
+  D1 told the owner that C12 0.2 follows the two fixes unless they say otherwise. When all three are merged, D1 reports to the owner and asks for the next item. The owner's other open questions (HR-18, severity scores, HR-17, which SEL switches, model naming) stay open.
+- **The branch cleanup (16:48Z).** The owner chose "Delete the 150 merged ones". D1 re-checked that each of the 150 branches is still at the tip recorded on 2026-10-31 and is the head of no open PR. `claude/project-thread-8k5430` has moved and stays. This session's GitHub access refuses a branch delete, as it refuses a force push. So D1 wrote `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1` for the owner to run from a clone. Each delete is leased to the recorded SHA. The four unmerged mutant branches are kept.

@@ -226,4 +226,4 @@ D4-48 to D4-60 are in `docs/phase4/B1-decisions.md`. These matter most for later
 
 ## Owner sign-off
 
-Not yet given.
+**Accepted with its conditions** by the owner on 2026-11-06 (16:48Z, on D1's decision card), with the two hardening items first (D4-62). The owner's open questions above stay open.
