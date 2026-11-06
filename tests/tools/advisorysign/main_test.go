@@ -59,6 +59,24 @@ func TestRefusesAReleaseSet(t *testing.T) {
 	}
 }
 
+// TestRefusesAnOversizedPayload: one byte over MaxSetPayload is signed, for
+// a size refusal on purpose; two bytes over is refused, never cut to a
+// prefix (C5 on #449).
+func TestRefusesAnOversizedPayload(t *testing.T) {
+	bin := buildTool(t)
+	for _, n := range []int{advisory.MaxSetPayload + 1, advisory.MaxSetPayload + 2} {
+		cmd := exec.Command(bin, "-key", "0")
+		cmd.Stdin = strings.NewReader(strings.Repeat(" ", n))
+		out, err := cmd.Output()
+		switch {
+		case n == advisory.MaxSetPayload+1 && (err != nil || len(out) == 0):
+			t.Fatalf("%d bytes: not signed: %v", n, err)
+		case n == advisory.MaxSetPayload+2 && (err == nil || len(out) != 0):
+			t.Fatalf("%d bytes: signed (%d bytes out), not refused", n, len(out))
+		}
+	}
+}
+
 // TestNotInEitherBinary: neither product binary links the test keys or this
 // tool.
 func TestNotInEitherBinary(t *testing.T) {
