@@ -281,6 +281,13 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 		return nil
 	case rec != nil || pruned:
 		a.floor = advisory.Floor{SetID: set.SetID, Version: set.Version, PayloadSHA256: payloadSum}
+	case a.floor.Held() && set.Version <= a.floor.Version:
+		// A stored set with no record that is not newer than the floor was
+		// not written by this node's install path: it is not repaired, so
+		// it cannot hold the intake pending, and nothing older is used
+		// (C6 on #452).
+		s.noSet(ctx, fmt.Sprintf("the newest stored set (%s version %d) has no installation record and is not newer than the floor (version %d); it is not used", set.SetID, set.Version, a.floor.Version))
+		return nil
 	case ref == nil:
 		// A crash fell between the set's commit and its record: write it
 		// now, after verifying the set (D4-26's order).

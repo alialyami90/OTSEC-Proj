@@ -483,3 +483,26 @@ func TestAdvisoryFloorHoldsWithoutTheStoredSet(t *testing.T) {
 		t.Fatalf("in use %+v", u)
 	}
 }
+
+// A stored set with no installation record that is not newer than the floor
+// is not repaired, so it cannot hold the intake pending: a newer set still
+// installs (C6 on #452).
+func TestAdvisoryStaleUnrecordedSetIsNotRepaired(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.put(k.sign(advPayload(t, "otsec-sel", 2, advisory.PurposeRelease, 1)))
+	n.step()
+	if _, err := n.s.storeItem3(bg, AdvisoryStream, k.sign(advPayload(t, "otsec-sel", 1, advisory.PurposeRelease, 1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	n.restart()
+	if n.inUse() != nil || len(n.records(audit.ActionAdvisorySetInstalled)) != 1 {
+		t.Fatalf("a stale stored set was repaired or used: %+v", n.inUse())
+	}
+	n.put(k.sign(advPayload(t, "otsec-sel", 3, advisory.PurposeRelease, 1)))
+	n.step()
+	inst := n.records(audit.ActionAdvisorySetInstalled)
+	if u := n.inUse(); u == nil || u.Version != 3 || inst[len(inst)-1].Advisory.PreviousVersion != 2 {
+		t.Fatalf("a newer set did not install: %+v", u)
+	}
+}
