@@ -2,6 +2,8 @@ package node
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -207,5 +209,76 @@ func TestSignedAssetClearWinsOverTheFile(t *testing.T) {
 	}
 	if ignored != 1 {
 		t.Fatalf("%d ignored alarms for the file", ignored)
+	}
+}
+
+// The recovery path D3 asked for (P4-H1): the node cleared a suspension from
+// the file on a lab-only node, the collector refused that clear, and then an
+// endpoint stopped being simulated, so the file is refused at both ends. The
+// administrator's signed clear of the same asset and ref closes the owed
+// clear, though the node no longer holds the suspension: the next run is
+// sent with no clear request first, and a rebuild from the chain keeps it
+// closed.
+func TestSignedAssetClearClosesAnOwedFileClear(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	run := uuidSuspending(t)
+	answer := run.answer
+	run.answer = func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		if req.Kind == authz.KindAssetClearSusp {
+			return collectorclient.Response{Reply: authz.CollectorReply{Contract: authz.ContractID, RequestID: req.RequestID,
+				Status: authz.ReplyRefused, Refusal: authz.AdminRefusal(authz.AdminCheckEnvelope), CollectorSeq: 1000}}, nil
+		}
+		return answer(req)
+	}
+	mux := &adminMux{run: run, admin: newAdminCollector()}
+	mux.admin.installKey = kid(testInstallKey)
+	s := newScheduler(t, r, mux)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	writeClear(t, nc, relayID, ref)
+	if rep := s.RunOnce(bg, 0); rep.Sent || run.nClears() != 1 {
+		t.Fatalf("the clear the collector refuses: run %+v, %d clears sent", rep, run.nClears())
+	}
+	if owed := s.CollectorClears(); owed[relayID] != ref {
+		t.Fatalf("owed clears %v, want %s", owed, ref)
+	}
+
+	setTargets(t, c, asset.DeviceObserved)
+	env := signN(t, authz.KindAssetClearSusp, 1, func(p *authz.AdminRequest) {
+		p.AssetClearSusp.Ref, p.InstallKeyID = ref, kid(testInstallKey)
+	})
+	writeAdminFile(t, nc, "admin-request-clear.json", authz.KindAssetClearSusp, env)
+	s.relayAdmin(bg)
+	if owed := s.CollectorClears(); len(owed) != 0 {
+		t.Fatalf("the signed clear left owed clears %v", owed)
+	}
+	if _, clears := suspensionRecords(t, r); len(clears) != 1 {
+		t.Fatalf("%d clear records, want the file's one", len(clears))
+	}
+	cleared := 0
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == AlarmSuspensionCleared && a.Asset == relayID && strings.Contains(a.Detail, "signed") {
+			cleared++
+		}
+	}
+	if cleared != 1 {
+		t.Fatalf("%d signed clear alarms on the asset", cleared)
+	}
+	before := run.n()
+	if rep := s.RunOnce(bg, 0); !rep.Sent || run.n() != before+1 || run.nClears() != 1 {
+		t.Fatalf("the run after the signed clear: %+v, %d clears sent", rep, run.nClears())
+	}
+
+	// A rebuild from the chain keeps the owed clear closed.
+	r.Close()
+	if err := os.Remove(filepath.Join(c.Store.Dir, SuspensionsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	s = newScheduler(t, r, mux)
+	if owed := s.CollectorClears(); len(owed) != 0 {
+		t.Fatalf("owed clears after a rebuild: %v", owed)
 	}
 }

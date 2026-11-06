@@ -536,6 +536,22 @@ func TestRelayRecordFits(t *testing.T) {
 			t.Fatalf("%s: %v", o.outcome, err)
 		}
 	}
+	// An accepted asset clear names its asset and ref too (P4-H1).
+	f.kind, f.claims.Kind = authz.KindAssetClearSusp, authz.KindAssetClearSusp
+	f.signed.Payload, _ = json.Marshal(authz.AdminRequest{Kind: authz.KindAssetClearSusp, Nonce: f.claims.Nonce,
+		AssetClearSusp: &authz.AssetClearSuspBody{AssetID: relayID, Ref: okInvocation}})
+	accepted.Admin.PayloadSHA256 = authz.AdminPayloadSHA256(f.signed)
+	rec, err := s.relayRecord(f, req, audit.OutcomeAllowed, accepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a audit.Record
+	if err := json.Unmarshal(rec.Event, &a); err != nil {
+		t.Fatal(err)
+	}
+	if c := signedClearAccepted.FindStringSubmatch(a.Detail); c == nil || c[1] != relayID || c[2] != okInvocation {
+		t.Fatalf("the accepted asset clear's detail %q", a.Detail)
+	}
 }
 
 // Run relays at start and between runs, without waiting for a run.

@@ -526,6 +526,14 @@ func (s *Scheduler) relayRecord(f *adminFile, req *authz.CollectorRequest, outco
 			rec.Verified = &audit.Admin{AdminKeyID: acc.AdminKeyID, Principal: acc.Principal.ID, Nonce: acc.Nonce,
 				PayloadSHA256: acc.PayloadSHA256, Kind: f.kind}
 			rec.RepeatOf = reply.RepeatOf
+			// The collector verified these bytes, so the body may be read now:
+			// the asset and ref of a signed asset clear go in the record, which
+			// is how the chain shows that the collector lifted that
+			// suspension (applyCollectorClear).
+			var p authz.AdminRequest
+			if f.kind == authz.KindAssetClearSusp && collectorwire.DecodeStrict(f.signed.Payload, &p) == nil && p.Kind == f.kind && p.AssetClearSusp != nil {
+				rec.Detail += fmt.Sprintf("; clears asset %s suspension %s", p.AssetClearSusp.AssetID, p.AssetClearSusp.Ref)
+			}
 		}
 	case audit.OutcomeDenied:
 		code, check := refusalOf(reply)

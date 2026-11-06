@@ -52,6 +52,10 @@ const (
 // clear of the unsigned file. The node writes both, in its own chain.
 var signedClearDetail = regexp.MustCompile(`^cleared by admin-request-[a-z0-9-]{1,64}\.json \(signed by `)
 
+// signedClearAccepted reads the asset and ref out of the node's own allowed
+// record of a relayed asset.clear_suspension (relayRecord).
+var signedClearAccepted = regexp.MustCompile(`; clears asset (\S+) suspension (\S+)$`)
+
 // applySignedClear records the node's clear of suspension b.Ref of asset
 // b.AssetID, from a signed asset.clear_suspension the collector accepted
 // (source names the file, the person and the decision). It holds settleMu
@@ -96,13 +100,21 @@ func clearRequestID(ref string) string {
 // replace a ref the collector still holds (A3 on #120), so such a path
 // must keep the owed refs per suspension.
 //
-// A signed clear opens nothing, since the collector accepted it before the
-// node recorded it, and it closes an owed clear of the same ref.
+// A signed clear (P4-H1) opens nothing, since the collector accepted it
+// before the node recorded it. The collector's acceptance of a signed clear
+// closes an owed clear of the same asset and ref, whether or not the node
+// still holds the suspension: it is the collector's half that is owed, and
+// that acceptance lifted it. So a clear the node made from the file, which
+// the collector now refuses off-lab, is closed by the administrator's
+// signed clear of the same ref.
 func applyCollectorClear(m map[string]string, rec *audit.Record) bool {
 	switch {
 	case rec.Action == audit.ActionAssetSuspensionClear && rec.Target != nil && signedClearDetail.MatchString(rec.Detail):
-		if m[rec.Target.AssetID] == rec.CorrelationID {
-			delete(m, rec.Target.AssetID)
+	case rec.Action == audit.ActionCollectorRequest && rec.Outcome == audit.OutcomeAllowed && rec.Verified != nil &&
+		rec.Verified.Kind == authz.KindAssetClearSusp:
+		if c := signedClearAccepted.FindStringSubmatch(rec.Detail); c != nil && m[c[1]] == c[2] {
+			delete(m, c[1])
+			return true
 		}
 	case rec.Action == audit.ActionAssetSuspensionClear && rec.Target != nil:
 		m[rec.Target.AssetID] = rec.CorrelationID

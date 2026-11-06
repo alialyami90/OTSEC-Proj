@@ -519,7 +519,9 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 					s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator; runs resume once the collector accepts the clear")
 				}
 			}
-			if announce && accepted {
+			if c := signedClearAccepted.FindStringSubmatch(rec.Detail); announce && accepted && rec.Target == nil && c != nil {
+				s.rt.opt.Status.Raise(c[1], AlarmSuspensionCleared, "the collector accepted an administrator's signed asset.clear_suspension of suspension "+c[2]+", which the node had cleared; runs resume")
+			} else if announce && accepted {
 				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "the collector accepted the "+rec.Detail+"; runs resume")
 			}
 			after = st.Key.Seq
