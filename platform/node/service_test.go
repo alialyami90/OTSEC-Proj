@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -53,6 +54,19 @@ func TestRunStartsAndStops(t *testing.T) {
 		defer logMu.Unlock()
 		t.Fatalf("audit: %v; OS log: %q", acts, oslog)
 	}
+	// Run logs one start timing line, with Run's phases (P4-H2).
+	logMu.Lock()
+	var lines []string
+	for _, l := range oslog {
+		if strings.HasPrefix(l, "otsec node start:") {
+			lines = append(lines, l)
+		}
+	}
+	logMu.Unlock()
+	if len(lines) != 1 {
+		t.Fatalf("start lines in the OS log: %q", lines)
+	}
+	checkStartLine(t, lines[0], "node")
 	if ep := CollectorEndpoint(c); ep.Address != c.CollectorPipe || ep.Peer == "" {
 		t.Fatalf("collector endpoint %+v", ep)
 	}

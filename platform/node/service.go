@@ -37,26 +37,38 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 		return err
 	}
 	defer rt.Close()
+	starts := rt.starts
+	from := time.Now()
 	fw, err := NewForwarding(rt)
 	if err != nil {
 		return err
 	}
+	starts.add("forwarding", from)
+	from = time.Now()
 	ls, err := NewListening(rt)
 	if err != nil {
 		return err
 	}
+	starts.add("listening", from)
+	from = time.Now()
 	// Every reference is resolved now, so the key register is loaded:
 	// record its new entries (section 9).
 	keysLeft := rt.RecordNodeKeys(ctx)
 	rt.CheckNodeKeys()
 	rt.RecordLabTLSFiles(ctx)
+	starts.add("node-keys", from)
+	from = time.Now()
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
 	if err != nil {
 		return err
 	}
+	starts.add("scheduler", from)
+	from = time.Now()
 	if err := ls.Listen(); err != nil {
 		return err
 	}
+	starts.add("listen", from)
+	from = time.Now()
 	// Status shows each target and listener from the start, a link held back
 	// for its certificate's period among them (HR-13), not after the first
 	// CheckInterval.
@@ -64,8 +76,14 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	if len(cfg.Listeners) > 0 {
 		ls.Publish()
 	}
+	starts.add("first-check", from)
+	from = time.Now()
 	st.Resume()
 	st.Write(string(cfg.NodeID))
+	starts.add("status", from)
+	if oslog != nil {
+		oslog(starts.line("node"))
+	}
 	listened := make(chan struct{})
 	go func() {
 		defer close(listened)

@@ -48,6 +48,8 @@ type Runtime struct {
 	// only to build C9 snapshots (register.go). Nil when there is no copy or
 	// it was refused at start (AlarmRegisterRefused).
 	commands *register.Matcher
+	// starts are the start phases' times (starttimes.go); Run adds its own.
+	starts *startTimes
 
 	mu      sync.Mutex
 	pending []queued                    // store alarms raised during a commit, for Tick
@@ -86,6 +88,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	if opt.Status == nil {
 		return nil, errors.New("node: no status sink")
 	}
+	starts := newStartTimes()
 	if opt.Now == nil {
 		opt.Now = nodeClock.Now
 	}
@@ -107,7 +110,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	if consumers, err = eventBaselineConsumers(cfg, consumers); err != nil {
 		return nil, err
 	}
-	r := &Runtime{cfg: cfg, layout: layout, opt: opt}
+	r := &Runtime{cfg: cfg, layout: layout, opt: opt, starts: starts}
 	specs := append([]c5.Database{}, layout.Databases...)
 	sort.SliceStable(specs, func(i, j int) bool { return specs[i].ID == AuditDB && specs[j].ID != AuditDB })
 	for _, spec := range specs {
@@ -118,6 +121,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		}
 		r.dbs = append(r.dbs, d)
 	}
+	from := time.Now()
 	if cfg.Register != nil {
 		if m, err := cfg.loadRegister(); err != nil {
 			opt.Status.Raise("", AlarmRegisterRefused, "configuration reads are held: "+err.Error())
@@ -125,10 +129,17 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 			r.commands = m
 		}
 	}
+	starts.add("register", from)
+	from = time.Now()
 	r.recordStart(ctx)
+	starts.add("record-start", from)
+	from = time.Now()
 	r.reconcileHolds(ctx)
 	r.advanceHolds(ctx)
+	starts.add("holds", from)
+	from = time.Now()
 	opt.Status.Write(string(cfg.NodeID))
+	starts.add("status", from)
 	return r, nil
 }
 
@@ -169,10 +180,15 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 	}}
 	sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
 	defer cancel()
-	d.report = c5.RunStartup(sctx, env, d.policy)
+	timed := &timedEnv{StartupEnv: env, t: r.starts}
+	from := time.Now()
+	d.report = c5.RunStartup(sctx, timed, d.policy)
+	r.starts.d["store-startup"] += time.Since(from) - timed.spent
+	from = time.Now()
 	if err := r.adopt(d); err != nil {
 		return nil, err
 	}
+	r.starts.add("store-adopt", from)
 	return d, nil
 }
 
