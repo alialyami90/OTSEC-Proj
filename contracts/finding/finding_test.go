@@ -258,13 +258,132 @@ func TestReclassificationIsARevision(t *testing.T) {
 // Known names exactly the minors this build reads, so a node can refuse
 // any other rather than skip it (D4-61).
 func TestKnown(t *testing.T) {
-	if !Known(Identifier) {
-		t.Errorf("Known(%q) = false", Identifier)
+	for _, s := range []string{Identifier, "otsec.finding/0.1", "otsec.finding/0.2"} {
+		if !Known(s) {
+			t.Errorf("Known(%q) = false", s)
+		}
 	}
-	for _, s := range []string{"", "otsec.finding/0.2", "otsec.finding/0.10", "otsec.finding/1.0",
+	for _, s := range []string{"", "otsec.finding/0.3", "otsec.finding/0.10", "otsec.finding/1.0",
 		"otsec.finding/0.01", "otsec.finding/0.1 ", "otsec.config/0.1", "OTSEC.FINDING/0.1"} {
 		if Known(s) {
 			t.Errorf("Known(%q) = true", s)
+		}
+	}
+}
+
+// mismatched is a valid 0.2 finding on an operator identity that a device
+// read refused (D4-55, D4-61): applicable-by-version, firmware-version
+// unread, the declaration stale, and the refusing read in identity.mismatch.
+func mismatched() *Finding {
+	f := confirmed()
+	f.Class = ApplicableByVersion
+	f.Identity.Source, f.Identity.LatestRead = Operator, nil
+	f.Identity.Evidence = []Evidence{{Source: Operator, ID: entered.ID, Stale: true}}
+	f.Identity.Mismatch = &Read{ID: "7c1d2e3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f", AtUTC: "2026-11-05T05:58:00.123456789Z"}
+	f.Preconditions = []Precondition{{Name: "firmware-version", State: Unread}}
+	return f
+}
+
+// C12 0.2's rules 1 to 5 on identity.mismatch (docs/phase4/D4-c12-0.2.md
+// section 4).
+func TestMismatchRules(t *testing.T) {
+	for name, mut := range map[string]func(*Finding){
+		"an operator identity under a mismatch": func(*Finding) {},
+		"a passive identity under a mismatch": func(f *Finding) {
+			f.Identity.Source, f.Identity.Evidence = Passive, []Evidence{{Source: Passive, ID: seen.ID, Stale: true}}
+		},
+		"other preconditions beside firmware-version": func(f *Finding) {
+			f.Preconditions = append(f.Preconditions, Precondition{Name: "web-server-enabled", State: Evidenced, Evidence: []Evidence{cfgRead}})
+		},
+		// Rule 4 is for 0.2 records only: a 0.1 reader is kept.
+		"a 0.1 record, a stale operator identity, no mismatch": func(f *Finding) {
+			f.Schema, f.Identity.Mismatch = "otsec.finding/0.1", nil
+		},
+	} {
+		f := mismatched()
+		mut(f)
+		if err := f.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, c := range map[string]struct {
+		mut  func(*Finding)
+		want Code
+	}{
+		"rule 1: an ID of no invocation form": {func(f *Finding) { f.Identity.Mismatch.ID = entered.ID }, CodeForm},
+		"rule 1: an upper-case invocation ID": {func(f *Finding) { f.Identity.Mismatch.ID = strings.ToUpper(f.Identity.Mismatch.ID) }, CodeForm},
+		"rule 1: no time":                     {func(f *Finding) { f.Identity.Mismatch.AtUTC = "" }, CodeMissing},
+		"rule 1: a local time":                {func(f *Finding) { f.Identity.Mismatch.AtUTC = "2026-11-05T08:58:00+03:00" }, CodeForm},
+		"rule 2: on a device-read identity": {func(f *Finding) {
+			f.Identity.Source, f.Identity.Evidence = DeviceRead, []Evidence{{Source: DeviceRead, ID: idRead.ID, Stale: true}}
+		}, CodeConflict},
+		"rule 3: the identity's evidence current": {func(f *Finding) { f.Identity.Evidence[0].Stale = false }, CodeConflict},
+		"rule 3: not-applicable-operator": {func(f *Finding) {
+			f.Class, f.Reason, f.Preconditions = NotApplicableOperator, OutsideRange, nil
+		}, CodeConflict},
+		"rule 3: mitigated": {func(f *Finding) {
+			f.Class = Mitigated
+			f.Mitigations = []Mitigation{{Name: "http-blocked-at-firewall", OperatorAttested: true, Evidence: []Evidence{entered}}}
+		}, CodeConflict},
+		"rule 3: firmware-version not named": {func(f *Finding) { f.Preconditions = nil }, CodeConflict},
+		"rule 3: firmware-version named, not unread": {func(f *Finding) {
+			f.Preconditions[0] = Precondition{Name: "firmware-version", State: Evidenced, Evidence: []Evidence{cfgRead}}
+		}, CodeConflict},
+		"rule 4: a stale operator identity that names no mismatch": {func(f *Finding) { f.Identity.Mismatch = nil }, CodeConflict},
+		"rule 4: a stale passive identity that names no mismatch": {func(f *Finding) {
+			f.Identity.Source, f.Identity.Evidence, f.Identity.Mismatch = Passive, []Evidence{{Source: Passive, ID: seen.ID, Stale: true}}, nil
+		}, CodeConflict},
+		"rule 5: in a 0.1 record": {func(f *Finding) { f.Schema = "otsec.finding/0.1" }, CodeSchema},
+		// The operator's entry still never stands as a device read (C6 on #440).
+		"the mismatch read cited as the identity's own evidence": {func(f *Finding) {
+			f.Identity.Evidence = append(f.Identity.Evidence, Evidence{Source: DeviceRead, ID: f.Identity.Mismatch.ID})
+		}, CodeConflict},
+	} {
+		f := mismatched()
+		c.mut(f)
+		err := f.Validate()
+		if !slices.Contains(Codes(err), c.want) {
+			t.Errorf("%s: got %v, want a %s failure", name, err, c.want)
+		}
+	}
+}
+
+// A 0.1 record decodes into this build's type and encodes to its own
+// bytes, so its Hash, which a later revision names, is unchanged (D4-61).
+func TestA01RecordKeepsItsBytes(t *testing.T) {
+	f := confirmed()
+	f.Schema = "otsec.finding/0.1"
+	b, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"mismatch"`) {
+		t.Fatalf("a 0.1 record carries the 0.2 field: %s", b)
+	}
+	var back Finding
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	again, err := json.Marshal(&back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again) != string(b) || back.Validate() != nil {
+		t.Errorf("a 0.1 record did not keep its bytes or stopped validating: %s", again)
+	}
+}
+
+// Every minor begins with its schema, so an older reader recognises the
+// record by its prefix and refuses a minor it does not know rather than
+// skipping it (D4-61).
+func TestEncodingBeginsWithSchema(t *testing.T) {
+	for _, f := range []*Finding{confirmed(), mismatched()} {
+		b, err := json.Marshal(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := `{"schema":"` + Identifier + `",`; !strings.HasPrefix(string(b), want) {
+			t.Errorf("a finding begins %.40q, want %q", b, want)
 		}
 	}
 }

@@ -380,11 +380,88 @@ func TestOperatorMismatch(t *testing.T) {
 			if c.class == finding.ApplicableByVersion && (len(f.Preconditions) != 1 || f.Preconditions[0].Name != advisory.ReservedFirmwareVersion) {
 				t.Errorf("firmware-version is not named unread: %+v", f.Preconditions)
 			}
+			// C12 0.2 (D4-61): the refusing read is cited in
+			// identity.mismatch exactly where the declaration is stale.
+			if c.class == finding.ApplicableByVersion {
+				if m := f.Identity.Mismatch; m == nil || *m != (finding.Read{ID: mismatchID, AtUTC: afterRead}) {
+					t.Errorf("identity.mismatch %+v, want the mismatch read", m)
+				}
+			} else if f.Identity.Mismatch != nil {
+				t.Errorf("identity.mismatch %+v on %s", f.Identity.Mismatch, c.class)
+			}
 		})
 	}
 	bad := operator("SEL-751A-R100-V1-Z000000-D20250101")
 	bad.LatestMismatch.AtUTC = "later"
 	if _, err := Evaluate(bad, oneEntry("SEL-751", advisory.SchemeSELFID, r500, nil), nil); err == nil {
 		t.Error("a mismatch with a bad time was accepted")
+	}
+}
+
+// C12 0.2 (D4-61): a stored 0.1 finding is revised only when its content
+// changes, an operator finding under a standing mismatch gains
+// identity.mismatch in one revision, and a new declaration then clears the
+// field and the stale mark in one more.
+func TestC12Upgrade(t *testing.T) {
+	r500 := []advisory.Range{{Introduced: "R500-V0", Fixed: "R500-V1"}}
+	set := oneEntry("SEL-751", advisory.SchemeSELFID, r500, nil)
+	declared := Input{AssetID: assetID, EvaluatedUTC: evaluated, Identity: Identity{Source: finding.Operator,
+		Evidence: operatorID, FirmwareID: "SEL-751-R500-V0-Z103101-D20260327"}}
+	refused := declared
+	refused.LatestMismatch = &finding.Read{ID: mismatchID, AtUTC: afterRead}
+	refused.MismatchFID = "SEL-751A-R100-V1-Z000000-D20250101"
+
+	// prev01 stores fs as a 0.1 node would have: the same content, under
+	// 0.1, without the field 0.1 does not have.
+	prev01 := func(fs []finding.Finding) map[string]Previous {
+		out := map[string]Previous{}
+		for _, f := range fs {
+			f.Schema, f.Identity.Mismatch = "otsec.finding/0.1", nil
+			b, err := json.Marshal(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[f.Advisory] = Previous{Finding: f, Hash: finding.Hash(b)}
+		}
+		return out
+	}
+	if out := eval(t, declared, set, prev01(eval(t, declared, set, nil))); len(out) != 0 {
+		t.Fatalf("a 0.1 finding with no content change was revised: %+v", out)
+	}
+	old := prev01(eval(t, refused, set, nil))
+	out := eval(t, refused, set, old)
+	if len(out) != 1 || out[0].Revision != 2 || out[0].Previous != old["TEST-UNIT-01"].Hash ||
+		out[0].From != finding.ApplicableByVersion || out[0].Identity.Mismatch == nil || out[0].Schema != finding.Identifier {
+		t.Fatalf("under a standing mismatch, want one 0.2 revision citing it, got %+v", out)
+	}
+
+	// A new declaration clears the mismatch (D4-55): one revision, with no
+	// field and no stale mark, and the class follows the declared FID.
+	cleared := declared
+	cleared.Identity.Evidence = "audit:node-a:9"
+	again := eval(t, cleared, set, byEntry(t, out))
+	if len(again) != 1 || again[0].Revision != 3 || again[0].Identity.Mismatch != nil || again[0].Identity.Evidence[0].Stale ||
+		again[0].Class != finding.ApplicableByVersion {
+		t.Fatalf("a new declaration did not clear the mismatch in one revision: %+v", again)
+	}
+}
+
+// Rule 3 is a contract rule: under a mismatch, every piece of an operator
+// identity's evidence is stale, not only the first. Evaluate gives such an
+// identity one piece today, so markStale is called directly with two
+// (D2 and D1 on the C12 0.2 patch).
+func TestMarkStaleMarksEveryPiece(t *testing.T) {
+	m := finding.Read{ID: mismatchID, AtUTC: afterRead}
+	e := evaluator{in: Input{Identity: Identity{Source: finding.Operator, Evidence: operatorID}, LatestMismatch: &m}, mismatched: true}
+	f := finding.Finding{Identity: finding.Identity{Source: finding.Operator, Evidence: []finding.Evidence{
+		{Source: finding.Operator, ID: operatorID}, {Source: finding.Operator, ID: "audit:node-a:8"}}}}
+	e.markStale(&f)
+	for i, ev := range f.Identity.Evidence {
+		if !ev.Stale {
+			t.Errorf("identity.evidence[%d] is not stale under a mismatch", i)
+		}
+	}
+	if f.Identity.Mismatch == nil || *f.Identity.Mismatch != m {
+		t.Errorf("identity.mismatch %+v, want %+v", f.Identity.Mismatch, m)
 	}
 }

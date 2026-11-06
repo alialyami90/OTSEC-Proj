@@ -17,14 +17,17 @@ import (
 )
 
 // Identifier is this contract's schema identifier.
-const Identifier = "otsec.finding/0.1"
+const Identifier = "otsec.finding/0.2"
 
-var self = version.ID{Name: "finding", Major: 0, Minor: 1}
+// identifier01 is the minor before this one, which this build still reads.
+const identifier01 = "otsec.finding/0.1"
+
+var self = version.ID{Name: "finding", Major: 0, Minor: 2}
 
 // Known reports whether schema names a minor of this contract that this
 // build reads. A reader refuses a finding of any other minor rather than skip
 // it, so a node rolled back past a newer minor fails closed (D4-61).
-func Known(schema string) bool { return schema == Identifier }
+func Known(schema string) bool { return schema == Identifier || schema == identifier01 }
 
 // Bounds on one record, so a finding always fits one store record.
 const (
@@ -94,12 +97,19 @@ type Evidence struct {
 // that read the same value. It shows the identity was current when this
 // revision was decided. A later run that only confirms the value again
 // records no new revision.
+//
+// Mismatch (0.2) is the device read that refused an operator or passive
+// identity: its C2 invocation ID and the run's stored ended_at, and nothing
+// the device reported (D4-61). It is never the identity's own evidence, only
+// why that evidence is stale. A device-read identity cites the reads that
+// made it stale in Evidence instead.
 type Identity struct {
 	Product    string     `json:"product"`
 	Version    string     `json:"version"`
 	Source     Source     `json:"source"`
 	Evidence   []Evidence `json:"evidence"`
 	LatestRead *Read      `json:"latest_read,omitempty"`
+	Mismatch   *Read      `json:"mismatch,omitempty"`
 }
 
 // Read is one run that read a value from the device: its C2 invocation ID
@@ -276,8 +286,11 @@ func (c *checker) evidence(field string, ev []Evidence, need bool) {
 // Validate checks every rule of the contract that holds on one record.
 func (f *Finding) Validate() error {
 	c := &checker{}
+	minor := -1
 	if got, err := version.Parse(f.Schema); err != nil || !self.Accepts(got) {
 		c.fail(CodeSchema, "schema", "%q is not %s or another 0.x minor of it", f.Schema, Identifier)
+	} else {
+		minor = got.Minor
 	}
 	if !asset.ValidAssetID(f.AssetID) {
 		c.fail(CodeForm, "asset_id", "%q is not a lowercase UUID", f.AssetID)
@@ -330,6 +343,7 @@ func (f *Finding) Validate() error {
 			c.fail(CodeConflict, fmt.Sprintf("identity.evidence[%d].source", i), "%s evidence for a %s identity", e.Source, id.Source)
 		}
 	}
+	c.mismatch(f, minor)
 
 	var unread, notMet, notMetRead, weak, stale int
 	for _, e := range id.Evidence {
@@ -448,6 +462,52 @@ func (f *Finding) Validate() error {
 	}
 	return errors.Join(c.errs...)
 }
+
+// mismatch checks identity.mismatch, D4-61's rules 1 to 5
+// (docs/phase4/D4-c12-0.2.md section 4). minor is the record's schema minor,
+// or -1 when the schema did not parse.
+func (c *checker) mismatch(f *Finding, minor int) {
+	id := f.Identity
+	m := id.Mismatch
+	if m == nil {
+		// Rule 4: in 0.2, a mismatch is the only thing that makes an
+		// operator or passive identity stale, so a stale one names it.
+		// Revisit when R6.7 builds passive identities.
+		if minor >= 2 && id.Source != DeviceRead && anyStale(id.Evidence) {
+			c.fail(CodeConflict, "identity.mismatch", "a stale %s identity names the device read that made it so", id.Source)
+		}
+		return
+	}
+	if minor >= 0 && minor < 2 { // rule 5
+		c.fail(CodeSchema, "identity.mismatch", "not in %s", f.Schema)
+	}
+	if !invocationID.MatchString(m.ID) { // rule 1
+		c.fail(CodeForm, "identity.mismatch.id", "%q is not an invocation ID", m.ID)
+	}
+	c.utc("identity.mismatch.at_utc", m.AtUTC)
+	if id.Source == DeviceRead { // rule 2
+		c.fail(CodeConflict, "identity.mismatch", "a device-read identity cites the reads that made it stale in identity.evidence")
+	}
+	// Rule 3: what the matcher gives under a mismatch to an entry naming
+	// either model.
+	if len(currentOnly(id.Evidence)) > 0 {
+		c.fail(CodeConflict, "identity.mismatch", "a mismatch makes every piece of the identity's evidence stale")
+	}
+	unreadVersion := false
+	for _, p := range f.Preconditions {
+		if p.Name == reservedFirmwareVersion && p.State == Unread {
+			unreadVersion = true
+		}
+	}
+	if f.Class != ApplicableByVersion || !unreadVersion {
+		c.fail(CodeConflict, "identity.mismatch", "a mismatch leaves the finding applicable-by-version with %s unread", reservedFirmwareVersion)
+	}
+}
+
+// reservedFirmwareVersion is C11's reserved precondition name for the
+// version itself (advisory.ReservedFirmwareVersion), which a mismatch
+// leaves unread.
+const reservedFirmwareVersion = "firmware-version"
 
 // validAuditRef reports whether s is audit:<node_id>:<seq>, with a valid
 // node ID (contracts/node) and a seq of 1 or more.
