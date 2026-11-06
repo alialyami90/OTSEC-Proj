@@ -62,7 +62,8 @@ GT_ADV = os.path.join(HERE, "..", "gt_adv", "gt_adv.json")
 EXPLOIT = re.compile(r"exploit", re.I)
 # C12's evidence ID forms, each tied to its source.
 ID_FORM = {
-    "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+    # C2's invocation ID as C12 takes it: UUID version 1 to 8, RFC variant.
+    "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
     "operator": re.compile(r"^audit:[^:]+:[0-9]+$"),
 }
 
@@ -210,7 +211,12 @@ def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
         bad.append(f"{adv}: class {f['class']} after the mismatch, want applicable-by-version")
     if "firmware-version" not in [p["name"] for p in f.get("preconditions", []) if p["state"] == "unread"]:
         bad.append(f"{adv}: firmware-version is not named unread")
-    if not any(e.get("stale") for e in f["identity"].get("evidence", [])):
+    # A device-read identity marks the reads the mismatch contradicts stale
+    # and cites the mismatch read itself; under C12 0.2's rule 3 every piece
+    # of an operator or passive identity's evidence is stale.
+    ev = f["identity"].get("evidence", [])
+    stale = all if f["identity"]["source"] != "device-read" else any
+    if not ev or not stale(e.get("stale") for e in ev):
         bad.append(f"{adv}: the identity is not marked stale")
     rd = asset.get("identity_read") or {}
     mm = rd.get("mismatch") or {}

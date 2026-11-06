@@ -286,6 +286,13 @@ def test_operator_mismatch_passes_before_and_after_restart():
     ("device text cited", lambda a, f: f["identity"]["mismatch"].update({"fid": OP_MISMATCH_FID}), "identity.mismatch"),
     ("both reads changed together", lambda a, f: (f["identity"]["mismatch"].update({"id": "audit:n:1"}),
         a["identity_read"]["mismatch"].update({"invocation_id": "audit:n:1"})), "identity.mismatch"),
+    # C12's form: version 1 to 8 and the RFC variant (D4 and D1 on #512).
+    ("a version 0 ID on both sides", lambda a, f: (f["identity"]["mismatch"].update({"id": OP_MISMATCH_ID[:14] + "0" + OP_MISMATCH_ID[15:]}),
+        a["identity_read"]["mismatch"].update({"invocation_id": OP_MISMATCH_ID[:14] + "0" + OP_MISMATCH_ID[15:]})), "identity.mismatch"),
+    ("a non-RFC variant on both sides", lambda a, f: (f["identity"]["mismatch"].update({"id": OP_MISMATCH_ID[:19] + "c" + OP_MISMATCH_ID[20:]}),
+        a["identity_read"]["mismatch"].update({"invocation_id": OP_MISMATCH_ID[:19] + "c" + OP_MISMATCH_ID[20:]})), "identity.mismatch"),
+    # Rule 3: every piece stale, not any (D1 on #512).
+    ("one of two pieces current", lambda a, f: f["identity"]["evidence"].append({"source": "operator", "id": "audit:node-1:99"}), "stale"),
 ], ids=lambda x: x if isinstance(x, str) else "")
 def test_operator_mismatch_mutants_fail(name, fn, phrase):
     obs = after_operator_mismatch()
