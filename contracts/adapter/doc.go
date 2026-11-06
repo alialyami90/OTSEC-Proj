@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.7: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.8: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -158,7 +158,7 @@
 //     when sent). Every authenticated message sent carries exactly one,
 //     discovery none, and authenticated needs an answer that carried one.
 //     Every value but the discovery engine ID is read from a received
-//     operate message that carried one (C3 and C6 on #445). Eight SNMP codes, none of which suspends anything (D4-53),
+//     operate message that carried one (C3 and C6 on #445). Nine SNMP codes, none of which suspends anything (D4-53),
 //     and the codes that need a prompt or a SEL line are refused on an SNMP
 //     result, and the SNMP codes on a line result. The identity starts with
 //     snmp_engine_id, read at discovery, and an auth or operate message is
@@ -171,6 +171,13 @@
 //     SNMP result, finds an SNMP read in an operation the invocation ran and
 //     its OID in that operation's oids or subtree. Earlier results read
 //     unchanged.
+//   - 0.8 (D4-54, C1 on the GT-MIB case table): two more SNMP codes, both
+//     SNMP-only, suspending nothing, with the bytes kept.
+//     failed.snmp_unexpected_report ends a session on a Report out of the
+//     expected order, at any stage after connecting.
+//     failed.snmp_scoped_pdu_unreadable ends one on an authenticated,
+//     decrypted message whose ScopedPDU does not decode. Earlier results
+//     read unchanged.
 //
 // # For the consumers of a result
 //

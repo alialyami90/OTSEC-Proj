@@ -197,14 +197,51 @@ func upgrade(rec c1.Asset) (c1.Asset, error) {
 	return out, nil
 }
 
+// Upgrade writes a record as 0.3, as Apply does before it merges a result
+// (see upgrade), and checks the outcome with C1's Validate. The node calls
+// it on each declared record at configuration load (C5 on #445), so a
+// record that cannot be written as 0.3 is refused there and not at every
+// run. It is stricter than Apply: a 0.2 session read with no read path is
+// dropped here, and an attribute left with nothing fails, even if a later
+// result would have read that attribute again.
+func Upgrade(rec c1.Asset) (c1.Asset, error) {
+	out, err := upgrade(rec)
+	if err != nil {
+		return rec, err
+	}
+	if err := out.Validate(); err != nil {
+		return rec, fmt.Errorf("asset: the record written as %s is invalid: %w", c1.Contract, err)
+	}
+	return out, nil
+}
+
+// Models gives, for a declared product_family, the models that product
+// covers, each as the device prints it (§1.5 of
+// docs/phase4/C2-c1-0.3-c3-0.4.md). The node holds only an asset's profile
+// reference, not the profile documents, so the lists are carried here for
+// FamilyConflict (C5 on #445). product_family names one product, not the
+// profile's family: sel-2731 and sel-2741 each list their RSTP-mode model,
+// so an OT SDN (S) or unmanaged (U) model is a conflict (D4-51, D4-54). A
+// family not listed has no list, and no family check is made.
+func Models(productFamily string) []string {
+	return slices.Clone(familyModels[productFamily])
+}
+
+var familyModels = map[string][]string{
+	"sel-751":  {"SEL-751"},
+	"sel-2731": {"SEL-2731M"},
+	"sel-2741": {"SEL-2741M"},
+}
+
 // FamilyConflict reports whether the record's device-read model is outside
 // the models its declared product family covers (§1.5): models is the list
 // the family's capability profile gives. A conflict is shown in health as
 // identity.family_conflict and settled by an administrator; it is never a
-// match input. A record with no device-read model has no conflict.
+// match input. A record with no device-read model has no conflict, and
+// neither has one checked against no list (no family check is made).
 func FamilyConflict(rec c1.Asset, models []string) (model string, conflict bool) {
 	at, ok := rec.Attribute(c1.AttrModel)
-	if !ok {
+	if !ok || len(models) == 0 {
 		return "", false
 	}
 	for _, o := range at.Observations {

@@ -17,34 +17,37 @@ import (
 // snmpWant is the error each invalid SNMP example must produce. Every file in
 // testdata/snmp/results/invalid must be listed.
 var snmpWant = map[string]string{
-	"snmp-at-0.6":                                "session.snmp is new in 0.7",
-	"line-code-on-snmp":                          `"failed.device_error" ends only a line session`,
-	"snmp-code-on-line-session":                  `"refused.engine_id_mismatch" ends only an SNMP session`,
-	"ok-not-authenticated":                       "status ok needs an authenticated SNMP session",
-	"snmp-with-quit":                             "an SNMP session has no wake",
-	"engine-mismatch-after-auth":                 "is decided at discovery",
-	"usm-failure-at-discovery":                   "so an auth or operate message was sent",
-	"after-auth-not-authenticated":               "happens after authentication, so the session authenticated",
-	"authenticated-before-auth-sent":             "authenticated needs a discovered engine ID and an auth or operate message sent",
-	"no-engine-check-before-auth":                "must precede it (AP-27)",
-	"engine-id-item-not-first":                   "an SNMP identity starts with snmp_engine_id",
-	"engine-id-item-not-session":                 "equals session.snmp.engine_id",
-	"engine-id-not-hex":                          "is not 5 to 32 octets in lowercase hex",
-	"observation-without-read":                   "observations[1].read is required from 0.7",
-	"observation-read-oid-and-header":            "names exactly one of oid and header",
-	"engine-id-observation-from-oid":             "is read from the msgAuthoritativeEngineID header",
-	"observation-value-not-span":                 "observations[1]: the span does not select the value",
-	"observation-read-header-other-field":        `header "msgUserName" is not msgAuthoritativeEngineID`,
-	"credential-redaction-on-snmp":               "an SNMP result's only redaction is usm-digest",
-	"sent-digest-20-octets":                      "a sent digest is 24 or 48 octets, not 20",
-	"digest-not-zeroed":                          "a usm-digest redaction is zero octets",
-	"snmp-close-phase":                           "an SNMP session has no close phase",
-	"not-connected-with-engine-id":               "not connected, so the transcript is empty",
-	"keyed-send-without-digest-redaction":        "an authenticated message sent holds exactly one usm-digest redaction, not 0",
-	"value-from-message-without-digest":          "observations[0]: snmp_engine_id is read only from a received operate message that carried a digest",
-	"authenticated-without-authenticated-answer": "authenticated needs a received auth or operate message that carried a digest",
-	"fid-unreadable-with-fid-item":               "failed.snmp_fid_unreadable: the identity holds only the matching snmp_engine_id item",
-	"fid-unreadable-with-fid-observation":        "failed.snmp_fid_unreadable reports no firmware_id",
+	"snmp-at-0.6":                                        "session.snmp is new in 0.7",
+	"line-code-on-snmp":                                  `"failed.device_error" ends only a line session`,
+	"snmp-code-on-line-session":                          `"refused.engine_id_mismatch" ends only an SNMP session`,
+	"ok-not-authenticated":                               "status ok needs an authenticated SNMP session",
+	"snmp-with-quit":                                     "an SNMP session has no wake",
+	"engine-mismatch-after-auth":                         "is decided at discovery",
+	"usm-failure-at-discovery":                           "so an auth or operate message was sent",
+	"after-auth-not-authenticated":                       "happens after authentication, so the session authenticated",
+	"authenticated-before-auth-sent":                     "authenticated needs a discovered engine ID and an auth or operate message sent",
+	"no-engine-check-before-auth":                        "must precede it (AP-27)",
+	"engine-id-item-not-first":                           "an SNMP identity starts with snmp_engine_id",
+	"engine-id-item-not-session":                         "equals session.snmp.engine_id",
+	"engine-id-not-hex":                                  "is not 5 to 32 octets in lowercase hex",
+	"observation-without-read":                           "observations[1].read is required from 0.7",
+	"observation-read-oid-and-header":                    "names exactly one of oid and header",
+	"engine-id-observation-from-oid":                     "is read from the msgAuthoritativeEngineID header",
+	"observation-value-not-span":                         "observations[1]: the span does not select the value",
+	"observation-read-header-other-field":                `header "msgUserName" is not msgAuthoritativeEngineID`,
+	"credential-redaction-on-snmp":                       "an SNMP result's only redaction is usm-digest",
+	"sent-digest-20-octets":                              "a sent digest is 24 or 48 octets, not 20",
+	"digest-not-zeroed":                                  "a usm-digest redaction is zero octets",
+	"snmp-close-phase":                                   "an SNMP session has no close phase",
+	"not-connected-with-engine-id":                       "not connected, so the transcript is empty",
+	"keyed-send-without-digest-redaction":                "an authenticated message sent holds exactly one usm-digest redaction, not 0",
+	"value-from-message-without-digest":                  "observations[0]: snmp_engine_id is read only from a received operate message that carried a digest",
+	"authenticated-without-authenticated-answer":         "authenticated needs a received auth or operate message that carried a digest",
+	"fid-unreadable-with-fid-item":                       "failed.snmp_fid_unreadable: the identity holds only the matching snmp_engine_id item",
+	"fid-unreadable-with-fid-observation":                "failed.snmp_fid_unreadable reports no firmware_id",
+	"scoped-pdu-unreadable-at-0.7":                       `error code "failed.snmp_scoped_pdu_unreadable" is new in 0.8`,
+	"scoped-pdu-unreadable-without-authenticated-answer": "answers an authenticated message, so a received auth or operate message carried a digest",
+	"unexpected-report-with-nothing-received":            "answers a Report, so a message was received",
 }
 
 func snmpFixtures(t *testing.T) (*register.Package, Invocation) {
@@ -196,7 +199,7 @@ func TestSNMPCodes(t *testing.T) {
 		if snmp != (info.session == snmpOnly) {
 			t.Errorf("%s: session kind %q", c, info.session)
 		}
-		if snmp && info.since != 7 {
+		if snmp && info.since != 7 && !(info.since == 8 && (c == FailedSNMPUnexpectedReport || c == FailedSNMPScopedPDUUnreadable)) {
 			t.Errorf("%s: since 0.%d", c, info.since)
 		}
 		if snmp && (info.suspends != "" || info.credential != "") {
