@@ -326,14 +326,20 @@ def test_attributes(vm1):
 
 
 def test_f6_health_shows_the_family_conflict(vm1):
-    """F6: the run is ok, the read model is kept, and health shows
-    identity.family_conflict (the plan's 2.2; modules/asset FamilyConflict,
-    C5 on #445)."""
+    """F6: the run is ok, the read model is kept, and the node shows the
+    family conflict (the plan's 2.2): status names the read model on F6's
+    identity, and health shows the identity-family-conflict alarm for F6's
+    asset (#499). I2, whose declared family covers its model, shows none."""
     got, reads = _device_reads(vm1, "F6", "model")
     assert vm1.first["F6"]["code"] == "ok" and got == "SEL-2741M" and reads, (vm1.first["F6"], got)
-    f6 = vm1.agents["F6"].asset
-    assert "family_conflict" in vm1.health_text or "family_conflict" in json.dumps(vm1.status), \
+    ident = vm1.status.get("identity", {})
+    f6, i2 = vm1.agents["F6"].asset, vm1.agents["I2"].asset
+    assert ident.get(f6, {}).get("family_conflict") == "SEL-2741M", ident.get(f6, {}).get("family_conflict")
+    assert any(f6 in line and "identity-family-conflict" in line for line in vm1.health_text.splitlines()), \
         [line for line in vm1.health_text.splitlines() if f6 in line]
+    conflicted = sorted(c for c, a in vm1.agents.items() if ident.get(a.asset, {}).get("family_conflict"))
+    assert conflicted == ["F6"], conflicted
+    assert not ident.get(i2, {}).get("family_conflict")
 
 
 def test_every_run(vm1):
