@@ -111,16 +111,20 @@ func TestIntegers(t *testing.T) {
 
 func TestLengthForms(t *testing.T) {
 	for h, ok := range map[string]bool{
-		"0400":                       true,
-		"04810141":                   true, // long form, not minimal: accepted
-		"0482000141":                 true,
-		"0480":                       false, // indefinite
-		"0485" + "0000000001" + "41": false, // five length octets
-		"1f0101":                     false, // a multi-octet tag
-		"0402":                       false, // truncated
-		"048400000002" + "41":        false, // a length past the end
-		"04":                         false,
-		"0484" + "ffffffff":          false,
+		"0400":                               true,
+		"04810141":                           true, // long form, not minimal: accepted
+		"0482000141":                         true,
+		"0480":                               false, // indefinite
+		"0485" + "0000000001" + "41":         true,  // five length octets: RFC 3417 §8 (1) allows more than needed
+		"0488" + "0000000000000001" + "41":   true,
+		"04ff" + "0141":                      false, // 0xff is reserved (X.690 8.1.3.5)
+		"0485" + "0100000000" + "41":         false, // 2^32, past the end
+		"0489" + "010000000000000000" + "41": false, // 2^64, refused before it overflows
+		"1f0101":                             false, // a multi-octet tag
+		"0402":                               false, // truncated
+		"048400000002" + "41":                false, // a length past the end
+		"04":                                 false,
+		"0484" + "ffffffff":                  false,
 	} {
 		b, _ := hex.DecodeString(h)
 		if _, err := decode(b, 0); (err == nil) != ok {

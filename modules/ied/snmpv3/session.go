@@ -158,6 +158,7 @@ type state struct {
 	// non-authoritative side's notion (RFC 3414 §2.3).
 	synced            bool
 	boots, agentTime  int64
+	latestTime        int64 // latestReceivedEngineTime
 	syncedAt          time.Time
 	timeWindowReports int
 	unreadable        bool // an authenticated, encrypted message did not decrypt to a ScopedPDU
@@ -189,6 +190,10 @@ func (st *state) start(p *register.Package, runID string) error {
 	if n := len(st.s.EngineID); n < 5 || n > 32 {
 		return fmt.Errorf("snmpv3: pinned engine ID of %d octets", n)
 	}
+	// RFC 3411 §5: never all zeros or all 'ff'H.
+	if e := st.s.EngineID; bytes.Count(e, []byte{0}) == len(e) || bytes.Count(e, []byte{0xff}) == len(e) {
+		return fmt.Errorf("snmpv3: pinned engine ID %x is all zeros or all ff", e)
+	}
 	st.run = p.Run(runID)
 	if st.run == nil || len(st.run.Steps) == 0 || p.SNMPOperation(st.run.Steps[0]) == nil {
 		return fmt.Errorf("snmpv3: %q is not an SNMP run", runID)
@@ -214,6 +219,10 @@ func newID() int64 {
 	_, _ = rand.Read(b[:])
 	return int64(binary.BigEndian.Uint32(b[:]) & 0x7FFFFFFF)
 }
+
+// newRequestID is a request-id inside RFC 3416 §3's range as printed,
+// -214783648..214783647, so an agent that holds to it accepts the request.
+func newRequestID() int64 { return newID() % 214783648 }
 
 // send encodes, protects, checks and writes one request for step. secure
 // false is discovery's noAuthNoPriv message.
@@ -354,6 +363,12 @@ func (st *state) accept(ph adapter.Phase, b []byte, msgID int64) (*reply, bool) 
 		st.record(adapter.Received, ph, b, m, nil)
 		return nil, false
 	}
+	// RFC 3826 §3.3.2 step 1: msgPrivacyParameters that is not 8 octets
+	// is a decryption error, and the message is discarded.
+	if m.Flags&flagPriv != 0 && len(m.USM.PrivParams) != 8 {
+		st.record(adapter.Received, ph, b, m, nil)
+		return nil, false
+	}
 	authed := false
 	if m.Flags&flagAuth != 0 && bytes.Equal(m.USM.EngineID, st.s.EngineID) && string(m.USM.User) == st.s.Keys.User {
 		authed = st.s.Keys.verify(b, m)
@@ -387,7 +402,11 @@ func (st *state) accept(ph adapter.Phase, b []byte, msgID int64) (*reply, bool) 
 		return nil, false
 	}
 	r := &reply{m: m, sc: sc, seg: seg, authed: authed}
-	if sc.PDU.Tag == tagResponse && !(authed && m.Flags&flagPriv != 0 && st.inWindow(m)) {
+	// A Response counts at authPriv, inside the time window, and with the
+	// request's context: the pinned engine ID and the default context ""
+	// (RFC 3412 §7.2 step 12 b)).
+	if sc.PDU.Tag == tagResponse && !(authed && m.Flags&flagPriv != 0 && st.inWindow(m) &&
+		bytes.Equal(sc.ContextEngineID, st.s.EngineID) && len(sc.ContextName) == 0) {
 		return nil, false
 	}
 	if authed && m.encrypted() {
@@ -423,7 +442,7 @@ func (st *state) report(r *reply, discovery bool) error {
 		return st.end(adapter.FailedUSMNotInTimeWindow, "a usmStatsNotInTimeWindows Report that did not authenticate, or a second one")
 	}
 	r.timeRep = true
-	st.synced, st.boots, st.agentTime, st.syncedAt = true, r.m.USM.Boots, r.m.USM.Time, st.s.Now()
+	st.synced, st.boots, st.agentTime, st.latestTime, st.syncedAt = true, r.m.USM.Boots, r.m.USM.Time, r.m.USM.Time, st.s.Now()
 	return nil
 }
 
@@ -436,20 +455,18 @@ func (st *state) agentClock() (int64, int64) {
 	return st.boots, st.agentTime + int64(st.s.Now().Sub(st.syncedAt)/time.Second)
 }
 
-// inWindow applies RFC 3414 §3.2 step 7b for a non-authoritative receiver
-// to an authenticated message, and updates the estimate when it is newer.
+// inWindow applies RFC 3414 §3.2 step 7 b) for a non-authoritative
+// receiver to an authenticated message: first 1), take the message's boots
+// and time when it is newer than the latest received, then 2), the window.
 func (st *state) inWindow(m *message) bool {
 	if !st.synced {
 		return true
 	}
+	if m.USM.Boots > st.boots || (m.USM.Boots == st.boots && m.USM.Time > st.latestTime) {
+		st.boots, st.agentTime, st.latestTime, st.syncedAt = m.USM.Boots, m.USM.Time, m.USM.Time, st.s.Now()
+	}
 	b, t := st.agentClock()
-	if m.USM.Boots == 0x7FFFFFFF || m.USM.Boots < b || (m.USM.Boots == b && m.USM.Time < t-timeWindow) {
-		return false
-	}
-	if m.USM.Boots > b || m.USM.Time > t {
-		st.boots, st.agentTime, st.syncedAt = m.USM.Boots, m.USM.Time, st.s.Now()
-	}
-	return true
+	return b != 0x7FFFFFFF && m.USM.Boots >= b && !(m.USM.Boots == b && m.USM.Time < t-timeWindow)
 }
 
 // --- the phases ----------------------------------------------------------------
@@ -462,7 +479,7 @@ func (st *state) firstLimits(p *register.Package) register.Limits {
 // before any authenticated message (D4-49 Q1).
 func (st *state) discover(p *register.Package) error {
 	lim := st.firstLimits(p)
-	req, err := requestPDU(tagGetRequest, newID(), 0, 0, nil)
+	req, err := requestPDU(tagGetRequest, newRequestID(), 0, 0, nil)
 	if err != nil {
 		return st.end(adapter.FailedInternal, "%v", err)
 	}
@@ -496,7 +513,7 @@ func (st *state) discover(p *register.Package) error {
 // and the request is sent again with it: that resend is not the request's
 // retransmission (§2.3 step 3). sends counts every transmission.
 func (st *state) exchange(op *register.SNMPOperation, tag byte, a, b int64, oids []string) (r *reply, sends int, err error) {
-	reqID := newID()
+	reqID := newRequestID()
 	pdu, err := requestPDU(tag, reqID, a, b, oids)
 	if err != nil {
 		return nil, 0, st.end(adapter.FailedInternal, "%v", err)
@@ -599,6 +616,11 @@ func (st *state) walk(op *register.SNMPOperation) error {
 			return err
 		}
 		if len(r.sc.PDU.VarBinds) == 0 {
+			// RFC 3416 §4.2.3: a GetBulk answered with no varbinds did not
+			// fit the message size (reason (1)); the walk is not complete.
+			if tag == tagGetBulkRequest {
+				return st.end(adapter.FailedResponseTooLarge, "%s: a GetBulk Response with no varbinds after %s", op.ID, prev)
+			}
 			return nil
 		}
 		for _, vb := range r.sc.PDU.VarBinds {
