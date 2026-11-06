@@ -142,6 +142,15 @@ def test_the_clear_reaches_both_sides(run):
     assert not run.cleared_collector.get("suspended_by"), run.cleared_collector
 
 
+def test_the_lab_only_node_says_it_acted_on_an_unsigned_file(run):
+    # P4-H1: this node's endpoints are all simulated, so it still acts on
+    # clear-suspension.json, and says so with unsigned-admin-file-accepted
+    # naming the file; nothing is refused or ignored.
+    lines = [l for l in run.cleared_health.splitlines() if "unsigned-admin-file-" in l]
+    assert [l for l in lines if "unsigned-admin-file-accepted" in l and "clear-suspension.json" in l], run.cleared_health
+    assert not [l for l in lines if "unsigned-admin-file-refused" in l or "unsigned-admin-file-ignored" in l], run.cleared_health
+
+
 def test_every_row_arrives_once_after_the_clear(run):
     problems, stats = reconcile.reconcile(run.received(), reconcile.native_rows())
     assert problems == [], problems
