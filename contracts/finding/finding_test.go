@@ -254,3 +254,17 @@ func TestReclassificationIsARevision(t *testing.T) {
 		t.Errorf("previous %q", r2.Previous)
 	}
 }
+
+// Known names exactly the minors this build reads, so a node can refuse
+// any other rather than skip it (D4-61).
+func TestKnown(t *testing.T) {
+	if !Known(Identifier) {
+		t.Errorf("Known(%q) = false", Identifier)
+	}
+	for _, s := range []string{"", "otsec.finding/0.2", "otsec.finding/0.10", "otsec.finding/1.0",
+		"otsec.finding/0.01", "otsec.finding/0.1 ", "otsec.config/0.1", "OTSEC.FINDING/0.1"} {
+		if Known(s) {
+			t.Errorf("Known(%q) = true", s)
+		}
+	}
+}
