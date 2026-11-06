@@ -337,3 +337,54 @@ func TestMismatchModel(t *testing.T) {
 		t.Errorf("an old mismatch: %s %s", f.Class, f.Reason)
 	}
 }
+
+// A mismatch read on an operator identity contradicts the declaration as it
+// does a device read (C1 on #458): the version is unread, an entry naming
+// the reported model is not product-not-named, and the declaration is
+// marked stale. C12 0.1 cannot cite the device read on an operator
+// identity, so the mismatch is not in the finding.
+func TestOperatorMismatch(t *testing.T) {
+	r500 := []advisory.Range{{Introduced: "R500-V0", Fixed: "R500-V1"}}
+	operator := func(mismatchFID string) Input {
+		in := Input{AssetID: assetID, EvaluatedUTC: evaluated, Identity: Identity{Source: finding.Operator,
+			Evidence: operatorID, FirmwareID: "SEL-751-R501-V0-Z104101-D20260910"}}
+		if mismatchFID != "" {
+			in.LatestMismatch = &finding.Read{ID: mismatchID, AtUTC: afterRead}
+			in.MismatchFID = mismatchFID
+		}
+		return in
+	}
+	for _, c := range []struct {
+		name, mismatchFID, product string
+		class                      finding.Class
+		reason                     finding.Reason
+	}{
+		{"no mismatch, outside", "", "SEL-751", finding.NotApplicableOperator, finding.OutsideRange},
+		{"mismatch, declared FID outside", "SEL-751-R500-V0-Z103101-D20260327", "SEL-751", finding.ApplicableByVersion, ""},
+		{"mismatch names the reported model", "SEL-751A-R100-V1-Z000000-D20250101", "SEL-751A", finding.ApplicableByVersion, ""},
+		{"mismatch, neither model named", "SEL-751A-R100-V1-Z000000-D20250101", "SEL-2730M", finding.NotApplicableOperator, finding.ProductNotNamed},
+		{"mismatch FID does not parse", "garbled", "SEL-751A", finding.NotApplicableOperator, finding.ProductNotNamed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := eval(t, operator(c.mismatchFID), oneEntry(c.product, advisory.SchemeSELFID, r500, nil), nil)[0]
+			if f.Class != c.class || f.Reason != c.reason {
+				t.Fatalf("got %s %s, want %s %s", f.Class, f.Reason, c.class, c.reason)
+			}
+			ev := f.Identity.Evidence
+			if len(ev) != 1 || ev[0].ID != operatorID || ev[0].Stale != (c.class == finding.ApplicableByVersion) {
+				t.Errorf("identity evidence %+v", ev)
+			}
+			if f.Identity.Version != "SEL-751-R501-V0-Z104101-D20260910" {
+				t.Errorf("the mismatch was adopted: %q", f.Identity.Version)
+			}
+			if c.class == finding.ApplicableByVersion && (len(f.Preconditions) != 1 || f.Preconditions[0].Name != advisory.ReservedFirmwareVersion) {
+				t.Errorf("firmware-version is not named unread: %+v", f.Preconditions)
+			}
+		})
+	}
+	bad := operator("SEL-751A-R100-V1-Z000000-D20250101")
+	bad.LatestMismatch.AtUTC = "later"
+	if _, err := Evaluate(bad, oneEntry("SEL-751", advisory.SchemeSELFID, r500, nil), nil); err == nil {
+		t.Error("a mismatch with a bad time was accepted")
+	}
+}
