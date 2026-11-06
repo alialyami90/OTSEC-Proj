@@ -1,6 +1,6 @@
 # Handoff summary: C-team to D-team
 
-Owner: C1 (outgoing lead). Date: 2026-11-06. `main` at `MAINSHA` when this was written, after the role checkpoint PRs #481 to #484 and C6PR. The generation log is [GENERATIONS.md](GENERATIONS.md). The C-to-D handoff is recorded in D4-58.
+Owner: C1 (outgoing lead). Date: 2026-11-06. `main` at `6045edb` when this was written, after the role checkpoint PRs #481 to #485. The generation log is [GENERATIONS.md](GENERATIONS.md). The C-to-D handoff is recorded in D4-58.
 
 ## Reading order
 
@@ -62,27 +62,30 @@ The contracts are listed in [contracts/README.md](../contracts/README.md); the i
 
 ## Open PRs at the checkpoint
 
-OPENPRS
+None. Every PR from generation C is merged or closed. The last were #479 (the item 3 exit report), #480 (role 6's D4-57 tests) and the checkpoints #481 to #485. Role 6's V-M1 work is not a PR yet: it is a patch in `/mnt/project-files/c6-wip/` (see its README). This checkpoint's own PR is the only one open.
 
 ## Dependency order and each agent's next action
 
 V-M1 is the only gate item left. The order:
 
+0. **This checkpoint's PR** merges on D6's review. Then every D agent writes its ack, and D1 merges the acks (cutover).
 1. **D2** checks `modules/ied/snmpv3` against the RFC texts in `/mnt/project-files/rfc/`.
 2. **D6** checks GT-MIB's case table and the egress corpus against the same texts, then builds GT-MIB's agent and runs V-M1.
 3. **Reviews of D6's V-M1 PR:** D2 (SNMP reading), D3 (security), D5 (node side), and D4 (any change to `contracts/finding` or `modules/applicability`).
 4. **D1** merges the PR, decides the gate, updates the exit report, and puts the acceptance to the owner. Then work stops for the owner's check (D4-34).
 
-Every D agent first writes its ack (reading order, step 4). After that, each agent's NEXT ACTION is:
+Every D agent first writes its ack (reading order, step 4), whether or not its handoff repeats this step. Read the role handoffs with these corrections, made after they were written. #479 and #480 are merged (`a69c416`, `158a5d0`). This summary is the C-to-D one, GENERATIONS.md's C row is closed, and its standing rules section is "Standing rules every D agent must keep". All twelve RFC texts are in `/mnt/project-files/rfc/` (D4-58). "C1" in a role handoff means D1.
+
+After the ack, each agent's NEXT ACTION is:
 
 - **D1:** confirm the cutover. Review and squash-merge the six acks. Then drive V-M1 and decide the item 3 gate ([D1-handoff.md](D1-handoff.md)).
 - **D2:** check `modules/ied/snmpv3` against the RFC texts. Then give the SNMP reading of V-M1 ([D2-handoff.md](D2-handoff.md)).
 - **D3:** the security review of V-M1 when D6 posts GT-MIB's agent ([D3-handoff.md](D3-handoff.md)).
 - **D4:** review for the item 3 gate. #480 has merged, so this means any change V-M1 makes to `contracts/finding`, `modules/applicability` or `tests/integration/applicability`. Then the C12 0.2 proposal when D1 opens it ([D4-handoff.md](D4-handoff.md)).
 - **D5:** the node-side review of D6's V-M1 PR ([D5-handoff.md](D5-handoff.md)).
-- **D6:** D6NEXT ([D6-handoff.md](D6-handoff.md)).
+- **D6:** finish GT-MIB's agent from the WIP patch `/mnt/project-files/c6-wip/2026-11-06-gt-mib-agent-wip.patch`, and correct the case table to what the RFC texts confirm. Two corrections are known: H12 is not hostile (RFC 3417 §8), and W4 is 720 varbinds (RFC 6933's 18 columns). Then build the V-M1 runner on the real binaries ([D6-handoff.md](D6-handoff.md)).
 
-**The single highest team priority:** V-M1 over GT-MIB, built from the RFC texts. It is the last item 3 gate item.
+**The single highest team priority:** V-M1 over GT-MIB, built from the RFC texts in `/mnt/project-files/rfc/`. The twelve texts are the eight from D4-58, plus RFC 2578, 3417, 1157 and 1901 for the MIB roots and encoding. All twelve are listed in `SHA256SUMS`. It is the last item 3 gate item.
 
 ## STALLED items
 
@@ -91,7 +94,6 @@ Every D agent first writes its ack (reading order, step 4). After that, each age
 - Role 3: D4-20 rule 4, the evidence release and export kind. D4-20 lets it stay unbuilt ([D3-handoff.md](D3-handoff.md)).
 - Role 5: refusing `clear-suspension.json` off-lab. It needs role 3 first and a brief from role 1 ([D5-handoff.md](D5-handoff.md)).
 - Role 4: IDS (item 4) is untouched by design. It waits on the owner's protocols.
-D6STALLED
 
 ## How the D team works
 
@@ -132,7 +134,7 @@ These come from the owner and hold until the owner changes them. They are carrie
 - **No contact with operational equipment or any real device.** Collecting from a real device needs the owner's separate authorization. So does a first contact with a relay whose firmware ID is unknown. H-01 to ~~H-15~~ H-17 and Q3 are written only and are never run. Every endpoint stays on the simulator, on loopback (D2-4, D2-10).
 - **Never fabricate evidence**: no invented device outputs, results, commit SHAs or test counts. Label every result with its evidence class.
 - **Credentials are test values only** (D2-5). No vendor-default or real-device password may appear in any fixture or doc (D2-11). The repository is public, so keep secrets, real device data and internal hostnames out of it. *Added by D4-53 and HR-18: every advisory set and advisory signing key is a test one until the owner decides HR-18.*
-- **Testing (D2-13, D4-3).** GitHub Actions is the main test path. `ci.yml` has ~~twelve~~ eighteen jobs (#470) and `govulncheck.yml` has one. A PR merges when its reviewers accept it and every job in both is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. A PR that changes only Markdown skips both and merges on review (D3-13). Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
+- **Testing (D2-13, D4-3).** GitHub Actions is the main test path. `ci.yml` has ~~twelve~~ eighteen jobs (#470; CLAUDE.md) and `govulncheck.yml` has one. A PR merges when its reviewers accept it and every job in both is green on its head. When the head's CI is older than newer `main`, verify the merged result before merging. A PR that changes only Markdown skips both and merges on review (D3-13; *widened by the owner on 2026-11-01, in CLAUDE.md: also `.pdf`, `.doc`, `.docx`, `.pptx` and `.xlsx` files outside a `testdata` directory, and a push to `main` with only such changes skips `ci.yml`*). Re-run a failing commit at most once. Never push an empty commit, and never call a property failure a flake.
 - **The owner's PC.** *Changed by D4-12: no test runs on the owner's PC until the owner resumes them, so GitHub Actions is the only test path. The rest applies when they do.*
   - The GitHub-hosted runner comes first (D2-13). The owner's PC is the second Windows run, and the fallback when Actions is unavailable or a run needs a real installation. This replaces the earlier PC-first rule (D1-26) and the PC wording in `B5-handoff.md` (B1's ack, #220).
   - Install nothing on it beyond what the owner approved: portable Go inside the OTSEC folder, and a venv inside OTSEC with `pytest` and `asyncssh`. That means no installer, no admin rights requested, no system settings, no permanent PATH changes, and no pip installs outside the venv.

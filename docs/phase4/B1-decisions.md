@@ -968,6 +968,7 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
 - **The RFC texts (owner, 11:41Z).**
   - The owner chose "Allow www.rfc-editor.org" on C1's V-M1 decision card.
   - C1 added that one host to the cloud environment's allowed hosts. C1 then fetched RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 into the project files (`/mnt/project-files/rfc/`, with `SHA256SUMS`).
+  - Role 6 also needed RFC 2578 (the MIB roots), 3417 (the transport and BER rules), 1157 and 1901. C1 fetched them from the same host. Each matches role 6's own copy byte for byte, and `SHA256SUMS` covers all twelve.
   - V-M1 is unblocked. GT-MIB may be built only from these texts. The item 3 gate still never counts a GT-MIB built from memory.
 - **Messages between agents go through the coordinator (owner, 11:43Z).** "New rule. All messages run through you the coordinator."
   - An agent sends a message meant for another agent to the coordinator, which relays it. This replaces direct thread-to-thread messages.
