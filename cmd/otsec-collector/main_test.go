@@ -140,10 +140,15 @@ func TestParseConfig(t *testing.T) {
 		return marshal(t, d)
 	}
 	for name, b := range map[string][]byte{
-		"unknown field":   edit(func(d map[string]any) { d["secret"] = "x" }),
-		"case variant":    edit(func(d map[string]any) { d["NODE_ID"] = d["node_id"]; delete(d, "node_id") }),
-		"format":          edit(func(d map[string]any) { d["format"] = "otsec.collector-config/0.2" }),
-		"node id":         edit(func(d map[string]any) { d["node_id"] = "Site A" }),
+		"unknown field": edit(func(d map[string]any) { d["secret"] = "x" }),
+		"case variant":  edit(func(d map[string]any) { d["NODE_ID"] = d["node_id"]; delete(d, "node_id") }),
+		"format":        edit(func(d map[string]any) { d["format"] = "otsec.collector-config/0.2" }),
+		"node id":       edit(func(d map[string]any) { d["node_id"] = "Site A" }),
+		"reserved node id": edit(func(d map[string]any) {
+			// Its asset moves with it, so only the reserved name refuses it.
+			d["node_id"] = "audit"
+			d["assets"].([]any)[0].(map[string]any)["node_id"] = "audit"
+		}),
 		"policy 0":        edit(func(d map[string]any) { d["policy_version"] = 0 }),
 		"bad asset":       edit(func(d map[string]any) { d["assets"].([]any)[0].(map[string]any)["asset_id"] = "x" }),
 		"missing profile": edit(func(d map[string]any) { d["profiles"] = []any{} }),
