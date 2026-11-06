@@ -412,8 +412,8 @@ def test_a_later_mismatch_is_kept_apart_and_hides_no_advisory(runs, when):
 def test_an_operator_only_mismatch_is_kept_apart_and_hides_no_advisory(runs, when):
     # No read ever confirmed the identity, so it stays the operator's, the
     # identity.read document holds the mismatch alone, and every SEL-751
-    # advisory is applicable-by-version with the declaration stale. Under
-    # C12 0.1 the operator finding cannot cite the read (a C12 0.2 item).
+    # advisory is applicable-by-version with the declaration stale, and
+    # each finding's identity.mismatch is identity.read's mismatch (C12 0.2).
     state, mismatch = _scenario(runs, OP_MISMATCH, when, "mismatch")
     asset = _observe(state, MISMATCH_ROW)
     assert asset["identity"]["source"] == "operator" and (asset["identity"]["evidence_id"] or "").startswith("audit:"), asset["identity"]
