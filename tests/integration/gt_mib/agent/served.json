@@ -1,0 +1,608 @@
+{
+ "source": "S29, the RSTP user's guide 20260424 (phase0/manuals-SEL/RSTP_UG_20260424.pdf), 'MIB Downloads', the table of supported MIBs and OIDs on pp. 46 and 47. Copied line by line; mib, oid and name as printed. kind and syntax are C6's reading (SYNTHESIZED), not S29's: S29 prints no syntax and no instance.",
+ "objects": [
+  {
+   "oid": "1.3.6.1.2.1.1.1",
+   "name": "sysDescr",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.1.2",
+   "name": "sysObjectID",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "oid"
+  },
+  {
+   "oid": "1.3.6.1.2.1.1.3",
+   "name": "sysUpTime",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "timeticks"
+  },
+  {
+   "oid": "1.3.6.1.2.1.1.4",
+   "name": "sysContact",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.1.5",
+   "name": "sysName",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.1.6",
+   "name": "sysLocation",
+   "mib": "SNMPv2-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.47.1.1.1",
+   "name": "entPhysicalTable",
+   "mib": "ENTITY-MIB",
+   "page": 46,
+   "kind": "table"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.4.5",
+   "name": "memTotalReal",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.4.6",
+   "name": "memAvailReal",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.4.11",
+   "name": "memTotalFree",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.9.1.1",
+   "name": "dskIndex",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.9.1.6",
+   "name": "dskTotal",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.9.1.7",
+   "name": "dskAvail",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.9.1.8",
+   "name": "dskUsed",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.2021.9.1.9",
+   "name": "dskPercent",
+   "mib": "UCD-SNMP-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.2.2",
+   "name": "ifTable",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "table"
+  },
+  {
+   "oid": "1.3.6.1.2.1.31.1.1.1.1",
+   "name": "ifName",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.31.1.1.1.2",
+   "name": "ifInMulticastPkts",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "counter32"
+  },
+  {
+   "oid": "1.3.6.1.2.1.31.1.1.1.3",
+   "name": "ifInBroadcastPkts",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "counter32"
+  },
+  {
+   "oid": "1.3.6.1.2.1.31.1.1.1.4",
+   "name": "ifOutMulticastPkts",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "counter32"
+  },
+  {
+   "oid": "1.3.6.1.2.1.31.1.1.1.5",
+   "name": "ifOutBroadcastPkts",
+   "mib": "IF-MIB",
+   "page": 46,
+   "kind": "column",
+   "syntax": "counter32"
+  },
+  {
+   "oid": "1.0.8802.1.1.2.1.3.7",
+   "name": "lldpLocPortTable",
+   "mib": "LLDP-MIB",
+   "page": 46,
+   "kind": "table"
+  },
+  {
+   "oid": "1.0.8802.1.1.2.1.4.1",
+   "name": "lldpRemTable",
+   "mib": "LLDP-MIB",
+   "page": 46,
+   "kind": "table"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.1.1",
+   "name": "dot1dBaseBridgeAddress",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.1.2",
+   "name": "dot1dBaseNumPorts",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.1.4.1.1",
+   "name": "dot1dBasePort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.1.4.1.2",
+   "name": "dot1dBasePortIfIndex",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.1",
+   "name": "dot1dStpProtocolSpecification",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.2",
+   "name": "dot1dStpPriority",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.3",
+   "name": "dot1dStpTimeSinceTopologyChange",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "timeticks"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.4",
+   "name": "dot1dStpTopChanges",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "counter32"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.5",
+   "name": "dot1dStpDesignatedRoot",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.6",
+   "name": "dot1dStpRootCost",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.7",
+   "name": "dot1dStpRootPort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.8",
+   "name": "dot1dStpMaxAge",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.11",
+   "name": "dot1dStpForwardDelay",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.12",
+   "name": "dot1dStpBridgeMaxAge",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.13",
+   "name": "dot1dStpBridgeHelloTime",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.14",
+   "name": "dot1dStpBridgeForwardDelay",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15",
+   "name": "dot1dStpPortTable",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "table"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.1",
+   "name": "dot1dStpPort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.2",
+   "name": "dot1dStpPortId",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.3",
+   "name": "dot1dStpPortState",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.4",
+   "name": "dot1dStpPortEnable",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.5",
+   "name": "dot1dStpPortPathCost",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.6",
+   "name": "dot1dStpPortDesignatedRoot",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.7",
+   "name": "dot1dStpPortDesignatedCost",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.8",
+   "name": "dot1dStpPortDesignatedBridge",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.15.1.9",
+   "name": "dot1dStpPortDesignatedPort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.4.3.1.1",
+   "name": "dot1dTpFdbAddress",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.4.3.1.2",
+   "name": "dot1dTpFdbPort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.4.3.1.3",
+   "name": "dot1dTpFdbStatus",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.5.1.1.2",
+   "name": "dot1dStaticReceivePort",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.5.1.1.1",
+   "name": "dot1dStaticAddress",
+   "mib": "BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.6.3.10.2.1.1",
+   "name": "snmpEngineID",
+   "mib": "SNMP-FRAMEWORK_MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.6.3.10.2.1.2",
+   "name": "snmpEngineBoots",
+   "mib": "SNMP-FRAMEWORK_MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.6.3.10.2.1.3",
+   "name": "snmpEngineTime",
+   "mib": "SNMP-FRAMEWORK_MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.6.3.10.2.1.4",
+   "name": "snmpEngineMaxMessageSize",
+   "mib": "SNMP-FRAMEWORK_MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.1",
+   "name": "dot1qVlanTimeMark",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "timeticks"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.2",
+   "name": "dot1qVlanIndex",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.3",
+   "name": "dot1qVlanFdbId",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.4",
+   "name": "dot1qVlanCurrentEgressPorts",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.5",
+   "name": "dot1qVlanCurrentUntaggedPorts",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.6",
+   "name": "dot1qVlanStatus",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.2.1.7",
+   "name": "dot1qVlanCreationTime",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "timeticks"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.3.1.1",
+   "name": "dot1qVlanStaticName",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.3.1.2",
+   "name": "dot1qVlanStaticEgressPorts",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.3.1.3",
+   "name": "dot1qVlanForbiddenEgressPorts",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.3.1.4",
+   "name": "dot1qVlanStaticUntaggedPorts",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.7.1.4.3.1.5",
+   "name": "dot1qVlanStaticRowStatus",
+   "mib": "Q-BRIDGE-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.31823.1.2700.2.1.1.1.1",
+   "name": "sel2700PowerSupplyIndex",
+   "mib": "SEL-2700-POWER-SUPPLY-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.31823.1.2700.2.1.1.1.2",
+   "name": "sel2700PowerSupplyAlias",
+   "mib": "SEL-2700-POWER-SUPPLY-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "octets"
+  },
+  {
+   "oid": "1.3.6.1.4.1.31823.1.2700.2.1.1.1.3",
+   "name": "sel2700PowerSupplyState",
+   "mib": "SEL-2700-POWER-SUPPLY-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.4.1.31823.1.2700.2.1.1.1.4",
+   "name": "sel2700PowerSupplyStatus",
+   "mib": "SEL-2700-POWER-SUPPLY-MIB",
+   "page": 47,
+   "kind": "column",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.16",
+   "name": "dot1dStpVersion",
+   "mib": "RSTP-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  },
+  {
+   "oid": "1.3.6.1.2.1.17.2.17",
+   "name": "dot1dStpTxHoldCount",
+   "mib": "RSTP-MIB",
+   "page": 47,
+   "kind": "scalar",
+   "syntax": "integer"
+  }
+ ]
+}
