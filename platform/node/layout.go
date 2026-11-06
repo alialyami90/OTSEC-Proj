@@ -125,7 +125,7 @@ func (c *Config) Layout() (c5.Layout, error) {
 	// to an asset that sends Syslog or SER events whether or not any
 	// configuration is read from it.
 	configDB := c5.Database{ID: ConfigDB, Writer: "node"}
-	floor := int64(c.ConfigAssets())*ConfigQuotaFloorRecords*ConfigRecordBytes + c.EventBaselineQuotaFloor()
+	floor := c.configModuleFloor()
 	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; !ok && floor > 0 {
 		// An absent quota is below the floor too (D4-20 rule 5): without it
 		// there is no configuration database, and the first read would have
@@ -133,9 +133,15 @@ func (c *Config) Layout() (c5.Layout, error) {
 		return c5.Layout{}, fmt.Errorf("store.quotas.configuration is required: the schedule reads the configuration of %d assets and %d event baselines are set, which needs at least %d bytes (%d x the record cap for each configuration asset, D4-20, and %d x %d bytes and %d x %d bytes for the baselines and checkpoints of each other event-baseline asset)",
 			c.ConfigAssets(), len(c.EventBaselines), floor, ConfigQuotaFloorRecords, EventBaselineQuotaRecords, baseline.MaxBytes, EventCheckpointRecords, ConfigRecordBytes)
 	}
+	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; !ok && c.item3Floor() > 0 {
+		return c5.Layout{}, fmt.Errorf("store.quotas.configuration is required: %s", c.item3FloorTerms())
+	}
 	if _, ok := c.Store.Quotas[string(c5.ClassConfiguration)]; ok {
 		for _, a := range c.assets {
 			configDB.Streams = append(configDB.Streams, c5.StreamSpec{ID: ConfigStream(a.AssetID), Class: c5.ClassConfiguration})
+		}
+		if c.ApplicabilityOn() {
+			configDB.Streams = append(configDB.Streams, c5.StreamSpec{ID: AdvisoryStream, Class: c5.ClassConfiguration})
 		}
 	}
 
@@ -178,6 +184,10 @@ func (c *Config) Layout() (c5.Layout, error) {
 				if bytes < floor {
 					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the floor for event baselines and configuration: %d bytes (%d x %d bytes of baselines and %d x %d bytes of checkpoints for each event-baseline asset whose configuration is not read, and the D4-20 floor for each that is)",
 						bytes, floor, EventBaselineQuotaRecords, baseline.MaxBytes, EventCheckpointRecords, ConfigRecordBytes)
+				}
+				if item3 := c.item3Floor(); item3 > 0 && bytes < floor+item3 {
+					return c5.Layout{}, fmt.Errorf("store.quotas.configuration (%d bytes) is below the floor with item 3: %d bytes, the configuration module's %d bytes plus %s",
+						bytes, floor+item3, floor, c.item3FloorTerms())
 				}
 				q.MaxRecordBytes = ConfigRecordBytes
 			}

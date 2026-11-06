@@ -51,7 +51,11 @@ type Config struct {
 	// EventBaselines are the assets whose event behaviour is learnt and
 	// watched (R4.8; eventbaselines.go).
 	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
-	CollectorPipe  string          `json:"collector_pipe"`
+	// Asset and Applicability are the item 3 switches (item3config.go,
+	// D4-50); an absent section is off.
+	AssetModule   *AssetModule   `json:"asset,omitempty"`
+	Applicability *Applicability `json:"applicability,omitempty"`
+	CollectorPipe string         `json:"collector_pipe"`
 	// CollectorPeer is the identity the collector must hold (collectorwire
 	// Endpoint.Peer). On Windows it may be empty, which means the
 	// otsec-collector service SID; on Linux it is the collector's uid.
@@ -427,6 +431,7 @@ func (c *Config) check() error {
 		}
 	}
 	c.checkEventBaselines(fail)
+	c.checkItem3(fail)
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
