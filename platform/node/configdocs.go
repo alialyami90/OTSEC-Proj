@@ -116,7 +116,7 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return checkIdentityRecord(document, capture)
 	case head.Schema == IdentityReadSchema:
 		return checkIdentityReadRecord(document, capture)
-	case head.Schema == finding.Identifier:
+	case finding.Known(head.Schema):
 		return checkFindingRecord(document, capture)
 	}
 	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record or a C12 finding", head.Schema, head.Kind)
