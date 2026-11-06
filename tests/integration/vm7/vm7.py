@@ -22,6 +22,9 @@ identity record. "Later" is read as C5 proposed on #458: the evaluation
 names the newest identity record's evidence ID. The node evaluates after
 storing the identity, so on the test clock the two times can be equal, and
 RFC 3339 strings with different fraction lengths do not compare in order.
+An operator-only asset has no identity record, so there (C1, after C4 on
+#459) the evaluation must be no earlier than the declared identity's
+policy.apply record, compared as times parsed to the nanosecond.
 
 The observed dict, one per run under one set (field names from C5 on #458):
 
@@ -29,7 +32,8 @@ The observed dict, one per run under one set (field names from C5 on #458):
       "set": {"id": str, "version": int, "issued_at": str},
       "assets": {
         "<row id>": {
-          "identity": {"source": str, "evidence_id": str},  # status.identity: the newest record
+          "identity": {"source": str, "evidence_id": str,   # status.identity: the newest record
+                       "declared_at": str},                # operator rows: the policy.apply record's time
           "last_evaluation": {"set_id": str, "version": int, "at": str,
                               "identity_evidence_id": str} | None,  # status.applicability
           "evidence": {                                     # the IDs the run made
@@ -60,6 +64,18 @@ ID_FORM = {
     "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
     "operator": re.compile(r"^audit:[^:]+:[0-9]+$"),
 }
+
+
+UTC = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$")
+
+
+def utc(s):
+    """An RFC 3339 UTC time as a comparable (seconds, nanoseconds) pair, so
+    fraction lengths do not change the order."""
+    m = UTC.match(s)
+    if not m:
+        raise ValueError(f"{s!r} is not RFC 3339 UTC with Z")
+    return m.group(1), int((m.group(2) or "").ljust(9, "0"))
 
 
 def load_gt(path=GT_ADV):
@@ -109,7 +125,10 @@ def check_cell(row, adv, cell, asset, set_):
         bad = []
         if ev["version"] != set_["version"] or ev["set_id"] != set_["id"]:
             bad.append(f"the last completed evaluation ran under set {ev['set_id']} version {ev['version']}, not the set in use")
-        if ev["identity_evidence_id"] != asset["identity"]["evidence_id"]:
+        if asset["identity"]["source"] == "operator":
+            if utc(ev["at"]) < utc(asset["identity"]["declared_at"]):
+                bad.append(f"the last completed evaluation ({ev['at']}) is earlier than the declared identity's record ({asset['identity']['declared_at']})")
+        elif ev["identity_evidence_id"] != asset["identity"]["evidence_id"]:
             bad.append(f"the last completed evaluation ran on identity record {ev['identity_evidence_id']}, not the newest, {asset['identity']['evidence_id']}")
         return bad
     if not revs:
@@ -188,11 +207,14 @@ def check_restart(before, after):
 
 
 def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
-    """A later mismatch on a device-read asset whose stored model the entry
-    names (#451, D4-54): the newest finding is applicable-by-version with the
-    version unread, the identity stale and the mismatch cited; the
-    identity.read document keeps the mismatch FID apart and the last
-    confirming read as its latest read. Run it before and after a restart."""
+    """A later mismatch (#451, D4-54), on a device-read asset or, by C1's
+    later ruling, an operator-only one: the newest finding is
+    applicable-by-version with the version unread, the identity stale and
+    the mismatch cited, whether or not the entry names the reported model;
+    the identity.read document keeps the mismatch apart, and the last
+    confirming read as its latest read. An operator-only asset has no
+    confirming read (confirming is None), so the document has none. Run it
+    before and after a restart."""
     revs = asset.get("findings", {}).get(adv, [])
     if not revs:
         return [f"{adv}: no stored finding after the mismatch"]
@@ -203,9 +225,13 @@ def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
         bad.append(f"{adv}: firmware-version is not named unread")
     if not any(e.get("stale") for e in f["identity"].get("evidence", [])):
         bad.append(f"{adv}: the identity is not marked stale")
-    if mismatch_id not in _ids(f):
+    # C12 0.1 cannot cite device-read evidence on an operator identity, so
+    # an operator finding does not cite the mismatch (C1, a C12 0.2 item).
+    if f["identity"]["source"] != "operator" and mismatch_id not in _ids(f):
         bad.append(f"{adv}: the mismatch read {mismatch_id} is not cited")
     rd = asset.get("identity_read") or {}
+    if f["identity"]["source"] != asset["identity"]["source"]:
+        bad.append(f"{adv}: identity source {f['identity']['source']} after the mismatch, the asset's is {asset['identity']['source']}")
     if rd.get("invocation_id") != confirming:
         bad.append(f"identity.read's latest read is {rd.get('invocation_id')}, want the last confirming read {confirming}")
     mm = rd.get("mismatch") or {}

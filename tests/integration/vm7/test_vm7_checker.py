@@ -12,7 +12,7 @@ import vm7
 GT = vm7.load_gt()
 IDENT = {i["id"]: i for i in GT["identities"]}
 SET = {"id": "test-adv-set", "version": 3, "issued_at": "2026-11-01T00:00:00Z"}
-EVALUATED = "2026-11-06T10:00:05Z"
+EVALUATED = "2026-11-06T10:00:05.100000Z"
 
 
 def inv(*parts):
@@ -59,7 +59,9 @@ def perfect():
     assets = {}
     for seq, row in enumerate(IDENT, 1):
         ev = evidence_ids(row, seq)
-        assets[row] = {"identity": {"source": IDENT[row]["source"], "evidence_id": ev["identity"]},
+        op = IDENT[row]["source"] == "operator"
+        assets[row] = {"identity": {"source": IDENT[row]["source"], "evidence_id": "" if op else ev["identity"],
+                                    "declared_at": "2026-11-06T10:00:05.1Z" if op else None},
                        "last_evaluation": {"set_id": SET["id"], "version": SET["version"], "at": EVALUATED,
                                            "identity_evidence_id": ev["identity"]},
                        "evidence": ev, "findings": {}}
@@ -133,8 +135,10 @@ MUTANTS = [
      lambda o, a, f: a["last_evaluation"].update({"version": 2}), "version 2"),
     ("pnn, evaluation under another set", lambda r, c: c.get("reason") == "product-not-named",
      lambda o, a, f: a["last_evaluation"].update({"set_id": "other"}), "set other"),
-    ("pnn, evaluation on an older identity record", lambda r, c: c.get("reason") == "product-not-named",
+    ("pnn, evaluation on an older identity record", lambda r, c: c.get("reason") == "product-not-named" and r.startswith("D"),
      lambda o, a, f: a["identity"].update({"evidence_id": inv("newer")}), "not the newest"),
+    ("pnn, evaluation before the declaration", lambda r, c: c.get("reason") == "product-not-named" and r.startswith("O"),
+     lambda o, a, f: a["identity"].update({"declared_at": "2026-11-06T10:00:05.10001Z"}), "earlier than the declared"),
 ]
 
 
@@ -235,3 +239,58 @@ def test_mismatch_revision_that_restart_rewrites_fails():
     revs = after["assets"]["D1"]["findings"]["TEST-ADV-07"]
     revs.append(dict(revs[-1], revision=3, **{"from": "applicable-by-version", "class": "not-applicable", "reason": "product-not-named"}))
     assert any("D1 TEST-ADV-07" in b for b in vm7.check_restart(before, after))
+
+
+# C1's ruling: a mismatch on an operator-only asset counts. O1 is
+# not-applicable-operator on TEST-ADV-01 (outside range); a mismatch read
+# reporting an in-range FID makes it applicable-by-version and stale, and
+# the operator source stays. C12 0.1 cannot cite the mismatch on an
+# operator identity, so the finding does not (a C12 0.2 item).
+OP_MISMATCH_ID = inv("O1", "mismatch")
+OP_MISMATCH_FID = "SEL-751-R400-V3-Z100100-D20240930"
+
+
+def after_operator_mismatch():
+    obs = perfect()
+    a = obs["assets"]["O1"]
+    adv = "TEST-ADV-01"
+    prev = a["findings"][adv][-1]
+    a["findings"][adv].append(dict(prev, revision=2, previous="h", **{
+        "from": prev["class"], "class": "applicable-by-version",
+        "identity": dict(prev["identity"], evidence=[
+            dict(prev["identity"]["evidence"][0], stale=True),
+            ]),
+        "preconditions": [{"name": "firmware-version", "state": "unread"}]}))
+    a["findings"][adv][-1].pop("reason", None)
+    a["identity_read"] = {"mismatch": {"invocation_id": OP_MISMATCH_ID, "read_at": EVALUATED, "fid": OP_MISMATCH_FID}}
+    return obs
+
+
+def test_operator_mismatch_passes_before_and_after_restart():
+    obs = after_operator_mismatch()
+    a = obs["assets"]["O1"]
+    assert vm7.check_mismatch(a, "TEST-ADV-01", OP_MISMATCH_ID, OP_MISMATCH_FID, None) == []
+    assert vm7.check_restart(obs, copy.deepcopy(obs)) == []
+
+
+@pytest.mark.parametrize("name,fn,phrase", [
+    ("mismatch ignored on an operator asset", lambda a, f: f.update({"class": "not-applicable-operator", "reason": "outside-range"}), "class"),
+    ("operator identity adopted as a device read", lambda a, f: f["identity"].update({"source": "device-read"}), "identity source"),
+    ("not stale", lambda a, f: f["identity"]["evidence"][0].update({"stale": False}), "stale"),
+    ("mismatch shown as a confirming read", lambda a, f: a["identity_read"].update({"invocation_id": OP_MISMATCH_ID}), "last confirming read"),
+    ("mismatch lost", lambda a, f: a["identity_read"].update({"mismatch": None}), "keeps mismatch"),
+], ids=lambda x: x if isinstance(x, str) else "")
+def test_operator_mismatch_mutants_fail(name, fn, phrase):
+    obs = after_operator_mismatch()
+    a = obs["assets"]["O1"]
+    fn(a, a["findings"]["TEST-ADV-01"][-1])
+    bad = vm7.check_mismatch(a, "TEST-ADV-01", OP_MISMATCH_ID, OP_MISMATCH_FID, None)
+    assert any(phrase in b for b in bad), bad
+
+
+def test_utc_orders_across_fraction_lengths():
+    assert vm7.utc("2026-11-06T10:00:05.1Z") == vm7.utc("2026-11-06T10:00:05.100000000Z")
+    assert vm7.utc("2026-11-06T10:00:05.09Z") < vm7.utc("2026-11-06T10:00:05.1Z")
+    assert vm7.utc("2026-11-06T10:00:05Z") < vm7.utc("2026-11-06T10:00:05.000000001Z")
+    with pytest.raises(ValueError):
+        vm7.utc("2026-11-06T10:00:05+00:00")
