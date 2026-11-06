@@ -222,6 +222,7 @@ def test_mismatch_passes_before_and_after_restart():
     ("confirming read removed", lambda a, f: a["identity_read"].pop("invocation_id"), "last confirming read"),
     ("mismatch lost", lambda a, f: a["identity_read"].update({"mismatch": None}), "keeps mismatch"),
     ("mismatch FID changed", lambda a, f: a["identity_read"]["mismatch"].update({"fid": "SEL-751-R501-V0-Z104101-D20260910"}), "keeps mismatch"),
+    ("identity.mismatch on a device-read identity", lambda a, f: f["identity"].update({"mismatch": {"id": MISMATCH_ID, "at_utc": EVALUATED}}), "carries identity.mismatch"),
 ], ids=lambda x: x if isinstance(x, str) else "")
 def test_mismatch_mutants_fail(name, fn, phrase):
     obs = after_mismatch()
@@ -242,8 +243,8 @@ def test_mismatch_revision_that_restart_rewrites_fails():
 # C1's ruling: a mismatch on an operator-only asset counts. O1 is
 # not-applicable-operator on TEST-ADV-01 (outside range); a mismatch read
 # reporting an in-range FID makes it applicable-by-version and stale, and
-# the operator source stays. C12 0.1 cannot cite the mismatch on an
-# operator identity, so the finding does not (a C12 0.2 item).
+# the operator source stays. The finding cites the mismatch in
+# identity.mismatch (C12 0.2), as identity.read stores it.
 OP_MISMATCH_ID = inv("O1", "mismatch")
 OP_MISMATCH_FID = "SEL-751-R400-V3-Z100100-D20240930"
 
@@ -257,7 +258,7 @@ def after_operator_mismatch():
         "from": prev["class"], "class": "applicable-by-version",
         "identity": dict(prev["identity"], evidence=[
             dict(prev["identity"]["evidence"][0], stale=True),
-            ]),
+            ], mismatch={"id": OP_MISMATCH_ID, "at_utc": EVALUATED}),
         "preconditions": [{"name": "firmware-version", "state": "unread"}]}))
     a["findings"][adv][-1].pop("reason", None)
     a["identity_read"] = {"mismatch": {"invocation_id": OP_MISMATCH_ID, "read_at": EVALUATED, "fid": OP_MISMATCH_FID}}
@@ -277,6 +278,14 @@ def test_operator_mismatch_passes_before_and_after_restart():
     ("not stale", lambda a, f: f["identity"]["evidence"][0].update({"stale": False}), "stale"),
     ("mismatch shown as a confirming read", lambda a, f: a["identity_read"].update({"invocation_id": OP_MISMATCH_ID}), "last confirming read"),
     ("mismatch lost", lambda a, f: a["identity_read"].update({"mismatch": None}), "keeps mismatch"),
+    ("mismatch not cited", lambda a, f: f["identity"].pop("mismatch"), "identity.mismatch"),
+    ("another read cited", lambda a, f: f["identity"]["mismatch"].update({"id": inv("O1", "other")}), "identity.mismatch"),
+    ("another time cited", lambda a, f: f["identity"]["mismatch"].update({"at_utc": "2026-11-06T00:00:00Z"}), "identity.mismatch"),
+    ("cited as evidence instead", lambda a, f: (f["identity"].pop("mismatch"), f["identity"]["evidence"].append(
+        {"source": "device-read", "id": OP_MISMATCH_ID})), "identity.mismatch"),
+    ("device text cited", lambda a, f: f["identity"]["mismatch"].update({"fid": OP_MISMATCH_FID}), "identity.mismatch"),
+    ("both reads changed together", lambda a, f: (f["identity"]["mismatch"].update({"id": "audit:n:1"}),
+        a["identity_read"]["mismatch"].update({"invocation_id": "audit:n:1"})), "identity.mismatch"),
 ], ids=lambda x: x if isinstance(x, str) else "")
 def test_operator_mismatch_mutants_fail(name, fn, phrase):
     obs = after_operator_mismatch()
