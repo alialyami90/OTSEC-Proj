@@ -2,6 +2,8 @@ package collector
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
 	"errors"
 	"io/fs"
 	"strings"
@@ -297,4 +299,113 @@ func TestHeldSuspensionNamed(t *testing.T) {
 		t.Fatal("a run to the suspended asset reached the runner")
 	}
 	f.stillSuspended(t, suspendingRun)
+}
+
+// otherAdminPriv is a test key no collector pins (D2-5).
+var otherAdminPriv = func() ed25519.PrivateKey {
+	seed := sha256.Sum256([]byte("otsec test admin key, not pinned"))
+	return ed25519.NewKeyFromSeed(seed[:])
+}()
+
+// offLab gives the fixture's asset a second endpoint, not labelled
+// simulated, beside its simulated one: one such endpoint is enough to make
+// the asset off-lab. The configuration loader refuses such a target in this
+// phase (D2-4), so the test sets it after loading, as the node's tests do.
+func offLab(c *PipelineConfig, _ *pipeFixture) {
+	a := &c.Assets[0].Asset
+	ep := a.Endpoints[0]
+	ep.ID, ep.Port, ep.Target = ep.ID+"-device", ep.Port+1, asset.DeviceObserved
+	a.Endpoints = append(a.Endpoints, ep)
+}
+
+// TestAssetClearOffLab: for an asset with an endpoint not labelled
+// simulated, the administrator's unsigned clear-suspension.json lifts
+// nothing (P4-H1). The node's clear in the clear is refused as an unsigned
+// admin request before the file is read, with an alarm, whatever the node
+// believes about itself. Only an administrator's signed asset.clear_suspension
+// lifts the suspension, and a signed clear that is replayed, expired,
+// signed by another key or names another invocation changes nothing.
+func TestAssetClearOffLab(t *testing.T) {
+	ctx := context.Background()
+	file := &adminFile{b: clearFileFor(testAsset, suspendingRun)}
+	f := newPipeline(t, func(c *PipelineConfig, f *pipeFixture) { c.ReadClearFile = file.read }, offLab)
+	if err := f.state.SuspendAsset(testAsset, adapter.FailedAuthRejected, suspendingRun); err != nil {
+		t.Fatal(err)
+	}
+
+	// The node's clear in the clear, with a matching file.
+	for _, contract := range []string{authz.ContractID, "otsec.authz/0.3"} {
+		reply, work := f.pipe.Handle(ctx, stamped(clearRequest(testAsset, suspendingRun), contract))
+		want := authz.RefuseAdminUnverified
+		if contract == "otsec.authz/0.3" {
+			want = authz.RefusePrincipal // admin_unverified is 0.4's (Refusal.ForRequest)
+		}
+		if work != nil || refusalOf(reply) != want || reply.CollectorSeq == 0 {
+			t.Fatalf("%s: unsigned clear: %+v, want %s", contract, reply, want)
+		}
+		if err := reply.Validate(); err != nil {
+			t.Fatalf("%s: the reply is not one the node accepts: %v", contract, err)
+		}
+		if contract == authz.ContractID {
+			wantAdminRefusal(t, "unsigned clear", reply, authz.AdminCheckEnvelope)
+		}
+	}
+	if file.reads != 0 {
+		t.Fatalf("the file was read %d times", file.reads)
+	}
+	f.stillSuspended(t, suspendingRun)
+	if a := f.alarmList(); len(a) != 2 || !strings.Contains(a[0].Error(), "not labelled simulated") {
+		t.Fatalf("alarms %v", a)
+	}
+
+	signedClear := func(ref string) *authz.CollectorRequest {
+		return f.signed(t, &authz.CollectorRequest{Contract: authz.ContractID, Kind: authz.KindAssetClearSusp, RequestID: "req-asset-clear",
+			OnBehalfOf: pipeAdmin, PolicyVersion: policyVersion, AssetClearSusp: &authz.AssetClearSuspBody{AssetID: testAsset, Ref: ref}})
+	}
+
+	// Another invocation: refused, and its nonce is spent all the same.
+	other := signedClear(laterRun)
+	if reply, _ := f.pipe.Handle(ctx, other); refusalOf(reply) != authz.RefuseSuspensionMismatch {
+		t.Fatalf("other invocation: %+v", reply)
+	}
+	reply, _ := f.pipe.Handle(ctx, other)
+	wantAdminRefusal(t, "other invocation, sent again", reply, authz.AdminCheckReplay)
+	f.stillSuspended(t, suspendingRun)
+
+	// Signed by a key nobody pinned, under the pinned key's ID.
+	forged := signedClear(suspendingRun)
+	forged.AdminSigned.Signature = ed25519.Sign(otherAdminPriv, authz.AdminSigningInput(authz.KindAssetClearSusp, forged.AdminSigned.Payload))
+	reply, _ = f.pipe.Handle(ctx, forged)
+	wantAdminRefusal(t, "another key", reply, authz.AdminCheckSignature)
+	f.stillSuspended(t, suspendingRun)
+
+	// Expired.
+	late := signedClear(suspendingRun)
+	f.clock.t = f.clock.t.Add(authz.MaxAdminLifetime + time.Minute)
+	reply, _ = f.pipe.Handle(ctx, late)
+	wantAdminRefusal(t, "expired", reply, authz.AdminCheckWindow)
+	f.stillSuspended(t, suspendingRun)
+
+	// The administrator's signed clear lifts it, durably, with no file read.
+	ok := signedClear(suspendingRun)
+	if reply, _ := f.pipe.Handle(ctx, ok); !reply.Accepted() || reply.Admin == nil || reply.Admin.Principal != pipeAdmin {
+		t.Fatalf("signed clear: %+v", reply)
+	}
+	for _, s := range []*State{f.state, f.reopenState(t)} {
+		if err := s.CheckSuspended(testAsset); err != nil {
+			t.Fatalf("still suspended: %v", err)
+		}
+	}
+	if file.reads != 0 {
+		t.Fatalf("the file was read %d times", file.reads)
+	}
+
+	// A replay of the accepted clear, after a later suspension, lifts
+	// nothing.
+	if err := f.state.SuspendAsset(testAsset, adapter.FailedAuthRejected, laterRun); err != nil {
+		t.Fatal(err)
+	}
+	reply, _ = f.pipe.Handle(ctx, stamped(ok, "otsec.authz/0.4"))
+	wantAdminRefusal(t, "replay", reply, authz.AdminCheckReplay)
+	f.stillSuspended(t, laterRun)
 }
