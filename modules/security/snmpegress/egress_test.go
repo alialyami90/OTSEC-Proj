@@ -57,6 +57,11 @@ func encOID(s string) []byte {
 
 func octets(b []byte) []byte { return enc(0x04, b) }
 
+// arcs extends o with ".1" arcs until it has n sub-identifiers.
+func arcs(o string, n int) string {
+	return o + strings.Repeat(".1", n-strings.Count(o, ".")-1)
+}
+
 var (
 	testEngine = []byte{0x80, 0x00, 0x7c, 0x4f, 0x03, 0x02, 0x00, 0x00, 0x27, 0x31, 0x01}
 	testPriv   = []byte("0123456789abcdef")
@@ -160,19 +165,22 @@ func TestAllowed(t *testing.T) {
 	nextCont.oids = []string{entityTbl + ".1.7.1"}
 	one := read(getOp)
 	one.oids = []string{sysName}
+	longest := read(bulkOp)
+	longest.oids = []string{arcs(entityTbl, 128)} // RFC 2578 section 3.5's most
 	for name, c := range map[string]struct {
 		m  msg
 		op Op
 		s  Session
 	}{
-		"discovery":               {discovery(), getOp, before()},
-		"get":                     {read(getOp), getOp, after()},
-		"get of one named oid":    {one, getOp, after()},
-		"getbulk at subtree":      {read(bulkOp), bulkOp, after()},
-		"getbulk continuation":    {cont, bulkOp, after()},
-		"getnext at subtree":      {read(nextOp), nextOp, after()},
-		"getnext continuation":    {nextCont, nextOp, after()},
-		"authPriv not reportable": {func() msg { m := read(getOp); m.flags &^= flagReportable; return m }(), getOp, after()},
+		"discovery":                {discovery(), getOp, before()},
+		"get":                      {read(getOp), getOp, after()},
+		"get of one named oid":     {one, getOp, after()},
+		"getbulk at subtree":       {read(bulkOp), bulkOp, after()},
+		"getbulk continuation":     {cont, bulkOp, after()},
+		"getnext at subtree":       {read(nextOp), nextOp, after()},
+		"getnext continuation":     {nextCont, nextOp, after()},
+		"continuation of 128 arcs": {longest, bulkOp, after()},
+		"authPriv not reportable":  {func() msg { m := read(getOp); m.flags &^= flagReportable; return m }(), getOp, after()},
 	} {
 		if r := Check(c.m.bytes(), c.op, c.s); r != Allowed {
 			t.Errorf("%s: refused by %q", name, r)
@@ -231,6 +239,9 @@ func TestDenyCorpus(t *testing.T) {
 		"a walk of two varbinds":             {with(read(bulkOp), func(m *msg) { m.oids = []string{entityTbl, entityTbl + ".1"} }), bulkOp, after(), RuleVarbindCount},
 		"max-repetitions not the register's": {with(read(bulkOp), func(m *msg) { m.b = 32 }), bulkOp, after(), RuleMaxRepetitions},
 		"non-repeaters not 0":                {with(read(bulkOp), func(m *msg) { m.a = 1 }), bulkOp, after(), RuleNonRepeaters},
+		// RFC 2578 section 3.5: at most 128 sub-identifiers, so an OID of
+		// 129 inside the subtree is not an OID at all.
+		"a walk continuation of 129 arcs": {with(read(bulkOp), func(m *msg) { m.oids = []string{arcs(entityTbl, 129)} }), bulkOp, after(), RuleBER},
 		// The discovery shape, one field off at a time (13 near misses).
 		"discovery: msgVersion 1":        {with(d, func(m *msg) { m.version = 1 }), getOp, before(), RuleVersion},
 		"discovery: security model 2":    {with(d, func(m *msg) { m.model = 2 }), getOp, before(), RuleSecurityModel},

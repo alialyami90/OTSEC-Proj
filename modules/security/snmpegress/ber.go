@@ -91,8 +91,12 @@ func readInt(b []byte) (int64, []byte, error) {
 	return n, rest, err
 }
 
+// maxArcs is RFC 2578 section 3.5's most sub-identifiers in an OID.
+const maxArcs = 128
+
 // oid decodes an OBJECT IDENTIFIER into dotted decimal. Each sub-identifier
-// is in its shortest base-128 form, and every arc is below 2^32.
+// is in its shortest base-128 form, every arc is below 2^32, and there are at
+// most maxArcs arcs (RFC 2578 section 3.5).
 func oid(v []byte) (string, error) {
 	if len(v) == 0 {
 		return "", errBER
@@ -129,6 +133,9 @@ func oid(v []byte) (string, error) {
 			arcs = append(arcs, strconv.FormatUint(cur, 10))
 		}
 		cur, start = 0, true
+	}
+	if len(arcs) > maxArcs {
+		return "", errBER
 	}
 	return strings.Join(arcs, "."), nil
 }
