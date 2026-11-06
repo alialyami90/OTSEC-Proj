@@ -17,6 +17,7 @@ import (
 	c1 "otsec.local/otsec/contracts/asset"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/asset"
+	"otsec.local/otsec/platform/store"
 )
 
 // The node's two identity documents (C5 0.8 section 1). Each writes its
@@ -257,29 +258,39 @@ func (s *Scheduler) identityOf(ctx context.Context, assetID string) *identitySta
 	if st, ok := s.idents[assetID]; ok {
 		return st
 	}
-	st, err := s.loadIdentity(ctx, assetID)
+	st, unsignalled, err := s.loadIdentity(ctx, assetID)
 	if err != nil {
 		s.raiseOnceKey("identity "+assetID, assetID, AlarmIdentityNotStored, "the stored identity records could not be read, so no identity is stored until they can: "+err.Error())
 		return nil
 	}
 	s.idents[assetID] = st
+	if unsignalled != nil {
+		s.identityChanged(ctx, assetID, unsignalled, st.doc)
+	}
 	return st
 }
 
-// loadIdentity reads the asset's identity records from config/<asset>.
-func (s *Scheduler) loadIdentity(ctx context.Context, assetID string) (*identityState, error) {
+// loadIdentity reads the asset's identity records from config/<asset>. A
+// change is committed in the configuration database and signalled in the
+// evidence database, so a crash can fall between them (C6 on #454). The
+// newest record is a change whose signal may be lost when it names a
+// previous record and no identity.read follows it, since every applied run
+// stores its read after the signal. loadIdentity then returns that previous
+// record as unsignalled, and the change is raised at start. A crash after
+// the signal and before the read raises it a second time, never not at all.
+func (s *Scheduler) loadIdentity(ctx context.Context, assetID string) (*identityState, *identityDoc, error) {
 	stream := ConfigStream(assetID)
 	db := s.rt.Store(stream)
 	if db == nil {
-		return nil, errors.New("the configuration database is not open")
+		return nil, nil, errors.New("the configuration database is not open")
 	}
 	st := &identityState{}
-	var newest *c5.Stored
+	var newest, previous *c5.Stored
 	var after c5.Seq
 	for {
 		got, err := db.Read(ctx, stream, after, 16)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(got) == 0 {
 			break
@@ -289,36 +300,58 @@ func (s *Scheduler) loadIdentity(ctx context.Context, assetID string) (*identity
 			after = r.Key.Seq
 			switch {
 			case bytes.HasPrefix(r.Event, []byte(`{"schema":"`+IdentitySchema)):
-				newest = &got[i]
+				previous, newest = newest, &got[i]
 			case bytes.HasPrefix(r.Event, []byte(`{"schema":"`+IdentityReadSchema)):
 				d, err := decodeIdentityRead(r.Event)
 				if err != nil {
-					return nil, fmt.Errorf("identity read %d: %w", r.Key.Seq, err)
+					return nil, nil, fmt.Errorf("identity read %d: %w", r.Key.Seq, err)
 				}
 				st.reads, st.last = append(st.reads, r.Key.Seq), &d
 			}
 		}
 	}
 	if newest == nil {
-		return st, nil
+		return st, nil, nil
 	}
-	var capture *c5.Capture
-	if newest.EvidenceRef != "" {
-		c, err := db.ReadCapture(ctx, newest.EvidenceRef)
+	d, capture, err := readIdentity(ctx, db, newest)
+	if err != nil {
+		return nil, nil, err
+	}
+	st.doc, st.docBytes, st.storedAt, st.capture = &d, newest.Event, newest.CommittedAt, capture
+	if d.Previous == "" || (len(st.reads) > 0 && st.reads[len(st.reads)-1] > newest.Key.Seq) {
+		return st, nil, nil
+	}
+	// The previous record is the one before the newest. Should it not be
+	// (it is never removed), the change is still raised, against nothing.
+	prev := &identityDoc{InvocationID: "(not found)"}
+	if previous != nil && digest(previous.Event) == d.Previous {
+		p, _, err := readIdentity(ctx, db, previous)
 		if err != nil {
-			return nil, fmt.Errorf("identity record %d: %w", newest.Key.Seq, err)
+			return nil, nil, err
+		}
+		prev = &p
+	}
+	return st, prev, nil
+}
+
+// readIdentity reads one stored identity record with its capture.
+func readIdentity(ctx context.Context, db *store.DB, r *c5.Stored) (identityDoc, []byte, error) {
+	var capture *c5.Capture
+	if r.EvidenceRef != "" {
+		c, err := db.ReadCapture(ctx, r.EvidenceRef)
+		if err != nil {
+			return identityDoc{}, nil, fmt.Errorf("identity record %d: %w", r.Key.Seq, err)
 		}
 		capture = &c
 	}
-	d, err := decodeIdentity(newest.Event, capture)
+	d, err := decodeIdentity(r.Event, capture)
 	if err != nil {
-		return nil, fmt.Errorf("identity record %d: %w", newest.Key.Seq, err)
+		return identityDoc{}, nil, fmt.Errorf("identity record %d: %w", r.Key.Seq, err)
 	}
-	st.doc, st.docBytes, st.storedAt = &d, newest.Event, newest.CommittedAt
-	if capture != nil {
-		st.capture = capture.Bytes
+	if capture == nil {
+		return d, nil, nil
 	}
-	return st, nil
+	return d, capture.Bytes, nil
 }
 
 // storeIdentity applies a run's identity to the asset's records, with asset
