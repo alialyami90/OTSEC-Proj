@@ -117,7 +117,7 @@ func TestLengthForms(t *testing.T) {
 		"0480":                               false, // indefinite
 		"0485" + "0000000001" + "41":         true,  // five length octets: RFC 3417 §8 (1) allows more than needed
 		"0488" + "0000000000000001" + "41":   true,
-		"04ff" + "0141":                      false, // 0xff is reserved (X.690 8.1.3.5)
+		"04ff" + strings.Repeat("00", 127):   false, // 0xff is reserved (X.690 8.1.3.5), even with a length that fits
 		"0485" + "0100000000" + "41":         false, // 2^32, past the end
 		"0489" + "010000000000000000" + "41": false, // 2^64, refused before it overflows
 		"1f0101":                             false, // a multi-octet tag

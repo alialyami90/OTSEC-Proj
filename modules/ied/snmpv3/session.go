@@ -156,9 +156,10 @@ type state struct {
 	salt     uint64
 	// The agent's boots and time, and when its time was read: the
 	// non-authoritative side's notion (RFC 3414 §2.3).
-	synced            bool
+	synced bool
+	// agentTime is also latestReceivedEngineTime (RFC 3414 §2.3): it is
+	// only ever set from a received message's time.
 	boots, agentTime  int64
-	latestTime        int64 // latestReceivedEngineTime
 	syncedAt          time.Time
 	timeWindowReports int
 	unreadable        bool // an authenticated, encrypted message did not decrypt to a ScopedPDU
@@ -442,7 +443,7 @@ func (st *state) report(r *reply, discovery bool) error {
 		return st.end(adapter.FailedUSMNotInTimeWindow, "a usmStatsNotInTimeWindows Report that did not authenticate, or a second one")
 	}
 	r.timeRep = true
-	st.synced, st.boots, st.agentTime, st.latestTime, st.syncedAt = true, r.m.USM.Boots, r.m.USM.Time, r.m.USM.Time, st.s.Now()
+	st.synced, st.boots, st.agentTime, st.syncedAt = true, r.m.USM.Boots, r.m.USM.Time, st.s.Now()
 	return nil
 }
 
@@ -462,8 +463,8 @@ func (st *state) inWindow(m *message) bool {
 	if !st.synced {
 		return true
 	}
-	if m.USM.Boots > st.boots || (m.USM.Boots == st.boots && m.USM.Time > st.latestTime) {
-		st.boots, st.agentTime, st.latestTime, st.syncedAt = m.USM.Boots, m.USM.Time, m.USM.Time, st.s.Now()
+	if m.USM.Boots > st.boots || (m.USM.Boots == st.boots && m.USM.Time > st.agentTime) {
+		st.boots, st.agentTime, st.syncedAt = m.USM.Boots, m.USM.Time, st.s.Now()
 	}
 	b, t := st.agentClock()
 	return b != 0x7FFFFFFF && m.USM.Boots >= b && !(m.USM.Boots == b && m.USM.Time < t-timeWindow)

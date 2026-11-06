@@ -143,7 +143,7 @@ func TestTimeWindowBootsMax(t *testing.T) {
 	if st.inWindow(&message{USM: usmParams{Boots: 0x7FFFFFFF, Time: 20}}) {
 		t.Error("accepted at boots 2147483647")
 	}
-	st = &state{s: &Session{Now: time.Now}, synced: true, boots: 5, agentTime: 1000, latestTime: 1000, syncedAt: time.Now()}
+	st = &state{s: &Session{Now: time.Now}, synced: true, boots: 5, agentTime: 1000, syncedAt: time.Now()}
 	for _, c := range []struct {
 		boots, time int64
 		in          bool
@@ -181,3 +181,22 @@ func (c *clockConn) Write(b []byte) error {
 }
 
 func (c *clockConn) Read(deadline time.Time) ([]byte, error) { return c.agent.Read(deadline) }
+
+// RFC 3414 §3.2 step 7 b): the time-window Report's boots and time are the
+// latest received, so an older authentic message neither moves the notion of
+// time back nor escapes the window (D6 on #495).
+func TestTimeWindowAfterReport(t *testing.T) {
+	now := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	st := &state{s: &Session{Now: func() time.Time { return now }}}
+	r := &reply{m: &message{USM: usmParams{Boots: 5, Time: 1000}}, authed: true,
+		sc: &scoped{PDU: pdu{Tag: tagReport, VarBinds: []varbind{{OID: oidNotInTimeWindows}}}}}
+	if err := st.report(r, false); err != nil || !r.timeRep {
+		t.Fatalf("the time-window Report was not adopted: %v", err)
+	}
+	if !st.inWindow(&message{USM: usmParams{Boots: 5, Time: 900}}) || st.agentTime != 1000 {
+		t.Errorf("time 900: notion moved to %d", st.agentTime)
+	}
+	if st.inWindow(&message{USM: usmParams{Boots: 5, Time: 800}}) {
+		t.Error("time 800 accepted, more than 150 s before 1000")
+	}
+}
