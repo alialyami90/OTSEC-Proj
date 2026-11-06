@@ -19,6 +19,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -302,6 +303,18 @@ def item(name, expected, observed, span):
     return {"name": name, "expected": expected, "observed": observed, "span": span}
 
 
+FID_GRAMMAR = re.compile(r"^(SEL-[0-9A-Z]+)-([RX][0-9]{3}-V[0-9]+)-Z[0-9]{6}-D[0-9]{8}$")
+
+
+def fid_parts(fid, span):
+    """The model and firmware_version observations, as sub-spans of the FID's
+    bytes (C1 0.3 sections 1.1 and 1.5): the product part and the R and V
+    parts, as printed."""
+    m = FID_GRAMMAR.match(fid)
+    return [{"name": n, "value": m.group(i), "span": {"offset": span["offset"] + m.start(i), "length": m.end(i) - m.start(i)}}
+            for n, i in (("model", 1), ("firmware_version", 2))]
+
+
 def to_level1(s, fid=FID, echo=False):
     """Connect, probe, check the FID, authenticate. Returns identity items."""
     s.connect()
@@ -332,7 +345,7 @@ def full(bad_row=False, echo=False, n_rows=None, date_f="MDY", rows_date_f=None,
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
     s.quit()
-    obs = [{"name": "firmware_id", "value": FID, "span": fid_span},
+    obs = [{"name": "firmware_id", "value": FID, "span": fid_span}, *fid_parts(FID, fid_span),
            {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
            {"name": "serial_number", "value": SERIAL, "span": ser_span}]
     ident = {"result": "match", "items": items}
@@ -588,7 +601,7 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_7", schema="otsec.adapter/0.7")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_8", schema="otsec.adapter/0.8")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -602,7 +615,7 @@ def results():
     ser_span = s.span(SERIAL, s.ser_start)
     items.append(item("serial_number", SERIAL, SERIAL, ser_span))
     s.quit()
-    obs = [{"name": "firmware_id", "value": FID, "span": fid_span},
+    obs = [{"name": "firmware_id", "value": FID, "span": fid_span}, *fid_parts(FID, fid_span),
            {"name": "sel.cid", "value": CID, "span": s.span(CID, s.id_start)},
            {"name": "serial_number", "value": SERIAL, "span": ser_span}]
     out["ok-missing-setting"] = s.result("ok", None, {"result": "match", "items": items}, obs, [

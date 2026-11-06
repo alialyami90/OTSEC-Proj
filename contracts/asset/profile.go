@@ -3,6 +3,7 @@ package asset
 import (
 	"fmt"
 	"regexp"
+	"slices"
 
 	"otsec.local/otsec/contracts/version"
 )
@@ -29,8 +30,15 @@ type CapabilityProfile struct {
 	// authentication, which an asset's binding may compare before a
 	// credential is sent. Its evidence is the identification capability's
 	// citation. Empty for a family that reports nothing unauthenticated.
-	PreCredential []string     `json:"pre_credential,omitempty"`
-	Capabilities  []Capability `json:"capabilities"`
+	PreCredential []string `json:"pre_credential,omitempty"`
+	// Models (0.3, optional) lists the models the product family covers,
+	// each as the device prints it, for example "SEL-2731M". modules/asset
+	// compares a device-read model with it, and a model outside it is shown
+	// as identity.family_conflict (§1.5 of docs/phase4/C2-c1-0.3-c3-0.4.md).
+	// When it is absent, no family check is made. The applicability match
+	// does not use it: it compares the device-read model (D4-53).
+	Models       []string     `json:"models,omitempty"`
+	Capabilities []Capability `json:"capabilities"`
 	// MaxReadRows bounds one read of the family's native record buffer
 	// (D1-12): a read with more rows is a failed parse, and nothing from it
 	// is aligned or stored. At most MaxReadRowsCeiling. Required when event
@@ -202,6 +210,15 @@ func (p CapabilityProfile) Validate() error {
 	v.enum("device_class", p.DeviceClass, DeviceClasses)
 	if p.Firmware.Allowlist != "none" && !tokenPattern.MatchString(p.Firmware.Allowlist) {
 		v.fail("firmware.allowlist must name an allowlist or be \"none\"")
+	}
+	if len(p.Models) > 0 && id.Minor < 3 {
+		v.fail("models is new in 0.3, so a 0.%d profile cannot carry it", id.Minor)
+	}
+	for i, m := range p.Models {
+		v.value(fmt.Sprintf("models[%d]", i), AttrModel, m)
+		if slices.Contains(p.Models[:i], m) {
+			v.fail("models[%d]: %q is listed twice", i, m)
+		}
 	}
 	for i, name := range p.PreCredential {
 		if !ValidAttributeName(name) || contains(OperatorOnlyAttributes, name) {

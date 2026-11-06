@@ -1,0 +1,118 @@
+{
+  "contract": "otsec.register/0.4",
+  "family": "sel-27x1-rstp",
+  "revision": 1,
+  "issued": "2026-11-05",
+  "owner": "C2",
+  "sources": [
+    {
+      "id": "T1",
+      "title": "SEL-2731 and SEL-2741 RSTP-mode user's guide, S29 (test package)"
+    }
+  ],
+  "preconditions": [],
+  "warnings": [],
+  "context": [],
+  "operations": [],
+  "snmp_operations": [
+    {
+      "id": "sel27x1.snmp.system",
+      "pdu": "get",
+      "oids": [
+        "1.3.6.1.2.1.1.1.0",
+        "1.3.6.1.2.1.1.5.0"
+      ],
+      "limits": {
+        "max_reply_bytes": 1472,
+        "timeout_ms": 3000
+      },
+      "citations": [
+        {
+          "source": "T1",
+          "ref": "pp. 46 to 47"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "none: reads two system-group scalars"
+    },
+    {
+      "id": "sel27x1.snmp.entity",
+      "pdu": "getbulk",
+      "subtree": "1.3.6.1.2.1.47.1.1.1",
+      "max_repetitions": 16,
+      "walk": {
+        "max_varbinds": 512,
+        "max_requests": 32
+      },
+      "limits": {
+        "max_reply_bytes": 1472,
+        "timeout_ms": 3000
+      },
+      "citations": [
+        {
+          "source": "T1",
+          "ref": "pp. 46 and 75"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "none: walks entPhysicalTable within the bounds"
+    }
+  ],
+  "runs": [
+    {
+      "id": "sel27x1.snmp.identity",
+      "steps": [
+        "sel27x1.snmp.system",
+        "sel27x1.snmp.entity"
+      ],
+      "max_total_bytes": 65536,
+      "deadline_ms": 30000,
+      "citations": [
+        {
+          "source": "T1",
+          "ref": "pp. 46 to 47"
+        }
+      ],
+      "evidence": {
+        "class": "documented-untested"
+      },
+      "side_effects": "none: two reads"
+    }
+  ],
+  "session_control": [],
+  "denied": [],
+  "firmware": {
+    "known": [
+      {
+        "fid": "SEL-2731M-R102-V1-Z003001-D20260408",
+        "branch": "R102",
+        "version": 1,
+        "citation": {
+          "source": "T1",
+          "ref": "invented"
+        }
+      }
+    ],
+    "branches": [
+      {
+        "branch": "R102",
+        "status": "allow",
+        "min_version": 0,
+        "basis": "test package",
+        "evidence": {
+          "class": "inferred"
+        }
+      }
+    ],
+    "not_covered": [
+      "Everything: this is a test package"
+    ]
+  },
+  "notes": [
+    "A test package for contracts/adapter's CheckSNMP. Not a register."
+  ]
+}

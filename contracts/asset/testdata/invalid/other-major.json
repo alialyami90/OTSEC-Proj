@@ -14,7 +14,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         }
       ]
@@ -30,7 +31,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         }
       ]
@@ -46,7 +48,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         }
       ]
@@ -62,7 +65,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         },
         {
@@ -75,6 +79,11 @@
             "span": {
               "offset": 127,
               "length": 33
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "telnet",
+              "operation": "sel.id"
             }
           }
         }
@@ -91,7 +100,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         }
       ]
@@ -111,6 +121,11 @@
             "span": {
               "offset": 224,
               "length": 4
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "telnet",
+              "operation": "sel.id"
             }
           }
         }
@@ -127,7 +142,8 @@
           "source": {
             "method": "operator-entry",
             "ref": "operator:commissioning-sheet-07",
-            "observed_at": "2026-10-24T09:00:00Z"
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
           }
         }
       ]

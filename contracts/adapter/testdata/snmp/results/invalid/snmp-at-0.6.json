@@ -1,0 +1,213 @@
+{
+  "schema": "otsec.adapter/0.6",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel27x1.snmp.identity",
+  "adapter": {
+    "id": "sel-27x1-snmpv3",
+    "version": "0.1.0-example"
+  },
+  "register_version": 1,
+  "target": "simulated",
+  "status": "ok",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.8Z",
+  "transcript": {
+    "data": "MDcCAQMwDQIBAQICBcAEAQQCAQMEEDAOBAACAQACAQAEAAQABAAwEQQABACgCwIBAQIBAAIBADAAMF8CAQMwDQIBAQICBcAEAQACAQMEHDAaBAuAAHxPAwIAACcxAQIBAQICDhAEAAQABAAwLQQLgAB8TwMCAAAnMQEEAKgcAgEBAgEAAgEAMBEwDwYKKwYBBgMPAQEEAEEBATCBkQIBAzANAgECAgIFwAQBBwIBAwRDMEEEC4AAfE8DAgAAJzEBAgEAAgEABAhvdHNlYy1ybwQYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgAAAAAAAAAATA4BAuAAHxPAwIAACcxAQQAoCcCAQICAQACAQAwHDAMBggrBgECAQEBAAUAMAwGCCsGAQIBAQUABQAwfwIBAzANAgECAgIFwAQBAQIBAwQ8MDoEC4AAfE8DAgAAJzEBAgEBAgIOEAQIb3RzZWMtcm8EGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAMC0EC4AAfE8DAgAAJzEBBACoHAIBAgIBAAIBADARMA8GCisGAQYDDwEBAgBBAQEwgZICAQMwDQIBAwICBcAEAQcCAQMERDBCBAuAAHxPAwIAACcxAQIBAQICDhAECG90c2VjLXJvBBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAABMDgEC4AAfE8DAgAAJzEBBACgJwIBAwIBAAIBADAcMAwGCCsGAQIBAQEABQAwDAYIKwYBAgEBBQAFADCBuwIBAzANAgEDAgIFwAQBAwIBAwREMEIEC4AAfE8DAgAAJzEBAgEBAgIOEAQIb3RzZWMtcm8EGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAEwYQQLgAB8TwMCAAAnMQEEAKJQAgEDAgEAAgEAMEUwLQYIKwYBAgEBAQAEIVNFTC0yNzMxTSBNYW5hZ2VkIEV0aGVybmV0IFN3aXRjaDAUBggrBgECAQEFAAQIc3ctYmF5LTEwgYUCAQMwDQIBBAICBcAEAQcCAQMERDBCBAuAAHxPAwIAACcxAQIBAQICDhEECG90c2VjLXJvBBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAABMCsEC4AAfE8DAgAAJzEBBAClGgIBBAIBAAIBEDAPMA0GCSsGAQIBLwEBAQUAMIHZAgEDMA0CAQQCAgXABAEDAgEDBEQwQgQLgAB8TwMCAAAnMQECAQECAg4RBAhvdHNlYy1ybwQYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgAAAAAAAAAATB/BAuAAHxPAwIAACcxAQQAom4CAQQCAQACAQAwYzAZBgwrBgECAS8BAQEBAgEECVNFTC0yNzMxTTAzBgwrBgECAS8BAQEBCgEEI1NFTC0yNzMxTS1SMTAyLVYxLVowMDMwMDEtRDIwMjYwNDA4MBEGDCsGAQIBLwECAQECAQQBeA==",
+    "sha256": "8bc55d23ad98d33439ae5899627e7824c2cf8435a89e5013407def1cc6b77f37",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 57,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 57,
+        "length": 97,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 154,
+        "length": 148,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 302,
+        "length": 129,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 431,
+        "length": 149,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 580,
+        "length": 190,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.5Z"
+      },
+      {
+        "offset": 770,
+        "length": 136,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.6Z"
+      },
+      {
+        "offset": 906,
+        "length": 220,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.7Z"
+      }
+    ],
+    "redactions": [
+      {
+        "offset": 210,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 358,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 488,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 637,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 827,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 963,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      }
+    ]
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": false,
+    "language_probe": "not-run",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "",
+    "quit_sent": false,
+    "snmp": {
+      "engine_id": "80007c4f03020000273101",
+      "authenticated": true
+    }
+  },
+  "identity": {
+    "result": "match",
+    "items": [
+      {
+        "name": "snmp_engine_id",
+        "expected": "80007c4f03020000273101",
+        "observed": "80007c4f03020000273101",
+        "span": {
+          "offset": 83,
+          "length": 11
+        }
+      },
+      {
+        "name": "firmware_id",
+        "expected": "SEL-2731M-R102-V1-Z003001-D20260408",
+        "observed": "SEL-2731M-R102-V1-Z003001-D20260408",
+        "span": {
+          "offset": 1072,
+          "length": 35
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "name": "snmp_engine_id",
+      "value": "80007c4f03020000273101",
+      "span": {
+        "offset": 607,
+        "length": 11
+      },
+      "read": {
+        "operation": "sel27x1.snmp.system",
+        "header": "msgAuthoritativeEngineID"
+      }
+    },
+    {
+      "name": "hostname",
+      "value": "sw-bay-1",
+      "span": {
+        "offset": 762,
+        "length": 8
+      },
+      "read": {
+        "operation": "sel27x1.snmp.system",
+        "oid": "1.3.6.1.2.1.1.5.0"
+      }
+    },
+    {
+      "name": "firmware_id",
+      "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+      "span": {
+        "offset": 1072,
+        "length": 35
+      },
+      "read": {
+        "operation": "sel27x1.snmp.entity",
+        "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+      }
+    },
+    {
+      "name": "model",
+      "value": "SEL-2731M",
+      "span": {
+        "offset": 1072,
+        "length": 9
+      },
+      "read": {
+        "operation": "sel27x1.snmp.entity",
+        "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+      }
+    },
+    {
+      "name": "firmware_version",
+      "value": "R102-V1",
+      "span": {
+        "offset": 1082,
+        "length": 7
+      },
+      "read": {
+        "operation": "sel27x1.snmp.entity",
+        "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+      }
+    }
+  ]
+}

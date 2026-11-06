@@ -1,5 +1,5 @@
 // Package register is contract C3, the approved command register format
-// otsec.register/0.3 (A1 owns the format, A2 the content).
+// otsec.register/0.4 (A1 owns the format, A2 the content).
 //
 // A register package lists, for one device family, every line the collector
 // may send and the conditions under which it may send them. It serves risk 1
@@ -52,6 +52,20 @@
 //     lines, and Matcher.Permit still checks every one on its own, so a run
 //     adds no line the register does not already permit. A run is read-only
 //     without exception: a state-changing or Level 2 step is invalid.
+//   - SNMP operations (0.4, C3 0.4, D4-53) are SNMPv3 reads. The PDU is a
+//     closed enum of get, getnext and getbulk, so a SET cannot be written,
+//     and every OID is literal dotted decimal under 1.3.6.1. A get names 1 to
+//     16 OIDs; a getnext or getbulk walks one subtree within its walk bounds
+//     (at most 2048 varbinds and 64 requests), getbulk with max_repetitions
+//     1 to 32. Limits are required, and max_reply_bytes, 484 to 65,507 (the
+//     largest UDP payload over IPv4; C1 on #445), is the msgMaxSize every
+//     request advertises. A run is all SNMP steps or all
+//     line steps, because one run is one session on one transport, and an
+//     SNMP run has no gate, warning or context reads. SNMP operations never
+//     reach Matcher: they are not lines, so Render and RenderRun refuse
+//     them, and the SNMP client reads them with Package.SNMPOperation. What
+//     the collector does with them (discovery, USM, retransmission) is in
+//     docs/phase4/C2-c1-0.3-c3-0.4.md §2.3 and C3's #437.
 //   - The firmware allowlist for the family ships in the same package, so it
 //     is covered by the same signature and anti-rollback floor (C-A2-2).
 //
@@ -59,14 +73,17 @@
 //
 //   - 0.1: the Phase 1 format.
 //   - 0.2 adds context. A 0.1 package with context is invalid.
-//   - 0.3 adds limits and runs. This reader decodes 0.1, 0.2 and 0.3
-//     packages. A later minor is invalid here, because the reader is strict,
-//     so a node that has not been upgraded refuses a 0.3 package and keeps the
-//     floor it has (fail closed).
+//   - 0.3 adds limits and runs.
+//   - 0.4 adds snmp_operations, and a package may hold SNMP operations only.
+//     This reader decodes 0.1 to 0.4 packages. A later minor is invalid
+//     here, because the reader is strict, so a node that has not been
+//     upgraded refuses a 0.4 package and keeps the floor it has (fail
+//     closed).
 //   - A key introduced at a version is refused by its presence in any package
 //     below that version, whatever its value: an empty list and null count,
 //     as an older reader refuses the key (D4-16). That covers context before
-//     0.2 and runs and limits before 0.3. The envelope's
+//     0.2, runs and limits before 0.3, and snmp_operations before 0.4. The
+//     envelope's
 //     contract is an unsigned label: C7 accepts any stamp in Readable (D3-4),
 //     and the signed payload names its own contract. SigningDomain stays
 //     "otsec.register/0.1 package\n" in every minor, so a signature made over

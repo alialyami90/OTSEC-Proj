@@ -9,6 +9,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/register"
 )
 
 // C1 keeps a copy of C4's ceiling so the two packages need not import each
@@ -16,6 +17,13 @@ import (
 func TestMaxReadRowsCeilingIsC4s(t *testing.T) {
 	if asset.MaxReadRowsCeiling != event.MaxAlignRows {
 		t.Errorf("asset.MaxReadRowsCeiling %d, event.MaxAlignRows %d", asset.MaxReadRowsCeiling, event.MaxAlignRows)
+	}
+}
+
+// C3 0.4 bounds a walk by C1's read-row ceiling; register keeps a copy.
+func TestMaxWalkVarbindsIsC1s(t *testing.T) {
+	if register.MaxWalkVarbinds != asset.MaxReadRowsCeiling {
+		t.Errorf("register.MaxWalkVarbinds %d, asset.MaxReadRowsCeiling %d", register.MaxWalkVarbinds, asset.MaxReadRowsCeiling)
 	}
 }
 
