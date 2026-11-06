@@ -26,19 +26,15 @@ import (
 
 const snmpRunID = "sel27x1.snmp.identity"
 
-// snmpProfile is a capability profile for the SEL-2731 whose firmware
-// allowlist names C2's test package, sel-27x1-rstp. It is test data built
-// from the SEL-751 profile; no SNMP profile is published yet.
+// snmpProfile is the test profile for the SEL-2731 whose firmware
+// allowlist names C2's test package, sel-27x1-rstp. It is test data; no
+// SNMP profile is published yet. C6's slice helper reads the same file.
 func snmpProfile(t *testing.T) asset.CapabilityProfile {
 	t.Helper()
-	p := simProfile(t)
-	p.ProfileID, p.ProductFamily, p.DeviceClass = "sel-27x1-rstp", "sel-2731", "ethernet-switch"
-	p.Firmware.Allowlist = "sel-27x1-rstp"
-	p.PreCredential = []string{asset.AttrSNMPEngineID}
-	p.Capabilities = []asset.Capability{{
-		Capability: "identification", Mechanism: "adapter-operation", Operations: []string{snmpRunID},
-		Status: "simulated", Citation: "C2 0.7 test package (contracts/adapter/testdata/snmp); test profile only",
-	}}
+	p, err := asset.DecodeProfile(readFixture(t, "profile-sel-27x1-rstp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return p
 }
 
