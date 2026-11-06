@@ -26,6 +26,12 @@ const TickInterval = 60 * time.Second
 // quarantine export and clear (Scheduler.QuarantineTick). It returns nil when ctx ends, after service.stop
 // is recorded and every database is closed.
 func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
+	return RunFrom(ctx, cfg, oslog, PreStart{})
+}
+
+// RunFrom is Run, its start timing line counting from pre (P4-H2).
+func RunFrom(ctx context.Context, cfg *Config, oslog func(string), pre PreStart) error {
+	entered := time.Now()
 	st := NewStatus(StatusPath(cfg), oslog, nodeClock.Now)
 	// No status file is written until each target and listener has been
 	// judged against its certificate's period (below), so the first one
@@ -38,6 +44,7 @@ func Run(ctx context.Context, cfg *Config, oslog func(string)) error {
 	}
 	defer rt.Close()
 	starts := rt.starts
+	starts.from(pre, entered)
 	from := time.Now()
 	fw, err := NewForwarding(rt)
 	if err != nil {

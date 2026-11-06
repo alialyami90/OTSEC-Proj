@@ -11,12 +11,14 @@ import (
 
 // StartPhases are the node start phases the start timing line names, in
 // order (P4-H2). The names are fixed, since CI and D6's workflows read
-// them; store phases are summed across the databases. Start runs the
-// phases up to status, and Run the rest, adding its own status write to
-// status. Run's line ends before the scheduler's first collector exchange:
+// them; store phases are summed across the databases. The command's
+// PreStart gives config and scm, Start runs the phases up to status, and
+// Run the rest, adding its own status write to status. Run's line ends before the scheduler's first collector exchange:
 // that waits for the first entry's due time, a minute after start (AP-13),
 // so it is not part of starting.
 var StartPhases = []string{
+	"config",        // the command's LoadConfig (PreStart)
+	"scm",           // from the loaded configuration to Run: the SCM handshake as a service
 	"store-lock",    // c5 StartupEnv.Lock
 	"store-open",    // StartupEnv.Open
 	"store-reserve", // StartupEnv.CreateReserve and ReleaseReserve
@@ -62,6 +64,26 @@ func (t *startTimes) line(scope string) string {
 	}
 	fmt.Fprintf(&b, " other=%dms", max(other, 0).Milliseconds())
 	return b.String()
+}
+
+// PreStart is the part of a node's start before Run, as the otsec command
+// measured it on the monotonic clock: Began at the command's entry, and
+// Config the time its LoadConfig took. Run's total then counts from Began,
+// and the time from the loaded configuration to Run is scm. The zero
+// PreStart counts from Run's own start, with config and scm zero.
+type PreStart struct {
+	Began  time.Time
+	Config time.Duration
+}
+
+// from makes t count from p.Began, entered being when Run was entered.
+func (t *startTimes) from(p PreStart, entered time.Time) {
+	if p.Began.IsZero() {
+		return
+	}
+	t.began = p.Began
+	t.d["config"] = p.Config
+	t.d["scm"] = max(entered.Sub(p.Began)-p.Config, 0)
 }
 
 // StartLine is the start timing line of Start's phases, for tests that

@@ -27,8 +27,10 @@ func TestRunStartsAndStops(t *testing.T) {
 	// and 120 runs of this test alone did not reproduce it.
 	var logMu sync.Mutex
 	var oslog []string
+	// The command began 2 s ago and its LoadConfig took 1.5 s (P4-H2).
+	pre := PreStart{Began: time.Now().Add(-2 * time.Second), Config: 1500 * time.Millisecond}
 	go func() {
-		done <- Run(ctx, c, func(l string) { logMu.Lock(); oslog = append(oslog, l); logMu.Unlock() })
+		done <- RunFrom(ctx, c, func(l string) { logMu.Lock(); oslog = append(oslog, l); logMu.Unlock() }, pre)
 	}()
 	var st StatusFile
 	var err error
@@ -54,7 +56,8 @@ func TestRunStartsAndStops(t *testing.T) {
 		defer logMu.Unlock()
 		t.Fatalf("audit: %v; OS log: %q", acts, oslog)
 	}
-	// Run logs one start timing line, with Run's phases (P4-H2).
+	// Run logs one start timing line, with Run's phases, counting from the
+	// command's start (P4-H2).
 	logMu.Lock()
 	var lines []string
 	for _, l := range oslog {
@@ -67,6 +70,10 @@ func TestRunStartsAndStops(t *testing.T) {
 		t.Fatalf("start lines in the OS log: %q", lines)
 	}
 	checkStartLine(t, lines[0], "node")
+	m := startLineRE.FindStringSubmatch(lines[0])
+	if total, config, scm := atoi(m[2]), atoi(m[3]), atoi(m[4]); total < 2000 || config != 1500 || scm < 499 {
+		t.Fatalf("the line does not count from the command's start: %q", lines[0])
+	}
 	if ep := CollectorEndpoint(c); ep.Address != c.CollectorPipe || ep.Peer == "" {
 		t.Fatalf("collector endpoint %+v", ep)
 	}

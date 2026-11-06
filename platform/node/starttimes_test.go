@@ -14,7 +14,7 @@ func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 // startLineRE is the start timing line, its phases fixed and in order
 // (P4-H2): CI and D6's workflows read these names.
 var startLineRE = regexp.MustCompile(`^otsec node start: scope=(runtime|node) total=(\d+)ms` +
-	` store-lock=(\d+)ms store-open=(\d+)ms store-reserve=(\d+)ms store-startup=(\d+)ms store-adopt=(\d+)ms` +
+	` config=(\d+)ms scm=(\d+)ms store-lock=(\d+)ms store-open=(\d+)ms store-reserve=(\d+)ms store-startup=(\d+)ms store-adopt=(\d+)ms` +
 	` register=(\d+)ms record-start=(\d+)ms holds=(\d+)ms status=(\d+)ms forwarding=(\d+)ms listening=(\d+)ms` +
 	` node-keys=(\d+)ms scheduler=(\d+)ms listen=(\d+)ms first-check=(\d+)ms other=(\d+)ms$`)
 
@@ -48,7 +48,7 @@ func TestStartLine(t *testing.T) {
 			t.Errorf("phase %q is not in StartPhases", p)
 		}
 	}
-	for _, p := range StartPhases[:slices.Index(StartPhases, "status")+1] {
+	for _, p := range StartPhases[slices.Index(StartPhases, "store-lock") : slices.Index(StartPhases, "status")+1] {
 		if _, ok := r.starts.d[p]; !ok && p != "store-reserve" {
 			t.Errorf("Start did not time %s", p)
 		}
@@ -63,6 +63,12 @@ func TestStartLine(t *testing.T) {
 	checkStartLine(t, st.line("node"), "node")
 	if o := regexp.MustCompile(` other=(\d+)ms$`).FindStringSubmatch(st.line("node")); o == nil || atoi(o[1]) < 499 {
 		t.Fatalf("other in %q", st.line("node"))
+	}
+	// Run with the zero PreStart counts from its own start.
+	zero := newStartTimes()
+	zero.from(PreStart{}, time.Now())
+	if _, ok := zero.d["config"]; ok || !strings.Contains(zero.line("node"), " config=0ms scm=0ms ") {
+		t.Fatalf("the zero PreStart: %q", zero.line("node"))
 	}
 	st.d["store-lock"] = 2 * time.Second
 	if !strings.HasSuffix(st.line("node"), " other=0ms") {
