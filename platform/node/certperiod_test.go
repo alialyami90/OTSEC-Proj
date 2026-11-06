@@ -57,6 +57,16 @@ func newWindow(t *testing.T, p nodeconfigtest.Period) window {
 
 func (w window) open() bool { return time.Now().Before(w.begin) }
 
+// releaseWait is how long after a certificate's period begins a test waits
+// for the held link to start.
+const releaseWait = 20 * time.Second
+
+// releaseBy is when a test stops waiting for the held link to start. It
+// counts from the period's beginning, not from the end of the held checks:
+// with a long margin and a quick setup, a wait counted from the checks
+// could end before the period began, and the link was then never released.
+func (w window) releaseBy() time.Time { return w.begin.Add(releaseWait) }
+
 // fatalf reports a failed check made while the link should be held. If the
 // window had closed by then, the check shows nothing, and the failure says
 // that.
@@ -69,20 +79,25 @@ func (w window) fatalf(format string, args ...any) {
 }
 
 // notYetRun calls try with a period that begins notYetMargin from now, and
-// again with twice the margin, up to three times in all, while try reports
+// again with a longer margin, up to three times in all, while try reports
 // that the node loaded the certificate after its period began: a held link
-// was then not seen, and nothing about it can be checked.
+// was then not seen, and nothing about it can be checked. The next margin
+// is twice the last, or twice what the late try took if that is longer, so
+// a runner slower than the doubled margin is given room by its own measure.
 func notYetRun(t *testing.T, try func(per nodeconfigtest.Period, w window) (late bool)) {
 	t.Helper()
-	for margin, n := notYetMargin, 1; ; margin, n = margin*2, n+1 {
+	for margin, n := notYetMargin, 1; ; n++ {
 		per := notYet(margin)
+		began := time.Now()
 		if !try(per, newWindow(t, per)) {
 			return
 		}
+		took := time.Since(began)
 		if n == 3 {
-			t.Fatalf("the node loaded the certificate after its period began in all %d tries, the last with a %s margin", n, margin)
+			t.Fatalf("the node loaded the certificate after its period began in all %d tries, the last with a %s margin, which took %s", n, margin, took.Round(time.Millisecond))
 		}
-		t.Logf("the node loaded the certificate after its period began (margin %s); trying again with a longer one", margin)
+		t.Logf("the node loaded the certificate after its period began (margin %s, the try took %s); trying again with a longer one", margin, took.Round(time.Millisecond))
+		margin = max(margin*2, (2 * took).Round(time.Second))
 	}
 }
 
@@ -206,8 +221,7 @@ func TestHeldTargetStartsWhenThePeriodIsValid(t *testing.T) {
 		if got := st.Snapshot("x").Targets["central"].HeldBack; got != "not-yet-valid" {
 			w.fatalf("held back %q", got)
 		}
-		deadline := time.Now().Add(20 * time.Second)
-		for len(srv.Acked()) == 0 && time.Now().Before(deadline) {
+		for len(srv.Acked()) == 0 && time.Now().Before(w.releaseBy()) {
 			fw.Check(bg)
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -460,13 +474,13 @@ func listenerHeldCase(t *testing.T, per nodeconfigtest.Period, w window, state s
 		}
 		return false
 	}
-	deadline := time.Now().Add(20 * time.Second)
-	for ls.Addr("lab-tls") == nil && time.Now().Before(deadline) {
+	for ls.Addr("lab-tls") == nil && time.Now().Before(w.releaseBy()) {
 		ls.Publish()
 		time.Sleep(100 * time.Millisecond)
 	}
 	if ls.Addr("lab-tls") == nil {
-		t.Fatal("the listener never started")
+		t.Fatalf("the listener never started, %s after its period began at %s: status %+v, stopped alarms %+v",
+			releaseWait, w.begin.Format(time.RFC3339), st.Snapshot("x").Listeners["lab-tls"], statusAlarms(st, AlarmListenerStopped, "listener lab-tls"))
 	}
 	c := tls.Client(dialFrom(t, "tcp", "127.0.0.1", ls.Addr("lab-tls")), &tls.Config{RootCAs: p.Roots, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12})
 	c.SetDeadline(time.Now().Add(5 * time.Second))
