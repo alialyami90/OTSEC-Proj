@@ -139,7 +139,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp openssl
       - run: rsyslogd -v && openssl version
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
-      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py --ignore=tests/integration/slice/test_slice_busy_open_e2e.py --ignore=tests/integration/slice/test_slice_admin_relay_e2e.py --ignore=tests/integration/slice/test_slice_unknown_restart_e2e.py --ignore=tests/integration/slice/test_slice_date_orders_e2e.py --ignore=tests/integration/slice/test_slice_unknown_fill_outage_e2e.py --ignore=tests/integration/slice/test_slice_gtinj_feed_e2e.py --ignore=tests/integration/slice/test_slice_config_changes_e2e.py --ignore=tests/integration/slice/test_slice_gtinj_ser_e2e.py --ignore=tests/integration/slice/test_slice_vm7_e2e.py --ignore=tests/integration/slice/test_slice_vm8_sets_e2e.py --ignore=tests/integration/slice/test_slice_vm8_paired_e2e.py
+      - run: python -m pytest -q -rs tests/integration/slice --ignore=tests/integration/slice/test_slice_interruptions_e2e.py --ignore=tests/integration/slice/test_slice_buffer_e2e.py --ignore=tests/integration/slice/test_slice_store_full_e2e.py --ignore=tests/integration/slice/test_slice_busy_open_e2e.py --ignore=tests/integration/slice/test_slice_admin_relay_e2e.py --ignore=tests/integration/slice/test_slice_unknown_restart_e2e.py --ignore=tests/integration/slice/test_slice_date_orders_e2e.py --ignore=tests/integration/slice/test_slice_unknown_fill_outage_e2e.py --ignore=tests/integration/slice/test_slice_gtinj_feed_e2e.py --ignore=tests/integration/slice/test_slice_config_changes_e2e.py --ignore=tests/integration/slice/test_slice_gtinj_ser_e2e.py --ignore=tests/integration/slice/test_slice_vm7_e2e.py --ignore=tests/integration/slice/test_slice_vm8_sets_e2e.py --ignore=tests/integration/slice/test_slice_vm8_paired_e2e.py --ignore=tests/integration/slice/test_slice_vm1_e2e.py
   # The long slice files (7 to 9 minutes each), one job per file so each
   # stays inside its limit and they run beside the integration job, which
   # ignores exactly these (A1, #132; busy_open added by A6 with A1's
@@ -153,7 +153,10 @@ jobs:
   # GT-ADV, about 4 min, added by C6 under P4-3-C6; vm8_sets and
   # vm8_paired, V-M8's set cases and its paired runs, about 5 and 8 min,
   # added by C6 under P4-3-C6: the paired runs execute as root in a
-  # network namespace of their own, with the binaries built before it).
+  # network namespace of their own, with the binaries built before it;
+  # vm1, V-M1 over GT-MIB's agents, about 9 min, proposed by D6 under
+  # D4-59 for D1's authorization: its step tees the output and then runs
+  # M3's key search over it).
   integration-long:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.file == 'test_slice_gtinj_ser_e2e.py' && 50 || 20 }}
@@ -175,6 +178,7 @@ jobs:
           - test_slice_vm7_e2e.py
           - test_slice_vm8_sets_e2e.py
           - test_slice_vm8_paired_e2e.py
+          - test_slice_vm1_e2e.py
     env:
       OTSEC_SLICE_REQUIRED: "1"
     steps:
@@ -190,7 +194,15 @@ jobs:
       - run: rsyslogd -v && openssl version
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
       - run: python -m pytest -q -rs tests/integration/slice/${{ matrix.file }}
-        if: matrix.file != 'test_slice_vm8_paired_e2e.py'
+        if: matrix.file != 'test_slice_vm8_paired_e2e.py' && matrix.file != 'test_slice_vm1_e2e.py'
+      - name: V-M1 over GT-MIB, then M3's key search over this step's own output
+        if: matrix.file == 'test_slice_vm1_e2e.py'
+        run: |
+          set -o pipefail
+          rc=0
+          OTSEC_VM1_KEYS_OUT="$RUNNER_TEMP/vm1-keys.json" python -m pytest -q -rA tests/integration/slice/test_slice_vm1_e2e.py 2>&1 | tee "$RUNNER_TEMP/vm1-out.txt" || rc=$?
+          python tests/integration/slice/vm1_keysearch.py "$RUNNER_TEMP/vm1-keys.json" "$RUNNER_TEMP/vm1-out.txt" || rc=1
+          exit $rc
       - name: V-M8's paired runs, as root in a network namespace of their own
         if: matrix.file == 'test_slice_vm8_paired_e2e.py'
         run: |
