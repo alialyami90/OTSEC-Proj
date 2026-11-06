@@ -46,7 +46,7 @@ import pytest
 import harness
 import netcapture
 from conftest import need
-from slicerun import SERVICE, Slice
+from slicerun import SERVICE, Slice, check_v_s7
 from test_slice_gtinj_feed_e2e import _query, _status
 
 SIM_PORT = 47021  # fixed for every run (D4-49 Q12)
@@ -81,6 +81,7 @@ def _run(d, bin_dir, tun, r9):
         if not cap._stop.is_set():
             packets, external = cap.stop()
         s.stop()
+        out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
     out["connections"], out["external"] = netcapture.connections(packets), external
     return out
 
@@ -166,3 +167,12 @@ def test_the_same_device_sessions_packet_for_packet(runs, second):
 def test_no_flow_the_first_run_lacks(runs, second):
     extra = _flows(runs[second]) - _flows(runs["A1"])
     assert not extra, f"{second} has flows A1 lacks: {sorted(extra)}"
+
+
+@pytest.mark.parametrize("name", ["A1", "A2", "B"])
+def test_v_s7_only_read_only_register_lines_reached_the_device(runs, name):
+    # V-S7 (b) over each run's recording.
+    assert runs[name]["checked"], "no recording"
+    for log, code, report in runs[name]["checked"]:
+        assert code == 0 and report.get("pass") and not report.get("violations"), (log, report)
+        assert report["commands_received"] > 0 and report["peak_concurrent_sessions"] == 1, (log, report)
