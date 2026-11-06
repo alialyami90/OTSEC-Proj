@@ -46,7 +46,8 @@ The observed dict, one per run under one set (field names from C5 on #458):
           "identity_read": {"invocation_id": str, "read_at": str,   # the identity.read document:
                             "mismatch": {"invocation_id": str,      # the last confirming read,
                                          "read_at": str,            # and the mismatch apart
-                                         "fid": str} | None},
+                                         "fid": str,
+                                         "declared_sha256": str} | None},  # operator rows only (D4-55)
         },
       },
     }

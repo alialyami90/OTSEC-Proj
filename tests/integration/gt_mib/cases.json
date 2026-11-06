@@ -59,6 +59,10 @@
     {
       "what": "HMAC-SHA-256-192 and HMAC-SHA-512-384 digests of 24 and 48 octets",
       "check_in": "RFC 7860"
+    },
+    {
+      "what": "the agent's order of checks on an incoming message (RFC 3414 section 3.2): the security level, user and digest before the time window (step 7), and the time window before decryption (step 8). U2 to U6's counts rest on it, and so does whether the time-window Report comes first",
+      "check_in": "RFC 3414"
     }
   ],
   "agent": {
@@ -82,19 +86,20 @@
       "SEL-2731M-R100": "SEL-2731M-R100-V0-Z001001-D20231120"
     },
     "fids_source": "S29 p. 62, Tables A.3 and A.4 (documented)",
-    "serves": "exactly S29's list (pp. 46 to 47), as a data file with the page cited per line; anything else gets noSuchObject, and a GETNEXT past the last object gets endOfMibView"
+    "serves": "exactly S29's list (pp. 46 to 47), as a data file with the page cited per line; anything else gets noSuchObject, and a GETNEXT past the last object gets endOfMibView",
+    "time_window_first": "the agent answers the client's first authPriv request, which carries boots and time 0, with an authenticated usmStatsNotInTimeWindows Report, as a real agent does, and the client sends the request again with the adopted values. Each case with authPriv requests states whether its agent does (time_window_first), because the counts depend on it (C2 on #457)"
   },
   "counts": {
     "datagrams": "datagrams the agent received in the run, discovery included",
-    "authenticated_requests": "authPriv requests the agent received",
-    "requests": "requests of the named operation the agent received"
+    "authenticated_requests": "authPriv requests the agent received in the whole run, the time-window round included; given only for runs that end before the walk, since an ok run's walk adds its GetBulk requests",
+    "requests": "requests of one operation the agent received: requests_of where the case names it, otherwise the walk's sel27x1.snmp.entity (section 2.4); the time-window round is included"
   },
   "every_run": [
     "every PDU the agent receives is GetRequest or GetBulkRequest as the operation names, never SetRequest (V-M1 (b)), in the agent's own decoded log",
     "a get names only the operation's OIDs; a walk request lies inside the subtree",
     "max-repetitions is 16 and non-repeaters is 0",
     "msgMaxSize is 1472",
-    "msgFlags is authPriv on every message but the one discovery message",
+    "msgFlags is authPriv on every message but discovery's, at most two (U12, T3)",
     "the collector's transcript holds every message sent and received, and C8's transcript_sha256 matches it (bytes kept)",
     "no community-based (v1 or v2c) message is ever received",
     "the collector does not panic and reads no byte past a datagram"
@@ -227,11 +232,14 @@
         "authenticated": true,
         "attributes": {
           "firmware_id": {
-            "value": "SEL-2731M-R102-V1-Z003001-D20260408"
+            "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+            "operation": "sel27x1.snmp.system",
+            "oid": "1.3.6.1.2.1.1.1.0"
           }
         },
         "checks": [
-          "equal values count as one match, not as two FIDs"
+          "equal values count as one match, not as two FIDs",
+          "reported from its first occurrence in read order: sysDescr.0, since the get runs before the walk (C2 on #457)"
         ]
       }
     },
@@ -401,7 +409,7 @@
       "id": "F6",
       "section": "2.2",
       "vm": "e",
-      "setup": "the asset record declares a product_family whose capability-profile models exclude SEL-2741M; the agent serves the SEL-2741M FID",
+      "setup": "the asset record declares product_family sel-2731, whose models are [SEL-2731M] (asset.Models, D4-54); the agent serves the SEL-2741M FID",
       "expect": {
         "code": "ok",
         "authenticated": true,
@@ -434,30 +442,32 @@
       "id": "U2",
       "section": "2.3",
       "vm": "c",
-      "setup": "the agent holds another password; it answers with a usmStatsWrongDigests Report sent noAuthNoPriv",
+      "setup": "the agent holds another password; it answers with a usmStatsWrongDigests Report sent noAuthNoPriv; the agent does not send the time-window Report first (the digest is checked before the time window)",
       "expect": {
         "code": "failed.usm_wrong_digest",
         "authenticated_requests": 1,
         "checks": [
           "no retransmission after a failure Report"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U3",
       "section": "2.3",
       "vm": "c",
-      "setup": "unknown user; usmStatsUnknownUserNames Report sent noAuthNoPriv",
+      "setup": "unknown user; usmStatsUnknownUserNames Report sent noAuthNoPriv; the agent does not send the time-window Report first (the user is checked before the time window)",
       "expect": {
         "code": "failed.usm_unknown_user",
         "authenticated_requests": 1
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U4a",
       "section": "2.3",
       "vm": "c",
-      "setup": "the agent is configured for SHA-1 only and answers the client's SHA-256 with a usmStatsWrongDigests Report (noAuthNoPriv)",
+      "setup": "the agent is configured for SHA-1 only and answers the client's SHA-256 with a usmStatsWrongDigests Report (noAuthNoPriv); the agent does not send the time-window Report first (the digest is checked before the time window)",
       "expect": {
         "code": "failed.usm_wrong_digest",
         "authenticated_requests": 1,
@@ -465,13 +475,14 @@
           "no request at SHA-1 or MD5",
           "no request at a lower level"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U4b",
       "section": "2.3",
       "vm": "c",
-      "setup": "the agent is configured for SHA-1 only and stays silent",
+      "setup": "the agent is configured for SHA-1 only and stays silent; the agent does not send the time-window Report first (the agent is silent)",
       "expect": {
         "code": "failed.timeout",
         "authenticated_requests": 2,
@@ -479,103 +490,114 @@
           "no request at SHA-1 or MD5",
           "no request at a lower level"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U5",
       "section": "2.3",
       "vm": "c",
-      "setup": "usmStatsUnsupportedSecLevels Report, sent noAuthNoPriv",
+      "setup": "usmStatsUnsupportedSecLevels Report, sent noAuthNoPriv; the agent does not send the time-window Report first (the security level is checked before the time window)",
       "expect": {
         "code": "failed.usm_unsupported_sec_level",
         "authenticated_requests": 1,
         "checks": [
           "no retry below authPriv"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U6",
       "section": "2.3",
       "vm": "c",
-      "setup": "usmStatsDecryptionErrors Report, sent noAuthNoPriv",
+      "setup": "usmStatsDecryptionErrors Report, sent noAuthNoPriv; the agent sends the time-window Report first (the time window is checked before decryption, so the decryption error answers the resend)",
       "expect": {
         "code": "failed.usm_decryption_error",
-        "authenticated_requests": 1
-      }
+        "authenticated_requests": 2
+      },
+      "time_window_first": true
     },
     {
       "id": "U7",
       "section": "2.3",
       "vm": "c",
-      "setup": "one authenticated usmStatsNotInTimeWindows Report, then normal",
+      "setup": "one authenticated usmStatsNotInTimeWindows Report, then normal; that Report is the agent's answer to the first authPriv request",
       "expect": {
         "code": "ok",
-        "authenticated_requests": 2,
         "checks": [
           "the request is sent again with the corrected boots and time",
           "that resend is not the retransmission"
-        ]
-      }
+        ],
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 2
+      },
+      "time_window_first": true
     },
     {
       "id": "U7b",
       "section": "2.3",
       "vm": "c",
-      "setup": "an authenticated time-window Report, then the corrected request is dropped, then its retransmission is answered",
+      "setup": "an authenticated time-window Report, then the corrected request is dropped, then its retransmission is answered; that Report is the agent's answer to the first authPriv request",
       "expect": {
         "code": "ok",
-        "authenticated_requests": 3
-      }
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 3
+      },
+      "time_window_first": true
     },
     {
       "id": "U8",
       "section": "2.3",
       "vm": "c",
-      "setup": "an authenticated time-window Report, twice",
+      "setup": "an authenticated time-window Report, twice; the agent sends the time-window Report first (the second time-window Report answers the resend)",
       "expect": {
         "code": "failed.usm_not_in_time_window",
         "authenticated_requests": 2
-      }
+      },
+      "time_window_first": true
     },
     {
       "id": "U9",
       "section": "2.3",
       "vm": "c",
-      "setup": "an unauthenticated time-window Report",
+      "setup": "an unauthenticated time-window Report; the agent does not send the time-window Report first (the agent's first answer is the unauthenticated time-window Report itself)",
       "expect": {
         "code": "failed.usm_not_in_time_window",
         "authenticated_requests": 1,
         "checks": [
           "its boots and time are never adopted"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U10",
       "section": "2.3",
       "vm": "c",
-      "setup": "answers an authPriv request with a noAuthNoPriv Response",
+      "setup": "answers an authPriv request with a noAuthNoPriv Response; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
       "expect": {
         "code": "failed.timeout",
-        "authenticated_requests": 2,
+        "authenticated_requests": 3,
         "checks": [
           "the Response is discarded, not parsed"
         ]
-      }
+      },
+      "time_window_first": true
     },
     {
       "id": "U11",
       "section": "2.3",
       "vm": "c",
-      "setup": "a Response with a bad digest, then silence",
+      "setup": "a Response with a bad digest, then silence; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
       "expect": {
         "code": "failed.timeout",
-        "authenticated_requests": 2,
+        "authenticated_requests": 3,
         "checks": [
           "the Response is discarded"
         ]
-      }
+      },
+      "time_window_first": true
     },
     {
       "id": "U12",
@@ -624,7 +646,7 @@
       "id": "U15",
       "section": "2.3",
       "vm": "c",
-      "setup": "a forged noAuthNoPriv usmStatsWrongDigests Report carrying the outstanding msgID",
+      "setup": "a forged noAuthNoPriv usmStatsWrongDigests Report carrying the outstanding msgID; the agent does not send the time-window Report first (the forged Report arrives before the agent's answer to the first authPriv request)",
       "expect": {
         "code": "failed.usm_wrong_digest",
         "authenticated_requests": 1,
@@ -632,62 +654,68 @@
           "neither the credential nor the asset is suspended",
           "the next run succeeds"
         ]
-      }
+      },
+      "time_window_first": false
     },
     {
       "id": "U16",
       "section": "2.3",
       "vm": "c",
-      "setup": "the same forged Report with another msgID, or from another source port",
+      "setup": "the same forged Report with another msgID, or from another source port; the agent then sends the time-window Report, and the run goes on as normal",
       "expect": {
         "code": "ok",
-        "authenticated_requests": 1,
         "checks": [
           "the Report is discarded and recorded as received"
-        ]
-      }
+        ],
+        "requests_of": "sel27x1.snmp.system",
+        "requests": 2
+      },
+      "time_window_first": true
     },
     {
       "id": "U17",
       "section": "2.3",
       "vm": "c",
-      "setup": "answers an authPriv request with an authNoPriv Response carrying a valid digest",
+      "setup": "answers an authPriv request with an authNoPriv Response carrying a valid digest; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
       "expect": {
         "code": "failed.timeout",
-        "authenticated_requests": 2,
+        "authenticated_requests": 3,
         "checks": [
           "discarded unparsed",
           "no plaintext Response parsed in the agent's log or the transcript"
         ]
-      }
+      },
+      "time_window_first": true
     },
     {
       "id": "U18",
       "section": "2.3",
       "vm": "c",
-      "setup": "discovery returns the pinned engine ID; a later Response carries another msgAuthoritativeEngineID",
+      "setup": "discovery returns the pinned engine ID; a later Response carries another msgAuthoritativeEngineID; the agent sends the time-window Report first (the fault answers the resend; then the retransmission)",
       "expect": {
         "code": "failed.timeout",
-        "authenticated_requests": 2,
+        "authenticated_requests": 3,
         "checks": [
           "discarded before its digest is checked"
         ]
-      }
+      },
+      "time_window_first": true
     },
     {
       "id": "U19a",
       "section": "2.3",
       "vm": "c",
-      "setup": "a second usmStatsUnknownEngineIDs Report, after an authenticated exchange",
+      "setup": "a second usmStatsUnknownEngineIDs Report, after an authenticated exchange; the agent sends the time-window Report first (the authenticated exchange is the time-window round; the second unknownEngineIDs Report answers the resend)",
       "expect": {
         "code": "failed.snmp_unexpected_report",
-        "authenticated_requests": 1,
+        "authenticated_requests": 2,
         "checks": [
           "the session ends",
           "nothing suspended, and the bytes kept"
         ]
       },
-      "code_from": "D4-54 (C2 0.8)"
+      "code_from": "D4-54 (C2 0.8)",
+      "time_window_first": true
     },
     {
       "id": "U19b",
@@ -709,16 +737,18 @@
       "id": "U20",
       "section": "2.3",
       "vm": "c",
-      "setup": "after the one adoption, an authenticated Response with lower boots or with time outside the 150-second window, then a Report claiming lower boots",
+      "setup": "after the one adoption, an authenticated Response with lower boots or with time outside the 150-second window, then a Report claiming lower boots; the agent sends the time-window Report first (the one adoption is the time-window round)",
       "expect": {
-        "code": "failed.timeout",
+        "code": "failed.usm_not_in_time_window",
         "authenticated_requests": 2,
         "checks": [
           "the Response is discarded",
-          "the Report is not adopted",
+          "the Report is not adopted, and it ends the run",
           "the client's engine boots never move backwards"
         ]
-      }
+      },
+      "time_window_first": true,
+      "code_from": "C2 on #457: any time-window Report after the adopted one ends the run (#437 section 4 rule 1)"
     },
     {
       "id": "W1",

@@ -13,6 +13,7 @@
   - the counts where the plan fixes them: datagrams the agent received, authenticated requests, and requests of the operation;
   - the attributes with their read paths, and the attributes that must be absent;
   - the health lines, and any further checks.
+  The counts depend on whether the agent answers the client's first authPriv request with the authenticated time-window Report, as a real agent does, so each such case says so in `time_window_first` and in its setup (C2 on #457). A whole-run count of authPriv requests is given only for runs that end before the walk; an ok run gives the requests of one operation (`requests_of`).
   The plan's U4 and F5 each hold two behaviours, so the table splits them into U4a and U4b, and F5a and F5b.
 - `every_run`: what the agent's own decoded log and the transcript must show in every case, as V-M1 (b) requires.
 - `hostile`: section 2.6's malformed messages, at the outer layer, which is parsed before authentication, and at the scoped layer, which is parsed after decryption.
