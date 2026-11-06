@@ -42,7 +42,15 @@ func run() error {
 	user := flag.String("user", "gt-mib", "the USM user name")
 	auth := flag.String("auth", string(agent.AuthSHA256), "hmac-sha-256 or hmac-sha-512")
 	secret := flag.Bool("secret", false, "print the credential secret in hex and exit")
+	list := flag.Bool("list", false, "print every case ID, one a line, and exit")
 	flag.Parse()
+
+	if *list {
+		for _, c := range agent.Cases() {
+			fmt.Println(c)
+		}
+		return nil
+	}
 
 	password := os.Getenv("GTMIB_PASSWORD")
 	if password == "" {

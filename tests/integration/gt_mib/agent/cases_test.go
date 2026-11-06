@@ -269,8 +269,9 @@ var behaviour = map[string]func(t *testing.T, f *flow){
 		}
 	},
 	"W1": func(t *testing.T, f *flow) {
-		r := one(t, "bulk", f.b1)
-		if b := r.s.PDU.Binds; len(b) < 6 || b[4].OID != outside || !Under(b[5].OID, EntPhysicalTable) {
+		wantResponse(t, "bulk", one(t, "bulk", f.b1))
+		b := one(t, "bulk at the FID", f.c.request(bulk(6, EntCol(9, 6)))).s.PDU.Binds
+		if len(b) < 3 || b[0].OID != EntCol(10, 1) || b[1].OID != outside || !Under(b[2].OID, EntPhysicalTable) {
 			t.Fatalf("bulk: %+v", b)
 		}
 	},
@@ -321,8 +322,9 @@ var behaviour = map[string]func(t *testing.T, f *flow){
 		}
 	},
 	"W9": func(t *testing.T, f *flow) {
-		b := one(t, "bulk", f.b1).s.PDU.Binds
-		if len(b) != 4 || b[3].Tag != EndOfMibView || b[3].OID != b[2].OID {
+		wantResponse(t, "bulk", one(t, "bulk", f.b1))
+		b := one(t, "bulk at the FID", f.c.request(bulk(6, EntCol(9, 6)))).s.PDU.Binds
+		if len(b) != 2 || b[0].OID != EntCol(10, 1) || b[1].Tag != EndOfMibView || b[1].OID != b[0].OID {
 			t.Fatalf("bulk: %+v", b)
 		}
 	},

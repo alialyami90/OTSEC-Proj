@@ -9,6 +9,7 @@ package agent
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -123,6 +124,26 @@ func onResponse(filter func(*Exchange) bool, f func(a *Agent, x *Exchange, i int
 			}
 			return a.DefaultSend(x)
 		}
+	}
+}
+
+// afterFID changes the first GetBulk Response that holds the FID's cell
+// (entPhysicalSoftwareRev.1) with a varbind after it: change gets the
+// varbinds and the cell's index, and returns the new varbinds.
+func afterFID(change func(b []Bind, k int) []Bind) func() Hook {
+	return func() Hook {
+		done := false
+		return onResponse(isBulk, func(a *Agent, x *Exchange, _ int) []Send {
+			b := x.Out.Scoped.PDU.Binds
+			k := slices.IndexFunc(b, func(v Bind) bool { return v.OID == EntCol(10, 1) })
+			if done || k < 0 || k+1 >= len(b) {
+				return a.DefaultSend(x)
+			}
+			done = true
+			o := copyOut(a, x)
+			o.Scoped.PDU.Binds = change(o.Scoped.PDU.Binds, k)
+			return []Send{send(x, o)}
+		})()
 	}
 }
 
@@ -251,13 +272,11 @@ var cases = map[string]caseDef{
 	})},
 
 	// 2.4 The walk and its bounds (V-M1 (b)).
-	"W1": {hook: onResponse(isBulk, func(a *Agent, x *Exchange, i int) []Send {
-		if i == 1 && len(x.Out.Scoped.PDU.Binds) > 5 {
-			o := copyOut(a, x)
-			o.Scoped.PDU.Binds[4] = Bind{OID: outside, Tag: TagOctets, Val: []byte(FID2741)}
-			return []Send{send(x, o)}
-		}
-		return a.DefaultSend(x)
+	// W1 and W9 come just after the FID's cell, so that the walk has read
+	// it and the run can end ok, as the table expects.
+	"W1": {hook: afterFID(func(b []Bind, k int) []Bind {
+		b[k+1] = Bind{OID: outside, Tag: TagOctets, Val: []byte(FID2741)}
+		return b
 	})},
 	"W2": {hook: onResponse(isBulk, func(a *Agent, x *Exchange, i int) []Send {
 		o := copyOut(a, x)
@@ -308,14 +327,10 @@ var cases = map[string]caseDef{
 		}
 		return []Send{send(x, o)}
 	})},
-	"W9": {hook: onResponse(isBulk, func(a *Agent, x *Exchange, i int) []Send {
-		o := copyOut(a, x)
-		if b := o.Scoped.PDU.Binds; i == 1 && len(b) > 3 {
-			// RFC 3416 4.2.3: past the end, a repetition's varbind is
-			// endOfMibView under the name it was asked for.
-			o.Scoped.PDU.Binds = append(b[:3], Bind{OID: b[2].OID, Tag: EndOfMibView})
-		}
-		return []Send{send(x, o)}
+	"W9": {hook: afterFID(func(b []Bind, k int) []Bind {
+		// RFC 3416 4.2.3: past the end, a repetition's varbind is
+		// endOfMibView under the name it was asked for, the one before.
+		return append(b[:k+1], Bind{OID: b[k].OID, Tag: EndOfMibView})
 	})},
 
 	// 2.5 Transport faults.
