@@ -86,12 +86,13 @@ type identityPiece struct {
 
 // identityReadDoc is an otsec.identityread/0.1 document. InvocationID and
 // ReadAt are always the last confirming read, so removing older reads never
-// removes it (C6 on #455).
+// removes it (C6 on #455). Both are empty only in a document that carries a
+// mismatch for an asset no read has confirmed yet (C1 on #458).
 type identityReadDoc struct {
 	Schema       string `json:"schema"`
 	AssetID      string `json:"asset_id"`
-	InvocationID string `json:"invocation_id"`
-	ReadAt       string `json:"read_at"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	ReadAt       string `json:"read_at,omitempty"`
 	// Mismatch is a read after the confirming one that refused the
 	// identity (D4-54, a C5 0.8 amendment). It is set only from such a read
 	// and is cleared by the next confirming read, which writes a document
@@ -230,6 +231,10 @@ func decodeIdentityRead(document []byte) (identityReadDoc, error) {
 		return d, fmt.Errorf("identity read: schema %q", d.Schema)
 	case !c1.ValidAssetID(d.AssetID):
 		return d, fmt.Errorf("identity read: asset_id %q", d.AssetID)
+	case d.InvocationID == "" && d.ReadAt == "" && d.Mismatch == nil:
+		return d, errors.New("identity read: no confirming read and no mismatch")
+	case d.InvocationID == "" && d.ReadAt == "":
+		// A mismatch on an asset no read has confirmed (C1 on #458).
 	case d.InvocationID == "":
 		return d, errors.New("identity read: invocation_id is empty")
 	case !c1.ValidTime(d.ReadAt):
@@ -276,7 +281,8 @@ type identityState struct {
 	storedAt time.Time
 	reads    []c5.Seq // the identity.read records in the stream, oldest first
 	last     *identityReadDoc
-	removed  uint64 // identity.read records removed in this process
+	lastAt   time.Time // when last was committed
+	removed  uint64    // identity.read records removed in this process
 }
 
 // identityOf returns the asset's state, reading its stream the first time.
@@ -334,7 +340,7 @@ func (s *Scheduler) loadIdentity(ctx context.Context, assetID string) (*identity
 				if err != nil {
 					return nil, nil, fmt.Errorf("identity read %d: %w", r.Key.Seq, err)
 				}
-				st.reads, st.last = append(st.reads, r.Key.Seq), &d
+				st.reads, st.last, st.lastAt = append(st.reads, r.Key.Seq), &d, r.CommittedAt
 			}
 		}
 	}
@@ -463,8 +469,9 @@ func (s *Scheduler) mismatchRead(col Collection, res adapter.Result) bool {
 }
 
 // storeMismatch stores an identity.read that keeps the last confirming read
-// and adds the mismatch (D4-54). With no device-read identity stored there
-// is nothing for a mismatch to make stale, so nothing is written.
+// and adds the mismatch (D4-54). An asset no read has confirmed, whose
+// identity is its declaration, keeps the mismatch with no latest-read part,
+// since the matcher reads it under an operator identity too (C1 on #458).
 func (s *Scheduler) storeMismatch(ctx context.Context, col Collection, res adapter.Result, st *identityState) {
 	rd := identityReadDoc{Schema: IdentityReadSchema, AssetID: col.AssetID}
 	switch {
@@ -472,8 +479,6 @@ func (s *Scheduler) storeMismatch(ctx context.Context, col Collection, res adapt
 		rd.InvocationID, rd.ReadAt = st.last.InvocationID, st.last.ReadAt
 	case st.doc != nil:
 		rd.InvocationID, rd.ReadAt = st.doc.InvocationID, st.doc.ReadAt
-	default:
-		return
 	}
 	rd.Mismatch = &identityMismatch{InvocationID: res.InvocationID, ReadAt: res.EndedAt}
 	for _, it := range res.Identity.Items {
@@ -492,7 +497,7 @@ func (s *Scheduler) storeRead(ctx context.Context, assetID string, st *identityS
 		var seq c5.Seq
 		if seq, err = s.storeItem3(ctx, ConfigStream(assetID), b, nil); err == nil {
 			s.clearQuietKey("identity " + assetID)
-			st.reads, st.last = append(st.reads, seq), &rd
+			st.reads, st.last, st.lastAt = append(st.reads, seq), &rd, s.now().UTC()
 			s.removeOlderReads(ctx, assetID, st)
 			s.publishIdentity()
 			return
@@ -714,7 +719,9 @@ func (s *Scheduler) publishIdentity() {
 			is.Attributes, is.EvidenceID, is.StoredAt = st.doc.Asset.Attributes, st.doc.InvocationID, st.storedAt
 		}
 		if st.last != nil {
-			is.LastRead = &IdentityReadStatus{InvocationID: st.last.InvocationID, At: st.last.ReadAt}
+			if st.last.InvocationID != "" {
+				is.LastRead = &IdentityReadStatus{InvocationID: st.last.InvocationID, At: st.last.ReadAt}
+			}
 			if m := st.last.Mismatch; m != nil {
 				is.Mismatch = &IdentityReadStatus{InvocationID: m.InvocationID, At: m.ReadAt}
 			}

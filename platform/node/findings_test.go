@@ -377,3 +377,50 @@ func TestFindingDocuments(t *testing.T) {
 		}
 	}
 }
+
+// A mismatch on an asset no read has confirmed is kept with no latest-read
+// part, and the matcher gets it under the operator identity (C1 on #458)
+// until the declaration changes (C4 on #459).
+func TestFindingsOperatorMismatch(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.startWith(answering(mismatchRun(t, invB)))
+	n.put(k.sign(findPayload(t, 1)))
+	n.step()
+	n.s.RunOnce(bg, 0)
+	_, reads := identityRecords(t, n.r, relayID)
+	if len(reads) != 1 || reads[0].InvocationID != "" || reads[0].ReadAt != "" || reads[0].Mismatch == nil ||
+		reads[0].Mismatch.InvocationID != invB || reads[0].Mismatch.FID != mismatchFID {
+		t.Fatalf("identity reads %+v", reads)
+	}
+	n.startWith(nil)
+	fs, err := n.s.findingsOf(bg, relayID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, _, err := n.s.matcherInput(bg, relayID, fs)
+	if err != nil || in.Identity.Source != finding.Operator || in.LatestMismatch == nil || in.LatestMismatch.ID != invB || in.MismatchFID != mismatchFID {
+		t.Fatalf("input after a restart %+v, %v", in, err)
+	}
+	if id := n.st.Snapshot("x").Identity[relayID]; id.LastRead != nil || id.Mismatch == nil || id.Mismatch.InvocationID != invB {
+		t.Fatalf("identity status %+v", id)
+	}
+	// A changed declaration clears it (C4 on #459).
+	at := n.nc.Assets[0]["attributes"].([]any)[3].(map[string]any)
+	at["value"] = "SEL-751-R400-V0-Z104101-D20260910"
+	at["observations"].([]any)[0].(map[string]any)["value"] = at["value"]
+	c, err := ParseConfig(n.nc.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.cfg = c
+	n.startWith(nil)
+	fs, _ = n.s.findingsOf(bg, relayID)
+	if in, _, err = n.s.matcherInput(bg, relayID, fs); err != nil || in.LatestMismatch != nil || in.MismatchFID != "" {
+		t.Fatalf("input after the declaration changed %+v, %v", in, err)
+	}
+	// A document with neither part is refused.
+	if _, err := decodeIdentityRead([]byte(`{"schema":"` + IdentityReadSchema + `","asset_id":"` + relayID + `"}`)); err == nil {
+		t.Fatal("an identity read with no read and no mismatch was accepted")
+	}
+}

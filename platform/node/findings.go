@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -64,6 +65,8 @@ const DeclaredIdentitiesFileName = "declared-identities.json"
 
 const declaredSchema = "otsec.node-declared/0.1"
 
+const maxDeclaredFileBytes = 4 << 20
+
 var declaredDetailRe = regexp.MustCompile(`^asset (\S+) declared identity sha256:([0-9a-f]{64})$`)
 
 func declaredDetail(assetID, sum string) string {
@@ -72,8 +75,9 @@ func declaredDetail(assetID, sum string) string {
 
 // declaredRecord is one asset's newest declared-identity record.
 type declaredRecord struct {
-	SHA256 string `json:"sha256"`
-	Seq    uint64 `json:"seq"`
+	SHA256 string    `json:"sha256"`
+	Seq    uint64    `json:"seq"`
+	At     time.Time `json:"at"` // when it was committed
 }
 
 type declaredFile struct {
@@ -327,14 +331,11 @@ func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findin
 			model, _, _ := deviceRead(st.doc.Asset, c1.AttrModel)
 			version, _, _ := deviceRead(st.doc.Asset, c1.AttrFirmwareVersion)
 			in.Identity = applicability.Identity{Source: finding.DeviceRead, Evidence: ref, FirmwareID: fid, Model: model, FirmwareVersion: version}
-			read := &finding.Read{ID: st.doc.InvocationID, AtUTC: st.doc.ReadAt}
-			if st.last != nil {
-				read = &finding.Read{ID: st.last.InvocationID, AtUTC: st.last.ReadAt}
-				if m := st.last.Mismatch; m != nil {
-					in.LatestMismatch, in.MismatchFID = &finding.Read{ID: m.InvocationID, AtUTC: m.ReadAt}, m.FID
-				}
+			in.Identity.LatestRead = &finding.Read{ID: st.doc.InvocationID, AtUTC: st.doc.ReadAt}
+			if st.last != nil && st.last.InvocationID != "" {
+				in.Identity.LatestRead = &finding.Read{ID: st.last.InvocationID, AtUTC: st.last.ReadAt}
 			}
-			in.Identity.LatestRead = read
+			mismatchInput(&in, st)
 			return in, evidence, nil
 		}
 	}
@@ -343,9 +344,24 @@ func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findin
 	if err != nil {
 		return in, evidence, err
 	}
+	// A mismatch counts under an operator identity too (C1 on #458), until
+	// a confirming read or a changed declaration clears it (C4 on #459): a
+	// mismatch stored before the declaration's record was written is of an
+	// earlier declaration.
+	if !s.declared[assetID].At.After(st.lastAt) {
+		mismatchInput(&in, st)
+	}
 	in.Identity = applicability.Identity{Source: finding.Operator, Evidence: ref, FirmwareID: operatorValue(declared, c1.AttrFirmwareID),
 		Model: operatorValue(declared, c1.AttrModel), FirmwareVersion: operatorValue(declared, c1.AttrFirmwareVersion)}
 	return in, evidence, nil
+}
+
+// mismatchInput gives the matcher the asset's stored mismatch, if any.
+func mismatchInput(in *applicability.Input, st *identityState) {
+	if st.last != nil && st.last.Mismatch != nil {
+		m := st.last.Mismatch
+		in.LatestMismatch, in.MismatchFID = &finding.Read{ID: m.InvocationID, AtUTC: m.ReadAt}, m.FID
+	}
 }
 
 // deviceRead returns the attribute's device-read value and the run that
@@ -448,7 +464,7 @@ func (s *Scheduler) declaredRef(ctx context.Context, a c1.Asset) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("the declared identity's policy.apply record was not written: %w", err)
 	}
-	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: uint64(got[0].Key().Seq)}
+	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: uint64(got[0].Key().Seq), At: s.now().UTC()}
 	s.clearQuietKey("declared " + a.AssetID)
 	if err := s.writeDeclared(); err != nil {
 		// The chain still holds the record, and the next start reads it
@@ -490,7 +506,7 @@ func (s *Scheduler) loadDeclared(ctx context.Context) (map[string]declaredRecord
 				continue
 			}
 			if m := declaredDetailRe.FindStringSubmatch(rec.Detail); m != nil {
-				chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq)}
+				chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq), At: st.CommittedAt}
 			}
 		}
 		if len(got) < 500 {
@@ -514,9 +530,19 @@ func (s *Scheduler) loadDeclared(ctx context.Context) (map[string]declaredRecord
 }
 
 func readDeclared(path string) (declaredFile, error) {
-	b, err := os.ReadFile(path)
+	fh, err := os.Open(path)
 	if err != nil {
 		return declaredFile{}, err
+	}
+	defer fh.Close()
+	// Bounded, so a damaged or planted file cannot exhaust memory (C3 on
+	// #458): a few hundred bytes per declared asset.
+	b, err := io.ReadAll(io.LimitReader(fh, maxDeclaredFileBytes+1))
+	if err != nil {
+		return declaredFile{}, err
+	}
+	if len(b) > maxDeclaredFileBytes {
+		return declaredFile{}, fmt.Errorf("%s: over %d bytes", path, maxDeclaredFileBytes)
 	}
 	var f declaredFile
 	dec := json.NewDecoder(bytes.NewReader(b))
