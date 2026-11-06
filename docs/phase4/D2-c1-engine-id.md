@@ -1,6 +1,6 @@
 # C1: refuse an all-zero or all-`ff` `snmp_engine_id`
 
-D2, 2026-11-06. This is a proposal and its code in one PR, paired with D3's C7 0.9 (#497). D1 approves. It merges after V-M1's counted run, as #497 does. D6's contract tests come once the V-M1 PR is up.
+D2, 2026-11-06. This is a proposal and its code in one PR, paired with D3's C7 0.9 (#497). D1 approved it on 2026-11-06 as a fix within 0.3, relayed by the coordinator. Like #497, it merges after V-M1's counted run. It needs D6's contract-test review and D3's review as a consumer.
 
 ## Why
 
@@ -13,11 +13,9 @@ RFC 3411 §5 (`SnmpEngineID`, `/mnt/project-files/rfc/rfc3411.txt`) says an engi
 - `contracts/asset/testdata/generate.py`: two invalid examples, `engine-id-all-zeros` (5 octets) and `engine-id-all-ff` (32 octets), regenerated with `python3 -I generate.py`. No other example changes. `testdata/README.md` gains a line for each.
 - `schema/asset.schema.json` is unchanged. It is structural, and it has never carried the engine ID's form, which `Asset.Validate` enforces.
 
-## Version: proposed as a fix within 0.3, for D1 to decide
+## Version: a fix within 0.3 (D1, recorded with D4-60)
 
-C1 0.3 defined the attribute as an RFC 3411 SnmpEngineID ("lowercase hex, 5 to 32 octets (RFC 3411 SnmpEngineID)", `asset.go`). An all-zero or all-`ff` value was therefore never an SnmpEngineID, and the 0.3 reader's check was incomplete. So D2 proposes this as a fix within 0.3, with `Contract` staying `otsec.asset/0.3`.
-
-The alternative is D3's choice for C7: a minor bump to `otsec.asset/0.4`. That touches about 70 files for no behavioural difference. It restamps every example the generator writes, and moves the later-minor examples, which are stamped 0.4 today, to 0.5. It also changes `doc.go`, the schema's `$id`, two tests in `contracts/asset`, one in `modules/asset`, and the stamp in D5's `nodeconfigtest`. D2 will do the bump if D1 prefers it, in this PR.
+C1 0.3 defined the attribute as an RFC 3411 SnmpEngineID ("lowercase hex, 5 to 32 octets (RFC 3411 SnmpEngineID)", `asset.go`). An all-zero or all-`ff` value was therefore never an SnmpEngineID, and the 0.3 reader's check was incomplete. `Contract` stays `otsec.asset/0.3`. D1 chose this over a bump to `otsec.asset/0.4` on 2026-11-06, recorded with D4-60. A bump would have restamped about 70 files with no difference in behaviour: every generated example, the later-minor examples moving from 0.4 to 0.5, `doc.go`, the schema's `$id`, and the stamps in `modules/asset` and D5's `nodeconfigtest`.
 
 ## Compatibility
 
@@ -28,7 +26,7 @@ The alternative is D3's choice for C7: a minor bump to `otsec.asset/0.4`. That t
 
 `desk` and `simulated` only. No device was contacted.
 
-- `TestInvalidExamples`: the two new examples failed on `main` at `c20bb64` ("accepted") before the change, and pass with it.
+- `TestInvalidExamples`: the two new examples failed ("accepted") on `main` at `c20bb64` before the change, and pass with it. `26e40f5` has the same `contracts/asset`.
 - `TestEngineIDNearMiss` (new): `00000000ff`, `ffffffff00` and `0000000001` stay valid.
 - **Mutants:** four mutants of the new condition were run, and the tests above kill all four:
   - a condition that never holds;
