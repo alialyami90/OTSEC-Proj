@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.7: how a site node keeps,
+// Package store is contract C5, otsec.store/0.8: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
@@ -72,6 +72,10 @@
 //     checkpoints as working state. ConfigRemover removes unheld records of
 //     RemovableSeries in steps of RemoveConfigStep, never the newest record
 //     of its series and never a record with no series, all or nothing.
+//   - Since 0.8 (D4-53, docs/phase4/C5-c5-0.8.md): four series for item 3.
+//     identity, finding and advisory.set are evidence and are never
+//     removable; identity.read is working state and joins RemovableSeries.
+//     No hold code, class, action or store format changes.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -94,4 +98,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.7"
+const Identifier = "otsec.store/0.8"

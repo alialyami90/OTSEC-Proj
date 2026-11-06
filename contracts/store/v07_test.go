@@ -48,12 +48,12 @@ func TestHoldPriority(t *testing.T) {
 	}
 }
 
-// The ten kind-by-series pairs: the five in the table pass and the other
-// five are refused, as are an empty series, baseline.configuration and an
-// unknown kind.
+// Every kind-by-series pair: the nine in the table (five since 0.7, four
+// since 0.8) pass and the other nine are refused, as are an empty series,
+// baseline.configuration and an unknown kind.
 func TestDocumentInfo(t *testing.T) {
-	evidence := []string{"config.snapshot", "config.difference", "baseline.event"}
-	working := []string{"eventcheckpoint.learner", "eventcheckpoint.detector"}
+	evidence := []string{"config.snapshot", "config.difference", "baseline.event", "identity", "finding", "advisory.set"}
+	working := []string{"eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read"}
 	for _, s := range append(slices.Clone(evidence), working...) {
 		for _, k := range []DocumentKind{"evidence", "working-state"} {
 			err := DocumentInfo{Kind: k, Series: s}.Validate()
@@ -79,7 +79,7 @@ func TestDocumentInfo(t *testing.T) {
 
 func TestRemovableSeries(t *testing.T) {
 	got := RemovableSeries()
-	if !slices.Equal(got, []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector"}) {
+	if !slices.Equal(got, []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read"}) {
 		t.Fatalf("RemovableSeries %v", got)
 	}
 	got[0] = SeriesConfigDifference

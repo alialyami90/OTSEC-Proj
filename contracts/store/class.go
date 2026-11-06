@@ -33,7 +33,11 @@ const (
 	// (C9) and baselines (C10), each a typed document, not a C4 event.
 	// Since 0.7 it also holds the node's event-baseline checkpoints
 	// (otsec.eventcheckpoint/0.1), which are working state, not evidence
-	// (DocumentInfo, D4-32). At its quota configuration reads stop
+	// (DocumentInfo, D4-32). Since 0.8 it also holds the item 3 records:
+	// identity records, findings and advisory sets as evidence, and the
+	// latest identity read as working state (docs/phase4/C5-c5-0.8.md); the
+	// node keeps their writes below a ceiling inside the quota, so they
+	// never take the room configuration reads need. At its quota configuration reads stop
 	// (StopCollecting). Its records may be held (Holder), removed in
 	// bounded steps (ConfigRemover), and its quota requires a
 	// MaxRecordBytes.
