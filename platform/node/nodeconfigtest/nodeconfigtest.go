@@ -255,6 +255,66 @@ func (c *Config) AddSEL751(assetID, host string, port, everySeconds int) *Config
 	return c
 }
 
+// TestSNMPCredentialRef is the credential reference AddSEL2731M schedules
+// with: the snmpv3 handle of C2's SNMP test invocation, never bound to a
+// real secret.
+const TestSNMPCredentialRef = "cred_lab2731usm"
+
+// TestSNMPEngineID is the snmpEngineID AddSEL2731M declares, C1's
+// sel-2731m-snmpv3 example's, which the collector pins.
+const TestSNMPEngineID = "80007c4f03020000273101"
+
+// AddSEL2731M adds a simulated SEL-2731M reached over SNMPv3 at host:port
+// (C6's GT-MIB agent); an empty host is 127.0.0.1, and the loader refuses
+// any host that is not a loopback IP literal (D2-10). It turns the asset
+// module on, which an SNMP entry needs, and schedules
+// sel27x1.snmp.identity on it every everySeconds, at least 60 (P4-3-C5
+// deliverable 3). The record is C1's sel-2731m-snmpv3 example with its
+// operator-declared attributes only: nothing in it claims a device
+// observation, and its engine ID is TestSNMPEngineID. It names the
+// collector's sel-27x1-rstp test profile.
+func (c *Config) AddSEL2731M(assetID, host string, port, everySeconds int) *Config {
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	declared := func(name, value string) map[string]any {
+		return map[string]any{
+			"name": name, "value": value, "confidence": "single-source",
+			"observations": []any{map[string]any{
+				"value": value, "evidence_class": "operator-declared",
+				"source": map[string]any{"method": "operator-entry", "ref": "operator:test-fixture",
+					"observed_at": "2026-10-24T09:00:00Z", "kind": "operator"},
+			}},
+		}
+	}
+	c.Assets = append(c.Assets, map[string]any{
+		"schema":   "otsec.asset/0.3",
+		"asset_id": assetID,
+		"node_id":  c.NodeID,
+		"attributes": []any{
+			declared("device_class", "ethernet-switch"),
+			declared("vendor", "sel"),
+			declared("product_family", "sel-2731"),
+			declared("firmware_id", "SEL-2731M-R102-V1-Z003001-D20260408"),
+			declared("snmp_engine_id", TestSNMPEngineID),
+		},
+		"endpoints": []any{map[string]any{
+			"id": "mgmt-snmpv3", "transport": "snmpv3", "host": host, "port": port, "target": "simulated", "path": "direct",
+			"downstream_security": map[string]any{"level": "encrypted-authenticated"},
+		}},
+		"identity_binding": map[string]any{
+			"method": "pinned-key", "strength": "cryptographic",
+			"attributes": []string{"snmp_engine_id", "firmware_id"}, "pre_credential": []string{"snmp_engine_id"},
+		},
+		// The collector's test profile for the SEL-2731 (C3 on #461).
+		"profile": map[string]any{"id": "sel-27x1-rstp", "version": "0.1"},
+	})
+	c.Asset = &struct{}{}
+	c.Schedule = append(c.Schedule, Collection{ID: "sch-snmp-" + assetID[:8], AssetID: assetID, Endpoint: "mgmt-snmpv3",
+		Operation: "sel27x1.snmp.identity", CredentialRef: TestSNMPCredentialRef, EverySeconds: everySeconds})
+	return c
+}
+
 // AddRELPTarget adds a required relp-tls C6 0.2 target. durableAckRef is
 // the evidence reference of the target's durable-acknowledgement check
 // (V-S6); tests that have not run one must not use a required target. The
