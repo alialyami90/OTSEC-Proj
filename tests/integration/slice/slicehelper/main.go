@@ -133,6 +133,10 @@ type Layout struct {
 	// may not sign node.change_approval.
 	OtherAsset  string `json:"other_asset,omitempty"`
 	OperatorKey string `json:"operator_key,omitempty"`
+	// The mixed node (#466), when -snmp-port is set: the SEL-2731M.
+	SNMPAsset string `json:"snmp_asset,omitempty"`
+	// V-M7, with -gtadv-row or -gtadv-operators: each GT-ADV row's asset.
+	GTADVAssets map[string]string `json:"gtadv_assets,omitempty"`
 }
 
 // leaveAdminFile writes an administrator's file into admin_dir as one
@@ -163,7 +167,7 @@ var (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|verify-audit ...")
+		fmt.Fprintln(os.Stderr, "usage: slicehelper setup|install-credential|admin-file|advisory-file|verify-audit ...")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -187,17 +191,27 @@ func main() {
 	digest := fs.String("digest", "", "admin-file: the baseline a baseline-ack acknowledges, or a change-approval is against (V-M4, V-M2)")
 	gtinjSER := fs.String("gtinj-ser", "", "setup: give the slice's asset an event baseline whose params are this series' (V-M4's SER half, D4-47)")
 	configEvery := fs.Int("config-every", 0, "setup: read the asset's configuration (sel.config.read_all) every this many seconds instead of its SER (V-M2)")
+	snmpPort := fs.Int("snmp-port", 0, "setup: add a SEL-2731M polled over SNMPv3 at this port of 127.0.0.1, under its own register package (the mixed node, #466)")
+	snmpUnlisted := fs.Bool("snmp-unlisted", false, "setup: with -snmp-port, leave the SEL-2731M's profile out of register_versions, so its run names the SEL-751's revision")
 	baselineKind := fs.String("baseline-kind", "event", "admin-file: a baseline-ack's kind, event (the GT-INJ asset) or configuration (the slice's asset)")
 	device := fs.String("device", "self", "admin-file: a change-approval's asset, self (the slice's) or other (V-M2)")
 	window := fs.String("window", "", "admin-file: a change-approval's window, start,end in RFC 3339")
 	issued := fs.String("issued", "", "admin-file: the request's issued_at in RFC 3339, its expiry -expires after it (default: now)")
 	in := fs.String("in", "", "verify-audit: a file of the audit stream's stored records, one base64 line each, in seq order")
 	operator := fs.Bool("operator", false, "admin-file: sign with the second administrator's key, which may not sign node.change_approval (V-M2)")
+	gtadvRow := fs.String("gtadv-row", "", "setup: make the asset GT-ADV's device-read row of this name, with R9 on and GT-ADV's set in admin_dir (V-M7)")
+	assetOn := fs.Bool("asset", false, "setup: the asset module on, R9 off (V-M8's paired run without R9)")
+	vm8On := fs.Bool("vm8", false, "setup: R9 on with advisory test key 0 pinned active and test key 2 pinned revoked, and no set (V-M8)")
+	setCase := fs.String("case", "valid", "advisory-file: which set file to leave (see advisoryFile)")
+	setVersion := fs.Uint64("set-version", 2, "advisory-file: the set's version")
+	gtadvOperators := fs.Bool("gtadv-operators", false, "setup: add GT-ADV's operator rows as assets with no schedule, with R9 on and GT-ADV's set in admin_dir (V-M7)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn)
+	case "advisory-file":
+		err = advisoryFile(*root, *repo, *setCase, *setVersion)
 	case "install-credential":
 		err = installCredential(*root)
 	case "verify-audit":
@@ -227,7 +241,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery int) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -307,6 +321,20 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	if err := configReads(nc, &l, payload, reg.Revision, configEvery); err != nil {
 		return err
+	}
+	snmpProfile, snmpPayload, err := mixedSNMP(nc, &l, repo, snmpPort, snmpUnlisted)
+	if err != nil {
+		return err
+	}
+	if err := gtADV(nc, &l, repo, gtadvRow, gtadvOperators); err != nil {
+		return err
+	}
+	if vm8On {
+		vm8(nc)
+	}
+	if assetOn {
+		nc.Asset = &struct{}{}
+		nc.Store.Quotas["configuration"] = 64 << 20
 	}
 	if installed {
 		nc.TLSDir = l.TLSDir
@@ -411,14 +439,28 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 			}
 		}
 	}
+	profiles, registers := []any{json.RawMessage(profile)}, []any{env}
+	if snmpPort != 0 {
+		// The SEL-2731M's profile and package, signed by the same release
+		// key: the collector selects the package by the profile's firmware
+		// allowlist (C3 on #461).
+		profiles = append(profiles, json.RawMessage(snmpProfile))
+		registers = append(registers, register.Envelope{Contract: register.ContractID, Algorithm: "ed25519", KeyID: "a6-slice-release",
+			Payload: snmpPayload, Signature: ed25519.Sign(priv, authz.RegisterSigningInput(snmpPayload))})
+		for _, a := range nc.Assets {
+			if a["asset_id"] == snmpAssetID {
+				assets = append(assets, a)
+			}
+		}
+	}
 	collectorConfig := func(peer string) ([]byte, error) {
 		return json.MarshalIndent(map[string]any{
 			"format": "otsec.collector-config/0.1", "node_id": nodeID, "policy_version": nc.PolicyVersion,
 			"ipc":           map[string]any{"address": l.Socket, "node_peer": peer},
 			"assets":        assets,
-			"profiles":      []any{json.RawMessage(profile)},
+			"profiles":      profiles,
 			"trust_anchors": []any{map[string]any{"key_id": "a6-slice-release", "public_key": base64.StdEncoding.EncodeToString(pub), "status": "active"}},
-			"registers":     []any{env},
+			"registers":     registers,
 			"admin_keys":    admins,
 		}, "", "  ")
 	}

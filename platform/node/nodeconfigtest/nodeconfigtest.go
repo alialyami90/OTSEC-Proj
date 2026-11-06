@@ -34,6 +34,9 @@ type Config struct {
 	Schedule          []Collection     `json:"schedule"`
 	// EventBaselines is the event_baselines section (AddEventBaseline).
 	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
+	// AssetControls is asset_controls: the network controls recorded in
+	// front of assets, beside the C1 records (D4-56).
+	AssetControls []AssetControls `json:"asset_controls,omitempty"`
 	// Asset and Applicability are the item 3 switches; nil is off.
 	Asset           *struct{}      `json:"asset,omitempty"`
 	Applicability   *Applicability `json:"applicability,omitempty"`
@@ -41,6 +44,9 @@ type Config struct {
 	CollectorPeer   string         `json:"collector_peer,omitempty"`
 	PolicyVersion   uint64         `json:"policy_version"`
 	RegisterVersion uint64         `json:"register_version"`
+	// RegisterVersions is register_versions: a register revision by
+	// profile ID (AddSEL2731M sets its profile's).
+	RegisterVersions map[string]uint64 `json:"register_versions,omitempty"`
 	// LabTLSFiles is the lab flag tls_dir needs (D2-12); New sets it.
 	LabTLSFiles bool   `json:"lab_tls_files,omitempty"`
 	TLSDir      string `json:"tls_dir,omitempty"`
@@ -51,6 +57,12 @@ type Config struct {
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 	// Register is the node's command register copy (WriteCommandRegister).
 	Register map[string]any `json:"register,omitempty"`
+}
+
+// AssetControls is one asset_controls entry.
+type AssetControls struct {
+	AssetID  string   `json:"asset_id"`
+	Controls []string `json:"controls"`
 }
 
 // Applicability is the applicability section.
@@ -264,6 +276,10 @@ const TestSNMPCredentialRef = "cred_lab2731usm"
 // sel-2731m-snmpv3 example's, which the collector pins.
 const TestSNMPEngineID = "80007c4f03020000273101"
 
+// TestSNMPProfile is the collector's SEL-2731 test profile, whose firmware
+// allowlist selects the sel-27x1-rstp register package.
+const TestSNMPProfile = "sel-27x1-rstp"
+
 // TestSNMPRegisterRevision is the revision of C2's sel-27x1-rstp test
 // register package (contracts/adapter/testdata/snmp/register.json).
 const TestSNMPRegisterRevision = 1
@@ -278,10 +294,9 @@ const TestSNMPRegisterRevision = 1
 // observation, and its engine ID is TestSNMPEngineID. It names the
 // collector's sel-27x1-rstp test profile.
 //
-// It sets register_version to TestSNMPRegisterRevision, which the
-// collector checks against the SNMP register (C3 on #463). The node names
-// one register revision, so a node with this entry and a SEL-751 entry
-// cannot yet run both.
+// It names TestSNMPRegisterRevision for that profile in register_versions,
+// which the collector checks against the SNMP register (C3 on #463), so the
+// same node can also run a SEL-751 entry under register_version.
 func (c *Config) AddSEL2731M(assetID, host string, port, everySeconds int) *Config {
 	if host == "" {
 		host = "127.0.0.1"
@@ -316,10 +331,13 @@ func (c *Config) AddSEL2731M(assetID, host string, port, everySeconds int) *Conf
 			"attributes": []string{"snmp_engine_id", "firmware_id"}, "pre_credential": []string{"snmp_engine_id"},
 		},
 		// The collector's test profile for the SEL-2731 (C3 on #461).
-		"profile": map[string]any{"id": "sel-27x1-rstp", "version": "0.1"},
+		"profile": map[string]any{"id": TestSNMPProfile, "version": "0.1"},
 	})
 	c.Asset = &struct{}{}
-	c.RegisterVersion = TestSNMPRegisterRevision
+	if c.RegisterVersions == nil {
+		c.RegisterVersions = map[string]uint64{}
+	}
+	c.RegisterVersions[TestSNMPProfile] = TestSNMPRegisterRevision
 	c.Schedule = append(c.Schedule, Collection{ID: "sch-snmp-" + assetID[:8], AssetID: assetID, Endpoint: "mgmt-snmpv3",
 		Operation: "sel27x1.snmp.identity", CredentialRef: TestSNMPCredentialRef, EverySeconds: everySeconds})
 	return c

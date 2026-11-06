@@ -48,8 +48,8 @@ func TestAddSEL2731M(t *testing.T) {
 	if err := json.Unmarshal(readFile(t, "../../contracts/adapter/testdata/snmp/register.json"), &reg); err != nil {
 		t.Fatal(err)
 	}
-	if reg.Family != "sel-27x1-rstp" || c.RegisterVersion != reg.Revision {
-		t.Fatalf("register_version %d, and the SNMP register %s is at revision %d", c.RegisterVersion, reg.Family, reg.Revision)
+	if v := c.registerVersion(id); reg.Family != "sel-27x1-rstp" || v != reg.Revision {
+		t.Fatalf("the SNMP entry names register revision %d, and the SNMP register %s is at revision %d", v, reg.Family, reg.Revision)
 	}
 
 	// Every attribute the helper declares, C1's example declares with the

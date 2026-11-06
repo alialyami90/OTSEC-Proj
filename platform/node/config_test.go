@@ -159,7 +159,14 @@ func TestStrictDecoding(t *testing.T) {
 
 func TestChecks(t *testing.T) {
 	cases := map[string]func(c *nodeconfigtest.Config){
-		"bad node":         func(c *nodeconfigtest.Config) { c.NodeID = "Site-A" },
+		"bad node": func(c *nodeconfigtest.Config) { c.NodeID = "Site-A" },
+		"reserved node": func(c *nodeconfigtest.Config) {
+			// Its assets move with it, so only the reserved name refuses it.
+			c.NodeID = "audit"
+			for _, a := range c.Assets {
+				a["node_id"] = "audit"
+			}
+		},
 		"relative store":   func(c *nodeconfigtest.Config) { c.Store.Dir = "store" },
 		"missing quota":    func(c *nodeconfigtest.Config) { delete(c.Store.Quotas, "audit") },
 		"unknown quota":    func(c *nodeconfigtest.Config) { c.Store.Quotas["cache"] = 1 },

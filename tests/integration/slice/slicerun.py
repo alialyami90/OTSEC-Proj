@@ -91,6 +91,27 @@ CHECK = os.path.join(harness.REPO, "tests", "safety", "recording_simulator", "ch
 REGISTER = os.path.join(harness.REPO, "tests", "safety", "recording_simulator", "sel751-collector-register.json")
 
 
+def check_v_s7(logs, root):
+    """V-S7 (b): check.py over each simulator recording in logs, against a
+    register built from the signed SEL-751 register (revision 5): its
+    operations and session lines read-only, its denied patterns
+    state-changing. Returns [(log, returncode, report)]. The register file
+    is written in root."""
+    with open(os.path.join(harness.REPO, "contracts", "register", "testdata", "sel-751.json"), encoding="utf-8") as f:
+        reg = json.load(f)
+    commands = [{"id": e["id"], "pattern": re.escape(e["line"]), "classification": "read-only"}
+                for e in reg["operations"] + reg["session_control"]]
+    commands += [{"id": e["id"], "pattern": e["pattern"], "classification": "state-changing"} for e in reg["denied"]]
+    path = os.path.join(root, "check-register.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"commands": commands}, f)
+    out = []
+    for log in logs:
+        r = subprocess.run([sys.executable, CHECK, "--log", log, "--register", path], capture_output=True, text=True)
+        out.append((log, r.returncode, json.loads(r.stdout) if r.stdout.strip() else {"stderr": r.stderr}))
+    return out
+
+
 SERVICE = os.environ.get("OTSEC_SLICE_SERVICE") == "1"
 # The installed services, their folders and the W-3 rule are machine-wide,
 # so in service mode one Slice holds the machine from start() to stop(): a

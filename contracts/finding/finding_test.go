@@ -137,6 +137,15 @@ func TestInvalidFindings(t *testing.T) {
 		"passive evidence citing an invocation": {func(f *Finding) {
 			f.Preconditions[1].Evidence = []Evidence{{Source: Passive, ID: cfgRead.ID}}
 		}, CodeForm},
+		// D4-57 (C6's F-025): an audit reference is also a well-formed
+		// event ID, with "audit" as the node, so the prefix decides.
+		"passive evidence citing an audit record": {func(f *Finding) {
+			f.Preconditions[1].Evidence = []Evidence{{Source: Passive, ID: entered.ID}}
+		}, CodeForm},
+		"an invocation ID of version 0": {func(f *Finding) { f.Identity.Evidence[0].ID = "0b6c2f1e-7d3a-0c5b-9e8f-1a2b3c4d5e6f" }, CodeForm},
+		"an invocation ID of another variant": {func(f *Finding) {
+			f.Identity.Evidence[0].ID = "0b6c2f1e-7d3a-4c5b-7e8f-1a2b3c4d5e6f"
+		}, CodeForm},
 		"an audit reference to seq 0": {func(f *Finding) {
 			f.Mitigations, f.Class = []Mitigation{{Name: "x", OperatorAttested: true, Evidence: []Evidence{{Source: Operator, ID: "audit:site-a-node1:0"}}}}, Mitigated
 		}, CodeForm},

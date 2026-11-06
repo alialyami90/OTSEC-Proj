@@ -220,8 +220,9 @@ var (
 	nameForm  = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`)
 	idForm    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	setID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`) // C11 set_id
-	// invocationID is a C2 invocation ID, a lowercase UUID (contracts/adapter).
-	invocationID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	// invocationID is a C2 invocation ID: a lowercase UUID of version 1 to 8
+	// with the RFC variant, as contracts/adapter issues it (D4-57).
+	invocationID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 )
 
 func (c *checker) utc(field, s string) {
@@ -256,8 +257,11 @@ func (c *checker) evidence(field string, ev []Evidence, need bool) {
 		switch {
 		case e.Source == DeviceRead && !invocationID.MatchString(e.ID):
 			c.fail(CodeForm, f+".id", "%q: a device read is cited by its invocation ID", e.ID)
-		case e.Source == Passive && err != nil:
-			c.fail(CodeForm, f+".id", "%q: a passive observation is cited by its event ID", e.ID)
+		case e.Source == Passive && (err != nil || strings.HasPrefix(e.ID, "audit:")):
+			// An audit reference is also a well-formed event ID, since a
+			// node may be named "audit", so it is refused here by its
+			// prefix (D4-57, C6's F-025).
+			c.fail(CodeForm, f+".id", "%q: a passive observation is cited by its event ID, never an audit reference", e.ID)
 		case e.Source == Operator && !validAuditRef(e.ID):
 			c.fail(CodeForm, f+".id", "%q: an operator entry is cited as audit:<node_id>:<seq>", e.ID)
 		}

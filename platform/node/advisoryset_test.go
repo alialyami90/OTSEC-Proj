@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/advisory"
 	"otsec.local/otsec/contracts/advisory/advisorytest"
@@ -31,13 +32,20 @@ func advEntry(id, title string) advisory.Entry {
 }
 
 // advPayload is a set's payload. entries above 1 pads it with distinct
-// entries whose titles are at the bound, to make a large set.
+// entries whose titles are at the bound, to make a large set. Only the
+// first names the SEL-751; the others name a product no test asset is, so
+// they give product-not-named findings, which are not stored (D4-54), and
+// a large set does not fill the class with findings.
 func advPayload(t *testing.T, setID string, version uint64, purpose advisory.Purpose, entries int) []byte {
 	t.Helper()
 	s := advisory.Set{Contract: advisory.Identifier, SetID: setID, Version: version, IssuedAt: "2026-11-05T00:00:00Z",
 		Purpose: purpose, Publisher: "node tests"}
 	for i := range entries {
-		s.Entries = append(s.Entries, advEntry(fmt.Sprintf("adv-%04d", i), strings.Repeat("t", advisory.MaxTitleBytes)))
+		e := advEntry(fmt.Sprintf("adv-%04d", i), strings.Repeat("t", advisory.MaxTitleBytes))
+		if i > 0 {
+			e.Affected[0].Product = "SEL-311C"
+		}
+		s.Entries = append(s.Entries, e)
 	}
 	if purpose == advisory.PurposeTest {
 		for i := range s.Entries {
@@ -504,5 +512,30 @@ func TestAdvisoryStaleUnrecordedSetIsNotRepaired(t *testing.T) {
 	inst := n.records(audit.ActionAdvisorySetInstalled)
 	if u := n.inUse(); u == nil || u.Version != 3 || inst[len(inst)-1].Advisory.PreviousVersion != 2 {
 		t.Fatalf("a newer set did not install: %+v", u)
+	}
+}
+
+// in_use_since is the set's advisory.set_installed time, at install and
+// after a restart, so a restart does not move it (C1 on #470).
+func TestAdvisoryInUseSinceSurvivesRestart(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.put(k.sign(advPayload(t, "otsec-sel", 1, advisory.PurposeRelease, 1)))
+	n.step()
+	inst := n.records(audit.ActionAdvisorySetInstalled)
+	if len(inst) != 1 {
+		t.Fatalf("%d advisory.set_installed records", len(inst))
+	}
+	want, err := time.Parse(time.RFC3339Nano, inst[0].Time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := n.inUse()
+	if before == nil || !before.InUseSince.Equal(want) {
+		t.Fatalf("at install, set in use %+v, want in_use_since %s", before, want)
+	}
+	n.restart()
+	if after := n.inUse(); after == nil || !after.InUseSince.Equal(before.InUseSince) {
+		t.Fatalf("after a restart, set in use %+v, want in_use_since %s", after, before.InUseSince)
 	}
 }
