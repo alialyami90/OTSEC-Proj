@@ -3,12 +3,15 @@ package node
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/advisory"
 	"otsec.local/otsec/contracts/finding"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/store"
 )
 
@@ -68,8 +71,12 @@ func appendUnchecked(t *testing.T, c *Config, stream c5.StreamID, doc []byte) {
 // evaluation is not completed and nothing is appended, so no revision names
 // an older finding as previous; the not-evaluated alarm names the schema,
 // at most 64 bytes of printable ASCII, quoted. Finding.Validate accepts any
-// 0.x minor, so the refusal must come from finding.Known.
+// 0.x minor, so the refusal must come from finding.Known. The refusal is
+// per asset, and collection goes on (D3 on #509): a second asset still gets
+// its findings under a new set, and a run of the refused asset is still
+// accepted and its events committed.
 func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
+	const secondID = "3c8e5f21-9d40-4b6c-8f32-8d5a1e7b9c24"
 	for name, tc := range map[string]struct{ schema, shown string }{
 		"0.2":       {"otsec.finding/0.2", `"otsec.finding/0.2"`},
 		"0.10":      {"otsec.finding/0.10", `"otsec.finding/0.10"`},
@@ -78,10 +85,16 @@ func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			k := newAdvKey(t)
-			n := newAdvNode(t, k.anchor("active"))
+			n := newAdvNodeWith(t, func(nc *nodeconfigtest.Config) {
+				nc.AddSEL751(secondID, "", 2324, 300)
+				nc.Store.Quotas["configuration"] = 8 << 20 // the item 3 floor for two assets
+			}, k.anchor("active"))
 			n.put(k.sign(findPayload(t, 1)))
 			n.step()
 			doc := mustStored(t, n, "adv-in", 1)
+			if got := advisoriesOf(t, n, secondID); !slices.Contains(got, "adv-in") {
+				t.Fatalf("the second asset's findings %q, want adv-in", got)
+			}
 			newer := bytes.Replace(doc, []byte(`"schema":"`+finding.Identifier+`"`), []byte(`"schema":"`+jsonString(tc.schema)+`"`), 1)
 			if bytes.Equal(newer, doc) {
 				t.Fatal("the schema was not replaced")
@@ -97,7 +110,8 @@ func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
 				t.Fatal(err)
 			}
 			appendUnchecked(t, n.cfg, ConfigStream(relayID), newer)
-			n.startNode()
+			n.r, n.st, _ = start(t, n.cfg, n.dir)
+			n.s = newScheduler(t, n.r, answering(okRun(t, invA, nil)))
 			stream := ConfigStream(relayID)
 			before, _ := n.r.Store(stream).LastCommitted(bg, stream)
 			n.step()
@@ -118,8 +132,71 @@ func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
 			if strings.ContainsAny(details[0], "\n\x1b") {
 				t.Fatalf("control characters in the alarm: %q", details[0])
 			}
+
+			// Per asset: a set with a new advisory gives the second asset
+			// its finding, and the refused asset none.
+			n.put(k.sign(withEntry(t, findPayload(t, 2), "adv-new")))
+			n.step()
+			if got := advisoriesOf(t, n, secondID); !slices.Contains(got, "adv-new") {
+				t.Fatalf("the second asset's findings %q after the refusal, want adv-new", got)
+			}
+			if got := advisoriesOf(t, n, relayID); slices.Contains(got, "adv-new") {
+				t.Fatalf("the refused asset got a finding: %q", got)
+			}
+			for _, a := range n.st.Snapshot("x").Alarms {
+				if a.Code == AlarmNotEvaluated && a.Asset == secondID {
+					t.Fatalf("the second asset is not evaluated: %s", a.Detail)
+				}
+			}
+			// Collection goes on for the refused asset.
+			ran := false
+			for i, e := range n.cfg.Schedule {
+				if e.AssetID == relayID {
+					if rep := n.s.RunOnce(bg, i); rep.Outcome != "ok" || rep.Events == 0 {
+						t.Fatalf("a run of the refused asset: %+v", rep)
+					}
+					ran = true
+				}
+			}
+			if !ran {
+				t.Fatal("no schedule entry for the refused asset")
+			}
 		})
 	}
+}
+
+// advisoriesOf are the advisories of the asset's stored findings.
+func advisoriesOf(t *testing.T, n *advNode, assetID string) []string {
+	t.Helper()
+	got, err := n.r.Store(ConfigStream(assetID)).Read(bg, ConfigStream(assetID), 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, st := range got {
+		if f, err := decodeFinding(st.Event); err == nil {
+			out = append(out, f.Advisory)
+		}
+	}
+	return out
+}
+
+// withEntry is payload with one more entry, id, whose range holds the
+// SEL-751 FID ok.json reads.
+func withEntry(t *testing.T, payload []byte, id string) []byte {
+	t.Helper()
+	var s advisory.Set
+	if err := json.Unmarshal(payload, &s); err != nil {
+		t.Fatal(err)
+	}
+	e := advEntry(id, "a new advisory")
+	e.Affected[0].Ranges = []advisory.Range{{Introduced: "R501-V0", Fixed: "R501-V9"}}
+	s.Entries = append(s.Entries, e)
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // jsonString is s as it lies inside a JSON string.
