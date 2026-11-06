@@ -4,7 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -438,5 +442,44 @@ func TestAdvisoryCeiling(t *testing.T) {
 	}
 	if u := n.inUse(); u == nil || u.Version != 5 {
 		t.Fatalf("the node did not start with its set: %+v", u)
+	}
+}
+
+// The floor is the chain's newest installation whatever the store holds
+// (C3 on #452): with the configuration database lost and the chain kept, no
+// set is in use, a validly signed older set is refused as older_version,
+// and only a newer one installs. A refusal record carries only checked
+// fields: no detail (C3, the C11 table).
+func TestAdvisoryFloorHoldsWithoutTheStoredSet(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.put(k.sign(advPayload(t, "otsec-sel", 1, advisory.PurposeRelease, 1)))
+	n.step()
+	n.put(k.sign(advPayload(t, "otsec-sel", 2, advisory.PurposeRelease, 1)))
+	n.step()
+	if err := n.r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(filepath.Join(n.cfg.Store.Dir, string(ConfigDB)+".db"+suffix)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal(err)
+		}
+	}
+	n.startNode()
+	if len(n.stored()) != 0 || n.inUse() != nil {
+		t.Fatalf("after the loss: %d stored, in use %+v", len(n.stored()), n.inUse())
+	}
+	older := k.sign(advPayload(t, "otsec-sel", 1, advisory.PurposeRelease, 2))
+	n.put(older)
+	n.step()
+	r := n.records(audit.ActionAdvisorySetRefused)
+	if len(r) != 1 || r[0].ReasonCode != string(advisory.OlderVersion) || r[0].Detail != "" {
+		t.Fatalf("refusals %+v", r)
+	}
+	n.put(k.sign(advPayload(t, "otsec-sel", 3, advisory.PurposeRelease, 1)))
+	n.step()
+	inst := n.records(audit.ActionAdvisorySetInstalled)
+	if u := n.inUse(); u == nil || u.Version != 3 || inst[len(inst)-1].Advisory.PreviousVersion != 2 {
+		t.Fatalf("in use %+v", u)
 	}
 }

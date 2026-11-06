@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/advisory"
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/authz"
@@ -88,6 +89,9 @@ type advisoryRun struct {
 	// code; noRoom the hashes whose no-room alarm was raised.
 	refused map[[32]byte]string
 	noRoom  map[[32]byte]bool
+	// checked holds the file hashes given a verdict under this process's
+	// anchors, so a refused file is not verified again at every tick.
+	checked map[[32]byte]bool
 	// inUseFile is the hash of a file found to be the set in use, so it is
 	// not verified again at every tick.
 	inUseFile [32]byte
@@ -138,7 +142,7 @@ func newAdvisoryRun(cfg *Config) *advisoryRun {
 		// The configuration was checked at load.
 		panic(fmt.Sprintf("node: advisory anchors passed the load check and now fail: %v", err))
 	}
-	return &advisoryRun{anchors: anchors, refused: map[[32]byte]string{}, noRoom: map[[32]byte]bool{}}
+	return &advisoryRun{anchors: anchors, refused: map[[32]byte]string{}, noRoom: map[[32]byte]bool{}, checked: map[[32]byte]bool{}}
 }
 
 // startAdvisory loads the set state at start, so the set in use is known
@@ -242,11 +246,11 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 	s.checkSetsOverFloor(ctx, sets)
 	if newest != nil {
 		if sum, err := hex.DecodeString(newest.PayloadSHA256); err == nil && len(sum) == 32 {
-			// A floor from the chain alone, used only when the newest stored
-			// set is refused below: the next set must still be newer.
-			if s.storedPayload(sets, [32]byte(sum)) {
-				a.floor = advisory.Floor{SetID: newest.SetID, Version: newest.Version, PayloadSHA256: [32]byte(sum)}
-			}
+			// The chain's newest installation is the floor whatever the
+			// store holds, so a stored set that is missing or no longer
+			// decodes cannot lower it and let an older set install (C3 on
+			// #452). The node then has no set until a newer one arrives.
+			a.floor = advisory.Floor{SetID: newest.SetID, Version: newest.Version, PayloadSHA256: [32]byte(sum)}
 		}
 	}
 	a.loaded = true
@@ -271,6 +275,10 @@ func (s *Scheduler) loadAdvisory(ctx context.Context) error {
 	pruned := anchor.Seq > 0 && (firstRetained.IsZero() || firstRetained.After(n.CommittedAt))
 	v, ref := advisory.Verify(n.Event, a.anchors)
 	switch {
+	case (rec != nil || pruned) && a.floor.Held() && set.Version < a.floor.Version:
+		// The chain installed a newer set than any the store holds.
+		s.noSet(ctx, fmt.Sprintf("the newest installed set (%s version %d) is not in the store, and no older set is used in its place", a.floor.SetID, a.floor.Version))
+		return nil
 	case rec != nil || pruned:
 		a.floor = advisory.Floor{SetID: set.SetID, Version: set.Version, PayloadSHA256: payloadSum}
 	case ref == nil:
@@ -299,16 +307,6 @@ func (s *Scheduler) storedSetsSizes(sets []c5.Stored) []int64 {
 		out[i] = int64(len(st.Event))
 	}
 	return out
-}
-
-// storedPayload reports whether a stored set has the payload hash.
-func (s *Scheduler) storedPayload(sets []c5.Stored, sum [32]byte) bool {
-	for _, st := range sets {
-		if env, _, err := decodeStoredSet(st.Event); err == nil && sha256.Sum256(env.Payload) == sum {
-			return true
-		}
-	}
-	return false
 }
 
 // checkSetsOverFloor compares the quota with the floor plus every stored set
@@ -348,11 +346,11 @@ func (s *Scheduler) readSetFile(ctx context.Context) {
 	}
 	s.clearQuietPrefix(AlarmAdvisorySetUnread + " ")
 	sum := sha256.Sum256(file)
-	if code, ok := a.refused[sum]; ok {
-		// Its refusal is in the chain: once per file hash (C11 1.5).
-		if a.last == nil || a.last.FileSHA256 != hex.EncodeToString(sum[:]) {
-			a.last = &AdvisoryRefusalStatus{FileSHA256: hex.EncodeToString(sum[:]), Code: code, At: s.now().UTC()}
-		}
+	if code, ok := a.refused[sum]; ok && (a.checked[sum] || !anchorDependent(code)) {
+		// Its refusal is in the chain: once per file hash (C11 1.5). A
+		// refusal that depends on the anchors is given one more verdict
+		// under the anchors loaded now (C6 and C3 on #452).
+		s.lastRefusal(sum, code)
 		return
 	}
 	if a.inUse != nil && sum == a.inUseFile {
@@ -364,6 +362,11 @@ func (s *Scheduler) readSetFile(ctx context.Context) {
 		outcome, _, ref = advisory.Admit(v, a.floor, advisoryTestBuild)
 	}
 	switch {
+	case ref != nil && a.refused[sum] == string(ref.Code):
+		// The same verdict as the recorded one: nothing new is written.
+		a.checked[sum] = true
+		s.lastRefusal(sum, string(ref.Code))
+		return
 	case ref != nil:
 		s.refuseSet(ctx, ref)
 		return
@@ -442,22 +445,46 @@ func (s *Scheduler) refuseSet(ctx context.Context, ref *advisory.Refusal) {
 	node := string(s.rt.cfg.NodeID)
 	rec := &audit.Record{Contract: audit.ContractID, NodeID: node, Time: s.rt.received(),
 		Actor: audit.Actor{Type: authz.PrincipalNode, ID: node}, Action: audit.ActionAdvisorySetRefused, Outcome: audit.OutcomeDenied,
-		ReasonCode: string(ref.Code), Detail: ref.Detail,
-		Advisory: &audit.Advisory{FileSHA256: hex.EncodeToString(ref.FileSHA256[:]), KeyID: ref.KeyID, SetID: ref.SetID, Version: ref.Version}}
+		ReasonCode: string(ref.Code),
+		Advisory:   &audit.Advisory{FileSHA256: hex.EncodeToString(ref.FileSHA256[:]), KeyID: ref.KeyID, SetID: ref.SetID, Version: ref.Version}}
 	if _, err := s.appendConfigRecord(ctx, rec); err != nil {
 		s.raiseOnceKey(AlarmAdvisorySetRefused+" unrecorded "+hex.EncodeToString(ref.FileSHA256[:]), "", AlarmAdvisorySetRefused,
 			fmt.Sprintf("%s refused (%s), and the refusal was not recorded: %v; the set in use stays, and the record is written at the next tick", AdvisorySetFile, ref.Code, err))
 		return
 	}
 	a.refused[ref.FileSHA256] = string(ref.Code)
+	a.checked[ref.FileSHA256] = true
 	s.refusedAlarm(ctx, ref, AdvisorySetFile)
+}
+
+// anchorDependent reports whether a refusal depends on the anchors pinned,
+// which change only at a load: a file refused for its key may install once
+// its key is pinned. The other codes depend on the file and the floor only.
+func anchorDependent(code string) bool {
+	switch advisory.Code(code) {
+	case advisory.UnknownKey, advisory.RevokedKey, advisory.BadSignature:
+		return true
+	}
+	return false
+}
+
+// lastRefusal shows a recorded refusal in status.
+func (s *Scheduler) lastRefusal(sum [32]byte, code string) {
+	a := s.adv
+	if a.last == nil || a.last.FileSHA256 != hex.EncodeToString(sum[:]) {
+		a.last = &AdvisoryRefusalStatus{FileSHA256: hex.EncodeToString(sum[:]), Code: code, At: s.now().UTC()}
+	}
 }
 
 // refusedAlarm raises advisory-set-refused for one file hash.
 func (s *Scheduler) refusedAlarm(ctx context.Context, ref *advisory.Refusal, what string) {
 	sum := hex.EncodeToString(ref.FileSHA256[:])
 	s.adv.last = &AdvisoryRefusalStatus{FileSHA256: sum, Code: string(ref.Code), Detail: ref.Detail, SetID: ref.SetID, Version: ref.Version, At: s.now().UTC()}
-	s.raiseOnceKey(AlarmAdvisorySetRefused+" "+sum, "", AlarmAdvisorySetRefused, fmt.Sprintf("%s (sha256 %s) is refused: %s", what, sum, ref.Error()))
+	detail := ref.Detail
+	if len(detail) > adapter.MaxDetailLen {
+		detail = detail[:adapter.MaxDetailLen]
+	}
+	s.raiseOnceKey(AlarmAdvisorySetRefused+" "+sum, "", AlarmAdvisorySetRefused, fmt.Sprintf("%s (sha256 %s) is refused: %s %q", what, sum, ref.Code, detail))
 	d := map[string]string{"file_sha256": sum, "code": string(ref.Code)}
 	if ref.SetID != "" {
 		d["set_id"], d["version"] = ref.SetID, strconv.FormatUint(ref.Version, 10)
