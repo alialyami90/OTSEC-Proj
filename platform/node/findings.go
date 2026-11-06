@@ -79,9 +79,12 @@ type declaredRecord struct {
 	Seq    uint64 `json:"seq"`
 }
 
+// declaredFile is DeclaredIdentitiesFileName: the newest record of each
+// asset's declared identity, and of its controls (D4-56).
 type declaredFile struct {
-	Schema string                    `json:"schema"`
-	Assets map[string]declaredRecord `json:"assets"`
+	Schema   string                    `json:"schema"`
+	Assets   map[string]declaredRecord `json:"assets"`
+	Controls map[string]declaredRecord `json:"controls,omitempty"`
 }
 
 // checkFindingRecord is ConfigDocuments' check of a C12 finding: a strict
@@ -341,6 +344,21 @@ func (s *Scheduler) evaluate(ctx context.Context, assetID string) {
 // by the run that first read it; otherwise it is the asset's declaration in
 // the node's configuration, cited by its policy.apply record.
 func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findingsState) (applicability.Input, string, error) {
+	in, evidence, err := s.identityInput(ctx, assetID, fs)
+	if err != nil {
+		return in, evidence, err
+	}
+	// Controls fail toward fewer mitigations: an unrecorded control is
+	// never cited (D4-56).
+	if in.Controls, err = s.controlsInput(ctx, assetID); err != nil {
+		in.Controls = nil
+		s.raiseOnceKey("controls "+assetID, assetID, AlarmControlsNotRecorded, err.Error())
+	}
+	return in, evidence, nil
+}
+
+// identityInput is matcherInput's identity, settings and change.
+func (s *Scheduler) identityInput(ctx context.Context, assetID string, fs *findingsState) (applicability.Input, string, error) {
 	in := applicability.Input{AssetID: assetID, Settings: fs.snap, LatestChange: fs.change}
 	st := s.identityOf(ctx, assetID)
 	if st == nil {
@@ -475,92 +493,109 @@ func (s *Scheduler) declaredRef(ctx context.Context, a c1.Asset) (string, error)
 	if sum == "" {
 		return "", errors.New("the asset's configuration declares no identity attribute")
 	}
-	if s.declared == nil {
-		m, err := s.loadDeclared(ctx)
-		if err != nil {
-			return "", fmt.Errorf("the declared-identity records could not be read: %w", err)
-		}
-		s.declared = m
+	if err := s.loadRecorded(ctx); err != nil {
+		return "", err
 	}
 	ref := func(seq uint64) string { return fmt.Sprintf("audit:%s:%d", s.rt.cfg.NodeID, seq) }
 	if r, ok := s.declared[a.AssetID]; ok && r.SHA256 == sum {
 		return ref(r.Seq), nil
 	}
-	rec, err := s.rt.AuditRecord(audit.ActionPolicyApply, audit.OutcomeInfo, ReasonAssetIdentityDeclared, declaredDetail(a.AssetID, sum))
-	if err != nil {
-		return "", err
-	}
-	log := s.rt.Log(AuditStream)
-	if log == nil {
-		return "", errAuditNotOpen
-	}
-	got, err := log.AppendBatch(ctx, []c5.Record{rec})
+	seq, err := s.writePolicyApply(ctx, ReasonAssetIdentityDeclared, declaredDetail(a.AssetID, sum))
 	if err != nil {
 		return "", fmt.Errorf("the declared identity's policy.apply record was not written: %w", err)
 	}
-	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: uint64(got[0].Key().Seq)}
+	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: seq}
 	s.clearQuietKey("declared " + a.AssetID)
-	if err := s.writeDeclared(); err != nil {
-		// The chain still holds the record, and the next start reads it
-		// there until it is pruned.
-		s.raiseOnceKey("declared-file", "", AlarmDeclaredNotRecorded, DeclaredIdentitiesFileName+" not written, so a declared identity's record may be written again after the chain is pruned: "+err.Error())
-	}
-	return ref(uint64(got[0].Key().Seq)), nil
+	s.writeRecordedFile()
+	return ref(seq), nil
 }
 
-// loadDeclared reads the newest declared-identity record of each asset from
-// the chain and from DeclaredIdentitiesFileName, the newest of the two
-// winning. A file entry that names a seq the chain should still hold, and
-// does not, is dropped, so a file from another store is never cited.
-func (s *Scheduler) loadDeclared(ctx context.Context) (map[string]declaredRecord, error) {
+// loadRecorded reads the declared-identity and controls records once.
+func (s *Scheduler) loadRecorded(ctx context.Context) error {
+	if s.declared != nil {
+		return nil
+	}
+	ids, controls, err := s.loadDeclared(ctx)
+	if err != nil {
+		return fmt.Errorf("the declared-identity and controls records could not be read: %w", err)
+	}
+	s.declared, s.controls = ids, controls
+	return nil
+}
+
+// writeRecordedFile writes DeclaredIdentitiesFileName after a new record.
+// When it fails, the chain still holds the record, and the next start
+// reads it there until it is pruned.
+func (s *Scheduler) writeRecordedFile() {
+	if err := s.writeDeclared(); err != nil {
+		s.raiseOnceKey("declared-file", "", AlarmDeclaredNotRecorded, DeclaredIdentitiesFileName+" not written, so a declared identity's or controls' record may be written again after the chain is pruned: "+err.Error())
+	}
+}
+
+// loadDeclared reads the newest declared-identity record and controls
+// record of each asset from the chain and from DeclaredIdentitiesFileName,
+// the newest of the two winning. A file entry that names a seq the chain
+// should still hold, and does not, is dropped, so a file from another
+// store is never cited.
+func (s *Scheduler) loadDeclared(ctx context.Context) (ids, controls map[string]declaredRecord, err error) {
 	adb := s.rt.Store(AuditStream)
 	if adb == nil {
-		return nil, errAuditNotOpen
+		return nil, nil, errAuditNotOpen
 	}
 	chain := map[string]declaredRecord{}
+	chainControls := map[string]declaredRecord{}
 	var first, last c5.Seq
 	for after := c5.Seq(0); ; {
 		got, err := adb.Read(ctx, AuditStream, after, 500)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, st := range got {
 			if first == 0 {
 				first = st.Key.Seq
 			}
 			after, last = st.Key.Seq, st.Key.Seq
-			if !bytes.Contains(st.Event, []byte(ReasonAssetIdentityDeclared)) {
+			if !bytes.Contains(st.Event, []byte(ReasonAssetIdentityDeclared)) && !bytes.Contains(st.Event, []byte(ReasonAssetControlsDeclared)) {
 				continue
 			}
 			rec, err := audit.ParseRecord(st.Event)
 			if err != nil {
-				return nil, fmt.Errorf("audit record %d: %w", st.Key.Seq, err)
+				return nil, nil, fmt.Errorf("audit record %d: %w", st.Key.Seq, err)
 			}
-			if rec.Action != audit.ActionPolicyApply || rec.ReasonCode != ReasonAssetIdentityDeclared {
+			if rec.Action != audit.ActionPolicyApply {
 				continue
 			}
-			if m := declaredDetailRe.FindStringSubmatch(rec.Detail); m != nil {
-				chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq)}
+			switch rec.ReasonCode {
+			case ReasonAssetIdentityDeclared:
+				if m := declaredDetailRe.FindStringSubmatch(rec.Detail); m != nil {
+					chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq)}
+				}
+			case ReasonAssetControlsDeclared:
+				if m := controlsDetailRe.FindStringSubmatch(rec.Detail); m != nil {
+					chainControls[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq)}
+				}
 			}
 		}
 		if len(got) < 500 {
 			break
 		}
 	}
-	out := chain
 	f, err := readDeclared(filepath.Join(s.rt.cfg.Store.Dir, DeclaredIdentitiesFileName))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		s.raiseOnceKey("declared-file", "", AlarmDeclaredNotRecorded, DeclaredIdentitiesFileName+" unreadable, so a declared identity the chain no longer holds is recorded again: "+err.Error())
+		s.raiseOnceKey("declared-file", "", AlarmDeclaredNotRecorded, DeclaredIdentitiesFileName+" unreadable, so a declared identity or controls list the chain no longer holds is recorded again: "+err.Error())
 	}
-	for id, r := range f.Assets {
-		if r.Seq > uint64(last) || (first != 0 && r.Seq >= uint64(first)) {
-			continue // the chain holds it, or should
+	merge := func(out, file map[string]declaredRecord) map[string]declaredRecord {
+		for id, r := range file {
+			if r.Seq > uint64(last) || (first != 0 && r.Seq >= uint64(first)) {
+				continue // the chain holds it, or should
+			}
+			if c, ok := out[id]; !ok || c.Seq < r.Seq {
+				out[id] = r
+			}
 		}
-		if c, ok := out[id]; !ok || c.Seq < r.Seq {
-			out[id] = r
-		}
+		return out
 	}
-	return out, nil
+	return merge(chain, f.Assets), merge(chainControls, f.Controls), nil
 }
 
 func readDeclared(path string) (declaredFile, error) {
@@ -590,10 +625,11 @@ func readDeclared(path string) (declaredFile, error) {
 	return f, nil
 }
 
-// writeDeclared replaces DeclaredIdentitiesFileName with s.declared.
+// writeDeclared replaces DeclaredIdentitiesFileName with s.declared and
+// s.controls.
 func (s *Scheduler) writeDeclared() error {
 	path := filepath.Join(s.rt.cfg.Store.Dir, DeclaredIdentitiesFileName)
-	b, err := json.MarshalIndent(declaredFile{Schema: declaredSchema, Assets: s.declared}, "", "  ")
+	b, err := json.MarshalIndent(declaredFile{Schema: declaredSchema, Assets: s.declared, Controls: s.controls}, "", "  ")
 	if err != nil {
 		return err
 	}

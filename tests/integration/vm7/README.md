@@ -2,7 +2,7 @@
 
 Evidence class: desk for the checker; simulated for the run on the binaries. No device is contacted.
 
-`vm7.py` decides V-M7 from what a run of the node stored and showed. It does not start a process or read a store. The runner on the binaries is `tests/integration/slice/test_slice_vm7_e2e.py`: it starts a node, a collector and a simulator for each device-read row, gathers the `observed` dict described in `vm7.py`, and checks every cell. There the two control cells (D8 and D9 on TEST-ADV-03) fail, because no control record exists yet (C1 0.3).
+`vm7.py` decides V-M7 from what a run of the node stored and showed. It does not start a process or read a store. The runner on the binaries is `tests/integration/slice/test_slice_vm7_e2e.py`: it starts a node, a collector and a simulator for each device-read row, gathers the `observed` dict described in `vm7.py`, and checks every cell. The control rows' `tcp/80` is their asset's `asset_controls` entry, recorded by a `policy.apply` record (D4-56).
 
 What it checks:
 

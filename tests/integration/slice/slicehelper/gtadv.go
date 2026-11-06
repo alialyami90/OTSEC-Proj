@@ -16,7 +16,8 @@ import (
 
 // V-M7 on the binaries (C6, P4-3-C6): GT-ADV's rows as the node's assets.
 // A device-read row is the slice's own asset, its declared firmware ID the
-// row's, which the simulator serves; an operator row is an asset with a
+// row's, which the simulator serves, and its controls, if any, the row's
+// asset_controls entry (D4-56); an operator row is an asset with a
 // declared firmware ID and no schedule, so no session ever reads it. The
 // set is GT-ADV's eight advisories in C11's form, signed with advisory
 // test key 0, which only a node built with otsec_testclock accepts.
@@ -28,10 +29,11 @@ const (
 )
 
 type gtADVRow struct {
-	ID       string `json:"id"`
-	FID      string `json:"fid"`
-	Source   string `json:"source"`
-	Declared string `json:"declared_product_family"`
+	ID       string   `json:"id"`
+	FID      string   `json:"fid"`
+	Source   string   `json:"source"`
+	Declared string   `json:"declared_product_family"`
+	Controls []string `json:"controls"`
 }
 
 type gtADVAdvisory struct {
@@ -90,6 +92,11 @@ func gtADV(nc *nodeconfigtest.Config, l *Layout, repo, row string, operators boo
 				// C1's product_family is a lowercase token: SEL-2730M
 				// is declared as sel-2730m.
 				setAttr(nc.Assets[0], "product_family", strings.ToLower(r.Declared))
+			}
+			if len(r.Controls) > 0 {
+				// The row's recorded controls (D4-56), beside the asset's
+				// C1 record.
+				nc.AssetControls = append(nc.AssetControls, nodeconfigtest.AssetControls{AssetID: assetID, Controls: r.Controls})
 			}
 			l.FID = r.FID
 			l.GTADVAssets[r.ID] = assetID
