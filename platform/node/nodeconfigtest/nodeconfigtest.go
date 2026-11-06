@@ -34,6 +34,9 @@ type Config struct {
 	Schedule          []Collection     `json:"schedule"`
 	// EventBaselines is the event_baselines section (AddEventBaseline).
 	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
+	// AssetControls is asset_controls: the network controls recorded in
+	// front of assets, beside the C1 records (D4-56).
+	AssetControls []AssetControls `json:"asset_controls,omitempty"`
 	// Asset and Applicability are the item 3 switches; nil is off.
 	Asset           *struct{}      `json:"asset,omitempty"`
 	Applicability   *Applicability `json:"applicability,omitempty"`
@@ -51,6 +54,12 @@ type Config struct {
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 	// Register is the node's command register copy (WriteCommandRegister).
 	Register map[string]any `json:"register,omitempty"`
+}
+
+// AssetControls is one asset_controls entry.
+type AssetControls struct {
+	AssetID  string   `json:"asset_id"`
+	Controls []string `json:"controls"`
 }
 
 // Applicability is the applicability section.

@@ -117,6 +117,9 @@ type Scheduler struct {
 	// as when a set comes into use.
 	finds    map[string]*findingsState
 	declared map[string]declaredRecord
+	// controls is the newest controls record of each asset, read with
+	// declared (controls.go, D4-56).
+	controls map[string]declaredRecord
 	evalAll  bool
 }
 
@@ -173,6 +176,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	s.startIdentity(ctx)
 	s.startAdvisory(ctx)
 	s.startDeclared(ctx)
+	s.startControls(ctx)
 	s.evaluateAll(ctx)
 	return s, nil
 }
