@@ -14,9 +14,12 @@ import (
 // ceiling (C5 0.8 section 5, C1 on #444): storing it would leave the
 // configuration class above the quota less the configuration module's own
 // floor terms. One name covers the asset module and R9. It is raised once
-// per crossing: a refusal raises it, and the next item 3 write that fits
-// ends the crossing, so a later refusal raises it again (C6 on #444).
-// Configuration reads, baselines and checkpoints are unaffected. Level 1.
+// per crossing: a refusal raises it, and a later refusal raises it again
+// only after the crossing has ended (C6 on #444). The crossing ends at the
+// next item 3 write that fits, or once the class holds little enough that
+// the smallest write it refused would fit, whatever freed the room (D4-54).
+// The matcher pauses while it holds. Configuration reads, baselines and
+// checkpoints are unaffected. Level 1.
 const AlarmAssetStoreFull = "asset-store-full"
 
 // HealthAssetStoreFull is AlarmAssetStoreFull's event on platform/health.
@@ -37,7 +40,9 @@ func (e *ceilingError) Error() string {
 
 // item3Store is the ceiling's state. Only the scheduler's goroutine uses it.
 type item3Store struct {
-	full    bool
+	full bool
+	// need is the smallest write refused in this crossing.
+	need    int64
 	refused map[string]uint64
 }
 
@@ -77,6 +82,7 @@ func (s *Scheduler) storeItem3(ctx context.Context, stream c5.StreamID, doc []by
 	if err != nil {
 		return 0, err
 	}
+	s.endCrossing(used)
 	need := int64(len(doc))
 	if capture != nil {
 		// An upper bound: a capture already stored is not counted again.
@@ -85,8 +91,10 @@ func (s *Scheduler) storeItem3(ctx context.Context, stream c5.StreamID, doc []by
 	if ceiling := s.rt.cfg.Item3Ceiling(); used+need > ceiling {
 		e := &ceilingError{series: info.Series, need: need, free: max(ceiling-used, 0), ceiling: ceiling, classBytes: used}
 		s.item3.refused[info.Series]++
-		if !s.item3.full {
-			s.item3.full = true
+		if s.item3.full {
+			s.item3.need = min(s.item3.need, need)
+		} else {
+			s.item3.full, s.item3.need = true, need
 			s.rt.opt.Status.Raise("", AlarmAssetStoreFull, e.Error()+"; identity records, findings and sets are not stored until room returns, and configuration monitoring continues to the full quota")
 			s.rt.health(ctx, HealthAssetStoreFull, map[string]string{"series": info.Series, "bytes_needed": strconv.FormatInt(need, 10),
 				"bytes_free": strconv.FormatInt(e.free, 10), "ceiling_bytes": strconv.FormatInt(ceiling, 10)})
@@ -103,6 +111,35 @@ func (s *Scheduler) storeItem3(ctx context.Context, stream c5.StreamID, doc []by
 		s.publishAssetStore()
 	}
 	return seq, nil
+}
+
+// endCrossing ends the crossing when the configuration class, holding used
+// bytes, has room under the ceiling for the smallest write refused in it,
+// whatever freed the room (D4-54).
+func (s *Scheduler) endCrossing(used int64) {
+	if s.item3.full && used+s.item3.need <= s.rt.cfg.Item3Ceiling() {
+		s.item3.full = false
+		s.publishAssetStore()
+	}
+}
+
+// item3Paused reports whether the matcher is paused: a crossing holds, and
+// the class still has no room for the smallest write it refused. An error
+// reading the class counts as paused.
+func (s *Scheduler) item3Paused(ctx context.Context) bool {
+	if !s.item3.full {
+		return false
+	}
+	db, _, _ := s.rt.view(s.rt.find(ConfigDB))
+	if db == nil {
+		return true
+	}
+	used, err := db.ClassBytes(ctx, c5.ClassConfiguration)
+	if err != nil {
+		return true
+	}
+	s.endCrossing(used)
+	return s.item3.full
 }
 
 // publishAssetStore puts the ceiling's state in status, with asset on.
