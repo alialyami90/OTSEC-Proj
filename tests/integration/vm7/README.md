@@ -1,8 +1,8 @@
 # V-M7 over GT-ADV (C6, P4-3-C6 deliverable 3)
 
-Evidence class: desk until the runner drives the binaries, then simulated. No device is contacted.
+Evidence class: desk for the checker; simulated for the run on the binaries. No device is contacted.
 
-`vm7.py` decides V-M7 from what a run of the node stored and showed. It does not start a process or read a store. The runner that starts the node and the collector against the simulator, and gathers the `observed` dict described in `vm7.py`, comes with C5's part 3, because it needs part 3's status and store field names.
+`vm7.py` decides V-M7 from what a run of the node stored and showed. It does not start a process or read a store. The runner on the binaries is `tests/integration/slice/test_slice_vm7_e2e.py`: it starts a node, a collector and a simulator for each device-read row, gathers the `observed` dict described in `vm7.py`, and checks every cell. There the two control cells (D8 and D9 on TEST-ADV-03) fail, because no control record exists yet (C1 0.3).
 
 What it checks:
 
