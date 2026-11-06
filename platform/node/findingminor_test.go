@@ -82,6 +82,8 @@ func TestFindingsRefuseAnUnknownMinor(t *testing.T) {
 		"0.10":      {"otsec.finding/0.10", `"otsec.finding/0.10"`},
 		"oversized": {"otsec.finding/0." + strings.Repeat("9", 200), `"otsec.finding/0.` + strings.Repeat("9", 64-len("otsec.finding/0.")) + `"`},
 		"control":   {"otsec.finding/0.2\n\x1b[2Jforged", `"otsec.finding/0.2??[2Jforged"`},
+		// A quote, a backslash and a two-byte character (D6 on #509).
+		"quoted": {"otsec.finding/0.2\"\\\u00e9x", `"otsec.finding/0.2????x"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			k := newAdvKey(t)
