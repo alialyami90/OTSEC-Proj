@@ -875,5 +875,5 @@ func (c *Config) runRequest(i int, requestID string) *authz.CollectorRequest {
 		OnBehalfOf:    authz.Principal{Type: authz.PrincipalSchedule, ID: s.ID},
 		PolicyVersion: c.PolicyVersion,
 		Run: &authz.RunBody{AssetID: s.AssetID, OperationID: s.Operation, Params: params,
-			CredentialRef: s.CredentialRef, RegisterVersion: c.RegisterVersion}}
+			CredentialRef: s.CredentialRef, RegisterVersion: c.registerVersion(s.AssetID)}}
 }

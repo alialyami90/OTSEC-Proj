@@ -69,6 +69,14 @@ type Config struct {
 	// register it was not commissioned with.
 	PolicyVersion   uint64 `json:"policy_version"`
 	RegisterVersion uint64 `json:"register_version"`
+	// RegisterVersions names, by profile ID, the revision of the register
+	// package that profile's firmware allowlist selects in the collector,
+	// for a node whose assets use more than one package (the C5 note
+	// "a register revision per family", #464). A run names its asset's
+	// profile's revision, or RegisterVersion when the profile is not
+	// listed. The numbers come only from this file: the node never takes
+	// one from a refusal or a result (C3 on #464).
+	RegisterVersions map[string]uint64 `json:"register_versions,omitempty"`
 	// KeyRegister is the node key register, register.json (nodekey,
 	// credential design section 9; see "Node keys" in the README). With it,
 	// every TLS reference is a nodekey_ reference resolved from it.
@@ -382,6 +390,7 @@ func (c *Config) check() error {
 		fail("lab_tls_files is set, so tls_dir is required")
 	}
 	c.checkRegister(fail)
+	c.checkRegisterVersions(fail)
 	c.checkAssetControls(fail)
 	if c.KeyRegister != "" && !filepath.IsAbs(c.KeyRegister) {
 		fail("key_register %q is not an absolute path", c.KeyRegister)
