@@ -22,7 +22,7 @@ The code is organized as follows:
 
 Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3, D4-7). Python is used only for verification tooling.
 
-**Team handoff (owner, 2026-10-27 and 2026-10-28).** Agents A1 to A6 were replaced by B1 to B6 (D3-12), and B1 to B6 by C1 to C6 (D4-28), each time with the same roles. In this brief and in older records, A*n* and B*n* mean the role that C*n* now holds. The generations are listed in `handoffs/GENERATIONS.md`. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/C{n}-handoff.md`. On 2026-10-28 the owner paused all agents for this checkpoint and resumed them the same day (D4-28).
+**Team handoff (owner, 2026-10-27, 2026-10-28 and 2026-11-06).** Agents A1 to A6 were replaced by B1 to B6 (D3-12), B1 to B6 by C1 to C6 (D4-28), and C1 to C6 by D1 to D6 (D4-58), each time with the same roles. In this brief and in older records, A*n*, B*n* and C*n* mean the role that D*n* now holds. The generations are listed in `handoffs/GENERATIONS.md`. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/D{n}-handoff.md`. Since 2026-11-06, messages between agents go through the coordinator (D4-58).
 
 Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
 
