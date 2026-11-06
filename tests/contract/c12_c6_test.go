@@ -148,6 +148,9 @@ func TestC12AFindingAtEveryBoundFitsOneRecord(t *testing.T) {
 		return s + strings.Repeat("z", 64-len(s))
 	}
 	f := c12Finding()
+	// A 0.1 record: its stale passive identity names no mismatch, which
+	// 0.2's rule 4 refuses; the 0.2 bound is c12_v02_d6_test.go's (D4-61).
+	f.Schema = "otsec.finding/0.1"
 	f.Advisory = "A" + strings.Repeat("9", 127)
 	f.Set.ID = strings.Repeat("s", 64)
 	f.Revision, f.Previous, f.From = 1<<31-1, "sha256:"+strings.Repeat("f", 64), finding.ApplicableByVersion
