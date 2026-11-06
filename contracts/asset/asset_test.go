@@ -81,6 +81,8 @@ var invalidWant = map[string]string{
 	"snmpv3-pre-credential-firmware":          "so the binding is pinned-key",
 	"snmpv3-encrypted-weak":                   "there is no lower level to acknowledge",
 	"engine-id-not-hex":                       "is not an engine ID",
+	"engine-id-all-zeros":                     "is all zeros or all ff",
+	"engine-id-all-ff":                        "is all zeros or all ff",
 }
 
 func decodeAny(b []byte) error {
@@ -618,5 +620,24 @@ func TestSNMPv3AssetGetsACredential(t *testing.T) {
 	}
 	if AlwaysPlaintext(SNMPv3) || SNMPv3.Inbound() {
 		t.Fatal("snmpv3 read as plaintext or inbound")
+	}
+}
+
+// RFC 3411 section 5: an engine ID of mixed zero and ff octets is valid; only
+// all zeros or all ff is refused (invalid/engine-id-all-*.json).
+func TestEngineIDNearMiss(t *testing.T) {
+	for _, e := range []string{"00000000ff", "ffffffff00", "0000000001"} {
+		a := load(t, "sel-2731m-snmpv3.json")
+		for i := range a.Attributes {
+			if a.Attributes[i].Name == AttrSNMPEngineID {
+				a.Attributes[i].Value = e
+				for j := range a.Attributes[i].Observations {
+					a.Attributes[i].Observations[j].Value = e
+				}
+			}
+		}
+		if err := a.Validate(); err != nil {
+			t.Errorf("%s refused: %v", e, err)
+		}
 	}
 }

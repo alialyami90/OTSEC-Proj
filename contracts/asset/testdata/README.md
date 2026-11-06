@@ -97,3 +97,5 @@ Written by `generate.py` (run `python3 -I generate.py` here). Device values are 
 | `invalid/snmpv3-pre-credential-firmware.json` | A pinned-key `snmpv3` binding whose `pre_credential` is `firmware_id`: the FID comes back only after authentication. |
 | `invalid/snmpv3-encrypted-weak.json` | An `snmpv3` endpoint labelled `encrypted-weak` with an acknowledgement: there is no lower level to acknowledge. |
 | `invalid/engine-id-not-hex.json` | An `snmp_engine_id` written with colons: it is 5 to 32 octets in lowercase hex. |
+| `invalid/engine-id-all-zeros.json` | An `snmp_engine_id` of five zero octets: RFC 3411 section 5 says an engine ID is never all zeros. |
+| `invalid/engine-id-all-ff.json` | An `snmp_engine_id` of 32 `ff` octets: RFC 3411 section 5 says an engine ID is never all `'ff'H`. |
