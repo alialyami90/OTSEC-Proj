@@ -12,8 +12,7 @@ import vm7
 GT = vm7.load_gt()
 IDENT = {i["id"]: i for i in GT["identities"]}
 SET = {"id": "test-adv-set", "version": 3, "issued_at": "2026-11-01T00:00:00Z"}
-STORED = "2026-11-06T10:00:00.000000Z"
-EVALUATED = "2026-11-06T10:00:05.000000Z"
+EVALUATED = "2026-11-06T10:00:05Z"
 
 
 def inv(*parts):
@@ -60,8 +59,9 @@ def perfect():
     assets = {}
     for seq, row in enumerate(IDENT, 1):
         ev = evidence_ids(row, seq)
-        assets[row] = {"identity": {"source": IDENT[row]["source"], "stored_at": STORED},
-                       "last_evaluation": {"set_version": SET["version"], "at": EVALUATED},
+        assets[row] = {"identity": {"source": IDENT[row]["source"], "evidence_id": ev["identity"]},
+                       "last_evaluation": {"set_id": SET["id"], "version": SET["version"], "at": EVALUATED,
+                                           "identity_evidence_id": ev["identity"]},
                        "evidence": ev, "findings": {}}
     for row, adv, cell in vm7.cells(GT):
         if cell.get("reason") != "product-not-named":
@@ -130,9 +130,11 @@ MUTANTS = [
     ("pnn, no completed evaluation", lambda r, c: c.get("reason") == "product-not-named",
      lambda o, a, f: a.update({"last_evaluation": None}), "no completed evaluation"),
     ("pnn, evaluation under an old set", lambda r, c: c.get("reason") == "product-not-named",
-     lambda o, a, f: a["last_evaluation"].update({"set_version": 2}), "set version 2"),
-    ("pnn, evaluation before the newest identity", lambda r, c: c.get("reason") == "product-not-named",
-     lambda o, a, f: a["identity"].update({"stored_at": "2026-11-06T10:00:09.000000Z"}), "not later"),
+     lambda o, a, f: a["last_evaluation"].update({"version": 2}), "version 2"),
+    ("pnn, evaluation under another set", lambda r, c: c.get("reason") == "product-not-named",
+     lambda o, a, f: a["last_evaluation"].update({"set_id": "other"}), "set other"),
+    ("pnn, evaluation on an older identity record", lambda r, c: c.get("reason") == "product-not-named",
+     lambda o, a, f: a["identity"].update({"evidence_id": inv("newer")}), "not the newest"),
 ]
 
 
@@ -195,7 +197,8 @@ def after_mismatch():
             dict(prev["identity"]["evidence"][0], stale=True),
             {"source": "device-read", "id": MISMATCH_ID}]),
         "preconditions": [{"name": "firmware-version", "state": "unread"}]}))
-    a["identity_read"] = {"latest_read": {"id": a["evidence"]["identity"], "at": STORED}, "mismatch_fid": MISMATCH_FID}
+    a["identity_read"] = {"invocation_id": a["evidence"]["identity"], "read_at": EVALUATED,
+                          "mismatch": {"invocation_id": MISMATCH_ID, "read_at": EVALUATED, "fid": MISMATCH_FID}}
     return obs
 
 
@@ -213,9 +216,10 @@ def test_mismatch_passes_before_and_after_restart():
     ("version read", lambda a, f: f.update({"preconditions": []}), "firmware-version"),
     ("not stale", lambda a, f: f["identity"]["evidence"][0].update({"stale": False}), "stale"),
     ("mismatch not cited", lambda a, f: f["identity"].update({"evidence": f["identity"]["evidence"][:1]}), "not cited"),
-    ("mismatch as the latest read", lambda a, f: a["identity_read"]["latest_read"].update({"id": MISMATCH_ID}), "last confirming read"),
-    ("confirming read removed", lambda a, f: a["identity_read"].update({"latest_read": None}), "last confirming read"),
-    ("mismatch FID lost", lambda a, f: a["identity_read"].update({"mismatch_fid": None}), "mismatch FID"),
+    ("mismatch as the latest read", lambda a, f: a["identity_read"].update({"invocation_id": MISMATCH_ID}), "last confirming read"),
+    ("confirming read removed", lambda a, f: a["identity_read"].pop("invocation_id"), "last confirming read"),
+    ("mismatch lost", lambda a, f: a["identity_read"].update({"mismatch": None}), "keeps mismatch"),
+    ("mismatch FID changed", lambda a, f: a["identity_read"]["mismatch"].update({"fid": "SEL-751-R501-V0-Z104101-D20260910"}), "keeps mismatch"),
 ], ids=lambda x: x if isinstance(x, str) else "")
 def test_mismatch_mutants_fail(name, fn, phrase):
     obs = after_mismatch()

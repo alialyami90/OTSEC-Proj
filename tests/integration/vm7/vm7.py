@@ -18,16 +18,20 @@ D4-54 (#455) decides how a `product-not-named` cell reads: the node stores
 no finding for it when the entry had none before. The cell passes only when
 no finding is stored for it, the asset's last completed evaluation ran under
 the set in use, and that evaluation is later than the asset's newest
-identity record.
+identity record. "Later" is read as C5 proposed on #458: the evaluation
+names the newest identity record's evidence ID. The node evaluates after
+storing the identity, so on the test clock the two times can be equal, and
+RFC 3339 strings with different fraction lengths do not compare in order.
 
-The observed dict, one per run under one set:
+The observed dict, one per run under one set (field names from C5 on #458):
 
     {
       "set": {"id": str, "version": int, "issued_at": str},
       "assets": {
         "<row id>": {
-          "identity": {"source": str, "stored_at": str},   # newest identity record
-          "last_evaluation": {"set_version": int, "at": str} | None,
+          "identity": {"source": str, "evidence_id": str},  # status.identity: the newest record
+          "last_evaluation": {"set_id": str, "version": int, "at": str,
+                              "identity_evidence_id": str} | None,  # status.applicability
           "evidence": {                                     # the IDs the run made
             "identity": str,       # the ID read's invocation, or the operator record's audit ref
             "settings": str,       # the configuration read's snapshot evidence, if any
@@ -35,8 +39,10 @@ The observed dict, one per run under one set:
             "control": str,        # the recorded control's audit ref, if any
           },
           "findings": {"<advisory>": [<C12 finding dict>, ...]},   # every stored revision, in order
-          "identity_read": {"latest_read": {"id": str, "at": str},  # the identity.read document
-                            "mismatch_fid": str | None},           # (field names wait for part 3)
+          "identity_read": {"invocation_id": str, "read_at": str,   # the identity.read document:
+                            "mismatch": {"invocation_id": str,      # the last confirming read,
+                                         "read_at": str,            # and the mismatch apart
+                                         "fid": str} | None},
         },
       },
     }
@@ -101,10 +107,10 @@ def check_cell(row, adv, cell, asset, set_):
         if ev is None:
             return ["no stored finding and no completed evaluation"]
         bad = []
-        if ev["set_version"] != set_["version"]:
-            bad.append(f"the last completed evaluation ran under set version {ev['set_version']}, not {set_['version']}")
-        if not ev["at"] > asset["identity"]["stored_at"]:
-            bad.append(f"the last completed evaluation ({ev['at']}) is not later than the newest identity record ({asset['identity']['stored_at']})")
+        if ev["version"] != set_["version"] or ev["set_id"] != set_["id"]:
+            bad.append(f"the last completed evaluation ran under set {ev['set_id']} version {ev['version']}, not the set in use")
+        if ev["identity_evidence_id"] != asset["identity"]["evidence_id"]:
+            bad.append(f"the last completed evaluation ran on identity record {ev['identity_evidence_id']}, not the newest, {asset['identity']['evidence_id']}")
         return bad
     if not revs:
         return [f"no stored finding, want {cell['class']}"]
@@ -200,8 +206,9 @@ def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
     if mismatch_id not in _ids(f):
         bad.append(f"{adv}: the mismatch read {mismatch_id} is not cited")
     rd = asset.get("identity_read") or {}
-    if (rd.get("latest_read") or {}).get("id") != confirming:
-        bad.append(f"identity.read's latest read is {(rd.get('latest_read') or {}).get('id')}, want the last confirming read {confirming}")
-    if rd.get("mismatch_fid") != mismatch_fid:
-        bad.append(f"identity.read keeps mismatch FID {rd.get('mismatch_fid')!r}, want {mismatch_fid!r}")
+    if rd.get("invocation_id") != confirming:
+        bad.append(f"identity.read's latest read is {rd.get('invocation_id')}, want the last confirming read {confirming}")
+    mm = rd.get("mismatch") or {}
+    if mm.get("fid") != mismatch_fid or mm.get("invocation_id") != mismatch_id:
+        bad.append(f"identity.read keeps mismatch {mm or None}, want FID {mismatch_fid!r} from {mismatch_id}")
     return bad
