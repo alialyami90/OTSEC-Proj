@@ -974,7 +974,7 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
   - An agent sends a message meant for another agent to the coordinator, which relays it. This replaces direct thread-to-thread messages.
   - What an agent posts in its own thread, and on its own PRs, is unchanged.
 - **The C team hands off to the D team (owner, 11:55Z).** The owner asked every agent to run a generation checkpoint.
-  - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #484, and C6's). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
+  - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #485). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
   - Roles, owned paths and rules stay with the number. Wherever a record says A*n*, B*n* or C*n*, read it as the role D*n* now holds.
   - Phase 4's decision file stays `docs/phase4/B1-decisions.md`, and its numbering continues at D4-59.
   - Cutover happens once D1 has confirmed all six acks.
@@ -986,3 +986,21 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
   - The cause is unknown. The CI logs do not show which step of the start stalls.
   - The lead is #428's profile: recreating the recovery reserve with a flush at every start (F-013). It is unverified.
   - Investigating it needs role 1's brief. It is not briefed yet.
+
+## D4-59: the carried items after the C-to-D handoff (D1, 2026-11-06)
+
+D1, on the D3 (#488) and D5 (#487) acknowledgements.
+
+- **D3's check of `modules/security/snmpegress` against the RFC texts goes ahead now.** It is item 3 verification under D4-34, not new feature work. A layout error the texts reveal is fixed in its owner's code (D1-handoff task 2), with a failing test first.
+- **The same holds for D2's check of `modules/ied/snmpv3`.** A client or egress fix the texts call for merges before D6's V-M1 run, so the run that counts for the gate is on the corrected code on `main`. A run on the old code may still help D6 debug, but it does not count. New findings notes use the `D{n}-` prefix (`docs/phase4/D2-snmpv3-rfc-check.md`, `docs/phase4/D3-snmpegress-rfc-check.md`).
+- **D4-20 rule 4 (the evidence release and export kind) is deferred past Phase 4.** D4-20 already says it is not owed by Phase 4, and D4-19's stop at the quota stands until it exists. It leaves the STALLED list and is no longer carried as a role 3 task. It is briefed only when the owner asks for it or a later item needs it.
+- **Two items are queued for right after the item 3 gate, not STALLED:**
+  - the off-lab refusal of `clear-suspension.json` (role 3's collector refusal of the unsigned file first, then role 5's node side);
+  - the Windows node start over 12 s (D4-58, #471). Role 5's first PR only logs per-phase start timings on Windows CI; no fix is made until those numbers show the cause.
+
+  Both harden what is already built, so neither is a later Phase 4 item. Under D4-34 they still wait for the owner's go at the item 3 check, where D1 puts them beside the choice of the next item. D1 writes their briefs then.
+- **D4 may draft C12 0.2 now, as a proposal document only** (`docs/phase4/D4-c12-0.2.md`). It fixes item 3's accepted limitation (D4-55), so it is not a later item. No code until D1 approves the proposal, and D1 reviews it after V-M1, so it does not compete with the gate.
+- **D6 writes GT-MIB's agent, the case-table corrections and the V-M1 runner now,** and opens the PR once its ack merges. D6 proposes the new `integration-long` leg's `ci.yml` line in that PR, with a time limit of about twice the measured run, and D1 authorizes it there.
+- **The real-store test of D4-21's byte share (HR-11)** is role 6's test against role 4's receiver. It gates the first `device-observed` listener, not item 3. It is carried as an open item in the summary until it is briefed.
+- **#486 needs no post-merge review.** Role 6 (C6) passed it at `c81b9e3`, the head that merged. #480's C12 part, checked by D4 on `main`, is recorded in D4's ack only.
+- **`govulncheck` on `main`.** D1 dispatches the workflow on `main` before deciding the item 3 gate, so the decision cites a run on the code it accepts. The weekly run stays as it is (D4-3).

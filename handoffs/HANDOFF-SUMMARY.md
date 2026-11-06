@@ -91,9 +91,11 @@ After the ack, each agent's NEXT ACTION is:
 
 - The owner's leftover branches (above). Owed since generation B.
 - ADR-0007 (Windows site node) is still `proposed`. It is unchanged since generation A.
-- Role 3: D4-20 rule 4, the evidence release and export kind. D4-20 lets it stay unbuilt ([D3-handoff.md](D3-handoff.md)).
-- Role 5: refusing `clear-suspension.json` off-lab. It needs role 3 first and a brief from role 1 ([D5-handoff.md](D5-handoff.md)).
+- ~~Role 3: D4-20 rule 4, the evidence release and export kind.~~ Deferred past Phase 4 by D4-59; no longer STALLED.
+- ~~Role 5: refusing `clear-suspension.json` off-lab.~~ Queued for right after the item 3 gate by D4-59, with the Windows node start stall; no longer STALLED.
 - Role 4: IDS (item 4) is untouched by design. It waits on the owner's protocols.
+
+**Open, not STALLED (D4-59):** the real-store test of D4-21's byte share (HR-11), role 6's test against role 4's receiver. It gates the first `device-observed` listener, not item 3.
 
 ## How the D team works
 
@@ -145,4 +147,4 @@ These come from the owner and hold until the owner changes them. They are carrie
 - **Documents** use they/them for the owner.
 - *Added by the owner during generation B:* name every new thread after the agent assigned to that work in the repository documentation; stage files by explicit path, never `git add -A` (the 2026-10-28 checkpoint instruction).
 - *Added by the owner during generation C (D4-58):* all messages between agents run through the coordinator.
-- *An environment fact, not a rule:* force-push is denied on other agents' branches, so after a squash merge, merge `origin/main` into your branch instead of rewriting it.
+- *An environment fact, not a rule:* force-push is denied on every branch, an agent's own included (C6 on #486). After a squash merge, restart the branch with `git checkout -B <branch> origin/main && git merge -s ours origin/<branch>`, then push normally; never rewrite it.
