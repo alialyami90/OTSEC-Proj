@@ -1,6 +1,6 @@
 # Phase 4 item 3 exit report (vulnerability applicability with the asset module)
 
-Owner: C1 (the A1 role). Date: 2026-11-06. Status: **every gate item is met on `main` except V-M1, which waits on the owner's choice for the RFC texts (see Owner decisions needed). The gate is not yet decided.**
+Owner: C1 (the A1 role). Date: 2026-11-06. Status: **every gate item is met on `main` except V-M1. The owner chose to allow `www.rfc-editor.org` (2026-11-06), the RFC texts are in the project, and C6 is building GT-MIB's agent. The gate is decided when V-M1 has run.**
 
 All item 3 PRs are merged, the last being #475 as `961221b`. C6's gate table in `docs/verification.md` ("Phase 4 item 3 exit gate status") is the record for each gate item.
 
@@ -74,10 +74,10 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 | Check | Result |
 | --- | --- |
 | **V-M7** (R9) on the real binaries | **Pass**, `simulated` (#467, #469). All 128 GT-ADV cells pass on main, locally and in the `integration-long` leg. Each of the eleven device-read rows runs on its own node and simulator, and D1's node also holds the five operator rows. Operator rows and denied-branch rows are never `confirmed` (F1). A restart changes no finding and no evidence ID. D2's FID mismatch is kept apart and hides no advisory, before and after a restart. The control cells (TEST-ADV-03 × D8 and × D9) pass with a recorded control (D4-56). |
-| **V-M8**, set cases | **Pass**, `simulated` (#470), 17 of 17. Ten bad files are each refused with their C11 code, with one `advisory.set_refused` record, the alarm and status's last refusal, and the set in use unchanged. The same bytes again, or a restart, records nothing. Version 3 installs, naming version 2. A set whose key is revoked in the configuration is dropped at start, and no older set replaces it. |
-| **V-M8**, paired runs | **Pass**, `simulated` (#470), 9 of 9. The runs are made as root in a network namespace whose only interfaces are `lo` and a TUN device holding both default routes. The A/A pair matches packet for packet, and so does the R9 run against A1. No run has a flow A1 lacks, and nothing is routed off the host. Kernel ICMPv6 router solicitations broke the first run. They were stopped at the source, not filtered in the comparison (C6, 18a2e21). |
+| **V-M8**, set cases | **Pass**, `simulated` (#470), 18 of 18. Ten bad files are each refused with their C11 code, with one `advisory.set_refused` record, the alarm and status's last refusal, and the set in use unchanged. The same bytes again, or a restart, records nothing. Version 3 installs, naming version 2. A set whose key is revoked in the configuration is dropped at start, and no older set replaces it. |
+| **V-M8**, paired runs | **Pass**, `simulated` (#470), 12 of 12. The runs are made as root in a network namespace whose only interfaces are `lo` and a TUN device holding the default route, and the IPv6 default route too wherever the kernel has IPv6. The A/A pair matches packet for packet, and so does the R9 run against A1. No run has a flow A1 lacks, and nothing is routed off the host. Kernel ICMPv6 router solicitations broke the first run. They were stopped at the source, not filtered in the comparison (C6, 18a2e21). |
 | **V-M8**, a release build refuses a test set | **Pass**, `desk`, Go level only. The binaries' runs use the `otsec_testclock` build, the only one that accepts a test set. The refusal is pinned by tests that `go test ./...` runs untagged: `c11_c6_test.go` ("first test set, release build"), `TestAdvisorySetRefusals`, `TestItem3ConfigRefused` and `TestTestKeyIDsAreTheSeeds`. |
-| **V-M1** over GT-MIB | **Not run. It waits on the RFC texts** (see Owner decisions needed). The client (#453), the collector's SNMP path (#461), the node's SNMP entry (#463) and GT-MIB's case table (#457) are built and tested at Go level against a fake agent on loopback. (d), the refusal alone, is shown at desk: C1 0.3, C7 0.8 and C3 0.4 refuse v1 and v2c, and the egress deny corpus refuses whole v1 and v2c messages. The gate never counts a GT-MIB built from memory. |
+| **V-M1** over GT-MIB | **Not yet run.** The owner allowed `www.rfc-editor.org` on 2026-11-06. The eight RFC texts are in the project, and C6 is checking the case table's and egress corpus's layouts against them before building GT-MIB's agent. The client (#453), the collector's SNMP path (#461), the node's SNMP entry (#463) and GT-MIB's case table (#457) are built and tested at Go level against a fake agent on loopback. (d), the refusal alone, is shown at desk: C1 0.3, C7 0.8 and C3 0.4 refuse v1 and v2c, and the egress deny corpus refuses whole v1 and v2c messages. The gate never counts a GT-MIB built from memory. |
 | **V-S7** | **Pass for the corpus and the SEL path.** The egress deny corpus refuses every SNMP write form (`SetRequest`, also hidden as a second scoped PDU inside the encryption; `InformRequest`; `SNMPv2-Trap`; `Report`; `GetResponse`) and whole v1 and v2c messages. The valid messages are allowed first. C3 0.4 refuses `set` at load. **Recordings:** `check.py` passes over every V-M7 and V-M8 recording against the signed revision 5 (#475, green in its `integration-long` legs). Every line the simulator received is a revision 5 read-only line, with one session at a time. |
 | **Contract tests** | C1 0.3, C3 0.4 and C2 0.7 (#445). C5 0.8 (#450). C11 0.1 and C8 0.11 (#446). C7 0.8 and C12 0.1 (#475). |
 
@@ -107,7 +107,7 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 | --- | --- |
 | V-M7 passes per cell over GT-ADV on the real binaries, `simulated`, for the SEL-751 path, including the denied-branch rows (F1) | **Met.** |
 | V-M8 passes: every set refusal case, and the paired runs | **Met.** A release build's refusal of a test set is shown at Go level only. |
-| V-M1 (a) to (c), (e) and (f) pass over GT-MIB, and (d) is shown for the refusal alone | **Not met.** It waits on the RFC texts, and the choice is with the owner. |
+| V-M1 (a) to (c), (e) and (f) pass over GT-MIB, and (d) is shown for the refusal alone | **Not yet met.** The RFC texts are in the project (the owner's choice, 2026-11-06), and C6 is building GT-MIB's agent. |
 | C1 0.3, C3 0.4, C2 0.7, C5 0.8, C7 0.8, C8 0.11, C11 0.1 and C12 0.1 merged, with reviewers' records and C6's contract tests | **Met.** C7 0.8's and C12 0.1's C6 tests merged in #475. |
 | V-S7 still passes, and the egress deny corpus refuses every SNMP write form | **Met.** The corpus, the SEL path, and `check.py` over the V-M7 and V-M8 recordings (#475). |
 | No real advisory is in any set, and the gate says which owner questions are open | **Met.** The questions are listed below. |
@@ -115,20 +115,16 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 
 ## Owner decisions needed
 
-1. **V-M1 and the RFC texts.** The choice is on the decision card. Either:
-   - allow `www.rfc-editor.org` in the environment's network policy;
-   - upload RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860;
-   - or close item 3 with V-M1 open as a condition.
-2. **Who publishes the advisory set and holds its signing key** (HR-18). No real advisory is entered until this is answered. C3 recommends an offline Ed25519 key on a dedicated device, never on central, a node or CI, and never the release key (TB9). One curator would sign, and a second person would check each set's citations.
-3. **Whether reports show publisher severity scores** (C3, #437 §5).
-4. **Whose key may sign a v1 or v2c per-device approval**, if a v1 or v2c path is ever added (HR-17). Item 3 builds none.
-5. **Which SEL switches the sites run.** D4-51 picks the SEL-2731/2741 in RSTP mode on the evidence. The SEL-2730M would follow if the sites run it, with its own ruling on SHA-1.
-6. **Model naming for set authors.** Models must be named as the device reports them, with the mode letter (`SEL-2731M`). This goes to whoever publishes the set.
-7. **Accept item 3** with the conditions in this report, and choose the next item.
+1. **Who publishes the advisory set and holds its signing key** (HR-18). No real advisory is entered until this is answered. C3 recommends an offline Ed25519 key on a dedicated device, never on central, a node or CI, and never the release key (TB9). One curator would sign, and a second person would check each set's citations.
+2. **Whether reports show publisher severity scores** (C3, #437 §5).
+3. **Whose key may sign a v1 or v2c per-device approval**, if a v1 or v2c path is ever added (HR-17). Item 3 builds none.
+4. **Which SEL switches the sites run.** D4-51 picks the SEL-2731/2741 in RSTP mode on the evidence. The SEL-2730M would follow if the sites run it, with its own ruling on SHA-1.
+5. **Model naming for set authors.** Models must be named as the device reports them, with the mode letter (`SEL-2731M`). This goes to whoever publishes the set.
+6. **Accept item 3** with the conditions in this report, and choose the next item.
 
 ## Failed or incomplete
 
-- **V-M1 is not run** (above). The egress corpus's message layout is written from memory of RFC 3412, 3414, 3416 and 3826, so it is unconfirmed until those texts are in the project. A layout error would make the valid messages fail, which the positive cases would catch. No SNMP message has gone over a socket to a real or simulated agent beyond the Go-level fake.
+- **V-M1 is not yet run** (above). The egress corpus's message layout is written from memory of RFC 3412, 3414, 3416 and 3826, and C6 is now checking it against the texts. A layout error would make the valid messages fail, which the positive cases would catch. No SNMP message has gone over a socket to a real or simulated agent beyond the Go-level fake.
 - **The Windows node start can stall for more than 12 s, and nobody yet knows why.** #471 made the certificate-period test survive it: #471's own run had a late try with a 6 s margin that took 12.47 s and recovered. The cause on the hosted Windows runner is not found, and the CI logs do not show which step of the start stalls (C5). The `platform/node` Windows budget warning (743 s against 720 s) stays a warning under D4-44's ruling.
 - **Carried from the first exit:** `config.reads_removed` is contract only; V-S7's 24-hour soak, (c) and (d); V-S6, V-S9, V-S15, V-S18 and V-S20.
 
@@ -198,7 +194,7 @@ D4-48 to D4-57 are in `docs/phase4/B1-decisions.md`. These matter most for later
 
 ## Next coordinated tasks
 
-1. **V-M1**, on the owner's choice: C6 builds GT-MIB's agent from the RFC texts and runs V-M1.
+1. **V-M1**: C6 builds GT-MIB's agent from the RFC texts and runs V-M1. C2 reviews the SNMP reading and C3 reviews security. The gate is then decided.
 2. **C12 0.2**: cite a mismatch on an operator identity. **C1 0.4**: the SEL-2731/2741 profile from measurement, after H-17.
 3. **The next Phase 4 item**, after the owner's check (D4-34).
 
