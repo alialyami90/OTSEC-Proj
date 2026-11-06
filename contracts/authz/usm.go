@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // USMAuth is an snmpv3 credential's authentication protocol (0.8). Closed
@@ -59,7 +60,8 @@ type USM struct {
 	Auth     USMAuth `json:"auth"`
 	Priv     USMPriv `json:"priv"`
 	// EngineID is the authoritative engine ID in lowercase hex: RFC 3411's
-	// SnmpEngineID, 5 to 32 octets. The collector refuses a session when it
+	// SnmpEngineID, 5 to 32 octets, and from 0.9 never all zeros or all
+	// 'ff'H (RFC 3411 section 5). The collector refuses a session when it
 	// differs from the asset's declared snmp_engine_id (C1 0.3), and the
 	// client stops when discovery reports another (C11 section 4 rule 2).
 	EngineID string `json:"engine_id"`
@@ -87,6 +89,9 @@ func (u *USM) Validate() error {
 		return fmt.Errorf("authz: usm priv %q is not %s", u.Priv, USMPrivAES128)
 	case !usmEngineIDPattern.MatchString(u.EngineID):
 		return errors.New("authz: usm engine_id is not 5 to 32 octets in lowercase hex")
+	case strings.Trim(u.EngineID, "0") == "" || strings.Trim(u.EngineID, "f") == "":
+		// RFC 3411 section 5, SnmpEngineID: never all zeros or all 'ff'H (0.9).
+		return errors.New("authz: usm engine_id is all zeros or all ff")
 	case !u.SoleDeviceAttested:
 		return errors.New("authz: usm needs the installer's attestation that the password is this device's alone")
 	}

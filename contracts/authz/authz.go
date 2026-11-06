@@ -23,8 +23,10 @@ import (
 // run_deadline_ms to the accepted reply of a run (P4-A3, D4-13, D4-24).
 // 0.8 adds the snmpv3 transport and its credential (CredentialRef.USM), held
 // by the collector, with its secret the localized keys (D4-49 Q1 and Q2,
-// D4-50, D4-53).
-const ContractID = "otsec.authz/0.8"
+// D4-50, D4-53). 0.9 refuses an snmpv3 credential whose engine ID is all
+// zeros or all 'ff'H, which RFC 3411 section 5 forbids, at install
+// (docs/phase4/D3-c7-0.9.md).
+const ContractID = "otsec.authz/0.9"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a
