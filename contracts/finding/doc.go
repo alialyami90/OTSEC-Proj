@@ -1,5 +1,7 @@
-// Package finding is contract C12, otsec.finding/0.1 (brief P4-3-A4),
-// approved by C1 together with C1 0.3 and C11 (D4-53).
+// Package finding is contract C12, otsec.finding/0.2 (brief P4-3-A4),
+// approved by C1 together with C1 0.3 and C11 (D4-53). 0.2 adds
+// identity.mismatch (D4-61, docs/phase4/D4-c12-0.2.md); this build still
+// reads 0.1 records (Known).
 //
 // A finding is the result of matching one asset's identity against one
 // advisory of the signed offline set (R9.1, R9.2). The classes and what
@@ -17,6 +19,12 @@
 //     (passive)", each written as one token).
 //   - The identity it was decided on: the product and version as read, the
 //     source (device-read, passive or operator) and its evidence IDs.
+//   - For an operator or passive identity that a device read refused (0.2),
+//     that read as identity.mismatch: its C2 invocation ID and the run's
+//     stored ended_at only. It is the reason the identity's evidence is
+//     stale, never evidence for the identity. No device text, such as the
+//     FID or model the refusing read reported, is ever in a finding; the
+//     node keeps that in identity.read (D4-54, D4-55).
 //   - Every further precondition the advisory names, by its name in the
 //     set, each evidenced, not met, or unread. An unread precondition is
 //     named, never dropped (V-M7).
@@ -36,6 +44,14 @@
 // and no change to this contract. Evidence that is no longer current is
 // kept and marked stale, so a finding that fell from confirmed names it
 // (D4-49 Q6 (ii)).
+//
+// # Every minor begins with its schema
+//
+// Every minor of this contract encodes schema as the record's first key,
+// with "/" unescaped, so a record begins {"schema":"otsec.finding/0.N". A
+// reader of any older build recognises a finding by that prefix, and then
+// refuses a minor that Known does not name, rather than skipping it (D4-61).
+// The Finding type keeps Schema as its first field for this.
 //
 // # A reclassification is a change, never an overwrite
 //
@@ -64,7 +80,12 @@
 // applicable-by-version, or on mitigated (D4-52, subject to C6); a
 // precondition not met only as D4-49 Q5 allows; mitigated exactly
 // when a mitigation is evidenced; and each not-applicable class only on its
-// identity source (device-read, operator, passive). Whether the evidence
+// identity source (device-read, operator, passive). For identity.mismatch
+// (0.2): only on an operator or passive identity, only with every piece of
+// the identity's evidence stale and the finding applicable-by-version with
+// firmware-version unread, and, in a 0.2 record, required whenever such an
+// identity is stale (revisited when R6.7 builds passive identities). A 0.1
+// record never carries it. Whether the evidence
 // was current (point 3 of "what confirmed needs") depends on records stored
 // after it, so it is the matcher's rule, tested over GT-ADV, not the
 // record's.
