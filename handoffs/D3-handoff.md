@@ -143,12 +143,4 @@ Use the GOROOT `gofmt`. The container's `/usr/local/go/bin/gofmt` is older and f
 - **Record fixed now:** HR-16 and HR-17 are named stale here (task 2), so the next agent does not take them for open designs.
 - **Proposed to D1:** record the owner's 2026-11-06 rule that agent messages go through the coordinator. Also record the wall-clock rule for socket waits under a simulated clock (#461) as a decision or failed approach. Today it is only in a commit message.
 
-Validated 2026-11-06 by a fresh read-only agent. Fixed after it:
-- the RFC blocker in `docs/verification.md` is marked stale;
-- the summary's D map is marked as still to come;
-- #479's file exists only on its branch;
-- the coordinator rule is now recorded;
-- the source of my `tests/tools/advisorysign/` ownership is cited;
-- D4-49 Q2 is no longer cited.
-
-The rest matched.
+Validated 2026-11-06 by a fresh read-only agent: fixed: the stale RFC blocker in `docs/verification.md`, the D map still to come, #479's file only on its branch, the coordinator rule recorded, the source of my `tests/tools/advisorysign/` ownership, and D4-49 Q2 no longer cited. The rest matched.
