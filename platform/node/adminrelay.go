@@ -99,17 +99,21 @@ var (
 // relayKinds are the kinds this node relays. The credential kinds are the
 // collector's whole operation. The node kinds (C7 0.5 and 0.6) are the
 // node's too: after the collector accepts one, the node does its part, from
-// the payload it sent (admin_actions.go).
+// the payload it sent (admin_actions.go). So is asset.clear_suspension (C7
+// 0.4, P4-H1): the collector lifts its own half on acceptance, and the node
+// then lifts its own.
 var relayKinds = map[authz.RequestKind]bool{
 	authz.KindCredentialInstall: true, authz.KindCredentialRevoke: true, authz.KindCredentialClearSusp: true,
+	authz.KindAssetClearSusp:      true,
 	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
 	authz.KindNodeChangeApproval: true, authz.KindNodeBaselineAck: true,
 }
 
 // nodeActKinds are the relayed kinds whose node part follows the
-// acceptance: the 0.5 node kinds, and since C7 0.6 the two configuration
-// kinds (admin_config.go).
+// acceptance: the 0.5 node kinds, since C7 0.6 the two configuration kinds
+// (admin_config.go), and the asset clear (P4-H1).
 var nodeActKinds = map[authz.RequestKind]bool{
+	authz.KindAssetClearSusp:      true,
 	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
 	authz.KindNodeChangeApproval: true, authz.KindNodeBaselineAck: true,
 }

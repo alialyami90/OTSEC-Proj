@@ -339,9 +339,8 @@ func TestRelayNeedsAnAdministratorsFile(t *testing.T) {
 	}
 }
 
-// What the node cannot relay is not sent: another schema, a kind this node
-// does not relay yet (the asset clear waits for C7 0.5), a payload of
-// another kind, a principal that is not a person, an unknown key in the
+// What the node cannot relay is not sent: another schema, a kind that is no
+// admin-signed kind, a payload of another kind, a principal that is not a person, an unknown key in the
 // file, and a misnamed file. Each raises the unread alarm once.
 func TestRelayRefusesWhatItCannotRelay(t *testing.T) {
 	c, dir, nc := suspendConfig(t)
@@ -356,7 +355,7 @@ func TestRelayRefusesWhatItCannotRelay(t *testing.T) {
 		"extra key": []byte(strings.Replace(string(good), `{"schema"`, `{"x":1,"schema"`, 1)),
 		"duplicate": []byte(strings.Replace(string(good), `{"schema"`, `{"kind":"credential.install","schema"`, 1)),
 		"kind": func() []byte {
-			b, _ := json.Marshal(adminRequestFile{Schema: AdminRequestFileSchema, Kind: authz.KindAssetClearSusp, Signed: signAdmin(t, authz.KindAssetClearSusp, nil)})
+			b, _ := json.Marshal(adminRequestFile{Schema: AdminRequestFileSchema, Kind: authz.KindRun, Signed: revoke})
 			return b
 		}(),
 		"payload kind": []byte(strings.Replace(string(good), `"kind":"credential.revoke"`, `"kind":"credential.install"`, 1)),

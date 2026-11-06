@@ -392,7 +392,7 @@ func health(ctx context.Context, cfg *node.Config, w io.Writer) error {
 	}
 	sort.Strings(clearing)
 	for _, a := range clearing {
-		fmt.Fprintf(w, "COLLECTOR STILL SUSPENDED %s: the node cleared ref %s, the collector has not accepted the clear yet; runs stay held, and %s stays in place until this line is gone\n", safe(a), safe(st.CollectorClears[a]), node.ClearSuspensionFileName)
+		fmt.Fprintf(w, "COLLECTOR STILL SUSPENDED %s: the node cleared ref %s from %s, the collector has not accepted the clear yet; runs stay held, and the file stays in place until this line is gone. The file clears only a lab-only asset: for any other the collector refuses it, and an administrator signs asset.clear_suspension instead\n", safe(a), safe(st.CollectorClears[a]), node.ClearSuspensionFileName)
 	}
 	for _, q := range st.Quarantine {
 		if q.Clearing {

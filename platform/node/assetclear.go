@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"maps"
+	"regexp"
+	"slices"
 	"strings"
 
 	"otsec.local/otsec/contracts/audit"
@@ -13,12 +15,21 @@ import (
 )
 
 // A clear has two halves (D2-15, A3 #117). The node's half is its own
-// asset.suspension_clear, from the administrator's clear-suspension.json
-// (checkClear). The collector holds the same suspension in its own state
-// and lifts it only for a C7 0.2 asset.clear_suspension that matches the
-// same file, which it reads itself. So after its own clear the node sends
-// that request, on its own behalf, and keeps the asset's runs held until
-// the collector accepts it: a run sent before would only be refused.
+// asset.suspension_clear. The collector holds the same suspension in its own
+// state. There are two ways to clear both:
+//
+//   - An administrator's signed asset.clear_suspension (P4-H1), relayed like
+//     any signed request. The collector lifts its half when it accepts it,
+//     and the node then records its own clear from the payload it sent
+//     (applySignedClear), naming the person and that it was signed. Nothing
+//     is owed to the collector after it.
+//   - On a lab-only node only, the unsigned clear-suspension.json
+//     (checkClear, unsigned.go). The collector lifts its half only for a C7
+//     0.2 asset.clear_suspension that matches the same file, which it reads
+//     itself, and refuses it for an asset with an endpoint that is not
+//     simulated (#508). So after its own clear the node sends that request,
+//     on its own behalf, and keeps the asset's runs held until the collector
+//     accepts it: a run sent before would only be refused.
 //
 // Which clears are still owed is read from the audit stream, like the
 // suspensions: an asset.suspension_clear opens one, and the collector's
@@ -35,6 +46,35 @@ const (
 
 	clearRequestPrefix = "clr:"
 )
+
+// signedClearDetail is the detail of the node's asset.suspension_clear for
+// a signed clear (applySignedClear), the only record that tells it from the
+// clear of the unsigned file. The node writes both, in its own chain.
+var signedClearDetail = regexp.MustCompile(`^cleared by admin-request-[a-z0-9-]{1,64}\.json \(signed by `)
+
+// applySignedClear records the node's clear of suspension b.Ref of asset
+// b.AssetID, from a signed asset.clear_suspension the collector accepted
+// (source names the file, the person and the decision). It holds settleMu
+// and the chain is folded. It clears only an exact asset and ref match, and
+// only a suspension already in the audit stream, as checkClear does.
+func (s *Scheduler) applySignedClear(ctx context.Context, b *authz.AssetClearSuspBody, source string) adminPart {
+	s.mu.Lock()
+	sp, held := s.susp[b.AssetID]
+	unwritten := slices.ContainsFunc(s.unaudited, func(u unaudited) bool { return u.assetID == b.AssetID && u.sp.Ref == b.Ref })
+	s.mu.Unlock()
+	switch {
+	case !held || sp.Ref != b.Ref:
+		return adminPart{state: partNothing, detail: "the node holds no suspension " + b.Ref + " of asset " + b.AssetID + ": it is cleared already, or was never held here"}
+	case unwritten:
+		return adminPart{state: partPending, detail: "suspension " + b.Ref + " is not yet in the audit stream; the clear waits until it is"}
+	}
+	if err := s.commitSuspensionRecord(ctx, audit.ActionAssetSuspensionClear, b.AssetID, sp, "", "cleared by "+source); err != nil {
+		return adminPart{state: partPending, detail: "the clear was not recorded in the audit stream, so not applied: " + err.Error()}
+	}
+	// It applies from the stream, as at a start.
+	s.settleLocked(ctx)
+	return adminPart{state: partDone}
+}
 
 // clearRequestID is a new request ID for the clear of the suspension ref.
 func clearRequestID(ref string) string {
@@ -55,8 +95,15 @@ func clearRequestID(ref string) string {
 // node-only suspension (reason operator) would break that: its clear would
 // replace a ref the collector still holds (A3 on #120), so such a path
 // must keep the owed refs per suspension.
+//
+// A signed clear opens nothing, since the collector accepted it before the
+// node recorded it, and it closes an owed clear of the same ref.
 func applyCollectorClear(m map[string]string, rec *audit.Record) bool {
 	switch {
+	case rec.Action == audit.ActionAssetSuspensionClear && rec.Target != nil && signedClearDetail.MatchString(rec.Detail):
+		if m[rec.Target.AssetID] == rec.CorrelationID {
+			delete(m, rec.Target.AssetID)
+		}
 	case rec.Action == audit.ActionAssetSuspensionClear && rec.Target != nil:
 		m[rec.Target.AssetID] = rec.CorrelationID
 	case rec.Action == audit.ActionCollectorRequest && rec.Outcome == audit.OutcomeAllowed &&

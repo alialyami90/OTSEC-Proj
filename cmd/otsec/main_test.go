@@ -358,7 +358,7 @@ func TestHealthShowsCollectorStillSuspended(t *testing.T) {
 	st.SetCollectorClears(map[string]string{relayID: "inv-run-1"})
 	st.Write("site-a-node1")
 	out, errs, code := otsec(t, "health", "-config", path)
-	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1, the collector has not accepted the clear yet; runs stay held, and " + node.ClearSuspensionFileName + " stays in place until this line is gone"
+	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1 from " + node.ClearSuspensionFileName + ", the collector has not accepted the clear yet; runs stay held, and the file stays in place until this line is gone. The file clears only a lab-only asset: for any other the collector refuses it, and an administrator signs asset.clear_suspension instead"
 	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("health: %d %s\n%s", code, errs, out)
 	}

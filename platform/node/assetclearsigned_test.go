@@ -1,0 +1,211 @@
+package node
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/audit"
+	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/modules/security/collectorclient"
+)
+
+// uuidSuspending is suspendingCollector with C2 invocation IDs, which a
+// signed clear's ref must be (C7).
+func uuidSuspending(t *testing.T) *fakeCollector {
+	t.Helper()
+	in := suspendingCollector(t, false)
+	n := 0
+	return &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		r, err := in.answer(req)
+		if r.Outcome != nil {
+			n++
+			id := fmt.Sprintf("6f1c2b9e-3d4a-4c1e-9b7a-%012d", n)
+			r.Reply.InvocationID, r.Outcome.InvocationID, r.Outcome.Result.InvocationID = id, id, id
+		}
+		return r, err
+	}}
+}
+
+// signedClearNode is a suspendConfig node whose collector is an adminMux,
+// with the relay asset suspended by one run, and a function that leaves a
+// signed clear of a ref in admin_dir.
+type signedClearNode struct {
+	t   *testing.T
+	s   *Scheduler
+	r   *Runtime
+	st  *Status
+	run *fakeCollector
+	mux *adminMux
+	ref string
+}
+
+func newSignedClearNode(t *testing.T, target asset.EvidenceClass) (*signedClearNode, func(name string, n int, ref string)) {
+	t.Helper()
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	t.Cleanup(func() { r.Close() })
+	run := uuidSuspending(t)
+	mux := &adminMux{run: run, admin: newAdminCollector()}
+	mux.admin.installKey = kid(testInstallKey)
+	s := newScheduler(t, r, mux)
+	setTargets(t, c, target)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	if ref == "" {
+		t.Fatal("the run did not suspend the asset")
+	}
+	sign := func(name string, n int, ref string) {
+		env := signN(t, authz.KindAssetClearSusp, n, func(p *authz.AdminRequest) {
+			p.AssetClearSusp.Ref, p.InstallKeyID = ref, kid(testInstallKey)
+		})
+		writeAdminFile(t, nc, name, authz.KindAssetClearSusp, env)
+	}
+	return &signedClearNode{t: t, s: s, r: r, st: st, run: run, mux: mux, ref: ref}, sign
+}
+
+func (n *signedClearNode) clears() []*audit.Record {
+	_, clears := suspensionRecords(n.t, n.r)
+	return clears
+}
+
+// An administrator's signed asset.clear_suspension is relayed to the
+// collector, and on its acceptance the node records asset.suspension_clear
+// naming the person and that it was signed (P4-H1). The collector lifted its
+// own half when it accepted, so nothing is owed to it: the next run is sent
+// with no clear request first. Relayed again, it records nothing more. This
+// holds on a lab-only node and on one with a device endpoint.
+func TestSignedAssetClear(t *testing.T) {
+	for name, target := range map[string]asset.EvidenceClass{"lab": asset.Simulated, "off-lab": asset.DeviceObserved} {
+		t.Run(name, func(t *testing.T) {
+			n, sign := newSignedClearNode(t, target)
+			sign("admin-request-clear.json", 1, n.ref)
+			n.s.relayAdmin(bg)
+			cl := n.clears()
+			if len(cl) != 1 || cl[0].CorrelationID != n.ref || cl[0].Target.AssetID != relayID ||
+				!strings.Contains(cl[0].Detail, "signed by "+relayAdmin.ID) || !strings.Contains(cl[0].Detail, "admin-request-clear.json") ||
+				strings.Contains(cl[0].Detail, "unsigned") {
+				t.Fatalf("asset.suspension_clear records %+v", cl)
+			}
+			if _, held := n.s.Suspensions()[relayID]; held {
+				t.Fatal("the asset is still suspended at the node")
+			}
+			if owed := n.s.CollectorClears(); len(owed) != 0 {
+				t.Fatalf("clears owed to the collector after a signed clear: %v", owed)
+			}
+			if shown := adminShown(n.st); len(shown) != 1 || shown[0].NodePart != partDone {
+				t.Fatalf("admin requests in status %+v", shown)
+			}
+			before := n.run.n()
+			if rep := n.s.RunOnce(bg, 0); rep.Alarm == AlarmAssetSuspended || n.run.n() != before+1 || n.run.nClears() != 0 {
+				t.Fatalf("the run after a signed clear: %+v, %d runs, %d unsigned clears sent", rep, n.run.n()-before, n.run.nClears())
+			}
+			n.s.relayAdmin(bg)
+			if len(n.clears()) != 1 {
+				t.Fatalf("%d clear records after relaying again", len(n.clears()))
+			}
+		})
+	}
+}
+
+// A signed clear naming another suspension than the one the node holds
+// clears nothing at the node.
+func TestSignedAssetClearOfAnotherRef(t *testing.T) {
+	n, sign := newSignedClearNode(t, asset.DeviceObserved)
+	sign("admin-request-clear.json", 1, "6f1c2b9e-3d4a-4c1e-9b7a-999999999999")
+	n.s.relayAdmin(bg)
+	if shown := adminShown(n.st); len(shown) != 1 || shown[0].State != "accepted" || shown[0].NodePart != partNothing {
+		t.Fatalf("admin requests in status %+v", shown)
+	}
+	if len(n.clears()) != 0 {
+		t.Fatalf("a clear of another ref was recorded: %+v", n.clears())
+	}
+	if _, held := n.s.Suspensions()[relayID]; !held {
+		t.Fatal("the asset is no longer suspended")
+	}
+}
+
+// On a node with a device endpoint, clear-suspension.json is refused in
+// code: unsigned-admin-file-refused once per file content, nothing cleared,
+// and no clear sent to the collector. On the lab node it is acted on, the
+// record says the file was unsigned, and unsigned-admin-file-accepted names
+// it (P4-H1).
+func TestUnsignedAssetClearRefusedOffLab(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	col := suspendingCollector(t, false)
+	s := newScheduler(t, r, col)
+	setTargets(t, c, asset.DeviceObserved)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	writeClear(t, nc, relayID, ref)
+	for range 2 {
+		if rep := s.RunOnce(bg, 0); rep.Alarm != AlarmAssetSuspended {
+			t.Fatalf("an unsigned clear was acted on off-lab: %+v", rep)
+		}
+	}
+	if _, clears := suspensionRecords(t, r); len(clears) != 0 || col.nClears() != 0 {
+		t.Fatalf("off-lab: %d clear records, %d clears sent", len(clears), col.nClears())
+	}
+	count := func(code string) (n int, detail string) {
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == code {
+				n, detail = n+1, a.Detail
+			}
+		}
+		return
+	}
+	if k, d := count(AlarmUnsignedAdminFileRefused); k != 1 || !strings.Contains(d, ClearSuspensionFileName) || !strings.Contains(d, string(authz.KindAssetClearSusp)) {
+		t.Fatalf("%d refusal alarms, the last %q", k, d)
+	}
+	if k, _ := count(AlarmUnsignedAdminFileAccepted); k != 0 {
+		t.Fatal("accepted alarm raised for a refused file")
+	}
+
+	setTargets(t, c, asset.Simulated)
+	s.RunOnce(bg, 0)
+	_, clears := suspensionRecords(t, r)
+	if len(clears) != 1 || !strings.Contains(clears[0].Detail, ClearSuspensionFileName+unsignedSuffix) {
+		t.Fatalf("the lab node's record does not name the file as unsigned: %+v", clears)
+	}
+	if k, d := count(AlarmUnsignedAdminFileAccepted); k != 1 || !strings.Contains(d, ClearSuspensionFileName) {
+		t.Fatalf("%d accepted alarms, the last %q", k, d)
+	}
+}
+
+// On a lab-only node, a signed request and clear-suspension.json for the
+// same clear: only the signed one is acted on, and the file raises
+// unsigned-admin-file-ignored.
+func TestSignedAssetClearWinsOverTheFile(t *testing.T) {
+	c, dir, nc := suspendConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	run := uuidSuspending(t)
+	mux := &adminMux{run: run, admin: newAdminCollector()}
+	mux.admin.installKey = kid(testInstallKey)
+	s := newScheduler(t, r, mux)
+	s.RunOnce(bg, 0)
+	ref := s.Suspensions()[relayID].Ref
+	env := signN(t, authz.KindAssetClearSusp, 1, func(p *authz.AdminRequest) {
+		p.AssetClearSusp.Ref, p.InstallKeyID = ref, kid(testInstallKey)
+	})
+	writeAdminFile(t, nc, "admin-request-clear.json", authz.KindAssetClearSusp, env)
+	writeClear(t, nc, relayID, ref)
+	s.checkClear(bg)
+	s.relayAdmin(bg)
+	_, clears := suspensionRecords(t, r)
+	if len(clears) != 1 || strings.Contains(clears[0].Detail, "unsigned") || !strings.Contains(clears[0].Detail, "admin-request-clear.json") {
+		t.Fatalf("clear records %+v", clears)
+	}
+	ignored := 0
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == AlarmUnsignedAdminFileIgnored && strings.Contains(a.Detail, ClearSuspensionFileName) {
+			ignored++
+		}
+	}
+	if ignored != 1 {
+		t.Fatalf("%d ignored alarms for the file", ignored)
+	}
+}
