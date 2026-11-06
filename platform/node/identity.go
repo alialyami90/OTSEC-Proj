@@ -84,12 +84,36 @@ type identityPiece struct {
 	Length       int64  `json:"length"`
 }
 
-// identityReadDoc is an otsec.identityread/0.1 document.
+// identityReadDoc is an otsec.identityread/0.1 document. InvocationID and
+// ReadAt are always the last confirming read, so removing older reads never
+// removes it (C6 on #455). Both are empty only in a document that carries a
+// mismatch for an asset no read has confirmed yet (C1 on #458).
 type identityReadDoc struct {
 	Schema       string `json:"schema"`
 	AssetID      string `json:"asset_id"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	ReadAt       string `json:"read_at,omitempty"`
+	// Mismatch is a read after the confirming one that refused the
+	// identity (D4-54, a C5 0.8 amendment). It is set only from such a read
+	// and is cleared by the next confirming read, which writes a document
+	// without it.
+	Mismatch *identityMismatch `json:"mismatch,omitempty"`
+}
+
+// identityMismatch is one read that refused the asset's identity: SEL
+// refused.identity_mismatch, or SNMP's authenticated
+// failed.identity_mismatch (D4-54). FID is the FID the device reported:
+// device text, at most C1's value bound, kept only so that the matcher can
+// tell whether an entry names it, and never adopted as the identity.
+type identityMismatch struct {
 	InvocationID string `json:"invocation_id"`
 	ReadAt       string `json:"read_at"`
+	FID          string `json:"fid,omitempty"`
+	// DeclaredSHA256 is set only on an asset whose identity is its
+	// declaration: the hash of the declared identity the read contradicted.
+	// The mismatch counts until the declaration's hash differs from it
+	// (C1 on #458, D4-55).
+	DeclaredSHA256 string `json:"declared_sha256,omitempty"`
 }
 
 // decodeExact decodes b into v with no unknown field and no trailing data,
@@ -212,10 +236,26 @@ func decodeIdentityRead(document []byte) (identityReadDoc, error) {
 		return d, fmt.Errorf("identity read: schema %q", d.Schema)
 	case !c1.ValidAssetID(d.AssetID):
 		return d, fmt.Errorf("identity read: asset_id %q", d.AssetID)
+	case d.InvocationID == "" && d.ReadAt == "" && d.Mismatch == nil:
+		return d, errors.New("identity read: no confirming read and no mismatch")
+	case d.InvocationID == "" && d.ReadAt == "":
+		// A mismatch on an asset no read has confirmed (C1 on #458).
 	case d.InvocationID == "":
 		return d, errors.New("identity read: invocation_id is empty")
 	case !c1.ValidTime(d.ReadAt):
 		return d, fmt.Errorf("identity read: read_at %q is not an RFC 3339 UTC time", d.ReadAt)
+	}
+	if m := d.Mismatch; m != nil {
+		switch {
+		case m.InvocationID == "":
+			return d, errors.New("identity read: mismatch.invocation_id is empty")
+		case !c1.ValidTime(m.ReadAt):
+			return d, fmt.Errorf("identity read: mismatch.read_at %q is not an RFC 3339 UTC time", m.ReadAt)
+		case len(m.FID) > c1.MaxValueBytes:
+			return d, fmt.Errorf("identity read: mismatch.fid is over %d bytes", c1.MaxValueBytes)
+		case m.DeclaredSHA256 != "" && !sha256Hex.MatchString(m.DeclaredSHA256):
+			return d, fmt.Errorf("identity read: mismatch.declared_sha256 %q is not 64 lowercase hex digits", m.DeclaredSHA256)
+		}
 	}
 	return d, nil
 }
@@ -248,6 +288,10 @@ type identityState struct {
 	storedAt time.Time
 	reads    []c5.Seq // the identity.read records in the stream, oldest first
 	last     *identityReadDoc
+	// unstored is set when a run's identity outcome was not stored, and
+	// cleared when one is. The matcher skips the asset meanwhile, since it
+	// would evaluate without what the run read (C6 on #458).
+	unstored bool
 	removed  uint64 // identity.read records removed in this process
 }
 
@@ -368,9 +412,15 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 	}
 	st := s.identityOf(ctx, col.AssetID)
 	if st == nil {
+		s.forgetEvaluation(col.AssetID)
+		return
+	}
+	if s.mismatchRead(col, res) {
+		s.storeMismatch(ctx, col, res, st)
 		return
 	}
 	notStored := func(err error) {
+		s.forgetEvaluation(col.AssetID)
 		s.raiseOnceKey("identity "+col.AssetID, col.AssetID, AlarmIdentityNotStored, "run "+res.InvocationID+" read an identity that was not stored: "+err.Error())
 	}
 	declared, _ := s.rt.cfg.Asset(col.AssetID)
@@ -398,6 +448,7 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 			if !errors.As(err, &ce) {
 				notStored(err)
 			}
+			s.forgetEvaluation(col.AssetID)
 			return
 		}
 		prev := st.doc
@@ -411,23 +462,71 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 		}
 	}
 	rd := identityReadDoc{Schema: IdentityReadSchema, AssetID: col.AssetID, InvocationID: res.InvocationID, ReadAt: res.EndedAt}
-	b, err := json.Marshal(rd)
-	if err != nil {
-		notStored(err)
-		return
+	s.storeRead(ctx, col.AssetID, st, rd, "run "+res.InvocationID+" read an identity that was not stored: ")
+}
+
+// mismatchRead reports whether res is a read that refused the asset's
+// identity and so feeds the matcher's LatestMismatch: SEL
+// refused.identity_mismatch, or an SNMP poll's authenticated
+// failed.identity_mismatch. An SEL failed.identity_mismatch (the SER header
+// serial), an unauthenticated refused.engine_id_mismatch and
+// failed.snmp_fid_unreadable never do (D4-54).
+func (s *Scheduler) mismatchRead(col Collection, res adapter.Result) bool {
+	if res.Error == nil || res.Identity.Result != adapter.IdentityMismatch {
+		return false
 	}
-	seq, err := s.storeItem3(ctx, stream, b, nil)
-	if err != nil {
-		var ce *ceilingError
-		if !errors.As(err, &ce) {
-			notStored(err)
+	if s.rt.cfg.snmpEntry(col) {
+		return res.Error.Code == adapter.FailedIdentityMismatchLate
+	}
+	return res.Error.Code == adapter.RefusedIdentityMismatch
+}
+
+// storeMismatch stores an identity.read that keeps the last confirming read
+// and adds the mismatch (D4-54). An asset no read has confirmed, whose
+// identity is its declaration, keeps the mismatch with no latest-read part,
+// since the matcher reads it under an operator identity too (C1 on #458).
+// Under an operator identity the mismatch names the declaration it
+// contradicted, by its hash.
+func (s *Scheduler) storeMismatch(ctx context.Context, col Collection, res adapter.Result, st *identityState) {
+	rd := identityReadDoc{Schema: IdentityReadSchema, AssetID: col.AssetID}
+	switch {
+	case st.last != nil:
+		rd.InvocationID, rd.ReadAt = st.last.InvocationID, st.last.ReadAt
+	case st.doc != nil:
+		rd.InvocationID, rd.ReadAt = st.doc.InvocationID, st.doc.ReadAt
+	}
+	rd.Mismatch = &identityMismatch{InvocationID: res.InvocationID, ReadAt: res.EndedAt}
+	for _, it := range res.Identity.Items {
+		if it.Name == c1.AttrFirmwareID && it.Observed != it.Expected && len(it.Observed) <= c1.MaxValueBytes {
+			rd.Mismatch.FID = it.Observed
 		}
-		return
 	}
-	s.clearQuietKey("identity " + col.AssetID)
-	st.reads, st.last = append(st.reads, seq), &rd
-	s.removeOlderReads(ctx, col.AssetID, st)
-	s.publishIdentity()
+	if _, _, read := deviceReadFID(st); !read {
+		declared, _ := s.rt.cfg.Asset(col.AssetID)
+		rd.Mismatch.DeclaredSHA256 = declaredSum(declared)
+	}
+	s.storeRead(ctx, col.AssetID, st, rd, "run "+res.InvocationID+" refused the identity, and the mismatch was not stored: ")
+}
+
+// storeRead stores one identity.read through the ceiling and removes the
+// older ones.
+func (s *Scheduler) storeRead(ctx context.Context, assetID string, st *identityState, rd identityReadDoc, what string) {
+	b, err := json.Marshal(rd)
+	if err == nil {
+		var seq c5.Seq
+		if seq, err = s.storeItem3(ctx, ConfigStream(assetID), b, nil); err == nil {
+			s.clearQuietKey("identity " + assetID)
+			st.reads, st.last, st.unstored = append(st.reads, seq), &rd, false
+			s.removeOlderReads(ctx, assetID, st)
+			s.publishIdentity()
+			return
+		}
+	}
+	s.forgetEvaluation(assetID)
+	var ce *ceilingError
+	if !errors.As(err, &ce) {
+		s.raiseOnceKey("identity "+assetID, assetID, AlarmIdentityNotStored, what+err.Error())
+	}
 }
 
 // removeOlderReads removes every identity.read but the newest, in steps of
@@ -617,6 +716,9 @@ type IdentityStatus struct {
 	StoredAt   time.Time `json:"stored_at,omitzero"`
 	// LastRead is the last run that confirmed it.
 	LastRead *IdentityReadStatus `json:"last_read,omitempty"`
+	// Mismatch is a later run that refused the identity, until a run
+	// confirms it again.
+	Mismatch *IdentityReadStatus `json:"mismatch,omitempty"`
 	// ReadsRemoved counts the older identity.read records removed in this
 	// process.
 	ReadsRemoved uint64 `json:"reads_removed,omitempty"`
@@ -637,7 +739,12 @@ func (s *Scheduler) publishIdentity() {
 			is.Attributes, is.EvidenceID, is.StoredAt = st.doc.Asset.Attributes, st.doc.InvocationID, st.storedAt
 		}
 		if st.last != nil {
-			is.LastRead = &IdentityReadStatus{InvocationID: st.last.InvocationID, At: st.last.ReadAt}
+			if st.last.InvocationID != "" {
+				is.LastRead = &IdentityReadStatus{InvocationID: st.last.InvocationID, At: st.last.ReadAt}
+			}
+			if m := st.last.Mismatch; m != nil {
+				is.Mismatch = &IdentityReadStatus{InvocationID: m.InvocationID, At: m.ReadAt}
+			}
 		}
 		is.ReadsRemoved = st.removed
 		m[id] = is

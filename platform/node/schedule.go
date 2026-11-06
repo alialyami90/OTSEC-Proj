@@ -111,6 +111,13 @@ type Scheduler struct {
 	// idents is each asset's identity records as read or written, with
 	// asset on (identity.go).
 	idents map[string]*identityState
+	// finds is each asset's findings and matcher inputs as read
+	// (findings.go), declared the newest declared-identity record of each
+	// asset once read, and evalAll asks for every asset to be evaluated,
+	// as when a set comes into use.
+	finds    map[string]*findingsState
+	declared map[string]declaredRecord
+	evalAll  bool
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -122,7 +129,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
 		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{},
 		configParts: map[string]audit.Outcome{}, item3: item3Store{refused: map[string]uint64{}}, adv: newAdvisoryRun(rt.cfg),
-		idents: map[string]*identityState{}}
+		idents: map[string]*identityState{}, finds: map[string]*findingsState{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -165,6 +172,8 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	s.publishAssetStore()
 	s.startIdentity(ctx)
 	s.startAdvisory(ctx)
+	s.startDeclared(ctx)
+	s.evaluateAll(ctx)
 	return s, nil
 }
 
@@ -364,6 +373,9 @@ func (s *Scheduler) runOnceEnded(ctx context.Context, i int) (Report, time.Time)
 		// status shows the collector's numbering after this run, not only
 		// before the next one (A6 on #118).
 		s.settle(ctx)
+		// Every run ends in an evaluation, one that commits nothing too
+		// (the note section 4, D4-53), before status shows the run.
+		s.evaluate(ctx, s.rt.cfg.Schedule[i].AssetID)
 		s.recordResult(s.rt.cfg.Schedule[i].AssetID, rep)
 		s.rt.opt.Status.Write(string(s.rt.cfg.NodeID))
 	}

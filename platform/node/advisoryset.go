@@ -175,6 +175,9 @@ func (s *Scheduler) stepAdvisory(ctx context.Context) {
 		s.writeInstalled(ctx)
 	}
 	s.readSetFile(ctx)
+	if s.evalAll {
+		s.evaluateAll(ctx)
+	}
 	s.publishApplicability()
 }
 
@@ -426,6 +429,7 @@ func (s *Scheduler) writeInstalled(ctx context.Context) {
 func (s *Scheduler) useSet(ctx context.Context, v *advisory.Verified, since time.Time) {
 	a := s.adv
 	a.inUse, a.since, a.inUseFile = v, since.UTC(), v.FileSHA256
+	s.evalAll = true
 	s.clearQuietKey(AlarmApplicabilityNoSet)
 	s.publishApplicability()
 }
@@ -527,7 +531,7 @@ func (s *Scheduler) publishApplicability() {
 	if a == nil {
 		return
 	}
-	st := &ApplicabilityStatus{StoredSets: a.stored}
+	st := &ApplicabilityStatus{StoredSets: a.stored, Assets: s.findingsStatus()}
 	if v := a.inUse; v != nil {
 		st.SetInUse = &AdvisorySetStatus{SetID: v.Set.SetID, Version: v.Set.Version, IssuedAt: v.Set.IssuedAt,
 			PayloadSHA256: hex.EncodeToString(v.PayloadSHA256[:]), KeyID: v.KeyID, InUseSince: a.since}
