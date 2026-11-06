@@ -68,6 +68,7 @@ A `schedule[]` entry is checked as follows:
 - the endpoint exists and is not inbound Syslog;
 - the operation is well formed;
 - the interval is at least 60 s;
+- an `snmpv3` endpoint needs `asset` on;
 - a configuration read's asset has a profile with a C9 rule (`ConfigRules`: `sel-751-ascii` reads under `sel-751-sho/2`).
 
 The collector checks the operation itself against the signed register. The node only names it.
@@ -197,7 +198,7 @@ A crash between the record and a hold is repaired by the start-up reconcile. Its
 
 ## Item 3: the asset module and R9
 
-The design is `docs/phase4/C5-asset-node.md`, and the store side is C5 0.8 (`docs/phase4/C5-c5-0.8.md`). Built so far: the two switches, the floor terms, the ceiling, and the advisory set's intake. Identity records, latest reads, SNMP schedule entries and findings come in later changes.
+The design is `docs/phase4/C5-asset-node.md`, and the store side is C5 0.8 (`docs/phase4/C5-c5-0.8.md`). Built so far: the two switches, the floor terms, the ceiling, the advisory set's intake, identity records, latest reads and SNMP schedule entries. Findings and the matcher's evaluation come in a later change.
 
 **The switches.** `asset` and `applicability` are top-level sections, and an absent section is off. There are three supported combinations: both off, which is the node as before; `asset` alone; and both on. `applicability` alone is refused at load (D4-50). With `applicability` off, the node adds no `advisory` stream, never reads the set file, and adds no status section or alarm.
 
@@ -220,6 +221,17 @@ The design is `docs/phase4/C5-asset-node.md`, and the store side is C5 0.8 (`doc
   - A set whose key is revoked or no longer pinned is not used, and no older set is used in its place. `advisory-set-refused` names the code, `applicability-no-set` stands, and the floor stays, so the next set must be newer.
 - **More sets than the floor counts.** If the quota is below the floor plus every stored set beyond the two the floor counts, the node raises `advisory-sets-over-floor` at start and still runs.
 - **Status.** `applicability` in status shows the set in use (set ID, version, `issued_at`, payload SHA-256, key ID, and when it came into use), the last refusal, and how many sets are stored. `applicability-no-set` is raised once while no set is in use.
+
+**Identity records** (the note section 2, C5 0.8 section 1), with `asset` on. After a run's own records are committed, the node takes the identity the run read through `modules/asset` (`Apply`). A run that did not collect, or whose identity did not match, changes nothing. A run whose result the node quarantined changes nothing either.
+- **What is stored.** An identity record, `otsec.identity/0.1`, is stored at the asset's first identity and then only when an attribute's value or source changes. It holds the asset's C1 0.3 record as `Apply` left it, the run that stored it (its evidence ID) and when that run ended, the SHA-256 of the asset's previous identity record, and `pieces`: the stretches of each run's transcript that the observations' spans point into. Its capture is those bytes, so the record keeps the device's bytes after `ser/<asset>` is pruned. Record and capture together are at most 64 KiB.
+- **First reads are kept.** The record is built from the declared record, with the stored record's device reads put back, so a value read again keeps the run that first read it, its span and its bytes, and a value this run did not read stays. A device read written in the node's configuration is dropped first: the node holds no bytes for it (EP-2). The operator's observations come from the configuration as it is now, so a changed declaration is a change too.
+- **Every applied run** then stores an `identity.read`, `otsec.identityread/0.1`: the asset, the run's invocation ID and when it ended (C12's `identity.latest_read`). The older ones are removed in the same step, so the stream keeps one. A removal that fails raises `identity-read-not-removed` once and is tried again after the next read.
+- **Through the ceiling.** Both records go through `storeItem3`. If the identity record is not stored, at the ceiling or for any other reason, no `identity.read` is stored for that run, because it would say the store holds an identity it does not.
+- **Alarms.** A stored change raises `identity-changed` with an `identity.changed` health event. Both name the attributes that changed and both records' evidence IDs, never a value. An identity that could not be stored or read back raises `identity-not-stored` once per asset until a run stores one. A refusal at the ceiling raises `asset-store-full` instead.
+- **Status.** `identity` in status gives each scheduled asset's attributes with their values and sources, the evidence ID and time of the newest record, the last run that confirmed it, and the `identity.read` records removed in this process. It is read from the store at start, so unlike `assets` it is there before the first run.
+- **Order within a run.** The identity is stored after the run's SER rows, or its configuration snapshot and comparison. A crash in between loses only that run's identity, and the next run reads it again.
+
+**SNMP schedule entries** (the note section 5). A schedule entry whose endpoint's transport is `snmpv3` is an SNMP poll. It is the asset module's, so it is refused at load with `asset` off, and with it GT-MIB sees no PDU (V-M1 (a)). It is an ordinary schedule entry otherwise: the same 60 s floor, the same quiet window per asset, the same serial runs. The collector checks the operation against the signed register and enforces its limits, and the node only names it. The node does not check the C1 profile's `min_interval_ms` at load, because it holds only the profile's reference; the collector refuses a run that is too soon (`refused.rate_limited`). A poll's run is committed as one `collection.run` health event that keeps the transcript, with no SER rows, and its identity is stored as above.
 
 ## Slow commits (B6 #294, B1's question)
 

@@ -417,6 +417,10 @@ func (c *Config) check() error {
 				fail("%s: asset %s has no endpoint %q", p, s.AssetID, s.Endpoint)
 			} else if ep.Transport.Inbound() {
 				fail("%s: endpoint %q is inbound Syslog, not a collector endpoint", p, s.Endpoint)
+			} else if ep.Transport == asset.SNMPv3 && c.AssetModule == nil {
+				// SNMP reads are the asset module's (the note, section 1):
+				// with it off, none is scheduled, so GT-MIB sees no PDU.
+				fail("%s: endpoint %q is snmpv3, and SNMP reads are the asset module's; set asset to schedule them", p, s.Endpoint)
 			}
 		}
 		if !operationPattern.MatchString(s.Operation) {

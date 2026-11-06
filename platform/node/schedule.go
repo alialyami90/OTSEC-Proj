@@ -108,6 +108,9 @@ type Scheduler struct {
 	// advisory set's, nil with applicability off (advisoryset.go).
 	item3 item3Store
 	adv   *advisoryRun
+	// idents is each asset's identity records as read or written, with
+	// asset on (identity.go).
+	idents map[string]*identityState
 }
 
 // NewScheduler returns a scheduler over rt. It reads every asset's
@@ -118,7 +121,8 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	s := &Scheduler{rt: rt, c: c, now: rt.opt.Now, newID: newRequestID, halted: map[string]string{}, quiet: map[string]bool{},
 		susp: map[string]asset.Suspension{}, collClear: map[string]string{}, results: map[string]AssetResult{}, haltUnread: map[string]bool{},
 		quar: map[string]*quarantineEntry{}, quarDone: map[string]bool{}, relayed: map[string]relayEntry{}, missed: map[string]*missedRun{},
-		configParts: map[string]audit.Outcome{}, item3: item3Store{refused: map[string]uint64{}}, adv: newAdvisoryRun(rt.cfg)}
+		configParts: map[string]audit.Outcome{}, item3: item3Store{refused: map[string]uint64{}}, adv: newAdvisoryRun(rt.cfg),
+		idents: map[string]*identityState{}}
 	if err := s.loadSuspensions(ctx); err != nil {
 		// Unknown suspensions: any asset may hold one (A1).
 		s.node = AlarmSuspensionsUnknown
@@ -159,6 +163,7 @@ func NewScheduler(ctx context.Context, rt *Runtime, c Collector) (*Scheduler, er
 	}
 	s.events = ev
 	s.publishAssetStore()
+	s.startIdentity(ctx)
 	s.startAdvisory(ctx)
 	return s, nil
 }
@@ -501,10 +506,20 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		return s.alarm(ctx, rep, col.AssetID, AlarmOutcomeUnknown, "no outcome arrived for the accepted run")
 	}
 	rep.Outcome = "ok"
-	if col.ReadsConfiguration() {
-		return s.commitConfigRead(ctx, rep, col, resp.Outcome, resp.Reply.CollectorSeq)
+	switch {
+	case s.rt.cfg.snmpEntry(col):
+		rep = s.commitSNMP(ctx, rep, col, resp.Outcome)
+	case col.ReadsConfiguration():
+		rep = s.commitConfigRead(ctx, rep, col, resp.Outcome, resp.Reply.CollectorSeq)
+	default:
+		rep = s.commitResult(ctx, rep, col, resp.Outcome)
 	}
-	return s.commitResult(ctx, rep, col, resp.Outcome)
+	if rep.Outcome == "ok" {
+		// After the run's own records, so an identity is taken only from a
+		// result the node kept (identity.go).
+		s.storeIdentity(ctx, col, resp.Outcome.Result)
+	}
+	return rep
 }
 
 // commitResult normalizes a checked outcome and commits it: the SER events
