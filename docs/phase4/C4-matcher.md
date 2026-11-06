@@ -1,6 +1,6 @@
 # The applicability matcher: design note (P4-3-A4)
 
-Owner: C4. Date: 2026-11-05. Status: **draft for review** under Phase 4 item 3 Stage A (D4-48). Reviewers: C6 and C2. C1 approves it together with C12, C11 and C1 0.3. Evidence class: `desk`. No matcher code exists, and none is written in this stage.
+Owner: C4. Date: 2026-11-05. Status: approved with C12 (D4-53). The matcher is built in `modules/applicability/` (P4-3-C4), and section 11 lists where the code settles points this note left open. Evidence class: `desk`.
 
 This note covers how an asset's identity is matched against an entry of the signed advisory set to give a finding:
 - the set is C11, `otsec.advisory/0.1` (C3's draft, `docs/phase4/C3-c11-advisory.md`, #437);
@@ -79,6 +79,8 @@ C11 ranges are half-open: `introduced` is inclusive, `fixed` is exclusive, and e
 - **No endpoint.** A range with neither endpoint covers every version of the product, including FIDs the matcher cannot parse (below).
 - **Exact versions.** `versions` lists full FIDs, compared as whole strings.
 
+Under C11's other scheme, `exact`, the matcher compares each `versions` item with the whole `firmware_id`, and a range can only be the empty one, which covers every version. Nothing is parsed, so no FID is unplaceable under `exact`.
+
 C11's `Validate` should refuse any other shape. An advisory published as "R302 and earlier" is then written by the set's author as one range per branch, citing the publisher, and the matcher never guesses the order.
 
 **Inside or outside.** A parsed FID is inside when either of these holds:
@@ -87,6 +89,8 @@ C11's `Validate` should refuse any other shape. An advisory published as "R302 a
 - a range with no endpoint covers the product.
 
 It is outside when the product is named and none of these holds. That includes the case where the entry has no range on the FID's branch: an entry that names a product but not a branch does not affect that branch. So C11 entries must list every affected branch. C3 and C6 should check that this reading suits the advisories they cite.
+
+**For set authors** (C1 on #451): an entry names each model as the device reports it, including the SEL-2731 and SEL-2741 mode letter (`SEL-2731M`, `SEL-2741M`). An entry that affects two models lists both.
 
 ### A FID that cannot be placed
 
@@ -173,7 +177,9 @@ Point 3 of "what `confirmed` needs" says evidence is current when no later read 
   - its record is the asset's latest identity record, so no later read has contradicted it;
   - the latest read of the same value is later than the latest configuration change retrieved for the asset (D4-49 Q6 (iv)).
 
-  A finding cites the record's invocation ID as its evidence, because C5 keeps those bytes. It shows the latest confirming read as `identity.latest_read`, so the currency check can be seen. `confirmed` requires that field. The SEL-751 reads `ID` at Level 0 on every run (the FID gate), so after a change the next run makes the identity current again. A later read with another value contradicts the record and starts a new one, and the matcher evaluates on the new value. That includes a `refused.identity_mismatch`, whose observed FID is a device read.
+  A finding cites the record's invocation ID as its evidence, because C5 keeps those bytes. It shows the latest confirming read as `identity.latest_read`, so the currency check can be seen. `confirmed` requires that field. The SEL-751 reads `ID` at Level 0 on every run (the FID gate), so after a change the next run makes the identity current again. A later matching read with another value (a firmware upgrade on the same device, through the FID gate) starts a new record, and the matcher evaluates on the new value.
+
+  **An identity mismatch adopts nothing** (C1 on #445). A `refused.identity_mismatch` on the SEL-751, or an authenticated `failed.identity_mismatch` on SNMPv3, may come from another device, so `modules/asset` writes no identity record from it. It still contradicts the evidence: the node passes the latest mismatch read to the matcher, and the identity is not current until a later read confirms it. The mismatch contradicts the FID on record, not only its age, so that FID can no longer place the asset outside a range or clear of a precondition (C6 on #451). Every entry that names the product is then `applicable-by-version`, with `firmware-version` unread, the identity evidence marked `stale`, and the mismatch read cited beside it, as for an unplaceable FID. So is an entry that names the model the mismatch read reported, the product part of its FID: that read is never adopted, but it is device-read evidence of what answered (C1 on #451). An entry that names neither model stays `product-not-named`, and so does every entry when the mismatch read's FID does not parse. A later confirming read restores the classes. An unauthenticated `refused.engine_id_mismatch` is not a mismatch input, because nothing an unauthenticated message causes may change a finding (D4-53). Neither is `failed.snmp_fid_unreadable`, which reports no FID and refreshes no evidence (C1 on #445).
 
   **Two conditions on C5 and the node for this to hold** (both met by #438 at `4be03fe`, and C1 confirmed the second as an extension of D4-49 Q7):
   - The latest confirming read must survive a restart. If it is lost, every `confirmed` finding falls to `applicable-by-version` at start and comes back at the next read. Each such fall is a recorded revision, and none of them would be real.
@@ -235,3 +241,15 @@ Over GT-ADV, a run shows:
 - that the matcher sends nothing.
 
 It shows nothing about the real FIDs on site, or about what a real advisory's conditions are. Those belong to V-M7's hardware-dependent column: H-01, and a desk check of each advisory against its publisher.
+
+## 11. What the code settles (P4-3-C4)
+
+The matcher is `modules/applicability`, `Evaluate(Input, *advisory.Set, map[string]Previous)`. Its tests run GT-ADV's 128 cells twice each, and six mutants of the rules each change at least one cell. Where the note left a point open, the code does the following:
+- **The input.** The node passes the latest identity record, the latest C9 snapshot, the latest configuration change retrieved, the latest identity mismatch (section 6), and the recorded controls. The matcher reads nothing else.
+- **What cites a stale identity.** On `applicable-by-version` with a stale device-read identity, the identity's evidence is the record marked `stale`, then each read that made it stale: the change retrieved, or the mismatch. Both are device reads, cited by invocation ID. Equal times count as stale.
+- **A stale snapshot** (a change retrieved after it) is not current, so its settings are read as unread, never as `not-met`.
+- **`absent` on a setting** is never shown, because a key missing from the snapshot may be a section that was not read. A key present makes `absent` not hold.
+- **`attribute` items are unread in 0.1.** C1 0.3's attribute records are not an input yet. Unread never hides an advisory. Reading them is a later change to the input, with no change to C11 or C12.
+- **A `precondition-not-met` finding lists only the preconditions not met,** since C12 refuses an unread precondition on `not-applicable`.
+- **The product** is the device-read `model` when given, otherwise the FID's product part. An identity with neither is refused with an error, and the node shows it.
+- **What is returned.** Only findings that are new, or that differ in anything section 7 lists. The node stores each one as it is returned, and passes the stored hash back as `Previous`.
