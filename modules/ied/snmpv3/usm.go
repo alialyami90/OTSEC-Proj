@@ -21,10 +21,10 @@ import (
 // never sees a password and never localizes a key, so a mismatched engine ID
 // cannot make it localize to the wrong one.
 //
-// Evidence: desk. These rules are written from RFC 3414, 3826 and 7860 as
-// the author knows them; the RFC texts are not in the project files, and no
-// RFC test vector has been run. The interoperability test is GT-MIB's agent
-// and, later, hardware.
+// Evidence: desk. These rules were checked against the texts of RFC 3414,
+// 3826 and 7860 on 2026-11-06 (docs/phase4/D2-snmpv3-rfc-check.md). The
+// texts give no test vector for these algorithms, so none has been run. The
+// interoperability test is GT-MIB's agent and, later, hardware.
 
 // AuthProto names an authentication protocol by C7 0.8's value.
 type AuthProto string

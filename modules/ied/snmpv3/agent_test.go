@@ -58,7 +58,12 @@ type agent struct {
 	timeRepAlways   bool                                     // every request gets a time-window Report
 	noAnswer        bool
 	saltCount       uint64
-	tamperResponses bool // flip a ciphertext bit after signing
+	tamperResponses bool   // flip a ciphertext bit after signing
+	emptyBulk       bool   // answer every GetBulk with no varbinds (RFC 3416 §4.2.3 reason (1))
+	ctxEngineID     []byte // the Response's contextEngineID, when not nil
+	ctxName         []byte // the Response's contextName
+	tick            int64  // added to the agent's snmpEngineTime after each Response
+	shortSalt       bool   // send msgPrivacyParameters of 7 octets, signed
 }
 
 func newAgent(t *testing.T) *agent {
@@ -191,6 +196,9 @@ func (a *agent) response(msgID int64, req pdu) []byte {
 	case tagGetBulkRequest:
 		o := req.VarBinds[0].OID
 		for range req.ErrIndex {
+			if a.emptyBulk {
+				break
+			}
 			k, v := a.next(o)
 			add(k, v)
 			if v[0] == tagEndOfMibView {
@@ -202,7 +210,13 @@ func (a *agent) response(msgID int64, req pdu) []byte {
 		a.t.Fatalf("agent: the client sent PDU 0x%02x", req.Tag)
 	}
 	p := seqOf(tagResponse, intOf(req.RequestID), intOf(a.errorStatus), intOf(0), seqOf(tagSequence, vbs...))
-	return a.protect(msgID, scopedOf(a.engineID, nil, p), true)
+	ctx := a.engineID
+	if a.ctxEngineID != nil {
+		ctx = a.ctxEngineID
+	}
+	w := a.protect(msgID, scopedOf(ctx, a.ctxName, p), true)
+	a.time += a.tick
+	return w
 }
 
 // report builds a Report: authNoPriv when auth, else noAuthNoPriv.
@@ -229,6 +243,9 @@ func (a *agent) protect(msgID int64, sc []byte, sign bool) []byte {
 	enc, err := a.keys.cfb(a.boots, a.time, salt, sc, true)
 	if err != nil {
 		a.t.Fatal(err)
+	}
+	if a.shortSalt {
+		salt = salt[1:]
 	}
 	u := usmParams{EngineID: a.engineID, Boots: a.boots, Time: a.time, User: []byte(a.keys.User),
 		AuthParams: make([]byte, a.keys.digestLen()), PrivParams: salt}
