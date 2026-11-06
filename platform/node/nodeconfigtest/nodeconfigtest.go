@@ -264,6 +264,10 @@ const TestSNMPCredentialRef = "cred_lab2731usm"
 // sel-2731m-snmpv3 example's, which the collector pins.
 const TestSNMPEngineID = "80007c4f03020000273101"
 
+// TestSNMPRegisterRevision is the revision of C2's sel-27x1-rstp test
+// register package (contracts/adapter/testdata/snmp/register.json).
+const TestSNMPRegisterRevision = 1
+
 // AddSEL2731M adds a simulated SEL-2731M reached over SNMPv3 at host:port
 // (C6's GT-MIB agent); an empty host is 127.0.0.1, and the loader refuses
 // any host that is not a loopback IP literal (D2-10). It turns the asset
@@ -273,6 +277,11 @@ const TestSNMPEngineID = "80007c4f03020000273101"
 // operator-declared attributes only: nothing in it claims a device
 // observation, and its engine ID is TestSNMPEngineID. It names the
 // collector's sel-27x1-rstp test profile.
+//
+// It sets register_version to TestSNMPRegisterRevision, which the
+// collector checks against the SNMP register (C3 on #463). The node names
+// one register revision, so a node with this entry and a SEL-751 entry
+// cannot yet run both.
 func (c *Config) AddSEL2731M(assetID, host string, port, everySeconds int) *Config {
 	if host == "" {
 		host = "127.0.0.1"
@@ -310,6 +319,7 @@ func (c *Config) AddSEL2731M(assetID, host string, port, everySeconds int) *Conf
 		"profile": map[string]any{"id": "sel-27x1-rstp", "version": "0.1"},
 	})
 	c.Asset = &struct{}{}
+	c.RegisterVersion = TestSNMPRegisterRevision
 	c.Schedule = append(c.Schedule, Collection{ID: "sch-snmp-" + assetID[:8], AssetID: assetID, Endpoint: "mgmt-snmpv3",
 		Operation: "sel27x1.snmp.identity", CredentialRef: TestSNMPCredentialRef, EverySeconds: everySeconds})
 	return c

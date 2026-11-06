@@ -39,6 +39,18 @@ func TestAddSEL2731M(t *testing.T) {
 	if len(c.Schedule) != 1 || !c.snmpEntry(c.Schedule[0]) || c.Schedule[0].CredentialRef != nodeconfigtest.TestSNMPCredentialRef {
 		t.Fatalf("schedule %+v", c.Schedule)
 	}
+	// The collector checks the node's register_version against the SNMP
+	// register's revision (C3 on #463).
+	var reg struct {
+		Family   string `json:"family"`
+		Revision uint64 `json:"revision"`
+	}
+	if err := json.Unmarshal(readFile(t, "../../contracts/adapter/testdata/snmp/register.json"), &reg); err != nil {
+		t.Fatal(err)
+	}
+	if reg.Family != "sel-27x1-rstp" || c.RegisterVersion != reg.Revision {
+		t.Fatalf("register_version %d, and the SNMP register %s is at revision %d", c.RegisterVersion, reg.Family, reg.Revision)
+	}
 
 	// Every attribute the helper declares, C1's example declares with the
 	// same operator value.
