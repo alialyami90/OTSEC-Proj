@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/register"
@@ -18,7 +20,7 @@ import (
 // item 7, #383). It comes from the node's configuration only, never from the
 // collector, and nothing derived from it goes to the collector. The node
 // verifies the envelope against its own trust anchors, refuses any payload
-// but the pinned one and any revision but register_version, and uses the
+// but the pinned one and any revision but the configured one, and uses the
 // package only to render a run's lines when it builds a C9 snapshot.
 type RegisterCopy struct {
 	// Envelope is the absolute path of the signed register envelope, as
@@ -82,6 +84,68 @@ func (c *Config) checkRegister(fail func(format string, args ...any)) {
 	}
 }
 
+// checkRegisterVersions checks register_versions: each key is the profile
+// of a scheduled asset, so a misspelt one cannot fall back to
+// register_version unseen, and each value is at least 1. The node holds
+// one register copy, so every asset whose configuration it reads must
+// name the same revision.
+func (c *Config) checkRegisterVersions(fail func(format string, args ...any)) {
+	scheduled := map[string]bool{}
+	for _, s := range c.Schedule {
+		if a, ok := c.Asset(s.AssetID); ok && a.Profile != nil {
+			scheduled[a.Profile.ID] = true
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(c.RegisterVersions)) {
+		switch {
+		case !scheduled[p]:
+			fail("register_versions names profile %q, which no scheduled asset uses", p)
+		case c.RegisterVersions[p] == 0:
+			fail("register_versions[%q] must be at least 1", p)
+		}
+	}
+	var first *Collection
+	for i, s := range c.Schedule {
+		if !s.ReadsConfiguration() {
+			continue
+		}
+		if first == nil {
+			first = &c.Schedule[i]
+		} else if a, b := c.registerVersion(first.AssetID), c.registerVersion(s.AssetID); a != b {
+			fail("schedule %s reads the configuration under register revision %d and %s under %d; the node holds one register copy", first.ID, a, s.ID, b)
+		}
+	}
+}
+
+// registerVersion is the register revision a run on the asset names: its
+// profile's in register_versions, else register_version.
+func (c *Config) registerVersion(assetID string) uint64 {
+	if a, ok := c.Asset(assetID); ok && a.Profile != nil {
+		if v, ok := c.RegisterVersions[a.Profile.ID]; ok {
+			return v
+		}
+	}
+	return c.RegisterVersion
+}
+
+// copyRevision is the revision the register copy must have: that of the
+// assets whose configuration the node reads, else register_version, and
+// the field that names it.
+func (c *Config) copyRevision() (uint64, string) {
+	for _, s := range c.Schedule {
+		if !s.ReadsConfiguration() {
+			continue
+		}
+		if a, ok := c.Asset(s.AssetID); ok && a.Profile != nil {
+			if v, ok := c.RegisterVersions[a.Profile.ID]; ok {
+				return v, fmt.Sprintf("register_versions[%q]", a.Profile.ID)
+			}
+		}
+		break
+	}
+	return c.RegisterVersion, "register_version"
+}
+
 func (r *RegisterCopy) anchors() ([]authz.TrustAnchor, error) {
 	var out []authz.TrustAnchor
 	for i, a := range r.TrustAnchors {
@@ -101,7 +165,8 @@ func (r *RegisterCopy) anchors() ([]authz.TrustAnchor, error) {
 // loadRegister reads, pins and verifies the register copy and returns its
 // matcher. The pin is checked before the signature, so bytes other than the
 // commissioned ones are refused without being parsed. No floor is kept: the
-// node accepts exactly one revision, register_version.
+// node accepts exactly one revision: that of the assets whose
+// configuration it reads (copyRevision).
 func (c *Config) loadRegister() (*register.Matcher, error) {
 	r := c.Register
 	f, err := os.Open(r.Envelope)
@@ -129,8 +194,8 @@ func (c *Config) loadRegister() (*register.Matcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if pkg.Revision != c.RegisterVersion {
-		return nil, fmt.Errorf("register revision %d is not register_version %d", pkg.Revision, c.RegisterVersion)
+	if want, field := c.copyRevision(); pkg.Revision != want {
+		return nil, fmt.Errorf("register revision %d is not %s %d", pkg.Revision, field, want)
 	}
 	return register.NewMatcher(pkg)
 }
