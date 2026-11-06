@@ -54,10 +54,20 @@ const AlarmIdentityNotStored = "identity-not-stored"
 // next identity.read commits (C5 0.8 section 2).
 const AlarmIdentityReadNotRemoved = "identity-read-not-removed"
 
+// AlarmIdentityFamilyConflict is raised once per asset and model when a
+// stored identity's device-read model is outside the models its declared
+// product_family covers (§1.5 of docs/phase4/C2-c1-0.3-c3-0.4.md). An
+// administrator settles it; it is never a match input (D4-53). Level 1.
+const AlarmIdentityFamilyConflict = "identity-family-conflict"
+
 // Health events of the identity records, on platform/health.
 const (
 	HealthIdentityChanged      = "identity.changed"
 	HealthIdentityReadsRemoved = "identity.reads-removed"
+	// HealthIdentityFamilyConflict goes with AlarmIdentityFamilyConflict.
+	// It is the plan's identity.family_conflict (§1.5), spelt as C4 health
+	// type tokens are, which allow no '_'.
+	HealthIdentityFamilyConflict = "identity.family-conflict"
 )
 
 // identityDoc is an otsec.identity/0.1 document. Its capture is the bytes of
@@ -293,6 +303,7 @@ type identityState struct {
 	// would evaluate without what the run read (C6 on #458).
 	unstored bool
 	removed  uint64 // identity.read records removed in this process
+	conflict string // the model whose family conflict this process raised
 }
 
 // identityOf returns the asset's state, reading its stream the first time.
@@ -461,6 +472,7 @@ func (s *Scheduler) storeIdentity(ctx context.Context, col Collection, res adapt
 			s.identityChanged(ctx, col.AssetID, prev, &d)
 		}
 	}
+	s.familyConflict(ctx, col.AssetID, st)
 	rd := identityReadDoc{Schema: IdentityReadSchema, AssetID: col.AssetID, InvocationID: res.InvocationID, ReadAt: res.EndedAt}
 	s.storeRead(ctx, col.AssetID, st, rd, "run "+res.InvocationID+" read an identity that was not stored: ")
 }
@@ -573,6 +585,38 @@ func (s *Scheduler) identityChanged(ctx context.Context, assetID string, prev, n
 	s.rt.opt.Status.Raise(assetID, AlarmIdentityChanged, fmt.Sprintf("the identity changed (%s): record %s replaces %s", list, now.InvocationID, prev.InvocationID))
 	s.rt.health(ctx, HealthIdentityChanged, map[string]string{"asset_id": assetID, "attributes": list,
 		"evidence_id": now.InvocationID, "previous_evidence_id": prev.InvocationID})
+}
+
+// familyConflict raises AlarmIdentityFamilyConflict and its health event
+// when the stored identity's device-read model is outside the models its
+// declared product_family covers, once per model in this process. Neither
+// names the model, which is device text: status holds it.
+func (s *Scheduler) familyConflict(ctx context.Context, assetID string, st *identityState) {
+	family, model := familyConflict(st.doc.Asset)
+	if model == st.conflict {
+		return
+	}
+	st.conflict = model
+	if model == "" {
+		return
+	}
+	s.rt.opt.Status.Raise(assetID, AlarmIdentityFamilyConflict, fmt.Sprintf("record %s: the device-read model is not one product_family %s covers; an administrator settles it, and it is never a match input", st.doc.InvocationID, family))
+	s.rt.health(ctx, HealthIdentityFamilyConflict, map[string]string{"asset_id": assetID, "product_family": family, "evidence_id": st.doc.InvocationID})
+}
+
+// familyConflict gives rec's declared product_family and its device-read
+// model when modules/asset finds them in conflict, and empty strings
+// otherwise (a family with no model list is not checked).
+func familyConflict(rec c1.Asset) (family, model string) {
+	pf, ok := rec.Attribute(c1.AttrProductFamily)
+	if !ok {
+		return "", ""
+	}
+	m, bad := asset.FamilyConflict(rec, asset.Models(pf.Value))
+	if !bad {
+		return "", ""
+	}
+	return pf.Value, m
 }
 
 // withStoredReads is the declared record with its device reads replaced by
@@ -722,6 +766,9 @@ type IdentityStatus struct {
 	// ReadsRemoved counts the older identity.read records removed in this
 	// process.
 	ReadsRemoved uint64 `json:"reads_removed,omitempty"`
+	// FamilyConflict is the stored device-read model when it is outside
+	// the models the declared product_family covers, empty otherwise.
+	FamilyConflict string `json:"family_conflict,omitempty"`
 }
 
 // IdentityReadStatus is one run that read the identity.
@@ -737,6 +784,7 @@ func (s *Scheduler) publishIdentity() {
 		var is IdentityStatus
 		if st.doc != nil {
 			is.Attributes, is.EvidenceID, is.StoredAt = st.doc.Asset.Attributes, st.doc.InvocationID, st.storedAt
+			_, is.FamilyConflict = familyConflict(st.doc.Asset)
 		}
 		if st.last != nil {
 			if st.last.InvocationID != "" {
