@@ -884,3 +884,38 @@ Date: 2026-11-05. C1, under §5.4, after every draft had its reviewers' acceptan
   - C11 §4 rule 1 (a Response below `authPriv` is discarded unparsed, even with a valid digest) and HR-16 are read with this ruling (C6's cross-reference on #437).
 - **Advisory set loading** (C3 on #438). The node reads at most `MaxEnvelopeBytes` (1,399,128 B) + 1 and refuses a larger file before parsing. It verifies the newest installed set again against the current anchors at start and on every anchor change. If that fails, no set is in use, and an older set never takes its place. `advisory.set_refused` is written once per file hash, as the alarm is.
 - **Still with the owner** (`docs/agent-handoffs.md`, item 3): who publishes the advisory set and holds its key (HR-18), the severity scores, which SEL switches the sites run, the RFC texts (RFC 3411, 3418 and 6933), and the approval key for a later v1 or v2c path. No real advisory goes into a set until the publisher and key are answered. The implementation can be built and verified on GT-ADV's test sets without them.
+
+## D4-54: rulings made while item 3 was built (C1, 2026-11-05 and 2026-11-06)
+
+Date: 2026-11-06. C1, on the item 3 implementation PRs (#444 to #453). Evidence class: desk. No device was read. Each ruling was given on its PR when it was made, and is recorded here so that the contracts and briefs can be read with it.
+
+- **C5 0.8, the node's store for item 3** (#444, merged as `f5b3205`; the store code in #450):
+  - No hold codes. An installed set's records are never removable, which is stronger than a hold.
+  - Advisory sets are kept for good (D4-20), to be revisited with the publisher's cadence (HR-18). The node refuses an install that would leave less than one record free (C3's condition).
+  - **The item 3 ceiling** (C6's FAIL: item 3 evidence could fill the configuration class). Every item 3 series write is refused above the quota less the configuration floor. `asset-store-full` is raised once per crossing and cleared below the ceiling, the matcher pauses while it holds, and refusals are counted. Configuration reads still commit up to the full quota.
+- **C2 0.7, C1 0.3 and C3 0.4 in code** (#445, merged as `8ecbe61`):
+  - The SNMP result rules join C2 0.7: `session.snmp`; the engine ID as the first identity item, under AP-27; and `observations[].read`.
+  - **An authenticated SNMPv3 FID mismatch suspends the asset only, not the credential.** The SEL-751 rule is unchanged. C3 confirmed.
+  - `max_reply_bytes` is capped at 65,507, the largest UDP payload.
+  - `CapabilityProfile.models` is optional in C1 0.3. When it is absent, no `family_conflict` check is made.
+  - **`failed.snmp_fid_unreadable`** is a new code. It is raised after authentication, on SNMP only. It suspends nothing, keeps the transcript, reports only the engine-ID identity item, and is not a confirming read.
+  - **Apply never adopts a mismatched identity.** A mismatch (SEL `refused.identity_mismatch`, or SNMP authenticated `failed.identity_mismatch`) writes no new identity record and marks the device-read evidence stale (D4-49 Q6 (ii)).
+- **C2 0.8** (in #453, with the SNMPv3 client). Two more codes, both SNMP-only, both suspending nothing, both keeping the bytes:
+  - `failed.snmp_unexpected_report`, at any stage after connecting;
+  - `failed.snmp_scoped_pdu_unreadable`, after authentication.
+
+  #445 merged without them so that C3 and C5 were not held up.
+- **The family token** (C5 and C2, #453). `product_family` stays per product: `sel-2731` and `sel-2741`. `Models(sel-2731)` is `[SEL-2731M]` and `Models(sel-2741)` is `[SEL-2741M]`. `sel-27x1` (and `sel-27x1-rstp`) names only the profile, the register entry and the adapter family. A family with no model list makes no conflict check. This corrects C1's first answer, which used `sel-27x1` as the product family.
+- **C11, C7 0.8 and C8 0.11 in code** (#446, merged as `cf37940`):
+  - §1.7's eight points are confirmed.
+  - `MaxMitigations` is 16, to match C12.
+  - A `sel-fid` product must match `^SEL-[0-9A-Z]+$`, and each FID in `versions` must begin with that product (C6). C2 confirms the read forms.
+  - An `attribute` key must be a C1 attribute name.
+- **The matcher** (#451, C4):
+  - After a mismatch, the version is treated as unread: the finding is `applicable-by-version`, stale, and cites the mismatch (C6's fix). A mismatch contradicts the FID on record, not only its age.
+  - `product-not-named` holds under a mismatch only if neither the stored model nor the model the mismatch read reported is named.
+  - Only SEL `refused.identity_mismatch` and SNMP authenticated `failed.identity_mismatch` feed `LatestMismatch`. `refused.engine_id_mismatch` (unauthenticated) and `failed.snmp_fid_unreadable` never do (C2).
+  - C4's three conservative points in the note's §11 are confirmed.
+- **Set authors name models as the device reports them** (C2 on #451): `SEL-2731M` and `SEL-2741M`, with the mode letter. A bare `SEL-2731` gives a false `not-applicable`. This joins the publisher question (HR-18), and GT-ADV's test sets follow it.
+- **P4-3-C3 deliverable 5** (a gap in the brief). C3 also builds the SNMP path in `modules/security/collector/pipeline.go`: the register lookup for SNMP runs, the credential acquired with the engine ID pinned, C2's client called through the egress check, `SuspendsCredential` returning nothing for SNMP, and asset-only suspension on an authenticated FID mismatch.
+- **Still with the owner,** in addition to D4-53's list: the five remaining RFC texts (RFC 3412, 3414, 3416, 3826 and 7860) or access to `www.rfc-editor.org`, and the model naming rule above, which goes to whoever publishes the set.
