@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// The BER subset SNMPv3 uses (RFC 3416 §2 via X.690): single-octet tags,
-// definite lengths of at most four length octets, and the universal,
+// The BER subset SNMPv3 uses (RFC 3416 §2 via X.690, RFC 3417 §8):
+// single-octet tags, definite lengths, and the universal,
 // application and context types below. Anything else is a decode error.
 // Elements are sub-slices of the input: the decoder copies nothing, and the
 // message parser reads a fixed shape, so nesting is bounded by the shape.
@@ -72,8 +72,11 @@ func decode(b []byte, off int) (elem, error) {
 	}
 	n, hdr := int(b[off+1]), 2
 	if n&0x80 != 0 {
+		// RFC 3417 §8 (1): definite form only, and the long form may use
+		// more length octets than it needs. 0x80 is the indefinite form and
+		// 0xff is reserved (X.690 8.1.3.5).
 		k := n & 0x7F
-		if k == 0 || k > 4 {
+		if k == 0 || k == 0x7F {
 			return elem{}, fmt.Errorf("%w: length form 0x%02x at %d", errBER, b[off+1], off)
 		}
 		if off+2+k > len(b) {
@@ -81,6 +84,9 @@ func decode(b []byte, off int) (elem, error) {
 		}
 		n = 0
 		for _, c := range b[off+2 : off+2+k] {
+			if n > len(b) {
+				return elem{}, fmt.Errorf("%w: length past the end at %d", errBER, off)
+			}
 			n = n<<8 | int(c)
 		}
 		hdr += k
