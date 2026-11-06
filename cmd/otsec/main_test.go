@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -69,6 +70,35 @@ func ranNode(t *testing.T) (string, *node.Config) {
 	}
 	st.Write("site-a-node1")
 	return path, cfg
+}
+
+// otsec node passes the node its start: the time at the command's entry,
+// before the configuration is loaded, and how long the load took (P4-H2).
+// A load made slow by a known delay shows that delay, so the test does not
+// depend on a phase rounding to a nonzero millisecond.
+func TestNodePassesItsStartTime(t *testing.T) {
+	path, _ := ranNode(t)
+	const delay = 50 * time.Millisecond
+	load, start := loadConfig, startNode
+	t.Cleanup(func() { loadConfig, startNode = load, start })
+	var loading time.Time
+	loadConfig = func(p string) (*node.Config, error) {
+		loading = time.Now()
+		time.Sleep(delay)
+		return load(p)
+	}
+	var got node.PreStart
+	startNode = func(_ context.Context, _ *node.Config, pre node.PreStart, _ io.Writer) error {
+		got = pre
+		return nil
+	}
+	before := time.Now()
+	if _, stderr, code := otsec(t, "node", "-config", path); code != 0 {
+		t.Fatalf("otsec node: %d %s", code, stderr)
+	}
+	if got.Began.Before(before) || got.Began.After(loading) || got.Config < delay {
+		t.Fatalf("the node's start %+v; the command began after %v and loaded its configuration at %v", got, before, loading)
+	}
 }
 
 func otsec(t *testing.T, args ...string) (string, string, int) {

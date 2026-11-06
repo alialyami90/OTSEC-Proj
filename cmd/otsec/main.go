@@ -97,7 +97,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	loading := time.Now()
-	cfg, err := node.LoadConfig(*configPath)
+	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -105,7 +105,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	pre := node.PreStart{Began: began, Config: time.Since(loading)}
 	switch args[0] {
 	case "node":
-		err = runNode(ctx, cfg, pre, stderr)
+		err = startNode(ctx, cfg, pre, stderr)
 	case "install":
 		exe, xerr := os.Executable()
 		if xerr != nil {
@@ -168,6 +168,13 @@ func report(stderr io.Writer, err error) int {
 	}
 	return 0
 }
+
+// loadConfig and startNode are node.LoadConfig and runNode in run. A test
+// replaces them to check the start time run passes to the node (P4-H2).
+var (
+	loadConfig = node.LoadConfig
+	startNode  = runNode
+)
 
 // runNode runs the node: under the Windows SCM when the SCM started the
 // process, otherwise in the foreground until SIGINT or SIGTERM.
