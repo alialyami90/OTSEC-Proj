@@ -138,21 +138,10 @@ func TestC6RefusedMismatchIsNotReadAsNotNamed(t *testing.T) {
 
 	// Fill the class so a small identity.read still fits and the mismatch's
 	// larger one does not.
-	stream := ConfigStream(relayID)
-	db := n.r.Store(stream)
+	// In batches (C1 on #458): one fsync per record took minutes on
+	// Windows.
 	small, _ := json.Marshal(identityReadDoc{Schema: IdentityReadSchema, AssetID: relayID, InvocationID: invD, ReadAt: "2026-10-24T09:00:00Z"})
-	for {
-		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if used+2*int64(len(small)) > n.cfg.Item3Ceiling() {
-			break
-		}
-		if _, err := n.r.Log(stream).AppendBatch(bg, []c5.Record{{Stream: stream, Class: c5.ClassConfiguration, Event: small}}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	n.fillConfig(int64(len(small)))
 	n.s.RunOnce(bg, 0)
 	if snap := n.st.Snapshot("x"); snap.AssetStore == nil || snap.AssetStore.Refused[c5.SeriesIdentityRead] == 0 {
 		t.Fatalf("setup: the mismatch's identity.read was not refused: %+v", snap.AssetStore)

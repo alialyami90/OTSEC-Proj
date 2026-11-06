@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,22 +259,7 @@ func TestFindingsAtTheCeiling(t *testing.T) {
 	// fits and no finding does.
 	stream := ConfigStream(relayID)
 	db := n.r.Store(stream)
-	doc, _ := json.Marshal(identityReadDoc{Schema: IdentityReadSchema, AssetID: relayID, InvocationID: invD, ReadAt: "2026-10-24T09:00:00Z"})
-	var filler []c5.Seq
-	for {
-		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if used+int64(len(doc)+len(file))+100 > n.cfg.Item3Ceiling() {
-			break
-		}
-		got, err := n.r.Log(stream).AppendBatch(bg, []c5.Record{{Stream: stream, Class: c5.ClassConfiguration, Event: doc}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		filler = append(filler, got[0].Key().Seq)
-	}
+	filler := n.fillConfig(int64(len(file)) + 100)
 	n.put(file)
 	n.step()
 	if n.inUse() == nil {
@@ -291,9 +277,18 @@ func TestFindingsAtTheCeiling(t *testing.T) {
 		t.Fatalf("the paused matcher tried again: %d refusals", got)
 	}
 
-	// Room returns from a removal that is not an item 3 write.
-	for len(filler) > 1 {
-		step := filler[:min(len(filler)-1, c5.RemoveConfigStep)]
+	// Room returns from a removal that is not an item 3 write: enough
+	// fillers for the findings, not all of them, which on Windows would
+	// take minutes of fsyncs (C1 on #458).
+	for {
+		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if used+16<<10 <= n.cfg.Item3Ceiling() {
+			break
+		}
+		step := filler[:c5.RemoveConfigStep]
 		if _, err := db.RemoveConfig(bg, stream, c5.SeriesIdentityRead, step); err != nil {
 			t.Fatal(err)
 		}
@@ -443,6 +438,54 @@ func TestFindingsOperatorMismatch(t *testing.T) {
 	if _, err := decodeIdentityRead([]byte(`{"schema":"` + IdentityReadSchema + `","asset_id":"` + relayID + `"}`)); err == nil {
 		t.Fatal("an identity read with no read and no mismatch was accepted")
 	}
+}
+
+// fillConfig fills the configuration class while reserve bytes and one
+// more identity.read of relayID still fit under the item 3 ceiling, and
+// returns the seqs of the removable identity.read records it wrote. The
+// store takes one configuration record per commit, so a fill of ~150-byte
+// records alone took minutes of fsyncs on Windows (C1 on #458). Most of the
+// class is filled with learner checkpoints carrying 1 MiB captures, one
+// commit each, which nothing in these tests reads; the last 64 KiB with
+// identity.read records one at a time, stopping where a fill of those alone
+// would.
+func (n *advNode) fillConfig(reserve int64) []c5.Seq {
+	n.t.Helper()
+	stream := ConfigStream(relayID)
+	db := n.r.Store(stream)
+	room := func() int64 {
+		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
+		if err != nil {
+			n.t.Fatal(err)
+		}
+		return n.cfg.Item3Ceiling() - used - reserve
+	}
+	for i := 0; ; i++ {
+		size := min(room()-64<<10-8<<10, 1<<20)
+		if size < 4<<10 {
+			break
+		}
+		snap := bytes.Repeat([]byte{byte(i)}, int(size))
+		copy(snap, fmt.Sprintf("filler %d", i))
+		doc, err := encodeCheckpoint(testCheckpoint(snap))
+		if err != nil {
+			n.t.Fatal(err)
+		}
+		capture := snapCapture(snap)
+		if _, err := n.r.Log(stream).AppendBatch(bg, []c5.Record{{Stream: stream, Class: c5.ClassConfiguration, Event: doc, Capture: &capture}}); err != nil {
+			n.t.Fatal(err)
+		}
+	}
+	doc, _ := json.Marshal(identityReadDoc{Schema: IdentityReadSchema, AssetID: relayID, InvocationID: invD, ReadAt: "2026-10-24T09:00:00Z"})
+	var seqs []c5.Seq
+	for room() >= int64(len(doc)) {
+		got, err := n.r.Log(stream).AppendBatch(bg, []c5.Record{{Stream: stream, Class: c5.ClassConfiguration, Event: doc}})
+		if err != nil {
+			n.t.Fatal(err)
+		}
+		seqs = append(seqs, got[0].Key().Seq)
+	}
+	return seqs
 }
 
 // After a run whose identity outcome was not stored, for any reason, the
