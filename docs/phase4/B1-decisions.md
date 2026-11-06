@@ -1018,3 +1018,13 @@ D1, on #495, #496, #497 and #498, with each owner's and reviewer's word through 
 - **The V-M1 leg** (D6's #496, merged as `73ab7b6`). D1 authorized a new `integration-long` leg for `test_slice_vm1_e2e.py`, with the matrix's 20-minute limit, about twice the measured 9.4 minutes. The step pipes the run's output to `vm1_keysearch.py`, so the CI log itself is searched for the test keys. `ci.yml` now has nineteen jobs, fifteen of them `integration-long` legs.
 - **V-M1 (f) needs its own check on the V-M1 run.** V-M7's runs show the SEL-751's identity read over telnet, but they are other runs and do not show that the SEL-751 receives no SNMP. D6 adds a check to the asset-alone run: a UDP socket on the SEL-751's address and port gets no datagram, its configuration has no SNMP entry, and its identity is device-read over telnet. The gate counts (f) only from that check, green in CI.
 - **F6 was a product defect, not a test error** (D6 on #496). GT-MIB plan §2.2 says a case whose read model belongs to another family shows `identity.family_conflict` in health. `modules/asset.FamilyConflict` existed, but nothing on the node called it. D5 fixed it in #499, and #496's F6 check passed on the binaries only after that.
+
+## D4-61: C12 0.2's proposal is approved (D1, 2026-11-06)
+
+D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing. The full rulings are in the proposal's §10.
+
+- **Option A.** A new `identity.mismatch` field, a `Read` holding only the C2 invocation ID and the stored `ended_at`, cites the device read that refused an operator or passive identity. No device text ever goes into a finding. `identity.evidence` keeps its 0.1 meaning. Rules 1 to 5 apply, and rule 3 matches the matcher: `applicable-by-version` with `firmware-version` unread.
+- **Rollback fails closed.** Before 0.2 merges, D5 makes the node refuse any `otsec.finding/` minor that `finding.Known` does not name. The refusal is per asset and for applicability only, through the existing not-evaluated alarm in health. The alarm names the schema, bounded to 64 bytes of printable ASCII and quoted. Collection, SER forwarding and configuration monitoring go on. The release record states that this change must be in every build a node can roll back to before any node writes 0.2.
+- **Proof.** Role 6's V-M7 checker resolves `identity.mismatch.id` to its stored `identity.read`. An operator-only mismatch scenario joins the V-M7 leg on the binaries, checked across a restart. Role 6's contract tests for 0.2 are in a new `c12_v02_d6_test.go`.
+- **The next C2 revision** bounds `ended_at`'s fraction at nine digits, beside D4-60's GetNext code.
+- **No code before the owner's go** (D4-34). C12 0.2's code is queued with D4-59's two hardening items.
