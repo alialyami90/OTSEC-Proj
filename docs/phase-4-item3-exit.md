@@ -1,11 +1,8 @@
 # Phase 4 item 3 exit report (vulnerability applicability with the asset module)
 
-Owner: C1 (the A1 role). Date: 2026-11-06. Status: **DRAFT. The gate is not yet decided.** It waits on:
+Owner: C1 (the A1 role). Date: 2026-11-06. Status: **every gate item is met on `main` except V-M1, which waits on the owner's choice for the RFC texts (see Owner decisions needed). The gate is not yet decided.**
 
-- #466, #474, #475, #476 and #477 merging;
-- V-M1, which waits on the owner's choice for the RFC texts.
-
-C6's gate table in `docs/verification.md` ("Phase 4 item 3 exit gate status") is the record for each gate item.
+All item 3 PRs are merged, the last being #475 as `961221b`. C6's gate table in `docs/verification.md` ("Phase 4 item 3 exit gate status") is the record for each gate item.
 
 This report closes Phase 4 item 3:
 
@@ -48,10 +45,10 @@ In older records, A*n* and B*n* mean the role that C*n* now holds (D3-12, D4-28)
 | Component | Owner | Main PRs | Reviewers |
 | --- | --- | --- | --- |
 | The SNMPv3 family note (the SEL-2731/2741 in RSTP mode, D4-51). C1 0.3, C3 0.4, C2 0.7 and C2 0.8. The collector's SNMPv3 client in `modules/ied/snmpv3`. Its adapter ID and version | C2 | #439, #445, #453, #462 | C3, C4, C6 |
-| C11 `otsec.advisory/0.1`, C7 0.8 and C8 0.11. The SNMP egress check and the advisory signing tool. SNMPv3 credentials in the credential store. The SNMP path through the collector's pipeline. Node ID `audit` reserved (D4-57) | C3 | #437, #446, #449, #456, #461, #465, #477 *(pending)* | C2, C4, C5, C6 |
-| C12 `otsec.finding/0.1` and the matcher note. The matcher in `modules/applicability`. A mismatch under an operator identity. Passive evidence never an audit reference (D4-57) | C4 | #440, #451, #459, #476 *(pending)* | C3, C6 |
-| The node's side of item 3. C5 0.8. Parts 1 to 3: the switches, the advisory set and the item 3 ceiling; identity records, latest reads and SNMP entries; findings and the evaluation. A node with one SNMP entry. Recorded network controls (D4-56). The per-family register note, and its code in #466 *(pending)*. The certificate-period test fix. `in_use_since` across a restart, in #474 *(pending)* | C5 | #438, #444, #450, #452, #454, #458, #463, #464, #469, #471, #466 *(pending)*, #474 *(pending)* | C3, C4, C6 |
-| The item 3 testability check. GT-ADV, the applicability truth table, written before the matcher. The GT-MIB plan and case table. V-M7's checker. V-M7 and V-M8 on the real binaries. The gate table. The contract tests for C7 0.8 and C12 0.1, `check.py` over the V-M7 and V-M8 recordings, and H-17, in #475 *(pending)* | C6 | #436, #441, #447, #457, #467, #470, #473, #475 *(pending)* | C1, and the owners of what each test covers |
+| C11 `otsec.advisory/0.1`, C7 0.8 and C8 0.11. The SNMP egress check and the advisory signing tool. SNMPv3 credentials in the credential store. The SNMP path through the collector's pipeline. Node ID `audit` reserved (D4-57) | C3 | #437, #446, #449, #456, #461, #465, #477 | C2, C4, C5, C6 |
+| C12 `otsec.finding/0.1` and the matcher note. The matcher in `modules/applicability`. A mismatch under an operator identity. Passive evidence never an audit reference (D4-57) | C4 | #440, #451, #459, #476 | C3, C6 |
+| The node's side of item 3. C5 0.8. Parts 1 to 3: the switches, the advisory set and the item 3 ceiling; identity records, latest reads and SNMP entries; findings and the evaluation. A node with one SNMP entry. Recorded network controls (D4-56). The per-family register note, and its code in #466. The certificate-period test fix. `in_use_since` across a restart, in #474 | C5 | #438, #444, #450, #452, #454, #458, #463, #464, #469, #471, #466, #474 | C3, C4, C6 |
+| The item 3 testability check. GT-ADV, the applicability truth table, written before the matcher. The GT-MIB plan and case table. V-M7's checker. V-M7 and V-M8 on the real binaries. The gate table. The contract tests for C7 0.8 and C12 0.1, `check.py` over the V-M7 and V-M8 recordings, and H-17, in #475 | C6 | #436, #441, #447, #457, #467, #470, #473, #475 | C1, and the owners of what each test covers |
 | D4-48 to D4-57, the item 3 briefs and exit gate, and the CI legs | C1 | #435, #442, #443, #455, #460, #468, #472, #478 | The affected owners for each ruling |
 
 Contract versions on `main`:
@@ -68,7 +65,7 @@ Contract versions on `main`:
 | C12 | none | `otsec.finding/0.1` | New. A finding: its class, its evidence by source, its staleness and its revisions. D4-57 tightens what it accepts with no version change. |
 | C4, C6, C9, C10 | | unchanged | |
 
-The item 3 contracts were approved together under D4-53. Every change bumped the minor, kept a reader for the previous version, and had C6's contract tests before the gate. C7 0.8's and C12 0.1's C6 tests are in #475 *(pending)*.
+The item 3 contracts were approved together under D4-53. Every change bumped the minor, kept a reader for the previous version, and had C6's contract tests before the gate. C7 0.8's and C12 0.1's C6 tests came last, in #475; C3 and C4 passed them as the contracts' owners.
 
 ## Independently verified
 
@@ -81,18 +78,18 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 | **V-M8**, paired runs | **Pass**, `simulated` (#470), 9 of 9. The runs are made as root in a network namespace whose only interfaces are `lo` and a TUN device holding both default routes. The A/A pair matches packet for packet, and so does the R9 run against A1. No run has a flow A1 lacks, and nothing is routed off the host. Kernel ICMPv6 router solicitations broke the first run. They were stopped at the source, not filtered in the comparison (C6, 18a2e21). |
 | **V-M8**, a release build refuses a test set | **Pass**, `desk`, Go level only. The binaries' runs use the `otsec_testclock` build, the only one that accepts a test set. The refusal is pinned by tests that `go test ./...` runs untagged: `c11_c6_test.go` ("first test set, release build"), `TestAdvisorySetRefusals`, `TestItem3ConfigRefused` and `TestTestKeyIDsAreTheSeeds`. |
 | **V-M1** over GT-MIB | **Not run. It waits on the RFC texts** (see Owner decisions needed). The client (#453), the collector's SNMP path (#461), the node's SNMP entry (#463) and GT-MIB's case table (#457) are built and tested at Go level against a fake agent on loopback. (d), the refusal alone, is shown at desk: C1 0.3, C7 0.8 and C3 0.4 refuse v1 and v2c, and the egress deny corpus refuses whole v1 and v2c messages. The gate never counts a GT-MIB built from memory. |
-| **V-S7** | **Pass for the corpus and the SEL path.** The egress deny corpus refuses every SNMP write form (`SetRequest`, also hidden as a second scoped PDU inside the encryption; `InformRequest`; `SNMPv2-Trap`; `Report`; `GetResponse`) and whole v1 and v2c messages. The valid messages are allowed first. C3 0.4 refuses `set` at load. `check.py` over the V-M7 and V-M8 recordings against revision 5 is in #475 *(pending)*. |
-| **Contract tests** | C1 0.3, C3 0.4 and C2 0.7 (#445). C5 0.8 (#450). C11 0.1 and C8 0.11 (#446). C7 0.8 and C12 0.1 in #475 *(pending)*. |
+| **V-S7** | **Pass for the corpus and the SEL path.** The egress deny corpus refuses every SNMP write form (`SetRequest`, also hidden as a second scoped PDU inside the encryption; `InformRequest`; `SNMPv2-Trap`; `Report`; `GetResponse`) and whole v1 and v2c messages. The valid messages are allowed first. C3 0.4 refuses `set` at load. **Recordings:** `check.py` passes over every V-M7 and V-M8 recording against the signed revision 5 (#475, green in its `integration-long` legs). Every line the simulator received is a revision 5 read-only line, with one session at a time. |
+| **Contract tests** | C1 0.3, C3 0.4 and C2 0.7 (#445). C5 0.8 (#450). C11 0.1 and C8 0.11 (#446). C7 0.8 and C12 0.1 (#475). |
 
 ### Defects found by independent review and tests in item 3
 
 - **No control could be recorded** (C6 on #467). V-M7 needed a recorded network control for TEST-ADV-03 × D8 and × D9, and none existed anywhere: C11 and the matcher note had left it to C1 0.3, which never settled it. Fixed by D4-56 and #469. #467's pin was a tripwire, not a waiver.
-- **An audit citation could read as passive evidence** (C6's F-025, desk). With a node named `audit`, `audit:<node>:<seq>` is also a valid passive event ID, which could back `confirmed`. No configuration ever named a node `audit`. Fixed at both ends by D4-57: #476 and #477 *(pending)*.
+- **An audit citation could read as passive evidence** (C6's F-025, desk). With a node named `audit`, `audit:<node>:<seq>` is also a valid passive event ID, which could back `confirmed`. No configuration ever named a node `audit`. Fixed at both ends by D4-57: #476 and #477.
 - **Item 3 evidence could fill the configuration class** (C6's FAIL on #444). Fixed by the item 3 ceiling (D4-54), and by when its crossing ends (D4-55).
 - **A false downgrade after a restart** (C5 for part 3). A mismatch FID held only in memory would have turned an `applicable-by-version` finding into a stored `product-not-named`. The FID is now stored (D4-54, D4-55).
 - **A bare model name matches nothing** (C2 on #451). `SEL-2731` gives a false `not-applicable`, because the device reports `SEL-2731M`. This is now a rule for whoever authors the set (D4-54).
 - **A certificate-period test that could not pass on a slow Windows start** (#469, #466). The third try's release wait was counted from the end of the held checks, so it ended before `NotBefore`. Fixed in #471.
-- **The in-use time reset on restart** (C1 on #470). Fixed in #474 *(pending)*.
+- **The in-use time reset on restart** (C1 on #470). Fixed in #474.
 
 ### Where tests ran
 
@@ -111,10 +108,10 @@ C6's gate table in `docs/verification.md` is the record. C6 wrote GT-ADV before 
 | V-M7 passes per cell over GT-ADV on the real binaries, `simulated`, for the SEL-751 path, including the denied-branch rows (F1) | **Met.** |
 | V-M8 passes: every set refusal case, and the paired runs | **Met.** A release build's refusal of a test set is shown at Go level only. |
 | V-M1 (a) to (c), (e) and (f) pass over GT-MIB, and (d) is shown for the refusal alone | **Not met.** It waits on the RFC texts, and the choice is with the owner. |
-| C1 0.3, C3 0.4, C2 0.7, C5 0.8, C7 0.8, C8 0.11, C11 0.1 and C12 0.1 merged, with reviewers' records and C6's contract tests | **Met for six of the eight.** C7 0.8 and C12 0.1 are met once #475 merges. |
-| V-S7 still passes, and the egress deny corpus refuses every SNMP write form | **Met for the corpus and the SEL path.** The recordings are met once #475 merges. |
+| C1 0.3, C3 0.4, C2 0.7, C5 0.8, C7 0.8, C8 0.11, C11 0.1 and C12 0.1 merged, with reviewers' records and C6's contract tests | **Met.** C7 0.8's and C12 0.1's C6 tests merged in #475. |
+| V-S7 still passes, and the egress deny corpus refuses every SNMP write form | **Met.** The corpus, the SEL path, and `check.py` over the V-M7 and V-M8 recordings (#475). |
 | No real advisory is in any set, and the gate says which owner questions are open | **Met.** The questions are listed below. |
-| No safety or security objection open | **None open.** C6 has none, and F-025 is closed once #476 and #477 merge. C3 has none against item 3 as it will stand once #466, #474, #475, #476 and #477 merge, provided they merge at the heads reviewed (C3, 2026-11-06). C3 names two standing limits, which are not objections. No real advisory is entered until the owner decides HR-18. The SNMPv3 path is not pointed at any real device until V-M1 has run and the owner approves device contact. |
+| No safety or security objection open | **None open.** C6 has none, and F-025 is closed (#476, #477). C3 has none against item 3 as it stands with #466, #474, #475, #476 and #477 merged at the heads reviewed (C3, 2026-11-06). C3 names two standing limits, which are not objections. No real advisory is entered until the owner decides HR-18. The SNMPv3 path is not pointed at any real device until V-M1 has run and the owner approves device contact. |
 
 ## Owner decisions needed
 
@@ -144,7 +141,7 @@ Everything in the earlier lists still stands. Item 3 adds:
   - the engine ID format, inferred to be MAC-based and to survive a firmware upgrade;
   - the OIDs it serves, and the model and FID forms.
 
-  H-17 in #475 *(pending)* is the hardware item.
+  H-17 in #475 is the hardware item.
 - **The real FIDs, and each real advisory's conditions.** These wait on H-01 and on a desk check against the publisher.
 - **The SNMP wire layout**, from memory of the RFCs (above).
 
