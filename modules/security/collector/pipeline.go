@@ -416,7 +416,8 @@ type clearFile struct {
 	Ref     string `json:"ref"`
 }
 
-// clearAsset decides an asset.clear_suspension (C7 0.2, D2-15). The node
+// clearAsset decides an asset.clear_suspension in the clear (C7 0.2, D2-15),
+// for an asset whose endpoints are all labelled simulated. The node
 // asks after it has recorded its own clear, but the request alone clears
 // nothing: the collector reads the administrator's file itself, and the
 // request, the file and the invocation that suspended the asset must all
@@ -428,8 +429,18 @@ func (p *Pipeline) clearAsset(req *authz.CollectorRequest) error {
 		return &authz.Refusal{Code: authz.RefusePrincipal, Detail: "asset clear requests come from the node"}
 	}
 	body := *req.AssetClearSusp
-	if _, ok := p.assets[body.AssetID]; !ok {
+	e, ok := p.assets[body.AssetID]
+	if !ok {
 		return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: body.AssetID}
+	}
+	if ep, off := offLabEndpoint(e.Asset); off {
+		// Off the lab only an administrator's signed clear lifts a
+		// suspension (P4-H1). The node's clear in the clear is an unsigned
+		// admin request, refused before the file is read, whatever the
+		// node believes about itself.
+		p.cfg.Alarm(fmt.Errorf("collector: %s request %s refused: asset %s has endpoint %s not labelled simulated, so %s lifts nothing; only a signed %s does",
+			req.Kind, req.RequestID, body.AssetID, ep, ClearSuspensionFileName, authz.KindAssetClearSusp))
+		return authz.AdminRefusal(authz.AdminCheckEnvelope)
 	}
 	if p.cfg.ReadClearFile == nil {
 		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: "no administrators' folder is configured"}
@@ -450,6 +461,18 @@ func (p *Pipeline) clearAsset(req *authz.CollectorRequest) error {
 		return &authz.Refusal{Code: authz.RefuseSuspensionMismatch, Detail: "the request and " + ClearSuspensionFileName + " name different suspensions"}
 	}
 	return p.cfg.State.ClearAssetSuspension(body.AssetID, body.Ref)
+}
+
+// offLabEndpoint returns the first endpoint of a that is not labelled
+// simulated, if it has one. Such an asset's suspension is never lifted
+// through the unsigned clear-suspension.json (P4-H1).
+func offLabEndpoint(a asset.Asset) (string, bool) {
+	for _, ep := range a.Endpoints {
+		if ep.Target != asset.Simulated {
+			return ep.ID, true
+		}
+	}
+	return "", false
 }
 
 // install spends one install from the budget, then installs. The budget is
