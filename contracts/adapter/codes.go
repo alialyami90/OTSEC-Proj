@@ -143,6 +143,17 @@ const (
 	// engine-ID item, and no FID, model or firmware version is reported, so
 	// nothing is guessed. The run is not a confirming read.
 	FailedSNMPFIDUnreadable Code = "failed.snmp_fid_unreadable"
+	// FailedSNMPUnexpectedReport (0.8, C1 for GT-MIB U19, D4-54): a Report
+	// out of the expected order (#437 §4 rule 1). At discovery, any Report
+	// but usmStatsUnknownEngineIDs; afterwards, a usmStatsUnknownEngineIDs
+	// or a Report this contract does not name. The session ends and the
+	// bytes are kept.
+	FailedSNMPUnexpectedReport Code = "failed.snmp_unexpected_report"
+	// FailedSNMPScopedPDUUnreadable (0.8, C1 for GT-MIB §2.6, D4-54): a
+	// message authenticated and decrypted under the pinned keys, but its
+	// ScopedPDU does not decode. Only a key holder can send one. The session
+	// ends and the bytes are kept.
+	FailedSNMPScopedPDUUnreadable Code = "failed.snmp_scoped_pdu_unreadable"
 
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
 	// PartialReadRowsExceeded: the read has more rows than the profile's
@@ -223,6 +234,8 @@ var codes = map[Code]codeInfo{
 	FailedSNMPErrorStatus:          {StageAfterAuth, 7, "", "", snmpOnly},
 	FailedSNMPWalkNotIncreasing:    {StageAfterAuth, 7, "", "", snmpOnly},
 	FailedSNMPFIDUnreadable:        {StageAfterAuth, 7, "", "", snmpOnly},
+	FailedSNMPUnexpectedReport:     {StageAny, 8, "", "", snmpOnly},
+	FailedSNMPScopedPDUUnreadable:  {StageAuth, 8, "", "", snmpOnly},
 }
 
 // Codes lists every code in the taxonomy of this package's minor.
