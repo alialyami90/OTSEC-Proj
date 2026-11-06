@@ -135,6 +135,8 @@ type Layout struct {
 	OperatorKey string `json:"operator_key,omitempty"`
 	// The mixed node (#466), when -snmp-port is set: the SEL-2731M.
 	SNMPAsset string `json:"snmp_asset,omitempty"`
+	// V-M7, with -gtadv-row or -gtadv-operators: each GT-ADV row's asset.
+	GTADVAssets map[string]string `json:"gtadv_assets,omitempty"`
 }
 
 // leaveAdminFile writes an administrator's file into admin_dir as one
@@ -197,11 +199,13 @@ func main() {
 	issued := fs.String("issued", "", "admin-file: the request's issued_at in RFC 3339, its expiry -expires after it (default: now)")
 	in := fs.String("in", "", "verify-audit: a file of the audit stream's stored records, one base64 line each, in seq order")
 	operator := fs.Bool("operator", false, "admin-file: sign with the second administrator's key, which may not sign node.change_approval (V-M2)")
+	gtadvRow := fs.String("gtadv-row", "", "setup: make the asset GT-ADV's device-read row of this name, with R9 on and GT-ADV's set in admin_dir (V-M7)")
+	gtadvOperators := fs.Bool("gtadv-operators", false, "setup: add GT-ADV's operator rows as assets with no schedule, with R9 on and GT-ADV's set in admin_dir (V-M7)")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators)
 	case "install-credential":
 		err = installCredential(*root)
 	case "verify-audit":
@@ -231,7 +235,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators bool) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -314,6 +318,9 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	snmpProfile, snmpPayload, err := mixedSNMP(nc, &l, repo, snmpPort, snmpUnlisted)
 	if err != nil {
+		return err
+	}
+	if err := gtADV(nc, &l, repo, gtadvRow, gtadvOperators); err != nil {
 		return err
 	}
 	if installed {
