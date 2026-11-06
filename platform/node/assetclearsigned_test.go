@@ -245,6 +245,21 @@ func TestSignedAssetClearClosesAnOwedFileClear(t *testing.T) {
 	}
 
 	setTargets(t, c, asset.DeviceObserved)
+	// An accepted signed clear of another ref leaves the owed clear open
+	// (D3 on #514).
+	other := signN(t, authz.KindAssetClearSusp, 2, func(p *authz.AdminRequest) {
+		p.AssetClearSusp.Ref, p.InstallKeyID = "6f1c2b9e-3d4a-4c1e-9b7a-999999999999", kid(testInstallKey)
+	})
+	writeAdminFile(t, nc, "admin-request-other.json", authz.KindAssetClearSusp, other)
+	s.relayAdmin(bg)
+	if shown := adminShown(st); len(shown) != 1 || shown[0].State != "accepted" {
+		t.Fatalf("the clear of another ref: %+v", shown)
+	}
+	if owed := s.CollectorClears(); owed[relayID] != ref {
+		t.Fatalf("a signed clear of another ref closed the owed clear: %v", owed)
+	}
+	removeAdminFile(t, nc, "admin-request-other.json")
+
 	env := signN(t, authz.KindAssetClearSusp, 1, func(p *authz.AdminRequest) {
 		p.AssetClearSusp.Ref, p.InstallKeyID = ref, kid(testInstallKey)
 	})
