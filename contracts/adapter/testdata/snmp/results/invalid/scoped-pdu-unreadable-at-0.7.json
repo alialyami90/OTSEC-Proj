@@ -1,0 +1,119 @@
+{
+  "schema": "otsec.adapter/0.7",
+  "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
+  "operation_id": "sel27x1.snmp.identity",
+  "adapter": {
+    "id": "sel-27x1-snmpv3",
+    "version": "0.1.0-example"
+  },
+  "register_version": 1,
+  "target": "simulated",
+  "status": "failed",
+  "started_at": "2026-10-24T09:15:00.0Z",
+  "ended_at": "2026-10-24T09:15:00.6Z",
+  "transcript": {
+    "data": "MDcCAQMwDQIBAQICBcAEAQQCAQMEEDAOBAACAQACAQAEAAQABAAwEQQABACgCwIBAQIBAAIBADAAMF8CAQMwDQIBAQICBcAEAQACAQMEHDAaBAuAAHxPAwIAACcxAQIBAQICDhAEAAQABAAwLQQLgAB8TwMCAAAnMQEEAKgcAgEBAgEAAgEAMBEwDwYKKwYBBgMPAQEEAEEBATCBkQIBAzANAgECAgIFwAQBBwIBAwRDMEEEC4AAfE8DAgAAJzEBAgEAAgEABAhvdHNlYy1ybwQYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgAAAAAAAAAATA4BAuAAHxPAwIAACcxAQQAoCcCAQICAQACAQAwHDAMBggrBgECAQEBAAUAMAwGCCsGAQIBAQUABQAwfwIBAzANAgECAgIFwAQBAQIBAwQ8MDoEC4AAfE8DAgAAJzEBAgEBAgIOEAQIb3RzZWMtcm8EGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAMC0EC4AAfE8DAgAAJzEBBACoHAIBAgIBAAIBADARMA8GCisGAQYDDwEBAgBBAQEwgZICAQMwDQIBAwICBcAEAQcCAQMERDBCBAuAAHxPAwIAACcxAQIBAQICDhAECG90c2VjLXJvBBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAABMDgEC4AAfE8DAgAAJzEBBACgJwIBAwIBAAIBADAcMAwGCCsGAQIBAQEABQAwDAYIKwYBAgEBBQAFADBcAgEDMA0CAQMCAgXABAEDAgEDBEQwQgQLgAB8TwMCAAAnMQECAQECAg4QBAhvdHNlYy1ybwQYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAgAAAAAAAAAATAQBAA=",
+    "sha256": "7595cf7d194b33c5fc6d768267388c12310768de3d5fc066dda7f979421ad695",
+    "segments": [
+      {
+        "offset": 0,
+        "length": 57,
+        "dir": "tx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.0Z"
+      },
+      {
+        "offset": 57,
+        "length": 97,
+        "dir": "rx",
+        "phase": "probe",
+        "at": "2026-10-24T09:15:00.1Z"
+      },
+      {
+        "offset": 154,
+        "length": 148,
+        "dir": "tx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.2Z"
+      },
+      {
+        "offset": 302,
+        "length": 129,
+        "dir": "rx",
+        "phase": "auth",
+        "at": "2026-10-24T09:15:00.3Z"
+      },
+      {
+        "offset": 431,
+        "length": 149,
+        "dir": "tx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.4Z"
+      },
+      {
+        "offset": 580,
+        "length": 94,
+        "dir": "rx",
+        "phase": "operate",
+        "at": "2026-10-24T09:15:00.5Z"
+      }
+    ],
+    "redactions": [
+      {
+        "offset": 210,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 358,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 488,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      },
+      {
+        "offset": 636,
+        "length": 24,
+        "reason": "usm-digest",
+        "component": "transport"
+      }
+    ]
+  },
+  "session": {
+    "connected": true,
+    "wake_sent": false,
+    "language_probe": "not-run",
+    "password_prompt": false,
+    "credential_sent": false,
+    "echo_scan": "not-applicable",
+    "access_level": "",
+    "quit_sent": false,
+    "snmp": {
+      "engine_id": "80007c4f03020000273101",
+      "authenticated": true
+    }
+  },
+  "identity": {
+    "result": "match",
+    "items": [
+      {
+        "name": "snmp_engine_id",
+        "expected": "80007c4f03020000273101",
+        "observed": "80007c4f03020000273101",
+        "span": {
+          "offset": 83,
+          "length": 11
+        }
+      }
+    ]
+  },
+  "error": {
+    "code": "failed.snmp_scoped_pdu_unreadable"
+  }
+}

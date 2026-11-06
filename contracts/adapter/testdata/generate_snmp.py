@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 import generate as g  # noqa: E402  (a module of this directory, run with -I from here)
 
 SCHEMA_0_7 = "otsec.adapter/0.7"
+SCHEMA_0_8 = "otsec.adapter/0.8"  # the two codes D4-54 added
 RUN = "sel27x1.snmp.identity"
 SYSTEM = "sel27x1.snmp.system"
 ENTITY = "sel27x1.snmp.entity"
@@ -112,14 +113,15 @@ def scoped(engine, body):
     return seq(octets(engine), octets(b""), body)
 
 
-def message(msg_id, flags, engine, boots, time, user, body, digest=0):
+def message(msg_id, flags, engine, boots, time, user, body, digest=0, raw=False):
     """One SNMPv3 message in its stored form. It returns the bytes and the
-    digest's offset in them (None without a digest)."""
+    digest's offset in them (None without a digest). raw puts body in place
+    of the ScopedPDU, as it is."""
     mark = DIGEST_MARK[:digest]
     usm = seq(octets(engine), integer(boots), integer(time), octets(user), octets(mark),
               octets(b"\x00\x00\x00\x00\x00\x00\x00\x01" if flags & PRIV else b""))
     m = seq(integer(3), seq(integer(msg_id), integer(1472), octets(bytes([flags])), integer(3)),
-            octets(usm), scoped(engine, body))
+            octets(usm), body if raw else scoped(engine, body))
     if not digest:
         return m, None
     at = m.index(mark)
@@ -148,9 +150,9 @@ class SNMP(g.Session):
         self.digest(off, at, digest)
         self.facts["connected"] = True
 
-    def recv(self, phase, flags, engine, boots, time, body, user=USER, digest=24):
+    def recv(self, phase, flags, engine, boots, time, body, user=USER, digest=24, raw=False):
         m, at = message(self.req, flags, engine, boots, time, user if flags & AUTH else b"", body,
-                        digest if flags & AUTH else 0)
+                        digest if flags & AUTH else 0, raw)
         off = self.rx(phase, m)
         self.digest(off, at, digest)
         return off, m
@@ -221,8 +223,8 @@ class SNMP(g.Session):
         same = all(i["expected"] == i["observed"] for i in self.items)
         return {"result": "match" if same else "mismatch", "items": self.items}
 
-    def result(self, status, code=None, **kw):
-        r = super().result(status, code, self.identity(), self.obs, schema=SCHEMA_0_7, **kw)
+    def result(self, status, code=None, schema=SCHEMA_0_7, **kw):
+        r = super().result(status, code, self.identity(), self.obs, schema=schema, **kw)
         r["operation_id"] = RUN
         r["adapter"] = {"id": "sel-27x1-snmpv3", "version": "0.1.0-example"}
         r["register_version"] = REGISTER_REVISION
@@ -290,6 +292,36 @@ def results():
     s.discover()
     s.first_request("auth", 0, 0)
     out["failed.timeout"] = s.result("failed", "failed.timeout")
+
+    # 0.8 (D4-54). A second usmStatsUnknownEngineIDs Report, unauthenticated,
+    # answering the walk (GT-MIB U19a).
+    s = SNMP()
+    s.discover()
+    s.time_sync()
+    s.system()
+    s.send("operate", AUTH | PRIV | REPORTABLE, ENGINE, 1, 3601,
+           lambda r: tlv(GETBULK, integer(r) + integer(0) + integer(16) + seq(seq(oid(ENT_TREE), NULL))))
+    s.recv("operate", 0, ENGINE, 1, 3601, pdu(REPORT, s.req, [(USM_STATS % UNKNOWN_ENGINE, counter(2))]))
+    out["failed.snmp_unexpected_report"] = s.result("failed", "failed.snmp_unexpected_report", schema=SCHEMA_0_8)
+
+    # A usmStatsNotInTimeWindows Report answering discovery (U19b). Its
+    # engine ID, boots and time are not adopted.
+    s = SNMP()
+    s.send("probe", REPORTABLE, b"", 0, 0, lambda r: pdu(GET, r, []))
+    s.recv("probe", 0, ENGINE, 1, 3600, pdu(REPORT, s.req, [(USM_STATS % NOT_IN_TIME, counter(1))]))
+    out["failed.snmp_unexpected_report.at-discovery"] = s.result("failed", "failed.snmp_unexpected_report",
+                                                                 schema=SCHEMA_0_8)
+
+    # The get's Response authenticates and decrypts, but msgData is not a
+    # ScopedPDU: a SEQUENCE cut short (GT-MIB §2.6). The decrypted bytes are
+    # kept in place, never the ciphertext.
+    s = SNMP()
+    s.discover()
+    s.time_sync()
+    s.first_request("operate", 1, 3600)
+    s.recv("operate", AUTH | PRIV, ENGINE, 1, 3600, b"\x30\x10\x04\x00", raw=True)
+    out["failed.snmp_scoped_pdu_unreadable"] = s.result("failed", "failed.snmp_scoped_pdu_unreadable",
+                                                        schema=SCHEMA_0_8)
 
     s = SNMP()
     out["refused.credential_unavailable"] = s.result("refused", "refused.credential_unavailable")
@@ -364,6 +396,17 @@ def invalid_results(good):
     mut("fid-unreadable-with-fid-item", "ok", code("failed.snmp_fid_unreadable"))
     mut("fid-unreadable-with-fid-observation", "failed.snmp_fid_unreadable",
         lambda r: r["observations"].append(dict(r["observations"][1], name="firmware_id")))
+
+    # 0.8 (D4-54).
+    mut("scoped-pdu-unreadable-at-0.7", "failed.snmp_scoped_pdu_unreadable", lambda r: r.update(schema=SCHEMA_0_7))
+    def no_authenticated_answer(r):
+        drop_redaction("rx", "auth")(r)
+        drop_redaction("rx", "operate")(r)
+        r["session"]["snmp"]["authenticated"] = False
+    mut("scoped-pdu-unreadable-without-authenticated-answer", "failed.snmp_scoped_pdu_unreadable",
+        no_authenticated_answer)
+    mut("unexpected-report-with-nothing-received", "refused.credential_unavailable",
+        lambda r: (code("failed.snmp_unexpected_report")(r), r.update(schema=SCHEMA_0_8)))
 
     mut("not-connected-with-engine-id", "refused.credential_unavailable",
         lambda r: r["session"]["snmp"].update(engine_id=ENGINE.hex()))

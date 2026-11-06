@@ -302,7 +302,7 @@ func TestFamilyConflict(t *testing.T) {
 	if m, bad := FamilyConflict(out, []string{"SEL-751"}); bad {
 		t.Errorf("SEL-751 in its own family: %s", m)
 	}
-	if m, bad := FamilyConflict(out, []string{"SEL-2731M", "SEL-2741M"}); !bad || m != "SEL-751" {
+	if m, bad := FamilyConflict(out, Models("sel-2731")); !bad || m != "SEL-751" {
 		t.Errorf("SEL-751 in the switch family: %q %v", m, bad)
 	}
 	// No device-read model, no conflict: a declared model is not a read.
@@ -310,11 +310,85 @@ func TestFamilyConflict(t *testing.T) {
 	if _, bad := FamilyConflict(rec, nil); bad {
 		t.Error("conflict with no model")
 	}
+	// No list, no check (C5 on #453).
+	if m, bad := FamilyConflict(out, nil); bad {
+		t.Errorf("conflict with no list: %s", m)
+	}
+	if m, bad := FamilyConflict(out, Models("sel-rtac")); bad {
+		t.Errorf("conflict for an unlisted family: %s", m)
+	}
 	rec.Attributes = append(rec.Attributes, c1.Attribute{Name: c1.AttrModel, Value: "SEL-9999", Confidence: c1.SingleSource,
 		Observations: []c1.Observation{{Value: "SEL-9999", EvidenceClass: c1.OperatorDeclared,
 			Source: c1.Source{Method: c1.OperatorEntry, Ref: "admin:lab-admin", ObservedAt: "2026-11-05T09:00:00Z", Kind: c1.Operator}}}})
 	if _, bad := FamilyConflict(rec, []string{"SEL-751"}); bad {
 		t.Error("a declared model raised a conflict")
+	}
+}
+
+// Upgrade refuses at load what Apply could not write as 0.3: a record of a
+// later minor, and an attribute whose only observation was a 0.2 session
+// read.
+func TestUpgrade(t *testing.T) {
+	for _, n := range []string{"sel-751-model-and-firmware.json", "sel-751-simulated.json", "sel-2731m-snmpv3.json"} {
+		rec := record(t, n)
+		if out, err := Upgrade(rec); err != nil || !reflect.DeepEqual(out, rec) {
+			t.Errorf("%s: %v", n, err)
+		}
+	}
+	rec := record(t, "sel-751-at-0.2.json")
+	if out, err := Upgrade(rec); err == nil || !strings.Contains(err.Error(), "sel.cid") || !reflect.DeepEqual(out, rec) {
+		t.Errorf("0.2 with a session read only: %v", err)
+	}
+	// Without sel.cid, firmware_id keeps only its operator entry, so it can
+	// no longer be corroborated.
+	rec.Attributes = slices.DeleteFunc(rec.Attributes, func(at c1.Attribute) bool { return at.Name == "sel.cid" })
+	if _, err := Upgrade(rec); err == nil || !strings.Contains(err.Error(), "corroborated") {
+		t.Errorf("0.2 with a corroboration lost: %v", err)
+	}
+	i := slices.IndexFunc(rec.Attributes, func(at c1.Attribute) bool { return at.Name == c1.AttrFirmwareID })
+	rec.Attributes[i].Confidence = c1.SingleSource
+	if out, err := Upgrade(rec); err != nil || out.Schema != c1.Contract || len(attr(t, out, c1.AttrFirmwareID).Observations) != 1 {
+		t.Errorf("0.2 with an operator entry left: %v", err)
+	}
+	if _, err := Upgrade(record(t, "later-minor.json")); err == nil {
+		t.Error("a 0.4 record written as 0.3")
+	}
+}
+
+// The family lists are the ones §1.5 of the approved contract note gives.
+// No capability profile document carries models yet; when one does, it
+// should be compared here too.
+func TestModels(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "phase4", "C2-c1-0.3-c3-0.4.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "covers (`SEL-751`; `SEL-2731M` and `SEL-2741M`)") {
+		t.Fatal("§1.5's family lists changed; update familyModels and this test")
+	}
+	if got := Models("sel-751"); !slices.Equal(got, []string{"SEL-751"}) {
+		t.Errorf("sel-751: %v", got)
+	}
+	// One RSTP-mode model per product: §1.5's SEL-2731M and SEL-2741M.
+	if got := append(Models("sel-2731"), Models("sel-2741")...); !slices.Equal(got, []string{"SEL-2731M", "SEL-2741M"}) {
+		t.Errorf("sel-2731 and sel-2741: %v", got)
+	}
+	if got := Models("sel-27x1"); got != nil {
+		t.Errorf("the profile family is not a product: %v", got)
+	}
+	if got := Models("sel-rtac"); got != nil {
+		t.Errorf("sel-rtac: %v", got)
+	}
+	// Each declared family in the contract examples has its list.
+	for _, n := range []string{"sel-751-simulated.json", "sel-2731m-snmpv3.json"} {
+		if f := attr(t, record(t, n), c1.AttrProductFamily).Value; Models(f) == nil {
+			t.Errorf("%s: no models for %s", n, f)
+		}
+	}
+	m := Models("sel-751")
+	m[0] = "x"
+	if Models("sel-751")[0] != "SEL-751" {
+		t.Error("the list is shared")
 	}
 }
 
