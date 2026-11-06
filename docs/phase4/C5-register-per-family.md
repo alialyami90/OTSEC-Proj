@@ -1,6 +1,6 @@
 # C5 note: a register revision per family on the node
 
-C5, 2026-11-06, for C1's item 3 scheduling after C3 on #463. This is a proposal: it changes the node configuration (`otsec.nodeconfig/0.1`), additively. C3 reviews the trust boundary, C6 adds a mixed-node case, and C1 approves. Evidence class: desk.
+C5, 2026-11-06, for C1's item 3 scheduling after C3 on #463. C1 approved it on #464, keyed by profile ID, subject to C3's trust review. It changes the node configuration (`otsec.nodeconfig/0.1`), additively. C3 reviews the trust boundary, C6 adds a mixed-node case, and C1 approves. Evidence class: desk.
 
 ## The problem
 
@@ -40,4 +40,4 @@ The one cost: two profiles that share an allowlist each name the revision, and t
 - A mixed node, with one SEL-751 entry and one SNMP entry: each run request carries its own revision.
 - Each refusal at load: a key no scheduled asset names, a value of 0, and a register copy whose revision is not that of the configuration-reading profiles.
 - A configuration without the section is unchanged, byte for byte, in its requests.
-- C6 adds the mixed-node case on the binaries once GT-MIB's agent exists.
+- C6 adds the mixed-node case on the binaries. It needs no GT-MIB agent: an SNMP run that times out still shows its revision was not refused (C1 on #464).
