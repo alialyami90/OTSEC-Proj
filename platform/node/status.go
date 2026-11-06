@@ -51,6 +51,7 @@ type Status struct {
 	eventCkpts  map[string]EventCheckpointStatus
 	assetStore  *AssetStoreStatus
 	applic      *ApplicabilityStatus
+	identity    map[string]IdentityStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -141,6 +142,10 @@ type StatusFile struct {
 	// applicability on (item3status.go).
 	AssetStore    *AssetStoreStatus    `json:"asset_store,omitempty"`
 	Applicability *ApplicabilityStatus `json:"applicability,omitempty"`
+	// Identity is each scheduled asset's stored identity and the run that
+	// last confirmed it, with asset on (identity.go). It comes from the
+	// store, so unlike Assets it is there from the start.
+	Identity map[string]IdentityStatus `json:"identity,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -460,6 +465,9 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if s.applic != nil {
 		a := *s.applic
 		f.Applicability = &a
+	}
+	if len(s.identity) > 0 {
+		f.Identity = maps.Clone(s.identity)
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}

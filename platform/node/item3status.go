@@ -58,3 +58,10 @@ func (s *Status) SetApplicability(a *ApplicabilityStatus) {
 	s.applic = a
 	s.mu.Unlock()
 }
+
+// SetIdentity records each asset's identity (identity.go).
+func (s *Status) SetIdentity(m map[string]IdentityStatus) {
+	s.mu.Lock()
+	s.identity = m
+	s.mu.Unlock()
+}

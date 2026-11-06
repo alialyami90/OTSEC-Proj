@@ -33,7 +33,12 @@ import (
 //     slice 1c), in the bytes its encoder writes, with a capture that is the
 //     snapshot it names. It is working state, not evidence (D4-32);
 //   - since C5 0.8, a C11 advisory set envelope, signature included, in the
-//     series advisory.set (checkAdvisorySetRecord).
+//     series advisory.set (checkAdvisorySetRecord);
+//   - since C5 0.8, the node's identity record (otsec.identity, evidence,
+//     series identity), with a capture that holds the bytes its session
+//     observations' spans point to, and its latest-read record
+//     (otsec.identityread, working state, series identity.read), with no
+//     capture (identity.go).
 //
 // It returns each document's C5 0.7 DocumentInfo. The first three are
 // evidence, in the series config.snapshot or config.difference (C9's own
@@ -103,6 +108,10 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return checkCheckpointRecord(document, capture)
 	case head.Schema == "" && strings.HasPrefix(head.Contract, "otsec.advisory/"):
 		return checkAdvisorySetRecord(document, capture)
+	case head.Schema == IdentitySchema:
+		return checkIdentityRecord(document, capture)
+	case head.Schema == IdentityReadSchema:
+		return checkIdentityReadRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint or a C11 set", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set or an identity record", head.Schema, head.Kind)
 }
