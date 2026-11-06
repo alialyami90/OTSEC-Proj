@@ -119,6 +119,17 @@ func TestSealRefusesBadInput(t *testing.T) {
 	if _, err := Seal(key, pin, testRef(), bytes.Repeat([]byte("a"), authz.MaxSecretLen+1), nil); err == nil {
 		t.Error("oversize secret was sealed")
 	}
+	// An snmpv3 secret is the localized keys: 80 octets for HMAC-SHA-512.
+	snmp := testRef()
+	snmp.EndpointID, snmp.Transport, snmp.AccessLevel = "mgmt-snmpv3", authz.TransportSNMPv3, ""
+	snmp.DownstreamSecurity, snmp.PlaintextScope = authz.DownstreamEncryptedAuthenticated, ""
+	snmp.USM = &authz.USM{UserName: "otsec-ro", Auth: authz.USMAuthHMACSHA512, Priv: authz.USMPrivAES128, EngineID: "80007c4f03020000273101", SoleDeviceAttested: true}
+	if _, err := Seal(key, pin, snmp, bytes.Repeat([]byte("a"), authz.MaxSealedLen), nil); err != nil {
+		t.Errorf("an %d-octet snmpv3 secret was refused: %v", authz.MaxSealedLen, err)
+	}
+	if _, err := Seal(key, pin, snmp, bytes.Repeat([]byte("a"), authz.MaxSealedLen+1), nil); err == nil {
+		t.Error("oversize snmpv3 secret was sealed")
+	}
 	bad := testRef()
 	bad.Transport = authz.TransportSerial
 	if _, err := Seal(key, pin, bad, testSecret, nil); err == nil {

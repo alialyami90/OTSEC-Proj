@@ -12,8 +12,10 @@
 //
 // The first form reads the set's payload bytes as they are and writes the
 // signed envelope. It signs the bytes it is given, valid or not, so a test
-// can build invalid sets on purpose; it does not validate them. The one thing
-// it refuses is a payload whose purpose is release: a test key has no
+// can build invalid sets on purpose; it does not validate them. It refuses
+// two things. A payload more than one byte over advisory.MaxSetPayload is
+// refused, not cut, so an oversized case is never signed as a valid prefix.
+// A payload whose purpose is release is refused too: a test key has no
 // business on one, and refusing it means nobody makes one by mistake. A Go
 // test that needs such a set on purpose calls advisorytest.Sign. The second
 // prints test key n's key ID and public key in base64, for a test node's
@@ -47,9 +49,17 @@ func main() {
 		fmt.Printf("%s %s\n", advisory.KeyID(pub), base64.StdEncoding.EncodeToString(pub))
 		return
 	}
-	payload, err := io.ReadAll(io.LimitReader(os.Stdin, advisory.MaxSetPayload+1))
+	// One byte over the bound is signed, so a test can build a set the
+	// verifier refuses for its size. Anything longer is refused, not cut:
+	// signing a prefix could turn an oversized negative case into a valid
+	// set without anyone noticing (C5 on #449).
+	payload, err := io.ReadAll(io.LimitReader(os.Stdin, advisory.MaxSetPayload+2))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "advisorysign: %v\n", err)
+		os.Exit(1)
+	}
+	if len(payload) > advisory.MaxSetPayload+1 {
+		fmt.Fprintf(os.Stderr, "advisorysign: the payload is over %d bytes; it is refused, not cut\n", advisory.MaxSetPayload+1)
 		os.Exit(1)
 	}
 	var head struct {

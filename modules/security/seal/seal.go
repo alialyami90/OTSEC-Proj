@@ -131,8 +131,14 @@ func Seal(key InstallKey, pinned string, ref authz.CredentialRef, secret []byte,
 	if want == "" || subtle.ConstantTimeCompare([]byte(want), []byte(Fingerprint(pub))) != 1 {
 		return authz.SealedSecret{}, ErrFingerprintMismatch
 	}
-	if len(secret) == 0 || len(secret) > authz.MaxSecretLen {
-		return authz.SealedSecret{}, fmt.Errorf("seal: secret must be 1 to %d bytes", authz.MaxSecretLen)
+	// A password is at most MaxSecretLen; an snmpv3 secret is the localized
+	// keys, up to MaxSealedLen for HMAC-SHA-512 (C7 0.8, C6 on #456).
+	limit := authz.MaxSecretLen
+	if ref.Transport == authz.TransportSNMPv3 {
+		limit = authz.MaxSealedLen
+	}
+	if len(secret) == 0 || len(secret) > limit {
+		return authz.SealedSecret{}, fmt.Errorf("seal: secret must be 1 to %d bytes", limit)
 	}
 	if err := ref.Validate(); err != nil {
 		return authz.SealedSecret{}, err

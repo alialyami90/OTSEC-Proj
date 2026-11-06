@@ -330,7 +330,7 @@ func checkEntries(es []credEntry, nodeID string) error {
 		if _, err := unb64(e.Nonce, 12, 12); err != nil {
 			return fmt.Errorf("entry %d nonce: %v", i, err)
 		}
-		if _, err := unb64(e.Ciphertext, 1+16, authz.MaxSecretLen+16); err != nil {
+		if _, err := unb64(e.Ciphertext, 1+16, authz.MaxSealedLen+16); err != nil {
 			return fmt.Errorf("entry %d ciphertext: %v", i, err)
 		}
 		if _, err := unb64(e.ReuseTag, 32, 32); err != nil {
@@ -421,7 +421,7 @@ func (s *CredStore) Install(body authz.CredentialInstallBody, t InstallTarget) (
 	if pkg == nil {
 		return InstallResult{}, refusal(authz.RefuseRegisterUnverified, "no verified register package for the asset")
 	}
-	if err := authz.CheckAccessLevel(pkg, ref.AccessLevel); err != nil {
+	if err := checkLevel(pkg, ref); err != nil {
 		return InstallResult{}, err
 	}
 	// 4. Endpoint.
@@ -455,17 +455,14 @@ func (s *CredStore) Install(body authz.CredentialInstallBody, t InstallTarget) (
 		return InstallResult{}, refusal(authz.RefuseSecretRejected, "sealed secret does not open for this reference")
 	}
 	defer clear(secret)
-	// 7. Write-time rules.
-	policy, ok := authz.SecretPolicies[pkg.Family]
-	if !ok {
-		return InstallResult{}, refusal(authz.RefuseSecretRejected, "no secret policy for family %q", pkg.Family)
-	}
-	if err := authz.ValidateSecret(secret, policy, pkg); err != nil {
-		detail := err.Error()
-		if bytes.Contains([]byte(detail), secret) {
-			detail = authz.ErrSecretRejected.Error() // defence in depth: C7 already keeps the secret out
+	// 7. Write-time rules. An snmpv3 secret is the localized keys, not a
+	// password, so it is checked for its layout only (C7 0.8).
+	if ref.Transport == authz.TransportSNMPv3 {
+		if _, _, err := authz.SplitUSMSecret(secret, ref.USM); err != nil {
+			return InstallResult{}, refusal(authz.RefuseSecretRejected, "%v", err)
 		}
-		return InstallResult{}, refusal(authz.RefuseSecretRejected, "%s", detail)
+	} else if err := checkPassword(secret, pkg); err != nil {
+		return InstallResult{}, err
 	}
 	// 8. Reuse.
 	tag := s.reuseTag(secret)
@@ -513,7 +510,45 @@ func (s *CredStore) Install(body authz.CredentialInstallBody, t InstallTarget) (
 	return res, nil
 }
 
-// endpointMatches is check 4 of Install.
+// checkPassword is check 7 of Install for a password: the family's policy
+// and the register package.
+func checkPassword(secret []byte, pkg *register.Package) error {
+	policy, ok := authz.SecretPolicies[pkg.Family]
+	if !ok {
+		return refusal(authz.RefuseSecretRejected, "no secret policy for family %q", pkg.Family)
+	}
+	if err := authz.ValidateSecret(secret, policy, pkg); err != nil {
+		detail := err.Error()
+		if bytes.Contains([]byte(detail), secret) {
+			detail = authz.ErrSecretRejected.Error() // defence in depth: C7 already keeps the secret out
+		}
+		return refusal(authz.RefuseSecretRejected, "%s", detail)
+	}
+	return nil
+}
+
+// checkLevel is check 3 of Install, and is applied again at every run. An
+// snmpv3 credential has no access level (C7 0.8): the register's SNMP
+// operations name the OIDs and the device's view bounds the user, so it needs
+// a package with at least one SNMP operation. Any other credential needs an
+// access level the package reaches (CheckAccessLevel).
+func checkLevel(pkg *register.Package, ref authz.CredentialRef) error {
+	if ref.Transport != authz.TransportSNMPv3 {
+		return authz.CheckAccessLevel(pkg, ref.AccessLevel)
+	}
+	if pkg == nil {
+		return refusal(authz.RefuseRegisterUnverified, "no verified register package")
+	}
+	if len(pkg.SNMPOperations) == 0 {
+		return refusal(authz.RefuseCredentialMismatch, "the register package has no SNMP operation")
+	}
+	return nil
+}
+
+// endpointMatches is check 4 of Install. For snmpv3 it also holds the
+// credential's engine ID to the asset's declared snmp_engine_id: the two
+// pins are one, so a credential cannot be localized to an engine other than
+// the one the asset's identity binding compares.
 func endpointMatches(a *asset.Asset, ref authz.CredentialRef) error {
 	var ep *asset.Endpoint
 	for i := range a.Endpoints {
@@ -533,6 +568,11 @@ func endpointMatches(a *asset.Asset, ref authz.CredentialRef) error {
 	}
 	if got := ackScope(ep); got != ref.PlaintextScope {
 		return refusal(authz.RefuseCredentialMismatch, "endpoint %s acknowledgement scope %q differs from the credential's %q", ep.ID, got, ref.PlaintextScope)
+	}
+	if ref.Transport == authz.TransportSNMPv3 {
+		if id, ok := a.Declared(asset.AttrSNMPEngineID); !ok || id != ref.USM.EngineID {
+			return refusal(authz.RefuseCredentialMismatch, "credential engine ID %s is not the asset's declared %s", ref.USM.EngineID, asset.AttrSNMPEngineID)
+		}
 	}
 	return nil
 }
@@ -665,11 +705,11 @@ func (s *CredStore) Acquire(refID string, use authz.Use, pkg *register.Package) 
 	if err := e.Ref.Binds(use); err != nil {
 		return nil, authz.CredentialRef{}, err
 	}
-	if err := authz.CheckAccessLevel(pkg, e.Ref.AccessLevel); err != nil {
+	if err := checkLevel(pkg, e.Ref); err != nil {
 		return nil, authz.CredentialRef{}, err
 	}
 	nonce, _ := unb64(e.Nonce, 12, 12) // checked on open and on write
-	ct, _ := unb64(e.Ciphertext, 1+16, authz.MaxSecretLen+16)
+	ct, _ := unb64(e.Ciphertext, 1+16, authz.MaxSealedLen+16)
 	pt, err := s.records.Open(nil, nonce, ct, authz.SealAAD(e.Ref))
 	if err != nil {
 		return nil, authz.CredentialRef{}, refusal(authz.RefuseCredentialUnusable, "stored secret of %s does not decrypt for its reference", refID)
