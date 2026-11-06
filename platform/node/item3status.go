@@ -22,6 +22,9 @@ type ApplicabilityStatus struct {
 	LastRefusal *AdvisoryRefusalStatus `json:"last_refusal,omitempty"`
 	// StoredSets is how many sets the advisory stream holds.
 	StoredSets int `json:"stored_sets"`
+	// Assets holds each evaluated asset's last completed evaluation and
+	// its findings by class (findings.go).
+	Assets map[string]AssetFindingsStatus `json:"assets,omitempty"`
 }
 
 // AdvisorySetStatus is one installed set (R9.3: what a report names).

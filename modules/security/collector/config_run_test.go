@@ -58,7 +58,7 @@ func configWork(t *testing.T, f *pipeFixture, limit func(*adapter.Limits)) *runW
 	}
 	req := pipeRun(configRun, pipeCred)
 	req.Run.RegisterVersion = 5
-	inv, err := p.invocation(req, e, ep)
+	inv, err := p.invocation(req, e, ep, pkg, m)
 	if err != nil {
 		t.Fatalf("invocation: %v", err)
 	}

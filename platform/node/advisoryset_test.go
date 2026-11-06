@@ -31,13 +31,20 @@ func advEntry(id, title string) advisory.Entry {
 }
 
 // advPayload is a set's payload. entries above 1 pads it with distinct
-// entries whose titles are at the bound, to make a large set.
+// entries whose titles are at the bound, to make a large set. Only the
+// first names the SEL-751; the others name a product no test asset is, so
+// they give product-not-named findings, which are not stored (D4-54), and
+// a large set does not fill the class with findings.
 func advPayload(t *testing.T, setID string, version uint64, purpose advisory.Purpose, entries int) []byte {
 	t.Helper()
 	s := advisory.Set{Contract: advisory.Identifier, SetID: setID, Version: version, IssuedAt: "2026-11-05T00:00:00Z",
 		Purpose: purpose, Publisher: "node tests"}
 	for i := range entries {
-		s.Entries = append(s.Entries, advEntry(fmt.Sprintf("adv-%04d", i), strings.Repeat("t", advisory.MaxTitleBytes)))
+		e := advEntry(fmt.Sprintf("adv-%04d", i), strings.Repeat("t", advisory.MaxTitleBytes))
+		if i > 0 {
+			e.Affected[0].Product = "SEL-311C"
+		}
+		s.Entries = append(s.Entries, e)
 	}
 	if purpose == advisory.PurposeTest {
 		for i := range s.Entries {

@@ -1,0 +1,41 @@
+{
+  "schema": "otsec.asset/0.1",
+  "kind": "capability-profile",
+  "profile_id": "sel-27x1-rstp",
+  "version": "0.1",
+  "vendor": "sel",
+  "product_family": "sel-2731",
+  "device_class": "ethernet-switch",
+  "firmware": {
+    "allowlist": "sel-27x1-rstp"
+  },
+  "pre_credential": [
+    "snmp_engine_id"
+  ],
+  "capabilities": [
+    {
+      "capability": "identification",
+      "mechanism": "adapter-operation",
+      "operations": [
+        "sel27x1.snmp.identity"
+      ],
+      "status": "simulated",
+      "citation": "Test profile for C2's test package contracts/adapter/testdata/snmp/register.json (D4-54); no device behind it"
+    }
+  ],
+  "session_limits": {
+    "max_concurrent_sessions": 1,
+    "min_interval_ms": 60000,
+    "password_attempts": 1,
+    "idle_timeout_ms": 0,
+    "failed_auth_floor_ms": 1,
+    "citation": "Test values, not device facts. min_interval_ms is a platform choice. SNMPv3 has no login: password_attempts is 1 only because C2's CheckAgainst requires it for any credential, and the idle timeout and floor are placeholders that an SNMP run never uses (no login is confirmed, so no floor is set)."
+  },
+  "secret_policy": {
+    "min_len": 1,
+    "max_len": 12,
+    "allowed": "[!-~]+",
+    "mnemonic_len": 3,
+    "citation": "Placeholder required by D1-19 because password_attempts is 1. An SNMPv3 secret is USM keys, which the credential store holds to the USM rules (C7 0.8), not to this policy."
+  }
+}

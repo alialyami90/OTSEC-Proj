@@ -9,6 +9,7 @@ import (
 
 	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/contracts/config"
+	"otsec.local/otsec/contracts/finding"
 	c5 "otsec.local/otsec/contracts/store"
 )
 
@@ -38,7 +39,10 @@ import (
 //     series identity), with a capture that holds the bytes its session
 //     observations' spans point to, and its latest-read record
 //     (otsec.identityread, working state, series identity.read), with no
-//     capture (identity.go).
+//     capture (identity.go);
+//   - since C5 0.8, a C12 finding (otsec.finding, evidence, series
+//     finding), with no capture, that passes C12's Validate in the bytes
+//     the node's encoder writes (findings.go).
 //
 // It returns each document's C5 0.7 DocumentInfo. The first three are
 // evidence, in the series config.snapshot or config.difference (C9's own
@@ -112,6 +116,8 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return checkIdentityRecord(document, capture)
 	case head.Schema == IdentityReadSchema:
 		return checkIdentityReadRecord(document, capture)
+	case head.Schema == finding.Identifier:
+		return checkFindingRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set or an identity record", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record or a C12 finding", head.Schema, head.Kind)
 }

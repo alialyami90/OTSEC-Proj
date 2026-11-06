@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"otsec.local/otsec/contracts/adapter"
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/modules/security/collector"
 	"otsec.local/otsec/modules/security/collectorwire"
@@ -148,7 +149,10 @@ func start(data string, log *slog.Logger) (*running, error) {
 	pipe, err := collector.NewPipeline(collector.PipelineConfig{
 		NodeID: cfg.NodeID, PolicyVersion: cfg.PolicyVersion, Assets: cfg.Assets,
 		State: state, Creds: creds, Registers: regs, Runner: &collector.SEL751Runner{Alarm: alarm, Now: testNow}, Now: testNow,
-		AdminKeys: cfg.AdminKeys, InstallLimit: cfg.InstallLimit, Alarm: alarm,
+		// The SNMPv3 client is C2's modules/ied/snmpv3 (D4-54). Its
+		// adapter ID is the one C2's examples use.
+		SNMPRunner: &collector.SNMPRunner{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0"}, Alarm: alarm, Now: testNow},
+		AdminKeys:  cfg.AdminKeys, InstallLimit: cfg.InstallLimit, Alarm: alarm,
 		ReadClearFile: clearFileReader(l.admin, []string{cfg.Endpoint.Peer, collectorwire.ServiceSID(collectorwire.CollectorService)}),
 	})
 	if err != nil {
