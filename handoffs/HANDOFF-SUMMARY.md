@@ -145,4 +145,4 @@ These come from the owner and hold until the owner changes them. They are carrie
 - **Documents** use they/them for the owner.
 - *Added by the owner during generation B:* name every new thread after the agent assigned to that work in the repository documentation; stage files by explicit path, never `git add -A` (the 2026-10-28 checkpoint instruction).
 - *Added by the owner during generation C (D4-58):* all messages between agents run through the coordinator.
-- *An environment fact, not a rule:* force-push is denied on other agents' branches, so after a squash merge, merge `origin/main` into your branch instead of rewriting it.
+- *An environment fact, not a rule:* force-push is denied on every branch, an agent's own included (C6 on #486). After a squash merge, restart the branch with `git checkout -B <branch> origin/main && git merge -s ours origin/<branch>`, then push normally; never rewrite it.

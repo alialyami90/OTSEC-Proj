@@ -974,7 +974,7 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
   - An agent sends a message meant for another agent to the coordinator, which relays it. This replaces direct thread-to-thread messages.
   - What an agent posts in its own thread, and on its own PRs, is unchanged.
 - **The C team hands off to the D team (owner, 11:55Z).** The owner asked every agent to run a generation checkpoint.
-  - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #484, and C6's). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
+  - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #485). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
   - Roles, owned paths and rules stay with the number. Wherever a record says A*n*, B*n* or C*n*, read it as the role D*n* now holds.
   - Phase 4's decision file stays `docs/phase4/B1-decisions.md`, and its numbering continues at D4-59.
   - Cutover happens once D1 has confirmed all six acks.
