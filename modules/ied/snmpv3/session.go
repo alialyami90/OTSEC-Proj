@@ -247,7 +247,9 @@ func (st *state) send(ph adapter.Phase, step string, secure bool, maxSize int64,
 	if secure {
 		st.s.Keys.sign(wire, m)
 	}
-	if err := st.s.Permit(step, secure, wire); err != nil {
+	// engineKnown comes from discovery's result, not from the flags the
+	// check judges (C3 on #453).
+	if err := st.s.Permit(step, st.out.EngineID != nil, wire); err != nil {
 		return 0, st.end(adapter.FailedEgressViolation, "the egress check refused a request: %v", err)
 	}
 	st.record(adapter.Sent, ph, wire, m, sc)
