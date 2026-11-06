@@ -513,9 +513,15 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 				return badRecord{st.Key.Seq, err}
 			}
 			if announce && changed && rec.Action == audit.ActionAssetSuspensionClear {
-				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator; runs resume once the collector accepts the clear")
+				if signedClearDetail.MatchString(rec.Detail) {
+					s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator's signed request, which the collector accepted; runs resume")
+				} else {
+					s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "suspension "+rec.CorrelationID+" cleared by an administrator; runs resume once the collector accepts the clear")
+				}
 			}
-			if announce && accepted {
+			if c := signedClearAccepted.FindStringSubmatch(rec.Detail); announce && accepted && rec.Target == nil && c != nil {
+				s.rt.opt.Status.Raise(c[1], AlarmSuspensionCleared, "the collector accepted an administrator's signed asset.clear_suspension of suspension "+c[2]+", which the node had cleared; runs resume")
+			} else if announce && accepted {
 				s.rt.opt.Status.Raise(rec.Target.AssetID, AlarmSuspensionCleared, "the collector accepted the "+rec.Detail+"; runs resume")
 			}
 			after = st.Key.Seq
@@ -627,6 +633,11 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 		s.refuseClear(key, "", fmt.Sprintf("%s is not a %s object with asset_id and ref", ClearSuspensionFileName, ClearSuspensionSchema))
 		return
 	}
+	// Off-lab the file is refused, and on a lab-only node a signed request
+	// naming the same clear supersedes it (unsigned.go, P4-H1).
+	if !s.unsignedGate(ClearSuspensionFileName, digest(b), func(w unsignedWants) bool { return w.clear[cl.AssetID+" "+cl.Ref] }) {
+		return
+	}
 	s.mu.Lock()
 	file := cl
 	s.clearFile = &file
@@ -658,10 +669,11 @@ func (s *Scheduler) checkClear(ctx context.Context) {
 		s.refuseClear("unaudited "+key, cl.AssetID, fmt.Sprintf("suspension %s is not yet in the audit stream; nothing cleared, and the clear waits until it is", cl.Ref))
 		return
 	}
-	if err := s.commitSuspensionRecord(ctx, audit.ActionAssetSuspensionClear, cl.AssetID, sp, "", "cleared by "+ClearSuspensionFileName); err != nil {
+	if err := s.commitSuspensionRecord(ctx, audit.ActionAssetSuspensionClear, cl.AssetID, sp, "", "cleared by "+ClearSuspensionFileName+unsignedSuffix); err != nil {
 		s.refuseClear("audit "+key, cl.AssetID, "clear not recorded in the audit stream, so not applied: "+err.Error())
 		return
 	}
+	s.unsignedAccepted(ClearSuspensionFileName, digest(b), cl.AssetID)
 	// The clear applies from the stream, as at a start: settle's fold
 	// finds it and lifts the suspension. A checkpoint that still holds the
 	// cleared suspension errs on the safe side.

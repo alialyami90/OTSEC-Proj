@@ -12,11 +12,12 @@ import (
 
 // Unsigned administrator files (relay PR 2b, A3 on #181 and B1 on #339).
 //
-// clear-quarantine.json and seq-reset-ack.json are the Phase 2 interim way
-// to tell the node something: a JSON file in admin_dir with no signature,
-// protected only by the directory's ACL. A signed C7 request
-// (node.quarantine_clear, node.seq_reset_ack; admin_actions.go) carries the
-// administrator's key and a nonce, and the collector verifies it. So:
+// clear-quarantine.json, seq-reset-ack.json and clear-suspension.json are
+// the Phase 2 interim way to tell the node something: a JSON file in
+// admin_dir with no signature, protected only by the directory's ACL. A
+// signed C7 request (node.quarantine_clear, node.seq_reset_ack,
+// asset.clear_suspension; admin_actions.go) carries the administrator's key
+// and a nonce, and the collector verifies it. So:
 //
 //   - On a node with a lab endpoint only (every endpoint of every asset has
 //     target simulated), the unsigned files still work, and each one the node
@@ -27,16 +28,14 @@ import (
 //     is done. There is no flag that lifts this; the administrator signs a
 //     request instead.
 //   - When an unsigned file and a signed request in admin_dir name the same
-//     clear (the same export, or the same install key), the unsigned file is
-//     ignored (unsigned-admin-file-ignored): the signed one is acted on, and
-//     the signed one only.
+//     clear (the same export, the same install key, or the same asset and
+//     suspension), the unsigned file is ignored (unsigned-admin-file-ignored):
+//     the signed one is acted on, and the signed one only.
 //     A signed request the collector has refused does not count.
 //
-// clear-suspension.json is not covered here: the node's suspension clear has
-// no signed counterpart yet (the collector reads the same file for its own
-// part), so refusing it would leave no way to clear a suspension on a
-// non-lab node. That needs asset.clear_suspension relayed and acted on, and
-// the collector's own refusal of the file; it is a separate PR.
+// The collector applies the same rule to clear-suspension.json for its own
+// half, per asset (#508): it refuses the file for an asset with an endpoint
+// that is not simulated, and reads it otherwise (P4-H1).
 const (
 	// AlarmUnsignedAdminFileRefused: an unsigned file on a node with a
 	// non-lab endpoint. Level 0 (asset-less), once per file content.
@@ -71,10 +70,11 @@ func (c *Config) LabOnly() bool {
 type unsignedWants struct {
 	quarantine map[string]bool // asset ID + " " + manifest SHA-256
 	ack        map[string]bool // install key ID
+	clear      map[string]bool // asset ID + " " + suspension ref
 }
 
 func unsignedWantsOf(files []*adminFile) unsignedWants {
-	w := unsignedWants{quarantine: map[string]bool{}, ack: map[string]bool{}}
+	w := unsignedWants{quarantine: map[string]bool{}, ack: map[string]bool{}, clear: map[string]bool{}}
 	for _, f := range files {
 		var p authz.AdminRequest
 		if f.signed == nil || collectorwire.DecodeStrict(f.signed.Payload, &p) != nil {
@@ -88,6 +88,10 @@ func unsignedWantsOf(files []*adminFile) unsignedWants {
 		case authz.KindNodeSeqResetAck:
 			if p.NodeSeqResetAck != nil && p.Kind == f.kind {
 				w.ack[p.InstallKeyID] = true
+			}
+		case authz.KindAssetClearSusp:
+			if b := p.AssetClearSusp; b != nil && p.Kind == f.kind {
+				w.clear[b.AssetID+" "+b.Ref] = true
 			}
 		}
 	}
@@ -115,7 +119,7 @@ func (s *Scheduler) signedWants() unsignedWants {
 func (s *Scheduler) unsignedGate(name, sum string, superseded func(unsignedWants) bool) bool {
 	if !s.rt.cfg.LabOnly() {
 		s.raiseOnceKey(AlarmUnsignedAdminFileRefused+" "+sum, "", AlarmUnsignedAdminFileRefused,
-			fmt.Sprintf("%s is not signed, and this node has an endpoint that is not simulated, so it is not acted on. Sign a request (node.quarantine_clear, node.seq_reset_ack) instead", name))
+			fmt.Sprintf("%s is not signed, and this node has an endpoint that is not simulated, so it is not acted on. Sign a request (node.quarantine_clear, node.seq_reset_ack, asset.clear_suspension) instead", name))
 		return false
 	}
 	if superseded(s.signedWants()) {
