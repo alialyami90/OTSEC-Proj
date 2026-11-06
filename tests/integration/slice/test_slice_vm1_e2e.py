@@ -20,6 +20,7 @@ import os
 import glob
 import secrets
 import shutil
+import socket
 import sqlite3
 import subprocess
 import time
@@ -187,6 +188,13 @@ def vm1(tmp_path_factory):
         # each agent sees exactly one run (two for U15).
         t0 = time.time()
         s.start(setup_extra=("-gtmib", spec))
+        # V-M1 (f): a UDP socket on the SEL-751's address and port, the only
+        # place the node and the collector know for it, held for the whole
+        # run. It is bound after the node starts, and before any credential
+        # is installed, so before any SNMP run can be made.
+        sel751_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sel751_udp.bind(("127.0.0.1", s.sim_port))
+        sel751_udp.setblocking(False)
         env = dict(os.environ, OTSEC_GTMIB_SECRETS_HEX=json.dumps({c: a.secret for c, a in agents.items()}))
         out = subprocess.run([s.exe("slicehelper"), "install-gtmib", "-root", s.root, "-gtmib", spec],
                              capture_output=True, env=env, text=True, timeout=900)
@@ -219,6 +227,17 @@ def vm1(tmp_path_factory):
         s.health_text = s.health()
         s.agents = agents
         s.stop()
+        s.sel751_datagrams = []
+        while True:
+            try:
+                s.sel751_datagrams.append(sel751_udp.recvfrom(65535))
+            except BlockingIOError:
+                break
+        sel751_udp.close()
+        with open(s.layout["node_config"], encoding="utf-8") as f:
+            s.node_config = json.load(f)
+        with open(os.path.join(s.layout["collector_data"], "collector", "collector.json"), encoding="utf-8") as f:
+            s.collector_config = json.load(f)
         s.logs_by_case = {c: a.records() for c, a in agents.items()}
         s.transcripts = transcripts(s)
         s.refusals = refusals_before_any_run(s)
@@ -323,6 +342,31 @@ def test_attributes(vm1):
             if _device_reads(vm1, c, name)[1]:
                 wrong.append(f"{c} {name}: read, but the table says absent")
     assert not wrong, "\n".join(wrong)
+
+
+def test_f_sel751_reads_its_identity_on_its_registered_path_and_gets_no_snmp(vm1):
+    """V-M1 (f): the SEL-751, a family with no SNMP agent, has no SNMP
+    endpoint in the node's or the collector's configuration (the collector
+    dials from its own) and no SNMP schedule entry; every device-read
+    observation of its identity names its registered transport and a SEL
+    operation; its model is read, not declared; and no datagram reached its
+    address and port during the run."""
+    asset = vm1.layout["asset_id"]
+    a = next(x for x in vm1.node_config["assets"] if x["asset_id"] == asset)
+    transports = {e["transport"] for e in a["endpoints"]}
+    assert transports == {"telnet"}, transports
+    c = next(x for x in vm1.collector_config["assets"] if x["asset_id"] == asset)
+    assert {e["transport"] for e in c["endpoints"]} == transports, c["endpoints"]
+    assert not [e for e in vm1.node_config["schedule"] if e["asset_id"] == asset and "snmp" in e["operation"]]
+    attrs = {at["name"]: at for at in vm1.status["identity"][asset]["attributes"]}
+    reads = [(n, o) for n, at in attrs.items() for o in at["observations"] if o["source"].get("kind") == "device-read"]
+    wrong = [(n, o["source"].get("read")) for n, o in reads
+             if o["source"].get("read", {}).get("transport") not in transports
+             or not o["source"]["read"].get("operation", "").startswith("sel.")]
+    assert reads and not wrong, wrong or "no device-read observation"
+    model = [o for n, o in reads if n == "model"]
+    assert attrs["model"]["value"] == "SEL-751" and model and all(o["value"] == "SEL-751" for o in model), attrs["model"]
+    assert vm1.sel751_datagrams == [], vm1.sel751_datagrams[:3]
 
 
 def test_f6_health_shows_the_family_conflict(vm1):
