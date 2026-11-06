@@ -206,6 +206,9 @@ def test_the_set_in_use_again_records_nothing(run):
 def test_a_restart_keeps_version_2_and_records_no_refusal_again(run):
     u = run["restarted"]["in_use"]
     assert (u["version"], u["payload_sha256"]) == (2, run["v2"]["payload_sha256"]), u
+    # The time it came into use is its install record's, not the restart's
+    # (C1 on #470, #474).
+    assert u == run["in_use_v2"], (u, run["in_use_v2"])
     assert run["restarted"]["records"] == [], run["restarted"]["records"]
 
 
