@@ -75,6 +75,8 @@ type RunPlan struct {
 	// pipeline puts them in the outcome after the runner returns, with the
 	// credential suspension it applies; a runner never sets Outcome.Audit.
 	Audit *RunAudit
+
+	runner Runner // Runner, or SNMPRunner for an SNMP run
 }
 
 // RunReport is what a run tells the pipeline besides the outcome. Its zero
@@ -105,6 +107,10 @@ type PipelineConfig struct {
 	// yet: every run is refused with not_invocable after the checks that
 	// need no adapter, and credential requests still work.
 	Runner Runner
+	// SNMPRunner runs accepted SNMPv3 runs (P4-3-C3 deliverable 5, D4-54).
+	// Nil means this collector hosts no SNMP adapter: every SNMP run is
+	// refused with not_invocable.
+	SNMPRunner Runner
 	// Limits are the C2 limits of every invocation, except MinIntervalMS,
 	// which is the profile's. Zero values take DefaultLimits.
 	Limits adapter.Limits
@@ -458,7 +464,7 @@ func (p *Pipeline) install(body authz.CredentialInstallBody) error {
 	if e, ok := p.assets[body.Ref.AssetID]; ok {
 		a := e.Asset
 		t.Asset = &a
-		t.Register, _, _ = p.cfg.Registers.Active(e.Profile.ProductFamily)
+		t.Register, _, _ = p.registerFor(e.Profile)
 	}
 	_, err := p.cfg.Creds.Install(body, t)
 	return err
@@ -474,16 +480,22 @@ func (p *Pipeline) install(body authz.CredentialInstallBody) error {
 //     run's endpoint is labelled simulated.
 //  4. D2-10: every outbound endpoint of the asset has a loopback IP
 //     literal as its host. Host names, localhost included, are refused.
-//  5. The family's register package is active, which means its signature
-//     verified in this collector, and the run names its revision; and an
-//     adapter is hosted.
+//  5. The register package the profile's firmware allowlist names is
+//     active, which means its signature verified in this collector, and the
+//     run names its revision; and an adapter is hosted. An allowlist of
+//     "none" finds no package (C1 on deliverable 5). An SNMP run (every
+//     step an SNMP operation) goes to the SNMP runner, anything else to the
+//     line runner.
 //  6. The operation is invocable, read-only, in the operate phase, with
 //     parameters that render, and a credential exactly when it needs one
 //     (RunBody.ValidateAgainst). A register run (C7 0.7) takes no
 //     parameters, its steps are each held to the same rules, its level is
 //     its highest step's, and a request stamped before 0.7 may not name
 //     one (CollectorRequest.ValidateRun). If the runner says which
-//     operations it hosts (Hoster), the name must be one of them.
+//     operations it hosts (Hoster), the name must be one of them. An SNMP
+//     run instead needs a request that may name runs, no parameters, a
+//     credential and an snmpv3 endpoint; a line operation is never run on
+//     an snmpv3 endpoint.
 //  7. The invocation the collector builds passes C2's checks against the
 //     asset and profile (Validate, ValidateWith, CheckAgainst): asset not
 //     suspended, a binding that compares something, a credential only where
@@ -492,7 +504,8 @@ func (p *Pipeline) install(body authz.CredentialInstallBody) error {
 //  9. One session per device: no other run to the asset is open.
 //  10. The credential: current version active, bound to this use, its
 //     access level reached by the register; the secret is decrypted only
-//     here, after every other check.
+//     here, after every other check. An snmpv3 credential's engine ID must
+//     still be the asset's declared snmp_engine_id (C2 2.3 step 1).
 //  11. The run's start is recorded durably.
 func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, Work, error) {
 	body := req.Run
@@ -511,29 +524,43 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		return "", nil, err
 	}
 	// 5.
-	pkg, m, ok := p.cfg.Registers.Active(e.Profile.ProductFamily)
+	pkg, m, ok := p.registerFor(e.Profile)
 	if !ok {
-		return "", nil, &authz.Refusal{Code: authz.RefuseRegisterUnverified, Detail: fmt.Sprintf("no verified register package for family %s", e.Profile.ProductFamily)}
+		return "", nil, &authz.Refusal{Code: authz.RefuseRegisterUnverified, Detail: fmt.Sprintf("no verified register package for allowlist %s", e.Profile.Firmware.Allowlist)}
 	}
 	if body.RegisterVersion != pkg.Revision {
 		return "", nil, &authz.Refusal{Code: authz.RefuseRegisterVersion, Detail: fmt.Sprintf("request names register %d, active is %d", body.RegisterVersion, pkg.Revision)}
 	}
-	if p.cfg.Runner == nil {
+	snmp := snmpRun(pkg, body.OperationID) != nil
+	runner := p.cfg.Runner
+	if snmp {
+		runner = p.cfg.SNMPRunner
+	}
+	if runner == nil {
 		return "", nil, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: fmt.Sprintf("this collector hosts no adapter for family %s", e.Profile.ProductFamily)}
 	}
 	// 6.
-	if err := req.ValidateRun(m); err != nil {
-		return "", nil, err
+	level := ""
+	if snmp {
+		if err := checkSNMPRun(req, ep); err != nil {
+			return "", nil, err
+		}
+	} else {
+		if ep.Transport == asset.SNMPv3 {
+			return "", nil, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: fmt.Sprintf("%s is not an SNMP run, and endpoint %s is snmpv3", body.OperationID, ep.ID)}
+		}
+		if err := req.ValidateRun(m); err != nil {
+			return "", nil, err
+		}
+		if level, err = body.AccessLevel(m); err != nil {
+			return "", nil, err
+		}
 	}
-	level, err := body.AccessLevel(m)
-	if err != nil {
-		return "", nil, err
-	}
-	if h, ok := p.cfg.Runner.(Hoster); ok && !h.Hosts(body.OperationID) {
+	if h, ok := runner.(Hoster); ok && !h.Hosts(body.OperationID) {
 		return "", nil, &authz.Refusal{Code: authz.RefuseNotInvocable, Detail: fmt.Sprintf("this collector's adapter for family %s does not host %s", e.Profile.ProductFamily, body.OperationID)}
 	}
 	// 7.
-	inv, err := p.invocation(req, e, ep)
+	inv, err := p.invocation(req, e, ep, pkg, m)
 	if err != nil {
 		return "", nil, err
 	}
@@ -565,6 +592,16 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 			release()
 			return "", nil, err
 		}
+		// Acquire has no asset: the engine ID it was installed for must
+		// still be the asset's declared one (C2 2.3 step 1; C1 and C6 on
+		// #456).
+		if ref.Transport == authz.TransportSNMPv3 {
+			if id, ok := e.Asset.Declared(asset.AttrSNMPEngineID); !ok || ref.USM == nil || id != ref.USM.EngineID {
+				h.Close()
+				release()
+				return "", nil, &authz.Refusal{Code: authz.RefuseCredentialMismatch, Detail: fmt.Sprintf("credential %s is for another engine ID than the asset's declared %s", ref.ID, asset.AttrSNMPEngineID)}
+			}
+		}
 		secret, cred = h, &ref
 	}
 	// 11.
@@ -579,7 +616,7 @@ func (p *Pipeline) decideRun(req *authz.CollectorRequest, seq uint64) (string, W
 		Invocation: inv, Asset: e.Asset, Profile: e.Profile, Endpoint: ep, Register: pkg,
 		Credential: cred, Secret: secret, Floor: NewFloorGate(p.cfg.State, body.AssetID),
 		Dial: endpointDialer(ep), ReplySeq: seq, NextSeq: p.cfg.State.NextSeq,
-		Principal: req.OnBehalfOf,
+		Principal: req.OnBehalfOf, runner: runner,
 	}
 	plan.Floor.Alarm = p.cfg.Alarm
 	plan.Audit = newRunAudit(p, &plan)
@@ -640,7 +677,10 @@ func (p *Pipeline) execute(ctx context.Context, plan RunPlan) collectorwire.RunO
 		}
 	}
 	credSuspend := report.Suspend
-	if credSuspend == "" {
+	if credSuspend == "" && !snmpEndpoint(plan.Endpoint) {
+		// An SNMP run suspends no credential, whatever its code: an
+		// authenticated FID mismatch suspends the asset only, above
+		// (Result.SuspendsCredential; C1 on #445, D4-54).
 		credSuspend = authz.SuspendReason(code.SuspendsCredential())
 	}
 	if credSuspend != "" && plan.Credential != nil {
@@ -707,7 +747,11 @@ func (p *Pipeline) runSafely(ctx context.Context, plan RunPlan) (report RunRepor
 			report = RunReport{Outcome: collectorwire.RunOutcome{InvocationID: plan.Invocation.InvocationID}}
 		}
 	}()
-	return p.cfg.Runner.Run(ctx, plan)
+	runner := plan.runner
+	if runner == nil {
+		runner = p.cfg.Runner // a plan built outside decideRun
+	}
+	return runner.Run(ctx, plan)
 }
 
 // checkResult runs the collector's own checks on the result before it is
@@ -724,7 +768,15 @@ func (p *Pipeline) checkResult(plan RunPlan, o collectorwire.RunOutcome) {
 	if err == nil {
 		err = res.Validate()
 	}
-	if err == nil {
+	if err == nil && snmpEndpoint(plan.Endpoint) {
+		// An SNMP result has no lines: CheckSNMP holds its reads, its
+		// redactions and its identity to the register (C2 0.7).
+		if serr := res.CheckSNMP(plan.Register, plan.Invocation); serr != nil {
+			p.cfg.Alarm(fmt.Errorf("collector: SAFETY: the SNMP result of invocation %s fails CheckSNMP: %w", id, serr))
+			return
+		}
+		err = res.CheckAgainst(plan.Invocation, plan.Asset)
+	} else if err == nil {
 		if lerr := res.CheckLines(plan.Register, plan.Invocation); lerr != nil {
 			p.cfg.Alarm(fmt.Errorf("collector: SAFETY: invocation %s put a line on the wire the register does not allow: %w", id, lerr))
 			return
@@ -737,7 +789,7 @@ func (p *Pipeline) checkResult(plan RunPlan, o collectorwire.RunOutcome) {
 }
 
 // invocation builds the C2 invocation for a run and checks it (step 7).
-func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.Endpoint) (adapter.Invocation, error) {
+func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.Endpoint, pkg *register.Package, m *register.Matcher) (adapter.Invocation, error) {
 	inv := adapter.Invocation{
 		Schema:        adapter.Contract,
 		InvocationID:  p.cfg.NewID(),
@@ -751,8 +803,10 @@ func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.
 		CredentialRef: req.Run.CredentialRef,
 		Limits:        p.cfg.Limits,
 	}
-	_, m, _ := p.cfg.Registers.Active(e.Profile.ProductFamily)
-	if _, isRun := m.Run(req.Run.OperationID); isRun {
+	var lookup adapter.OperationLookup = adapter.RegisterLookup{M: m}
+	if run := snmpRun(pkg, req.Run.OperationID); run != nil {
+		inv.Limits, lookup = snmpLimits(p.cfg.Limits, pkg, run), snmpLookup{pkg}
+	} else if _, isRun := m.Run(req.Run.OperationID); isRun {
 		// A run's bytes, deadline and step timeout come from the signed
 		// register, never from the request or this collector's defaults
 		// (C7 0.7): the defaults would cut a run short.
@@ -772,7 +826,7 @@ func (p *Pipeline) invocation(req *authz.CollectorRequest, e Enrolled, ep asset.
 			inv.Expected = append(inv.Expected, adapter.Expected{Name: name, Value: v})
 		}
 	}
-	if err := inv.ValidateWith(adapter.RegisterLookup{M: m}); err != nil {
+	if err := inv.ValidateWith(lookup); err != nil {
 		return adapter.Invocation{}, c2Refusal(err)
 	}
 	if err := inv.CheckAgainst(e.Asset, e.Profile); err != nil {
@@ -811,7 +865,7 @@ func collectionEndpoint(a asset.Asset) (asset.Endpoint, error) {
 			return asset.Endpoint{}, &authz.Refusal{Code: authz.RefuseAssetNotEnrolled,
 				Detail: fmt.Sprintf("D2-4: endpoint %s is labelled device-observed; Phase 2 collects from simulators only", ep.ID)}
 		}
-		if ep.Transport == asset.Telnet || ep.Transport == asset.SSH {
+		if ep.Transport == asset.Telnet || ep.Transport == asset.SSH || ep.Transport == asset.SNMPv3 {
 			if err := loopbackLiteral(ep.Host); err != nil {
 				return asset.Endpoint{}, &authz.Refusal{Code: authz.RefuseAssetNotEnrolled,
 					Detail: fmt.Sprintf("D2-10: endpoint %s: %v", ep.ID, err)}
@@ -853,12 +907,17 @@ func loopbackLiteral(host string) error {
 // errDialRefused is returned by an endpoint dialer for any other address.
 var errDialRefused = errors.New("collector: dial refused: not the run's endpoint")
 
-// endpointDialer permits exactly the endpoint's host and port over TCP, and
-// checks D2-10 again at dial time.
+// endpointDialer permits exactly the endpoint's host and port, over UDP for
+// an snmpv3 endpoint and TCP for any other, and checks D2-10 again at dial
+// time.
 func endpointDialer(ep asset.Endpoint) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	want := net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port))
+	proto := "tcp"
+	if ep.Transport == asset.SNMPv3 {
+		proto = "udp"
+	}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if (network != "tcp" && network != "tcp4" && network != "tcp6") || addr != want {
+		if (network != proto && network != proto+"4" && network != proto+"6") || addr != want {
 			return nil, fmt.Errorf("%w: %s %s", errDialRefused, network, addr)
 		}
 		if err := loopbackLiteral(ep.Host); err != nil {
