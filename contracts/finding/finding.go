@@ -21,6 +21,11 @@ const Identifier = "otsec.finding/0.1"
 
 var self = version.ID{Name: "finding", Major: 0, Minor: 1}
 
+// Known reports whether schema names a minor of this contract that this
+// build reads. A reader refuses a finding of any other minor rather than skip
+// it, so a node rolled back past a newer minor fails closed (D4-61).
+func Known(schema string) bool { return schema == Identifier }
+
 // Bounds on one record, so a finding always fits one store record.
 const (
 	MaxEvidence      = 16 // evidence IDs per identity, precondition or mitigation
