@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/advisory"
 	"otsec.local/otsec/contracts/advisory/advisorytest"
@@ -511,5 +512,30 @@ func TestAdvisoryStaleUnrecordedSetIsNotRepaired(t *testing.T) {
 	inst := n.records(audit.ActionAdvisorySetInstalled)
 	if u := n.inUse(); u == nil || u.Version != 3 || inst[len(inst)-1].Advisory.PreviousVersion != 2 {
 		t.Fatalf("a newer set did not install: %+v", u)
+	}
+}
+
+// in_use_since is the set's advisory.set_installed time, at install and
+// after a restart, so a restart does not move it (C1 on #470).
+func TestAdvisoryInUseSinceSurvivesRestart(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.put(k.sign(advPayload(t, "otsec-sel", 1, advisory.PurposeRelease, 1)))
+	n.step()
+	inst := n.records(audit.ActionAdvisorySetInstalled)
+	if len(inst) != 1 {
+		t.Fatalf("%d advisory.set_installed records", len(inst))
+	}
+	want, err := time.Parse(time.RFC3339Nano, inst[0].Time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := n.inUse()
+	if before == nil || !before.InUseSince.Equal(want) {
+		t.Fatalf("at install, set in use %+v, want in_use_since %s", before, want)
+	}
+	n.restart()
+	if after := n.inUse(); after == nil || !after.InUseSince.Equal(before.InUseSince) {
+		t.Fatalf("after a restart, set in use %+v, want in_use_since %s", after, before.InUseSince)
 	}
 }

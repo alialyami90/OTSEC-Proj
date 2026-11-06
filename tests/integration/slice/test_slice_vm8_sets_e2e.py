@@ -45,7 +45,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import SERVICE, Slice
+from slicerun import SERVICE, Slice, check_v_s7
 from test_slice_gtinj_feed_e2e import _query, _status
 
 TICK = 15
@@ -142,6 +142,7 @@ def run(tmp_path_factory):
                           "findings": _findings(s)[len(out["findings"]):]}
     finally:
         s.stop()
+        out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
     return out
 
 
@@ -235,3 +236,11 @@ def test_a_revoked_key_drops_the_set_in_use_at_start(run):
         [("advisory.set_refused", "denied", "revoked_key", v3["file_sha256"])], r["records"]
     assert (app["last_refusal"]["file_sha256"], app["last_refusal"]["code"]) == (v3["file_sha256"], "revoked_key"), app["last_refusal"]
     assert r["findings"] == [], r["findings"]
+
+
+def test_v_s7_only_read_only_register_lines_reached_the_device(run):
+    # V-S7 (b) over the run's recordings: R9 adds no line to the device.
+    assert run["checked"], "no recording"
+    for log, code, report in run["checked"]:
+        assert code == 0 and report.get("pass") and not report.get("violations"), (log, report)
+        assert report["commands_received"] > 0 and report["peak_concurrent_sessions"] == 1, (log, report)

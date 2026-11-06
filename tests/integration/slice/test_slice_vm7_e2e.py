@@ -59,7 +59,7 @@ import pytest
 
 import harness
 from conftest import need
-from slicerun import SERVICE, Slice
+from slicerun import SERVICE, Slice, check_v_s7
 from test_slice_gtinj_feed_e2e import _parse, _query, _status
 
 sys.path.insert(0, os.path.join(harness.REPO, "tests", "integration", "vm7"))
@@ -173,6 +173,7 @@ class _Run:
                 out["mismatched_restarted"] = self.collect()
         finally:
             s.stop()
+            out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
         return out
 
     def collect(self):
@@ -369,3 +370,16 @@ def test_a_later_mismatch_is_kept_apart_and_hides_no_advisory(runs, when):
     asset = _observe(state, MISMATCH_ROW)
     bad = [b for adv in ADVISORIES_OF_THE_751 for b in vm7.check_mismatch(asset, adv, mismatch, MISMATCH_FID, confirming)]
     assert bad == [], bad
+
+
+@pytest.mark.parametrize("row", [r["id"] for r in DEVICE_ROWS])
+def test_v_s7_only_read_only_register_lines_reached_the_device(runs, row):
+    # V-S7 (b) over this row's recordings, the mismatch's replacement
+    # simulator included: every line is a revision 5 read-only line, none
+    # before a prompt, none non-printable, and no second password.
+    o = runs[row]
+    assert "error" not in o, o.get("error")
+    assert o["checked"], "no recording"
+    for log, code, report in o["checked"]:
+        assert code == 0 and report.get("pass") and not report.get("violations"), (log, report)
+        assert report["commands_received"] > 0 and report["peak_concurrent_sessions"] == 1, (log, report)

@@ -28,11 +28,18 @@ var (
 	streamRE = regexp.MustCompile(StreamPattern)
 )
 
+// Reserved is the one name IDPattern matches that is not a node ID:
+// "audit" is the first part of an operator audit citation
+// ("audit:<node_id>:<seq>"), so a node of that name would emit event IDs
+// ("<node_id>:<stream>:<seq>") of the same form (C6's F-025, D4-57). A JSON
+// Schema that repeats IDPattern does not exclude it; Valid does.
+const Reserved = "audit"
+
 // ID names a platform node.
 type ID string
 
-// Valid reports whether id is a well-formed node ID.
-func (id ID) Valid() bool { return idRE.MatchString(string(id)) }
+// Valid reports whether id is a well-formed node ID, and not Reserved.
+func (id ID) Valid() bool { return id != Reserved && idRE.MatchString(string(id)) }
 
 // Stream names one native sequence space on a node, for example one
 // device's SER buffer or one Syslog sender.

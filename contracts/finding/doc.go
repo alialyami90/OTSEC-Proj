@@ -1,7 +1,5 @@
-// Package finding is contract C12, otsec.finding/0.1, a DRAFT for review
-// under Phase 4 item 3 Stage A (brief P4-3-A4, D4-48). It is not approved,
-// and no product code may depend on it until C1 approves it together with
-// C1 0.3 (identity attributes) and C11 (the advisory set).
+// Package finding is contract C12, otsec.finding/0.1 (brief P4-3-A4),
+// approved by C1 together with C1 0.3 and C11 (D4-53).
 //
 // A finding is the result of matching one asset's identity against one
 // advisory of the signed offline set (R9.1, R9.2). The classes and what
