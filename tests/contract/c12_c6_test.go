@@ -23,6 +23,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/finding"
+	cnode "otsec.local/otsec/contracts/node"
 	"otsec.local/otsec/platform/node"
 )
 
@@ -85,20 +86,13 @@ func TestC12NamesAC11SetExactly(t *testing.T) {
 
 // Each evidence ID is the form its source's contract writes, and no form
 // stands for another source, so an operator's entry can never be cited as a
-// device read (C6 on #440).
+// device read (C6 on #440) or as passive evidence (F-025, D4-57).
 func TestC12EvidenceIsItsSourcesForm(t *testing.T) {
 	passive := event.EventID{NodeID: "site-a-node-1", Stream: "syslog/192.0.2.31", Seq: 7}.String()
 	audit := "audit:site-a-node-1:12"
 	forms := map[finding.Source]string{finding.DeviceRead: c12Inv, finding.Passive: passive, finding.Operator: audit}
 	for src := range forms {
 		for other, otherID := range forms {
-			if src == finding.Passive && other == finding.Operator {
-				// An audit ref is also a well-formed event ID, of a node
-				// named "audit" (C3's node ID pattern allows it), so C12
-				// 0.1 takes it as passive evidence. Raised with C4 and C1
-				// as F-025; this pair is asserted once they rule.
-				continue
-			}
 			f := c12Finding()
 			f.Class, f.Reason = finding.ApplicableByVersion, ""
 			f.Identity.Source = src
@@ -116,6 +110,14 @@ func TestC12EvidenceIsItsSourcesForm(t *testing.T) {
 		"an event ID at seq 0":                 {Source: finding.Passive, ID: "site-a-node-1:syslog/192.0.2.31:0"},
 		"an event ID on an invalid stream":     {Source: finding.Passive, ID: "site-a-node-1:Syslog:7"},
 		"an operator entry cited by free text": {Source: finding.Operator, ID: "operator:commissioning-sheet-07"},
+		// F-025, D4-57: an audit ref is also an event ID's shape, of a
+		// node named "audit"; C3 reserves that name, so neither reading
+		// stands as passive evidence, and no audit ref names that node.
+		"an audit ref cited as passive, on node audit": {Source: finding.Passive, ID: "audit:audit:12"},
+		"an event ID on node audit":                    {Source: finding.Passive, ID: "audit:syslog/192.0.2.31:7"},
+		"an audit ref on node audit":                   {Source: finding.Operator, ID: "audit:audit:12"},
+		"a device read of UUID version 0":              {Source: finding.DeviceRead, ID: "3e9d5a71-0b2c-0f86-a1d4-6c8e2f0b9a53"},
+		"a device read without the RFC variant":        {Source: finding.DeviceRead, ID: "3e9d5a71-0b2c-4f86-c1d4-6c8e2f0b9a53"},
 	} {
 		f := c12Finding()
 		f.Identity.Source, f.Identity.Evidence = ev.Source, []finding.Evidence{ev}
@@ -169,4 +171,21 @@ func TestC12AFindingAtEveryBoundFitsOneRecord(t *testing.T) {
 		t.Fatalf("a finding at every bound is %d bytes, above the node's configuration record cap %d", len(b), node.ConfigRecordBytes)
 	}
 	t.Logf("a finding at every bound is %d bytes; the node's configuration record cap is %d", len(b), node.ConfigRecordBytes)
+}
+
+// D4-57: "audit" is the first part of an operator's audit citation, so it is
+// no node ID, and no event ID can be issued on it; a name that only contains
+// the word stays a node ID.
+func TestC12NodeAuditIsReserved(t *testing.T) {
+	if cnode.ID("audit").Valid() || event.NodeID("audit").Valid() {
+		t.Error(`node ID "audit": accepted`)
+	}
+	if _, err := event.ParseEventID("audit:site-a-node-1:12"); err == nil {
+		t.Error(`event ID on node "audit": accepted`)
+	}
+	for _, id := range []string{"audit1", "audit-node", "site-audit", "audits"} {
+		if !cnode.ID(id).Valid() {
+			t.Errorf("node ID %q: refused", id)
+		}
+	}
 }
