@@ -10,6 +10,13 @@ import (
 	"otsec.local/otsec/contracts/register"
 )
 
+// AdapterID and Version name this build in every result (C2 adapter, A4
+// EP-4), as modules/ied/sel751 does.
+const (
+	AdapterID = "sel-27x1-snmpv3"
+	Version   = "0.1.0" // 0.1.0: the SEL-2731M and SEL-2741M identity run over SNMPv3 (P4-3-C2, D4-54)
+)
+
 // Meta is what the collector adds to a result: the adapter build, the
 // endpoint's target (C1, never what the agent says) and when the run began.
 type Meta struct {

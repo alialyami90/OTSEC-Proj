@@ -29,7 +29,7 @@ func built(t *testing.T, a *agent, inv adapter.Invocation) adapter.Result {
 	t.Helper()
 	p := identityPackage(t, nil)
 	o := session(a).Run(p, runID)
-	r := Result(o, inv, p, Meta{Adapter: adapter.AdapterRef{ID: "sel-27x1-snmpv3", Version: "0.1.0-test"},
+	r := Result(o, inv, p, Meta{Adapter: adapter.AdapterRef{ID: AdapterID, Version: Version},
 		Target: c1.Simulated, Started: time.Now().Add(-time.Second)})
 	b, err := json.Marshal(r)
 	if err != nil {
