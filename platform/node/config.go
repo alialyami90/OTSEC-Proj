@@ -51,6 +51,9 @@ type Config struct {
 	// EventBaselines are the assets whose event behaviour is learnt and
 	// watched (R4.8; eventbaselines.go).
 	EventBaselines []EventBaseline `json:"event_baselines,omitempty"`
+	// AssetControls are the network controls recorded in front of assets,
+	// beside the C1 records (controls.go, D4-56).
+	AssetControls []AssetControls `json:"asset_controls,omitempty"`
 	// Asset and Applicability are the item 3 switches (item3config.go,
 	// D4-50); an absent section is off.
 	AssetModule   *AssetModule   `json:"asset,omitempty"`
@@ -388,6 +391,7 @@ func (c *Config) check() error {
 	}
 	c.checkRegister(fail)
 	c.checkRegisterVersions(fail)
+	c.checkAssetControls(fail)
 	if c.KeyRegister != "" && !filepath.IsAbs(c.KeyRegister) {
 		fail("key_register %q is not an absolute path", c.KeyRegister)
 	}
