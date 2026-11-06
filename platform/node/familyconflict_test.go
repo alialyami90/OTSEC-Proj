@@ -94,7 +94,8 @@ func TestIdentityFamilyConflict(t *testing.T) {
 			if len(alarms) != 1 || !strings.Contains(alarms[0], tc.family) || strings.Contains(alarms[0], tc.conflict) {
 				t.Fatalf("alarms %q, want one naming %s", alarms, tc.family)
 			}
-			if len(events) != 1 || events[0]["asset_id"] != id || events[0]["product_family"] != tc.family || events[0]["evidence_id"] != res.InvocationID {
+			// Only these three keys: the model is device text (D6 on #499).
+			if len(events) != 1 || len(events[0]) != 3 || events[0]["asset_id"] != id || events[0]["product_family"] != tc.family || events[0]["evidence_id"] != res.InvocationID {
 				t.Fatalf("health events %v", events)
 			}
 
