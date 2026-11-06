@@ -25,14 +25,42 @@ FID_OTHER = "SEL-751-R500-V1-Z103101-D20260910"  # S22 Table A.1 p. A.2
 # the ID reply. C2's tests check that each span selects its value.
 FID_AT = 127
 CID_AT = 224
+# C1 0.3: every observation says its kind; a device read from a session says
+# its read path (the endpoint's transport and the register step).
+KIND = {"adapter-session": "device-read", "simulator-session": "device-read",
+        "syslog-received": "passive", "passive-network": "passive",
+        "operator-entry": "operator", "document": "operator"}
+READ_ID = {"transport": "telnet", "operation": "sel.id"}
+# The SEL-2731M example (C1 0.3, D4-51): the FID is verbatim from S29 Table
+# A.4 p. 62; the engine ID has S29 p. 42's form with a locally administered
+# MAC (02:00:00:27:31:01), so it is no real unit's. Its invocation ID, spans
+# and OIDs are invented: no transcript backs them, and the FID's column in
+# entPhysicalTable is not documented.
+SW_FID = "SEL-2731M-R102-V1-Z003001-D20260408"
+SW_ENGINE = "80007c4f03020000273101"
+SW_INV = "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53"
+SW_T = "2026-11-05T09:30:00Z"
 
 
-def obs(value, cls, method, ref, at, span=None):
+def obs(value, cls, method, ref, at, span=None, read=None):
     o = {"value": value, "evidence_class": cls,
          "source": {"method": method, "ref": ref, "observed_at": at}}
     if span:
         o["source"]["span"] = {"offset": span[0], "length": span[1]}
+    if method in KIND:
+        o["source"]["kind"] = KIND[method]
+    if KIND.get(method) == "device-read":
+        o["source"]["read"] = read or READ_ID
     return o
+
+
+def strip_kinds(a):
+    # A record of a minor before 0.3 has no kind and no read path.
+    for at in a["attributes"]:
+        for o in at["observations"]:
+            o["source"].pop("kind", None)
+            o["source"].pop("read", None)
+    return a
 
 
 def declared(name, value, by="operator:commissioning-sheet-07"):
@@ -42,7 +70,7 @@ def declared(name, value, by="operator:commissioning-sheet-07"):
 
 def relay():
     return {
-        "schema": "otsec.asset/0.2",
+        "schema": "otsec.asset/0.3",
         "asset_id": "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13",
         "node_id": "site-a-node1",
         "attributes": [
@@ -76,7 +104,7 @@ def relay():
 
 def node():
     return {
-        "schema": "otsec.asset/0.2",
+        "schema": "otsec.asset/0.3",
         "asset_id": "9a0c6e42-1f7b-4d38-a5c9-3e8b2d1f6a07",
         "node_id": "site-a-node1",
         "attributes": [
@@ -98,7 +126,7 @@ def node():
 
 def rtac():
     return {
-        "schema": "otsec.asset/0.2",
+        "schema": "otsec.asset/0.3",
         "asset_id": "c41f8a2d-6b0e-4e97-8d13-5a2c9f7b0e64",
         "node_id": "site-a-node1",
         "attributes": [
@@ -143,11 +171,82 @@ def relay_0_1():
     # D2-16: a record written before 0.2 has no path. It is still read, and
     # Endpoint.CheckPath refuses a session to it until an administrator sets
     # the path.
-    a = relay()
+    a = strip_kinds(relay())
     a["schema"] = "otsec.asset/0.1"
     for ep in a["endpoints"]:
         ep.pop("path", None)
     return a
+
+
+def relay_0_2():
+    # C1 0.3: a 0.2 record has no kind and no read path. It is still read,
+    # and each observation takes its method's kind (EffectiveKind).
+    a = strip_kinds(relay())
+    a["schema"] = "otsec.asset/0.2"
+    return a
+
+
+def relay_model():
+    # C1 0.3 section 1.5: the model and firmware version are cut from the
+    # FID's own bytes, each its own device-read observation with a sub-span
+    # of the FID's span and the same ref (S22 Table A.1's FID).
+    a = relay()
+    a["attributes"].append({"name": "model", "value": "SEL-751", "confidence": "single-source",
+                            "observations": [obs("SEL-751", "simulated", "simulator-session", INV, T1, (FID_AT, 7))]})
+    a["attributes"].append({"name": "firmware_version", "value": "R501-V0", "confidence": "single-source",
+                            "observations": [obs("R501-V0", "simulated", "simulator-session", INV, T1, (FID_AT + 8, 7))]})
+    return a
+
+
+def switch():
+    # C1 0.3: an SEL-2731M over SNMPv3 (D4-51). The binding is pinned-key on
+    # the engine ID, compared before anything authenticated is sent.
+    def snmp(oid=None, header=None):
+        r = {"transport": "snmpv3", "operation": "sel27x1.snmp.entity" if oid and oid.startswith("1.3.6.1.2.1.47")
+             else "sel27x1.snmp.system"}
+        if oid:
+            r["oid"] = oid
+        if header:
+            r["header"] = header
+        return r
+    return {
+        "schema": "otsec.asset/0.3",
+        "asset_id": "5d2e8f14-7a3b-4c69-b0e1-9f4a6c2d8e75",
+        "node_id": "site-a-node1",
+        "attributes": [
+            declared("device_class", "ethernet-switch"),
+            declared("vendor", "sel"),
+            declared("product_family", "sel-2731"),
+            {"name": "firmware_id", "value": SW_FID, "confidence": "corroborated",
+             "observations": [
+                 obs(SW_FID, "operator-declared", "operator-entry", "operator:commissioning-sheet-07", T0),
+                 obs(SW_FID, "simulated", "simulator-session", SW_INV, SW_T, (612, 35),
+                     snmp(oid="1.3.6.1.2.1.47.1.1.1.1.10.1")),
+             ]},
+            {"name": "model", "value": "SEL-2731M", "confidence": "single-source",
+             "observations": [obs("SEL-2731M", "simulated", "simulator-session", SW_INV, SW_T, (612, 9),
+                                  snmp(oid="1.3.6.1.2.1.47.1.1.1.1.10.1"))]},
+            {"name": "firmware_version", "value": "R102-V1", "confidence": "single-source",
+             "observations": [obs("R102-V1", "simulated", "simulator-session", SW_INV, SW_T, (622, 7),
+                                  snmp(oid="1.3.6.1.2.1.47.1.1.1.1.10.1"))]},
+            {"name": "hostname", "value": "gt-mib-sw1", "confidence": "single-source",
+             "observations": [obs("gt-mib-sw1", "simulated", "simulator-session", SW_INV, SW_T, (301, 10),
+                                  snmp(oid="1.3.6.1.2.1.1.5.0"))]},
+            {"name": "snmp_engine_id", "value": SW_ENGINE, "confidence": "corroborated",
+             "observations": [
+                 obs(SW_ENGINE, "operator-declared", "operator-entry", "operator:commissioning-sheet-07", T0),
+                 obs(SW_ENGINE, "simulated", "simulator-session", SW_INV, SW_T, (180, 11),
+                     snmp(header="msgAuthoritativeEngineID")),
+             ]},
+            declared("ip_address", "192.0.2.31"),
+        ],
+        "endpoints": [{
+            "id": "mgmt-snmpv3", "transport": "snmpv3", "host": "192.0.2.31", "port": 161, "target": "simulated",
+            "path": "direct", "downstream_security": {"level": "encrypted-authenticated"}}],
+        "identity_binding": {"method": "pinned-key", "strength": "cryptographic",
+                             "attributes": ["snmp_engine_id", "firmware_id"],
+                             "pre_credential": ["snmp_engine_id"]},
+    }
 
 
 def port_server():
@@ -160,7 +259,7 @@ def port_server():
 
 def later(fn):
     a = relay()
-    a["schema"] = "otsec.asset/0.3"
+    a["schema"] = "otsec.asset/0.4"
     fn(a)
     return a
 
@@ -172,6 +271,7 @@ LATER = {
         method="tpm-attested", strength="cryptographic"),
     "later-minor-unknown-source-method": lambda a: attr(a, "firmware_id")["observations"][1].update(
         evidence_class="device-observed", source={"method": "simulator-replay", "ref": INV, "observed_at": T1,
+                                                   "kind": "device-read",
                                                    "span": {"offset": FID_AT, "length": 33}}),
     # A6 C1 re-check R-1: an unknown method with nothing compared before the
     # password reads as address-only, and gets no credential.
@@ -181,13 +281,17 @@ LATER = {
     "later-minor-unknown-path": lambda a: a["endpoints"][0].update(path="jump-host"),
     "later-minor-unknown-evidence-class": lambda a: attr(a, "sel.cid")["observations"][0].update(
         evidence_class="hardware-verified", source={"method": "adapter-session", "ref": INV, "observed_at": T1,
+                                                     "kind": "device-read", "read": READ_ID,
                                                      "span": {"offset": CID_AT, "length": 4}}),
+    # C1 0.3: a kind a 0.3 reader does not know reads as operator.
+    "later-minor-unknown-source-kind": lambda a: attr(a, "sel.cid")["observations"][0]["source"].update(
+        kind="witnessed"),
 }
 
 
 def later_minor():
     a = relay()
-    a["schema"] = "otsec.asset/0.3"
+    a["schema"] = "otsec.asset/0.4"
     a["attributes"][0] = declared("device_class", "protection-gateway")
     a["field_from_a_later_minor"] = {"anything": True}
     return a
@@ -283,7 +387,8 @@ INVALID = {
         attributes=["firmware_id", "sel.cid"])),
     "platform-node-on-relay": (relay, lambda a: a.update(platform_node={"posture": []})),
     "os-out-of-support-without-condition": (node, lambda a: a["platform_node"]["posture"][0].pop("condition")),
-    "unknown-device-class-at-0.1": (relay_0_1, lambda a: a["attributes"].__setitem__(0, declared("device_class", "protection-gateway"))),
+    "unknown-device-class-at-0.1": (relay_0_1, lambda a: (a["attributes"].__setitem__(0, declared("device_class", "protection-gateway")),
+                                                       strip_kinds(a))),
     "unprefixed-unknown-attribute": (relay, lambda a: a["attributes"].append(declared("cid", "E754"))),
     "simulator-value-labelled-device": (relay, lambda a: attr(a, "firmware_id")["observations"][1].update(
         evidence_class="device-observed")),
@@ -314,11 +419,35 @@ INVALID = {
     "path-on-syslog-endpoint": (rtac, lambda a: a["endpoints"][0].update(path="direct")),
     "endpoint-without-target": (relay, lambda a: a["endpoints"][0].pop("target")),
     "endpoint-target-documented": (relay, lambda a: a["endpoints"][0].update(target="documented")),
-    "later-minor-endpoint-target-unknown": (relay, lambda a: (a.update(schema="otsec.asset/0.3"),
+    "later-minor-endpoint-target-unknown": (relay, lambda a: (a.update(schema="otsec.asset/0.4"),
                                                                a["endpoints"][0].update(target="replay"))),
     "device-value-without-device-endpoint": (relay, lambda a: attr(a, "firmware_id")["observations"].append(
         obs(FID, "device-observed", "adapter-session", INV, T1, (FID_AT, 33)))),
     "simulator-value-without-simulated-endpoint": (relay, lambda a: a["endpoints"][0].update(target="device-observed")),
+    # C1 0.3 (D4-49 Q4, D4-53).
+    "kind-at-0.2": (relay, lambda a: a.update(schema="otsec.asset/0.2")),
+    "kind-missing": (relay, lambda a: attr(a, "vendor")["observations"][0]["source"].pop("kind")),
+    "kind-not-the-methods": (relay, lambda a: attr(a, "vendor")["observations"][0]["source"].update(kind="device-read")),
+    "device-read-without-read-path": (relay, lambda a: attr(a, "sel.cid")["observations"][0]["source"].pop("read")),
+    "read-path-on-operator-entry": (relay, lambda a: attr(a, "vendor")["observations"][0]["source"].update(read=READ_ID)),
+    "derived-device-read-from-operator-input": (relay, lambda a: a["attributes"].append(
+        {"name": "sel.family_from_vendor", "value": "sel", "confidence": "single-source",
+         "observations": [{"value": "sel", "evidence_class": "inferred",
+                           "source": {"method": "derived", "ref": "vendor", "observed_at": T1, "kind": "device-read"}}]})),
+    "snmpv3-read-without-oid-or-header": (switch, lambda a: attr(a, "hostname")["observations"][0]["source"]["read"].pop("oid")),
+    "snmpv3-read-with-oid-and-header": (switch, lambda a: attr(a, "hostname")["observations"][0]["source"]["read"].update(
+        header="msgAuthoritativeEngineID")),
+    "snmpv3-read-oid-outside-internet": (switch, lambda a: attr(a, "hostname")["observations"][0]["source"]["read"].update(
+        oid="2.5.4.3")),
+    "telnet-read-with-oid": (relay, lambda a: attr(a, "sel.cid")["observations"][0]["source"]["read"].update(
+        oid="1.3.6.1.2.1.1.5.0")),
+    "snmpv3-at-0.2": (switch, lambda a: (a.update(schema="otsec.asset/0.2"), strip_kinds(a))),
+    "snmpv3-device-reported": (switch, lambda a: a["identity_binding"].update(method="device-reported", strength="spoofable")),
+    "snmpv3-pre-credential-firmware": (switch, lambda a: a["identity_binding"].update(pre_credential=["firmware_id"])),
+    "snmpv3-encrypted-weak": (switch, lambda a: a["endpoints"][0]["downstream_security"].update(
+        level="encrypted-weak", acknowledgement={"by": "admin:lab-admin", "at": T0, "reason": "test", "scope": "lab-only"})),
+    "engine-id-not-hex": (switch, lambda a: [o.update(value="80:00:7c:4f:03") for o in attr(a, "snmp_engine_id")["observations"]]
+                          and attr(a, "snmp_engine_id").update(value="80:00:7c:4f:03")),
 }
 
 INVALID_PROFILES = {
@@ -358,6 +487,9 @@ def main():
     write("valid/sel-rtac-syslog.json", rtac())
     write("valid/sel-751-address-only.json", address_only_relay())
     write("valid/sel-751-at-0.1.json", relay_0_1())
+    write("valid/sel-751-at-0.2.json", relay_0_2())
+    write("valid/sel-751-model-and-firmware.json", relay_model())
+    write("valid/sel-2731m-snmpv3.json", switch())
     write("valid/sel-751-port-server.json", port_server())
     write("valid/later-minor.json", later_minor())
     for name, fn in LATER.items():

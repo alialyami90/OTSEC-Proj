@@ -15,12 +15,12 @@ import (
 // ContractID is the identifier this reader writes. A package carries it or
 // an earlier minor in Readable; a later minor is invalid here, because the
 // reader is strict (an unknown field is refused, never ignored).
-const ContractID = "otsec.register/0.3"
+const ContractID = "otsec.register/0.4"
 
 // Readable lists the package contracts this reader decodes. A 0.1 package
 // reads as before; only 0.2 and later may carry context, and only 0.3 may
 // carry limits and runs.
-var Readable = []string{"otsec.register/0.1", "otsec.register/0.2", ContractID}
+var Readable = []string{"otsec.register/0.1", "otsec.register/0.2", "otsec.register/0.3", ContractID}
 
 // Classification of a register entry. The list an entry sits in fixes which
 // value it may carry: operations are read-only, session lines are
@@ -91,11 +91,15 @@ type Package struct {
 	Operations []Operation   `json:"operations"`
 	// Runs are named, ordered lists of operations sent in one session. Added
 	// in 0.3 (P4-A2).
-	Runs           []Run         `json:"runs,omitempty"`
-	SessionControl []SessionLine `json:"session_control"`
-	Denied         []DenyRule    `json:"denied"`
-	Firmware       Firmware      `json:"firmware"`
-	Notes          []string      `json:"notes,omitempty"`
+	Runs []Run `json:"runs,omitempty"`
+	// SNMPOperations are SNMPv3 reads (0.4, C3 0.4). Each is a GET of named
+	// instances or a walk of one named subtree; no PDU type that writes can
+	// be expressed.
+	SNMPOperations []SNMPOperation `json:"snmp_operations,omitempty"`
+	SessionControl []SessionLine   `json:"session_control"`
+	Denied         []DenyRule      `json:"denied"`
+	Firmware       Firmware        `json:"firmware"`
+	Notes          []string        `json:"notes,omitempty"`
 }
 
 // Source is a document the entries cite.
@@ -137,6 +141,98 @@ type Operation struct {
 	Evidence    Evidence   `json:"evidence"`
 	SideEffects string     `json:"side_effects"`
 	Notes       string     `json:"notes,omitempty"`
+}
+
+// SNMPOperation is one SNMPv3 read (0.4). It is read-only by construction:
+// PDU is a closed enum of the three read PDUs, and every OID is literal.
+//
+//   - get names 1 to MaxGetOIDs instance OIDs in OIDs, sent in one request,
+//     and has no Subtree, MaxRepetitions or Walk.
+//   - getnext and getbulk name one Subtree and a Walk, and no OIDs. The
+//     first request starts at the subtree and each later one at the last OID
+//     returned. The walk ends normally on an OID outside the subtree or on
+//     endOfMibView. A walk that reaches Walk.MaxVarbinds or MaxRequests
+//     first fails the run with failed.response_too_large, bytes kept, and a
+//     returned OID not greater than the one before it fails it with
+//     failed.snmp_walk_not_increasing (C2 0.7). getbulk sets MaxRepetitions
+//     (1 to MaxRepetitionsCeiling) with non-repeaters 0; getnext has none.
+//   - Limits is required. MaxReplyBytes bounds each response and is the
+//     msgMaxSize every request advertises, so it is at least
+//     MinSNMPMessageBytes (RFC 3412) and at most MaxSNMPMessageBytes, the
+//     largest UDP payload over IPv4: a larger msgMaxSize could never arrive
+//     (C1 on #445). TimeoutMS bounds the wait for each response.
+type SNMPOperation struct {
+	ID             string     `json:"id"`
+	PDU            SNMPPDU    `json:"pdu"`
+	OIDs           []string   `json:"oids,omitempty"`
+	Subtree        string     `json:"subtree,omitempty"`
+	MaxRepetitions int        `json:"max_repetitions,omitempty"`
+	Walk           *Walk      `json:"walk,omitempty"`
+	Limits         *Limits    `json:"limits"`
+	Citations      []Citation `json:"citations"`
+	Evidence       Evidence   `json:"evidence"`
+	SideEffects    string     `json:"side_effects"`
+	Notes          string     `json:"notes,omitempty"`
+}
+
+// SNMPPDU is the request PDU of an SNMP operation. Closed: there is no
+// value for SET, Inform, Trap or Report, and an unknown value makes the
+// package invalid.
+type SNMPPDU string
+
+const (
+	PDUGet     SNMPPDU = "get"
+	PDUGetNext SNMPPDU = "getnext"
+	PDUGetBulk SNMPPDU = "getbulk"
+)
+
+// Walk bounds a getnext or getbulk walk.
+type Walk struct {
+	MaxVarbinds int `json:"max_varbinds"`
+	MaxRequests int `json:"max_requests"`
+}
+
+// The bounds of an SNMP operation (0.4).
+const (
+	MaxGetOIDs            = 16
+	MaxRepetitionsCeiling = 32
+	// MaxWalkVarbinds is C1's MaxReadRowsCeiling; a test in contracts/asset
+	// pins the two, because register does not import asset.
+	MaxWalkVarbinds = 2048
+	MaxWalkRequests = 64
+	// MinSNMPMessageBytes is RFC 3412's smallest msgMaxSize.
+	MinSNMPMessageBytes = 484
+	// MaxSNMPMessageBytes is the largest UDP payload over IPv4: 65,535
+	// less the 20-octet IP and 8-octet UDP headers.
+	MaxSNMPMessageBytes = 65_507
+	maxOIDArcs          = 128
+)
+
+// ValidOID reports whether s is a literal OID as 0.4 writes it: dotted
+// decimal under 1.3.6.1, at most 128 arcs, each below 2^32, with no leading
+// zeros.
+func ValidOID(s string) bool {
+	if !strings.HasPrefix(s, "1.3.6.1.") {
+		return false
+	}
+	arcs := strings.Split(s, ".")
+	if len(arcs) > maxOIDArcs {
+		return false
+	}
+	for _, a := range arcs {
+		if a == "" || (len(a) > 1 && a[0] == '0') {
+			return false
+		}
+		if _, err := strconv.ParseUint(a, 10, 32); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// InSubtree reports whether oid lies strictly inside subtree.
+func InSubtree(oid, subtree string) bool {
+	return strings.HasPrefix(oid, subtree+".")
 }
 
 // Limits bound the reply to one line: the adapter ends a reply that passes
@@ -402,12 +498,14 @@ func Decode(data []byte) (*Package, error) {
 // unknown, so a newer reader that took an empty one would read a package an
 // older reader refuses. Validate sees only the decoded package, where an empty
 // value and a missing key look alike, so the keys are looked for in the bytes.
-// The keys are context (0.2), runs and an operation's limits (0.3).
+// The keys are context (0.2), runs and an operation's limits (0.3), and
+// snmp_operations (0.4).
 func checkNewKeys(data []byte) error {
 	var raw struct {
 		Contract   string          `json:"contract"`
 		Context    json.RawMessage `json:"context"`
 		Runs       json.RawMessage `json:"runs"`
+		SNMP       json.RawMessage `json:"snmp_operations"`
 		Operations []struct {
 			ID     string          `json:"id"`
 			Limits json.RawMessage `json:"limits"`
@@ -426,6 +524,9 @@ func checkNewKeys(data []byte) error {
 	}
 	if raw.Runs != nil && minor < 3 {
 		return fmt.Errorf("register: runs are new in 0.3, so a %s package cannot carry the key", raw.Contract)
+	}
+	if raw.SNMP != nil && minor < 4 {
+		return fmt.Errorf("register: snmp_operations are new in 0.4, so a %s package cannot carry the key", raw.Contract)
 	}
 	for _, o := range raw.Operations {
 		if o.Limits != nil && minor < 3 {
@@ -488,8 +589,20 @@ func (p *Package) Validate() error {
 		return nil
 	}
 	lines := map[string]string{}
-	if len(p.Operations) == 0 {
+	if len(p.Operations) == 0 && len(p.SNMPOperations) == 0 {
 		return fmt.Errorf("register: no operations")
+	}
+	if len(p.SNMPOperations) != 0 && minor < 4 {
+		return fmt.Errorf("register: snmp_operations are new in 0.4, so a %s package cannot carry them", p.Contract)
+	}
+	for i := range p.SNMPOperations {
+		o := &p.SNMPOperations[i]
+		if err := claim(o.ID); err != nil {
+			return err
+		}
+		if err := o.validate(sources); err != nil {
+			return err
+		}
 	}
 	for i := range p.Operations {
 		o := &p.Operations[i]
@@ -797,6 +910,9 @@ func (p *Package) validateRun(r *Run, sources map[string]bool) error {
 	if len(r.Steps) == 0 || len(r.Steps) > MaxRunSteps {
 		return fmt.Errorf("register: run %s has %d steps, want 1..%d", r.ID, len(r.Steps), MaxRunSteps)
 	}
+	if p.SNMPOperation(r.Steps[0]) != nil {
+		return p.validateSNMPRun(r)
+	}
 	at := map[string]int{}
 	for i, id := range r.Steps {
 		o := p.operation(id)
@@ -868,6 +984,69 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// validateSNMPRun checks a run whose first step is an SNMP operation: every
+// step is one, none twice, and each step's limits fit the run's. One run is
+// one session on one transport, so lines and SNMP never mix. An SNMP run has
+// no precondition, warning or context reads: those are line operations.
+func (p *Package) validateSNMPRun(r *Run) error {
+	seen := map[string]bool{}
+	for _, id := range r.Steps {
+		o := p.SNMPOperation(id)
+		switch {
+		case o == nil:
+			return fmt.Errorf("register: run %s mixes SNMP and line steps, or step %q is not an operation", r.ID, id)
+		case seen[id]:
+			return fmt.Errorf("register: run %s sends %s twice", r.ID, id)
+		case o.Limits.MaxReplyBytes > r.MaxTotalBytes:
+			return fmt.Errorf("register: run %s step %s max_reply_bytes %d is above the run's max_total_bytes %d", r.ID, id, o.Limits.MaxReplyBytes, r.MaxTotalBytes)
+		case o.Limits.TimeoutMS > r.DeadlineMS:
+			return fmt.Errorf("register: run %s step %s timeout_ms %d is above the run's deadline_ms %d", r.ID, id, o.Limits.TimeoutMS, r.DeadlineMS)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// validate applies the rules in SNMPOperation's documentation.
+func (o *SNMPOperation) validate(sources map[string]bool) error {
+	walk := o.PDU == PDUGetNext || o.PDU == PDUGetBulk
+	switch {
+	case o.PDU != PDUGet && !walk:
+		return fmt.Errorf("register: snmp operation %s has pdu %q; only get, getnext and getbulk are readable", o.ID, o.PDU)
+	case o.PDU == PDUGet && (len(o.OIDs) == 0 || len(o.OIDs) > MaxGetOIDs || o.Subtree != "" || o.Walk != nil || o.MaxRepetitions != 0):
+		return fmt.Errorf("register: snmp operation %s is a get: 1..%d oids and no subtree, walk or max_repetitions", o.ID, MaxGetOIDs)
+	case walk && (len(o.OIDs) != 0 || !ValidOID(o.Subtree) || o.Walk == nil):
+		return fmt.Errorf("register: snmp operation %s is a walk: one valid subtree, a walk and no oids", o.ID)
+	case o.PDU == PDUGetBulk && (o.MaxRepetitions < 1 || o.MaxRepetitions > MaxRepetitionsCeiling):
+		return fmt.Errorf("register: snmp operation %s max_repetitions %d is outside 1..%d", o.ID, o.MaxRepetitions, MaxRepetitionsCeiling)
+	case o.PDU == PDUGetNext && o.MaxRepetitions != 0:
+		return fmt.Errorf("register: snmp operation %s is a getnext and has max_repetitions", o.ID)
+	case walk && (o.Walk.MaxVarbinds < 1 || o.Walk.MaxVarbinds > MaxWalkVarbinds || o.Walk.MaxRequests < 1 || o.Walk.MaxRequests > MaxWalkRequests):
+		return fmt.Errorf("register: snmp operation %s walk %+v is outside max_varbinds 1..%d and max_requests 1..%d", o.ID, *o.Walk, MaxWalkVarbinds, MaxWalkRequests)
+	}
+	seen := map[string]bool{}
+	for _, oid := range o.OIDs {
+		if !ValidOID(oid) || seen[oid] {
+			return fmt.Errorf("register: snmp operation %s oid %q is not a literal OID under 1.3.6.1, or is repeated", o.ID, oid)
+		}
+		seen[oid] = true
+	}
+	if l := o.Limits; l == nil || l.MaxReplyBytes < MinSNMPMessageBytes || l.MaxReplyBytes > MaxSNMPMessageBytes || l.TimeoutMS < 1 || l.TimeoutMS > MaxStepMS {
+		return fmt.Errorf("register: snmp operation %s needs limits with max_reply_bytes %d..%d and timeout_ms 1..%d", o.ID, MinSNMPMessageBytes, MaxSNMPMessageBytes, MaxStepMS)
+	}
+	return checkCommon(o.ID, "", o.Citations, o.Evidence, o.SideEffects, sources, false)
+}
+
+// SNMPOperation returns the SNMP operation with this ID, or nil.
+func (p *Package) SNMPOperation(id string) *SNMPOperation {
+	for i := range p.SNMPOperations {
+		if p.SNMPOperations[i].ID == id {
+			return &p.SNMPOperations[i]
+		}
+	}
+	return nil
 }
 
 func (p *Package) operation(id string) *Operation {

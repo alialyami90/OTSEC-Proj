@@ -144,6 +144,15 @@ const (
 	RedactCredential RedactionReason = "credential"
 	// RedactEcho: the device echoing the password back (C-A2-3).
 	RedactEcho RedactionReason = "echo"
+	// RedactUSMDigest (0.7, C3's review of #439): an SNMPv3 message's
+	// msgAuthenticationParameters, stored as zero octets of the same length
+	// in every segment, sent or received, not as RedactionMarker. Zeroing in
+	// place keeps every span's offset and the message valid BER, and leaves
+	// nothing to test a password guess against offline. A sent digest is 24
+	// octets (HMAC-SHA-256) or 48 (HMAC-SHA-512), the algorithms 0.7 allows
+	// (D4-49 Q2); a received message, forged or not, may carry any length,
+	// and that is zeroed too.
+	RedactUSMDigest RedactionReason = "usm-digest"
 )
 
 // RedactionMarker replaces a secret in the stored transcript.
@@ -178,6 +187,26 @@ type SessionFacts struct {
 	AccessLevel string `json:"access_level"`
 	// QuitSent: QUI was sent in the close phase.
 	QuitSent bool `json:"quit_sent"`
+	// SNMP (0.7) is present exactly when the session was SNMPv3. The SEL
+	// facts above then hold fixed values (see SNMPFacts).
+	SNMP *SNMPFacts `json:"snmp,omitempty"`
+}
+
+// SNMPFacts are what an SNMPv3 session established (0.7). With them, the
+// SEL facts are: no wake, probe not-run, no password prompt, no credential,
+// echo scan not-applicable, access level "" and no QUI. The dialogue, QUI
+// and STX and ETX rules do not apply; the transcript rules do. Every
+// segment is one whole SNMPv3 message in its stored form: msgData holds the
+// plaintext scoped PDU and the digest is zeroed (RedactUSMDigest). The
+// phases are probe (discovery), auth (time synchronization) and operate (the
+// steps), and there is no close. Connected means a datagram was sent.
+type SNMPFacts struct {
+	// EngineID is discovery's msgAuthoritativeEngineID in lowercase hex (C1
+	// 0.3's snmp_engine_id form), or "" when no discovery answer counted.
+	EngineID string `json:"engine_id"`
+	// Authenticated: at least one message from the endpoint authenticated
+	// and decrypted under the keys localized to the pinned engine ID.
+	Authenticated bool `json:"authenticated"`
 }
 
 // ProbeOutcome is closed.
@@ -231,6 +260,23 @@ type Observation struct {
 	Name  string `json:"name"` // C1 attribute name
 	Value string `json:"value"`
 	Span  Span   `json:"span"`
+	// Read (0.7) is how the bytes were read. It is required on every
+	// observation of a 0.7 result, and modules/asset copies it into C1's
+	// Source.read, so it never parses the transcript.
+	Read *Read `json:"read,omitempty"`
+}
+
+// Read is the register operation that read an observation's bytes (0.7):
+// the run's step, or for the SEL-751 sel.id or the SER read. On an SNMP
+// result exactly one of OID and Header is set, with C1 0.3's values: OID is
+// the varbind that held the value, and Header is asset.HeaderEngineID for
+// snmp_engine_id, whose value is then the lowercase hex of its span. A line
+// result sets neither. CheckLines and CheckSNMP check Operation and OID
+// against the register.
+type Read struct {
+	Operation string `json:"operation"`
+	OID       string `json:"oid,omitempty"`
+	Header    string `json:"header,omitempty"`
 }
 
 // Setting is one device setting as the device printed it (0.5). Name is
@@ -334,7 +380,7 @@ var (
 	Statuses         = []Status{StatusOK, StatusPartial, StatusRefused, StatusFailed}
 	Directions       = []Direction{Sent, Received}
 	Phases           = []Phase{PhaseProbe, PhaseAuth, PhaseOperate, PhaseClose}
-	RedactionReasons = []RedactionReason{RedactCredential, RedactEcho}
+	RedactionReasons = []RedactionReason{RedactCredential, RedactEcho, RedactUSMDigest}
 	ProbeOutcomes    = []ProbeOutcome{ProbeAccepted, ProbeRejected, ProbeNotRun, ProbeUnanswered}
 	EchoScans        = []EchoScan{EchoScanPerformed, EchoScanNotApplicable}
 	IdentityResults  = []IdentityResult{IdentityMatch, IdentityMismatch, IdentityNotChecked}
@@ -404,7 +450,10 @@ func (r Result) Validate() error {
 	if err != nil || !self.Accepts(id) {
 		return fmt.Errorf("adapter: result: schema %q is not readable as %s", r.Schema, Contract)
 	}
-	c := &check{minor: id.Minor, later: id.Minor > self.Minor}
+	c := &check{minor: id.Minor, later: id.Minor > self.Minor, snmp: r.Session.SNMP != nil}
+	if c.snmp && c.minor < 7 {
+		c.fail("session.snmp is new in 0.7, so a 0.%d result cannot carry it", c.minor)
+	}
 	if !uuidPattern.MatchString(r.InvocationID) {
 		c.fail("invocation_id %q is not a lowercase UUID", r.InvocationID)
 	}
@@ -437,6 +486,7 @@ func (r Result) Validate() error {
 			c.fail("observations[%d]: needs a C1 attribute name and a value", i)
 		}
 		c.rxSpan(fmt.Sprintf("observations[%d].span", i), o.Span, t)
+		c.read(i, o, r)
 	}
 	for i, w := range r.Warnings {
 		if !warningCode.MatchString(w.Code) || !settingName.MatchString(w.Setting) || (w.Observed == "") != w.Missing {
@@ -587,6 +637,12 @@ func (c *check) status(r Result) Code {
 	if code.Status() != r.Status && code != FailedUnknown {
 		c.fail("error code %q implies status %q, not %q", code, code.Status(), r.Status)
 	}
+	switch k := codes[code].session; {
+	case k == snmpOnly && !c.snmp:
+		c.fail("error code %q ends only an SNMP session", code)
+	case k == lineOnly && c.snmp:
+		c.fail("error code %q ends only a line session, not an SNMP one", code)
+	}
 	return code
 }
 
@@ -643,7 +699,13 @@ func (c *check) transcript(t Transcript) bool {
 			c.fail("%s: a redaction must lie inside one segment", p)
 			continue
 		}
-		if string(t.Data[rd.Offset:rd.Offset+rd.Length]) != RedactionMarker {
+		if rd.Reason == RedactUSMDigest {
+			if bytes.Count(t.Data[rd.Offset:rd.Offset+rd.Length], []byte{0}) != int(rd.Length) {
+				c.fail("%s: a usm-digest redaction is zero octets", p)
+			}
+		} else if c.snmp {
+			c.fail("%s: an SNMP result's only redaction is %s", p, RedactUSMDigest)
+		} else if string(t.Data[rd.Offset:rd.Offset+rd.Length]) != RedactionMarker {
 			c.fail("%s: the bytes there are not the redaction marker", p)
 		}
 		if rd.Component != "transport" {
@@ -660,8 +722,20 @@ func (c *check) transcript(t Transcript) bool {
 			if seg.Dir != Received || credAt < 0 || rd.Offset < credAt {
 				c.fail("%s: an echo redaction lies in a received segment after the credential", p)
 			}
+		case RedactUSMDigest:
+			if c.minor < 7 {
+				c.fail("%s.reason %q is new in 0.7, so a 0.%d result cannot carry it", p, rd.Reason, c.minor)
+			}
+			if !c.snmp {
+				c.fail("%s: %s is only on an SNMP result", p, rd.Reason)
+			}
+			// The collector signs with HMAC-SHA-256 or HMAC-SHA-512 only
+			// (D4-49 Q2); what it receives may carry any length.
+			if seg.Dir == Sent && rd.Length != 24 && rd.Length != 48 {
+				c.fail("%s: a sent digest is 24 or 48 octets, not %d", p, rd.Length)
+			}
 		default:
-			c.fail("%s.reason %q is not credential or echo", p, rd.Reason)
+			c.fail("%s.reason %q is not credential, echo or usm-digest", p, rd.Reason)
 		}
 		for j := 0; j < i; j++ {
 			q := t.Redactions[j]
@@ -675,6 +749,10 @@ func (c *check) transcript(t Transcript) bool {
 
 // session checks the session facts against the transcript and the code.
 func (c *check) session(r Result, code Code) {
+	if c.snmp {
+		c.snmpSession(r, code)
+		return
+	}
 	t, s := r.Transcript, r.Session
 	if !contains(ProbeOutcomes, s.LanguageProbe) {
 		c.fail("session.language_probe %q is not a probe outcome", s.LanguageProbe)
@@ -830,7 +908,7 @@ func (c *check) identity(r Result, code Code) {
 		if !differs {
 			c.fail("identity mismatch needs an item that differs")
 		}
-		if code != RefusedIdentityMismatch && code != FailedIdentityMismatchLate {
+		if code != RefusedIdentityMismatch && code != FailedIdentityMismatchLate && code != RefusedEngineIDMismatch {
 			c.fail("an identity mismatch ends the invocation with an identity_mismatch code")
 		}
 	case IdentityNotChecked:
@@ -862,7 +940,7 @@ func (c *check) identity(r Result, code Code) {
 			c.fail("a credential was sent, so a matching identity item read in the probe phase must precede it (AP-27)")
 		}
 	}
-	if (code == RefusedIdentityMismatch || code == FailedIdentityMismatchLate) && id.Result != IdentityMismatch {
+	if (code == RefusedIdentityMismatch || code == FailedIdentityMismatchLate || code == RefusedEngineIDMismatch) && id.Result != IdentityMismatch {
 		c.fail("%s needs identity.result mismatch", code)
 	}
 	// Nothing was read, so nothing was compared (0.3).
@@ -871,6 +949,15 @@ func (c *check) identity(r Result, code Code) {
 	}
 	if r.Status == StatusOK && id.Result != IdentityMatch {
 		c.fail("status ok needs a matching identity")
+	}
+	if c.snmp {
+		c.snmpIdentity(r, code)
+	} else {
+		for i, it := range id.Items {
+			if it.Name == asset.AttrSNMPEngineID {
+				c.fail("identity.items[%d]: %s is compared only in an SNMP session", i, it.Name)
+			}
+		}
 	}
 }
 
@@ -895,7 +982,8 @@ func (c *check) rxSpan(path string, sp Span, t Transcript) {
 	}
 	// A record is text: the STX and ETX that frame a relay message are not
 	// part of it (S22 p. 7.28; A4's record bytes and C6 dtext depend on it).
-	if bytes.ContainsAny(t.Data[sp.Offset:sp.Offset+sp.Length], "\x02\x03") {
+	// An SNMP message is BER, where 0x02 is the INTEGER tag (0.7).
+	if !c.snmp && bytes.ContainsAny(t.Data[sp.Offset:sp.Offset+sp.Length], "\x02\x03") {
 		c.fail("%s includes an STX or ETX framing byte", path)
 	}
 }
@@ -924,6 +1012,7 @@ func segmentAt(t Transcript, off, n int64) (Segment, bool) {
 type check struct {
 	minor int  // the result's minor
 	later bool // a minor after this package's
+	snmp  bool // an SNMPv3 session (0.7)
 	errs  []error
 }
 

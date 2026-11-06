@@ -232,6 +232,12 @@ func normal(r adapter.Result, keepDetail bool) adapter.Result {
 		e.Detail = ""
 		r.Error = &e
 	}
+	// The goldens predate 0.7's observation reads. check() verifies each
+	// read: CheckLines finds it in the reply to its operation's line.
+	r.Observations = append([]adapter.Observation(nil), r.Observations...)
+	for i := range r.Observations {
+		r.Observations[i].Read = nil
+	}
 	return r
 }
 
@@ -592,7 +598,7 @@ func TestLevel0ID(t *testing.T) {
 	for _, o := range got.Observations {
 		names = append(names, o.Name)
 	}
-	if strings.Join(names, ",") != "firmware_id,sel.cid" || len(got.Identity.Items) != 1 {
+	if strings.Join(names, ",") != "firmware_id,model,firmware_version,sel.cid" || len(got.Identity.Items) != 1 {
 		t.Errorf("observations %v, identity %+v", names, got.Identity)
 	}
 }

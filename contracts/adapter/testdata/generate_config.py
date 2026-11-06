@@ -153,7 +153,7 @@ def read(upto=None, absent=ABSENT, bad=None, error_at=None, drop_at=None, timeou
         s.quit()
     else:
         s.quit()
-    obs = [{"name": "firmware_id", "value": g.FID, "span": fid_span},
+    obs = [{"name": "firmware_id", "value": g.FID, "span": fid_span}, *g.fid_parts(g.FID, fid_span),
            {"name": "sel.cid", "value": g.CID, "span": s.span(g.CID, s.id_start)}]
     if ok:
         return run_result(s, "ok", None, items, obs, warnings, records)

@@ -485,6 +485,22 @@
       }
     },
     {
+      "name": "model",
+      "value": "SEL-751",
+      "span": {
+        "offset": 127,
+        "length": 7
+      }
+    },
+    {
+      "name": "firmware_version",
+      "value": "R501-V0",
+      "span": {
+        "offset": 135,
+        "length": 7
+      }
+    },
+    {
       "name": "sel.cid",
       "value": "E754",
       "span": {

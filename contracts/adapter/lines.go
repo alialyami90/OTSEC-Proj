@@ -26,13 +26,21 @@ import (
 //     posture warning or a firmware condition with, or a context setting
 //     for the invocation's operation (C3 0.2, D3-2). Nothing else, even when
 //     it is read-only: a context read for another operation is refused.
+//   - Each observation's read (0.7) names the operation whose reply holds
+//     its span, so an observation cannot claim a read that did not print it.
 //   - Each reported setting (0.5) is one a context read for the invocation's
 //     operation names, and its span lies in the reply to that read's line:
 //     the bytes received after it was sent and before the next send. So a
 //     DATE_F can only come from the SHO G reply, never from a SER row that
 //     happens to hold "MDY" (A4 on #164). Validate checks that the span
 //     selects the value; this checks where the value came from.
+//
+// An SNMP result is not lines: CheckLines refuses it, and CheckSNMP checks it
+// (0.7).
 func (r Result) CheckLines(p *register.Package, inv Invocation) error {
+	if r.Session.SNMP != nil {
+		return fmt.Errorf("adapter: lines: an SNMP result has no lines; check it with CheckSNMP")
+	}
 	m, err := register.NewMatcher(p)
 	if err != nil {
 		return fmt.Errorf("adapter: lines: %w", err)
@@ -102,10 +110,13 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 			fail("%s: %v", at, err)
 			continue
 		}
-		if x.phase != PhaseOperate || v != register.VerdictOperation {
+		if v != register.VerdictOperation {
 			continue
 		}
 		replyTo[i] = id
+		if x.phase != PhaseOperate {
+			continue
+		}
 		sent = append(sent, id)
 		if !reads[id] {
 			fail("%s: %q is operation %s, which this invocation does not run or need", at, line, id)
@@ -121,6 +132,11 @@ func (r Result) CheckLines(p *register.Package, inv Invocation) error {
 			if rec.Kind == RecordConfigSection || rec.Kind == RecordConfigAbsent {
 				fail("records[%d]: %s is a record of a run, and %s is not one", i, rec.Kind, inv.OperationID)
 			}
+		}
+	}
+	for i, o := range r.Observations {
+		if o.Read != nil && r.replyHolding(ss, replyTo, o.Span) != o.Read.Operation {
+			fail("observations[%d]: %s is not in the reply to a line of %s", i, o.Name, o.Read.Operation)
 		}
 	}
 	ctx := p.ContextFor(inv.OperationID)

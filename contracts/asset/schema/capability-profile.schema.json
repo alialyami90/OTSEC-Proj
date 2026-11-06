@@ -18,6 +18,7 @@
       "properties": {"allowlist": {"type": "string", "description": "A firmware allowlist in the register package (TODO(C3)), or \"none\"."}}
     },
     "pre_credential": {"type": "array", "items": {"type": "string"}, "description": "Attributes the family reports before authentication."},
+    "models": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "description": "Added in 0.3, optional: the models the product family covers, each as the device prints it. modules/asset shows a device-read model outside the list as identity.family_conflict; absent means no family check."},
     "capabilities": {
       "type": "array",
       "items": {

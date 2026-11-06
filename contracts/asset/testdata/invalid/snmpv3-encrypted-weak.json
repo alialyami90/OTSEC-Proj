@@ -1,0 +1,255 @@
+{
+  "schema": "otsec.asset/0.3",
+  "asset_id": "5d2e8f14-7a3b-4c69-b0e1-9f4a6c2d8e75",
+  "node_id": "site-a-node1",
+  "attributes": [
+    {
+      "name": "device_class",
+      "value": "ethernet-switch",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "ethernet-switch",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        }
+      ]
+    },
+    {
+      "name": "vendor",
+      "value": "sel",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "sel",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        }
+      ]
+    },
+    {
+      "name": "product_family",
+      "value": "sel-2731",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "sel-2731",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        }
+      ]
+    },
+    {
+      "name": "firmware_id",
+      "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+      "confidence": "corroborated",
+      "observations": [
+        {
+          "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        },
+        {
+          "value": "SEL-2731M-R102-V1-Z003001-D20260408",
+          "evidence_class": "simulated",
+          "source": {
+            "method": "simulator-session",
+            "ref": "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53",
+            "observed_at": "2026-11-05T09:30:00Z",
+            "span": {
+              "offset": 612,
+              "length": 35
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "snmpv3",
+              "operation": "sel27x1.snmp.entity",
+              "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "model",
+      "value": "SEL-2731M",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "SEL-2731M",
+          "evidence_class": "simulated",
+          "source": {
+            "method": "simulator-session",
+            "ref": "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53",
+            "observed_at": "2026-11-05T09:30:00Z",
+            "span": {
+              "offset": 612,
+              "length": 9
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "snmpv3",
+              "operation": "sel27x1.snmp.entity",
+              "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "firmware_version",
+      "value": "R102-V1",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "R102-V1",
+          "evidence_class": "simulated",
+          "source": {
+            "method": "simulator-session",
+            "ref": "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53",
+            "observed_at": "2026-11-05T09:30:00Z",
+            "span": {
+              "offset": 622,
+              "length": 7
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "snmpv3",
+              "operation": "sel27x1.snmp.entity",
+              "oid": "1.3.6.1.2.1.47.1.1.1.1.10.1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "hostname",
+      "value": "gt-mib-sw1",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "gt-mib-sw1",
+          "evidence_class": "simulated",
+          "source": {
+            "method": "simulator-session",
+            "ref": "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53",
+            "observed_at": "2026-11-05T09:30:00Z",
+            "span": {
+              "offset": 301,
+              "length": 10
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "snmpv3",
+              "operation": "sel27x1.snmp.system",
+              "oid": "1.3.6.1.2.1.1.5.0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "snmp_engine_id",
+      "value": "80007c4f03020000273101",
+      "confidence": "corroborated",
+      "observations": [
+        {
+          "value": "80007c4f03020000273101",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        },
+        {
+          "value": "80007c4f03020000273101",
+          "evidence_class": "simulated",
+          "source": {
+            "method": "simulator-session",
+            "ref": "3e9d5a71-0b2c-4f86-a1d4-6c8e2f0b9a53",
+            "observed_at": "2026-11-05T09:30:00Z",
+            "span": {
+              "offset": 180,
+              "length": 11
+            },
+            "kind": "device-read",
+            "read": {
+              "transport": "snmpv3",
+              "operation": "sel27x1.snmp.system",
+              "header": "msgAuthoritativeEngineID"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ip_address",
+      "value": "192.0.2.31",
+      "confidence": "single-source",
+      "observations": [
+        {
+          "value": "192.0.2.31",
+          "evidence_class": "operator-declared",
+          "source": {
+            "method": "operator-entry",
+            "ref": "operator:commissioning-sheet-07",
+            "observed_at": "2026-10-24T09:00:00Z",
+            "kind": "operator"
+          }
+        }
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "mgmt-snmpv3",
+      "transport": "snmpv3",
+      "host": "192.0.2.31",
+      "port": 161,
+      "target": "simulated",
+      "path": "direct",
+      "downstream_security": {
+        "level": "encrypted-weak",
+        "acknowledgement": {
+          "by": "admin:lab-admin",
+          "at": "2026-10-24T09:00:00Z",
+          "reason": "test",
+          "scope": "lab-only"
+        }
+      }
+    }
+  ],
+  "identity_binding": {
+    "method": "pinned-key",
+    "strength": "cryptographic",
+    "attributes": [
+      "snmp_engine_id",
+      "firmware_id"
+    ],
+    "pre_credential": [
+      "snmp_engine_id"
+    ]
+  }
+}
