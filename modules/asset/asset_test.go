@@ -302,13 +302,20 @@ func TestFamilyConflict(t *testing.T) {
 	if m, bad := FamilyConflict(out, []string{"SEL-751"}); bad {
 		t.Errorf("SEL-751 in its own family: %s", m)
 	}
-	if m, bad := FamilyConflict(out, []string{"SEL-2731M", "SEL-2741M"}); !bad || m != "SEL-751" {
+	if m, bad := FamilyConflict(out, Models("sel-2731")); !bad || m != "SEL-751" {
 		t.Errorf("SEL-751 in the switch family: %q %v", m, bad)
 	}
 	// No device-read model, no conflict: a declared model is not a read.
 	rec := record(t, "sel-751-simulated.json")
 	if _, bad := FamilyConflict(rec, nil); bad {
 		t.Error("conflict with no model")
+	}
+	// No list, no check (C5 on #453).
+	if m, bad := FamilyConflict(out, nil); bad {
+		t.Errorf("conflict with no list: %s", m)
+	}
+	if m, bad := FamilyConflict(out, Models("sel-rtac")); bad {
+		t.Errorf("conflict for an unlisted family: %s", m)
 	}
 	rec.Attributes = append(rec.Attributes, c1.Attribute{Name: c1.AttrModel, Value: "SEL-9999", Confidence: c1.SingleSource,
 		Observations: []c1.Observation{{Value: "SEL-9999", EvidenceClass: c1.OperatorDeclared,
@@ -363,8 +370,12 @@ func TestModels(t *testing.T) {
 	if got := Models("sel-751"); !slices.Equal(got, []string{"SEL-751"}) {
 		t.Errorf("sel-751: %v", got)
 	}
-	if got := Models("sel-2731"); !slices.Equal(got, []string{"SEL-2731M", "SEL-2741M"}) {
-		t.Errorf("sel-2731: %v", got)
+	// One RSTP-mode model per product: §1.5's SEL-2731M and SEL-2741M.
+	if got := append(Models("sel-2731"), Models("sel-2741")...); !slices.Equal(got, []string{"SEL-2731M", "SEL-2741M"}) {
+		t.Errorf("sel-2731 and sel-2741: %v", got)
+	}
+	if got := Models("sel-27x1"); got != nil {
+		t.Errorf("the profile family is not a product: %v", got)
 	}
 	if got := Models("sel-rtac"); got != nil {
 		t.Errorf("sel-rtac: %v", got)
