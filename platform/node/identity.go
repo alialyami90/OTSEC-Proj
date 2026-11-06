@@ -109,6 +109,11 @@ type identityMismatch struct {
 	InvocationID string `json:"invocation_id"`
 	ReadAt       string `json:"read_at"`
 	FID          string `json:"fid,omitempty"`
+	// DeclaredSHA256 is set only on an asset whose identity is its
+	// declaration: the hash of the declared identity the read contradicted.
+	// The mismatch counts until the declaration's hash differs from it
+	// (C1 on #458, D4-55).
+	DeclaredSHA256 string `json:"declared_sha256,omitempty"`
 }
 
 // decodeExact decodes b into v with no unknown field and no trailing data,
@@ -248,6 +253,8 @@ func decodeIdentityRead(document []byte) (identityReadDoc, error) {
 			return d, fmt.Errorf("identity read: mismatch.read_at %q is not an RFC 3339 UTC time", m.ReadAt)
 		case len(m.FID) > c1.MaxValueBytes:
 			return d, fmt.Errorf("identity read: mismatch.fid is over %d bytes", c1.MaxValueBytes)
+		case m.DeclaredSHA256 != "" && !sha256Hex.MatchString(m.DeclaredSHA256):
+			return d, fmt.Errorf("identity read: mismatch.declared_sha256 %q is not 64 lowercase hex digits", m.DeclaredSHA256)
 		}
 	}
 	return d, nil
@@ -281,8 +288,11 @@ type identityState struct {
 	storedAt time.Time
 	reads    []c5.Seq // the identity.read records in the stream, oldest first
 	last     *identityReadDoc
-	lastAt   time.Time // when last was committed
-	removed  uint64    // identity.read records removed in this process
+	// unstored is set when a run's identity outcome was not stored, and
+	// cleared when one is. The matcher skips the asset meanwhile, since it
+	// would evaluate without what the run read (C6 on #458).
+	unstored bool
+	removed  uint64 // identity.read records removed in this process
 }
 
 // identityOf returns the asset's state, reading its stream the first time.
@@ -340,7 +350,7 @@ func (s *Scheduler) loadIdentity(ctx context.Context, assetID string) (*identity
 				if err != nil {
 					return nil, nil, fmt.Errorf("identity read %d: %w", r.Key.Seq, err)
 				}
-				st.reads, st.last, st.lastAt = append(st.reads, r.Key.Seq), &d, r.CommittedAt
+				st.reads, st.last = append(st.reads, r.Key.Seq), &d
 			}
 		}
 	}
@@ -475,6 +485,8 @@ func (s *Scheduler) mismatchRead(col Collection, res adapter.Result) bool {
 // and adds the mismatch (D4-54). An asset no read has confirmed, whose
 // identity is its declaration, keeps the mismatch with no latest-read part,
 // since the matcher reads it under an operator identity too (C1 on #458).
+// Under an operator identity the mismatch names the declaration it
+// contradicted, by its hash.
 func (s *Scheduler) storeMismatch(ctx context.Context, col Collection, res adapter.Result, st *identityState) {
 	rd := identityReadDoc{Schema: IdentityReadSchema, AssetID: col.AssetID}
 	switch {
@@ -489,6 +501,10 @@ func (s *Scheduler) storeMismatch(ctx context.Context, col Collection, res adapt
 			rd.Mismatch.FID = it.Observed
 		}
 	}
+	if _, _, read := deviceReadFID(st); !read {
+		declared, _ := s.rt.cfg.Asset(col.AssetID)
+		rd.Mismatch.DeclaredSHA256 = declaredSum(declared)
+	}
 	s.storeRead(ctx, col.AssetID, st, rd, "run "+res.InvocationID+" refused the identity, and the mismatch was not stored: ")
 }
 
@@ -500,7 +516,7 @@ func (s *Scheduler) storeRead(ctx context.Context, assetID string, st *identityS
 		var seq c5.Seq
 		if seq, err = s.storeItem3(ctx, ConfigStream(assetID), b, nil); err == nil {
 			s.clearQuietKey("identity " + assetID)
-			st.reads, st.last, st.lastAt = append(st.reads, seq), &rd, s.now().UTC()
+			st.reads, st.last, st.unstored = append(st.reads, seq), &rd, false
 			s.removeOlderReads(ctx, assetID, st)
 			s.publishIdentity()
 			return

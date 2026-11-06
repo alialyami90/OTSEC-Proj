@@ -75,9 +75,8 @@ func declaredDetail(assetID, sum string) string {
 
 // declaredRecord is one asset's newest declared-identity record.
 type declaredRecord struct {
-	SHA256 string    `json:"sha256"`
-	Seq    uint64    `json:"seq"`
-	At     time.Time `json:"at"` // when it was committed
+	SHA256 string `json:"sha256"`
+	Seq    uint64 `json:"seq"`
 }
 
 type declaredFile struct {
@@ -246,9 +245,12 @@ func (s *Scheduler) notEvaluated(assetID, cause, why string) {
 // forgetEvaluation drops the asset's last completed evaluation when a run's
 // identity outcome, a record, a read or a mismatch, was not stored (C6 on
 // #458). The evaluation may then describe an identity the device no longer
-// shows, so status must not read it as current; the next completed
-// evaluation sets it again.
+// shows, so status must not read it as current, and the asset is not
+// evaluated again until a run's identity outcome is stored.
 func (s *Scheduler) forgetEvaluation(assetID string) {
+	if st := s.idents[assetID]; st != nil {
+		st.unstored = true
+	}
 	if fs := s.finds[assetID]; fs != nil && fs.last != nil {
 		fs.last = nil
 		s.publishApplicability()
@@ -269,6 +271,12 @@ func (s *Scheduler) evaluateAll(ctx context.Context) {
 // matcher compares with the stored findings.
 func (s *Scheduler) evaluate(ctx context.Context, assetID string) {
 	if s.adv == nil || s.adv.inUse == nil || s.item3Paused(ctx) {
+		return
+	}
+	if st := s.idents[assetID]; st != nil && st.unstored {
+		// The run's identity outcome was not stored: evaluating without it
+		// would complete an evaluation of what the device no longer shows.
+		s.notEvaluated(assetID, "identity", "the last run's identity outcome was not stored")
 		return
 	}
 	set := s.adv.inUse.Set
@@ -341,7 +349,7 @@ func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findin
 	evidence := ""
 	if st.doc != nil {
 		evidence = st.doc.InvocationID
-		if fid, ref, ok := deviceRead(st.doc.Asset, c1.AttrFirmwareID); ok {
+		if fid, ref, ok := deviceReadFID(st); ok {
 			model, _, _ := deviceRead(st.doc.Asset, c1.AttrModel)
 			version, _, _ := deviceRead(st.doc.Asset, c1.AttrFirmwareVersion)
 			in.Identity = applicability.Identity{Source: finding.DeviceRead, Evidence: ref, FirmwareID: fid, Model: model, FirmwareVersion: version}
@@ -359,10 +367,10 @@ func (s *Scheduler) matcherInput(ctx context.Context, assetID string, fs *findin
 		return in, evidence, err
 	}
 	// A mismatch counts under an operator identity too (C1 on #458), until
-	// a confirming read or a changed declaration clears it (C4 on #459): a
-	// mismatch stored before the declaration's record was written is of an
-	// earlier declaration.
-	if !s.declared[assetID].At.After(st.lastAt) {
+	// a confirming read clears it or the declaration it contradicted
+	// changes: by its hash, never by time, so a record written again after
+	// a prune does not clear it (C1 on #458, D4-55).
+	if m := st.last; m == nil || m.Mismatch == nil || m.Mismatch.DeclaredSHA256 == "" || m.Mismatch.DeclaredSHA256 == declaredSum(declared) {
 		mismatchInput(&in, st)
 	}
 	// The evaluation read the declaration, so status names its record
@@ -379,6 +387,15 @@ func mismatchInput(in *applicability.Input, st *identityState) {
 		m := st.last.Mismatch
 		in.LatestMismatch, in.MismatchFID = &finding.Read{ID: m.InvocationID, AtUTC: m.ReadAt}, m.FID
 	}
+}
+
+// deviceReadFID returns the newest identity record's device-read firmware
+// ID, if it has one: then the identity is device-read.
+func deviceReadFID(st *identityState) (fid, ref string, ok bool) {
+	if st.doc == nil {
+		return "", "", false
+	}
+	return deviceRead(st.doc.Asset, c1.AttrFirmwareID)
 }
 
 // deviceRead returns the attribute's device-read value and the run that
@@ -481,7 +498,7 @@ func (s *Scheduler) declaredRef(ctx context.Context, a c1.Asset) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("the declared identity's policy.apply record was not written: %w", err)
 	}
-	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: uint64(got[0].Key().Seq), At: s.now().UTC()}
+	s.declared[a.AssetID] = declaredRecord{SHA256: sum, Seq: uint64(got[0].Key().Seq)}
 	s.clearQuietKey("declared " + a.AssetID)
 	if err := s.writeDeclared(); err != nil {
 		// The chain still holds the record, and the next start reads it
@@ -523,7 +540,7 @@ func (s *Scheduler) loadDeclared(ctx context.Context) (map[string]declaredRecord
 				continue
 			}
 			if m := declaredDetailRe.FindStringSubmatch(rec.Detail); m != nil {
-				chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq), At: st.CommittedAt}
+				chain[m[1]] = declaredRecord{SHA256: m[2], Seq: uint64(st.Key.Seq)}
 			}
 		}
 		if len(got) < 500 {

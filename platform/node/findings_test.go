@@ -209,7 +209,7 @@ func TestFindingsKeepTheMismatch(t *testing.T) {
 
 	_, reads := identityRecords(t, n.r, relayID)
 	if len(reads) != 1 || reads[0].InvocationID != invA || reads[0].Mismatch == nil || reads[0].Mismatch.InvocationID != invB ||
-		reads[0].Mismatch.FID != mismatchFID {
+		reads[0].Mismatch.FID != mismatchFID || reads[0].Mismatch.DeclaredSHA256 != "" {
 		t.Fatalf("identity reads %+v", reads)
 	}
 	latest := func() map[string]finding.Finding {
@@ -389,8 +389,10 @@ func TestFindingsOperatorMismatch(t *testing.T) {
 	n.step()
 	n.s.RunOnce(bg, 0)
 	_, reads := identityRecords(t, n.r, relayID)
+	declared, _ := n.cfg.Asset(relayID)
 	if len(reads) != 1 || reads[0].InvocationID != "" || reads[0].ReadAt != "" || reads[0].Mismatch == nil ||
-		reads[0].Mismatch.InvocationID != invB || reads[0].Mismatch.FID != mismatchFID {
+		reads[0].Mismatch.InvocationID != invB || reads[0].Mismatch.FID != mismatchFID ||
+		reads[0].Mismatch.DeclaredSHA256 != declaredSum(declared) {
 		t.Fatalf("identity reads %+v", reads)
 	}
 	n.startWith(nil)
@@ -404,6 +406,18 @@ func TestFindingsOperatorMismatch(t *testing.T) {
 	}
 	if id := n.st.Snapshot("x").Identity[relayID]; id.LastRead != nil || id.Mismatch == nil || id.Mismatch.InvocationID != invB {
 		t.Fatalf("identity status %+v", id)
+	}
+	// The declaration's record written again, after a prune that lost
+	// declared-identities.json, does not clear it: the hash is unchanged
+	// (C1 on #458, D4-55).
+	n.pruneThrough(n.lastAuditSeq())
+	if err := os.Remove(filepath.Join(n.cfg.Store.Dir, DeclaredIdentitiesFileName)); err != nil {
+		t.Fatal(err)
+	}
+	n.startWith(nil)
+	fs, _ = n.s.findingsOf(bg, relayID)
+	if in, _, err = n.s.matcherInput(bg, relayID, fs); err != nil || in.LatestMismatch == nil || in.MismatchFID != mismatchFID {
+		t.Fatalf("input after the declared record was written again %+v, %v", in, err)
 	}
 	// A changed declaration clears it (C4 on #459).
 	at := n.nc.Assets[0]["attributes"].([]any)[3].(map[string]any)
@@ -419,8 +433,38 @@ func TestFindingsOperatorMismatch(t *testing.T) {
 	if in, _, err = n.s.matcherInput(bg, relayID, fs); err != nil || in.LatestMismatch != nil || in.MismatchFID != "" {
 		t.Fatalf("input after the declaration changed %+v, %v", in, err)
 	}
+	// A declared hash that is not 64 lowercase hex digits is refused.
+	bad := `{"schema":"` + IdentityReadSchema + `","asset_id":"` + relayID + `","mismatch":{"invocation_id":"` + invB +
+		`","read_at":"2026-01-01T09:20:00Z","declared_sha256":"ABC"}}`
+	if _, err := decodeIdentityRead([]byte(bad)); err == nil {
+		t.Fatal("a mismatch with a malformed declared_sha256 was accepted")
+	}
 	// A document with neither part is refused.
 	if _, err := decodeIdentityRead([]byte(`{"schema":"` + IdentityReadSchema + `","asset_id":"` + relayID + `"}`)); err == nil {
 		t.Fatal("an identity read with no read and no mismatch was accepted")
+	}
+}
+
+// After a run whose identity outcome was not stored, for any reason, the
+// asset is not evaluated until one is (C6 on #458).
+func TestFindingsWaitForAStoredIdentity(t *testing.T) {
+	k := newAdvKey(t)
+	n := newAdvNode(t, k.anchor("active"))
+	n.startWith(answering(okRun(t, invA, nil)))
+	n.put(k.sign(findPayload(t, 1)))
+	n.step()
+	n.s.RunOnce(bg, 0)
+	if n.assetFindings().LastEvaluation == nil {
+		t.Fatal("no evaluation after the run")
+	}
+	n.s.forgetEvaluation(relayID) // as a refused or failed identity.read does
+	n.s.evaluate(bg, relayID)
+	if l := n.assetFindings().LastEvaluation; l != nil || n.alarms(AlarmNotEvaluated) != 1 {
+		t.Fatalf("evaluated without the run's identity: %+v", l)
+	}
+	n.s.storeIdentity(bg, n.cfg.Schedule[0], okRun(t, invC, nil).Result)
+	n.s.evaluate(bg, relayID)
+	if l := n.assetFindings().LastEvaluation; l == nil {
+		t.Fatal("no evaluation once an identity outcome was stored")
 	}
 }
