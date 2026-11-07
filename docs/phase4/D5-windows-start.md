@@ -118,7 +118,7 @@ The parts, in ms (median, p90 and max over each attempt's 543 starts):
 
 How to read the parts:
 
-- `store-reserve` stays on the line, and it is the sum of the `reserve-*` parts: the start-up code adds each part's time to both. Each value on the line is cut to whole milliseconds on its own, so on one line the printed parts can fall up to 4 ms short of the printed `store-reserve`; `TestReserveParts` checks the sum exactly, before rounding.
+- `store-reserve` stays on the line, and it is the sum of the `reserve-*` parts: the start-up code adds each part's time to both. Each value on the line is cut to whole milliseconds on its own, so on one line the printed parts can fall short of the printed `store-reserve`: by up to 4 ms on Windows, where `reserve-dirsync` is exactly 0, and by up to 5 ms where all six parts take time (D3); `TestReserveParts` checks the sum exactly, before rounding.
 - `reserve-create` includes the `OpenFile` that creates the file. `reserve-close` is the rest of `CreateReserve`, chiefly the file's close (D3).
 - `reserve-dirsync` is 0 on Windows by construction: `syncDir` does nothing there, and P4-H4 adds no Windows folder flush (D1).
 - At a normal start the node releases and re-creates only the recovery reserve (F-013), at least 1 MiB: twice `store.WALBoundBytes` plus the largest commit's WAL bytes.
@@ -134,7 +134,7 @@ How to read the parts:
 
 The file flush, then the folder flush, still run before the reserve counts. The flush now has only the size and the allocation to make durable, not a mebibyte of zeros. `RecoveryReserveBytes`, `LastResortReserveBytes`, `OpenHeadroomBytes` and the store's open are unchanged.
 
-**Plain `Truncate` on `windows-latest` holds the space.** `TestReserveHoldsItsSpace` reads each reserve's `AllocationSize` back through `GetFileInformationByHandleEx` and logs it. In #520's `go (windows-latest)` job at `bce9619a0898780a860e725caf3f2b50633c3863` ([run 42378339919](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42378339919), [job 128420487452](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42378339919/job/128420487452)) it logged:
+**Plain `Truncate` on `windows-latest` holds the space.** `TestReserveHoldsItsSpace` reads each reserve's `AllocationSize` back through `GetFileInformationByHandleEx` and logs it. In #520's green `go (windows-latest)` job at `02b7ca62aaed4f4d13a45e583d5b7c1e2232c201` ([run 42379611439](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/attempts/1), [job 128424252544](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/job/128424252544)) it logged the lines below. The re-run's job [128432081632](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/job/128432081632) logged the same two lines.
 
 ```text
 reserve_test.go:33: recovery reserve: 4206649 bytes long, 4210688 allocated
@@ -142,6 +142,29 @@ reserve_test.go:33: last-resort reserve: 4206649 bytes long, 4210688 allocated
 ```
 
 That is the file's length rounded up to whole 4 KiB clusters. This line is the `CI-Windows` evidence that `SetEndOfFile` holds real clusters on the runner's NTFS volume. `TestAllocatedBytesSeesASparseFile` shows the reader is not fooled by a sparse file: FSCTL_SET_SPARSE then a truncate on Windows, a truncate on Linux. On Linux, a `Truncate` in place of `fallocate` fails `TestReserveHoldsItsSpace` (desk).
+
+**Before and after.** "Before" is the two step-1 attempts at `8fef498` (section 6). "After" is two runs of the `go (windows-latest)` job at `02b7ca6`, the fix with the `TestReserveParts` change. Every number is `CI-Windows`, from the same step and the same kind of line, 543 starts in each job.
+
+| Source | Run | Job | `platform/node` budget step |
+| --- | --- | --- | --- |
+| After, run 1 | [42379611439, attempt 1](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/attempts/1) | [128424252544](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/job/128424252544) | 584.178 s |
+| After, run 2 | [42379611439, attempt 2](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439) | [128432081632](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42379611439/job/128432081632) | 530.622 s |
+
+Median, p90 and max in ms:
+
+| Phase | Before 1 | Before 2 | After 1 | After 2 |
+| --- | --- | --- | --- | --- |
+| `store-reserve` | 151, 366, 8906 | 138, 383, 4195 | 9, 19, 80 | 8, 14, 452 |
+| `total` | 325, 922, 17484 | 322, 954, 10639 | 196, 736, 12692 | 179, 672, 14618 |
+| `reserve-sync` | 137, 348, 7527 | 123, 364, 4180 | 7, 15, 72 | 6, 11, 448 |
+| `store-open` | 63, 327, 8354 | 66, 372, 8509 | 67, 423, 8636 | 54, 395, 3589 |
+| `record-start` | 80, 211, 973 | 84, 230, 2113 | 90, 280, 7711 | 78, 248, 12508 |
+| Sum of all start time | 270124 | 273332 | 222933 | 178192 |
+| Starts over 6 s, over 12 s | 2, 1 | 1, 0 | 4, 1 | 1, 1 |
+
+**The acceptance holds.** In each "after" run, the median and p90 of `store-reserve` and of `total` are below both "before" runs. `store-reserve` fell from 43.1% of all start time to 2.9%. It is now 8 to 9 ms at the median, and the flush is about 6 to 7 ms of that.
+
+**The fix does not remove the slow tail.** The starts over 6 s are still there: five after, three before. Every slow start "after" spent its time in `store-open` (up to 8.6 s) or `record-start` (up to 12.5 s), not in `store-reserve`, whose largest value is 452 ms. **`store-open` is now the next cost**, at 46.6% of all start time "after", with `record-start` at 44.5%. The `record-start` tail is longer "after" than "before" (p90 280 and 248 against 211 and 230, and maxima of 7.7 s and 12.5 s). Two runs on each side cannot tell whether that is the runners' disks or time that has moved from one phase to another; no `record-start` change is in this PR. P4-H4 excludes any `store-open` change.
 
 **What pins each must-keep property:**
 
