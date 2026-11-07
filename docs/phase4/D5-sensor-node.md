@@ -124,7 +124,7 @@ R6.5 needs every alert's packets to be retrievable. C13 has every observation an
   - **It fails closed.** Where a slot can't be placed, the client-sent bytes of that login are not written. This is D4-67's rule for the store, applied to the ring.
   - **Ring frames carry the same markers as a citation.** A cited SHA-256 is over the redacted bytes, so it checks against what the ring keeps, and an alert's stored capture and the ring agree byte for byte.
 
-  This protects the disk at rest, a stolen node and other local readers. It does not protect against a compromised sensor, which still sees live traffic (AP-33's scope).
+  This protects the disk at rest, a stolen node and other local readers. It does not protect against a compromised sensor, which still sees live traffic (AP-33's scope). GT-PCAP's key search searches the ring's directory as well as the store (D6). The WER exclusion in §1 is still needed for the packets the sensor holds in memory.
 - **Nothing leaves the site, by construction.** The forwarder reads events only. `modules/telemetry/forward` never calls `Outbox.ReadCapture` (grep, at `7e09898`). On the node, only quarantine export, identity and the event-baseline feeder read captures. So cited bytes are never forwarded upstream; their hash and frame numbers are (D3's stored-captures row).
 - **Retention.** An alert's bytes go when the alert is pruned, which needs every required consumer to have confirmed it. The ring's retention is its size divided by the traffic rate, and status shows the age of the oldest file in the ring. A fixed retention in days would need deletion that C5 doesn't do, so I don't propose one. If the owner needs one, it is D3's row and a C5 question.
 - **Who may read them.** The ring's directory gets a protected DACL: the sensor's account, plus whatever D3's row names for the security role. The node's account doesn't read the ring, and status never shows packet bytes. Reading an alert's packets from the store goes through a security-role export, like quarantine export. D3's row decides the role.
@@ -191,7 +191,7 @@ On Linux, for CI and for option (b)'s host, the same steps are:
 - no DHCP client on it;
 - the sensor's user holding `CAP_NET_RAW` only.
 
-`CAP_NET_RAW` also allows sending, so the same caveat applies. An nftables `netdev` egress drop on the interface would add enforcement in the kernel. Whether it also catches every `AF_PACKET` send path is unverified, so the ADR marks it `unknown` until a test shows it.
+`CAP_NET_RAW` also allows sending, so the same caveat applies. An nftables `netdev` egress drop on the interface would add enforcement in the kernel. Whether it also catches every `AF_PACKET` send path is unverified, so the ADR marks it `unknown` until a test shows it. D6's C-11 rig can settle this: a veth pair in its own network namespace, the rule in place, and a deliberate `AF_PACKET` send from the sensor's end that must not reach the peer. D6 adds it as a rig case once ADR-0009 needs it.
 
 ## 8. Tests and where they go
 
@@ -201,7 +201,13 @@ On Windows, the `platform/node` test step already runs 530 to 648 s against its 
 - The node gains only the wiring and one start test.
 - The installer's NIC steps go in `platform/winsvc`, tested in the dispatched Windows workflow. A hosted runner may not allow its adapters to be rebound, so a step that can't run there is reported `unknown`, not skipped silently.
 
-These tests would show the design holds; D6's testability review decides the final list:
+Three rules for these tests, from D6's testability review:
+
+- **The test clock.** The 10 s heartbeat and the 60 s `sensor-unreachable` run on the test clock, as GT-INJ's tests do. A 60 s wait on the wall clock against a deadline that moves is the H11 kind of race.
+- **Forced drops are asserted exactly.** Decoder-queue and channel drops are forced with a small queue or a seam, and their counts are asserted exactly. Capture-driver drops can't be forced on a hosted runner, so they are read and reported, never asserted.
+- **Status comparisons name what they ignore.** §5's "the same status apart from times" strips a listed set of field names. The list is committed with the test, so the normalizer can't hide a difference.
+
+These tests would show the design holds:
 
 | Property | Test |
 | --- | --- |
@@ -214,6 +220,12 @@ These tests would show the design holds; D6's testability review decides the fin
 | The ring holds no cleartext credential (D3, D4-67) | Replay GT-PCAP's Telnet, FTP, SNMPv1 and v2c, and HTTP Basic sessions, including a midstream login. The ring's files contain none of the known test secrets. The midstream login's client bytes are absent, and every cited hash matches the ring's bytes. |
 | Observations are pruned once consumed | The consumer's cursor moves after a checkpoint, and a prune frees the space. |
 | Gaps are recorded | Kill the sensor: `sensor-unreachable` is raised after 60 s, and the gap record is closed when the sensor returns. |
+| A gap is open at start (D6) | A node start opens a coverage gap, and the first heartbeat closes it. |
+| Restarts are counted (D6) | Each reconnect after a gap adds one to the restart count. |
+| Coverage is checked (D6) | A heartbeat whose coverage statement doesn't match the configuration raises `sensor-coverage-mismatch`. |
+| The sensor's account reaches nothing of the node's (D6, D3's AP-30) | From the sensor's account, opening the store directory, the node keys or the credential store fails. |
+| The ring's DACL holds (D6) | The node's account and the monitoring role are refused when they open the ring. |
+| A re-bound NIC is caught (D6, §7 step 4) | Re-bind IPv4 on the monitoring NIC and start the sensor: `sensor-interface-bound` is raised. Where a hosted runner can't re-bind, the step reports `unknown`. |
 | Packets stay at the site | A forwarded alert carries the hash and frame numbers and no packet bytes. |
 
 ## 9. Open points
