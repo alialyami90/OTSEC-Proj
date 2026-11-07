@@ -276,7 +276,7 @@ SNMP comes from the Windows SNMP Service with the SEL SysMon extension (p. 7.7).
 
 R6.7 and C12 treat a passive read differently depending on whose session it came from:
 
-- **A third party's session** is independent passive evidence for the asset. It covers an engineer's Telnet `ID`, an SCADA master's DNP3 Object 0 read, an MMS client reading the nameplate, an FTP retrieval of `CFG.TXT` or `CFG.XML`, an SNMP manager's v1 or v2c response, and the v3 engine ID in any manager's exchange.
+- **A third party's session** is independent of the platform's read, but unauthenticated. A host that can send from the relay's address can answer an `ID` or an Object 0 read with whatever it likes, so this evidence never outranks the collector's read (AP-34, D4 on #528). It covers an engineer's Telnet `ID`, an SCADA master's DNP3 Object 0 read, an MMS client reading the nameplate, an FTP retrieval of `CFG.TXT` or `CFG.XML`, an SNMP manager's v1 or v2c response, and the v3 engine ID in any manager's exchange.
 - **The platform's own session** is not independent. C2's SEL-751 run sends `QUI` and then `ID` at Level 0 in its probe phase, so the FID it reads also crosses the wire in clear. The same holds for the engine ID in its SNMPv3 sessions. Read passively, that is the same evidence as the C2 result. It does not corroborate it, and it does not count twice in C12 (#522; D6's GT-PCAP plan §2C). The flow is still recorded as an insecure service (Telnet) where it is one.
 - **Banners and Syslog hostnames are operator settings** (`TCBAN`, `FTPCBAN`, `HTTPBAN` and the RTAC hostname). They are weak evidence of identity, and can be set to anything.
 - **The source MAC address's OUI** is in every frame. Which OUIs SEL uses is not in these manuals: `unknown`.
