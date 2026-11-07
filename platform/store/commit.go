@@ -122,7 +122,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			}
 		}
 
-		add, newCaptures, err := d.batchBytes(ctx, recs, payload)
+		add, newCaptures, err := d.batchBytes(ctx, class, recs, payload)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			if !d.full[class] {
 				d.full[class] = true
 				code, detail := c5.FullAlarm(class), refusal.Error()
-				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown {
+				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown || code == c5.AlarmNetworkFull {
 					detail += "; most bytes: " + d.topStreams(ctx, class, 3)
 				}
 				alarm = &c5.Alarm{Code: code, Class: class, Stream: stream, Detail: detail}
@@ -233,9 +233,11 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 	return out, nil
 }
 
-// batchBytes is the payload a batch adds to its class: event bytes, source
-// cursors, and each capture not yet stored. newCaptures lists those.
-func (d *DB) batchBytes(ctx context.Context, recs []c5.Record, payload [][]byte) (int64, map[string]bool, error) {
+// batchBytes is the payload a batch adds to class: event bytes, source
+// cursors, each capture not yet stored, and since C5 0.9 each stored capture
+// no record of class cites yet, unless it is of the 0.8 accounting
+// (releaseCaptures). newCaptures lists the captures not yet stored.
+func (d *DB) batchBytes(ctx context.Context, class c5.StreamClass, recs []c5.Record, payload [][]byte) (int64, map[string]bool, error) {
 	var n int64
 	newCaptures := map[string]bool{}
 	seen := map[string]bool{}
@@ -245,14 +247,22 @@ func (d *DB) batchBytes(ctx context.Context, recs []c5.Record, payload [][]byte)
 			continue
 		}
 		seen[r.Capture.SHA256] = true
-		var one int
-		err := d.conn.QueryRowContext(ctx, `SELECT 1 FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&one)
+		var id int64
+		err := d.conn.QueryRowContext(ctx, `SELECT id FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&id)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			newCaptures[r.Capture.SHA256] = true
 			n += int64(len(r.Capture.Bytes))
 		case err != nil:
 			return 0, nil, fmt.Errorf("read capture: %w", err)
+		case id >= d.chargeFrom:
+			cites, err := d.classCites(ctx, class, r.Capture.SHA256)
+			if err != nil {
+				return 0, nil, fmt.Errorf("read capture: %w", err)
+			}
+			if !cites {
+				n += int64(len(r.Capture.Bytes))
+			}
 		}
 	}
 	return n, newCaptures, nil

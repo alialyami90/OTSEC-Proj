@@ -12,9 +12,6 @@ func TestSeriesV08(t *testing.T) {
 			t.Errorf("series %q, want %q", got, want)
 		}
 	}
-	if Identifier != "otsec.store/0.8" {
-		t.Errorf("identifier %q", Identifier)
-	}
 }
 
 // identity.read is removable; the three item 3 evidence series are not.

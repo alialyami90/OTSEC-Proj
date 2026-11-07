@@ -62,22 +62,11 @@ func (d *DB) Discard(ctx context.Context, consumers []c5.Consumer, stream c5.Str
 				captures = append(captures, cap.String)
 			}
 		}
-		for _, sha := range captures {
-			var capClass string
-			var size int64
-			err := d.conn.QueryRowContext(ctx, `DELETE FROM captures WHERE sha256 = ?
-				AND NOT EXISTS (SELECT 1 FROM events WHERE capture = ?) RETURNING class, length(bytes)`, sha, sha).Scan(&capClass, &size)
-			switch {
-			case errors.Is(err, sql.ErrNoRows): // still referred to, or already deleted in this call
-			case err != nil:
-				return err
-			default:
-				if err := d.addClassBytes(ctx, c5.StreamClass(capClass), -size); err != nil {
-					return err
-				}
-				out.Bytes += size
-			}
+		freed, err := d.releaseCaptures(ctx, class, captures)
+		if err != nil {
+			return err
 		}
+		out.Bytes += freed
 		return nil
 	})
 	if err != nil {
