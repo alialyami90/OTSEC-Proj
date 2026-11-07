@@ -1149,7 +1149,7 @@ ADR-0009 stays **proposed** until the owner chooses where the sensor runs. None 
 D1, on #539 to #544, with each owner's and reviewer's word through the coordinator (D4-58).
 
 - **The item 4 briefs (#539).** Shared document types (`otsec.netbaseline/0.1`, `otsec.netcheckpoint/0.1`) go in `contracts/netobs`. `fc-classes/1` exists once, in `modules/detection/`, and the node imports its classification function. D3 writes the acknowledgement checks as pure functions in `modules/security/`, and D5 wires them into `platform/node`. The node sets `platform_session`. The full text is in `docs/agent-handoffs.md`.
-- **C2 0.9 is approved** (D2's #541, `docs/phase4/D2-c2-0.9.md`). D3, D4, D5 and D6 reviewed it. It adds `local_addr` and `connected_at`, `failed.snmp_varbinds_mismatch` for a Get or GetNext reply, and `ended_at` bounded to nine fractional digits. It also makes the collector refuse to load on a shared host:port, compared after `Unmap()` and without the zone. `local_addr` is written unmapped and without a zone. The count check runs before any binding from that Response is kept.
+- **C2 0.9 is approved** (D2's #541, `docs/phase4/D2-c2-0.9.md`). D3, D4, D5 and D6 reviewed it. It adds `local_addr` and `connected_at`, and `failed.snmp_varbinds_mismatch` for a Get or GetNext reply. Every C2 time (`started_at`, `ended_at`, `connected_at` and each segment's `at`) is bounded to at most nine fractional digits. The collector refuses to load when two assets share a transport layer, host and port, with the host compared after `Unmap()` and without the zone. `local_addr` is written unmapped and without a zone. Validate refuses a hostname, a zone, the mapped form, the unspecified address, port 0, and any other non-canonical form. The count check runs before any binding from that Response is kept.
   - **D4-60's GETNEXT bar lifts** only when the 0.9 code merges with D6's test 3 green at that head.
   - **§1.5's time rule** lives in the baseline note §5. D4 widens it for midstream TCP and held-open UDP flows, and D3, D5 and D6 review that change.
 - **Audit 0.12 goes in readers first** (#534 §2.5). D3's code reads 0.12 in full, while writers still stamp 0.11, and a test pins it. D5's B5 deliverable 7 bumps the stamp, in the same change that wires `policy.apply` and `verified.keys_digest`. `authz` 0.10 bumps at once, because the collector sets `keys` and `keys_digest` in the same change.
@@ -1159,6 +1159,10 @@ D1, on #539 to #544, with each owner's and reviewer's word through the coordinat
   - `MaxRedactions` is 16 per frame, and any excess is covered as one `slot-not-placed` over that side's payload, which fails closed;
   - `stored_capture` sits in `node` only;
   - `node.function_table` is present exactly when `function_class` is.
+
+  - a Modbus 8 or 43 request too short to carry its sub-function has no `sub`, and is classed by the most restrictive row for its code: `control` for 8, `write` for 43. Function 43 with MEI type 13 is `write`, `unknown`;
+  - the one `slot-not-placed` replaces that frame's per-slot `credential` entries, and the node refuses a cited frame listing more than `MaxRedactions` as `sensor-record-refused`;
+  - the `contracts/netobs` decoder refuses duplicate keys, and a sensor body that carries `node`.
 
   The text is in C13 §14, reviewed by C13's reviewers (D2, D3, D5, D6) in #543. It merges before the `contracts/netobs` code that relies on it, and that PR cites #543 for it.
 - **PRP in ADR-0009 (D4's #540, E-D4-02, simulated).** Stock Suricata and Zeek keep both PRP copies. Under options (a) and (b), a site whose station network is PRP needs a duplicate-discard stage. That stage discards only a copy that is byte-identical apart from the LAN ID. It counts a mismatched "duplicate" as a signal, and its table is bounded and counted (D3, carried to the sensor brief). ADR-0009 stays proposed.
