@@ -1163,6 +1163,7 @@ The provisional direction is Zeek as a separate supervised process (ADR-0002 ite
 - DNP3 and Modbus/TCP, which Zeek decodes.
 - R6.7's insecure list from V-M6: Telnet, FTP, plain HTTP, SNMPv1 and v2c, unauthenticated Modbus/TCP, and DNP3 without Secure Authentication.
 - SNMPv3 and the SEL Telnet sessions that the platform itself runs. These are a known flow for the baseline and the unknown-flow alerts, but they are still recorded as an insecure service under R6.7, because the SEL-751's only path is Telnet (D4, D2).
+- The customer HMI server's relay traffic, an existing authorized path that the baseline models as a known flow (ADR-0007 item 7).
 
 IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms they are in use. Each of them needs its own decoder, and GOOSE needs every precondition R-A4-4 lists.
 
@@ -1176,7 +1177,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   - detection rate, false-positive rate and latency for each rule;
   - every alert linked to packets that can be retrieved.
 - **R6.6:** the PRP, encryption and unsupported-protocol limits, listed per deployment.
-- **C-11 in CI** runs for the full GT-PCAP replay plus the sensor's start and stop, with the interface up throughout. The 24 h run stays with H-06 on hardware (D6).
+- **C-11 in CI** runs for the full GT-PCAP replay plus the sensor's start and stop, with the interface up throughout. The interface is a virtual one in a network namespace of its own, as in V-M8's paired runs, and never the runner's real NIC (D3). The 24 h run stays with H-06 on hardware (D6).
 - These criteria are fixed (#144), and a brief may not lower them.
 
 #### P4-4-A4 (D4): the sensor, its first protocols, and its contracts
