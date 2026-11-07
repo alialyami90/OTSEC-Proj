@@ -1059,3 +1059,12 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
 
   The fix is not briefed yet. It goes to the owner beside the next item (D4-34).
 - **A timing-sensitive test, and its fix at the cause (open).** `TestHostileCorpus/H11/outer` failed once on Windows, on #515's docs-only head, because GT-MIB's test manager read a fixed window before the agent had finished answering. D6's #517, open when this was written, waits for the agent's own handled count, and loosens no count. D2 passed it. It merges on green CI.
+
+## D4-64: the owner chooses the slow-start fix before the next item (owner and D1, 2026-11-07)
+
+- **The owner's choice.** At 09:36Z, on D1's card "Which Phase 4 item should come next?", the owner chose "Fix the slow start first". D1 had recommended IDS (item 4). The fix comes before items 4 to 6, and D1 checks with the owner again once it is merged (D4-34).
+- **The brief.** D1 issues P4-H4 to D5 in `docs/agent-handoffs.md`.
+  - Measure which part of `store-reserve` dominates on Windows first, then make the smallest change that removes it.
+  - Keep F-013's release-before-open rule, a reserve that only counts once it holds real space and is flushed, and AP-13's 60 s first wait.
+  - Any change to C5's startup order or its report is a C5 minor bump, through a reviewed proposal first.
+  - Proof is before and after Windows numbers from the PR's own code.

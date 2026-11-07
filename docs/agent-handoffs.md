@@ -1109,3 +1109,32 @@ In the order of `docs/phase4/D4-c12-0.2.md` §8 and §10:
 #### Order
 
 P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touch different paths. P4-H1's D5 part follows D3's part, and P4-H3's step 2 follows its step 1. P4-H2 uses Windows CI time, so a V-M1-length leg is not added while it runs.
+
+## After the hardening briefs: P4-H4 (issued 2026-11-07, D4-64)
+
+#### P4-H4 (D5): make the store's start-up reserve step faster on Windows
+
+- **Objective.** P4-H2's numbers show where slow node starts spend their time (`docs/phase4/D5-windows-start.md`). In the Windows `go` job, `store-reserve` was 49% of all start time and the largest phase in 404 of 541 starts, with `store-open` second. P4-H4 makes `store-reserve` faster without weakening anything it protects. Real service starts already took 0.7 to 1.2 s, so the goal is the loaded case, not a new feature.
+- **What the step does today.** At every start, C5's startup releases the recovery reserve before the store is first opened (F-013). After recovery, `platform/store.Env.CreateReserve` re-creates the reserve by writing `RecoveryReserveBytes` of zeros in 64 KiB writes, then flushes the file and its folder. This happens for each of the node's databases.
+- **Step 1, measure before changing (desk and CI-Windows).** Split `store-reserve` into the release, the zero writes, the file flush and the folder flush, using the P4-H2 line or a test-only timer. Report which part dominates on `windows-latest`, with the run link. The fix targets that part, not a guess.
+- **Step 2, the fix.** D5 picks the smallest change that removes the dominant part. Candidates to weigh with numbers:
+  - larger writes;
+  - one preallocation call in place of the writes, if the space is really allocated (no sparse file);
+  - keeping a valid reserve across a clean stop, so that a clean start does not delete and rewrite it.
+
+  Any change to C5's startup order, or to what the startup report or its alarms say, is a C5 minor bump. It needs a proposal reviewed by D6 and D3, and D1's approval, before any code.
+- **Must keep** (D3 on #515, D4-63):
+  1. F-013's rule. The recovery reserve is released before the store is first opened, and nothing opens the store before that.
+  2. A reserve counts only once it holds real space and is flushed. A start never reports a reserve that a full disk could take away. ADR-0004 item 8 still holds: a node whose reserve cannot be re-created alarms and does not collect.
+  3. AP-13's 60 s first wait before the first collector exchange.
+- **Deliverables.**
+  1. The step 1 split, in `docs/phase4/D5-windows-start.md` as a new section.
+  2. The change, with tests. Every existing V-S9 and storage-exhaustion test passes unchanged, and a test pins that the reserve holds its full size on disk.
+  3. Before and after numbers from the platform budget step and the P4-H2 line on `windows-latest`, from runs on the PR's own code. They go in the same note, with run links.
+- **May change:** `platform/store/`, `platform/node/`, `docs/phase4/D5-*.md`. A change in `contracts/store/` only through the C5 proposal above.
+- **Acceptance.**
+  - Both workflows are green on Linux and Windows.
+  - The `store-reserve` median in the Windows `go` job falls, shown by before and after runs, and no other phase rises to take its place.
+  - The three properties above are each pinned by a test that fails if the property is broken.
+- **Exclusions.** No change to `RecoveryReserveBytes`, `LastResortReserveBytes` or `OpenHeadroomBytes`. No change to `store-open` in this PR; if it remains the next cost, D5 says so in the note and D1 decides. No skipped or loosened test.
+- **Reviewers:** D6 for reliability, D3 for the trust boundary and the three properties.
