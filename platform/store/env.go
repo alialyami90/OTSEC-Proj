@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"time"
 
 	"modernc.org/sqlite"
@@ -115,6 +116,30 @@ func (o Options) now() time.Time {
 // except Open touches the database, its WAL or its -shm.
 type Env struct {
 	opt Options
+
+	mu    sync.Mutex
+	times ReserveTimes
+}
+
+// ReserveTimes is the time CreateReserve has spent in its zero writes and
+// in its folder flush, summed over its calls, on the monotonic clock. The
+// node's start timing line splits store-reserve with it (P4-H4).
+type ReserveTimes struct {
+	Write   time.Duration // creating the file and writing its zeros
+	DirSync time.Duration // flushing the folder; nothing on Windows
+}
+
+// ReserveTimes returns the times CreateReserve has spent so far.
+func (e *Env) ReserveTimes() ReserveTimes {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.times
+}
+
+func (e *Env) took(d *time.Duration, from time.Time) {
+	e.mu.Lock()
+	*d += time.Since(from)
+	e.mu.Unlock()
 }
 
 var _ c5.StartupEnv = (*Env)(nil)
@@ -228,6 +253,7 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 		return fmt.Errorf("reserve size %d", n)
 	}
 	p := e.reservePath(r)
+	from := time.Now()
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %s reserve: %w", r, err)
@@ -251,9 +277,11 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 		}
 		left -= k
 	}
+	e.took(&e.times.Write, from)
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("flush %s reserve: %w", r, err)
 	}
+	defer e.took(&e.times.DirSync, time.Now())
 	return syncDir(e.opt.Dir)
 }
 
