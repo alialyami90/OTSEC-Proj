@@ -1028,3 +1028,55 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
 - **Proof.** Role 6's V-M7 checker resolves `identity.mismatch.id` to its stored `identity.read`. An operator-only mismatch scenario joins the V-M7 leg on the binaries, checked across a restart. Role 6's contract tests for 0.2 are in a new `c12_v02_d6_test.go`.
 - **The next C2 revision** bounds `ended_at`'s fraction at nine digits, beside D4-60's GetNext code.
 - **No code before the owner's go** (D4-34). C12 0.2's code is queued with D4-59's two hardening items.
+
+## D4-62: the owner accepts item 3, the hardening briefs, and the branch cleanup (owner and D1, 2026-11-06)
+
+- **The owner accepted Phase 4 item 3 with its conditions** (16:48Z, on D1's decision card) and chose "Accept, do two hardening fixes first". The conditions are the limits in `docs/phase-4-item3-exit.md`. D1 issues the hardening briefs in `docs/agent-handoffs.md` ("After item 3: hardening briefs"):
+  - P4-H1, refusing `clear-suspension.json` off-lab;
+  - P4-H2, finding the Windows node start stall;
+  - P4-H3, C12 0.2's code as D4-61 approved it, which closes item 3's last limitation.
+
+  D1 told the owner that C12 0.2 follows the two fixes unless they say otherwise. When all three are merged, D1 reports to the owner and asks for the next item. The owner's other open questions (HR-18, severity scores, HR-17, which SEL switches, model naming) stay open.
+- **The branch cleanup (16:48Z).** The owner chose "Delete the 150 merged ones". D1 re-checked that each of the 150 branches is still at the tip recorded on 2026-10-31 and is the head of no open PR. `claude/project-thread-8k5430` has moved and stays. This session's GitHub access refuses a branch delete, as it refuses a force push. So D1 wrote `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1` for the owner to run from a clone. Each delete is leased to the recorded SHA. The four unmerged mutant branches are kept.
+
+## D4-63: the hardening briefs are done, and two rulings on P4-H2 (D1, 2026-11-07)
+
+- **All three briefs are merged.**
+  - **P4-H1:** D3's #508, D5's #514, and D6's acceptance tests in #516 (`e205da6`).
+  - **P4-H2:** D5's #515 (`ad42d4a`), with the note `docs/phase4/D5-windows-start.md`.
+  - **P4-H3:** #507, #509, #510, #511, #512 and #513.
+- **P4-H2's result** (`CI-Windows`, from 550 starts at #515's head `8a6e5600`).
+  - In slow starts, the dominant phase is `store-reserve`, followed by `store-open`. `store-reserve` is 49% of all start time in the Windows `go` job, and the largest phase in 404 of 541 starts.
+  - The 9 service starts took 0.7 to 1.2 s.
+  - #428's F-013 lead (recreating the reserve with a flush at every start) is consistent with these numbers but not shown by them.
+  - D6 recomputed every figure from the raw log.
+- **Ruling 1: two starts over 6 s are accepted, not three.** The brief asks for three "if any occur". One run gave two, and the dominant phase is already clear, so more Windows time would not change what a fix targets.
+- **Ruling 2: the go job's coverage is accepted as limited to starts made through the tests' `start()` helper.** Direct `Start`, `Run` and `RunFrom` calls in tests leave no line there. The production path, `Run` and `RunFrom`, always logs the line, and the service job shows one line per SCM start. The note states the limit.
+- **For any fix brief** (D3 on #515):
+  - The fix keeps F-013's recovery reserve, flushed before it counts, when the disk is full.
+  - The fix keeps AP-13's 60 s first wait.
+  - Its proving test is the platform budget numbers before and after.
+
+  The fix is not briefed yet. It goes to the owner beside the next item (D4-34).
+- **A timing-sensitive test, and its fix at the cause (open).** `TestHostileCorpus/H11/outer` failed once on Windows, on #515's docs-only head, because GT-MIB's test manager read a fixed window before the agent had finished answering. D6's #517, open when this was written, waits for the agent's own handled count, and loosens no count. D2 passed it. It merges on green CI.
+
+## D4-64: the owner chooses the slow-start fix before the next item (owner and D1, 2026-11-07)
+
+- **The owner's choice.** At 09:36Z, on D1's card "Which Phase 4 item should come next?", the owner chose "Fix the slow start first". D1 had recommended IDS (item 4). The fix comes before items 4 to 6, and D1 checks with the owner again once it is merged (D4-34).
+- **The brief.** D1 issues P4-H4 to D5 in `docs/agent-handoffs.md`.
+  - Measure which part of `store-reserve` dominates on Windows first, then make the smallest change that removes it.
+  - Keep F-013's release-before-open rule, a reserve that only counts once it holds real space and is flushed, and AP-13's 60 s first wait.
+  - Any change to C5's startup order or its report is a C5 minor bump, through a reviewed proposal first.
+  - Proof is before and after Windows numbers from the PR's own code.
+
+## D4-65: the slow-start fix is merged, with two rulings (D1, 2026-11-07)
+
+- **The result.** P4-H4 merged as #520 (`28e94ae`), with D5 implementing and D6 and D3 reviewing. Evidence class: CI-Windows, with 543 starts per run.
+  - The step-1 split showed that the file flush of about 1 MiB of written zeros was about 92% of `store-reserve`.
+  - `CreateReserve` now reserves the space in one call: `fallocate` on Linux, and a non-sparse extend on Windows. It falls back to zero writes only on `ErrUnsupported`, and it keeps both flushes before a reserve counts.
+  - `store-reserve` median/p90 went from 151/366 and 138/383 ms to 9/19 and 8/14 ms.
+  - `total` median/p90 went from 325/922 and 322/954 ms to 196/736 and 179/672 ms.
+  - The three must-keeps are pinned by tests. Must-keep 1 is pinned by order only, because C-22 and H-14 are open.
+- **Ruling 1: no allocation read-back.** D3 asked for a read-back that falls back to zero writes when the allocation is short. On compressed or copy-on-write volumes, the zero writes hold no real space either, so a fallback cannot fix it. The only real fix is to fail the reserve on such volumes, which would change which file systems the node supports. The PR's note therefore records this as a known limit next to H-14. D1 takes the question to the owner in the next report: should the reserve fail (drain-only) where it can't hold real space? D3's Windows folder-flush item goes with it.
+- **Ruling 2: the Windows clock.** `TestReserveParts` dropped its `> 0` checks on the release and the allocation, because under the Windows clock tick both read 0. The exact sum and `reserve-sync > 0` stay. If `reserve-sync` ever reads 0, that check is dropped, not retried.
+- **Not fixed, and carried.** There are still starts over 6 s: 5 after the fix against 3 before. All of them sit in `store-open` or `record-start`, never the reserve. `store-open` is now about 47% of start time. Whether to brief it is the owner's call, alongside the next Phase 4 item (D4-34).

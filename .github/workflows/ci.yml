@@ -98,6 +98,20 @@ jobs:
           if awk -v t="$total" 'BEGIN { exit !(t + 0 > 720) }'; then
             echo "::warning::platform/node took ${total} s on Windows, over its 720 s budget (D4-22, D4-44)"
           fi
+      # The node start timing lines (P4-H2, authorized by D1): each start in
+      # the go test log with its per-phase times, their count, and the ten
+      # slowest by total. It never fails the job.
+      - name: platform/node start times (P4-H2)
+        if: runner.os == 'Windows' && !cancelled()
+        shell: bash
+        run: |
+          set +e +o pipefail
+          tr -d '\r' < gotest.txt | grep -o 'otsec node start: .*' > node-starts.txt
+          echo "$(wc -l < node-starts.txt) node start lines in the go test log. The ten slowest by total:"
+          sed -E 's/.* total=([0-9]+)ms.*/\1 &/' node-starts.txt | sort -rn | head -n 10 | cut -d' ' -f2-
+          echo "Every start line:"
+          cat node-starts.txt
+          exit 0
       # The test clock's own tests compile only with its tag (D4-40, V-M4).
       # The release build's refusal of the clock runs in the step above
       # (tests/security, TestC6ReleaseBuildsRefuseTheTestClock).

@@ -193,10 +193,36 @@ func (s *Scheduler) findingsOf(ctx context.Context, assetID string) (*findingsSt
 	return fs, nil
 }
 
+// shownSchema is a stored schema string as an alarm may show it: at most
+// 64 bytes, each outside printable ASCII, or a quote or backslash, shown as
+// '?', in quotes.
+func shownSchema(s string) string {
+	b := []byte(s[:min(len(s), 64)])
+	for i, c := range b {
+		if c < 0x20 || c > 0x7e || c == '"' || c == '\\' {
+			b[i] = '?'
+		}
+	}
+	return `"` + string(b) + `"`
+}
+
 // fold reads one stored record into the state.
 func (fs *findingsState) fold(r c5.Stored) error {
 	switch {
-	case bytes.HasPrefix(r.Event, []byte(`{"schema":"`+finding.Identifier+`"`)):
+	case bytes.HasPrefix(r.Event, []byte(`{"schema":"otsec.finding/`)):
+		// A minor this build does not know stops the asset's evaluation
+		// rather than being skipped, so a rolled-back node never revises
+		// an older finding past a newer one (D4-61). Finding.Validate
+		// accepts any 0.x minor, so finding.Known decides.
+		var head struct {
+			Schema string `json:"schema"`
+		}
+		if err := json.Unmarshal(r.Event, &head); err != nil {
+			return err
+		}
+		if !finding.Known(head.Schema) {
+			return fmt.Errorf("finding schema %s is not known to this build", shownSchema(head.Schema))
+		}
 		f, err := decodeFinding(r.Event)
 		if err != nil {
 			return err

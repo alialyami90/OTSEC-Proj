@@ -16,7 +16,7 @@ import (
 // The matcher's name and version, written into every finding.
 const (
 	Name    = "otsec-applicability"
-	Version = "0.1.0"
+	Version = "0.2.0"
 )
 
 // Input is everything the matcher reads about one asset. The node fills it
@@ -383,11 +383,17 @@ func (e *evaluator) inside(f finding.Finding, entry advisory.Entry) finding.Find
 
 // markStale marks a device-read identity that is not current stale, and
 // cites each read that made it so. Another identity contradicted by a
-// mismatch is marked stale too, but the mismatch is not cited: C12 0.1 lets
-// an identity cite only evidence of its own source.
+// mismatch is marked stale too, and cites the mismatch read in
+// identity.mismatch, never as its own evidence (C12 0.2, D4-61).
 func (e *evaluator) markStale(f *finding.Finding) {
 	if e.in.Identity.Source != finding.DeviceRead {
-		f.Identity.Evidence[0].Stale = e.mismatched
+		for i := range f.Identity.Evidence {
+			f.Identity.Evidence[i].Stale = e.mismatched
+		}
+		if e.mismatched {
+			m := *e.in.LatestMismatch
+			f.Identity.Mismatch = &m
+		}
 		return
 	}
 	if e.current {
@@ -455,10 +461,11 @@ func allOperator(ev []finding.Evidence) bool {
 
 // same reports whether two findings differ in nothing C12 §7 lists: the
 // revision fields, the evaluation time, the matcher and
-// identity.latest_read are left out.
+// identity.latest_read are left out, and so is the schema, so a stored 0.1
+// finding is revised only when its content changes (D4-61).
 func same(a, b finding.Finding) bool {
 	strip := func(f finding.Finding) finding.Finding {
-		f.Revision, f.Previous, f.From, f.EvaluatedUTC, f.Matcher = 0, "", "", "", finding.Matcher{}
+		f.Schema, f.Revision, f.Previous, f.From, f.EvaluatedUTC, f.Matcher = "", 0, "", "", "", finding.Matcher{}
 		f.Identity.LatestRead = nil
 		return f
 	}

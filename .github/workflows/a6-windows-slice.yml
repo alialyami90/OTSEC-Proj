@@ -56,6 +56,20 @@ jobs:
       - name: run logs
         if: always()
         run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\e2e", "$env:RUNNER_TEMP\unknown", "$env:RUNNER_TEMP\relay" -Include scm.log,node.log,collector.log -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'current' } | ForEach-Object { "==== $($_.FullName)"; Get-Content -LiteralPath $_.FullName }
+      # P4-H2 (D4-62): the installed node logs one start timing line to the
+      # Application log at each start (platform/node/starttimes.go). Every
+      # one from this job, read by its insertion strings, so it prints after
+      # the installer has removed the event source too. It never fails.
+      - name: node start timing lines from the Application log (P4-H2)
+        if: always()
+        run: |
+          $lines = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -eq 'otsec-node' } | Sort-Object TimeCreated |
+            ForEach-Object { (($_.Properties | ForEach-Object { $_.Value }) -join ' ') } |
+            Select-String -Pattern 'otsec node start: .*' | ForEach-Object { $_.Matches[0].Value })
+          "$($lines.Count) node start lines in the Application log"
+          $lines
+          exit 0
       - name: independent leftovers check
         if: always()
         run: |

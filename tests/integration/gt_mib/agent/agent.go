@@ -110,6 +110,7 @@ type Agent struct {
 	start time.Time
 	mu    sync.Mutex
 	n     int
+	ended int // datagrams the agent has finished with (Handled)
 	salt  uint64
 	log   *os.File
 	done  chan struct{}
@@ -178,6 +179,14 @@ func (a *Agent) Received() int {
 	return a.n
 }
 
+// Handled is the number of datagrams the agent has finished with: every
+// datagram it sent in answer to them is written to its socket.
+func (a *Agent) Handled() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.ended
+}
+
 // EngineTime is the agent's snmpEngineTime now.
 func (a *Agent) EngineTime() int64 { return int64(a.cfg.Now().Sub(a.start) / time.Second) }
 
@@ -231,6 +240,9 @@ func (a *Agent) serve() {
 			sent = append(sent, a.describeSent(s))
 		}
 		a.write(x, raw, sent)
+		a.mu.Lock()
+		a.ended++
+		a.mu.Unlock()
 	}
 }
 

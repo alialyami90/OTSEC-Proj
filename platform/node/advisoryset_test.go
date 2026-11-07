@@ -81,9 +81,18 @@ type advNode struct {
 // newAdvNode starts a node with both switches on and anchors.
 func newAdvNode(t *testing.T, anchors ...nodeconfigtest.AdvisoryAnchor) *advNode {
 	t.Helper()
+	return newAdvNodeWith(t, nil, anchors...)
+}
+
+// newAdvNodeWith is newAdvNode with mod applied to the configuration too.
+func newAdvNodeWith(t *testing.T, mod func(*nodeconfigtest.Config), anchors ...nodeconfigtest.AdvisoryAnchor) *advNode {
+	t.Helper()
 	b, dir, nc, err := item3Node(t, func(nc *nodeconfigtest.Config) {
 		nc.Asset = &struct{}{}
 		nc.Applicability = &nodeconfigtest.Applicability{Anchors: anchors}
+		if mod != nil {
+			mod(nc)
+		}
 	})
 	if err != nil {
 		t.Fatal(err)

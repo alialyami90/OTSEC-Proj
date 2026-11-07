@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -69,6 +70,35 @@ func ranNode(t *testing.T) (string, *node.Config) {
 	}
 	st.Write("site-a-node1")
 	return path, cfg
+}
+
+// otsec node passes the node its start: the time at the command's entry,
+// before the configuration is loaded, and how long the load took (P4-H2).
+// A load made slow by a known delay shows that delay, so the test does not
+// depend on a phase rounding to a nonzero millisecond.
+func TestNodePassesItsStartTime(t *testing.T) {
+	path, _ := ranNode(t)
+	const delay = 50 * time.Millisecond
+	load, start := loadConfig, startNode
+	t.Cleanup(func() { loadConfig, startNode = load, start })
+	var loading time.Time
+	loadConfig = func(p string) (*node.Config, error) {
+		loading = time.Now()
+		time.Sleep(delay)
+		return load(p)
+	}
+	var got node.PreStart
+	startNode = func(_ context.Context, _ *node.Config, pre node.PreStart, _ io.Writer) error {
+		got = pre
+		return nil
+	}
+	before := time.Now()
+	if _, stderr, code := otsec(t, "node", "-config", path); code != 0 {
+		t.Fatalf("otsec node: %d %s", code, stderr)
+	}
+	if got.Began.Before(before) || got.Began.After(loading) || got.Config < delay {
+		t.Fatalf("the node's start %+v; the command began after %v and loaded its configuration at %v", got, before, loading)
+	}
 }
 
 func otsec(t *testing.T, args ...string) (string, string, int) {
@@ -358,7 +388,7 @@ func TestHealthShowsCollectorStillSuspended(t *testing.T) {
 	st.SetCollectorClears(map[string]string{relayID: "inv-run-1"})
 	st.Write("site-a-node1")
 	out, errs, code := otsec(t, "health", "-config", path)
-	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1, the collector has not accepted the clear yet; runs stay held, and " + node.ClearSuspensionFileName + " stays in place until this line is gone"
+	want := "COLLECTOR STILL SUSPENDED " + relayID + ": the node cleared ref inv-run-1 from " + node.ClearSuspensionFileName + ", the collector has not accepted the clear yet; runs stay held, and the file stays in place until this line is gone. The file clears only a lab-only asset: for any other the collector refuses it, and an administrator signs asset.clear_suspension instead"
 	if code != 0 || !strings.Contains(out, want) {
 		t.Fatalf("health: %d %s\n%s", code, errs, out)
 	}

@@ -179,6 +179,19 @@ func (s *Scheduler) applyAdminPart(ctx context.Context, f *adminFile) adminPart 
 			return adminPart{state: partPending, detail: why}
 		}
 		return adminPart{state: partDone}
+	case authz.KindAssetClearSusp:
+		b := p.AssetClearSusp
+		if b == nil {
+			return s.notApplied(f, "the accepted payload has no asset_clear_suspension body")
+		}
+		// Bound to an install key as a quarantine clear is.
+		switch {
+		case open != "":
+			return s.notApplied(f, "the collector was reinstalled and the reset on install key "+open+" is not acknowledged yet; the clear is bound to install key "+p.InstallKeyID)
+		case p.InstallKeyID != trusted:
+			return s.neverApplied(f, "accepted for install key "+p.InstallKeyID+", which is not the key the node trusts ("+keyOrNone(trusted)+"): a reinstall retired it. Sign the request again")
+		}
+		return s.applySignedClear(ctx, b, source)
 	case authz.KindNodeChangeApproval, authz.KindNodeBaselineAck:
 		// Bound to an install key as a clear is: a reinstall retires the
 		// acceptances of the old key, and its decision_seq is of the old

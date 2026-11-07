@@ -62,7 +62,8 @@ GT_ADV = os.path.join(HERE, "..", "gt_adv", "gt_adv.json")
 EXPLOIT = re.compile(r"exploit", re.I)
 # C12's evidence ID forms, each tied to its source.
 ID_FORM = {
-    "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+    # C2's invocation ID as C12 takes it: UUID version 1 to 8, RFC variant.
+    "device-read": re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
     "operator": re.compile(r"^audit:[^:]+:[0-9]+$"),
 }
 
@@ -196,7 +197,8 @@ def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
     """A later mismatch (#451, D4-54), on a device-read asset or, by C1's
     later ruling, an operator-only one: the newest finding is
     applicable-by-version with the version unread, the identity stale and
-    the mismatch cited, whether or not the entry names the reported model;
+    the mismatch cited (in identity.mismatch on an operator identity, C12
+    0.2), whether or not the entry names the reported model;
     the identity.read document keeps the mismatch apart, and the last
     confirming read as its latest read. An operator-only asset has no
     confirming read (confirming is None), so the document has none. Run it
@@ -209,13 +211,29 @@ def check_mismatch(asset, adv, mismatch_id, mismatch_fid, confirming):
         bad.append(f"{adv}: class {f['class']} after the mismatch, want applicable-by-version")
     if "firmware-version" not in [p["name"] for p in f.get("preconditions", []) if p["state"] == "unread"]:
         bad.append(f"{adv}: firmware-version is not named unread")
-    if not any(e.get("stale") for e in f["identity"].get("evidence", [])):
+    # A device-read identity marks the reads the mismatch contradicts stale
+    # and cites the mismatch read itself; under C12 0.2's rule 3 every piece
+    # of an operator or passive identity's evidence is stale.
+    ev = f["identity"].get("evidence", [])
+    stale = all if f["identity"]["source"] != "device-read" else any
+    if not ev or not stale(e.get("stale") for e in ev):
         bad.append(f"{adv}: the identity is not marked stale")
-    # C12 0.1 cannot cite device-read evidence on an operator identity, so
-    # an operator finding does not cite the mismatch (C1, a C12 0.2 item).
-    if f["identity"]["source"] != "operator" and mismatch_id not in _ids(f):
-        bad.append(f"{adv}: the mismatch read {mismatch_id} is not cited")
     rd = asset.get("identity_read") or {}
+    mm = rd.get("mismatch") or {}
+    # A device-read identity cites the mismatch read as its own evidence; an
+    # operator or passive one cites it in identity.mismatch (C12 0.2, D4-61),
+    # which is the stored identity.read's mismatch: its invocation ID, and its
+    # read_at, the run's ended_at (D3 on #504).
+    cited = f["identity"].get("mismatch")
+    if f["identity"]["source"] == "device-read":
+        if mismatch_id not in _ids(f):
+            bad.append(f"{adv}: the mismatch read {mismatch_id} is not cited")
+        if cited is not None:
+            bad.append(f"{adv}: a device-read identity carries identity.mismatch {cited}")
+    elif cited != {"id": mm.get("invocation_id"), "at_utc": mm.get("read_at")} or \
+            not ID_FORM["device-read"].match(cited.get("id") or ""):
+        bad.append(f"{adv}: identity.mismatch {cited}, want identity.read's mismatch "
+                   f"{mm.get('invocation_id')} at {mm.get('read_at')}")
     if f["identity"]["source"] != asset["identity"]["source"]:
         bad.append(f"{adv}: identity source {f['identity']['source']} after the mismatch, the asset's is {asset['identity']['source']}")
     if rd.get("invocation_id") != confirming:
