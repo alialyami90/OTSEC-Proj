@@ -191,6 +191,7 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		cfg.NewID = newUUID
 	}
 	p := &Pipeline{cfg: cfg, assets: map[string]Enrolled{}, busy: map[string]bool{}}
+	outbound := map[string]string{} // "l4 host:port" -> the asset that has it
 	for _, e := range cfg.Assets {
 		if err := e.Asset.Validate(); err != nil {
 			return nil, fmt.Errorf("collector: asset %s: %w", e.Asset.AssetID, err)
@@ -203,6 +204,25 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		}
 		if _, dup := p.assets[e.Asset.AssetID]; dup {
 			return nil, fmt.Errorf("collector: asset %s is enrolled twice", e.Asset.AssetID)
+		}
+		// Two assets on one transport layer, host and port: the node could
+		// not tie a flow there to one asset's session, so the collector does
+		// not start (C2 0.9 §4, D4-68). The host is compared unmapped and
+		// without a zone, as the sensor sees it.
+		for _, ep := range e.Asset.Endpoints {
+			l4 := map[asset.Transport]string{asset.Telnet: "tcp", asset.SSH: "tcp", asset.SNMPv3: "udp"}[ep.Transport]
+			if l4 == "" {
+				continue
+			}
+			a, err := netip.ParseAddr(ep.Host)
+			if err != nil {
+				return nil, fmt.Errorf("collector: asset %s: endpoint %s: host %q is not an IP address", e.Asset.AssetID, ep.ID, ep.Host)
+			}
+			k := l4 + " " + netip.AddrPortFrom(a.Unmap().WithZone(""), uint16(ep.Port)).String()
+			if other, ok := outbound[k]; ok && other != e.Asset.AssetID {
+				return nil, fmt.Errorf("collector: assets %s and %s share the outbound endpoint %s", other, e.Asset.AssetID, k)
+			}
+			outbound[k] = e.Asset.AssetID
 		}
 		p.assets[e.Asset.AssetID] = e
 	}

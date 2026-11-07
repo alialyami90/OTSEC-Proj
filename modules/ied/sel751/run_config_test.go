@@ -70,7 +70,7 @@ func play(t *testing.T, f inputs, steps []step, hangUp bool, setup func(*Config)
 	if setup != nil {
 		setup(&cfg)
 	}
-	near, far := net.Pipe()
+	near, far := pipe()
 	done := farEnd(far, steps, hangUp)
 	cfg.Dial = func(context.Context, string, string) (net.Conn, error) { return near, nil }
 	got := Run(context.Background(), f.inv, cfg)
@@ -396,7 +396,7 @@ func FuzzRunConfig(f *testing.F) {
 	m := mustMatcher(&testing.T{}, in.reg)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		chunks := bytes.Split(data, []byte{0xF7})
-		near, far := net.Pipe()
+		near, far := pipe()
 		go func() {
 			defer far.Close()
 			_ = far.SetDeadline(time.Now().Add(10 * time.Second))

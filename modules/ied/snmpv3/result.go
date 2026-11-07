@@ -55,7 +55,11 @@ func Result(o Outcome, inv adapter.Invocation, p *register.Package, m Meta) adap
 			r.Transcript.Redactions = append(r.Transcript.Redactions, adapter.Redaction{Offset: base[i] + int64(sg.DigestOff),
 				Length: int64(sg.DigestLen), Reason: adapter.RedactUSMDigest, Component: "transport"})
 		}
-		r.Session.Connected = r.Session.Connected || sg.Dir == adapter.Sent
+		if sg.Dir == adapter.Sent && !r.Session.Connected {
+			// C2 0.9: connected means a datagram was sent, and the
+			// connection is the Conn's, made then.
+			r.Session.Connected, r.Session.LocalAddr, r.Session.ConnectedAt = true, o.LocalAddr, stamp(sg.At)
+		}
 		r.EndedAt = stamp(sg.At)
 	}
 	sum := sha256.Sum256(r.Transcript.Data)
