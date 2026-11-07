@@ -53,7 +53,8 @@ var (
 // kindSince is the minor that added a request kind; absent means 0.1. A
 // request stamped with an earlier minor cannot ask for it.
 var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince,
-	KindNodeChangeApproval: configKindsSince, KindNodeBaselineAck: configKindsSince}
+	KindNodeChangeApproval: configKindsSince, KindNodeBaselineAck: configKindsSince,
+	KindNodeNetworkBaselineAck: networkAckSince}
 
 // snmpv3Since is the minor that added the snmpv3 transport and
 // CredentialRef.USM. A request stamped with an earlier minor cannot install
@@ -380,6 +381,16 @@ type AdminAccepted struct {
 	Principal     Principal `json:"principal"`
 	Nonce         string    `json:"nonce"`
 	PayloadSHA256 string    `json:"payload_sha256"`
+	// KeysDigest and Keys (since 0.10) are set on every accepted reply to
+	// an admin-signed request stamped 0.10 or later: the collector's
+	// pinned administrator keys (AdminKeyEntries) and their digest
+	// (AdminKeysDigest). Before it applies any decision under a digest it
+	// has not recorded, the node writes a C8 policy.apply naming it, so a
+	// key's grant of a kind is in the chain before its first use (D4-68
+	// ruling 9). The node takes both from this reply only, and refuses to
+	// apply a 0.10 decision whose acceptance names none.
+	KeysDigest string          `json:"keys_digest,omitempty"`
+	Keys       []AdminKeyEntry `json:"keys,omitempty"`
 }
 
 // AdminPayloadSHA256 is the lowercase hex SHA-256 of a signed request's
@@ -481,7 +492,7 @@ func (r CollectorReply) Validate() error {
 	case !sha256HexPattern.MatchString(a.PayloadSHA256):
 		return errors.New("authz: admin.payload_sha256 is not 64 lowercase hex digits")
 	}
-	return nil
+	return a.validateKeys(r.Contract)
 }
 
 // validateRunDeadline checks run_deadline_ms (since 0.7): only on an
@@ -636,6 +647,8 @@ type requestBodies struct {
 	NodeSeqResetAck     *NodeSeqResetAckBody     // admin-signed only
 	NodeChangeApproval  *NodeChangeApprovalBody  // admin-signed only
 	NodeBaselineAck     *NodeBaselineAckBody     // admin-signed only
+	// NodeNetworkBaselineAck is admin-signed only (since 0.10).
+	NodeNetworkBaselineAck *NodeNetworkBaselineAckBody
 }
 
 // validateBody checks that the one body set matches kind and passes its
@@ -684,6 +697,8 @@ func validateBody(kind RequestKind, by Principal, b requestBodies) error {
 		return b.NodeChangeApproval.Validate()
 	case kind == KindNodeBaselineAck && b.NodeBaselineAck != nil:
 		return b.NodeBaselineAck.Validate()
+	case kind == KindNodeNetworkBaselineAck && b.NodeNetworkBaselineAck != nil:
+		return b.NodeNetworkBaselineAck.Validate()
 	default:
 		return refuse(RefuseInvalid, "body does not match kind %q", kind)
 	}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.7/collector-reply",
+  "$id": "otsec.authz/0.10/collector-reply",
   "title": "Collector reply (C7). Anything but status 'accepted' with no refusal is a refusal; unknown refusal codes read as refused_unknown.",
   "type": "object",
   "required": [
@@ -165,9 +165,71 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
           "description": "SHA-256 of the signed payload bytes as sent: the node acts only on an acceptance of the bytes it sent."
+        },
+        "keys_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Since 0.10, on every accepted reply to an admin-signed request stamped 0.10 or later, with keys: sha256: and the SHA-256 of keys, one line per entry, 'key_id principal status kinds' with the kinds joined by commas, each line ended by a line feed (AdminKeysDigest). Validate checks it against keys."
+        },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Since 0.10: the collector's pinned administrator keys, sorted by key_id (AdminKeyEntries). A key pinned without a list is written with the 0.5 default kinds it has.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key_id",
+              "principal",
+              "status",
+              "kinds"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string",
+                "pattern": "^ed25519-[0-9a-f]{16}$"
+              },
+              "principal": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "revoked"
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "credential.install",
+                    "credential.revoke",
+                    "credential.clear_suspension",
+                    "asset.clear_suspension",
+                    "node.quarantine_clear",
+                    "node.seq_reset_ack",
+                    "node.change_approval",
+                    "node.baseline_ack",
+                    "node.network_baseline_ack"
+                  ]
+                },
+                "description": "Sorted."
+              }
+            }
+          }
         }
       },
-      "description": "Since 0.5, on every accepted reply to an admin-signed request stamped 0.5 or later, and on no other reply: what the collector verified."
+      "description": "Since 0.5, on every accepted reply to an admin-signed request stamped 0.5 or later, and on no other reply: what the collector verified.",
+      "dependentRequired": {
+        "keys_digest": [
+          "keys"
+        ],
+        "keys": [
+          "keys_digest"
+        ]
+      }
     }
   },
   "oneOf": [

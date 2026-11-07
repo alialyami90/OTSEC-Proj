@@ -39,7 +39,7 @@ func testAdminKeys() []AdminKey {
 }
 
 func allAdminKinds() []RequestKind {
-	return append(append([]RequestKind{}, DefaultAdminKinds...), KindNodeChangeApproval, KindNodeBaselineAck)
+	return append(append([]RequestKind{}, DefaultAdminKinds...), KindNodeChangeApproval, KindNodeBaselineAck, KindNodeNetworkBaselineAck)
 }
 
 // installBody is the 0.1 golden's body, the one an admin signs from 0.4.
@@ -81,6 +81,9 @@ func adminPayload(t *testing.T, kind RequestKind) AdminRequest {
 	case KindNodeBaselineAck:
 		p.NodeBaselineAck = &NodeBaselineAckBody{AssetID: "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13", Kind: BaselineConfiguration,
 			BaselineDigest: testBaselineDigest}
+	case KindNodeNetworkBaselineAck:
+		p.NodeNetworkBaselineAck = &NodeNetworkBaselineAckBody{SensorID: testSensorID, DraftDigest: testDraftDigest,
+			BaselineDigest: testBaselineDigest}
 	}
 	return p
 }
@@ -88,6 +91,13 @@ func adminPayload(t *testing.T, kind RequestKind) AdminRequest {
 // testBaselineDigest is "sha256:" and the SHA-256 of "otsec test
 // configuration baseline"; no baseline has it.
 const testBaselineDigest = "sha256:ee1d5cd04fcee7fd33c68453b7fb6a9ec1f7124bf9e88b03f1a4bb6640310e89"
+
+// testDraftDigest is "sha256:" and the SHA-256 of "otsec test network
+// baseline draft"; no draft has it. testSensorID is a test sensor's ID.
+const (
+	testDraftDigest = "sha256:1558f5823cffdd0b9629fa56878467c6896d4e19f93fd15fb6368e7edc40a3c9"
+	testSensorID    = "5a1f0c3e-2b4d-4e6f-8a9b-0c1d2e3f4a5b"
+)
 
 // testManifestSHA256 is the SHA-256 of "otsec test quarantine manifest";
 // no manifest has it.

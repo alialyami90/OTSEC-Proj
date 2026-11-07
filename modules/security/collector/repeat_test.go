@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -178,7 +179,7 @@ func TestAdminRepeat(t *testing.T) {
 				if err != nil {
 					t.Fatalf("repeat %d: %v", i, err)
 				}
-				if *got != *acc {
+				if !reflect.DeepEqual(got, acc) {
 					t.Fatalf("repeat %d names %+v, first %+v", i, got, acc)
 				}
 			}
