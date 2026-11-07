@@ -1154,12 +1154,11 @@ D1, on #539 to #544, with each owner's and reviewer's word through the coordinat
   - **§1.5's time rule** lives in the baseline note §5. D4 widens it for midstream TCP and held-open UDP flows, and D3, D5 and D6 review that change.
 - **Audit 0.12 goes in readers first** (#534 §2.5). D3's code reads 0.12 in full, while writers still stamp 0.11, and a test pins it. D5's B5 deliverable 7 bumps the stamp, in the same change that wires `policy.apply` and `verified.keys_digest`. `authz` 0.10 bumps at once, because the collector sets `keys` and `keys_digest` in the same change.
 - **Per-class capture charging covers only the network classes** (D5's #544, D6's R1). A capture whose first class is `network-observation` or `network-alert` is charged once to each class that cites it. Every other database keeps 0.8's accounting. A 0.8 node never opens the network database, so a rollback and re-upgrade can't make any class read fuller or emptier than it is. The Format stays `otsec.platform-store/2`. A `class_bytes` update that would go below zero fails its transaction.
-- **Four C13 gaps found in coding (D4), fixed within `otsec.netobs/0.1`,** since nothing has been written under it:
+- **C13 gaps found in coding (D4) and in its review (D2, D3), fixed within `otsec.netobs/0.1`,** since nothing has been written under it:
   - `function.sub`, on Modbus 8 and 43 only, is part of the first-sight key and the baseline's `functions` entry;
   - `MaxRedactions` is 16 per frame, and any excess is covered as one `slot-not-placed` over that side's payload, which fails closed;
   - `stored_capture` sits in `node` only;
-  - `node.function_table` is present exactly when `function_class` is.
-
+  - `node.function_table` is present exactly when `function_class` is;
   - a Modbus 8 or 43 request too short to carry its sub-function has no `sub`, and is classed by the most restrictive row for its code: `control` for 8, `write` for 43. Function 43 with MEI type 13 is `write`, `unknown`;
   - the one `slot-not-placed` replaces that frame's per-slot `credential` entries, and the node refuses a cited frame listing more than `MaxRedactions` as `sensor-record-refused`;
   - the `contracts/netobs` decoder refuses duplicate keys, and a sensor body that carries `node`.
