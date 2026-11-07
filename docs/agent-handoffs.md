@@ -1160,12 +1160,12 @@ The provisional direction is Zeek as a separate supervised process (ADR-0002 ite
 **Protocols for the first sensor.** These come from the owner's answer about their sites, which was asked for on 2026-11-07. Until the answer arrives, the first set is the following:
 
 - DNP3 and Modbus/TCP, which Zeek decodes.
-- R6.7's insecure list from V-M6: Telnet, FTP, plain HTTP, SNMPv1 and v2c, Modbus/TCP, and DNP3 without Secure Authentication.
+- R6.7's insecure list from V-M6: Telnet, FTP, plain HTTP, SNMPv1 and v2c, unauthenticated Modbus/TCP, and DNP3 without Secure Authentication.
 - SNMPv3 and the SEL Telnet sessions that the platform itself runs, so that the platform's own traffic is a known flow and not an alert (ADR-0007 item 7).
 
 IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms they are in use. Each of them needs its own decoder, and GOOSE needs every precondition R-A4-4 lists.
 
-**What item 4 must show at its gate**, to be fixed in the implementation briefs once the contracts are approved:
+**What item 4 must show at its gate**, to be fixed in the implementation briefs once the contracts are approved. V-M6 and R6.1 to R6.6 apply as `docs/verification.md` states them, and the bullets below are only a summary (D6):
 
 - **V-M6** over GT-PCAP on the real binaries, `simulated`. The sensor sends zero packets. Every labelled service is recorded against its asset with the packets that show it. Every protocol on the insecure list is flagged.
 - **R6.1 to R6.5** as `docs/verification.md` sets them:
@@ -1175,6 +1175,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   - detection rate, false-positive rate and latency for each rule;
   - every alert linked to packets that can be retrieved.
 - **R6.6:** the PRP, encryption and unsupported-protocol limits, listed per deployment.
+- **C-11 in CI** runs for the full GT-PCAP replay plus the sensor's start and stop, with the interface up throughout. The 24 h run stays with H-06 on hardware (D6).
 - These criteria are fixed (#144), and a brief may not lower them.
 
 #### P4-4-A4 (D4): the sensor, its first protocols, and its contracts
@@ -1187,12 +1188,13 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
      - (c) the project's own Go decoders in a separate process on the node.
 
      For each option it records the following, with sources and a re-check of upstream (ICSNPP and the Zeek packages change):
-     - whether it runs on ADR-0007's Windows floor, shown by a run on `windows-latest` in a dispatched workflow, or else marked `unknown`;
+     - whether it runs on Windows, shown by a run on `windows-latest` in a dispatched workflow, or else marked `unknown`. Offline decoding of a capture file (no driver) is recorded apart from live capture. A `windows-latest` result is labelled Windows Server, not ADR-0007's 10/11 LTSC floor (D5);
      - the capture driver and its licence for a product that ships it;
      - which of the protocols above it decodes, shown on the public captures;
      - midstream handling;
      - PRP duplicate handling;
      - the process and privilege it needs;
+     - whether it accepts a live interface fed by a timed replay, which R6.4's latency and the C-11 test both need (D6);
      - the channel to the node and how it is authenticated. For (a) and (c) this is a local channel with an OS ACL bound to the sensor's account. For (b) it is a network link that needs enrollment and a revocable credential like a node's (SC-11), and the comparison counts the new device's own management interface and update path as attack surface (D3);
      - what C-11 relies on: a TAP is receive-only by construction, while a SPAN port with a host NIC relies on software settings (D3).
 
@@ -1248,11 +1250,14 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
 #### P4-4-A5 (D5): the node's side
 
 - **Objective.** A design note, `docs/phase4/D5-sensor-node.md`, covering the following:
-  - how the node supervises the sensor process (start, restart and health) on Windows and on Linux;
+  - how the sensor process is supervised (start, restart and health) on Windows and on Linux. The note compares its own SCM service, like the collector, with a child of the node (ADR-0002 item 5: no orchestrator). For option (b) the node supervises nothing, so the note covers the network link's health and its inbound boundary instead (D5);
   - how C13 records reach the store, and in which stream and quota (C5), so that a flood of observations cannot starve SER or Syslog (the lesson from HR-11);
+  - where the cited capture bytes live, with their quota and retention, so that R6.5's packets can be retrieved. This sits next to D3's protection row (D5);
+  - C-11 on Windows: unbinding the IP stack from the monitoring NIC, plus an HR-9-style firewall rule. This is installer work under `deploy/` (D5);
   - enabling and disabling the sensor on its own: with it disabled, nothing it owns runs and nothing else changes;
   - what status shows.
-- **May change:** `docs/phase4/D5-*.md`.
+- **May change:** `docs/phase4/D5-*.md`, and `contracts/store` (a C5 draft of the new stream class, in a PR for review, approved together with C13).
+- **Note:** the sensor's supervision tests go in their own package, because `platform/node`'s Windows test step already runs 530 to 648 s against a 720 s budget (D5).
 - **Reviewers:** D3 and D6.
 
 #### P4-4-A6 (D6): GT-PCAP and the item 4 checks
@@ -1263,7 +1268,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
      - the public captures already listed;
      - captures recorded in CI from the project's own simulators (the SEL-751 Telnet profile, GT-MIB's SNMPv3 agents, and a DNP3 and a Modbus/TCP source D6 picks or writes).
 
-     Labels come from tshark or Zeek, never from the product. The plan includes held-out benign series for R6.2, and labelled malicious samples with benign near-misses for R6.3. A PRP duplicate case is built from a capture by duplicating frames with their RCT trailer.
+     Labels come from a decoder the product does not use: tshark if ADR-0009 picks Zeek, and Zeek or tshark otherwise. They never come from the product (D6). The plan includes held-out benign series for R6.2, and labelled malicious samples with benign near-misses for R6.3. A PRP duplicate case is built from a capture by sending each frame twice, each copy with an IEC 62439-3 Redundancy Control Trailer carrying the same sequence number, one with LAN ID A and one with LAN ID B. That is what a sensor on both LANs sees.
   2. **Testability review** of ADR-0009, C13 and the baseline note against V-M6 and R6.1 to R6.5.
   3. **The C-11 test design:** zero frames from the monitoring interface, for whichever option ADR-0009 picks.
 - **May change:** `tests/integration/`, `tests/fixtures/network/`, and `docs/verification.md` (plans and criteria wording only, never a threshold that has run).
@@ -1272,5 +1277,5 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
 ### Order
 
 1. D4 drafts ADR-0009 first, with D5 and D3. D2's note and D6's GT-PCAP plan run at the same time.
-2. D4 drafts C13 and the baseline note once ADR-0009 names the option. Every consumer reviews them, and D1 approves them together.
+2. D4 drafts C13 and the baseline note once ADR-0009 names the option, and D5 drafts the C5 stream class beside them. Every consumer reviews them, and D1 approves them together.
 3. The implementation briefs follow approval. They include the owner's protocols, or record that the owner hasn't answered and the first set above stands.
