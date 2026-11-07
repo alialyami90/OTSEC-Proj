@@ -171,9 +171,9 @@ These are committed before the product's detection code runs. A rule with no pai
   - SER and Syslog lose no record, and keep the throughput they reach without the flood;
   - every labelled observation from the resolved asset is stored, none dropped (D6 on #532);
   - every dropped record is counted once, under exactly one of the three drop counts, and the test reads them apart: the unresolved budget, the class full (`CodeQuotaReached`), and over the record cap (`CodeRecordTooLarge`). No record is counted under two (D5 on #542);
-  - every alerting hit is accounted for. C13's per-window bound of 2 × rules × (assets + 1) alert records drops nothing: a key's repeat hits coalesce into its summary (C13 §7.3). So for each key and window, the first alert and the summary's `hits` together account for every hit the labelled cases and the flood should raise, with none missing and none counted twice (D4 on #542).
+  - every alerting hit is accounted for. C13's per-window bound of 2 × rules × (assets + 1) alert records drops nothing: a key's repeat hits coalesce into its summary (C13 §7.3). So for each key and window, the summary's `hits` equal the hits the labelled cases and the flood should raise, or the expected hits are 1 where the key has no summary. A summary's `hits` include the first alert's, and its `related` lists the first alert's observation (D4 on #542).
 
-  The unresolved budget is a bucket that starts empty and holds at most B = Q / 4 bytes, where Q is the observation quota, and refills at B / H bytes per second on the monotonic clock, where H is the planned outage hours in seconds (`D5-c5-0.9.md` §4). So the report states Q, H and the time from the node's start to the flood, and the test sets H small enough that the bucket refills within the run (D5 on #542).
+  The unresolved budget is a bucket that starts empty and holds at most B = Q / 4 bytes, where Q is the observation quota, and refills at B / H bytes per second on the monotonic clock, where H is the planned outage, in seconds (`D5-c5-0.9.md` §4). So the report states Q, H and the time from the node's start to the flood, and the test sets H small enough that the bucket refills within the run (D5 on #542).
 
   If any of these fails, `network-unresolved` becomes a C5 class before the item 4 gate (D1).
 
