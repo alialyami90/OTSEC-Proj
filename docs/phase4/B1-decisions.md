@@ -1091,3 +1091,13 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
   The brief proceeds without waiting for the answers. The first protocol set is DNP3, Modbus/TCP and R6.7's insecure list, and IEC 61850 and IEC 104 are added when the owner confirms them.
 - **The brief.** D1 issues item 4's Stage A in `docs/agent-handoffs.md`. Where the sensor runs on the Windows site node (ADR-0007) is settled first, in a draft ADR-0009, before any contract depends on it. C13 `otsec.netobs/0.1` is drafted after that. D6 builds GT-PCAP from public captures and from the project's own simulators. No real network is captured.
 - **Carried.** Two questions still go to the owner: whether the reserve should fail on volumes that can't hold real space, and the Windows folder flush (D4-65). The rare slow starts are also carried, and can be briefed beside item 4 if the owner wants.
+
+## D4-67: cleartext secrets in stored captures are redacted by position (D1, 2026-11-07, HR-19)
+
+D3 asked, in HR-19 on #523, whether HR-3's transcript rule applies to stored captures. D1 rules yes, with three refinements:
+
+- **By position, never by the secret.** Redaction uses the same positional rule as HR-3. The decoder redacts the client-sent bytes that fill a documented credential slot: a Telnet password after the device's password prompt up to the end of the line, FTP `PASS`, and an SNMPv1 or v2c community. It never finds them by matching a known secret. The sensor never receives or holds any of the platform's credentials, because only the collector resolves them (ADR-0002).
+- **For every session, not only the platform's own.** A third party's cleartext password is as sensitive as the node's, and its value adds nothing as evidence. What matters as evidence is that a secret was sent in clear (the R6.7 finding), the user name, and how many attempts were made, and all of those are kept.
+- **The citation says so.** A redacted frame is marked as redacted in its C13 citation, with the position and length of each marker, and the marker is never derived from the secret (HR-3's condition). The cited SHA-256 is over the stored (redacted) bytes. A stored capture therefore differs from the wire only inside those markers.
+
+D4 carries this into C13 and the decoder design, D6 into GT-PCAP's key search (AP-33's test), and D3 closes HR-19 citing this decision.
