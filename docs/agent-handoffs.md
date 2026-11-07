@@ -1192,17 +1192,21 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
      - which of the protocols above it decodes, shown on the public captures;
      - midstream handling;
      - PRP duplicate handling;
-     - the process and privilege it needs.
+     - the process and privilege it needs;
+     - the channel to the node and how it is authenticated. For (a) and (c) this is a local channel with an OS ACL bound to the sensor's account. For (b) it is a network link that needs enrollment and a revocable credential like a node's (SC-11), and the comparison counts the new device's own management interface and update path as attack surface (D3);
+     - what C-11 relies on: a TAP is receive-only by construction, while a SPAN port with a host NIC relies on software settings (D3).
 
      The ADR names the supervised process and the boundary it enforces (ADR-0002 item 2).
   2. **Contract draft C13 `otsec.netobs/0.1`.**
      - **Observations:** a flow or service seen. Each holds the addresses, ports, protocol and the version where it shows in clear, and the asset it resolves to, or `asset-unresolved`.
      - **Packet citation:** each observation cites its packets as the capture's ID and the frame numbers, plus the SHA-256 of the cited bytes.
+     - **Device text is hostile input.** A version or banner read in clear is bounded printable ASCII, kept quoted and never interpreted, as in C12 0.2. It never reaches a Syslog forward or a status line raw (D3).
      - **Coverage statement:** the sensor states which protocols it decodes, which LANs and VLANs it sees, and whether it uses SPAN or a TAP. The statement is attached to every observation and alert (A4 §4, R6.1).
      - **Alerts:** the alert form reuses C10's departure alarm form where it fits. D4 says where it doesn't fit and why. It has no ML field.
   3. **A design note, `docs/phase4/D4-network-baseline.md`,** with the following content:
      - **The baseline:** who talks to whom, and which function codes are used per pair, against a baseline of authorized masters (A4 §3: "write = bad" alerts on routine time sync).
      - **The insecure-list rule.**
+     - **The platform's own traffic.** A known flow is tied to the node's own session record: the asset, the time window of a scheduled or granted session, and the destination. Traffic outside that record is alerted, even when it comes from the node's address, so that spoofing the node's address does not hide a session (D3).
      - **How R6.7's observations reach C12's matcher** without a C12 change (D4-53).
 - **May change:** `contracts/` (drafts only, in a PR for review), `modules/detection/`, `modules/telemetry/experiments/`, `docs/decisions/` (the ADR draft), and `docs/phase4/D4-*.md`.
 - **Exclusions.**
@@ -1231,7 +1235,10 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   - **Hostile input:** packet parsing is a hostile-input surface, so a decoder crash or exploit must not reach the node's store or keys.
   - **The capture driver:** its privilege on Windows.
   - **The monitoring interface:** it transmits nothing, which is C-11, and the ADR states how that is enforced and how it is tested.
-  - **Stored captures:** cited packets may hold credentials in clear (Telnet and FTP passwords), so the rows say how stored packets are protected and how long they are kept.
+  - **Stored captures:** cited packets may hold credentials in clear, including the platform's own SEL Telnet logins and SNMPv1 or v2c community strings. The rows say three things:
+    - cited bytes stay at the site and are never forwarded upstream, only their hash and frame numbers;
+    - how long they are kept;
+    - who may read them (the security role, not monitoring).
   - **Spoofed alerts:** the sensor as a path to forge alerts or observations into the node.
 
   D3 also reviews ADR-0009 and C13 for the boundary.
