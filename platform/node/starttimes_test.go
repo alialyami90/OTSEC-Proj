@@ -85,9 +85,10 @@ func TestStartLine(t *testing.T) {
 	}
 }
 
-// A restart releases each database's recovery reserve and creates it again
-// (F-013), and store-reserve is exactly the sum of ReserveParts, each of
-// which the restart times (P4-H4).
+// A restart times each of ReserveParts, store-reserve is exactly their sum,
+// and the reserve's flush takes time (P4-H4). The release and the
+// allocation are not checked against zero: on windows-latest both can
+// measure 0 s (#520, D1).
 func TestReserveParts(t *testing.T) {
 	c, dir := runtimeConfig(t)
 	r, _, _ := start(t, c, dir)
@@ -102,7 +103,7 @@ func TestReserveParts(t *testing.T) {
 		}
 		sum += d
 	}
-	if r.starts.d["reserve-release"] <= 0 || r.starts.d["reserve-write"] <= 0 || r.starts.d["reserve-sync"] <= 0 || sum != r.starts.d["store-reserve"] {
+	if r.starts.d["reserve-sync"] <= 0 || sum != r.starts.d["store-reserve"] {
 		t.Fatalf("store-reserve %v, its parts %v", r.starts.d["store-reserve"], r.starts.d)
 	}
 }
