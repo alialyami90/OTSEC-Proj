@@ -182,6 +182,7 @@ type rx struct {
 
 type mgr struct {
 	t      *testing.T
+	a      *Agent
 	c      *net.UDPConn
 	to     *net.UDPAddr
 	spec   Spec
@@ -199,15 +200,22 @@ func newMgr(t *testing.T, a *Agent, spec Spec) *mgr {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	return &mgr{t: t, c: c, to: a.Addr(), spec: spec, msgID: 100}
+	return &mgr{t: t, a: a, c: c, to: a.Addr(), spec: spec, msgID: 100}
 }
 
-// exchange sends o and collects every datagram that arrives within wait.
+// exchange sends o, waits until the agent has handled it, then collects
+// every datagram that arrives within wait. Waiting for the agent first keeps
+// a slow answer from landing in a later step's window (H11/outer on a loaded
+// Windows runner: five late Responses counted as the retransmission's).
 func (c *mgr) exchange(o Out, wait time.Duration) []rx {
 	c.msgID++
 	o.MsgID = c.msgID
+	before := c.a.Handled()
 	if _, err := c.c.WriteToUDP(o.Encode(c.u), c.to); err != nil {
 		c.t.Fatal(err)
+	}
+	if !harnessWait(func() bool { return c.a.Handled() > before }, handleLimit) {
+		c.t.Fatalf("msgID %d: the agent did not handle it within %v", o.MsgID, handleLimit)
 	}
 	var out []rx
 	buf := make([]byte, 65536)
@@ -250,6 +258,21 @@ func (c *mgr) decode(b []byte, from *net.UDPAddr) rx {
 }
 
 const wait = 150 * time.Millisecond
+
+// handleLimit bounds the wait for the agent to handle one datagram. It only
+// ends a stuck run: a datagram the agent never handles fails the test.
+const handleLimit = 30 * time.Second
+
+func harnessWait(ok func() bool, limit time.Duration) bool {
+	for end := time.Now().Add(limit); ; time.Sleep(time.Millisecond) {
+		if ok() {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+	}
+}
 
 // discover sends RFC 3414 section 4's discovery message and adopts the
 // engine ID it learns, localizing the user's keys to it.
