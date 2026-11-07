@@ -17,7 +17,8 @@ var startLineRE = regexp.MustCompile(`^otsec node start: scope=(runtime|node) to
 	` config=(\d+)ms scm=(\d+)ms store-lock=(\d+)ms store-open=(\d+)ms store-reserve=(\d+)ms store-startup=(\d+)ms store-adopt=(\d+)ms` +
 	` register=(\d+)ms record-start=(\d+)ms holds=(\d+)ms status=(\d+)ms forwarding=(\d+)ms listening=(\d+)ms` +
 	` node-keys=(\d+)ms scheduler=(\d+)ms listen=(\d+)ms first-check=(\d+)ms other=(\d+)ms` +
-	` reserve-release=(\d+)ms reserve-write=(\d+)ms reserve-sync=(\d+)ms reserve-dirsync=(\d+)ms$`)
+	` reserve-release=(\d+)ms reserve-create=(\d+)ms reserve-write=(\d+)ms reserve-sync=(\d+)ms` +
+	` reserve-dirsync=(\d+)ms reserve-close=(\d+)ms$`)
 
 // checkStartLine checks the line's form, that its phases and other sum to
 // its total, and that ReserveParts sum to store-reserve, each within a
@@ -96,12 +97,12 @@ func TestReserveParts(t *testing.T) {
 	var sum time.Duration
 	for _, p := range ReserveParts {
 		d, ok := r.starts.d[p]
-		if !ok && p != "reserve-dirsync" {
+		if !ok {
 			t.Errorf("the restart did not time %s", p)
 		}
 		sum += d
 	}
-	if r.starts.d["reserve-release"] <= 0 || r.starts.d["reserve-write"] <= 0 || sum != r.starts.d["store-reserve"] {
+	if r.starts.d["reserve-release"] <= 0 || r.starts.d["reserve-write"] <= 0 || r.starts.d["reserve-sync"] <= 0 || sum != r.starts.d["store-reserve"] {
 		t.Fatalf("store-reserve %v, its parts %v", r.starts.d["store-reserve"], r.starts.d)
 	}
 }

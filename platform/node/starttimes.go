@@ -42,9 +42,11 @@ var StartPhases = []string{
 // store-reserve measures the same thing before and after the split.
 var ReserveParts = []string{
 	"reserve-release", // ReleaseReserve
-	"reserve-write",   // CreateReserve: creating the file and writing its zeros
-	"reserve-sync",    // CreateReserve: the file flush, the close and the rest
+	"reserve-create",  // CreateReserve: creating the file
+	"reserve-write",   // CreateReserve: writing its zeros
+	"reserve-sync",    // CreateReserve: the file flush
 	"reserve-dirsync", // CreateReserve: the folder flush; nothing on Windows
+	"reserve-close",   // CreateReserve: the rest, chiefly the file's close
 }
 
 // startTimes accumulates the time of each start phase on the monotonic
@@ -134,10 +136,17 @@ func (e *timedEnv) CreateReserve(ctx context.Context, r c5.Reserve, bytes int64)
 	from, before := time.Now(), e.env.ReserveTimes()
 	defer func() {
 		took, after := time.Since(from), e.env.ReserveTimes()
-		write, dir := after.Write-before.Write, after.DirSync-before.DirSync
-		e.t.d["reserve-write"] += write
-		e.t.d["reserve-dirsync"] += dir
-		e.t.d["reserve-sync"] += max(took-write-dir, 0)
+		rest := took
+		for p, d := range map[string]time.Duration{
+			"reserve-create":  after.Create - before.Create,
+			"reserve-write":   after.Write - before.Write,
+			"reserve-sync":    after.Sync - before.Sync,
+			"reserve-dirsync": after.DirSync - before.DirSync,
+		} {
+			e.t.d[p] += d
+			rest -= d
+		}
+		e.t.d["reserve-close"] += max(rest, 0)
 		e.t.d["store-reserve"] += took
 		e.spent += took
 	}()

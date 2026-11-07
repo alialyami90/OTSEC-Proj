@@ -121,11 +121,13 @@ type Env struct {
 	times ReserveTimes
 }
 
-// ReserveTimes is the time CreateReserve has spent in its zero writes and
-// in its folder flush, summed over its calls, on the monotonic clock. The
-// node's start timing line splits store-reserve with it (P4-H4).
+// ReserveTimes is the time CreateReserve has spent in each of its steps,
+// summed over its calls, on the monotonic clock. The node's start timing
+// line splits store-reserve with it (P4-H4).
 type ReserveTimes struct {
-	Write   time.Duration // creating the file and writing its zeros
+	Create  time.Duration // creating the file
+	Write   time.Duration // writing its zeros
+	Sync    time.Duration // flushing the file
 	DirSync time.Duration // flushing the folder; nothing on Windows
 }
 
@@ -258,6 +260,8 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 	if err != nil {
 		return fmt.Errorf("create %s reserve: %w", r, err)
 	}
+	e.took(&e.times.Create, from)
+	from = time.Now()
 	defer func() {
 		if cerr := f.Close(); err == nil && cerr != nil {
 			err = cerr
@@ -278,9 +282,11 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 		left -= k
 	}
 	e.took(&e.times.Write, from)
+	from = time.Now()
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("flush %s reserve: %w", r, err)
 	}
+	e.took(&e.times.Sync, from)
 	defer e.took(&e.times.DirSync, time.Now())
 	return syncDir(e.opt.Dir)
 }
