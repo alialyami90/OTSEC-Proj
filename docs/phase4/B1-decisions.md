@@ -1038,3 +1038,24 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
 
   D1 told the owner that C12 0.2 follows the two fixes unless they say otherwise. When all three are merged, D1 reports to the owner and asks for the next item. The owner's other open questions (HR-18, severity scores, HR-17, which SEL switches, model naming) stay open.
 - **The branch cleanup (16:48Z).** The owner chose "Delete the 150 merged ones". D1 re-checked that each of the 150 branches is still at the tip recorded on 2026-10-31 and is the head of no open PR. `claude/project-thread-8k5430` has moved and stays. This session's GitHub access refuses a branch delete, as it refuses a force push. So D1 wrote `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1` for the owner to run from a clone. Each delete is leased to the recorded SHA. The four unmerged mutant branches are kept.
+
+## D4-63: the hardening briefs are done, and two rulings on P4-H2 (D1, 2026-11-07)
+
+- **All three briefs are merged.**
+  - **P4-H1:** D3's #508, D5's #514, and D6's acceptance tests in #516 (`e205da6`).
+  - **P4-H2:** D5's #515 (`ad42d4a`), with the note `docs/phase4/D5-windows-start.md`.
+  - **P4-H3:** #507, #509, #510, #511, #512 and #513.
+- **P4-H2's result** (`CI-Windows`, from 550 starts at #515's head `8a6e5600`).
+  - In slow starts, the dominant phase is `store-reserve`, followed by `store-open`. `store-reserve` is 49% of all start time in the Windows `go` job, and the largest phase in 404 of 541 starts.
+  - The 9 service starts took 0.7 to 1.2 s.
+  - #428's F-013 lead (recreating the reserve with a flush at every start) is consistent with these numbers but not shown by them.
+  - D6 recomputed every figure from the raw log.
+- **Ruling 1: two starts over 6 s are accepted, not three.** The brief asks for three "if any occur". One run gave two, and the dominant phase is already clear, so more Windows time would not change what a fix targets.
+- **Ruling 2: the go job's coverage is accepted as limited to starts made through the tests' `start()` helper.** Direct `Start`, `Run` and `RunFrom` calls in tests leave no line there. The production path, `Run` and `RunFrom`, always logs the line, and the service job shows one line per SCM start. The note states the limit.
+- **For any fix brief** (D3 on #515):
+  - The fix keeps F-013's recovery reserve, flushed before it counts, when the disk is full.
+  - The fix keeps AP-13's 60 s first wait.
+  - Its proving test is the platform budget numbers before and after.
+
+  The fix is not briefed yet. It goes to the owner beside the next item (D4-34).
+- **A timing-sensitive test, and its fix at the cause (open).** `TestHostileCorpus/H11/outer` failed once on Windows, on #515's docs-only head, because GT-MIB's test manager read a fixed window before the agent had finished answering. D6's #517, open when this was written, waits for the agent's own handled count, and loosens no count. D2 passed it. It merges on green CI.
