@@ -1116,11 +1116,12 @@ P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touc
 
 - **Objective.** P4-H2's numbers show where slow node starts spend their time (`docs/phase4/D5-windows-start.md`). In the Windows `go` job, `store-reserve` was 49% of all start time and the largest phase in 404 of 541 starts, with `store-open` second. P4-H4 makes `store-reserve` faster without weakening anything it protects. Real service starts already took 0.7 to 1.2 s, so the goal is the loaded case, not a new feature.
 - **What the step does today.** At every start, C5's startup releases the recovery reserve before the store is first opened (F-013). After recovery, `platform/store.Env.CreateReserve` re-creates the reserve by writing `RecoveryReserveBytes` of zeros in 64 KiB writes, then flushes the file and its folder. This happens for each of the node's databases.
-- **Step 1, measure before changing (desk and CI-Windows).** Split `store-reserve` into the release, the zero writes, the file flush and the folder flush, using the P4-H2 line or a test-only timer. Report which part dominates on `windows-latest`, with the run link. The fix targets that part, not a guess.
+- **Step 1, measure before changing (desk and CI-Windows).** Split `store-reserve` into the release, the zero writes, the file flush and the folder flush, using the P4-H2 line or a test-only timer. A split in the P4-H2 line keeps its rule: phase names and milliseconds only, with no path, key or device text. Report which part dominates on `windows-latest`, with the run link. The fix targets that part, not a guess.
 - **Step 2, the fix.** D5 picks the smallest change that removes the dominant part. Candidates to weigh with numbers:
   - larger writes;
-  - one preallocation call in place of the writes, if the space is really allocated (no sparse file);
-  - keeping a valid reserve across a clean stop, so that a clean start does not delete and rewrite it.
+  - one preallocation call in place of the writes, if the space is really allocated (no sparse file), still followed by the file flush and the folder flush.
+
+  Skipping the release at a clean start is out of scope, because it breaks must-keep 1 (D3 on #519).
 
   Any change to C5's startup order, or to what the startup report or its alarms say, is a C5 minor bump. It needs a proposal reviewed by D6 and D3, and D1's approval, before any code.
 - **Must keep** (D3 on #515, D4-63):
@@ -1129,7 +1130,7 @@ P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touc
   3. AP-13's 60 s first wait before the first collector exchange.
 - **Deliverables.**
   1. The step 1 split, in `docs/phase4/D5-windows-start.md` as a new section.
-  2. The change, with tests. Every existing V-S9 and storage-exhaustion test passes unchanged, and a test pins that the reserve holds its full size on disk.
+  2. The change, with tests. Every existing V-S9 and storage-exhaustion test passes unchanged, and a test pins that the reserve holds its full size on disk. The test reads the space allocated, not the file's length: `Stat_t.Blocks` times 512 on Linux, and the allocation size from `GetFileInformationByHandleEx` on Windows. `Stat().Size()` passes for a sparse file and does not count.
   3. Before and after numbers from the platform budget step and the P4-H2 line on `windows-latest`, from runs on the PR's own code. They go in the same note, with run links.
 - **May change:** `platform/store/`, `platform/node/`, `docs/phase4/D5-*.md`. A change in `contracts/store/` only through the C5 proposal above.
 - **Acceptance.**
