@@ -54,7 +54,7 @@ The public captures carry no asset table, so their addresses are `asset-unresolv
 
 ### B. Captures recorded from this project's simulators
 
-These are recorded once, on Linux in CI, by a dispatch-only D6 workflow (`.github/workflows/a6-gt-pcap-record.yml`, to be written). Each simulator pair runs in a network namespace with fixed addresses from 192.0.2.0/24 (TEST-NET-1), and `tcpdump` writes the capture. The captures and their labels are then reviewed and committed. Recording again is a reviewed change, never part of a product test run, so GT-PCAP stays fixed while the product changes.
+These are recorded once, on Linux in CI, by a recording step that runs only when dispatched by hand. GT-PCAP's own workflow, `.github/workflows/a6-gt-pcap.yml`, runs on dispatch and on every pull request that touches GT-PCAP or the workflow, so no GT-PCAP change merges without tshark's verdict (D1 on #529). Each simulator pair runs in a network namespace with fixed addresses from 192.0.2.0/24 (TEST-NET-1), and `tcpdump` writes the capture. The captures and their labels are then reviewed and committed. Recording again is a reviewed change, never part of a product test run, so GT-PCAP stays fixed while the product changes.
 
 | Source | What it produces | Label kinds |
 | --- | --- | --- |
@@ -68,6 +68,9 @@ These are recorded once, on Linux in CI, by a dispatch-only D6 workflow (`.githu
 | A Modbus/TCP pair written by D6 in stdlib Python, port 502: function codes 3, 6 and 16 | Modbus/TCP reads and writes | `service`, `flow`, `insecure` (unauthenticated Modbus/TCP) |
 | A TLS session on port 802 (Python `ssl`, test certificate). The port comes from the Modbus Organization's Modbus/TCP Security specification, which is not in the project files, so the row says it is from the standard (D2 on #527) | Modbus/TCP Security as a passive sensor sees it | `encrypted` and not `insecure`: the near-miss for the Modbus/TCP row (D6 on #522) |
 | Python `http.server` and `ftplib` against a minimal stdlib FTP responder | Plain HTTP with a `Server` banner, and an FTP login | `service` with its banner as `version`, `insecure` |
+| The same HTTP server with a login taken two ways: an `Authorization: Basic` header, and a form POST. Which one the SEL-751 and SEL-787-4 web servers use is `unknown` (S22, S34 p. 3.2; D2 on #528). | A web login in clear | `insecure`. The Basic value is a `secret-slot`. The form POST has no fixed slot, so the product must fail closed on its body (D4-67). |
+| A port 80 server that only redirects to HTTPS, as the RTAC, SEL-2488, SEL-2730M and SEL-2731 offer | A redirect-only plain-HTTP service | `insecure`, with the detail "redirect to HTTPS only, no credential seen". Plain HTTP stays on the list whatever it serves, because the redirect is sent in clear and can be stripped (D1's ruling, 2026-11-07). A product that flags it is right, not a false positive. |
+| GT-MIB with one user at `noAuthNoPriv` | SNMPv3 with its scoped PDU in clear, the default of a new SEL-2488 v3 profile (S26 Table 19.1, D2 on #528) | Not `encrypted`: the PDU is labelled as read. Not on the insecure list (the list is the owner's), and recorded with its flags. |
 | A TLS session on 443, one with TLS 1.2 and one with TLS 1.3 | HTTPS | `encrypted`, with the TLS version and SNI from the handshake only. For TLS 1.3 the version is the one ServerHello's `supported_versions` names, not the record or legacy version field, which says 1.2 (D2 on #527) |
 
 The DNP3 and Modbus sources are written by D6, and not taken from a library the product might link, so a shared bug can't make product and truth agree. Their correctness is whatever tshark's dissector shows when it decodes them, and that output is the label.
@@ -87,6 +90,8 @@ These are made from A and B by a stdlib Python pcap rewriter in `tests/integrati
 | A legitimate long banner | A printable Telnet banner of exactly 254 characters, the longest `TCBAN`, `FTPCBAN` or `HTTPBAN` a relay allows (S22 Table 4.104, D2 on #527) | The bound keeps the whole banner, so a normal relay's `version` row passes |
 | A blind sensor (AP-36's residual, #523) | The SEL-751 Telnet capture with the node's own scheduled session removed, while the sensor reports full coverage | The node knows its own session ran. When no observation of it arrives, it alarms instead of reading the window as quiet. |
 | Passive identity from the platform's own sessions | The SEL-751 Telnet capture, where the `ID` reply shows the FID in clear; and the GT-MIB SNMPv3 capture, where the engine ID shows in clear (D2 on #527) | Two rows. A passive FID or engine ID from the node's own session doesn't count twice in C12 (#522, D2): the asset's C12 corroboration is unchanged. |
+| Whose session an identity read came from (D2's note, #528) | Three legs on one relay: a third-party Telnet client's `ID` at Level 0 with the relay's FID; the platform's own probe-phase `ID`; and a third-party `ID` reply with a different FID, as a host spoofing the relay's address would send | The first counts as independent passive evidence. The second doesn't count. The third is recorded as observed, and never outranks the collector's read: the asset's identity and C12 findings are unchanged (AP-34, D4 on #528). |
+| The OT SDN discovery frame | The LLDP-structured OpenFlow announcement an uncommissioned SEL-2731 or SEL-2741 sends (S30 p. 5) | `seen-not-decoded` for the first sensor, or an identity row if C13 reads it |
 
 ### D. Credential slots and the key search (D4-67, AP-33)
 
@@ -182,7 +187,7 @@ When each draft arrives, D6 checks it against V-M6 and R6.1 to R6.5. The questio
    - the labeller, which runs pinned tshark and writes the TSVs;
    - the checker, with self-tests on hand-made records, as `test_vm7_checker.py` does for V-M7.
 
-   `.github/workflows/a6-gt-pcap-record.yml` is dispatch-only.
+   `.github/workflows/a6-gt-pcap.yml` runs on dispatch and on pull requests that touch GT-PCAP (D1 on #529). Recording new captures is a step that runs only on dispatch.
 3. `tests/fixtures/network/gt-pcap/`, holding the recorded captures, their labels, the asset table and `SOURCE.md`. These are committed after D4 and D2 review the labels.
 4. Section 4's pairs are finalized against D4's baseline note, and section 7's review is written against each draft as it arrives.
 

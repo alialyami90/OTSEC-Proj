@@ -8,7 +8,10 @@
 # files and contacts no device. It runs by hand and on pull requests that
 # change this file or GT-PCAP. The derived captures are not uploaded,
 # because the public sources state no redistribution terms; prp.py
-# rebuilds them byte for byte. Evidence class: simulated.
+# rebuilds them byte for byte. The labeller is pinned in prp_check.py, and a
+# different tshark fails the run (D4 on #529). D1 ruled on #529 that this
+# runs on its pull request paths, so no GT-PCAP change merges without
+# tshark's verdict. Evidence class: simulated.
 name: a6-gt-pcap
 on:
   workflow_dispatch:

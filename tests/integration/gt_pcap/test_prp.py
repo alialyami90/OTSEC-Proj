@@ -88,3 +88,18 @@ def test_truncated_and_non_ethernet_records_are_refused(tmp_path):
     q.write_bytes(struct.pack("<4sHHiIII", b"\xd4\xc3\xb2\xa1", 2, 4, 0, 0, 96, 105))
     with pytest.raises(ValueError, match="link type"):
         pcapfile.read(q)
+
+
+def test_short_frame_is_padded_before_the_rct_to_sixty_octets():
+    short = pcapfile.Frame(0, eth(MAC_1, b"\x45" + b"\x00" * 27))  # 42 octets, an ARP's size
+    ab, _ = prp.derive([short])
+    for c in ab:
+        assert len(c.data) == 60
+        assert c.data[:42] == short.data and c.data[42:54] == b"\x00" * 12
+        assert trailer(c.data)[2] == 60 - 14 and trailer(c.data)[3] == 0x88FB
+
+
+def test_802_1ad_frames_are_refused():
+    qinq = pcapfile.Frame(0, DST + MAC_1 + bytes.fromhex("88a80007810000080800") + b"\x45" + b"\x00" * 45)
+    with pytest.raises(ValueError, match="802.1ad"):
+        prp.derive([qinq])
