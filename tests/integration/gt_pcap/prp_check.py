@@ -29,6 +29,10 @@ import sys
 import pcapfile
 import prp
 
+# The pinned labeller (plan section 1, D4 on #529). A different tshark
+# fails the run, so a re-label can't change silently with an image update;
+# moving the pin is a reviewed change.
+TSHARK = "TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)."
 APP = ("dnp3", "mbtcp", "modbus", "telnet", "ftp", "http", "snmp", "tls")
 FIELDS = [
     "frame.number", "frame.len", "frame.protocols", "eth.src",
@@ -120,7 +124,10 @@ def label(stem, ab_path, a_path, opts, version, pick):
         "# frames: frame numbers in the -ab file, both PRP copies (LAN A copy n is 2n-1, LAN B is 2n); either copy satisfies the row.",
         "# frame_sha256: SHA-256 of each listed frame's link-layer bytes as captured (Ethernet frame with its RCT,"
         " no pcap record header, no timestamp), in the order of frames.",
-        "# packets, bytes: the flow's frame count and frame.len sum in the LAN A only file; the counts a sensor must record once.",
+        "# packets: the flow's frame count in the LAN A only file. This is the pass value: a sensor records each flow once,"
+        " with this many packets (ADR-0009's PRP row).",
+        "# bytes: the sum of frame.len over those frames, link-layer octets including the 6-octet RCT. A sensor that strips"
+        " the RCT counts 6 x packets fewer; bytes is compared only once C13 defines which octets a flow counts (D4 on #529).",
         f"# trailer fields read: {pick['seq']}, {pick['lan']}, {pick['size']}, {pick['suffix']}",
         "\t".join(["kind", "src", "dst", "sport", "dport", "l4", "protocol", "version", "direction",
                    "asset", "frames", "frame_sha256", "packets", "bytes"]),
@@ -140,6 +147,9 @@ def label(stem, ab_path, a_path, opts, version, pick):
 
 def main(src, outdir):
     version = tshark("-v").splitlines()[0]
+    if version != TSHARK:
+        print(f"prp_check: tshark is {version!r}; the pinned labeller is {TSHARK!r}")
+        return 1
     pick, names = prp_fields()
     print(f"prp_check: {version}")
     print(f"prp_check: PRP trailer fields {names}")

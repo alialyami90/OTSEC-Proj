@@ -8,15 +8,19 @@ From one Ethernet capture this writes two:
   copy SKEW_NS later.
 - `<stem>-prp-a.pcap`: only the LAN A copies, the single-LAN reference.
 
-The RCT is six octets appended after the frame as captured (any padding
-stays before it, as PRP-1 places the trailer last):
+The RCT is six octets appended after the frame. PRP-1 places the trailer
+last, after any padding, and counts it toward the 60-octet minimum frame
+(FCS excluded), so a frame under MIN_BEFORE_RCT octets is zero-padded to
+that length first (D2 on #529):
 
     SeqNr (16) | LanId (4) | LSDUsize (12) | PRP suffix 0x88FB (16)
 
 LanId is 0xA or 0xB. LSDUsize counts the octets after the EtherType (after
-the 802.1Q tag's inner EtherType when the frame is tagged), the RCT
-included. The sequence number counts per source MAC from SEQ_START and
-wraps at 16 bits.
+the 802.1Q tag's inner EtherType when the frame is tagged), padding and the
+RCT included. A frame with an 802.1ad (0x88A8) tag is refused: its header
+is 22 octets with the inner tag, which tshark's PRP size check does not
+take (D2 on #529). The sequence number counts per source MAC from
+SEQ_START and wraps at 16 bits.
 
 ADR-0009's pass condition for an engine run on these: each flow and
 service is recorded once, with counts equal to those from `-prp-a`.
@@ -34,7 +38,7 @@ SUFFIX = 0x88FB
 LAN_A, LAN_B = 0xA, 0xB
 SEQ_START = 0x1000
 SKEW_NS = 10_000
-_VLAN_TPIDS = (0x8100, 0x88A8)
+MIN_BEFORE_RCT = 54
 _MAX_LSDU = 0x0FFF
 
 
@@ -42,7 +46,10 @@ def header_len(data):
     """Octets up to and including the EtherType: 14, or 18 with one VLAN tag."""
     if len(data) < 14:
         raise ValueError(f"frame of {len(data)} octets has no Ethernet header")
-    if struct.unpack("!H", data[12:14])[0] in _VLAN_TPIDS:
+    tpid = struct.unpack("!H", data[12:14])[0]
+    if tpid == 0x88A8:
+        raise ValueError("802.1ad (0x88A8) frames are refused")
+    if tpid == 0x8100:
         if len(data) < 18:
             raise ValueError("tagged frame cut short")
         return 18
@@ -61,11 +68,12 @@ def derive(frames):
     """Return (ab, a): the doubled frames and the LAN A copies only."""
     seqs, ab, a = {}, [], []
     for fr in frames:
-        src = fr.data[6:12]
+        data = fr.data.ljust(MIN_BEFORE_RCT, b"\x00")
+        src = data[6:12]
         seq = seqs.get(src, SEQ_START)
         seqs[src] = (seq + 1) & 0xFFFF
-        copy_a = pcapfile.Frame(fr.ns, fr.data + rct(seq, LAN_A, fr.data))
-        copy_b = pcapfile.Frame(fr.ns + SKEW_NS, fr.data + rct(seq, LAN_B, fr.data))
+        copy_a = pcapfile.Frame(fr.ns, data + rct(seq, LAN_A, data))
+        copy_b = pcapfile.Frame(fr.ns + SKEW_NS, data + rct(seq, LAN_B, data))
         ab += [copy_a, copy_b]
         a.append(copy_a)
     return ab, a
