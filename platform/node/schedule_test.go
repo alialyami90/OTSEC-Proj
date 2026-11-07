@@ -648,6 +648,15 @@ func TestRunWaitsBeforeTheFirstRun(t *testing.T) {
 	}
 }
 
+// The first run of each entry waits a minute after start (AP-13), the
+// value TestRunWaitsBeforeTheFirstRun and TestPlanSpacesSessionsPerAsset
+// read through MinIntervalSeconds.
+func TestFirstRunWaitsAMinute(t *testing.T) {
+	if MinIntervalSeconds != 60 {
+		t.Fatalf("MinIntervalSeconds is %d, want 60", MinIntervalSeconds)
+	}
+}
+
 // Tick and the scheduler share the runtime (run under -race).
 func TestTickAlongsideRuns(t *testing.T) {
 	c, dir := schedConfig(t, nil)

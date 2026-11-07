@@ -43,7 +43,7 @@ var StartPhases = []string{
 var ReserveParts = []string{
 	"reserve-release", // ReleaseReserve
 	"reserve-create",  // CreateReserve: creating the file
-	"reserve-write",   // CreateReserve: writing its zeros
+	"reserve-write",   // CreateReserve: allocating its space
 	"reserve-sync",    // CreateReserve: the file flush
 	"reserve-dirsync", // CreateReserve: the folder flush; nothing on Windows
 	"reserve-close",   // CreateReserve: the rest, chiefly the file's close

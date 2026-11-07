@@ -126,7 +126,7 @@ type Env struct {
 // line splits store-reserve with it (P4-H4).
 type ReserveTimes struct {
 	Create  time.Duration // creating the file
-	Write   time.Duration // writing its zeros
+	Write   time.Duration // allocating its space, or writing its zeros
 	Sync    time.Duration // flushing the file
 	DirSync time.Duration // flushing the folder; nothing on Windows
 }
@@ -247,9 +247,11 @@ func AsDB(s c5.RecoveryStore) (*DB, bool) {
 	return db, ok
 }
 
-// CreateReserve writes a reserve of exactly n bytes of zeros and flushes
-// it. Zeros are written, not a sparse file, because a sparse file holds no
-// space. On any error it removes what it wrote.
+// CreateReserve allocates a reserve of exactly n bytes and flushes it, the
+// file and then its folder. The space is allocated by the file system in
+// one call where the OS has one (P4-H4), and otherwise by writing zeros;
+// never as a sparse file, which holds no space. On any error it removes
+// what it wrote.
 func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err error) {
 	if n <= 0 {
 		return fmt.Errorf("reserve size %d", n)
@@ -270,6 +272,12 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 			os.Remove(p)
 		}
 	}()
+	if err := reserveAllocate(f, n); err == nil {
+		e.took(&e.times.Write, from)
+		return e.flushReserve(f, r)
+	} else if !errors.Is(err, errors.ErrUnsupported) {
+		return fmt.Errorf("allocate %s reserve: %w", r, err)
+	}
 	buf := make([]byte, 64<<10)
 	for left := n; left > 0; {
 		if err := ctx.Err(); err != nil {
@@ -282,13 +290,30 @@ func (e *Env) CreateReserve(ctx context.Context, r c5.Reserve, n int64) (err err
 		left -= k
 	}
 	e.took(&e.times.Write, from)
-	from = time.Now()
-	if err := f.Sync(); err != nil {
+	return e.flushReserve(f, r)
+}
+
+// reserveAllocate allocates the reserve, and reserveFileSync and
+// reserveDirSync are its two flushes. Tests replace them to make one fail
+// (P4-H4).
+var (
+	reserveAllocate = allocateFile
+	reserveFileSync = (*os.File).Sync
+	reserveDirSync  = syncDir
+)
+
+// flushReserve flushes the reserve file f, then the store's folder.
+func (e *Env) flushReserve(f *os.File, r c5.Reserve) error {
+	from := time.Now()
+	if err := reserveFileSync(f); err != nil {
 		return fmt.Errorf("flush %s reserve: %w", r, err)
 	}
 	e.took(&e.times.Sync, from)
 	defer e.took(&e.times.DirSync, time.Now())
-	return syncDir(e.opt.Dir)
+	if err := reserveDirSync(e.opt.Dir); err != nil {
+		return fmt.Errorf("flush the folder of the %s reserve: %w", r, err)
+	}
+	return nil
 }
 
 func exists(p string) (bool, error) {
