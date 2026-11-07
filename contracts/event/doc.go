@@ -1,4 +1,4 @@
-// Package event is contract C4, otsec.event/0.2: the event every module
+// Package event is contract C4, otsec.event/0.3: the event every module
 // produces and the timestamp model every other contract imports.
 //
 // # What it covers
@@ -96,4 +96,11 @@
 //     tls-mutual sender presented. Required with tls-mutual from 0.2 and
 //     forbidden otherwise; binding confidence is unchanged by it. A 0.1
 //     event reads unchanged, and a 0.1 reader ignores the field.
+//   - 0.3 (D4, approved in D4-68, docs/phase4/D4-c4-0.3.md): the kind
+//     network-observation and Event.Netobs, a C13 otsec.netobs stored
+//     observation, exactly on that kind, from 0.3, at most MaxNetobsBytes,
+//     on a platform event with asset-unresolved when no destination asset
+//     resolves. C4 checks only that netobs is one object within its bound;
+//     the node checks the body against C13 at intake. A 0.2 reader keeps the
+//     kind and ignores the field.
 package event

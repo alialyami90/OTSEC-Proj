@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/internal/strictjson"
 )
 
 // serFixture is a byte-exact copy of A2's documented-example transcription
@@ -188,6 +189,14 @@ var invalid = map[string]Code{
 	"tls-leaf-without-mutual":            CodeForbidden,
 	"tls-leaf-not-hex":                   CodeEvidence,
 	"tls-mutual-without-leaf":            CodeMissing,
+	// C4 0.3 (C13 observations).
+	"network-observation-without-netobs":      CodeMissing,
+	"netobs-on-other-kind":                    CodeForbidden,
+	"netobs-at-0.2":                           CodeForbidden,
+	"netobs-not-object":                       CodeEnum,
+	"network-observation-from-device":         CodeEnum,
+	"network-observation-with-evidence-class": CodeForbidden,
+	"network-observation-no-asset-no-flag":    CodeMissing,
 }
 
 func TestInvalidExamples(t *testing.T) {
@@ -442,21 +451,71 @@ func TestSimulated(t *testing.T) {
 	}
 	// The enum is open to later minors (A6 D1-23 review change 1): a later
 	// minor's class is kept and read as simulated; an event of this
-	// reader's minor or earlier takes only the two, at 0.1 and, since C4
-	// 0.2, at exactly 0.2 (A6, the boundary 0.2 moves).
+	// reader's minor or earlier takes only the two, at 0.1 and, as each
+	// minor moves the boundary, up to this reader's minor, now 0.3 (A6).
 	e.Source.EvidenceClass = "lab-replay"
-	for _, schema := range []string{"otsec.event/0.1", "otsec.event/0.2"} {
+	for _, schema := range []string{"otsec.event/0.1", "otsec.event/0.2", "otsec.event/0.3"} {
 		e.Schema = schema
 		if !slices.Contains(Codes(e.Validate()), CodeEnum) {
 			t.Errorf("%s event with an unknown class validated", schema)
 		}
 	}
-	e.Schema = "otsec.event/0.3"
+	e.Schema = "otsec.event/0.4"
 	if err := e.Validate(); err != nil || !e.Source.Simulated() {
-		t.Errorf("0.3 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
+		t.Errorf("0.4 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
 	}
 	e.Source.EvidenceClass = "Not A Token"
 	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("0.3 event with a malformed class validated")
+		t.Error("0.4 event with a malformed class validated")
+	}
+}
+
+// C4 0.3: netobs at exactly MaxNetobsBytes passes, and one byte more is
+// refused (D6).
+func TestNetobsBound(t *testing.T) {
+	e := load(t, "testdata/valid/constructed-network-observation.json")
+	body := func(n int) json.RawMessage {
+		const head, tail = `{"pad":"`, `"}`
+		return json.RawMessage(head + strings.Repeat("x", n-len(head)-len(tail)) + tail)
+	}
+	e.Netobs = body(MaxNetobsBytes)
+	if err := e.Validate(); err != nil {
+		t.Fatalf("netobs at MaxNetobsBytes refused: %v", err)
+	}
+	e.Netobs = body(MaxNetobsBytes + 1)
+	if !slices.Contains(Codes(e.Validate()), CodeForbidden) {
+		t.Fatal("netobs one byte over MaxNetobsBytes validated")
+	}
+}
+
+// event02 is Event as C4 0.2 declared it: no Netobs field.
+type event02 struct {
+	Schema     string      `json:"schema"`
+	ID         EventID     `json:"id"`
+	Origin     Origin      `json:"origin"`
+	Kind       Kind        `json:"kind"`
+	Source     Source      `json:"source"`
+	Collection *Collection `json:"collection,omitempty"`
+	Received   Received    `json:"received"`
+	DeviceTime *DeviceTime `json:"device_time,omitempty"`
+	Native     *Native     `json:"native,omitempty"`
+	Normalized *Normalized `json:"normalized,omitempty"`
+	Health     *Health     `json:"health,omitempty"`
+	Flags      []string    `json:"flags,omitempty"`
+}
+
+// A 0.2 reader reads a 0.3 observation with strictjson.Forward, as Decode
+// does for a later minor: it keeps the kind and drops netobs without error.
+func TestReader02KeepsObservationKind(t *testing.T) {
+	b, err := os.ReadFile("testdata/valid/constructed-network-observation.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e event02
+	if err := strictjson.Forward(b, &e); err != nil {
+		t.Fatalf("0.2 reader refused a 0.3 observation: %v", err)
+	}
+	if e.Kind != KindNetworkObservation {
+		t.Fatalf("kind %q, want %q", e.Kind, KindNetworkObservation)
 	}
 }
