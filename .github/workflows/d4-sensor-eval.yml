@@ -69,10 +69,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install Suricata
+      - name: Install Suricata and tshark
         run: |
           sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends suricata
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends suricata tshark
       - name: Fetch the public captures (pinned SHA-256s)
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps"
       - name: Run both engines on the PRP pairs and compare
