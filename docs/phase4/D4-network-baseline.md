@@ -127,6 +127,10 @@ DNP3 0 (confirm) and the responses 129, 130 and 131 are never `function` observa
 | 8 with sub-function 0 (`sub` 0) | `other` | confirmed: loopback | S22 Table E.18 p. E.11 |
 | 8 with sub-function 1 or 4 | `control` | unknown | none held. D4 puts them in `control` because restarting communications or forcing listen-only mode can silence a device |
 | 8 with any other sub-function | `other` | unknown | none held |
+| 8 with no `sub` (a request too short to hold it) | `control` | D1's ruling | the most restrictive row for 8, so it fails closed against `authorized_writers` (D1 on #543) |
+| 43 with MEI type 13 (`sub` 13), CANopen General Reference | `write` | unknown | none held. It can write a CANopen object dictionary (D3 on #543) |
+| 43 with no `sub` (a request too short to hold it) | `write` | D1's ruling | the most restrictive row for 43, so it fails closed against `authorized_writers` (D1 on #543) |
+| 43 with any other MEI type | `other` | unknown | none held |
 | 60h, 61h, 62h | `read` | confirmed: parameter information and text reads | S22 Table E.2 p. E.2 and p. E.17; S34 Table E.2 p. E.2 |
 | 7Dh | `control` | confirmed: encapsulated packet with a control command | S22 Table E.30 pp. E.15 to E.16; S34 p. E.14 |
 | 7Eh | `other` | confirmed: no-operation, used only inside 7Dh | S22 Table E.2 p. E.2 |
