@@ -234,9 +234,9 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 }
 
 // batchBytes is the payload a batch adds to class: event bytes, source
-// cursors, each capture not yet stored, and since C5 0.9 each stored capture
-// no record of class cites yet, unless it is of the 0.8 accounting
-// (releaseCaptures). newCaptures lists the captures not yet stored.
+// cursors, each capture not yet stored, and since C5 0.9 each stored
+// network capture no record of class cites yet (releaseCaptures).
+// newCaptures lists the captures not yet stored.
 func (d *DB) batchBytes(ctx context.Context, class c5.StreamClass, recs []c5.Record, payload [][]byte) (int64, map[string]bool, error) {
 	var n int64
 	newCaptures := map[string]bool{}
@@ -247,15 +247,15 @@ func (d *DB) batchBytes(ctx context.Context, class c5.StreamClass, recs []c5.Rec
 			continue
 		}
 		seen[r.Capture.SHA256] = true
-		var id int64
-		err := d.conn.QueryRowContext(ctx, `SELECT id FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&id)
+		var capClass string
+		err := d.conn.QueryRowContext(ctx, `SELECT class FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&capClass)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			newCaptures[r.Capture.SHA256] = true
 			n += int64(len(r.Capture.Bytes))
 		case err != nil:
 			return 0, nil, fmt.Errorf("read capture: %w", err)
-		case id >= d.chargeFrom:
+		case perClassCapture(c5.StreamClass(capClass)):
 			cites, err := d.classCites(ctx, class, r.Capture.SHA256)
 			if err != nil {
 				return 0, nil, fmt.Errorf("read capture: %w", err)
@@ -277,10 +277,19 @@ func (d *DB) classBytes(ctx context.Context, class c5.StreamClass) (int64, error
 	return n, err
 }
 
+// addClassBytes adds n to class's count. A count that would go below zero
+// fails the caller's transaction instead of being stored: it can only come
+// from an accounting drift, and failing shows it (C5 0.9).
 func (d *DB) addClassBytes(ctx context.Context, class c5.StreamClass, n int64) error {
-	_, err := d.conn.ExecContext(ctx, `INSERT INTO class_bytes (class, bytes) VALUES (?, ?)
-		ON CONFLICT (class) DO UPDATE SET bytes = bytes + excluded.bytes`, string(class), n)
-	return err
+	var after int64
+	if err := d.conn.QueryRowContext(ctx, `INSERT INTO class_bytes (class, bytes) VALUES (?, ?)
+		ON CONFLICT (class) DO UPDATE SET bytes = bytes + excluded.bytes RETURNING bytes`, string(class), n).Scan(&after); err != nil {
+		return err
+	}
+	if after < 0 {
+		return fmt.Errorf("class %s would hold %d bytes: its byte count has drifted", class, after)
+	}
+	return nil
 }
 
 // ClassBytes is the payload a class holds in this database, as the quota

@@ -80,8 +80,9 @@
 //     passive network sensor, network-observation and network-alert, both
 //     drop-and-count with the alarm network-full, both needing a record
 //     cap, and only ever in a database of network classes. A shared
-//     capture is charged once to each class that holds a record citing
-//     it, so one class's records never hold another's quota. Three
+//     capture of a network class is charged once to each class that holds
+//     a record citing it, so one class's records never hold another's
+//     quota; every other capture is charged as in 0.8. Three
 //     configuration series for the network baseline: baseline.network
 //     (evidence) and netcheckpoint.learner and netcheckpoint.detector
 //     (working state, removable). No hold code, action or store format

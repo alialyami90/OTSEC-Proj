@@ -90,9 +90,6 @@ type DB struct {
 	closed  bool
 	// readOnly is set by OpenReadOnly: every transaction is refused.
 	readOnly bool
-	// chargeFrom is the first capture id charged per class (C5 0.9,
-	// ensureCaptureCharge).
-	chargeFrom int64
 
 	// begin* time BEGIN IMMEDIATE, where the connection waits when another
 	// connection holds the write lock (BeginStats).
@@ -450,10 +447,7 @@ func (d *DB) load(ctx context.Context) error {
 	if err := d.ensureHolds(ctx); err != nil {
 		return err
 	}
-	if err := d.ensureSeries(ctx); err != nil {
-		return err
-	}
-	return d.ensureCaptureCharge(ctx)
+	return d.ensureSeries(ctx)
 }
 
 // tx runs f in one BEGIN IMMEDIATE transaction on the connection. The

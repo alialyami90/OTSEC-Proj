@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,93 +215,138 @@ func TestSharedCaptureDoesNotHoldOtherQuotaV09(t *testing.T) {
 	}
 }
 
-// Discard keeps the same rule: discarding one class's last citing record
-// ends that class's charge only.
-func TestDiscardChargesPerClassV09(t *testing.T) {
+// Outside the network classes a capture keeps 0.8's accounting exactly
+// (D6's R1 on #544): one charge, to the class that stored it first, ended
+// when the row is deleted. Pruning in either order leaves no class negative
+// and no charge behind.
+func TestNonNetworkCaptureChargedOnceV09(t *testing.T) {
+	for _, order := range [][]c5.StreamID{{"relay1/ser", "platform/health"}, {"platform/health", "relay1/ser"}} {
+		t.Run(string(order[0])+" first", func(t *testing.T) {
+			db := open1(t, storeDir(t), evidenceDB, nil)
+			tr := capture("a collection run's transcript")
+			size := int64(len(tr.Bytes))
+			commit1(t, db, withCapture(rec("relay1/ser", c5.ClassAdapterEvidence, 1), tr))
+			commit1(t, db, withCapture(rec("platform/health", c5.ClassPlatform, 1), tr))
+			ser, health := payloadBytes(t, db, "relay1/ser"), payloadBytes(t, db, "platform/health")
+			if got := classBytes(t, db, c5.ClassAdapterEvidence); got != ser+size {
+				t.Fatalf("evidence class %d, want %d (its payload and the capture)", got, ser+size)
+			}
+			if got := classBytes(t, db, c5.ClassPlatform); got != health {
+				t.Fatalf("platform class %d, want its payload %d: a second class charged for the capture", got, health)
+			}
+			class := map[c5.StreamID]c5.StreamClass{"relay1/ser": c5.ClassAdapterEvidence, "platform/health": c5.ClassPlatform}
+			pruneAll(t, db, order[0], class[order[0]])
+			wantSer, wantHealth := ser+size, health // the capture is still cited
+			if order[0] == "relay1/ser" {
+				wantSer = size
+			} else {
+				wantHealth = 0
+			}
+			if got := classBytes(t, db, c5.ClassAdapterEvidence); got != wantSer {
+				t.Errorf("evidence class %d after the first prune, want %d", got, wantSer)
+			}
+			if got := classBytes(t, db, c5.ClassPlatform); got != wantHealth {
+				t.Errorf("platform class %d after the first prune, want %d", got, wantHealth)
+			}
+			if !captureStored(t, db, tr.SHA256) {
+				t.Fatal("capture deleted while a record cites it")
+			}
+			pruneAll(t, db, order[1], class[order[1]])
+			for _, c := range []c5.StreamClass{c5.ClassAdapterEvidence, c5.ClassPlatform} {
+				if got := classBytes(t, db, c); got != 0 {
+					t.Errorf("%s class %d after both prunes, want 0", c, got)
+				}
+			}
+			if captureStored(t, db, tr.SHA256) {
+				t.Error("capture kept after its last citing record")
+			}
+		})
+	}
+}
+
+// Discard keeps 0.8's accounting too: discarding the quarantined record
+// that stored a capture another class still cites frees only its event,
+// and the capture stays charged to its first class until its row goes.
+func TestDiscardKeepsFirstChargeV09(t *testing.T) {
 	d := evidenceDB
 	d.Streams = append([]c5.StreamSpec{{ID: "quarantine/relay1", Class: c5.ClassAdapterEvidence}}, d.Streams...)
 	db := open1(t, storeDir(t), d, nil)
 	tr := capture("a collection run's transcript")
+	size := int64(len(tr.Bytes))
 	commit1(t, db, withCapture(rec("quarantine/relay1", c5.ClassAdapterEvidence, 1), tr))
 	commit1(t, db, withCapture(rec("platform/health", c5.ClassPlatform, 1), tr))
-	healthBefore := classBytes(t, db, c5.ClassPlatform)
-	if want := payloadBytes(t, db, "platform/health") + int64(len(tr.Bytes)); healthBefore != want {
-		t.Fatalf("platform class %d, want %d", healthBefore, want)
-	}
+	health := payloadBytes(t, db, "platform/health")
 	payload := payloadBytes(t, db, "quarantine/relay1")
 	out, err := db.Discard(bg, nil, "quarantine/relay1", []c5.Seq{1})
 	if err != nil || out.Events != 1 {
 		t.Fatalf("discard: %+v %v", out, err)
 	}
-	if want := payload + int64(len(tr.Bytes)); out.Bytes != want {
-		t.Errorf("discarded %d bytes, want %d: the event and the ended capture charge", out.Bytes, want)
+	if out.Bytes != payload {
+		t.Errorf("discarded %d bytes, want the event's %d: the capture is still cited", out.Bytes, payload)
 	}
-	if got := classBytes(t, db, c5.ClassAdapterEvidence); got != 0 {
-		t.Errorf("evidence class %d after the discard, want 0", got)
+	if got := classBytes(t, db, c5.ClassAdapterEvidence); got != size {
+		t.Errorf("evidence class %d after the discard, want the capture's %d", got, size)
 	}
-	if got := classBytes(t, db, c5.ClassPlatform); got != healthBefore {
-		t.Errorf("platform class %d after the discard, want %d", got, healthBefore)
+	if got := classBytes(t, db, c5.ClassPlatform); got != health {
+		t.Errorf("platform class %d after the discard, want %d", got, health)
 	}
-	if !captureStored(t, db, tr.SHA256) {
-		t.Error("capture deleted while a health record cites it")
+	pruneAll(t, db, "platform/health", c5.ClassPlatform)
+	for _, c := range []c5.StreamClass{c5.ClassAdapterEvidence, c5.ClassPlatform} {
+		if got := classBytes(t, db, c); got != 0 {
+			t.Errorf("%s class %d once the capture is deleted, want 0", c, got)
+		}
 	}
 }
 
-// A capture a 0.8 binary stored is charged as 0.8 charged it, to its first
-// class only, until its row is deleted (section 5).
-func TestCaptureChargeFromV09(t *testing.T) {
-	dir := storeDir(t)
-	reopen := func() (*DB, func()) {
-		db, r := testStore(t, Options{Dir: dir, Node: testNode, Database: evidenceDB}, policy(evidenceDB), c5.ModeCollecting)
-		return db, func() { db.Close(); r.Unlock() }
-	}
-	db, done := reopen()
-	if db.chargeFrom != 1 {
-		t.Fatalf("a new database charges from capture %d, want 1", db.chargeFrom)
-	}
-	tr := capture("stored by 0.8")
-	commit1(t, db, withCapture(rec("relay1/ser", c5.ClassAdapterEvidence, 1), tr))
-	// As if a 0.8 binary had stored it: no key yet, so this binary's first
-	// open puts the 0.9 rule after it.
-	if _, err := db.conn.ExecContext(bg, `DELETE FROM meta WHERE key = ?`, chargeFromKey); err != nil {
+// S1 (D6 on #544): a capture written as a 0.8 binary writes it, with any
+// id, is charged once, to its first class, whatever cites it later.
+func TestLegacyInsertChargedOnceV09(t *testing.T) {
+	db := open1(t, storeDir(t), evidenceDB, nil)
+	tr := capture("stored by a 0.8 binary")
+	size := int64(len(tr.Bytes))
+	// 0.8's insert: the row with its first class, and that class charged.
+	if _, err := db.conn.ExecContext(bg, `INSERT INTO captures (id, sha256, class, bytes) VALUES (?, ?, ?, ?)`,
+		int64(1)<<40, tr.SHA256, string(c5.ClassAdapterEvidence), tr.Bytes); err != nil {
 		t.Fatal(err)
 	}
-	done()
-	db, done = reopen()
-	var id int64
-	db.conn.QueryRowContext(bg, `SELECT id FROM captures WHERE sha256 = ?`, tr.SHA256).Scan(&id)
-	if db.chargeFrom != id+1 {
-		t.Fatalf("charges from capture %d, want %d", db.chargeFrom, id+1)
+	if _, err := db.conn.ExecContext(bg, `INSERT INTO class_bytes (class, bytes) VALUES (?, ?)
+		ON CONFLICT (class) DO UPDATE SET bytes = bytes + excluded.bytes`, string(c5.ClassAdapterEvidence), size); err != nil {
+		t.Fatal(err)
 	}
-	var v string
-	db.conn.QueryRowContext(bg, `SELECT value FROM meta WHERE key = ?`, chargeFromKey).Scan(&v)
-	if v != strconv.FormatInt(id+1, 10) {
-		t.Fatalf("meta %s = %q", chargeFromKey, v)
-	}
-
-	serBefore := classBytes(t, db, c5.ClassAdapterEvidence)
+	commit1(t, db, withCapture(rec("relay1/ser", c5.ClassAdapterEvidence, 1), tr))
 	commit1(t, db, withCapture(rec("platform/health", c5.ClassPlatform, 1), tr))
+	if got, want := classBytes(t, db, c5.ClassAdapterEvidence), payloadBytes(t, db, "relay1/ser")+size; got != want {
+		t.Fatalf("evidence class %d, want %d", got, want)
+	}
 	if got, want := classBytes(t, db, c5.ClassPlatform), payloadBytes(t, db, "platform/health"); got != want {
-		t.Fatalf("platform class %d, want %d: a 0.8 capture charged to a second class", got, want)
-	}
-	if serBefore != payloadBytes(t, db, "relay1/ser")+int64(len(tr.Bytes)) {
-		t.Fatalf("evidence class %d before the prunes", serBefore)
-	}
-	pruneAll(t, db, "relay1/ser", c5.ClassAdapterEvidence)
-	if got := classBytes(t, db, c5.ClassAdapterEvidence); got != int64(len(tr.Bytes)) {
-		t.Errorf("evidence class %d after its prune, want the capture's %d still charged to it", got, len(tr.Bytes))
+		t.Fatalf("platform class %d, want %d: charged for a 0.8 capture", got, want)
 	}
 	pruneAll(t, db, "platform/health", c5.ClassPlatform)
-	if got := classBytes(t, db, c5.ClassAdapterEvidence); got != 0 {
-		t.Errorf("evidence class %d once the capture is deleted, want 0", got)
+	pruneAll(t, db, "relay1/ser", c5.ClassAdapterEvidence)
+	for _, c := range []c5.StreamClass{c5.ClassAdapterEvidence, c5.ClassPlatform} {
+		if got := classBytes(t, db, c); got != 0 {
+			t.Errorf("%s class %d after both prunes, want 0", c, got)
+		}
 	}
-	if got := classBytes(t, db, c5.ClassPlatform); got != 0 {
-		t.Errorf("platform class %d, want 0", got)
+}
+
+// S2 (D6 on #544): a class count that would go below zero fails its
+// transaction, so a drift shows instead of letting the class past its
+// quota.
+func TestClassBytesNeverNegativeV09(t *testing.T) {
+	db := open1(t, storeDir(t), evidenceDB, nil)
+	commit1(t, db, rec("platform/health", c5.ClassPlatform, 1))
+	before := classBytes(t, db, c5.ClassPlatform)
+	err := db.tx(bg, "drift", func() error {
+		return db.addClassBytes(bg, c5.ClassPlatform, -(before + 1))
+	})
+	if err == nil {
+		t.Fatal("a count below zero was stored")
 	}
-	done()
-	db, done = reopen()
-	defer done()
-	if db.chargeFrom != id+1 {
-		t.Errorf("reopened: charges from %d, want %d", db.chargeFrom, id+1)
+	if got := classBytes(t, db, c5.ClassPlatform); got != before {
+		t.Errorf("platform class %d after the failed update, want %d", got, before)
+	}
+	if err := db.tx(bg, "exact", func() error { return db.addClassBytes(bg, c5.ClassPlatform, -before) }); err != nil {
+		t.Errorf("down to exactly zero: %v", err)
 	}
 }
