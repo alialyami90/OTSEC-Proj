@@ -1,0 +1,64 @@
+# D4's E-D4-01 for ADR-0009 (P4-4-A4, D4-66): what a Windows site node can
+# offer a passive sensor. It can only be started by hand (workflow_dispatch)
+# and is not a project CI pipeline. It reads public captures listed in
+# tests/fixtures/network/public-ot-captures/MANIFEST.tsv and captures only the
+# runner's own traffic; it contacts no device and sends nothing to any other
+# host. Results are `simulated` on a GitHub-hosted Windows Server VM, not on
+# ADR-0007's Windows 10/11 LTSC floor. They are printed to the job log and
+# uploaded as an artifact; raw capture files of the runner's traffic are not.
+name: d4-sensor-eval
+on:
+  workflow_dispatch:
+    inputs:
+      suricata_msi_url:
+        description: "Suricata Windows installer URL (optional; empty skips the Suricata job)"
+        required: false
+        default: ""
+      suricata_msi_sha256:
+        description: "SHA-256 of that installer, from the vendor's page"
+        required: false
+        default: ""
+permissions:
+  contents: read
+jobs:
+  builtin:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe the image (OS, Npcap, pktmon)
+        shell: pwsh
+        run: ./modules/telemetry/experiments/sensor-windows/probe.ps1 -Out "$env:RUNNER_TEMP\e-d4-01" -Python (Get-Command python).Source
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: d4-sensor-eval-builtin
+          path: ${{ runner.temp }}/e-d4-01/probe.json
+  suricata:
+    if: ${{ inputs.suricata_msi_url != '' && inputs.suricata_msi_sha256 != '' }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch the public captures and check each SHA-256
+        shell: bash
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/captures" || echo "one or more captures did not match; those runs will show no eve.json"
+      - name: Offline decoding by Suricata's Windows build
+        shell: pwsh
+        env:
+          MSI_URL: ${{ inputs.suricata_msi_url }}
+          MSI_SHA256: ${{ inputs.suricata_msi_sha256 }}
+        run: ./modules/telemetry/experiments/sensor-windows/suricata.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-suricata" -Python (Get-Command python).Source -Cache "$env:RUNNER_TEMP\captures" -MsiUrl $env:MSI_URL -MsiSha256 $env:MSI_SHA256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: d4-sensor-eval-suricata
+          path: |
+            ${{ runner.temp }}/e-d4-01-suricata/suricata.json
+            ${{ runner.temp }}/e-d4-01-suricata/**/eve.json
