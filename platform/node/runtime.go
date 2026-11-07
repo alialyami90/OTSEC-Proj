@@ -180,7 +180,7 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 	}}
 	sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
 	defer cancel()
-	timed := &timedEnv{StartupEnv: env, t: r.starts}
+	timed := &timedEnv{StartupEnv: env, env: env, t: r.starts}
 	from := time.Now()
 	d.report = c5.RunStartup(sctx, timed, d.policy)
 	r.starts.d["store-startup"] += time.Since(from) - timed.spent

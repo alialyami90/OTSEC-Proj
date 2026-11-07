@@ -16,24 +16,33 @@ func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 var startLineRE = regexp.MustCompile(`^otsec node start: scope=(runtime|node) total=(\d+)ms` +
 	` config=(\d+)ms scm=(\d+)ms store-lock=(\d+)ms store-open=(\d+)ms store-reserve=(\d+)ms store-startup=(\d+)ms store-adopt=(\d+)ms` +
 	` register=(\d+)ms record-start=(\d+)ms holds=(\d+)ms status=(\d+)ms forwarding=(\d+)ms listening=(\d+)ms` +
-	` node-keys=(\d+)ms scheduler=(\d+)ms listen=(\d+)ms first-check=(\d+)ms other=(\d+)ms$`)
+	` node-keys=(\d+)ms scheduler=(\d+)ms listen=(\d+)ms first-check=(\d+)ms other=(\d+)ms` +
+	` reserve-release=(\d+)ms reserve-create=(\d+)ms reserve-write=(\d+)ms reserve-sync=(\d+)ms` +
+	` reserve-dirsync=(\d+)ms reserve-close=(\d+)ms$`)
 
-// checkStartLine checks the line's form, and that its phases and other sum
-// to its total, within a millisecond of rounding per value.
+// checkStartLine checks the line's form, that its phases and other sum to
+// its total, and that ReserveParts sum to store-reserve, each within a
+// millisecond of rounding per value.
 func checkStartLine(t *testing.T, line, scope string) {
 	t.Helper()
 	m := startLineRE.FindStringSubmatch(line)
 	if m == nil || m[1] != scope {
 		t.Fatalf("start line %q", line)
 	}
-	total, _ := strconv.Atoi(m[2])
+	parts := len(m) - len(ReserveParts)
 	sum := 0
-	for _, v := range m[3:] {
-		n, _ := strconv.Atoi(v)
-		sum += n
+	for _, v := range m[3:parts] {
+		sum += atoi(v)
 	}
-	if d := total - sum; d < 0 || d > len(m)-3 {
-		t.Fatalf("phases and other sum to %d ms, total %d ms: %q", sum, total, line)
+	if d := atoi(m[2]) - sum; d < 0 || d > parts-3 {
+		t.Fatalf("phases and other sum to %d ms, total %s ms: %q", sum, m[2], line)
+	}
+	reserve, split := atoi(m[3+slices.Index(StartPhases, "store-reserve")]), 0
+	for _, v := range m[parts:] {
+		split += atoi(v)
+	}
+	if d := reserve - split; d < 0 || d > len(ReserveParts) {
+		t.Fatalf("the reserve parts sum to %d ms, store-reserve %d ms: %q", split, reserve, line)
 	}
 }
 
@@ -44,8 +53,8 @@ func TestStartLine(t *testing.T) {
 	r, _, _ := start(t, c, dir)
 	defer r.Close()
 	for p := range r.starts.d {
-		if !slices.Contains(StartPhases, p) {
-			t.Errorf("phase %q is not in StartPhases", p)
+		if !slices.Contains(StartPhases, p) && !slices.Contains(ReserveParts, p) {
+			t.Errorf("phase %q is not in StartPhases or ReserveParts", p)
 		}
 	}
 	for _, p := range StartPhases[slices.Index(StartPhases, "store-lock") : slices.Index(StartPhases, "status")+1] {
@@ -61,7 +70,7 @@ func TestStartLine(t *testing.T) {
 	// other is the total less every phase, never below zero.
 	st := &startTimes{began: time.Now().Add(-time.Second), d: map[string]time.Duration{"store-open": 300 * time.Millisecond, "holds": 200 * time.Millisecond}}
 	checkStartLine(t, st.line("node"), "node")
-	if o := regexp.MustCompile(` other=(\d+)ms$`).FindStringSubmatch(st.line("node")); o == nil || atoi(o[1]) < 499 {
+	if o := regexp.MustCompile(` other=(\d+)ms `).FindStringSubmatch(st.line("node")); o == nil || atoi(o[1]) < 499 {
 		t.Fatalf("other in %q", st.line("node"))
 	}
 	// Run with the zero PreStart counts from its own start.
@@ -71,7 +80,30 @@ func TestStartLine(t *testing.T) {
 		t.Fatalf("the zero PreStart: %q", zero.line("node"))
 	}
 	st.d["store-lock"] = 2 * time.Second
-	if !strings.HasSuffix(st.line("node"), " other=0ms") {
+	if !strings.Contains(st.line("node"), " other=0ms ") {
 		t.Fatalf("other below zero: %q", st.line("node"))
+	}
+}
+
+// A restart times each of ReserveParts, store-reserve is exactly their sum,
+// and the reserve's flush takes time (P4-H4). The release and the
+// allocation are not checked against zero: on windows-latest both can
+// measure 0 s (#520, D1).
+func TestReserveParts(t *testing.T) {
+	c, dir := runtimeConfig(t)
+	r, _, _ := start(t, c, dir)
+	r.Close()
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	var sum time.Duration
+	for _, p := range ReserveParts {
+		d, ok := r.starts.d[p]
+		if !ok {
+			t.Errorf("the restart did not time %s", p)
+		}
+		sum += d
+	}
+	if r.starts.d["reserve-sync"] <= 0 || sum != r.starts.d["store-reserve"] {
+		t.Fatalf("store-reserve %v, its parts %v", r.starts.d["store-reserve"], r.starts.d)
 	}
 }

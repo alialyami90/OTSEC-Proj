@@ -7,6 +7,7 @@ import (
 	"time"
 
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/store"
 )
 
 // StartPhases are the node start phases the start timing line names, in
@@ -36,6 +37,18 @@ var StartPhases = []string{
 	"first-check",   // the first forwarding check and listener publish
 }
 
+// ReserveParts split store-reserve, in this order, and sum to it (P4-H4).
+// The line names them after other, outside the sum to total, so that
+// store-reserve measures the same thing before and after the split.
+var ReserveParts = []string{
+	"reserve-release", // ReleaseReserve
+	"reserve-create",  // CreateReserve: creating the file
+	"reserve-write",   // CreateReserve: allocating its space
+	"reserve-sync",    // CreateReserve: the file flush
+	"reserve-dirsync", // CreateReserve: the folder flush; nothing on Windows
+	"reserve-close",   // CreateReserve: the rest, chiefly the file's close
+}
+
 // startTimes accumulates the time of each start phase on the monotonic
 // clock, never the node clock, which a test clock may drive.
 type startTimes struct {
@@ -51,8 +64,9 @@ func newStartTimes() *startTimes {
 func (t *startTimes) add(phase string, from time.Time) { t.d[phase] += time.Since(from) }
 
 // line is the start timing line: scope, the total since began, each phase
-// in StartPhases order, and other, the part of the total no phase covers.
-// Every value is whole milliseconds. It holds no path, key or device text.
+// in StartPhases order, other, the part of the total no phase covers, and
+// then ReserveParts. Every value is whole milliseconds. It holds no path,
+// key or device text.
 func (t *startTimes) line(scope string) string {
 	total := time.Since(t.began)
 	var b strings.Builder
@@ -63,6 +77,9 @@ func (t *startTimes) line(scope string) string {
 		other -= t.d[p]
 	}
 	fmt.Fprintf(&b, " other=%dms", max(other, 0).Milliseconds())
+	for _, p := range ReserveParts {
+		fmt.Fprintf(&b, " %s=%dms", p, t.d[p].Milliseconds())
+	}
 	return b.String()
 }
 
@@ -91,9 +108,11 @@ func (t *startTimes) from(p PreStart, entered time.Time) {
 func (r *Runtime) StartLine() string { return r.starts.line("runtime") }
 
 // timedEnv is a StartupEnv that adds the time of its lock, open and reserve
-// calls to t, and their sum to spent.
+// calls to t, and their sum to spent. The reserve calls' time is also split
+// into ReserveParts, with store's own times from env.
 type timedEnv struct {
 	c5.StartupEnv
+	env   *store.Env
 	t     *startTimes
 	spent time.Duration
 }
@@ -114,11 +133,33 @@ func (e *timedEnv) Open(ctx context.Context) (c5.RecoveryStore, error) {
 }
 
 func (e *timedEnv) CreateReserve(ctx context.Context, r c5.Reserve, bytes int64) error {
-	defer e.took("store-reserve", time.Now())
+	from, before := time.Now(), e.env.ReserveTimes()
+	defer func() {
+		took, after := time.Since(from), e.env.ReserveTimes()
+		rest := took
+		for p, d := range map[string]time.Duration{
+			"reserve-create":  after.Create - before.Create,
+			"reserve-write":   after.Write - before.Write,
+			"reserve-sync":    after.Sync - before.Sync,
+			"reserve-dirsync": after.DirSync - before.DirSync,
+		} {
+			e.t.d[p] += d
+			rest -= d
+		}
+		e.t.d["reserve-close"] += max(rest, 0)
+		e.t.d["store-reserve"] += took
+		e.spent += took
+	}()
 	return e.StartupEnv.CreateReserve(ctx, r, bytes)
 }
 
 func (e *timedEnv) ReleaseReserve(ctx context.Context, r c5.Reserve) error {
-	defer e.took("store-reserve", time.Now())
+	from := time.Now()
+	defer func() {
+		took := time.Since(from)
+		e.t.d["reserve-release"] += took
+		e.t.d["store-reserve"] += took
+		e.spent += took
+	}()
 	return e.StartupEnv.ReleaseReserve(ctx, r)
 }
