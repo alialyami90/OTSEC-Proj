@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,7 +122,8 @@ func (u udp) Read(deadline time.Time) ([]byte, error) {
 }
 
 type logged struct {
-	PDU *struct {
+	From string `json:"from"`
+	PDU  *struct {
 		Type     string `json:"type"`
 		Varbinds []struct {
 			OID string `json:"oid"`
@@ -257,5 +259,38 @@ func TestGetNextWalkGoesOnWithOneBindingEach(t *testing.T) {
 	}
 	if len(o.Values) != 2+32 {
 		t.Errorf("%d values, want the get's 2 and one per GetNext", len(o.Values))
+	}
+}
+
+// C2 0.9's test 2, SNMPv3 half: the result's session.local_addr is the
+// address every datagram reached the agent from, as the agent's own log
+// records it, and connected_at is the at of the first segment, which is
+// sent. The run is I1's, the default agent, under the GetBulk walk V-M1's
+// binary run uses.
+func TestC2v09LocalAddrIsWhatTheAgentSaw(t *testing.T) {
+	o, recs := run(t, "I1", false)
+	if o.Code != "" {
+		t.Fatalf("code %q (%s)", o.Code, o.Detail)
+	}
+	if len(recs) == 0 {
+		t.Fatal("the agent logged nothing")
+	}
+	for _, r := range recs {
+		if r.From != o.LocalAddr {
+			t.Errorf("a datagram from %q, but the session's local_addr is %q", r.From, o.LocalAddr)
+		}
+	}
+	r := snmpv3.Result(o, adapter.Invocation{InvocationID: "8d0c7a52-3f1e-4b6a-9c2d-5e7f1a3b4c6d", OperationID: runID,
+		Expected: []adapter.Expected{{Name: "snmp_engine_id", Value: hex.EncodeToString(engineID)}, {Name: "firmware_id", Value: agent.FID2731}}},
+		pkg(t, false), snmpv3.Meta{Adapter: adapter.AdapterRef{ID: snmpv3.AdapterID, Version: snmpv3.Version},
+			Target: "simulated", Started: o.Segments[0].At})
+	if r.Session.LocalAddr != o.LocalAddr || !r.Session.Connected || !strings.HasPrefix(r.Session.LocalAddr, "127.0.0.1:") {
+		t.Errorf("result session %+v, outcome local address %q", r.Session, o.LocalAddr)
+	}
+	if r.Session.ConnectedAt != r.Transcript.Segments[0].At || r.Transcript.Segments[0].Dir != adapter.Sent {
+		t.Errorf("connected_at %s, first segment %s %s", r.Session.ConnectedAt, r.Transcript.Segments[0].Dir, r.Transcript.Segments[0].At)
+	}
+	if err := r.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
 	}
 }
