@@ -87,6 +87,8 @@ ADR-0008 makes the collection-method order a rule, recorded here per family. For
 
 Each cell gives the evidence class and the citation. A rung is `unsupported` when the device's own list of ports or protocols leaves it out, and `unknown` when the source has no such list and does not mention it. "Reached" is the highest rung that is both documented and safe for a monitoring credential, and says whether anything is built. Every cell is from documents: nothing here was tried on a device, and the Phase 2 adapter is `simulated`. No FTP or SNMP code is planned in Phase 3.
 
+The network services each family below can offer, with ports, defaults, the setting that turns each one on, the insecure-list flag and what a passive sensor reads in clear, are in [D2-sel-network-services.md](phase4/D2-sel-network-services.md) (P4-4-A2, `desk`).
+
 A finding that applies to several families: **on SEL ASCII relays a Level 1 login is not read-only.** `SER C` and `SER R` clear the SER at Level 1 (S22 Table 7.63; S34 Table 7.46 p. 7.62), which is why the register allows only exact lines (D1, D3).
 
 ### SEL-751 (S22)
