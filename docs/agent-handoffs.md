@@ -1281,3 +1281,149 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
 1. D4 drafts ADR-0009 first, with D5 and D3. D2's note and D6's GT-PCAP plan run at the same time.
 2. D4 drafts C13 and the baseline note once ADR-0009 names the option, and D5 drafts the C5 stream class beside them. Every consumer reviews them, and D1 approves them together.
 3. The implementation briefs follow approval. They include the owner's protocols, or record that the owner hasn't answered and the first set above stands.
+
+### Phase 4 item 4: implementation briefs, first part (issued 2026-11-07, D4-68)
+
+D1 approved item 4's contracts together in D4-68. The approved texts are:
+
+- `docs/phase4/D4-c13-netobs.md`: C13 `otsec.netobs/0.1`, with its follow-up #538;
+- `docs/phase4/D4-network-baseline.md`: the baseline, the detector and its nine rules;
+- `docs/phase4/D4-c4-0.3.md`: C4 0.3;
+- `docs/phase4/D5-c5-0.9.md`: C5 0.9;
+- `docs/phase4/D3-c7-0.10-c8-0.12.md`: C7 0.10 and C8 0.12.
+
+D4-68's rulings refine these texts, and where they differ, the decision wins. The common rules for every Phase 4 brief apply. A contract that was approved as text is coded exactly as approved. If code shows that the text is wrong, the owner of the text raises it with D1 before merging, and the change goes to the same reviewers.
+
+Nothing captures traffic on a real network. Nothing scans, probes or transmits on a monitoring interface (P1, C-11).
+
+**This is the first part, and it does not include the sensor.** ADR-0009 is still proposed: the owner hasn't chosen where the sensor runs. Everything below is the same under all three options:
+
+- the contract code;
+- the node's intake, store, learner and detector;
+- the admin path for the acknowledgement;
+- GT-PCAP.
+
+**Where the options differ.** The sensor process itself and the channel's transport depend on the option. Under (a) and (c) the transport is a local pipe or socket bound to the sensor's account. Under (b) it is mutual TLS on a link the node opens. These are briefed once the owner chooses. Until then, the node's intake is written over a byte stream with C13's framing, and its tests drive it in-process.
+
+**Protocols.** The owner hasn't yet said which protocols their sites run (asked 2026-11-07). The first set from the Stage A brief stands: DNP3, Modbus/TCP, R6.7's insecure list, and the platform's own Telnet and SNMPv3 sessions.
+
+#### P4-4-B4 (D4): the C13 and C4 code, and the detector
+
+- **Objective.** Code C13 and C4 0.3, and build the learner and the detector as the baseline note describes.
+- **Deliverables, in this order:**
+  1. **`contracts/netobs`**, covering C13 0.1 and #538:
+     - the records, the framing, and strict decoding with every bound in §10;
+     - the token grammar and the device-text rules;
+     - the citation, including the redaction markers (D4-67 as amended by D4-68 ruling 13);
+     - the coverage statement with `coverage.settings`;
+     - a fuzz target on the decoder.
+  2. **`contracts/event` 0.3**: the `network-observation` kind and the `netobs` field, keeping a reader for 0.2.
+
+     Both packages have D6's contract tests before they merge.
+  3. **`modules/detection/`**: the learner and the detector, as pure functions over C13 observations, the node's session records and a baseline document. They cover:
+     - the nine rules, with `sa-failed` and the three other baseline-free rules running before acknowledgement (D4-68 ruling 10);
+     - coalescing by (rule, destination asset), two records per window (ruling 5);
+     - the drop-count key (ruling 4);
+     - `own-session-unseen` as #538 defines it before acknowledgement;
+     - the frozen draft at the end of learning (ruling 7).
+
+     An import test fails on any network, `syscall`, `os/exec`, store or `modules/ied/...` import.
+- **May change:** `contracts/netobs`, `contracts/event`, `modules/detection/`, `docs/phase4/D4-*.md`.
+- **Acceptance (D6, independent):**
+  - Unit runs of every rule over GT-PCAP's labelled observations: each rule's malicious sample alerts and its near-miss doesn't (R6.3).
+  - The benign held-out series raises zero alerts against a baseline learned from the benign training series (R6.2).
+  - Mutation of each rule's condition is caught.
+- **Exclusions:** no sensor and no capture code. No ML.
+- **Reviewers:** D6 for detection accuracy, D2 for protocol reading, D5 for what the node calls, and D3 for the boundary.
+
+#### P4-4-B5 (D5): C5 0.9 and the node's side
+
+- **Objective.** Code C5 0.9, and give the node its sensor intake, store classes, checkpoints, retention consumer, status and the `network_sensor` section.
+- **Deliverables:**
+  1. **`contracts/store` 0.9**, with D6's contract tests:
+     - two classes;
+     - three series;
+     - `network-full`;
+     - the record-cap and database rules.
+  2. **Intake.** The node reads C13 records from a byte stream:
+     - strict decoding, `sensor_id`, `seq` gaps, and record types (the channel carries only heartbeats and observations);
+     - the unresolved budget (D4-68 ruling 1);
+     - the first-sight capture stored once and reused by SHA-256 (#532);
+     - an absent `sa` that never sets `dnp3_no_sa`.
+
+     The transport waits for ADR-0009, as above.
+  3. **The learner and detector consumers**, with their checkpoint series. The learner is retired at acknowledgement, with its C8 record written first (ruling 7).
+  4. **The retention consumer** when there is no alert forward target (ruling 6). It takes separate seams for the wall clock and the monotonic clock, so that D6's clock-step test can drive them apart.
+  5. **`network-full`, with per-key drop counts**, in status and in `intake.drop-counted` (ruling 4).
+  6. **The `network_sensor` section.** With it absent, nothing item 4 owns runs, and nothing else changes.
+  7. **Admin replies are serialized** where the node applies an acknowledgement (D5's note on #534).
+- **May change:** `contracts/store` (as approved), `platform/`, `cmd/otsec/`, `docs/phase4/D5-*.md`.
+- **Note:** the sensor's supervision tests go in their own package, because `platform/node`'s Windows test step is near its budget.
+- **Acceptance (D6, independent):**
+  - No observation, alert or checkpoint is lost across a SIGKILL at each commit point.
+  - A flood of observations leaves SER and Syslog throughput unchanged, and it is counted.
+  - The refused-learner-checkpoint path goes from `network-baseline-no-room` to `network-full`, with the drops counted (#535).
+  - D3's decoy case (AP-36 (3)), and the retention clock-step case.
+- **Reviewers:** D6 for reliability, D3 for the trust boundary, and D4 for the detector's calls.
+
+#### P4-4-B3 (D3): C7 0.10, C8 0.12 and the acknowledgement path
+
+- **Objective.** Code C7 0.10 and C8 0.12, and let a person acknowledge a network baseline and its authorized writers.
+- **Deliverables:**
+  1. **`contracts/authz` 0.10 and `contracts/audit` 0.12**, with their schemas and goldens.
+  2. **The collector accepts `node.network_baseline_ack`**, a separate admin kind that no existing key gains silently (ruling 8).
+  3. **The node's adoption checks** for the accepted document (#534 §1).
+  4. **`policy.apply` at first use** of a new key-kind digest, written before any decision under it and failing closed (ruling 9).
+  5. **The admin client's accepted-document file**, with HR-14's rule: the client computes the digest over the bytes it shows.
+- **May change:** `contracts/authz`, `contracts/audit`, `modules/security/`, the collector's request path, `docs/threat-model.md`, `docs/phase4/D3-*.md`.
+- **Acceptance (D6, independent):**
+  - A key holding only `node.baseline_ack` is refused for kind `network`, and the reverse case is refused too.
+  - A document that differs from the draft in anything but `authorized_writers` is refused.
+  - The chain shows `policy.apply` before the first network acknowledgement under it, and a forced write failure blocks adoption.
+- **Reviewers:** D6, D5 for the node's side, and D4 for the baseline document.
+
+#### P4-4-B6 (D6): GT-PCAP, the contract tests and the node-side runs
+
+- **Objective.** Finish GT-PCAP's labelled cases, and verify everything above before the sensor exists.
+- **Deliverables:**
+  1. **Contract tests** for C13, C4 0.3, C5 0.9, C7 0.10 and C8 0.12, ready before each package merges.
+  2. **GT-PCAP's labelled cases**, with their label files:
+     - the R6.3 malicious samples and near-misses for all nine rules;
+     - the `sa-failed` case;
+     - an operate with its response removed;
+     - the cookie and form-login cases, including a server-side value that can't be placed;
+     - the off-default ports;
+     - the R6.2 held-out benign series.
+
+     Labels come from tshark, never from the product.
+  3. **A test-only C13 source** under `tests/` that turns GT-PCAP labels into C13 records. It drives the node's intake through a real byte stream, so the node-side checks run before any sensor exists. It is never linked into either binary, and its results are marked as running without a sensor.
+  4. **The C-11 rig**, prepared: the namespaced veth pair, with its negative control. It runs once the sensor exists.
+- **May change:** `tests/`, `docs/verification.md` (plans and wording only), `.github/workflows/a6-gt-pcap.yml`.
+- **Reviewers:** D4 for the labels, D2 for protocol reading, D5 for the node runs.
+
+#### P4-4-B2 (D2): the C2 revision for AP-35
+
+- **Objective.** Tie the platform's known flows to one connection (D4-68, carried to C2).
+- **Deliverables:**
+  1. **A C2 0.8 proposal**, with D5's and D3's review:
+     - `local_addr` and `connected_at` in `SessionFacts`;
+     - the GetNext code;
+     - `ended_at` bounded to 9 fractional digits;
+     - the collector refusing to load when two enrolled assets share one host:port.
+  2. After D1 approves it, the code in `contracts/adapter` and the collector, with D6's tests.
+  3. **If the owner places the DNP3 SA specification in the project files,** confirm `sa-failed`'s codes and the g120v7 layout in a C13 note.
+- **May change:** `contracts/adapter`, `modules/ied/`, `docs/phase4/D2-*.md`.
+- **Reviewers:** D6, D3 for the collector, D5 for the node, and D4 for the known-flow tie.
+
+#### Order
+
+1. Contract code comes first, each package with D6's contract tests: `contracts/netobs`, `contracts/event` 0.3, `contracts/store` 0.9, `contracts/authz` 0.10 and `contracts/audit` 0.12. The C2 0.8 proposal goes beside it.
+2. Then, in parallel:
+   - D4's detector;
+   - D5's node side;
+   - D3's acknowledgement path;
+   - D6's labelled cases and test source.
+3. The node-side runs go over the test source as soon as D5's intake and D4's detector are in.
+4. The sensor brief follows the owner's choice on ADR-0009. V-M6, R6.4's latency and C-11 run only on the real sensor.
+
+The item 4 exit gate is set in the sensor brief. It holds every criterion the Stage A brief listed, and a brief may not lower them.
