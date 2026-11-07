@@ -1322,7 +1322,7 @@ Nothing captures traffic on a real network. Nothing scans, probes or transmits o
      - the records, the framing, and strict decoding with every bound in §10;
      - `coverage.settings` checked against its bounds in the decoder, so the node refuses values outside them;
      - the token grammar and the device-text rules;
-     - the citation, including the redaction markers (D4-67 as amended by D4-68 ruling 12);
+     - the citation, including the redaction markers (D4-67 as amended by D4-68 ruling 13);
      - the coverage statement with `coverage.settings`;
      - the baseline document and the two checkpoint documents, as above;
      - `TestWorstObservationFits`, `TestWorstStoredObservationFits` and `TestWorstAlertFits` (C13 §10). The last two pin a C4 event plus its capture at 64 KiB or less;
@@ -1383,7 +1383,7 @@ Nothing captures traffic on a real network. Nothing scans, probes or transmits o
      - the accepted file read once;
      - the adoption checks (#534 §1);
      - `policy.apply` written before any decision under a new key-kind digest, failing closed (ruling 9);
-     - `node.baseline_recorded` and `node.baseline_acknowledged` with kind `network`;
+     - `config.baseline_recorded` and `config.baseline_acknowledged` with kind `network` (#534 §2.1);
      - admin replies serialized where the node applies an acknowledgement (D5's note on #534).
 - **May change:** `contracts/store` (as approved), `platform/`, `cmd/otsec/`, `docs/phase4/D5-*.md`.
 - **Note:** the sensor's supervision tests go in their own package, because `platform/node`'s Windows test step is near its budget.
