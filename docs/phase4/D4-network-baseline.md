@@ -35,7 +35,7 @@ The baseline is one document per sensor, stored as C13 §8 gives it. Each entry 
 | --- | --- | --- |
 | `pairs` | (client endpoint, server endpoint, `l4`, server port, `protocol`) | `flow` `start` observations with `direction: client-server`. Midstream flows are learned only if the orientation is already known from a client-server flow on the same pair, never guessed. |
 | `services` | (server endpoint, `l4`, port, `protocol`) | `service` observations with `basis: content`. A port-only basis is kept apart and marked as such. |
-| `functions` | (pair, function code, sorted object set) | `function` observations |
+| `functions` | (pair, function code, `sub` where present, sorted object set) | `function` observations. `sub` is C13's field for Modbus 8's sub-function and 43's MEI type (C13 §4.3, §14) |
 | `addresses` | every endpoint seen | all observations |
 | `authorized_writers` | (client endpoint, server endpoint, class `write` or `control`) | **a person**, never the traffic (§2.3) |
 | `period` | start and end of learning, and observation counts by kind | the learner |
@@ -123,8 +123,8 @@ DNP3 0 (confirm) and the responses 129, 130 and 131 are never `function` observa
 | 15 (0Fh) | `write` | confirmed | S32 Table 10.31 p. 10.64; S23 p. 274 |
 | 16 (10h) | `write` | confirmed | as 1 to 4; operates outputs as 06h does |
 | 22, 23 | `write` | unknown | none held |
-| 43 with MEI type 14 | `read` | unknown | no held SEL device lists 2Bh |
-| 8 with sub-function 0 | `other` | confirmed: loopback | S22 Table E.18 p. E.11 |
+| 43 with MEI type 14 (`sub` 14) | `read` | unknown | no held SEL device lists 2Bh |
+| 8 with sub-function 0 (`sub` 0) | `other` | confirmed: loopback | S22 Table E.18 p. E.11 |
 | 8 with sub-function 1 or 4 | `control` | unknown | none held. D4 puts them in `control` because restarting communications or forcing listen-only mode can silence a device |
 | 8 with any other sub-function | `other` | unknown | none held |
 | 60h, 61h, 62h | `read` | confirmed: parameter information and text reads | S22 Table E.2 p. E.2 and p. E.17; S34 Table E.2 p. E.2 |
