@@ -40,10 +40,11 @@ Under this choice the node doesn't start, stop or restart the sensor. It doesn't
 
 ### Option (b): a sensor on its own Linux host
 
-The node supervises nothing. Restarting the sensor is that host's job: a systemd unit with its own user. The node sees only the link, and its side looks like a `syslog-tls` listener with mutual TLS:
+The node supervises nothing. Restarting the sensor is that host's job: a systemd unit with its own user. The node sees only the link, which uses mutual TLS. **The node opens it, and the node never listens for it** (AP-34, "never a listener open to the station LAN"; settled with D3 on #526):
 
-- **Enrollment.** The sensor is enrolled with a revocable credential like a node's (SC-11). The node accepts only that sensor's certificate.
-- **The listener.** It is bound to the site LAN interface only, never the monitoring interface, with a per-service firewall rule that allows only the sensor's address.
+- **Enrollment.** The sensor is enrolled with a revocable credential like a node's (SC-11). The node accepts only that sensor's certificate, and the sensor accepts only the node's.
+- **The listener is on the sensor host.** It is bound to that host's management interface only, never its monitoring interface, and its host firewall allows only the node's address. The node dials out to it, as it dials out to its forward targets, and its own firewall allows that one destination. The node gains no inbound port.
+- **Records still flow from the sensor to the node** over the connection the node opened. The node reads them, as in §2.
 - **Health.** The heartbeat, `sensor-unreachable` and the coverage-gap records work as above. A link outage is also a coverage gap, unless the sensor buffers its records and the gap is in the records it sends. A disk buffer on the sensor host is the sensor's design, so it belongs to D4.
 - **Attack surface.** The sensor host's own management interface and update path count as attack surface (D3's ADR row). Nothing on the node's side reduces that.
 
@@ -67,7 +68,7 @@ A record that fails these checks is dropped and counted, and the node raises `se
 
 **Back-pressure.** A passive sensor can't slow the network. When the node isn't reading, because the database is drain-only or a class is full, the sensor's in-memory queue fills, and the sensor drops and counts. Each heartbeat carries the sensor's counts: drops in the capture driver, in the decoder queue, and on the channel. The node persists them as health events, so every loss at every stage is recorded once.
 
-**What option (b) changes:** the transport is TLS over the site LAN instead of the pipe. The validation, the counting and the single writer stay the same.
+**What option (b) changes:** the transport is TLS over the site LAN instead of the pipe, on a connection the node opens (§1). The validation, the counting and the single writer stay the same.
 
 ## 3. C13 records in the store: database, classes and quotas
 
