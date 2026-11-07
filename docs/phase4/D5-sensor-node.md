@@ -89,7 +89,7 @@ The absolute bound would be a third class, `network-unresolved`. I recommend sta
 - the local consumer below keeps the observation class draining;
 - the first unresolved address is itself an alert, which goes to the alert class, aggregated as below.
 
-D3's view is that a rate budget is acceptable for 0.1 once the aggregation below is in. A third class is the fix only if D6's flood test shows resolved observations starved despite the budget. D1 rules with the C5 draft. If the ruling is a third class, the cost is one more quota in the volume sizing.
+D1 ruled a rate budget for 0.1, with D3's agreement, once the ring redaction (§4) and the aggregation below are in. A third class is the fix only if D6's flood test shows starvation (§9). If the ruling is a third class, the cost is one more quota in the volume sizing.
 
 **Alerts an attacker can forge cheaply are aggregated (D3).** The alert class is meant to be the safe one. An attacker who spoofs many source addresses could still fill it with forged first-seen alerts, pushing out the real ones. So an alert whose trigger costs an attacker nothing is aggregated:
 
@@ -219,7 +219,7 @@ These tests would show the design holds; D6's testability review decides the fin
 ## 9. Open points
 
 - **The class names, full actions, floors and alarm codes** are drafts for the C5 change at Order step 2. They depend on C13's record shapes.
-- **A third class for unresolved observations, or a rate budget** (§3): D3 accepts the rate budget for 0.1 with alert aggregation in, and D1 rules.
+- **A third class for unresolved observations, or a rate budget** (§3). D1 ruled a rate budget for 0.1, on condition that the ring redaction and the alert aggregation are in. D6's spoofing-flood test decides: if alerts or SER and Syslog are starved, `network-unresolved` becomes a C5 class before the gate. D1 records this with the decision that approves C13 and the C5 draft.
 - **The aggregation window and sample size** (§3): C13's and D4's.
 - **Retention of the capture ring by size only** (§4): if the owner needs a retention in days, that is D3's row and a C5 question.
 - **Driver access on Windows, and egress enforcement on Linux** (§7): `unknown` until ADR-0009's runs show them.
