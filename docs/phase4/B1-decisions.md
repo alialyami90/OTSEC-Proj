@@ -1068,3 +1068,15 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
   - Keep F-013's release-before-open rule, a reserve that only counts once it holds real space and is flushed, and AP-13's 60 s first wait.
   - Any change to C5's startup order or its report is a C5 minor bump, through a reviewed proposal first.
   - Proof is before and after Windows numbers from the PR's own code.
+
+## D4-65: the slow-start fix is merged, with two rulings (D1, 2026-11-07)
+
+- **The result.** P4-H4 merged as #520 (`28e94ae`), with D5 implementing and D6 and D3 reviewing. Evidence class: CI-Windows, with 543 starts per run.
+  - The step-1 split showed that the file flush of about 1 MiB of written zeros was about 92% of `store-reserve`.
+  - `CreateReserve` now reserves the space in one call: `fallocate` on Linux, and a non-sparse extend on Windows. It falls back to zero writes only on `ErrUnsupported`, and it keeps both flushes before a reserve counts.
+  - `store-reserve` median/p90 went from 151/366 and 138/383 ms to 9/19 and 8/14 ms.
+  - `total` median/p90 went from 325/922 and 322/954 ms to 196/736 and 179/672 ms.
+  - The three must-keeps are pinned by tests. Must-keep 1 is pinned by order only, because C-22 and H-14 are open.
+- **Ruling 1: no allocation read-back.** D3 asked for a read-back that falls back to zero writes when the allocation is short. On compressed or copy-on-write volumes, the zero writes hold no real space either, so a fallback cannot fix it. The only real fix is to fail the reserve on such volumes, which would change which file systems the node supports. The PR's note therefore records this as a known limit next to H-14. D1 takes the question to the owner in the next report: should the reserve fail (drain-only) where it can't hold real space? D3's Windows folder-flush item goes with it.
+- **Ruling 2: the Windows clock.** `TestReserveParts` dropped its `> 0` checks on the release and the allocation, because under the Windows clock tick both read 0. The exact sum and `reserve-sync > 0` stay. If `reserve-sync` ever reads 0, that check is dropped, not retried.
+- **Not fixed, and carried.** There are still starts over 6 s: 5 after the fix against 3 before. All of them sit in `store-open` or `record-start`, never the reserve. `store-open` is now about 47% of start time. Whether to brief it is the owner's call, alongside the next Phase 4 item (D4-34).
