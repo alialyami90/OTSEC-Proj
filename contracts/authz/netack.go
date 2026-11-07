@@ -129,9 +129,20 @@ func (a *AdminAccepted) validateKeys(contract string) error {
 	if a.KeysDigest == "" && a.Keys == nil {
 		return nil
 	}
-	switch {
-	case !NamesAdminKeys(contract):
+	if !NamesAdminKeys(contract) {
 		return fmt.Errorf("authz: a reply stamped %q carries admin.keys_digest or admin.keys, which need 0.%d", contract, networkAckSince)
+	}
+	return ValidateAdminKeys(a.KeysDigest, a.Keys)
+}
+
+// ValidateAdminKeys checks a keys digest and the list it names, as an
+// accepted reply carries them and as C8's policy.apply admin_keys record
+// copies them: both present, the entries well formed, sorted by key ID and
+// unique, each key's kinds sorted, unique and known, and the digest the one
+// AdminKeysDigest gives over the list.
+func ValidateAdminKeys(digest string, keys []AdminKeyEntry) error {
+	a := &AdminAccepted{KeysDigest: digest, Keys: keys}
+	switch {
 	case a.KeysDigest == "" || len(a.Keys) == 0:
 		return errors.New("authz: admin.keys_digest and admin.keys come together")
 	case !baselineDigestPattern.MatchString(a.KeysDigest):
