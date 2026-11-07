@@ -1,0 +1,340 @@
+{
+ "cases": {
+  "dnp3-authorized-operate": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "the same operate from the authorized master; dnp3_no_sa, no alert",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-authorized-time-sync": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "time-sync from a pair that time-synced in learning (class time-sync, not write)",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-known-master-new-port": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "the known master on a new TCP source port",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-new-master": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "a new master, enrolled nowhere, polls the outstation",
+    "rules": [
+     "unknown-pair",
+     "unresolved-address"
+    ],
+    "sa": "none"
+   }
+  ],
+  "dnp3-reader-disable-unsolicited": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "function 21 from a pair that never did the reconnect sequence (session-setup)",
+    "rules": [
+     "new-function"
+    ],
+    "sa": "none"
+   }
+  ],
+  "dnp3-reader-time-sync": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "a pair that only read starts a time-sync",
+    "rules": [
+     "new-function"
+    ],
+    "sa": "none"
+   }
+  ],
+  "dnp3-reconnect-learned": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     8,
+     12
+    ],
+    "note": "the reconnect sequence from a reading master that did it in learning (session-setup)",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-reconnect-unlearned": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     8,
+     12
+    ],
+    "note": "the same sequence from a reading master that never did it",
+    "rules": [
+     "new-function"
+    ],
+    "sa": "none"
+   }
+  ],
+  "dnp3-response-new-group": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "the outstation's response carries g30v1, never seen in learning; a response is not a function",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-reused-seq": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4
+    ],
+    "note": "unanswered; completed early by the reuse, sa absent, no dnp3_no_sa",
+    "rules": [],
+    "sa": ""
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     6,
+     8
+    ],
+    "note": "the reuse pairs with the response; dnp3_seq_reused exactly 1 for this capture",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-sa": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4
+    ],
+    "note": "reads only: sa none, class read, no dnp3_no_sa, no alert",
+    "rules": [],
+    "sa": "none"
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     8,
+     10,
+     12,
+     14
+    ],
+    "note": "challenged operate; the function 32 reply shares the sequence number; dnp3_seq_reused 0",
+    "rules": [],
+    "sa": "challenged"
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     16,
+     18
+    ],
+    "note": "aggressive-mode operate (g120v3 with g120v9): no dnp3_no_sa, no alert",
+    "rules": [],
+    "sa": "aggressive"
+   }
+  ],
+  "dnp3-sa-failed-before-ack": [
+   {
+    "context": "before-acknowledgement",
+    "frames": [
+     4,
+     6,
+     8,
+     10
+    ],
+    "note": "replayed on a node with no acknowledged baseline: sa-failed and nothing else (D1, D4-68)",
+    "rules": [
+     "sa-failed"
+    ],
+    "sa": "failed",
+    "sa_error_from": "outstation"
+   }
+  ],
+  "dnp3-sa-failed-master": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6,
+     8
+    ],
+    "note": "g120v7 in function 33 from the master; dnp3_seq_reused 0",
+    "rules": [
+     "sa-failed"
+    ],
+    "sa": "failed",
+    "sa_error_from": "master"
+   }
+  ],
+  "dnp3-sa-failed-outstation": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6,
+     8,
+     10
+    ],
+    "note": "g120v7 in function 131 from the outstation; authorized master",
+    "rules": [
+     "sa-failed"
+    ],
+    "sa": "failed",
+    "sa_error_from": "outstation"
+   }
+  ],
+  "dnp3-sa-failed-unauthorized": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6,
+     8,
+     10
+    ],
+    "note": "the same failure from a read-only master",
+    "rules": [
+     "sa-failed",
+     "unauthorized-write"
+    ],
+    "sa": "failed",
+    "sa_error_from": "outstation"
+   }
+  ],
+  "dnp3-unauthorized-operate": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4,
+     6
+    ],
+    "note": "direct operate from a read-only master; dnp3_no_sa",
+    "rules": [
+     "unauthorized-write"
+    ],
+    "sa": "none"
+   }
+  ],
+  "dnp3-unauthorized-operate-no-response": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     4
+    ],
+    "note": "derived from dnp3-unauthorized-operate, frames 6 and 7 removed; emitted at sa_reply_timeout_ms with sa absent; latency includes that wait",
+    "rules": [
+     "unauthorized-write"
+    ],
+    "sa": ""
+   }
+  ]
+ },
+ "net": {
+  "authorized_writers": [
+   [
+    "M1",
+    "O1",
+    "write"
+   ],
+   [
+    "M1",
+    "O1",
+    "control"
+   ]
+  ],
+  "masters": {
+   "M1": {
+    "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a10",
+    "ip": "192.0.2.10",
+    "link": 1,
+    "mac": "02:00:00:00:00:10",
+    "writes": [
+     "write",
+     "control"
+    ]
+   },
+   "M2": {
+    "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a11",
+    "ip": "192.0.2.11",
+    "link": 2,
+    "mac": "02:00:00:00:00:11",
+    "writes": []
+   },
+   "M3": {
+    "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a12",
+    "ip": "192.0.2.12",
+    "link": 3,
+    "mac": "02:00:00:00:00:12",
+    "writes": []
+   },
+   "M4": {
+    "asset": null,
+    "ip": "192.0.2.13",
+    "link": 4,
+    "mac": "02:00:00:00:00:13",
+    "writes": []
+   }
+  },
+  "outstation": {
+   "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20",
+   "ip": "192.0.2.20",
+   "link": 10,
+   "mac": "02:00:00:00:00:20",
+   "name": "O1",
+   "port": 20000
+  },
+  "sa_reply_timeout_ms": 5000
+ },
+ "series": {
+  "dnp3-heldout": {
+   "seconds": 3600,
+   "seed": 2,
+   "start_ns": 1762552800000000000
+  },
+  "dnp3-train": {
+   "seconds": 3600,
+   "seed": 1,
+   "start_ns": 1762545600000000000
+  }
+ }
+}
