@@ -208,10 +208,24 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		// Two assets on one transport layer, host and port: the node could
 		// not tie a flow there to one asset's session, so the collector does
 		// not start (C2 0.9 §4, D4-68). The host is compared unmapped and
-		// without a zone, as the sensor sees it.
+		// without a zone, as the sensor sees it. Only direct endpoints, those
+		// whose CheckPath passes, are compared: no other gets a session, and
+		// port-server assets sharing one port are a real multi-drop layout
+		// (D5, D1 on #547). A transport this check does not name is refused,
+		// so a new outbound one cannot pass unchecked (D3, D1 on #547).
 		for _, ep := range e.Asset.Endpoints {
-			l4 := map[asset.Transport]string{asset.Telnet: "tcp", asset.SSH: "tcp", asset.SNMPv3: "udp"}[ep.Transport]
-			if l4 == "" {
+			var l4 string
+			switch ep.Transport {
+			case asset.Telnet, asset.SSH:
+				l4 = "tcp"
+			case asset.SNMPv3:
+				l4 = "udp"
+			case asset.Serial, asset.SyslogUDP, asset.SyslogTCP, asset.SyslogTLS:
+				continue // no outbound connection: a line, or the device sends to the node
+			default:
+				return nil, fmt.Errorf("collector: asset %s: endpoint %s: transport %q is not one the shared-endpoint check knows", e.Asset.AssetID, ep.ID, ep.Transport)
+			}
+			if ep.CheckPath() != nil {
 				continue
 			}
 			a, err := netip.ParseAddr(ep.Host)
