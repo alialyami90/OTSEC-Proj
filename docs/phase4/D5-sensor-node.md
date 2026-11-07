@@ -87,9 +87,17 @@ This is the HR-11 lesson. A flood of unknown senders once had a rate budget only
 The absolute bound would be a third class, `network-unresolved`. I recommend starting with the rate budget, for two reasons:
 
 - the local consumer below keeps the observation class draining;
-- the first unresolved address is itself an alert, which goes to the alert class.
+- the first unresolved address is itself an alert, which goes to the alert class, aggregated as below.
 
-D3 and D1 rule on this with the C5 draft. If the ruling is a third class, the cost is one more quota in the volume sizing.
+D3's view is that a rate budget is acceptable for 0.1 once the aggregation below is in. A third class is the fix only if D6's flood test shows resolved observations starved despite the budget. D1 rules with the C5 draft. If the ruling is a third class, the cost is one more quota in the volume sizing.
+
+**Alerts an attacker can forge cheaply are aggregated (D3).** The alert class is meant to be the safe one. An attacker who spoofs many source addresses could still fill it with forged first-seen alerts, pushing out the real ones. So an alert whose trigger costs an attacker nothing is aggregated:
+
+- This covers a new unresolved address, and a new pair from an unresolved source.
+- There is one alert per kind per window. It carries a count and a bounded sample of the cited frames, not one alert per address.
+- The window and the sample size are C13's, with D4's baseline note. The class's `MaxRecordBytes` bounds the sample's bytes.
+
+The node enforces this bound where alerts enter the store, whichever side raises them. If the sensor raises them, the node does not trust it to aggregate. A record of an aggregated kind beyond one per window is refused and counted (`sensor-record-refused`), so a compromised sensor cannot use those kinds to fill the class either. An alert of any other kind is unaffected.
 
 **Pruning needs a consumer.** C5 never prunes a stream with no consumer, and never evicts unconfirmed records (ADR-0004 item 9). Observations are not forwarded as they arrive: whether they are C4 events is C13's choice, and the configuration documents set the precedent that typed documents are not. So with no consumer the observation stream would fill once and then drop everything new, forever.
 
@@ -112,6 +120,11 @@ R6.5 needs every alert's packets to be retrievable. C13 has every observation an
 
 - **An alert carries its cited packets as its C5 capture.** The store already keeps each capture once, keyed by its SHA-256, and deletes it only in the prune step that removes the last record referring to it (EP-6). So an alert's packets live exactly as long as the alert does. The alert class's `MaxRecordBytes` bounds the bytes per alert (C13 sets how many frames an alert may cite).
 - **An observation carries only its citation.** The bytes stay in the sensor's capture ring: a fixed set of capture files in the sensor's own data directory, with a fixed total size set in the sensor's configuration and counted in the volume rule. An observation's packets can be retrieved while the ring holds them, and its hash and frame numbers last for as long as the observation does. Keeping every observation's bytes in the store would let an attacker turn traffic straight into used storage.
+- **The ring is written redacted (D3, D4-67 on #524).** Raw capture files would hold every cleartext credential on the segment at rest, the platform's own SEL Level 1 password included. That covers Telnet and FTP passwords, SNMPv1 and v2c communities, and HTTP Basic headers. So the sensor applies D4-67's positional redaction before it writes a frame to the ring, never after. Two rules follow:
+  - **It fails closed.** Where a slot can't be placed, the client-sent bytes of that login are not written. This is D4-67's rule for the store, applied to the ring.
+  - **Ring frames carry the same markers as a citation.** A cited SHA-256 is over the redacted bytes, so it checks against what the ring keeps, and an alert's stored capture and the ring agree byte for byte.
+
+  This protects the disk at rest, a stolen node and other local readers. It does not protect against a compromised sensor, which still sees live traffic (AP-33's scope).
 - **Nothing leaves the site, by construction.** The forwarder reads events only. `modules/telemetry/forward` never calls `Outbox.ReadCapture` (grep, at `7e09898`). On the node, only quarantine export, identity and the event-baseline feeder read captures. So cited bytes are never forwarded upstream; their hash and frame numbers are (D3's stored-captures row).
 - **Retention.** An alert's bytes go when the alert is pruned, which needs every required consumer to have confirmed it. The ring's retention is its size divided by the traffic rate, and status shows the age of the oldest file in the ring. A fixed retention in days would need deletion that C5 doesn't do, so I don't propose one. If the owner needs one, it is D3's row and a C5 question.
 - **Who may read them.** The ring's directory gets a protected DACL: the sensor's account, plus whatever D3's row names for the security role. The node's account doesn't read the ring, and status never shows packet bytes. Reading an alert's packets from the store goes through a security-role export, like quarantine export. D3's row decides the role.
@@ -197,6 +210,8 @@ These tests would show the design holds; D6's testability review decides the fin
 | Hostile records are refused | Oversized frames, malformed C13, and banners with control characters are each dropped and counted, and the connection stays up. |
 | A flood of observations doesn't take the alerts' room | Fill `network-observation` to its quota; alerts still store, and observations are counted as dropped. |
 | A flood of unresolved addresses doesn't take resolved assets' room | Spend the unresolved budget; resolved observations still store. |
+| Spoofed addresses can't fill the alert class (D3) | Spoof N source addresses in one window. The alert class grows by a bound that doesn't depend on N, and a real alert in the same window still stores. Do the same with the sensor sending one first-seen alert per address: the node refuses all but one per window, and counts them. |
+| The ring holds no cleartext credential (D3, D4-67) | Replay GT-PCAP's Telnet, FTP, SNMPv1 and v2c, and HTTP Basic sessions, including a midstream login. The ring's files contain none of the known test secrets. The midstream login's client bytes are absent, and every cited hash matches the ring's bytes. |
 | Observations are pruned once consumed | The consumer's cursor moves after a checkpoint, and a prune frees the space. |
 | Gaps are recorded | Kill the sensor: `sensor-unreachable` is raised after 60 s, and the gap record is closed when the sensor returns. |
 | Packets stay at the site | A forwarded alert carries the hash and frame numbers and no packet bytes. |
@@ -204,7 +219,8 @@ These tests would show the design holds; D6's testability review decides the fin
 ## 9. Open points
 
 - **The class names, full actions, floors and alarm codes** are drafts for the C5 change at Order step 2. They depend on C13's record shapes.
-- **A third class for unresolved observations, or a rate budget** (§3): D3 and D1 rule.
+- **A third class for unresolved observations, or a rate budget** (§3): D3 accepts the rate budget for 0.1 with alert aggregation in, and D1 rules.
+- **The aggregation window and sample size** (§3): C13's and D4's.
 - **Retention of the capture ring by size only** (§4): if the owner needs a retention in days, that is D3's row and a C5 question.
 - **Driver access on Windows, and egress enforcement on Linux** (§7): `unknown` until ADR-0009's runs show them.
 - **Option (b)'s buffering on the sensor host:** D4's design.
