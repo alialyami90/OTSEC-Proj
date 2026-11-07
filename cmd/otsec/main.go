@@ -60,6 +60,7 @@ const usage = `usage:
 `
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	began := time.Now() // the node start timing line counts from here (P4-H2)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -95,14 +96,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
-	cfg, err := node.LoadConfig(*configPath)
+	loading := time.Now()
+	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	pre := node.PreStart{Began: began, Config: time.Since(loading)}
 	switch args[0] {
 	case "node":
-		err = runNode(ctx, cfg, stderr)
+		err = startNode(ctx, cfg, pre, stderr)
 	case "install":
 		exe, xerr := os.Executable()
 		if xerr != nil {
@@ -166,17 +169,24 @@ func report(stderr io.Writer, err error) int {
 	return 0
 }
 
+// loadConfig and startNode are node.LoadConfig and runNode in run. A test
+// replaces them to check the start time run passes to the node (P4-H2).
+var (
+	loadConfig = node.LoadConfig
+	startNode  = runNode
+)
+
 // runNode runs the node: under the Windows SCM when the SCM started the
 // process, otherwise in the foreground until SIGINT or SIGTERM.
-func runNode(ctx context.Context, cfg *node.Config, stderr io.Writer) error {
+func runNode(ctx context.Context, cfg *node.Config, pre node.PreStart, stderr io.Writer) error {
 	if ok, err := winsvc.IsService(); err != nil {
 		return err
 	} else if ok {
-		return winsvc.Run(func(ctx context.Context, oslog func(string)) error { return node.Run(ctx, cfg, oslog) })
+		return winsvc.Run(func(ctx context.Context, oslog func(string)) error { return node.RunFrom(ctx, cfg, oslog, pre) })
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return node.Run(ctx, cfg, func(s string) { fmt.Fprintln(stderr, s) })
+	return node.RunFrom(ctx, cfg, func(s string) { fmt.Fprintln(stderr, s) }, pre)
 }
 
 func assets(cfg *node.Config, w io.Writer) error {

@@ -48,6 +48,7 @@ func start(t *testing.T, c *Config, dir string) (*Runtime, *Status, *[]string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(r.StartLine()) // read by CI's Windows start timing step (P4-H2)
 	return r, st, &logged
 }
 
