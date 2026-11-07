@@ -1149,7 +1149,8 @@ Nothing captures traffic on a real network. Every capture is either a public one
 
 **Starting point.** The Phase 0 evaluation (`docs/phase0/A4-telemetry-feasibility.md` §3 and §4, E-A4-01) found the following:
 
-- Zeek 8.0.4 decodes DNP3 and Modbus, including midstream sessions. Suricata 7.0.3 decodes them only with `stream.midstream=true`.
+- Zeek 8.0.4 decoded all 6 DNP3 captures, including midstream, and Modbus on 2 of 3.
+- Suricata 7.0.3 decoded 4 of 6 DNP3 captures by default. The 2 captured without the handshake needed `stream.midstream=true`. It decoded Modbus on 1 of 3 by default and 2 of 3 with midstream.
 - Neither engine decodes IEC 61850 MMS, GOOSE, SV or IEC 60870-5-104.
 - A6 broke the throwaway GOOSE sequence check: all 8 of its 8 adversarial cases failed (R-A4-4).
 
@@ -1161,7 +1162,7 @@ The provisional direction is Zeek as a separate supervised process (ADR-0002 ite
 
 - DNP3 and Modbus/TCP, which Zeek decodes.
 - R6.7's insecure list from V-M6: Telnet, FTP, plain HTTP, SNMPv1 and v2c, unauthenticated Modbus/TCP, and DNP3 without Secure Authentication.
-- SNMPv3 and the SEL Telnet sessions that the platform itself runs, so that the platform's own traffic is a known flow and not an alert (ADR-0007 item 7).
+- SNMPv3 and the SEL Telnet sessions that the platform itself runs. These are a known flow for the baseline and the unknown-flow alerts, but they are still recorded as an insecure service under R6.7, because the SEL-751's only path is Telnet (D4, D2).
 
 IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms they are in use. Each of them needs its own decoder, and GOOSE needs every precondition R-A4-4 lists.
 
@@ -1189,7 +1190,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
 
      For each option it records the following, with sources and a re-check of upstream (ICSNPP and the Zeek packages change):
      - whether it runs on Windows, shown by a run on `windows-latest` in a dispatched workflow, or else marked `unknown`. Offline decoding of a capture file (no driver) is recorded apart from live capture. A `windows-latest` result is labelled Windows Server, not ADR-0007's 10/11 LTSC floor (D5);
-     - the capture driver and its licence for a product that ships it;
+     - the capture driver and its licence for a product that ships it, and the engine's own licence (Zeek BSD, Suricata GPLv2) (D4);
      - which of the protocols above it decodes, shown on the public captures;
      - midstream handling;
      - PRP duplicate handling;
@@ -1209,8 +1210,8 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
      - **The baseline:** who talks to whom, and which function codes are used per pair, against a baseline of authorized masters (A4 §3: "write = bad" alerts on routine time sync).
      - **The insecure-list rule.**
      - **The platform's own traffic.** A known flow is tied to the node's own session record: the asset, the time window of a scheduled or granted session, and the destination. Traffic outside that record is alerted, even when it comes from the node's address, so that spoofing the node's address does not hide a session (D3).
-     - **How R6.7's observations reach C12's matcher** without a C12 change (D4-53).
-- **May change:** `contracts/` (drafts only, in a PR for review), `modules/detection/`, `modules/telemetry/experiments/`, `docs/decisions/` (the ADR draft), and `docs/phase4/D4-*.md`.
+     - **How R6.7's observations reach C12's matcher** without a C12 change (D4-53). A FID or an SNMPv3 engine ID read passively from the platform's own sessions doesn't corroborate the identity those sessions already read, and doesn't count twice in C12 (D2).
+- **May change:** `contracts/` (drafts only, in a PR for review), `modules/detection/`, `modules/telemetry/experiments/`, a dispatch-only `.github/workflows/d4-sensor-eval.yml`, `docs/decisions/` (the ADR draft), and `docs/phase4/D4-*.md`.
 - **Exclusions.**
   - No sensor code is merged in this stage.
   - No ML.
@@ -1226,7 +1227,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   - which services are on the insecure list;
   - what a passive sensor can read in clear for identity (R1.1, R6.7).
 
-  Mark a service `unknown` where the document is silent. Nothing is guessed.
+  The sources are the manuals already in the project files (S22 to S43). Nothing is taken from the web without the owner's leave (D4-58). Mark a service `unknown` where the document is silent. Nothing is guessed.
 - **May change:** `docs/device-capabilities.md` and `docs/phase4/D2-*.md`.
 - **Reviewers:** D4 and D6.
 
