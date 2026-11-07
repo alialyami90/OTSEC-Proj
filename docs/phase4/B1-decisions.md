@@ -1160,5 +1160,5 @@ D1, on #539 to #544, with each owner's and reviewer's word through the coordinat
   - `stored_capture` sits in `node` only;
   - `node.function_table` is present exactly when `function_class` is.
 
-  They go to C13's reviewers (D2, D3, D5, D6) in the same PR as the code that relies on them.
+  The text is in C13 §14, reviewed by C13's reviewers (D2, D3, D5, D6) in #543. It merges before the `contracts/netobs` code that relies on it, and that PR cites #543 for it.
 - **PRP in ADR-0009 (D4's #540, E-D4-02, simulated).** Stock Suricata and Zeek keep both PRP copies. Under options (a) and (b), a site whose station network is PRP needs a duplicate-discard stage. That stage discards only a copy that is byte-identical apart from the LAN ID. It counts a mismatched "duplicate" as a signal, and its table is bounded and counted (D3, carried to the sensor brief). ADR-0009 stays proposed.
