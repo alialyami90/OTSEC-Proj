@@ -45,7 +45,7 @@ These were read from `raw.githubusercontent.com`, the only upstream host this en
 | **The engine's own licence** | Zeek BSD, ICSNPP BSD-3 (`desk`). Suricata GPLv2 (`desk`): a separate process is not linking, but shipping its binary brings the GPL's distribution duties (source offer, licence text). | The same engines and licences, shipped on the sensor's image, or the customer installs them. Who ships the Linux image is an open question. | The project's own code. Any decoder library taken in must not be GPL (brief exclusion: no libiec61850 or lib60870 linked). |
 | **Protocols decoded**, shown on the public captures | E-A4-01 (`simulated (Linux)`): Zeek 8.0.4 decoded all 6 DNP3 captures, including midstream, and Modbus on 2 of 3. Suricata 7.0.3 decoded 4 of 6 DNP3 captures by default (2 more with midstream), and Modbus on 1 of 3 by default (2 of 3 with midstream). Neither decodes IEC 61850 MMS, GOOSE, SV or IEC 104. On Windows: `unknown`. Telnet, FTP, HTTP and SNMP are decoded by both (`desk`, E-A4-01 table, "built in"). | As E-A4-01, on the same OS it ran on. | None yet. DNP3 and Modbus/TCP framing are small, documented formats. IEC 61850 and IEC 104 need their own decoders under every option, because no stock engine has them (A4 Q4). |
 | **Midstream handling** | Zeek: yes (`simulated (Linux)`). Suricata: only with `stream.midstream=true`, whose false-positive cost has not been measured (A4 §3). | The same. | A design choice. The decoder must start on any frame (A4 §4), and that is testable on the two handshake-less captures. |
-| **PRP duplicate handling** (two copies with the same RCT sequence number, LAN A and LAN B). Pass: each flow and service is recorded once, with counts equal to those from the LAN-A-only capture (D6). | Neither engine is documented here as discarding PRP duplicates by RCT. `unknown` until E-D4-02 runs D6's PRP derived captures offline on Linux, as E-A4-01 did, with Suricata's `stream.midstream=true`. If they don't, either a pre-filter strips RCT duplicates before the engine, or every count is doubled. | The same as (a). | A design choice. Discard by (source MAC, RCT sequence number) before decoding, as A4 §4 and R-A4-4 already require. |
+| **PRP duplicate handling** (two copies with the same RCT sequence number, LAN A and LAN B). Pass: each flow and service is recorded once, with counts equal to those from the LAN-A-only capture (D6). | **Fails as stock engines** (E-D4-02, `simulated (Linux)`, offline). Suricata 7.0.3 and Zeek 8.0.4 each record every flow once, with the same service, but count both LAN copies: on `-ab` every packet total is exactly twice the `-a` total, in all 18 rows. So neither discards PRP duplicates by RCT. **Requirement:** a PRP duplicate-discard stage before the engine, keyed on (source MAC, RCT sequence number) (D1). It applies only if the site's station network is PRP, which is still asked of the owner. | The same as (a): the same engines, and the same requirement. | A design choice. Discard by (source MAC, RCT sequence number) before decoding, as A4 §4 and R-A4-4 already require. |
 | **Process and privilege** | D5 (#525, `docs/phase4/D5-sensor-node.md`): the sensor is its own SCM service (`NT SERVICE\otsec-sensor`, its own service SID, SCM restart), not a child of the node. A child would run under the node's account, so a decoder exploit would reach the store and keys. W-2 also denies the node the privilege to start a child under another account (ADR-0002 items 2 and 5 agree). It never runs as LocalSystem or in Administrators. Whether Npcap's "restrict to administrators" install option would force that is `unknown` (npcap.com refused). If it would, Npcap is installed without the option, and capture access is limited by other means, which is still to be designed. | A whole host whose only job is the sensor. The engine runs with `CAP_NET_RAW` only, dropped after the socket opens (AP-31). The node supervises nothing; D5's note covers the link's health instead. | As (a): its own SCM service and service SID. The decoder process needs no capture privilege if it reads capture files written by `pktmon` (c′). Something must start `pktmon` and keep it running. If that needs Administrators, it is a third privileged process, best kept as a small SCM service that runs only `pktmon` and parses no packets (D5). Its account is `unknown`. E-D4-01 ran as the runner's administrator, so it cannot show it; a run under a less-privileged account, or a lab run, must. |
 | **Live interface fed by a timed replay** (R6.4 latency, the C-11 test) | On Windows Server: `unknown`. There is no network namespace or veth on Windows. A loopback adapter or Npcap's send path would be needed, and the sensor itself must never use that path (AP-32). | Expected, but not yet shown: a veth pair across network namespaces with a timed replayer, the rig in D6's plan §6 (#527). No project workflow uses veth or a replayer yet. V-M8's paired runs use `unshare -n` with loopback only (`ci.yml`), so they are not a precedent for this (D6). | As (a) on the node. Or the decoder is tested on Linux with the same veth replay, which proves the decoder but not the Windows capture. |
 | **Channel to the node and how it is authenticated** | A named pipe on the collector's pattern: each end checks the other's service SID, and only the node writes the store (D5, #525; AP-34). | A network link with enrollment and a revocable credential like a node's (SC-11). The new device's own management interface and update path count as attack surface (D3). The node opens the link, so the node gains no inbound port. The sensor host's listener is bound to its management interface only and firewalled to the node's address, and never listens on the station LAN (D5, agreeing with AP-34). | As (a). |
@@ -88,7 +88,7 @@ All of these stay `unknown` until a lab machine runs them (H-06's hardware run, 
 
 **E-D4-01 does not choose an option.** It shows only that unfiltered capture works on Windows Server 2025 as administrator, simulated in CI, with no third-party driver. That keeps the `pktmon` variant possible; it does not show the variant is good enough for a site, and it says nothing for or against (a), (b) or (c).
 
-### E-D4-02 (to run)
+### E-D4-02 results
 
 E-D4-02 answers the PRP row. `modules/telemetry/experiments/prp-engines/` works in five steps:
 
@@ -98,7 +98,32 @@ E-D4-02 answers the PRP row. `modules/telemetry/experiments/prp-engines/` works 
 4. It checks the row's pass condition for each capture and engine. Each flow must have as many records on `-ab` as on `-a`, with the same packet total and the same service (Zeek's `service`, Suricata's `app_proto`). Every labelled flow must be in the `-a` output with its labelled packet count, so a flow that both runs drop does not pass (D6).
 5. A capture whose logs are missing reads `not run`, and the job fails unless every row passes. A `not run` row is `unknown`, never a pass (D6).
 
-It runs as the `prp-engines` job of the same dispatch-only workflow on `ubuntu-24.04` (`simulated (Linux)`), so it runs after the PR that adds it merges. Its table is added here in a follow-up.
+**The run.** Run 42407918524, job `prp-engines`, on `main` at `7716087`, `ubuntu-24.04`, on 2026-11-07 (`simulated (Linux)`, offline files, not live capture). Versions: Suricata 7.0.3, Zeek 8.0.4 (`zeek/zeek@sha256:753a694a1fc3a3447f3be02d5a0b80ac77f70b47d298de736e855e6d9799a3fa`), and tshark 4.2.2. Every PRP pair's trailers checked out, and every capture ran. The job exits 1 because rows fail, as designed.
+
+| Capture | Labelled flows | Flows `-a` / `-ab` | Packets `-a` / `-ab` | Once | Packets equal | Services equal | Labels met |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| dnp3-digitalbond-part1 | 8 | 8 / 8 | 181 / 362 | yes | no | yes | 8 of 8 |
+| dnp3-digitalbond-part2 | 1 | 1 / 1 | 33 / 66 | yes | no | yes | 1 of 1 |
+| dnp3-malformed | 198 | 198 / 198 | 198 / 396 | yes | no | yes | 198 of 198 |
+| dnp3-read | 1 | 1 / 1 | 8 / 16 | yes | no | yes | 1 of 1 |
+| dnp3-select-operate | 1 | 1 / 1 | 12 / 24 | yes | no | yes | 1 of 1 |
+| dnp3-write | 1 | 1 / 1 | 8 / 16 | yes | no | yes | 1 of 1 |
+| modbus | 1 | 1 / 1 | 102 / 204 | yes | no | yes | 1 of 1 |
+| modbus-digitalbond-part1 | 6 | 6 / 6 | 118 / 236 | yes | no | yes | 6 of 6 |
+| modbus-digitalbond-part2 | 1 | 1 / 1 | 350 / 700 | yes | no | yes | 1 of 1 |
+
+The two engines gave identical rows, so each row stands for both.
+
+**What it shows.**
+- **The doubling is the only failure** (the `-ab` and `-a` columns, as D6 asked). Neither engine splits a flow or changes its service when both LAN copies are present. But both count every copy, so each packet total doubles.
+- **There is no R6.1 gap.** Every flow tshark labels is in both engines' `-a` output with its labelled packet count.
+- **The requirement on (a) and (b)** (D1): a PRP duplicate-discard stage, keyed on (source MAC, RCT sequence number), runs before the engine. Under (c) the project's own decoder does the same discard (A4 §4, R-A4-4). Whichever option runs, the sensor reports it in C13's `prp.duplicates_discarded`. A sensor that sees both LANs and does not discard is a coverage mismatch at the node, not data (C13 §4.4). The requirement applies only where the station network is PRP, which the owner has yet to say.
+
+**What it doesn't show.**
+- Live capture on either LAN, or behaviour on Windows.
+- HSR (protocol point 5).
+- Whether a pre-filter in front of an engine keeps up at line rate.
+- What the engines' own alert rules do with doubled packets. The run read flow and service records only.
 
 ## What decides it
 
@@ -107,7 +132,7 @@ The options split on two questions only the owner can answer, and on two experim
 1. **Owner: may a site have a second machine for the sensor?** If yes, (b) is the only option where the engine is already shown decoding the first protocols (E-A4-01, on Linux), with no Windows driver licence, and with hostile parsing off the machine that holds the store and the collector's route. Its costs are a second box to enrol, patch and protect (D3's row), and the owner's hardware budget.
 2. **Owner: is an Npcap OEM licence acceptable?** If it is not, and (b) is not allowed, (a) and (c) depend on `pktmon` (variant ′) being good enough. Today that is `unknown`.
 3. **E-D4-01:** `pktmon` captures and converts to pcapng with no third-party driver on Windows Server 2025 (run on 2026-11-07). Whether it does so under a service account with less privilege, on a SPAN port, with layer-2 frames intact, and on a client edition is still `unknown`. Suricata's Windows build was not run.
-4. **E-D4-02, on D6's PRP captures:** whether the engines discard RCT duplicates. If not, a pre-filter is needed under (a) and (b).
+4. **E-D4-02, on D6's PRP captures:** neither engine discards RCT duplicates (run on 2026-11-07). If the station network is PRP, (a) and (b) need a duplicate-discard stage before the engine, and (c) builds it into its decoder. This doesn't separate the options, but it adds a component to (a) and (b).
 
 ## Decision
 
