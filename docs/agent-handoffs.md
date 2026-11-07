@@ -1109,3 +1109,34 @@ In the order of `docs/phase4/D4-c12-0.2.md` §8 and §10:
 #### Order
 
 P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touch different paths. P4-H1's D5 part follows D3's part, and P4-H3's step 2 follows its step 1. P4-H2 uses Windows CI time, so a V-M1-length leg is not added while it runs.
+
+## After the hardening briefs: P4-H4 (issued 2026-11-07, D4-64)
+
+#### P4-H4 (D5): make the store's start-up reserve step faster on Windows
+
+- **Objective.** P4-H2's numbers show where slow node starts spend their time (`docs/phase4/D5-windows-start.md`). In the Windows `go` job, `store-reserve` was 49% of all start time and the largest phase in 404 of 541 starts, with `store-open` second. P4-H4 makes `store-reserve` faster without weakening anything it protects. Real service starts already took 0.7 to 1.2 s, so the goal is the loaded case, not a new feature.
+- **What the step does today.** At every start, C5's startup releases the recovery reserve before the store is first opened (F-013). After recovery, `platform/store.Env.CreateReserve` re-creates the reserve by writing `RecoveryReserveBytes` of zeros in 64 KiB writes, then flushes the file and its folder. This happens for each of the node's databases.
+- **Step 1, measure before changing (desk and CI-Windows).** Split `store-reserve` into the release, the zero writes, the file flush and the folder flush, as new phases in the P4-H2 line (for example `reserve-release`, `reserve-write`, `reserve-sync` and `reserve-dirsync`), so that the service job's real SCM starts show it too, and `TestStartLine` pins the names. The line keeps its rule: phase names and milliseconds only, with no path, key or device text. This step-1 commit, with no fix, is the baseline for the acceptance numbers. Report which part dominates on `windows-latest`, with the run link. The fix targets that part, not a guess.
+- **Step 2, the fix.** D5 picks the smallest change that removes the dominant part. Candidates to weigh with numbers:
+  - larger writes;
+  - one preallocation call in place of the writes, if the space is really allocated (no sparse file), still followed by the same flushes as today: the file flush, and the folder flush where the store has one. On Windows `syncDir` is a no-op today (`platform/store/os_windows.go`), so there the reserve has the file flush only. Adding a Windows folder flush is a separate question and is not part of P4-H4 (D5 on #519).
+
+  Skipping the release at a clean start is out of scope, because it breaks must-keep 1 (D3 on #519).
+
+  Any change to C5's startup order, or to what the startup report or its alarms say, is a C5 minor bump. It needs a proposal reviewed by D6 and D3, and D1's approval, before any code.
+- **Must keep** (D3 on #515, D4-63):
+  1. F-013's rule. The recovery reserve is released before the store is first opened, and nothing opens the store before that.
+  2. A reserve counts only once it holds real space and is flushed. A start never reports a reserve that a full disk could take away. ADR-0004 item 8 still holds: a node whose reserve cannot be re-created alarms and does not collect.
+  3. AP-13's 60 s first wait before the first collector exchange.
+- **Deliverables.**
+  1. The step 1 split, in `docs/phase4/D5-windows-start.md` as a new section.
+  2. The change, with tests. Every existing V-S9 and storage-exhaustion test passes unchanged, and a test pins that the reserve holds its full size on disk. The test reads the space allocated, not the file's length: `Stat_t.Blocks` times 512 on Linux, and the allocation size from `GetFileInformationByHandleEx` on Windows. `Stat().Size()` passes for a sparse file and does not count. It runs on both OS legs. On Linux, a mutant that replaces the writes with `Truncate(n)` fails it. On Windows, extending a non-sparse file may allocate its clusters (a desk reading, untested), so there the mutant marks the file sparse (`FSCTL_SET_SPARSE`) and then truncates, and fails it. D5 reports in the note what a plain `Truncate(n)` allocates on `windows-latest` (D3 on #519). A second test pins the flush: a fault hook makes the file flush fail, and on Linux the folder flush too, and the test checks that `CreateReserve` returns an error and removes the file, and that the node raises the ADR-0004 item 8 alarm and does not collect.
+  3. Before and after numbers from the platform budget step and the P4-H2 line on `windows-latest`. "Before" is the step-1 commit and "after" is the fix head, both on the PR's own code, with two `go (windows-latest)` runs on each side. They go in the same note, with run links.
+  4. The note states that CI pins must-keep 1 by order only, not by reproducing F-013 on a full NTFS volume (C-22, H-14 still open). Next to H-14, it records a known limit that P4-H4 does not open: with no folder flush on Windows, a crash can lose the reserve's directory entry, and the next start then takes the existing "reserve missing" path (D6 on #519).
+- **May change:** `platform/store/`, `platform/node/`, `docs/phase4/D5-*.md`. A change in `contracts/store/` only through the C5 proposal above.
+- **Acceptance.**
+  - Both workflows are green on Linux and Windows.
+  - In the Windows `go` job, the median and the p90 of `store-reserve` both fall from the step-1 baseline to the fix head, and so do the median and the p90 of `total`.
+  - The three properties above are each pinned by a test that fails if the property is broken.
+- **Exclusions.** No change to `RecoveryReserveBytes`, `LastResortReserveBytes` or `OpenHeadroomBytes`. No change to `store-open` in this PR; if it remains the next cost, D5 says so in the note and D1 decides. No skipped or loosened test.
+- **Reviewers:** D6 for reliability, D3 for the trust boundary and the three properties.
