@@ -1203,7 +1203,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   2. **Contract draft C13 `otsec.netobs/0.1`.**
      - **Observations:** a flow or service seen. Each holds the addresses, ports, protocol and the version where it shows in clear, and the asset it resolves to, or `asset-unresolved`.
      - **Packet citation:** each observation cites its packets as the capture's ID and the frame numbers, plus the SHA-256 of the cited bytes.
-     - **Device text is hostile input.** A version or banner read in clear is bounded printable ASCII, kept quoted and never interpreted, as in C12 0.2. It never reaches a Syslog forward or a status line raw (D3).
+     - **Device text is hostile input.** A version or banner read in clear is bounded printable ASCII, kept quoted and never interpreted, as C2's record values are (`contracts/adapter/doc.go`). It never reaches a Syslog forward or a status line raw (D3).
      - **Coverage statement:** the sensor states which protocols it decodes, which LANs and VLANs it sees, and whether it uses SPAN or a TAP. The statement is attached to every observation and alert (A4 §4, R6.1).
      - **Alerts:** the alert form reuses C10's departure alarm form where it fits. D4 says where it doesn't fit and why. It has no ML field.
   3. **A design note, `docs/phase4/D4-network-baseline.md`,** with the following content:
