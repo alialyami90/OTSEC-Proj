@@ -108,9 +108,10 @@ func contains(xs []string, s string) bool {
 
 func send(x *Exchange, o *Out) Send { return Send{Bytes: o.Encode(x.User)} }
 
-func isGet(x *Exchange) bool  { return x.Scoped.PDU.Tag == PDUGet }
-func isBulk(x *Exchange) bool { return x.Scoped.PDU.Tag == PDUGetBulk }
-func anyReq(*Exchange) bool   { return true }
+func isGet(x *Exchange) bool     { return x.Scoped.PDU.Tag == PDUGet }
+func isBulk(x *Exchange) bool    { return x.Scoped.PDU.Tag == PDUGetBulk }
+func isGetNext(x *Exchange) bool { return x.Scoped.PDU.Tag == PDUGetNext }
+func anyReq(*Exchange) bool      { return true }
 
 // onResponse calls f for the i-th exchange (1-based) that reached the
 // response stage and matches filter; every other exchange gets the default.
@@ -331,6 +332,33 @@ var cases = map[string]caseDef{
 		// RFC 3416 4.2.3: past the end, a repetition's varbind is
 		// endOfMibView under the name it was asked for, the one before.
 		return append(b[:k+1], Bind{OID: b[k].OID, Tag: EndOfMibView})
+	})},
+	// A noError Response whose binding count is not the request's (RFC 3416
+	// 4.2.1, 4.2.2; C2 0.9, D4-60). W10 answers the first get with its first
+	// binding only. W11 and W12 answer the second GetNext of a walk with no
+	// binding and with two, after one well-formed GetNext Response, so the
+	// client has kept values before the one that ends the run.
+	"W10": {hook: onResponse(isGet, func(a *Agent, x *Exchange, i int) []Send {
+		o := copyOut(a, x)
+		if i == 1 && len(o.Scoped.PDU.Binds) > 1 {
+			o.Scoped.PDU.Binds = o.Scoped.PDU.Binds[:1]
+		}
+		return []Send{send(x, o)}
+	})},
+	"W11": {hook: onResponse(isGetNext, func(a *Agent, x *Exchange, i int) []Send {
+		o := copyOut(a, x)
+		if i == 2 {
+			o.Scoped.PDU.Binds = nil
+		}
+		return []Send{send(x, o)}
+	})},
+	"W12": {hook: onResponse(isGetNext, func(a *Agent, x *Exchange, i int) []Send {
+		o := copyOut(a, x)
+		if i == 2 && len(o.Scoped.PDU.Binds) == 1 {
+			v := a.MIB().Next(o.Scoped.PDU.Binds[0].OID)
+			o.Scoped.PDU.Binds = append(o.Scoped.PDU.Binds, Bind{OID: v.OID, Tag: v.Tag, Val: v.Val})
+		}
+		return []Send{send(x, o)}
 	})},
 
 	// 2.5 Transport faults.
