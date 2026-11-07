@@ -58,7 +58,7 @@ Every network service is on Port 1, the Ethernet port. Its settings are in Table
 
 The relay refuses a duplicate port setting, and any port setting equal to one of its fixed ports, 20, 21, 23, 102 and 502 (p. 4.251).
 
-**Three services are on by default, and all three are on the insecure list:** Telnet, FTP and HTTP. Each one carries the access-level password in clear.
+**Three services are on by default, and all three are on the insecure list:** Telnet, FTP and HTTP. Each one takes the Level 1 or Level 2 password in clear. How the web server takes it is not stated: S22 and S34 show only a login page offering Access Level 1 or 2 (p. 3.2 in each). Whether it is an `Authorization: Basic` header or a form POST is therefore `unknown`, and GT-PCAP carries both cases (D6 on #528).
 
 **Identity in clear.**
 
@@ -154,7 +154,7 @@ An RTAC opens only what its project configures, apart from a short default list.
 | UDP 123 | SNTP | **on** | `Enable_NTP_Time_In` in `System_Time_Control` (p. 1136) | no |
 | UDP 319, 320 | PTP | off | `Enable_PTP_Time_In` (p. 1136) | no |
 
-Note on port 80: with the redirect on, the only plain-HTTP exchange is the redirect itself, and nothing in the manual says it carries a credential. This note flags it `yes` only if D6's labels show more than a redirect on it.
+Note on port 80: with the redirect on, the only plain-HTTP exchange is the redirect itself, and nothing in the manual says it carries a credential. Whether a redirect that carries no credential counts as plain HTTP on the list is a ruling for D1 and the owner (D6 on #528). It applies equally to the SEL-2488, SEL-2730M and SEL-2731 redirects. Until it is ruled, the list applies as written: plain HTTP.
 
 Services the project adds, each off until configured:
 
@@ -293,6 +293,8 @@ The insecure list is the owner's (R6 brief). These services are documented above
 - **Raw TCP serial tunnels and Intel AMT's redirection and RMCP ports.**
 
 ## What this gives GT-PCAP and C13
+
+The family tables are a prior, not labels. GT-PCAP labels insecure use from the traffic it records, by V-M6's rules. DNP3, for example, is labelled from an unchallenged critical function, never from a table's "yes when on" (#527). GT-PCAP uses these tables only to choose which services a simulator profile offers, and on which ports (D6 on #528).
 
 - **Default-on services**, for D6's labels:
   - SEL-751 and SEL-787-4: Telnet 23, FTP 21 and HTTP 80.
