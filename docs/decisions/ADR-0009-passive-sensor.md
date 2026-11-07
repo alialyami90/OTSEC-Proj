@@ -82,6 +82,7 @@ Under every option the project writes its own IEC 61850 and IEC 104 decoders lat
 
 - C13 and the baseline note wait for the decision (brief, "Order"). One part doesn't depend on it, because every option produces the same records: C13's citation of packets as a capture ID and frame numbers. If (a′) or (c′) is chosen, the rotating capture files are themselves the citable capture IDs.
 - If (b) is chosen, enrollment, the credential and the update path of a second device class become new work for D5 and D3. If (a) or (c) is chosen, the Windows capture path and its privilege drop are the main risk.
+- Whichever option is chosen, the sensor's coverage is self-reported (AP-36), so it gets an independent check (D1 on #525 §3, from D3). Each of the node's own scheduled sessions, taken from the session record, must appear as an observation within its window. A missing one raises a coverage alarm. D4's baseline note specifies the check.
 - Whichever option is chosen, the coverage statement names the engine and its version, its decoded protocols, and SPAN or TAP. A protocol it cannot decode is a stated visibility limit (R6.1, R6.6), not a silent gap.
 
 ## Open objections
