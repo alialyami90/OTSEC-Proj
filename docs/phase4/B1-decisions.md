@@ -1058,4 +1058,4 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
   - Its proving test is the platform budget numbers before and after.
 
   The fix is not briefed yet. It goes to the owner beside the next item (D4-34).
-- **A timing-sensitive test, fixed at its cause.** `TestHostileCorpus/H11/outer` failed once on Windows, on #515's docs-only head, because GT-MIB's test manager read a fixed window before the agent had finished answering. D6's #517 waits for the agent's own handled count, and loosens no count. D2 passed it.
+- **A timing-sensitive test, and its fix at the cause (open).** `TestHostileCorpus/H11/outer` failed once on Windows, on #515's docs-only head, because GT-MIB's test manager read a fixed window before the agent had finished answering. D6's #517, open when this was written, waits for the agent's own handled count, and loosens no count. D2 passed it. It merges on green CI.
