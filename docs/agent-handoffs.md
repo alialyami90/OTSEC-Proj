@@ -1140,3 +1140,130 @@ P4-H1's D3 part, P4-H2 and P4-H3's step 1 may run in parallel, because they touc
   - The three properties above are each pinned by a test that fails if the property is broken.
 - **Exclusions.** No change to `RecoveryReserveBytes`, `LastResortReserveBytes` or `OpenHeadroomBytes`. No change to `store-open` in this PR; if it remains the next cost, D5 says so in the note and D1 decides. No skipped or loosened test.
 - **Reviewers:** D6 for reliability, D3 for the trust boundary and the three properties.
+
+## Phase 4 item 4: Stage A briefs (issued 2026-11-07, D4-66)
+
+The owner chose IDS (R6) as the next item (D4-66). This stage covers investigation and contract drafts only (CLAUDE.md §5.1, stages A and B). No product code merges until D1 approves the contracts and the sensor ADR. The common rules for every Phase 4 brief apply.
+
+Nothing captures traffic on a real network. Every capture is either a public one listed in `tests/fixtures/network/public-ot-captures/` or one recorded from the project's own simulators. The sensor never transmits on its monitoring interface (C-11), and nothing scans or probes, actively or otherwise (P1).
+
+**Starting point.** The Phase 0 evaluation (`docs/phase0/A4-telemetry-feasibility.md` §3 and §4, E-A4-01) found the following:
+
+- Zeek 8.0.4 decodes DNP3 and Modbus, including midstream sessions. Suricata 7.0.3 decodes them only with `stream.midstream=true`.
+- Neither engine decodes IEC 61850 MMS, GOOSE, SV or IEC 60870-5-104.
+- A6 broke the throwaway GOOSE sequence check: all 8 of its 8 adversarial cases failed (R-A4-4).
+
+The provisional direction is Zeek as a separate supervised process (ADR-0002 item 2b, A4 §3). It has no ADR yet.
+
+**The open question that comes first: where the sensor runs.** The site node is a dedicated Windows 10/11 machine (ADR-0007, C-22). Every engine and decoder evaluated so far ran on Linux. A packet capture on Windows needs a capture driver, and that driver's licence and privileges are part of the choice. Stage A settles this in an ADR before any contract depends on it.
+
+**Protocols for the first sensor.** These come from the owner's answer about their sites, which was asked for on 2026-11-07. Until the answer arrives, the first set is the following:
+
+- DNP3 and Modbus/TCP, which Zeek decodes.
+- R6.7's insecure list from V-M6: Telnet, FTP, plain HTTP, SNMPv1 and v2c, Modbus/TCP, and DNP3 without Secure Authentication.
+- SNMPv3 and the SEL Telnet sessions that the platform itself runs, so that the platform's own traffic is a known flow and not an alert (ADR-0007 item 7).
+
+IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms they are in use. Each of them needs its own decoder, and GOOSE needs every precondition R-A4-4 lists.
+
+**What item 4 must show at its gate**, to be fixed in the implementation briefs once the contracts are approved:
+
+- **V-M6** over GT-PCAP on the real binaries, `simulated`. The sensor sends zero packets. Every labelled service is recorded against its asset with the packets that show it. Every protocol on the insecure list is flagged.
+- **R6.1 to R6.5** as `docs/verification.md` sets them:
+  - a visibility statement per sensor placement;
+  - zero alerts when a baseline built from benign traffic is replayed against held-out benign traffic;
+  - one malicious sample and one benign near-miss for each detection;
+  - detection rate, false-positive rate and latency for each rule;
+  - every alert linked to packets that can be retrieved.
+- **R6.6:** the PRP, encryption and unsupported-protocol limits, listed per deployment.
+- These criteria are fixed (#144), and a brief may not lower them.
+
+#### P4-4-A4 (D4): the sensor, its first protocols, and its contracts
+
+- **Objective.** Choose the engine and where it runs on evidence, and define what the sensor hands the node.
+- **Deliverables.**
+  1. **A draft ADR-0009, the passive sensor**, written with D5 and D3. It compares these options:
+     - (a) Zeek or Suricata running on the Windows site node, with a capture driver;
+     - (b) a separate Linux sensor at the site that feeds the node;
+     - (c) the project's own Go decoders in a separate process on the node.
+
+     For each option it records the following, with sources and a re-check of upstream (ICSNPP and the Zeek packages change):
+     - whether it runs on ADR-0007's Windows floor, shown by a run on `windows-latest` in a dispatched workflow, or else marked `unknown`;
+     - the capture driver and its licence for a product that ships it;
+     - which of the protocols above it decodes, shown on the public captures;
+     - midstream handling;
+     - PRP duplicate handling;
+     - the process and privilege it needs.
+
+     The ADR names the supervised process and the boundary it enforces (ADR-0002 item 2).
+  2. **Contract draft C13 `otsec.netobs/0.1`.**
+     - **Observations:** a flow or service seen. Each holds the addresses, ports, protocol and the version where it shows in clear, and the asset it resolves to, or `asset-unresolved`.
+     - **Packet citation:** each observation cites its packets as the capture's ID and the frame numbers, plus the SHA-256 of the cited bytes.
+     - **Coverage statement:** the sensor states which protocols it decodes, which LANs and VLANs it sees, and whether it uses SPAN or a TAP. The statement is attached to every observation and alert (A4 §4, R6.1).
+     - **Alerts:** the alert form reuses C10's departure alarm form where it fits. D4 says where it doesn't fit and why. It has no ML field.
+  3. **A design note, `docs/phase4/D4-network-baseline.md`,** with the following content:
+     - **The baseline:** who talks to whom, and which function codes are used per pair, against a baseline of authorized masters (A4 §3: "write = bad" alerts on routine time sync).
+     - **The insecure-list rule.**
+     - **How R6.7's observations reach C12's matcher** without a C12 change (D4-53).
+- **May change:** `contracts/` (drafts only, in a PR for review), `modules/detection/`, `modules/telemetry/experiments/`, `docs/decisions/` (the ADR draft), and `docs/phase4/D4-*.md`.
+- **Exclusions.**
+  - No sensor code is merged in this stage.
+  - No ML.
+  - No GPL library (libiec61850 or lib60870) is linked into the Go binaries.
+  - No capture file is committed unless its source states redistribution terms.
+- **Reviewers:** D6 for detection accuracy, D2 for protocol interpretation, D3 for the trust boundary, and D5 for the process. D1 approves.
+
+#### P4-4-A2 (D2): what the SEL families put on the wire
+
+- **Objective.** Give GT-PCAP and R6.7 the protocols and ports the SEL families in scope speak, from documents, with citations.
+- **Deliverables:** `docs/phase4/D2-sel-network-services.md`. It covers each SEL family the matrix holds (SEL-751, SEL-2731/2741 and the others it lists), with the following for each:
+  - the network services it can offer, with protocol, port, default state and the setting that turns each one on;
+  - which services are on the insecure list;
+  - what a passive sensor can read in clear for identity (R1.1, R6.7).
+
+  Mark a service `unknown` where the document is silent. Nothing is guessed.
+- **May change:** `docs/device-capabilities.md` and `docs/phase4/D2-*.md`.
+- **Reviewers:** D4 and D6.
+
+#### P4-4-A3 (D3): the sensor's trust boundary
+
+- **Objective.** Bring the sensor into the threat model before any code is written.
+- **Deliverables:** threat-model rows covering the following:
+  - **Hostile input:** packet parsing is a hostile-input surface, so a decoder crash or exploit must not reach the node's store or keys.
+  - **The capture driver:** its privilege on Windows.
+  - **The monitoring interface:** it transmits nothing, which is C-11, and the ADR states how that is enforced and how it is tested.
+  - **Stored captures:** cited packets may hold credentials in clear (Telnet and FTP passwords), so the rows say how stored packets are protected and how long they are kept.
+  - **Spoofed alerts:** the sensor as a path to forge alerts or observations into the node.
+
+  D3 also reviews ADR-0009 and C13 for the boundary.
+- **May change:** `docs/threat-model.md` and `modules/security/` (notes only).
+- **Reviewers:** D6 and D4.
+
+#### P4-4-A5 (D5): the node's side
+
+- **Objective.** A design note, `docs/phase4/D5-sensor-node.md`, covering the following:
+  - how the node supervises the sensor process (start, restart and health) on Windows and on Linux;
+  - how C13 records reach the store, and in which stream and quota (C5), so that a flood of observations cannot starve SER or Syslog (the lesson from HR-11);
+  - enabling and disabling the sensor on its own: with it disabled, nothing it owns runs and nothing else changes;
+  - what status shows.
+- **May change:** `docs/phase4/D5-*.md`.
+- **Reviewers:** D3 and D6.
+
+#### P4-4-A6 (D6): GT-PCAP and the item 4 checks
+
+- **Objective.** Build the ground truth before any product test runs.
+- **Deliverables.**
+  1. **The GT-PCAP plan** (`docs/verification.md` definition), using two sources:
+     - the public captures already listed;
+     - captures recorded in CI from the project's own simulators (the SEL-751 Telnet profile, GT-MIB's SNMPv3 agents, and a DNP3 and a Modbus/TCP source D6 picks or writes).
+
+     Labels come from tshark or Zeek, never from the product. The plan includes held-out benign series for R6.2, and labelled malicious samples with benign near-misses for R6.3. A PRP duplicate case is built from a capture by duplicating frames with their RCT trailer.
+  2. **Testability review** of ADR-0009, C13 and the baseline note against V-M6 and R6.1 to R6.5.
+  3. **The C-11 test design:** zero frames from the monitoring interface, for whichever option ADR-0009 picks.
+- **May change:** `tests/integration/`, `tests/fixtures/network/`, and `docs/verification.md` (plans and criteria wording only, never a threshold that has run).
+- **Reviewers:** D4 for the labels and D2 for protocol interpretation.
+
+### Order
+
+1. D4 drafts ADR-0009 first, with D5 and D3. D2's note and D6's GT-PCAP plan run at the same time.
+2. D4 drafts C13 and the baseline note once ADR-0009 names the option. Every consumer reviews them, and D1 approves them together.
+3. The implementation briefs follow approval. They include the owner's protocols, or record that the owner hasn't answered and the first set above stands.

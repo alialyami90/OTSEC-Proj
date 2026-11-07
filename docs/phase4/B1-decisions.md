@@ -1080,3 +1080,14 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
 - **Ruling 1: no allocation read-back.** D3 asked for a read-back that falls back to zero writes when the allocation is short. On compressed or copy-on-write volumes, the zero writes hold no real space either, so a fallback cannot fix it. The only real fix is to fail the reserve on such volumes, which would change which file systems the node supports. The PR's note therefore records this as a known limit next to H-14. D1 takes the question to the owner in the next report: should the reserve fail (drain-only) where it can't hold real space? D3's Windows folder-flush item goes with it.
 - **Ruling 2: the Windows clock.** `TestReserveParts` dropped its `> 0` checks on the release and the allocation, because under the Windows clock tick both read 0. The exact sum and `reserve-sync > 0` stay. If `reserve-sync` ever reads 0, that check is dropped, not retried.
 - **Not fixed, and carried.** There are still starts over 6 s: 5 after the fix against 3 before. All of them sit in `store-open` or `record-start`, never the reserve. `store-open` is now about 47% of start time. Whether to brief it is the owner's call, alongside the next Phase 4 item (D4-34).
+
+## D4-66: the owner chooses IDS next, and item 4's Stage A is issued (owner and D1, 2026-11-07)
+
+- **The owner's choice.** At 17:59Z, on D1's card "Which Phase 4 item should come next?", the owner chose "Network IDS (item 4)", the option D1 recommended. The other options were secure engineering access (item 5), the central role (item 6), and a fix for the rare slow starts carried in D4-65.
+- **The ask.** D1 asked the owner two questions:
+  - which protocols run on their substation networks;
+  - whether a site node can get a SPAN port or a TAP, and whether the station network is PRP.
+
+  The brief proceeds without waiting for the answers. The first protocol set is DNP3, Modbus/TCP and R6.7's insecure list, and IEC 61850 and IEC 104 are added when the owner confirms them.
+- **The brief.** D1 issues item 4's Stage A in `docs/agent-handoffs.md`. Where the sensor runs on the Windows site node (ADR-0007) is settled first, in a draft ADR-0009, before any contract depends on it. C13 `otsec.netobs/0.1` is drafted after that. D6 builds GT-PCAP from public captures and from the project's own simulators. No real network is captured.
+- **Carried.** Two questions still go to the owner: whether the reserve should fail on volumes that can't hold real space, and the Windows folder flush (D4-65). The rare slow starts are also carried, and can be briefed beside item 4 if the owner wants.
