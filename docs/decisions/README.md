@@ -18,3 +18,4 @@ Use [ADR-0000-template.md](ADR-0000-template.md).
 | [0006](ADR-0006-device-coverage-and-vendor-strategy.md) | Device coverage scope and vendor strategy (SEL first) | accepted |
 | [0007](ADR-0007-windows-site-node.md) | Windows site node on SEL-3355-2 | proposed |
 | [0008](ADR-0008-monitoring-goals-and-collection-method-order.md) | Monitoring goals and the collection-method order (owner clarification) | accepted |
+| [0009](ADR-0009-passive-sensor.md) | The passive sensor: which engine, and where it runs | proposed (draft) |
