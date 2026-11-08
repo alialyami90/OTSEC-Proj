@@ -58,6 +58,9 @@ type Config struct {
 	// D4-50); an absent section is off.
 	AssetModule   *AssetModule   `json:"asset,omitempty"`
 	Applicability *Applicability `json:"applicability,omitempty"`
+	// NetworkSensor is item 4's switch (netsensor.go); an absent section
+	// is off.
+	NetworkSensor *NetworkSensor `json:"network_sensor,omitempty"`
 	CollectorPipe string         `json:"collector_pipe"`
 	// CollectorPeer is the identity the collector must hold (collectorwire
 	// Endpoint.Peer). On Windows it may be empty, which means the
@@ -449,6 +452,7 @@ func (c *Config) check() error {
 	}
 	c.checkEventBaselines(fail)
 	c.checkItem3(fail)
+	c.checkNetworkSensor(fail)
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}

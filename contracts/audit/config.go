@@ -272,6 +272,15 @@ type Config struct {
 	RemovedLastSeq  uint64 `json:"removed_last_seq,omitempty"`
 	RemovedDigest   string `json:"removed_digest,omitempty"`
 	KeptDigest      string `json:"kept_digest,omitempty"`
+	// DraftDigest (0.12) is the frozen draft a network baseline was built
+	// from, on config.baseline_acknowledged of kind network only, from the
+	// signed C7 node.network_baseline_ack body. It equals baseline_digest
+	// when the person added no authorized writer (network.go).
+	DraftDigest string `json:"draft_digest,omitempty"`
+	// CursorSeq (0.12) is a retired learner's last confirmed seq on its
+	// sensor's observation stream, on config.learner_retired only. Absent
+	// when the learner confirmed none.
+	CursorSeq uint64 `json:"cursor_seq,omitempty"`
 }
 
 // RemovedReadsDigest is the digest config.reads_removed carries over the
@@ -307,7 +316,8 @@ func (r *Record) validateConfig(minor int) error {
 	removed := r.Action == ActionConfigReadsRemoved
 	recorded := r.Action == ActionConfigBaselineRecorded
 	notRestored := r.Action == ActionConfigCheckpointNotRestored
-	if !approved && !acked && !detected && !restored && !compared && !removed && !recorded && !notRestored {
+	retired := r.Action == ActionConfigLearnerRetired
+	if !approved && !acked && !detected && !restored && !compared && !removed && !recorded && !notRestored && !retired {
 		if r.Config != nil {
 			return fmt.Errorf("audit: config belongs on the configuration actions, not %s", r.Action)
 		}
@@ -320,14 +330,29 @@ func (r *Record) validateConfig(minor int) error {
 	if minor < configSince {
 		return fmt.Errorf("audit: config is new in 0.%d, so a 0.%d record cannot carry it", configSince, minor)
 	}
-	if r.Target == nil || !asset.ValidAssetID(r.Target.AssetID) {
+	// 0.12: a network baseline belongs to a sensor, so its records name
+	// the sensor and no asset (network.go).
+	network := c.Kind == authz.BaselineNetwork || retired
+	switch {
+	case network && minor < networkSince:
+		return fmt.Errorf("audit: kind %s and config.learner_retired are new in 0.%d, so a 0.%d record cannot carry them", authz.BaselineNetwork, networkSince, minor)
+	case network && !recorded && !acked && !retired:
+		return fmt.Errorf("audit: kind %s is on config.baseline_recorded, config.baseline_acknowledged and config.learner_retired, not %s", authz.BaselineNetwork, r.Action)
+	case network && (r.Target == nil || !asset.ValidAssetID(r.Target.SensorID) || r.Target.AssetID != ""):
+		return fmt.Errorf("audit: %s of kind %s needs a target sensor and no asset", r.Action, authz.BaselineNetwork)
+	case !network && (r.Target == nil || !asset.ValidAssetID(r.Target.AssetID)):
 		return fmt.Errorf("audit: %s needs a target asset", r.Action)
-	}
-	if r.CorrelationID == "" {
+	case r.CorrelationID == "" && !retired:
 		return fmt.Errorf("audit: %s needs a correlation_id", r.Action)
-	}
-	if c.DifferenceTooLarge && !detected {
+	case c.DifferenceTooLarge && !detected:
 		return fmt.Errorf("audit: difference_too_large belongs on config.change_detected, not %s", r.Action)
+	case c.DraftDigest != "" && !(acked && network):
+		return fmt.Errorf("audit: draft_digest belongs on config.baseline_acknowledged of kind %s, not %s", authz.BaselineNetwork, r.Action)
+	case c.CursorSeq != 0 && !retired:
+		return fmt.Errorf("audit: cursor_seq belongs on config.learner_retired, not %s", r.Action)
+	}
+	if retired {
+		return r.validateLearnerRetired()
 	}
 	if notRestored {
 		return r.validateCheckpointNotRestored()
@@ -422,8 +447,9 @@ func (r *Record) validateBaselineRecorded() error {
 		return errors.New("audit: config.baseline_recorded is written by the node (actor type node)")
 	case r.Outcome != OutcomeInfo || r.ReasonCode != "":
 		return errors.New("audit: config.baseline_recorded has outcome info and no reason code")
-	case c.Kind != authz.BaselineEvent:
-		return fmt.Errorf("audit: config.baseline_recorded kind is %q in 0.%d: nothing records a configuration baseline yet", authz.BaselineEvent, configRecordedSince)
+	case c.Kind != authz.BaselineEvent && c.Kind != authz.BaselineNetwork:
+		// 0.12 adds network, the learner's frozen draft (network.go).
+		return fmt.Errorf("audit: config.baseline_recorded kind is %q or %q: nothing records a configuration baseline yet", authz.BaselineEvent, authz.BaselineNetwork)
 	case !digestPattern.MatchString(c.BaselineDigest):
 		return errors.New("audit: config.baseline_recorded needs baseline_digest sha256:<hex>")
 	case r.CorrelationID != strings.TrimPrefix(c.BaselineDigest, "sha256:"):
@@ -440,7 +466,7 @@ func (r *Record) validateBaselineRecorded() error {
 	}
 	switch {
 	case c.BaselineVersion < 1:
-		return errors.New("audit: an event baseline needs baseline_version of 1 or more")
+		return errors.New("audit: a recorded baseline needs baseline_version of 1 or more")
 	case (c.BaselineVersion == 1) != (c.PreviousDigest == ""):
 		return errors.New("audit: baseline_version is 1 exactly when no baseline is replaced (previous_digest absent)")
 	}
@@ -579,6 +605,15 @@ func (r *Record) validateConfigDecision(approved bool) error {
 	}
 	if c.WindowStart != "" || c.WindowEnd != "" || c.Reason != "" {
 		return errors.New("audit: config.baseline_acknowledged has no window or reason")
+	}
+	if c.Kind == authz.BaselineNetwork {
+		// 0.12: C7's node.network_baseline_ack body, which names the
+		// sensor and both digests.
+		body := authz.NodeNetworkBaselineAckBody{SensorID: r.Target.SensorID, DraftDigest: c.DraftDigest, BaselineDigest: c.BaselineDigest}
+		if err := body.Validate(); err != nil {
+			return fmt.Errorf("audit: config.baseline_acknowledged: %w", err)
+		}
+		return nil
 	}
 	body := authz.NodeBaselineAckBody{AssetID: r.Target.AssetID, Kind: c.Kind, BaselineDigest: c.BaselineDigest}
 	if err := body.Validate(); err != nil {
@@ -836,10 +871,12 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 	// shown to name a baseline never recorded (D4-26 amendment).
 	firstIn := map[string]bool{}
 	for _, r := range recs {
-		if r.Action == ActionConfigBaselineRecorded && r.Config != nil && r.Config.BaselineVersion == 1 && r.Target != nil {
+		if r.Action == ActionConfigBaselineRecorded && r.Config != nil && r.Config.BaselineVersion == 1 && r.Target != nil && !r.networkRecord() {
 			firstIn[r.Target.AssetID] = true
 		}
 	}
+	// 0.12: the network records, the retention moves and the key sets.
+	net := newNetworkChain(recs, cut)
 	// 0.7 (D4-20): the newest recorded change against each baseline, until a
 	// restore or a configuration acknowledgement ends it; the result each
 	// read has been given; and, for each asset, the snapshot digests of its
@@ -897,7 +934,10 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 		case r.Action == ActionConfigChangeApproved || r.Action == ActionConfigBaselineAcknowledge:
 			c := r.Config
 			want := authz.KindNodeChangeApproval
-			if r.Action == ActionConfigBaselineAcknowledge {
+			switch {
+			case r.networkRecord():
+				want = authz.KindNodeNetworkBaselineAck
+			case r.Action == ActionConfigBaselineAcknowledge:
 				want = authz.KindNodeBaselineAck
 			}
 			acc := accepted[num{epoch, c.DecisionSeq}]
@@ -909,6 +949,26 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 				return broken("record %d (%s) does not match the acceptance of decision %d", r.Seq, r.Action, c.DecisionSeq)
 			case acc.Verified.Kind != want:
 				return broken("record %d (%s) follows an acceptance of %q, not %s", r.Seq, r.Action, acc.Verified.Kind, want)
+			}
+			if acc != nil && r.Outcome == OutcomeSucceeded {
+				// 0.12: a decision accepted under a key set is applied only
+				// after the node recorded that set (§2.4).
+				if err := net.granted(r, acc); err != nil {
+					return err
+				}
+			}
+			if r.networkRecord() {
+				if r.Outcome == OutcomeSucceeded {
+					if err := net.acknowledge(r); err != nil {
+						return err
+					}
+					k := kindOf{r.Target.SensorID, authz.BaselineNetwork}
+					if prev, ok := active[k]; ok && c.PreviousDigest != prev {
+						return broken("record %d acknowledges %s after %s, but names %q as the baseline it replaces", r.Seq, c.BaselineDigest, prev, c.PreviousDigest)
+					}
+					active[k] = c.BaselineDigest
+				}
+				continue
 			}
 			if r.Action == ActionConfigChangeApproved && r.Outcome == OutcomeSucceeded {
 				if err := acknowledged(r, activeFor(r)); err != nil {
@@ -998,6 +1058,22 @@ func VerifyConfigFrom(recs []*Record, first uint64) error {
 			}
 			if err := ApprovalCovers(a, r); err != nil {
 				return broken("record %d: approval %d does not cover it: %v", r.Seq, c.ApprovalSeq, err)
+			}
+		case r.Action == ActionConfigBaselineRecorded && r.networkRecord():
+			if err := net.record(r); err != nil {
+				return err
+			}
+		case r.Action == ActionConfigLearnerRetired:
+			if err := net.retire(r); err != nil {
+				return err
+			}
+		case r.Action == ActionStoreRetentionMoved:
+			if err := net.move(r); err != nil {
+				return err
+			}
+		case r.Action == ActionPolicyApply && r.AdminKeys != nil:
+			if err := net.adminKeys(r); err != nil {
+				return err
 			}
 		case r.Action == ActionConfigBaselineRecorded:
 			c := r.Config

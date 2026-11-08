@@ -19,8 +19,16 @@ import (
 	"otsec.local/otsec/contracts/version"
 )
 
-// ContractID is the identifier every audit record carries.
+// ContractID is the identifier writers stamp on every audit record. It
+// stays at 0.11 while this package reads 0.12: readers go before writers
+// (D4-69, #534 §2.5), and the node's B5 item 7 change bumps it in the same
+// change that writes the 0.12 records.
 const ContractID = "otsec.audit/0.11"
+
+// ReaderID is the newest minor this package reads in full, strictly and with
+// every gate: 0.12 (docs/phase4/D3-c7-0.10-c8-0.12.md §2). A record stamped
+// later is read forward-compatibly (ParseRecord).
+const ReaderID = "otsec.audit/0.12"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -156,6 +164,7 @@ func init() {
 		ActionConfigReadCompared, ActionConfigReadsRemoved, ActionConfigBaselineRecorded,
 		ActionConfigCheckpointNotRestored,
 		ActionAdvisorySetInstalled, ActionAdvisorySetRefused,
+		ActionStoreRetentionMoved, ActionConfigLearnerRetired,
 	} {
 		actions[a] = true
 	}
@@ -172,6 +181,7 @@ var actionSince = map[Action]int{
 	ActionConfigBaselineRecorded:      configRecordedSince,
 	ActionConfigCheckpointNotRestored: configCheckpointSince,
 	ActionAdvisorySetInstalled:        advisorySince, ActionAdvisorySetRefused: advisorySince,
+	ActionStoreRetentionMoved: networkSince, ActionConfigLearnerRetired: networkSince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -202,6 +212,9 @@ type Target struct {
 	CredentialRef      string                   `json:"credential_ref,omitempty"`
 	CredentialVersion  uint32                   `json:"credential_version,omitempty"`
 	Family             string                   `json:"family,omitempty"` // register family, e.g. "sel-751"
+	// SensorID (0.12) is a C13 sensor, a lowercase UUID: the target of the
+	// network records (network.go), which name no asset.
+	SensorID string `json:"sensor_id,omitempty"`
 }
 
 // Record is one audit record.
@@ -270,6 +283,11 @@ type Record struct {
 
 	// Advisory is on the advisory actions only (0.11): advisory.go.
 	Advisory *Advisory `json:"advisory,omitempty"`
+
+	// Retention is on store.retention_moved only, and AdminKeys on a
+	// policy.apply with reason_code admin_keys only (0.12): network.go.
+	Retention *Retention `json:"retention,omitempty"`
+	AdminKeys *AdminKeys `json:"admin_keys,omitempty"`
 }
 
 // Admin names one admin-signed request (C7 AdminAccepted): the signing
@@ -285,6 +303,11 @@ type Admin struct {
 	// says; on verified, the kind the collector verified. VerifyConfig
 	// needs it on the acceptance a configuration record follows.
 	Kind authz.RequestKind `json:"kind,omitempty"`
+	// KeysDigest (0.12) is the accepted reply's C7 admin.keys_digest: the
+	// administrator keys the collector held when it accepted. On verified
+	// only, and required there on a record stamped 0.12 or later, so the
+	// chain shows which key set each decision was made under (network.go).
+	KeysDigest string `json:"keys_digest,omitempty"`
 }
 
 func (a *Admin) validate(minor int) error {
@@ -403,7 +426,7 @@ var invocationActions = map[Action]bool{
 
 // Validate checks one record on its own. Chain rules are in VerifyChain.
 func (r *Record) Validate() error {
-	reader, _ := version.Parse(ContractID)
+	reader, _ := version.Parse(ReaderID)
 	got, err := version.Parse(r.Contract)
 	if err != nil || !reader.Accepts(got) {
 		return fmt.Errorf("audit: contract %q", r.Contract)
@@ -445,6 +468,9 @@ func (r *Record) Validate() error {
 		return err
 	}
 	if err := r.validateAdvisory(got.Minor); err != nil {
+		return err
+	}
+	if err := r.validateNetwork(got.Minor); err != nil {
 		return err
 	}
 	switch r.Outcome {
@@ -503,6 +529,9 @@ func (r *Record) Validate() error {
 	if t := r.Target; t != nil {
 		if t.AssetID != "" && !asset.ValidAssetID(t.AssetID) {
 			return fmt.Errorf("audit: asset id %q", t.AssetID)
+		}
+		if t.SensorID != "" && !asset.ValidAssetID(t.SensorID) {
+			return fmt.Errorf("audit: sensor id %q", t.SensorID)
 		}
 		if t.Transport != "" && t.Transport.Plaintext() && t.DownstreamSecurity != authz.DownstreamPlaintext {
 			return fmt.Errorf("audit: transport %s must be labelled %s", t.Transport, authz.DownstreamPlaintext)
@@ -616,7 +645,16 @@ func (r *Record) validateAdmin(minor int) error {
 	if (r.Verified != nil || r.RepeatOf != 0) && r.Outcome != OutcomeAllowed {
 		return errors.New("audit: verified and repeat_of are on the record of an accepted reply")
 	}
+	if r.Claimed != nil && r.Claimed.KeysDigest != "" {
+		return errors.New("audit: keys_digest is on verified only: the collector names the keys it held")
+	}
 	if r.Verified != nil {
+		switch {
+		case minor < networkSince && r.Verified.KeysDigest != "":
+			return fmt.Errorf("audit: verified.keys_digest is new in 0.%d, so a 0.%d record cannot carry it", networkSince, minor)
+		case minor >= networkSince && !digestPattern.MatchString(r.Verified.KeysDigest):
+			return fmt.Errorf("audit: verified needs keys_digest sha256:<hex> from 0.%d", networkSince)
+		}
 		if err := r.Verified.validate(minor); err != nil {
 			return fmt.Errorf("audit: verified: %w", err)
 		}
@@ -726,7 +764,7 @@ func ParseRecord(b []byte) (*Record, error) {
 	if err := strictjson.Forward(b, &r); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
 	}
-	reader, _ := version.Parse(ContractID)
+	reader, _ := version.Parse(ReaderID)
 	if got, err := version.Parse(r.Contract); err == nil && got.Major == reader.Major && got.Minor <= reader.Minor {
 		r = Record{}
 		if err := strictjson.Decode(b, &r); err != nil {

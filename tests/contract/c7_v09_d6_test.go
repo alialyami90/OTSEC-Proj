@@ -18,6 +18,7 @@ import (
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/authz"
+	"otsec.local/otsec/contracts/version"
 )
 
 // c7v09IDs are the engine IDs the 0.9 rule decides: all zeros and all ff at
@@ -40,8 +41,9 @@ var c7v09IDs = []struct {
 }
 
 func TestC7V09ContractID(t *testing.T) {
-	if authz.ContractID != "otsec.authz/0.9" {
-		t.Fatalf("ContractID %q, want otsec.authz/0.9", authz.ContractID)
+	// 0.10 (D4-68) keeps 0.9's rules, so this pins 0.9 or later.
+	if v, err := version.Parse(authz.ContractID); err != nil || v.Name != "authz" || v.Major != 0 || v.Minor < 9 {
+		t.Fatalf("ContractID %q, want otsec.authz/0.9 or later", authz.ContractID)
 	}
 	// Nothing new goes on the wire, so a 0.9 reader still reads 0.8.
 	if !authz.AcceptsContract("otsec.authz/0.8") {

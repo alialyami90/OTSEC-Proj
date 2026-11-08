@@ -1,0 +1,15 @@
+# GT-PCAP labels for dnp3-reader-disable-unsolicited.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.
+# fields: frame.number, frame.len, ip.src, ip.dst, tcp.srcport, tcp.dstport, tcp.flags.syn, tcp.flags.ack, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
+# sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.
+# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
+# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
+# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
+kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
+flow	192.0.2.11	192.0.2.20	41010	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1,2,3,4,5,6,7,8,9,10	6f5ef0a704d7a9711b0ddc484cb04aacb710d4ce6778e875d4832995f1066bed,5c3fa567dcc4cdde4b29b42a969961e1c82507b7db49b9e8f9730207095f7a2a,ec1c9072ed1e0b75add4672815cd2f73502cc9e56aecb34051bf143a84591b1a,6f7490236034fd5d31e8a7bef56716fc355c4ab3d8e6251f4a901612fcf0a585,eb3df490a6e9a473ad5b102200f0012a78eb64b6d86e8c154e6df1e16013517b,5ec098e6962f991b509b0df175e4b26a9a16c1b975a5379f331fe761b06c62c7,b1d76cb32ee881bea57f1f6d547d5b470d1444ada4c574f51d323645ca23b9b3,e363cf0f2996af8a8282b798c8f8920740b369e9f281a1c8c1bbc80dc09c8a5d,440c945e40aa8ebbb6000abba4a04c494c9e2228421d7b44d0683f388dbb3fea,dfede4455b2540a3e62ea1b8e5c71ca66dc9460246b5a9ef2e95b90effcdc7d4	10	623							
+service		192.0.2.20		20000	tcp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1	6f5ef0a704d7a9711b0ddc484cb04aacb710d4ce6778e875d4832995f1066bed									
+function	192.0.2.11	192.0.2.20	41010	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	4,6	6f7490236034fd5d31e8a7bef56716fc355c4ab3d8e6251f4a901612fcf0a585,5ec098e6962f991b509b0df175e4b26a9a16c1b975a5379f331fe761b06c62c7			21	g60v2	none				
+counter						dnp3														dnp3_seq_reused=0
+case					tcp	dnp3				4,6	6f7490236034fd5d31e8a7bef56716fc355c4ab3d8e6251f4a901612fcf0a585,5ec098e6962f991b509b0df175e4b26a9a16c1b975a5379f331fe761b06c62c7					none		new-function	acknowledged	function 21 from a pair that never did the reconnect sequence (session-setup)

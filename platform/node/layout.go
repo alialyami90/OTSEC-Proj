@@ -145,6 +145,11 @@ func (c *Config) Layout() (c5.Layout, error) {
 		}
 	}
 
+	networkDB, err := c.networkLayout(&configDB)
+	if err != nil {
+		return c5.Layout{}, err
+	}
+
 	syslogDB := c5.Database{ID: SyslogDB, Writer: "telemetry"}
 	for _, l := range c.Listeners {
 		class := c5.ClassSyslogStream
@@ -158,7 +163,7 @@ func (c *Config) Layout() (c5.Layout, error) {
 	auditDB := c5.Database{ID: AuditDB, Writer: "security", Streams: []c5.StreamSpec{{ID: AuditStream, Class: c5.ClassAudit}}}
 
 	var l c5.Layout
-	for _, d := range []c5.Database{evidence, syslogDB, auditDB, configDB} {
+	for _, d := range []c5.Database{evidence, syslogDB, auditDB, configDB, networkDB} {
 		if len(d.Streams) == 0 {
 			continue
 		}
@@ -191,6 +196,9 @@ func (c *Config) Layout() (c5.Layout, error) {
 				}
 				q.MaxRecordBytes = ConfigRecordBytes
 			}
+			if class == c5.ClassNetworkObservation || class == c5.ClassNetworkAlert {
+				q.MaxRecordBytes = NetworkRecordBytes
+			}
 			d.Quotas = append(d.Quotas, q)
 		}
 		sort.Slice(d.Classes, func(i, j int) bool { return d.Classes[i] < d.Classes[j] })
@@ -208,7 +216,9 @@ func (c *Config) Layout() (c5.Layout, error) {
 // and the audit stream when its audit flag is set. No target consumes a
 // quarantine stream, and none a configuration stream: its documents are C9
 // and C10, not C4 events, so no Syslog target carries them, and a stream
-// with no consumer is never pruned (only the class quota bounds it).
+// with no consumer is never pruned (only the class quota bounds it). None
+// consumes a network observation stream either: observations stay on the
+// node, and only alerts are forwarded (docs/phase4/D5-c5-0.9.md section 4).
 func (c *Config) Consumers() ([]c5.Consumer, error) {
 	l, err := c.Layout()
 	if err != nil {
@@ -216,7 +226,8 @@ func (c *Config) Consumers() ([]c5.Consumer, error) {
 	}
 	var events []c5.StreamID
 	for s, class := range l.StreamClasses() {
-		if class != c5.ClassAudit && class != c5.ClassConfiguration && !strings.HasPrefix(string(s), c5.QuarantinePrefix) {
+		if class != c5.ClassAudit && class != c5.ClassConfiguration && class != c5.ClassNetworkObservation &&
+			!strings.HasPrefix(string(s), c5.QuarantinePrefix) {
 			events = append(events, s)
 		}
 	}

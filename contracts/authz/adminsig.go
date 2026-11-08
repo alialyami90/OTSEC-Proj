@@ -53,6 +53,7 @@ var adminKinds = map[RequestKind]bool{
 	KindCredentialInstall: true, KindCredentialRevoke: true, KindCredentialClearSusp: true, KindAssetClearSusp: true,
 	KindNodeQuarantineClear: true, KindNodeSeqResetAck: true,
 	KindNodeChangeApproval: true, KindNodeBaselineAck: true,
+	KindNodeNetworkBaselineAck: true,
 }
 
 // AdminSigned is the envelope of an admin-signed request (0.4). The
@@ -99,6 +100,9 @@ type AdminRequest struct {
 	// reader refuses either as a payload error.
 	NodeChangeApproval *NodeChangeApprovalBody `json:"node_change_approval,omitempty"`
 	NodeBaselineAck    *NodeBaselineAckBody    `json:"node_baseline_ack,omitempty"`
+	// The network acknowledgement's body (since 0.10), the same way: a
+	// 0.9 reader refuses it as a payload error.
+	NodeNetworkBaselineAck *NodeNetworkBaselineAckBody `json:"node_network_baseline_ack,omitempty"`
 }
 
 // Expires is the request's parsed expiry; it is valid on a request
@@ -361,7 +365,8 @@ func (p *AdminRequest) validate() error {
 	}
 	set := 0
 	for _, present := range []bool{p.CredentialInstall != nil, p.CredentialRevoke != nil, p.CredentialClearSusp != nil, p.AssetClearSusp != nil,
-		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil, p.NodeChangeApproval != nil, p.NodeBaselineAck != nil} {
+		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil, p.NodeChangeApproval != nil, p.NodeBaselineAck != nil,
+		p.NodeNetworkBaselineAck != nil} {
 		if present {
 			set++
 		}
@@ -373,5 +378,6 @@ func (p *AdminRequest) validate() error {
 		CredentialInstall: p.CredentialInstall, CredentialRevoke: p.CredentialRevoke,
 		CredentialClearSusp: p.CredentialClearSusp, AssetClearSusp: p.AssetClearSusp,
 		NodeQuarantineClear: p.NodeQuarantineClear, NodeSeqResetAck: p.NodeSeqResetAck,
-		NodeChangeApproval: p.NodeChangeApproval, NodeBaselineAck: p.NodeBaselineAck})
+		NodeChangeApproval: p.NodeChangeApproval, NodeBaselineAck: p.NodeBaselineAck,
+		NodeNetworkBaselineAck: p.NodeNetworkBaselineAck})
 }

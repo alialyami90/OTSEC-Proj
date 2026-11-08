@@ -154,7 +154,7 @@ Each detection gets at least one labelled malicious sample and one benign near-m
 
 **Before acknowledgement**, only `own-session-outside-record`, `node-address-spoofed`, `own-session-unseen` and `sa-failed` run (D1, D4-68). The cases:
 
-- a failed SA exchange (g120v7) replayed on a node with no acknowledged baseline raises `sa-failed` and nothing else;
+- a failed SA exchange (g120v7) replayed on a node whose network database starts empty, with no learner and no acknowledged baseline, raises `sa-failed` and nothing else (D1 on #548);
 - the canary reads the learner's draft: a session removed for an asset the draft has observed raises `own-session-unseen`; a session removed for an enrolled asset the draft has never seen raises nothing, and status shows it as "not yet seen".
 
 These are committed before the product's detection code runs. A rule with no pair is a gap that blocks the item 4 gate.
@@ -181,7 +181,7 @@ These are committed before the product's detection code runs. A rule with no pai
 
 - **Alert drop counts** (D3's case, key confirmed by D1 on #532). Fill the alert quota with rule R aimed at unresolved destinations, then send one R alert at an enrolled asset. The drop count against (R, that asset) is exactly 1, and it stays apart from the unresolved bucket. Coalescing lets each key commit two records per window, its first alert and its summary, with `coalesce_window_s` at least 60 (C13 §7.3). So the case runs on the test clock, or the quota is sized to a few windows, and the count of exactly 1 holds within one retention period (D5 on #542). With no alert forward target, the node's local retention consumer drains the class, so this case is rerun against C5 0.9 §3 and §6 at D5's code.
 
-- **The DNP3 pending table.** With `max_pending_dnp3` set to 256, a series that holds more unanswered requests than that. Every request completes at `sa_reply_timeout_ms`, so the series sends more than 256 unanswered requests inside one timeout, or runs at 30000 ms (D4 on #542). Both settings are within C13's bounds, and the recorded `coverage.settings` must be the ones the run used. The expected `dnp3_pending_overflows` is the number of requests that arrive while 256 are still pending. The test asserts this counter, not a general table-evictions figure. The assertions are split by side (D5 on #542):
+- **The DNP3 pending table.** With `max_pending_dnp3` set to 256, a series that holds more unanswered requests than that. Every request completes at `sa_reply_timeout_ms`, so the series sends more than 256 unanswered requests inside one timeout, or runs at 30000 ms (D4 on #542). Both settings are within C13's bounds, and the recorded `coverage.settings` must be the ones the run used. The expected `dnp3_pending_overflows` is the number of requests that arrive while 256 are still pending. The replay brackets the series with heartbeats, and the product's value is the difference between the heartbeat after it and the one before it, as for every counter in a label file (D1 on #548). The test asserts this counter, not a general table-evictions figure. The assertions are split by side (D5 on #542):
   - **node side**, through the test-only source: `dnp3_pending_overflows` is carried and never falls within a run; `dnp3-pending-overflow` appears in `degraded` and in status; and the difference event is raised at most once a minute;
   - **sensor side**, only once a sensor exists: every request is still emitted.
 

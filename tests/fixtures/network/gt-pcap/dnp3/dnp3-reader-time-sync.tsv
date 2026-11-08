@@ -1,0 +1,15 @@
+# GT-PCAP labels for dnp3-reader-time-sync.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.
+# fields: frame.number, frame.len, ip.src, ip.dst, tcp.srcport, tcp.dstport, tcp.flags.syn, tcp.flags.ack, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
+# sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.
+# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
+# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
+# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
+kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
+flow	192.0.2.11	192.0.2.20	41009	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1,2,3,4,5,6,7,8,9,10	0e0c4a12300cd20912d5a5c8a1a841487e822795d84b8d3b2eff551d15786c60,02e536889e7fc1c5617eabcc37888a9879777faca68eac753f2f0583424c14ad,cef35bd441cfc2899deb9ccd6ef35f8bced59cc4e0d71896b7808666fab320fd,d1bb8a7618ddc55064fa380c5f6da99c46153235b3f40d9c36bc8c45d0da8566,a8fa960c3281fdd0d80fcb8866c466e38512bdf27d8a27c77dbaa988f4c17a9a,946400b9455ac9ab103722c0708efb27f92977d2f94e9f882cb2523afe052c3c,fbf2f9b64741bc03b51f6340757cea2eb851e093036dd59daa557afd8bdb81ac,de87ceed932e44cddfcf65a678074e565af1a9d77afd475ac2a96d36b1bb534a,31f2a1d2a60a4c3bca79fe3945207819197d361c95ead2ae5356be05bef571de,1b11efbebcea4d627b74ffe9c164f8afd26fc1cf88ac1ec36a2b587b0a69e301	10	630							
+service		192.0.2.20		20000	tcp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1	0e0c4a12300cd20912d5a5c8a1a841487e822795d84b8d3b2eff551d15786c60									
+function	192.0.2.11	192.0.2.20	41009	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	4,6	d1bb8a7618ddc55064fa380c5f6da99c46153235b3f40d9c36bc8c45d0da8566,946400b9455ac9ab103722c0708efb27f92977d2f94e9f882cb2523afe052c3c			2	g50v1	none				
+counter						dnp3														dnp3_seq_reused=0
+case					tcp	dnp3				4,6	d1bb8a7618ddc55064fa380c5f6da99c46153235b3f40d9c36bc8c45d0da8566,946400b9455ac9ab103722c0708efb27f92977d2f94e9f882cb2523afe052c3c					none		new-function	acknowledged	a pair that only read starts a time-sync
