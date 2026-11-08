@@ -37,9 +37,12 @@ type Config struct {
 	Stream c5.StreamID
 }
 
-// Appender commits one record: the node's c5.Log for the network database.
+// Appender commits records to the observation stream: the node's c5.Log
+// for the network database, and the stream's last committed seq.
 type Appender interface {
 	Append(ctx context.Context, rec c5.Record) (c5.Receipt, error)
+	AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error)
+	LastCommitted(ctx context.Context) (uint64, error)
 }
 
 // Options are the link's seams.
@@ -52,6 +55,9 @@ type Options struct {
 	Monotonic func() time.Duration
 	// Received is the node's received time for a C4 event.
 	Received func() event.Received
+	// Hold is the intake hold (hold.go). With no node addresses nothing
+	// is held.
+	Hold HoldConfig
 }
 
 // Reasons a record is refused (sensor-record-refused), beside the C13
@@ -102,6 +108,8 @@ type Stats struct {
 	DroppedByAsset map[string]uint64
 	// Heartbeat is the last heartbeat accepted in the run, or nil.
 	Heartbeat *netobs.Heartbeat
+	// Hold is the intake hold's counts.
+	Hold HoldStats
 }
 
 // Link reads one sensor's channel.
@@ -109,6 +117,12 @@ type Link struct {
 	cfg      Config
 	opt      Options
 	resolver *Resolver
+
+	// cmu orders every commit to the stream with the hold's changes, so a
+	// release's batch and its saved state agree with what came before and
+	// after it. It is taken before mu.
+	cmu  sync.Mutex
+	hold *hold
 
 	mu     sync.Mutex
 	stats  Stats
@@ -127,7 +141,11 @@ func New(cfg Config, opt Options) (*Link, error) {
 	case opt.Store == nil || opt.Monotonic == nil || opt.Received == nil:
 		return nil, errors.New("sensorlink: Store, Monotonic and Received are required")
 	}
-	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets),
+	h, err := newHold(opt.Hold)
+	if err != nil {
+		return nil, err
+	}
+	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets), hold: h,
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}, nil
 }
@@ -195,7 +213,14 @@ func (l *Link) handle(ctx context.Context, b []byte) {
 	}
 	// A record that decoded strictly takes its seq even when a later check
 	// refuses it, so a gap counts only records the channel lost.
-	if !l.takeSeq(run, n) {
+	ok, newRun := l.takeSeq(run, n)
+	if newRun {
+		l.cmu.Lock()
+		l.giveWay(ctx, true)
+		l.syncHold()
+		l.cmu.Unlock()
+	}
+	if !ok {
 		l.refuse(RefusedSeq)
 		return
 	}
@@ -205,35 +230,44 @@ func (l *Link) handle(ctx context.Context, b []byte) {
 	}
 	if h := rec.Heartbeat; h != nil {
 		l.mu.Lock()
-		defer l.mu.Unlock()
 		if err := h.Follows(l.stats.Heartbeat); err != nil {
 			l.stats.Refused[RefusedCounterDecrease]++
+			l.mu.Unlock()
 			return
 		}
 		l.stats.Heartbeat = h
+		l.mu.Unlock()
+		if degraded(h.Coverage) {
+			l.cmu.Lock()
+			l.giveWay(ctx, false)
+			l.syncHold()
+			l.cmu.Unlock()
+		}
 		return
 	}
 	l.observe(ctx, rec.Observation, n)
 }
 
 // takeSeq records seq n of run, counting the seqs skipped. A new run starts
-// afresh from 0. It reports false for a seq at or below the run's last.
-func (l *Link) takeSeq(run string, n uint64) bool {
+// afresh from 0. It reports false for a seq at or below the run's last, and
+// whether run replaced another.
+func (l *Link) takeSeq(run string, n uint64) (ok, newRun bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	s := &l.stats
 	if run != s.RunID {
 		if s.RunID != "" {
 			s.RunChanges++
+			newRun = true
 		}
 		s.RunID, s.LastSeq, s.LastCommittedSeq, s.Heartbeat = run, 0, 0, nil
 	}
 	if n <= s.LastSeq {
-		return false
+		return false, newRun
 	}
 	s.SeqGaps += n - s.LastSeq - 1
 	s.LastSeq = n
-	return true
+	return true, newRun
 }
 
 func (l *Link) refuse(reason string) {
@@ -257,10 +291,10 @@ func codeOf(err error) string {
 	return string(netobs.CodeDecode)
 }
 
-// observe adds the node object to o, builds its C4 event and capture, and
-// commits it, or drops and counts it.
+// observe adds the node object to o, and holds it (hold.go) or commits
+// it untied, or drops and counts it.
 func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
-	nd, unresolved := l.nodeObject(o)
+	nd, _ := l.nodeObject(o)
 	var capture *c5.Capture
 	if o.FirstSight {
 		c, err := firstSightCapture(o)
@@ -282,9 +316,40 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 		l.refuse(RefusedStored)
 		return
 	}
+	hr := HeldRecord{RunID: o.RunID, Seq: seq, Observation: body, Capture: capture, Received: l.opt.Received()}
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	defer l.syncHold()
+	if degraded(o.Coverage) {
+		l.giveWay(ctx, false)
+	}
+	if l.takeHeld(ctx, &stored, hr) {
+		return
+	}
+	l.commitOne(ctx, hr, nil, "")
+}
+
+// record builds hr's C4 event with tie, if any, and reports its
+// destination asset and whether neither end resolved, so it draws on the
+// unresolved budget (C13 section 5).
+func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, string, bool, error) {
+	body := hr.Observation
+	var st netobs.Observation
+	if err := json.Unmarshal(body, &st); err != nil || st.Node == nil {
+		return c5.Record{}, "", false, fmt.Errorf("sensorlink: a held record does not decode: %v", err)
+	}
+	nd := st.Node
+	if tie != nil {
+		nd.PlatformSession = tie
+		b, err := json.Marshal(&st)
+		if err != nil || len(b) > event.MaxNetobsBytes {
+			return c5.Record{}, "", false, fmt.Errorf("sensorlink: the tied record does not fit: %v", err)
+		}
+		body = b
+	}
 	e := event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: l.cfg.NodeID, Stream: event.Stream(l.cfg.Stream)},
 		Origin: event.OriginPlatform, Kind: event.KindNetworkObservation, Source: event.Source{OriginAuth: event.AuthPlatform},
-		Received: l.opt.Received(), Netobs: body}
+		Received: hr.Received, Netobs: body}
 	if nd.DstAsset == netobs.AssetUnresolved {
 		e.Flags = []string{"asset-unresolved"}
 	} else {
@@ -292,14 +357,23 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 	}
 	eb, err := json.Marshal(e)
 	if err != nil {
+		return c5.Record{}, "", false, err
+	}
+	rec := c5.Record{Stream: l.cfg.Stream, Class: c5.ClassNetworkObservation, Event: eb, Capture: hr.Capture}
+	return rec, nd.DstAsset, nd.SrcAsset == netobs.AssetUnresolved && nd.DstAsset == netobs.AssetUnresolved, nil
+}
+
+// commitOne commits one record with tie, if any, or drops and counts it.
+// The caller holds cmu.
+func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.PlatformSession, _ string) {
+	rec, dst, unresolved, err := l.record(hr, tie)
+	if err != nil {
 		l.refuse(RefusedStored)
 		return
 	}
-	rec := c5.Record{Stream: l.cfg.Stream, Class: c5.ClassNetworkObservation, Event: eb, Capture: capture}
-
 	l.mu.Lock()
 	if unresolved && !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
-		l.drop(DropUnresolvedBudget, nd.DstAsset)
+		l.drop(DropUnresolvedBudget, dst)
 		l.mu.Unlock()
 		return
 	}
@@ -313,25 +387,78 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 		if unresolved {
 			l.budget.giveBack(rec.Bytes())
 		}
-		switch {
-		case errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}):
-			l.drop(DropClassFull, nd.DstAsset)
-		case errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}):
-			l.drop(DropRecordCap, nd.DstAsset)
-		default:
-			l.drop(DropStore, nd.DstAsset)
-		}
+		l.storeDrop(err, dst)
 		return
 	}
+	l.committed(hr)
+}
+
+// commitBatch commits a release's records in one batch, in order, so a
+// restart can tell whether it committed (RecoverHold). A record the budget
+// refuses is dropped and counted; a batch the store refuses drops and
+// counts each. The caller holds cmu.
+func (l *Link) commitBatch(ctx context.Context, rel []Release) {
+	var recs []c5.Record
+	var held []HeldRecord
+	var dsts []string
+	var bytes []int64 // the budget each unresolved record took
+	l.mu.Lock()
+	for _, r := range rel {
+		rec, dst, unresolved, err := l.record(r.Record, r.Tie)
+		if err != nil {
+			l.stats.Refused[RefusedStored]++
+			continue
+		}
+		var took int64
+		if unresolved {
+			if !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
+				l.drop(DropUnresolvedBudget, dst)
+				continue
+			}
+			took = rec.Bytes()
+		}
+		recs, held, dsts, bytes = append(recs, rec), append(held, r.Record), append(dsts, dst), append(bytes, took)
+	}
+	l.mu.Unlock()
+	if len(recs) == 0 {
+		return
+	}
+	_, err := l.opt.Store.AppendBatch(ctx, recs)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range recs {
+		if err != nil {
+			l.budget.giveBack(bytes[i])
+			l.storeDrop(err, dsts[i])
+			continue
+		}
+		l.committed(held[i])
+	}
+}
+
+// storeDrop counts a record the store refused. The caller holds l.mu.
+func (l *Link) storeDrop(err error, dst string) {
+	switch {
+	case errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}):
+		l.drop(DropClassFull, dst)
+	case errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}):
+		l.drop(DropRecordCap, dst)
+	default:
+		l.drop(DropStore, dst)
+	}
+}
+
+// committed counts a committed record. The caller holds l.mu.
+func (l *Link) committed(hr HeldRecord) {
 	l.stats.Committed++
-	if l.stats.RunID == o.RunID && seq > l.stats.LastCommittedSeq {
-		l.stats.LastCommittedSeq = seq
+	if l.stats.RunID == hr.RunID && hr.Seq > l.stats.LastCommittedSeq {
+		l.stats.LastCommittedSeq = hr.Seq
 	}
 }
 
 // nodeObject builds the node object, all but stored_capture, and reports
 // whether neither end resolved, so the observation draws on the unresolved
-// budget (C13 section 5). The platform_session tie is not set yet.
+// budget (C13 section 5). The platform_session tie is the hold's (hold.go).
 func (l *Link) nodeObject(o *netobs.Observation) (*netobs.Node, bool) {
 	nd := &netobs.Node{SrcAsset: netobs.AssetUnresolved, DstAsset: netobs.AssetUnresolved, ResolvedBy: "none",
 		EvidenceClass: string(l.cfg.EvidenceClass)}

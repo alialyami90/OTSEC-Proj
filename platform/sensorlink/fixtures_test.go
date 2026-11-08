@@ -186,11 +186,24 @@ func openNet(t *testing.T, obsQuota int64) netStore {
 	return netStore{db: db, log: log}
 }
 
+// Append, AppendBatch and LastCommitted make a netStore the link's Appender.
+func (s netStore) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error) {
+	return s.log.Append(ctx, rec)
+}
+
+func (s netStore) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
+	return s.log.AppendBatch(ctx, recs)
+}
+
+func (s netStore) LastCommitted(ctx context.Context) (uint64, error) {
+	return s.db.LastCommitted(ctx, obsStream)
+}
+
 func newLink(t *testing.T, s netStore, c *clock, obsQuota int64) *Link {
 	t.Helper()
 	l, err := New(Config{NodeID: testNode, SensorID: testSensor, EvidenceClass: asset.Simulated, OutageHours: 1,
 		ObservationQuota: obsQuota, Stream: obsStream},
-		Options{Assets: testAssets(), Store: s.log, Monotonic: c.mono, Received: received})
+		Options{Assets: testAssets(), Store: s, Monotonic: c.mono, Received: received})
 	if err != nil {
 		t.Fatal(err)
 	}
