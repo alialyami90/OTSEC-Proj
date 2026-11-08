@@ -470,6 +470,42 @@ func owStream(t testing.TB) ([]*netobs.Observation, []handoff) {
 	}
 }
 
+// A session handed over before any observation, as when a collection runs
+// before the sensor has sent anything, is pending with no clock, and the
+// checkpoint holds it (D1 on #590, C13 §14 item 19). An unconnected one
+// leaves nothing to hold. Restored, the pending one is judged once
+// observations move the clock past its end plus tie_grace_s.
+func TestOwnSessionBeforeClock(t *testing.T) {
+	r := newOwRun(t, nil)
+	must0(t, r.session(owSession(1, 1, lxRelay, owRelay, true, 10, 20)))
+	must0(t, r.session(owSession(2, 2, lxRelay, owRelay, false, 10, 20)))
+	cp, err := r.d.Checkpoint(0)
+	if err != nil {
+		t.Fatalf("checkpoint before any observation: %v", err)
+	}
+	k, err := netobs.DecodeDetectorCheckpoint(cp)
+	if err != nil || k.ClockUTC != "" || len(k.Sessions) != 1 || len(k.Taken) != 0 || k.SessionThrough != 2 {
+		t.Fatalf("checkpoint: %v, %+v", err, k)
+	}
+	re, err := RestoreDetector(owCfg(nil), cp, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.d = re
+	if out, err := re.Session(owSession(2, 2, lxRelay, owRelay, false, 10, 20), 0); err != nil || out != nil {
+		t.Fatalf("session 2 handed over again: %v, %v", out, err)
+	}
+	r.obs(owQuiet(t), 49)
+	if len(r.unseen()) != 0 {
+		t.Fatal("judged before the end plus tie_grace_s")
+	}
+	r.obs(owQuiet(t), 50)
+	if got := r.unseen(); !slices.Equal(got, []string{lxRelay}) {
+		t.Fatalf("unseen %v, want the connected session's asset", got)
+	}
+	must(r.d.Checkpoint(0))
+}
+
 // D6's 2b row: restore at every cut with session handovers equals the
 // uninterrupted run, with the checkpoint taken before the handovers after
 // an observation (so a restore hands them over again and takes them) and
