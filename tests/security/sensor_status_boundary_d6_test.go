@@ -39,7 +39,8 @@ func TestD6SensorTextNeverReachesStatus(t *testing.T) {
 	nc.Store.Quotas["configuration"] = 16 << 20
 	nc.Store.Quotas["network-observation"] = 64 << 20
 	nc.Store.Quotas["network-alert"] = 16 << 20
-	nc.NetworkSensor = map[string]any{"sensor_id": sensor, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30}
+	nc.NetworkSensor = map[string]any{"sensor_id": sensor, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30,
+		"node_addresses": []string{"192.0.2.5"}, "node_macs": []string{"02:00:00:00:00:05"}, "node_vlans": []any{10}}
 	if err := nc.WriteInstallKey("ik_d6_boundary"); err != nil {
 		t.Fatal(err)
 	}
