@@ -20,7 +20,7 @@ import (
 var c5v6Codes = []store.HoldCode{store.HoldBaseline, store.HoldUnapprovedDifference, "acknowledged-difference", "restored-difference"}
 
 func TestC5v06Identifier(t *testing.T) {
-	if store.Identifier != "otsec.store/0.8" {
+	if store.Identifier != "otsec.store/0.9" {
 		t.Errorf("identifier %q", store.Identifier)
 	}
 	if store.HoldAcknowledgedDifference != "acknowledged-difference" || store.HoldRestoredDifference != "restored-difference" {

@@ -1,4 +1,4 @@
-// Package store is contract C5, otsec.store/0.8: how a site node keeps,
+// Package store is contract C5, otsec.store/0.9: how a site node keeps,
 // acknowledges, recovers and prunes events. It is owned by A5 (now B5). Reviewers are
 // A4, A6 and A3. The full semantics, with the evidence behind each rule, are
 // in docs/phase1/A5-store-semantics.md.
@@ -58,7 +58,7 @@
 //     store-quota-reached at every start), and the classes are not summed (a
 //     full class beside a light one restarted silently). Pruning steps only
 //     the streams of a class above the target. A class with no room for its
-//     largest record (event, capture and source cursor, as the runtime refusal counts it; Record.Bytes) raises the alarm the runtime raises for the class (FullAlarm: audit-store-full, syslog-unknown-full, or store-quota-reached) naming the class, and a
+//     largest record (event, capture and source cursor, as the runtime refusal counts it; Record.Bytes) raises the alarm the runtime raises for the class (FullAlarm: audit-store-full, syslog-unknown-full, network-full, or store-quota-reached) naming the class, and a
 //     class at its warning level raises store-quota-warning, as the runtime
 //     would at its next commit. Pages are the store's PageBytes and stay
 //     bounded by DiskBytesPerQuotaByte.
@@ -76,6 +76,17 @@
 //     identity, finding and advisory.set are evidence and are never
 //     removable; identity.read is working state and joins RemovableSeries.
 //     No hold code, class, action or store format changes.
+//   - Since 0.9 (D4-68, docs/phase4/D5-c5-0.9.md): two classes for the
+//     passive network sensor, network-observation and network-alert, both
+//     drop-and-count with the alarm network-full, both needing a record
+//     cap, and only ever in a database of network classes. A shared
+//     capture of a network class is charged once to each class that holds
+//     a record citing it, so one class's records never hold another's
+//     quota; every other capture is charged as in 0.8. Three
+//     configuration series for the network baseline: baseline.network
+//     (evidence) and netcheckpoint.learner and netcheckpoint.detector
+//     (working state, removable). No hold code, action or store format
+//     changes.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation
@@ -98,4 +109,4 @@
 package store
 
 // Identifier is this contract's identifier, parsed by contracts/version.
-const Identifier = "otsec.store/0.8"
+const Identifier = "otsec.store/0.9"

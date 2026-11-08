@@ -51,11 +51,13 @@ func TestC5v08KindSeriesProduct(t *testing.T) {
 	}
 }
 
-// TestC5v08RemovableSeries: exactly the four removable series, the item 3
-// evidence series never among them, and a fresh slice on each call.
+// TestC5v08RemovableSeries: the four removable series of 0.8 (and since 0.9
+// the two network checkpoints), the item 3 evidence series never among them,
+// and a fresh slice on each call.
 func TestC5v08RemovableSeries(t *testing.T) {
 	got := store.RemovableSeries()
-	want := []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read"}
+	want := []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read",
+		"netcheckpoint.learner", "netcheckpoint.detector"}
 	if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
 		t.Fatalf("RemovableSeries %v, want %v", got, want)
 	}
