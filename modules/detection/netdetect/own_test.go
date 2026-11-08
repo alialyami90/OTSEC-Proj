@@ -477,6 +477,9 @@ func owStream(t testing.TB) ([]*netobs.Observation, []handoff) {
 // observations move the clock past its end plus tie_grace_s.
 func TestOwnSessionBeforeClock(t *testing.T) {
 	r := newOwRun(t, nil)
+	if r.d.SessionThrough() != 0 {
+		t.Fatalf("session through %d before any session", r.d.SessionThrough())
+	}
 	must0(t, r.session(owSession(1, 1, lxRelay, owRelay, true, 10, 20)))
 	must0(t, r.session(owSession(2, 2, lxRelay, owRelay, false, 10, 20)))
 	cp, err := r.d.Checkpoint(0)
@@ -490,6 +493,9 @@ func TestOwnSessionBeforeClock(t *testing.T) {
 	re, err := RestoreDetector(owCfg(nil), cp, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if r.d.SessionThrough() != 2 || re.SessionThrough() != 2 {
+		t.Fatalf("session through %d, restored %d, want 2", r.d.SessionThrough(), re.SessionThrough())
 	}
 	r.d = re
 	if out, err := re.Session(owSession(2, 2, lxRelay, owRelay, false, 10, 20), 0); err != nil || out != nil {

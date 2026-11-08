@@ -329,6 +329,11 @@ func (d *Detector) TiedEvicted() int64 { return d.tiedEvicted }
 // sessions taken with Skip: not judged, for before-retained (D1 in D4-74).
 func (d *Detector) BeforeRetained() int64 { return d.beforeRetained }
 
+// SessionThrough is the health-stream seq of the last session record taken,
+// or 0: a restored detector takes none at or below it, so the node can
+// start its health read there (D1's note 2 on #590).
+func (d *Detector) SessionThrough() uint64 { return d.sessionThrough }
+
 // OpenFlowSeen counts, since this detector was built or restored, the
 // sessions counted as seen because intake reported their 5-tuple open from
 // an earlier session, with no observation tied to them first. The node
