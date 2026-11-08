@@ -56,8 +56,10 @@ const (
 	// acknowledgement (D1's C1 on #575). Raised at start.
 	AlarmEndpointsNotTracked = "network-endpoints-not-tracked"
 	// AlarmAlertNotStored: an alert the detector raised was not committed.
-	// It is kept and tried again at each tick, and until it commits the
-	// detector reads nothing more and is not checkpointed.
+	// One the store refused for the class's quota or record cap is dropped
+	// and counted by (rule, asset). Any other is kept and tried again at
+	// each tick, and until it commits the detector reads nothing more and
+	// is not checkpointed. Raised once until an alert commits (D1 on B3).
 	AlarmAlertNotStored = "network-alert-not-stored"
 )
 
@@ -137,17 +139,25 @@ type netDetector struct {
 	handed  uint64
 	moved   bool
 	// unsent are the alert records raised and not yet committed, in the
-	// order raised, and unsentFM whether each has frames_missing above 0.
+	// order raised, and unsentAt each one's frames_missing above 0 and its
+	// drop key.
 	// While any are unsent the driver reads nothing more and the detector
 	// is not checkpointed, so neither its checkpoint nor its cursor passes
 	// an alert that isn't stored; a restart reads the observations again
 	// and raises it again (D1's F1 on #590).
 	unsent   []c5.Record
-	unsentFM []bool
+	unsentAt []unsentAlert
 	index    frameIndex
 	start    time.Duration
 	st       DetectorStatus
 	raised   map[string]bool
+}
+
+// unsentAlert is what the node keeps of an unsent alert beside its record:
+// whether frames_missing is above 0, and its drop key "<rule>.<asset>".
+type unsentAlert struct {
+	fm  bool
+	key string
 }
 
 // frameIndex maps a cited frame's SHA-256 to the evidence ref of the
@@ -592,17 +602,20 @@ func (r *Runtime) commitAlerts(ctx context.Context, nd *netDetector, alerts []ne
 			nd.st.AlertsNotStored++
 			continue
 		}
-		nd.unsent, nd.unsentFM = append(nd.unsent, rec), append(nd.unsentFM, alerts[i].FramesMissing > 0)
+		nd.unsent = append(nd.unsent, rec)
+		nd.unsentAt = append(nd.unsentAt, unsentAlert{alerts[i].FramesMissing > 0, string(alerts[i].Rule) + "." + alerts[i].AssetID})
 	}
 	r.flushAlerts(ctx, nd)
 }
 
 // flushAlerts commits the unsent alerts, in the order raised, and reports
 // whether none is left. An alert the store refuses for its class's quota
-// or record cap is dropped and counted, as C5 0.9 section 8 drops a full
-// class's records, and the detector goes on. Any other failure keeps the
-// alert and those after it, raises the alarm once and is counted; the next
-// tick tries again (D1 on #590).
+// or record cap is dropped and counted by reason and by (rule, asset), as
+// C5 0.9 section 8 drops a full class's records, and the detector goes on
+// (AP-36 (3)). Any other failure keeps the alert and those after it and is
+// counted; the next tick tries again (D1 on #590). Either raises the alarm
+// once until an alert commits, so a full class raises it once per stretch
+// of drops (D1 on B3).
 func (r *Runtime) flushAlerts(ctx context.Context, nd *netDetector) bool {
 	if len(nd.unsent) == 0 {
 		return true
@@ -618,9 +631,13 @@ func (r *Runtime) flushAlerts(ctx context.Context, nd *netDetector) bool {
 			r.alertsStored(nd, 1)
 		case errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}) || errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}):
 			nd.st.AlertsNotStored++
-			r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmAlertNotStored, At: r.opt.Now(), Stream: NetAlertStream(r.cfg.NetworkSensor.SensorID),
-				Detail: "an alert was dropped and counted: " + err.Error()})
-			nd.unsent, nd.unsentFM = nd.unsent[1:], nd.unsentFM[1:]
+			reason := sensorlink.DropClassFull
+			if errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}) {
+				reason = sensorlink.DropRecordCap
+			}
+			r.alertDropped(reason, nd.unsentAt[0].key)
+			r.raiseDetector(nd, AlarmAlertNotStored, "alerts are dropped and counted by rule and asset until one commits: "+err.Error())
+			nd.unsent, nd.unsentAt = nd.unsent[1:], nd.unsentAt[1:]
 		default:
 			nd.st.AlertCommitFailures++
 			r.raiseDetector(nd, AlarmAlertNotStored, fmt.Sprintf("%d alerts were not committed, so the detector reads nothing more and its cursor stays until they are: %v", len(nd.unsent), err))
@@ -643,19 +660,30 @@ func (r *Runtime) appendAlerts(ctx context.Context, recs []c5.Record) error {
 	return err
 }
 
-// alertsStored counts the first n unsent alerts stored.
+// alertDropped counts an alert the store refused, by reason and by its
+// "<rule>.<asset>" key.
+func (r *Runtime) alertDropped(reason, key string) {
+	in := r.sensor
+	in.mu.Lock()
+	in.alerts.reason[reason]++
+	in.alerts.asset[key]++
+	in.mu.Unlock()
+}
+
+// alertsStored counts the first n unsent alerts stored, and re-arms the
+// alarm.
 func (r *Runtime) alertsStored(nd *netDetector, n int) {
 	nd.st.Alerts += int64(n)
-	for _, fm := range nd.unsentFM[:n] {
-		if fm {
+	for _, u := range nd.unsentAt[:n] {
+		if u.fm {
 			nd.st.AlertsFramesMissing++
 		}
 	}
-	nd.unsent, nd.unsentFM = nd.unsent[n:], nd.unsentFM[n:]
+	nd.unsent, nd.unsentAt = nd.unsent[n:], nd.unsentAt[n:]
 	if len(nd.unsent) == 0 {
-		nd.unsent, nd.unsentFM = nil, nil
-		delete(nd.raised, AlarmAlertNotStored)
+		nd.unsent, nd.unsentAt = nil, nil
 	}
+	delete(nd.raised, AlarmAlertNotStored)
 }
 
 // alertRecord is a's record, with its capture unless it is

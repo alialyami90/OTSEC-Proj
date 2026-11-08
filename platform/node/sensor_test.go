@@ -234,6 +234,48 @@ func TestSensorDropEventFits(t *testing.T) {
 	t.Logf("worst case: %d octets", len(msg))
 }
 
+// The alert class's intake.drop-counted event at its worst case (D1 on
+// B3): eight pairs of the longest rule name and a 36-character asset ID,
+// other, both reasons, and every count at its widest, with the
+// longest node ID, render within a default Syslog target's 2048 octets,
+// and within three quarters of it as the observation event does.
+func TestSensorAlertDropEventFits(t *testing.T) {
+	d := dropCounts{map[string]uint64{sensorlink.DropClassFull: math.MaxUint64, sensorlink.DropRecordCap: math.MaxUint64}, map[string]uint64{}}
+	longest := netobs.RuleOwnSessionOutsideRecord
+	for _, r := range []netobs.Rule{netobs.RuleNodeAddressSpoofed, netobs.RuleOwnSessionUnseen, netobs.RuleUnresolvedAddress} {
+		if len(r) > len(longest) {
+			longest = r
+		}
+	}
+	for i := range SensorDropDetailAssets + 2 {
+		d.asset[string(longest)+"."+fmt.Sprintf("ffffffff-ffff-4fff-bfff-%012d", i)] = math.MaxUint64 - uint64(i)
+	}
+	det := alertDropDetails(NetAlertStream(strings.Repeat("f", 36)), time.Date(2026, 11, 1, 0, 0, 0, 123456789, time.UTC), d)
+	for k := range det {
+		if k != "stream" && k != "class" && k != "since" {
+			det[k] = strconv.FormatUint(math.MaxUint64, 10)
+		}
+	}
+	if n := len(det); n != 4+2+SensorDropDetailAssets+1 {
+		t.Fatalf("%d details: %v", n, det)
+	}
+	e := &event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: event.NodeID(strings.Repeat("n", 63)), Stream: event.Stream(HealthStream), Seq: math.MaxUint64 >> 1},
+		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
+		Received: event.Received{UTC: "2026-11-01T00:00:00.000000001Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized, Source: "ntp"}},
+		Health:   &event.Health{Type: event.HealthDropCounted, Details: det}}
+	tg, err := syslog.ParseTarget([]byte(`{"schema": "otsec.syslog/0.1", "name": "central", "host": "collector.example", "port": 6514,
+		"transport": "tls", "format": "rfc5424", "framing": "octet-counting", "class": "best-effort", "replay_seconds": 3600, "max_message_octets": 2048,
+		"tls": {"server_name": "collector.example", "trust_anchor_ref": "ca"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, out, err := syslog.Render(e, tg)
+	if err != nil || out.SummaryDropped || len(msg) > syslog.DefaultMaxOctets*3/4 {
+		t.Fatalf("%d octets (limit %d), %+v, %v: %s", len(msg), syslog.DefaultMaxOctets*3/4, out, err, msg)
+	}
+	t.Logf("worst case: %d octets", len(msg))
+}
+
 // A drop-count write that fails raises store-commit-failed on the health
 // stream's database, once for each try, and is tried again a minute later,
 // not at every tick (D4-72, D4's low row on #568). Desk only.
