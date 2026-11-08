@@ -289,8 +289,9 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 // applies Session's ordering check and moves the sessions taken, so a
 // restart that hands s over again finds it taken, never an ordering
 // fault. Its invocation ID is taken too, so its late tied records take no
-// tied room. A malformed record is refused with an error, and its seq is
-// taken.
+// tied room. A session already tied was seen, so it is done as Session
+// does and isn't counted (D5's N1 on #589). A malformed record is refused
+// with an error, and its seq is taken.
 func (d *Detector) Skip(s Session, afterSeq uint64) error {
 	if s.Seq <= d.sessionThrough {
 		return nil
@@ -303,8 +304,12 @@ func (d *Detector) Skip(s Session, afterSeq uint64) error {
 	if !netobs.ValidUUID(s.InvocationID) {
 		return fmt.Errorf("netdetect: session %q", s.InvocationID)
 	}
+	if i := slices.IndexFunc(d.tied, func(t netobs.TiedSession) bool { return t.InvocationID == s.InvocationID }); i >= 0 {
+		d.tied = slices.Delete(d.tied, i, i+1)
+		d.take(s.InvocationID)
+		return nil
+	}
 	d.beforeRetained++
-	d.tied = slices.DeleteFunc(d.tied, func(t netobs.TiedSession) bool { return t.InvocationID == s.InvocationID })
 	d.take(s.InvocationID)
 	return nil
 }

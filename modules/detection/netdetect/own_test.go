@@ -304,7 +304,8 @@ func TestOwnSessionOrdering(t *testing.T) {
 }
 
 // Skip takes a session without judging it (D1 in D4-74): it applies
-// Session's ordering check, counts before-retained, and moves the sessions
+// Session's ordering check, counts before-retained unless a retained
+// observation already tied the session (D5's N1), and moves the sessions
 // taken, so a skip as the last session before a checkpoint, handed over
 // again after a restore, is a replay and never an ordering fault.
 func TestOwnSessionSkip(t *testing.T) {
@@ -316,18 +317,23 @@ func TestOwnSessionSkip(t *testing.T) {
 		r.d.OrderingFaults() != 1 || r.d.BeforeRetained() != 0 || !bytes.Equal(must(r.d.Checkpoint(0)), before) {
 		t.Fatalf("after_seq below through: %v, %d faults, %d before-retained", err, r.d.OrderingFaults(), r.d.BeforeRetained())
 	}
-	if err := r.d.Skip(owSession(1, 1, lxRelay, owRelay, true, 0, 5), r.seq); err != nil || r.d.BeforeRetained() != 1 ||
+	// Session 1 was tied, so it was seen: done, and not counted.
+	if err := r.d.Skip(owSession(1, 1, lxRelay, owRelay, true, 0, 5), r.seq); err != nil || r.d.BeforeRetained() != 0 ||
 		len(r.d.tied) != 0 || len(r.d.taken) != 1 || len(r.d.sessions) != 0 {
-		t.Fatalf("skip: %v, %d before-retained, tied %v, taken %v, pending %v", err, r.d.BeforeRetained(), r.d.tied, r.d.taken, r.d.sessions)
+		t.Fatalf("skip of a tied session: %v, %d before-retained, tied %v, taken %v, pending %v", err, r.d.BeforeRetained(), r.d.tied, r.d.taken, r.d.sessions)
 	}
-	// A session never seen, skipped, raises nothing once its window passes.
+	// A session never seen, skipped, is counted and raises nothing once
+	// its window passes.
 	must0(t, r.d.Skip(owSession(2, 2, lxRelay, owRelay, true, 10, 20), r.seq))
+	if r.d.BeforeRetained() != 1 || len(r.d.taken) != 2 || len(r.d.sessions) != 0 {
+		t.Fatalf("skip: %d before-retained, taken %v, pending %v", r.d.BeforeRetained(), r.d.taken, r.d.sessions)
+	}
 	r.obs(owQuiet(t), 100)
 	r.obs(owQuiet(t), 101)
-	if len(r.unseen()) != 0 || r.d.BeforeRetained() != 2 {
+	if len(r.unseen()) != 0 || r.d.BeforeRetained() != 1 {
 		t.Fatalf("unseen %v, %d before-retained", r.unseen(), r.d.BeforeRetained())
 	}
-	if err := r.d.Skip(Session{Seq: 3, InvocationID: "x"}, r.seq); err == nil || r.d.BeforeRetained() != 2 {
+	if err := r.d.Skip(Session{Seq: 3, InvocationID: "x"}, r.seq); err == nil || r.d.BeforeRetained() != 1 {
 		t.Fatalf("a malformed skip: %v", err)
 	}
 	cp := must(r.d.Checkpoint(0))
