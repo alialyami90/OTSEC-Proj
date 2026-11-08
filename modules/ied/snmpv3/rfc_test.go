@@ -182,6 +182,8 @@ func (c *clockConn) Write(b []byte) error {
 
 func (c *clockConn) Read(deadline time.Time) ([]byte, error) { return c.agent.Read(deadline) }
 
+func (c *clockConn) LocalAddr() string { return c.agent.LocalAddr() }
+
 // RFC 3414 §3.2 step 7 b): the time-window Report's boots and time are the
 // latest received, so an older authentic message neither moves the notion of
 // time back nor escapes the window (D6 on #495).

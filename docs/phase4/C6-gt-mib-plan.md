@@ -119,8 +119,13 @@ Each case gives the expected C2 code (#439 §2.4), the health line, and two coun
 | W7 | ignores `msgMaxSize` and sends 4000 bytes | `failed.response_too_large`, bytes kept |
 | W8 | a Response with `error-status` `authorizationError` | `failed.snmp_error_status`, bytes kept |
 | W9 | `endOfMibView` inside the table | the walk ends normally |
+| W10 | answers the first `GetRequest` for the system operation's two OIDs with a `noError` Response carrying sysDescr's binding alone | `failed.snmp_varbinds_mismatch`, the Response kept, no value from it, and nothing sent after it (C2 0.9, RFC 3416 §4.2.1) |
+| W11 | the entity operation as a `GetNext` walk: the second `GetNextRequest` is answered `noError` with no binding | `failed.snmp_varbinds_mismatch`, not a complete walk. The values of the earlier Responses are kept, none from that one, and nothing is sent after it (C2 0.9, RFC 3416 §4.2.2) |
+| W12 | the same walk, with the second `GetNextRequest` answered `noError` with two bindings | `failed.snmp_varbinds_mismatch`. Neither binding gives a value, and nothing is sent after it |
 
-Every request in W1 to W9 is checked in the agent's log for these things:
+W10 to W12 are C2 0.9's test 3 (`docs/phase4/D2-c2-0.9.md` §6), and D4-60's bar on `GETNEXT` walks lifts only with them green at the 0.9 code's merge head. W10 runs on the binaries in V-M1's run, because the system operation is a two-OID `get`. W11 and W12 need the entity operation as a `GetNext` walk, which no signed register holds while the bar stands. So they run at the client: C2's SNMPv3 session over a UDP socket against the case's agent, with the test package's entity operation as a `getnext` (`tests/integration/gt_mib/client`). They leave V-M1's binary run, which has no package to run them with.
+
+Every request in W1 to W10 is checked in the agent's log for these things:
 - the PDU is `GetRequest` or `GetBulkRequest`, as the operation names;
 - for a `get`, each OID is one the operation names;
 - for a walk, each OID lies inside the subtree;

@@ -28,7 +28,9 @@
 // failed.snmp_unexpected_report, and an authenticated, encrypted message
 // whose ScopedPDU does not decode ends it with
 // failed.snmp_scoped_pdu_unreadable, its decrypted bytes kept (C2 0.8,
-// D4-54). Anything else that does not authenticate, decrypt, decode or match
+// D4-54). A noError Response to a Get or GetNext whose binding count is not
+// the request's ends it with failed.snmp_varbinds_mismatch, before any of
+// its bindings is kept (C2 0.9, D4-60). Anything else that does not authenticate, decrypt, decode or match
 // is discarded, kept in the transcript, and the request times out if nothing
 // good arrives. Each request is sent at most twice, each time with a fresh
 // msgID, and both count against the bounds.
@@ -82,6 +84,10 @@ type Conn interface {
 	Write(b []byte) error
 	// Read returns the next datagram, or an error once deadline passes.
 	Read(deadline time.Time) ([]byte, error)
+	// LocalAddr is the socket's own end in C2 0.9's session.local_addr
+	// form (adapter.LocalAddrOf), so the node can tie the run's datagrams
+	// to it. A session whose Conn gives none sends nothing.
+	LocalAddr() string
 }
 
 // ErrDeadline is what a Conn's Read returns when the deadline passes.
@@ -144,6 +150,8 @@ type Outcome struct {
 	Authenticated bool
 	Segments      []Segment
 	Values        []Value
+	// LocalAddr is the Conn's local address (C2 0.9).
+	LocalAddr string
 }
 
 // state is the session in progress.
@@ -184,6 +192,9 @@ func (s *Session) Run(p *register.Package, runID string) Outcome {
 func (st *state) start(p *register.Package, runID string) error {
 	if st.s.Permit == nil || st.s.Conn == nil || st.s.Now == nil {
 		return errors.New("snmpv3: a session needs a Conn, a clock and the egress check")
+	}
+	if st.out.LocalAddr = st.s.Conn.LocalAddr(); !adapter.ValidLocalAddr(st.out.LocalAddr) {
+		return fmt.Errorf("snmpv3: the connection's local address %q is not an IP address and port", st.out.LocalAddr)
 	}
 	if err := st.s.Keys.check(); err != nil {
 		return err
@@ -587,8 +598,22 @@ func (st *state) get(op *register.SNMPOperation) error {
 	if err := st.checkStatus(op, r); err != nil {
 		return err
 	}
+	if err := st.checkCount(op, r, len(op.OIDs)); err != nil {
+		return err
+	}
 	for _, vb := range r.sc.PDU.VarBinds {
 		st.keep(op, r, vb)
+	}
+	return nil
+}
+
+// checkCount ends the run when a noError Response to a Get or GetNext does
+// not carry one binding for each of the request's (RFC 3416 §4.2.1, §4.2.2;
+// C2 0.9). It runs before any binding of that Response is kept, so none of
+// them gives a value; bindings kept from earlier Responses stay.
+func (st *state) checkCount(op *register.SNMPOperation, r *reply, want int) error {
+	if n := len(r.sc.PDU.VarBinds); n != want {
+		return st.end(adapter.FailedSNMPVarbindsMismatch, "%s: a Response with %d varbinds to a request with %d", op.ID, n, want)
 	}
 	return nil
 }
@@ -596,8 +621,10 @@ func (st *state) get(op *register.SNMPOperation) error {
 // walk walks the operation's subtree within its bounds. It ends normally on
 // an OID outside the subtree or on endOfMibView. A returned OID not greater
 // than the one before it ends the run with failed.snmp_walk_not_increasing,
-// and a walk that reaches max_varbinds or max_requests first with
-// failed.response_too_large; the bytes are kept either way.
+// a GetNext Response with other than one binding with
+// failed.snmp_varbinds_mismatch (C2 0.9), and a walk that reaches
+// max_varbinds or max_requests first with failed.response_too_large; the
+// bytes are kept either way.
 func (st *state) walk(op *register.SNMPOperation) error {
 	prev, kept, sent := op.Subtree, 0, 0
 	tag, reps := byte(tagGetNextRequest), int64(0)
@@ -616,13 +643,14 @@ func (st *state) walk(op *register.SNMPOperation) error {
 		if err := st.checkStatus(op, r); err != nil {
 			return err
 		}
-		if len(r.sc.PDU.VarBinds) == 0 {
+		if tag == tagGetNextRequest {
+			if err := st.checkCount(op, r, 1); err != nil {
+				return err
+			}
+		} else if len(r.sc.PDU.VarBinds) == 0 {
 			// RFC 3416 §4.2.3: a GetBulk answered with no varbinds did not
 			// fit the message size (reason (1)); the walk is not complete.
-			if tag == tagGetBulkRequest {
-				return st.end(adapter.FailedResponseTooLarge, "%s: a GetBulk Response with no varbinds after %s", op.ID, prev)
-			}
-			return nil
+			return st.end(adapter.FailedResponseTooLarge, "%s: a GetBulk Response with no varbinds after %s", op.ID, prev)
 		}
 		for _, vb := range r.sc.PDU.VarBinds {
 			if vb.Value.Tag == tagEndOfMibView || !register.InSubtree(vb.OID, op.Subtree) {

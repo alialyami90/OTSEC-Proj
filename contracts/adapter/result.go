@@ -190,6 +190,15 @@ type SessionFacts struct {
 	// SNMP (0.7) is present exactly when the session was SNMPv3. The SEL
 	// facts above then hold fixed values (see SNMPFacts).
 	SNMP *SNMPFacts `json:"snmp,omitempty"`
+	// LocalAddr and ConnectedAt (0.9, AP-35) are the collector's end of the
+	// session's one connection and when it was made, so the node can tie a
+	// flow the sensor sees to this session. Both are present exactly when
+	// Connected is. LocalAddr is host:port with the host an IP literal in
+	// netip's canonical form, unmapped and without a zone (LocalAddrOf).
+	// ConnectedAt is when the dial returned for a TCP session, and the at of
+	// the first segment sent for an SNMPv3 one, on the clock of started_at.
+	LocalAddr   string `json:"local_addr,omitempty"`
+	ConnectedAt string `json:"connected_at,omitempty"`
 }
 
 // SNMPFacts are what an SNMPv3 session established (0.7). With them, the
@@ -466,8 +475,8 @@ func (r Result) Validate() error {
 	if r.Target != asset.DeviceObserved && r.Target != asset.Simulated {
 		c.fail("target must be %q or %q", asset.DeviceObserved, asset.Simulated)
 	}
-	if !asset.ValidTime(r.StartedAt) || !asset.ValidTime(r.EndedAt) {
-		c.fail("started_at and ended_at must be RFC 3339 UTC times")
+	if !validTime(r.StartedAt) || !validTime(r.EndedAt) {
+		c.fail("started_at and ended_at must be RFC 3339 UTC times with at most nine fractional digits")
 	}
 	code := c.status(r)
 	if r.RegisterVersion == 0 && code != RefusedRegisterUnverified {
@@ -480,6 +489,7 @@ func (r Result) Validate() error {
 		return c.err()
 	}
 	c.session(r, code)
+	c.connection(r)
 	c.identity(r, code)
 	for i, o := range r.Observations {
 		if !asset.ValidAttributeName(o.Name) || o.Value == "" {
@@ -672,8 +682,8 @@ func (c *check) transcript(t Transcript) bool {
 		} else {
 			last = o
 		}
-		if !asset.ValidTime(s.At) {
-			c.fail("%s.at is not an RFC 3339 UTC time", p)
+		if !validTime(s.At) {
+			c.fail("%s.at is not an RFC 3339 UTC time with at most nine fractional digits", p)
 		}
 	}
 	covered := next == int64(len(t.Data))

@@ -238,8 +238,25 @@ func normal(r adapter.Result, keepDetail bool) adapter.Result {
 	for i := range r.Observations {
 		r.Observations[i].Read = nil
 	}
+	// Nor do they carry 0.9's connection. check() validates it, and
+	// TestConnection checks its value.
+	r.Session.LocalAddr, r.Session.ConnectedAt = "", ""
 	return r
 }
+
+// localAddr is the address pipe's near end reports.
+var localAddr = &net.TCPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 49152}
+
+// pipe is net.Pipe with the near end's local address a TCP socket's, which
+// a 0.9 result's session.local_addr needs. A pipe has none of its own.
+func pipe() (net.Conn, net.Conn) {
+	near, far := net.Pipe()
+	return tcpConn{near}, far
+}
+
+type tcpConn struct{ net.Conn }
+
+func (tcpConn) LocalAddr() net.Addr { return localAddr }
 
 func jsonOf(t *testing.T, v any) string {
 	t.Helper()
@@ -390,7 +407,7 @@ func TestReplayGoldens(t *testing.T) {
 			if rp.limits != nil {
 				rp.limits(&f.inv.Limits, steps)
 			}
-			near, far := net.Pipe()
+			near, far := pipe()
 			done := farEnd(far, steps, rp.hangUp)
 			dials := 0
 			cfg.Asset, cfg.Profile, cfg.Register = f.asset, f.profile, f.reg
@@ -452,7 +469,8 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.7 result read by a 0.6 reader; no 0.6 adapter writes it",
+	"failed.unknown":                     "a 0.10 result read by a 0.9 reader; no 0.9 adapter writes it",
+	"ok-0.9":                             "the ok session at 0.9, which ok's replay already runs: normal() leaves out what 0.9 adds",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",
@@ -581,7 +599,7 @@ func TestLevel0ID(t *testing.T) {
 	steps := append(ok[:4:4], ok[len(ok)-1]) // wake, QUI probe, ID; then the closing QUI
 	f := load(t)
 	level0(t, &f)
-	near, far := net.Pipe()
+	near, far := pipe()
 	done := farEnd(far, steps, false)
 	cfg := Config{Asset: f.asset, Profile: f.profile, Register: f.reg, Endpoint: f.inv.EndpointID, Now: clock(),
 		hooks: &hooks{quiet: 20 * time.Millisecond, wakeWait: 50 * time.Millisecond},

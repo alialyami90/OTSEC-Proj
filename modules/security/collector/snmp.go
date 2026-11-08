@@ -236,6 +236,10 @@ type udpConn struct {
 	buf []byte
 }
 
+// LocalAddr is the connected socket's own end, in C2 0.9's local_addr form,
+// so the node can tie the run's datagrams to this session (AP-35).
+func (u *udpConn) LocalAddr() string { return adapter.LocalAddrOf(u.c.LocalAddr()) }
+
 func (u *udpConn) Write(b []byte) error {
 	_, err := u.c.Write(b)
 	return err

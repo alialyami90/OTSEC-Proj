@@ -28,6 +28,8 @@ SCHEMA_0_2 = "otsec.adapter/0.2"  # results that need a 0.2 rule or code (D2-14)
 SCHEMA_0_3 = "otsec.adapter/0.3"  # results that need a 0.3 code (A6 on #118)
 SCHEMA_0_4 = "otsec.adapter/0.4"  # results that need a 0.4 probe outcome (A6, V-S12)
 SCHEMA_0_5 = "otsec.adapter/0.5"  # results that need a 0.5 code or field (P3-A2)
+SCHEMA_0_9 = "otsec.adapter/0.9"  # results that carry the session's connection (D4-68)
+LOCAL_ADDR = "192.0.2.10:49152"   # the collector's end, from RFC 5737's documentation range
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
 FID = "SEL-751-R501-V0-Z104101-D20260910"       # S22 Table A.1 p. A.2
@@ -120,6 +122,11 @@ class Session:
         return {"offset": s["offset"], "length": s["length"]}
 
     # -- stages ------------------------------------------------------------
+
+    def connection(self, local_addr=LOCAL_ADDR):
+        """0.9: the connection's local address, and connected_at when the
+        dial returned, before the first segment."""
+        self.facts.update(local_addr=local_addr, connected_at=ts(0))
 
     def connect(self, prompt=b"\r\n="):
         # The device printed nothing on connect, so the transport sends one
@@ -601,7 +608,8 @@ def results():
 
     s = Session()
     s.connect()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_9", schema="otsec.adapter/0.9")
+    s.connection()
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_10", schema="otsec.adapter/0.10")
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -621,6 +629,15 @@ def results():
     out["ok-missing-setting"] = s.result("ok", None, {"result": "match", "items": items}, obs, [
         {"code": "warn.maxacc_above_1", "setting": "MAXACC", "missing": True, "span": p1}], recs,
         schema=SCHEMA_0_5, settings=s.settings)
+
+    # 0.9 (D4-68): the ok session with its connection. From 0.7 every
+    # observation carries its read.
+    r = copy.deepcopy(out["ok"])
+    r["schema"] = SCHEMA_0_9
+    for o in r["observations"]:
+        o["read"] = {"operation": "sel.ser.read_all" if o["name"] == "serial_number" else "sel.id"}
+    r["session"].update(local_addr=LOCAL_ADDR, connected_at=ts(0))
+    out["ok-0.9"] = r
     return out
 
 
@@ -1033,6 +1050,30 @@ def invalid_results(good):
     r["transcript"]["data"] = base64.b64encode(d + b"QUI\r\n").decode()
     r["session"]["quit_sent"] = True
     out["language-not-english-then-quit"] = refresh(r)
+
+    # 0.9 (D4-68, D4-61): the connection's fields and the bounded times.
+    def at09(name, f, base="ok-0.9"):
+        r = copy.deepcopy(good[base])
+        f(r)
+        out[name] = r
+    at09("connection-at-0.8", lambda r: r.update(schema="otsec.adapter/0.8"))
+    at09("connected-without-local-addr", lambda r: r["session"].pop("local_addr"))
+    at09("connected-without-connected-at", lambda r: r["session"].pop("connected_at"))
+    at09("not-connected-with-connection", lambda r: r.update(schema=SCHEMA_0_9) or r["session"].update(
+        local_addr=LOCAL_ADDR, connected_at=ts(0)), "refused.asset_suspended")
+    for name, addr in [("hostname", "collector.example:49152"), ("zone", "[fe80::1%eth0]:49152"),
+                       ("port-0", "192.0.2.10:0"), ("unspecified-v4", "0.0.0.0:40000"), ("unspecified-v6", "[::]:40000"),
+                       ("mapped", "[::ffff:192.0.2.10]:49152"), ("not-canonical", "[2001:db8:0:0::1]:49152"),
+                       ("no-port", "192.0.2.10")]:
+        at09("local-addr-" + name, lambda r, a=addr: r["session"].update(local_addr=a))
+    at09("connected-before-started", lambda r: r.update(started_at=ts(1)))
+    at09("connected-after-first-segment", lambda r: r["session"].update(connected_at=ts(1)))
+    at09("connected-after-ended", lambda r: r["session"].update(connected_at=ts(30)))
+    ten = "2026-10-24T09:15:00.0000000001Z"
+    at09("ten-digits-started-at", lambda r: r.update(started_at=ten))
+    at09("ten-digits-ended-at", lambda r: r.update(ended_at="2026-10-24T09:15:01.8000000001Z"))
+    at09("ten-digits-connected-at", lambda r: r["session"].update(connected_at=ten))
+    at09("ten-digits-segment-at", lambda r: r["transcript"]["segments"][-1].update(at="2026-10-24T09:15:01.8000000001Z"))
     return out
 
 

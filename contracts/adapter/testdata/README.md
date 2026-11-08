@@ -25,7 +25,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.7 result with a code 0.6 does not know: read as `failed.unknown`.
+- `results/valid/failed.unknown.json`: A 0.10 result with a code 0.9 does not know: read as `failed.unknown`. It carries the connection, as every connected result from 0.9 does.
 - `results/valid/failed.timeout-probe-unanswered.json`: No reply to the `QUI` probe before the step timeout (0.4, A6 on V-S12): `language_probe` unanswered, nothing more sent, nothing suspended.
 - `results/valid/failed.transport_closed-probe-unanswered.json`: Only the echo of the `QUI` probe, then the connection closed: as above.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
@@ -37,6 +37,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/partial.parse_errors-date-f-missing.json`: 0.5. `SHO G` prints no `DATE_F`: no setting is reported, and no row is parsed.
 - `results/valid/partial.parse_errors-date-misfit.json`: 0.5. `DATE_F := DMY`, but the rows print `10/24/2026`, which is no calendar date in DMY: each such row is unparsed, its bytes kept.
 - `results/valid/refused.endpoint_path.json`: 0.5. The C1 endpoint's path is not direct (no path, a port server, or unknown): nothing sent, nothing suspended (D2-16, H-13).
+- `results/valid/ok-0.9.json`: 0.9 (D4-68). The `ok` session at 0.9: every observation carries its read (0.7), and the session carries `local_addr`, from RFC 5737's documentation range, and `connected_at`, the first segment's time.
 - `results/valid/ok.json`: 0.5. Full session: wake (the device printed nothing on connect), `=`, QUI probe accepted, `ID` FID check, `ACC`, password (redacted), `SHO P 1` with `MAXACC := 2` (warning), `SHO G` with `DATE_F := MDY`, `SER` with two rows, QUI. Identity match on FID and serial. `DATE_F` is reported in `settings`, its span selecting exactly the value (D2-20, D3-2). The `SHO G` layout is modelled on the global block of S22 Figure 10.3 and is approximate (documented-untested): S22 prints no `SHO G` reply. Every SER-run example reads `SHO G` between `SHO P 1` and `SER`, as register revision 4 names it (C3 0.2 context).
 - `results/valid/partial.parse_errors.json`: As `ok`, with a third SER row the parser cannot read: `parse_ok` false, bytes kept (EP-1).
 - `results/valid/partial.read_rows_exceeded.json`: The SER reply has 1,025 invented rows, more than the profile's `max_read_rows` of 1,024 (D1-12). The bytes are kept and no record is parsed. S22 Table 7.63 says the relay holds 1,024 rows, so on a real SEL-751 this would mean the far end is not behaving as the manual says.
@@ -112,6 +113,25 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/invalid/access-level-without-prompt.json`: `access_level` 2, with no `=>>` received (A6 P12).
 - `results/invalid/identity-only-after-password.json`: The only identity item is the serial from the SER header, read after the password (A3 P5, A6 P7).
 - `results/invalid/detail-with-device-text.json`: `error.detail` holding device text with CR and LF (A3 P10).
+- `results/invalid/connection-at-0.8.json`: 0.9. `ok-0.9` stamped 0.8: the connection's fields are new in 0.9.
+- `results/invalid/connected-without-local-addr.json`: 0.9. Connected, with `connected_at` and no `local_addr`.
+- `results/invalid/connected-without-connected-at.json`: 0.9. Connected, with `local_addr` and no `connected_at`.
+- `results/invalid/not-connected-with-connection.json`: 0.9. A 0.9 refusal before connecting that carries both fields.
+- `results/invalid/local-addr-hostname.json`: 0.9. `local_addr` names a host, not an IP address.
+- `results/invalid/local-addr-zone.json`: 0.9. `local_addr` carries a zone.
+- `results/invalid/local-addr-port-0.json`: 0.9. `local_addr` has port 0.
+- `results/invalid/local-addr-unspecified-v4.json`: 0.9. `local_addr` is `0.0.0.0`.
+- `results/invalid/local-addr-unspecified-v6.json`: 0.9. `local_addr` is `::`.
+- `results/invalid/local-addr-mapped.json`: 0.9. `local_addr` is an IPv4-mapped IPv6 address, which the collector writes unmapped.
+- `results/invalid/local-addr-not-canonical.json`: 0.9. `local_addr` is IPv6 not in netip's compressed form.
+- `results/invalid/local-addr-no-port.json`: 0.9. `local_addr` has no port.
+- `results/invalid/connected-before-started.json`: 0.9. `connected_at` is before `started_at`.
+- `results/invalid/connected-after-first-segment.json`: 0.9. `connected_at` is after the first segment's `at`.
+- `results/invalid/connected-after-ended.json`: 0.9. `connected_at` is after `ended_at`.
+- `results/invalid/ten-digits-started-at.json`: 0.9. `started_at` has ten fractional digits (D4-61).
+- `results/invalid/ten-digits-ended-at.json`: 0.9. `ended_at` has ten fractional digits.
+- `results/invalid/ten-digits-connected-at.json`: 0.9. `connected_at` has ten fractional digits.
+- `results/invalid/ten-digits-segment-at.json`: 0.9. A segment's `at` has ten fractional digits.
 - `results/invalid/unknown-field-in-own-minor.json`: A 0.1 result with a field 0.1 does not define (A6 P13).
 - `results/invalid/span-includes-stx.json`: The SER header span is widened back over the STX that opens the relay's message (S22 p. 7.28). A record is the text between the framing bytes, never the bytes themselves.
 - `results/invalid/span-on-echo-redaction.json`: An observation span points at the echo redaction.
