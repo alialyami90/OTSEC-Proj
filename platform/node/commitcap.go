@@ -58,6 +58,15 @@ const SERReadBound = adapter.MaxResponseBytes + adapter.MaxResponseBytes*SERByte
 // rounded up to a MiB. serbound_test.go fails if the bound rises above it.
 const SERCommitBytes int64 = 11 << 20
 
+// NetworkCommitBytes is the network database's MaxCommitBytes (D1 in
+// D4-72). A release of the intake hold commits a run's held records in one
+// batch, so that a restart can tell whether it committed: at most
+// sensorlink.HoldRecordCap records, each under c5.MinRecordBytes (64 KiB;
+// sensorlink's TestHoldRecordFits holds a held record's saved form under
+// it, and the committed form, with its capture raw, is smaller). That is
+// 1.44 MiB, over c5's default of 1 MiB; netcommit_test.go holds the bound.
+const NetworkCommitBytes int64 = 2 << 20
+
 // The most records one AppendBatch of each database carries (C5 0.5, D4-14),
 // which sizes its recovery reserve (RowWALBytes a row):
 //   - evidence: one SER read, at most MaxReadRowsCeiling events;
@@ -74,12 +83,15 @@ const (
 
 // groupFor is the group-commit options of database d: the node's options
 // with the database's commit caps. The evidence database's byte cap is the
-// SER bound; every other database keeps c5's default, 1 MiB, unless the
-// caller set one. The record cap is the database's batch above, and never
+// SER bound and the network database's NetworkCommitBytes; every other
+// database keeps c5's default, 1 MiB, unless the caller set one. The record cap is the database's batch above, and never
 // below MaxEvents.
 func groupFor(d c5.Database, g c5.GroupOptions) c5.GroupOptions {
 	if g.MaxCommitBytes == 0 && d.ID == EvidenceDB {
 		g.MaxCommitBytes = SERCommitBytes
+	}
+	if g.MaxCommitBytes == 0 && d.ID == NetworkDB {
+		g.MaxCommitBytes = NetworkCommitBytes
 	}
 	if g.MaxCommitRecords == 0 {
 		n := AuditBatchRecords
