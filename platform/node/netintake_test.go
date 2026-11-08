@@ -198,6 +198,7 @@ func TestIntakeDocuments(t *testing.T) {
 		"unknown field": bytes.Replace(b, []byte(`"health_head":0`), []byte(`"health_head":0,"x":1`), 1),
 		"state":         bytes.Replace(b, []byte(`"holding"`), []byte(`"held"`), 1),
 		"request":       bytes.Replace(b, []byte(`"req-1"`), []byte(`""`), 1),
+		"asset":         bytes.Replace(b, []byte(relayID), []byte("relay-1"), 1), // D6's R10
 	} {
 		if _, err := ConfigDocuments(bad, nil); err == nil {
 			t.Errorf("%s: taken", name)
@@ -220,12 +221,12 @@ func TestIntakeDocuments(t *testing.T) {
 }
 
 // crashAfterRelease leaves the node as a crash between a run's release and
-// its collection.run would: the run dispatched, its allowed
-// collector.request committed (when allowed), its own flow held and its
+// its collection.run would: the run dispatched, its collector.request
+// with outcome committed (none when outcome is ""), its own flow held and its
 // result released, and nothing of the result committed. With dial, a
 // failed dial from another local port is still open at the result, so the
 // run's record is left waiting for its end (D3's R3 on #584).
-func crashAfterRelease(t *testing.T, r *Runtime, allowed, dial bool) string {
+func crashAfterRelease(t *testing.T, r *Runtime, outcome audit.Outcome, dial bool) string {
 	t.Helper()
 	s := newScheduler(t, r, &fakeCollector{})
 	id := s.newID()
@@ -234,8 +235,12 @@ func crashAfterRelease(t *testing.T, r *Runtime, allowed, dial bool) string {
 	if s.dispatchHold(bg, col, id) == nil {
 		t.Fatal("the hold doesn't watch the run")
 	}
-	if allowed {
-		rec, err := s.requestRecord(req, audit.OutcomeAllowed, "", 1)
+	if outcome != "" {
+		reason := ""
+		if outcome == audit.OutcomeDenied {
+			reason = string(authz.RefuseUnknown)
+		}
+		rec, err := s.requestRecord(req, outcome, reason, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -284,7 +289,7 @@ func crashAfterRelease(t *testing.T, r *Runtime, allowed, dial bool) string {
 func TestIntakeStartRepair(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	id := crashAfterRelease(t, r, true, false)
+	id := crashAfterRelease(t, r, audit.OutcomeAllowed, false)
 	if runs := healthRuns(t, r); len(runs) != 0 {
 		t.Fatalf("%d collection.run records before the crash", len(runs))
 	}
@@ -340,7 +345,7 @@ func TestIntakeStartRepair(t *testing.T) {
 func TestIntakeRepairRefused(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	crashAfterRelease(t, r, false, false)
+	crashAfterRelease(t, r, "", false)
 	r.Close()
 
 	r, st, _ := start(t, c, dir)
@@ -511,7 +516,7 @@ func TestIntakeCeilingRefuses(t *testing.T) {
 func TestIntakeStartRepairWaiting(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	id := crashAfterRelease(t, r, true, true)
+	id := crashAfterRelease(t, r, audit.OutcomeAllowed, true)
 	if _, docs := intakeDocs(t, r); docs[len(docs)-1].State != sensorlink.HoldWaiting {
 		t.Fatalf("the run's record is %s, not waiting", docs[len(docs)-1].State)
 	}
@@ -543,7 +548,7 @@ func TestIntakeStartRepairWaiting(t *testing.T) {
 func TestIntakeStartRepairOpenFlow(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	a := crashAfterRelease(t, r, true, false)
+	a := crashAfterRelease(t, r, audit.OutcomeAllowed, false)
 	s := newScheduler(t, r, &fakeCollector{})
 	b := s.newID()
 	if s.dispatchHold(bg, c.Schedule[0], b) == nil {
@@ -609,5 +614,55 @@ func TestIntakeResultFailsCounted(t *testing.T) {
 	r.Tick(bg)
 	if f := st.Snapshot("x").Sensor; f == nil || f.SessionMissing != 1 {
 		t.Fatalf("status: %+v", f)
+	}
+}
+
+// D6's R13 on #584: a denied collector.request is not an allowed one, so a
+// release whose run the collector refused is not repaired.
+func TestIntakeRepairRefusedDenied(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	crashAfterRelease(t, r, audit.OutcomeDenied, false)
+	r.Close()
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	if f := st.Snapshot("x").Sensor; len(healthRuns(t, r)) != 0 || f == nil || f.Repaired != 0 || f.RepairRefused != 1 {
+		t.Fatalf("%d collection.run records, status %+v", len(healthRuns(t, r)), f)
+	}
+}
+
+// D6's R6 on #584: a run whose release committed but whose collection.run
+// was not stored (here its alignment state is unreadable, as
+// missed_test.go breaks it) keeps its hold records for the start repair.
+func TestIntakeResultNotStoredKeeps(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	result, transcript := figureOrderFrom(t, ok09Result)
+	var seq uint64
+	client := wireCollectorResult(t, result, transcript, func(*authz.CollectorRequest) {
+		if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+			t.Error(err)
+		}
+	}, &seq)
+	s := newScheduler(t, r, client)
+	ser := SERStream(relayID)
+	if err := r.Store(ser).SaveSourceCursor(bg, ser, []byte("not a state")); err != nil {
+		t.Fatal(err)
+	}
+	rep := s.RunOnce(bg, 0)
+	if rep.Alarm != AlarmEvidenceNotStored || len(healthRuns(t, r)) != 0 {
+		t.Fatalf("run: %+v, %d collection.run records", rep, len(healthRuns(t, r)))
+	}
+	r.Tick(bg)
+	kept := 0
+	for _, d := range func() []intakeDoc { _, d := intakeDocs(t, r); return d }() {
+		if d.Run.RequestID == rep.RequestID {
+			kept++
+		}
+	}
+	if kept < 2 {
+		t.Fatalf("%d of the run's hold records kept", kept)
 	}
 }
