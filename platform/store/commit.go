@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"otsec.local/otsec/contracts/event"
@@ -145,8 +146,18 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 
 		// Commit time never goes backwards within a stream, so LastCommittedBy
 		// is a range query. A clock stepped back lengthens replay windows,
-		// which keeps more, never less.
+		// which keeps more, never less. With Options.WallMark it is also
+		// never below a wall time this database has already used, its
+		// persisted mark, raised in this transaction, so an alert committed
+		// while the clock is back can't land below a retention cutoff
+		// already recorded, even on a stream, or a database, idle for
+		// longer than the retention (D3's F1 on #559, D4-71).
 		at := max(d.opt.now().UnixNano(), lastAt)
+		if d.opt.WallMark {
+			if at, err = d.raiseWallMark(ctx, at); err != nil {
+				return err
+			}
+		}
 		for i, r := range recs {
 			var capture any
 			if r.Capture != nil {
@@ -418,4 +429,54 @@ func replaceMember(b []byte, key string, value []byte) ([]byte, error) {
 	}
 	out.WriteByte('}')
 	return out.Bytes(), nil
+}
+
+// RaiseWallMark raises the database's persisted wall mark (Options.WallMark)
+// to the clock now,
+// in a transaction of its own (raiseWallMark). A commit and a cursor save
+// raise it too; a caller that reads commit times against the clock, as a
+// retention consumer does at each evaluation, raises it as well, so the
+// mark is no staler than its last evaluation even on a database idle for
+// longer than the retention (D3's F2 on #559, D4-71).
+func (d *DB) RaiseWallMark(ctx context.Context) error {
+	if !d.opt.WallMark {
+		return invalid("database %s keeps no wall mark", d.opt.Database.ID)
+	}
+	if err := d.lock(); err != nil {
+		return err
+	}
+	defer d.mu.Unlock()
+	if d.sync != c5.SyncFull {
+		return errors.New("store: settings not checked; CheckSettings must pass before the wall mark is raised")
+	}
+	return d.tx(ctx, "wall-mark", func() error {
+		_, err := d.raiseWallMark(ctx, d.opt.now().UnixNano())
+		return err
+	})
+}
+
+// raiseWallMark raises the database's persisted wall-clock high-water mark
+// to t, in the caller's transaction, and returns the mark: at least t, and
+// at least every wall time a commit or a cursor save of this database has
+// used. A store created before the mark existed starts it at 0.
+func (d *DB) raiseWallMark(ctx context.Context, t int64) (int64, error) {
+	var mark int64
+	var v string
+	switch err := d.conn.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'wall_mark'`).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return 0, fmt.Errorf("read wall mark: %w", err)
+	default:
+		if mark, err = strconv.ParseInt(v, 10, 64); err != nil {
+			return 0, fmt.Errorf("wall mark %q: %w", v, err)
+		}
+	}
+	if t <= mark {
+		return mark, nil
+	}
+	if _, err := d.conn.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('wall_mark', ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value`, strconv.FormatInt(t, 10)); err != nil {
+		return 0, fmt.Errorf("raise wall mark: %w", err)
+	}
+	return t, nil
 }

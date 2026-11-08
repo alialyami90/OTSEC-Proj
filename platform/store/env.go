@@ -60,6 +60,13 @@ type Options struct {
 	// hold a database busy on purpose shorten it, so they do not wait out the
 	// full 5 s on every open and tick.
 	BusyTimeout time.Duration
+	// WallMark makes the database floor every commit time at a persisted
+	// wall-clock high-water mark, which its commits, its cursor saves and
+	// RaiseWallMark raise. Only the network database sets it (D1 in D4-71):
+	// its retention consumer passes alerts by commit time. Every other
+	// database keeps commit times that only never go back within a stream,
+	// so a forward clock step does not hold them at the stepped time.
+	WallMark bool
 
 	// hook is called at named points of every transaction. Only tests set
 	// it, to kill the process at each commit point.
