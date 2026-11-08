@@ -548,6 +548,15 @@ func TestOwnSessionLateTiedRecords(t *testing.T) {
 	if len(r.d.tied) != 0 || len(r.unseen()) != 1 {
 		t.Fatalf("tied %v, unseen %v", r.d.tied, r.unseen())
 	}
+	// D6's T4 on #575: a session that never connected is taken too, so a
+	// failed dial's tied end arriving after it takes no tied room.
+	r = newOwRun(t, nil)
+	r.obs(owQuiet(t), 0)
+	must0(t, r.session(owSession(1, 1, lxRelay, owRelay, false, 10, 20)))
+	r.obs(owTied(t, 1, owRelay), 25)
+	if len(r.d.tied) != 0 || len(r.d.taken) != 1 || len(r.unseen()) != 0 {
+		t.Fatalf("tied %v, taken %v, unseen %v after an unconnected session's late end", r.d.tied, r.d.taken, r.unseen())
+	}
 }
 
 // The coverage conditions one by one, before acknowledgement (D6's G1 to
