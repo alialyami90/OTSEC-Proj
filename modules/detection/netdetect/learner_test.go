@@ -741,3 +741,41 @@ func TestLearnerDestinationGrowsAlone(t *testing.T) {
 		t.Errorf("source held %v, destination VLANs %v, overflow %d", srcHeld, l.addresses[addrKey{"192.0.2.20", lxRelay}].VLANs, l.period.Overflow)
 	}
 }
+
+// D6's A1, confirmed by D1 (C13 §14 item 14): a midstream DNP3 flow first
+// seen on the outstation's response has the outstation as its src, but its
+// function is the master's request and its service the outstation's, so
+// the learner learns master→outstation on the server's port, adds no pair,
+// and keys nothing on the master's ephemeral port.
+func TestLearnerMidstreamOrientedByRole(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	flow := lxObs(t, netobs.KindFlow, "192.0.2.20", "192.0.2.10", 51234) // the response: outstation to master
+	flow.IP.Sport, flow.Direction = ptr(20000), netobs.DirectionMidstream
+	fn := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000) // the request, master to outstation
+	fn.Direction = netobs.DirectionMidstream
+	svc := lxObs(t, netobs.KindService, "192.0.2.10", "192.0.2.20", 20000) // the outstation's service
+	svc.Direction = netobs.DirectionMidstream
+	for i, o := range []*netobs.Observation{flow, fn, svc} {
+		if err := o.ValidateStored(); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Observe(uint64(i+1), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := netobs.DecodeBaseline(must(l.Draft()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: 20000, Protocol: "dnp3"}
+	switch {
+	case len(b.Pairs) != 0 || len(l.held) != 0:
+		t.Errorf("a midstream flow learned or held a pair: %v", b.Pairs)
+	case len(b.Functions) != 1 || b.Functions[0].Pair != want:
+		t.Errorf("functions %v, want one on %v", b.Functions, want)
+	case len(b.Services) != 1 || b.Services[0].Server != lxRelay || b.Services[0].Port != 20000:
+		t.Errorf("services %v, want the relay's on 20000", b.Services)
+	case bytes.Contains(must(l.Draft()), []byte("51234")):
+		t.Error("an entry is keyed on the master's ephemeral port")
+	}
+}
