@@ -619,3 +619,72 @@ func TestResyncIgnoresUnrelatedRecord(t *testing.T) {
 		t.Fatalf("after an unrelated record: cursor %d, store %d, last %+v", c.Status().Cursor, e.cursor(), r)
 	}
 }
+
+// AP-36's V2 (D6, D4-71): an alert, then a forward step of the wall clock by
+// three retentions. No move passes the alert before half the retention has
+// passed by monotonic time since its commit, the first hourly tick from
+// then on passes it, and the move's wall_utc shows the step. The alert
+// comes first, because one committed after the step carries the stepped
+// time and is kept longer.
+func TestForwardStepHalfRetention(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.clk.advance(time.Hour)
+	e.tick(c) // evaluates at the alert's time, with no lag
+	e.alert() // seq 1
+	committed := e.clk.mono
+	e.clk.wall = e.clk.wall.Add(3 * retention)
+	for e.cursor() == 0 {
+		e.clk.advance(time.Hour)
+		e.tick(c)
+		if since := e.clk.mono - committed; e.cursor() == 0 && since >= retention/2 {
+			t.Fatalf("not passed %s after its commit (monotonic), at half the retention", since)
+		} else if e.cursor() != 0 && since < retention/2 {
+			t.Fatalf("passed %s after its commit (monotonic), under half the retention: %+v", since, e.last())
+		}
+	}
+	if r := e.last(); r.Bound != audit.BoundMonotonic || r.WallUTC != utc(e.clk.wall) {
+		t.Fatalf("the move %+v, want wall_utc %s", r, utc(e.clk.wall))
+	}
+	e.verify()
+}
+
+// AP-36's V3 (D6, D4-71): the start's hour isn't doubled. After a start
+// with persisted cutoff C, the bound is C + 1 h at monotonic 0 and C + 2 h
+// at 30 minutes, by value, so n restarts gain n hours, each move bounded
+// start. Alerts ten minutes apart make each bound a recorded move.
+func TestStartHourNotDoubled(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	t0 := e.clk.wall
+	for range 6 * 24 { // a day of alerts, ten minutes apart
+		e.alert()
+		e.clk.advance(10 * time.Minute)
+	}
+	e.clk.advance(retention - 18*time.Hour)
+	e.tick(c)
+	if cut := e.last().CutoffUTC; cut != utc(t0.Add(6*time.Hour)) {
+		t.Fatalf("the cutoff before the restarts is %s", cut)
+	}
+	e.clk.advance(30 * day) // down
+	persisted := t0.Add(6 * time.Hour)
+	restart := func(first time.Duration, gain time.Duration) {
+		t.Helper()
+		e.clk.mono = 0 // the monotonic clock restarts
+		c = e.start()
+		e.clk.advance(first)
+		e.tick(c)
+		if r := e.last(); r.Bound != audit.BoundStart || r.CutoffUTC != utc(persisted.Add(gain)) {
+			t.Fatalf("%s after a start from %s: %+v, want cutoff %s", first, utc(persisted), r, utc(persisted.Add(gain)))
+		}
+		persisted = persisted.Add(gain)
+	}
+	for range 5 {
+		restart(0, time.Hour)
+	}
+	if want := t0.Add(11 * time.Hour); !persisted.Equal(want) {
+		t.Fatalf("five restarts reach %s, want %s", persisted, want)
+	}
+	restart(30*time.Minute, 2*time.Hour)
+	e.verify()
+}
