@@ -80,7 +80,7 @@ func TestDocumentInfo(t *testing.T) {
 func TestRemovableSeries(t *testing.T) {
 	got := RemovableSeries()
 	if !slices.Equal(got, []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read",
-		"netcheckpoint.learner", "netcheckpoint.detector"}) {
+		"netcheckpoint.learner", "netcheckpoint.detector", "netcheckpoint.intake"}) {
 		t.Fatalf("RemovableSeries %v", got)
 	}
 	got[0] = SeriesConfigDifference
