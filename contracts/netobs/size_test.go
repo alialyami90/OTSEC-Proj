@@ -184,7 +184,7 @@ func TestWorstStoredObservationFits(t *testing.T) {
 		e := &event.Event{
 			Schema: event.Identifier, ID: event.EventID{NodeID: worstNode, Stream: worstStrm, Seq: ^uint64(0)},
 			Origin: event.OriginPlatform, Kind: event.KindNetworkObservation,
-			Source:   event.Source{Asset: &event.AssetRef{ID: fxAsset, Binding: event.Binding{Method: "sender-address", Confidence: "inferred"}}, OriginAuth: "platform"},
+			Source:   event.Source{Asset: &event.AssetRef{ID: fxAsset, Binding: event.Binding{Method: "observed-address", Confidence: "inferred"}}, OriginAuth: "platform"},
 			Received: event.Received{UTC: "2026-11-07T10:00:01.123456789Z", ResolutionNS: 1, Clock: event.Clock{Sync: "synchronized", Source: worstToken("c")[:32]}},
 			Netobs:   body,
 		}
@@ -238,7 +238,7 @@ func TestWorstAlertFits(t *testing.T) {
 	e := &event.Event{
 		Schema: event.Identifier, ID: event.EventID{NodeID: worstNode, Stream: worstStrm, Seq: ^uint64(0)},
 		Origin: event.OriginPlatform, Kind: event.KindHealth,
-		Source:   event.Source{Asset: &event.AssetRef{ID: fxAsset, Binding: event.Binding{Method: "adapter-target", Confidence: "configured"}}, OriginAuth: "platform"},
+		Source:   event.Source{Asset: &event.AssetRef{ID: fxAsset, Binding: event.Binding{Method: "observed-address", Confidence: "inferred"}}, OriginAuth: "platform"},
 		Received: event.Received{UTC: "2026-11-07T10:04:01.123456789Z", ResolutionNS: 1, Clock: event.Clock{Sync: "synchronized", Source: worstToken("c")[:32]}},
 		Health:   &h,
 	}
