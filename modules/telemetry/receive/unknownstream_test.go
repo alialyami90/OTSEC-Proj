@@ -433,7 +433,7 @@ func TestUnknownQueueShareIsAQuarterOfTheBytes(t *testing.T) {
 			time.Sleep(2 * time.Millisecond)
 		}
 	}
-	g.wait("all read", func() bool { return g.r.Status().Received == int64(unknownN+1) })
+	g.unknownDone("all read", unknownN)
 	s := g.r.Status()
 	// A quarter of 64 KiB is 16 KiB: at most sixteen 1000-byte datagrams.
 	if max := int64(maxBytes / 4 / size); s.Dropped[DropUnknownQueueFull] < int64(unknownN)-max {
@@ -477,6 +477,18 @@ func unknownShareRig(t *testing.T, queue int, maxBytes int64, mut func(*Config))
 	return g, sc, tap, known, unknown
 }
 
+// unknownDone waits until the reader is done with the n unknown datagrams
+// sent: each is in the queue, paid for, or dropped at the share. A wait on
+// Status.Received alone can return a datagram early, because Received
+// counts it as read, before the share check drops it or payUnknown spends
+// the budget and queues it. The store is held, so the writer takes none.
+func (g *rig) unknownDone(what string, n int) {
+	g.t.Helper()
+	g.wait(what, func() bool {
+		return g.r.unknownQueued.Load()+g.r.Status().Dropped[DropUnknownQueueFull] == int64(n)
+	})
+}
+
 // TestUnknownShareIsReleasedWhenTheStoreDrains (B3's mutants on #317): the
 // share bounds what unknown senders hold at once, not what they may ever
 // send. After the store drains what filled it, a listener admits unknown
@@ -505,7 +517,7 @@ func TestUnknownShareIsReleasedWhenTheStoreDrains(t *testing.T) {
 			stored := func() int { return len(sc.events(t, testUnknown)) }
 			// Fill the share and past it with the store held.
 			send(0, 3*c.share)
-			g.wait("the flood read", func() bool { return g.r.Status().Received == int64(1+3*c.share) })
+			g.unknownDone("the flood read", 3*c.share)
 			if got, want := g.r.Status().Dropped[DropUnknownQueueFull], int64(2*c.share); got != want {
 				t.Fatalf("%d dropped as %s with the share full, want %d; status %+v", got, DropUnknownQueueFull, want, g.r.Status())
 			}
@@ -545,7 +557,7 @@ func TestUnknownShareDropSpendsNoBudget(t *testing.T) {
 		unknown.Write([]byte(fmt.Sprintf("<13>unknown %03d", i)))
 		time.Sleep(time.Millisecond)
 	}
-	g.wait("the share filled", func() bool { return g.r.Status().Received == int64(1+queue/4) })
+	g.unknownDone("the share filled", queue/4)
 	before := tokens()
 	for i := 0; i < 3*queue; i++ {
 		unknown.Write([]byte(fmt.Sprintf("<13>unknown over %03d %s", i, strings.Repeat("x", 1000))))
