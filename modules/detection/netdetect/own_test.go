@@ -470,11 +470,6 @@ func owStream(t testing.TB) ([]*netobs.Observation, []handoff) {
 	}
 }
 
-// D6's 2b row: restore at every cut with session handovers equals the
-// uninterrupted run, with the checkpoint taken before the handovers after
-// an observation (so a restore hands them over again and takes them) and
-// after them (so the replay is a seq already taken), with and without a
-// backward clock step.
 // A session handed over before any observation, as when a collection runs
 // before the sensor has sent anything, is pending with no clock, and the
 // checkpoint holds it (D1 on #590, C13 §14 item 19). An unconnected one
@@ -511,6 +506,11 @@ func TestOwnSessionBeforeClock(t *testing.T) {
 	must(r.d.Checkpoint(0))
 }
 
+// D6's 2b row: restore at every cut with session handovers equals the
+// uninterrupted run, with the checkpoint taken before the handovers after
+// an observation (so a restore hands them over again and takes them) and
+// after them (so the replay is a seq already taken), with and without a
+// backward clock step.
 func TestOwnSessionRestoreAtEveryCut(t *testing.T) {
 	base := accept(t, dxBaseline(t))
 	obs, hs := owStream(t)
