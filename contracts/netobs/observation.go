@@ -465,7 +465,7 @@ func (f *Function) check(c *checker, protocol string) {
 			c.fail(CodeRange, "function.unit", "required for Modbus, in [0, 255]")
 		}
 		// sub is absent when the request is too short to hold it; the node
-		// then classes 8 as control and 43 as other (C13 §4.3, D2).
+		// then classes 8 as control and 43 as write (C13 §4.3, D1 on #543).
 		switch {
 		case f.Sub == nil:
 		case f.Code == 8 && (*f.Sub < 0 || *f.Sub > 65535):

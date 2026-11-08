@@ -273,8 +273,16 @@ func (b *Baseline) Validate() error {
 		if fn.Code < 0 || fn.Code > 255 {
 			c.fail(CodeRange, f+".code", "%d not in [0, 255]", fn.Code)
 		}
-		if fn.Sub != nil && (*fn.Sub < 0 || *fn.Sub > 65535) {
-			c.fail(CodeRange, f+".sub", "%d not in [0, 65535]", *fn.Sub)
+		// sub as on an observation (C13 §4.3): only on Modbus 8 and 43,
+		// in range for its code, and possibly absent (D1 on #549).
+		switch {
+		case fn.Sub == nil:
+		case fn.Protocol != "modbus" || (fn.Code != 8 && fn.Code != 43):
+			c.fail(CodeConflict, f+".sub", "only on Modbus 8 and 43")
+		case fn.Code == 8 && (*fn.Sub < 0 || *fn.Sub > 65535):
+			c.fail(CodeRange, f+".sub", "Modbus 8's sub-function, in [0, 65535]")
+		case fn.Code == 43 && (*fn.Sub < 0 || *fn.Sub > 255):
+			c.fail(CodeRange, f+".sub", "Modbus 43's MEI type, in [0, 255]")
 		}
 		if len(fn.Objects) > MaxObjects {
 			c.fail(CodeRange, f+".objects", "%d, above %d", len(fn.Objects), MaxObjects)

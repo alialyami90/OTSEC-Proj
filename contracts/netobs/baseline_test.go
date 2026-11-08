@@ -121,6 +121,10 @@ func TestBaselineRules(t *testing.T) {
 		{"objects unsorted", CodeOrder, func(b *Baseline) { b.Functions[0].Objects = []string{"g60v2", "g60v1"} }},
 		{"address endpoint not its own", CodeConflict, func(b *Baseline) { b.Addresses[2].Endpoint = "addr:192.0.2.98" }},
 		{"lan", CodeForm, func(b *Baseline) { b.Addresses[1].LANs = []string{"c"} }},
+		{"sub on DNP3", CodeConflict, func(b *Baseline) { b.Functions[0].Sub = ptr(1) }},
+		{"sub on Modbus 3", CodeConflict, func(b *Baseline) { b.Functions[2].Code = 3 }},
+		{"sub-function above 65535", CodeRange, func(b *Baseline) { b.Functions[2].Sub = ptr(65536) }},
+		{"MEI type above 255", CodeRange, func(b *Baseline) { b.Functions[2].Code, b.Functions[2].Sub = 43, ptr(256) }},
 		{"writer class read", CodeForm, func(b *Baseline) {
 			b.AuthorizedWriters = []Writer{{Client: fxMaster, Server: fxAsset, Class: ClassRead}}
 		}},
@@ -133,6 +137,13 @@ func TestBaselineRules(t *testing.T) {
 		}
 		if _, err := b.Encode(); err == nil {
 			t.Errorf("%s: encoded", tc.name)
+		}
+	}
+	for _, sub := range []*int{nil, ptr(255)} {
+		b := fxBaseline()
+		b.Functions[2].Code, b.Functions[2].Sub = 43, sub
+		if err := b.Validate(); err != nil {
+			t.Errorf("Modbus 43 sub %v: %v", sub, err)
 		}
 	}
 	big := make([]byte, MaxBaselineBytes+1)
