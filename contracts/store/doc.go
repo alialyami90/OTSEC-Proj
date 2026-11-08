@@ -82,11 +82,11 @@
 //     cap, and only ever in a database of network classes. A shared
 //     capture of a network class is charged once to each class that holds
 //     a record citing it, so one class's records never hold another's
-//     quota; every other capture is charged as in 0.8. Three
+//     quota; every other capture is charged as in 0.8. Four
 //     configuration series for the network baseline: baseline.network
-//     (evidence) and netcheckpoint.learner and netcheckpoint.detector
-//     (working state, removable). No hold code, action or store format
-//     changes.
+//     (evidence) and netcheckpoint.learner, netcheckpoint.detector and,
+//     from D4-72, the node's intake hold netcheckpoint.intake (working
+//     state, removable). No hold code, action or store format changes.
 //   - Audit records: one audit stream per node, sealed into the C8 hash
 //     chain inside the commit and never re-encoded, a chain anchor kept
 //     across pruning, and audit before act, so that a privileged operation

@@ -150,6 +150,12 @@ const (
 	// SeriesNetCheckpointDetector (0.9) is the network detector's folded
 	// state (otsec.netcheckpoint/0.1). Working state.
 	SeriesNetCheckpointDetector = "netcheckpoint.detector"
+	// SeriesNetCheckpointIntake (0.9, D4-72) is the node's intake hold:
+	// the flows from the node's own address to a dispatched run's
+	// endpoint, held until the run's result ties them. One record per run,
+	// written before each hold and release takes effect. Working state;
+	// the detector never reads it.
+	SeriesNetCheckpointIntake = "netcheckpoint.intake"
 )
 
 // DocumentInfo is what DocumentValidator says a configuration record is
@@ -163,8 +169,8 @@ type DocumentInfo struct {
 // config.snapshot, config.difference, baseline.event, since 0.8 identity,
 // finding or advisory.set, and since 0.9 baseline.network; working-state
 // with eventcheckpoint.learner, eventcheckpoint.detector, since 0.8
-// identity.read, and since 0.9 netcheckpoint.learner and
-// netcheckpoint.detector. Any other pair is refused, so a working-state record can
+// identity.read, and since 0.9 netcheckpoint.learner,
+// netcheckpoint.detector and netcheckpoint.intake. Any other pair is refused, so a working-state record can
 // never name an evidence series and make the real newest record of that
 // series look superseded.
 func (i DocumentInfo) Validate() error {
@@ -175,7 +181,7 @@ func (i DocumentInfo) Validate() error {
 			SeriesIdentity, SeriesFinding, SeriesAdvisorySet, SeriesBaselineNetwork}
 	case DocumentWorkingState:
 		series = []string{SeriesCheckpointLearner, SeriesCheckpointDetector, SeriesIdentityRead,
-			SeriesNetCheckpointLearner, SeriesNetCheckpointDetector}
+			SeriesNetCheckpointLearner, SeriesNetCheckpointDetector, SeriesNetCheckpointIntake}
 	default:
 		return errf(CodeInvalid, nil, "unknown document kind %q", i.Kind)
 	}

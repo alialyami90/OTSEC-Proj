@@ -28,6 +28,7 @@ var c5v9Pairs = map[[2]string]bool{
 	{"evidence", "baseline.network"}:              true,
 	{"working-state", "netcheckpoint.learner"}:    true,
 	{"working-state", "netcheckpoint.detector"}:   true,
+	{"working-state", "netcheckpoint.intake"}:     true,
 }
 
 const (
@@ -165,7 +166,7 @@ func TestC5v09LayoutKeepsNetworkApart(t *testing.T) {
 	}
 }
 
-// Every kind against every series, known and near-miss: exactly the twelve
+// Every kind against every series, known and near-miss: exactly the thirteen
 // pairs pass, so neither checkpoint is evidence and the baseline is never
 // working state.
 func TestC5v09KindSeriesProduct(t *testing.T) {
@@ -173,7 +174,7 @@ func TestC5v09KindSeriesProduct(t *testing.T) {
 	series := []string{
 		"config.snapshot", "config.difference", "baseline.event", "eventcheckpoint.learner", "eventcheckpoint.detector",
 		"identity", "finding", "advisory.set", "identity.read",
-		"baseline.network", "netcheckpoint.learner", "netcheckpoint.detector",
+		"baseline.network", "netcheckpoint.learner", "netcheckpoint.detector", "netcheckpoint.intake",
 		"", "baseline.Network", "baseline.networks", "netcheckpoint", "netcheckpoint.", "netcheckpoint.learners",
 		"netcheckpoint.Detector", "network.baseline", "netbaseline", "eventcheckpoint.network",
 	}
@@ -195,16 +196,16 @@ func TestC5v09KindSeriesProduct(t *testing.T) {
 	}
 }
 
-// RemovableSeries is exactly the six; both network checkpoints are
+// RemovableSeries is exactly the seven; both network checkpoints are
 // removable and the network baseline never is.
 func TestC5v09RemovableSeries(t *testing.T) {
 	got := store.RemovableSeries()
 	want := []string{"config.snapshot", "eventcheckpoint.learner", "eventcheckpoint.detector", "identity.read",
-		"netcheckpoint.learner", "netcheckpoint.detector"}
+		"netcheckpoint.learner", "netcheckpoint.detector", "netcheckpoint.intake"}
 	if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
 		t.Fatalf("RemovableSeries %v, want %v", got, want)
 	}
-	for _, s := range []string{"netcheckpoint.learner", "netcheckpoint.detector"} {
+	for _, s := range []string{"netcheckpoint.learner", "netcheckpoint.detector", "netcheckpoint.intake"} {
 		if err := store.CheckRemoveConfig(c5v9Base, s, []store.Seq{1}); err != nil {
 			t.Errorf("CheckRemoveConfig(%s): %v", s, err)
 		}
