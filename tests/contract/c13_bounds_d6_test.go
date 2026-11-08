@@ -4,9 +4,11 @@ package contract
 // contracts/netobs is checked against the value C13 states, so a change to a
 // bound fails here until the contract text and this table change with it.
 // Sources: docs/phase4/D4-c13-netobs.md §10 (the bounds table) and §7.1 (an
-// alert's related list and explanation fields), and D1's value for
-// MaxBaselineBytes in D4-71 (§8 leaves it to code). Ground truth: GT-HAND,
-// from the contract text and the ruling. Evidence class: desk.
+// alert's related list and explanation fields), and D1's values in D4-71
+// for MaxBaselineBytes (§8 leaves it to code), period.overflow's saturation
+// (§14 item 13) and the learner checkpoint's held starts (#561). Ground
+// truth: GT-HAND, from the contract text and the rulings. Evidence class:
+// desk.
 
 import (
 	"math"
@@ -49,10 +51,19 @@ func TestC13BoundsByValue(t *testing.T) {
 		{"MinMaxPendingDNP3", netobs.MinMaxPendingDNP3, 256, "§10: bounded 256"},
 		{"MaxMaxPendingDNP3", netobs.MaxMaxPendingDNP3, 65536, "§10: to 65,536"},
 		{"MaxBaselineBytes", netobs.MaxBaselineBytes, 512 << 10, "§8 with D1 in D4-71: 512 KiB"},
+		{"MaxCaptureBytes", netobs.MaxCaptureBytes, 16536, "§7.1 with D4 on #564: 16,536"},
+		{"MaxHeldStarts", netobs.MaxHeldStarts, 512, "D1 in D4-71: at most 512 starts"},
+		{"MaxHeldStartBytes", netobs.MaxHeldStartBytes, 384, "D1 on #564 (#561): 384"},
+		{"MaxLearnerCheckpointBytes", netobs.MaxLearnerCheckpointBytes, 721920, "D1 on #564 (#561): 705 KiB"},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %d, C13 %s says %d", c.name, c.got, c.source, c.want)
 		}
+	}
+	// period.overflow saturates at 2^53 − 1, so every JSON reader holds it
+	// exactly (§14 item 13, D4-71).
+	if netobs.MaxOverflow != 1<<53-1 {
+		t.Errorf("MaxOverflow = %d, C13 §14 item 13 says 2^53 − 1", uint64(netobs.MaxOverflow))
 	}
 	// MaxWireLen's basis (§10): far below the capture's 32-bit orig_len, so
 	// a stored wire length can't wrap.
