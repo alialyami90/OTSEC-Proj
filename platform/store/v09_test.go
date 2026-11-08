@@ -14,8 +14,8 @@ import (
 // (docs/phase4/D5-c5-0.9.md sections 1, 2 and 6). Evidence class: simulated.
 
 const (
-	netObs   c5.StreamID = "netobs/sensor1"
-	netAlert c5.StreamID = "netalert/sensor1"
+	netObs   c5.StreamID = "network-observation/sensor1"
+	netAlert c5.StreamID = "network-alert/sensor1"
 )
 
 func networkDB(obsBytes, alertBytes int64) c5.Database {

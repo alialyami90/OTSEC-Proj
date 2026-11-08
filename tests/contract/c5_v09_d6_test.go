@@ -31,8 +31,8 @@ var c5v9Pairs = map[[2]string]bool{
 }
 
 const (
-	c5v9Obs   store.StreamID = "netobs/sensor1"
-	c5v9Alert store.StreamID = "netalert/sensor1"
+	c5v9Obs   store.StreamID = "network-observation/sensor1"
+	c5v9Alert store.StreamID = "network-alert/sensor1"
 	c5v9Base  store.StreamID = "netbaseline/sensor1"
 )
 

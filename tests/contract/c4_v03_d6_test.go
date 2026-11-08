@@ -32,7 +32,7 @@ func c4v3Base() c4v3Parts {
 
 func (p c4v3Parts) json() []byte {
 	var b strings.Builder
-	b.WriteString(`{"schema": "` + p.schema + `", "id": {"node_id": "d6-node", "stream": "netobs/d6", "seq": 4},`)
+	b.WriteString(`{"schema": "` + p.schema + `", "id": {"node_id": "d6-node", "stream": "network-observation/d6", "seq": 4},`)
 	b.WriteString(`"origin": "` + p.origin + `", "kind": "` + p.kind + `",`)
 	b.WriteString(`"source": {` + p.asset + `"origin_auth": "` + p.auth + `"},`)
 	b.WriteString(`"received": {"utc": "2026-11-07T20:00:01.000001Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}}`)
