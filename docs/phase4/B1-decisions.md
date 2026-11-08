@@ -1165,3 +1165,49 @@ D1, on #539 to #544, with each owner's and reviewer's word through the coordinat
 
   The text is in C13 §14, reviewed by C13's reviewers (D2, D3, D5, D6) in #543. It merges before the `contracts/netobs` code that relies on it, and that PR cites #543 for it.
 - **PRP in ADR-0009 (D4's #540, E-D4-02, simulated).** Stock Suricata and Zeek keep both PRP copies. Under options (a) and (b), a site whose station network is PRP needs a duplicate-discard stage. That stage discards only a copy that is byte-identical apart from the LAN ID. It counts a mismatched "duplicate" as a signal, and its table is bounded and counted (D3, carried to the sensor brief). ADR-0009 stays proposed.
+
+## D4-70: item 4's contract code is merged, with the rulings from its review (D1, 2026-11-08)
+
+D1, on #542 and #545 to #553, with each owner's and reviewer's word through the coordinator (D4-58). Merged: #543, #544, #545, #547, #548, #549, #550, #551 and #552.
+
+- **GT-PCAP's plan (#542) and DNP3 set (#548).**
+  - The node counts three drops: unresolved budget, class full and record cap. The per-window alert cap is not a drop, and a summary's hit count includes the first alert's hit.
+  - The kill and restart test resumes from the node's last committed sequence number, as shown in status.
+  - Each enrolled fixture host has C1 direct endpoints: SSH 22 for M1 to M3 and Telnet 23 for O1. M4 is unenrolled. The replay node schedules no collection on those endpoints (D5).
+  - Counters are taken as the difference between the heartbeats that bracket a replay.
+  - A before-acknowledgement run starts from an empty `network` database.
+  - The no-response case is renumbered, so it shows an unanswered request and not a capture gap. A test checks that no case has a hole in either sequence space (D2).
+- **C2 0.9's shared-endpoint check (#547).** `CheckPath` runs first, so only endpoints that get a session are compared. Telnet and SSH are keyed on TCP and SNMPv3 on UDP, and serial is skipped.
+  - A transport this build's C1 knows, but the check doesn't name, refuses the load. A table test over `asset.Transports` keeps that branch unreachable.
+  - A transport from a later C1 minor loads, and is refused per endpoint at session time (D2-16), so it can't stop collection for every asset (D3).
+  - **Whatever lifts H-13 brings a port-server tie rule and port-server resolution in the same change.**
+  - **D4-60's GETNEXT bar is lifted.** The 0.9 code merged with D6's test 3 green at that head: W10 in the vm1 leg, and W11 and W12 at the client.
+- **Audit 0.12 and authz 0.10 (#545).**
+  - `granted` requires a key the recorded set lists as active.
+  - The record-local retention rules hold on every record that isn't `created`: the cutoff advances, and stays at or behind `wall_utc − retention_s`. The wall bound is compared in whole seconds with a nanosecond tie-break, so no value can wrap it.
+  - An unknown key status is refused.
+  - **Residual, not claimed:** `quarantine.cleared` and `collector.seq_reset_ack` name no `decision_seq`, so the chain can't tie them to a key set (D6).
+  - **The writer stamp:** D4-69 stands, and `ContractID` and its pin move with item 7. Until then, a record whose action exists only in 0.12 is stamped 0.12: `store.retention_moved`, and `config.learner_retired` when its writer lands. Every other record stays at 0.11. Minors are checked per record and need not rise along a chain, and a test shows a mixed chain verifies (D5).
+- **`contracts/netobs` and `fc-classes/1` (#549, #552). Each fix is made within `otsec.netobs/0.1`, since nothing has been written under it.**
+  - DNP3 function 2 is `time-sync` only with g50v1 or g50v3 objects. Any other group 50 variation is `write` (D2).
+  - A baseline's `sub` is checked as strictly as an observation's.
+  - **Resolution (C13 §14 items 9 and 12).**
+    - Each end resolves on its own, against this node's inbound endpoints and its outbound endpoints whose `CheckPath` passes. Hosts are compared after `Unmap().WithZone("")`.
+    - `ip-ambiguous` means at least one end is shared, and the other end keeps its asset. The unresolved budget applies only when neither end names an asset, so filling it can't hide a write to an enrolled relay (D3 on #553).
+    - A resolution through an inbound endpoint is a label for detection and `source.asset`, never identity evidence (D3).
+    - The baseline does not record how an end resolved. The acknowledgement view derives that from `addresses` and C1, and marks each pair end named only through an inbound address. That duty is D3's in the acknowledgement work.
+    - Two assets on one IP with different ports, and a device that uses a second address, stay unresolved there. These are stated limits.
+  - **The failed-dial tie (§14 item 10, baseline note §5).**
+    - A TCP `end` carries `syn_only`. It is true only when a client SYN was seen and every segment was a client SYN or a server RST, with no payload.
+    - A held flow's deadline is fixed at its `start`: `connect_timeout_ms` + `flow_idle_s` + *g*. `flow_idle_s` is required in `coverage.settings`, in [10, 600].
+    - A held flow alerts at once on a new sensor `run_id`, or on a heartbeat with a non-empty `degraded`. Held flows are checkpointed.
+    - Held flows and failed-dial ties per run are capped at `connect_retries`, or `connect_retries` + 1 for a run that never connected. A flow past the cap alerts at its `start`, and status counts it. Only the run's endpoint port ties.
+  - **The stored capture's byte form (§14 item 11)** is little-endian, with the nanosecond magic, snaplen 2048 and link type 1. `ts` must fit 32-bit seconds. `wire_len` must be in [`captured_len`, `MaxWireLen` = 262144].
+- **The `network_sensor` section (#550 and the retention consumer).**
+  - `evidence_class` refuses `device-observed` (D2-4).
+  - `outage_hours` is required, in [1, 720], the bound `syslog_outage_hours` uses.
+  - `alert_retention_days` is in [1, 3650]. It is required when the node has no forwarding target, and refused when it has one, so no setting is ignored in silence.
+- **One Windows CI miss.** The Syslog rig's 15 s Serve limit was missed by 0.9 s once (#548, attempt 1), and the re-run passed. D5 opens an issue beside #230 if it recurs.
+- **Test follow-ups, not blocking.**
+  - D3 adds an accepted retention row exactly on the wall bound.
+  - D4 adds three `contracts/netobs` rows: a server `RST|SYN` is not `syn_only`, `ip-ambiguous` without `ip` is refused, and `flow_idle_s` 9 is refused while 10 is accepted (D6's surviving mutants).
