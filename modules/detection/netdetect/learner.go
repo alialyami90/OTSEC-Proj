@@ -103,7 +103,9 @@ func (l *Learner) Frozen() bool { return l.frozen }
 
 // Observe folds the stored observation o at stream seq seq. A seq at or
 // below Through was taken already and is passed over, so a re-read after a
-// restore folds nothing twice. An observation tied to the node's own
+// restore folds nothing twice. A refused observation (not stored, or
+// another sensor's) returns an error, folds nothing, and still takes its
+// seq. An observation tied to the node's own
 // session, or seen while the coverage was degraded, is counted and not
 // learned (§2.1). It returns ErrFrozen after Freeze.
 func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
@@ -112,12 +114,17 @@ func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
 		return ErrFrozen
 	case seq <= l.through:
 		return nil
+	}
+	// The seq is taken even when the observation is refused, so the
+	// node's cursor can move past it and the stream still prunes (D5-S1
+	// on #561). A refused observation is reported, not folded.
+	l.through = seq
+	switch {
 	case o == nil || o.Node == nil:
 		return errors.New("netdetect: not a stored observation")
 	case o.SensorID != l.cfg.SensorID:
 		return fmt.Errorf("netdetect: observation of sensor %s, not %s", o.SensorID, l.cfg.SensorID)
 	}
-	l.through = seq
 	switch {
 	case o.Node.PlatformSession != nil:
 		l.period.PlatformSession++
@@ -146,7 +153,10 @@ func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
 	lans = slices.Compact(lans)
 	fits := l.address(o.IP.Src, src, vlan, lans)
 	fits = l.address(o.IP.Dst, dst, vlan, lans) && fits
-	if (o.IP.L4 == "tcp" || o.IP.L4 == "udp") && o.IP.Dport != nil {
+	// An entry is learned only when both addresses it was seen at are
+	// held, so every end of every entry has its address in the draft
+	// (D3's S1 on #561; the acknowledgement view relies on it, D4-70).
+	if fits && (o.IP.L4 == "tcp" || o.IP.L4 == "udp") && o.IP.Dport != nil {
 		pair := netobs.Pair{Client: src, Server: dst, L4: o.IP.L4, Port: *o.IP.Dport, Protocol: o.Protocol}
 		switch {
 		// Midstream flows add nothing: a pair is learned only from a

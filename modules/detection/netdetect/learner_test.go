@@ -478,13 +478,23 @@ func TestLearnerRefuses(t *testing.T) {
 	l, _ := NewLearner(lxConfig())
 	other := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000)
 	other.SensorID = lxRelay
-	if err := l.Observe(1, other); err == nil || l.Through() != 0 {
+	// A refused observation is reported and folds nothing, but takes its
+	// seq, so the node's cursor moves past it (D5-S1 on #561); fed again,
+	// it is passed over.
+	empty := must(l.Draft())
+	if err := l.Observe(1, other); err == nil || l.Through() != 1 {
 		t.Errorf("another sensor's observation: %v, through %d", err, l.Through())
+	}
+	if err := l.Observe(1, other); err != nil {
+		t.Errorf("a refused seq fed again: %v", err)
 	}
 	bare := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000)
 	bare.Node = nil
-	if err := l.Observe(1, bare); err == nil {
-		t.Error("an observation without its node object")
+	if err := l.Observe(2, bare); err == nil || l.Through() != 2 {
+		t.Errorf("an observation without its node object: %v, through %d", err, l.Through())
+	}
+	if !bytes.Equal(must(l.Draft()), empty) {
+		t.Error("a refused observation folded")
 	}
 	if _, err := l.Freeze("2026-10-01T00:00:00Z"); err == nil || l.Frozen() {
 		t.Error("frozen before its start")
@@ -498,5 +508,38 @@ func TestLearnerRefuses(t *testing.T) {
 	}
 	if _, err := l.Freeze("2026-11-09T00:00:00Z"); err == nil {
 		t.Error("frozen twice at different times")
+	}
+}
+
+// D3's S1 on #561: with room for a service but not for the new address it
+// was seen at, the observation learns nothing and counts in overflow, so
+// every entry's ends keep their address in the draft. A service is the
+// entry that can be smaller than an address; a pair or a function, larger
+// than any address, never fits where its address doesn't.
+func TestLearnerNoEntryWithoutItsAddress(t *testing.T) {
+	const v6 = "2001:db8:ffff:ffff:ffff:ffff:ffff:fff1"
+	l, err := NewLearner(lxConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := lxObs(t, netobs.KindService, "192.0.2.10", "192.0.2.20", 502)
+	o.IP.Dst = v6 // the relay, seen at a second address
+	svc := encodedLen(netobs.BaselineService{Server: lxRelay, L4: "tcp", Port: 502, Protocol: "dnp3", Basis: "content"})
+	src := addressLen(&netobs.Address{IP: "192.0.2.10", Endpoint: lxMaster, VLANs: []int{10}, LANs: []string{}})
+	dst := addressLen(&netobs.Address{IP: v6, Endpoint: lxRelay, VLANs: []int{10}, LANs: []string{}})
+	pair := netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: 502, Protocol: "dnp3"}
+	if svc >= dst || encodedLen(pair)+1 <= dst {
+		t.Fatalf("sizes: service %d, address %d, pair %d", svc, dst, encodedLen(pair))
+	}
+	// Room for the source address and the service, not for the
+	// destination address.
+	l.lists[listPairs].bytes = netobs.MaxBaselineBytes - l.size() - (src + svc)
+	l.lists[listPairs].n = 1
+	if err := l.Observe(1, o); err != nil {
+		t.Fatal(err)
+	}
+	_, held := l.addresses[addrKey{v6, lxRelay}]
+	if held || len(l.services) != 0 || l.period.Overflow != 1 {
+		t.Errorf("address held %v, services %d, overflow %d", held, len(l.services), l.period.Overflow)
 	}
 }
