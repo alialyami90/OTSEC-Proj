@@ -45,13 +45,15 @@ const MaxDetectorWindowBytes = 12 << 10
 // session is counted as not judged and the node raises the alarm. Past
 // MaxDegradedIntervals the oldest interval is dropped, never merged. Past
 // MaxDetectorEndpoints the extra endpoints are never recorded, so they show
-// as not yet seen. Each Max*Bytes bounds one entry as encoded, with its
+// as not yet seen. Past MaxTakenSessions the oldest taken ID is dropped.
+// A taken entry is a tied entry's size. Each Max*Bytes bounds one entry as encoded, with its
 // comma (TestWorstDetectorCheckpointFits).
 const (
 	MaxPendingSessions       = 128
 	MaxPendingSessionBytes   = 512
 	MaxTiedSessions          = 256
 	MaxTiedSessionBytes      = 128
+	MaxTakenSessions         = 128
 	MaxDetectorEndpoints     = 256
 	MaxDetectorEndpointBytes = 192
 	MaxEndpointVLANs         = 8
@@ -60,14 +62,14 @@ const (
 )
 
 // MaxDetectorCheckpointBytes bounds a detector checkpoint: the sum of its
-// parts at their worst (its windows, pending sessions, tied invocation IDs,
-// endpoint record, degraded intervals and coverage statement) and an
-// envelope of under 1 KiB, 1,338,368 bytes. It is strictly below the
-// configuration record cap less its headroom (1,507,328), with 168,960
-// bytes (11%) to spare, so a checkpoint that fits is never refused there
+// parts at their worst (its windows, pending sessions, tied and taken
+// invocation IDs, endpoint record, degraded intervals and coverage
+// statement) and an envelope of under 1 KiB, 1,354,752 bytes. It is
+// strictly below the configuration record cap less its headroom
+// (1,507,328), with 152,576 bytes (10.1%) to spare, so a checkpoint that fits is never refused there
 // (C13 §14 item 17).
 const MaxDetectorCheckpointBytes = MaxDetectorWindows*MaxDetectorWindowBytes +
-	MaxPendingSessions*MaxPendingSessionBytes + MaxTiedSessions*MaxTiedSessionBytes +
+	MaxPendingSessions*MaxPendingSessionBytes + (MaxTiedSessions+MaxTakenSessions)*MaxTiedSessionBytes +
 	MaxDetectorEndpoints*MaxDetectorEndpointBytes + MaxDegradedIntervals*MaxDegradedIntervalBytes +
 	MaxCoverageBytes + 1<<10
 
@@ -236,6 +238,10 @@ type DetectorCheckpoint struct {
 	// Tied are the invocation IDs that observations were tied to and whose
 	// session record has not been taken yet, in the order first tied.
 	Tied []TiedSession `json:"tied"`
+	// Taken are the invocation IDs of sessions handed over and done with,
+	// oldest first, so a later record tied to one takes no room in Tied
+	// (D6's F1 on #575).
+	Taken []TiedSession `json:"taken"`
 	// Endpoints are the enrolled run endpoints' addresses seen in
 	// observations neither tied nor degraded, sorted by address: the
 	// coverage record before acknowledgement (D1 in D4-72).
@@ -410,7 +416,7 @@ func (k *DetectorCheckpoint) validateOwn(c *checker) {
 	if k.Coverage != nil {
 		k.Coverage.check(c, "coverage")
 	}
-	if k.ClockUTC == "" && (k.Coverage != nil || len(k.Sessions)+len(k.Tied)+len(k.Endpoints)+len(k.Degraded) != 0 || k.DegradedOpen) {
+	if k.ClockUTC == "" && (k.Coverage != nil || len(k.Sessions)+len(k.Tied)+len(k.Taken)+len(k.Endpoints)+len(k.Degraded) != 0 || k.DegradedOpen) {
 		c.fail(CodeConflict, "clock_utc", "own-session state with no clock")
 	}
 	if k.DegradedOpen && len(k.Degraded) == 0 {
@@ -460,6 +466,16 @@ func (k *DetectorCheckpoint) validateOwn(c *checker) {
 		}
 		ids[t.InvocationID] = true
 	}
+	for i, t := range k.Taken {
+		f := fmt.Sprintf("taken[%d]", i)
+		bound("taken", len(k.Taken), MaxTakenSessions, MaxTiedSessionBytes, t)
+		c.uuid(f+".invocation_id", t.InvocationID)
+		c.utc(f+".clock_utc", t.ClockUTC)
+		if ids[t.InvocationID] {
+			c.fail(CodeConflict, f+".invocation_id", "taken and also pending, tied or taken")
+		}
+		ids[t.InvocationID] = true
+	}
 	for i, e := range k.Endpoints {
 		f := fmt.Sprintf("endpoints[%d]", i)
 		bound("endpoints", len(k.Endpoints), MaxDetectorEndpoints, MaxDetectorEndpointBytes, e)
@@ -505,6 +521,9 @@ func (k *DetectorCheckpoint) Encode() ([]byte, error) {
 	}
 	if e.Tied == nil {
 		e.Tied = []TiedSession{}
+	}
+	if e.Taken == nil {
+		e.Taken = []TiedSession{}
 	}
 	if e.Endpoints == nil {
 		e.Endpoints = []EndpointSeen{}

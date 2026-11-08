@@ -256,9 +256,11 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 	}
 	if i := slices.IndexFunc(d.tied, func(t netobs.TiedSession) bool { return t.InvocationID == s.InvocationID }); i >= 0 {
 		d.tied = slices.Delete(d.tied, i, i+1)
+		d.take(s.InvocationID)
 		return nil, nil
 	}
 	if !s.Connected {
+		d.take(s.InvocationID)
 		return nil, nil
 	}
 	if len(d.sessions) >= netobs.MaxPendingSessions {
@@ -342,8 +344,13 @@ func (d *Detector) track(o *netobs.Observation) {
 	if ps == nil {
 		return
 	}
+	if slices.ContainsFunc(d.taken, func(t netobs.TiedSession) bool { return t.InvocationID == ps.InvocationID }) {
+		d.take(ps.InvocationID) // a later record of a session handed over: it refreshes, and takes no tied room
+		return
+	}
 	if i := slices.IndexFunc(d.sessions, func(p netobs.PendingSession) bool { return p.InvocationID == ps.InvocationID }); i >= 0 {
 		d.sessions = slices.Delete(d.sessions, i, i+1)
+		d.take(ps.InvocationID)
 		return
 	}
 	if i := slices.IndexFunc(d.tied, func(t netobs.TiedSession) bool { return t.InvocationID == ps.InvocationID }); i >= 0 {
@@ -354,6 +361,22 @@ func (d *Detector) track(o *netobs.Observation) {
 	if len(d.tied) > netobs.MaxTiedSessions {
 		d.tied = slices.Delete(d.tied, 0, 1)
 		d.notJudged++
+	}
+}
+
+// take records that id's session was handed over and is done with, so a
+// later record tied to it takes no room in tied (D6's F1 on #575). The
+// newest is last; past MaxTakenSessions the oldest is dropped. A dropped
+// ID's later record then counts as tied with no session, which can only
+// count a session as not judged, so it fails loud.
+func (d *Detector) take(id string) {
+	if d.clockUTC == "" {
+		return // nothing observed yet, so the session had no flow to tie
+	}
+	d.taken = slices.DeleteFunc(d.taken, func(t netobs.TiedSession) bool { return t.InvocationID == id })
+	d.taken = append(d.taken, netobs.TiedSession{InvocationID: id, ClockUTC: d.clockUTC})
+	if len(d.taken) > netobs.MaxTakenSessions {
+		d.taken = slices.Delete(d.taken, 0, 1)
 	}
 }
 
@@ -425,15 +448,15 @@ func (d *Detector) covers(p *netobs.PendingSession, g time.Duration) bool {
 }
 
 // judge judges every pending session that is due, in the order taken, and
-// appends the alerts it raises to out. It also drops the tied invocation
-// IDs past tiedHorizon.
+// appends the alerts it raises to out. It also drops the tied and taken
+// invocation IDs past tiedHorizon.
 func (d *Detector) judge(out []netobs.Alert) []netobs.Alert {
 	if d.clockUTC == "" {
 		return out
 	}
-	d.tied = slices.DeleteFunc(d.tied, func(t netobs.TiedSession) bool {
-		return d.clock.After(mustTime(t.ClockUTC).Add(tiedHorizon))
-	})
+	stale := func(t netobs.TiedSession) bool { return d.clock.After(mustTime(t.ClockUTC).Add(tiedHorizon)) }
+	d.tied = slices.DeleteFunc(d.tied, stale)
+	d.taken = slices.DeleteFunc(d.taken, stale)
 	g := time.Duration(d.params.TieGraceS) * time.Second
 	kept := d.sessions[:0]
 	var due []netobs.PendingSession
@@ -446,6 +469,7 @@ func (d *Detector) judge(out []netobs.Alert) []netobs.Alert {
 	}
 	d.sessions = kept
 	for _, p := range due {
+		d.take(p.InvocationID)
 		if !d.covers(&p, g) {
 			continue
 		}

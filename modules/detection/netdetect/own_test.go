@@ -512,3 +512,179 @@ func TestOwnSessionRestoreNegatives(t *testing.T) {
 		}
 	}
 }
+
+// D6's probe for F1 on #575, as a row: a record tied to a session already
+// handed over (an SNMPv3 flow's idle end after the run) takes no room in
+// tied, so 300 sessions, all seen, leave nothing counted as not judged.
+// The negative: ties whose session never came still count past the cap.
+func TestOwnSessionLateTiedRecords(t *testing.T) {
+	r := newOwRun(t, nil)
+	for i := 1; i <= 300; i++ {
+		s := i * 20 // one run every 20 s: 300 runs in 100 min, inside tiedHorizon
+		r.obs(owTied(t, i, owRelay), s)
+		must0(t, r.session(owSession(uint64(i), i, lxRelay, owRelay, true, s-1, s+5)))
+		r.obs(owTied(t, i, owRelay), s+10) // a later record of the same flow
+	}
+	if r.d.NotJudged() != 0 || len(r.d.tied) != 0 || len(r.unseen()) != 0 {
+		t.Fatalf("tied %d, not judged %d, unseen %d after 300 sessions all seen", len(r.d.tied), r.d.NotJudged(), len(r.unseen()))
+	}
+	must(r.d.Checkpoint(0))
+	for i := range netobs.MaxTiedSessions + 1 {
+		r.obs(owTied(t, 1000+i, owRelay), 6100+i)
+	}
+	if r.d.NotJudged() != 1 {
+		t.Fatalf("%d not judged past the cap of ties with no session, want 1", r.d.NotJudged())
+	}
+	// A late record of a pending session that was then seen, and of one
+	// judged unseen, takes no tied room either.
+	r = newOwRun(t, nil)
+	r.obs(owQuiet(t), 0)
+	must0(t, r.session(owSession(1, 1, lxRelay, owRelay, true, 10, 20)))
+	must0(t, r.session(owSession(2, 2, lxMaster, owMaster, true, 10, 20)))
+	r.obs(owTied(t, 1, owRelay), 21)
+	r.obs(owQuiet(t), 100)
+	r.obs(owTied(t, 1, owRelay), 101)
+	r.obs(owTied(t, 2, owMaster), 102)
+	if len(r.d.tied) != 0 || len(r.unseen()) != 1 {
+		t.Fatalf("tied %v, unseen %v", r.d.tied, r.unseen())
+	}
+}
+
+// The coverage conditions one by one, before acknowledgement (D6's G1 to
+// G4 on #575). judgeAt is an observation that touches neither endpoint,
+// on VLAN 30, whose coverage is the one the session is judged against.
+func TestOwnSessionCoverageConditions(t *testing.T) {
+	judgeAt := func(t testing.TB, lans []string) *netobs.Observation {
+		o := lxObs(t, netobs.KindFlow, "198.51.100.7", "198.51.100.8", 502)
+		o.L2.VLAN, o.Coverage.VLANsSeen, o.Coverage.PRP.LANsSeen = ptr(30), []int{30}, lans
+		return o
+	}
+	onVLAN := func(t testing.TB, vlan int, lan string) *netobs.Observation {
+		o := lxObs(t, netobs.KindFlow, "198.51.100.7", "192.0.2.20", 502)
+		o.L2.VLAN, o.Citation.Frames[0].LAN = ptr(vlan), lan
+		o.Coverage.VLANsSeen = []int{vlan}
+		if lan != "" {
+			o.Coverage.PRP.LANsSeen = []string{lan}
+		}
+		return o
+	}
+	cases := []struct {
+		name string
+		seed func(r *owRun)
+		lans []string
+		want int
+	}{
+		{"G1: the record's LAN b, coverage seeing a only", func(r *owRun) { r.obs(onVLAN(t, 30, "b"), 0) }, []string{"a"}, 0},
+		{"G1: the record's LAN b, coverage seeing both", func(r *owRun) { r.obs(onVLAN(t, 30, "b"), 0) }, []string{"a", "b"}, 1},
+		{"G2: eight VLANs, none seen now", func(r *owRun) {
+			for v := 11; v <= 18; v++ {
+				r.obs(onVLAN(t, v, ""), 0)
+			}
+		}, []string{}, 0},
+		{"G2: nine VLANs, the record overflowed, counts as seen", func(r *owRun) {
+			for v := 11; v <= 19; v++ {
+				r.obs(onVLAN(t, v, ""), 0)
+			}
+		}, []string{}, 1},
+		{"G3: seen only while degraded is not seen", func(r *owRun) {
+			o := onVLAN(t, 30, "")
+			o.Coverage.Degraded = []string{"drops-driver"}
+			r.obs(o, 0)
+		}, []string{}, 0},
+		{"G4: degraded within g before the window", func(r *owRun) {
+			r.obs(onVLAN(t, 30, ""), 0)
+			o := judgeAt(t, []string{})
+			o.Coverage.Degraded = []string{"drops-driver"}
+			r.obs(o, 15) // the window is [40, 50], so g reaches back to 10
+		}, []string{}, 0},
+		{"G4: degraded just outside g", func(r *owRun) {
+			r.obs(onVLAN(t, 30, ""), 0)
+			o := judgeAt(t, []string{})
+			o.Coverage.Degraded = []string{"drops-driver"}
+			r.obs(o, 9)
+		}, []string{}, 1},
+	}
+	for _, c := range cases {
+		r := newOwRun(t, nil)
+		c.seed(r)
+		r.obs(judgeAt(t, c.lans), 20) // closes any degraded run
+		must0(t, r.session(owSession(1, 1, lxRelay, owRelay, true, 40, 50)))
+		r.obs(judgeAt(t, c.lans), 100)
+		if got := len(r.unseen()); got != c.want {
+			t.Errorf("%s: %d unseen, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// D6's G5 and G6 on #575: a restore inside a tied ID's wait and an open
+// degraded run gives the uninterrupted run's alerts and checkpoint; an
+// endpoint dropped from enrollment is gone after the restore; a re-tied
+// ID's clock is refreshed.
+func TestOwnSessionRestoreState(t *testing.T) {
+	steps := func(t testing.TB) []*netobs.Observation {
+		deg := func(s int) *netobs.Observation {
+			o := owQuiet(t)
+			o.Coverage.Degraded = []string{"drops-driver"}
+			return dxAt(t, o, owT0.Add(time.Duration(s)*time.Second))
+		}
+		return []*netobs.Observation{
+			dxAt(t, owQuiet(t), owT0),
+			dxAt(t, owTied(t, 1, owRelay), owT0.Add(5*time.Second)),
+			deg(100), // checkpoint after this: one tied ID, a degraded run open
+			deg(110), // extends the open run
+			dxAt(t, owQuiet(t), owT0.Add(120*time.Second)),
+		}
+	}
+	obs := steps(t)
+	play := func(d *Detector, from int, cp *[]byte) []netobs.Alert {
+		var out []netobs.Alert
+		for i := from; i < len(obs); i++ {
+			as, err := d.Observe(dxID(uint64(i+1)), obs[i])
+			must0(t, err)
+			out = append(out, as...)
+			if i == 2 && cp != nil {
+				*cp = must(d.Checkpoint(0))
+			}
+		}
+		as, err := d.Session(owSession(1, 1, lxRelay, owRelay, true, 10, 20), uint64(len(obs)))
+		must0(t, err)
+		as2, err := d.Session(owSession(2, 2, lxRelay, owRelay, true, 104, 106), uint64(len(obs)))
+		must0(t, err)
+		return append(append(out, as...), as2...)
+	}
+	d, err := NewDetector(owCfg(nil))
+	must0(t, err)
+	var cp []byte
+	whole := play(d, 0, &cp)
+	k := mustV(netobs.DecodeDetectorCheckpoint(cp))
+	if len(k.Tied) != 1 || !k.DegradedOpen {
+		t.Fatalf("the checkpoint holds tied %v, degraded open %v", k.Tied, k.DegradedOpen)
+	}
+	r, err := RestoreDetector(owCfg(nil), cp, nil, uint64(len(obs)))
+	must0(t, err)
+	again := play(r, 3, nil)
+	if len(again) != len(whole) || !bytes.Equal(must(r.Checkpoint(0)), must(d.Checkpoint(0))) {
+		t.Fatalf("restored: %d alerts, want %d, or the checkpoint differs", len(again), len(whole))
+	}
+	if len(mustV(netobs.DecodeDetectorCheckpoint(must(d.Checkpoint(0)))).Degraded) != 1 {
+		t.Fatal("the open degraded run split in two")
+	}
+
+	cfg := owCfg(nil)
+	cfg.Endpoints = cfg.Endpoints[:1] // the relay is no longer enrolled
+	r, err = RestoreDetector(cfg, cp, nil, uint64(len(obs)))
+	must0(t, err)
+	for _, e := range mustV(netobs.DecodeDetectorCheckpoint(must(r.Checkpoint(0)))).Endpoints {
+		if e.IP == "192.0.2.20" {
+			t.Fatal("an endpoint no longer enrolled is still recorded after the restore")
+		}
+	}
+
+	run := newOwRun(t, nil)
+	run.obs(owTied(t, 1, owRelay), 0)
+	run.obs(owTied(t, 1, owRelay), 1000)
+	run.obs(owQuiet(t), int(tiedHorizon/time.Second)+500)
+	if len(run.d.tied) != 1 {
+		t.Fatal("a re-tied ID's clock wasn't refreshed")
+	}
+}

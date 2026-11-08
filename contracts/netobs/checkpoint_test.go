@@ -160,6 +160,7 @@ func fxDetectorCheckpoint() *DetectorCheckpoint {
 		Sessions: []PendingSession{{InvocationID: fxInv(1), AssetID: a.AssetID, IP: "192.0.2.20", L4: "tcp", Port: 23,
 			StartedUTC: "2026-11-07T10:00:00Z", EndedUTC: "2026-11-07T10:00:10Z", AfterSeq: 38}},
 		Tied:      []TiedSession{{InvocationID: fxInv(2), ClockUTC: a.AtUTC}},
+		Taken:     []TiedSession{{InvocationID: fxInv(4), ClockUTC: a.AtUTC}},
 		Endpoints: []EndpointSeen{{IP: "192.0.2.10", VLANs: []int{10}, LANs: []string{}}, {IP: "192.0.2.20", VLANs: []int{0, 10}, LANs: []string{"a", "b"}}},
 		Degraded:  []Interval{{StartUTC: "2026-11-07T09:00:00Z", EndUTC: "2026-11-07T09:00:30Z"}}, DegradedOpen: true}
 }
@@ -260,6 +261,14 @@ func TestDetectorCheckpointRules(t *testing.T) {
 				k.Tied = append(k.Tied, TiedSession{InvocationID: fxInv(1000 + i), ClockUTC: k.ClockUTC})
 			}
 		}},
+		{"taken and tied", CodeConflict, func(k *DetectorCheckpoint) { k.Taken[0].InvocationID = fxInv(2) }},
+		{"taken twice", CodeConflict, func(k *DetectorCheckpoint) { k.Taken = append(k.Taken, k.Taken[0]) }},
+		{"taken clock form", CodeForm, func(k *DetectorCheckpoint) { k.Taken[0].ClockUTC = "now" }},
+		{"taken past the bound", CodeRange, func(k *DetectorCheckpoint) {
+			for i := range MaxTakenSessions {
+				k.Taken = append(k.Taken, TiedSession{InvocationID: fxInv(3000 + i), ClockUTC: k.ClockUTC})
+			}
+		}},
 		{"endpoints unsorted", CodeOrder, func(k *DetectorCheckpoint) { k.Endpoints[0], k.Endpoints[1] = k.Endpoints[1], k.Endpoints[0] }},
 		{"endpoint address form", CodeForm, func(k *DetectorCheckpoint) { k.Endpoints[0].IP = "192.0.2.010" }},
 		{"endpoint with no VLAN", CodeRange, func(k *DetectorCheckpoint) { k.Endpoints[0].VLANs = []int{} }},
@@ -294,12 +303,12 @@ func TestDetectorCheckpointRules(t *testing.T) {
 // window's worst encoding, and the checkpoint under the configuration
 // record cap less its headroom.
 func TestDetectorBounds(t *testing.T) {
-	if MaxDetectorWindows != 96 || MaxDetectorWindowBytes != 12288 || MaxDetectorCheckpointBytes != 1338368 {
+	if MaxDetectorWindows != 96 || MaxDetectorWindowBytes != 12288 || MaxDetectorCheckpointBytes != 1354752 {
 		t.Fatalf("bounds %d, %d, %d", MaxDetectorWindows, MaxDetectorWindowBytes, MaxDetectorCheckpointBytes)
 	}
-	own := []int{MaxPendingSessions, MaxPendingSessionBytes, MaxTiedSessions, MaxTiedSessionBytes, MaxDetectorEndpoints,
+	own := []int{MaxPendingSessions, MaxPendingSessionBytes, MaxTiedSessions, MaxTiedSessionBytes, MaxTakenSessions, MaxDetectorEndpoints,
 		MaxDetectorEndpointBytes, MaxEndpointVLANs, MaxDegradedIntervals, MaxDegradedIntervalBytes}
-	if !slices.Equal(own, []int{128, 512, 256, 128, 256, 192, 8, 64, 128}) {
+	if !slices.Equal(own, []int{128, 512, 256, 128, 128, 256, 192, 8, 64, 128}) {
 		t.Fatalf("own-session bounds %v", own)
 	}
 	// Strictly below the cap less headroom, with at least a tenth of it to
@@ -385,7 +394,7 @@ func worstOwn(t *testing.T, k *DetectorCheckpoint) {
 		t.Logf("worst %s %d bytes", name, len(b)+1)
 	}
 	e := *k
-	e.Windows, e.Coverage, e.Sessions, e.Tied, e.Endpoints, e.Degraded = nil, nil, nil, nil, nil, nil
+	e.Windows, e.Coverage, e.Sessions, e.Tied, e.Taken, e.Endpoints, e.Degraded = nil, nil, nil, nil, nil, nil, nil
 	e.Baseline, e.BaselineVersion, e.LastAlertSeq, e.SessionThrough = "sha256:"+strings.Repeat("f", 64), 1<<63-1, 1<<64-1, 1<<64-1
 	e.ClockUTC, e.DegradedOpen = utc, false
 	env, err := e.Encode()
@@ -396,13 +405,16 @@ func worstOwn(t *testing.T, k *DetectorCheckpoint) {
 		t.Fatalf("envelope %d bytes, not under 1 KiB", len(env))
 	}
 	t.Logf("envelope %d bytes", len(env))
-	k.Sessions, k.Tied, k.Endpoints, k.Degraded = nil, nil, nil, nil
+	k.Sessions, k.Tied, k.Taken, k.Endpoints, k.Degraded = nil, nil, nil, nil, nil
 	for i := range MaxPendingSessions {
 		k.Sessions = append(k.Sessions, PendingSession{InvocationID: inv(i), AssetID: fxAsset, IP: ip(i), L4: "tcp", Port: 65535,
 			StartedUTC: utc, EndedUTC: utc, AfterSeq: 1<<64 - 1})
 	}
 	for i := range MaxTiedSessions {
 		k.Tied = append(k.Tied, TiedSession{InvocationID: inv(1000 + i), ClockUTC: utc})
+	}
+	for i := range MaxTakenSessions {
+		k.Taken = append(k.Taken, TiedSession{InvocationID: inv(2000 + i), ClockUTC: utc})
 	}
 	for i := range MaxDetectorEndpoints {
 		k.Endpoints = append(k.Endpoints, EndpointSeen{IP: ip(i), VLANs: []int{4087, 4088, 4089, 4090, 4091, 4092, 4093, 4094},

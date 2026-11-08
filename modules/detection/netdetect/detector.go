@@ -126,6 +126,7 @@ type Detector struct {
 	sessionThrough uint64
 	sessions       []netobs.PendingSession
 	tied           []netobs.TiedSession
+	taken          []netobs.TiedSession
 	seen           map[netip.Addr]*netobs.EndpointSeen
 	degraded       []netobs.Interval
 	degradedOpen   bool
@@ -467,7 +468,7 @@ func (d *Detector) Checkpoint(lastAlertSeq uint64) ([]byte, error) {
 	k := netobs.DetectorCheckpoint{Schema: netobs.CheckpointIdentifier, Half: netobs.HalfDetector, SensorID: d.sensor,
 		NodeID: d.node, Stream: d.stream, Baseline: d.hash, BaselineVersion: d.version, Through: d.through, LastAlertSeq: lastAlertSeq, ClockUTC: d.clockUTC,
 		Windows: []netobs.DetectorWindow{}, Coverage: d.cov, SessionThrough: d.sessionThrough, Sessions: d.sessions,
-		Tied: d.tied, Degraded: d.degraded, DegradedOpen: d.degradedOpen}
+		Tied: d.tied, Taken: d.taken, Degraded: d.degraded, DegradedOpen: d.degradedOpen}
 	for _, e := range d.seen {
 		k.Endpoints = append(k.Endpoints, *e)
 	}
@@ -519,7 +520,7 @@ func RestoreDetector(cfg DetectorConfig, checkpoint []byte, committed []Committe
 		w := k.Windows[i]
 		d.windows[Key{w.Rule, w.AssetID}] = &w
 	}
-	d.cov, d.sessionThrough, d.sessions, d.tied = k.Coverage, k.SessionThrough, k.Sessions, k.Tied
+	d.cov, d.sessionThrough, d.sessions, d.tied, d.taken = k.Coverage, k.SessionThrough, k.Sessions, k.Tied, k.Taken
 	d.degraded, d.degradedOpen = k.Degraded, k.DegradedOpen
 	for i := range k.Endpoints {
 		e := k.Endpoints[i]
