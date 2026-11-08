@@ -1314,3 +1314,36 @@ D1, on #571 and #575 to #578, with each owner's and reviewer's word through the 
   - **D6:** after #575, pins `MaxDetectorWindows` 96, `MaxDetectorWindowBytes` 12,288, `MaxTakenSessions` 128, `MaxDetectorCheckpointBytes` 1,354,752 and the other own-session bounds by value. `sensor-unreachable`'s rows above.
   - **D3:** in `docs/threat-model.md`, AP-35's residuals above (injection on a live or just-lost open tuple, the midstream reply, and a forger who keeps an entry alive into the next SNMPv3 reuse). AP-36 (b)'s silent-sensor backstop is already on main, from #574.
   - **Sensor brief (D1, after ADR-0009):** the sensor-link exclusion, D3's PRP discard rule, D4's offline resume, and the C13 "MAC changed within a flow" signal as a candidate for the next minor.
+
+## D4-74: `sensor-unreachable` is merged, PR B is split, and the rulings for B1's review and B2's questions (D1, 2026-11-08)
+
+D1, on #579 to #581 and #584, with each owner's and reviewer's word through the coordinator (D4-58). Merged: #579 (D4-73), #580 (AP-35's residuals), #578 (`Session.OpenFlow`), #577 (D6's rows) and #581 (`sensor-unreachable`, D5).
+
+- **`sensor-unreachable`'s timing (D1 on #581).** It has no timer of its own. It is raised at the first `Tick` at or after 60 s of quiet, so at most 60 s + `TickInterval` (120 s or less today) after the last accepted heartbeat or the node's start. D5's cadence test holds it. D6's node-API rows allow for the tick.
+- **PR B is split in two.** B1 switches the hold on in the node. B2 adds the detector consumer: the `Session` calls, the handover barrier, `RestoreDetector` and the detector's status counts. B1's condition is that `collection.run` carries every field `netdetect.Session` needs, with a test that rebuilds the session from the committed record alone. B2 adds a first-start row (below). The text for `dropped_by_asset`'s status moves to B2.
+- **B1's review (#584). These three are fixed in B1, before merge.**
+  - **The repair covers a run that is still waiting (D3's R3).** The start repair takes every run that is not `Holding` and whose newest record has a session, so a `Waiting` run with a dial outstanding is repaired too, not only a `Released` one. `RecoverHold` has already settled any `Releasing` run. This matches the live path, which writes `collection.run` at the first release while a dial still waits. `after_seq` is the head at the repair. A repaired `Waiting` run's records stay until `TickHold` releases it, then the prune removes them. Row: a crash after a release with one dial waiting gives one repair, and a second restart gives none.
+  - **The repair reads `open_flow`, never infers it (D4's F1).** The releasing record saves `Released.OpenFlow`, and the repair reads it. Inferring it from the open table counted the run's own tied flow as a reused conversation, so a repaired session landed under `OpenFlowSeen` where the live path counts it as seen by a tie. Rows: the run's own tied flow still open gives `open_flow: false`, as live, and a real re-point gives `true`.
+  - **A run with no session is counted (D4).** A `Link.Result` that fails, and a dispatch whose save failed so nothing is held, write a `collection.run` with no session. B1 counts each as `runs_session_missing` in the sensor's status, with a row for each, and B2 counts them as not judged.
+- **B2's questions (D5).**
+  - **An alert whose cited frames aren't all stored (D4 owns C13).** A repeat observation can cite frames whose first-sight capture was evicted, dropped or pruned. A header-only capture with no signal would mislead V-M6 and any reader, because C13 §7.1 says the capture holds the cited frames. D4's C13 change is approved as their next PR:
+    - The capture holds the cited frames still stored, in citation order.
+    - The cites list every frame.
+    - A new `frames_missing` (0 to the cited count, absent when 0) is range-checked by `Validate`.
+    - The node's `alert_frames_missing` is the total in status.
+    - An alert is never dropped.
+    - It amends 0.1 in place only if no merged code has committed an alert, and the PR shows the search. Otherwise it is 0.2.
+    - D5's index (4,096 entries, oldest out) from frame SHA-256 to capture is rebuilt at start from the retained first sights. A frame whose capture was pruned counts as missing.
+    - D6 adds a V-M6 row for an alert with a frame missing.
+    - A header-only capture without the field is not allowed.
+  - **Checkpoint cadence.** `netcheckpoint.detector` is written at each `Tick` where `through` moved, and at a clean stop. The cursor is confirmed only after that commit, and older checkpoints are removed, as `identity.read`'s are. Two conditions:
+    - A write that fails keeps the old cursor and raises an alarm.
+    - A crash after an alert commits but before its checkpoint gives one alert on replay, not two. D5 chooses how, and adds a row.
+    - B2's body gives the checkpoint's size at the 2b bound and its writes per day.
+  - **First start with no checkpoint.** The detector begins at the oldest retained observation and replays the retained `collection.run` sessions in seq order, interleaved by `after_seq`, under the handover barrier. A session whose observations may have been pruned is never judged `own-session-unseen`:
+    - When the observation stream has been pruned, a connected session that is not `open_flow` is judged only if `started_at` − g is at or after the first observation read's capture time + g.
+    - Any other connected session that is not `open_flow` is not judged, with the reason `before-retained`. An `open_flow` session counts as `OpenFlowSeen`, as now.
+    - Status shows not-judged by reason: `pending-full`, `before-retained` and `session-missing`.
+    - D6's rows: on a pruned stream, a session whose flows were pruned raises no `own-session-unseen` and shows `before-retained` 1, and a session inside the retained range gets its verdict.
+- **Candidates for the sensor brief (D1, after ADR-0009)**, beside D4-73's list:
+  - A sensor that keeps sending heartbeats but has gone blind shows as flat packet counters. `sensor-unreachable` can't see it.
