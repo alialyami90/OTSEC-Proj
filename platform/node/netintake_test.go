@@ -775,3 +775,42 @@ func TestIntakeRepairCountsCommitted(t *testing.T) {
 		t.Fatalf("SER stream: %d rows, %v; %d committed before the crash", len(got), err, n)
 	}
 }
+
+// D6's S10 on #584: a result the normalizer refuses after its release is
+// quarantined, and its outcome-unknown record ends the run. Its hold
+// records go, and a restart repairs nothing.
+func TestIntakeQuarantinedAfterRelease(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	res, err := adapter.DecodeResult(readFile(t, ok09Result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Error = &adapter.Error{Code: adapter.FailedTimeout, Detail: "read timed out"}
+	f := &fakeCollector{answer: func(req *authz.CollectorRequest) (collectorclient.Response, error) {
+		if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+			t.Error(err)
+		}
+		return collectorclient.Response{Reply: accepted(req, 1),
+			Outcome: &collectorclient.Outcome{InvocationID: okInvocation, ResultJSON: []byte(`{}`), Result: res}}, nil
+	}}
+	s := newScheduler(t, r, f)
+	rep := s.RunOnce(bg, 0)
+	if rep.Outcome != "quarantined" || rep.Alarm != AlarmResultRefused {
+		t.Fatalf("run: %+v", rep)
+	}
+	if obs := observations(t, r); len(obs) != 1 || obs[0].Node == nil || obs[0].Node.PlatformSession == nil {
+		t.Fatalf("the run's flow did not commit tied: %+v", obs)
+	}
+	for _, d := range func() []intakeDoc { _, d := intakeDocs(t, r); return d }() {
+		if d.Run.RequestID == rep.RequestID && d.State != sensorlink.HoldReleased {
+			t.Fatalf("run's %s hold record kept", d.State)
+		}
+	}
+	r.Close()
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	if f := st.Snapshot("x").Sensor; len(healthRuns(t, r)) != 0 || f == nil || f.Repaired != 0 {
+		t.Fatalf("%d collection.run records, status %+v", len(healthRuns(t, r)), f)
+	}
+}

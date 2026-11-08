@@ -31,6 +31,7 @@ type holdRig struct {
 	wall     time.Time
 	saved    []RunRecord
 	failSave int
+	okFirst  int // saves that pass before failSave's start failing
 	l        *Link
 	seq      int
 	run      string
@@ -59,7 +60,9 @@ func (g *holdRig) link(restore []RunRecord) *Link {
 
 // save keeps each record as the node would store it: as JSON.
 func (g *holdRig) save(_ context.Context, rec RunRecord) error {
-	if g.failSave > 0 {
+	if g.okFirst > 0 {
+		g.okFirst--
+	} else if g.failSave > 0 {
 		g.failSave--
 		return errors.New("test: the intake write failed")
 	}
@@ -906,5 +909,27 @@ func TestHoldRepointSaveFails(t *testing.T) {
 	last := g.saved[len(g.saved)-1]
 	if err != nil || got.OpenFlow || last.Run.RequestID != "req-3" || last.OpenFlow {
 		t.Errorf("result %+v, %v; saved record %s open_flow %v", got, err, last.Run.RequestID, last.OpenFlow)
+	}
+
+	// With a batch, the releasing record saves and the final one fails, as
+	// a crash between them would leave it: the re-point took effect, and
+	// the record RecoverHold finishes from the releasing one says so
+	// (D6's S3 on #584).
+	g.dispatch("req-4")
+	g.send(g.obs("start", 40004, 20*time.Minute)) // outside the session, in the batch
+	g.okFirst, g.failSave = 1, 1
+	got, err = g.l.Result(bg, "req-4", session09("9c4f5e21-6a7d-4f41-8e0d-5c3b1a8f4d63", 40001, 3*time.Minute))
+	if err != nil || !got.OpenFlow {
+		t.Fatalf("req-4's result: %+v, %v", got, err)
+	}
+	if last := g.saved[len(g.saved)-1]; last.Run.RequestID != "req-4" || last.State != HoldReleasing {
+		t.Fatalf("newest record: %s %s", last.Run.RequestID, last.State)
+	}
+	g.l = g.link(g.restore())
+	if err := g.l.RecoverHold(bg); err != nil {
+		t.Fatal(err)
+	}
+	if last := g.saved[len(g.saved)-1]; last.Run.RequestID != "req-4" || last.State != HoldReleased || !last.OpenFlow {
+		t.Errorf("recovered record: %s %s open_flow %v", last.Run.RequestID, last.State, last.OpenFlow)
 	}
 }
