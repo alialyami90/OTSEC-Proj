@@ -84,6 +84,7 @@ func TestObservationRules(t *testing.T) {
 		{"pending table below bound", CodeRange, func(o *Observation) { o.Coverage.Settings.MaxPendingDNP3 = 255 }},
 		{"flow_idle_s absent", CodeRange, func(o *Observation) { o.Coverage.Settings.FlowIdleS = 0 }},
 		{"flow_idle_s above bound", CodeRange, func(o *Observation) { o.Coverage.Settings.FlowIdleS = MaxFlowIdleS + 1 }},
+		{"flow_idle_s below bound", CodeRange, func(o *Observation) { o.Coverage.Settings.FlowIdleS = MinFlowIdleS - 1 }},
 		{"degraded unknown", CodeForm, func(o *Observation) { o.Coverage.Degraded = []string{"lost"} }},
 		{"vlans not ascending", CodeOrder, func(o *Observation) { o.Coverage.VLANsSeen = []int{20, 10} }},
 		{"overflow before full", CodeConflict, func(o *Observation) { o.Coverage.VLANsOverflow = true }},
@@ -454,6 +455,7 @@ func TestSynOnly(t *testing.T) {
 		"SYN-ACK seen":            {[]Segment{syn, {Flags: TCPSyn | TCPAck}}, false},
 		"client RST":              {[]Segment{syn, {FromClient: true, Flags: TCPRst}}, false},
 		"server RST with payload": {[]Segment{syn, {Flags: TCPRst | TCPAck, Payload: 4}}, false},
+		"server RST and SYN":      {[]Segment{syn, {Flags: TCPRst | TCPSyn}}, false},
 	} {
 		if got := SynOnly(tc.segs); got != tc.want {
 			t.Errorf("%s: %v, want %v", name, got, tc.want)
@@ -495,5 +497,26 @@ func TestWireLenBound(t *testing.T) {
 		if !ok && !slices.Contains(got, CodeRange) {
 			t.Errorf("wire_len %d: got %v, want range", wire, got)
 		}
+	}
+}
+
+// TestFlowIdleSLowerEdge: flow_idle_s 10 is accepted (D6 on #552).
+func TestFlowIdleSLowerEdge(t *testing.T) {
+	o := fxFlow()
+	o.Coverage.Settings.FlowIdleS = MinFlowIdleS
+	if err := o.Validate(); err != nil {
+		t.Errorf("flow_idle_s %d: %v", MinFlowIdleS, err)
+	}
+}
+
+// TestAmbiguousNeedsIP: ip-ambiguous names an address, so a record with
+// no ip can't carry it. The check is on resolved_by itself, not only on
+// the kind needing ip (D6 on #552).
+func TestAmbiguousNeedsIP(t *testing.T) {
+	o := fxStored()
+	o.Node.ResolvedBy, o.Node.SrcAsset, o.IP = "ip-ambiguous", AssetUnresolved, nil
+	err := o.ValidateStored()
+	if err == nil || !strings.Contains(err.Error(), "node.resolved_by") {
+		t.Errorf("ip-ambiguous with no ip: %v", err)
 	}
 }
