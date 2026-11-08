@@ -278,4 +278,17 @@ func TestInboundOnly(t *testing.T) {
 	if got := InboundOnly(b, testNode, assets[1:]); !got[relay] || !got[master] {
 		t.Errorf("no relay endpoint: marked %v", got)
 	}
+	// A session open before capture began leaves a function, or a
+	// service, with no entry in pairs: its inbound-only end is marked
+	// too (D4 on #558, N1).
+	const (
+		writer = "3a9d6b42-1e7f-4c08-a5d3-6f2b8e0c4d91"
+		server = "4e2c8a16-9b3d-4f5a-8c71-0d6e2f4a9b37"
+	)
+	mid := *b
+	mid.Functions = append(slices.Clone(b.Functions), netobs.BaselineFunction{Pair: netobs.Pair{Client: writer, Server: relay, L4: "tcp", Port: 20000, Protocol: "dnp3"}, Code: 2})
+	mid.Services = append(slices.Clone(b.Services), netobs.BaselineService{Server: server, L4: "tcp", Port: 502, Protocol: "modbus", Basis: "content"})
+	if got := InboundOnly(&mid, testNode, assets); len(got) != 3 || !got[master] || !got[writer] || !got[server] {
+		t.Errorf("midstream function and service: marked %v, want the master, the writer and the server", got)
+	}
 }
