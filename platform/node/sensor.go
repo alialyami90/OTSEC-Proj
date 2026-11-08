@@ -37,7 +37,9 @@ const AlarmSensorRecordRefused = "sensor-record-refused"
 // D1 in D4-73). It is raised once per such stretch, and status shows the
 // sensor unreachable until the next accepted heartbeat (D5-sensor-node.md
 // section 2). The node's own clock times it, so a step of the wall clock
-// or of the sensor's moves nothing.
+// or of the sensor's moves nothing. It is raised at the first Tick at or
+// after 60 s of quiet, so at most 60 s + TickInterval (<= 120 s today)
+// after the last heartbeat or the start (D1 on #581).
 const AlarmSensorUnreachable = "sensor-unreachable"
 
 // SensorUnreachableAfter is six of the sensor's 10 s heartbeats.

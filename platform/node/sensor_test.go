@@ -400,9 +400,10 @@ func unreachable(r *Runtime, st *Status) (int, bool) {
 	return alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable
 }
 
-// sensor-unreachable on the node's monotonic clock (D4-73): not at 59 s
-// from the start, raised at 61 s with no heartbeat ever, once only, and
-// cleared by a heartbeat. Desk only.
+// sensor-unreachable on the node's monotonic clock (D4-73): it is raised
+// at SensorUnreachableAfter (60 s) exactly, so not at 59 s from the start
+// and raised by 61 s, with no heartbeat ever; once only; and cleared by a
+// heartbeat. Desk only.
 func TestSensorUnreachable(t *testing.T) {
 	g := newRetentionRig(t)
 	r, st := g.start()
