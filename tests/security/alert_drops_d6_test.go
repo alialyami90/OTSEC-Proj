@@ -239,13 +239,11 @@ func TestD6AlertClassFullCounts(t *testing.T) {
 	if got := dropsOf(s, base); !maps.Equal(got, want) || s.Detector.Alerts != committed {
 		t.Fatalf("drops since full %v, want %v; alerts committed %d, was %d", got, want, s.Detector.Alerts, committed)
 	}
-	// Section 2 says once per fill, re-armed by a prune. On main each
-	// prune of the observation stream re-arms it, though the alert class
-	// is still full, so it is raised again at the next refusal (D6's F1 on
-	// this row, reported to D5). Status must still show it; the row pins
-	// once per fill when F1 is fixed.
-	if n.fullAlarms() < 1 {
-		t.Fatalf("no network-full alarm after the drops")
+	// Once per fill: the detector's prunes of the observation stream
+	// leave the alert class without room for a minimum-size record, so
+	// they don't re-arm it (D6's F1 on #601, fixed in #602).
+	if n.fullAlarms() != 1 {
+		t.Fatalf("%d network-full alarms after the drops, want the one", n.fullAlarms())
 	}
 	var total uint64
 	for _, v := range s.AlertsDroppedBy {
