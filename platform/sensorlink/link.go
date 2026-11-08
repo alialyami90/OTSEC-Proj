@@ -94,6 +94,12 @@ type Stats struct {
 	Committed      uint64
 	Refused        map[string]uint64
 	Dropped        map[string]uint64
+	// DroppedByAsset counts the same dropped observations by destination
+	// asset, with one bucket, netobs.AssetUnresolved, for every unresolved
+	// destination, so a flood that mimics a known pair shows against the
+	// asset it starves (baseline note section 8). Its keys are the node's
+	// own asset IDs, so it is bounded by the enrolled assets plus one.
+	DroppedByAsset map[string]uint64
 	// Heartbeat is the last heartbeat accepted in the run, or nil.
 	Heartbeat *netobs.Heartbeat
 }
@@ -122,7 +128,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 		return nil, errors.New("sensorlink: Store, Monotonic and Received are required")
 	}
 	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets),
-		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}},
+		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}, nil
 }
 
@@ -131,7 +137,7 @@ func (l *Link) Stats() Stats {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	s := l.stats
-	s.Refused, s.Dropped = clone(s.Refused), clone(s.Dropped)
+	s.Refused, s.Dropped, s.DroppedByAsset = clone(s.Refused), clone(s.Dropped), clone(s.DroppedByAsset)
 	return s
 }
 
@@ -236,10 +242,11 @@ func (l *Link) refuse(reason string) {
 	l.mu.Unlock()
 }
 
-func (l *Link) drop(reason string) {
-	l.mu.Lock()
+// drop counts a dropped observation under its reason and its destination
+// asset. The caller holds l.mu.
+func (l *Link) drop(reason, dstAsset string) {
 	l.stats.Dropped[reason]++
-	l.mu.Unlock()
+	l.stats.DroppedByAsset[dstAsset]++
 }
 
 // codeOf is the reason for a C13 validation failure: its first code.
@@ -292,7 +299,7 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 
 	l.mu.Lock()
 	if unresolved && !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
-		l.stats.Dropped[DropUnresolvedBudget]++
+		l.drop(DropUnresolvedBudget, nd.DstAsset)
 		l.mu.Unlock()
 		return
 	}
@@ -308,11 +315,11 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 		}
 		switch {
 		case errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}):
-			l.stats.Dropped[DropClassFull]++
+			l.drop(DropClassFull, nd.DstAsset)
 		case errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}):
-			l.stats.Dropped[DropRecordCap]++
+			l.drop(DropRecordCap, nd.DstAsset)
 		default:
-			l.stats.Dropped[DropStore]++
+			l.drop(DropStore, nd.DstAsset)
 		}
 		return
 	}

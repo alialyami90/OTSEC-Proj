@@ -415,6 +415,10 @@ func TestStoreDrops(t *testing.T) {
 	if st.Dropped[DropClassFull] != 1 || len(st.Dropped) != 1 || st.Committed != uint64(seq-1) {
 		t.Fatalf("stats %+v after %d", st, seq)
 	}
+	// Counted against the destination asset too (baseline note section 8).
+	if st.DroppedByAsset[relay] != 1 || len(st.DroppedByAsset) != 1 {
+		t.Fatalf("by asset %v", st.DroppedByAsset)
+	}
 }
 
 // firstSightFlow is a resolved first sight, so each stores its capture.
@@ -487,6 +491,10 @@ func TestBudgetGiveBack(t *testing.T) {
 	st := l.Stats()
 	if st.Committed != k || st.Dropped[DropClassFull] != 3 || st.Dropped[DropUnresolvedBudget] != 1 {
 		t.Fatalf("stats %+v", st)
+	}
+	// Every unresolved destination shares one bucket, whatever the reason.
+	if st.DroppedByAsset[netobs.AssetUnresolved] != 4 || len(st.DroppedByAsset) != 1 {
+		t.Fatalf("by asset %v", st.DroppedByAsset)
 	}
 
 	// From empty, H/2 earns floor((B/2)/r) records: 2 of k = 4.

@@ -50,10 +50,14 @@ func TestCaptureGolden(t *testing.T) {
 }
 
 // A wire length below the captured bytes, or one the uint32 would wrap, is
-// refused (D3 on #553).
+// refused (D3 on #553). The values are int64 so the test builds on 32-bit
+// targets, where the second can't be an int at all.
 func TestCaptureWireLenRange(t *testing.T) {
-	for _, n := range []int{1, math.MaxUint32 + 1} {
-		if _, err := buildPcap([]pcapFrame{{TS: time.Unix(0, 0), Data: []byte{1, 2}, WireLen: n}}); err == nil {
+	for _, n := range []int64{1, math.MaxUint32 + 1} {
+		if int64(int(n)) != n {
+			continue // a 32-bit int can't hold it, so it can't reach the uint32 either
+		}
+		if _, err := buildPcap([]pcapFrame{{TS: time.Unix(0, 0), Data: []byte{1, 2}, WireLen: int(n)}}); err == nil {
 			t.Errorf("wire length %d accepted", n)
 		}
 	}

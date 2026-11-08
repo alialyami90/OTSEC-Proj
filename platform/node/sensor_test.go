@@ -1,0 +1,157 @@
+package node
+
+import (
+	"bytes"
+	"encoding/json"
+	"strconv"
+	"testing"
+	"time"
+
+	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/netobs"
+	"otsec.local/otsec/platform/sensorlink"
+)
+
+// Constructed C13 records, desk only: no sensor produced them and no device
+// was contacted. Addresses are TEST-NET-2 (198.51.100.0/24), which no
+// asset holds, so every observation is unresolved.
+const sensorRun = "0b9e4c6d-1a2f-4e3b-8c7d-5f6a7b8c9d0e"
+
+func sensorFlow(seq int, sensor string) *netobs.Observation {
+	p := func(v int) *int { return &v }
+	return &netobs.Observation{
+		Schema: netobs.Identifier, Type: netobs.TypeObservation, SensorID: sensor, RunID: sensorRun, Seq: strconv.Itoa(seq),
+		Kind: netobs.KindFlow, FirstUTC: "2026-11-07T10:00:00.000001Z", LastUTC: "2026-11-07T10:00:00.120001Z", ResolutionNS: 1000,
+		L2:        netobs.L2{SrcMAC: "02:00:00:00:00:01", DstMAC: "02:00:00:00:00:02", VLAN: p(10), EtherType: "0x0800"},
+		IP:        &netobs.IP{Src: "198.51.100.1", Dst: "198.51.100.2", L4: "tcp", Sport: p(51234), Dport: p(20000)},
+		Direction: netobs.DirectionClientServer, Protocol: "dnp3",
+		Citation: netobs.Citation{CaptureID: "ring:" + sensorRun + ":3", FramesTotal: 1, Frames: []netobs.CitedFrame{
+			{N: 17, CapturedLen: 74, WireLen: 74, SHA256: "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"}}},
+		Coverage: netobs.Coverage{
+			SensorVersion: "0.1.0", Engine: netobs.Engine{Name: "test-engine", Version: "1"},
+			Interfaces: []netobs.Interface{{Name: "eth1", Attachment: "span", LAN: "single"}},
+			PRP:        netobs.PRP{LANsSeen: []string{}}, HSR: netobs.HSRNotDecoded,
+			VLANsSeen: []int{10}, UntaggedSeen: true, Decodes: []string{"dnp3"}, Degraded: []string{},
+			Settings: netobs.Settings{SAReplyTimeoutMS: netobs.DefaultSAReplyTimeoutMS, MaxPendingDNP3: netobs.DefaultMaxPendingDNP3, FlowIdleS: netobs.DefaultFlowIdleS},
+			SinceUTC: "2026-11-07T08:00:00.000000Z",
+		},
+		Flow: &netobs.Flow{Phase: "start", Packets: 3, Bytes: 222},
+	}
+}
+
+// sensorChannel frames records as the sensor writes them.
+func sensorChannel(t *testing.T, recs ...any) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	for _, r := range recs {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := netobs.WriteFrame(&buf, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &buf
+}
+
+// dropEvents are the intake.drop-counted events on platform/health.
+func dropEvents(t *testing.T, r *Runtime) (out []map[string]string) {
+	t.Helper()
+	got, err := r.Store(HealthStream).Read(bg, HealthStream, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range got {
+		var e struct {
+			Health *event.Health `json:"health"`
+		}
+		if json.Unmarshal(st.Event, &e) == nil && e.Health != nil && e.Health.Type == event.HealthDropCounted {
+			out = append(out, e.Health.Details)
+		}
+	}
+	return out
+}
+
+// The sensor's intake in the runtime (P4-4-B5 deliverable 2). Unresolved
+// observations over the budget, which starts empty, are dropped and
+// counted by reason and in the unresolved bucket, and a record from
+// another sensor is refused, counted and alarmed once. The counts are
+// written as an intake.drop-counted event at once, then at most once a
+// minute and only when they changed, and at a clean stop; a restart shows
+// the same counts, and the same since (D5-c5-0.9.md section 4). Desk only.
+func TestSensorDropCounts(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	serve := func(recs ...any) {
+		t.Helper()
+		if err := r.ServeSensor(bg, sensorChannel(t, recs...)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seq := 0
+	flows := func(n int) (out []any) {
+		for range n {
+			seq++
+			out = append(out, sensorFlow(seq, sensorID))
+		}
+		return out
+	}
+	serve(flows(2)...)
+	seq++
+	serve(sensorFlow(seq, "11111111-2222-4333-8444-555555555555")) // another sensor's
+	r.Tick(bg)
+	s := st.Snapshot("x").Sensor
+	if s == nil || s.Dropped[sensorlink.DropUnresolvedBudget] != 2 || s.DroppedByAsset[netobs.AssetUnresolved] != 2 ||
+		s.Refused[sensorlink.RefusedSensorID] != 1 || s.Connected {
+		t.Fatalf("status %+v", s)
+	}
+	since := s.DropsSince
+	if n := alarms(st, AlarmSensorRecordRefused); n != 1 {
+		t.Fatalf("%d refused alarms", n)
+	}
+	ev := dropEvents(t, r)
+	if len(ev) != 1 || ev[0]["count"] != "2" || ev[0]["reason."+sensorlink.DropUnresolvedBudget] != "2" ||
+		ev[0]["asset."+netobs.AssetUnresolved] != "2" || ev[0]["stream"] != string(NetObservationStream(sensorID)) {
+		t.Fatalf("events %v", ev)
+	}
+
+	// More drops: not written again within the minute, then written.
+	serve(flows(3)...)
+	g.advance(30 * time.Second)
+	r.Tick(bg)
+	if ev := dropEvents(t, r); len(ev) != 1 {
+		t.Fatalf("written again within the minute: %v", ev)
+	}
+	g.advance(30 * time.Second)
+	r.Tick(bg)
+	if ev := dropEvents(t, r); len(ev) != 2 || ev[1]["count"] != "5" {
+		t.Fatalf("after the minute: %v", ev)
+	}
+	r.Tick(bg) // unchanged: nothing written
+	seq++
+	serve(sensorFlow(seq, "11111111-2222-4333-8444-555555555555"))
+	r.Tick(bg)
+	if n := alarms(st, AlarmSensorRecordRefused); n != 1 || len(dropEvents(t, r)) != 2 {
+		t.Fatalf("%d refused alarms, %d events", n, len(dropEvents(t, r)))
+	}
+
+	// A clean stop writes what changed since, and a start reads it back.
+	// The minute has refilled the budget by a record or so, so four more
+	// flows drop at least two.
+	serve(flows(4)...)
+	want := r.sensor.link.Stats().Dropped[sensorlink.DropUnresolvedBudget] // all since this start, with nothing restored
+	if want < 7 {
+		t.Fatalf("only %d dropped in all", want)
+	}
+	r.Close()
+	r, st = g.start()
+	defer r.Close()
+	if ev := dropEvents(t, r); len(ev) != 3 || ev[2]["count"] != strconv.FormatUint(want, 10) {
+		t.Fatalf("at the stop, want %d: %v", want, ev)
+	}
+	s = st.Snapshot("x").Sensor
+	if s.Dropped[sensorlink.DropUnresolvedBudget] != want || s.DroppedByAsset[netobs.AssetUnresolved] != want || !s.DropsSince.Equal(since) || s.Committed != 0 {
+		t.Fatalf("after the restart: %+v, want %d, since %s", s, want, since)
+	}
+}
