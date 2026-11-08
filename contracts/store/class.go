@@ -204,9 +204,11 @@ const (
 	// AlarmNetworkFull (0.9): a network class reached its quota; new
 	// records of the class are dropped and counted. It is a blind spot in
 	// detection, not a storage fault a device will cover, so it is not
-	// store-quota-reached. Raised once per fill with Class set, re-armed by
-	// a prune. Detail names the streams holding the most bytes. Reported
-	// as store.network-full.
+	// store-quota-reached. Raised once per fill with Class set, re-armed
+	// once the class has room for a minimum-size record again (used +
+	// min(MinRecordBytes, quota) <= quota), the rule of every full alarm
+	// (docs/phase4/D5-c5-0.9.md section 1). Detail names the streams
+	// holding the most bytes. Reported as store.network-full.
 	AlarmNetworkFull AlarmCode = "network-full"
 )
 

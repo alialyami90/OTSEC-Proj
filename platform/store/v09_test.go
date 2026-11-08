@@ -65,6 +65,12 @@ func payloadBytes(t *testing.T, db *DB, stream c5.StreamID) int64 {
 
 func pruneAll(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass) {
 	t.Helper()
+	pruneN(t, db, stream, class, 0)
+}
+
+// pruneN prunes stream's first n records, or all of them when n is 0.
+func pruneN(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass, n int) {
+	t.Helper()
 	last, err := db.LastCommitted(bg, stream)
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +83,20 @@ func pruneAll(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.PruneStep(bg, b, 100); err != nil {
-		t.Fatal(err)
+	if n > 0 {
+		if _, err := db.PruneStep(bg, b, n); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	for {
+		n, err := db.PruneStep(bg, b, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
 	}
 }
 
@@ -145,6 +163,144 @@ func TestNetworkFullV09(t *testing.T) {
 	}
 	if len(full) != 2 {
 		t.Fatalf("%d network-full alarms after a prune and a second fill, want 2", len(full))
+	}
+}
+
+// D6's F1 on #601 and D1's ruling: network-full is raised once per fill.
+// A prune elsewhere in the database leaves a full class full, though it
+// is below its quota by less than one record, so refused commits after
+// each of several observation prunes raise no second alarm. A prune that
+// frees at least MinRecordBytes of the class re-arms it, and the next fill
+// raises the second.
+func TestNetworkFullOncePerFill(t *testing.T) {
+	a := &alarms{}
+	db := open1(t, storeDir(t), networkDB(8<<20, c5.MinRecordBytes), a)
+	fills := func() (n int) {
+		for _, x := range a.got {
+			if x.Code == c5.AlarmNetworkFull {
+				n++
+			}
+		}
+		return n
+	}
+	n := 0
+	fill := func() {
+		t.Helper()
+		var refused error
+		for refused == nil && n < 100000 {
+			n++
+			_, refused = db.CommitBatch(bg, netAlert, []c5.Record{rec(netAlert, c5.ClassNetworkAlert, n)})
+		}
+		if !isCode(refused, c5.CodeQuotaReached) {
+			t.Fatalf("after %d alerts: %v, want CodeQuotaReached", n, refused)
+		}
+	}
+	fill()
+	for i := 1; i <= 5; i++ {
+		commit1(t, db, rec(netObs, c5.ClassNetworkObservation, i))
+		pruneAll(t, db, netObs, c5.ClassNetworkObservation)
+		n++
+		if _, err := db.CommitBatch(bg, netAlert, []c5.Record{rec(netAlert, c5.ClassNetworkAlert, n)}); !isCode(err, c5.CodeQuotaReached) {
+			t.Fatalf("after observation prune %d: %v, want CodeQuotaReached", i, err)
+		}
+	}
+	if f := fills(); f != 1 {
+		t.Fatalf("%d network-full alarms for one fill with prunes elsewhere, want 1", f)
+	}
+	pruneAll(t, db, netAlert, c5.ClassNetworkAlert)
+	fill()
+	if f := fills(); f != 2 {
+		t.Fatalf("%d network-full alarms after the class was pruned and filled again, want 2", f)
+	}
+}
+
+// D1 on F1: a quota below MinRecordBytes, allowed for a class with no
+// record cap, re-arms its full alarm only once the class is empty, since
+// any record could fill it. A prune of one record leaves it full, and the
+// refill raises no second alarm; a prune of every record re-arms it.
+func TestSmallQuotaFullOncePerFill(t *testing.T) {
+	const stream c5.StreamID = "platform/health"
+	a := &alarms{}
+	db := open1(t, storeDir(t), withQuota(evidenceDB, c5.ClassPlatform, 4<<10), a)
+	fills := func() (n int) {
+		for _, x := range a.got {
+			if x.Code == c5.FullAlarm(c5.ClassPlatform) && x.Class == c5.ClassPlatform {
+				n++
+			}
+		}
+		return n
+	}
+	n := 0
+	fill := func() {
+		t.Helper()
+		var refused error
+		for refused == nil && n < 10000 {
+			n++
+			_, refused = db.CommitBatch(bg, stream, []c5.Record{rec(stream, c5.ClassPlatform, n)})
+		}
+		if !isCode(refused, c5.CodeQuotaReached) {
+			t.Fatalf("after %d records: %v, want CodeQuotaReached", n, refused)
+		}
+	}
+	fill()
+	pruneN(t, db, stream, c5.ClassPlatform, 1)
+	fill()
+	if f := fills(); f != 1 {
+		t.Fatalf("%d full alarms after a one-record prune and a refill, want 1", f)
+	}
+	pruneAll(t, db, stream, c5.ClassPlatform)
+	fill()
+	if f := fills(); f != 2 {
+		t.Fatalf("%d full alarms after the class was emptied and filled again, want 2", f)
+	}
+}
+
+// D6's R1 on #602 (kills a re-arm at half a minimum record free): a prune
+// that leaves free room between half of min(MinRecordBytes, quota) and one
+// byte short of it doesn't re-arm the class, so the next refusal raises no
+// second alarm. Here the quota is 4 KiB: a 2.5 KiB record and small ones
+// fill it, and pruning the large one leaves between 2 KiB and 4 KiB free.
+func TestSmallQuotaRearmNeedsRoom(t *testing.T) {
+	const (
+		stream c5.StreamID = "platform/health"
+		quota              = 4 << 10
+	)
+	a := &alarms{}
+	db := open1(t, storeDir(t), withQuota(evidenceDB, c5.ClassPlatform, quota), a)
+	// padded is record n with a detail of size bytes.
+	padded := func(n int, size int64) c5.Record {
+		r := rec(stream, c5.ClassPlatform, n)
+		r.Event = bytes.Replace(r.Event, []byte(`"}}}`), []byte(`","pad":"`+strings.Repeat("p", int(size))+`"}}}`), 1)
+		return r
+	}
+	commit1(t, db, padded(0, 2560))
+	n, refused := 0, error(nil)
+	for refused == nil && n < 1000 {
+		n++
+		_, refused = db.CommitBatch(bg, stream, []c5.Record{rec(stream, c5.ClassPlatform, n)})
+	}
+	if !isCode(refused, c5.CodeQuotaReached) {
+		t.Fatalf("after %d records: %v, want CodeQuotaReached", n, refused)
+	}
+	pruneN(t, db, stream, c5.ClassPlatform, 1)
+	used, err := db.classBytes(bg, c5.ClassPlatform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if free := quota - used; free < quota/2 || free >= quota {
+		t.Fatalf("%d bytes free after the prune, want [%d, %d)", free, quota/2, quota)
+	}
+	if _, err := db.CommitBatch(bg, stream, []c5.Record{padded(n+1, quota-used)}); !isCode(err, c5.CodeQuotaReached) {
+		t.Fatalf("a record over the free room: %v, want CodeQuotaReached", err)
+	}
+	var full int
+	for _, x := range a.got {
+		if x.Code == c5.FullAlarm(c5.ClassPlatform) {
+			full++
+		}
+	}
+	if full != 1 {
+		t.Fatalf("%d full alarms, want 1: the prune left less than a minimum record free", full)
 	}
 }
 

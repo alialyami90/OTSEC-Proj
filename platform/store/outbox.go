@@ -349,7 +349,12 @@ func (d *DB) clearQuotaAlarms(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		if used < q.Bytes {
+		// A class is no longer full once a minimum-size record fits again,
+		// not when it is below its quota by less than one record, so a
+		// prune elsewhere in the database doesn't re-arm a full class
+		// (D6's F1 on #601, D1). A quota below MinRecordBytes re-arms only
+		// when the class is empty.
+		if used+min(c5.MinRecordBytes, q.Bytes) <= q.Bytes {
 			d.full[class] = false
 		}
 		if float64(used) < q.WarnFraction*float64(q.Bytes) {
