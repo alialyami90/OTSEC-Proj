@@ -275,7 +275,7 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 		return nil, nil
 	}
 	if len(d.sessions) >= netobs.MaxPendingSessions {
-		d.notJudged++
+		d.pendingFull++
 		return nil, ErrNotJudged
 	}
 	d.sessions = append(d.sessions, netobs.PendingSession{InvocationID: s.InvocationID, AssetID: s.AssetID,
@@ -283,11 +283,46 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 	return d.hold(d.judge(nil)), nil
 }
 
-// NotJudged counts, since this detector was built or restored, the sessions
-// it couldn't judge: one past MaxPendingSessions, or one whose tied
-// invocation ID was dropped past MaxTiedSessions. The node shows it in
-// status and raises the alarm (D1 in D4-72).
-func (d *Detector) NotJudged() int64 { return d.notJudged }
+// Skip takes the session record s as Session would, without judging it:
+// the node's first-start guard found that its observations may have been
+// pruned, so it is not judged, for before-retained (D1 in D4-74). Skip
+// applies Session's ordering check and moves the sessions taken, so a
+// restart that hands s over again finds it taken, never an ordering
+// fault. Its invocation ID is taken too, so its late tied records take no
+// tied room. A malformed record is refused with an error, and its seq is
+// taken.
+func (d *Detector) Skip(s Session, afterSeq uint64) error {
+	if s.Seq <= d.sessionThrough {
+		return nil
+	}
+	if afterSeq < d.through {
+		d.orderingFaults++
+		return ErrOrdering
+	}
+	d.sessionThrough = s.Seq
+	if !netobs.ValidUUID(s.InvocationID) {
+		return fmt.Errorf("netdetect: session %q", s.InvocationID)
+	}
+	d.beforeRetained++
+	d.tied = slices.DeleteFunc(d.tied, func(t netobs.TiedSession) bool { return t.InvocationID == s.InvocationID })
+	d.take(s.InvocationID)
+	return nil
+}
+
+// PendingFull counts, since this detector was built or restored, the
+// sessions refused past MaxPendingSessions (ErrNotJudged). The node shows
+// it in status as not judged for pending-full, beside its own reasons,
+// and raises the alarm (D1 in D4-72 and D4-74).
+func (d *Detector) PendingFull() int64 { return d.pendingFull }
+
+// TiedEvicted counts, since this detector was built or restored, the tied
+// invocation IDs dropped past MaxTiedSessions before their session came:
+// sessions not judged for tied-evicted (D1 in D4-74).
+func (d *Detector) TiedEvicted() int64 { return d.tiedEvicted }
+
+// BeforeRetained counts, since this detector was built or restored, the
+// sessions taken with Skip: not judged, for before-retained (D1 in D4-74).
+func (d *Detector) BeforeRetained() int64 { return d.beforeRetained }
 
 // OpenFlowSeen counts, since this detector was built or restored, the
 // sessions counted as seen because intake reported their 5-tuple open from
@@ -377,7 +412,7 @@ func (d *Detector) track(o *netobs.Observation) {
 	d.tied = append(d.tied, netobs.TiedSession{InvocationID: ps.InvocationID, ClockUTC: d.clockUTC})
 	if len(d.tied) > netobs.MaxTiedSessions {
 		d.tied = slices.Delete(d.tied, 0, 1)
-		d.notJudged++
+		d.tiedEvicted++
 	}
 }
 

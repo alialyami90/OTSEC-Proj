@@ -303,6 +303,45 @@ func TestOwnSessionOrdering(t *testing.T) {
 	}
 }
 
+// Skip takes a session without judging it (D1 in D4-74): it applies
+// Session's ordering check, counts before-retained, and moves the sessions
+// taken, so a skip as the last session before a checkpoint, handed over
+// again after a restore, is a replay and never an ordering fault.
+func TestOwnSessionSkip(t *testing.T) {
+	r := newOwRun(t, nil)
+	r.obs(owTied(t, 1, owRelay), 0)
+	r.obs(owQuiet(t), 1)
+	before := must(r.d.Checkpoint(0))
+	if err := r.d.Skip(owSession(1, 1, lxRelay, owRelay, true, 0, 5), 1); !errors.Is(err, ErrOrdering) ||
+		r.d.OrderingFaults() != 1 || r.d.BeforeRetained() != 0 || !bytes.Equal(must(r.d.Checkpoint(0)), before) {
+		t.Fatalf("after_seq below through: %v, %d faults, %d before-retained", err, r.d.OrderingFaults(), r.d.BeforeRetained())
+	}
+	if err := r.d.Skip(owSession(1, 1, lxRelay, owRelay, true, 0, 5), r.seq); err != nil || r.d.BeforeRetained() != 1 ||
+		len(r.d.tied) != 0 || len(r.d.taken) != 1 || len(r.d.sessions) != 0 {
+		t.Fatalf("skip: %v, %d before-retained, tied %v, taken %v, pending %v", err, r.d.BeforeRetained(), r.d.tied, r.d.taken, r.d.sessions)
+	}
+	// A session never seen, skipped, raises nothing once its window passes.
+	must0(t, r.d.Skip(owSession(2, 2, lxRelay, owRelay, true, 10, 20), r.seq))
+	r.obs(owQuiet(t), 100)
+	r.obs(owQuiet(t), 101)
+	if len(r.unseen()) != 0 || r.d.BeforeRetained() != 2 {
+		t.Fatalf("unseen %v, %d before-retained", r.unseen(), r.d.BeforeRetained())
+	}
+	if err := r.d.Skip(Session{Seq: 3, InvocationID: "x"}, r.seq); err == nil || r.d.BeforeRetained() != 2 {
+		t.Fatalf("a malformed skip: %v", err)
+	}
+	cp := must(r.d.Checkpoint(0))
+	re, err := RestoreDetector(owCfg(nil), cp, nil, r.seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seq := range []uint64{2, 3} {
+		if out, err := re.Session(owSession(seq, int(seq), lxRelay, owRelay, true, 10, 20), r.seq-2); err != nil || out != nil || re.OrderingFaults() != 0 {
+			t.Fatalf("session %d handed over again after the restore: %v, %v, %d faults", seq, out, err, re.OrderingFaults())
+		}
+	}
+}
+
 // The bounds fail loud: past MaxPendingSessions a session isn't judged,
 // and past MaxTiedSessions the oldest tied ID is dropped; each is counted.
 // Past MaxDegradedIntervals the oldest interval is dropped, never merged.
@@ -312,8 +351,8 @@ func TestOwnSessionBounds(t *testing.T) {
 	for i := range netobs.MaxPendingSessions {
 		must0(t, r.session(owSession(uint64(i+1), i+1, lxRelay, owRelay, true, 10, 3600)))
 	}
-	if err := r.session(owSession(1000, 1000, lxRelay, owRelay, true, 10, 3600)); !errors.Is(err, ErrNotJudged) || r.d.NotJudged() != 1 {
-		t.Fatalf("past the cap: %v, %d", err, r.d.NotJudged())
+	if err := r.session(owSession(1000, 1000, lxRelay, owRelay, true, 10, 3600)); !errors.Is(err, ErrNotJudged) || r.d.PendingFull() != 1 || r.d.TiedEvicted() != 0 {
+		t.Fatalf("past the cap: %v, %d pending-full, %d tied-evicted", err, r.d.PendingFull(), r.d.TiedEvicted())
 	}
 	must(r.d.Checkpoint(0))
 
@@ -321,8 +360,8 @@ func TestOwnSessionBounds(t *testing.T) {
 	for i := range netobs.MaxTiedSessions + 1 {
 		r.obs(owTied(t, i+1, owRelay), i)
 	}
-	if r.d.NotJudged() != 1 || len(r.d.tied) != netobs.MaxTiedSessions || r.d.tied[0].InvocationID != owInv(2) {
-		t.Fatalf("tied past the cap: %d not judged, %d held", r.d.NotJudged(), len(r.d.tied))
+	if r.d.TiedEvicted() != 1 || r.d.PendingFull() != 0 || len(r.d.tied) != netobs.MaxTiedSessions || r.d.tied[0].InvocationID != owInv(2) {
+		t.Fatalf("tied past the cap: %d tied-evicted, %d pending-full, %d held", r.d.TiedEvicted(), r.d.PendingFull(), len(r.d.tied))
 	}
 	must(r.d.Checkpoint(0))
 
@@ -349,8 +388,8 @@ func TestOwnSessionTiedHorizon(t *testing.T) {
 		t.Fatal("dropped at the horizon")
 	}
 	r.obs(owQuiet(t), int(tiedHorizon/time.Second)+1)
-	if len(r.d.tied) != 0 || r.d.NotJudged() != 0 {
-		t.Fatalf("%d held, %d not judged past the horizon", len(r.d.tied), r.d.NotJudged())
+	if len(r.d.tied) != 0 || r.d.TiedEvicted() != 0 {
+		t.Fatalf("%d held, %d tied-evicted past the horizon", len(r.d.tied), r.d.TiedEvicted())
 	}
 }
 
@@ -525,15 +564,15 @@ func TestOwnSessionLateTiedRecords(t *testing.T) {
 		must0(t, r.session(owSession(uint64(i), i, lxRelay, owRelay, true, s-1, s+5)))
 		r.obs(owTied(t, i, owRelay), s+10) // a later record of the same flow
 	}
-	if r.d.NotJudged() != 0 || len(r.d.tied) != 0 || len(r.unseen()) != 0 {
-		t.Fatalf("tied %d, not judged %d, unseen %d after 300 sessions all seen", len(r.d.tied), r.d.NotJudged(), len(r.unseen()))
+	if r.d.TiedEvicted() != 0 || r.d.PendingFull() != 0 || len(r.d.tied) != 0 || len(r.unseen()) != 0 {
+		t.Fatalf("tied %d, tied-evicted %d, pending-full %d, unseen %d after 300 sessions all seen", len(r.d.tied), r.d.TiedEvicted(), r.d.PendingFull(), len(r.unseen()))
 	}
 	must(r.d.Checkpoint(0))
 	for i := range netobs.MaxTiedSessions + 1 {
 		r.obs(owTied(t, 1000+i, owRelay), 6100+i)
 	}
-	if r.d.NotJudged() != 1 {
-		t.Fatalf("%d not judged past the cap of ties with no session, want 1", r.d.NotJudged())
+	if r.d.TiedEvicted() != 1 {
+		t.Fatalf("%d tied-evicted past the cap of ties with no session, want 1", r.d.TiedEvicted())
 	}
 	// A late record of a pending session that was then seen, and of one
 	// judged unseen, takes no tied room either.
