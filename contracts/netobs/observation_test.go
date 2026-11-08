@@ -82,6 +82,8 @@ func TestObservationRules(t *testing.T) {
 		}},
 		{"coverage settings out of bound", CodeRange, func(o *Observation) { o.Coverage.Settings.SAReplyTimeoutMS = 30001 }},
 		{"pending table below bound", CodeRange, func(o *Observation) { o.Coverage.Settings.MaxPendingDNP3 = 255 }},
+		{"flow_idle_s absent", CodeRange, func(o *Observation) { o.Coverage.Settings.FlowIdleS = 0 }},
+		{"flow_idle_s above bound", CodeRange, func(o *Observation) { o.Coverage.Settings.FlowIdleS = MaxFlowIdleS + 1 }},
 		{"degraded unknown", CodeForm, func(o *Observation) { o.Coverage.Degraded = []string{"lost"} }},
 		{"vlans not ascending", CodeOrder, func(o *Observation) { o.Coverage.VLANsSeen = []int{20, 10} }},
 		{"overflow before full", CodeConflict, func(o *Observation) { o.Coverage.VLANsOverflow = true }},
@@ -377,39 +379,68 @@ func TestValidUUID(t *testing.T) {
 	}
 }
 
-// TestFlowEstablished: established is on a TCP end only, and false only
-// after a seen SYN (C13 §4.3, §14 item 10).
-func TestFlowEstablished(t *testing.T) {
-	end := func(dir string, est *bool) *Observation {
+// TestFlowSynOnly: syn_only is on a TCP end only, and true only after a
+// client SYN (C13 §4.3, §14 item 10).
+func TestFlowSynOnly(t *testing.T) {
+	end := func(dir string, syn *bool) *Observation {
 		o := fxFlow()
 		o.Direction = dir
-		o.Flow = &Flow{Phase: "end", Packets: 2, Bytes: 120, End: "rst", Established: est}
+		o.Flow = &Flow{Phase: "end", Packets: 2, Bytes: 120, End: "rst", SynOnly: syn}
 		return o
 	}
 	for name, o := range map[string]*Observation{
-		"a half-open dial": end(DirectionClientServer, ptr(false)),
-		"a handshake seen": end(DirectionClientServer, ptr(true)),
-		"midstream":        end(DirectionMidstream, ptr(true)),
+		"a failed dial":    end(DirectionClientServer, ptr(true)),
+		"a handshake seen": end(DirectionClientServer, ptr(false)),
+		"midstream":        end(DirectionMidstream, ptr(false)),
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	udp := end(DirectionNone, ptr(true))
+	udp := end(DirectionNone, ptr(false))
 	udp.IP.L4 = "udp"
 	start := fxFlow()
-	start.Flow.Established = ptr(true)
+	start.Flow.SynOnly = ptr(false)
 	for name, tc := range map[string]struct {
 		o    *Observation
 		code Code
 	}{
-		"a tcp end without it":   {end(DirectionClientServer, nil), CodeMissing},
-		"on a start":             {start, CodeConflict},
-		"on a udp end":           {udp, CodeConflict},
-		"false with no SYN seen": {end(DirectionMidstream, ptr(false)), CodeConflict},
+		"a tcp end without it":  {end(DirectionClientServer, nil), CodeMissing},
+		"on a start":            {start, CodeConflict},
+		"on a udp end":          {udp, CodeConflict},
+		"true with no SYN seen": {end(DirectionMidstream, ptr(true)), CodeConflict},
 	} {
 		if got := Codes(tc.o.Validate()); !slices.Contains(got, tc.code) {
 			t.Errorf("%s: got %v, want %s", name, got, tc.code)
+		}
+	}
+}
+
+// TestSynOnly: only client SYNs, with server RSTs, are syn-only; data in
+// either direction, a SYN with data, or a handshake reply is not (D3, D1
+// on #552).
+func TestSynOnly(t *testing.T) {
+	syn := Segment{FromClient: true, Flags: TCPSyn}
+	for name, tc := range map[string]struct {
+		segs []Segment
+		want bool
+	}{
+		"one SYN":                 {[]Segment{syn}, true},
+		"SYN retransmitted":       {[]Segment{syn, syn, syn}, true},
+		"SYN with ECN":            {[]Segment{{FromClient: true, Flags: TCPSyn | TCPEce | TCPCwr}}, true},
+		"refused with RST, ACK":   {[]Segment{syn, {Flags: TCPRst | TCPAck}}, true},
+		"nothing":                 {nil, false},
+		"client to server, data":  {[]Segment{syn, {FromClient: true, Flags: TCPAck, Payload: 40}}, false},
+		"client to server, ACK":   {[]Segment{syn, {FromClient: true, Flags: TCPAck}}, false},
+		"server to client only":   {[]Segment{{Flags: TCPSyn | TCPAck}, {Flags: TCPAck, Payload: 40}}, false},
+		"server RST only":         {[]Segment{{Flags: TCPRst}}, false},
+		"SYN with payload (TFO)":  {[]Segment{{FromClient: true, Flags: TCPSyn, Payload: 16}}, false},
+		"SYN-ACK seen":            {[]Segment{syn, {Flags: TCPSyn | TCPAck}}, false},
+		"client RST":              {[]Segment{syn, {FromClient: true, Flags: TCPRst}}, false},
+		"server RST with payload": {[]Segment{syn, {Flags: TCPRst | TCPAck, Payload: 4}}, false},
+	} {
+		if got := SynOnly(tc.segs); got != tc.want {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
 		}
 	}
 }

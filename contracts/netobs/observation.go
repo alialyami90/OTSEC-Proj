@@ -102,14 +102,14 @@ const (
 )
 
 // Flow is a flow's start or end (C13 §4.3). End is set exactly on the end,
-// and Established exactly on a TCP end: false only when the sensor saw the
-// client's SYN and not the handshake completing (C13 §14 item 10).
+// and SynOnly exactly on a TCP end: true only when SynOnly(segments) holds
+// for the flow (C13 §14 item 10).
 type Flow struct {
-	Phase       string `json:"phase"`
-	Packets     int64  `json:"packets"`
-	Bytes       int64  `json:"bytes"`
-	End         string `json:"end,omitempty"`
-	Established *bool  `json:"established,omitempty"`
+	Phase   string `json:"phase"`
+	Packets int64  `json:"packets"`
+	Bytes   int64  `json:"bytes"`
+	End     string `json:"end,omitempty"`
+	SynOnly *bool  `json:"syn_only,omitempty"`
 }
 
 // Service is a server seen on a port. The server is ip.dst.
@@ -384,20 +384,20 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 			if f.End != "" {
 				c.fail(CodeConflict, "flow.end", "only on the end phase")
 			}
-			if f.Established != nil {
-				c.fail(CodeConflict, "flow.established", "only on the end phase")
+			if f.SynOnly != nil {
+				c.fail(CodeConflict, "flow.syn_only", "only on the end phase")
 			}
 		case "end":
 			if !contains([]string{"fin", "rst", "idle", "sensor-stop"}, f.End) {
 				c.fail(CodeForm, "flow.end", "%q is not fin, rst, idle or sensor-stop", f.End)
 			}
 			switch {
-			case l4 == "tcp" && f.Established == nil:
-				c.fail(CodeMissing, "flow.established", "required on a tcp end")
-			case l4 != "tcp" && f.Established != nil:
-				c.fail(CodeConflict, "flow.established", "only on a tcp end")
-			case f.Established != nil && !*f.Established && o.Direction != DirectionClientServer:
-				c.fail(CodeConflict, "flow.established", "false needs direction client-server: only a seen SYN shows a handshake that did not complete")
+			case l4 == "tcp" && f.SynOnly == nil:
+				c.fail(CodeMissing, "flow.syn_only", "required on a tcp end")
+			case l4 != "tcp" && f.SynOnly != nil:
+				c.fail(CodeConflict, "flow.syn_only", "only on a tcp end")
+			case f.SynOnly != nil && *f.SynOnly && o.Direction != DirectionClientServer:
+				c.fail(CodeConflict, "flow.syn_only", "true needs direction client-server: a syn-only flow starts with the client's SYN")
 			}
 		default:
 			c.fail(CodeForm, "flow.phase", "%q is not start or end", f.Phase)

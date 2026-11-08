@@ -67,6 +67,10 @@ const (
 	MinMaxPendingDNP3     = 256
 	MaxMaxPendingDNP3     = 65536
 
+	DefaultFlowIdleS = 60
+	MinFlowIdleS     = 10
+	MaxFlowIdleS     = 600
+
 	DefaultCoalesceWindowS = 300
 	MinCoalesceWindowS     = 60
 	MaxCoalesceWindowS     = 3600

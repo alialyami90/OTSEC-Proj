@@ -162,6 +162,7 @@ type PRP struct {
 type Settings struct {
 	SAReplyTimeoutMS int `json:"sa_reply_timeout_ms"`
 	MaxPendingDNP3   int `json:"max_pending_dnp3"`
+	FlowIdleS        int `json:"flow_idle_s"`
 }
 
 // HSRNotDecoded is coverage.hsr in 0.1.
@@ -238,6 +239,9 @@ func (cv *Coverage) check(c *checker, field string) {
 	}
 	if s.MaxPendingDNP3 < MinMaxPendingDNP3 || s.MaxPendingDNP3 > MaxMaxPendingDNP3 {
 		c.fail(CodeRange, field+".settings.max_pending_dnp3", "%d not in [%d, %d]", s.MaxPendingDNP3, MinMaxPendingDNP3, MaxMaxPendingDNP3)
+	}
+	if s.FlowIdleS < MinFlowIdleS || s.FlowIdleS > MaxFlowIdleS {
+		c.fail(CodeRange, field+".settings.flow_idle_s", "%d not in [%d, %d]", s.FlowIdleS, MinFlowIdleS, MaxFlowIdleS)
 	}
 	c.utc(field+".since_utc", cv.SinceUTC)
 }

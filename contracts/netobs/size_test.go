@@ -41,7 +41,7 @@ func worstCoverage(t testing.TB) Coverage {
 	}
 	cv.VLANsOverflow = true
 	cv.Degraded = append([]string(nil), Degraded...)
-	cv.Settings = Settings{SAReplyTimeoutMS: MaxSAReplyTimeoutMS, MaxPendingDNP3: MaxMaxPendingDNP3}
+	cv.Settings = Settings{SAReplyTimeoutMS: MaxSAReplyTimeoutMS, MaxPendingDNP3: MaxMaxPendingDNP3, FlowIdleS: MaxFlowIdleS}
 	cv.SinceUTC = "2026-11-07T08:00:00.123456789Z"
 	cv.Decodes = nil
 	for i := 0; ; i++ {
@@ -94,9 +94,9 @@ func worstObservations(t testing.TB) []*Observation {
 		switch k {
 		case KindFlow:
 			// client-server and false are the longest direction and the
-			// longest established.
+			// longest syn_only.
 			o.Direction = DirectionClientServer
-			o.Flow = &Flow{Phase: "end", Packets: 1 << 62, Bytes: 1 << 62, End: "sensor-stop", Established: ptr(false)}
+			o.Flow = &Flow{Phase: "end", Packets: 1 << 62, Bytes: 1 << 62, End: "sensor-stop", SynOnly: ptr(false)}
 		case KindService:
 			o.Service = &Service{Basis: "content", Version: &worstText}
 		case KindFunction:
