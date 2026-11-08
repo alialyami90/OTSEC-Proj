@@ -1,10 +1,6 @@
 package netdetect
 
-import (
-	"strings"
-
-	"otsec.local/otsec/contracts/netobs"
-)
+import "otsec.local/otsec/contracts/netobs"
 
 // Table is the class table this package holds: fc-classes/1, the baseline
 // note §4 as amended by C13 §14 (D4-69). It is the only copy; the node
@@ -56,24 +52,28 @@ func dnp3(code int, objects []string) Row {
 		return Row{netobs.ClassRead, Confirmed, "Read: S33 Table F.2 p. F.2"}
 	case 2:
 		switch {
-		case only(objects, func(o string) bool { return strings.HasPrefix(o, "g50v") }):
-			return Row{netobs.ClassTimeSync, Confirmed, "Write of group 50: S33 Table F.2 p. F.2; S22 Table D.9 pp. D.17 to D.18"}
+		case only(objects, func(o string) bool { return o == "g50v1" || o == "g50v3" }):
+			return Row{netobs.ClassTimeSync, Confirmed, "Write of g50v1 or g50v3: S33 Table F.2 p. F.2; S22 Table D.9 pp. D.17 to D.18"}
 		case only(objects, func(o string) bool { return o == "g80v1" }):
 			return Row{netobs.ClassSessionSetup, Confirmed, "Write of g80v1: S22 p. D.18; S23 Table 2.30 p. 82"}
 		}
-		return Row{netobs.ClassWrite, Confirmed, "Write: S33 Table F.2 p. F.2"}
+		return Row{netobs.ClassWrite, Confirmed, "Write: S33 Table F.2 p. F.2; g34 deadbands in S22 Table D.9"}
 	case 3, 4:
 		return Row{netobs.ClassControl, Confirmed, "Select, Operate: S33 Table F.2 p. F.2"}
 	case 5, 6:
 		return Row{netobs.ClassControl, Confirmed, "Direct operate: S33 Table F.2 p. F.3"}
 	case 7, 8, 9, 10:
 		return Row{netobs.ClassWrite, NumberOnly, "counter freezes: S22 Table D.9 p. D.15; S23 Table 2.30 p. 80"}
-	case 11, 12, 19, 27:
+	case 11, 12, 19:
 		return Row{netobs.ClassWrite, Unknown, "none held"}
+	case 27:
+		return Row{netobs.ClassWrite, Unknown, "S22 p. D.18 lists the g70 file objects without codes"}
 	case 13, 14:
 		return Row{netobs.ClassControl, Confirmed, "cold and warm start: S22 Table D.9 p. D.19; S23 Table 2.30 p. 83"}
-	case 15, 16, 17, 18, 31:
+	case 15, 16, 17, 18:
 		return Row{netobs.ClassControl, Unknown, "none held"}
+	case 31:
+		return Row{netobs.ClassControl, Unknown, "as 27: S22 p. D.18 lists the g70 file objects without codes"}
 	case 20, 21:
 		return Row{netobs.ClassSessionSetup, NumberOnly, "on g60 class objects: S22 Table D.9 p. D.18; S23 Table 2.30 p. 82"}
 	case 22:
@@ -91,13 +91,13 @@ func dnp3(code int, objects []string) Row {
 func modbus(code int, sub *int) Row {
 	switch code {
 	case 1, 2, 3, 4:
-		return Row{netobs.ClassRead, Confirmed, "S22 Table E.2 p. E.2; S34 Table E.2 p. E.2"}
+		return Row{netobs.ClassRead, Confirmed, "S22 Table E.2 p. E.2; S34 Table E.2 p. E.2; S32 Table 10.31 p. 10.64; S23 p. 274"}
 	case 5, 6:
-		return Row{netobs.ClassWrite, Confirmed, "S22 Table E.2 p. E.2; 06h also operates outputs, S22 p. E.17"}
+		return Row{netobs.ClassWrite, Confirmed, "S22 Table E.2 p. E.2; S34 Table E.2 p. E.2; S32 Table 10.31 p. 10.64; S23 p. 274; 06h also operates outputs, S22 p. E.17"}
 	case 15:
 		return Row{netobs.ClassWrite, Confirmed, "S32 Table 10.31 p. 10.64; S23 p. 274"}
 	case 16:
-		return Row{netobs.ClassWrite, Confirmed, "S22 Table E.2 p. E.2; operates outputs as 06h does"}
+		return Row{netobs.ClassWrite, Confirmed, "S22 Table E.2 p. E.2; S34 Table E.2 p. E.2; S32 Table 10.31 p. 10.64; S23 p. 274; operates outputs as 06h does"}
 	case 22, 23:
 		return Row{netobs.ClassWrite, Unknown, "none held"}
 	case 8:
