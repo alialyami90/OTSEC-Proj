@@ -554,3 +554,57 @@ func TestReader02KeepsObservationKind(t *testing.T) {
 		t.Fatalf("kind %q, want %q", e.Kind, KindNetworkObservation)
 	}
 }
+
+// D4-72: sensor.counters carries the sensor's own counter differences,
+// never totals, and is new in 0.3.
+func TestSensorCounters(t *testing.T) {
+	fresh := func() *Event { return load(t, "testdata/valid/health-sensor-counters.json") }
+	if err := fresh().Validate(); err != nil {
+		t.Fatalf("valid sensor.counters refused: %v", err)
+	}
+	cases := []struct {
+		name string
+		code Code
+		mut  func(e *Event)
+	}{
+		{"at 0.2", CodeForbidden, func(e *Event) { e.Schema = "otsec.event/0.2" }},
+		{"not reported by the sensor", CodeEnum, func(e *Event) { e.Health.Details["reported_by"] = "node" }},
+		{"no reported_by", CodeEnum, func(e *Event) { delete(e.Health.Details, "reported_by") }},
+		{"no sensor", CodeMissing, func(e *Event) { delete(e.Health.Details, "sensor_id") }},
+		{"no run", CodeMissing, func(e *Event) { e.Health.Details["run_id"] = "run-1" }},
+		{"a total", CodeForbidden, func(e *Event) { e.Health.Details["packets"] = "48211" }},
+		{"a total, named so", CodeForbidden, func(e *Event) { e.Health.Details["total.packets"] = "48211" }},
+		{"a negative difference", CodeEnum, func(e *Event) { e.Health.Details["diff.packets"] = "-1" }},
+		{"a padded difference", CodeEnum, func(e *Event) { e.Health.Details["diff.packets"] = "012" }},
+		{"an unknown counter", CodeEnum, func(e *Event) { e.Health.Details["diff.frames"] = "1" }},
+		{"an unknown detail", CodeEnum, func(e *Event) { e.Health.Details["note"] = "x" }},
+		{"no difference", CodeMissing, func(e *Event) {
+			for k := range e.Health.Details {
+				if strings.HasPrefix(k, "diff.") {
+					delete(e.Health.Details, k)
+				}
+			}
+		}},
+	}
+	for _, tc := range cases {
+		e := fresh()
+		tc.mut(e)
+		if got := Codes(e.Validate()); !slices.Contains(got, tc.code) {
+			t.Errorf("%s: got %v, want %s", tc.name, got, tc.code)
+		}
+	}
+	// Every counter of C13 §6 is accepted as a difference, and a later
+	// minor may add details.
+	e := fresh()
+	for _, n := range SensorCounters {
+		e.Health.Details["diff."+n] = "18446744073709551615"
+	}
+	if err := e.Validate(); err != nil {
+		t.Errorf("every counter: %v", err)
+	}
+	e = fresh()
+	e.Schema, e.Health.Details["since_utc"] = "otsec.event/0.4", "2026-10-24T12:05:00Z"
+	if err := e.Validate(); slices.Contains(Codes(err), CodeEnum) {
+		t.Errorf("a later minor's detail: %v", err)
+	}
+}

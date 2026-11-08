@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,6 +111,7 @@ func (e *Event) validate(pending bool) error {
 	checkReceived(c, &e.Received)
 	checkNetobs(c, e)
 	checkObservedAddress(c, e)
+	checkSensorCounters(c, e)
 	switch e.Origin {
 	case OriginDevice:
 		checkDeviceEvent(c, e)
@@ -290,6 +293,51 @@ func checkObservedAddress(c *checker, e *Event) {
 		c.fail(CodeEnum, "source.asset.binding.method", "a network observation or alert binds its asset by observed-address, not %q", a.Binding.Method)
 	case observed && a.Binding.Confidence != ConfidenceInferred:
 		c.fail(CodeEnum, "source.asset.binding.confidence", "observed-address is inferred, never %q", a.Binding.Confidence)
+	}
+}
+
+// checkSensorCounters checks a sensor.counters health event (D4-72): new
+// in 0.3; reported_by "sensor", because the counts are the sensor's own
+// report; the sensor's and run's IDs; and at least one counter, each as
+// diff.<name>, a decimal difference since the previous report. A total is
+// never carried: a detail named for a counter without diff. is refused,
+// as is any detail 0.3 doesn't define, unless the event is a later minor.
+func checkSensorCounters(c *checker, e *Event) {
+	if e.Kind != KindHealth || e.Health == nil || e.Health.Type != HealthSensorCounters {
+		return
+	}
+	v, err := version.Parse(e.Schema)
+	if err == nil && v.Minor < 3 {
+		c.fail(CodeForbidden, "health.type", "%s is new in otsec.event/0.3; this event is %s", HealthSensorCounters, e.Schema)
+	}
+	later := err == nil && v.Minor > 3
+	d := e.Health.Details
+	if d["reported_by"] != SensorReported {
+		c.fail(CodeEnum, "health.details.reported_by", "%q: the counts are the sensor's own report, %q", d["reported_by"], SensorReported)
+	}
+	for _, k := range []string{"sensor_id", "run_id"} {
+		if !assetIDPattern.MatchString(d[k]) {
+			c.fail(CodeMissing, "health.details."+k, "%q is not a lowercase UUID", d[k])
+		}
+	}
+	diffs := 0
+	for k, val := range d {
+		name, isDiff := strings.CutPrefix(k, "diff.")
+		switch {
+		case k == "reported_by" || k == "sensor_id" || k == "run_id":
+		case isDiff && slices.Contains(SensorCounters, name):
+			diffs++
+			if n, err := strconv.ParseUint(val, 10, 64); err != nil || strconv.FormatUint(n, 10) != val {
+				c.fail(CodeEnum, "health.details."+k, "%q is not a decimal difference", val)
+			}
+		case slices.Contains(SensorCounters, k) || slices.Contains(SensorCounters, strings.TrimPrefix(k, "total.")):
+			c.fail(CodeForbidden, "health.details."+k, "a counter's total; sensor.counters carries diff.<name> only")
+		case !later:
+			c.fail(CodeEnum, "health.details."+k, "not a detail of %s in 0.3", HealthSensorCounters)
+		}
+	}
+	if diffs == 0 {
+		c.fail(CodeMissing, "health.details", "no diff.<counter>")
 	}
 }
 
