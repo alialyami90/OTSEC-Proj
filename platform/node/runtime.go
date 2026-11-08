@@ -82,6 +82,7 @@ type Runtime struct {
 	// sensor is the sensor's intake, nil without the network_sensor
 	// section (sensor.go).
 	sensor *sensorIntake
+	intake intakeRecords // the intake hold's records (netintake.go)
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.

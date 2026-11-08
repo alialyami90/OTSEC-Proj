@@ -58,12 +58,20 @@ WANT = {"unsigned": "malformed", "truncated": "malformed", "unknown-key": "unkno
         "differs": "same_version_differs", "valid": "older_version"}
 
 
-def _events(s, stream):
-    return [json.loads(e) for (e,) in _query(s.layout["store_dir"], "SELECT event FROM events WHERE stream = ? ORDER BY seq", stream)]
+def _events(s, stream, after=0, through=None):
+    """stream's events past store seq after and through seq through, in
+    seq order."""
+    upto = "" if through is None else f" AND seq <= {int(through)}"
+    return [json.loads(e) for (e,) in _query(s.layout["store_dir"], f"SELECT event FROM events WHERE stream = ? AND seq > {int(after)}{upto} ORDER BY seq", stream)]
 
 
-def _advisory_records(s):
-    return [r for r in _events(s, "audit") if (r.get("action") or "").startswith("advisory.")]
+def _head(s, stream):
+    """stream's highest store seq, 0 if it holds nothing."""
+    return int((_query(s.layout["store_dir"], "SELECT MAX(seq) FROM events WHERE stream = ?", stream) or [(0,)])[0][0] or 0)
+
+
+def _advisory_records(s, after=0, through=None):
+    return [r for r in _events(s, "audit", after, through) if (r.get("action") or "").startswith("advisory.")]
 
 
 def _in_use(s):
@@ -131,15 +139,21 @@ def run(tmp_path_factory):
         _wait(s, lambda: (_in_use(s) or {}).get("version") == 3, "version 3 not in use")
         out["in_use_v3"] = _in_use(s)
         _wait(s, lambda: any(f["set"]["version"] == 3 for f in _findings(s)), "no finding under version 3")
-        out["records"] = _advisory_records(s)
-        out["findings"] = _findings(s)
 
         # 6. Test key 0 revoked in the configuration, and a restart: version
         # 3, signed with it, is dropped at start, and no older set is used.
-        _restart(s, revoke=out["v3"]["key_id"])
+        # What the node stored before the restart is read while it is
+        # stopped, and what it stored after is selected by store seq above
+        # that head: the node goes on storing findings after the first one
+        # under version 3 (one commit per finding, and again at the end of
+        # each collection run), so no earlier read marks where the
+        # restart falls.
+        heads = _restart(s, revoke=out["v3"]["key_id"])
+        out["records"] = _advisory_records(s, through=heads["audit"])
+        out["findings"] = _findings(s, through=heads["config"])
         harness.wait_for(lambda: False, 2 * TICK + 2, step=1.0)
-        out["revoked"] = {"status": _status(s), "records": _advisory_records(s)[len(out["records"]):],
-                          "findings": _findings(s)[len(out["findings"]):]}
+        out["revoked"] = {"status": _status(s), "records": _advisory_records(s, heads["audit"]),
+                          "findings": _findings(s, heads["config"])}
     finally:
         s.stop()
         out["checked"] = check_v_s7([l for l in s.sim_logs if os.path.exists(l)], s.d)
@@ -152,11 +166,13 @@ def _written(s):
 
 
 def _restart(s, revoke=None):
-    """Kill the node, optionally mark the anchor revoke (a key ID) revoked
-    in its configuration, start it again, and wait until it has written
-    status since."""
+    """Kill the node, read what it stored, optionally mark the anchor
+    revoke (a key ID) revoked in its configuration, start it again, and
+    wait until it has written status since. Returns the audit and
+    configuration streams' heads while the node was stopped."""
     s.kill("node")
     killed = datetime.datetime.now(datetime.timezone.utc)
+    heads = {"audit": _head(s, "audit"), "config": _head(s, "config/" + s.layout["asset_id"])}
     if revoke:
         with open(s.layout["node_config"], "r+", encoding="utf-8") as f:
             nc = json.load(f)
@@ -167,10 +183,11 @@ def _restart(s, revoke=None):
             f.truncate()
     s.respawn("node")
     _wait(s, lambda: (_written(s) or killed) > killed and "applicability" in _status(s), "no status written after the restart")
+    return heads
 
 
-def _findings(s):
-    return [e for e in _events(s, "config/" + s.layout["asset_id"]) if (e.get("schema") or "").startswith("otsec.finding/")]
+def _findings(s, after=0, through=None):
+    return [e for e in _events(s, "config/" + s.layout["asset_id"], after, through) if (e.get("schema") or "").startswith("otsec.finding/")]
 
 
 def test_no_set_before_the_first_file(run):

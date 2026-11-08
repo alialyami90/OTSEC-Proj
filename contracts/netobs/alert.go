@@ -107,9 +107,13 @@ type Alert struct {
 	RelatedTotal int64
 	// Cites are up to MaxAlertFlows flows; Capture is the alert's own C5
 	// capture's SHA-256. own-session-unseen cites nothing and has none.
-	Cites    []Cite
-	Capture  string
-	Coverage Coverage
+	Cites   []Cite
+	Capture string
+	// FramesMissing counts the cited frames whose bytes the node no longer
+	// held, so the capture leaves them out. The cites still list every
+	// frame, and the alert is never dropped for it (C13 §4.2, §7.1).
+	FramesMissing int64
+	Coverage      Coverage
 }
 
 var baselineHashForm = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -192,6 +196,13 @@ func (a *Alert) Validate() error {
 	case !unseen:
 		c.sha256("capture", a.Capture)
 	}
+	frames := int64(0)
+	for _, ct := range a.Cites {
+		frames += int64(len(ct.Frames))
+	}
+	if a.FramesMissing < 0 || a.FramesMissing > frames {
+		c.fail(CodeRange, "frames_missing", "%d not in [0, %d cited frames]", a.FramesMissing, frames)
+	}
 	for i, ct := range a.Cites {
 		f := fmt.Sprintf("cite.%d", i+1)
 		if !ValidCaptureID(ct.CaptureID) {
@@ -217,7 +228,8 @@ func (a *Alert) Validate() error {
 // baseline_version (when there is a baseline), key_text, param.<name>,
 // baseline_value, observation, clock, at_utc, window_start_utc, hits,
 // sources, related_total, cite.1 to cite.4 ("<capture_id> <n>=<sha256>
-// ..."), capture (when there is one), and the coverage statement flattened
+// ..."), capture (when there is one), frames_missing (when above 0), and
+// the coverage statement flattened
 // as coverage.* (flattenCoverage). AlertFromHealth reverses it.
 func (a *Alert) Health() (event.Health, error) {
 	if err := a.Validate(); err != nil {
@@ -246,6 +258,9 @@ func (a *Alert) Health() (event.Health, error) {
 	}
 	if a.Capture != "" {
 		d["capture"] = a.Capture
+	}
+	if a.FramesMissing > 0 {
+		d["frames_missing"] = strconv.FormatInt(a.FramesMissing, 10)
 	}
 	for k, v := range flattenCoverage(&a.Coverage) {
 		d[k] = v
@@ -300,6 +315,10 @@ func AlertFromHealth(h event.Health) (*Alert, error) {
 	num("sources", &a.Sources, false)
 	num("related_total", &a.RelatedTotal, false)
 	num("baseline_version", &a.BaselineVersion, true)
+	num("frames_missing", &a.FramesMissing, true)
+	if d["frames_missing"] == "0" {
+		c.fail(CodeConflict, "frames_missing", "0 is left out")
+	}
 	for _, name := range ruleParams[a.Rule] {
 		known["param."+name] = true
 		if v, ok := d["param."+name]; ok {

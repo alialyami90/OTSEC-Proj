@@ -34,7 +34,7 @@ The brief asks for a comparison of two ways to run the sensor: as its own SCM se
 
 Under this choice the node doesn't start, stop or restart the sensor. It doesn't have the SCM rights to, and it shouldn't get them. The node watches the sensor over the channel instead (§2):
 
-- **The heartbeat.** The sensor sends one every 10 s. The node raises `sensor-unreachable` after 60 s with no heartbeat, as it does for `forward-unreachable`.
+- **The heartbeat.** The sensor sends one every 10 s. The node raises `sensor-unreachable` after 60 s with no heartbeat accepted, as it does for `forward-unreachable`. It times this on its own monotonic clock from the later of the last accepted heartbeat and its start; a reconnect never resets it (D4-73). It is raised once per quiet stretch, status shows `unreachable` until the next accepted heartbeat clears it, and a step of the wall clock moves nothing. `sensor-unreachable` is raised at the first Tick at or after 60 s of quiet, so at most 60 s + `TickInterval` (≤ 120 s today) (D1 on #581).
 - **Restarts are counted.** Each time the channel reconnects after a gap, the node counts a sensor restart and shows the count in status. A decoder that crashes on the same packet every time restarts every 60 s indefinitely, and status shows that loop.
 - **Coverage gaps are records.** While the sensor isn't capturing, the network isn't watched. The node commits a `sensor.coverage-gap` health event when the channel drops, and closes it with the end time when the channel returns. The gap is forwarded like any other health event. A quiet alert stream therefore can't be read as a quiet network over a period when nothing was capturing (R6.1). It also holds at a node start: a gap is open until the first heartbeat arrives.
 
@@ -167,11 +167,12 @@ Status gets a `sensor` section, written as the other sections are, and `otsec he
 - observations and alerts stored;
 - the restart count since the node started, and the open coverage gap, if any;
 - the oldest file in the capture ring;
-- the C-11 interface check (§7): `ok`, or what is bound.
+- the C-11 interface check (§7): `ok`, or what is bound;
+- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8).
 
 Status never shows packet bytes or device text, and banners are shown bounded and quoted (D3).
 
-The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
+The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`, and the intake hold's `intake-checkpoint-failed`, `intake-record-not-removed` and `intake-repair-refused`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
 
 ## 7. C-11 on Windows: the install side
 

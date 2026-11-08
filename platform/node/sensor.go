@@ -30,6 +30,21 @@ import (
 // refused record under its reason (D5-sensor-node.md section 2).
 const AlarmSensorRecordRefused = "sensor-record-refused"
 
+// AlarmSensorUnreachable: no heartbeat was accepted for SensorUnreachableAfter
+// of the node's monotonic time since the later of the last one and the
+// node's start. A connect never resets it, so a sensor that reconnects
+// again and again without a heartbeat accepted still raises it (D3's S1,
+// D1 in D4-73). It is raised once per such stretch, and status shows the
+// sensor unreachable until the next accepted heartbeat (D5-sensor-node.md
+// section 2). The node's own clock times it, so a step of the wall clock
+// or of the sensor's moves nothing. It is raised at the first Tick at or
+// after 60 s of quiet, so at most 60 s + TickInterval (<= 120 s today)
+// after the last heartbeat or the start (D1 on #581).
+const AlarmSensorUnreachable = "sensor-unreachable"
+
+// SensorUnreachableAfter is six of the sensor's 10 s heartbeats.
+const SensorUnreachableAfter = 60 * time.Second
+
 // SensorDropReportEvery is how often, at most, the node writes the
 // observation class's drop counts as an intake.drop-counted event, and only
 // when they changed (D5-c5-0.9.md section 4).
@@ -78,6 +93,20 @@ type SensorStatus struct {
 	DroppedByAsset map[string]uint64 `json:"dropped_by_asset,omitempty"`
 	DropsSince     time.Time         `json:"drops_since,omitzero"`
 	DropsWritten   time.Time         `json:"drops_written,omitzero"`
+	// Unreachable: no heartbeat accepted for SensorUnreachableAfter, as
+	// AlarmSensorUnreachable says; it clears at the next accepted one.
+	Unreachable bool `json:"unreachable"`
+	// Hold is the intake hold's counts since start (D4-72). Repaired and
+	// RepairRefused are the start repair's runs: a release whose
+	// collection.run it wrote, and one it refused for want of an allowed
+	// collector.request.
+	Hold          sensorlink.HoldStats `json:"hold"`
+	Repaired      uint64               `json:"runs_repaired"`
+	RepairRefused uint64               `json:"runs_repair_refused"`
+	// SessionMissing counts the runs the hold watched whose collection.run
+	// has no session: the dispatch's record was not saved, or the result
+	// could not be released (D1 in D4-74).
+	SessionMissing uint64 `json:"runs_session_missing"`
 	// Heartbeat is the last heartbeat of the run: the sensor's own
 	// report of its totals and time, which the node checks only for
 	// monotonic counters (C13 section 6, AP-36 (2)).
@@ -118,6 +147,15 @@ type sensorIntake struct {
 	triedMono time.Duration
 	everTried bool
 	refused   map[string]bool // reasons whose alarm is raised
+	// The sensor-unreachable timer: quietFrom is the monotonic time of the
+	// last accepted heartbeat, or of the start before the first;
+	// heartbeats is the link's count last seen.
+	quietFrom   time.Duration
+	heartbeats  uint64
+	unreachable bool // status shows it, until a heartbeat
+	raised      bool // the alarm for this quiet stretch is raised
+	// checkpointFailures is the hold's count the last alarm was raised at.
+	checkpointFailures uint64
 }
 
 // dropCounts are dropped observations by reason and by destination asset.
@@ -142,19 +180,34 @@ func (r *Runtime) startSensor(ctx context.Context) error {
 		return nil
 	}
 	stream := NetObservationStream(s.SensorID)
+	restore, err := r.loadIntake(ctx)
+	if err != nil {
+		return fmt.Errorf("the intake hold's records: %w", err)
+	}
+	hold := sensorlink.HoldConfig{NodeAddrs: s.NodeAddrs(), TieGrace: netobs.DefaultTieGraceS * time.Second,
+		Now: r.opt.Now, Save: r.saveIntake, Restore: restore}
 	link, err := sensorlink.New(sensorlink.Config{NodeID: r.cfg.NodeID, SensorID: s.SensorID, EvidenceClass: s.EvidenceClass,
 		OutageHours: s.OutageHours, ObservationQuota: r.cfg.Store.Quotas[string(c5.ClassNetworkObservation)], Stream: stream},
-		sensorlink.Options{Assets: r.cfg.AssetRecords(), Store: liveAppender{r, stream}, Monotonic: r.opt.Mono, Received: r.received})
+		sensorlink.Options{Assets: r.cfg.AssetRecords(), Store: liveAppender{r, stream}, Monotonic: r.opt.Mono, Received: r.received, Hold: hold})
 	if err != nil {
 		return err
 	}
-	in := &sensorIntake{link: link, stream: stream, since: r.opt.Now().UTC(), refused: map[string]bool{},
+	in := &sensorIntake{link: link, stream: stream, since: r.opt.Now().UTC(), refused: map[string]bool{}, quietFrom: r.opt.Mono(),
 		base: dropCounts{map[string]uint64{}, map[string]uint64{}}}
 	if d, at, ok := r.lastDropCounts(ctx, stream); ok {
 		in.base, in.since = d, at
 	}
 	in.written = in.base
 	r.sensor = in
+	// A release a restart interrupted commits once, and a release whose
+	// collection.run never committed gets one, before the sensor is
+	// served. Start's first tickSensor then gives way the holds whose
+	// deadlines passed while the node was down (D3 on #576, D1 in D4-72).
+	if err := link.RecoverHold(ctx); err != nil {
+		return fmt.Errorf("the intake hold's recovery: %w", err)
+	}
+	r.repairIntake(ctx)
+	r.pruneIntake(ctx, "")
 	return nil
 }
 
@@ -233,6 +286,8 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	if in == nil {
 		return
 	}
+	in.link.TickHold(ctx)
+	r.pruneIntake(ctx, "")
 	st := in.link.Stats()
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -252,6 +307,19 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 			in.written, in.writtenAt = now, at
 		}
 	}
+	if st.Heartbeats != in.heartbeats {
+		in.heartbeats, in.quietFrom, in.raised, in.unreachable = st.Heartbeats, max(in.quietFrom, st.HeartbeatMono), false, false
+	}
+	if !in.raised && m-in.quietFrom >= SensorUnreachableAfter {
+		in.raised, in.unreachable = true, true
+		r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmSensorUnreachable, At: r.opt.Now(), Stream: in.stream,
+			Detail: fmt.Sprintf("no heartbeat from the sensor for %s; the network is not watched while it lasts", SensorUnreachableAfter)})
+	}
+	if n := st.Hold.CheckpointFailures; n > in.checkpointFailures {
+		in.checkpointFailures = n
+		r.opt.Status.Alarm(ConfigDB, c5.Alarm{Code: AlarmIntakeCheckpointFailed, At: r.opt.Now(), Stream: r.intakeStream(),
+			Detail: fmt.Sprintf("%d intake hold records not saved since start, so their flows committed untied", n)})
+	}
 	for _, reason := range slices.Sorted(maps.Keys(st.Refused)) {
 		if in.refused[reason] {
 			continue
@@ -262,7 +330,10 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	}
 	s := &SensorStatus{SensorID: r.cfg.NetworkSensor.SensorID, Connected: in.connected > 0, RunID: st.RunID, LastSeq: st.LastSeq,
 		LastCommittedSeq: st.LastCommittedSeq, RunChanges: st.RunChanges, SeqGaps: st.SeqGaps, FramesTooLarge: st.FramesTooLarge,
-		Committed: st.Committed, Refused: st.Refused, Dropped: now.reason, DroppedByAsset: now.asset, DropsSince: in.since, DropsWritten: in.writtenAt}
+		Committed: st.Committed, Refused: st.Refused, Unreachable: in.unreachable, Hold: st.Hold, Dropped: now.reason, DroppedByAsset: now.asset, DropsSince: in.since, DropsWritten: in.writtenAt}
+	r.intake.mu.Lock()
+	s.Repaired, s.RepairRefused, s.SessionMissing = r.intake.repaired, r.intake.repairRefused, r.intake.sessionMissing
+	r.intake.mu.Unlock()
 	if h := st.Heartbeat; h != nil {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
 	}

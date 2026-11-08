@@ -548,6 +548,15 @@ func TestOwnSessionLateTiedRecords(t *testing.T) {
 	if len(r.d.tied) != 0 || len(r.unseen()) != 1 {
 		t.Fatalf("tied %v, unseen %v", r.d.tied, r.unseen())
 	}
+	// D6's T4 on #575: a session that never connected is taken too, so a
+	// failed dial's tied end arriving after it takes no tied room.
+	r = newOwRun(t, nil)
+	r.obs(owQuiet(t), 0)
+	must0(t, r.session(owSession(1, 1, lxRelay, owRelay, false, 10, 20)))
+	r.obs(owTied(t, 1, owRelay), 25)
+	if len(r.d.tied) != 0 || len(r.d.taken) != 1 || len(r.unseen()) != 0 {
+		t.Fatalf("tied %v, taken %v, unseen %v after an unconnected session's late end", r.d.tied, r.d.taken, r.unseen())
+	}
 }
 
 // The coverage conditions one by one, before acknowledgement (D6's G1 to
@@ -686,5 +695,36 @@ func TestOwnSessionRestoreState(t *testing.T) {
 	run.obs(owQuiet(t), int(tiedHorizon/time.Second)+500)
 	if len(run.d.tied) != 1 {
 		t.Fatal("a re-tied ID's clock wasn't refreshed")
+	}
+}
+
+// A session whose 5-tuple intake found open from an earlier session counts
+// as seen with no observation tied to it, under its own count; one already
+// seen by a tie counts there, not here (D1 in D4-73).
+func TestOwnSessionOpenFlow(t *testing.T) {
+	r := newOwRun(t, nil)
+	r.obs(owQuiet(t), 0)
+	s := owSession(1, 1, lxRelay, owRelay, true, 10, 20)
+	s.OpenFlow = true
+	must0(t, r.session(s))
+	r.obs(owTied(t, 1, owRelay), 30) // a later record of the conversation takes no tied room
+	r.obs(owQuiet(t), 100)
+	if len(r.unseen()) != 0 || r.d.OpenFlowSeen() != 1 || len(r.d.tied) != 0 {
+		t.Fatalf("unseen %v, open-flow seen %d, tied %d", r.unseen(), r.d.OpenFlowSeen(), len(r.d.tied))
+	}
+	r = newOwRun(t, nil)
+	r.obs(owTied(t, 1, owRelay), 0)
+	must0(t, r.session(s))
+	if r.d.OpenFlowSeen() != 0 {
+		t.Fatal("a session seen by a tie counted as open-flow seen")
+	}
+	// Without the report, the same session alerts: the canary still fires.
+	r = newOwRun(t, nil)
+	r.obs(owQuiet(t), 0)
+	s.OpenFlow = false
+	must0(t, r.session(s))
+	r.obs(owQuiet(t), 100)
+	if len(r.unseen()) != 1 {
+		t.Fatalf("unseen %v without the open-flow report", r.unseen())
 	}
 }

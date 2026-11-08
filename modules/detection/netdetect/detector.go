@@ -84,8 +84,8 @@ type Committed struct {
 // (baseline note §3, §4). It holds no clock of its own: its time is the
 // capture time of the observations it takes, so the same observations in
 // the same order give the same alerts. It leaves each alert's Capture
-// empty; the node builds the capture from the cited frames and fills it
-// (C13 §7.1).
+// empty and FramesMissing 0; the node builds the capture from the cited
+// frames it still holds and fills both (C13 §7.1).
 //
 // It runs every rule of 0.1: the five that judge against the baseline,
 // sa-failed, and the three on the node's own traffic, which also take the
@@ -131,7 +131,7 @@ type Detector struct {
 	degraded       []netobs.Interval
 	degradedOpen   bool
 
-	notJudged, orderingFaults, degradedDropped int64
+	notJudged, orderingFaults, degradedDropped, openFlowSeen int64
 }
 
 // serviceKey is a service without its basis: new-service asks whether the
@@ -432,10 +432,11 @@ func (d *Detector) hold(out []netobs.Alert) []netobs.Alert {
 }
 
 // same reports whether a, raised again, is the committed c byte for byte
-// as a health body, but for the capture the node filled in.
+// as a health body, but for the capture and frames_missing the node filled
+// in.
 func same(a, c *netobs.Alert) bool {
 	x := *a
-	x.Capture = c.Capture
+	x.Capture, x.FramesMissing = c.Capture, c.FramesMissing
 	hx, err1 := x.Health()
 	hc, err2 := c.Health()
 	if err1 != nil || err2 != nil {

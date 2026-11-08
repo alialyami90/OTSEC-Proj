@@ -181,8 +181,11 @@ type RunRecord struct {
 	// committed: the seq the run's session follows (D1's (A)).
 	AfterSeq uint64 `json:"after_seq,omitempty"`
 	// WindowTaken: a 0.8 result's window tie went to a flow already.
-	WindowTaken bool       `json:"window_taken,omitempty"`
-	Open        []OpenFlow `json:"open"`
+	WindowTaken bool `json:"window_taken,omitempty"`
+	// OpenFlow is the release's Released.OpenFlow, kept so the node's start
+	// repair writes what the live path would (D4's F1 on #584).
+	OpenFlow bool       `json:"open_flow,omitempty"`
+	Open     []OpenFlow `json:"open"`
 }
 
 // Release is a released record and its tie, if any.
@@ -239,8 +242,12 @@ type hold struct {
 	// the table only with its releasing record (release).
 	pending     []OpenFlow
 	pendingTied uint64
-	last        *RunRecord // the newest record saved, which carries the open table
-	stats       HoldStats
+	// repoint is a result's re-point of an open entry (Result), staged as
+	// pending is; repointed says whether the last release applied it.
+	repoint   *OpenFlow
+	repointed bool
+	last      *RunRecord // the newest record saved, which carries the open table
+	stats     HoldStats
 }
 
 func newHold(cfg HoldConfig) (*hold, error) {
@@ -367,9 +374,11 @@ func (h *hold) runFor(k FlowKey) *holdRun {
 		if slices.ContainsFunc(r.rec.Flows, func(f HeldFlow) bool { return f.Key == k }) {
 			return r // the run already holding the flow
 		}
-		// Otherwise the newest run to the endpoint with no result yet:
-		// of overlapping sessions, the latest that began before the flow
-		// (D1 on #576).
+		// Otherwise the newest run to the endpoint with no result yet. This
+		// approximates D1's rule on #576, that of overlapping sessions the
+		// latest connected_at not after the flow's start + g wins: the
+		// node can't know connected_at until the result, and every holding
+		// run was dispatched before the flow arrived.
 		if r.rec.State == HoldHolding && r.rec.Run.Endpoint == k.Peer && r.rec.Run.L4 == k.L4 && (out == nil || r.order > out.order) {
 			out = r
 		}
@@ -510,10 +519,11 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (Release
 	var out Released
 	if s.Connected && s.Local.IsValid() {
 		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && now.Before(h.expires(h.open[i], now)) {
-			// Written with the release below.
-			h.open = slices.Clone(h.open)
-			h.open[i].InvocationID, h.open[i].Tie, h.open[i].AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
-			out.OpenFlow = true
+			// Staged: it takes effect only with the release's record below
+			// (D6's N1 on #576). Its expiry is unchanged.
+			o := h.open[i]
+			o.InvocationID, o.Tie, o.AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
+			h.repoint = &o
 		}
 	}
 	var rel []Release
@@ -544,6 +554,7 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (Release
 		rel = append(rel, h.releaseFlow(f, tie, s.InvocationID, rec.Run.AssetID)...)
 	}
 	out.AfterSeq = l.release(ctx, r, rec, rel, remaining)
+	out.OpenFlow = h.repointed
 	return out, nil
 }
 
@@ -674,32 +685,49 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	head, _ := l.head(ctx)
 	rec.Flows, rec.Releasing, rec.Head = remaining, rel, head
 	rec.State = HoldReleasing
-	if len(rel) > 0 {
-		// The tied flows still open join the table in the same record, and
-		// only if it saves.
-		prev, evicted := slices.Clone(h.open), uint64(0)
-		for _, o := range h.pending {
-			evicted += h.addOpen(o)
+	// The staged table changes (the tied flows still open, and a result's
+	// re-point) take effect only with the first record saved below: the
+	// releasing record if there is a batch, else the final one.
+	prev, evicted := slices.Clone(h.open), uint64(0)
+	if o := h.repoint; o != nil {
+		if i := h.openIndex(o.Key); i >= 0 {
+			h.open = slices.Clone(h.open)
+			h.open[i] = *o
 		}
+	}
+	for _, o := range h.pending {
+		evicted += h.addOpen(o)
+	}
+	applied := true
+	rec.OpenFlow = h.repoint != nil
+	if len(rel) > 0 {
 		if err := h.save(ctx, rec); err != nil {
-			h.open = prev
+			h.open, applied = prev, false
 			for i := range rel {
 				rel[i].Tie, rel[i].Asset = nil, ""
 			}
-		} else {
-			h.stats.OpenEvicted += evicted
-			h.stats.Tied += h.pendingTied
 		}
 		l.commitBatch(ctx, rel)
 	}
-	h.pending, h.pendingTied = nil, 0
 	after, _ := l.head(ctx)
 	rec.Releasing, rec.Head, rec.AfterSeq = nil, 0, after
 	rec.State = HoldReleased
 	if len(remaining) > 0 {
 		rec.State = HoldWaiting
 	}
-	_ = h.save(ctx, rec) // counted on failure; a restart finds the releasing record and checks the batch
+	rec.OpenFlow = applied && h.repoint != nil
+	// Counted on failure; a restart finds the releasing record and checks
+	// the batch.
+	if err := h.save(ctx, rec); err != nil && len(rel) == 0 {
+		h.open, applied = prev, false
+	}
+	if applied {
+		h.stats.OpenEvicted += evicted
+		h.stats.Tied += h.pendingTied
+	}
+	rec.OpenFlow = applied && h.repoint != nil
+	h.repointed = rec.OpenFlow
+	h.pending, h.pendingTied, h.repoint = nil, 0, nil
 	if rec.State == HoldReleased {
 		delete(h.runs, rec.Run.RequestID)
 	} else {

@@ -202,6 +202,12 @@ type Session struct {
 	// Connected is the C2 result's: a session that never connected expects
 	// no flow, so it is never judged.
 	Connected bool
+	// OpenFlow is intake's report, carried on collection.run, that the
+	// session's exact 5-tuple was a conversation still open from an earlier
+	// session, which intake re-pointed to this one (baseline note §5 (a) 2).
+	// Such a session may give no new observation, so it counts as seen,
+	// under its own count (D1 in D4-73, on D4's finding 3 on #576).
+	OpenFlow bool
 	// StartedUTC and EndedUTC are the run's window on the collector host's
 	// clock.
 	StartedUTC string
@@ -259,6 +265,11 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 		d.take(s.InvocationID)
 		return nil, nil
 	}
+	if s.OpenFlow {
+		d.openFlowSeen++
+		d.take(s.InvocationID)
+		return nil, nil
+	}
 	if !s.Connected {
 		d.take(s.InvocationID)
 		return nil, nil
@@ -277,6 +288,12 @@ func (d *Detector) Session(s Session, afterSeq uint64) ([]netobs.Alert, error) {
 // invocation ID was dropped past MaxTiedSessions. The node shows it in
 // status and raises the alarm (D1 in D4-72).
 func (d *Detector) NotJudged() int64 { return d.notJudged }
+
+// OpenFlowSeen counts, since this detector was built or restored, the
+// sessions counted as seen because intake reported their 5-tuple open from
+// an earlier session, with no observation tied to them first. The node
+// shows it in status apart from the sessions seen by a tie (D1 in D4-73).
+func (d *Detector) OpenFlowSeen() int64 { return d.openFlowSeen }
 
 // OrderingFaults counts, since this detector was built or restored, the
 // sessions refused with ErrOrdering.

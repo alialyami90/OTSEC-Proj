@@ -32,8 +32,8 @@ func (s *Scheduler) commitSNMP(ctx context.Context, rep Report, col Collection, 
 		rep.Detail = o.Result.Error.Detail
 	}
 	tr := o.Result.Transcript
-	rec, err := s.runRecord(HealthStream, HealthCollectionRun, col, rep.RequestID, o.InvocationID, map[string]string{
-		"status": string(o.Result.Status), "events": "0"})
+	rec, err := s.runRecord(HealthStream, HealthCollectionRun, col, rep.RequestID, o.InvocationID, withSession(map[string]string{
+		"status": string(o.Result.Status), "events": "0"}, rep))
 	if err == nil && len(tr.Data) > 0 {
 		rec.Capture = &c5.Capture{SHA256: tr.SHA256, Bytes: tr.Data}
 	}
