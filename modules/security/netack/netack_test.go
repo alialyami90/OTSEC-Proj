@@ -321,3 +321,41 @@ func TestInboundOnly(t *testing.T) {
 		t.Errorf("midstream functions, service and undecoded pair: marked %v, want the master, the writer, the outstation, the server, the RTU and the poller", got)
 	}
 }
+
+// TestDraftFill: the view shows the draft's period.overflow and its size
+// against the bound, and the accepted document built from that draft
+// carries the same overflow (D4-71).
+func TestDraftFill(t *testing.T) {
+	for _, overflow := range []int64{0, 7, netobs.MaxOverflow} {
+		b, err := netobs.DecodeBaseline(testDraft(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Period.Overflow = overflow
+		draft, err := b.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown, err := DraftFill(draft)
+		if err != nil {
+			t.Fatalf("overflow %d: %v", overflow, err)
+		}
+		if want := (Fill{Overflow: overflow, Bytes: len(draft), MaxBytes: netobs.MaxBaselineBytes}); shown != want {
+			t.Fatalf("overflow %d: shown %+v, want %+v", overflow, shown, want)
+		}
+		doc, _, _, err := BuildAccepted(draft, testWriters)
+		if err != nil {
+			t.Fatal(err)
+		}
+		accepted, err := netobs.DecodeBaseline(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accepted.Period.Overflow != shown.Overflow {
+			t.Errorf("accepted overflow %d, shown %d", accepted.Period.Overflow, shown.Overflow)
+		}
+	}
+	if _, err := DraftFill([]byte(`{"schema":`)); err == nil {
+		t.Error("DraftFill accepted a truncated draft")
+	}
+}

@@ -74,3 +74,25 @@ func InboundOnly(b *netobs.Baseline, nodeID node.ID, assets []asset.Asset) map[s
 	}
 	return marked
 }
+
+// Fill is what the acknowledgement view shows about a frozen draft's
+// completeness before a person can acknowledge it (C13 §14 item 13, D4-71).
+// A non-zero Overflow means the full draft left out entries, which alert as
+// new once the baseline is acknowledged; it says the draft is incomplete,
+// not how much is missing. Bytes against MaxBytes is how full the draft is.
+type Fill struct {
+	Overflow int64
+	Bytes    int
+	MaxBytes int
+}
+
+// DraftFill reads a frozen draft's fill from the bytes the view shows, which
+// are the bytes whose digest the person signs (HR-14). The signed digest
+// binds period.overflow, so the accepted document carries the count shown.
+func DraftFill(draft []byte) (Fill, error) {
+	b, err := netobs.DecodeBaseline(draft)
+	if err != nil {
+		return Fill{}, err
+	}
+	return Fill{Overflow: b.Period.Overflow, Bytes: len(draft), MaxBytes: netobs.MaxBaselineBytes}, nil
+}
