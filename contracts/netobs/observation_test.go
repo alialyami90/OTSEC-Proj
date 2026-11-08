@@ -351,3 +351,28 @@ func TestRedactionBound(t *testing.T) {
 		t.Errorf("lone slot-not-placed: %v", err)
 	}
 }
+
+// TestValidUUID: C13's IDs take C1's and C2's form, version 1 to 8 and
+// variant 8, 9, a or b (D5 on #549).
+func TestValidUUID(t *testing.T) {
+	for _, s := range []string{fxSensor, fxRun, fxAsset, "00000000-0000-1000-8000-000000000000"} {
+		if !ValidUUID(s) {
+			t.Errorf("%s refused", s)
+		}
+	}
+	for _, s := range []string{
+		"00000000-0000-0000-8000-000000000000", // version 0
+		"00000000-0000-9000-8000-000000000000", // version 9
+		"00000000-0000-4000-c000-000000000000", // variant c
+		"00000000-0000-4000-8000-00000000000A", // uppercase
+	} {
+		if ValidUUID(s) {
+			t.Errorf("%s accepted", s)
+		}
+	}
+	o := fxFlow()
+	o.SensorID = "5f0c2a7e-3b1d-0c8e-9a2f-6d4e8b1c7a90"
+	if !slices.Contains(Codes(o.Validate()), CodeForm) {
+		t.Error("a version-0 sensor_id accepted")
+	}
+}

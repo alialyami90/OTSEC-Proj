@@ -390,6 +390,10 @@ func DecodeBaseline(b []byte) (*Baseline, error) {
 // IsCanonical reports whether b is a valid network baseline in canonical
 // encoding: decoded strictly and encoded again, it gives the same bytes
 // (C13 §8). The node adopts only canonical bytes (baseline note §2.3).
+//
+// It does not pin the minor: a document labelled with another 0.x minor
+// that decodes strictly is canonical too. Adoption pins it through the
+// draft, which OnlyWritersAdded compares byte for byte (D5 on #549).
 func IsCanonical(b []byte) bool {
 	if len(b) > MaxBaselineBytes {
 		return false
@@ -407,4 +411,23 @@ func IsCanonical(b []byte) bool {
 func Digest(b []byte) string {
 	sum := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// OnlyWritersAdded reports whether accepted is draft with authorized
+// writers filled in and nothing else changed: both are canonical, and
+// accepted decoded, with its writers cleared and encoded again, is draft
+// byte for byte (C7 0.10 §1.2's last check; D5 on #549). Equal bytes pass,
+// the case where the person added no writer. It does not check the
+// digests, the sensor or the size of a file read from disk; the node does.
+func OnlyWritersAdded(draft, accepted []byte) bool {
+	if !IsCanonical(draft) || !IsCanonical(accepted) {
+		return false
+	}
+	b, err := DecodeBaseline(accepted)
+	if err != nil {
+		return false
+	}
+	b.AuthorizedWriters = nil
+	again, err := b.Encode()
+	return err == nil && bytes.Equal(again, draft)
 }

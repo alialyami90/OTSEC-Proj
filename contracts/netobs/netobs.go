@@ -122,7 +122,7 @@ func (c *checker) err() error { return errors.Join(c.errs...) }
 
 var (
 	tokenForm   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$`)
-	uuidForm    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	uuidForm    = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	utcForm     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$`)
 	sha256Form  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	decimalForm = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
@@ -134,7 +134,8 @@ var (
 func ValidToken(s string) bool { return tokenForm.MatchString(s) }
 
 // ValidUUID reports whether s is a lowercase UUID, the form of sensor_id,
-// run_id and every asset ID C13 names.
+// run_id and every asset ID C13 names: version 1 to 8 and variant 8, 9, a or
+// b, the same form as C1's asset IDs and C2's invocation IDs (D5 on #549).
 func ValidUUID(s string) bool { return uuidForm.MatchString(s) }
 
 func (c *checker) token(field, s string) {

@@ -99,6 +99,27 @@ func TestAcceptedDiffersOnlyInWriters(t *testing.T) {
 	if Digest(accepted) == Digest(draft) {
 		t.Error("a writer did not change the digest")
 	}
+	if !OnlyWritersAdded(draft, accepted) || !OnlyWritersAdded(draft, draft) {
+		t.Error("OnlyWritersAdded refuses the draft with writers added, or the draft itself")
+	}
+	other := fxBaseline()
+	other.AuthorizedWriters = acc.AuthorizedWriters
+	other.Params.TieGraceS++
+	changed, _ := other.Encode()
+	reminor := bytes.Replace(accepted, []byte(BaselineIdentifier), []byte("otsec.netbaseline/0.2"), 1)
+	for name, b := range map[string][]byte{
+		"another change":    changed,
+		"another minor":     reminor,
+		"not canonical":     append([]byte(" "), accepted...),
+		"draft not decoded": nil,
+	} {
+		if OnlyWritersAdded(draft, b) {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if !IsCanonical(reminor) {
+		t.Error("IsCanonical pins the minor; its comment says it doesn't")
+	}
 }
 
 func TestBaselineRules(t *testing.T) {
