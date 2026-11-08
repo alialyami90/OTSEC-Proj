@@ -376,3 +376,40 @@ func TestValidUUID(t *testing.T) {
 		t.Error("a version-0 sensor_id accepted")
 	}
 }
+
+// TestFlowEstablished: established is on a TCP end only, and false only
+// after a seen SYN (C13 §4.3, §14 item 10).
+func TestFlowEstablished(t *testing.T) {
+	end := func(dir string, est *bool) *Observation {
+		o := fxFlow()
+		o.Direction = dir
+		o.Flow = &Flow{Phase: "end", Packets: 2, Bytes: 120, End: "rst", Established: est}
+		return o
+	}
+	for name, o := range map[string]*Observation{
+		"a half-open dial": end(DirectionClientServer, ptr(false)),
+		"a handshake seen": end(DirectionClientServer, ptr(true)),
+		"midstream":        end(DirectionMidstream, ptr(true)),
+	} {
+		if err := o.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	udp := end(DirectionNone, ptr(true))
+	udp.IP.L4 = "udp"
+	start := fxFlow()
+	start.Flow.Established = ptr(true)
+	for name, tc := range map[string]struct {
+		o    *Observation
+		code Code
+	}{
+		"a tcp end without it":   {end(DirectionClientServer, nil), CodeMissing},
+		"on a start":             {start, CodeConflict},
+		"on a udp end":           {udp, CodeConflict},
+		"false with no SYN seen": {end(DirectionMidstream, ptr(false)), CodeConflict},
+	} {
+		if got := Codes(tc.o.Validate()); !slices.Contains(got, tc.code) {
+			t.Errorf("%s: got %v, want %s", name, got, tc.code)
+		}
+	}
+}

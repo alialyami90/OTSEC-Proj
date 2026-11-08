@@ -93,7 +93,10 @@ func worstObservations(t testing.TB) []*Observation {
 		}
 		switch k {
 		case KindFlow:
-			o.Flow = &Flow{Phase: "end", Packets: 1 << 62, Bytes: 1 << 62, End: "sensor-stop"}
+			// client-server and false are the longest direction and the
+			// longest established.
+			o.Direction = DirectionClientServer
+			o.Flow = &Flow{Phase: "end", Packets: 1 << 62, Bytes: 1 << 62, End: "sensor-stop", Established: ptr(false)}
 		case KindService:
 			o.Service = &Service{Basis: "content", Version: &worstText}
 		case KindFunction:
