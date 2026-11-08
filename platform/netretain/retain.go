@@ -52,6 +52,12 @@ type Store interface {
 	Read(ctx context.Context, stream c5.StreamID, after c5.Seq, max int) ([]c5.Stored, error)
 	LoadCursors(ctx context.Context, stream c5.StreamID) ([]c5.Cursor, error)
 	SaveCursor(ctx context.Context, c c5.Cursor) error
+	// RaiseWallMark raises the database's wall mark, the floor of every
+	// later commit time, to the clock now. The consumer calls it at each
+	// evaluation, so an alert committed while the clock is stepped back
+	// lands no lower than the wall time of the last evaluation, even on a
+	// database idle since its last commit (D3's F2 on #559).
+	RaiseWallMark(ctx context.Context) error
 }
 
 // Config is one sensor's consumer.
@@ -248,6 +254,9 @@ func (c *Consumer) Tick(ctx context.Context) error {
 const CatchUp = 2
 
 func (c *Consumer) evaluate(ctx context.Context, m time.Duration) error {
+	if err := c.opt.Store.RaiseWallMark(ctx); err != nil {
+		return err
+	}
 	wall := c.opt.Wall().Round(0).UTC()
 	cutoff, bound := wall.Add(-c.cfg.Retention), audit.BoundWall
 	mb := c.base.Add(CatchUp * (m - c.baseMono))

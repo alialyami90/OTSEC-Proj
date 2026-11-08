@@ -166,7 +166,8 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
 	dbID := spec.ID
 	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments, BusyTimeout: r.opt.BusyTimeout,
-		Alarms: func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) }}
+		Alarms:   func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) },
+		WallMark: dbID == NetworkDB} // its alerts are passed by commit time (D1 in D4-71)
 	env, err := store.NewEnv(opt)
 	if err != nil {
 		return nil, fmt.Errorf("database %s: %w", spec.ID, err)

@@ -24,10 +24,12 @@ const AlarmNetRetentionStalled = "network-retention-stalled"
 
 // AlarmNetRetentionLagging: the retention consumer's monotonic bound is
 // more than one retention period behind the wall-clock cutoff, so the alert
-// stream keeps more than twice its retention. The cutoff advances no faster than the monotonic
-// clock, so downtime, a forward clock correction or a cut to
-// alert_retention_days leave a lag that never closes on its own (D3's R1
-// on #559, D4-71); a larger window fills the alert quota sooner.
+// stream keeps more than twice its retention. Downtime, a forward clock
+// correction, a cut to alert_retention_days or a consumer created over old
+// alerts leave such a lag; the bound advances at twice the monotonic clock
+// (netretain.CatchUp), so it closes at up to an hour an hour, and until
+// then a larger window fills the alert quota sooner (D3's R1 on #559,
+// D4-71).
 // AlarmNetRetentionLagCleared follows when the lag falls back under.
 const (
 	AlarmNetRetentionLagging    = "network-retention-lagging"

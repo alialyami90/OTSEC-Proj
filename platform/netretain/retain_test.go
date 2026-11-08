@@ -61,7 +61,7 @@ func newEnv(t *testing.T) *env {
 		Streams: []c5.StreamSpec{{ID: stream, Class: c5.ClassNetworkAlert}},
 		Classes: []c5.StreamClass{c5.ClassNetworkAlert},
 		Quotas:  []c5.Quota{{Class: c5.ClassNetworkAlert, Bytes: 4 << 20, WarnFraction: 0.8, MaxRecordBytes: c5.MinRecordBytes}}}
-	en, err := store.NewEnv(store.Options{Dir: dir, Node: testNode, Database: d, Now: func() time.Time { return e.clk.wall }})
+	en, err := store.NewEnv(store.Options{Dir: dir, Node: testNode, Database: d, Now: func() time.Time { return e.clk.wall }, WallMark: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,4 +530,92 @@ func TestRecordCommittedWithError(t *testing.T) {
 		t.Fatalf("the next move %+v", r)
 	}
 	e.verify()
+}
+
+// After a long idle period, a forward step of the wall clock still prunes
+// no faster than CatchUp times the monotonic clock: while there is no lag
+// the bound is held at the wall cutoff, so 30 idle days build no lead that
+// the step could spend (D1 in D4-71).
+func TestForwardStepAfterIdle(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert()
+	e.clk.advance(retention + time.Hour)
+	e.tick(c)      // passes seq 1
+	for range 30 { // idle
+		e.clk.advance(day)
+		e.tick(c)
+	}
+	for range 5 { // fresh alerts, an hour apart
+		e.alert()
+		e.clk.advance(time.Hour)
+		e.tick(c)
+	}
+	before := c.Status().WallCutoff
+	n := len(e.recs)
+	e.clk.wall = e.clk.wall.Add(2 * retention)
+	e.clk.advance(time.Hour)
+	e.tick(c)
+	s := c.Status()
+	if bound := s.WallCutoff.Add(-s.Lag); !bound.Equal(before.Add(CatchUp * time.Hour)) {
+		t.Fatalf("the bound after the step is %s, want %s", bound, before.Add(CatchUp*time.Hour))
+	}
+	if len(e.recs) != n || e.cursor() != 1 {
+		t.Fatalf("a fresh alert passed: cursor %d, %+v", e.cursor(), e.last())
+	}
+	e.verify()
+}
+
+// F2 (D3 on #559): the database idle for twice the retention after the
+// last move, so no commit or cursor save raises the wall mark in that
+// time; the clock is stepped back, an alert commits, and the clock is
+// restored, all between two ticks. The alert survives at least half its
+// retention by monotonic time.
+func TestBackwardStepIdleDatabase(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert() // seq 1
+	e.clk.advance(retention + day)
+	e.tick(c) // passes seq 1: the last commit or cursor save
+	if e.cursor() != 1 {
+		t.Fatalf("cursor %d before the step, want 1", e.cursor())
+	}
+	for range 2 * 7 * 24 { // two retentions, hourly ticks, nothing to pass
+		e.clk.advance(time.Hour)
+		e.tick(c)
+	}
+	e.clk.wall = e.clk.wall.Add(-3 * retention)
+	e.alert() // seq 2
+	committed := e.clk.mono
+	e.clk.wall = e.clk.wall.Add(3 * retention) // restored before the next tick
+	e.clk.advance(time.Hour)
+	for e.clk.mono-committed < retention/2 {
+		e.tick(c)
+		if e.cursor() >= 2 {
+			t.Fatalf("seq 2 passed %s after its commit (monotonic), under half the retention: %+v", e.clk.mono-committed, e.last())
+		}
+		e.clk.advance(time.Hour)
+	}
+}
+
+// After a record error, only a record that continues the chain from the
+// consumer's cursor is taken as the failed move: a later record that does
+// not (here one from seq 5) leaves the consumer where it was, and its next
+// move is from its own cursor (D6's N6 on #559).
+func TestResyncIgnoresUnrelatedRecord(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert()
+	e.clk.advance(retention + time.Hour)
+	e.fail, e.fails = errors.New("audit refused"), 1
+	if err := c.Tick(bg); err == nil {
+		t.Fatal("a failed record reported no error")
+	}
+	e.record(bg, audit.Retention{Stream: string(stream), FromSeq: 5, ToSeq: 6, RetentionS: int64(retention / time.Second),
+		WallUTC: utc(e.clk.wall), CutoffUTC: utc(e.clk.wall.Add(-retention)), PreviousCutoffUTC: e.last().CutoffUTC, Bound: audit.BoundWall})
+	e.clk.advance(time.Minute)
+	e.tick(c)
+	if r := e.last(); c.Status().Cursor != 1 || r.FromSeq != 0 || r.ToSeq != 1 || e.cursor() != 1 {
+		t.Fatalf("after an unrelated record: cursor %d, store %d, last %+v", c.Status().Cursor, e.cursor(), r)
+	}
 }

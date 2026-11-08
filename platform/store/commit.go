@@ -145,16 +145,18 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		}
 
 		// Commit time never goes backwards within a stream, so LastCommittedBy
-		// is a range query, and never below a wall time this database has
-		// already used, its persisted mark, raised in this transaction. A
-		// clock stepped back lengthens replay windows, which keeps more,
-		// never less; and an alert committed while it is back can't land
-		// below a retention cutoff already recorded, even on a stream, or
-		// a database, idle for longer than the retention (D3's F1 on #559,
-		// D4-71).
-		at, err := d.raiseWallMark(ctx, max(d.opt.now().UnixNano(), lastAt))
-		if err != nil {
-			return err
+		// is a range query. A clock stepped back lengthens replay windows,
+		// which keeps more, never less. With Options.WallMark it is also
+		// never below a wall time this database has already used, its
+		// persisted mark, raised in this transaction, so an alert committed
+		// while the clock is back can't land below a retention cutoff
+		// already recorded, even on a stream, or a database, idle for
+		// longer than the retention (D3's F1 on #559, D4-71).
+		at := max(d.opt.now().UnixNano(), lastAt)
+		if d.opt.WallMark {
+			if at, err = d.raiseWallMark(ctx, at); err != nil {
+				return err
+			}
 		}
 		for i, r := range recs {
 			var capture any
@@ -427,6 +429,30 @@ func replaceMember(b []byte, key string, value []byte) ([]byte, error) {
 	}
 	out.WriteByte('}')
 	return out.Bytes(), nil
+}
+
+// RaiseWallMark raises the database's persisted wall mark (Options.WallMark)
+// to the clock now,
+// in a transaction of its own (raiseWallMark). A commit and a cursor save
+// raise it too; a caller that reads commit times against the clock, as a
+// retention consumer does at each evaluation, raises it as well, so the
+// mark is no staler than its last evaluation even on a database idle for
+// longer than the retention (D3's F2 on #559, D4-71).
+func (d *DB) RaiseWallMark(ctx context.Context) error {
+	if !d.opt.WallMark {
+		return invalid("database %s keeps no wall mark", d.opt.Database.ID)
+	}
+	if err := d.lock(); err != nil {
+		return err
+	}
+	defer d.mu.Unlock()
+	if d.sync != c5.SyncFull {
+		return errors.New("store: settings not checked; CheckSettings must pass before the wall mark is raised")
+	}
+	return d.tx(ctx, "wall-mark", func() error {
+		_, err := d.raiseWallMark(ctx, d.opt.now().UnixNano())
+		return err
+	})
 }
 
 // raiseWallMark raises the database's persisted wall-clock high-water mark

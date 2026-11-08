@@ -314,3 +314,28 @@ func TestNetRetentionLagAndUnrecorded(t *testing.T) {
 		t.Fatalf("status %+v", s)
 	}
 }
+
+// An idle stream whose alerts have all been passed is not lagging: its
+// bound is held at the wall cutoff, so 60 idle days show no lag and raise
+// no lag alarm (D1 in D4-71).
+func TestNetRetentionIdleNoLag(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	g.alert(r)
+	g.advance(30*24*time.Hour + time.Hour)
+	r.Tick(bg)
+	if m := g.moves(r); len(m) != 2 || m[1].Retention.ToSeq != 1 {
+		t.Fatalf("the alert not passed: %+v", m[len(m)-1].Retention)
+	}
+	for range 60 {
+		g.advance(24 * time.Hour)
+		r.Tick(bg)
+		if s := st.Snapshot("x").NetRetention; s.LagS != 0 || s.Lagging {
+			t.Fatalf("an idle stream lags: %+v", s)
+		}
+	}
+	if n := alarms(st, AlarmNetRetentionLagging); n != 0 {
+		t.Fatalf("lagging raised %d times on an idle stream", n)
+	}
+}
