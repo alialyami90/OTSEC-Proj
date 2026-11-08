@@ -413,3 +413,24 @@ func TestFlowEstablished(t *testing.T) {
 		}
 	}
 }
+
+// TestFrameTSFitsPcap: a frame's ts fits the stored capture's unsigned
+// 32-bit seconds (C13 §4.2, §14 item 11).
+func TestFrameTSFitsPcap(t *testing.T) {
+	for ts, ok := range map[string]bool{
+		"1970-01-01T00:00:00Z":           true,
+		"2106-02-07T06:28:15.999999999Z": true,
+		"1969-12-31T23:59:59.999999999Z": false,
+		"2106-02-07T06:28:16Z":           false,
+	} {
+		o := fxFunction()
+		o.Frames[0].TS = ts
+		got := Codes(o.Validate())
+		if ok && len(got) > 0 {
+			t.Errorf("%s: %v", ts, got)
+		}
+		if !ok && !slices.Contains(got, CodeRange) {
+			t.Errorf("%s: got %v, want range", ts, got)
+		}
+	}
+}

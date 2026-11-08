@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 
@@ -578,7 +579,9 @@ func (o *Observation) checkFrames(c *checker) {
 		if f.N != cf.N {
 			c.fail(CodeConflict, ff+".n", "%d, but the citation lists %d", f.N, cf.N)
 		}
-		c.utc(ff+".ts", f.TS)
+		if t, ok := c.utc(ff+".ts", f.TS); ok && (t.Unix() < 0 || t.Unix() > math.MaxUint32) {
+			c.fail(CodeRange, ff+".ts", "%s is outside the stored capture's 32-bit seconds, 1970 to 2106 (C13 §4.2)", f.TS)
+		}
 		b, err := base64.StdEncoding.Strict().DecodeString(f.Data)
 		if err != nil {
 			c.fail(CodeForm, ff+".data", "not base64: %v", err)
