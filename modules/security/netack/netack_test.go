@@ -278,6 +278,20 @@ func TestInboundOnly(t *testing.T) {
 	if got := InboundOnly(b, testNode, assets[1:]); !got[relay] || !got[master] {
 		t.Errorf("no relay endpoint: marked %v", got)
 	}
+	// The master polled at .11 and sending Syslog from .10, both in b:
+	// one connected address must not hide the spoofable one, since b
+	// does not say which address a pair was learned at (D5 on #558).
+	dual := *b
+	dual.Addresses = append(slices.Clone(b.Addresses), netobs.Address{IP: "192.0.2.11", Endpoint: master, VLANs: []int{0}, LANs: []string{}})
+	dualAssets := []asset.Asset{assets[0], {AssetID: master, NodeID: testNode, Endpoints: []asset.Endpoint{ep("syslog", asset.SyslogUDP, "192.0.2.10", ""), ep("ssh", asset.SSH, "192.0.2.11", asset.Direct)}}}
+	if got := InboundOnly(&dual, testNode, dualAssets); len(got) != 1 || !got[master] {
+		t.Errorf("one connected and one inbound address: marked %v, want the master", got)
+	}
+	// With both addresses polled directly, nothing is marked.
+	dualAssets[1].Endpoints = append(slices.Clone(dualAssets[1].Endpoints), ep("ssh2", asset.SSH, "192.0.2.10", asset.Direct))
+	if got := InboundOnly(&dual, testNode, dualAssets); len(got) != 0 {
+		t.Errorf("both addresses direct: marked %v", got)
+	}
 	// A session open before capture began leaves a function, or a
 	// service, with no entry in pairs: its inbound-only end is marked
 	// too (D4 on #558, N1).

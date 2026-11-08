@@ -13,10 +13,10 @@ import (
 // the acknowledgement view must mark (C13 §14 item 9, baseline note §2.3,
 // D4-70). The baseline does not record how an end resolved, so this
 // derives it from b's addresses and the node's current C1 records, as the
-// resolver counts them: an asset end is marked unless one of its addresses
-// in b is the host of one of its outbound endpoints whose CheckPath
-// passes. An asset end with no address in b is marked too, since nothing
-// shows the node connects to it.
+// resolver counts them: an asset end is marked unless every one of its
+// addresses in b is the host of one of its outbound endpoints whose
+// CheckPath passes. An asset end with no address in b is marked too, since
+// nothing shows the node connects to it.
 //
 // Such an end is a label from a sender's address, which anyone on the
 // segment can spoof, so a pair learned from it must not look like one the
@@ -41,12 +41,16 @@ func InboundOnly(b *netobs.Baseline, nodeID node.ID, assets []asset.Asset) map[s
 			direct[a.AssetID][addr.Unmap().WithZone("")] = true
 		}
 	}
+	// The baseline does not record which address a pair was learned at,
+	// so one spoofable address marks the asset's every end (D5 on #558).
 	connected := map[string]bool{}
 	for _, ad := range b.Addresses {
 		addr, err := netip.ParseAddr(ad.IP)
-		if err == nil && direct[ad.Endpoint][addr.Unmap().WithZone("")] {
-			connected[ad.Endpoint] = true
+		ok := err == nil && direct[ad.Endpoint][addr.Unmap().WithZone("")]
+		if prev, seen := connected[ad.Endpoint]; seen && !prev {
+			ok = false
 		}
+		connected[ad.Endpoint] = ok
 	}
 	marked := map[string]bool{}
 	mark := func(ends ...string) {
