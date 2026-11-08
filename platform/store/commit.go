@@ -122,7 +122,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			}
 		}
 
-		add, newCaptures, err := d.batchBytes(ctx, recs, payload)
+		add, newCaptures, err := d.batchBytes(ctx, class, recs, payload)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 			if !d.full[class] {
 				d.full[class] = true
 				code, detail := c5.FullAlarm(class), refusal.Error()
-				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown {
+				if class == c5.ClassConfiguration || class == c5.ClassSyslogUnknown || code == c5.AlarmNetworkFull {
 					detail += "; most bytes: " + d.topStreams(ctx, class, 3)
 				}
 				alarm = &c5.Alarm{Code: code, Class: class, Stream: stream, Detail: detail}
@@ -233,9 +233,11 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 	return out, nil
 }
 
-// batchBytes is the payload a batch adds to its class: event bytes, source
-// cursors, and each capture not yet stored. newCaptures lists those.
-func (d *DB) batchBytes(ctx context.Context, recs []c5.Record, payload [][]byte) (int64, map[string]bool, error) {
+// batchBytes is the payload a batch adds to class: event bytes, source
+// cursors, each capture not yet stored, and since C5 0.9 each stored
+// network capture no record of class cites yet (releaseCaptures).
+// newCaptures lists the captures not yet stored.
+func (d *DB) batchBytes(ctx context.Context, class c5.StreamClass, recs []c5.Record, payload [][]byte) (int64, map[string]bool, error) {
 	var n int64
 	newCaptures := map[string]bool{}
 	seen := map[string]bool{}
@@ -245,14 +247,22 @@ func (d *DB) batchBytes(ctx context.Context, recs []c5.Record, payload [][]byte)
 			continue
 		}
 		seen[r.Capture.SHA256] = true
-		var one int
-		err := d.conn.QueryRowContext(ctx, `SELECT 1 FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&one)
+		var capClass string
+		err := d.conn.QueryRowContext(ctx, `SELECT class FROM captures WHERE sha256 = ?`, r.Capture.SHA256).Scan(&capClass)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			newCaptures[r.Capture.SHA256] = true
 			n += int64(len(r.Capture.Bytes))
 		case err != nil:
 			return 0, nil, fmt.Errorf("read capture: %w", err)
+		case perClassCapture(c5.StreamClass(capClass)):
+			cites, err := d.classCites(ctx, class, r.Capture.SHA256)
+			if err != nil {
+				return 0, nil, fmt.Errorf("read capture: %w", err)
+			}
+			if !cites {
+				n += int64(len(r.Capture.Bytes))
+			}
 		}
 	}
 	return n, newCaptures, nil
@@ -267,10 +277,19 @@ func (d *DB) classBytes(ctx context.Context, class c5.StreamClass) (int64, error
 	return n, err
 }
 
+// addClassBytes adds n to class's count. A count that would go below zero
+// fails the caller's transaction instead of being stored: it can only come
+// from an accounting drift, and failing shows it (C5 0.9).
 func (d *DB) addClassBytes(ctx context.Context, class c5.StreamClass, n int64) error {
-	_, err := d.conn.ExecContext(ctx, `INSERT INTO class_bytes (class, bytes) VALUES (?, ?)
-		ON CONFLICT (class) DO UPDATE SET bytes = bytes + excluded.bytes`, string(class), n)
-	return err
+	var after int64
+	if err := d.conn.QueryRowContext(ctx, `INSERT INTO class_bytes (class, bytes) VALUES (?, ?)
+		ON CONFLICT (class) DO UPDATE SET bytes = bytes + excluded.bytes RETURNING bytes`, string(class), n).Scan(&after); err != nil {
+		return err
+	}
+	if after < 0 {
+		return fmt.Errorf("class %s would hold %d bytes: its byte count has drifted", class, after)
+	}
+	return nil
 }
 
 // ClassBytes is the payload a class holds in this database, as the quota

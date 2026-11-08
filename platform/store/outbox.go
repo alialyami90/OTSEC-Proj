@@ -312,20 +312,8 @@ func (d *DB) PruneStep(ctx context.Context, b c5.Boundary, max int) (int, error)
 		if err := d.addClassBytes(ctx, class, -freed); err != nil {
 			return err
 		}
-		for _, sha := range captures {
-			var capClass string
-			var size int64
-			err := d.conn.QueryRowContext(ctx, `DELETE FROM captures WHERE sha256 = ?
-				AND NOT EXISTS (SELECT 1 FROM events WHERE capture = ?) RETURNING class, length(bytes)`, sha, sha).Scan(&capClass, &size)
-			switch {
-			case errors.Is(err, sql.ErrNoRows): // still referred to, or already deleted in this step
-			case err != nil:
-				return err
-			default:
-				if err := d.addClassBytes(ctx, c5.StreamClass(capClass), -size); err != nil {
-					return err
-				}
-			}
+		if _, err := d.releaseCaptures(ctx, class, captures); err != nil {
+			return err
 		}
 		if class == c5.ClassAudit {
 			if _, err := d.conn.ExecContext(ctx, `UPDATE streams SET anchor_seq = ?, anchor_hash = ? WHERE stream = ?`,
