@@ -358,4 +358,15 @@ func TestDraftFill(t *testing.T) {
 	if _, err := DraftFill([]byte(`{"schema":`)); err == nil {
 		t.Error("DraftFill accepted a truncated draft")
 	}
+	// Well-formed JSON that C13 refuses: an overflow outside [0, MaxOverflow],
+	// which Encode would never write (D6 on #565).
+	for _, bad := range []string{"-1", "9007199254740992"} {
+		draft := bytes.Replace(testDraft(t), []byte(`"overflow":0`), []byte(`"overflow":`+bad), 1)
+		if !bytes.Contains(draft, []byte(`"overflow":`+bad)) {
+			t.Fatal("test draft has no overflow field to edit")
+		}
+		if _, err := DraftFill(draft); err == nil {
+			t.Errorf("DraftFill accepted overflow %s", bad)
+		}
+	}
 }
