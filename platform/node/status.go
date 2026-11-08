@@ -54,6 +54,8 @@ type Status struct {
 	identity    map[string]IdentityStatus
 	// netRetention is the alert stream's retention consumer (netretention.go).
 	netRetention *NetRetentionStatus
+	// sensor is the sensor's intake (sensor.go).
+	sensor *SensorStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -151,6 +153,9 @@ type StatusFile struct {
 	// NetRetention is the alert stream's retention consumer, when the
 	// node has network_sensor and no forwarding target (netretention.go).
 	NetRetention *NetRetentionStatus `json:"net_retention,omitempty"`
+	// Sensor is the passive network sensor's intake, when the
+	// configuration has the network_sensor section (sensor.go).
+	Sensor *SensorStatus `json:"sensor,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -477,6 +482,11 @@ func (s *Status) Snapshot(node string) StatusFile {
 	if s.netRetention != nil {
 		n := *s.netRetention
 		f.NetRetention = &n
+	}
+	if s.sensor != nil {
+		n := *s.sensor
+		n.Refused, n.Dropped, n.DroppedByAsset = maps.Clone(n.Refused), maps.Clone(n.Dropped), maps.Clone(n.DroppedByAsset)
+		f.Sensor = &n
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}

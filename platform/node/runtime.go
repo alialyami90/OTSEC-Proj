@@ -79,6 +79,9 @@ type Runtime struct {
 	// retentionRecord, when set, replaces recordRetention as the
 	// consumer's Record: a test's way to make a record fail.
 	retentionRecord func(context.Context, audit.Retention) error
+	// sensor is the sensor's intake, nil without the network_sensor
+	// section (sensor.go).
+	sensor *sensorIntake
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
@@ -157,6 +160,11 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	r.advanceHolds(ctx)
 	starts.add("holds", from)
 	r.tickRetention(ctx)
+	if err := r.startSensor(ctx); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("node: the sensor's intake: %w", err)
+	}
+	r.tickSensor(ctx, false)
 	from = time.Now()
 	opt.Status.Write(string(cfg.NodeID))
 	starts.add("status", from)
@@ -386,6 +394,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 		r.health(ctx, x.a.Code.HealthType(), details)
 	}
 	r.tickRetention(ctx)
+	r.tickSensor(ctx, false)
 	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
 }
@@ -449,6 +458,7 @@ func (r *Runtime) Mode(id c5.DatabaseID) c5.Mode {
 // locks.
 func (r *Runtime) Close() error {
 	if len(r.dbs) > 0 {
+		r.tickSensor(context.Background(), true)
 		r.audit(context.Background(), audit.ActionServiceStop, audit.OutcomeInfo, "", "otsec node stopping")
 	}
 	r.state.Lock()

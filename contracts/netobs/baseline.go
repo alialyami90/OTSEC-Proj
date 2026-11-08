@@ -258,7 +258,7 @@ func (b *Baseline) Validate() error {
 		}
 	}
 	if o := b.Period.Overflow; o < 0 || o > MaxOverflow {
-		c.fail(CodeRange, "period.overflow", "%d not in [0, %d]", o, MaxOverflow)
+		c.fail(CodeRange, "period.overflow", "%d not in [0, %d]", o, int64(MaxOverflow))
 	}
 	if p := b.Params; p.TieGraceS < 1 || p.TieGraceS > MaxTieGraceS {
 		c.fail(CodeRange, "params.tie_grace_s", "%d not in [1, %d]", p.TieGraceS, MaxTieGraceS)
