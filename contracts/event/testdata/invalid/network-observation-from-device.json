@@ -2,7 +2,7 @@
   "schema": "otsec.event/0.3",
   "id": {
     "node_id": "site-a-node1",
-    "stream": "netobs/5f0c2a7e-3b1d-4c8e-9a2f-6d4e8b1c7a90",
+    "stream": "network-observation/5f0c2a7e-3b1d-4c8e-9a2f-6d4e8b1c7a90",
     "seq": 1
   },
   "origin": "device",

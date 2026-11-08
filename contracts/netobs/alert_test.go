@@ -16,7 +16,7 @@ func fxAlert() *Alert {
 		Observation: `wrote to the device: DNP3 5 from "192.0.2.10"`, Clock: ClockCapture,
 		AtUTC: "2026-11-07T10:04:00.000001Z", WindowStartUTC: "2026-11-07T10:00:00.000001Z",
 		Hits: 3, Sources: 2,
-		Related:      []event.EventID{{NodeID: "site-a-node1", Stream: event.Stream("netobs/" + fxSensor), Seq: 7}, {NodeID: "site-a-node1", Stream: event.Stream("netobs/" + fxSensor), Seq: 9}, {NodeID: "site-a-node1", Stream: event.Stream("netobs/" + fxSensor), Seq: 12}},
+		Related:      []event.EventID{{NodeID: "site-a-node1", Stream: event.Stream("network-observation/" + fxSensor), Seq: 7}, {NodeID: "site-a-node1", Stream: event.Stream("network-observation/" + fxSensor), Seq: 9}, {NodeID: "site-a-node1", Stream: event.Stream("network-observation/" + fxSensor), Seq: 12}},
 		RelatedTotal: 3,
 		Cites: []Cite{{CaptureID: "ring:" + fxRun + ":3", Frames: []CiteFrame{{N: 17, SHA256: hash([]byte{1})}, {N: 19, SHA256: hash([]byte{2})}}},
 			{CaptureID: "file:" + hash([]byte("pcap")), Frames: []CiteFrame{{N: 4, SHA256: hash([]byte{3})}}}},
