@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -49,13 +51,10 @@ func TestB6HeldLinksDialAndBindNothing(t *testing.T) {
 			c.Close()
 		}
 	}()
-	// The listener's address: free when the node starts.
-	pl, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lAddr := pl.Addr().String()
-	pl.Close()
+	// The listener's address: free when the node starts, and outside the
+	// ephemeral range, so no other package's connection can take its port
+	// as a source port while the test binds it in turn (#554).
+	lAddr := nonEphemeralLoopbackAddr(t)
 
 	dir := filepath.Join(t.TempDir(), "store")
 	if err := store.CreateDir(dir, ""); err != nil {
@@ -189,4 +188,40 @@ func TestB6HeldLinksDialAndBindNothing(t *testing.T) {
 		t.Errorf("the held-back listener's address %s could not be bound %d times: %s", lAddr, n, *bindErr.Load())
 	}
 	t.Logf("%d status reads, %d distinct writes", reads.Load(), writes.Load())
+}
+
+// nonEphemeralLoopbackAddr is a loopback TCP address that binds now, on a
+// port just below the kernel's ephemeral range. A port the kernel handed out
+// for :0 is in that range, so a connection from any test running in parallel
+// can take it as its source port, and binding it again then fails with
+// "address already in use" (#554). Below the range, only an explicit bind can
+// hold it. Linux's range is read from the kernel; elsewhere it is the IANA
+// dynamic range, Windows' default.
+func nonEphemeralLoopbackAddr(t *testing.T) string {
+	t.Helper()
+	lo := 49152
+	if runtime.GOOS == "linux" {
+		b, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := strings.Fields(string(b))
+		if len(f) != 2 {
+			t.Fatalf("ip_local_port_range %q", b)
+		}
+		if lo, err = strconv.Atoi(f[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for p := lo - 1; p > 1024 && p >= lo-4096; p-- {
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
+		if err != nil {
+			continue
+		}
+		addr := l.Addr().String()
+		l.Close()
+		return addr
+	}
+	t.Fatalf("no loopback port free in the 4096 below %d", lo)
+	return ""
 }
