@@ -1199,7 +1199,7 @@ D1, on #542 and #545 to #553, with each owner's and reviewer's word through the 
     - Two assets on one IP with different ports, and a device that uses a second address, stay unresolved there. These are stated limits.
   - **The failed-dial tie (§14 item 10, baseline note §5).**
     - A TCP `end` carries `syn_only`. It is true only when a client SYN was seen and every segment was a client SYN or a server RST, with no payload.
-    - A held flow's deadline is fixed at its `start`: `connect_timeout_ms` + `flow_idle_s` + *g*. `flow_idle_s` is required in `coverage.settings`, in [10, 600].
+    - A held flow's deadline is its `start` + `connect_timeout_ms` + `flow_idle_s` + *g*, fixed when the flow starts, so nothing the sender does moves it. `flow_idle_s` is required in `coverage.settings`, in [10, 600].
     - A held flow alerts at once on a new sensor `run_id`, or on a heartbeat with a non-empty `degraded`. Held flows are checkpointed.
     - Held flows and failed-dial ties per run are capped at `connect_retries`, or `connect_retries` + 1 for a run that never connected. A flow past the cap alerts at its `start`, and status counts it. Only the run's endpoint port ties.
   - **The stored capture's byte form (§14 item 11)** is little-endian, with the nanosecond magic, snaplen 2048 and link type 1. `ts` must fit 32-bit seconds. `wire_len` must be in [`captured_len`, `MaxWireLen` = 262144].
@@ -1207,7 +1207,9 @@ D1, on #542 and #545 to #553, with each owner's and reviewer's word through the 
   - `evidence_class` refuses `device-observed` (D2-4).
   - `outage_hours` is required, in [1, 720], the bound `syslog_outage_hours` uses.
   - `alert_retention_days` is in [1, 3650]. It is required when the node has no forwarding target, and refused when it has one, so no setting is ignored in silence.
-- **One Windows CI miss.** The Syslog rig's 15 s Serve limit was missed by 0.9 s once (#548, attempt 1), and the re-run passed. D5 opens an issue beside #230 if it recurs.
+- **CI misses.**
+  - The Windows Syslog rig's 15 s Serve limit was missed by 0.9 s once (#548, attempt 1), and the re-run passed. D5 opens an issue beside #230 if it recurs.
+  - One Linux miss class: `TestB6HeldLinksDialAndBindNothing`'s listener port came from `:0`, inside the ephemeral range, so a parallel connection could take it (#545, #554). D6's #556 moves it below the range.
 - **Test follow-ups, not blocking.**
-  - D3 adds an accepted retention row exactly on the wall bound.
+  - D3 adds an accepted retention row exactly on the wall bound (#554).
   - D4 adds three `contracts/netobs` rows: a server `RST|SYN` is not `syn_only`, `ip-ambiguous` without `ip` is refused, and `flow_idle_s` 9 is refused while 10 is accepted (D6's surviving mutants).
