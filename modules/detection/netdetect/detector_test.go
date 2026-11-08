@@ -1081,3 +1081,127 @@ func TestDetectorRestoreAtCap(t *testing.T) {
 		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}}
 	restoreAtEveryCut(t, cfg, capStream(t, 600), 50, 2, false)
 }
+
+// A checkpoint taken mid-restore, with committed alerts still pending,
+// names the seq before the first of them, so a second restore from it
+// holds them back too: the run matches the uninterrupted one, with no
+// duplicate (D6's D4 on #569).
+func TestCheckpointMidRestore(t *testing.T) {
+	const every = 4
+	base := dxBaseline(t)
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}
+	obs := dxStream(t, 60)
+	now := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
+	var whole alertStream
+	marks := map[int][]byte{}
+	d := dxDetector(t, base)
+	for i, o := range obs {
+		out, err := d.Observe(dxID(uint64(i+1)), o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range out {
+			whole.commit(t, a, now)
+		}
+		if (i+1)%every == 0 {
+			marks[i+1] = must(d.Checkpoint(uint64(len(whole.alerts))))
+		}
+	}
+	tested := 0
+	for k := every; k+2*every <= len(obs); k += every {
+		// The crash came after observation j, with every alert through it
+		// committed.
+		j := k + 2*every
+		var s alertStream
+		for _, a := range whole.alerts {
+			s.commit(t, a, now)
+		}
+		cp := mustV(netobs.DecodeDetectorCheckpoint(marks[k]))
+		committedThrough := 0
+		r1 := mustV(RestoreDetector(cfg, marks[k], nil, 0))
+		for i := k; i < j; i++ { // count the alerts through j on a scratch restore
+			out, _ := r1.Observe(dxID(uint64(i+1)), obs[i])
+			committedThrough += len(out)
+		}
+		s.recs, s.alerts, s.stamps = s.recs[:int(cp.LastAlertSeq)+committedThrough], s.alerts[:int(cp.LastAlertSeq)+committedThrough], s.stamps[:int(cp.LastAlertSeq)+committedThrough]
+		r := mustV(RestoreDetector(cfg, marks[k], s.after(cp.LastAlertSeq), uint64(j)))
+		// Replay until some committed alerts were held back and some wait.
+		i := k
+		for ; i < j && (len(r.pending) == len(s.after(cp.LastAlertSeq)) || len(r.pending) == 0); i++ {
+			if out := mustV(r.Observe(dxID(uint64(i+1)), obs[i])); len(out) != 0 {
+				t.Fatalf("cut %d: a committed alert raised again: %+v", k, out)
+			}
+		}
+		if len(r.pending) == 0 {
+			continue
+		}
+		tested++
+		mid := mustV(r.Checkpoint(uint64(len(s.alerts))))
+		midCP := mustV(netobs.DecodeDetectorCheckpoint(mid))
+		if midCP.LastAlertSeq != r.pending[0].Seq-1 {
+			t.Fatalf("cut %d: mid-restore checkpoint names %d, want %d", k, midCP.LastAlertSeq, r.pending[0].Seq-1)
+		}
+		r2 := mustV(RestoreDetector(cfg, mid, s.after(midCP.LastAlertSeq), uint64(j)))
+		for i := int(r2.Through()); i < len(obs); i++ {
+			for _, a := range mustV(r2.Observe(dxID(uint64(i+1)), obs[i])) {
+				s.commit(t, a, now)
+			}
+		}
+		if len(s.recs) != len(whole.recs) || r2.Mismatches() != 0 {
+			t.Fatalf("cut %d: %d records, want %d; mismatches %d", k, len(s.recs), len(whole.recs), r2.Mismatches())
+		}
+		for n := range s.recs {
+			if !bytesEqual(s.recs[n], whole.recs[n]) {
+				t.Fatalf("cut %d: record %d differs", k, n+1)
+			}
+		}
+	}
+	if tested == 0 {
+		t.Fatal("no cut left committed alerts pending mid-restore")
+	}
+}
+
+// An observation that arrives late, with an earlier first_utc, doesn't move
+// the capture clock back, so windows close where they would have, and a
+// late hit doesn't move a window's at_utc back from its latest hit (D6's D6
+// and D16 on #569).
+func TestLateObservations(t *testing.T) {
+	d := capDetector(t)
+	t0 := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
+	seq := uint64(0)
+	feed := func(i int, at time.Duration) []netobs.Alert {
+		t.Helper()
+		seq++
+		return mustV(d.Observe(dxID(seq), capObs(t, i, t0.Add(at))))
+	}
+	feed(0, 0)
+	feed(0, 30*time.Second)
+	if out := feed(0, 10*time.Second); len(out) != 0 { // late: a third hit
+		t.Fatalf("a late hit: %+v", out)
+	}
+	feed(1, 59*time.Second)
+	if out := feed(1, 20*time.Second); len(out) != 0 { // late: key 1's second hit
+		t.Fatalf("a late hit on key 1: %+v", out)
+	}
+	cp := mustV(netobs.DecodeDetectorCheckpoint(mustV(d.Checkpoint(0))))
+	if cp.ClockUTC != "2026-11-09T08:00:59Z" {
+		t.Fatalf("clock %s after a late observation, want the latest", cp.ClockUTC)
+	}
+	if w := cp.Windows[0]; w.AssetID != capAsset(0) || w.Hits != 3 || w.AtUTC != "2026-11-09T08:00:30Z" {
+		t.Fatalf("window 0: hits %d at %s, want 3 at the latest hit", w.Hits, w.AtUTC)
+	}
+	// Key 0's window closes at its start plus 60 s on the clock, and its
+	// summary is at the latest hit.
+	out := feed(2, 60*time.Second)
+	if len(out) != 2 || out[0].AssetID != capAsset(0) || out[0].Hits != 3 || out[0].AtUTC != "2026-11-09T08:00:30Z" {
+		t.Fatalf("at the window's end: %+v", out)
+	}
+}
+
+// mustV is v, or a panic on err.
+func mustV[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
