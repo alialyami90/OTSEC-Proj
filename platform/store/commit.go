@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"otsec.local/otsec/contracts/event"
@@ -144,9 +145,17 @@ func (d *DB) CommitBatch(ctx context.Context, stream c5.StreamID, recs []c5.Reco
 		}
 
 		// Commit time never goes backwards within a stream, so LastCommittedBy
-		// is a range query. A clock stepped back lengthens replay windows,
-		// which keeps more, never less.
-		at := max(d.opt.now().UnixNano(), lastAt)
+		// is a range query, and never below a wall time this database has
+		// already used, its persisted mark, raised in this transaction. A
+		// clock stepped back lengthens replay windows, which keeps more,
+		// never less; and an alert committed while it is back can't land
+		// below a retention cutoff already recorded, even on a stream, or
+		// a database, idle for longer than the retention (D3's F1 on #559,
+		// D4-71).
+		at, err := d.raiseWallMark(ctx, max(d.opt.now().UnixNano(), lastAt))
+		if err != nil {
+			return err
+		}
 		for i, r := range recs {
 			var capture any
 			if r.Capture != nil {
@@ -418,4 +427,30 @@ func replaceMember(b []byte, key string, value []byte) ([]byte, error) {
 	}
 	out.WriteByte('}')
 	return out.Bytes(), nil
+}
+
+// raiseWallMark raises the database's persisted wall-clock high-water mark
+// to t, in the caller's transaction, and returns the mark: at least t, and
+// at least every wall time a commit or a cursor save of this database has
+// used. A store created before the mark existed starts it at 0.
+func (d *DB) raiseWallMark(ctx context.Context, t int64) (int64, error) {
+	var mark int64
+	var v string
+	switch err := d.conn.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'wall_mark'`).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return 0, fmt.Errorf("read wall mark: %w", err)
+	default:
+		if mark, err = strconv.ParseInt(v, 10, 64); err != nil {
+			return 0, fmt.Errorf("wall mark %q: %w", v, err)
+		}
+	}
+	if t <= mark {
+		return mark, nil
+	}
+	if _, err := d.conn.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('wall_mark', ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value`, strconv.FormatInt(t, 10)); err != nil {
+		return 0, fmt.Errorf("raise wall mark: %w", err)
+	}
+	return t, nil
 }

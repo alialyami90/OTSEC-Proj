@@ -125,7 +125,8 @@ func (e *env) record(_ context.Context, r audit.Retention) error {
 func (e *env) start() *Consumer {
 	e.t.Helper()
 	c, err := Start(bg, Config{SensorID: testSensor, Retention: retention},
-		Options{Store: e.db, Wall: e.clk.Wall, Mono: e.clk.Mono, Record: e.record}, Latest(e.recs, testSensor))
+		Options{Store: e.db, Wall: e.clk.Wall, Mono: e.clk.Mono, Record: e.record,
+			Latest: func(context.Context) (*audit.Retention, error) { return Latest(e.recs, testSensor), nil }}, Latest(e.recs, testSensor))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -300,13 +301,13 @@ func TestClockSteps(t *testing.T) {
 	r := e.last()
 	prev, _ := time.Parse(time.RFC3339Nano, moved.CutoffUTC)
 	cut, _ := time.Parse(time.RFC3339Nano, r.CutoffUTC)
-	if r.Bound != audit.BoundMonotonic || !cut.Equal(prev.Add(time.Hour)) {
+	if r.Bound != audit.BoundMonotonic || !cut.Equal(prev.Add(CatchUp*time.Hour)) {
 		t.Fatalf("after a forward step: %+v", r)
 	}
-	// By monotonic time the retention has passed only the alerts of the
-	// first two hours and a third: seqs 1 to 3.
-	if e.cursor() != 3 {
-		t.Fatalf("cursor %d, want 3", e.cursor())
+	// The step prunes no faster than CatchUp times the monotonic clock:
+	// one hour of it passes the alerts of two more hours, seqs 3 and 4.
+	if e.cursor() != 4 {
+		t.Fatalf("cursor %d, want 4", e.cursor())
 	}
 
 	// A restart: the first move goes at most StartAllowance past the
@@ -319,6 +320,16 @@ func TestClockSteps(t *testing.T) {
 	cut, _ = time.Parse(time.RFC3339Nano, r.CutoffUTC)
 	if r.Bound != audit.BoundStart || cut.After(persisted.Add(StartAllowance)) {
 		t.Fatalf("after a restart: %+v, persisted %s", r, persisted)
+	}
+	// The next move is bounded by the monotonic clock again, and says so
+	// (D6's M8 on #559).
+	startCut := cut
+	e.clk.advance(time.Hour)
+	e.tick(c)
+	r = e.last()
+	cut, _ = time.Parse(time.RFC3339Nano, r.CutoffUTC)
+	if r.Bound != audit.BoundMonotonic || !cut.Equal(startCut.Add(CatchUp*time.Hour)) {
+		t.Fatalf("the move after the start's: %+v", r)
 	}
 
 	// Backward by three retentions: ticks write nothing, and the chain
@@ -364,6 +375,159 @@ func TestCursorAfterCrash(t *testing.T) {
 	c = e.start()
 	if e.cursor() != 3 || c.Status().Cursor != 3 || !c.Status().CursorSaved {
 		t.Fatalf("cursor %d, status %+v", e.cursor(), c.Status())
+	}
+	e.verify()
+}
+
+// A store cursor past the latest record is a move nothing recorded: Start
+// creates the consumer at the store's cursor, so the audit stream shows the
+// jump, and Status reports it (D3 on #559, S1). A resume, the benign path,
+// reports nothing.
+func TestUnrecordedCursor(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert()
+	e.alert()
+	e.clk.advance(retention + time.Hour)
+	e.tick(c)
+	for range 3 {
+		e.alert()
+	}
+	if c = e.start(); c.Status().Unrecorded {
+		t.Fatalf("a resume reports a jump: %+v", c.Status())
+	}
+	// The store's cursor moves to 4 with no record.
+	if err := e.db.SaveCursor(bg, c5.Cursor{Consumer: ConsumerID, Stream: stream, Through: 4}); err != nil {
+		t.Fatal(err)
+	}
+	c = e.start()
+	r := e.last()
+	if r.Bound != audit.BoundCreated || r.FromSeq != 4 || r.ToSeq != 4 {
+		t.Fatalf("after the jump: %+v", r)
+	}
+	if s := c.Status(); !s.Unrecorded || s.UnrecordedTo != 2 || s.Cursor != 4 || e.cursor() != 4 {
+		t.Fatalf("status %+v, store cursor %d", s, e.cursor())
+	}
+	e.verify()
+}
+
+// F1 (D3 on #559, D4-71): a backward wall-clock step on an alert stream
+// idle for longer than the retention must not let a fresh alert commit
+// below the recorded cutoff and be passed at the first move after the
+// clock is restored. The alert survives at least half its retention by
+// monotonic time, the guarantee D1 accepted for a forward step with the
+// 2x catch-up, and the wall bound still passes it once it is older than
+// the retention.
+func TestBackwardStepIdleStream(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert() // seq 1
+	e.clk.advance(retention + day)
+	e.tick(c) // passes seq 1; the stream is now idle past its retention
+	if e.cursor() != 1 {
+		t.Fatalf("cursor %d before the step, want 1", e.cursor())
+	}
+	e.clk.advance(time.Hour)
+	e.tick(c) // nothing to pass
+
+	// Back by twice the retention, and an alert while the clock is back.
+	e.clk.wall = e.clk.wall.Add(-2 * retention)
+	e.alert() // seq 2
+	committed := e.clk.mono
+	e.clk.advance(time.Hour)
+	e.tick(c) // stalls
+
+	// The clock is restored. Until half the retention has passed by
+	// monotonic time, no move passes seq 2.
+	e.clk.wall = e.clk.wall.Add(2 * retention)
+	for e.clk.mono-committed < retention/2 {
+		e.tick(c)
+		if e.cursor() >= 2 {
+			t.Fatalf("seq 2 passed %s after its commit (monotonic), under half the retention: %+v", e.clk.mono-committed, e.last())
+		}
+		e.clk.advance(time.Hour)
+	}
+	// Once it is older than the retention by every clock, it is passed.
+	e.clk.advance(retention/2 + 2*time.Hour)
+	e.tick(c)
+	if e.cursor() != 2 {
+		t.Fatalf("cursor %d past the retention, want 2: %+v", e.cursor(), e.last())
+	}
+	e.verify()
+}
+
+// D6's F3 probe on #559: a consumer created 60 days after the oldest
+// alert, with a 7-day retention, starts 53 days behind the wall cutoff.
+// With CatchUp the bound gains one hour on the wall cutoff per hour, so the
+// lag is gone within 53 days of test clock, and no move passes the wall
+// bound on the way (the record seam runs audit.Validate on each).
+func TestCatchUp(t *testing.T) {
+	e := newEnv(t)
+	e.alert() // T0
+	e.clk.advance(60 * day)
+	c := e.start()
+	if r := e.last(); r.Bound != audit.BoundCreated {
+		t.Fatalf("start %+v", r)
+	}
+	lag0 := 53 * day
+	for h := time.Duration(0); h <= lag0+2*time.Hour; h += time.Hour {
+		if h%day == 0 {
+			e.alert()
+		}
+		e.tick(c)
+		s := c.Status()
+		if want := max(lag0-h, 0); s.Lag != want {
+			t.Fatalf("after %s: lag %s, want %s (%+v)", h, s.Lag, want, s)
+		}
+		e.clk.advance(time.Hour)
+	}
+	if e.last().Bound != audit.BoundWall {
+		t.Fatalf("the last move once caught up: %+v", e.last())
+	}
+	e.verify()
+}
+
+// D6's R1 and R2 on #559. A record that commits and still reports an error
+// (C5's Append on a cancelled context) does not break the chain: the next
+// Tick reads it back and continues from it. And a failed record stays an
+// error at every Tick until one succeeds, not only once an hour.
+func TestRecordCommittedWithError(t *testing.T) {
+	e := newEnv(t)
+	c := e.start()
+	e.alert()
+	e.clk.advance(retention + time.Hour)
+	e.fail, e.fails = errors.New("audit refused"), 1
+	if err := c.Tick(bg); err == nil {
+		t.Fatal("a failed record reported no error")
+	}
+	e.fail, e.fails = errors.New("audit refused"), 1
+	e.clk.advance(time.Minute)
+	if err := c.Tick(bg); err == nil || len(e.recs) != 1 {
+		t.Fatalf("a minute later: %v, %d records; want the error again", err, len(e.recs))
+	}
+	// Committed, and reported as failed.
+	commitThenFail := func(ctx context.Context, r audit.Retention) error {
+		if err := e.record(ctx, r); err != nil {
+			return err
+		}
+		return context.Canceled
+	}
+	c.opt.Record = commitThenFail
+	e.clk.advance(time.Minute)
+	if err := c.Tick(bg); !errors.Is(err, context.Canceled) || e.last().ToSeq != 1 {
+		t.Fatalf("%v, %+v", err, e.last())
+	}
+	c.opt.Record = e.record
+	e.alert()
+	e.clk.advance(time.Hour)
+	e.tick(c) // re-reads the record: the consumer is at 1
+	if s := c.Status(); s.Cursor != 1 || e.cursor() != 1 {
+		t.Fatalf("after the re-read: %+v, store cursor %d", s, e.cursor())
+	}
+	e.clk.advance(retention)
+	e.tick(c)
+	if r := e.last(); r.FromSeq != 1 || r.ToSeq != 2 {
+		t.Fatalf("the next move %+v", r)
 	}
 	e.verify()
 }

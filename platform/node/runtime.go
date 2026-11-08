@@ -73,6 +73,12 @@ type Runtime struct {
 	// retention is the alert stream's retention consumer, nil until it
 	// starts (netretention.go). Only Start and Tick touch it.
 	retention *netretain.Consumer
+	// retentionLag is whether the retention consumer's lag was over one
+	// retention period at the last tick (netretention.go).
+	retentionLag bool
+	// retentionRecord, when set, replaces recordRetention as the
+	// consumer's Record: a test's way to make a record fail.
+	retentionRecord func(context.Context, audit.Retention) error
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
