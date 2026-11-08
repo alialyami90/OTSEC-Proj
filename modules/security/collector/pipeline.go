@@ -208,25 +208,22 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		// Two assets on one transport layer, host and port: the node could
 		// not tie a flow there to one asset's session, so the collector does
 		// not start (C2 0.9 §4, D4-68). The host is compared unmapped and
-		// without a zone, as the sensor sees it. Only direct endpoints, those
-		// whose CheckPath passes, are compared: no other gets a session, and
-		// port-server assets sharing one port are a real multi-drop layout
-		// (D5, D1 on #547). A transport this check does not name is refused,
-		// so a new outbound one cannot pass unchecked (D3, D1 on #547).
+		// without a zone, as the sensor sees it. Only endpoints whose
+		// CheckPath passes are compared: no other gets a session. So
+		// port-server assets sharing one port, a real multi-drop layout,
+		// load (D5, D1 on #547), and a transport from a later C1 minor loads
+		// and is refused per endpoint at session time (D2-16; D3, D1 on
+		// #547).
 		for _, ep := range e.Asset.Endpoints {
-			var l4 string
-			switch ep.Transport {
-			case asset.Telnet, asset.SSH:
-				l4 = "tcp"
-			case asset.SNMPv3:
-				l4 = "udp"
-			case asset.Serial, asset.SyslogUDP, asset.SyslogTCP, asset.SyslogTLS:
-				continue // no outbound connection: a line, or the device sends to the node
-			default:
-				return nil, fmt.Errorf("collector: asset %s: endpoint %s: transport %q is not one the shared-endpoint check knows", e.Asset.AssetID, ep.ID, ep.Transport)
-			}
 			if ep.CheckPath() != nil {
 				continue
+			}
+			l4, err := sharedL4(ep.Transport)
+			if err != nil {
+				return nil, fmt.Errorf("collector: asset %s: endpoint %s: %w", e.Asset.AssetID, ep.ID, err)
+			}
+			if l4 == "" {
+				continue // a serial line: no outbound connection
 			}
 			a, err := netip.ParseAddr(ep.Host)
 			if err != nil {
@@ -241,6 +238,24 @@ func NewPipeline(cfg PipelineConfig) (*Pipeline, error) {
 		p.assets[e.Asset.AssetID] = e
 	}
 	return p, nil
+}
+
+// sharedL4 is the transport layer the shared-endpoint check keys a
+// transport on, or "" for a serial line, which has no outbound connection.
+// Every transport whose endpoints can pass CheckPath has a case
+// (TestSharedL4CoversEveryTransport), so the error is for a C1 transport
+// added without one.
+func sharedL4(t asset.Transport) (string, error) {
+	switch t {
+	case asset.Telnet, asset.SSH:
+		return "tcp", nil
+	case asset.SNMPv3:
+		return "udp", nil
+	case asset.Serial:
+		return "", nil
+	default:
+		return "", fmt.Errorf("transport %q is not one the shared-endpoint check knows", t)
+	}
 }
 
 // Refuse answers a request that failed decoding.

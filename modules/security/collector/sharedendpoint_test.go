@@ -1,10 +1,12 @@
 package collector
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/asset"
+	"otsec.local/otsec/contracts/authz"
 )
 
 // Two enrolled assets on one transport layer, host and port would make the
@@ -79,13 +81,14 @@ func TestNewPipelineRefusesSharedEndpoint(t *testing.T) {
 	}
 }
 
-// A transport the check does not name is refused, so a new outbound one
-// cannot bypass it (D3 on #547).
-func TestNewPipelineRefusesUnknownTransport(t *testing.T) {
+// A transport from a later C1 minor does not stop the collector loading:
+// CheckPath refuses its endpoint, so it is not compared, and a run on it is
+// refused at session time (D2-16; D3, D1 on #547).
+func TestUnknownTransportLoadsAndIsRefusedAtSessionTime(t *testing.T) {
 	f := newPipeline(t)
-	cfg := PipelineConfig{NodeID: testNode, PolicyVersion: 1, State: f.state, Creds: f.store, Registers: f.registers, Runner: f.runner}
-	// A later C1 minor may carry a transport this reader does not know, and
-	// C1 accepts such a record; this check must still refuse it.
+	cfg := PipelineConfig{NodeID: testNode, PolicyVersion: policyVersion, State: f.state, Creds: f.store, Registers: f.registers, Runner: f.runner}
+	// C1 accepts a later-minor record with a transport this reader does
+	// not know.
 	a := *snmpAsset(t)
 	a.Profile = &asset.ProfileRef{ID: "sel-27x1-rstp", Version: "0.1"}
 	a.Schema = "otsec.asset/0.4"
@@ -93,8 +96,44 @@ func TestNewPipelineRefusesUnknownTransport(t *testing.T) {
 	if err := a.Validate(); err != nil {
 		t.Fatalf("C1 refuses the later-minor asset itself: %v", err)
 	}
+	if err := a.Endpoints[0].CheckPath(); !errors.Is(err, asset.ErrPathRefused) {
+		t.Fatalf("CheckPath on the unknown transport: %v", err)
+	}
 	cfg.Assets = []Enrolled{{Asset: a, Profile: snmpProfile(t)}}
-	if _, err := NewPipeline(cfg); err == nil || !strings.Contains(err.Error(), "is not one the shared-endpoint check knows") {
-		t.Fatalf("an endpoint with an unknown transport: %v", err)
+	p, err := NewPipeline(cfg)
+	if err != nil {
+		t.Fatalf("the collector does not load: %v", err)
+	}
+	f.pipe = p
+	req := pipeRun("sel.id", "")
+	req.Run.AssetID = a.AssetID
+	if reply, _ := f.run(t, req); refusalOf(reply) != authz.RefuseAssetNotEnrolled {
+		t.Fatalf("a run on the endpoint: %+v", reply)
+	}
+	if f.runner.count() != 0 {
+		t.Fatal("the runner was called")
+	}
+}
+
+// Every transport C1 knows whose endpoint can pass CheckPath has a case in
+// sharedL4, so its default arm is unreachable; a transport added to C1
+// without one fails here, not in a load (D3, D1 on #547).
+func TestSharedL4CoversEveryTransport(t *testing.T) {
+	want := map[asset.Transport]string{asset.Telnet: "tcp", asset.SSH: "tcp", asset.SNMPv3: "udp", asset.Serial: ""}
+	for _, tr := range asset.Transports {
+		if (asset.Endpoint{ID: "e", Transport: tr, Path: asset.Direct}).CheckPath() != nil {
+			continue // never compared
+		}
+		l4, err := sharedL4(tr)
+		if err != nil {
+			t.Errorf("%s: %v", tr, err)
+			continue
+		}
+		if w, ok := want[tr]; !ok || l4 != w {
+			t.Errorf("%s maps to %q; this test names it %q (known %v)", tr, l4, w, ok)
+		}
+	}
+	if _, err := sharedL4("modbus-tcp"); err == nil {
+		t.Error("an unknown transport maps to a layer")
 	}
 }
