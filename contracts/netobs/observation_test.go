@@ -197,7 +197,10 @@ func TestStoredNode(t *testing.T) {
 		{"resolved_by ip with nothing resolved", CodeConflict, func(o *Observation) {
 			o.Node.SrcAsset, o.Node.DstAsset = AssetUnresolved, AssetUnresolved
 		}},
-		{"ambiguous with an asset", CodeConflict, func(o *Observation) { o.Node.ResolvedBy = "ip-ambiguous" }},
+		{"ambiguous with both ends resolved", CodeConflict, func(o *Observation) { o.Node.ResolvedBy = "ip-ambiguous" }},
+		{"none with an end resolved", CodeConflict, func(o *Observation) {
+			o.Node.ResolvedBy, o.Node.SrcAsset = "none", AssetUnresolved
+		}},
 		{"first sight with no capture", CodeMissing, func(o *Observation) { o.Node.StoredCapture = "" }},
 		{"class without table", CodeConflict, func(o *Observation) { o.Node.FunctionTable = "" }},
 		{"evidence class", CodeForm, func(o *Observation) { o.Node.EvidenceClass = "lab" }},
@@ -226,6 +229,19 @@ func TestStoredNode(t *testing.T) {
 	ok.Function.SA, ok.Node.DNP3NoSA = SANone, ptr(true)
 	if err := ok.ValidateStored(); err != nil {
 		t.Errorf("an unchallenged operate with dnp3_no_sa: %v", err)
+	}
+	// Each end resolves on its own: an ambiguous end beside a resolved one
+	// keeps the resolved end's asset (D1 in D4-70, D3 on #553).
+	for name, ends := range map[string][2]string{
+		"ambiguous src, resolved dst": {AssetUnresolved, fxAsset},
+		"resolved src, ambiguous dst": {fxMaster, AssetUnresolved},
+		"both ambiguous":              {AssetUnresolved, AssetUnresolved},
+	} {
+		o := fxStored()
+		o.Node.ResolvedBy, o.Node.SrcAsset, o.Node.DstAsset = "ip-ambiguous", ends[0], ends[1]
+		if err := o.ValidateStored(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
@@ -462,6 +478,22 @@ func TestFrameTSFitsPcap(t *testing.T) {
 		}
 		if !ok && !slices.Contains(got, CodeRange) {
 			t.Errorf("%s: got %v, want range", ts, got)
+		}
+	}
+}
+
+// TestWireLenBound: captured_len <= wire_len <= MaxWireLen, or range (D3 on
+// #553, D1 in D4-70).
+func TestWireLenBound(t *testing.T) {
+	for wire, ok := range map[int]bool{MaxWireLen: true, MaxWireLen + 1: false, MaxFrameBytes - 1: false} {
+		o := fxFlow()
+		o.Citation.Frames[0].CapturedLen, o.Citation.Frames[0].WireLen = MaxFrameBytes, wire
+		got := Codes(o.Validate())
+		if ok && len(got) > 0 {
+			t.Errorf("wire_len %d: %v", wire, got)
+		}
+		if !ok && !slices.Contains(got, CodeRange) {
+			t.Errorf("wire_len %d: got %v, want range", wire, got)
 		}
 	}
 }

@@ -612,6 +612,10 @@ func (o *Observation) checkNode(c *checker) {
 			c.fail(CodeForm, e.f, "%q is not an asset ID or %s", e.v, AssetUnresolved)
 		}
 	}
+	// Each end resolves on its own (C13 §5, D1 in D4-70): ip-ambiguous
+	// when at least one end's address is shared, so that end is
+	// unresolved and the other may name its asset; ip when an end resolved
+	// and none is ambiguous; none when neither end matched.
 	unresolved := n.SrcAsset == AssetUnresolved && n.DstAsset == AssetUnresolved
 	switch n.ResolvedBy {
 	case "ip":
@@ -621,9 +625,16 @@ func (o *Observation) checkNode(c *checker) {
 		if o.IP == nil {
 			c.fail(CodeConflict, "node.resolved_by", "ip, but the observation has no ip")
 		}
-	case "ip-ambiguous", "none":
+	case "ip-ambiguous":
+		if n.SrcAsset != AssetUnresolved && n.DstAsset != AssetUnresolved {
+			c.fail(CodeConflict, "node.resolved_by", "ip-ambiguous, but both ends resolved")
+		}
+		if o.IP == nil {
+			c.fail(CodeConflict, "node.resolved_by", "ip-ambiguous, but the observation has no ip")
+		}
+	case "none":
 		if !unresolved {
-			c.fail(CodeConflict, "node.resolved_by", "%s, but an end resolved", n.ResolvedBy)
+			c.fail(CodeConflict, "node.resolved_by", "none, but an end resolved")
 		}
 	default:
 		c.fail(CodeForm, "node.resolved_by", "%q is not ip, ip-ambiguous or none", n.ResolvedBy)

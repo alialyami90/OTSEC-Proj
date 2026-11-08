@@ -88,7 +88,9 @@ func (f *CitedFrame) check(c *checker, field string) {
 		c.fail(CodeRange, field+".captured_len", "%d not in [1, %d]", f.CapturedLen, MaxFrameBytes)
 	}
 	// wire_len is larger only for a frame cut at MaxFrameBytes.
-	if f.WireLen < f.CapturedLen || (f.WireLen > f.CapturedLen && f.CapturedLen != MaxFrameBytes) {
+	if f.WireLen < f.CapturedLen || f.WireLen > MaxWireLen {
+		c.fail(CodeRange, field+".wire_len", "%d not in [captured_len %d, %d]", f.WireLen, f.CapturedLen, MaxWireLen)
+	} else if f.WireLen > f.CapturedLen && f.CapturedLen != MaxFrameBytes {
 		c.fail(CodeConflict, field+".wire_len", "%d with captured_len %d: a frame is cut only at %d", f.WireLen, f.CapturedLen, MaxFrameBytes)
 	}
 	c.sha256(field+".sha256", f.SHA256)

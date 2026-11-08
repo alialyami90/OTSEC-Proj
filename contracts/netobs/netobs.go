@@ -25,6 +25,9 @@ const (
 	MaxCitedFrames = 8
 	// MaxFrameBytes is the most bytes of one frame the sensor stores.
 	MaxFrameBytes = 2048
+	// MaxWireLen bounds a frame's wire_len, so the stored capture's
+	// 32-bit orig_len can't wrap (C13 §3.2, §10; D3 on #553).
+	MaxWireLen = 256 << 10
 	// MaxTextBytes is the most original bytes a Text keeps, and
 	// MaxTextEscaped the longest escaped value.
 	MaxTextBytes   = 256

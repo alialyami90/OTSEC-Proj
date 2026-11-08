@@ -87,7 +87,7 @@ func worstObservations(t testing.TB) []*Observation {
 				data[r.Offset] = RedactionByte
 			}
 			n := int64(1<<62) + int64(i)
-			o.Citation.Frames = append(o.Citation.Frames, CitedFrame{N: n, CapturedLen: MaxFrameBytes, WireLen: 1 << 30,
+			o.Citation.Frames = append(o.Citation.Frames, CitedFrame{N: n, CapturedLen: MaxFrameBytes, WireLen: MaxWireLen,
 				SHA256: hash(data), LAN: "a", Redactions: rs})
 			o.Frames = append(o.Frames, Frame{N: n, TS: "2026-11-07T10:00:00.123456789Z", Data: base64.StdEncoding.EncodeToString(data)})
 		}
