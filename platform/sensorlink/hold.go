@@ -181,8 +181,11 @@ type RunRecord struct {
 	// committed: the seq the run's session follows (D1's (A)).
 	AfterSeq uint64 `json:"after_seq,omitempty"`
 	// WindowTaken: a 0.8 result's window tie went to a flow already.
-	WindowTaken bool       `json:"window_taken,omitempty"`
-	Open        []OpenFlow `json:"open"`
+	WindowTaken bool `json:"window_taken,omitempty"`
+	// OpenFlow is the release's Released.OpenFlow, kept so the node's start
+	// repair writes what the live path would (D4's F1 on #584).
+	OpenFlow bool       `json:"open_flow,omitempty"`
+	Open     []OpenFlow `json:"open"`
 }
 
 // Release is a released record and its tie, if any.
@@ -696,6 +699,7 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 		evicted += h.addOpen(o)
 	}
 	applied := true
+	rec.OpenFlow = h.repoint != nil
 	if len(rel) > 0 {
 		if err := h.save(ctx, rec); err != nil {
 			h.open, applied = prev, false
@@ -711,6 +715,7 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	if len(remaining) > 0 {
 		rec.State = HoldWaiting
 	}
+	rec.OpenFlow = applied && h.repoint != nil
 	// Counted on failure; a restart finds the releasing record and checks
 	// the batch.
 	if err := h.save(ctx, rec); err != nil && len(rel) == 0 {
@@ -720,7 +725,8 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 		h.stats.OpenEvicted += evicted
 		h.stats.Tied += h.pendingTied
 	}
-	h.repointed = applied && h.repoint != nil
+	rec.OpenFlow = applied && h.repoint != nil
+	h.repointed = rec.OpenFlow
 	h.pending, h.pendingTied, h.repoint = nil, 0, nil
 	if rec.State == HoldReleased {
 		delete(h.runs, rec.Run.RequestID)

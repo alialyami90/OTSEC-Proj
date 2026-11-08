@@ -896,4 +896,15 @@ func TestHoldRepointSaveFails(t *testing.T) {
 	if c := g.committed(); c[len(c)-1].invocation != inv1 {
 		t.Errorf("after a restart the entry ties to %+v", c[len(c)-1])
 	}
+
+	// With a batch, the releasing record fails and the final one saves: the
+	// saved record says the re-point did not happen (D4's F1 on #584).
+	g.dispatch("req-3")
+	g.send(g.obs("start", 40003, 10*time.Minute)) // outside the session: released untied, in the batch
+	g.failSave = 1
+	got, err = g.l.Result(bg, "req-3", session09("8b3e4d10-5f6c-4e30-9d9c-4b2a0f7e3c52", 40001, 2*time.Minute))
+	last := g.saved[len(g.saved)-1]
+	if err != nil || got.OpenFlow || last.Run.RequestID != "req-3" || last.OpenFlow {
+		t.Errorf("result %+v, %v; saved record %s open_flow %v", got, err, last.Run.RequestID, last.OpenFlow)
+	}
 }

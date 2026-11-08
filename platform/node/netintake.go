@@ -109,8 +109,18 @@ type intakeRecords struct {
 	newest c5.Seq // the series' newest record, which is never removed
 	// removing is the alarm raised for a removal that failed.
 	removing bool
-	// repaired and repairRefused count the start repair's runs.
-	repaired, repairRefused uint64
+	// repaired and repairRefused count the start repair's runs, and
+	// sessionMissing the runs whose collection.run has no session: their
+	// dispatch held nothing, or their result could not be released (D1 in
+	// D4-74).
+	repaired, repairRefused, sessionMissing uint64
+}
+
+// missing counts a run whose collection.run has no session.
+func (ir *intakeRecords) missing() {
+	ir.mu.Lock()
+	ir.sessionMissing++
+	ir.mu.Unlock()
 }
 
 func (ir *intakeRecords) note(seq c5.Seq, d intakeDoc) {
@@ -261,7 +271,8 @@ type heldRun struct{ run sensorlink.HoldRun }
 
 // dispatchHold starts holding the run's endpoint, before the request is
 // sent. It returns nil when the hold doesn't watch the run. A save that
-// fails holds nothing: the run's flows commit untied, counted in status.
+// fails holds nothing: the run's flows commit untied, its collection.run
+// has no session, and both are counted in status.
 func (s *Scheduler) dispatchHold(ctx context.Context, col Collection, requestID string) *heldRun {
 	in := s.rt.sensor
 	if in == nil {
@@ -272,7 +283,10 @@ func (s *Scheduler) dispatchHold(ctx context.Context, col Collection, requestID 
 		return nil
 	}
 	h := &heldRun{run: sensorlink.HoldRun{RequestID: requestID, AssetID: col.AssetID, Endpoint: ep, L4: l4}}
-	_ = in.link.Dispatch(ctx, h.run)
+	if err := in.link.Dispatch(ctx, h.run); err != nil {
+		s.rt.intake.missing()
+		return nil
+	}
 	return h
 }
 
@@ -305,6 +319,7 @@ func (s *Scheduler) resultHold(ctx context.Context, h *heldRun, invocationID str
 	}
 	rel, err := s.rt.sensor.link.Result(ctx, h.run.RequestID, sess)
 	if err != nil {
+		s.rt.intake.missing()
 		return nil
 	}
 	return sessionDetails(h.run, sess, rel)
@@ -480,7 +495,9 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 	var todo []string
 	for _, id := range slices.Sorted(maps.Keys(ir.runs)) {
 		run := ir.runs[id]
-		if run.newest.State == sensorlink.HoldReleased && run.newest.Session != nil && !run.recorded {
+		// Released, or waiting for a failed dial's end: either way its
+		// session is final (D3's R3 on #584).
+		if st := run.newest.State; (st == sensorlink.HoldReleased || st == sensorlink.HoldWaiting) && run.newest.Session != nil && !run.recorded {
 			todo = append(todo, id)
 		}
 	}
@@ -510,10 +527,7 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 			continue
 		}
 		s := *rec.Session
-		openFlow := slices.ContainsFunc(rec.Open, func(o sensorlink.OpenFlow) bool {
-			return o.InvocationID == s.InvocationID && o.Key == sensorlink.FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}
-		})
-		d := sessionDetails(rec.Run, s, sensorlink.Released{AfterSeq: r.lastSeq(ctx, NetObservationStream(r.cfg.NetworkSensor.SensorID)), OpenFlow: openFlow})
+		d := sessionDetails(rec.Run, s, sensorlink.Released{AfterSeq: r.lastSeq(ctx, NetObservationStream(r.cfg.NetworkSensor.SensorID)), OpenFlow: rec.OpenFlow})
 		d["asset_id"], d["request_id"], d["invocation_id"] = rec.Run.AssetID, id, s.InvocationID
 		d["schedule"], d["operation"] = allowed.Actor.ID, allowed.OperationID
 		d["status"], d["events"], d["repaired_from"] = RunNotCommitted, "0", RepairedFromIntake

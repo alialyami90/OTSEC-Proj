@@ -222,8 +222,10 @@ func TestIntakeDocuments(t *testing.T) {
 // crashAfterRelease leaves the node as a crash between a run's release and
 // its collection.run would: the run dispatched, its allowed
 // collector.request committed (when allowed), its own flow held and its
-// result released, and nothing of the result committed.
-func crashAfterRelease(t *testing.T, r *Runtime, allowed bool) string {
+// result released, and nothing of the result committed. With dial, a
+// failed dial from another local port is still open at the result, so the
+// run's record is left waiting for its end (D3's R3 on #584).
+func crashAfterRelease(t *testing.T, r *Runtime, allowed, dial bool) string {
 	t.Helper()
 	s := newScheduler(t, r, &fakeCollector{})
 	id := s.newID()
@@ -239,9 +241,19 @@ func crashAfterRelease(t *testing.T, r *Runtime, allowed bool) string {
 		}
 		s.appendAudit(bg, relayID, []c5.Record{rec})
 	}
-	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+	seq := 1
+	if dial {
+		d := ownFlow(seq)
+		*d.IP.Sport = 49151
+		if err := r.ServeSensor(bg, sensorChannel(t, d)); err != nil {
+			t.Fatal(err)
+		}
+		seq++
+	}
+	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(seq))); err != nil {
 		t.Fatal(err)
 	}
+	seq++
 	res, err := adapter.DecodeResult(readFile(t, ok09Result))
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +266,7 @@ func crashAfterRelease(t *testing.T, r *Runtime, allowed bool) string {
 	}
 	// An observation after the release, so the repair's after_seq, the
 	// head at the repair, is not the release's (D6's mutant).
-	other := ownFlow(2)
+	other := ownFlow(seq)
 	other.IP.Src = "192.0.2.99" // not the node's, to the relay
 	if err := r.ServeSensor(bg, sensorChannel(t, other)); err != nil {
 		t.Fatal(err)
@@ -272,7 +284,7 @@ func crashAfterRelease(t *testing.T, r *Runtime, allowed bool) string {
 func TestIntakeStartRepair(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	id := crashAfterRelease(t, r, true)
+	id := crashAfterRelease(t, r, true, false)
 	if runs := healthRuns(t, r); len(runs) != 0 {
 		t.Fatalf("%d collection.run records before the crash", len(runs))
 	}
@@ -294,7 +306,9 @@ func TestIntakeStartRepair(t *testing.T) {
 	if _, docs := intakeDocs(t, r); len(docs) != 1 || obsHead <= docs[0].AfterSeq {
 		t.Fatalf("observation head %d, hold records %+v", obsHead, docs)
 	}
-	if err != nil || !ok || got.InvocationID != okInvocation || !got.Connected || got.AfterSeq != obsHead || got.Local.String() != "192.0.2.10:49152" {
+	// Its own tied flow is still open in the table, which is not an open
+	// flow it reused (D4's F1 on #584).
+	if err != nil || !ok || got.InvocationID != okInvocation || !got.Connected || got.AfterSeq != obsHead || got.Local.String() != "192.0.2.10:49152" || got.OpenFlow {
 		t.Fatalf("repaired session: %+v, %v, %v", got, ok, err)
 	}
 	if f := st.Snapshot("x").Sensor; f == nil || f.Repaired != 1 || f.RepairRefused != 0 {
@@ -326,7 +340,7 @@ func TestIntakeStartRepair(t *testing.T) {
 func TestIntakeRepairRefused(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
-	crashAfterRelease(t, r, false)
+	crashAfterRelease(t, r, false, false)
 	r.Close()
 
 	r, st, _ := start(t, c, dir)
@@ -474,7 +488,9 @@ func TestIntakeCeilingRefuses(t *testing.T) {
 		}
 	}
 	s := newScheduler(t, r, &fakeCollector{})
-	s.dispatchHold(bg, c.Schedule[0], s.newID())
+	if h := s.dispatchHold(bg, c.Schedule[0], s.newID()); h != nil {
+		t.Fatal("a dispatch whose record was refused holds the run")
+	}
 	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +500,114 @@ func TestIntakeCeilingRefuses(t *testing.T) {
 		f := st.Snapshot("x").Sensor
 		t.Fatalf("the refused run's flow: %+v; status %+v", obs, f)
 	}
-	if f := st.Snapshot("x").Sensor; f == nil || f.Hold.CheckpointFailures != 1 || countAlarms(st, AlarmIntakeCheckpointFailed) != 1 {
+	if f := st.Snapshot("x").Sensor; f == nil || f.Hold.CheckpointFailures != 1 || f.SessionMissing != 1 || countAlarms(st, AlarmIntakeCheckpointFailed) != 1 {
+		t.Fatalf("status: %+v", f)
+	}
+}
+
+// D3's R3 on #584: a run whose result left a failed dial waiting for its
+// end is saved waiting, with its session. A crash before its collection.run
+// is repaired at the next start, as a released run's is.
+func TestIntakeStartRepairWaiting(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	id := crashAfterRelease(t, r, true, true)
+	if _, docs := intakeDocs(t, r); docs[len(docs)-1].State != sensorlink.HoldWaiting {
+		t.Fatalf("the run's record is %s, not waiting", docs[len(docs)-1].State)
+	}
+	r.Close()
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	runs := healthRuns(t, r)
+	if len(runs) != 1 {
+		t.Fatalf("%d collection.run records after the repair", len(runs))
+	}
+	if e, _ := event.Decode(runs[0].Event); e.Health.Details["request_id"] != id || e.Health.Details["repaired_from"] != RepairedFromIntake {
+		t.Fatalf("repaired collection.run: %v", e.Health.Details)
+	}
+	if f := st.Snapshot("x").Sensor; f == nil || f.Repaired != 1 {
+		t.Fatalf("status: %+v", f)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	if f := st.Snapshot("x").Sensor; len(healthRuns(t, r)) != 1 || f == nil || f.Repaired != 0 || f.RepairRefused != 0 {
+		t.Fatalf("a second restart: %d collection.run records, status %+v", len(healthRuns(t, r)), f)
+	}
+}
+
+// D4's F1 on #584: the repair writes the open_flow the live path would. Run
+// A's own flow is still open when run B reuses its 5-tuple, so B's result
+// re-points the entry and B is an open-flow session; A is not. Both crash
+// before their collection.run, and the repair gives A false and B true.
+func TestIntakeStartRepairOpenFlow(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	a := crashAfterRelease(t, r, true, false)
+	s := newScheduler(t, r, &fakeCollector{})
+	b := s.newID()
+	if s.dispatchHold(bg, c.Schedule[0], b) == nil {
+		t.Fatal("the hold doesn't watch run B")
+	}
+	rec, err := s.requestRecord(r.cfg.runRequest(0, b), audit.OutcomeAllowed, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.appendAudit(bg, relayID, []c5.Record{rec})
+	res, err := adapter.DecodeResult(readFile(t, ok09Result))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := sensorlink.Session{InvocationID: "7a2d3c0f-4e5b-4d2f-8c8b-3a1f9e6d2b41", Connected: true, Local: netip.MustParseAddrPort(res.Session.LocalAddr)}
+	sess.StartedAt, _ = time.Parse(time.RFC3339Nano, res.StartedAt)
+	sess.EndedAt, _ = time.Parse(time.RFC3339Nano, res.EndedAt)
+	if rel, err := r.sensor.link.Result(bg, b, sess); err != nil || !rel.OpenFlow {
+		t.Fatalf("run B's result: %+v, %v", rel, err)
+	}
+	r.Close()
+
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	got := map[string]bool{}
+	for _, st := range healthRuns(t, r) {
+		e, _ := event.Decode(st.Event)
+		rs, ok, err := runSessionOf(st)
+		if err != nil || !ok {
+			t.Fatalf("%v, %v", ok, err)
+		}
+		got[e.Health.Details["request_id"]] = rs.OpenFlow
+	}
+	if len(got) != 2 || got[a] || !got[b] {
+		t.Fatalf("open_flow by run: %v (A %s, B %s)", got, a, b)
+	}
+}
+
+// A result the hold can't release leaves its collection.run with no
+// session, counted as runs_session_missing (D1 in D4-74): here the run's
+// hold gave way at its deadline, and the observation stream's head can't
+// be read when its result comes.
+func TestIntakeResultFailsCounted(t *testing.T) {
+	c, _ := holdConfig(t)
+	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
+	r, st := g.start()
+	defer r.Close()
+	s := newScheduler(t, r, &fakeCollector{})
+	h := s.dispatchHold(bg, c.Schedule[0], s.newID())
+	if h == nil {
+		t.Fatal("the hold doesn't watch the run")
+	}
+	g.advance(sensorlink.HoldRunLimit + netobs.DefaultTieGraceS*time.Second + time.Second)
+	r.Tick(bg) // the hold gives way at its deadline
+	d := r.find(NetworkDB)
+	r.state.RLock()
+	db := d.db
+	r.state.RUnlock()
+	db.Close()
+	if got := s.resultHold(bg, h, okInvocation, sessionResult{Connected: true, StartedAt: "2026-11-01T00:00:00Z", EndedAt: "2026-11-01T00:00:01Z"}); got != nil {
+		t.Fatalf("session details with no head: %v", got)
+	}
+	r.Tick(bg)
+	if f := st.Snapshot("x").Sensor; f == nil || f.SessionMissing != 1 {
 		t.Fatalf("status: %+v", f)
 	}
 }

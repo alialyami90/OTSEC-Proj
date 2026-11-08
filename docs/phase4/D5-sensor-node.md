@@ -168,7 +168,7 @@ Status gets a `sensor` section, written as the other sections are, and `otsec he
 - the restart count since the node started, and the open coverage gap, if any;
 - the oldest file in the capture ring;
 - the C-11 interface check (§7): `ok`, or what is bound;
-- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), and the start repair's runs (`runs_repaired`, `runs_repair_refused`) (D4-72, `D5-c5-0.9.md` §8).
+- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8).
 
 Status never shows packet bytes or device text, and banners are shown bounded and quoted (D3).
 

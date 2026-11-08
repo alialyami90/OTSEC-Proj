@@ -103,6 +103,10 @@ type SensorStatus struct {
 	Hold          sensorlink.HoldStats `json:"hold"`
 	Repaired      uint64               `json:"runs_repaired"`
 	RepairRefused uint64               `json:"runs_repair_refused"`
+	// SessionMissing counts the runs the hold watched whose collection.run
+	// has no session: the dispatch's record was not saved, or the result
+	// could not be released (D1 in D4-74).
+	SessionMissing uint64 `json:"runs_session_missing"`
 	// Heartbeat is the last heartbeat of the run: the sensor's own
 	// report of its totals and time, which the node checks only for
 	// monotonic counters (C13 section 6, AP-36 (2)).
@@ -328,7 +332,7 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 		LastCommittedSeq: st.LastCommittedSeq, RunChanges: st.RunChanges, SeqGaps: st.SeqGaps, FramesTooLarge: st.FramesTooLarge,
 		Committed: st.Committed, Refused: st.Refused, Unreachable: in.unreachable, Hold: st.Hold, Dropped: now.reason, DroppedByAsset: now.asset, DropsSince: in.since, DropsWritten: in.writtenAt}
 	r.intake.mu.Lock()
-	s.Repaired, s.RepairRefused = r.intake.repaired, r.intake.repairRefused
+	s.Repaired, s.RepairRefused, s.SessionMissing = r.intake.repaired, r.intake.repairRefused, r.intake.sessionMissing
 	r.intake.mu.Unlock()
 	if h := st.Heartbeat; h != nil {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
