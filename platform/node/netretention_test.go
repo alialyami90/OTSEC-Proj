@@ -534,18 +534,26 @@ func TestNetRetentionBackwardStepRestart(t *testing.T) {
 			g.setWall(restored) // restored, and started again
 			r, st = g.start()
 			defer r.Close()
-			starts := time.Duration(2) // between the commit and the end: this start and the one before
+			// Between the commit and the pass, only the start that restored
+			// the clock counts: the one before held the bound at the recorded
+			// cutoff, the wall cutoff being behind it (D6 on #563).
+			starts := time.Duration(1)
+			bound := R/2 - starts*time.Hour
 			since := time.Duration(0)
-			for ; since < R/2-starts*time.Hour; since += 6 * time.Hour {
-				if s := st.Snapshot("x").NetRetention; s.Cursor >= 2 {
-					t.Fatalf("seq 2 passed %s after its commit (monotonic): %+v", since, s)
+			step := func(d time.Duration) {
+				t.Helper()
+				g.advance(d)
+				r.Tick(bg)
+				since += d
+				if s := st.Snapshot("x").NetRetention; since <= bound && s.Cursor >= 2 {
+					t.Fatalf("seq 2 passed %s after its commit (monotonic), within %s: %+v", since, bound, s)
 				}
-				g.advance(6 * time.Hour)
-				r.Tick(bg)
 			}
-			for ; since < R/2+time.Hour; since += time.Hour {
-				g.advance(time.Hour)
-				r.Tick(bg)
+			for since+6*time.Hour <= bound {
+				step(6 * time.Hour)
+			}
+			for since < R/2+time.Hour { // hourly near the bound, and past it
+				step(time.Hour)
 			}
 			if s := st.Snapshot("x").NetRetention; s.Cursor != 2 {
 				t.Fatalf("seq 2 not passed %s after its commit: %+v", since, s)
