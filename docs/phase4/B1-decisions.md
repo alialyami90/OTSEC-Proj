@@ -1312,5 +1312,5 @@ D1, on #571 and #575 to #578, with each owner's and reviewer's word through the 
   - **D5, annotation follow-up:** `sensor-unreachable`, plus D4-72's list.
   - **D4:** the root cause of `TestUnknownShareDropSpendsNoBudget`'s failure under parallel load (the budget fell by 843 tokens), as its own PR, with the fix explaining the 843.
   - **D6:** after #575, pins `MaxDetectorWindows` 96, `MaxDetectorWindowBytes` 12,288, `MaxTakenSessions` 128, `MaxDetectorCheckpointBytes` 1,354,752 and the other own-session bounds by value. `sensor-unreachable`'s rows above.
-  - **D3:** in `docs/threat-model.md`, AP-35's residuals above (injection on a live or just-lost open tuple, the midstream reply, and a forger who keeps an entry alive into the next SNMPv3 reuse) and AP-36 (b)'s silent-sensor backstop.
+  - **D3:** in `docs/threat-model.md`, AP-35's residuals above (injection on a live or just-lost open tuple, the midstream reply, and a forger who keeps an entry alive into the next SNMPv3 reuse). AP-36 (b)'s silent-sensor backstop is already on main, from #574.
   - **Sensor brief (D1, after ADR-0009):** the sensor-link exclusion, D3's PRP discard rule, D4's offline resume, and the C13 "MAC changed within a flow" signal as a candidate for the next minor.
