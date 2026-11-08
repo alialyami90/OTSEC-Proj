@@ -463,7 +463,7 @@ func TestLearnerOverflowSaturates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if l.period.Overflow != netobs.MaxOverflow {
-		t.Fatalf("overflow %d, want %d", l.period.Overflow, netobs.MaxOverflow)
+		t.Fatalf("overflow %d, want %d", l.period.Overflow, int64(netobs.MaxOverflow))
 	}
 	if _, err := l.Draft(); err != nil {
 		t.Fatal(err)
@@ -822,6 +822,19 @@ func TestLearnerUDPStart(t *testing.T) {
 	if len(l.held) != 1 || len(l.pairs) != 2 {
 		t.Fatalf("TCP start: held %d, pairs %d", len(l.held), len(l.pairs))
 	}
+	// D6's U4, in 2a: with both addresses held and no room for the pair,
+	// a UDP start learns nothing and counts once in overflow.
+	room, _ := NewLearner(lxConfig())
+	if err := room.Observe(1, lxEnd(t, "192.0.2.10", "192.0.2.20", 1, false)); err != nil {
+		t.Fatal(err)
+	}
+	room.lists[listPairs].bytes, room.lists[listPairs].n = netobs.MaxBaselineBytes-room.size(), 1
+	if err := room.Observe(2, lxUDP(t, "192.0.2.10", 40000, "192.0.2.20", 123)); err != nil {
+		t.Fatal(err)
+	}
+	if len(room.pairs) != 0 || room.period.Overflow != 1 {
+		t.Fatalf("no room for the pair: pairs %d, overflow %d", len(room.pairs), room.period.Overflow)
+	}
 	// With no room for its new address, a UDP start learns no pair.
 	full, _ := NewLearner(lxConfig())
 	full.lists[listPairs].bytes, full.lists[listPairs].n = netobs.MaxBaselineBytes-full.size(), 1
@@ -857,7 +870,7 @@ func TestLearnerHoldEdges(t *testing.T) {
 		t.Fatalf("no sport: %v, held %d, overflow %d", err, len(l.held), l.period.Overflow)
 	}
 	fn := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000)
-	fn.IP.Sport = ptr(1024) // the master on a port below the server's
+	fn.IP.Sport, fn.Direction = ptr(1024), netobs.DirectionMidstream // the master on a port below the server's, midstream (D6's M1, in 2a)
 	if err := l.Observe(5, fn); err != nil {
 		t.Fatal(err)
 	}

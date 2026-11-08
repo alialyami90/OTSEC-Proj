@@ -67,14 +67,14 @@ type Param struct {
 // Cite is one flow's citation in an alert: a capture and up to
 // MaxAlertFramesPerFlow frames, shown as "<capture_id> <n>=<sha256> ...".
 type Cite struct {
-	CaptureID string
-	Frames    []CiteFrame
+	CaptureID string      `json:"capture_id"`
+	Frames    []CiteFrame `json:"frames"`
 }
 
 // CiteFrame is one cited frame.
 type CiteFrame struct {
-	N      int64
-	SHA256 string
+	N      int64  `json:"n"`
+	SHA256 string `json:"sha256"`
 }
 
 // Alert is a network alert, carried as a C4 telemetry-health event of type
