@@ -150,6 +150,9 @@ func TestNetworkSensorRefusals(t *testing.T) {
 		{"evidence_class absent", func(nc *nodeconfigtest.Config) { delete(nc.NetworkSensor, "evidence_class") }, "network_sensor.evidence_class"},
 		{"outage_hours 0", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["outage_hours"] = 0 }, "network_sensor.outage_hours"},
 		{"outage_hours negative", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["outage_hours"] = -1 }, "network_sensor.outage_hours"},
+		{"outage_hours 721", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["outage_hours"] = MaxSyslogOutageHours + 1
+		}, "network_sensor.outage_hours"},
 		{"unknown field", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["interfaces"] = []string{"eth1"} }, "interfaces"},
 		{"no observation quota", func(nc *nodeconfigtest.Config) {
 			delete(nc.Store.Quotas, "network-observation")
@@ -179,6 +182,12 @@ func TestNetworkSensorRefusals(t *testing.T) {
 	nc.NetworkSensor = sensorSection()
 	if _, err := ParseConfig(nc.Bytes()); err != nil {
 		t.Fatalf("the base case: %v", err)
+	}
+	for _, h := range []int{1, MaxSyslogOutageHours} {
+		nc.NetworkSensor["outage_hours"] = h
+		if _, err := ParseConfig(nc.Bytes()); err != nil {
+			t.Fatalf("outage_hours %d: %v", h, err)
+		}
 	}
 	nc.NetworkSensor["evidence_class"] = "device-observed"
 	if _, err := ParseConfig(nc.Bytes()); !errors.Is(err, ErrDeviceObserved) {

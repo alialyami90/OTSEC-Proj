@@ -73,8 +73,11 @@ func (c *Config) checkNetworkSensor(fail func(format string, args ...any)) {
 	default:
 		fail("network_sensor.evidence_class %q is not %s", s.EvidenceClass, asset.Simulated)
 	}
-	if s.OutageHours < 1 {
-		fail("network_sensor.outage_hours %d is below 1: the unresolved budget refills over it", s.OutageHours)
+	if s.OutageHours < 1 || s.OutageHours > MaxSyslogOutageHours {
+		// The budget refills over it, so 0 has no rate, and a typo far above
+		// any planned outage would starve unresolved observations (D1 on
+		// #550). The bound is syslog_outage_hours's.
+		fail("network_sensor.outage_hours %d not in [1, %d]: the unresolved budget refills over it", s.OutageHours, MaxSyslogOutageHours)
 	}
 }
 
