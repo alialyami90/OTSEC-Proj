@@ -167,7 +167,7 @@ func TestBaselineRules(t *testing.T) {
 	at := fxBaseline()
 	at.Period.Overflow = MaxOverflow
 	if MaxOverflow != 1<<53-1 || at.Validate() != nil {
-		t.Errorf("overflow at MaxOverflow (%d): %v", MaxOverflow, at.Validate())
+		t.Errorf("overflow at MaxOverflow (%d): %v", int64(MaxOverflow), at.Validate())
 	}
 	enc, _ := fxBaseline().Encode()
 	if !bytes.Contains(enc, []byte(`,"overflow":0}`)) || IsCanonical(bytes.Replace(enc, []byte(`,"overflow":0`), nil, 1)) {
