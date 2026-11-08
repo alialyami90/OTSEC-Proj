@@ -1209,6 +1209,7 @@ D1, on #542 and #545 to #553, with each owner's and reviewer's word through the 
   - `alert_retention_days` is in [1, 3650]. It is required when the node has no forwarding target, and refused when it has one, so no setting is ignored in silence.
 - **CI misses.**
   - The Windows Syslog rig's 15 s Serve limit was missed by 0.9 s once (#548, attempt 1), and the re-run passed. D5 opens an issue beside #230 if it recurs.
+  - A second Windows failure, on #553's superseded head e23f5469 (`go (windows-latest)`, job 128600914702), is not diagnosed: the failing package sorts before `platform/node`, its log is past the readable tail, and the next head b89a8aab passed. D5 commented on #553 and opens an issue beside #230 if it recurs.
   - One Linux miss class: `TestB6HeldLinksDialAndBindNothing`'s listener port came from `:0`, inside the ephemeral range, so a parallel connection could take it (#545, #554). D6's #556 moves it below the range.
 - **Test follow-ups, not blocking.**
   - D3 adds an accepted retention row exactly on the wall bound (#554).
