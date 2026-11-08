@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -241,8 +242,8 @@ func TestSensorDropEventFits(t *testing.T) {
 // and within three quarters of it as the observation event does.
 func TestSensorAlertDropEventFits(t *testing.T) {
 	d := dropCounts{map[string]uint64{sensorlink.DropClassFull: math.MaxUint64, sensorlink.DropRecordCap: math.MaxUint64}, map[string]uint64{}}
-	longest := netobs.RuleOwnSessionOutsideRecord
-	for _, r := range []netobs.Rule{netobs.RuleNodeAddressSpoofed, netobs.RuleOwnSessionUnseen, netobs.RuleUnresolvedAddress} {
+	var longest netobs.Rule
+	for _, r := range netobs.Rules {
 		if len(r) > len(longest) {
 			longest = r
 		}
@@ -274,6 +275,72 @@ func TestSensorAlertDropEventFits(t *testing.T) {
 		t.Fatalf("%d octets (limit %d), %+v, %v: %s", len(msg), syslog.DefaultMaxOctets*3/4, out, err, msg)
 	}
 	t.Logf("worst case: %d octets", len(msg))
+}
+
+// D6's B8 on #597 and D1's ruling: more than SensorDropDetailAssets
+// (rule, asset) pairs, every rule's on the enrolled relay as a spoofed
+// source could land them, plus decoys to unresolved addresses, written at
+// a tick and kept across a clean stop and start. The pairs past the eighth
+// come back in other, and other plus the named pairs equals the totals
+// from before the stop. Desk: the drops are counted through the hook the
+// detector calls, not by a store that refused them.
+func TestSensorAlertDropOtherKept(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	total := uint64(0)
+	for i, rule := range netobs.Rules {
+		for range i + 1 {
+			r.alertDropped(sensorlink.DropClassFull, string(rule)+"."+relayID)
+			total++
+		}
+	}
+	for _, rule := range netobs.Rules[:2] {
+		r.alertDropped(sensorlink.DropRecordCap, string(rule)+"."+netobs.AssetUnresolved)
+		total++
+	}
+	r.tickSensor(bg, false)
+	r.Close()
+	r, st := g.start()
+	defer r.Close()
+	s := st.Snapshot("x").Sensor
+	var named, all uint64
+	for k, n := range s.AlertsDroppedBy {
+		all += n
+		if k != sensorDropOther {
+			named++
+		}
+	}
+	if s.AlertsDroppedBy[sensorDropOther] == 0 || named != SensorDropDetailAssets || all != total ||
+		s.AlertsDropped[sensorlink.DropClassFull]+s.AlertsDropped[sensorlink.DropRecordCap] != total {
+		t.Fatalf("after the restart: by (rule, asset) %v, by reason %v, want a total of %d with %d named", s.AlertsDroppedBy, s.AlertsDropped, total, SensorDropDetailAssets)
+	}
+}
+
+// D6's B14 on #597 and D1's ruling: an alert-class drop-count event is
+// written again a minute after the first when more alerts were dropped,
+// with the higher count, so the written counts are not the live ones.
+// Desk only.
+func TestSensorAlertDropEventRewritten(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	defer r.Close()
+	key := string(netobs.RuleNodeAddressSpoofed) + "." + relayID
+	alertEvents := func() (out []string) {
+		for _, d := range dropEvents(t, r) {
+			if d["class"] == string(c5.ClassNetworkAlert) {
+				out = append(out, d["count"]+"/"+d[key])
+			}
+		}
+		return out
+	}
+	r.alertDropped(sensorlink.DropClassFull, key)
+	r.tickSensor(bg, false)
+	g.advance(time.Minute)
+	r.alertDropped(sensorlink.DropClassFull, key)
+	r.tickSensor(bg, false)
+	if got := alertEvents(); !slices.Equal(got, []string{"1/1", "2/2"}) {
+		t.Fatalf("alert drop events (count/pair) %v", got)
+	}
 }
 
 // A drop-count write that fails raises store-commit-failed on the health
