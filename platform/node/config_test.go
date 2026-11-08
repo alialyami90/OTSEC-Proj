@@ -245,3 +245,16 @@ func FuzzParseConfig(f *testing.F) {
 		}
 	})
 }
+
+// syslog_outage_hours is bounded at 720, as network_sensor.outage_hours is:
+// a typo far above any planned outage is refused (D1 on #550).
+func TestSyslogOutageHoursBound(t *testing.T) {
+	for h, ok := range map[int]bool{MaxSyslogOutageHours: true, MaxSyslogOutageHours + 1: false} {
+		nc := nodeconfigtest.New("site-a-node1", t.TempDir()).AddSEL751(relayID, "127.0.0.1", 2323, 300)
+		nc.SyslogOutageHours = h
+		_, err := ParseConfig(nc.Bytes())
+		if ok != (err == nil) || (!ok && !strings.Contains(err.Error(), "syslog_outage_hours")) {
+			t.Errorf("syslog_outage_hours %d: %v", h, err)
+		}
+	}
+}
