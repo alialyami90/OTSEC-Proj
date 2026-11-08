@@ -108,6 +108,11 @@ type Stats struct {
 	DroppedByAsset map[string]uint64
 	// Heartbeat is the last heartbeat accepted in the run, or nil.
 	Heartbeat *netobs.Heartbeat
+	// Heartbeats counts the heartbeats accepted, in every run, and
+	// HeartbeatMono is the monotonic time the last one was accepted at,
+	// for the node's sensor-unreachable (D4-73).
+	Heartbeats    uint64
+	HeartbeatMono time.Duration
 	// Hold is the intake hold's counts.
 	Hold HoldStats
 }
@@ -236,6 +241,8 @@ func (l *Link) handle(ctx context.Context, b []byte) {
 			return
 		}
 		l.stats.Heartbeat = h
+		l.stats.Heartbeats++
+		l.stats.HeartbeatMono = l.opt.Monotonic()
 		l.mu.Unlock()
 		if degraded(h.Coverage) {
 			l.cmu.Lock()

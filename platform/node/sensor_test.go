@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -275,5 +276,264 @@ func TestSensorDropWriteFails(t *testing.T) {
 	r.tickSensor(bg, false)
 	if ev := dropEvents(t, r); failed() != 2 || len(ev) != 1 || ev[0]["count"] != "1" {
 		t.Fatalf("after the store recovered: %d alarms, %v", failed(), ev)
+	}
+}
+
+// Two refusal reasons raise two sensor-record-refused alarms, one each
+// (D6's M6 on #568). Desk only.
+func TestSensorRefusedAlarmPerReason(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID), sensorFlow(1, sensorID),
+		sensorFlow(2, "11111111-2222-4333-8444-555555555555"))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	s := st.Snapshot("x").Sensor
+	if n := alarms(st, AlarmSensorRecordRefused); n != 2 || s.Refused[sensorlink.RefusedSeq] != 1 || s.Refused[sensorlink.RefusedSensorID] != 1 {
+		t.Fatalf("%d refused alarms, refused %v", n, s.Refused)
+	}
+}
+
+// Status shows the link connected while ServeSensor reads, and not after
+// (D6's M7 on #568). Desk only.
+func TestSensorConnected(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- r.ServeSensor(bg, pr) }()
+	b := sensorChannel(t, sensorFlow(1, sensorID)).Bytes()
+	if _, err := pw.Write(b); err != nil { // returns once Serve has read it
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if s := st.Snapshot("x").Sensor; !s.Connected {
+		t.Fatalf("not connected while serving: %+v", s)
+	}
+	pw.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if s := st.Snapshot("x").Sensor; s.Connected {
+		t.Fatalf("connected after the stream ended: %+v", s)
+	}
+}
+
+// The first write happens at once even at monotonic time 0, which the
+// minute gate alone would hold back (D6's M2 on #568). Desk only.
+func TestSensorFirstWriteAtMonoZero(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	defer r.Close()
+	g.mu.Lock()
+	g.mono = 0
+	g.mu.Unlock()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if ev := dropEvents(t, r); len(ev) != 1 || ev[0]["count"] != "1" {
+		t.Fatalf("events %v", ev)
+	}
+}
+
+// A start finds the last drop counts behind more than one page of other
+// health records, and past sensorDropScanRecords starts from zero, with
+// since the start (D6's M10 and M11 on #568). Desk only.
+func TestSensorDropRestoreScan(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	fill := func(r *Runtime, n int) {
+		t.Helper()
+		for n > 0 {
+			k := min(n, 100)
+			recs := make([]c5.Record, k)
+			for i := range recs {
+				rec, err := r.healthRecord(HealthStream, "store.test", map[string]string{"i": strconv.Itoa(i)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				recs[i] = rec
+			}
+			if _, err := r.Log(HealthStream).AppendBatch(bg, recs); err != nil {
+				t.Fatal(err)
+			}
+			n -= k
+		}
+	}
+	fill(r, 600) // more than one 500-record page
+	r.Close()
+	g.advance(time.Hour)
+	r, st := g.start()
+	s := st.Snapshot("x").Sensor
+	if s.Dropped[sensorlink.DropUnresolvedBudget] != 1 || !s.DropsSince.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("behind 600 records: %+v", s)
+	}
+	fill(r, sensorDropScanRecords)
+	r.Close()
+	g.advance(time.Hour)
+	r, st = g.start()
+	defer r.Close()
+	if s := st.Snapshot("x").Sensor; s.Dropped[sensorlink.DropUnresolvedBudget] != 0 || !s.DropsSince.Equal(g.now()) {
+		t.Fatalf("behind %d records: %+v", sensorDropScanRecords+600, s)
+	}
+}
+
+// sensorHeartbeat is a heartbeat of sensorRun.
+func sensorHeartbeat(seq int) *netobs.Heartbeat {
+	return &netobs.Heartbeat{Schema: netobs.Identifier, Type: netobs.TypeHeartbeat, SensorID: sensorID, RunID: sensorRun,
+		Seq: strconv.Itoa(seq), AtUTC: "2026-11-07T10:00:10.000000Z", Coverage: sensorFlow(1, sensorID).Coverage,
+		Counters: netobs.Counters{Packets: uint64(seq), Bytes: uint64(seq) * 90}, InterfaceCheck: "ok"}
+}
+
+// unreachable is the sensor-unreachable alarms raised and status's flag.
+func unreachable(r *Runtime, st *Status) (int, bool) {
+	r.tickSensor(bg, false)
+	return alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable
+}
+
+// sensor-unreachable on the node's monotonic clock (D4-73): it is raised
+// at SensorUnreachableAfter (60 s) exactly, so not at 59 s from the start
+// and raised by 61 s, with no heartbeat ever; once only; and cleared by a
+// heartbeat. Desk only.
+func TestSensorUnreachable(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	step := func(d time.Duration, wantN int, wantFlag bool) {
+		t.Helper()
+		g.advance(d)
+		if n, f := unreachable(r, st); n != wantN || f != wantFlag {
+			t.Fatalf("at mono %s: %d alarms, unreachable %v; want %d, %v", g.monoNow(), n, f, wantN, wantFlag)
+		}
+	}
+	step(59*time.Second, 0, false)
+	step(2*time.Second, 1, true)
+	step(120*time.Second, 1, true) // once
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorHeartbeat(1))); err != nil {
+		t.Fatal(err)
+	}
+	step(0, 1, false) // cleared by the heartbeat
+	step(59*time.Second, 1, false)
+	step(2*time.Second, 2, true) // a new quiet stretch
+}
+
+// A connect never resets the timer (D3's S1, D1 in D4-73): reconnecting
+// every 30 s for 120 s with no heartbeat raises once, at 61 s after the
+// last heartbeat, and the flag stays until a heartbeat. Desk only.
+func TestSensorUnreachableReconnects(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorHeartbeat(1))); err != nil {
+		t.Fatal(err)
+	}
+	reconnect := func() {
+		t.Helper()
+		if err := r.ServeSensor(bg, sensorChannel(t)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		advance   time.Duration
+		reconnect bool
+		n         int
+	}{{30 * time.Second, true, 0}, {29 * time.Second, false, 0}, {time.Second, true, 1}, {time.Second, false, 1},
+		{29 * time.Second, true, 1}, {30 * time.Second, true, 1}} {
+		g.advance(c.advance)
+		if c.reconnect {
+			reconnect()
+		}
+		if n, f := unreachable(r, st); n != c.n || f != (c.n > 0) {
+			t.Fatalf("at %s after the heartbeat: %d alarms, unreachable %v; want %d", g.monoNow()-time.Minute, n, f, c.n)
+		}
+	}
+}
+
+// (d): the wall clock moves nothing. A forward wall jump of an hour with
+// 10 s of monotonic time raises nothing; a backward wall step with 61 s of
+// monotonic time still raises. Desk only.
+func TestSensorUnreachableWallSteps(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	g.mu.Lock()
+	g.wall, g.mono = g.wall.Add(time.Hour), g.mono+10*time.Second
+	g.mu.Unlock()
+	if n, f := unreachable(r, st); n != 0 || f {
+		t.Fatalf("a wall jump raised it: %d, %v", n, f)
+	}
+	g.mu.Lock()
+	g.wall, g.mono = g.wall.Add(-3*time.Hour), g.mono+51*time.Second
+	g.mu.Unlock()
+	if n, f := unreachable(r, st); n != 1 || !f {
+		t.Fatalf("a backward wall step held it back: %d, %v", n, f)
+	}
+}
+
+// The quiet stretch runs from the last accepted heartbeat, not from the
+// connect before it. Desk only.
+func TestSensorUnreachableFromHeartbeat(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- r.ServeSensor(bg, pr) }()
+	if _, err := pw.Write(sensorChannel(t, sensorHeartbeat(1)).Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	g.advance(40 * time.Second)
+	if _, err := pw.Write(sensorChannel(t, sensorHeartbeat(2)).Bytes()); err != nil { // returns once read
+		t.Fatal(err)
+	}
+	g.advance(59 * time.Second)
+	if n, f := unreachable(r, st); n != 0 || f {
+		t.Fatalf("raised 59 s after a heartbeat: %d, %v", n, f)
+	}
+	g.advance(2 * time.Second)
+	if n, f := unreachable(r, st); n != 1 || !f {
+		t.Fatalf("not raised 61 s after a heartbeat: %d, %v", n, f)
+	}
+	pw.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The cadence through the exported Tick at the real TickInterval (D1 on
+// #581): a heartbeat just after a tick raises nothing at the next tick,
+// TickInterval later, and the tick after that raises it, within 60 s +
+// TickInterval of the heartbeat. Desk only.
+func TestSensorUnreachableTickCadence(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	r.Tick(bg)
+	g.advance(time.Second)
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorHeartbeat(1))); err != nil {
+		t.Fatal(err)
+	}
+	hb := g.monoNow()
+	g.advance(TickInterval - time.Second)
+	r.Tick(bg)
+	if n := alarms(st, AlarmSensorUnreachable); n != 0 {
+		t.Fatalf("raised at the first tick after the heartbeat: %d", n)
+	}
+	g.advance(TickInterval)
+	r.Tick(bg)
+	if n, f := alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable; n != 1 || !f {
+		t.Fatalf("not raised at the second tick: %d, %v", n, f)
+	}
+	if d := g.monoNow() - hb; d < SensorUnreachableAfter || d > SensorUnreachableAfter+TickInterval {
+		t.Fatalf("raised %s after the heartbeat, outside [60 s, 60 s + TickInterval]", d)
 	}
 }
