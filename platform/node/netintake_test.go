@@ -16,6 +16,7 @@ import (
 	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/modules/security/collectorclient"
+	"otsec.local/otsec/modules/telemetry/normalize"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/sensorlink"
 )
@@ -284,8 +285,10 @@ func crashAfterRelease(t *testing.T, r *Runtime, outcome audit.Outcome, dial boo
 // no collection.run. The next start writes exactly one, from the release's
 // session facts, with status not-committed, repaired_from
 // netcheckpoint.intake and after_seq the observation stream's head at the
-// repair; a second restart writes none. The SER rows the run read were not
-// committed, so the next run of the schedule reads and commits them.
+// repair; a second restart writes none. The crash here is before the SER
+// batch, so the run's SER rows were not committed and the next run of the
+// schedule reads and commits them; TestIntakeRepairCountsCommitted is a
+// crash after it.
 func TestIntakeStartRepair(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
@@ -704,5 +707,71 @@ func TestIntakeRepairPastMissed(t *testing.T) {
 	}
 	if len(got) != 2 || got[first.RequestID] != RepairedFromIntake || got[second.RequestID] != RepairedFromIntake {
 		t.Fatalf("repaired runs %v (first %s, second %s)", got, first.RequestID, second.RequestID)
+	}
+}
+
+// serBatch commits the result's SER rows, with their alignment state, as
+// commitResult's first batch does, and nothing after it: what a crash
+// between the SER batch and the health batch leaves. It returns the rows.
+func serBatch(t *testing.T, r *Runtime, result []byte) int {
+	t.Helper()
+	res, err := adapter.DecodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	col := r.cfg.Schedule[0]
+	a, _ := r.cfg.Asset(col.AssetID)
+	profile := ""
+	if a.Profile != nil {
+		profile = a.Profile.ID
+	}
+	inv := adapter.Invocation{InvocationID: okInvocation, PrincipalRef: col.ID, AssetID: col.AssetID, EndpointID: col.Endpoint,
+		ProfileID: profile, OperationID: col.Operation, Params: col.Params, CredentialRef: col.CredentialRef}
+	stream := SERStream(col.AssetID)
+	rx := r.received()
+	out, err := normalize.Normalize(res, inv, a, normalize.Input{Node: r.cfg.NodeID, Stream: event.Stream(stream),
+		HealthStream: event.Stream(HealthStream), ClockResolutionNS: rx.ResolutionNS, Clock: rx.Clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ser, _, err := out.Records(event.Stream(stream), event.Stream(HealthStream))
+	if err != nil || len(ser) == 0 {
+		t.Fatalf("%d SER rows, %v", len(ser), err)
+	}
+	if _, err := r.Log(stream).AppendBatch(bg, ser); err != nil {
+		t.Fatal(err)
+	}
+	return len(ser)
+}
+
+// D1 on D6's F2 (#584): a crash between the SER batch and the health batch
+// leaves the run's SER rows and their alignment state committed. The
+// repaired collection.run counts them as its events, and the next run of
+// the schedule doesn't read them again.
+func TestIntakeRepairCountsCommitted(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	crashAfterRelease(t, r, audit.OutcomeAllowed, false)
+	result, transcript := figureOrderFrom(t, ok09Result)
+	n := serBatch(t, r, result)
+	r.Close()
+
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	runs := healthRuns(t, r)
+	if len(runs) != 1 {
+		t.Fatalf("%d collection.run records after the repair", len(runs))
+	}
+	if e, _ := event.Decode(runs[0].Event); e.Health.Details["status"] != RunNotCommitted || e.Health.Details["events"] != strconv.Itoa(n) {
+		t.Fatalf("repaired collection.run %v, %d SER rows committed", e.Health.Details, n)
+	}
+	var seq uint64
+	s := newScheduler(t, r, wireCollectorResult(t, result, transcript, func(*authz.CollectorRequest) {}, &seq))
+	if rep := s.RunOnce(bg, 0); rep.Outcome != "ok" || rep.Events != 0 {
+		t.Fatalf("the next run: %+v", rep)
+	}
+	ser := SERStream(relayID)
+	if got, err := r.Store(ser).Read(bg, ser, 0, 100); err != nil || len(got) != n {
+		t.Fatalf("SER stream: %d rows, %v; %d committed before the crash", len(got), err, n)
 	}
 }

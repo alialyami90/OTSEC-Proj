@@ -53,11 +53,12 @@ const (
 // intakeDoc is a netcheckpoint.intake document.
 type intakeDoc struct {
 	Schema string `json:"schema"`
-	// HealthHead and AuditHead are the health and audit streams' last seq
-	// when the record was written, so the start repair reads only what
-	// came after the run's dispatch.
-	HealthHead uint64 `json:"health_head"`
-	AuditHead  uint64 `json:"audit_head"`
+	// HealthHead, AuditHead and EvidenceHead are the health, audit and
+	// run's SER streams' last seq when the record was written, so the
+	// start repair reads only what came after the run's dispatch.
+	HealthHead   uint64 `json:"health_head"`
+	AuditHead    uint64 `json:"audit_head"`
+	EvidenceHead uint64 `json:"evidence_head"`
 	sensorlink.RunRecord
 }
 
@@ -93,10 +94,11 @@ func checkIntakeRecord(document []byte, capture *c5.Capture) (c5.DocumentInfo, e
 
 // intakeRun is what the node keeps of one run's hold records.
 type intakeRun struct {
-	seqs       []c5.Seq // its records, oldest first
-	healthHead uint64   // of its first record
-	auditHead  uint64
-	newest     sensorlink.RunRecord
+	seqs         []c5.Seq // its records, oldest first
+	healthHead   uint64   // of its first record
+	auditHead    uint64
+	evidenceHead uint64
+	newest       sensorlink.RunRecord
 	// recorded: its collection.run committed, so its records may go.
 	recorded bool
 }
@@ -131,7 +133,7 @@ func (ir *intakeRecords) note(seq c5.Seq, d intakeDoc) {
 	}
 	r := ir.runs[d.Run.RequestID]
 	if r == nil {
-		r = &intakeRun{healthHead: d.HealthHead, auditHead: d.AuditHead}
+		r = &intakeRun{healthHead: d.HealthHead, auditHead: d.AuditHead, evidenceHead: d.EvidenceHead}
 		ir.runs[d.Run.RequestID] = r
 	}
 	r.seqs, r.newest, ir.newest = append(r.seqs, seq), d.RunRecord, max(ir.newest, seq)
@@ -156,7 +158,8 @@ func (r *Runtime) lastSeq(ctx context.Context, stream c5.StreamID) uint64 {
 // saveIntake is the hold's HoldConfig.Save: it commits rec as a
 // netcheckpoint.intake document before the change takes effect.
 func (r *Runtime) saveIntake(ctx context.Context, rec sensorlink.RunRecord) error {
-	d := intakeDoc{Schema: IntakeSchema, HealthHead: r.lastSeq(ctx, HealthStream), AuditHead: r.lastSeq(ctx, AuditStream), RunRecord: rec}
+	d := intakeDoc{Schema: IntakeSchema, HealthHead: r.lastSeq(ctx, HealthStream), AuditHead: r.lastSeq(ctx, AuditStream),
+		EvidenceHead: r.lastSeq(ctx, SERStream(rec.Run.AssetID)), RunRecord: rec}
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -483,7 +486,8 @@ func (r *Runtime) pruneIntake(ctx context.Context, recorded string) {
 // repairIntake is the start repair (D1 in D4-72, D3's R1 and R2): a run
 // whose release committed but whose collection.run did not gets one, from
 // the session facts its release record holds, with after_seq the
-// observation stream's head now and status RunNotCommitted. It runs once,
+// observation stream's head now, status RunNotCommitted and events the SER
+// rows of its invocation committed after its dispatch. It runs once,
 // at start, after RecoverHold and before the detector restores. A run is
 // repaired only when the audit stream has an allowed collector.request
 // for its request after its dispatch, so a repair never invents a run, and
@@ -505,7 +509,7 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 	for _, id := range todo {
 		ir.mu.Lock()
 		run := ir.runs[id]
-		rec, healthHead, auditHead := run.newest, run.healthHead, run.auditHead
+		rec, healthHead, auditHead, evidenceHead := run.newest, run.healthHead, run.auditHead, run.evidenceHead
 		ir.mu.Unlock()
 		seen, err := r.healthNames(ctx, healthHead, id)
 		if err != nil {
@@ -527,10 +531,16 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 			continue
 		}
 		s := *rec.Session
+		// A crash between the SER batch and the health batch leaves the
+		// run's SER rows and the cursor committed (D1 on D6's F2).
+		events, err := r.committedEvents(ctx, SERStream(rec.Run.AssetID), evidenceHead, s.InvocationID)
+		if err != nil {
+			continue
+		}
 		d := sessionDetails(rec.Run, s, sensorlink.Released{AfterSeq: r.lastSeq(ctx, NetObservationStream(r.cfg.NetworkSensor.SensorID)), OpenFlow: rec.OpenFlow})
 		d["asset_id"], d["request_id"], d["invocation_id"] = rec.Run.AssetID, id, s.InvocationID
 		d["schedule"], d["operation"] = allowed.Actor.ID, allowed.OperationID
-		d["status"], d["events"], d["repaired_from"] = RunNotCommitted, "0", RepairedFromIntake
+		d["status"], d["events"], d["repaired_from"] = RunNotCommitted, strconv.Itoa(events), RepairedFromIntake
 		hr, err := r.healthRecord(HealthStream, HealthCollectionRun, d)
 		log := r.Log(HealthStream)
 		if err == nil && log == nil {
@@ -550,11 +560,40 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 	}
 }
 
+// committedEvents counts the records on stream after seq after that the
+// invocation read.
+func (r *Runtime) committedEvents(ctx context.Context, stream c5.StreamID, after uint64, invocationID string) (int, error) {
+	db := r.Store(stream)
+	if db == nil {
+		return 0, errors.New("the evidence database is not open")
+	}
+	want := []byte(`"invocation_id":` + strconv.Quote(invocationID))
+	n := 0
+	for {
+		got, err := db.Read(ctx, stream, after, 500)
+		if err != nil {
+			return 0, err
+		}
+		for _, st := range got {
+			after = st.Key.Seq
+			if !bytes.Contains(st.Event, want) {
+				continue
+			}
+			if ev, err := event.Decode(st.Event); err == nil && ev.Collection != nil && ev.Collection.InvocationID == invocationID {
+				n++
+			}
+		}
+		if len(got) < 500 {
+			return n, nil
+		}
+	}
+}
+
 // healthNames reports whether the health stream has the record that ends
 // the run requestID after seq after: its collection.run, or the
-// collection.outcome-unknown of a result the node quarantined. A
-// collection.missed names a run too, the first of its series, but says
-// nothing of its result, so it doesn't count (D6's F3 on #584).
+// collection.outcome-unknown of a result the node quarantined. No other
+// record that names the run counts, such as the collection.missed of a
+// series it starts (D1 on D6's F3 on #584).
 func (r *Runtime) healthNames(ctx context.Context, after uint64, requestID string) (bool, error) {
 	db := r.Store(HealthStream)
 	if db == nil {
@@ -573,7 +612,7 @@ func (r *Runtime) healthNames(ctx context.Context, after uint64, requestID strin
 			}
 			ev, err := event.Decode(st.Event)
 			if err == nil && ev.Health != nil && ev.Health.Details["request_id"] == requestID &&
-				(ev.Health.Type == HealthCollectionRun || ev.Health.Type == HealthCollectionOutcomeUnknown) {
+				(ev.Health.Type == HealthCollectionRun || ev.Health.Type == HealthCollectionOutcomeUnknown && ev.Health.Details["quarantined"] == "true") {
 				return true, nil
 			}
 		}
