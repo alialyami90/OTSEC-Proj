@@ -67,7 +67,7 @@ func TestNetworkLayoutV09(t *testing.T) {
 	}
 	audit := Database{ID: "audit", Writer: "security", Streams: []StreamSpec{{"audit", ClassAudit}}, Classes: []StreamClass{ClassAudit}, Quotas: []Quota{q(ClassAudit)}}
 	network := Database{ID: "network", Writer: "node",
-		Streams: []StreamSpec{{"netobs/s1", ClassNetworkObservation}, {"netalert/s1", ClassNetworkAlert}},
+		Streams: []StreamSpec{{"network-observation/s1", ClassNetworkObservation}, {"network-alert/s1", ClassNetworkAlert}},
 		Classes: []StreamClass{ClassNetworkObservation, ClassNetworkAlert},
 		Quotas:  []Quota{q(ClassNetworkObservation), q(ClassNetworkAlert)}}
 	if err := (Layout{Databases: []Database{audit, network}}).Validate(); err != nil {

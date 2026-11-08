@@ -339,3 +339,217 @@ func TestNetRetentionIdleNoLag(t *testing.T) {
 		t.Fatalf("lagging raised %d times on an idle stream", n)
 	}
 }
+
+// setWall sets the wall clock alone, as a clock step does.
+func (g *retentionRig) setWall(w time.Time) { g.mu.Lock(); g.wall = w; g.mu.Unlock() }
+
+// commitAt commits one health event on stream through the runtime's Log and
+// returns its commit time as the store read it back.
+func (g *retentionRig) commitAt(r *Runtime, stream c5.StreamID, class c5.StreamClass) time.Time {
+	g.t.Helper()
+	ev := []byte(`{"schema":"otsec.event/0.1","id":{"node_id":"site-a-node1","stream":"` + string(stream) + `","seq":0},` +
+		`"origin":"platform","kind":"telemetry-health","source":{"origin_auth":"platform"},` +
+		`"received":{"utc":"2026-11-01T00:00:00.000001Z","resolution_ns":1000,"clock":{"sync":"synchronized","source":"ntp"}},` +
+		`"health":{"type":"store.test","details":{}}}`)
+	if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: class, Event: ev}); err != nil {
+		g.t.Fatal(err)
+	}
+	got, err := r.Store(stream).Read(bg, stream, 0, 1000)
+	if err != nil || len(got) == 0 {
+		g.t.Fatalf("read back %s: %v, %d events", stream, err, len(got))
+	}
+	return got[len(got)-1].CommittedAt
+}
+
+// D6's P1 on #559 (D4-71): through the runtime, only the network database
+// floors commit times at its wall mark. With the clock stepped forward and
+// then back, a commit on a network stream not written before takes the
+// forward time, and a commit on an evidence stream not written before takes
+// the stepped-back time. A runtime that set WallMark on every database, or
+// on none, fails here. Desk only.
+func TestNetWallMarkNetworkDBOnly(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	defer r.Close()
+	t0 := g.now()
+	forward, back := t0.Add(10*24*time.Hour), t0.Add(time.Hour)
+	g.setWall(forward)
+	g.commitAt(r, NetAlertStream(sensorID), c5.ClassNetworkAlert)
+	g.commitAt(r, SERStream(relayID), c5.ClassAdapterEvidence)
+	g.setWall(back)
+	if at := g.commitAt(r, NetObservationStream(sensorID), c5.ClassNetworkObservation); !at.Equal(forward) {
+		t.Errorf("network database: a commit after the step back at %s, want the mark %s", at, forward)
+	}
+	if at := g.commitAt(r, QuarantineStream(relayID), c5.ClassAdapterEvidence); !at.Equal(back) {
+		t.Errorf("evidence database: a commit after the step back at %s, want the clock's %s", at, back)
+	}
+}
+
+// AP-36's V1 at its edge (D6, D4-71): a lag of exactly the retention raises
+// no alarm, and one second more raises it once. Over the next two days of
+// hourly ticks the lag falls, the alarm is cleared once if it was raised,
+// and neither is raised again. Desk only.
+func TestNetRetentionLagEdge(t *testing.T) {
+	const R = 30 * 24 * time.Hour
+	for _, c := range []struct {
+		over    time.Duration
+		lagging int
+	}{{0, 0}, {time.Second, 1}} {
+		g := newRetentionRig(t)
+		r, _ := g.start()
+		r.Close()
+		g.advance(R + time.Hour + c.over) // down, with the start's hour: at start the lag is R + over
+		r, st := g.start()
+		s := st.Snapshot("x").NetRetention
+		if s.LagS != int64((R+c.over)/time.Second) || s.Lagging != (c.lagging == 1) || alarms(st, AlarmNetRetentionLagging) != c.lagging {
+			t.Fatalf("lag R + %s at start: %+v, %d alarms", c.over, s, alarms(st, AlarmNetRetentionLagging))
+		}
+		for range 48 {
+			g.advance(time.Hour)
+			r.Tick(bg)
+		}
+		if s := st.Snapshot("x").NetRetention; s.Lagging || alarms(st, AlarmNetRetentionLagging) != c.lagging || alarms(st, AlarmNetRetentionLagCleared) != c.lagging {
+			t.Fatalf("lag R + %s, two days on: %+v, raised %d, cleared %d", c.over, s,
+				alarms(st, AlarmNetRetentionLagging), alarms(st, AlarmNetRetentionLagCleared))
+		}
+		r.Close()
+	}
+}
+
+// AP-36's V1 (D6, D4-71), through the runtime: after a downtime D longer
+// than the retention, or a cut of the retention from 30 days to 7, status
+// shows the lag at start and the alarm is raised once. The first move is
+// bounded start, one hour past the persisted cutoff. After k of monotonic
+// time the lag is the start's less k, so within an hour of D − k. The alarm
+// is cleared once the lag is at most the retention and not raised again,
+// and once the lag has closed every move is bounded wall. Desk only.
+func TestNetRetentionLagCloses(t *testing.T) {
+	const day = 24 * time.Hour
+	for _, c := range []struct {
+		name string
+		down time.Duration
+		days int
+	}{{"downtime", 35 * day, 30}, {"cut to 7 days", 0, 7}} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newRetentionRig(t)
+			r, _ := g.start()
+			for range 48 { // an alert an hour for two days
+				g.alert(r)
+				g.advance(time.Hour)
+			}
+			g.advance(30*day - 24*time.Hour) // the first day's alerts are past the retention
+			r.Tick(bg)
+			before := g.moves(r)
+			persisted, _ := time.Parse(time.RFC3339Nano, before[len(before)-1].Retention.CutoffUTC)
+			r.Close()
+
+			g.advance(c.down)
+			g.c.NetworkSensor.AlertRetentionDays = c.days
+			r, st := g.start()
+			defer r.Close()
+			R := time.Duration(c.days) * day
+			lag0 := g.now().Add(-R).Sub(persisted.Add(time.Hour)) // the start's hour, by value (D3's conditions in D4-71)
+			if s := st.Snapshot("x").NetRetention; s.LagS != int64(lag0/time.Second) || !s.Lagging || alarms(st, AlarmNetRetentionLagging) != 1 {
+				t.Fatalf("at start: %+v, want lag %s", s, lag0)
+			}
+			m := g.moves(r)[len(before):]
+			if len(m) != 1 || m[0].Retention.Bound != audit.BoundStart || m[0].Retention.CutoffUTC != persisted.Add(time.Hour).Format(time.RFC3339Nano) {
+				t.Fatalf("the start's move: %d moves, %+v", len(m), m[0].Retention)
+			}
+
+			walls := 0
+			for k := time.Duration(0); k <= lag0+2*day; {
+				g.alert(r)
+				g.advance(6 * time.Hour)
+				k += 6 * time.Hour
+				r.Tick(bg)
+				s := st.Snapshot("x").NetRetention
+				if want := max(lag0-k, 0); s.LagS != int64(want/time.Second) {
+					t.Fatalf("after %s: lag %ds, want %s", k, s.LagS, want)
+				}
+				cleared := 0
+				if lag0-k <= R {
+					cleared = 1
+				}
+				if s.Lagging != (cleared == 0) || alarms(st, AlarmNetRetentionLagging) != 1 || alarms(st, AlarmNetRetentionLagCleared) != cleared {
+					t.Fatalf("after %s: %+v, raised %d, cleared %d", k, s, alarms(st, AlarmNetRetentionLagging), alarms(st, AlarmNetRetentionLagCleared))
+				}
+				all := g.moves(r)
+				if last := all[len(all)-1].Retention; s.LagS == 0 && len(all) > len(before)+len(m) && last.WallUTC == g.now().Format(time.RFC3339Nano) {
+					if last.Bound != audit.BoundWall {
+						t.Fatalf("after %s, with no lag: %+v", k, last)
+					}
+					walls++
+				}
+			}
+			if walls == 0 {
+				t.Fatal("no move once the lag closed")
+			}
+		})
+	}
+}
+
+// AP-36's V4 (D6, D4-71), through the runtime with a restart: the alert
+// stream and the network database idle past the retention, the node down,
+// and the clock set back by more than the retention when it starts. An
+// alert committed then, with the node restarted before the clock is
+// restored, survives at least half its retention less an hour for each
+// start in between, by monotonic time: the wall mark, kept in the
+// database, floors its commit time across the restart. Twice: with the
+// mark last raised by the move that passed the stream's alerts (its
+// evaluation and cursor save), and by a later commit on the observation
+// stream. Desk only.
+func TestNetRetentionBackwardStepRestart(t *testing.T) {
+	const R = 30 * 24 * time.Hour
+	for _, c := range []struct {
+		name string
+		obs  bool
+	}{{"mark from the move", false}, {"mark from a commit", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newRetentionRig(t)
+			r, st := g.start()
+			g.alert(r) // seq 1
+			g.advance(R + 24*time.Hour)
+			r.Tick(bg) // passes seq 1
+			mark := g.now()
+			if s := st.Snapshot("x").NetRetention; s.Cursor != 1 {
+				t.Fatalf("seq 1 not passed: %+v", s)
+			}
+			if c.obs {
+				g.advance(time.Hour)
+				mark = g.now()
+				g.commitAt(r, NetObservationStream(sensorID), c5.ClassNetworkObservation)
+			}
+			r.Close()
+
+			g.advance(2 * R) // down, idle
+			restored := g.now()
+			g.setWall(restored.Add(-3 * R)) // and the clock set back
+			r, _ = g.start()
+			if at := g.commitAt(r, NetAlertStream(sensorID), c5.ClassNetworkAlert); !at.Equal(mark) { // seq 2
+				t.Fatalf("seq 2 committed at %s, want the mark %s", at, mark)
+			}
+			r.Close()
+
+			g.setWall(restored) // restored, and started again
+			r, st = g.start()
+			defer r.Close()
+			starts := time.Duration(2) // between the commit and the end: this start and the one before
+			since := time.Duration(0)
+			for ; since < R/2-starts*time.Hour; since += 6 * time.Hour {
+				if s := st.Snapshot("x").NetRetention; s.Cursor >= 2 {
+					t.Fatalf("seq 2 passed %s after its commit (monotonic): %+v", since, s)
+				}
+				g.advance(6 * time.Hour)
+				r.Tick(bg)
+			}
+			for ; since < R/2+time.Hour; since += time.Hour {
+				g.advance(time.Hour)
+				r.Tick(bg)
+			}
+			if s := st.Snapshot("x").NetRetention; s.Cursor != 2 {
+				t.Fatalf("seq 2 not passed %s after its commit: %+v", since, s)
+			}
+		})
+	}
+}
