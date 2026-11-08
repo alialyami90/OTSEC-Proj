@@ -14,7 +14,7 @@ import (
 )
 
 // HealthAlert is the C4 health type of a network alert (C13 §7.1).
-const HealthAlert = "netobs.alert"
+const HealthAlert = event.HealthNetobsAlert
 
 // MaxAlertBytes bounds an alert's Health body encoded as JSON. The worst
 // alert Validate accepts is pinned by TestWorstAlertFits, with its capture,

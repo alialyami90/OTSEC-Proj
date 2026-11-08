@@ -14,7 +14,7 @@ import (
 	"otsec.local/otsec/contracts/event"
 )
 
-const c4v3Asset = `"asset": {"id": "7c1e5a20-4d3b-4f6a-8b2c-9e0d1f2a3b4c", "binding": {"method": "sender-address", "confidence": "inferred"}},`
+const c4v3Asset = `"asset": {"id": "7c1e5a20-4d3b-4f6a-8b2c-9e0d1f2a3b4c", "binding": {"method": "observed-address", "confidence": "inferred"}},`
 
 // c4v3Event builds a network-observation event. Each argument replaces one
 // part, so a case changes exactly what it names.

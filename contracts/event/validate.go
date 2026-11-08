@@ -108,6 +108,7 @@ func (e *Event) validate(pending bool) error {
 	}
 	checkReceived(c, &e.Received)
 	checkNetobs(c, e)
+	checkObservedAddress(c, e)
 	switch e.Origin {
 	case OriginDevice:
 		checkDeviceEvent(c, e)
@@ -268,11 +269,35 @@ func checkTLSLeaf(c *checker, e *Event) {
 	}
 }
 
+// checkObservedAddress applies D4-71: observed-address is new in 0.3, is
+// only on a network-observation event and a netobs.alert health event, and
+// only inferred; those two bind their asset by observed-address alone, so a
+// network resolution never reads as sender-address or as configured.
+func checkObservedAddress(c *checker, e *Event) {
+	a := e.Source.Asset
+	if a == nil {
+		return
+	}
+	observed := a.Binding.Method == BindObservedAddress
+	network := e.Kind == KindNetworkObservation || (e.Kind == KindHealth && e.Health != nil && e.Health.Type == HealthNetobsAlert)
+	if v, err := version.Parse(e.Schema); observed && err == nil && v.Minor < 3 {
+		c.fail(CodeForbidden, "source.asset.binding.method", "observed-address is new in otsec.event/0.3; this event is %s", e.Schema)
+	}
+	switch {
+	case observed && !network:
+		c.fail(CodeForbidden, "source.asset.binding.method", "observed-address is only on a %s event or a %s health event", KindNetworkObservation, HealthNetobsAlert)
+	case network && !observed:
+		c.fail(CodeEnum, "source.asset.binding.method", "a network observation or alert binds its asset by observed-address, not %q", a.Binding.Method)
+	case observed && a.Binding.Confidence != ConfidenceInferred:
+		c.fail(CodeEnum, "source.asset.binding.confidence", "observed-address is inferred, never %q", a.Binding.Confidence)
+	}
+}
+
 func checkAsset(c *checker, a *AssetRef) {
 	if !assetIDPattern.MatchString(a.ID) {
 		c.fail(CodeID, "source.asset.id", "%q is not an asset ID", a.ID)
 	}
-	if !oneOf(a.Binding.Method, BindAdapterTarget, BindSenderAddress, BindContentField, BindOperator) {
+	if !oneOf(a.Binding.Method, BindAdapterTarget, BindSenderAddress, BindContentField, BindOperator, BindObservedAddress) {
 		c.fail(CodeEnum, "source.asset.binding.method", "%q", a.Binding.Method)
 	}
 	if !oneOf(a.Binding.Confidence, ConfidenceConfigured, ConfidenceAsserted, ConfidenceInferred) {

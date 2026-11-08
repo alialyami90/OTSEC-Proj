@@ -23,7 +23,7 @@
               "type": "object",
               "required": ["method", "confidence"],
               "properties": {
-                "method": {"enum": ["adapter-target", "sender-address", "content-field", "operator"]},
+                "method": {"enum": ["adapter-target", "sender-address", "content-field", "operator", "observed-address"]},
                 "confidence": {"enum": ["configured", "asserted", "inferred"]}
               }
             }
