@@ -40,6 +40,8 @@ type ownConfig struct {
 	// endpoint, in the configuration's order.
 	recorded     map[netip.Addr]bool
 	endpointList []configEndpoint
+	// untracked counts the endpoint addresses past MaxDetectorEndpoints.
+	untracked int
 }
 
 type configEndpoint struct {
@@ -121,6 +123,7 @@ func newOwnConfig(cfg DetectorConfig) (ownConfig, error) {
 	for _, a := range addrs[:min(len(addrs), netobs.MaxDetectorEndpoints)] {
 		o.recorded[a] = true
 	}
+	o.untracked = len(addrs) - len(o.recorded)
 	return o, nil
 }
 
@@ -295,6 +298,12 @@ func (d *Detector) NotYetSeen() []Endpoint {
 	}
 	return out
 }
+
+// EndpointsNotTracked counts the enrolled endpoint addresses past
+// MaxDetectorEndpoints, which the detector's own coverage record never
+// holds. Before acknowledgement their sessions are never judged, so the
+// node shows the count in status beside NotYetSeen (D1's C1 on #575).
+func (d *Detector) EndpointsNotTracked() int { return d.own.untracked }
 
 // track keeps the own-session state o changes: the degraded intervals, the
 // endpoint record, and the sessions o's tie marks seen.

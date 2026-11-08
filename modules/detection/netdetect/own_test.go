@@ -221,6 +221,39 @@ func TestOwnSessionNotYetSeen(t *testing.T) {
 	}
 }
 
+// Past MaxDetectorEndpoints enrolled addresses, the rest are never
+// recorded: before acknowledgement their sessions stay unjudged, and both
+// NotYetSeen and EndpointsNotTracked show it (D1's C1 on #575).
+func TestOwnSessionEndpointsPastTheCap(t *testing.T) {
+	cfg := owCfg(nil)
+	cfg.Endpoints = nil
+	for i := range netobs.MaxDetectorEndpoints + 1 {
+		cfg.Endpoints = append(cfg.Endpoints, Endpoint{lxRelay, Destination{fmt.Sprintf("2001:db8::%x", 0x1000+i), "tcp", 23}})
+	}
+	last := cfg.Endpoints[netobs.MaxDetectorEndpoints] // 2001:db8::1100 sorts last
+	d, err := NewDetector(cfg)
+	must0(t, err)
+	if d.EndpointsNotTracked() != 1 || len(d.NotYetSeen()) != netobs.MaxDetectorEndpoints+1 {
+		t.Fatalf("not tracked %d, not yet seen %d", d.EndpointsNotTracked(), len(d.NotYetSeen()))
+	}
+	r := &owRun{t: t, d: d}
+	for _, e := range cfg.Endpoints {
+		o := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000)
+		o.IP.Dst = e.Addr
+		r.obs(o, 0)
+	}
+	if got := d.NotYetSeen(); !slices.Equal(got, []Endpoint{last}) || d.EndpointsNotTracked() != 1 {
+		t.Fatalf("not yet seen %v, want only the untracked %v", got, last)
+	}
+	must0(t, r.session(owSession(1, 1, lxRelay, last.Destination, true, 10, 20)))
+	must0(t, r.session(owSession(2, 2, lxRelay, cfg.Endpoints[0].Destination, true, 10, 20)))
+	r.obs(owQuiet(t), 100)
+	if got := r.unseen(); len(got) != 1 {
+		t.Fatalf("unseen %v: want the tracked endpoint's only", got)
+	}
+	must(d.Checkpoint(0))
+}
+
 // A session is judged only once the detector has taken after_seq: the
 // observations up to it may still tie its flow (D1 in D4-72).
 func TestOwnSessionWaitsForAfterSeq(t *testing.T) {
