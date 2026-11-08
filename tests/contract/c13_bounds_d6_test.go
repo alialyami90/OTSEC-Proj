@@ -4,8 +4,9 @@ package contract
 // contracts/netobs is checked against the value C13 states, so a change to a
 // bound fails here until the contract text and this table change with it.
 // Sources: docs/phase4/D4-c13-netobs.md §10 (the bounds table) and §7.1 (an
-// alert's related list and explanation fields). Ground truth: GT-HAND, from
-// the contract text. Evidence class: desk.
+// alert's related list and explanation fields), and D1's value for
+// MaxBaselineBytes in D4-71 (§8 leaves it to code). Ground truth: GT-HAND,
+// from the contract text and the ruling. Evidence class: desk.
 
 import (
 	"math"
@@ -47,6 +48,7 @@ func TestC13BoundsByValue(t *testing.T) {
 		{"DefaultMaxPendingDNP3", netobs.DefaultMaxPendingDNP3, 4096, "§10: max_pending_dnp3 4,096"},
 		{"MinMaxPendingDNP3", netobs.MinMaxPendingDNP3, 256, "§10: bounded 256"},
 		{"MaxMaxPendingDNP3", netobs.MaxMaxPendingDNP3, 65536, "§10: to 65,536"},
+		{"MaxBaselineBytes", netobs.MaxBaselineBytes, 512 << 10, "§8 with D1 in D4-71: 512 KiB"},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %d, C13 %s says %d", c.name, c.got, c.source, c.want)
