@@ -318,6 +318,14 @@ func TestRetentionFields(t *testing.T) {
 			t.Errorf("bound %s: %v", b, err)
 		}
 	}
+	// A cutoff exactly at the wall time less the retention, with
+	// fractional seconds, is accepted: the bound is inclusive (D6 on #545).
+	edge := move()
+	edge.Retention.WallUTC = "2026-11-17T06:00:00.25Z"
+	edge.Retention.CutoffUTC = "2026-11-10T06:00:00.25Z"
+	if err := edge.Validate(); err != nil {
+		t.Errorf("a cutoff exactly at the bound: %v", err)
+	}
 	bad := map[string]*Record{
 		"a move that passes nothing": func() *Record { r := move(); r.Retention.ToSeq = 5; return r }(),
 		"a move backwards":           func() *Record { r := move(); r.Retention.ToSeq = 4; return r }(),
