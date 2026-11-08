@@ -52,7 +52,7 @@ The operator starts learning for a period (the default is 7 days, a parameter). 
 
 ### 2.3 Acknowledgement and the authorized writers
 
-The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked. It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
+The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked, and each pair end named only through an inbound (Syslog sender) address marked too, derived from `addresses` and the current C1 (C13 §14 item 9). It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
 
 1. **The client builds the accepted document.** It is the frozen draft with the person's `authorized_writers` filled in, in C13 §8's canonical encoding. The client shows it, and writes its exact bytes to the node's admin folder as `network-baseline-<sensor_id>.json` (D5). Those bytes are unsigned and have no effect on their own.
 2. **The client signs `node.network_baseline_ack`**, a separate admin kind (D1, D4-68). The body names the sensor and the accepted document's digest (`baseline_digest`). It also names the frozen draft it was built from (`draft_digest`), so the signature binds both. The client computes both digests over the bytes it shows (HR-14). The two digests are equal when the person adds no writers.
