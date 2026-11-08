@@ -299,13 +299,17 @@ func TestInboundOnly(t *testing.T) {
 		writer = "3a9d6b42-1e7f-4c08-a5d3-6f2b8e0c4d91"
 		server = "4e2c8a16-9b3d-4f5a-8c71-0d6e2f4a9b37"
 		outstn = "5d1b7f38-2c6e-4a90-b4e7-8f3a1c5d0e62"
+		rtu    = "6f4a2d90-7e1b-4c35-9a08-1b5c3e7d2f84"
 	)
 	mid := *b
 	mid.Functions = append(slices.Clone(b.Functions),
 		netobs.BaselineFunction{Pair: netobs.Pair{Client: writer, Server: relay, L4: "tcp", Port: 20000, Protocol: "dnp3"}, Code: 2},
 		netobs.BaselineFunction{Pair: netobs.Pair{Client: relay, Server: outstn, L4: "tcp", Port: 20000, Protocol: "dnp3"}, Code: 1})
 	mid.Services = append(slices.Clone(b.Services), netobs.BaselineService{Server: server, L4: "tcp", Port: 502, Protocol: "modbus", Basis: "content"})
-	if got := InboundOnly(&mid, testNode, assets); len(got) != 4 || !got[master] || !got[writer] || !got[outstn] || !got[server] {
-		t.Errorf("midstream functions and service: marked %v, want the master, the writer, the outstation and the server", got)
+	// A pair with no decoded function, such as an undecoded protocol's
+	// flow, is marked through pairs alone (D6 on #558, R1).
+	mid.Pairs = append(slices.Clone(b.Pairs), netobs.Pair{Client: relay, Server: rtu, L4: "tcp", Port: 2404, Protocol: "unknown"})
+	if got := InboundOnly(&mid, testNode, assets); len(got) != 5 || !got[master] || !got[writer] || !got[outstn] || !got[server] || !got[rtu] {
+		t.Errorf("midstream functions, service and undecoded pair: marked %v, want the master, the writer, the outstation, the server and the RTU", got)
 	}
 }
