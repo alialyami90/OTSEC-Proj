@@ -526,7 +526,7 @@ func TestIntakeStartRepairWaiting(t *testing.T) {
 	r.Close()
 
 	r, st, _ := start(t, c, dir)
-	defer r.Close()
+	defer func() { r.Close() }() // the runtime open last, as r changes below
 	runs := healthRuns(t, r)
 	if len(runs) != 1 {
 		t.Fatalf("%d collection.run records after the repair", len(runs))
