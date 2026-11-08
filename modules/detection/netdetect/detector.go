@@ -131,7 +131,7 @@ type Detector struct {
 	degraded       []netobs.Interval
 	degradedOpen   bool
 
-	notJudged, orderingFaults, degradedDropped int64
+	notJudged, orderingFaults, degradedDropped, openFlowSeen int64
 }
 
 // serviceKey is a service without its basis: new-service asks whether the
