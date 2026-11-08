@@ -1,16 +1,24 @@
 package node
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
 	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/sensorlink"
 )
 
@@ -389,6 +397,715 @@ func TestDetectorBarrierDuringRelease(t *testing.T) {
 	r.afterRelease = nil
 	r.Tick(bg)
 	if d := detectorStatus(t, st); d.Through != 2 || d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
+		t.Fatalf("status %+v", d)
+	}
+}
+
+// An alert that isn't committed stays unsent: the detector reads nothing
+// more, neither its checkpoint nor its cursor passes the alert, the alarm
+// is raised once, and each tick tries again. Once the commit succeeds the
+// alerts are stored in the order raised and the detector goes on (D1's F1
+// on #590). Desk: the commit is refused by a test hook.
+func TestDetectorAlertRetried(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.alertAppend = func([]c5.Record) error { return errors.New("refused") }
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), laterFlow(2, hashOf(frameData(1))))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	r.Tick(bg)
+	d := detectorStatus(t, st)
+	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures != 2 ||
+		d.CheckpointsWritten != 1 || detectorCursor(t, r) != 0 || countAlarms(st, AlarmAlertNotStored) != 1 {
+		t.Fatalf("%d alerts, cursor %d, status %+v, %d alarms", n, detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
+	}
+	r.alertAppend = nil
+	r.Tick(bg)
+	got := committedAlerts(t, r)
+	d = detectorStatus(t, st)
+	if len(got) != 4 || got[0].alert.Rule != netobs.RuleOwnSessionOutsideRecord || got[1].alert.Rule != netobs.RuleNodeAddressSpoofed ||
+		d.Through != 2 || d.AlertsPending != 0 || d.Alerts != 4 || detectorCursor(t, r) != 2 {
+		t.Fatalf("%d alerts, cursor %d, status %+v", len(got), detectorCursor(t, r), d)
+	}
+}
+
+// An alert still unsent at a stop is raised again by the restart's replay
+// and stored once: the stop wrote no checkpoint past it (D1's F1 on #590).
+func TestDetectorAlertUnsentAtStop(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	r.alertAppend = func([]c5.Record) error { return errors.New("refused") }
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	r.Close()
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	d := detectorStatus(t, st)
+	if n := len(committedAlerts(t, r)); n != 2 || !d.Restored || d.Through != 1 || d.Mismatches != 0 || detectorCursor(t, r) != 1 {
+		t.Fatalf("%d alerts after the restart, cursor %d, status %+v", n, detectorCursor(t, r), d)
+	}
+}
+
+// D4's probe on #590: after a pruned start, the first record read is the
+// fin end of a flow from 07:00 to 09:30, committed at 09:30. A session at
+// 08:15 may have had its flows pruned, so it is skipped, for
+// before-retained, and raises no own-session-unseen once its window
+// passes. The guard's bound is the record's commit time, not its
+// first_utc, which is the flow's start (D1 on #590). Desk: the stream's
+// pruning is set by hand, and the times are relative to the commit.
+func TestDetectorGuardCommitTime(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.detector.pruned = true
+	now := time.Now().UTC()
+	at := func(d time.Duration) string { return now.Add(d).Format("2006-01-02T15:04:05.000000Z") }
+	end := ownFlow(1)
+	end.FirstUTC, end.LastUTC, end.Coverage.SinceUTC = at(-150*time.Minute), at(0), at(-4*time.Hour)
+	no := false
+	end.Flow.Phase, end.Flow.End, end.Flow.SynOnly = "end", "fin", &no
+	if err := r.ServeSensor(bg, sensorChannel(t, end)); err != nil {
+		t.Fatal(err)
+	}
+	s := newScheduler(t, r, &fakeCollector{})
+	if !s.health(bg, HealthCollectionRun, c.Schedule[0], "r-1", okInvocation, map[string]string{"endpoint": "127.0.0.1:2323", "l4": "tcp",
+		"started_at": at(-75 * time.Minute), "ended_at": at(-74 * time.Minute), "connected": "true", "open_flow": "false", "after_seq": "1"}) {
+		t.Fatal("collection.run not stored")
+	}
+	later := ownFlow(2)
+	later.FirstUTC, later.LastUTC, later.Coverage.SinceUTC = at(-10*time.Minute), at(-10*time.Minute+time.Second), at(-4*time.Hour)
+	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	for _, a := range committedAlerts(t, r) {
+		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
+			t.Errorf("the session at 08:15 alerted: %+v", a.alert)
+		}
+	}
+	if d := detectorStatus(t, st); d.NotJudged["before-retained"] != 1 || d.Through != 2 {
+		t.Fatalf("status %+v", d)
+	}
+}
+
+// An alert the store refuses for its class's quota or record cap is
+// dropped and counted, and the detector goes on: its checkpoint and cursor
+// move, as C5 0.9 section 8 drops a full class's records (D1 on #590).
+func TestDetectorAlertDroppedAtQuota(t *testing.T) {
+	for _, code := range []c5.Code{c5.CodeQuotaReached, c5.CodeRecordTooLarge} {
+		t.Run(string(code), func(t *testing.T) {
+			c, dir := holdConfig(t)
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			r.alertAppend = func([]c5.Record) error { return &c5.Error{Code: code} }
+			if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			d := detectorStatus(t, st)
+			if d.AlertsNotStored != 2 || d.AlertsPending != 0 || d.AlertCommitFailures != 0 || d.Through != 1 || d.Checkpointed != 1 ||
+				detectorCursor(t, r) != 1 || countAlarms(st, AlarmAlertNotStored) != 2 {
+				t.Fatalf("cursor %d, status %+v, %d alarms", detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
+			}
+		})
+	}
+}
+
+// testInvocation is the i-th invocation ID of a test run.
+func testInvocation(i int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012d", i) }
+
+// runRecord stores a connected collection.run of the relay's endpoint for
+// invocation inv, with details changed by over.
+func runRecord(t *testing.T, s *Scheduler, c *Config, inv string, over map[string]string) {
+	t.Helper()
+	d := map[string]string{"endpoint": "127.0.0.1:2323", "l4": "tcp", "started_at": "2026-10-24T09:15:00Z", "ended_at": "2026-10-24T09:15:01Z",
+		"connected": "true", "open_flow": "false", "after_seq": "0"}
+	maps.Copy(d, over)
+	if !s.health(bg, HealthCollectionRun, c.Schedule[0], "r-"+inv, inv, d) {
+		t.Fatal("collection.run not stored")
+	}
+}
+
+// A session past MaxPendingSessions is not judged: status counts it as
+// pending-full and the alarm is raised as the count rises (D1's F2 on
+// #590). A collection.run that doesn't parse counts as session missing
+// (D3 on #590).
+func TestDetectorPendingFullAlarm(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	s := newScheduler(t, r, &fakeCollector{})
+	for i := range netobs.MaxPendingSessions + 1 {
+		runRecord(t, s, c, testInvocation(i+1), nil)
+	}
+	runRecord(t, s, c, testInvocation(1000), map[string]string{"after_seq": "x"})
+	r.Tick(bg)
+	r.Tick(bg)
+	d := detectorStatus(t, st)
+	if d.NotJudged["pending-full"] != 1 || d.NotJudged["tied-evicted"] != 0 || d.NotJudged["session-missing"] != 1 || countAlarms(st, AlarmSessionNotJudged) != 1 {
+		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmSessionNotJudged))
+	}
+}
+
+// A tied flow whose session never comes, dropped past MaxTiedSessions, is
+// a session not judged: status counts it as tied-evicted and the alarm is
+// raised as the count rises (D1's F2 on #590). Desk: the ties are written
+// to the observation stream by hand, as intake writes them.
+func TestDetectorTiedEvictedAlarm(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+		t.Fatal(err)
+	}
+	stream := NetObservationStream(sensorID)
+	got, err := r.Store(stream).Read(bg, stream, 0, 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%d observations, %v", len(got), err)
+	}
+	e, err := event.Decode(got[0].Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o netobs.Observation
+	if err := json.Unmarshal(e.Netobs, &o); err != nil {
+		t.Fatal(err)
+	}
+	for i := range netobs.MaxTiedSessions + 1 {
+		e.ID.Seq = 0
+		o.Node.PlatformSession = &netobs.PlatformSession{InvocationID: testInvocation(i + 1), Tie: sensorlink.TieConnection}
+		if e.Netobs, err = json.Marshal(&o); err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassNetworkObservation, Event: b}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Tick(bg)
+	r.Tick(bg)
+	d := detectorStatus(t, st)
+	if d.NotJudged["tied-evicted"] != 1 || d.NotJudged["pending-full"] != 0 || countAlarms(st, AlarmSessionNotJudged) != 1 {
+		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmSessionNotJudged))
+	}
+}
+
+// pruneObservations prunes the observation stream at the detector's
+// cursor, at most max records, as the runtime's prune pass does.
+func pruneObservations(t *testing.T, r *Runtime, c *Config, max int) {
+	t.Helper()
+	stream := NetObservationStream(sensorID)
+	db := r.Store(stream)
+	cs, err := c.Consumers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c5.ComputeBoundary(bg, db, db, cs, stream, c5.ClassNetworkObservation, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, err := db.PruneStep(bg, b, max); err != nil || k == 0 {
+		t.Fatalf("pruned %d: %v", k, err)
+	}
+}
+
+// firstRetained is the observation stream's first retained seq.
+func firstRetained(t *testing.T, r *Runtime) c5.Seq {
+	t.Helper()
+	stream := NetObservationStream(sensorID)
+	first, err := r.Store(stream).FirstRetained(bg, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return first
+}
+
+// foreignCheckpoint stores, as the newest detector checkpoint, the newest
+// one renamed to another node's, which doesn't restore here, and returns
+// its seq.
+func foreignCheckpoint(t *testing.T, r *Runtime) c5.Seq {
+	t.Helper()
+	_, doc, err := r.detectorCheckpoints(bg)
+	if err != nil || doc == nil {
+		t.Fatalf("no checkpoint: %v", err)
+	}
+	k, err := netobs.DecodeDetectorCheckpoint(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.NodeID = "site-b-node1"
+	b, err := json.Marshal(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := r.Log(r.intakeStream()).Append(bg, c5.Record{Stream: r.intakeStream(), Class: c5.ClassConfiguration, Event: b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rc.Key().Seq
+}
+
+// prunedStart is a node whose detector starts again over an observation
+// stream pruned of every record: one observation was read, checkpointed
+// and pruned at the cursor, and the checkpoint then failed to restore. It
+// returns the pruned observation's event.
+func prunedStart(t *testing.T) (*Runtime, *Status, *Config, event.Event) {
+	t.Helper()
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	stream := NetObservationStream(sensorID)
+	got, err := r.Store(stream).Read(bg, stream, 0, 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%d observations, %v", len(got), err)
+	}
+	e, err := event.Decode(got[0].Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruneObservations(t, r, c, 1000)
+	foreignCheckpoint(t, r)
+	r.Close()
+	r, st, _ := start(t, c, dir)
+	r.Tick(bg)
+	if nd := r.detector; !nd.pruned || nd.restored || !nd.firstObs.IsZero() || firstRetained(t, r) != 0 {
+		t.Fatalf("pruned %v, restored %v, first read at %v", nd.pruned, nd.restored, nd.firstObs)
+	}
+	return r, st, c, *e
+}
+
+// D6's R1 on #590: the guard's pruned is computed from a stream the
+// store's prune step really pruned, with records still retained after the
+// detector's Through and with none; a restore at the stream's head finds
+// it not pruned. Desk: the restore fails on a checkpoint renamed to
+// another node's.
+func TestDetectorPrunedFromStream(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		step  int
+		first c5.Seq
+	}{{"some retained", 1, 2}, {"none retained", 1000, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, dir := holdConfig(t)
+			r, _, _ := start(t, c, dir)
+			if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1), ownFlow(2))); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			pruneObservations(t, r, c, tc.step)
+			if f := firstRetained(t, r); f != tc.first || detectorCursor(t, r) != 2 {
+				t.Fatalf("first retained %d, cursor %d", f, detectorCursor(t, r))
+			}
+			r.Close()
+			r, _, _ = start(t, c, dir)
+			if nd := r.detector; !nd.restored || nd.pruned {
+				t.Fatalf("a restore at the head: restored %v, pruned %v", nd.restored, nd.pruned)
+			}
+			foreignCheckpoint(t, r)
+			r.Close()
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			if nd := r.detector; nd.restored || !nd.pruned || countAlarms(st, AlarmDetectorNotRestored) != 1 {
+				t.Fatalf("a first start: restored %v, pruned %v, %d alarms", nd.restored, nd.pruned, countAlarms(st, AlarmDetectorNotRestored))
+			}
+		})
+	}
+}
+
+// guardRun stores a connected collection.run of the relay's endpoint for
+// inv, started at from and ended a second later, after after.
+func guardRun(t *testing.T, s *Scheduler, c *Config, inv string, from time.Time, after int) {
+	t.Helper()
+	f := func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+	runRecord(t, s, c, inv, map[string]string{"started_at": f(from), "ended_at": f(from.Add(time.Second)), "after_seq": strconv.Itoa(after)})
+}
+
+// unseenAlerts are the committed own-session-unseen alerts, each checked
+// to have no capture (C13 section 7.1).
+func unseenAlerts(t *testing.T, r *Runtime) (n int) {
+	t.Helper()
+	for _, a := range committedAlerts(t, r) {
+		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
+			if a.alert.Capture != "" || a.frames != nil {
+				t.Errorf("own-session-unseen with a capture: %+v", a.alert)
+			}
+			n++
+		}
+	}
+	return n
+}
+
+// D6's R2 to R4 on #590, from the CommittedAt bound: after a pruned start
+// the first record read, stored or refused, sets the bound at its commit
+// time T. A session that starts at T + 2g, so start − g equals T + g, is
+// judged, and alerts own-session-unseen once its window passes with no
+// flow; one that starts a nanosecond earlier is skipped, for
+// before-retained. D6's R8: own-session-unseen has no capture. Desk: the
+// refused record is the pruned observation stored again by hand with
+// another sensor's ID, which the detector refuses.
+func TestDetectorGuardEdge(t *testing.T) {
+	for _, malformed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("malformed %v", malformed), func(t *testing.T) {
+			r, st, c, e := prunedStart(t)
+			defer r.Close()
+			stream := NetObservationStream(sensorID)
+			if malformed {
+				var o netobs.Observation
+				if err := json.Unmarshal(e.Netobs, &o); err != nil {
+					t.Fatal(err)
+				}
+				o.SensorID = "00000000-0000-4000-8000-0000000000ff"
+				b, err := json.Marshal(&o)
+				if err != nil {
+					t.Fatal(err)
+				}
+				e.ID.Seq, e.Netobs = 0, b
+				if b, err = json.Marshal(e); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassNetworkObservation, Event: b}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(2))); err != nil {
+				t.Fatal(err)
+			}
+			got, err := r.Store(stream).Read(bg, stream, 1, 1)
+			if err != nil || len(got) != 1 || got[0].Key.Seq != 2 {
+				t.Fatalf("%d records, %v", len(got), err)
+			}
+			at, g := got[0].CommittedAt, time.Duration(netobs.DefaultTieGraceS)*time.Second
+			s := newScheduler(t, r, &fakeCollector{})
+			guardRun(t, s, c, testInvocation(1), at.Add(2*g-time.Nanosecond), 2)
+			guardRun(t, s, c, testInvocation(2), at.Add(2*g), 2)
+			later := ownFlow(3)
+			us := func(d time.Duration) string { return at.Add(d).UTC().Format("2006-01-02T15:04:05.000000Z") }
+			later.FirstUTC, later.LastUTC, later.Coverage.SinceUTC = us(time.Hour), us(time.Hour+time.Second), us(-4*time.Hour)
+			if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			d := detectorStatus(t, st)
+			refused := int64(0)
+			if malformed {
+				refused = 1
+			}
+			if !r.detector.firstObs.Equal(at) || d.NotJudged["before-retained"] != 1 || unseenAlerts(t, r) != 1 || d.Refused != refused || d.Through != 3 {
+				t.Fatalf("bound %v, want %v; %d unseen; status %+v", r.detector.firstObs, at, unseenAlerts(t, r), d)
+			}
+		})
+	}
+}
+
+// D6's R4 on #590: after a pruned start, a session handed over before
+// any record is read has no bound, so it is skipped.
+func TestDetectorGuardNothingRead(t *testing.T) {
+	r, st, c, _ := prunedStart(t)
+	defer r.Close()
+	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), time.Now().Add(time.Hour), 1)
+	r.Tick(bg)
+	if d := detectorStatus(t, st); d.NotJudged["before-retained"] != 1 || d.Through != 0 || d.OrderingFaults != 0 {
+		t.Fatalf("status %+v", d)
+	}
+}
+
+// D6's R8 on #590, without the guard: a connected session with no flow
+// alerts own-session-unseen once its window passes, with no capture.
+func TestDetectorUnseenNoCapture(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	defer r.Close()
+	from := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), from, 0)
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(1, hashOf(frameData(1))))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	if n := unseenAlerts(t, r); n != 1 {
+		t.Fatalf("%d own-session-unseen alerts", n)
+	}
+}
+
+// D6's R5 on #590: the frame index is rebuilt at a restart from the
+// retained first sights, so an alert after the restart that cites a
+// first sight's frame holds it.
+func TestDetectorFrameIndexRebuilt(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	f1 := frameData(1)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	r.Close()
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	if !r.detector.restored || r.detector.index.at[hashOf(f1)] == "" {
+		t.Fatalf("restored %v, index %v", r.detector.restored, r.detector.index.at)
+	}
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(f1)))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	got := committedAlerts(t, r)
+	if len(got) != 4 {
+		t.Fatalf("%d alerts", len(got))
+	}
+	for _, a := range got[2:] {
+		if a.alert.FramesMissing != 0 || len(a.frames) != 1 || string(a.frames[0].Data) != string(f1) {
+			t.Errorf("%s: %d missing, %d frames", a.alert.Rule, a.alert.FramesMissing, len(a.frames))
+		}
+	}
+}
+
+// D6's R6 on #590: a checkpoint that doesn't restore raises the alarm, the
+// detector starts again from the oldest retained observation, its first
+// checkpoint is stored, and every older one, the one that didn't restore
+// too, is removed: the next restart restores from the new one. Desk: the
+// checkpoint is renamed to another node's.
+func TestDetectorRestoreFailure(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	foreign := foreignCheckpoint(t, r)
+	r.Close()
+	r, st, _ := start(t, c, dir)
+	r.Tick(bg)
+	d, seqs := detectorStatus(t, st), detectorCkpts(t, r)
+	if countAlarms(st, AlarmDetectorNotRestored) != 1 || d.Restored || r.detector.pruned || d.Through != 1 || len(seqs) != 1 || seqs[0] <= foreign {
+		t.Fatalf("status %+v, checkpoints %v (foreign %d), %d alarms", d, seqs, foreign, countAlarms(st, AlarmDetectorNotRestored))
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	if d := detectorStatus(t, st); !d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 0 {
+		t.Fatalf("status %+v", d)
+	}
+}
+
+// D6's R7 on #590: a crash after a second checkpoint that holds committed
+// alerts, and after more alerts commit, gives each alert once: the restore
+// holds back the alerts after the checkpoint's last_alert_seq, and those
+// at or below it are not raised again. The crash is the next checkpoint
+// refused at item 3's ceiling.
+func TestDetectorCrashAfterAlertCheckpoint(t *testing.T) {
+	c, dir := ceilingConfig(t)
+	r, _, _ := start(t, c, dir)
+	f1 := frameData(1)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	_, doc, err := r.detectorCheckpoints(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := netobs.DecodeDetectorCheckpoint(doc)
+	if err != nil || k.LastAlertSeq != 2 || len(detectorCkpts(t, r)) != 1 {
+		t.Fatalf("checkpoint %+v, %v", k, err)
+	}
+	fillCeiling(t, r, c)
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(f1)))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	if n := len(committedAlerts(t, r)); n != 4 || detectorCursor(t, r) != 1 {
+		t.Fatalf("%d alerts before the crash, cursor %d", n, detectorCursor(t, r))
+	}
+	r.Close()
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	d := detectorStatus(t, st)
+	if n := len(committedAlerts(t, r)); n != 4 || !d.Restored || d.Through != 2 || d.Mismatches != 0 || d.Alerts != 0 {
+		t.Fatalf("%d alerts after the restart, status %+v", n, d)
+	}
+}
+
+// D6's R9 on #590: a session handed over after observations it precedes
+// raises the ordering alarm; a restore whose replay departs from the
+// alerts committed raises the mismatch alarm. Desk: the ordering fault is
+// a collection.run with an after_seq below Through, and the departure an
+// alert committed again by hand after the checkpoint.
+func TestDetectorOrderingMismatchAlarms(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), ownFlow(2))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	runRecord(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), map[string]string{"after_seq": "1"})
+	r.Tick(bg)
+	if d := detectorStatus(t, st); d.OrderingFaults != 1 || countAlarms(st, AlarmDetectorOrdering) != 1 || d.NotJudged["session-missing"] != 0 {
+		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmDetectorOrdering))
+	}
+	stream := NetAlertStream(sensorID)
+	got, err := r.Store(stream).Read(bg, stream, 0, 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%d alerts, %v", len(got), err)
+	}
+	e, err := event.Decode(got[0].Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ID.Seq = 0
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassNetworkAlert, Event: b}); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	if d := detectorStatus(t, st); !d.Restored || d.Mismatches != 1 || countAlarms(st, AlarmDetectorMismatch) != 1 {
+		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmDetectorMismatch))
+	}
+}
+
+// D6's R9 on #590: enrolled run endpoint addresses past
+// MaxDetectorEndpoints raise the alarm at start, with their count.
+func TestDetectorEndpointsNotTracked(t *testing.T) {
+	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) {
+		sensorQuotas(nc)
+		nc.NetworkSensor = sensorSection()
+		for i := range netobs.MaxDetectorEndpoints {
+			nc.AddSEL751(fmt.Sprintf("%08x-0000-4000-9000-000000000000", i+1), fmt.Sprintf("127.1.%d.%d", i/250, i%250+1), 2323, 300)
+		}
+	})
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	if d := detectorStatus(t, st); d.EndpointsNotTracked != 1 || countAlarms(st, AlarmEndpointsNotTracked) != 1 {
+		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmEndpointsNotTracked))
+	}
+}
+
+// D6's R10 on #590: the frame index holds FrameIndexEntries frames, the
+// oldest out first, and a frame indexed again keeps its place.
+func TestDetectorFrameIndexBound(t *testing.T) {
+	var x frameIndex
+	for i := range FrameIndexEntries + 1 {
+		x.add(fmt.Sprint(i), "r")
+		if i == 1 {
+			x.add("0", "r") // already in: no move
+		}
+	}
+	if len(x.at) != FrameIndexEntries || len(x.order) != FrameIndexEntries || x.at["0"] != "" || x.at["1"] == "" || x.at[fmt.Sprint(FrameIndexEntries)] == "" {
+		t.Fatalf("%d entries, %d in order", len(x.at), len(x.order))
+	}
+}
+
+// D6's N1 on #590: a collection.run the driver stops before, at an alert
+// not committed, is read again and handed over at the next tick, and one
+// that doesn't parse, before it, is counted once. A read of the health
+// stream that fails moves nothing. Desk: the commit is
+// refused by a test hook, and the read by a fake reader.
+func TestDetectorHealthPosition(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.alertAppend = func([]c5.Record) error { return errors.New("refused") }
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	s := newScheduler(t, r, &fakeCollector{})
+	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
+	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
+	r.Tick(bg)
+	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.detector.health >= run {
+		t.Fatalf("health position %d past the session at %d, not handed over", r.detector.health, run)
+	}
+	r.alertAppend = nil
+	r.Tick(bg)
+	doc, err := r.detector.d.Checkpoint(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := netobs.DecodeDetectorCheckpoint(doc)
+	if d := detectorStatus(t, st); err != nil || k.SessionThrough != uint64(run) || d.Alerts != 2 || d.NotJudged["session-missing"] != 1 {
+		t.Fatalf("session through %d, status %+v, %v", k.SessionThrough, d, err)
+	}
+	pages, health := 0, r.detector.health
+	runs, _, err := r.newSessions(bg, readerFunc(func(after c5.Seq) ([]c5.Stored, error) {
+		if pages++; pages > 1 {
+			return nil, errors.New("refused")
+		}
+		return make([]c5.Stored, detectorReadPage), nil
+	}), r.detector)
+	if err == nil || runs != nil || r.detector.health != health {
+		t.Fatalf("%d runs, health %d, %v", len(runs), r.detector.health, err)
+	}
+}
+
+// readerFunc is a health stream reader.
+type readerFunc func(c5.Seq) ([]c5.Stored, error)
+
+func (f readerFunc) Read(_ context.Context, _ c5.StreamID, after c5.Seq, _ int) ([]c5.Stored, error) {
+	return f(after)
+}
+
+// D6's N2 on #590: a stored checkpoint whose cursor save or older
+// checkpoints' removal failed is completed at the next tick, though
+// nothing moved. Desk: the failure is the checkpoint stored by hand with
+// neither, the state a failed SaveCursor or RemoveConfig leaves.
+func TestDetectorCursorRetried(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	for i := 1; i <= 2; i++ {
+		if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(i))); err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			r.Tick(bg)
+		}
+	}
+	nd := r.detector
+	r.observeTo(bg, nd, 2)
+	seq, err := r.storeDetectorCheckpoint(bg, nd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nd.written, nd.ckpts = nd.d.Through(), append(nd.ckpts, seq)
+	if n := len(detectorCkpts(t, r)); n != 2 || detectorCursor(t, r) != 1 {
+		t.Fatalf("%d checkpoints, cursor %d", n, detectorCursor(t, r))
+	}
+	written := detectorStatus(t, st).CheckpointsWritten
+	r.Tick(bg)
+	if seqs := detectorCkpts(t, r); len(seqs) != 1 || seqs[0] != seq || detectorCursor(t, r) != 2 || detectorStatus(t, st).CheckpointsWritten != written {
+		t.Fatalf("checkpoints %v, cursor %d", seqs, detectorCursor(t, r))
+	}
+}
+
+// D6's N3 on #590: a session the detector refuses, here one that ends
+// before it starts, is not judged, and counts as session missing.
+func TestDetectorSessionRefused(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	runRecord(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), map[string]string{"ended_at": "2026-10-24T09:14:00Z"})
+	r.Tick(bg)
+	if d := detectorStatus(t, st); d.NotJudged["session-missing"] != 1 || d.OrderingFaults != 0 {
 		t.Fatalf("status %+v", d)
 	}
 }

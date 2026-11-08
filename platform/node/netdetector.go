@@ -45,6 +45,9 @@ const (
 	// AlarmDetectorMismatch: a restore's replay departed from the alerts
 	// already committed (netdetect.Detector.Mismatches).
 	AlarmDetectorMismatch = "network-detector-mismatch"
+	// AlarmSessionNotJudged: a session was not judged for pending-full or
+	// tied-evicted, raised as each count rises (D1's F2 on #590).
+	AlarmSessionNotJudged = "network-session-not-judged"
 	// AlarmDetectorOrdering: a session was handed over after observations
 	// it precedes, the node's ordering fault (netdetect.ErrOrdering).
 	AlarmDetectorOrdering = "network-detector-ordering"
@@ -53,6 +56,8 @@ const (
 	// acknowledgement (D1's C1 on #575). Raised at start.
 	AlarmEndpointsNotTracked = "network-endpoints-not-tracked"
 	// AlarmAlertNotStored: an alert the detector raised was not committed.
+	// It is kept and tried again at each tick, and until it commits the
+	// detector reads nothing more and is not checkpointed.
 	AlarmAlertNotStored = "network-alert-not-stored"
 )
 
@@ -77,6 +82,10 @@ type DetectorStatus struct {
 	Alerts              int64 `json:"alerts"`
 	AlertsFramesMissing int64 `json:"alerts_frames_missing"`
 	AlertsNotStored     int64 `json:"alerts_not_stored"`
+	// AlertsPending are the alerts raised and not yet committed, and
+	// AlertCommitFailures the commits of them that failed since start.
+	AlertsPending       int   `json:"alerts_pending"`
+	AlertCommitFailures int64 `json:"alert_commit_failures"`
 	// Refused are observations the detector refused, still taken.
 	Refused int64 `json:"observations_refused"`
 	// NotJudged are the sessions not judged, by reason (D4-74).
@@ -107,9 +116,11 @@ type netDetector struct {
 	obs c5.StreamID
 	// restored: the detector came from a checkpoint. pruned says the
 	// observations after its Through were pruned at start, as they are at
-	// a first start over a pruned stream, with firstObs the capture time
-	// of the first observation the detector read: the before-retained
-	// guard (D1 in D4-74).
+	// a first start over a pruned stream, with firstObs the node's commit
+	// time of the first record the detector read, refused or not: the
+	// before-retained guard (D1 in D4-74 and on D4's F1 on #590). Not the
+	// sensor's first_utc, which is a flow's start, nor received.utc, which
+	// a held record's later commit takes out of seq order.
 	restored bool
 	pruned   bool
 	firstObs time.Time
@@ -125,10 +136,18 @@ type netDetector struct {
 	ckpts   []c5.Seq
 	handed  uint64
 	moved   bool
-	index   frameIndex
-	start   time.Duration
-	st      DetectorStatus
-	raised  map[string]bool
+	// unsent are the alert records raised and not yet committed, in the
+	// order raised, and unsentFM whether each has frames_missing above 0.
+	// While any are unsent the driver reads nothing more and the detector
+	// is not checkpointed, so neither its checkpoint nor its cursor passes
+	// an alert that isn't stored; a restart reads the observations again
+	// and raises it again (D1's F1 on #590).
+	unsent   []c5.Record
+	unsentFM []bool
+	index    frameIndex
+	start    time.Duration
+	st       DetectorStatus
+	raised   map[string]bool
 }
 
 // frameIndex maps a cited frame's SHA-256 to the evidence ref of the
@@ -383,9 +402,15 @@ func (r *Runtime) tickDetector(ctx context.Context) {
 	if nd == nil {
 		return
 	}
-	r.driveDetector(ctx, nd)
-	if nd.d.Through() != nd.written || nd.moved {
+	if r.flushAlerts(ctx, nd) {
+		r.driveDetector(ctx, nd)
+	}
+	if len(nd.unsent) == 0 && (nd.d.Through() != nd.written || nd.moved) {
 		r.checkpointDetector(ctx, nd)
+	} else if c5.Seq(nd.written) > nd.saved || len(nd.ckpts) > 1 {
+		// A cursor save or a removal that failed is tried again, though no
+		// new checkpoint is due (D6's N2 on #590).
+		r.saveDetectorCursor(ctx, nd)
 	}
 	r.detectorStatus(nd)
 }
@@ -398,7 +423,8 @@ func (r *Runtime) tickDetector(ctx context.Context) {
 // head read, and a run that left the barrier has its collection.run on the
 // health stream already. Observations go to min(head, barrier), and each
 // session is handed over, in health-stream seq order, before the
-// observations past its after_seq (D4's finding 4 on #576).
+// observations past its after_seq (D4's finding 4 on #576). It stops at an
+// alert that isn't committed.
 func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector) {
 	odb, hdb := r.Store(nd.obs), r.Store(HealthStream)
 	if odb == nil || hdb == nil {
@@ -409,40 +435,66 @@ func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector) {
 		return
 	}
 	limit := min(head, r.intake.barrier(head))
-	sessions, err := r.newSessions(ctx, hdb, nd)
+	runs, end, err := r.newSessions(ctx, hdb, nd)
 	if err != nil {
 		return
 	}
-	for _, s := range sessions {
-		r.observeTo(ctx, nd, min(s.AfterSeq, limit))
-		r.handOver(ctx, nd, s)
+	// The health position moves past a collection.run only once it is
+	// handed over, or counted when it doesn't parse, so one the driver
+	// stops before is read again at the next tick (D6's N1 on #590).
+	for _, e := range runs {
+		if e.bad {
+			r.intake.missing() // D3 on #590
+		} else {
+			if r.observeTo(ctx, nd, min(e.s.AfterSeq, limit)); len(nd.unsent) > 0 {
+				return
+			}
+			r.handOver(ctx, nd, e.s)
+		}
+		nd.health = e.seq
+		if len(nd.unsent) > 0 {
+			return
+		}
 	}
+	nd.health = end
 	r.observeTo(ctx, nd, limit)
 }
 
+// runEntry is a collection.run record on the health stream: its session,
+// or bad when it doesn't parse.
+type runEntry struct {
+	seq c5.Seq
+	s   RunSession
+	bad bool
+}
+
 // newSessions reads the collection.run records with a session after the
-// driver's health position, in seq order.
+// driver's health position, in seq order, and the last seq read. It moves
+// nothing: a read that fails gives nothing, and the next tick reads the
+// same records again.
 func (r *Runtime) newSessions(ctx context.Context, hdb interface {
 	Read(context.Context, c5.StreamID, c5.Seq, int) ([]c5.Stored, error)
-}, nd *netDetector) ([]RunSession, error) {
-	var out []RunSession
+}, nd *netDetector) ([]runEntry, c5.Seq, error) {
+	var out []runEntry
 	want := []byte(`"` + HealthCollectionRun + `"`)
-	for {
-		got, err := hdb.Read(ctx, HealthStream, nd.health, detectorReadPage)
+	for after := nd.health; ; {
+		got, err := hdb.Read(ctx, HealthStream, after, detectorReadPage)
 		if err != nil {
-			return out, err
+			return nil, 0, err
 		}
 		for _, st := range got {
-			nd.health = st.Key.Seq
+			after = st.Key.Seq
 			if !bytes.Contains(st.Event, want) {
 				continue
 			}
-			if s, ok, err := runSessionOf(st); err == nil && ok {
-				out = append(out, s)
+			if s, ok, err := runSessionOf(st); err != nil {
+				out = append(out, runEntry{seq: st.Key.Seq, bad: true})
+			} else if ok {
+				out = append(out, runEntry{seq: st.Key.Seq, s: s})
 			}
 		}
 		if len(got) < detectorReadPage {
-			return out, nil
+			return out, after, nil
 		}
 	}
 }
@@ -465,15 +517,20 @@ func (r *Runtime) handOver(ctx context.Context, nd *netDetector, s RunSession) {
 	} else {
 		alerts, err = nd.d.Session(ds, s.AfterSeq)
 	}
-	if errors.Is(err, netdetect.ErrOrdering) {
+	switch {
+	case errors.Is(err, netdetect.ErrOrdering):
 		r.raiseDetector(nd, AlarmDetectorOrdering, fmt.Sprintf("collection.run %d was handed over after observations it precedes; it is not judged", s.Seq))
+	case err != nil && !errors.Is(err, netdetect.ErrNotJudged):
+		// A session the detector refused is not judged, as one whose
+		// record is missing (D6's N3 on #590); ErrNotJudged is pending-full.
+		r.intake.missing()
 	}
 	r.commitAlerts(ctx, nd, alerts)
 }
 
 // beforeRetained is the guard: with the observations after the start's
 // Through pruned, a connected session that is not open_flow, whose start
-// less g is before the first observation read's capture time plus g, may
+// less g is before the commit time of the first record read plus g, may
 // have had its flows pruned, so it is skipped (D1 in D4-74).
 func (nd *netDetector) beforeRetained(s RunSession) bool {
 	if !nd.pruned || !s.Connected || s.OpenFlow {
@@ -502,14 +559,16 @@ func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64) {
 				o = nil // refused by Observe, which still takes its seq
 			}
 			nd.index.note(o)
-			if o != nil && nd.firstObs.IsZero() {
-				nd.firstObs, _ = time.Parse(time.RFC3339Nano, o.FirstUTC)
+			if nd.firstObs.IsZero() {
+				nd.firstObs = st.CommittedAt
 			}
 			alerts, err := nd.d.Observe(id, o)
 			if err != nil {
 				nd.st.Refused++
 			}
-			r.commitAlerts(ctx, nd, alerts)
+			if r.commitAlerts(ctx, nd, alerts); len(nd.unsent) > 0 {
+				return
+			}
 		}
 	}
 }
@@ -518,14 +577,14 @@ func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64) {
 // it cites and commits the alerts, in order, to the alert stream (C13
 // section 7.1). A cited frame whose capture the node no longer holds, or
 // whose bytes don't hash to the cite, is left out and counted in
-// frames_missing (D1 in D4-74).
+// frames_missing (D1 in D4-74). An alert that isn't committed stays unsent
+// (flushAlerts). One that can't be built, which no input the detector
+// accepts gives, is counted as not stored.
 func (r *Runtime) commitAlerts(ctx context.Context, nd *netDetector, alerts []netobs.Alert) {
 	if len(alerts) == 0 {
 		return
 	}
 	stream := NetAlertStream(r.cfg.NetworkSensor.SensorID)
-	recs := make([]c5.Record, 0, len(alerts))
-	var missing int64
 	for i := range alerts {
 		rec, err := r.alertRecord(ctx, nd, stream, &alerts[i])
 		if err != nil {
@@ -533,25 +592,70 @@ func (r *Runtime) commitAlerts(ctx context.Context, nd *netDetector, alerts []ne
 			nd.st.AlertsNotStored++
 			continue
 		}
-		recs = append(recs, rec)
-		if alerts[i].FramesMissing > 0 {
-			missing++
+		nd.unsent, nd.unsentFM = append(nd.unsent, rec), append(nd.unsentFM, alerts[i].FramesMissing > 0)
+	}
+	r.flushAlerts(ctx, nd)
+}
+
+// flushAlerts commits the unsent alerts, in the order raised, and reports
+// whether none is left. An alert the store refuses for its class's quota
+// or record cap is dropped and counted, as C5 0.9 section 8 drops a full
+// class's records, and the detector goes on. Any other failure keeps the
+// alert and those after it, raises the alarm once and is counted; the next
+// tick tries again (D1 on #590).
+func (r *Runtime) flushAlerts(ctx context.Context, nd *netDetector) bool {
+	if len(nd.unsent) == 0 {
+		return true
+	}
+	if r.appendAlerts(ctx, nd.unsent) == nil {
+		r.alertsStored(nd, len(nd.unsent))
+		return true
+	}
+	for len(nd.unsent) > 0 {
+		err := r.appendAlerts(ctx, nd.unsent[:1])
+		switch {
+		case err == nil:
+			r.alertsStored(nd, 1)
+		case errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}) || errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge}):
+			nd.st.AlertsNotStored++
+			r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmAlertNotStored, At: r.opt.Now(), Stream: NetAlertStream(r.cfg.NetworkSensor.SensorID),
+				Detail: "an alert was dropped and counted: " + err.Error()})
+			nd.unsent, nd.unsentFM = nd.unsent[1:], nd.unsentFM[1:]
+		default:
+			nd.st.AlertCommitFailures++
+			r.raiseDetector(nd, AlarmAlertNotStored, fmt.Sprintf("%d alerts were not committed, so the detector reads nothing more and its cursor stays until they are: %v", len(nd.unsent), err))
+			return false
 		}
 	}
-	if len(recs) == 0 {
-		return
+	return true
+}
+
+// appendAlerts commits recs to the alert stream in one batch.
+func (r *Runtime) appendAlerts(ctx context.Context, recs []c5.Record) error {
+	if r.alertAppend != nil {
+		return r.alertAppend(recs)
 	}
-	err := errors.New("the network database is not open")
-	if log := r.Log(stream); log != nil {
-		_, err = log.AppendBatch(ctx, recs)
+	log := r.Log(NetAlertStream(r.cfg.NetworkSensor.SensorID))
+	if log == nil {
+		return errors.New("the network database is not open")
 	}
-	if err != nil {
-		r.raiseDetector(nd, AlarmAlertNotStored, fmt.Sprintf("%d alerts were not committed: %v", len(recs), err))
-		nd.st.AlertsNotStored += int64(len(recs))
-		return
+	_, err := log.AppendBatch(ctx, recs)
+	return err
+}
+
+// alertsStored counts the first n unsent alerts stored.
+func (r *Runtime) alertsStored(nd *netDetector, n int) {
+	nd.st.Alerts += int64(n)
+	for _, fm := range nd.unsentFM[:n] {
+		if fm {
+			nd.st.AlertsFramesMissing++
+		}
 	}
-	nd.st.Alerts += int64(len(recs))
-	nd.st.AlertsFramesMissing += missing
+	nd.unsent, nd.unsentFM = nd.unsent[n:], nd.unsentFM[n:]
+	if len(nd.unsent) == 0 {
+		nd.unsent, nd.unsentFM = nil, nil
+		delete(nd.raised, AlarmAlertNotStored)
+	}
 }
 
 // alertRecord is a's record, with its capture unless it is
@@ -711,10 +815,20 @@ func (r *Runtime) detectorStatus(nd *netDetector) {
 	if n := d.OrderingFaults(); n > nd.st.OrderingFaults {
 		delete(nd.raised, AlarmDetectorOrdering)
 	}
+	for _, x := range []struct {
+		reason, why string
+		n           int64
+	}{{"pending-full", fmt.Sprintf("past %d sessions pending", netobs.MaxPendingSessions), d.PendingFull()},
+		{"tied-evicted", fmt.Sprintf("whose tied flows were dropped past %d", netobs.MaxTiedSessions), d.TiedEvicted()}} {
+		if x.n > nd.st.NotJudged[x.reason] {
+			r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmSessionNotJudged, At: r.opt.Now(), Stream: nd.obs,
+				Detail: fmt.Sprintf("%d of the node's own sessions not judged since start (%s), %s", x.n, x.reason, x.why)})
+		}
+	}
 	r.intake.mu.Lock()
 	missing := int64(r.intake.sessionMissing)
 	r.intake.mu.Unlock()
-	nd.st.Through, nd.st.Checkpointed, nd.st.Restored = d.Through(), nd.written, nd.restored
+	nd.st.Through, nd.st.Checkpointed, nd.st.Restored, nd.st.AlertsPending = d.Through(), nd.written, nd.restored, len(nd.unsent)
 	nd.st.NotJudged = map[string]int64{"pending-full": d.PendingFull(), "tied-evicted": d.TiedEvicted(), "before-retained": d.BeforeRetained(), "session-missing": missing}
 	nd.st.OpenFlowSeen, nd.st.EarlyCloses, nd.st.Mismatches, nd.st.OrderingFaults = d.OpenFlowSeen(), d.EarlyCloses(), d.Mismatches(), d.OrderingFaults()
 	if h := (r.opt.Mono() - nd.start).Hours(); h > 0 {

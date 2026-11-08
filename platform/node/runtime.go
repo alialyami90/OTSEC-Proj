@@ -89,6 +89,9 @@ type Runtime struct {
 	// afterRelease, when set, runs between a run's release and its entry
 	// in the handover barrier at its after_seq: a test's way to tick there.
 	afterRelease func()
+	// alertAppend, when set, replaces the commit of the detector's alerts:
+	// a test's way to make it fail.
+	alertAppend func([]c5.Record) error
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
