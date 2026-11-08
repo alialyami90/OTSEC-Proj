@@ -173,6 +173,14 @@ const (
 	BindSenderAddress BindingMethod = "sender-address" // the sender's address maps to this asset
 	BindContentField  BindingMethod = "content-field"  // a field in the record names the subject (RTAC tag, OpenFlow datapath ID)
 	BindOperator      BindingMethod = "operator"       // an operator assigned it
+
+	// BindObservedAddress (since 0.3): an address seen in captured traffic
+	// maps to this asset. Only on a network-observation event and on a
+	// telemetry-health event of type HealthNetobsAlert, only with
+	// ConfidenceInferred, and those two take no other method (D4-71). It is
+	// not sender-address: the address may be a destination's, and a spoofed
+	// packet must not read upstream as "this asset sent it".
+	BindObservedAddress BindingMethod = "observed-address"
 )
 
 // BindingConfidence is closed.
@@ -460,6 +468,7 @@ const (
 	HealthDropCounted         = "intake.drop-counted"     // datagrams dropped and counted (storage full, rate limit)
 	HealthForwardUnconfirmed  = "forward.unconfirmed"     // events sent to a best-effort target without confirmation
 	HealthForwardUnreachable  = "forward.unreachable"     // a required target unreachable beyond its period
+	HealthNetobsAlert         = "netobs.alert"            // a C13 network alert (since 0.3); contracts/netobs.HealthAlert
 	HealthForwardTextOmitted  = "forward.text-omitted"    // device text replaced by a reference to fit the size limit
 )
 

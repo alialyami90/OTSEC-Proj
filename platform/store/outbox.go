@@ -200,8 +200,17 @@ func (d *DB) SaveCursor(ctx context.Context, c c5.Cursor) error {
 			refusal = codeErr(c5.CodeCursorRegress, nil, "cursor %s/%s from %d back to %d", c.Consumer, c.Stream, have, c.Through)
 			return refusal
 		}
-		_, err = d.conn.ExecContext(ctx, `INSERT INTO cursors (consumer, stream, through) VALUES (?, ?, ?)
-			ON CONFLICT (consumer, stream) DO UPDATE SET through = excluded.through`, string(c.Consumer), string(c.Stream), int64(c.Through))
+		if _, err := d.conn.ExecContext(ctx, `INSERT INTO cursors (consumer, stream, through) VALUES (?, ?, ?)
+			ON CONFLICT (consumer, stream) DO UPDATE SET through = excluded.through`, string(c.Consumer), string(c.Stream), int64(c.Through)); err != nil {
+			return err
+		}
+		// A cursor save raises the wall mark too (Options.WallMark): a
+		// retention consumer's move is one, so a stream idle since its last
+		// commit still floors later commit times at the move's wall time.
+		if !d.opt.WallMark {
+			return nil
+		}
+		_, err = d.raiseWallMark(ctx, d.opt.now().UnixNano())
 		return err
 	})
 	return err

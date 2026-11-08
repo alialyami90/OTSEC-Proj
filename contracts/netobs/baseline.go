@@ -53,14 +53,22 @@ type Baseline struct {
 // Period is the learning period and what it folded. Observations counts
 // the observations folded, by kind; Degraded and PlatformSession count
 // those left out because the coverage was degraded or they were tied to
-// the node's own sessions (baseline note §2.1).
+// the node's own sessions (baseline note §2.1). Overflow counts the folded
+// observations that carried at least one entry the full draft could not
+// hold (C13 §14 item 13, D4-71): it says the draft is incomplete, not how
+// much is missing, and it saturates at MaxOverflow.
 type Period struct {
 	StartUTC        string `json:"start_utc"`
 	EndUTC          string `json:"end_utc"`
 	Observations    Counts `json:"observations"`
 	Degraded        int64  `json:"degraded"`
 	PlatformSession int64  `json:"platform_session"`
+	Overflow        int64  `json:"overflow"`
 }
+
+// MaxOverflow is where Period.Overflow saturates: 2^53 - 1, so it is
+// exact in any JSON reader (D4-71).
+const MaxOverflow = 1<<53 - 1
 
 // Counts are observation counts by kind.
 type Counts struct {
@@ -248,6 +256,9 @@ func (b *Baseline) Validate() error {
 			c.fail(CodeRange, "period", "counts are not negative")
 			break
 		}
+	}
+	if o := b.Period.Overflow; o < 0 || o > MaxOverflow {
+		c.fail(CodeRange, "period.overflow", "%d not in [0, %d]", o, MaxOverflow)
 	}
 	if p := b.Params; p.TieGraceS < 1 || p.TieGraceS > MaxTieGraceS {
 		c.fail(CodeRange, "params.tie_grace_s", "%d not in [1, %d]", p.TieGraceS, MaxTieGraceS)

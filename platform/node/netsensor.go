@@ -24,7 +24,18 @@ type NetworkSensor struct {
 	// observations may take at most a quarter of the observation quota
 	// (the unresolved budget, docs/phase4/D5-c5-0.9.md section 4).
 	OutageHours int `json:"outage_hours"`
+	// AlertRetentionDays is how long the sensor's alerts are kept when no
+	// forward target consumes the alert stream: the node's retention
+	// consumer then moves past older alerts (D5-c5-0.9.md section 3,
+	// netretain). It is required with no target, and refused with one,
+	// where the target confirms alerts and nothing would read it (D1 in
+	// D4-70).
+	AlertRetentionDays int `json:"alert_retention_days,omitempty"`
 }
+
+// MaxAlertRetentionDays bounds alert_retention_days, so a typo can't keep
+// alerts, and hold the alert class, for good.
+const MaxAlertRetentionDays = 3650
 
 // NetworkDB holds the network classes and nothing else (C5 0.9), so a
 // network flood never holds another database's write lock. It exists only
@@ -53,6 +64,11 @@ func NetBaselineStream(sensorID string) c5.StreamID {
 	return c5.StreamID("netbaseline/" + sensorID)
 }
 
+// NetRetentionOn reports whether the sensor's alert stream has the
+// retention consumer: the section is set and no forward target consumes
+// the alert stream (every target consumes every event stream, Consumers).
+func (c *Config) NetRetentionOn() bool { return c.NetworkSensor != nil && len(c.targets) == 0 }
+
 // NetworkSensorOn reports whether the network_sensor section is set.
 func (c *Config) NetworkSensorOn() bool { return c.NetworkSensor != nil }
 
@@ -78,6 +94,12 @@ func (c *Config) checkNetworkSensor(fail func(format string, args ...any)) {
 		// any planned outage would starve unresolved observations (D1 on
 		// #550). The bound is syslog_outage_hours's.
 		fail("network_sensor.outage_hours %d not in [1, %d]: the unresolved budget refills over it", s.OutageHours, MaxSyslogOutageHours)
+	}
+	switch d := s.AlertRetentionDays; {
+	case len(c.targets) > 0 && d != 0:
+		fail("network_sensor.alert_retention_days is set with a forwarding target: the target confirms the alert stream, so no retention applies; remove it")
+	case len(c.targets) == 0 && (d < 1 || d > MaxAlertRetentionDays):
+		fail("network_sensor.alert_retention_days %d not in [1, %d]: with no forwarding target, the retention consumer prunes the alert stream after it", d, MaxAlertRetentionDays)
 	}
 }
 

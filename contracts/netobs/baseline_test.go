@@ -132,6 +132,8 @@ func TestBaselineRules(t *testing.T) {
 		{"version 0", CodeRange, func(b *Baseline) { b.Version = 0 }},
 		{"table", CodeForm, func(b *Baseline) { b.FunctionTable = "fc classes" }},
 		{"period backwards", CodeOrder, func(b *Baseline) { b.Period.EndUTC = "2026-10-01T00:00:00Z" }},
+		{"overflow negative", CodeRange, func(b *Baseline) { b.Period.Overflow = -1 }},
+		{"overflow above 2^53-1", CodeRange, func(b *Baseline) { b.Period.Overflow = MaxOverflow + 1 }},
 		{"tie grace 0", CodeRange, func(b *Baseline) { b.Params.TieGraceS = 0 }},
 		{"window 59", CodeRange, func(b *Baseline) { b.Params.CoalesceWindowS = 59 }},
 		{"pairs out of order", CodeOrder, func(b *Baseline) { b.Pairs[0], b.Pairs[1] = b.Pairs[1], b.Pairs[0] }},
@@ -159,6 +161,17 @@ func TestBaselineRules(t *testing.T) {
 		if _, err := b.Encode(); err == nil {
 			t.Errorf("%s: encoded", tc.name)
 		}
+	}
+	// D4-71: overflow is in [0, 2^53-1], and is required: a document
+	// without it is not canonical.
+	at := fxBaseline()
+	at.Period.Overflow = MaxOverflow
+	if MaxOverflow != 1<<53-1 || at.Validate() != nil {
+		t.Errorf("overflow at MaxOverflow (%d): %v", MaxOverflow, at.Validate())
+	}
+	enc, _ := fxBaseline().Encode()
+	if !bytes.Contains(enc, []byte(`,"overflow":0}`)) || IsCanonical(bytes.Replace(enc, []byte(`,"overflow":0`), nil, 1)) {
+		t.Error("overflow is not required in the canonical form")
 	}
 	for _, sub := range []*int{nil, ptr(255)} {
 		b := fxBaseline()

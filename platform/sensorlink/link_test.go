@@ -352,6 +352,16 @@ func TestUnresolvedBudget(t *testing.T) {
 	if e.Source.Asset != nil || !slices.Equal(e.Flags, []string{"asset-unresolved"}) {
 		t.Fatalf("source %+v, flags %v", e.Source, e.Flags)
 	}
+	// A resolved destination is bound observed-address, inferred: a label
+	// from the wire, never sender-address or configured (D4-71, D3's B1 on
+	// #557).
+	var re event.Event
+	if err := json.Unmarshal(stored(t, s)[0].Event, &re); err != nil {
+		t.Fatal(err)
+	}
+	if a := re.Source.Asset; a == nil || a.ID != relay || a.Binding != (event.Binding{Method: event.BindObservedAddress, Confidence: event.ConfidenceInferred}) {
+		t.Fatalf("resolved destination: source %+v", re.Source)
+	}
 	c.now += time.Hour
 	for range k + 1 {
 		unresolved()
