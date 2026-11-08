@@ -57,6 +57,9 @@ type Config struct {
 	CollectorPublicDir string `json:"collector_public_dir,omitempty"`
 	// Register is the node's command register copy (WriteCommandRegister).
 	Register map[string]any `json:"register,omitempty"`
+	// NetworkSensor is the network_sensor section; nil is off. A map, so
+	// a test can set any field.
+	NetworkSensor map[string]any `json:"network_sensor,omitempty"`
 }
 
 // AssetControls is one asset_controls entry.

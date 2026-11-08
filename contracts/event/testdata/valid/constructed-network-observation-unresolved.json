@@ -1,0 +1,30 @@
+{
+  "schema": "otsec.event/0.3",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "netobs/5f0c2a7e-3b1d-4c8e-9a2f-6d4e8b1c7a90",
+    "seq": 1
+  },
+  "origin": "platform",
+  "kind": "network-observation",
+  "source": {
+    "origin_auth": "platform"
+  },
+  "received": {
+    "utc": "2026-10-24T12:05:05.200000Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "netobs": {
+    "schema": "otsec.netobs/0.1",
+    "type": "observation",
+    "kind": "function",
+    "illustrative": "C4 checks only that this is one object within MaxNetobsBytes"
+  },
+  "flags": [
+    "asset-unresolved"
+  ]
+}

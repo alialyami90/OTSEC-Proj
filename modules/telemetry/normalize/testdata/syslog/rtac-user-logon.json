@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.event/0.2",
+  "schema": "otsec.event/0.3",
   "id": {
     "node_id": "site-a-node1",
     "stream": "syslog/lab-tls",

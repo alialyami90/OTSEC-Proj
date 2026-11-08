@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/version"
 )
 
 // C4 0.2 source.sender.tls_leaf_sha256 (A4, #167): A6's cases. The
@@ -77,10 +78,11 @@ func TestC4V02TLSLeaf(t *testing.T) {
 	}
 }
 
-// TestC4V02Identifier: every event this build writes says 0.2, so a
-// tls-mutual event it writes must carry the leaf.
+// TestC4V02Identifier: every event this build writes says 0.2 or later, so
+// a tls-mutual event it writes must carry the leaf.
 func TestC4V02Identifier(t *testing.T) {
-	if event.Identifier != "otsec.event/0.2" {
-		t.Fatalf("Identifier %q", event.Identifier)
+	v, err := version.Parse(event.Identifier)
+	if err != nil || v.Name != "event" || v.Major != 0 || v.Minor < 2 {
+		t.Fatalf("Identifier %q (%v)", event.Identifier, err)
 	}
 }

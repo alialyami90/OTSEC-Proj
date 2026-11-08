@@ -1,8 +1,10 @@
 package event
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -68,7 +70,7 @@ var (
 	hexForm        = regexp.MustCompile(`^(?:[0-9a-f]{2})+$`)
 )
 
-var self = version.ID{Name: "event", Major: 0, Minor: 2}
+var self = version.ID{Name: "event", Major: 0, Minor: 3}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
@@ -105,6 +107,7 @@ func (e *Event) validate(pending bool) error {
 		checkFlag(c, fmt.Sprintf("flags[%d]", i), f)
 	}
 	checkReceived(c, &e.Received)
+	checkNetobs(c, e)
 	switch e.Origin {
 	case OriginDevice:
 		checkDeviceEvent(c, e)
@@ -545,5 +548,42 @@ func checkLeap(c *checker, t *DeviceTime, wall time.Time) {
 	}
 	if u := wall.Add(-off); u.Hour() != 23 || u.Minute() != 59 {
 		c.fail(CodeTimeFormat, "device_time.wall_clock", "%q at offset %s is not 23:59:60 UTC", t.WallClock, t.Offset)
+	}
+}
+
+// checkNetobs applies the 0.3 rules for C13 observations: netobs exactly on
+// a network-observation event stamped 0.3 or later, one JSON object within
+// MaxNetobsBytes, on a platform event. As every platform event, it has no
+// native record and no evidence_class (checkPlatformEvent); the
+// observation's evidence class is in its body (C13 §5). With no destination
+// asset, it carries asset-unresolved.
+func checkNetobs(c *checker, e *Event) {
+	isObs := e.Kind == KindNetworkObservation
+	switch {
+	case e.Netobs != nil && !isObs:
+		c.fail(CodeForbidden, "netobs", "only a %s event carries netobs", KindNetworkObservation)
+	case e.Netobs == nil && isObs:
+		c.fail(CodeMissing, "netobs", "required on %s events", KindNetworkObservation)
+	}
+	if e.Netobs != nil {
+		if v, err := version.Parse(e.Schema); err == nil && v.Minor < 3 {
+			c.fail(CodeForbidden, "netobs", "new in otsec.event/0.3; this event is %s", e.Schema)
+		}
+		b := bytes.TrimLeft(e.Netobs, " \t\r\n")
+		if len(b) == 0 || b[0] != '{' || !json.Valid(e.Netobs) {
+			c.fail(CodeEnum, "netobs", "not one JSON object")
+		}
+		if len(e.Netobs) > MaxNetobsBytes {
+			c.fail(CodeForbidden, "netobs", "%d bytes, over MaxNetobsBytes (%d)", len(e.Netobs), MaxNetobsBytes)
+		}
+	}
+	if !isObs {
+		return
+	}
+	if e.Origin != OriginPlatform {
+		c.fail(CodeEnum, "origin", "a %s event is a platform event", KindNetworkObservation)
+	}
+	if e.Source.Asset == nil && !contains(e.Flags, "asset-unresolved") {
+		c.fail(CodeMissing, "flags", "an observation without a destination asset carries asset-unresolved")
 	}
 }

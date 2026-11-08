@@ -12,6 +12,7 @@ import (
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/version"
 	"otsec.local/otsec/modules/telemetry/normalize"
 	"otsec.local/otsec/modules/telemetry/receive"
 )
@@ -37,8 +38,8 @@ func checkStoredValid(t *testing.T, ev []stored) {
 			t.Errorf("stored event %d does not decode: %v", i, err)
 			continue
 		}
-		if e.Schema != "otsec.event/0.2" {
-			t.Errorf("stored event %d is %s", i, e.Schema)
+		if v, err := version.Parse(e.Schema); err != nil || v.Name != "event" || v.Major != 0 || v.Minor < 2 {
+			t.Errorf("stored event %d is %s, want 0.2 or later", i, e.Schema)
 		}
 	}
 }

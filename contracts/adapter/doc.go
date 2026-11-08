@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.8: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.9: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -178,6 +178,19 @@
 //     failed.snmp_scoped_pdu_unreadable ends one on an authenticated,
 //     decrypted message whose ScopedPDU does not decode. Earlier results
 //     read unchanged.
+//   - 0.9 (D4-68, docs/phase4/D2-c2-0.9.md, approved by D1): the session's
+//     connection, so the node can tie a flow the sensor sees to the session
+//     (AP-35). session.local_addr is the collector's end of the one
+//     connection, an IP address and port in canonical form, unmapped and
+//     without a zone (LocalAddrOf, ValidLocalAddr); session.connected_at is
+//     when it was made, no earlier than started_at and no later than the
+//     first segment or ended_at, and for SNMPv3 the at of the first datagram
+//     sent. Both are present exactly when connected is, and a 0.8 result
+//     carries neither. failed.snmp_varbinds_mismatch (D4-60): an
+//     authenticated noError Response to a Get or GetNext whose binding count
+//     differs from the request's, checked before any of its bindings is
+//     kept. From 0.9 every result's times, of any minor, have at most nine
+//     fractional digits (D4-61). Earlier results read unchanged otherwise.
 //
 // # For the consumers of a result
 //

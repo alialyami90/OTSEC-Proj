@@ -1,6 +1,7 @@
 package event
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
-const Identifier = "otsec.event/0.2"
+const Identifier = "otsec.event/0.3"
 
 // NodeID names a platform node: a lowercase DNS label, defined in
 // contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
@@ -66,8 +67,18 @@ type Event struct {
 	Native     *Native     `json:"native,omitempty"`
 	Normalized *Normalized `json:"normalized,omitempty"`
 	Health     *Health     `json:"health,omitempty"`
-	Flags      []string    `json:"flags,omitempty"` // open set, see KnownFlags
+	// Netobs (since 0.3) is a C13 stored observation, set exactly on a
+	// network-observation event. C4 checks only that it is one JSON object
+	// of at most MaxNetobsBytes; the node checks the body against C13 at
+	// intake, so this package never imports contracts/netobs.
+	Netobs json.RawMessage `json:"netobs,omitempty"`
+	Flags  []string        `json:"flags,omitempty"` // open set, see KnownFlags
 }
+
+// MaxNetobsBytes bounds Event.Netobs. contracts/netobs pins it from C13's
+// worst stored observation (TestWorstStoredObservationFits): frame bytes are
+// in the record's C5 capture, not in the body.
+const MaxNetobsBytes = 24 << 10
 
 // Origin says who produced the content. It is set by the collector from how
 // the record arrived, never from the record's content. Closed.
@@ -90,6 +101,10 @@ const (
 	KindHostEvent    Kind = "host-event"       // a host event pushed by a host (Windows Event Forwarding or a forwarder)
 	KindDeviceStatus Kind = "device-status"    // a status report read from a device (for example a clock STATUS report)
 	KindHealth       Kind = "telemetry-health" // a platform event; Health is set
+
+	// KindNetworkObservation (since 0.3) is a C13 observation stored as a
+	// platform event; Netobs is set.
+	KindNetworkObservation Kind = "network-observation"
 )
 
 var tokenPattern = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,63}$`)

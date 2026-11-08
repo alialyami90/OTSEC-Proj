@@ -31,7 +31,10 @@ type Layout struct {
 //     store cannot stop evidence collection and an evidence flood cannot
 //     stop audit;
 //   - configuration (0.4) is never in a database with any other class,
-//     for the same reason, and because its records may be held.
+//     for the same reason, and because its records may be held;
+//   - a database that holds a network class (0.9) holds no class but the
+//     two network classes, so a flood of observations never holds the
+//     write lock of SER, Syslog, audit or configuration.
 func (l Layout) Validate() error {
 	dbs := map[DatabaseID]bool{}
 	streams := map[StreamID]DatabaseID{}
@@ -71,6 +74,15 @@ func (l Layout) Validate() error {
 		}
 		if classes[ClassConfiguration] && len(classes) > 1 {
 			return errf(CodeInvalid, nil, "database %s mixes configuration with other classes", d.ID)
+		}
+		// 0.9: a network flood never holds the write lock of another
+		// class's database. The two network classes may share one.
+		if classes[ClassNetworkObservation] || classes[ClassNetworkAlert] {
+			for c := range classes {
+				if !networkClass(c) {
+					return errf(CodeInvalid, nil, "database %s mixes the network classes with %s", d.ID, c)
+				}
+			}
 		}
 		for _, s := range d.Streams {
 			if !classes[s.Class] {

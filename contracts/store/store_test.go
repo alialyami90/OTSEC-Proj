@@ -19,7 +19,7 @@ func isCode(err error, c Code) bool { return errors.Is(err, &Error{Code: c}) }
 
 func TestIdentifier(t *testing.T) {
 	id, err := version.Parse(Identifier)
-	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 8 {
+	if err != nil || id.Name != "store" || id.Major != 0 || id.Minor != 9 {
 		t.Fatalf("Identifier %q: %+v %v", Identifier, id, err)
 	}
 }
@@ -90,6 +90,9 @@ func TestFullActions(t *testing.T) {
 		ClassPlatform:        RefuseNew,
 		ClassConfiguration:   StopCollecting,
 		ClassSyslogUnknown:   DropAndCount,
+		// 0.9
+		ClassNetworkObservation: DropAndCount,
+		ClassNetworkAlert:       DropAndCount,
 	}
 	for _, c := range Classes {
 		got, err := ActionFor(c)

@@ -48,10 +48,31 @@ const (
 	// also carries a known sender. The bound is the bytes stored at once,
 	// which no clock step or restart refills.
 	ClassSyslogUnknown StreamClass = "syslog-unknown"
+	// ClassNetworkObservation (0.9): C13 observations, what the passive
+	// sensor observed, as C4 events of kind network-observation. A
+	// first-sight observation carries its cited frames as its capture. The
+	// sender is the monitored network, which cannot be slowed or asked to
+	// resend, so at its quota new observations are dropped and counted
+	// (AlarmNetworkFull). Its quota requires a MaxRecordBytes, and a
+	// database that holds it holds only network classes.
+	ClassNetworkObservation StreamClass = "network-observation"
+	// ClassNetworkAlert (0.9): C13 alerts, which only the node raises, with
+	// a capture of the frames each cites. A class of its own, so a flood of
+	// observations cannot take the room the alerts need. At its quota new
+	// alerts are dropped and counted (AlarmNetworkFull). Its quota requires
+	// a MaxRecordBytes, and a database that holds it holds only network
+	// classes.
+	ClassNetworkAlert StreamClass = "network-alert"
 )
 
 // Classes lists every StreamClass.
-var Classes = []StreamClass{ClassAdapterEvidence, ClassSyslogStream, ClassSyslogDatagram, ClassAudit, ClassPlatform, ClassConfiguration, ClassSyslogUnknown}
+var Classes = []StreamClass{ClassAdapterEvidence, ClassSyslogStream, ClassSyslogDatagram, ClassAudit, ClassPlatform, ClassConfiguration, ClassSyslogUnknown,
+	ClassNetworkObservation, ClassNetworkAlert}
+
+// networkClass reports whether c is one of the two network classes (0.9).
+func networkClass(c StreamClass) bool {
+	return c == ClassNetworkObservation || c == ClassNetworkAlert
+}
 
 // FullAction is what the store does for a class at its quota. Closed set.
 type FullAction string
@@ -74,7 +95,8 @@ const (
 
 // FullAlarm is the alarm a class raises when its quota cannot hold the next
 // record: audit-store-full for the audit class, syslog-unknown-full for the
-// syslog-unknown class, and store-quota-reached for every other class. The
+// syslog-unknown class, network-full for the two network classes (0.9), and
+// store-quota-reached for every other class. The
 // runtime refusal and startup raise the same code, so one condition is one
 // alarm to an operator and to the C6 views (B6 and B1 on #324).
 func FullAlarm(c StreamClass) AlarmCode {
@@ -83,6 +105,8 @@ func FullAlarm(c StreamClass) AlarmCode {
 		return AlarmAuditFull
 	case ClassSyslogUnknown:
 		return AlarmSyslogUnknownFull
+	case ClassNetworkObservation, ClassNetworkAlert:
+		return AlarmNetworkFull
 	}
 	return AlarmQuotaReached
 }
@@ -96,7 +120,7 @@ func ActionFor(c StreamClass) (FullAction, error) {
 		return StopCollecting, nil
 	case ClassSyslogStream, ClassPlatform:
 		return RefuseNew, nil
-	case ClassSyslogDatagram, ClassSyslogUnknown:
+	case ClassSyslogDatagram, ClassSyslogUnknown, ClassNetworkObservation, ClassNetworkAlert:
 		return DropAndCount, nil
 	case ClassAudit:
 		return FailClosed, nil
@@ -114,7 +138,7 @@ type Quota struct {
 	// MaxRecordBytes (0.4) caps one record of the class: its event plus
 	// its capture. 0 means no cap of its own, so a record is bounded by
 	// the Log's MaxCommitBytes instead. The configuration class requires
-	// a cap. A record over it is refused with CodeRecordTooLarge before it
+	// a cap, and since 0.9 so do the two network classes. A record over it is refused with CodeRecordTooLarge before it
 	// is queued.
 	MaxRecordBytes int64
 }
@@ -135,7 +159,7 @@ func (q Quota) Validate() error {
 		return errf(CodeInvalid, nil, "quota for %s: warn fraction %v not in (0,1)", q.Class, q.WarnFraction)
 	}
 	switch {
-	case q.MaxRecordBytes == 0 && q.Class == ClassConfiguration:
+	case q.MaxRecordBytes == 0 && (q.Class == ClassConfiguration || networkClass(q.Class)):
 		return errf(CodeInvalid, nil, "quota for %s needs a record cap", q.Class)
 	case q.MaxRecordBytes != 0 && (q.MaxRecordBytes < MinRecordBytes || q.MaxRecordBytes > q.Bytes):
 		return errf(CodeInvalid, nil, "quota for %s: record cap %d not in [%d, %d]", q.Class, q.MaxRecordBytes, MinRecordBytes, q.Bytes)
@@ -177,6 +201,13 @@ const (
 	// not justify, or a missing one, and corrected it. Stream and Detail
 	// name the record.
 	AlarmHoldsReconciled AlarmCode = "store-holds-reconciled"
+	// AlarmNetworkFull (0.9): a network class reached its quota; new
+	// records of the class are dropped and counted. It is a blind spot in
+	// detection, not a storage fault a device will cover, so it is not
+	// store-quota-reached. Raised once per fill with Class set, re-armed by
+	// a prune. Detail names the streams holding the most bytes. Reported
+	// as store.network-full.
+	AlarmNetworkFull AlarmCode = "network-full"
 )
 
 // HealthModeChanged is the C4 Health.Type of a ModeChange.

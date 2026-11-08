@@ -1,5 +1,5 @@
 {
-  "schema": "otsec.adapter/0.9",
+  "schema": "otsec.adapter/0.10",
   "invocation_id": "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30",
   "operation_id": "sel.ser.read_all",
   "adapter": {
@@ -40,12 +40,14 @@
     "credential_sent": false,
     "echo_scan": "not-applicable",
     "access_level": "0",
-    "quit_sent": false
+    "quit_sent": false,
+    "local_addr": "192.0.2.10:49152",
+    "connected_at": "2026-10-24T09:15:00.0Z"
   },
   "identity": {
     "result": "not-checked"
   },
   "error": {
-    "code": "failed.some_code_from_0_9"
+    "code": "failed.some_code_from_0_10"
   }
 }

@@ -328,6 +328,17 @@ var behaviour = map[string]func(t *testing.T, f *flow){
 			t.Fatalf("bulk: %+v", b)
 		}
 	},
+	"W10": func(t *testing.T, f *flow) {
+		defaultStart(t, f)
+		if p := one(t, "get", f.g1).s.PDU; p.F1 != 0 || len(p.Binds) != 1 || p.Binds[0].OID != SysDescr {
+			t.Fatalf("get: %+v, want noError with sysDescr alone", p)
+		}
+		if n := len(one(t, "next get", f.g2).s.PDU.Binds); n != 2 {
+			t.Fatalf("next get: %d varbinds, want 2", n)
+		}
+	},
+	"W11": func(t *testing.T, f *flow) { wantNext(t, f, 0) },
+	"W12": func(t *testing.T, f *flow) { wantNext(t, f, 2) },
 	"T1": func(t *testing.T, f *flow) {
 		defaultStart(t, f)
 		wantResponse(t, "get", one(t, "get", f.g1))
@@ -358,6 +369,29 @@ var behaviour = map[string]func(t *testing.T, f *flow){
 			t.Fatalf("Counter64 %x: %v", b.Val, err)
 		}
 	},
+}
+
+// wantNext walks two GetNext steps into entPhysicalTable: the first
+// Response carries one binding, and the second carries n, noError (W11, W12).
+func wantNext(t *testing.T, f *flow, n int) {
+	t.Helper()
+	p := one(t, "getnext", f.c.request(getNext(6, EntPhysicalTable))).s.PDU
+	if p.F1 != 0 || len(p.Binds) != 1 || !Under(p.Binds[0].OID, EntPhysicalTable) {
+		t.Fatalf("first getnext: %+v", p)
+	}
+	q := one(t, "second getnext", f.c.request(getNext(7, p.Binds[0].OID))).s.PDU
+	if q.F1 != 0 || len(q.Binds) != n {
+		t.Fatalf("second getnext: error-status %d with %d varbinds, want noError with %d", q.F1, len(q.Binds), n)
+	}
+	for _, b := range q.Binds {
+		if !Under(b.OID, EntPhysicalTable) || b.OID == p.Binds[0].OID {
+			t.Fatalf("second getnext: %+v", q.Binds)
+		}
+	}
+}
+
+func getNext(id int64, oid string) PDU {
+	return PDU{Tag: PDUGetNext, ReqID: id, Binds: []Bind{{OID: oid, Tag: TagNull}}}
 }
 
 // The default-behaving cases answer the whole flow as the default does.

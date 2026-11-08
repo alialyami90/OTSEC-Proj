@@ -1,0 +1,15 @@
+# GT-PCAP labels for dnp3-response-new-group.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.
+# fields: frame.number, frame.len, ip.src, ip.dst, tcp.srcport, tcp.dstport, tcp.flags.syn, tcp.flags.ack, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
+# sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.
+# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
+# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
+# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
+kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
+flow	192.0.2.10	192.0.2.20	41013	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1,2,3,4,5,6,7,8,9,10	0639ec0c445184f745366e5d9bddcb288491bdba9159002091cf8cc3cc346d2e,8c595d9cd3fc85c72bfda4879b3f84d8580aad7e114dfdb43daf3380a58ae51c,4c9788322c911b7ea3178fb343061b9e61cfc609722d6008d1e6319192934551,3b999d43b3c9072cc670c2f4342f7a9ec1fbcba1d5e61886f0f0a99f05ba7c2d,a0e761f55f75ba845fa639b8c4ade1f25c30881af5909984180087911bc135c8,4a0e30799e7be7f2cdf6e7eec7ed4d747e879e269421e1147abaa709d692f1fe,57d98517e59f871aa88a1fc07a45b8eee7f1f7ca0a3965382d9637e9d38a8e42,7f4b2d44d2a9e77d214f47ee6a10bc0767a507498d7487d32b29b68249f480ca,422569ade74829c3d212d587046085be4c625c5cd55939cd1c71877c6388e056,7026b8832c84132e3129625254f1e7cad0edebdcbb8dd00c16c8b2505d1dc3bd	10	641							
+service		192.0.2.20		20000	tcp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1	0639ec0c445184f745366e5d9bddcb288491bdba9159002091cf8cc3cc346d2e									
+function	192.0.2.10	192.0.2.20	41013	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	4,6	3b999d43b3c9072cc670c2f4342f7a9ec1fbcba1d5e61886f0f0a99f05ba7c2d,4a0e30799e7be7f2cdf6e7eec7ed4d747e879e269421e1147abaa709d692f1fe			1	g60v1,g60v2,g60v3,g60v4	none				
+counter						dnp3														dnp3_seq_reused=0
+case					tcp	dnp3				4,6	3b999d43b3c9072cc670c2f4342f7a9ec1fbcba1d5e61886f0f0a99f05ba7c2d,4a0e30799e7be7f2cdf6e7eec7ed4d747e879e269421e1147abaa709d692f1fe					none			acknowledged	the outstation's response carries g30v1, never seen in learning; a response is not a function

@@ -21,7 +21,7 @@ func runSteps(t *testing.T, f inputs, cfg Config, steps []step, hangUp bool) (ad
 	cfg.Floor, cfg.Now = fl, clock()
 	cfg.hooks = &hooks{quiet: 20 * time.Millisecond, wakeWait: 50 * time.Millisecond}
 	cfg.Asset, cfg.Profile, cfg.Register, cfg.Endpoint = f.asset, f.profile, f.reg, f.inv.EndpointID
-	near, far := net.Pipe()
+	near, far := pipe()
 	done := farEnd(far, steps, hangUp)
 	cfg.Dial = func(context.Context, string, string) (net.Conn, error) { return near, nil }
 	res := Run(context.Background(), f.inv, cfg)

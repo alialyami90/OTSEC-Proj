@@ -35,7 +35,7 @@ The baseline is one document per sensor, stored as C13 §8 gives it. Each entry 
 | --- | --- | --- |
 | `pairs` | (client endpoint, server endpoint, `l4`, server port, `protocol`) | `flow` `start` observations with `direction: client-server`. Midstream flows are learned only if the orientation is already known from a client-server flow on the same pair, never guessed. |
 | `services` | (server endpoint, `l4`, port, `protocol`) | `service` observations with `basis: content`. A port-only basis is kept apart and marked as such. |
-| `functions` | (pair, function code, sorted object set) | `function` observations |
+| `functions` | (pair, function code, `sub` where present, sorted object set) | `function` observations. `sub` is C13's field for Modbus 8's sub-function and 43's MEI type (C13 §4.3, §14) |
 | `addresses` | every endpoint seen | all observations |
 | `authorized_writers` | (client endpoint, server endpoint, class `write` or `control`) | **a person**, never the traffic (§2.3) |
 | `period` | start and end of learning, and observation counts by kind | the learner |
@@ -52,7 +52,7 @@ The operator starts learning for a period (the default is 7 days, a parameter). 
 
 ### 2.3 Acknowledgement and the authorized writers
 
-The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked. It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
+The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked, and each pair end named only through an inbound (Syslog sender) address marked too, derived from `addresses` and the current C1 (C13 §14 item 9). It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
 
 1. **The client builds the accepted document.** It is the frozen draft with the person's `authorized_writers` filled in, in C13 §8's canonical encoding. The client shows it, and writes its exact bytes to the node's admin folder as `network-baseline-<sensor_id>.json` (D5). Those bytes are unsigned and have no effect on their own.
 2. **The client signs `node.network_baseline_ack`**, a separate admin kind (D1, D4-68). The body names the sensor and the accepted document's digest (`baseline_digest`). It also names the frozen draft it was built from (`draft_digest`), so the signature binds both. The client computes both digests over the bytes it shows (HR-14). The two digests are equal when the person adds no writers.
@@ -93,9 +93,9 @@ The class each code goes in is D4's call. D2 flagged only the codes where the ma
 | Code | Class | Status | Source |
 | --- | --- | --- | --- |
 | 1 | `read` | confirmed: Read | S33 Table F.2 p. F.2 |
-| 2 with only group 50 objects | `time-sync` | confirmed: Write | S33 Table F.2 p. F.2; g50v1 and g50v3 in S22 Table D.9 pp. D.17 to D.18 |
+| 2 with only g50v1 or g50v3 objects | `time-sync` | confirmed: Write | S33 Table F.2 p. F.2; g50v1 and g50v3 in S22 Table D.9 pp. D.17 to D.18. Any other group 50 variation is not a held time write, so it falls to the next row but one (D2, D1 on #549) |
 | 2 with only g80v1 objects | `session-setup` | confirmed: Write | S22 p. D.18 (index 7); S23 Table 2.30 p. 82 (indexes 4 and 7) |
-| 2 with any other object, or a mix | `write` | confirmed: Write | S33 Table F.2 p. F.2; g34 deadbands in S22 Table D.9 |
+| 2 with any other object, or a mix, including any group 50 variation other than 1 and 3 | `write` | confirmed: Write | S33 Table F.2 p. F.2; g34 deadbands in S22 Table D.9 |
 | 3, 4 | `control` | confirmed: Select, Operate | S33 Table F.2 p. F.2 |
 | 5, 6 | `control` | confirmed: Direct operate, and its no-reply form | S33 Table F.2 p. F.3; g12 and g41 in S22 p. D.15 and S23 pp. 80 to 82 |
 | 7 to 10 | `write` | number only: counter freezes | S22 Table D.9 p. D.15; S23 Table 2.30 p. 80 |
@@ -123,10 +123,14 @@ DNP3 0 (confirm) and the responses 129, 130 and 131 are never `function` observa
 | 15 (0Fh) | `write` | confirmed | S32 Table 10.31 p. 10.64; S23 p. 274 |
 | 16 (10h) | `write` | confirmed | as 1 to 4; operates outputs as 06h does |
 | 22, 23 | `write` | unknown | none held |
-| 43 with MEI type 14 | `read` | unknown | no held SEL device lists 2Bh |
-| 8 with sub-function 0 | `other` | confirmed: loopback | S22 Table E.18 p. E.11 |
+| 43 with MEI type 14 (`sub` 14) | `read` | unknown | no held SEL device lists 2Bh |
+| 8 with sub-function 0 (`sub` 0) | `other` | confirmed: loopback | S22 Table E.18 p. E.11 |
 | 8 with sub-function 1 or 4 | `control` | unknown | none held. D4 puts them in `control` because restarting communications or forcing listen-only mode can silence a device |
 | 8 with any other sub-function | `other` | unknown | none held |
+| 8 with no `sub` (a request too short to hold it) | `control` | D1's ruling | the most restrictive row for 8, so it fails closed against `authorized_writers` (D1 on #543) |
+| 43 with MEI type 13 (`sub` 13), CANopen General Reference | `write` | unknown | none held. It can write a CANopen object dictionary (D3 on #543) |
+| 43 with no `sub` (a request too short to hold it) | `write` | D1's ruling | the most restrictive row for 43, so it fails closed against `authorized_writers` (D1 on #543) |
+| 43 with any other MEI type | `other` | unknown | none held |
 | 60h, 61h, 62h | `read` | confirmed: parameter information and text reads | S22 Table E.2 p. E.2 and p. E.17; S34 Table E.2 p. E.2 |
 | 7Dh | `control` | confirmed: encapsulated packet with a control command | S22 Table E.30 pp. E.15 to E.16; S34 p. E.14 |
 | 7Eh | `other` | confirmed: no-operation, used only inside 7Dh | S22 Table E.2 p. E.2 |
