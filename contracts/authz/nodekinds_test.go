@@ -87,7 +87,7 @@ func testAcceptance(t *testing.T) (*CollectorRequest, CollectorReply) {
 	req := roundTrip(t, signedRequest(t, testAdminPriv, adminPayload(t, KindNodeQuarantineClear)))
 	return req, CollectorReply{Contract: ContractID, RequestID: req.RequestID, Status: ReplyAccepted, CollectorSeq: 12,
 		Admin: &AdminAccepted{AdminKeyID: req.AdminSigned.KeyID, Principal: req.OnBehalfOf, Nonce: testAdminNonce,
-			PayloadSHA256: AdminPayloadSHA256(req.AdminSigned)}}
+			PayloadSHA256: AdminPayloadSHA256(req.AdminSigned), Keys: testKeyEntries(), KeysDigest: AdminKeysDigest(testKeyEntries())}}
 }
 
 func TestAdminAcceptance(t *testing.T) {

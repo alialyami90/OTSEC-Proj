@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.11/record",
+  "$id": "otsec.audit/0.12/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -173,7 +173,9 @@
         "config.baseline_recorded",
         "config.checkpoint_not_restored",
         "advisory.set_installed",
-        "advisory.set_refused"
+        "advisory.set_refused",
+        "store.retention_moved",
+        "config.learner_retired"
       ]
     },
     "outcome": {
@@ -222,6 +224,11 @@
         },
         "family": {
           "type": "string"
+        },
+        "sensor_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "0.12: a C13 sensor ID (lowercase UUID), on the network records only, which name no asset"
         }
       },
       "if": {
@@ -415,6 +422,141 @@
         "file_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "0.12: one move of a sensor's alert-stream retention consumer, on store.retention_moved only, required there (contracts/audit/network.go)",
+      "required": [
+        "stream",
+        "from_seq",
+        "to_seq",
+        "retention_s",
+        "wall_utc",
+        "cutoff_utc",
+        "bound"
+      ],
+      "properties": {
+        "stream": {
+          "type": "string",
+          "pattern": "^network-alert/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "network-alert/<target.sensor_id>"
+        },
+        "from_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "to_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Greater than from_seq, except on created, where they are equal"
+        },
+        "retention_s": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "wall_utc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "cutoff_utc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "previous_cutoff_utc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "The cutoff of the record before in the chain; absent on created"
+        },
+        "bound": {
+          "enum": [
+            "created",
+            "wall",
+            "monotonic",
+            "start"
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "bound": {
+            "const": "created"
+          }
+        },
+        "required": [
+          "bound"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "previous_cutoff_utc"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "previous_cutoff_utc"
+        ]
+      }
+    },
+    "admin_keys": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "0.12: the administrator keys an accepted C7 0.10 reply named, on policy.apply with reason_code admin_keys only, required there",
+      "required": [
+        "digest",
+        "keys"
+      ],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The reply's keys_digest: C7 AdminKeysDigest over keys"
+        },
+        "previous_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The digest of the admin_keys record before; absent the first time"
+        },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key_id",
+              "principal",
+              "status",
+              "kinds"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string",
+                "pattern": "^ed25519-[0-9a-f]{16}$"
+              },
+              "principal": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}$"
+              },
+              "status": {
+                "enum": [
+                  "active",
+                  "revoked"
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "description": "Sorted by key_id; each key's kinds sorted (C7)"
         }
       }
     }
@@ -895,7 +1037,8 @@
               "config.read_compared",
               "config.reads_removed",
               "config.baseline_recorded",
-              "config.checkpoint_not_restored"
+              "config.checkpoint_not_restored",
+              "config.learner_retired"
             ]
           }
         },
@@ -906,14 +1049,27 @@
       "then": {
         "required": [
           "config",
-          "target",
-          "correlation_id"
+          "target"
         ],
         "properties": {
           "target": {
-            "required": [
-              "asset_id"
-            ]
+            "if": {
+              "required": [
+                "sensor_id"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "asset_id"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "asset_id"
+              ]
+            }
           }
         },
         "not": {
@@ -928,6 +1084,32 @@
             "config"
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "config.change_approved",
+              "config.baseline_acknowledged",
+              "config.change_detected",
+              "config.baseline_restored",
+              "config.read_compared",
+              "config.reads_removed",
+              "config.baseline_recorded",
+              "config.checkpoint_not_restored"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "correlation_id"
+        ]
       }
     },
     {
@@ -2096,7 +2278,10 @@
             },
             "properties": {
               "kind": {
-                "const": "event"
+                "enum": [
+                  "event",
+                  "network"
+                ]
               }
             },
             "if": {
@@ -2629,6 +2814,354 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "store.retention_moved",
+                  "config.learner_retired"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "required": [
+              "retention"
+            ]
+          },
+          {
+            "required": [
+              "admin_keys"
+            ]
+          },
+          {
+            "properties": {
+              "target": {
+                "required": [
+                  "sensor_id"
+                ]
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          {
+            "properties": {
+              "config": {
+                "properties": {
+                  "kind": {
+                    "const": "network"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "config"
+            ]
+          },
+          {
+            "properties": {
+              "verified": {
+                "required": [
+                  "keys_digest"
+                ]
+              }
+            },
+            "required": [
+              "verified"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.(1[2-9]|[2-9][0-9]|[1-9][0-9]{2,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "store.retention_moved"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "retention",
+          "target"
+        ],
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "required": [
+                "asset_id"
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "retention"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.learner_retired"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "config",
+          "target",
+          "reason_code"
+        ],
+        "properties": {
+          "outcome": {
+            "const": "info"
+          },
+          "reason_code": {
+            "enum": [
+              "acknowledged",
+              "stopped"
+            ]
+          },
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "required": [
+                "asset_id"
+              ]
+            }
+          },
+          "config": {
+            "properties": {
+              "kind": {
+                "const": "network"
+              }
+            },
+            "required": [
+              "kind",
+              "baseline_version"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "policy.apply"
+          },
+          "reason_code": {
+            "const": "admin_keys"
+          }
+        },
+        "required": [
+          "action",
+          "reason_code"
+        ]
+      },
+      "then": {
+        "required": [
+          "admin_keys"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "admin_keys"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.(1[2-9]|[2-9][0-9]|[1-9][0-9]{2,3})$"
+          },
+          "action": {
+            "const": "collector.request"
+          }
+        },
+        "required": [
+          "contract",
+          "action",
+          "verified"
+        ]
+      },
+      "then": {
+        "properties": {
+          "verified": {
+            "required": [
+              "keys_digest"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "config": {
+            "properties": {
+              "kind": {
+                "const": "network"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "config"
+        ]
+      },
+      "then": {
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "required": [
+                "asset_id"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "config": {
+            "required": [
+              "draft_digest"
+            ]
+          }
+        },
+        "required": [
+          "config"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "const": "config.baseline_acknowledged"
+          },
+          "config": {
+            "properties": {
+              "kind": {
+                "const": "network"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "config.learner_retired"
+          },
+          "reason_code": {
+            "const": "acknowledged"
+          }
+        },
+        "required": [
+          "action",
+          "reason_code"
+        ]
+      },
+      "then": {
+        "properties": {
+          "config": {
+            "required": [
+              "baseline_digest"
+            ]
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "config.learner_retired"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "then": {
+          "properties": {
+            "config": {
+              "not": {
+                "required": [
+                  "baseline_digest"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -2672,16 +3205,22 @@
             "node.quarantine_clear",
             "node.seq_reset_ack",
             "node.change_approval",
-            "node.baseline_ack"
+            "node.baseline_ack",
+            "node.network_baseline_ack"
           ],
           "description": "0.5: the request's C7 kind. On claimed, what the payload says; on verified, what the collector verified"
+        },
+        "keys_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "0.12: the accepted reply's C7 admin.keys_digest. On verified only, required there from 0.12"
         }
       }
     },
     "config": {
       "type": "object",
       "additionalProperties": false,
-      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed; from 0.8 also config.baseline_recorded; from 0.9 also config.checkpoint_not_restored) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
+      "description": "0.5: on the configuration actions (config.change_approved, config.baseline_acknowledged, config.change_detected, config.baseline_restored; from 0.7 also config.read_compared and config.reads_removed; from 0.8 also config.baseline_recorded; from 0.9 also config.checkpoint_not_restored; from 0.12 also config.learner_retired) only, required there. Each action has exactly its own fields (contracts/audit/config.go).",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -2697,9 +3236,10 @@
           "type": "string",
           "enum": [
             "configuration",
-            "event"
+            "event",
+            "network"
           ],
-          "description": "The baseline's kind (baseline_acknowledged; from 0.8 baseline_recorded, event only; from 0.9 checkpoint_not_restored, event)"
+          "description": "The baseline's kind (baseline_acknowledged; from 0.8 baseline_recorded, event only; from 0.9 checkpoint_not_restored, event); from 0.12 network on baseline_recorded, baseline_acknowledged and learner_retired"
         },
         "baseline_digest": {
           "type": "string",
@@ -2821,6 +3361,16 @@
           "type": "integer",
           "minimum": 1,
           "description": "0.9: seq of that checkpoint's record in the asset's configuration stream (checkpoint_not_restored only)"
+        },
+        "draft_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "0.12: the frozen draft a network baseline was built from (baseline_acknowledged of kind network only, required there)"
+        },
+        "cursor_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "0.12: the retired learner's last confirmed seq on its observation stream (learner_retired only); absent when none"
         }
       }
     }

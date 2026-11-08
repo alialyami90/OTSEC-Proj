@@ -308,6 +308,14 @@ func (p *Pipeline) Handle(ctx context.Context, req *authz.CollectorRequest) (aut
 				Nonce:         admin.Nonce,
 				PayloadSHA256: authz.AdminPayloadSHA256(req.AdminSigned),
 			}
+			if authz.NamesAdminKeys(req.Contract) {
+				// The keys this decision was made under (C7 0.10), so the
+				// node records a key's grant of a kind before its first use
+				// (D4-68 ruling 9). Only a request stamped 0.10 or later
+				// gets them: a node built for 0.9 decodes replies strictly.
+				reply.Admin.Keys = authz.AdminKeyEntries(p.cfg.AdminKeys)
+				reply.Admin.KeysDigest = authz.AdminKeysDigest(reply.Admin.Keys)
+			}
 		}
 		return reply, nil
 	}
@@ -444,6 +452,12 @@ func (p *Pipeline) decideAdmin(req *authz.CollectorRequest, a *authz.AdminReques
 		if _, ok := p.assets[id]; !ok {
 			return &authz.Refusal{Code: authz.RefuseAssetNotEnrolled, Detail: id}
 		}
+		return nil
+	case a.NodeNetworkBaselineAck != nil:
+		// The node's own action (C7 0.10). The collector does not know the
+		// node's sensors, so it has no asset to check: the node checks the
+		// sensor, both digests and the accepted document after this
+		// acceptance (docs/phase4/D3-c7-0.10-c8-0.12.md §1.2).
 		return nil
 	}
 	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"} // VerifyAdminRequest refuses this first

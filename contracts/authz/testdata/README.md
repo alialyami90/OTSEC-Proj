@@ -15,6 +15,7 @@ Files under `requests/invalid/` are named `<expected refusal code>__<what>.json`
 | `requests/valid/admin-signed-node-quarantine-clear.json` | 0.5: an administrator's signed clear of one quarantine the node holds, with the same test key and nonce. The body names the asset and the manifest's SHA-256 (of `otsec test quarantine manifest`, not a real manifest). `TestNodeQuarantineClearGolden` rebuilds and verifies it. |
 | `requests/valid/admin-signed-node-change-approval.json` | 0.6: an approval of a change to one asset's configuration against a baseline, for 16:00 to 20:00 UTC, with a reason. The baseline digest is the SHA-256 of `otsec test configuration baseline`, not of a stored snapshot. `TestConfigKindGoldens` rebuilds and verifies it with a key whose list allows the kind. |
 | `requests/valid/admin-signed-node-baseline-ack.json` | 0.6: an acknowledgement of the same test digest as the asset's configuration baseline. |
+| `requests/valid/admin-signed-node-network-baseline-ack.json` | 0.10: an acknowledgement of one sensor's network baseline. `draft_digest` is the SHA-256 of `otsec test network baseline draft`, and `baseline_digest` the configuration test digest above, standing for the accepted document; neither is a stored document's. `TestNetworkAckGolden` rebuilds and verifies it. The other admin-signed goldens are restamped 0.10, unchanged otherwise. |
 | `requests/invalid/bad_params__line-break-in-param.json` | A parameter value carrying CR LF and a second command. |
 | `requests/invalid/contract_mismatch__other-major.json` | A request stamped with another major version. |
 | `requests/invalid/invalid__asset-clear-suspension-ref-not-an-invocation.json` | An asset clear whose ref is a path, not a C2 invocation ID. |
@@ -65,3 +66,7 @@ Files under `replies/valid/` decode strictly and pass `CollectorReply.Validate`;
 | `replies/invalid/run-deadline-over-the-ceiling.json` | `run_deadline_ms` of 600001, above C3's 600 s deadline ceiling. |
 | `replies/invalid/run-deadline-without-invocation.json` | An accepted reply with a run deadline and no `invocation_id`. |
 | `replies/invalid/run-deadline-with-admin.json` | `run_deadline_ms` next to an admin acceptance: runs are never admin-signed. |
+| `replies/valid/admin-accepted-keys-0.10.json` | 0.10: the same acceptance naming the collector's pinned keys (the two test keys: Alice's with every admin kind, Bob's unlisted, so written with the 0.5 defaults) and their digest. |
+| `replies/invalid/admin-keys-stamped-0.9.json` | `keys_digest` and `keys` on a reply stamped 0.9, which no 0.9 collector writes. |
+| `replies/invalid/admin-keys-digest-of-other-keys.json` | Bob's key listed with `node.network_baseline_ack` under the digest of the list without it: the digest must be the one over the keys the reply carries. |
+| `replies/invalid/admin-keys-digest-without-keys.json` | `keys_digest` with no `keys`: they come together. |
