@@ -4,9 +4,9 @@ package contract
 // a C4 0.3 sensor.counters event may carry as diff.<name> are C13 §6's
 // heartbeat counters. The list below is copied from that section, in its
 // order. It must equal the JSON names of netobs.Counters, the heartbeat the
-// node reads them from (D3 on #566), and event.SensorCounters once #566 is
-// on main. A name that drifts on either side would refuse the node's own
-// events. Ground truth: GT-HAND, from the contract text. Evidence class:
+// node reads them from (D3 on #566), and event.SensorCounters, the names
+// C4 0.3's Validate accepts (D6's S1 and S2 on #566). A name that drifts on
+// either side would refuse the node's own events. Ground truth: GT-HAND, from the contract text. Evidence class:
 // desk.
 
 import (
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
 )
 
@@ -23,6 +24,9 @@ var c13Counters = []string{"packets", "bytes", "drops_driver", "drops_decoder", 
 	"redactions", "logins_not_placed"}
 
 func TestSensorCountersByValue(t *testing.T) {
+	if !slices.Equal(event.SensorCounters, c13Counters) {
+		t.Errorf("event.SensorCounters %v, C13 §6 lists %v", event.SensorCounters, c13Counters)
+	}
 	var tags []string
 	ty := reflect.TypeOf(netobs.Counters{})
 	for i := range ty.NumField() {
