@@ -469,8 +469,20 @@ const (
 	HealthForwardUnconfirmed  = "forward.unconfirmed"     // events sent to a best-effort target without confirmation
 	HealthForwardUnreachable  = "forward.unreachable"     // a required target unreachable beyond its period
 	HealthNetobsAlert         = "netobs.alert"            // a C13 network alert (since 0.3); contracts/netobs.HealthAlert
+	HealthSensorCounters      = "sensor.counters"         // a network sensor's own counter differences since its last report (since 0.3, D4-72)
 	HealthForwardTextOmitted  = "forward.text-omitted"    // device text replaced by a reference to fit the size limit
 )
+
+// SensorCounters are the counters a sensor.counters health event carries,
+// each as the detail "diff.<name>": C13 §6's heartbeat counters. The event
+// carries their differences since the sensor's previous report, never
+// their totals (D4-72).
+var SensorCounters = []string{"packets", "bytes", "drops_driver", "drops_decoder", "drops_channel", "decoder_errors",
+	"sessions_unparsed", "table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed"}
+
+// SensorReported is the reported_by detail of a sensor.counters event: the
+// counts are the sensor's own report, not the node's measurement.
+const SensorReported = "sensor"
 
 // KnownFlags are the event flags defined in 0.1. The set is open.
 var KnownFlags = []string{"asset-unresolved", "gap-before", "possible-duplicate"}
