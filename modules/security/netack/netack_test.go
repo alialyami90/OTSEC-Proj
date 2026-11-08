@@ -287,6 +287,12 @@ func TestInboundOnly(t *testing.T) {
 	if got := InboundOnly(&dual, testNode, dualAssets); len(got) != 1 || !got[master] {
 		t.Errorf("one connected and one inbound address: marked %v, want the master", got)
 	}
+	// The mirror, with the direct address first in b's IP order: the
+	// result does not depend on which address comes first (D6 on #558, R3).
+	mirror := []asset.Asset{assets[0], {AssetID: master, NodeID: testNode, Endpoints: []asset.Endpoint{ep("ssh", asset.SSH, "192.0.2.10", asset.Direct), ep("syslog", asset.SyslogUDP, "192.0.2.11", "")}}}
+	if got := InboundOnly(&dual, testNode, mirror); len(got) != 1 || !got[master] {
+		t.Errorf("mirror, direct address first: marked %v, want the master", got)
+	}
 	// With both addresses polled directly, nothing is marked.
 	dualAssets[1].Endpoints = append(slices.Clone(dualAssets[1].Endpoints), ep("ssh2", asset.SSH, "192.0.2.10", asset.Direct))
 	if got := InboundOnly(&dual, testNode, dualAssets); len(got) != 0 {
