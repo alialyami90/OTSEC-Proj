@@ -52,6 +52,8 @@ type Status struct {
 	assetStore  *AssetStoreStatus
 	applic      *ApplicabilityStatus
 	identity    map[string]IdentityStatus
+	// netRetention is the alert stream's retention consumer (netretention.go).
+	netRetention *NetRetentionStatus
 
 	// deferred holds Write back: Run sets it until the links' certificate
 	// periods are judged, so no status file says the node is collecting
@@ -146,6 +148,9 @@ type StatusFile struct {
 	// last confirmed it, with asset on (identity.go). It comes from the
 	// store, so unlike Assets it is there from the start.
 	Identity map[string]IdentityStatus `json:"identity,omitempty"`
+	// NetRetention is the alert stream's retention consumer, when the
+	// node has network_sensor and no forwarding target (netretention.go).
+	NetRetention *NetRetentionStatus `json:"net_retention,omitempty"`
 }
 
 // CollectorStatus is the collector's keys and numbering as node status
@@ -468,6 +473,10 @@ func (s *Status) Snapshot(node string) StatusFile {
 	}
 	if len(s.identity) > 0 {
 		f.Identity = maps.Clone(s.identity)
+	}
+	if s.netRetention != nil {
+		n := *s.netRetention
+		f.NetRetention = &n
 	}
 	if len(s.targets) > 0 {
 		f.Targets = map[string]TargetStatus{}

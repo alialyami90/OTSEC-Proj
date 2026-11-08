@@ -15,6 +15,7 @@ import (
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/register"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/netretain"
 	"otsec.local/otsec/platform/store"
 )
 
@@ -34,6 +35,11 @@ type RuntimeOptions struct {
 	// BusyTimeout is the stores' busy_timeout; zero means the store's 5 s.
 	// Only tests that hold a database busy on purpose set it.
 	BusyTimeout time.Duration
+	// Mono is the node's monotonic clock, as the time since a fixed point
+	// in this process; nil means the monotonic time since Start. Only the
+	// alert stream's retention consumer reads it, and a test sets it to
+	// drive it apart from Now (D5-c5-0.9.md section 3).
+	Mono func() time.Duration
 }
 
 // Runtime is a started node: every database through C5 startup, a Log per
@@ -64,6 +70,9 @@ type Runtime struct {
 	// counts the rest, and one record names how many.
 	deferred []c5.Record
 	dropped  int
+	// retention is the alert stream's retention consumer, nil until it
+	// starts (netretention.go). Only Start and Tick touch it.
+	retention *netretain.Consumer
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.
@@ -97,6 +106,10 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	}
 	if opt.ClockSync == "" {
 		opt.ClockSync = event.SyncUnknown
+	}
+	if opt.Mono == nil {
+		began := time.Now()
+		opt.Mono = func() time.Duration { return time.Since(began) }
 	}
 	layout, err := cfg.Layout()
 	if err != nil {
@@ -137,6 +150,7 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	r.reconcileHolds(ctx)
 	r.advanceHolds(ctx)
 	starts.add("holds", from)
+	r.tickRetention(ctx)
 	from = time.Now()
 	opt.Status.Write(string(cfg.NodeID))
 	starts.add("status", from)
@@ -364,6 +378,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 		}
 		r.health(ctx, x.a.Code.HealthType(), details)
 	}
+	r.tickRetention(ctx)
 	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
 }
