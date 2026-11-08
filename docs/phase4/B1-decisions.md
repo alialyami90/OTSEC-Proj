@@ -1214,3 +1214,35 @@ D1, on #542 and #545 to #553, with each owner's and reviewer's word through the 
 - **Test follow-ups, not blocking.**
   - D3 adds an accepted retention row exactly on the wall bound (#554).
   - D4 adds three `contracts/netobs` rows: a server `RST|SYN` is not `syn_only`, `ip-ambiguous` without `ip` is refused, and `flow_idle_s` 9 is refused while 10 is accepted (D6's surviving mutants).
+
+## D4-71: the node's intake, acknowledgement view and alert retention are merged, with the rulings from their review (D1, 2026-11-08)
+
+D1, on #553 to #561, with each owner's and reviewer's word through the coordinator (D4-58). Merged: #553, #554, #556, #557, #558, #559 and #560. This entry amends D4-68's item 6, whose retention bound read "no faster than the monotonic clock". The log's earlier entries stay as written.
+
+- **`observed-address` (C4 0.3, #557).** A network observation's `source.asset` names the destination, and `sender-address` means the sender's address maps to the asset. An upstream rule keyed on it would read spoofed traffic toward a relay as sent by the relay. So C4 0.3 adds the binding method `observed-address`: an address seen in captured traffic maps to this asset.
+  - It is allowed only on a network-observation event and on `netobs.alert`, and only with confidence `inferred`.
+  - `Validate` refuses it anywhere else, and refuses every other method on those two kinds, `sender-address` included (D3's B1 and B2).
+  - This changes nothing written under 0.3, since nothing had been.
+  - Merge order: #553 merged first with `sender-address`. #557 then carried the switch in `platform/sensorlink` (D5 reviewed that hunk) and D6's `c4_v03_d6_test.go` line 17 (D6 reviewed it), so main never had the refusal without the switch.
+- **`period.overflow` (C13 §14 item 13, within 0.1).**
+  - It counts the folded observations that carried at least one entry the full draft couldn't hold. Each observation adds at most 1, and repeats count again. It needs no extra state, and is a sign that the draft is incomplete, not a measure of how much is missing.
+  - Entries already in the draft are kept, and an overflowed entry is never merged into one. It saturates at 2^53 − 1, so every JSON reader holds it exactly, and `Validate` refuses anything above.
+  - The acknowledgement view shows a non-zero count before the person can acknowledge. The signed `baseline_digest` already binds it, so C8 doesn't change.
+- **The learner (#561).**
+  - **TCP.** A TCP pair is learned only once its flow shows it isn't `syn_only`: an end with `syn_only` false, or a decoded function on that flow. Until then the start is held, at most 512 starts. A start that can't be held counts in `period.overflow`, and one still unproven when the period ends isn't learned. So a SYN probe during learning buys no pass, and a long-lived session that never decoded or ended alerts once if it reconnects after acknowledgement. **Residual (D3):** a client, even a spoofed one, proves a pair with a SYN and then any other segment, such as a bare ACK, and no answer from the server, because one-sided capture mustn't read as a failed dial.
+  - **UDP.** A UDP start learns its pair at once, decoded or not, with the first datagram's sender as client (C13 §4.1). A capture that begins on a reply learns the reversed pair, which is a stated limit. Unknown-pair judges a UDP start both ways, but only within the same two endpoints with the learned port at the matching end. AP-36 (a) records the single-datagram residual.
+  - **Both addresses (D3's S1 on #561).** An entry is learned only when both addresses it was seen at are held in the draft. An address that doesn't fit, or is refused, learns no pair. So every end the acknowledgement view judges has an address there, and `netack.InboundOnly` marks an end with none.
+  - **Midstream.** A function's and a service's ends come from the protocol role, not the flow (C13 §4.3, §14 item 14): a function is the client's request, and a service's server is ip.dst. So both are learned the right way round on a midstream flow, and nothing is keyed on the client's ephemeral port. A midstream flow itself learns no pair.
+  - The learner checkpoint bound grows to 705 KiB (512 held starts at 384 bytes), and B5's configuration floor counts it.
+  - **Detector plan.** On a restore mismatch, the detector commits the regenerated alert and raises an alarm. Only an exact match is suppressed.
+- **Alert retention (#559, #560).**
+  - **Catch-up.** While the cutoff lags the wall bound, a move may advance it by up to twice the monotonic time since the previous recorded move, never past the wall bound. After a start, the allowance is a flat hour plus twice the monotonic time since the start (D3's conditions). Any lag then closes at up to an hour per hour, and D6's 60-day backlog with 7-day retention closed on day 53. **The cost:** while the wall clock is wrongly set forward, an alert survives at least half its retention, less one hour per audited `service.start` in between (D6's W1).
+  - **Lag alarm.** `lag_s` is how far the monotonic bound trails the wall cutoff (D5). The recorded cutoff also stalls on a stream with nothing to pass, so it would alarm when nothing lags. The alarm is raised while `lag_s` exceeds one retention period. With no lag, the bound is held at the wall cutoff, so no lead builds up. An audited operator catch-up is deferred until the alarm fires in practice.
+  - **Commit-time floor (D3's F1 and F2).** In the network database only, commit times are floored at a persisted wall high-water mark. Every commit and cursor save raises it in the same transaction, and so does every evaluation. Other databases keep their commit times, because the event baselines read them (D6), and a behaviour change there would need its own evidence.
+  - **Failure handling.** A failed `Record` is re-checked at the next tick: the consumer reads the latest record back and takes the move as made only if that record continues the chain from its cursor (D6's R1). A stall keeps its error until it succeeds, so `network-retention-stalled` is raised once (R2). A cursor ahead of its record raises `network-retention-unrecorded` (D3's S1 on #559).
+  - **Start cost.** Start reads the audit stream newest page first and stops at the page holding the latest record. That costs about 2 µs for each other record it passes, so about 0.2 s per 100,000, and about 40 ms for a page of 500 retention records (desk, Linux), within P4-H4's budget (D5).
+- **Test follow-ups, not blocking.**
+  - **D5:** P1, a node test that only the network database gets the mark (kills D6's S1), plus any of AP-36's V1 to V4 rows #559 doesn't already pin. D6 reviews it.
+  - **D4, in detector PR 2a:** D6's U4 and M1 rows from #561, the no-alert-after-acknowledgement half of the UDP test, and the reversed-match bound.
+  - **D6:** pins C13's bounds by value in `tests/contract`, and aligns the network stream names in `c4_v03_d6_test.go` and `c5_v09_d6_test.go` to `network-observation/<sensor>` and `network-alert/<id>`.
+  - **D6 or D4:** makes `TestCaptureWireLenRange`'s constant build on 32-bit targets.
