@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 
@@ -100,12 +101,15 @@ const (
 	DirectionNone         = "none"
 )
 
-// Flow is a flow's start or end (C13 §4.3). End is set exactly on the end.
+// Flow is a flow's start or end (C13 §4.3). End is set exactly on the end,
+// and SynOnly exactly on a TCP end: true only when SynOnly(segments) holds
+// for the flow (C13 §14 item 10).
 type Flow struct {
 	Phase   string `json:"phase"`
 	Packets int64  `json:"packets"`
 	Bytes   int64  `json:"bytes"`
 	End     string `json:"end,omitempty"`
+	SynOnly *bool  `json:"syn_only,omitempty"`
 }
 
 // Service is a server seen on a port. The server is ip.dst.
@@ -380,9 +384,20 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 			if f.End != "" {
 				c.fail(CodeConflict, "flow.end", "only on the end phase")
 			}
+			if f.SynOnly != nil {
+				c.fail(CodeConflict, "flow.syn_only", "only on the end phase")
+			}
 		case "end":
 			if !contains([]string{"fin", "rst", "idle", "sensor-stop"}, f.End) {
 				c.fail(CodeForm, "flow.end", "%q is not fin, rst, idle or sensor-stop", f.End)
+			}
+			switch {
+			case l4 == "tcp" && f.SynOnly == nil:
+				c.fail(CodeMissing, "flow.syn_only", "required on a tcp end")
+			case l4 != "tcp" && f.SynOnly != nil:
+				c.fail(CodeConflict, "flow.syn_only", "only on a tcp end")
+			case f.SynOnly != nil && *f.SynOnly && o.Direction != DirectionClientServer:
+				c.fail(CodeConflict, "flow.syn_only", "true needs direction client-server: a syn-only flow starts with the client's SYN")
 			}
 		default:
 			c.fail(CodeForm, "flow.phase", "%q is not start or end", f.Phase)
@@ -564,7 +579,9 @@ func (o *Observation) checkFrames(c *checker) {
 		if f.N != cf.N {
 			c.fail(CodeConflict, ff+".n", "%d, but the citation lists %d", f.N, cf.N)
 		}
-		c.utc(ff+".ts", f.TS)
+		if t, ok := c.utc(ff+".ts", f.TS); ok && (t.Unix() < 0 || t.Unix() > math.MaxUint32) {
+			c.fail(CodeRange, ff+".ts", "%s is outside the stored capture's 32-bit seconds, 1970 to 2106 (C13 §4.2)", f.TS)
+		}
 		b, err := base64.StdEncoding.Strict().DecodeString(f.Data)
 		if err != nil {
 			c.fail(CodeForm, ff+".data", "not base64: %v", err)
@@ -595,6 +612,10 @@ func (o *Observation) checkNode(c *checker) {
 			c.fail(CodeForm, e.f, "%q is not an asset ID or %s", e.v, AssetUnresolved)
 		}
 	}
+	// Each end resolves on its own (C13 §5, D1 in D4-70): ip-ambiguous
+	// when at least one end's address is shared, so that end is
+	// unresolved and the other may name its asset; ip when an end resolved
+	// and none is ambiguous; none when neither end matched.
 	unresolved := n.SrcAsset == AssetUnresolved && n.DstAsset == AssetUnresolved
 	switch n.ResolvedBy {
 	case "ip":
@@ -604,9 +625,16 @@ func (o *Observation) checkNode(c *checker) {
 		if o.IP == nil {
 			c.fail(CodeConflict, "node.resolved_by", "ip, but the observation has no ip")
 		}
-	case "ip-ambiguous", "none":
+	case "ip-ambiguous":
+		if n.SrcAsset != AssetUnresolved && n.DstAsset != AssetUnresolved {
+			c.fail(CodeConflict, "node.resolved_by", "ip-ambiguous, but both ends resolved")
+		}
+		if o.IP == nil {
+			c.fail(CodeConflict, "node.resolved_by", "ip-ambiguous, but the observation has no ip")
+		}
+	case "none":
 		if !unresolved {
-			c.fail(CodeConflict, "node.resolved_by", "%s, but an end resolved", n.ResolvedBy)
+			c.fail(CodeConflict, "node.resolved_by", "none, but an end resolved")
 		}
 	default:
 		c.fail(CodeForm, "node.resolved_by", "%q is not ip, ip-ambiguous or none", n.ResolvedBy)
