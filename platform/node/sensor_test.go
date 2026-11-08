@@ -3,12 +3,17 @@ package node
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
+	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/syslog"
 	"otsec.local/otsec/platform/sensorlink"
 )
 
@@ -153,5 +158,122 @@ func TestSensorDropCounts(t *testing.T) {
 	s = st.Snapshot("x").Sensor
 	if s.Dropped[sensorlink.DropUnresolvedBudget] != want || s.DroppedByAsset[netobs.AssetUnresolved] != want || !s.DropsSince.Equal(since) || s.Committed != 0 {
 		t.Fatalf("after the restart: %+v, want %d, since %s", s, want, since)
+	}
+}
+
+// The worst intake.drop-counted event: many enrolled assets and the
+// unresolved bucket all dropping, under every reason. The event names
+// SensorDropDetailAssets assets, the most dropped first, and sums the rest
+// in asset.other, so the asset details sum to count; a restored
+// asset.other is summed again, never listed twice. With every value at its
+// widest the event renders in under three quarters of a default target's
+// octets (D4-72, D4's low row on #568). Desk only.
+func TestSensorDropEventFits(t *testing.T) {
+	const enrolled = 4 * SensorDropDetailAssets
+	d := dropCounts{map[string]uint64{}, map[string]uint64{}}
+	for _, r := range []string{sensorlink.DropUnresolvedBudget, sensorlink.DropClassFull, sensorlink.DropRecordCap, sensorlink.DropStore} {
+		d.reason[r] = 1000
+	}
+	d.asset[netobs.AssetUnresolved] = 5
+	for i := range enrolled {
+		d.asset[fmt.Sprintf("00000000-0000-4000-8000-%012d", i)] = uint64(i + 1)
+	}
+	d.asset[sensorDropOther] = 7 // as a restart restores it
+	sum := func(det map[string]string) (n uint64, assets int) {
+		for k, v := range det {
+			if strings.HasPrefix(k, "asset.") {
+				x, err := strconv.ParseUint(v, 10, 64)
+				if err != nil {
+					t.Fatal(err)
+				}
+				n += x
+				assets++
+			}
+		}
+		return n, assets
+	}
+	var all uint64
+	for _, v := range d.asset {
+		all += v
+	}
+	stream := NetObservationStream(sensorID)
+	det := dropDetails(stream, time.Date(2026, 11, 1, 0, 0, 0, 123456789, time.UTC), d)
+	if n, k := sum(det); n != all || k != SensorDropDetailAssets+1 {
+		t.Fatalf("asset details sum to %d in %d details, want %d in %d: %v", n, k, all, SensorDropDetailAssets+1, det)
+	}
+	for i := enrolled - SensorDropDetailAssets; i < enrolled; i++ { // the most dropped are named
+		if id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i); det["asset."+id] == "" {
+			t.Fatalf("%s not named: %v", id, det)
+		}
+	}
+	if det["asset."+sensorDropOther] == "" || det["asset."+netobs.AssetUnresolved] != "" {
+		t.Fatalf("asset.other or the unresolved bucket: %v", det)
+	}
+
+	// Every value at its widest, and the longest node ID.
+	for k := range det {
+		if k != "stream" && k != "class" && k != "since" {
+			det[k] = strconv.FormatUint(math.MaxUint64, 10)
+		}
+	}
+	e := &event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: event.NodeID(strings.Repeat("n", 63)), Stream: event.Stream(HealthStream), Seq: math.MaxUint64 >> 1},
+		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
+		Received: event.Received{UTC: "2026-11-01T00:00:00.000000001Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized, Source: "ntp"}},
+		Health:   &event.Health{Type: event.HealthDropCounted, Details: det}}
+	tg, err := syslog.ParseTarget([]byte(`{"schema": "otsec.syslog/0.1", "name": "central", "host": "collector.example", "port": 6514,
+		"transport": "tls", "format": "rfc5424", "framing": "octet-counting", "class": "best-effort", "replay_seconds": 3600, "max_message_octets": 2048,
+		"tls": {"server_name": "collector.example", "trust_anchor_ref": "ca"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, out, err := syslog.Render(e, tg)
+	if err != nil || out.SummaryDropped || len(msg) > syslog.DefaultMaxOctets*3/4 {
+		t.Fatalf("%d octets (limit %d), %+v, %v: %s", len(msg), syslog.DefaultMaxOctets*3/4, out, err, msg)
+	}
+	t.Logf("worst case: %d octets", len(msg))
+}
+
+// A drop-count write that fails raises store-commit-failed on the health
+// stream's database, once for each try, and is tried again a minute later,
+// not at every tick (D4-72, D4's low row on #568). Desk only.
+func TestSensorDropWriteFails(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	d := r.dbFor(HealthStream)
+	r.state.Lock()
+	mode := d.report.Mode
+	d.report.Mode = c5.ModeDrainOnly
+	r.state.Unlock()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
+		t.Fatal(err)
+	}
+	failed := func() (n int) {
+		for _, a := range st.Snapshot("x").Alarms {
+			if a.Code == string(c5.AlarmCommitFailed) && a.Stream == string(HealthStream) && a.Database == d.spec.ID {
+				n++
+			}
+		}
+		return n
+	}
+	r.tickSensor(bg, false)
+	r.tickSensor(bg, false)
+	g.advance(30 * time.Second)
+	r.tickSensor(bg, false)
+	if n := failed(); n != 1 || len(dropEvents(t, r)) != 0 {
+		t.Fatalf("%d store-commit-failed alarms, %d events", n, len(dropEvents(t, r)))
+	}
+	g.advance(30 * time.Second)
+	r.tickSensor(bg, false)
+	if n := failed(); n != 2 {
+		t.Fatalf("%d store-commit-failed alarms after the minute", n)
+	}
+	r.state.Lock()
+	d.report.Mode = mode
+	r.state.Unlock()
+	g.advance(time.Minute)
+	r.tickSensor(bg, false)
+	if ev := dropEvents(t, r); failed() != 2 || len(ev) != 1 || ev[0]["count"] != "1" {
+		t.Fatalf("after the store recovered: %d alarms, %v", failed(), ev)
 	}
 }

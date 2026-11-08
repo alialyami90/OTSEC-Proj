@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,19 @@ const AlarmSensorRecordRefused = "sensor-record-refused"
 // observation class's drop counts as an intake.drop-counted event, and only
 // when they changed (D5-c5-0.9.md section 4).
 const SensorDropReportEvery = time.Minute
+
+// SensorDropDetailAssets is the most assets the intake.drop-counted event
+// names. The rest are summed in one asset.other detail, so the asset
+// details still sum to count. It bounds the event: with every reason and
+// every value at its widest, the event renders in under three quarters of
+// a default Syslog target's 2048 octets (syslog.DefaultMaxOctets), and a
+// health event a target cannot render stops the health stream's forwarding
+// (TestSensorDropEventFits).
+const SensorDropDetailAssets = 8
+
+// sensorDropOther is the asset key of the summed detail, asset.other. No
+// asset ID is "other": they are UUIDs or asset-unresolved.
+const sensorDropOther = "other"
 
 // sensorDropScanRecords bounds how far back a start reads platform/health
 // for the last drop counts. The node writes them at a clean stop, and a
@@ -96,13 +110,14 @@ type sensorIntake struct {
 	// base is the counts restored at start, which the link's own add to.
 	base  dropCounts
 	since time.Time
-	// written is the counts the last event carried, writtenAt its node
-	// time and writtenMono its monotonic time.
-	written     dropCounts
-	writtenAt   time.Time
-	writtenMono time.Duration
-	everWritten bool
-	refused     map[string]bool // reasons whose alarm is raised
+	// written is the counts the last event carried and writtenAt its node
+	// time; triedMono is the monotonic time of the last write, or of the
+	// last failed one.
+	written   dropCounts
+	writtenAt time.Time
+	triedMono time.Duration
+	everTried bool
+	refused   map[string]bool // reasons whose alarm is raised
 }
 
 // dropCounts are dropped observations by reason and by destination asset.
@@ -159,7 +174,9 @@ func (a liveAppender) Append(ctx context.Context, rec c5.Record) (c5.Receipt, er
 }
 
 // ServeSensor reads one connection of the sensor's channel until it ends
-// (sensorlink.Link.Serve). It returns an error when the configuration has
+// (sensorlink.Link.Serve). The caller authenticates the stream's peer as
+// the configured sensor (ADR-0009, TB6); the records' sensor_id only
+// refuses a misrouted stream. It returns an error when the configuration has
 // no network_sensor section. Status shows the link connected while it runs.
 func (r *Runtime) ServeSensor(ctx context.Context, rd io.Reader) error {
 	in := r.sensor
@@ -192,6 +209,8 @@ func (in *sensorIntake) counts(st sensorlink.Stats) dropCounts {
 // tickSensor writes the drop counts when they changed, at most once every
 // SensorDropReportEvery unless final, raises sensor-record-refused for a
 // new reason, and sets the sensor section. final is the clean stop's call.
+// A write that fails raises store-commit-failed on the health stream's
+// database, as Runtime.health does, and is tried again a minute later.
 func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	in := r.sensor
 	if in == nil {
@@ -202,10 +221,18 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	defer in.mu.Unlock()
 	now := in.counts(st)
 	m := r.opt.Mono()
-	if !now.equal(in.written) && (final || !in.everWritten || m-in.writtenMono >= SensorDropReportEvery) {
+	if !now.equal(in.written) && (final || !in.everTried || m-in.triedMono >= SensorDropReportEvery) {
 		at := r.opt.Now().UTC()
-		if _, err := (healthSink{r}).Emit(ctx, event.Health{Type: event.HealthDropCounted, Details: dropDetails(in.stream, in.since, now)}); err == nil {
-			in.written, in.writtenAt, in.writtenMono, in.everWritten = now, at, m, true
+		in.triedMono, in.everTried = m, true
+		if _, err := (healthSink{r}).Emit(ctx, event.Health{Type: event.HealthDropCounted, Details: dropDetails(in.stream, in.since, now)}); err != nil {
+			var db c5.DatabaseID
+			if d := r.dbFor(HealthStream); d != nil {
+				db = d.spec.ID
+			}
+			r.opt.Status.Alarm(db, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: HealthStream,
+				Detail: "health event " + event.HealthDropCounted + " for " + string(in.stream) + ": " + err.Error()})
+		} else {
+			in.written, in.writtenAt = now, at
 		}
 	}
 	for _, reason := range slices.Sorted(maps.Keys(st.Refused)) {
@@ -227,15 +254,32 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 
 // dropDetails is the intake.drop-counted event's details: the totals since
 // since, by reason ("reason.<r>") and by destination asset ("asset.<id>"),
-// and their sum ("count").
+// and their sum ("count"). It names the SensorDropDetailAssets assets with
+// the most drops (ties by ID) and sums the rest in asset.other.
 func dropDetails(stream c5.StreamID, since time.Time, d dropCounts) map[string]string {
 	out := map[string]string{"stream": string(stream), "class": string(c5.ClassNetworkObservation),
 		"since": since.Format(time.RFC3339Nano), "count": strconv.FormatUint(d.total(), 10)}
 	for k, v := range d.reason {
 		out["reason."+k] = strconv.FormatUint(v, 10)
 	}
-	for k, v := range d.asset {
-		out["asset."+k] = strconv.FormatUint(v, 10)
+	ids := slices.Collect(maps.Keys(d.asset))
+	ids = slices.DeleteFunc(ids, func(id string) bool { return id == sensorDropOther })
+	slices.SortFunc(ids, func(a, b string) int {
+		if c := cmp.Compare(d.asset[b], d.asset[a]); c != 0 {
+			return c
+		}
+		return strings.Compare(a, b)
+	})
+	other := d.asset[sensorDropOther]
+	for i, id := range ids {
+		if i < SensorDropDetailAssets {
+			out["asset."+id] = strconv.FormatUint(d.asset[id], 10)
+		} else {
+			other += d.asset[id]
+		}
+	}
+	if other > 0 {
+		out["asset."+sensorDropOther] = strconv.FormatUint(other, 10)
 	}
 	return out
 }
@@ -278,7 +322,9 @@ func (r *Runtime) lastDropCounts(ctx context.Context, stream c5.StreamID) (dropC
 }
 
 // parseDropCounts reads an event the node wrote with dropDetails for
-// stream; anything else is not one.
+// stream; anything else is not one. It trusts every reason.* and asset.*
+// detail it can parse because only the node writes this type for a sensor
+// stream on platform/health; asset.other comes back as the key "other".
 func parseDropCounts(b []byte, stream c5.StreamID) (dropCounts, time.Time, bool) {
 	if !strings.Contains(string(b), `"`+event.HealthDropCounted+`"`) {
 		return dropCounts{}, time.Time{}, false
