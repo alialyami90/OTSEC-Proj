@@ -9,6 +9,8 @@ D4, 2026-11-07. This is the draft for review. D1 approves it together with D5's 
 
 The design note beside it is [D4-network-baseline.md](D4-network-baseline.md). It holds the baseline, the rules and the platform's own traffic.
 
+**Revised 2026-11-07, after D4-68, with D1's agreement** (§14). Coding C13 found four gaps, and D1 agreed the fixes before the code merges. The identifier stays `otsec.netobs/0.1`, because nothing has been written under it yet.
+
 Everything here is `desk`. No sensor exists, no record has been produced, and no device was contacted. The Go package `contracts/netobs` follows approval, as C11 did (#437, then #446), so that review settles the text before code pins it.
 
 **Written before ADR-0009 names an option, at D1's direction.** The brief's order puts C13 after the ADR (Order step 2). D1 asked for it now, because every option hands the node the same records. Nothing below depends on the option except the channel's transport:
@@ -82,6 +84,8 @@ Every observation and every alert cites its packets as a capture ID, frame numbe
   - **`credential`**: a credential slot placed after reassembly. The slots are a Telnet password after the password prompt up to the line end, FTP `PASS`, the community of every SNMPv1 or v2c message in either direction, plain HTTP's `Authorization: Basic` value, and a server's echo of any of those. D1 extended the list in D4-68, as an amendment to D4-67. It now also covers the value of every plain-HTTP `Cookie` and `Set-Cookie` header (the names stay), and the whole body of a plain-HTTP request whose `Content-Type` is `application/x-www-form-urlencoded` or `multipart/form-data`.
   - **`slot-not-placed`**: the TCP payload that would hold a slot that could not be placed. Examples: a login joined midstream, after a lost segment, at an unknown prompt, or with a password sent before its prompt; or a plain-HTTP header or body whose boundary can't be placed (D4-68). For a login or a request, the whole client payload of each such frame is covered, so none of that login's client bytes are stored (D4-67's fail-closed rule). Fail-closed covers whichever side carries the unplaced slot (D1, D4-68). So for a `Set-Cookie` whose boundary can't be placed, the whole server payload of the frame is covered.
 
+- **At most `MaxRedactions` (16) per frame** (§14). A frame whose side of the exchange holds more slots than that is covered as one `slot-not-placed` redaction over that side's whole payload in the frame, as for any slot that can't be placed. That one entry replaces the per-slot `credential` entries for that payload, and doesn't sit beside them. So the bound fails closed, and a header with many cookies can't grow the record without limit. The node refuses a cited frame that lists more than `MaxRedactions`, and counts it under `sensor-record-refused`.
+
   Every redacted byte is replaced by `0x2A` (`*`). The node refuses a first-sight observation in which any byte inside a listed redaction is not `0x2A`, and counts the refusal under `sensor-record-refused` (D3). That catches a sensor that lists a redaction and forgets to apply it. A sensor that leaves a slot out of the list altogether can't be caught this way, and that remains AP-33's residual. The marker is a constant, never derived from the secret (HR-3's condition). Its length equals the slot's, on purpose, so a stolen node learns each secret's length and nothing more (D4-67, D6). The hash is over the stored, redacted bytes, so it checks against the ring and the alert's capture alike (D5 §4). Redactions in one frame are sorted and never overlap. A `credential` redaction covers exactly its slot, no wider and no narrower. A slot byte outside every redaction is a leak, and GT-PCAP fails it (D6). For a frame cut at `MaxFrameBytes`, the hash and the redactions cover the stored `captured_len` bytes only. A frame with a redaction is stored redacted everywhere: in the ring, on the channel and in the store.
 - **The bytes themselves** travel only with a first-sight observation (§4.2), and are stored only as a record's C5 capture at the site. A forward, Syslog, status and health carry the citation without bytes (AP-33 (1)).
 
@@ -152,7 +156,7 @@ Every observation carries the sensor's coverage statement, and every alert carri
 
 The node's detector raises alerts as it reads observations. An alert must carry its packets (R6.5), and the node can't read the sensor's ring (D5 §4), which may rotate first under a flood. So:
 
-- **A first-sight observation carries its cited frames' bytes** in `frames` (base64, redacted as cited, at most 8, each at most 2,048 bytes). The node checks every frame against its cited hash and refuses the record on any mismatch. It then strips `frames` from the stored body and stores the bytes as the record's C5 capture: a classic pcap (`LINKTYPE_ETHERNET`) of the cited frames in citation order, with the frames' own timestamps. The stored citation gains `stored_capture`, the capture's SHA-256 (§5).
+- **A first-sight observation carries its cited frames' bytes** in `frames` (base64, redacted as cited, at most 8, each at most 2,048 bytes). The node checks every frame against its cited hash and refuses the record on any mismatch. It then strips `frames` from the stored body and stores the bytes as the record's C5 capture: a classic pcap (`LINKTYPE_ETHERNET`) of the cited frames in citation order, with the frames' own timestamps. The node's object gains `stored_capture`, the capture's SHA-256 (§5). The citation itself is unchanged (§14).
 - **Every other observation carries its citation only.** Its bytes stay in the ring while the ring holds them (D5 §4).
 - **An alert has its own capture,** built the same way from the frames it cites (up to 4 flows, 2 frames each, §7.1), taken from those first-sight captures. Where it is byte for byte one first-sight capture, it has the same SHA-256, and C5 keeps the bytes once. Otherwise it is a new capture. Either way it is charged to the alert class (#532 §2), and it lives as long as the alert does (EP-6), whatever happens to the observations.
 
@@ -162,7 +166,7 @@ The node's detector raises alerts as it reads observations. An alert must carry 
 | --- | --- |
 | `flow` | `l4`, the sorted pair of (address, port), and `vlan`: one TCP connection or one UDP conversation |
 | `service` | server address, `l4`, server port, `protocol` |
-| `function` | the flow's key, the function code, the sorted object set, `unit` for Modbus, and `sa` for DNP3 (§4.3) |
+| `function` | the flow's key, the function code, `sub` where present, the sorted object set, `unit` for Modbus, and `sa` for DNP3 (§4.3) |
 | `insecure` | the flow's key and `reason` |
 | `encrypted` | the flow's key and `scheme` |
 | `identity` | server address, `attribute` and the value's SHA-256 |
@@ -176,9 +180,13 @@ The sensor keeps its first-sight table in bounded memory. When an entry is evict
 
 - **`flow`**: `{ "phase": "start|end", "packets": n, "bytes": n, "end": "fin|rst|idle|sensor-stop" }`. `packets` is every frame of the flow after the PRP discard, TCP retransmissions included. `bytes` is the sum of `wire_len` over those frames: link-layer octets with any 802.1Q tag and RCT, without the FCS, which is tshark's `frame.len`. A flow cut by `idle`, or a 5-tuple reused after FIN, gives several `start` and `end` pairs with one key, and a checker sums the `end` records by key (D6). A flow gives two observations. `start` is its first sight, with the counts so far. `end` gives the totals over the flow, and `end` says why it closed, including `idle` after `flow_idle_s`, a sensor setting, and `sensor-stop`. V-M6's packet counts and ADR-0009's PRP condition read the `end` record. The detector reads `start`.
 - **`service`**: `{ "basis": "content|port", "version": Text? }`. The server is `ip.dst`. `basis` says whether the protocol was found by its content or only by its port, which ADR-0009 protocol point 2 needs. `version` is present only where the protocol shows one in clear: an SNMP message version, an HTTP `Server` header, a Telnet or FTP banner, an SSH identification string. For TLS it is the negotiated version from ServerHello's `supported_versions` when present, otherwise the ServerHello version (D2 on #527). A HelloRetryRequest has the ServerHello format and carries `supported_versions` too, so the sensor takes the version from the last ServerHello of the handshake (D2).
-- **`function`**: `{ "code": n, "objects": ["g50v1", ...], "unit": n?, "sa": "challenged|aggressive|failed|none"?, "sa_error_from": "master|outstation"? }`. It covers requests only, the frames the client sends to the server. A response's objects depend on which events the outstation has, so they are not a function (D6, D2). For DNP3 it is never emitted for 0 (confirm, sent by both ends), 129 or 130 (responses), or 131 (the authentication response) (S23 Table 2.30 pp. 82–83).
+- **`function`**: `{ "code": n, "sub": n?, "objects": ["g50v1", ...], "unit": n?, "sa": "challenged|aggressive|failed|none"?, "sa_error_from": "master|outstation"? }`. It covers requests only, the frames the client sends to the server. A response's objects depend on which events the outstation has, so they are not a function (D6, D2). For DNP3 it is never emitted for 0 (confirm, sent by both ends), 129 or 130 (responses), or 131 (the authentication response) (S23 Table 2.30 pp. 82–83).
   - `code` is the application function code as on the wire: DNP3's application-layer function code, or Modbus's function code.
   - `objects` are DNP3 object headers as `g<group>v<variation>`, sorted, with at most 16 kept. It is empty for Modbus.
+  - `sub` is present only on Modbus 8 and 43, and holds what `fc-classes/1` needs to class them (§14). For 8 (Diagnostics) it is the sub-function, 0 to 65535 (S22 Tables E.18 and E.19, D2). For 43 (Encapsulated Interface Transport) it is the MEI type, 0 to 255. It is absent on every other code and on DNP3.
+    - **Byte order.** The sensor reads the sub-function high byte first. That is the Modbus convention, and no held source states it, so it is `unknown` from the held set (D2). The order decides whether sub-functions 1 and 4 land in `control`.
+    - **The MEI type** is the first byte after the function code. No held manual lists 2Bh, so that position and the value 14 for Read Device Identification are `unknown` from the held set, as the baseline note's row says (D2).
+    - **A request too short to hold it** gives `sub` absent, and the record is still valid. The node classes it by the most restrictive row for its code: `control` for 8 and `write` for 43, never `other`. That fails closed against `authorized_writers` (D1 on #543, baseline note §4).
   - `unit` is the Modbus unit identifier.
   - `sa` is DNP3 only, and it is a **fact about the exchange**, not a verdict (D2). Which functions must be challenged is the outstation's configuration (S23 §12.3.1, p. 88), which the sensor can't see. So the sensor reports what happened on every DNP3 request, and the node decides `dnp3_no_sa` from `fc-classes/1` (§5). The values are:
     - `challenged`: the outstation sent a group 120 challenge before its response to the request;
@@ -190,7 +198,7 @@ The sensor keeps its first-sight table in bounded memory. When an entry is evict
   - **`sa` absent means not known.** The node never sets `dnp3_no_sa` from it (D1). A reply or challenge that arrives after the request was emitted is not paired again.
   - **The pending table is bounded** by `max_pending_dnp3` (§10). When it is full, the oldest pending request is emitted at once, in the same way, to make room, and the heartbeat counts it under `dnp3_pending_overflows`, with `dnp3-pending-overflow` in `degraded`, as a coverage loss (§3.3, §6). The counter is apart from first-sight evictions, so an overflow that can lose an `sa-failed` shows by name (D6, D4-68; AP-36 (b)). At `sensor-stop` every pending request is emitted the same way. So an overflow can leave a request's `sa` unknown, but it can never hide the request (D5, D3, D1).
   - **`failed` keys on the object's presence, never on its contents** (D2). The project holds neither IEEE 1815's SA clause nor IEC 62351-5. S23 confirms only the object's name, the functions that carry it, and its qualifier 5B. The error code's offset, the other fields and every code value are `unknown`, so the sensor decodes no reason and keeps no code.
-  - The baseline's `functions` key stays (code, objects) per pair. The learner and `new-function` ignore `sa` and `unit`, so a new SA outcome or unit is not a new function.
+  - The baseline's `functions` key is (code, `sub`, objects) per pair. The learner and `new-function` ignore `sa` and `unit`, so a new SA outcome or unit is not a new function. They don't ignore `sub`, so a new diagnostic sub-function is one.
   - The sensor does not classify codes as read or write. The node does, from one versioned table in the baseline note (§4 there), so the class table lives in one place.
 - **`insecure`**: `{ "reason": "telnet|ftp|http-plain|snmp-v1|snmp-v2c|modbus-tcp", "login": { "user": Text?, "attempts": n, "slot": "placed|not-placed|none", "why": "<token>"? }?, "redirect_only": true? }`. This is V-M6's insecure list as R6 states it, except DNP3 without SA, which the node derives (§5).
   - `reason` is closed. A new entry on the list is a new minor.
@@ -220,6 +228,7 @@ The node validates the record, checks the frame hashes (§4.2), and then adds a 
   "evidence_class": "device-observed|simulated",
   "stored_capture": "<sha256>"?,
   "function_class": "read|write|control|session-setup|time-sync|other"?,
+  "function_table": "fc-classes/1"?,
   "dnp3_no_sa": true?
 }
 ```
@@ -228,7 +237,7 @@ The node validates the record, checks the frame hashes (§4.2), and then adds a 
 - **`platform_session`** ties the observation to one of the node's own sessions (AP-35, baseline note §5). `tie` is `connection` when the collector's record names the connection's local address and connect time. Until C2 `SessionFacts` gains `local_addr` and `connected_at`, it is `window`: the collector's address to the device's address and port, within the session's window plus a grace period for the TCP close (ADR-0009 Consequences, D2).
 - **`evidence_class`** comes from the node's configuration for this sensor, never from the record (D1-23): `simulated` for a GT-PCAP replay or a lab interface.
 - **`stored_capture`** is present on a first-sight observation (§4.2).
-- **`function_class`** is set on a `function` observation from `fc-classes/1` (baseline note §4), and names the table version the node used.
+- **`function_class`** is set on a `function` observation from `fc-classes/1` (baseline note §4). **`function_table`** names the table version the node used, and is present exactly when `function_class` is (§14).
 - **`dnp3_no_sa`** is true on a DNP3 `function` observation whose class is `write`, `control` or `session-setup` and whose `sa` is `none`. This is how V-M6's "DNP3 without Secure Authentication" is flagged: by the node, from the one class table, never by the sensor (D2). `failed` never sets it: SA was in use and refused the request (g120v7), so flagging it would be a false V-M6 flag and would hide the one sign that SA works. A failure stays visible as `sa: failed`, and raises `sa-failed` (§7, D1, D4-68). Reads are not challenged by default (S23 pp. 73–74). The held sources give no other default (S23 §12.3.1, p. 88), so the critical set is `write`, `control` and `session-setup` by D4's choice, consistent with the sources but not confirmed by them. Time-sync is left out by the same choice (D2).
 
 **Unresolved observations.** An observation counts against D5's unresolved budget when neither end resolves to an asset (#532 §4). An observation with one end resolved is not budgeted. An unknown master polling an enrolled relay must reach the detector. Such traffic is bounded by the class quota and by the coalescing of its alerts (§7.3). D6's flood test decides whether this holds (D5 §9).
@@ -348,6 +357,7 @@ The C7 and C8 asks are needed before the detector acts on a baseline, not before
 | `MaxTextBytes` | 256 original, 1,024 escaped | the 254-character banner (TCBAN), whole |
 | `MaxCoverageBytes` | 2 KiB | 64 VLANs, 8 interfaces, the protocol list |
 | `MaxObjects` | 16 | DNP3 object headers per function observation |
+| `MaxRedactions` | 16 per cited frame | bounds the worst stored observation, so C4's `MaxNetobsBytes` can be pinned. A frame with more slots fails closed as one `slot-not-placed` (§3.2, §14) |
 | Alert citations | 4 flows, 2 frames each | an alert's capture stays under the alert class's record cap |
 | `coalesce_window_s` | 300, bounded 60 to 3600 | D1's ruling |
 | `sa_reply_timeout_ms` | 5,000, bounded 1,000 to 30,000 | D4's choice; no held source gives an outstation's challenge or response time. It must exceed a normal response time, because a reply after it leaves `sa` unknown, and it is the most a DNP3 `function` observation adds to R6.4's latency. The checker reads it from `coverage.settings` |
@@ -383,3 +393,15 @@ The worst cases are pinned by tests in `contracts/netobs`, as C10's `TestWorstAl
 ## 13. Open questions
 
 None. D2 closed the last one, on the DNP3 `sa` values, the critical-function set and the TLS version rule.
+
+## 14. Revision after D4-68: four gaps found in coding (D1, 2026-11-07)
+
+Coding `contracts/netobs` found four places where the approved text could not be coded as written. D1 agreed each fix before the code merges. The identifier stays `otsec.netobs/0.1`, because no sensor or node has written a record under it.
+
+1. **Modbus sub-function.** `fc-classes/1` classes Modbus 8 by its sub-function (0 is `other`, 1 and 4 are `control`) and 43 by its MEI type, but `function` had no field for either. So 8/1 could not be told from 8/0, and the class table could not be applied. `function.sub` now carries them (§4.3). It is in the first-sight key (§4.2) and in the baseline's `functions` entry (baseline note §2.1). D2 checked the readings on #543: the sub-function is read high byte first (Modbus convention, `unknown` from the held set), and a request too short for it gives `sub` absent. D1 ruled that the node classes such a request by the most restrictive row for its code, `control` for 8 and `write` for 43, never `other` (D1 on #543, after D2 and D3 differed).
+2. **Redactions per frame were unbounded,** so the worst stored observation had no bound, and C4 0.3's `MaxNetobsBytes` could not be pinned. `MaxRedactions` is 16 per frame, and a frame with more slots is covered as one `slot-not-placed`. That is D4-67's fail-closed rule as amended by D4-68 ruling 13 (§3.2, §10). D3 confirmed it on #543.
+   - The single `slot-not-placed` entry **replaces** the frame's per-slot `credential` entries for that side's payload. It does not sit beside them (D1 on #543).
+   - The node refuses a cited frame that lists more than `MaxRedactions` redactions, and counts the refusal under `sensor-record-refused` (D1 on #543).
+3. **`stored_capture` had two places.** §4.2 put it in the citation, while §5's schema put it in `node`. It is in `node` only (§4.2, §5).
+4. **The table version had no field.** §5 said `function_class` names the table version, but no field held it. `node.function_table` holds it, exactly when `function_class` is present (§5).
+

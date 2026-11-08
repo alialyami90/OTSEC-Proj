@@ -14,6 +14,8 @@ Generated from the documented-example fixtures named below, then frozen. None of
 | `health-ser-gap.json` | A platform `ser.gap` event: the next read of the same SER stream had no overlap with the previous one. |
 | `constructed-invalid-date.json` | **Constructed, not from the manual.** Row 8 with the date changed to `02/30/2007`. The native time is kept, `wall_clock` is absent, the flag is `invalid-time`, and parse status is `partial`. The record is kept, not dropped (EP-1). Its evidence is the row itself. |
 | `constructed-rtac-tls-mutual.json` | **Constructed, not from the manual (C4 0.2).** The RTAC example as if received over RFC 5425 from a sender that presented a certificate from the listener's CA set: `origin_auth` `tls-mutual` and `source.sender.tls_leaf_sha256`. The fingerprint is the SHA-256 of the text `illustrative: not a certificate; C4 0.2 example`, not of any certificate. Binding stays `sender-address` / `configured`: the certificate does not name the asset. |
+| `constructed-network-observation.json` | **Constructed (C4 0.3).** A C13 observation stored as a platform event of kind `network-observation`, stream `netobs/<sensor>`, with `netobs` holding an illustrative body. C4 checks only that `netobs` is one object within `MaxNetobsBytes`; the body's own goldens are in `contracts/netobs`. The sensor ID, asset ID and binding are illustrative. |
+| `constructed-network-observation-unresolved.json` | The same with no destination asset, so it carries `asset-unresolved`. |
 | `constructed-leap-second.json` | **Constructed, not from the manual.** Row 8 at `12/31/2016 23:59:60.602`. Second 60 is accepted at 23:59. No UTC is stated, so a consumer that has the leap-second table may convert it. |
 
 ## Invalid
@@ -60,3 +62,10 @@ These four start from `constructed-rtac-tls-mutual.json` (C4 0.2) with one chang
 | `tls-leaf-without-mutual.json` | forbidden | no | `tls-server-only` verified no sender certificate, so there is none to name. |
 | `tls-leaf-not-hex.json` | evidence | yes | The fingerprint in uppercase hex: it must be lowercase, as every C4 hash is. |
 | `tls-mutual-without-leaf.json` | missing | no | A `tls-mutual` event of 0.2 that does not name the certificate that spoke. |
+| `network-observation-without-netobs.json` | missing | no | C4 0.3: a `network-observation` event carries `netobs`. |
+| `netobs-on-other-kind.json` | forbidden | no | `netobs` on a `telemetry-health` event. |
+| `netobs-at-0.2.json` | forbidden | no | `netobs` is new in 0.3. |
+| `netobs-not-object.json` | enum | yes | `netobs` is one JSON object. |
+| `network-observation-from-device.json` | enum | no | An observation is a platform event. |
+| `network-observation-with-evidence-class.json` | forbidden | no | Its evidence class is in its body (C13 §5), never in `source`. |
+| `network-observation-no-asset-no-flag.json` | missing | no | No destination asset and no `asset-unresolved`. |

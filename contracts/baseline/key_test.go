@@ -246,8 +246,9 @@ func TestKeyStringRoundTrips(t *testing.T) {
 }
 
 // TestC4Goldens keys C4's own frozen examples: each SEL-751 row is a type
-// of element and state, the ser.gap health event belongs to no baseline,
-// and the Phase 1 RTAC example, whose field names are not the parser's,
+// of element and state, the ser.gap health event and the C4 0.3 network
+// observations, both platform events, belong to no baseline, and the
+// Phase 1 RTAC example, whose field names are not the parser's,
 // falls back to its whole record as the message.
 func TestC4Goldens(t *testing.T) {
 	files, _ := filepath.Glob("../event/testdata/valid/*.json")
@@ -266,7 +267,7 @@ func TestC4Goldens(t *testing.T) {
 		k, _, use, why := Classify(e, false)
 		name := filepath.Base(f)
 		switch {
-		case strings.HasPrefix(name, "health-"):
+		case strings.HasPrefix(name, "health-") || strings.HasPrefix(name, "constructed-network-observation"):
 			if why != ExcludedPlatform {
 				t.Errorf("%s: %s %q", name, use, why)
 			}
