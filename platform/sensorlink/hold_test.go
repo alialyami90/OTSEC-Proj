@@ -825,6 +825,7 @@ func TestHoldResultRepointsOpen(t *testing.T) {
 	g.wall = g.wall.Add(time.Minute)
 	g.dispatch("req-2")
 	g.send(g.obs("function", 40001, time.Minute)) // the old session's, until the result
+	g.wall = g.wall.Add(10 * time.Second)
 	got, err := g.l.Result(bg, "req-2", session09(inv2, 40001, time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -832,8 +833,9 @@ func TestHoldResultRepointsOpen(t *testing.T) {
 	if !got.OpenFlow {
 		t.Fatalf("released %+v, want open_flow", got)
 	}
-	if last := g.saved[len(g.saved)-1]; len(last.Open) != 1 || last.Open[0].InvocationID != inv2 {
-		t.Fatalf("the saved table: %+v", last.Open)
+	if last := g.saved[len(g.saved)-1]; len(last.Open) != 1 || last.Open[0].InvocationID != inv2 ||
+		!last.Open[0].Expires.Equal(t0.Add(time.Minute+netobs.DefaultFlowIdleS*time.Second+30*time.Second)) {
+		t.Fatalf("the saved table: %+v (the re-point leaves the expiry as the function record moved it)", last.Open)
 	}
 	g.send(g.obs("function", 40001, 2*time.Minute))
 	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv2, TieConnection})
@@ -864,4 +866,34 @@ func TestHoldResultExpiredOpen(t *testing.T) {
 	}
 	g.send(g.obs("function", 40001, 3*time.Minute))
 	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, "", ""})
+}
+
+// D6's probe P4 on #576 (N1).
+// P4: a re-point takes effect only once its record saves (D4-72). With the
+// result's record failing, the result reports no open flow and the entry's
+// later records still tie to the old session, in memory and after a restart.
+func TestHoldRepointSaveFails(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(time.Minute)
+	g.dispatch("req-2")
+	g.failSave = 1
+	got, err := g.l.Result(bg, "req-2", session09(inv2, 40001, time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.send(g.obs("function", 40001, 2*time.Minute))
+	c := g.committed()
+	if got.OpenFlow || c[len(c)-1].invocation != inv1 {
+		t.Errorf("the re-point took effect though its record failed: open_flow %v, last tie %+v", got.OpenFlow, c[len(c)-1])
+	}
+	g.l = g.link(g.restore())
+	g.send(g.obs("function", 40001, 2*time.Minute+time.Second))
+	if c := g.committed(); c[len(c)-1].invocation != inv1 {
+		t.Errorf("after a restart the entry ties to %+v", c[len(c)-1])
+	}
 }
