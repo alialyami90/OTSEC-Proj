@@ -166,10 +166,16 @@ func (r *Record) validateRetention() error {
 		cutoff, _ := time.Parse(time.RFC3339Nano, m.CutoffUTC)
 		previous, _ := time.Parse(time.RFC3339Nano, m.PreviousCutoffUTC)
 		wall, _ := time.Parse(time.RFC3339Nano, m.WallUTC)
+		// The wall bound in whole seconds, then nanoseconds on a tie. A
+		// time.Duration of retention_s wraps above about 9.2e9 s, and
+		// wall.Unix() - retention_s can wrap for an early wall time; the
+		// difference of two parsed times and the negation of a positive
+		// retention_s cannot (D4, D1 on #545).
+		d := cutoff.Unix() - wall.Unix()
 		switch {
 		case !cutoff.After(previous):
 			return fmt.Errorf("audit: a retention move advances the cutoff past previous_cutoff_utc %s", m.PreviousCutoffUTC)
-		case cutoff.After(wall.Add(-time.Duration(m.RetentionS) * time.Second)):
+		case d > -m.RetentionS || (d == -m.RetentionS && cutoff.Nanosecond() > wall.Nanosecond()):
 			return fmt.Errorf("audit: retention cutoff %s is later than wall_utc %s less retention_s %d", m.CutoffUTC, m.WallUTC, m.RetentionS)
 		}
 	default:

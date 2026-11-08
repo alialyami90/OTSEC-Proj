@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -336,6 +337,26 @@ func TestRetentionFields(t *testing.T) {
 		"a cutoff later than the wall time less the retention": func() *Record {
 			r := move()
 			r.Retention.CutoffUTC = "2026-11-10T06:00:01Z"
+			return r
+		}(),
+		"a cutoff half a second past the wall time less the retention": func() *Record {
+			r := move()
+			r.Retention.CutoffUTC = "2026-11-10T06:00:00.5Z"
+			return r
+		}(),
+		// time.Duration(9300000000) * time.Second wraps (D4 on #545).
+		"a retention that wraps a Duration, with a cutoff just before the wall time": func() *Record {
+			r := move()
+			r.Retention.RetentionS = 9300000000
+			r.Retention.CutoffUTC = "2026-11-17T05:59:59Z"
+			return r
+		}(),
+		"a retention of the largest int64 with a wall time in year 1": func() *Record {
+			r := move()
+			r.Retention.RetentionS = math.MaxInt64
+			r.Retention.WallUTC = "0001-01-01T00:00:00Z"
+			r.Retention.PreviousCutoffUTC = "0001-01-01T00:00:00Z"
+			r.Retention.CutoffUTC = "0001-01-01T00:00:01Z"
 			return r
 		}(),
 		"an unknown bound":                     func() *Record { r := move(); r.Retention.Bound = "manual"; return r }(),
