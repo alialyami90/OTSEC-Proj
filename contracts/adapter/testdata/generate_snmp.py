@@ -33,6 +33,7 @@ import generate as g  # noqa: E402  (a module of this directory, run with -I fro
 
 SCHEMA_0_7 = "otsec.adapter/0.7"
 SCHEMA_0_8 = "otsec.adapter/0.8"  # the two codes D4-54 added
+SCHEMA_0_9 = "otsec.adapter/0.9"  # the session's connection and failed.snmp_varbinds_mismatch
 RUN = "sel27x1.snmp.identity"
 SYSTEM = "sel27x1.snmp.system"
 ENTITY = "sel27x1.snmp.entity"
@@ -325,6 +326,27 @@ def results():
 
     s = SNMP()
     out["refused.credential_unavailable"] = s.result("refused", "refused.credential_unavailable")
+
+    # 0.9 (D4-68): the ok run with its connection. connected_at is the at
+    # of the first datagram sent.
+    s = SNMP()
+    s.discover()
+    s.time_sync()
+    s.system()
+    s.entity()
+    s.connection()
+    out["ok-0.9"] = s.result("ok", schema=SCHEMA_0_9)
+
+    # 0.9 (D4-60, D1 on #541): the Get of two OIDs answered with one binding.
+    # No binding of that Response gives a value.
+    s = SNMP()
+    s.discover()
+    s.time_sync()
+    s.first_request("operate", 1, 3600)
+    s.recv("operate", AUTH | PRIV, ENGINE, 1, 3600,
+           pdu(RESPONSE, s.req, [(SYS_DESCR, octets("SEL-2731M Managed Ethernet Switch"))]))
+    s.connection()
+    out["failed.snmp_varbinds_mismatch"] = s.result("failed", "failed.snmp_varbinds_mismatch", schema=SCHEMA_0_9)
     return out
 
 
@@ -407,6 +429,11 @@ def invalid_results(good):
         no_authenticated_answer)
     mut("unexpected-report-with-nothing-received", "refused.credential_unavailable",
         lambda r: (code("failed.snmp_unexpected_report")(r), r.update(schema=SCHEMA_0_8)))
+
+    # 0.9.
+    mut("varbinds-mismatch-at-0.8", "failed.snmp_varbinds_mismatch", lambda r: r.update(schema=SCHEMA_0_8))
+    mut("connected-at-not-first-segment", "ok-0.9",
+        lambda r: r["session"].update(connected_at=r["transcript"]["segments"][1]["at"]))
 
     mut("not-connected-with-engine-id", "refused.credential_unavailable",
         lambda r: r["session"]["snmp"].update(engine_id=ENGINE.hex()))

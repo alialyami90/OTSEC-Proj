@@ -83,6 +83,8 @@ func TestResults(t *testing.T) {
 			adapter.RefusedEngineIDMismatch, adapter.IdentityMismatch, false},
 		{"error status", func(a *agent) { a.errorStatus = 16 }, testFID, adapter.FailedSNMPErrorStatus, adapter.IdentityMatch, false},
 		{"walk loops", func(a *agent) { a.loopWalk = true }, testFID, adapter.FailedSNMPWalkNotIncreasing, adapter.IdentityMatch, false},
+		{"get answered short", func(a *agent) { a.countTag, a.countDelta = tagGetRequest, -1 }, testFID,
+			adapter.FailedSNMPVarbindsMismatch, adapter.IdentityMatch, false},
 		{"silence", func(a *agent) { a.noAnswer = true }, testFID, adapter.FailedTimeout, adapter.IdentityNotChecked, false},
 		{"unauthenticated time-window Report", func(a *agent) { a.unauthTimeRep = true }, testFID,
 			adapter.FailedUSMNotInTimeWindow, adapter.IdentityMatch, false},
@@ -131,6 +133,10 @@ func TestResults(t *testing.T) {
 			}
 			if r.SuspendsCredential() != "" {
 				t.Error("an SNMP result suspends the credential")
+			}
+			// C2 0.9: the Conn's address, from the first datagram sent.
+			if r.Session.Connected && (r.Session.LocalAddr != agentLocal || r.Session.ConnectedAt != r.Transcript.Segments[0].At) {
+				t.Errorf("local_addr %q, connected_at %s, first segment %s", r.Session.LocalAddr, r.Session.ConnectedAt, r.Transcript.Segments[0].At)
 			}
 		})
 	}

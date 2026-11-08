@@ -64,6 +64,10 @@ type agent struct {
 	ctxName         []byte // the Response's contextName
 	tick            int64  // added to the agent's snmpEngineTime after each Response
 	shortSalt       bool   // send msgPrivacyParameters of 7 octets, signed
+	// countTag and countDelta: a Response to a countTag request carries
+	// countDelta bindings more (1, a copy of the last) or fewer (-1).
+	countTag   byte
+	countDelta int
 }
 
 func newAgent(t *testing.T) *agent {
@@ -105,6 +109,11 @@ func (a *agent) Write(b []byte) error {
 	a.inbox = append(a.inbox, a.answer(b, m)...)
 	return nil
 }
+
+// agentLocal is the address the session's socket reports (C2 0.9).
+const agentLocal = "192.0.2.10:40161"
+
+func (a *agent) LocalAddr() string { return agentLocal }
 
 func (a *agent) Read(deadline time.Time) ([]byte, error) {
 	if len(a.inbox) == 0 {
@@ -208,6 +217,14 @@ func (a *agent) response(msgID int64, req pdu) []byte {
 		}
 	default:
 		a.t.Fatalf("agent: the client sent PDU 0x%02x", req.Tag)
+	}
+	if req.Tag == a.countTag && len(vbs) > 0 {
+		switch a.countDelta {
+		case 1:
+			vbs = append(vbs, vbs[len(vbs)-1])
+		case -1:
+			vbs = vbs[:len(vbs)-1]
+		}
 	}
 	p := seqOf(tagResponse, intOf(req.RequestID), intOf(a.errorStatus), intOf(0), seqOf(tagSequence, vbs...))
 	ctx := a.engineID

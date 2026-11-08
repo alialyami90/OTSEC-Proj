@@ -479,6 +479,16 @@ func (s *session) connect() adapter.Code {
 		s.detail = fmt.Sprintf("%d connection attempts failed", l.ConnectRetries+1)
 		return adapter.FailedConnect
 	}
+	// The connection's own end and time, so the node can tie the flow the
+	// sensor sees to this session (C2 0.9, AP-35). Without an IP address
+	// the result could not say which flow is the platform's, so nothing is
+	// sent.
+	connectedAt, localAddr := s.now(), adapter.LocalAddrOf(s.nc.LocalAddr())
+	if localAddr == "" {
+		s.nc.Close()
+		s.detail = "the connection has no IP local address"
+		return adapter.FailedInternal
+	}
 	s.conn, err = telnet.New(s.nc, telnet.Config{
 		MaxReceived: s.budget + closeAllowance, MaxCommands: maxCommands, Egress: s.egress,
 	})
@@ -488,7 +498,7 @@ func (s *session) connect() adapter.Code {
 		return adapter.FailedInternal
 	}
 	s.facts = adapter.SessionFacts{Connected: true, LanguageProbe: adapter.ProbeNotRun,
-		EchoScan: adapter.EchoScanNotApplicable, AccessLevel: "0"}
+		EchoScan: adapter.EchoScanNotApplicable, AccessLevel: "0", LocalAddr: localAddr, ConnectedAt: stamp(connectedAt)}
 	s.phase = adapter.PhaseProbe
 	return ""
 }
