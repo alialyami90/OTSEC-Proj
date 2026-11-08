@@ -86,11 +86,12 @@ func TestNetworkLayoutV09(t *testing.T) {
 	}
 }
 
-// Twelve kind and series pairs pass; the three 0.9 series pair with their
-// one kind only.
+// Thirteen kind and series pairs pass; the four 0.9 series pair with their
+// one kind only (netcheckpoint.intake from D4-72).
 func TestSeriesV09(t *testing.T) {
 	for got, want := range map[string]string{
 		SeriesBaselineNetwork: "baseline.network", SeriesNetCheckpointLearner: "netcheckpoint.learner", SeriesNetCheckpointDetector: "netcheckpoint.detector",
+		SeriesNetCheckpointIntake: "netcheckpoint.intake",
 	} {
 		if got != want {
 			t.Errorf("series %q, want %q", got, want)
@@ -98,7 +99,7 @@ func TestSeriesV09(t *testing.T) {
 	}
 	series := []string{SeriesConfigSnapshot, SeriesConfigDifference, SeriesBaselineEvent, SeriesCheckpointLearner, SeriesCheckpointDetector,
 		SeriesIdentity, SeriesFinding, SeriesAdvisorySet, SeriesIdentityRead,
-		SeriesBaselineNetwork, SeriesNetCheckpointLearner, SeriesNetCheckpointDetector}
+		SeriesBaselineNetwork, SeriesNetCheckpointLearner, SeriesNetCheckpointDetector, SeriesNetCheckpointIntake}
 	passed := 0
 	for _, k := range []DocumentKind{DocumentEvidence, DocumentWorkingState} {
 		for _, s := range series {
@@ -107,13 +108,14 @@ func TestSeriesV09(t *testing.T) {
 			}
 		}
 	}
-	if passed != 12 {
-		t.Errorf("%d pairs pass, want 12", passed)
+	if passed != 13 {
+		t.Errorf("%d pairs pass, want 13", passed)
 	}
 	for _, bad := range []DocumentInfo{
 		{DocumentWorkingState, SeriesBaselineNetwork},
 		{DocumentEvidence, SeriesNetCheckpointLearner},
 		{DocumentEvidence, SeriesNetCheckpointDetector},
+		{DocumentEvidence, SeriesNetCheckpointIntake},
 	} {
 		if err := bad.Validate(); !isCode(err, CodeInvalid) {
 			t.Errorf("%+v: %v, want CodeInvalid", bad, err)
@@ -121,10 +123,11 @@ func TestSeriesV09(t *testing.T) {
 	}
 }
 
-// Both network checkpoints are removable; baseline.network never is.
+// The network checkpoints and the intake hold are removable;
+// baseline.network never is.
 func TestCheckRemoveConfigV09(t *testing.T) {
 	const s StreamID = "netbaseline/s1"
-	for _, series := range []string{SeriesNetCheckpointLearner, SeriesNetCheckpointDetector} {
+	for _, series := range []string{SeriesNetCheckpointLearner, SeriesNetCheckpointDetector, SeriesNetCheckpointIntake} {
 		if err := CheckRemoveConfig(s, series, []Seq{3}); err != nil {
 			t.Errorf("%s: %v", series, err)
 		}
@@ -132,7 +135,7 @@ func TestCheckRemoveConfigV09(t *testing.T) {
 	if err := CheckRemoveConfig(s, SeriesBaselineNetwork, []Seq{3}); !isCode(err, CodeInvalid) {
 		t.Errorf("baseline.network: %v, want CodeInvalid", err)
 	}
-	if got := RemovableSeries(); len(got) != 6 {
-		t.Errorf("RemovableSeries %v, want six", got)
+	if got := RemovableSeries(); len(got) != 7 {
+		t.Errorf("RemovableSeries %v, want seven", got)
 	}
 }
