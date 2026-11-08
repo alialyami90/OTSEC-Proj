@@ -371,6 +371,7 @@ func flattenCoverage(cv *Coverage) map[string]string {
 		"coverage.degraded":                     strings.Join(cv.Degraded, " "),
 		"coverage.settings.sa_reply_timeout_ms": strconv.Itoa(cv.Settings.SAReplyTimeoutMS),
 		"coverage.settings.max_pending_dnp3":    strconv.Itoa(cv.Settings.MaxPendingDNP3),
+		"coverage.settings.flow_idle_s":         strconv.Itoa(cv.Settings.FlowIdleS),
 		"coverage.since_utc":                    cv.SinceUTC,
 	}
 	for i, in := range cv.Interfaces {
@@ -427,6 +428,7 @@ func unflattenCoverage(d map[string]string) (Coverage, []string, error) {
 	}
 	cv.Settings.SAReplyTimeoutMS = integer("coverage.settings.sa_reply_timeout_ms", get("coverage.settings.sa_reply_timeout_ms"))
 	cv.Settings.MaxPendingDNP3 = integer("coverage.settings.max_pending_dnp3", get("coverage.settings.max_pending_dnp3"))
+	cv.Settings.FlowIdleS = integer("coverage.settings.flow_idle_s", get("coverage.settings.flow_idle_s"))
 	for i := 1; i <= MaxInterfaces; i++ {
 		k := fmt.Sprintf("coverage.interface.%d", i)
 		v, ok := d[k]

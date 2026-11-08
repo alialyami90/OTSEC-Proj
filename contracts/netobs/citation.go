@@ -88,7 +88,9 @@ func (f *CitedFrame) check(c *checker, field string) {
 		c.fail(CodeRange, field+".captured_len", "%d not in [1, %d]", f.CapturedLen, MaxFrameBytes)
 	}
 	// wire_len is larger only for a frame cut at MaxFrameBytes.
-	if f.WireLen < f.CapturedLen || (f.WireLen > f.CapturedLen && f.CapturedLen != MaxFrameBytes) {
+	if f.WireLen < f.CapturedLen || f.WireLen > MaxWireLen {
+		c.fail(CodeRange, field+".wire_len", "%d not in [captured_len %d, %d]", f.WireLen, f.CapturedLen, MaxWireLen)
+	} else if f.WireLen > f.CapturedLen && f.CapturedLen != MaxFrameBytes {
 		c.fail(CodeConflict, field+".wire_len", "%d with captured_len %d: a frame is cut only at %d", f.WireLen, f.CapturedLen, MaxFrameBytes)
 	}
 	c.sha256(field+".sha256", f.SHA256)
@@ -162,6 +164,7 @@ type PRP struct {
 type Settings struct {
 	SAReplyTimeoutMS int `json:"sa_reply_timeout_ms"`
 	MaxPendingDNP3   int `json:"max_pending_dnp3"`
+	FlowIdleS        int `json:"flow_idle_s"`
 }
 
 // HSRNotDecoded is coverage.hsr in 0.1.
@@ -238,6 +241,9 @@ func (cv *Coverage) check(c *checker, field string) {
 	}
 	if s.MaxPendingDNP3 < MinMaxPendingDNP3 || s.MaxPendingDNP3 > MaxMaxPendingDNP3 {
 		c.fail(CodeRange, field+".settings.max_pending_dnp3", "%d not in [%d, %d]", s.MaxPendingDNP3, MinMaxPendingDNP3, MaxMaxPendingDNP3)
+	}
+	if s.FlowIdleS < MinFlowIdleS || s.FlowIdleS > MaxFlowIdleS {
+		c.fail(CodeRange, field+".settings.flow_idle_s", "%d not in [%d, %d]", s.FlowIdleS, MinFlowIdleS, MaxFlowIdleS)
 	}
 	c.utc(field+".since_utc", cv.SinceUTC)
 }
