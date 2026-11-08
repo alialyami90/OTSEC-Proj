@@ -132,8 +132,10 @@ func (r *Record) validateNetwork(minor int) error {
 // validateRetention checks store.retention_moved: the node's info record of
 // one move of the sensor's alert-stream consumer. A created record starts a
 // chain and moves nothing; every other moves the cursor forward from a
-// previous cutoff. That the cutoff advances and stays behind the wall clock
-// less the retention is VerifyConfigFrom's, with the chain.
+// previous cutoff, advances the cutoff past it, and keeps it at or behind
+// the wall clock less the retention. Those need only the record's own
+// fields, so they hold in every view (D6 on #545); that the move follows the
+// record before it is VerifyConfigFrom's, with the chain.
 func (r *Record) validateRetention() error {
 	m := r.Retention
 	switch {
@@ -160,6 +162,15 @@ func (r *Record) validateRetention() error {
 	case BoundWall, BoundMonotonic, BoundStart:
 		if m.ToSeq <= m.FromSeq || m.PreviousCutoffUTC == "" {
 			return errors.New("audit: a retention move passes at least one alert (to_seq > from_seq) and names previous_cutoff_utc")
+		}
+		cutoff, _ := time.Parse(time.RFC3339Nano, m.CutoffUTC)
+		previous, _ := time.Parse(time.RFC3339Nano, m.PreviousCutoffUTC)
+		wall, _ := time.Parse(time.RFC3339Nano, m.WallUTC)
+		switch {
+		case !cutoff.After(previous):
+			return fmt.Errorf("audit: a retention move advances the cutoff past previous_cutoff_utc %s", m.PreviousCutoffUTC)
+		case cutoff.After(wall.Add(-time.Duration(m.RetentionS) * time.Second)):
+			return fmt.Errorf("audit: retention cutoff %s is later than wall_utc %s less retention_s %d", m.CutoffUTC, m.WallUTC, m.RetentionS)
 		}
 	default:
 		return fmt.Errorf("audit: retention bound is %s, %s, %s or %s", BoundCreated, BoundWall, BoundMonotonic, BoundStart)
@@ -326,18 +337,11 @@ func (n *networkChain) move(r *Record) error {
 		return broken("record %d moves the retention of %s, but no created record of the stream comes before it", r.Seq, m.Stream)
 	}
 	p := prev.Retention
-	cutoff, _ := time.Parse(time.RFC3339Nano, m.CutoffUTC)
-	previous, _ := time.Parse(time.RFC3339Nano, m.PreviousCutoffUTC)
-	wall, _ := time.Parse(time.RFC3339Nano, m.WallUTC)
 	switch {
 	case m.FromSeq != p.ToSeq:
 		return broken("record %d moves %s from seq %d, but record %d left it at %d", r.Seq, m.Stream, m.FromSeq, prev.Seq, p.ToSeq)
 	case m.PreviousCutoffUTC != p.CutoffUTC:
 		return broken("record %d names previous cutoff %s, but record %d set %s", r.Seq, m.PreviousCutoffUTC, prev.Seq, p.CutoffUTC)
-	case !cutoff.After(previous):
-		return broken("record %d does not advance the cutoff of %s past %s", r.Seq, m.Stream, m.PreviousCutoffUTC)
-	case cutoff.After(wall.Add(-time.Duration(m.RetentionS) * time.Second)):
-		return broken("record %d sets cutoff %s, later than its wall time %s less the retention of %d s", r.Seq, m.CutoffUTC, m.WallUTC, m.RetentionS)
 	}
 	return nil
 }
@@ -360,7 +364,8 @@ func (n *networkChain) adminKeys(r *Record) error {
 // granted checks that a decision applied by r, accepted by acc stamped 0.12
 // or later, was made under the key set the latest admin_keys record before r
 // names: the acceptance's keys_digest is that record's digest, and the
-// verified key's kinds in it include the verified kind. With no admin_keys
+// verified key is active in it and its kinds include the verified kind (a
+// revoked key's decision breaks the chain, D6 on #545). With no admin_keys
 // record yet, it is unknown in a view that starts after seq 1.
 func (n *networkChain) granted(r, acc *Record) error {
 	if !atLeast(acc, networkSince) {
@@ -379,6 +384,9 @@ func (n *networkChain) granted(r, acc *Record) error {
 	for _, e := range n.keys.AdminKeys.Keys {
 		if e.KeyID != v.AdminKeyID {
 			continue
+		}
+		if e.Status != authz.KeyActive {
+			return broken("record %d applies a decision signed by %s, which the key set in record %d lists as %s", r.Seq, v.AdminKeyID, n.keys.Seq, e.Status)
 		}
 		for _, k := range e.Kinds {
 			if k == v.Kind {

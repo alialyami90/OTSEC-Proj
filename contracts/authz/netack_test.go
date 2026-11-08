@@ -225,6 +225,11 @@ func TestAdminAcceptanceKeys(t *testing.T) {
 			r.Admin.Keys[0].Kinds = []RequestKind{"run"}
 			r.Admin.KeysDigest = AdminKeysDigest(r.Admin.Keys)
 		},
+		"unknown status": func(r *CollectorReply) {
+			r.Admin.Keys = append([]AdminKeyEntry{}, r.Admin.Keys...)
+			r.Admin.Keys[0].Status = "suspended"
+			r.Admin.KeysDigest = AdminKeysDigest(r.Admin.Keys)
+		},
 		"reply stamped 0.9": func(r *CollectorReply) { r.Contract = "otsec.authz/0.9" },
 	} {
 		t.Run(name, func(t *testing.T) {

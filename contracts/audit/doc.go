@@ -443,11 +443,12 @@
 //
 // VerifyConfigFrom checks the chain: an acknowledgement's draft is the
 // sensor's latest recorded draft; a retirement follows its acknowledgement,
-// once per run; retention moves are contiguous from each created record,
-// name the previous cutoff, advance it and stay behind the wall time less
-// the retention; key sets succeed one another; and a decision accepted under
-// a key set is applied only after that set's record, which is the latest
-// before it and lets the verified key sign the verified kind. A view that
+// once per run; retention moves are contiguous from each created record
+// and name the previous cutoff; key sets succeed one another; and a decision
+// accepted under a key set is applied only after that set's record, which is
+// the latest before it, lists the verified key as active and lets it sign
+// the verified kind. That a move advances the cutoff and stays behind the
+// wall time less the retention needs only the record, so Validate checks it. A view that
 // starts after seq 1 accepts as given what came before it. The chain can't
 // prove the retention's monotonic bound: bound is the node's own word, and
 // the evidence for it is the node's test with the clock stepped forward.

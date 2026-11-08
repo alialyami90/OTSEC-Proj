@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -329,7 +330,14 @@ func TestRetentionFields(t *testing.T) {
 			r.Retention.PreviousCutoffUTC = "2026-11-09T22:00:00Z"
 			return r
 		}(),
-		"created that moves":                   func() *Record { r := created(); r.Retention.ToSeq = 6; return r }(),
+		"created that moves":            func() *Record { r := created(); r.Retention.ToSeq = 6; return r }(),
+		"a cutoff that doesn't advance": func() *Record { r := move(); r.Retention.CutoffUTC = r.Retention.PreviousCutoffUTC; return r }(),
+		// The wall time less seven days is 2026-11-10T06:00:00Z.
+		"a cutoff later than the wall time less the retention": func() *Record {
+			r := move()
+			r.Retention.CutoffUTC = "2026-11-10T06:00:01Z"
+			return r
+		}(),
 		"an unknown bound":                     func() *Record { r := move(); r.Retention.Bound = "manual"; return r }(),
 		"no bound":                             func() *Record { r := move(); r.Retention.Bound = ""; return r }(),
 		"another sensor's stream":              func() *Record { r := move(); r.Retention.Stream = AlertStreamPrefix + testAsset; return r }(),
@@ -394,6 +402,12 @@ func TestAdminKeysFields(t *testing.T) {
 		"previous bare hex":  func() *Record { r := keys(); r.AdminKeys.PreviousDigest = testOldKeys[7:]; return r }(),
 		"by a person":        func() *Record { r := keys(); r.Actor = adminActor; return r }(),
 		"as succeeded":       func() *Record { r := keys(); r.Outcome = OutcomeSucceeded; return r }(),
+		"an unknown key status": func() *Record {
+			r := keys()
+			r.AdminKeys.Keys[0].Status = "suspended"
+			r.AdminKeys.Digest = authz.AdminKeysDigest(r.AdminKeys.Keys)
+			return r
+		}(),
 		"an unknown key kind": func() *Record {
 			r := keys()
 			r.AdminKeys.Keys = []authz.AdminKeyEntry{{KeyID: "ed25519-183d5080d1a2ef2b", Principal: "admin@site-a", Status: authz.KeyActive, Kinds: []authz.RequestKind{"run"}}}
@@ -483,16 +497,6 @@ func TestNetworkChainBreaks(t *testing.T) {
 			recs[7].Retention.PreviousCutoffUTC = "2026-11-10T04:00:00Z"
 			return recs
 		},
-		"a cutoff that doesn't advance": func() []*Record {
-			recs := netChain()
-			recs[7].Retention.CutoffUTC = "2026-11-10T05:00:00Z"
-			return recs
-		},
-		"a cutoff later than the wall time less the retention": func() []*Record {
-			recs := netChain()
-			recs[7].Retention.CutoffUTC = "2026-11-10T08:00:01Z"
-			return recs
-		},
 		"a retirement with no matching acknowledgement": func() []*Record {
 			recs := netChain()
 			recs[4].Config.BaselineDigest = testDraft2
@@ -523,6 +527,14 @@ func TestNetworkChainBreaks(t *testing.T) {
 		"a key set whose key may not sign the verified kind": func() []*Record {
 			recs := netChain()
 			recs[0] = keysRec(2, "", testKeyEntries(authz.KindNodeBaselineAck))
+			recs[2].Verified.KeysDigest = recs[0].AdminKeys.Digest
+			return recs
+		},
+		"a key set that lists the verified key as revoked": func() []*Record {
+			recs := netChain()
+			entries := testKeyEntries()
+			entries[0].Status = authz.KeyRevoked
+			recs[0] = keysRec(2, "", entries)
 			recs[2].Verified.KeysDigest = recs[0].AdminKeys.Digest
 			return recs
 		},
@@ -580,6 +592,21 @@ func TestNetworkChainFromView(t *testing.T) {
 		if err := VerifyConfigFrom(view, view[0].Seq); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+	// The record-local rules hold in a cut view too: a first move whose
+	// cutoff is past its wall time less the retention is refused when the
+	// record is read, before any chain check (D6, D1 on #545).
+	first := netChain()[6]
+	if b, err := json.Marshal(first); err != nil {
+		t.Fatal(err)
+	} else if _, err := ParseRecord(b); err != nil {
+		t.Fatalf("a cut view's first move: %v", err)
+	}
+	first.Retention.CutoffUTC = "2026-11-10T06:00:01Z" // its wall time less seven days is 06:00:00
+	if b, err := json.Marshal(first); err != nil {
+		t.Fatal(err)
+	} else if _, err := ParseRecord(b); err == nil {
+		t.Error("a cut view's first move past the wall bound: accepted")
 	}
 	// A view that holds the sensor's first draft still refuses an
 	// acknowledgement of a draft never recorded.
