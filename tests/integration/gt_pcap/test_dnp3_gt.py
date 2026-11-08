@@ -119,3 +119,39 @@ def test_tcp_sequence_numbers_follow_the_payload():
     c.send(True, b"abc")
     seqs = [struct.unpack("!II", f.data[38:46]) for f in c.frames]
     assert seqs[3][0] == 1001 and seqs[4][1] == 1004  # data at isn+1; the ACK covers 3 octets
+
+
+def test_no_case_has_a_hole_in_either_sequence_space():
+    """Over every case, the derived ones included: each side's sequence
+    number continues from where it left off and from the other side's last
+    acknowledgement, so a removed response reads as never sent, not as a
+    capture gap (D1 on #548)."""
+    for name, frames, _ in dnp3_cases.cases():
+        nxt, last_ack = {}, {}
+        for i, f in enumerate(frames, 1):
+            src, dst, seq, ack, flags, n, _ = synth.tcp_fields(f.data)
+            where = (name, i)
+            if flags & synth.SYN:
+                assert src not in nxt, where
+            else:
+                assert seq == nxt[src], (where, seq, nxt[src])
+                assert last_ack.get(dst, seq) == seq, (where, "seq", seq, "the peer last acked", last_ack[dst])
+            if flags & synth.ACK:
+                assert ack == nxt[dst], (where, "ack", ack, "the peer's next", nxt[dst])
+                last_ack[src] = ack
+            nxt[src] = seq + n + (1 if flags & (synth.SYN | synth.FIN) else 0)
+
+
+def test_remove_segments_renumbers_and_keeps_checksums():
+    cases = {n: (f, r) for n, f, r in dnp3_cases.cases()}
+    full, rows = cases["dnp3-unauthorized-operate"]
+    cut, _ = cases["dnp3-unauthorized-operate-no-response"]
+    resp = rows[0]["frames"][1]
+    removed = synth.tcp_fields(full[resp - 1].data)[5]
+    assert removed == 37
+    for before, after in zip(full[resp + 1:], cut[resp - 1:]):
+        src, dst, seq, ack, flags, n, _ = synth.tcp_fields(before.data)
+        s2, d2, seq2, ack2, flags2, n2, _ = synth.tcp_fields(after.data)
+        out = src[3] == 20  # the outstation, 192.0.2.20
+        assert (s2, d2, flags2, n2) == (src, dst, flags, n)
+        assert seq2 == seq - (removed if out else 0) and ack2 == ack - (0 if out else removed)

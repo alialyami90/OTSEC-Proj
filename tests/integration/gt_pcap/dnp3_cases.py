@@ -23,20 +23,28 @@ import pcapfile
 import synth
 
 # The simulated network. Addresses are TEST-NET-1; MACs locally
-# administered; asset IDs are fixed UUIDs made for GT-PCAP.
+# administered; asset IDs are fixed UUIDs made for GT-PCAP. C1 has no DNP3
+# transport, so each enrolled host resolves through one direct endpoint on
+# its IP that C1 does have (c1_endpoint, D1 on #548): Telnet 23 for O1, SSH
+# 22 for M1 to M3. No capture here holds a session on those endpoints. M4
+# is enrolled nowhere.
 NET = {
     "outstation": {"name": "O1", "ip": "192.0.2.20", "mac": "02:00:00:00:00:20", "port": 20000, "link": 10,
-                   "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20"},
+                   "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20",
+                   "c1_endpoint": {"transport": "telnet", "port": 23, "path": "direct"}},
     "masters": {
         # Authorized to write and control O1 (the authorized_writers input).
         "M1": {"ip": "192.0.2.10", "mac": "02:00:00:00:00:10", "link": 1,
-               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a10", "writes": ["write", "control"]},
+               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a10",
+               "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": ["write", "control"]},
         # A reading master that never does the reconnect sequence or a time sync.
         "M2": {"ip": "192.0.2.11", "mac": "02:00:00:00:00:11", "link": 2,
-               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a11", "writes": []},
+               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a11",
+               "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": []},
         # A reading master that does the reconnect sequence in learning.
         "M3": {"ip": "192.0.2.12", "mac": "02:00:00:00:00:12", "link": 3,
-               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a12", "writes": []},
+               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a12",
+               "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": []},
         # Not enrolled and never seen in learning: the new master.
         "M4": {"ip": "192.0.2.13", "mac": "02:00:00:00:00:13", "link": 4, "asset": None, "writes": []},
     },
@@ -166,7 +174,8 @@ def cases():
         failed_rows(["sa-failed"], "acknowledged", "g120v7 in function 131 from the outstation; authorized master"))
     add("dnp3-sa-failed-before-ack", "M1", 41003, failed_outstation,
         failed_rows(["sa-failed"], "before-acknowledgement",
-                    "replayed on a node with no acknowledged baseline: sa-failed and nothing else (D1, D4-68)"))
+                    "replayed on a node whose network database starts empty, with no learner and no acknowledged "
+                    "baseline: sa-failed and nothing else (D1, D4-68; D1 on #548)"))
     add("dnp3-sa-failed-unauthorized", "M2", 41004, failed_outstation,
         failed_rows(["sa-failed", "unauthorized-write"], "acknowledged", "the same failure from a read-only master"))
 
@@ -259,14 +268,16 @@ def cases():
          "note": "the reuse pairs with the response; dnp3_seq_reused exactly 1 for this capture"}])
 
     # Derived (plan section 2C): the unauthorized operate with its response,
-    # and that response's bare ACK, removed (D3 on #536).
+    # and that response's bare ACK, removed (D3 on #536), and the later
+    # frames renumbered so the request is unanswered, not a capture gap
+    # (D1 on #548).
     name, frames, rows = next(c for c in out if c[0] == "dnp3-unauthorized-operate")
     resp = rows[0]["frames"][1]
-    keep = [f for i, f in enumerate(frames, 1) if i not in (resp, resp + 1)]
+    keep = synth.remove_segments(frames, {resp, resp + 1})
     out.append(("dnp3-unauthorized-operate-no-response", keep, [
         {"frames": [rows[0]["frames"][0]], "rules": ["unauthorized-write"], "context": "acknowledged", "sa": "",
-         "note": "derived from dnp3-unauthorized-operate, frames %d and %d removed; emitted at sa_reply_timeout_ms "
-                 "with sa absent; latency includes that wait" % (resp, resp + 1)}]))
+         "note": "derived from dnp3-unauthorized-operate, frames %d and %d removed and later frames renumbered; "
+                 "emitted at sa_reply_timeout_ms with sa absent; latency includes that wait" % (resp, resp + 1)}]))
     return out
 
 

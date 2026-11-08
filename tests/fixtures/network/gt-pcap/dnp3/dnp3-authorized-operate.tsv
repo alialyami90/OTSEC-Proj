@@ -6,6 +6,7 @@
 # group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
 # frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
 # case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
 kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
 flow	192.0.2.10	192.0.2.20	41007	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1,2,3,4,5,6,7,8,9,10	fdf84bec1740a83ed484600b4aea2847d94bf30f50f79fe438389b81a60ff95c,450241baf4a6abef9d538edf912015d8fb12521466d04032ca639e9e67b09827,2b976496ecdb561a350a97de3390750a28e333780c0b29cd4d6e3175f6b5a35b,efad252b1ac7558f1811f6f1b7f40935d714a74c3ea02fd8048445307e58d9a0,d25accabde4a3a31d29b79210671fd9d37e515642dc6cdd6e82b501a775af2fb,ad936996d12f6318d7e698b3c9a86ec155532d6008a4f6e821c6dd55f910753f,30e3781437e94d101d1c298e2fd01124fa7b50fdb14ec49de44fdd5ea6987f7f,ffd610b13cb2fae8743e0561bab8b86986b63657b89e6137fd95f6be668bf114,fe714c9eaa5e5f44db913c764810912a7fb2a897480f3dac69921abe7a77f9c5,79a8d82eaef176aac94c3a95b29a2af22b72452e43be841dbca138abd71de0e6	10	660							
 service		192.0.2.20		20000	tcp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1	fdf84bec1740a83ed484600b4aea2847d94bf30f50f79fe438389b81a60ff95c									

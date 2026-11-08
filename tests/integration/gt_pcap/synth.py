@@ -151,3 +151,45 @@ class UDPConv:
         fr = pcapfile.Frame(self.clock.tick(gap_ns), eth(b.mac, a.mac, ETH_IPV4, pkt, self.vlan))
         self.frames.append(fr)
         return [fr]
+
+
+def tcp_fields(data):
+    """(src ip, dst ip, seq, ack, flags, payload length, offset of the TCP
+    header) of an untagged Ethernet IPv4 TCP frame."""
+    ihl = (data[14] & 0x0F) * 4
+    total = struct.unpack("!H", data[16:18])[0]
+    t = 14 + ihl
+    seq, ack = struct.unpack("!II", data[t + 4:t + 12])
+    off = (data[t + 12] >> 4) * 4
+    return data[26:30], data[30:34], seq, ack, data[t + 13], total - ihl - off, t
+
+
+def shift_tcp(data, dseq, dack):
+    """The frame with dseq added to its sequence number and dack to its
+    acknowledgement number, and its TCP checksum recomputed."""
+    src, dst, seq, ack, flags, _, t = tcp_fields(data)
+    total = struct.unpack("!H", data[16:18])[0]
+    seg = bytearray(data[t:14 + total])
+    struct.pack_into("!II", seg, 4, (seq + dseq) & 0xFFFFFFFF, (ack + dack) & 0xFFFFFFFF)
+    struct.pack_into("!H", seg, 16, 0)
+    pseudo = src + dst + struct.pack("!BBH", 0, TCP, len(seg))
+    struct.pack_into("!H", seg, 16, checksum(pseudo + bytes(seg)))
+    return data[:t] + bytes(seg) + data[14 + total:]
+
+
+def remove_segments(frames, drop):
+    """Frames without those numbered in drop (1-based), every later frame
+    renumbered so neither side's sequence space has a hole: each side's
+    later sequence numbers, and the other side's acknowledgements of them,
+    come down by the payload octets removed from that side (D1 on #548).
+    The capture then shows data that was never sent, not data lost on the
+    way. One TCP connection only."""
+    out, gone = [], {}
+    for i, f in enumerate(frames, 1):
+        src, dst, _, _, _, n, _ = tcp_fields(f.data)
+        if i in drop:
+            gone[src] = gone.get(src, 0) + n
+            continue
+        ds, da = -gone.get(src, 0), -gone.get(dst, 0)
+        out.append(pcapfile.Frame(f.ns, shift_tcp(f.data, ds, da) if ds or da else f.data))
+    return out

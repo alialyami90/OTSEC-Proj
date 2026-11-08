@@ -22,6 +22,9 @@ reviewer can check each row against tshark's own output:
   else `sa` is empty (unknown). A new request with the same key completes
   the pending one early and counts under `dnp3_seq_reused`.
 - `counter`: dnp3_seq_reused for the capture, as tshark's frames show it.
+  The replay brackets each capture with heartbeats, and the product's value
+  is the difference between the heartbeat after the capture and the one
+  before it (D1 on #548).
 - `case`: the generator's case rows (dnp3_cases.py), each checked here
   against tshark: its first frame must be a request, and the sa this file
   derives for it must equal the sa the case states.
@@ -207,6 +210,7 @@ def header(name, version, net):
         "# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.",
         "# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.",
         "# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.",
+        "# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).",
         "\t".join(COLUMNS),
     ]
 

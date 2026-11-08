@@ -182,7 +182,7 @@
      8,
      10
     ],
-    "note": "replayed on a node with no acknowledged baseline: sa-failed and nothing else (D1, D4-68)",
+    "note": "replayed on a node whose network database starts empty, with no learner and no acknowledged baseline: sa-failed and nothing else (D1, D4-68; D1 on #548)",
     "rules": [
      "sa-failed"
     ],
@@ -261,7 +261,7 @@
     "frames": [
      4
     ],
-    "note": "derived from dnp3-unauthorized-operate, frames 6 and 7 removed; emitted at sa_reply_timeout_ms with sa absent; latency includes that wait",
+    "note": "derived from dnp3-unauthorized-operate, frames 6 and 7 removed and later frames renumbered; emitted at sa_reply_timeout_ms with sa absent; latency includes that wait",
     "rules": [
      "unauthorized-write"
     ],
@@ -285,6 +285,11 @@
   "masters": {
    "M1": {
     "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a10",
+    "c1_endpoint": {
+     "path": "direct",
+     "port": 22,
+     "transport": "ssh"
+    },
     "ip": "192.0.2.10",
     "link": 1,
     "mac": "02:00:00:00:00:10",
@@ -295,6 +300,11 @@
    },
    "M2": {
     "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a11",
+    "c1_endpoint": {
+     "path": "direct",
+     "port": 22,
+     "transport": "ssh"
+    },
     "ip": "192.0.2.11",
     "link": 2,
     "mac": "02:00:00:00:00:11",
@@ -302,6 +312,11 @@
    },
    "M3": {
     "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a12",
+    "c1_endpoint": {
+     "path": "direct",
+     "port": 22,
+     "transport": "ssh"
+    },
     "ip": "192.0.2.12",
     "link": 3,
     "mac": "02:00:00:00:00:12",
@@ -317,6 +332,11 @@
   },
   "outstation": {
    "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20",
+   "c1_endpoint": {
+    "path": "direct",
+    "port": 23,
+    "transport": "telnet"
+   },
    "ip": "192.0.2.20",
    "link": 10,
    "mac": "02:00:00:00:00:20",
