@@ -86,6 +86,8 @@ type Detector struct {
 	pending    []Committed
 	head       uint64
 	mismatches int64
+
+	earlyCloses int64
 }
 
 // serviceKey is a service without its basis: new-service asks whether the
@@ -164,6 +166,14 @@ func (d *Detector) Through() uint64 { return d.through }
 // alert raised again that didn't match is still returned, so it is
 // committed: only an exact match is held back (D1 on the 2a/2b plan).
 func (d *Detector) Mismatches() int64 { return d.mismatches }
+
+// EarlyCloses counts, since this detector was built or restored, the
+// windows closed early because MaxDetectorWindows were open (C13 §7.3 item
+// 3). Each is a key whose coalescing was cut short, so a rising count is
+// the sign of decoys rotated over more keys than the cap, before the alert
+// class fills (D3's C1 on #569). The node shows it in status. A restore
+// counts again the early closes of the observations it replays.
+func (d *Detector) EarlyCloses() int64 { return d.earlyCloses }
 
 // Observe takes the stored observation o, whose event ID is id, and returns
 // the alerts it raises, in order: first the summaries of the windows its
@@ -285,6 +295,7 @@ func (d *Detector) evict(out []netobs.Alert) []netobs.Alert {
 		}
 	}
 	delete(d.windows, Key{first.Rule, first.AssetID})
+	d.earlyCloses++
 	if first.Hits > 1 {
 		out = append(out, d.alert(first))
 	}

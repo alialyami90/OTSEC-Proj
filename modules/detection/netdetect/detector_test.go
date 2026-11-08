@@ -985,8 +985,8 @@ func TestWindowCap(t *testing.T) {
 	if len(out) != 2 || out[0].AssetID != capAsset(0) || out[0].Hits != 2 || out[1].AssetID != capAsset(netobs.MaxDetectorWindows) || out[1].Hits != 1 {
 		t.Fatalf("full table, new key: %+v", out)
 	}
-	if len(d.windows) != netobs.MaxDetectorWindows {
-		t.Fatalf("%d windows open", len(d.windows))
+	if len(d.windows) != netobs.MaxDetectorWindows || d.EarlyCloses() != 1 {
+		t.Fatalf("%d windows open, %d early closes", len(d.windows), d.EarlyCloses())
 	}
 	// Key 1 had no repeat, so it closes with no record.
 	if out := feed(netobs.MaxDetectorWindows+1, 102*time.Millisecond); len(out) != 1 || out[0].AssetID != capAsset(netobs.MaxDetectorWindows+1) {
@@ -1001,6 +1001,14 @@ func TestWindowCap(t *testing.T) {
 	}
 	if _, open := d.windows[Key{netobs.RuleSAFailed, capAsset(2)}]; open {
 		t.Fatal("key 2, the earliest, still open")
+	}
+	// Each early close is counted, with or without a summary (D3's C1 on
+	// #569); a window that closes in time is not.
+	if d.EarlyCloses() != 3 {
+		t.Fatalf("%d early closes, want 3", d.EarlyCloses())
+	}
+	if out := feed(1, 104*time.Millisecond+60*time.Second); len(out) == 0 || d.EarlyCloses() != 3 {
+		t.Fatalf("windows closing in time: %d alerts, %d early closes", len(out), d.EarlyCloses())
 	}
 }
 
@@ -1062,7 +1070,7 @@ func TestWindowCapCountsEachHitOnce(t *testing.T) {
 		summaries++
 		hits += a.Hits
 	}
-	if got := hits + int64(firsts-summaries); got != int64(len(obs)) || early == 0 || len(d.windows) != 0 {
+	if got := hits + int64(firsts-summaries); got != int64(len(obs)) || early == 0 || d.EarlyCloses() < int64(early) || len(d.windows) != 0 {
 		t.Fatalf("hits counted %d, want %d; %d summaries early; %d windows left", got, len(obs), early, len(d.windows))
 	}
 }
