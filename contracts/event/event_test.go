@@ -197,6 +197,13 @@ var invalid = map[string]Code{
 	"network-observation-from-device":         CodeEnum,
 	"network-observation-with-evidence-class": CodeForbidden,
 	"network-observation-no-asset-no-flag":    CodeMissing,
+	// D4-71: observed-address.
+	"network-observation-sender-address": CodeEnum,
+	"observed-address-configured":        CodeEnum,
+	"netobs-alert-sender-address":        CodeEnum,
+	"netobs-alert-configured":            CodeEnum,
+	"observed-address-at-0.2":            CodeForbidden,
+	"observed-address-on-syslog":         CodeForbidden,
 }
 
 func TestInvalidExamples(t *testing.T) {
@@ -485,6 +492,34 @@ func TestNetobsBound(t *testing.T) {
 	e.Netobs = body(MaxNetobsBytes + 1)
 	if !slices.Contains(Codes(e.Validate()), CodeForbidden) {
 		t.Fatal("netobs one byte over MaxNetobsBytes validated")
+	}
+}
+
+// D4-71 (B2): a netobs.alert binds its asset by observed-address and
+// inferred, and by nothing else. Every other method and every other
+// confidence is refused, so an alert's resolution never reads upstream as
+// configured or as the asset's own sending.
+func TestNetobsAlertBinding(t *testing.T) {
+	e := load(t, "testdata/valid/health-netobs-alert.json")
+	if e.Health.Type != HealthNetobsAlert || e.Source.Asset.Binding != (Binding{BindObservedAddress, ConfidenceInferred}) {
+		t.Fatalf("fixture is not an observed-address/inferred netobs.alert: %+v %+v", e.Health, e.Source.Asset)
+	}
+	if err := e.Validate(); err != nil {
+		t.Fatalf("observed-address/inferred alert refused: %v", err)
+	}
+	for _, m := range []BindingMethod{BindAdapterTarget, BindSenderAddress, BindContentField, BindOperator} {
+		for _, cf := range []BindingConfidence{ConfidenceConfigured, ConfidenceAsserted, ConfidenceInferred} {
+			e.Source.Asset.Binding = Binding{m, cf}
+			if err := e.Validate(); !slices.Contains(Codes(err), CodeEnum) {
+				t.Errorf("alert bound %s/%s: %v, want enum", m, cf, err)
+			}
+		}
+	}
+	for _, cf := range []BindingConfidence{ConfidenceConfigured, ConfidenceAsserted} {
+		e.Source.Asset.Binding = Binding{BindObservedAddress, cf}
+		if err := e.Validate(); !slices.Contains(Codes(err), CodeEnum) {
+			t.Errorf("alert bound observed-address/%s: %v, want enum", cf, err)
+		}
 	}
 }
 
