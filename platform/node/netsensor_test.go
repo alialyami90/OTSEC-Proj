@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/netretain"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 )
 
@@ -14,7 +15,7 @@ const sensorID = "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
 
 // sensorSection is a network_sensor section that loads.
 func sensorSection() map[string]any {
-	return map[string]any{"sensor_id": sensorID, "evidence_class": "simulated", "outage_hours": 72}
+	return map[string]any{"sensor_id": sensorID, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30}
 }
 
 // sensorQuotas gives nc the configuration quota and both network quotas.
@@ -88,6 +89,9 @@ func TestNetworkSensorLayout(t *testing.T) {
 	}
 	var alert bool
 	for _, x := range cs {
+		if x.ID == netretain.ConsumerID {
+			t.Errorf("a retention consumer beside a target: %+v", x)
+		}
 		switch x.Stream {
 		case NetObservationStream(sensorID), NetBaselineStream(sensorID):
 			t.Errorf("a target consumes %s: %+v", x.Stream, x)
@@ -153,6 +157,16 @@ func TestNetworkSensorRefusals(t *testing.T) {
 		{"outage_hours 721", func(nc *nodeconfigtest.Config) {
 			nc.NetworkSensor["outage_hours"] = MaxSyslogOutageHours + 1
 		}, "network_sensor.outage_hours"},
+		{"alert_retention_days absent with no target", func(nc *nodeconfigtest.Config) {
+			delete(nc.NetworkSensor, "alert_retention_days")
+		}, "network_sensor.alert_retention_days"},
+		{"alert_retention_days 3651", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["alert_retention_days"] = MaxAlertRetentionDays + 1
+		}, "network_sensor.alert_retention_days"},
+		{"alert_retention_days negative with a target", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["alert_retention_days"] = -1
+			nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
+		}, "network_sensor.alert_retention_days"},
 		{"unknown field", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["interfaces"] = []string{"eth1"} }, "interfaces"},
 		{"no observation quota", func(nc *nodeconfigtest.Config) {
 			delete(nc.Store.Quotas, "network-observation")
@@ -189,8 +203,41 @@ func TestNetworkSensorRefusals(t *testing.T) {
 			t.Fatalf("outage_hours %d: %v", h, err)
 		}
 	}
+	for _, d := range []int{1, MaxAlertRetentionDays} {
+		nc.NetworkSensor["alert_retention_days"] = d
+		if _, err := ParseConfig(nc.Bytes()); err != nil {
+			t.Fatalf("alert_retention_days %d: %v", d, err)
+		}
+	}
 	nc.NetworkSensor["evidence_class"] = "device-observed"
 	if _, err := ParseConfig(nc.Bytes()); !errors.Is(err, ErrDeviceObserved) {
 		t.Fatalf("device-observed: %v", err)
+	}
+}
+
+// With no forward target the alert stream has the node's retention
+// consumer, required, and nothing else consumes it; with a target it
+// doesn't, and the section needs no retention (D5-c5-0.9.md section 3).
+func TestNetworkRetentionConsumer(t *testing.T) {
+	c, _ := schedConfig(t, func(nc *nodeconfigtest.Config) {
+		sensorQuotas(nc)
+		nc.NetworkSensor = sensorSection()
+	})
+	cs, err := c.Consumers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := c5.Consumer{ID: netretain.ConsumerID, Stream: NetAlertStream(sensorID), Delivery: c5.Required}
+	if !c.NetRetentionOn() || len(cs) != 1 || cs[0] != want {
+		t.Fatalf("consumers %+v", cs)
+	}
+	c, _ = schedConfig(t, func(nc *nodeconfigtest.Config) {
+		sensorQuotas(nc)
+		nc.NetworkSensor = sensorSection()
+		delete(nc.NetworkSensor, "alert_retention_days")
+		nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
+	})
+	if c.NetRetentionOn() {
+		t.Fatal("a retention consumer beside a target")
 	}
 }

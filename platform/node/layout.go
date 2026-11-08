@@ -9,6 +9,7 @@ import (
 	"otsec.local/otsec/contracts/baseline"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/platform/netretain"
 )
 
 // The node's databases. Evidence read from devices and the node's own
@@ -219,6 +220,8 @@ func (c *Config) Layout() (c5.Layout, error) {
 // with no consumer is never pruned (only the class quota bounds it). None
 // consumes a network observation stream either: observations stay on the
 // node, and only alerts are forwarded (docs/phase4/D5-c5-0.9.md section 4).
+// With no target, the sensor's alert stream has the node's retention
+// consumer instead (NetRetentionOn, section 3).
 func (c *Config) Consumers() ([]c5.Consumer, error) {
 	l, err := c.Layout()
 	if err != nil {
@@ -233,6 +236,9 @@ func (c *Config) Consumers() ([]c5.Consumer, error) {
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i] < events[j] })
 	var out []c5.Consumer
+	if c.NetRetentionOn() {
+		out = append(out, c5.Consumer{ID: netretain.ConsumerID, Stream: NetAlertStream(c.NetworkSensor.SensorID), Delivery: c5.Required})
+	}
 	for _, t := range c.targets {
 		cs, err := syslog.Consumers(t, events, AuditStream)
 		if err != nil {
