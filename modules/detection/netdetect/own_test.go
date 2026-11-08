@@ -328,6 +328,15 @@ func TestOwnSessionSkip(t *testing.T) {
 	if r.d.BeforeRetained() != 1 || len(r.d.taken) != 2 || len(r.d.sessions) != 0 {
 		t.Fatalf("skip: %d before-retained, taken %v, pending %v", r.d.BeforeRetained(), r.d.taken, r.d.sessions)
 	}
+	// Skipping the same seq again, as a replay does, changes nothing, even
+	// with an after_seq now below through (D6 on #589).
+	again := must(r.d.Checkpoint(0))
+	for _, after := range []uint64{r.seq, 0} {
+		if err := r.d.Skip(owSession(2, 2, lxRelay, owRelay, true, 10, 20), after); err != nil || r.d.BeforeRetained() != 1 ||
+			r.d.OrderingFaults() != 1 || !bytes.Equal(must(r.d.Checkpoint(0)), again) {
+			t.Fatalf("skip again after %d: %v, %d before-retained, %d faults", after, err, r.d.BeforeRetained(), r.d.OrderingFaults())
+		}
+	}
 	r.obs(owQuiet(t), 100)
 	r.obs(owQuiet(t), 101)
 	if len(r.unseen()) != 0 || r.d.BeforeRetained() != 1 {
