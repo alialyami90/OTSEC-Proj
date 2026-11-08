@@ -51,3 +51,35 @@ jobs:
           name: gt-pcap-prp-labels
           path: ${{ runner.temp }}/labels/
           if-no-files-found: warn
+  # The DNP3 sources (plan sections 2B, 2C, 3 and 4): dnp3_cases.py writes
+  # every capture frame by frame, the hashes pin the bytes, and the pinned
+  # tshark's reading of them must give the committed labels exactly. The
+  # captures are rebuilt here, never committed.
+  dnp3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tshark
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Write the DNP3 captures
+        run: python3 tests/integration/gt_pcap/dnp3_cases.py "$RUNNER_TEMP/dnp3"
+      - name: Check them against the committed hashes
+        run: cd "$RUNNER_TEMP/dnp3" && sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/dnp3/dnp3.sha256"
+      - name: Label them with tshark (checksums, CRCs, sa per C13)
+        run: python3 tests/integration/gt_pcap/gtlabel.py "$RUNNER_TEMP/dnp3"
+      - name: The labels equal the committed ones
+        run: |
+          cd tests/fixtures/network/gt-pcap/dnp3
+          for f in *.tsv dnp3-cases.json; do diff -u "$f" "$RUNNER_TEMP/dnp3/$f"; done
+          ls "$RUNNER_TEMP"/dnp3/*.tsv | wc -l | grep -qx "$(ls *.tsv | wc -l)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-pcap-dnp3
+          path: ${{ runner.temp }}/dnp3/
+          if-no-files-found: warn
