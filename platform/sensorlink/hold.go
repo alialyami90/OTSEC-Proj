@@ -26,7 +26,9 @@ import (
 // The four parts of section 5:
 //   - (a) the connection tie: a 0.9 result that is connected ties the flow
 //     with the session's exact 5-tuple whose start falls in
-//     [started_at - g, connected_at + g];
+//     [started_at - g, ended_at + g], so a flow the sensor first sees
+//     midstream still ties (D1 on #576). Of overlapping runs to one
+//     endpoint, a new flow goes to the newest;
 //   - (b) the window tie: a 0.8 result that is connected, with no
 //     local_addr, ties the first established flow that starts in
 //     [started_at - g, ended_at + g];
@@ -36,7 +38,11 @@ import (
 //     at the result waits for its end, and gives way, untied, at its
 //     deadline, on a new sensor run or on degraded coverage;
 //   - (d) a tied flow still open is kept in the open table by its key, and
-//     its later records tie to the same session until its end.
+//     its later records tie to the same session until its end. A start on
+//     the key never ties through the table: the sensor saw the old flow
+//     end, so the entry leaves and the start is judged as a new flow. An
+//     entry expires at its latest record + flow_idle_s + g, and a new
+//     sensor run clears the table (D1 on #576).
 //
 // g is HoldConfig.TieGrace. The hold's state is saved through
 // HoldConfig.Save before each change takes effect (C5's
@@ -132,8 +138,10 @@ type HeldFlow struct {
 	Wait time.Time `json:"wait_utc,omitzero"`
 	// FlowIdle is the sensor's flow_idle_s from the flow's first record.
 	FlowIdle int64 `json:"flow_idle_s"`
-	// Arrival is the node's wall time when its first record arrived.
+	// Arrival is the node's wall time when its first record arrived, and
+	// Last when its latest did.
 	Arrival time.Time `json:"arrival_utc"`
+	Last    time.Time `json:"last_utc"`
 }
 
 // OpenFlow is a tied flow not yet ended (part (d)).
@@ -142,6 +150,12 @@ type OpenFlow struct {
 	InvocationID string  `json:"invocation_id"`
 	Tie          string  `json:"tie"`
 	AssetID      string  `json:"asset_id"`
+	// Expires is its latest record's arrival + flow_idle_s + g, in node
+	// wall time: the sensor ends an idle flow by then, so a record after it
+	// can't be the same flow (D1 on #576). FlowIdle is the flow's
+	// flow_idle_s, for the clamp.
+	Expires  time.Time `json:"expires_utc"`
+	FlowIdle int64     `json:"flow_idle_s"`
 }
 
 // HoldRecordState is a saved run record's state.
@@ -203,6 +217,8 @@ type HoldStats struct {
 	RecordCapReleases  uint64 `json:"record_cap_releases"`
 	DeadlineReleases   uint64 `json:"deadline_releases"`
 	OpenEvicted        uint64 `json:"open_evicted"`
+	OpenSuperseded     uint64 `json:"open_superseded"` // a start on an open key
+	OpenExpired        uint64 `json:"open_expired"`
 	CheckpointFailures uint64 `json:"checkpoint_failures"`
 }
 
@@ -219,8 +235,12 @@ type hold struct {
 	runs  map[string]*holdRun
 	n     int
 	open  []OpenFlow // oldest first
-	last  *RunRecord // the newest record saved, which carries the open table
-	stats HoldStats
+	// pending is the open entries of the release being built: they join
+	// the table only with its releasing record (release).
+	pending     []OpenFlow
+	pendingTied uint64
+	last        *RunRecord // the newest record saved, which carries the open table
+	stats       HoldStats
 }
 
 func newHold(cfg HoldConfig) (*hold, error) {
@@ -344,14 +364,13 @@ func (h *hold) statsNow() HoldStats {
 func (h *hold) runFor(k FlowKey) *holdRun {
 	var out *holdRun
 	for _, r := range h.runs {
-		match := false
-		switch r.rec.State {
-		case HoldHolding:
-			match = r.rec.Run.Endpoint == k.Peer && r.rec.Run.L4 == k.L4
-		case HoldWaiting:
-			match = slices.ContainsFunc(r.rec.Flows, func(f HeldFlow) bool { return f.Key == k })
+		if slices.ContainsFunc(r.rec.Flows, func(f HeldFlow) bool { return f.Key == k }) {
+			return r // the run already holding the flow
 		}
-		if match && (out == nil || r.order < out.order) {
+		// Otherwise the newest run to the endpoint with no result yet:
+		// of overlapping sessions, the latest that began before the flow
+		// (D1 on #576).
+		if r.rec.State == HoldHolding && r.rec.Run.Endpoint == k.Peer && r.rec.Run.L4 == k.L4 && (out == nil || r.order > out.order) {
 			out = r
 		}
 	}
@@ -370,14 +389,44 @@ func (h *hold) sorted() []*holdRun {
 
 // addOpen adds a tied flow to the open table; past HoldOpenCap the oldest
 // gives way, counted.
-func (h *hold) addOpen(o OpenFlow) {
+func (h *hold) addOpen(o OpenFlow) (evicted uint64) {
 	if i := h.openIndex(o.Key); i >= 0 {
 		h.open = slices.Delete(h.open, i, i+1)
 	}
 	h.open = append(h.open, o)
 	if len(h.open) > HoldOpenCap {
 		h.open = slices.Delete(h.open, 0, len(h.open)-HoldOpenCap)
-		h.stats.OpenEvicted++
+		evicted++
+	}
+	return evicted
+}
+
+// expires is of's expiry, never later than now + its flow_idle_s + g, so
+// a backward clock step can't stretch it.
+func (h *hold) expires(of OpenFlow, now time.Time) time.Time {
+	if lim := now.Add(time.Duration(of.FlowIdle)*time.Second + h.grace()); of.Expires.After(lim) {
+		return lim
+	}
+	return of.Expires
+}
+
+// expireOpen removes the open entries past their expiry, counted, and
+// writes the table if it changed.
+func (h *hold) expireOpen(ctx context.Context) {
+	now, n := h.now(), len(h.open)
+	open := make([]OpenFlow, 0, n)
+	for _, of := range h.open {
+		of.Expires = h.expires(of, now)
+		if now.Before(of.Expires) {
+			open = append(open, of)
+		}
+	}
+	h.open = open
+	if len(open) < n {
+		h.stats.OpenExpired += uint64(n - len(open))
+		if h.last != nil {
+			_ = h.save(ctx, *h.last) // counted on failure
+		}
 	}
 }
 
@@ -453,7 +502,7 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (uint64,
 			(!s.Connected || !s.Local.IsValid() || f.Key.Node.Port() != s.Local.Port())
 		switch {
 		case s.Connected && s.Local.IsValid() && f.Key == (FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}) &&
-			in(f.Start, s.StartedAt.Add(-g), s.ConnectedAt.Add(g)):
+			in(f.Start, s.StartedAt.Add(-g), s.EndedAt.Add(g)):
 			tie = TieConnection
 		case s.Connected && !s.Local.IsValid() && !rec.WindowTaken && in(f.Start, s.StartedAt.Add(-g), s.EndedAt.Add(g)) &&
 			(f.Other || (f.Ended && !f.SynOnly)):
@@ -497,6 +546,9 @@ func (l *Link) TickHold(ctx context.Context) {
 	defer l.syncHold()
 	h := l.hold
 	g, now := h.grace(), h.now()
+	if h.on() {
+		h.expireOpen(ctx)
+	}
 	for _, r := range h.sorted() {
 		rec := cloneRec(r.rec)
 		switch rec.State {
@@ -570,7 +622,7 @@ func (h *hold) untied(fs []HeldFlow) (out []Release) {
 }
 
 // releaseFlow is f's records with tie, if any; a tied flow not yet ended
-// joins the open table (part (d)).
+// joins the open table (part (d)) with the release (release).
 func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Release {
 	out := make([]Release, len(f.Records))
 	for i, r := range f.Records {
@@ -581,10 +633,11 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 		}
 	}
 	if tie != "" {
-		h.stats.Tied++
-		if !f.Ended {
-			h.addOpen(OpenFlow{Key: f.Key, InvocationID: invocation, Tie: tie, AssetID: assetID})
-		}
+		h.pendingTied++
+	}
+	if tie != "" && !f.Ended {
+		h.pending = append(h.pending, OpenFlow{Key: f.Key, InvocationID: invocation, Tie: tie, AssetID: assetID,
+			Expires: f.Last.Add(time.Duration(f.FlowIdle)*time.Second + h.grace()), FlowIdle: f.FlowIdle})
 	}
 	return out
 }
@@ -599,13 +652,24 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	rec.Flows, rec.Releasing, rec.Head = remaining, rel, head
 	rec.State = HoldReleasing
 	if len(rel) > 0 {
+		// The tied flows still open join the table in the same record, and
+		// only if it saves.
+		prev, evicted := slices.Clone(h.open), uint64(0)
+		for _, o := range h.pending {
+			evicted += h.addOpen(o)
+		}
 		if err := h.save(ctx, rec); err != nil {
+			h.open = prev
 			for i := range rel {
 				rel[i].Tie, rel[i].Asset = nil, ""
 			}
+		} else {
+			h.stats.OpenEvicted += evicted
+			h.stats.Tied += h.pendingTied
 		}
 		l.commitBatch(ctx, rel)
 	}
+	h.pending, h.pendingTied = nil, 0
 	after, _ := l.head(ctx)
 	rec.Releasing, rec.Head, rec.AfterSeq = nil, 0, after
 	rec.State = HoldReleased
@@ -668,8 +732,24 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		return false
 	}
 	if i := h.openIndex(k); i >= 0 {
-		of := h.open[i]
-		if isEnd(st) && h.last != nil {
+		of, now := h.open[i], h.now()
+		switch {
+		case isStart(st) || !now.Before(h.expires(of, now)):
+			// A start means the sensor saw the old flow end, and past its
+			// expiry the sensor has ended it as idle: the entry leaves,
+			// written first and counted, and the record is judged as a
+			// new flow (D1 on #576).
+			if isStart(st) {
+				h.stats.OpenSuperseded++
+			} else {
+				h.stats.OpenExpired++
+			}
+			h.open = slices.Delete(slices.Clone(h.open), i, i+1)
+			if h.last != nil && h.save(ctx, *h.last) != nil {
+				l.commitOne(ctx, hr, nil, "")
+				return true
+			}
+		case isEnd(st) && h.last != nil:
 			// The end releases the key, and the release is written first.
 			h.open = slices.Delete(slices.Clone(h.open), i, i+1)
 			if err := h.save(ctx, *h.last); err != nil {
@@ -677,9 +757,20 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 				l.commitOne(ctx, hr, nil, "")
 				return true
 			}
+			l.commitOne(ctx, hr, &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}, of.AssetID)
+			return true
+		default:
+			// The flow is still live: its expiry moves to this record's,
+			// written so that it survives a restart (a failed write is
+			// counted, and leaves the earlier expiry).
+			h.open = slices.Clone(h.open)
+			h.open[i].Expires = now.Add(time.Duration(of.FlowIdle)*time.Second + h.grace())
+			if h.last != nil {
+				_ = h.save(ctx, *h.last)
+			}
+			l.commitOne(ctx, hr, &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}, of.AssetID)
+			return true
 		}
-		l.commitOne(ctx, hr, &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}, of.AssetID)
-		return true
 	}
 	r := h.runFor(k)
 	if r == nil {
@@ -702,7 +793,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		fi = len(rec.Flows) - 1
 	}
 	f := &rec.Flows[fi]
-	f.Records = append(f.Records, hr)
+	f.Records, f.Last = append(f.Records, hr), h.now()
 	note(f, st)
 	if rec.State == HoldWaiting && (f.Ended || f.Other) {
 		// A waiting dial ended or carried data: a syn_only end takes the

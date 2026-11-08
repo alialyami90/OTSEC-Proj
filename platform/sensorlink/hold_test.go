@@ -103,7 +103,7 @@ func (g *holdRig) dispatch(id string) {
 func (g *holdRig) obs(kind string, sport int, at time.Duration) *netobs.Observation {
 	g.seq++
 	o := flow(g.seq, nodeAddr, endpoint.Addr().String())
-	o.RunID = g.run
+	o.RunID, o.Citation.CaptureID = g.run, "ring:"+g.run+":3"
 	o.IP.Sport, o.IP.Dport = ptr(sport), ptr(int(endpoint.Port()))
 	o.FirstUTC = t0.Add(at).Format("2006-01-02T15:04:05.000000Z")
 	o.LastUTC = o.FirstUTC
@@ -545,4 +545,268 @@ func TestHoldDegradedGivesWay(t *testing.T) {
 	if c := g.committed(); c[2] != (tied{4, inv1, TieConnection}) {
 		t.Fatalf("after degraded coverage: %+v", c)
 	}
+}
+
+// D3's H1 on #576, with D1's fix: an open key outlives a lost end only
+// until a start on its 5-tuple, which is judged as a new flow, or until its
+// expiry at its latest record + flow_idle_s + g.
+func TestHoldOpenLostEnd(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.seq++ // the end is lost on the channel
+	g.send(g.obs("start", 40001, time.Minute), g.obs("function", 40001, time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{3, "", ""}, tied{4, "", ""})
+	if s := g.l.Stats().Hold; s.OpenSuperseded != 1 || s.Open != 0 {
+		t.Fatalf("hold %+v", s)
+	}
+	if last := g.saved[len(g.saved)-1]; len(last.Open) != 0 {
+		t.Fatalf("the superseded key is still saved: %+v", last.Open)
+	}
+}
+
+// A live flow's expiry moves with each record; a record past it is untied,
+// and TickHold removes it too.
+func TestHoldOpenExpiry(t *testing.T) {
+	g := newHoldRig(t)
+	idle := netobs.DefaultFlowIdleS*time.Second + 30*time.Second // flow_idle_s + g
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(idle - time.Second)
+	g.send(g.obs("function", 40001, time.Minute))
+	g.wall = g.wall.Add(idle - time.Second)
+	g.send(g.obs("function", 40001, 2*time.Minute))
+	g.wall = g.wall.Add(idle)
+	g.send(g.obs("function", 40001, 3*time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""})
+	if s := g.l.Stats().Hold; s.OpenExpired != 1 || s.Open != 0 {
+		t.Fatalf("hold %+v", s)
+	}
+
+	g.dispatch("req-2")
+	g.send(g.obs("start", 40002, 0))
+	if _, err := g.l.Result(bg, "req-2", session09(inv2, 40002, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(idle)
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.OpenExpired != 2 || s.Open != 0 || len(g.saved[len(g.saved)-1].Open) != 0 {
+		t.Fatalf("after TickHold: %+v", s)
+	}
+}
+
+// The expiry survives a restart, as moved by the latest record, and a
+// backward clock step across it can't stretch it.
+func TestHoldOpenExpiryRestart(t *testing.T) {
+	g := newHoldRig(t)
+	idle := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(idle - time.Second)
+	g.send(g.obs("function", 40001, time.Minute)) // moves the expiry
+	g.wall = g.wall.Add(idle - time.Second)
+	g.l = g.link(g.restore())
+	g.send(g.obs("function", 40001, 2*time.Minute)) // within the moved expiry
+	g.wall = g.wall.Add(idle)
+	g.l = g.link(g.restore())
+	g.send(g.obs("function", 40001, 3*time.Minute)) // past it
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""})
+
+	g.dispatch("req-2")
+	g.send(g.obs("start", 40002, 0))
+	if _, err := g.l.Result(bg, "req-2", session09(inv2, 40002, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(-2 * time.Hour) // a backward step, then a restart
+	g.l = g.link(g.restore())
+	g.l.TickHold(bg) // at start, before Serve (D3's note for the wiring)
+	g.wall = g.wall.Add(idle)
+	g.send(g.obs("function", 40002, time.Minute))
+	if c := g.committed(); c[len(c)-1] != (tied{6, "", ""}) {
+		t.Fatalf("the step stretched the expiry: %+v", c)
+	}
+}
+
+// D6's probes on #576 (P1 to P3) and the rows for its gaps G1 to G5.
+
+// P1 (F1, D1's ruling): a flow the sensor first sees midstream, 60 s after
+// connected_at, still ties: the window runs to ended_at + g.
+func TestHoldMidstreamJoinTies(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, time.Minute))
+	s := Session{InvocationID: inv1, StartedAt: t0.Add(-time.Second), EndedAt: t0.Add(5 * time.Minute), Connected: true,
+		Local: netip.AddrPortFrom(netip.MustParseAddr(nodeAddr), 40001), ConnectedAt: t0}
+	if _, err := g.l.Result(bg, "req-1", s); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, inv1, TieConnection})
+}
+
+// G3: the connection tie's edges, [started_at - g, ended_at + g], to the
+// microsecond.
+func TestHoldConnectionTieEdges(t *testing.T) {
+	s := session09(inv1, 40001, time.Minute) // started_at t0+59s, ended_at t0+80s
+	lo, hi := s.StartedAt.Sub(t0)-30*time.Second, s.EndedAt.Sub(t0)+30*time.Second
+	for _, c := range []struct {
+		at  time.Duration
+		tie string
+	}{{lo - time.Microsecond, ""}, {lo, TieConnection}, {hi, TieConnection}, {hi + time.Microsecond, ""}} {
+		g := newHoldRig(t)
+		g.dispatch("req-1")
+		g.send(g.obs("start", 40001, c.at))
+		if _, err := g.l.Result(bg, "req-1", s); err != nil {
+			t.Fatal(err)
+		}
+		if got := g.committed(); len(got) != 1 || got[0].tie != c.tie {
+			t.Fatalf("a start at t0%+v: %+v, want tie %q", c.at, got, c.tie)
+		}
+	}
+}
+
+// P2 (G1): a flow whose first frame is the device's, src the endpoint and
+// dst the node, is the node's own flow too, and ties.
+func TestHoldDeviceFirstTies(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	o := g.obs("start", 40001, 0)
+	o.IP.Src, o.IP.Dst = o.IP.Dst, o.IP.Src
+	o.IP.Sport, o.IP.Dport = o.IP.Dport, o.IP.Sport
+	g.send(o)
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, inv1, TieConnection})
+}
+
+// P3 (G2): a release whose releasing record can't be saved commits untied
+// (D4-72).
+func TestHoldReleaseSaveFailsUntied(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	g.failSave = 1
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, "", ""})
+	if s := g.l.Stats().Hold; s.CheckpointFailures != 1 || s.Open != 0 {
+		t.Fatalf("hold %+v", s)
+	}
+}
+
+// G4 (H6): a backward step while a dial waits can't stretch its wait.
+func TestHoldDialWaitBackwardStep(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0), g.obs("start", 40002, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40002, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(-time.Hour)
+	g.l.TickHold(bg)
+	g.wall = g.wall.Add(HoldDialLimit + netobs.DefaultFlowIdleS*time.Second + 30*time.Second)
+	g.l.TickHold(bg)
+	want(t, g.committed(), tied{2, inv1, TieConnection}, tied{1, "", ""})
+}
+
+// G4 (H9): a sensor restart before the result leaves a dial with no end
+// to wait for: at the result it commits untied at once, never waiting.
+func TestHoldEndLostBeforeResult(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	g.run, g.seq = "3c9e4c6d-1a2f-4e3b-8c7d-5f6a7b8c9d0e", 1
+	hb := heartbeat(1, 10)
+	hb.RunID = g.run
+	g.send(hb)
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40002, 0)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, "", ""})
+	if s := g.l.Stats().Hold; s.Runs != 0 {
+		t.Fatalf("a dial waits for an end that can't come: %+v", s)
+	}
+}
+
+// G5 (H10): a new sensor run_id still clears the open table (D1); only a
+// seq gap or degraded coverage leaves it (TestHoldDegradedGivesWay).
+func TestHoldNewRunClearsOpen(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.run, g.seq = "3c9e4c6d-1a2f-4e3b-8c7d-5f6a7b8c9d0e", 0
+	g.send(g.obs("function", 40001, time.Second))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{1, "", ""})
+	if last := g.saved[len(g.saved)-1]; len(last.Open) != 0 || g.l.Stats().Hold.Open != 0 {
+		t.Fatalf("the table survived a new run: %+v", last.Open)
+	}
+}
+
+// G5 (H25): of two overlapping runs to one endpoint, a new flow goes to the
+// newest, and a flow already held stays with its run.
+func TestHoldOverlappingRuns(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	g.dispatch("req-2")
+	g.send(g.obs("function", 40001, time.Second), g.obs("start", 40002, 2*time.Second))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection})
+	if _, err := g.l.Result(bg, "req-2", session09(inv2, 40002, 2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv2, TieConnection})
+}
+
+// G5 (H26): a second result for a run does nothing; a waiting dial keeps
+// waiting and gives way untied at its wait.
+func TestHoldSecondResult(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0), g.obs("start", 40002, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40002, 0)); err != nil {
+		t.Fatal(err)
+	}
+	n := len(g.saved)
+	if _, err := g.l.Result(bg, "req-1", session09(inv2, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.saved) != n || g.l.Stats().Hold.Held != 1 {
+		t.Fatalf("a second result changed the hold: %+v", g.l.Stats().Hold)
+	}
+	g.wall = g.wall.Add(HoldDialLimit + netobs.DefaultFlowIdleS*time.Second + 30*time.Second)
+	g.l.TickHold(bg)
+	want(t, g.committed(), tied{2, inv1, TieConnection}, tied{1, "", ""})
+}
+
+// An open entry's expiry runs from the flow's latest held record, not its
+// first.
+func TestHoldOpenExpiryFromLatestHeld(t *testing.T) {
+	g := newHoldRig(t)
+	idle := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	g.wall = g.wall.Add(80 * time.Second)
+	g.send(g.obs("function", 40001, 80*time.Second))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(idle - time.Second)
+	g.send(g.obs("function", 40001, 3*time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection})
 }
