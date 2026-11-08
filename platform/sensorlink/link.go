@@ -281,7 +281,7 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 	if nd.DstAsset == netobs.AssetUnresolved {
 		e.Flags = []string{"asset-unresolved"}
 	} else {
-		e.Source.Asset = &event.AssetRef{ID: nd.DstAsset, Binding: event.Binding{Method: event.BindSenderAddress, Confidence: event.ConfidenceInferred}}
+		e.Source.Asset = &event.AssetRef{ID: nd.DstAsset, Binding: event.Binding{Method: event.BindObservedAddress, Confidence: event.ConfidenceInferred}}
 	}
 	eb, err := json.Marshal(e)
 	if err != nil {
