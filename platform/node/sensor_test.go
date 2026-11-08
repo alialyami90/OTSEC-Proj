@@ -508,3 +508,32 @@ func TestSensorUnreachableFromHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The cadence through the exported Tick at the real TickInterval (D1 on
+// #581): a heartbeat just after a tick raises nothing at the next tick,
+// TickInterval later, and the tick after that raises it, within 60 s +
+// TickInterval of the heartbeat. Desk only.
+func TestSensorUnreachableTickCadence(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	r.Tick(bg)
+	g.advance(time.Second)
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorHeartbeat(1))); err != nil {
+		t.Fatal(err)
+	}
+	hb := g.monoNow()
+	g.advance(TickInterval - time.Second)
+	r.Tick(bg)
+	if n := alarms(st, AlarmSensorUnreachable); n != 0 {
+		t.Fatalf("raised at the first tick after the heartbeat: %d", n)
+	}
+	g.advance(TickInterval)
+	r.Tick(bg)
+	if n, f := alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable; n != 1 || !f {
+		t.Fatalf("not raised at the second tick: %d, %v", n, f)
+	}
+	if d := g.monoNow() - hb; d < SensorUnreachableAfter || d > SensorUnreachableAfter+TickInterval {
+		t.Fatalf("raised %s after the heartbeat, outside [60 s, 60 s + TickInterval]", d)
+	}
+}
