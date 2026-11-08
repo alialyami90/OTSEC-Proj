@@ -464,6 +464,14 @@ func (r *refusing) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error
 	return r.log.Append(ctx, rec)
 }
 
+func (r *refusing) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
+	return r.log.AppendBatch(ctx, recs)
+}
+
+func (r *refusing) LastCommitted(ctx context.Context) (uint64, error) {
+	return r.log.LastCommitted(ctx)
+}
+
 // Bytes the store refuses go back to the bucket, so the earned records
 // still commit once the class has room (D6 on #553); and from empty, H/2
 // earns exactly half the bucket.
@@ -473,7 +481,7 @@ func TestBudgetGiveBack(t *testing.T) {
 	r := unresolvedBytes(t)
 	const k = 4
 	l := newLink(t, s, c, 4*k*r)
-	ref := &refusing{n: 3, log: s.log}
+	ref := &refusing{n: 3, log: s}
 	l.opt.Store = ref
 	seq := 100
 	send := func(n int) {

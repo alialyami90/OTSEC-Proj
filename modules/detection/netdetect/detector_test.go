@@ -20,6 +20,33 @@ const (
 	dxStreamName = event.Stream("network-observation/" + lxSensor)
 )
 
+// The node's own identity in the tests: an address, MAC and VLAN no other
+// fixture uses.
+var (
+	dxNodeAddrs = []string{"192.0.2.250"}
+	dxNodeMACs  = []string{"02:00:00:00:00:fa"}
+	dxNodeVLANs = []int{10}
+	// A forward target that is also an asset, and an enrolled run endpoint
+	// at an address intake resolves to no asset.
+	dxExclusions = []Destination{{"192.0.2.10", "tcp", 6514}}
+	dxEndpoints  = []Endpoint{{lxRelay, Destination{"192.0.2.20", "tcp", 23}}, {lxRelay, Destination{"192.0.2.21", "tcp", 23}}}
+)
+
+const dxInv = "0b9a6e2c-5d4f-4e3a-9b1c-2d3e4f5a6b7c"
+
+// nodeFlow is a flow start from the node's address to dst's dport, sent
+// from mac on vlan (nil for untagged), tied to dxInv's session or not.
+func nodeFlow(dst string, dport int, mac string, vlan *int, tied bool) func(t testing.TB) *netobs.Observation {
+	return func(t testing.TB) *netobs.Observation {
+		o := lxObs(t, netobs.KindFlow, dxNodeAddrs[0], dst, dport)
+		o.L2.SrcMAC, o.L2.VLAN = mac, vlan
+		if tied {
+			o.Node.PlatformSession = &netobs.PlatformSession{InvocationID: dxInv, Tie: "connection"}
+		}
+		return o
+	}
+}
+
 func dxID(seq uint64) event.EventID {
 	return event.EventID{NodeID: dxNode, Stream: dxStreamName, Seq: seq}
 }
@@ -101,8 +128,8 @@ func accept(t testing.TB, draft []byte, writers ...netobs.Writer) []byte {
 
 func dxDetector(t testing.TB, base []byte) *Detector {
 	t.Helper()
-	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base,
-		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}})
+	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base,
+		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}, Exclusions: dxExclusions, Endpoints: dxEndpoints})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,6 +241,44 @@ var ruleCases = []ruleCase{
 		obs: fnObs(2, []string{"g34v1"}, netobs.SAFailed, "master"), want: []netobs.Rule{netobs.RuleSAFailed}},
 	{name: "no baseline: the baseline rules are off", noBase: true, tagRule: netobs.RuleUnknownPair,
 		obs: flowObs("198.51.100.99", "192.0.2.20", 20000)},
+	{name: "a Telnet session to the relay from the node's address, tied to no record", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.20", 23, dxNodeMACs[0], ptr(10), false), want: []netobs.Rule{netobs.RuleOwnSessionOutsideRecord}},
+	{name: "the node's own session, tied", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.20", 23, dxNodeMACs[0], ptr(10), true)},
+	{name: "the node's address to a run endpoint intake resolves to no asset", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.21", 23, dxNodeMACs[0], ptr(10), false), want: []netobs.Rule{netobs.RuleOwnSessionOutsideRecord}},
+	{name: "the node's address to another port at that unresolved address", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.21", 24, dxNodeMACs[0], ptr(10), false)},
+	{name: "the node's forward target, excluded exactly", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.10", 6514, dxNodeMACs[0], ptr(10), false)},
+	{name: "the forward target's host on another port", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: nodeFlow("192.0.2.10", 6515, dxNodeMACs[0], ptr(10), false), want: []netobs.Rule{netobs.RuleOwnSessionOutsideRecord}},
+	{name: "the node's untied flow ends", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: func(t testing.TB) *netobs.Observation {
+			o := nodeFlow("192.0.2.20", 23, dxNodeMACs[0], ptr(10), false)(t)
+			o.Flow = &netobs.Flow{Phase: "end", End: "fin", Packets: 9, Bytes: 900, SynOnly: ptr(false)}
+			return o
+		}},
+	{name: "another host's Telnet to the relay", noBase: true, tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs: flowObs("192.0.2.10", "192.0.2.20", 23)},
+	{name: "the node's address to the relay, with a baseline", tagRule: netobs.RuleOwnSessionOutsideRecord,
+		obs:  nodeFlow("192.0.2.20", 23, dxNodeMACs[0], ptr(10), false),
+		want: []netobs.Rule{netobs.RuleUnknownPair, netobs.RuleOwnSessionOutsideRecord, netobs.RuleUnresolvedAddress}},
+	{name: "the node's address from another MAC on its segment", noBase: true, tagRule: netobs.RuleNodeAddressSpoofed,
+		obs: nodeFlow("192.0.2.20", 23, "02:00:00:00:00:01", ptr(10), true), want: []netobs.Rule{netobs.RuleNodeAddressSpoofed}},
+	{name: "the node's address from another MAC, untied", noBase: true, tagRule: netobs.RuleNodeAddressSpoofed,
+		obs:  nodeFlow("192.0.2.20", 23, "02:00:00:00:00:01", ptr(10), false),
+		want: []netobs.Rule{netobs.RuleOwnSessionOutsideRecord, netobs.RuleNodeAddressSpoofed}},
+	{name: "the node's session seen beyond a router", noBase: true, tagRule: netobs.RuleNodeAddressSpoofed,
+		obs: nodeFlow("192.0.2.20", 23, "02:00:00:00:00:01", ptr(20), true)},
+	{name: "the node's address from another MAC, untagged, where untagged isn't the node's", noBase: true, tagRule: netobs.RuleNodeAddressSpoofed,
+		obs: nodeFlow("192.0.2.20", 23, "02:00:00:00:00:01", nil, true)},
+	{name: "another host's MAC with its own address", noBase: true, tagRule: netobs.RuleNodeAddressSpoofed,
+		obs: func(t testing.TB) *netobs.Observation {
+			o := flowObs("192.0.2.10", "192.0.2.20", 23)(t)
+			o.Node.PlatformSession = &netobs.PlatformSession{InvocationID: dxInv, Tie: "connection"}
+			return o
+		}},
 	{name: "the node's own session is the tie rule's", tagRule: netobs.RuleUnknownPair,
 		obs: func(t testing.TB) *netobs.Observation {
 			o := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 22)
@@ -358,6 +423,51 @@ func TestMutants(t *testing.T) {
 			},
 			func(d *Detector, o *netobs.Observation) bool { // any unresolved end, known or not
 				return flowStart(o) && (o.Node.SrcAsset == netobs.AssetUnresolved || o.Node.DstAsset == netobs.AssetUnresolved)
+			},
+		},
+		netobs.RuleOwnSessionOutsideRecord: {never,
+			func(d *Detector, o *netobs.Observation) bool { // resolved assets only
+				return ownSessionOutsideRecord(d, o) && o.Node.DstAsset != netobs.AssetUnresolved
+			},
+			func(d *Detector, o *netobs.Observation) bool { // any destination
+				return flowStart(o) && d.fromNode(o) && o.Node.PlatformSession == nil
+			},
+			func(d *Detector, o *netobs.Observation) bool { // an exclusion by address alone
+				if k, ok := dest(o); ok {
+					for x := range d.own.excluded {
+						if x.addr == k.addr {
+							return false
+						}
+					}
+				}
+				return ownSessionOutsideRecord(d, o)
+			},
+			func(d *Detector, o *netobs.Observation) bool { // ends judged too
+				if o.Flow == nil {
+					return false
+				}
+				f := *o.Flow
+				f.Phase = "start"
+				x := *o
+				x.Flow = &f
+				return o.Kind == netobs.KindFlow && ownSessionOutsideRecord(d, &x)
+			},
+			func(d *Detector, o *netobs.Observation) bool { // any source
+				return flowStart(o) && o.Node.PlatformSession == nil && o.Node.DstAsset != netobs.AssetUnresolved
+			},
+		},
+		netobs.RuleNodeAddressSpoofed: {never,
+			func(d *Detector, o *netobs.Observation) bool { // every segment
+				return flowStart(o) && d.fromNode(o) && !d.own.macs[o.L2.SrcMAC]
+			},
+			func(d *Detector, o *netobs.Observation) bool { // untagged always the node's
+				return nodeAddressSpoofed(d, o) || (flowStart(o) && d.fromNode(o) && o.L2.VLAN == nil && !d.own.macs[o.L2.SrcMAC])
+			},
+			func(d *Detector, o *netobs.Observation) bool { // untied flows only
+				return nodeAddressSpoofed(d, o) && o.Node.PlatformSession == nil
+			},
+			func(d *Detector, o *netobs.Observation) bool { // any source with a MAC not the node's
+				return flowStart(o) && o.L2.VLAN != nil && d.own.vlans[*o.L2.VLAN] && !d.own.macs[o.L2.SrcMAC]
 			},
 		},
 		netobs.RuleSAFailed: {never,
@@ -506,7 +616,7 @@ func TestOverflowEntryAlertsAsNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: draft})
+	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: draft})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,6 +681,9 @@ func TestDetectorRefuses(t *testing.T) {
 			return out
 		}()},
 	} {
+		if name != "no sensor" && name != "another sensor" {
+			cfg.NodeID, cfg.Stream, cfg.NodeAddresses, cfg.NodeMACs, cfg.NodeVLANs = dxNode, dxStreamName, dxNodeAddrs, dxNodeMACs, dxNodeVLANs
+		}
 		if _, err := NewDetector(cfg); err == nil {
 			t.Errorf("%s: built", name)
 		}
@@ -630,7 +743,9 @@ type alertStream struct {
 
 func (s *alertStream) commit(t testing.TB, a netobs.Alert, now time.Time) {
 	t.Helper()
-	a.Capture = fmt.Sprintf("%x", sha256Of(mustJSON(t, a.Cites))) // the node's capture, deterministic here
+	if a.Rule != netobs.RuleOwnSessionUnseen {
+		a.Capture = fmt.Sprintf("%x", sha256Of(mustJSON(t, a.Cites))) // the node's capture, deterministic here
+	}
 	h, err := a.Health()
 	if err != nil {
 		t.Fatal(err)
@@ -661,7 +776,7 @@ func (s *alertStream) after(seq uint64) []Committed {
 // the restore, which goes by seq, is unchanged.
 func TestDetectorRestoreAtEveryCut(t *testing.T) {
 	base := dxBaseline(t)
-	restoreAtEveryCut(t, DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}, dxStream(t, 60), 4, 4, true)
+	restoreAtEveryCut(t, DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base}, dxStream(t, 60), nil, false, 4, 4, true)
 }
 
 // restoreAtEveryCut runs obs uninterrupted, checkpointing every every
@@ -669,8 +784,37 @@ func TestDetectorRestoreAtEveryCut(t *testing.T) {
 // span observations after it, after each prefix of that observation's
 // alerts, with and without a backward clock step, and checks the restored
 // run against the uninterrupted one byte for byte.
-func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observation, every, span int, needHazard bool) {
+// handoff is a session the node hands over after observation seq after.
+type handoff struct {
+	after uint64
+	s     Session
+}
+
+// restoreAtEveryCut runs obs, with the sessions handed over after the
+// observations they name, uninterrupted, then cut at every checkpoint and
+// crashed at every point up to span observations later. A checkpoint is
+// taken after an observation and, with afterHandoffs, after the sessions
+// handed over after it too. The restored node hands the sessions after the
+// checkpoint's through over again before the next observation, as the node
+// does (D1 in D4-72).
+func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observation, sessions []handoff, afterHandoffs bool, every, span int, needHazard bool) {
 	t.Helper()
+	handOver := func(d *Detector, seq uint64, ckpt func()) []netobs.Alert {
+		if !afterHandoffs && ckpt != nil {
+			ckpt()
+		}
+		var out []netobs.Alert
+		for _, h := range sessions {
+			if h.after == seq {
+				as, err := d.Session(h.s, h.after)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, as...)
+			}
+		}
+		return out
+	}
 	t0 := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
 	clock := func(i int, step bool, ckpt int) time.Time { // the node's clock at observation i
 		now := t0.Add(time.Duration(i) * time.Second)
@@ -687,6 +831,9 @@ func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observati
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(handOver(d, 0, nil)) != 0 {
+		t.Fatal("a session handed over before any observation raised an alert")
+	}
 	for i, o := range obs {
 		out, err := d.Observe(dxID(uint64(i+1)), o)
 		if err != nil {
@@ -695,10 +842,18 @@ func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observati
 		for _, a := range out {
 			whole.commit(t, a, clock(i+1, false, 0))
 		}
-		perObs[i] = len(out)
+		var ckpt func()
 		if (i+1)%every == 0 {
-			marks[i+1] = must(d.Checkpoint(uint64(len(whole.alerts))))
+			ckpt = func() { marks[i+1] = must(d.Checkpoint(uint64(len(whole.alerts)))) }
 		}
+		more := handOver(d, uint64(i+1), ckpt)
+		for _, a := range more {
+			whole.commit(t, a, clock(i+1, false, 0))
+		}
+		if afterHandoffs && ckpt != nil {
+			ckpt()
+		}
+		perObs[i] = len(out) + len(more)
 	}
 	summaries := 0
 	for _, a := range whole.alerts {
@@ -736,6 +891,9 @@ func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observati
 					if err != nil {
 						t.Fatalf("cut %d crash %d/%d: %v", k, j, m, err)
 					}
+					for _, a := range handOver(r, r.Through(), nil) {
+						s.commit(t, a, clock(int(r.Through()), step, k))
+					}
 					for i := int(r.Through()); i < len(obs); i++ {
 						out, err := r.Observe(dxID(uint64(i+1)), obs[i])
 						if err != nil {
@@ -744,8 +902,19 @@ func restoreAtEveryCut(t *testing.T, cfg DetectorConfig, obs []*netobs.Observati
 						for _, a := range out {
 							s.commit(t, a, clock(i+1, step, k))
 						}
-						if (i+1)%every == 0 && i+1 > j && !bytesEqual(must(r.Checkpoint(uint64(len(s.alerts)))), marks[i+1]) {
-							t.Fatalf("cut %d crash %d/%d: checkpoint at %d differs", k, j, m, i+1)
+						var ckpt func()
+						if (i+1)%every == 0 && i+1 > j {
+							ckpt = func() {
+								if !bytesEqual(must(r.Checkpoint(uint64(len(s.alerts)))), marks[i+1]) {
+									t.Fatalf("cut %d crash %d/%d: checkpoint at %d differs", k, j, m, i+1)
+								}
+							}
+						}
+						for _, a := range handOver(r, uint64(i+1), ckpt) {
+							s.commit(t, a, clock(i+1, step, k))
+						}
+						if afterHandoffs && ckpt != nil {
+							ckpt()
 						}
 					}
 					if len(s.recs) != len(whole.recs) || r.Mismatches() != 0 {
@@ -799,7 +968,7 @@ func TestDetectorRestoreMismatch(t *testing.T) {
 	}
 	committed := []Committed{{1, raised[0]}, {2, raised[1]}}
 	committed[1].Alert.Observation = "altered"
-	r, err := RestoreDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}, cp, committed, uint64(len(obs)))
+	r, err := RestoreDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base}, cp, committed, uint64(len(obs)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,7 +986,7 @@ func TestDetectorRestoreMismatch(t *testing.T) {
 	// A committed alert past everything the replay raises by the head.
 	extra := raised[len(raised)-1]
 	extra.Hits = 99
-	r, err = RestoreDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}, cp,
+	r, err = RestoreDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base}, cp,
 		[]Committed{{1, raised[0]}, {2, extra}}, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -838,14 +1007,14 @@ func TestDetectorRestoreRefuses(t *testing.T) {
 	}
 	cp := must(d.Checkpoint(5))
 	a := netobs.Alert{}
-	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base}
 	for name, c := range map[string]struct {
 		cfg       DetectorConfig
 		cp        []byte
 		committed []Committed
 	}{
-		"no baseline":       {DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Params: netobs.BaselineParams{TieGraceS: 30, CoalesceWindowS: 60}}, cp, nil},
-		"another baseline":  {DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: accept(t, base)}, cp, nil},
+		"no baseline":       {DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Params: netobs.BaselineParams{TieGraceS: 30, CoalesceWindowS: 60}}, cp, nil},
+		"another baseline":  {DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: accept(t, base)}, cp, nil},
 		"at last_alert_seq": {cfg, cp, []Committed{{5, a}}},
 		"out of order":      {cfg, cp, []Committed{{7, a}, {6, a}}},
 		"whitespace":        {cfg, append(slices.Clone(cp), ' '), nil},
@@ -880,7 +1049,7 @@ func TestUDPPairBothWays(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: must(l.Freeze("2026-11-08T00:00:00Z"))})
+	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: must(l.Freeze("2026-11-08T00:00:00Z"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -926,7 +1095,7 @@ func TestSYNProbeAlertsAfterAcknowledgement(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: must(l.Freeze("2026-11-08T00:00:00Z"))})
+	d, err := NewDetector(DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: must(l.Freeze("2026-11-08T00:00:00Z"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1077,9 +1246,9 @@ func TestWindowCapCountsEachHitOnce(t *testing.T) {
 
 // Restore at the cap gives the uninterrupted run's records byte for byte.
 func TestDetectorRestoreAtCap(t *testing.T) {
-	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName,
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs,
 		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}}
-	restoreAtEveryCut(t, cfg, capStream(t, 600), 50, 2, false)
+	restoreAtEveryCut(t, cfg, capStream(t, 600), nil, false, 50, 2, false)
 }
 
 // A checkpoint taken mid-restore, with committed alerts still pending,
@@ -1089,7 +1258,7 @@ func TestDetectorRestoreAtCap(t *testing.T) {
 func TestCheckpointMidRestore(t *testing.T) {
 	const every = 4
 	base := dxBaseline(t)
-	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, Baseline: base}
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base}
 	obs := dxStream(t, 60)
 	now := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
 	var whole alertStream
