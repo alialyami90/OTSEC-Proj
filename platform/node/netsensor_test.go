@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -95,6 +96,12 @@ func TestNetworkSensorLayout(t *testing.T) {
 	for _, x := range cs {
 		if x.ID == netretain.ConsumerID {
 			t.Errorf("a retention consumer beside a target: %+v", x)
+		}
+		if x.ID == DetectorConsumer {
+			if x != (c5.Consumer{ID: DetectorConsumer, Stream: NetObservationStream(sensorID), Delivery: c5.Required}) {
+				t.Errorf("the detector consumer: %+v", x)
+			}
+			continue
 		}
 		switch x.Stream {
 		case NetObservationStream(sensorID), NetBaselineStream(sensorID):
@@ -252,6 +259,7 @@ func TestNetworkSensorRefusals(t *testing.T) {
 // With no forward target the alert stream has the node's retention
 // consumer, required, and nothing else consumes it; with a target it
 // doesn't, and the section takes no retention (D5-c5-0.9.md section 3).
+// The observation stream has the detector's, required, either way.
 func TestNetworkRetentionConsumer(t *testing.T) {
 	c, _ := schedConfig(t, func(nc *nodeconfigtest.Config) {
 		sensorQuotas(nc)
@@ -261,8 +269,9 @@ func TestNetworkRetentionConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := c5.Consumer{ID: netretain.ConsumerID, Stream: NetAlertStream(sensorID), Delivery: c5.Required}
-	if !c.NetRetentionOn() || len(cs) != 1 || cs[0] != want {
+	want := []c5.Consumer{{ID: DetectorConsumer, Stream: NetObservationStream(sensorID), Delivery: c5.Required},
+		{ID: netretain.ConsumerID, Stream: NetAlertStream(sensorID), Delivery: c5.Required}}
+	if !c.NetRetentionOn() || !slices.Equal(cs, want) {
 		t.Fatalf("consumers %+v", cs)
 	}
 	c, _ = schedConfig(t, func(nc *nodeconfigtest.Config) {

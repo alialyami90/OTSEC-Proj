@@ -488,13 +488,27 @@ func TestSensorUnreachableFromHeartbeat(t *testing.T) {
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
 	go func() { done <- r.ServeSensor(bg, pr) }()
+	// Write returns once Serve has read the bytes, which may be before it
+	// has accepted the heartbeat, so the test waits for each one before it
+	// moves the clock (D1 on #590, go on windows-latest at 0f8fdaf8).
+	accepted := func(n uint64) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); r.sensor.link.Stats().Heartbeats < n; {
+			if time.Now().After(deadline) {
+				t.Fatalf("heartbeat %d not accepted", n)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 	if _, err := pw.Write(sensorChannel(t, sensorHeartbeat(1)).Bytes()); err != nil {
 		t.Fatal(err)
 	}
+	accepted(1)
 	g.advance(40 * time.Second)
-	if _, err := pw.Write(sensorChannel(t, sensorHeartbeat(2)).Bytes()); err != nil { // returns once read
+	if _, err := pw.Write(sensorChannel(t, sensorHeartbeat(2)).Bytes()); err != nil {
 		t.Fatal(err)
 	}
+	accepted(2)
 	g.advance(59 * time.Second)
 	if n, f := unreachable(r, st); n != 0 || f {
 		t.Fatalf("raised 59 s after a heartbeat: %d, %v", n, f)
