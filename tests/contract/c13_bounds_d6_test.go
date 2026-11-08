@@ -6,7 +6,11 @@ package contract
 // Sources: docs/phase4/D4-c13-netobs.md §10 (the bounds table) and §7.1 (an
 // alert's related list and explanation fields), and D1's values in D4-71
 // for MaxBaselineBytes (§8 leaves it to code), period.overflow's saturation
-// (§14 item 13) and the learner checkpoint's held starts (#561). Ground
+// (§14 item 13) and the learner checkpoint's held starts (#561), and §8's
+// detector checkpoint as #575 merged it: its windows (§7.3 item 3, §14
+// item 16) and its own-session state, each part bounded, and the sum of
+// their worst sizes strictly under the configuration record cap less its
+// headroom with at least 10% to spare (§14 item 17, D1 in D4-72). Ground
 // truth: GT-HAND, from the contract text and the rulings. Evidence class:
 // desk.
 
@@ -14,6 +18,7 @@ import (
 	"math"
 	"testing"
 
+	"otsec.local/otsec/contracts/config"
 	"otsec.local/otsec/contracts/netobs"
 )
 
@@ -55,6 +60,19 @@ func TestC13BoundsByValue(t *testing.T) {
 		{"MaxHeldStarts", netobs.MaxHeldStarts, 512, "D1 in D4-71: at most 512 starts"},
 		{"MaxHeldStartBytes", netobs.MaxHeldStartBytes, 384, "D1 on #564 (#561): 384"},
 		{"MaxLearnerCheckpointBytes", netobs.MaxLearnerCheckpointBytes, 721920, "D1 on #564 (#561): 705 KiB"},
+		{"MaxDetectorWindows", netobs.MaxDetectorWindows, 96, "§7.3 item 3, §14 item 16: 96"},
+		{"MaxDetectorWindowBytes", netobs.MaxDetectorWindowBytes, 12 << 10, "§8: 12 KiB"},
+		{"MaxPendingSessions", netobs.MaxPendingSessions, 128, "§8, §14 item 17: 128"},
+		{"MaxPendingSessionBytes", netobs.MaxPendingSessionBytes, 512, "§8: 512"},
+		{"MaxTiedSessions", netobs.MaxTiedSessions, 256, "§8, §14 item 17: 256"},
+		{"MaxTiedSessionBytes", netobs.MaxTiedSessionBytes, 128, "§8: 128"},
+		{"MaxTakenSessions", netobs.MaxTakenSessions, 128, "§8 (D6's F1 on #575): 128"},
+		{"MaxDetectorEndpoints", netobs.MaxDetectorEndpoints, 256, "§8: 256"},
+		{"MaxDetectorEndpointBytes", netobs.MaxDetectorEndpointBytes, 192, "§8: 192"},
+		{"MaxEndpointVLANs", netobs.MaxEndpointVLANs, 8, "§8: 8"},
+		{"MaxDegradedIntervals", netobs.MaxDegradedIntervals, 64, "§8, §14 item 17: 64"},
+		{"MaxDegradedIntervalBytes", netobs.MaxDegradedIntervalBytes, 128, "§8: 128"},
+		{"MaxDetectorCheckpointBytes", netobs.MaxDetectorCheckpointBytes, 1354752, "§8, §14 item 17: 1,354,752"},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %d, C13 %s says %d", c.name, c.got, c.source, c.want)
@@ -64,6 +82,16 @@ func TestC13BoundsByValue(t *testing.T) {
 	// exactly (§14 item 13, D4-71).
 	if netobs.MaxOverflow != 1<<53-1 {
 		t.Errorf("MaxOverflow = %d, C13 §14 item 13 says 2^53 − 1", uint64(netobs.MaxOverflow))
+	}
+	// The detector checkpoint fits one configuration record with room to
+	// spare: under 1,507,328 bytes (the cap less its headroom) by at least
+	// 10% of it (§14 item 17).
+	const recordRoom = 1507328
+	if got := config.RecordCap - config.RecordHeadroom; got != recordRoom {
+		t.Errorf("the configuration record cap less its headroom is %d, C13 §14 item 17 says %d", got, recordRoom)
+	}
+	if b := netobs.MaxDetectorCheckpointBytes; b >= recordRoom || 10*(recordRoom-b) < recordRoom {
+		t.Errorf("MaxDetectorCheckpointBytes %d leaves under 10%% of %d", b, recordRoom)
 	}
 	// MaxWireLen's basis (§10): far below the capture's 32-bit orig_len, so
 	// a stored wire length can't wrap.
