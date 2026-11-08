@@ -416,7 +416,9 @@ func (k *DetectorCheckpoint) validateOwn(c *checker) {
 	if k.Coverage != nil {
 		k.Coverage.check(c, "coverage")
 	}
-	if k.ClockUTC == "" && (k.Coverage != nil || len(k.Sessions)+len(k.Tied)+len(k.Taken)+len(k.Endpoints)+len(k.Degraded) != 0 || k.DegradedOpen) {
+	// With no clock, only sessions handed over before any observation may
+	// be held, pending: the rest comes from observations (D1 on #590).
+	if k.ClockUTC == "" && (k.Coverage != nil || len(k.Tied)+len(k.Taken)+len(k.Endpoints)+len(k.Degraded) != 0 || k.DegradedOpen) {
 		c.fail(CodeConflict, "clock_utc", "own-session state with no clock")
 	}
 	if k.DegradedOpen && len(k.Degraded) == 0 {

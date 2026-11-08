@@ -165,6 +165,12 @@ func fxDetectorCheckpoint() *DetectorCheckpoint {
 		Degraded:  []Interval{{StartUTC: "2026-11-07T09:00:00Z", EndUTC: "2026-11-07T09:00:30Z"}}, DegradedOpen: true}
 }
 
+// noClock is k as before any observation: no clock, and none of the state
+// observations set.
+func noClock(k *DetectorCheckpoint) {
+	k.ClockUTC, k.Windows, k.Coverage, k.Tied, k.Taken, k.Endpoints, k.Degraded, k.DegradedOpen = "", nil, nil, nil, nil, nil, nil, false
+}
+
 func fxInv(n int) string { return fmt.Sprintf("0b9a6e2c-5d4f-4e3a-9b1c-%012x", n) }
 
 // A detector checkpoint round-trips byte for byte, and each window gives
@@ -191,6 +197,21 @@ func TestDetectorCheckpointRoundTrip(t *testing.T) {
 	empty := &DetectorCheckpoint{Schema: CheckpointIdentifier, Half: HalfDetector, SensorID: fxSensor, NodeID: "site-a-node1", Stream: "network-observation/" + fxSensor}
 	if b, err := empty.Encode(); err != nil || !bytes.Contains(b, []byte(`"windows":[]`)) {
 		t.Fatalf("no baseline, no windows: %s, %v", b, err)
+	}
+	// A session handed over before any observation is pending with no
+	// clock, and round-trips (D1 on #590, C13 §14 item 19).
+	pending := fxDetectorCheckpoint()
+	noClock(pending)
+	b, err = pending.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err = DecodeDetectorCheckpoint(b)
+	if err != nil || back.ClockUTC != "" || len(back.Sessions) != 1 || back.SessionThrough != 5 {
+		t.Fatalf("pending with no clock: %v, %+v", err, back)
+	}
+	if again, _ := back.Encode(); !bytes.Equal(again, b) {
+		t.Fatalf("round trip:\n%s\n%s", b, again)
 	}
 }
 
@@ -228,6 +249,11 @@ func TestDetectorCheckpointRules(t *testing.T) {
 		{"no source", CodeForm, func(k *DetectorCheckpoint) { k.Windows[0].Sources = nil }},
 		{"no cite", CodeForm, func(k *DetectorCheckpoint) { k.Windows[0].Cites = nil }},
 		{"own-session state with no clock", CodeConflict, func(k *DetectorCheckpoint) { k.ClockUTC, k.Windows = "", nil }},
+		{"coverage with no clock", CodeConflict, func(k *DetectorCheckpoint) { c := k.Coverage; noClock(k); k.Coverage = c }},
+		{"tied with no clock", CodeConflict, func(k *DetectorCheckpoint) { t := k.Tied; noClock(k); k.Tied = t }},
+		{"taken with no clock", CodeConflict, func(k *DetectorCheckpoint) { t := k.Taken; noClock(k); k.Taken = t }},
+		{"endpoints with no clock", CodeConflict, func(k *DetectorCheckpoint) { e := k.Endpoints; noClock(k); k.Endpoints = e }},
+		{"degraded with no clock", CodeConflict, func(k *DetectorCheckpoint) { d := k.Degraded; noClock(k); k.Degraded = d }},
 		{"coverage form", CodeForm, func(k *DetectorCheckpoint) { c := *k.Coverage; c.HSR = "decoded"; k.Coverage = &c }},
 		{"degraded open with no interval", CodeConflict, func(k *DetectorCheckpoint) { k.Degraded = nil }},
 		{"interval reversed", CodeOrder, func(k *DetectorCheckpoint) { k.Degraded[0].EndUTC = "2026-11-07T08:59:59Z" }},
