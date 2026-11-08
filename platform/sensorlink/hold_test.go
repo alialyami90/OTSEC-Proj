@@ -192,8 +192,8 @@ func TestHoldConnectionTie(t *testing.T) {
 		t.Fatal(err)
 	}
 	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection})
-	if after != 2 {
-		t.Fatalf("after_seq %d, want 2", after)
+	if after.AfterSeq != 2 || after.OpenFlow {
+		t.Fatalf("released %+v, want after_seq 2", after)
 	}
 	if last := g.saved[len(g.saved)-1]; last.State != HoldReleased || last.AfterSeq != 2 || len(last.Open) != 1 || last.Open[0].Key.Node.Port() != 40001 {
 		t.Fatalf("the release record %+v", last)
@@ -809,4 +809,59 @@ func TestHoldOpenExpiryFromLatestHeld(t *testing.T) {
 	g.wall = g.wall.Add(idle - time.Second)
 	g.send(g.obs("function", 40001, 3*time.Minute))
 	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection})
+}
+
+// D4's finding 3, as D1 ruled: a run whose session is a flow still open in
+// the table (an SNMPv3 run reusing its conversation) re-points the entry to
+// its own invocation and reports open_flow; the entry's later records tie
+// to the new run.
+func TestHoldResultRepointsOpen(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(time.Minute)
+	g.dispatch("req-2")
+	g.send(g.obs("function", 40001, time.Minute)) // the old session's, until the result
+	got, err := g.l.Result(bg, "req-2", session09(inv2, 40001, time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.OpenFlow {
+		t.Fatalf("released %+v, want open_flow", got)
+	}
+	if last := g.saved[len(g.saved)-1]; len(last.Open) != 1 || last.Open[0].InvocationID != inv2 {
+		t.Fatalf("the saved table: %+v", last.Open)
+	}
+	g.send(g.obs("function", 40001, 2*time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv2, TieConnection})
+}
+
+// An expired entry is not re-pointed: the result reports no open flow, and
+// a later record on the tuple is untied; another tuple is never re-pointed.
+func TestHoldResultExpiredOpen(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(netobs.DefaultFlowIdleS*time.Second + 30*time.Second)
+	g.dispatch("req-2")
+	got, err := g.l.Result(bg, "req-2", session09(inv2, 40001, 2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.dispatch("req-3")
+	other, err := g.l.Result(bg, "req-3", session09(inv2, 40002, 2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OpenFlow || other.OpenFlow {
+		t.Fatalf("released %+v and %+v, want no open flow", got, other)
+	}
+	g.send(g.obs("function", 40001, 3*time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, "", ""})
 }

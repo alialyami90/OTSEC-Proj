@@ -479,21 +479,43 @@ func (l *Link) Dispatch(ctx context.Context, run HoldRun) error {
 	return nil
 }
 
+// Released is what a run's result did.
+type Released struct {
+	// AfterSeq is the observation stream's head once the run's flows
+	// committed: the seq the run's session follows.
+	AfterSeq uint64
+	// OpenFlow: the session's 5-tuple was a flow still open in the table,
+	// which an earlier session began (an SNMPv3 run that reuses its
+	// conversation). Its entry now ties to this run's invocation (D1 on
+	// #576); the node writes open_flow on collection.run.
+	OpenFlow bool
+}
+
 // Result ties the run's held flows by its session and commits them in
 // arrival order, leaving any failed dial still to end waiting (part (c)).
-// It returns the observation stream's head once they committed: the seq
-// the run's session follows.
-func (l *Link) Result(ctx context.Context, requestID string, s Session) (uint64, error) {
+// A second result for a run, or one for a run the hold doesn't know, does
+// nothing.
+func (l *Link) Result(ctx context.Context, requestID string, s Session) (Released, error) {
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
 	defer l.syncHold()
 	r := l.hold.runs[requestID]
 	if r == nil || r.rec.State != HoldHolding {
-		return l.head(ctx)
+		head, err := l.head(ctx)
+		return Released{AfterSeq: head}, err
 	}
 	h, g, now := l.hold, l.hold.grace(), l.hold.now()
 	rec := cloneRec(r.rec)
 	rec.Session = &s
+	var out Released
+	if s.Connected && s.Local.IsValid() {
+		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && now.Before(h.expires(h.open[i], now)) {
+			// Written with the release below.
+			h.open = slices.Clone(h.open)
+			h.open[i].InvocationID, h.open[i].Tie, h.open[i].AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
+			out.OpenFlow = true
+		}
+	}
 	var rel []Release
 	var remaining []HeldFlow
 	for _, f := range rec.Flows {
@@ -521,7 +543,8 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (uint64,
 		}
 		rel = append(rel, h.releaseFlow(f, tie, s.InvocationID, rec.Run.AssetID)...)
 	}
-	return l.release(ctx, r, rec, rel, remaining), nil
+	out.AfterSeq = l.release(ctx, r, rec, rel, remaining)
+	return out, nil
 }
 
 // Abandon releases a run that ended without a result, untied, at once.
