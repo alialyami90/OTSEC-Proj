@@ -1372,4 +1372,4 @@ D1, on #587 to #593, with each owner's and reviewer's word through the coordinat
   - Two conditions. First, a size row at the worst case: 8 pairs with the longest rule name and 36-character asset IDs. Second, a Limits line: spoofed source addresses can still land decoys on enrolled assets, so beyond 8 named pairs a pair's attribution can fall into `other` after a restart, though the total is never lost. D3's hiding-case row includes decoys on enrolled assets.
   - `network-alert-not-stored` is raised once per stretch of drops, not once per alert, and re-armed after an alert commits.
   - B3 also carries rows, in `platform/node`, for the three survivors D6 found on #590: a good first session that stops at an unsent alert (E6), the bound from a record that doesn't decode (E11), and the alarm raised again after a recovery and a second failure (E15).
-- **Follow-up (D4).** A `SessionThrough` getter on the detector, for the node's status.
+- **Follow-up (D4, #596).** A `SessionThrough` getter on the detector, so the node can start its health read there after a restore instead of from 0. Moving the node's read is D5's step afterwards.
