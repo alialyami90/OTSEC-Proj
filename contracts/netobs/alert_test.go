@@ -36,8 +36,16 @@ func fxUnseen() *Alert {
 	}
 }
 
+// fxMissing is fxAlert with every cited frame's bytes gone: its capture is
+// the header-only pcap, and the alert still cites all three frames.
+func fxMissing() *Alert {
+	a := fxAlert()
+	a.FramesMissing = 3
+	return a
+}
+
 func TestAlertRoundTrip(t *testing.T) {
-	for _, a := range []*Alert{fxAlert(), fxUnseen()} {
+	for _, a := range []*Alert{fxAlert(), fxUnseen(), fxMissing()} {
 		h, err := a.Health()
 		if err != nil {
 			t.Fatalf("%s: %v", a.Rule, err)
@@ -111,6 +119,9 @@ func TestAlertRules(t *testing.T) {
 		{"text over ExplainMax", CodeRange, fxAlert, func(a *Alert) { a.Observation = string(make([]byte, ExplainMax+1)) }},
 		{"asset", CodeForm, fxAlert, func(a *Alert) { a.AssetID = "relay-1" }},
 		{"coverage", CodeRange, fxAlert, func(a *Alert) { a.Coverage.Settings.MaxPendingDNP3 = 1 }},
+		{"frames_missing above the cited frames", CodeRange, fxAlert, func(a *Alert) { a.FramesMissing = 4 }},
+		{"frames_missing negative", CodeRange, fxAlert, func(a *Alert) { a.FramesMissing = -1 }},
+		{"unseen frames_missing", CodeRange, fxUnseen, func(a *Alert) { a.FramesMissing = 1 }},
 	}
 	for _, tc := range cases {
 		a := tc.base()
@@ -153,6 +164,19 @@ func TestAlertFromHealthStrict(t *testing.T) {
 	delete(h.Details, "coverage.hsr")
 	if _, err := AlertFromHealth(h); !slices.Contains(Codes(err), CodeMissing) {
 		t.Errorf("coverage detail missing: %v", err)
+	}
+	if h, _ := fxAlert().Health(); h.Details["frames_missing"] != "" {
+		t.Errorf("frames_missing written when 0: %q", h.Details["frames_missing"])
+	}
+	h3, _ := fxMissing().Health()
+	if h3.Details["frames_missing"] != "3" {
+		t.Errorf("frames_missing: %q", h3.Details["frames_missing"])
+	}
+	for _, v := range []string{"0", "03", "x"} {
+		h3.Details["frames_missing"] = v
+		if _, err := AlertFromHealth(h3); err == nil {
+			t.Errorf("frames_missing %q read", v)
+		}
 	}
 	h2, _ := fxAlert().Health()
 	h2.Type = "baseline.departure"

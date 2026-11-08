@@ -965,6 +965,7 @@ func TestDetectorRestoreMismatch(t *testing.T) {
 	}
 	for i := range raised {
 		raised[i].Capture = fmt.Sprintf("%064x", i+1) // the node's
+		raised[i].FramesMissing = 1                   // a cited frame the node no longer held
 	}
 	committed := []Committed{{1, raised[0]}, {2, raised[1]}}
 	committed[1].Alert.Observation = "altered"

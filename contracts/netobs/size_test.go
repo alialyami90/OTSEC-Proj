@@ -229,6 +229,7 @@ func TestWorstAlertFits(t *testing.T) {
 		a.Cites = append(a.Cites, Cite{CaptureID: "ring:" + fxRun + ":999999999999999999",
 			Frames: []CiteFrame{{N: 1<<62 + int64(i), SHA256: hash(nil)}, {N: 1<<62 + 100 + int64(i), SHA256: hash(nil)}}})
 	}
+	a.FramesMissing = MaxAlertFlows * MaxAlertFramesPerFlow
 	a.Coverage = worstCoverage(t)
 	h, err := a.Health()
 	if err != nil {
