@@ -29,9 +29,10 @@ const IntakeSchema = "otsec.netcheckpoint.intake/0.1"
 
 // Status values of a collection.run the start repair writes.
 const (
-	// RunNotCommitted is a repaired run's status: its release committed,
-	// the node stopped before its result did (D1 in D4-72).
-	RunNotCommitted = "not-committed"
+	// RunNotRecorded is a repaired run's status: its release committed,
+	// and the node stopped before it stored the run's ending record, while
+	// the run's SER rows may have committed (D1 in D4-72 and D4-74).
+	RunNotRecorded = "not-recorded"
 	// RepairedFromIntake is a repaired run's repaired_from detail.
 	RepairedFromIntake = "netcheckpoint.intake"
 )
@@ -116,6 +117,49 @@ type intakeRecords struct {
 	// dispatch held nothing, or their result could not be released (D1 in
 	// D4-74).
 	repaired, repairRefused, sessionMissing uint64
+	// inflight is the handover barrier: for each run whose result is
+	// being released, or whose collection.run may still commit, an
+	// observation seq at or below its after_seq. The detector reads no
+	// observation past the lowest, so it never passes a session's
+	// after_seq before the session is handed over (netdetector.go).
+	inflight map[string]inflightRun
+}
+
+// inflightRun is a run in the barrier: at is the observation head before
+// its release, then its after_seq once released.
+type inflightRun struct {
+	at       uint64
+	released bool
+}
+
+// enter puts the run in the barrier at seq.
+func (ir *intakeRecords) enter(id string, seq uint64, released bool) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	if ir.inflight == nil {
+		ir.inflight = map[string]inflightRun{}
+	}
+	ir.inflight[id] = inflightRun{at: seq, released: released}
+}
+
+// leave takes the run out of the barrier, and says whether it was
+// released.
+func (ir *intakeRecords) leave(id string) bool {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	r, ok := ir.inflight[id]
+	delete(ir.inflight, id)
+	return ok && r.released
+}
+
+// barrier is the lowest seq in the barrier, or head when none is.
+func (ir *intakeRecords) barrier(head uint64) uint64 {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
+	for _, r := range ir.inflight {
+		head = min(head, r.at)
+	}
+	return head
 }
 
 // missing counts a run whose collection.run has no session.
@@ -320,11 +364,25 @@ func (s *Scheduler) resultHold(ctx context.Context, h *heldRun, invocationID str
 	if res.ConnectedAt != "" {
 		sess.ConnectedAt, _ = time.Parse(time.RFC3339Nano, res.ConnectedAt)
 	}
+	// The barrier holds the detector at the observation head before the
+	// release, which the release's after_seq can't be below, until
+	// recordedRun (D4's finding 4 on #576).
+	var head uint64
+	if db := s.rt.Store(s.rt.sensor.stream); db != nil {
+		if seq, err := db.LastCommitted(ctx, s.rt.sensor.stream); err == nil {
+			head = uint64(seq)
+		}
+	}
+	s.rt.intake.enter(h.run.RequestID, head, false)
 	rel, err := s.rt.sensor.link.Result(ctx, h.run.RequestID, sess)
 	if err != nil {
 		s.rt.intake.missing()
 		return nil
 	}
+	if s.rt.afterRelease != nil {
+		s.rt.afterRelease()
+	}
+	s.rt.intake.enter(h.run.RequestID, rel.AfterSeq, true)
 	return sessionDetails(h.run, sess, rel)
 }
 
@@ -418,12 +476,15 @@ func runSessionOf(st c5.Stored) (RunSession, bool, error) {
 // recordedRun removes the run's older hold records once the health stream
 // holds a record of the run: its collection.run, or the outcome-unknown
 // record of a result the node quarantined. Otherwise they stay for the
-// start repair.
+// start repair. It takes the run out of the handover barrier, and a
+// released run whose collection.run didn't commit counts as session
+// missing (D1 in D4-74).
 func (s *Scheduler) recordedRun(ctx context.Context, h *heldRun) {
 	if h == nil {
 		return
 	}
 	id := h.run.RequestID
+	released := s.rt.intake.leave(id)
 	s.rt.intake.mu.Lock()
 	run := s.rt.intake.runs[id]
 	var head uint64
@@ -434,7 +495,11 @@ func (s *Scheduler) recordedRun(ctx context.Context, h *heldRun) {
 	if run == nil {
 		return
 	}
-	if seen, err := s.rt.healthNames(ctx, head, id); err != nil || !seen {
+	seen, err := s.rt.healthNames(ctx, head, id)
+	if err != nil || !seen {
+		if err == nil && released {
+			s.rt.intake.missing()
+		}
 		return
 	}
 	s.rt.pruneIntake(ctx, id)
@@ -486,7 +551,7 @@ func (r *Runtime) pruneIntake(ctx context.Context, recorded string) {
 // repairIntake is the start repair (D1 in D4-72, D3's R1 and R2): a run
 // whose release committed but whose collection.run did not gets one, from
 // the session facts its release record holds, with after_seq the
-// observation stream's head now, status RunNotCommitted and events the SER
+// observation stream's head now, status RunNotRecorded and events the SER
 // rows of its invocation committed after its dispatch. It runs once,
 // at start, after RecoverHold and before the detector restores. A run is
 // repaired only when the audit stream has an allowed collector.request
@@ -540,7 +605,7 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 		d := sessionDetails(rec.Run, s, sensorlink.Released{AfterSeq: r.lastSeq(ctx, NetObservationStream(r.cfg.NetworkSensor.SensorID)), OpenFlow: rec.OpenFlow})
 		d["asset_id"], d["request_id"], d["invocation_id"] = rec.Run.AssetID, id, s.InvocationID
 		d["schedule"], d["operation"] = allowed.Actor.ID, allowed.OperationID
-		d["status"], d["events"], d["repaired_from"] = RunNotCommitted, strconv.Itoa(events), RepairedFromIntake
+		d["status"], d["events"], d["repaired_from"] = RunNotRecorded, strconv.Itoa(events), RepairedFromIntake
 		hr, err := r.healthRecord(HealthStream, HealthCollectionRun, d)
 		log := r.Log(HealthStream)
 		if err == nil && log == nil {

@@ -283,7 +283,7 @@ func crashAfterRelease(t *testing.T, r *Runtime, outcome audit.Outcome, dial boo
 // The start repair (D1 in D4-72, D3's R1 and R2, D6's row): a crash between
 // a run's release and its collection.run leaves the release committed and
 // no collection.run. The next start writes exactly one, from the release's
-// session facts, with status not-committed, repaired_from
+// session facts, with status not-recorded, repaired_from
 // netcheckpoint.intake and after_seq the observation stream's head at the
 // repair; a second restart writes none. The crash here is before the SER
 // batch, so the run's SER rows were not committed and the next run of the
@@ -305,7 +305,7 @@ func TestIntakeStartRepair(t *testing.T) {
 	}
 	e, _ := event.Decode(runs[0].Event)
 	d := e.Health.Details
-	if d["request_id"] != id || d["status"] != RunNotCommitted || d["repaired_from"] != RepairedFromIntake ||
+	if d["request_id"] != id || d["status"] != RunNotRecorded || d["repaired_from"] != RepairedFromIntake ||
 		d["schedule"] != c.Schedule[0].ID || d["operation"] != c.Schedule[0].Operation || d["events"] != "0" {
 		t.Fatalf("repaired collection.run: %v", d)
 	}
@@ -460,41 +460,10 @@ func TestIntakeRecoversRelease(t *testing.T) {
 func TestIntakeCeilingRefuses(t *testing.T) {
 	// An event baseline puts a configuration floor under the quota, so the
 	// ceiling, not the quota, refuses.
-	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) {
-		sensorQuotas(nc)
-		nc.Store.Quotas["configuration"] = 64 << 20
-		nc.NetworkSensor = sensorSection()
-		nc.AddEventBaseline(relayID)
-	})
-	if q := c.Store.Quotas[string(c5.ClassConfiguration)]; c.Item3Ceiling() >= q {
-		t.Fatalf("ceiling %d, quota %d", c.Item3Ceiling(), q)
-	}
+	c, dir := ceilingConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	stream := r.intakeStream()
-	db := r.Store(stream)
-	// Filled until no smaller filler fits, so no hold record does.
-	for size := 1 << 20; size >= 1; {
-		filler := intakeDoc{Schema: IntakeSchema, RunRecord: sensorlink.RunRecord{State: sensorlink.HoldReleased,
-			Run:   sensorlink.HoldRun{RequestID: "filler", AssetID: relayID, Endpoint: netip.MustParseAddrPort("127.0.0.1:2323"), L4: "tcp"},
-			Flows: []sensorlink.HeldFlow{{Records: []sensorlink.HeldRecord{{Observation: json.RawMessage(strconv.Quote(strings.Repeat("x", size)))}}}},
-			Open:  []sensorlink.OpenFlow{}}}
-		b, err := json.Marshal(filler)
-		if err != nil {
-			t.Fatal(err)
-		}
-		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if used+int64(len(b)) > c.Item3Ceiling() {
-			size /= 2
-			continue
-		}
-		if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: b}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fillCeiling(t, r, c)
 	s := newScheduler(t, r, &fakeCollector{})
 	if h := s.dispatchHold(bg, c.Schedule[0], s.newID()); h != nil {
 		t.Fatal("a dispatch whose record was refused holds the run")
@@ -637,10 +606,11 @@ func TestIntakeRepairRefusedDenied(t *testing.T) {
 
 // D6's R6 on #584: a run whose release committed but whose collection.run
 // was not stored (here its alignment state is unreadable, as
-// missed_test.go breaks it) keeps its hold records for the start repair.
+// missed_test.go breaks it) keeps its hold records for the start repair,
+// and status counts it as session missing (D1 in D4-74).
 func TestIntakeResultNotStoredKeeps(t *testing.T) {
 	c, dir := holdConfig(t)
-	r, _, _ := start(t, c, dir)
+	r, st, _ := start(t, c, dir)
 	defer r.Close()
 	result, transcript := figureOrderFrom(t, ok09Result)
 	var seq uint64
@@ -667,6 +637,9 @@ func TestIntakeResultNotStoredKeeps(t *testing.T) {
 	}
 	if kept < 2 {
 		t.Fatalf("%d of the run's hold records kept", kept)
+	}
+	if f := st.Snapshot("x").Sensor; f == nil || f.SessionMissing != 1 || f.Detector == nil || f.Detector.NotJudged["session-missing"] != 1 {
+		t.Fatalf("status: %+v", f)
 	}
 }
 
@@ -762,7 +735,7 @@ func TestIntakeRepairCountsCommitted(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("%d collection.run records after the repair", len(runs))
 	}
-	if e, _ := event.Decode(runs[0].Event); e.Health.Details["status"] != RunNotCommitted || e.Health.Details["events"] != strconv.Itoa(n) {
+	if e, _ := event.Decode(runs[0].Event); e.Health.Details["status"] != RunNotRecorded || e.Health.Details["events"] != strconv.Itoa(n) {
 		t.Fatalf("repaired collection.run %v, %d SER rows committed", e.Health.Details, n)
 	}
 	var seq uint64
@@ -812,5 +785,51 @@ func TestIntakeQuarantinedAfterRelease(t *testing.T) {
 	defer r.Close()
 	if f := st.Snapshot("x").Sensor; len(healthRuns(t, r)) != 0 || f == nil || f.Repaired != 0 {
 		t.Fatalf("%d collection.run records, status %+v", len(healthRuns(t, r)), f)
+	}
+}
+
+// ceilingConfig is a node with the sensor section whose configuration class
+// has item 3's ceiling under its quota: an event baseline puts a floor
+// under the quota.
+func ceilingConfig(t *testing.T) (*Config, string) {
+	t.Helper()
+	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) {
+		sensorQuotas(nc)
+		nc.Store.Quotas["configuration"] = 64 << 20
+		nc.NetworkSensor = sensorSection()
+		nc.AddEventBaseline(relayID)
+	})
+	if q := c.Store.Quotas[string(c5.ClassConfiguration)]; c.Item3Ceiling() >= q {
+		t.Fatalf("ceiling %d, quota %d", c.Item3Ceiling(), q)
+	}
+	return c, dir
+}
+
+// fillCeiling fills the configuration class to item 3's ceiling, until no
+// smaller filler fits, so no network series record does.
+func fillCeiling(t *testing.T, r *Runtime, c *Config) {
+	t.Helper()
+	stream := r.intakeStream()
+	db := r.Store(stream)
+	for size := 1 << 20; size >= 1; {
+		filler := intakeDoc{Schema: IntakeSchema, RunRecord: sensorlink.RunRecord{State: sensorlink.HoldReleased,
+			Run:   sensorlink.HoldRun{RequestID: "filler", AssetID: relayID, Endpoint: netip.MustParseAddrPort("127.0.0.1:2323"), L4: "tcp"},
+			Flows: []sensorlink.HeldFlow{{Records: []sensorlink.HeldRecord{{Observation: json.RawMessage(strconv.Quote(strings.Repeat("x", size)))}}}},
+			Open:  []sensorlink.OpenFlow{}}}
+		b, err := json.Marshal(filler)
+		if err != nil {
+			t.Fatal(err)
+		}
+		used, err := db.ClassBytes(bg, c5.ClassConfiguration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if used+int64(len(b)) > c.Item3Ceiling() {
+			size /= 2
+			continue
+		}
+		if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: b}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

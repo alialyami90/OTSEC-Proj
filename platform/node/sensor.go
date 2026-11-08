@@ -93,6 +93,16 @@ type SensorStatus struct {
 	DroppedByAsset map[string]uint64 `json:"dropped_by_asset,omitempty"`
 	DropsSince     time.Time         `json:"drops_since,omitzero"`
 	DropsWritten   time.Time         `json:"drops_written,omitzero"`
+	// AlertsDropped and AlertsDroppedBy are the alerts the store refused,
+	// beside network-full, by reason and by "<rule>.<asset>", with one
+	// asset, asset-unresolved, for every unresolved destination, since
+	// AlertDropsSince, which a restart keeps as it keeps Dropped (AP-36
+	// (3), D5-c5-0.9.md section 4). After a restart a pair the last event
+	// summed is in "other".
+	AlertsDropped     map[string]uint64 `json:"alerts_dropped,omitempty"`
+	AlertsDroppedBy   map[string]uint64 `json:"alerts_dropped_by_rule_asset,omitempty"`
+	AlertDropsSince   time.Time         `json:"alert_drops_since,omitzero"`
+	AlertDropsWritten time.Time         `json:"alert_drops_written,omitzero"`
 	// Unreachable: no heartbeat accepted for SensorUnreachableAfter, as
 	// AlarmSensorUnreachable says; it clears at the next accepted one.
 	Unreachable bool `json:"unreachable"`
@@ -107,6 +117,9 @@ type SensorStatus struct {
 	// has no session: the dispatch's record was not saved, or the result
 	// could not be released (D1 in D4-74).
 	SessionMissing uint64 `json:"runs_session_missing"`
+	// Detector is the detector consumer's part, nil until it starts
+	// (netdetector.go).
+	Detector *DetectorStatus `json:"detector,omitempty"`
 	// Heartbeat is the last heartbeat of the run: the sensor's own
 	// report of its totals and time, which the node checks only for
 	// monotonic counters (C13 section 6, AP-36 (2)).
@@ -137,16 +150,14 @@ type sensorIntake struct {
 	mu        sync.Mutex
 	connected int
 	// base is the counts restored at start, which the link's own add to.
-	base  dropCounts
-	since time.Time
-	// written is the counts the last event carried and writtenAt its node
-	// time; triedMono is the monotonic time of the last write, or of the
-	// last failed one.
-	written   dropCounts
-	writtenAt time.Time
-	triedMono time.Duration
-	everTried bool
-	refused   map[string]bool // reasons whose alarm is raised
+	base dropCounts
+	// alerts are the alerts the store refused, by reason and by
+	// "<rule>.<asset>", since alert.since: those restored at start and
+	// the detector's since (netdetector.go, AP-36 (3)).
+	alerts dropCounts
+	// obs and alert are the two classes' intake.drop-counted reports.
+	obs, alert dropReport
+	refused    map[string]bool // reasons whose alarm is raised
 	// The sensor-unreachable timer: quietFrom is the monotonic time of the
 	// last accepted heartbeat, or of the start before the first;
 	// heartbeats is the link's count last seen.
@@ -156,10 +167,28 @@ type sensorIntake struct {
 	raised      bool // the alarm for this quiet stretch is raised
 	// checkpointFailures is the hold's count the last alarm was raised at.
 	checkpointFailures uint64
+	// detectorDown: the detector consumer did not start, and its alarm is
+	// raised; each tick tries again (netdetector.go).
+	detectorDown bool
 }
 
-// dropCounts are dropped observations by reason and by destination asset.
+// dropCounts are dropped records by reason and by destination asset, or
+// for alerts by "<rule>.<asset>".
 type dropCounts struct{ reason, asset map[string]uint64 }
+
+// dropReport is a class's drop counts as its intake.drop-counted events
+// keep them: since is when the counts began, which a restart keeps from
+// the last event; written is the counts that event carried and writtenAt
+// its node time; triedMono is the monotonic time of the last write, or of
+// the last failed one.
+type dropReport struct {
+	stream    c5.StreamID
+	since     time.Time
+	written   dropCounts
+	writtenAt time.Time
+	triedMono time.Duration
+	everTried bool
+}
 
 func (d dropCounts) equal(o dropCounts) bool {
 	return maps.Equal(d.reason, o.reason) && maps.Equal(d.asset, o.asset)
@@ -192,12 +221,17 @@ func (r *Runtime) startSensor(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	in := &sensorIntake{link: link, stream: stream, since: r.opt.Now().UTC(), refused: map[string]bool{}, quietFrom: r.opt.Mono(),
-		base: dropCounts{map[string]uint64{}, map[string]uint64{}}}
+	now := r.opt.Now().UTC()
+	in := &sensorIntake{link: link, stream: stream, refused: map[string]bool{}, quietFrom: r.opt.Mono(),
+		base: dropCounts{map[string]uint64{}, map[string]uint64{}}, alerts: dropCounts{map[string]uint64{}, map[string]uint64{}},
+		obs: dropReport{stream: stream, since: now}, alert: dropReport{stream: NetAlertStream(s.SensorID), since: now}}
 	if d, at, ok := r.lastDropCounts(ctx, stream); ok {
-		in.base, in.since = d, at
+		in.base, in.obs.since = d, at
 	}
-	in.written = in.base
+	if d, at, ok := r.lastDropCounts(ctx, in.alert.stream); ok {
+		in.alerts, in.alert.since = d, at
+	}
+	in.obs.written, in.alert.written = in.base, dropCounts{maps.Clone(in.alerts.reason), maps.Clone(in.alerts.asset)}
 	r.sensor = in
 	// A release a restart interrupted commits once, and a release whose
 	// collection.run never committed gets one, before the sensor is
@@ -288,25 +322,26 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	}
 	in.link.TickHold(ctx)
 	r.pruneIntake(ctx, "")
+	if r.detector == nil {
+		// After the intake's start repair, so the sessions it wrote are
+		// on the health stream when the detector replays them (D4-72).
+		if err := r.startDetector(ctx); err != nil {
+			if !in.detectorDown {
+				r.opt.Status.Raise("", AlarmDetectorNotStarted, "the network detector did not start, so no alert is raised and the observation stream is not pruned: "+err.Error())
+			}
+			in.detectorDown = true
+		} else {
+			in.detectorDown = false
+		}
+	}
+	r.tickDetector(ctx)
 	st := in.link.Stats()
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	now := in.counts(st)
 	m := r.opt.Mono()
-	if !now.equal(in.written) && (final || !in.everTried || m-in.triedMono >= SensorDropReportEvery) {
-		at := r.opt.Now().UTC()
-		in.triedMono, in.everTried = m, true
-		if _, err := (healthSink{r}).Emit(ctx, event.Health{Type: event.HealthDropCounted, Details: dropDetails(in.stream, in.since, now)}); err != nil {
-			var db c5.DatabaseID
-			if d := r.dbFor(HealthStream); d != nil {
-				db = d.spec.ID
-			}
-			r.opt.Status.Alarm(db, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: HealthStream,
-				Detail: "health event " + event.HealthDropCounted + " for " + string(in.stream) + ": " + err.Error()})
-		} else {
-			in.written, in.writtenAt = now, at
-		}
-	}
+	r.reportDrops(ctx, &in.obs, now, final, func() map[string]string { return dropDetails(in.stream, in.obs.since, now) })
+	r.reportDrops(ctx, &in.alert, in.alerts, final, func() map[string]string { return alertDropDetails(in.alert.stream, in.alert.since, in.alerts) })
 	if st.Heartbeats != in.heartbeats {
 		in.heartbeats, in.quietFrom, in.raised, in.unreachable = st.Heartbeats, max(in.quietFrom, st.HeartbeatMono), false, false
 	}
@@ -330,14 +365,43 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	}
 	s := &SensorStatus{SensorID: r.cfg.NetworkSensor.SensorID, Connected: in.connected > 0, RunID: st.RunID, LastSeq: st.LastSeq,
 		LastCommittedSeq: st.LastCommittedSeq, RunChanges: st.RunChanges, SeqGaps: st.SeqGaps, FramesTooLarge: st.FramesTooLarge,
-		Committed: st.Committed, Refused: st.Refused, Unreachable: in.unreachable, Hold: st.Hold, Dropped: now.reason, DroppedByAsset: now.asset, DropsSince: in.since, DropsWritten: in.writtenAt}
+		Committed: st.Committed, Refused: st.Refused, Unreachable: in.unreachable, Hold: st.Hold, Dropped: now.reason, DroppedByAsset: now.asset, DropsSince: in.obs.since, DropsWritten: in.obs.writtenAt,
+		AlertsDropped: maps.Clone(in.alerts.reason), AlertsDroppedBy: maps.Clone(in.alerts.asset), AlertDropsSince: in.alert.since, AlertDropsWritten: in.alert.writtenAt}
 	r.intake.mu.Lock()
 	s.Repaired, s.RepairRefused, s.SessionMissing = r.intake.repaired, r.intake.repairRefused, r.intake.sessionMissing
 	r.intake.mu.Unlock()
+	if nd := r.detector; nd != nil {
+		d := nd.st
+		s.Detector = &d
+	}
 	if h := st.Heartbeat; h != nil {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
 	}
 	r.opt.Status.SetSensor(s)
+}
+
+// reportDrops writes now as rep's intake.drop-counted event when it
+// changed since the last write, at most once every SensorDropReportEvery
+// unless final. A write that fails raises store-commit-failed on the
+// health stream's database, as Runtime.health does, and is tried again a
+// minute later.
+func (r *Runtime) reportDrops(ctx context.Context, rep *dropReport, now dropCounts, final bool, details func() map[string]string) {
+	m := r.opt.Mono()
+	if now.equal(rep.written) || !(final || !rep.everTried || m-rep.triedMono >= SensorDropReportEvery) {
+		return
+	}
+	at := r.opt.Now().UTC()
+	rep.triedMono, rep.everTried = m, true
+	if _, err := (healthSink{r}).Emit(ctx, event.Health{Type: event.HealthDropCounted, Details: details()}); err != nil {
+		var db c5.DatabaseID
+		if d := r.dbFor(HealthStream); d != nil {
+			db = d.spec.ID
+		}
+		r.opt.Status.Alarm(db, c5.Alarm{Code: c5.AlarmCommitFailed, At: r.opt.Now(), Stream: HealthStream,
+			Detail: "health event " + event.HealthDropCounted + " for " + string(rep.stream) + ": " + err.Error()})
+	} else {
+		rep.written, rep.writtenAt = dropCounts{maps.Clone(now.reason), maps.Clone(now.asset)}, at
+	}
 }
 
 // dropDetails is the intake.drop-counted event's details: the totals since
@@ -345,7 +409,30 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 // and their sum ("count"). It names the SensorDropDetailAssets assets with
 // the most drops (ties by ID) and sums the rest in asset.other.
 func dropDetails(stream c5.StreamID, since time.Time, d dropCounts) map[string]string {
-	out := map[string]string{"stream": string(stream), "class": string(c5.ClassNetworkObservation),
+	return countDetails(stream, c5.ClassNetworkObservation, "asset.", since, d, func(string) int { return 0 })
+}
+
+// alertDropDetails is the alert class's intake.drop-counted details, as
+// dropDetails but by "<rule>.<asset>", with no prefix: a detail key is at
+// most 64 characters, and the longest rule and an asset ID take 63. The
+// rest are summed in "other". The pairs of an enrolled asset are named
+// before the unresolved buckets, then by the most drops, so decoys to
+// unresolved addresses never push an enrolled asset's drop into other (D1
+// on B3).
+func alertDropDetails(stream c5.StreamID, since time.Time, d dropCounts) map[string]string {
+	return countDetails(stream, c5.ClassNetworkAlert, "", since, d, func(key string) int {
+		if strings.HasSuffix(key, "."+netobs.AssetUnresolved) {
+			return 1
+		}
+		return 0
+	})
+}
+
+// countDetails names, under prefix, the SensorDropDetailAssets keys of
+// d.asset first by group, then with the most drops (ties by key), and
+// sums the rest in <prefix>other.
+func countDetails(stream c5.StreamID, class c5.StreamClass, prefix string, since time.Time, d dropCounts, group func(string) int) map[string]string {
+	out := map[string]string{"stream": string(stream), "class": string(class),
 		"since": since.Format(time.RFC3339Nano), "count": strconv.FormatUint(d.total(), 10)}
 	for k, v := range d.reason {
 		out["reason."+k] = strconv.FormatUint(v, 10)
@@ -353,6 +440,9 @@ func dropDetails(stream c5.StreamID, since time.Time, d dropCounts) map[string]s
 	ids := slices.Collect(maps.Keys(d.asset))
 	ids = slices.DeleteFunc(ids, func(id string) bool { return id == sensorDropOther })
 	slices.SortFunc(ids, func(a, b string) int {
+		if c := cmp.Compare(group(a), group(b)); c != 0 {
+			return c
+		}
 		if c := cmp.Compare(d.asset[b], d.asset[a]); c != 0 {
 			return c
 		}
@@ -361,13 +451,13 @@ func dropDetails(stream c5.StreamID, since time.Time, d dropCounts) map[string]s
 	other := d.asset[sensorDropOther]
 	for i, id := range ids {
 		if i < SensorDropDetailAssets {
-			out["asset."+id] = strconv.FormatUint(d.asset[id], 10)
+			out[prefix+id] = strconv.FormatUint(d.asset[id], 10)
 		} else {
 			other += d.asset[id]
 		}
 	}
 	if other > 0 {
-		out["asset."+sensorDropOther] = strconv.FormatUint(other, 10)
+		out[prefix+sensorDropOther] = strconv.FormatUint(other, 10)
 	}
 	return out
 }
@@ -409,10 +499,12 @@ func (r *Runtime) lastDropCounts(ctx context.Context, stream c5.StreamID) (dropC
 	return dropCounts{}, time.Time{}, false
 }
 
-// parseDropCounts reads an event the node wrote with dropDetails for
-// stream; anything else is not one. It trusts every reason.* and asset.*
-// detail it can parse because only the node writes this type for a sensor
-// stream on platform/health; asset.other comes back as the key "other".
+// parseDropCounts reads an event the node wrote with dropDetails or
+// alertDropDetails for stream; anything else is not one. It trusts every
+// reason.* and asset.* detail, or for the alert class every
+// "<rule>.<asset>" and "other" detail, it can parse because only the node
+// writes this type for a sensor stream on platform/health; asset.other
+// comes back as the key "other".
 func parseDropCounts(b []byte, stream c5.StreamID) (dropCounts, time.Time, bool) {
 	if !strings.Contains(string(b), `"`+event.HealthDropCounted+`"`) {
 		return dropCounts{}, time.Time{}, false
@@ -429,13 +521,17 @@ func parseDropCounts(b []byte, stream c5.StreamID) (dropCounts, time.Time, bool)
 		return dropCounts{}, time.Time{}, false
 	}
 	d := dropCounts{map[string]uint64{}, map[string]uint64{}}
+	alert := e.Health.Details["class"] == string(c5.ClassNetworkAlert)
 	for k, v := range e.Health.Details {
 		n, err := strconv.ParseUint(v, 10, 64)
 		switch {
-		case strings.HasPrefix(k, "reason.") && err == nil:
+		case err != nil || k == "count":
+		case strings.HasPrefix(k, "reason."):
 			d.reason[strings.TrimPrefix(k, "reason.")] = n
-		case strings.HasPrefix(k, "asset.") && err == nil:
+		case !alert && strings.HasPrefix(k, "asset."):
 			d.asset[strings.TrimPrefix(k, "asset.")] = n
+		case alert && (k == sensorDropOther || strings.Contains(k, ".")):
+			d.asset[k] = n // alertDropDetails's "<rule>.<asset>" or "other"
 		}
 	}
 	return d, since, true

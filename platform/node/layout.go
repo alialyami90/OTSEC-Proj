@@ -236,6 +236,11 @@ func (c *Config) Consumers() ([]c5.Consumer, error) {
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i] < events[j] })
 	var out []c5.Consumer
+	if c.NetworkSensor != nil {
+		// The detector folds an observation into a stored checkpoint
+		// before its cursor confirms it (netdetector.go).
+		out = append(out, c5.Consumer{ID: DetectorConsumer, Stream: NetObservationStream(c.NetworkSensor.SensorID), Delivery: c5.Required})
+	}
 	if c.NetRetentionOn() {
 		out = append(out, c5.Consumer{ID: netretain.ConsumerID, Stream: NetAlertStream(c.NetworkSensor.SensorID), Delivery: c5.Required})
 	}
