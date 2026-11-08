@@ -173,6 +173,23 @@ func (a liveAppender) Append(ctx context.Context, rec c5.Record) (c5.Receipt, er
 	return log.Append(ctx, rec)
 }
 
+func (a liveAppender) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
+	log := a.r.Log(a.stream)
+	if log == nil {
+		return nil, errors.New("node: the network database is not open")
+	}
+	return log.AppendBatch(ctx, recs)
+}
+
+// LastCommitted is the stream's last committed seq.
+func (a liveAppender) LastCommitted(ctx context.Context) (uint64, error) {
+	db := a.r.Store(a.stream)
+	if db == nil {
+		return 0, errors.New("node: the network database is not open")
+	}
+	return db.LastCommitted(ctx, a.stream)
+}
+
 // ServeSensor reads one connection of the sensor's channel until it ends
 // (sensorlink.Link.Serve). The caller authenticates the stream's peer as
 // the configured sensor (ADR-0009, TB6); the records' sensor_id only

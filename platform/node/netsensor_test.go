@@ -3,6 +3,8 @@ package node
 import (
 	"encoding/json"
 	"errors"
+	"net/netip"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,7 +17,8 @@ const sensorID = "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
 
 // sensorSection is a network_sensor section that loads.
 func sensorSection() map[string]any {
-	return map[string]any{"sensor_id": sensorID, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30}
+	return map[string]any{"sensor_id": sensorID, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30,
+		"node_addresses": []any{"192.0.2.10"}, "node_macs": []any{"02:00:5e:00:00:0a"}, "node_vlans": []any{10, "untagged"}}
 }
 
 // sensorQuotas gives nc the configuration quota and both network quotas.
@@ -181,6 +184,34 @@ func TestNetworkSensorRefusals(t *testing.T) {
 		{"no configuration quota", func(nc *nodeconfigtest.Config) {
 			delete(nc.Store.Quotas, "configuration")
 		}, "store.quotas.configuration is required: network_sensor"},
+		{"node_addresses absent", func(nc *nodeconfigtest.Config) { delete(nc.NetworkSensor, "node_addresses") }, "network_sensor.node_addresses"},
+		{"node_addresses nine", func(nc *nodeconfigtest.Config) {
+			var a []any
+			for i := range 9 {
+				a = append(a, "192.0.2."+strconv.Itoa(i+1))
+			}
+			nc.NetworkSensor["node_addresses"] = a
+		}, "network_sensor.node_addresses"},
+		{"node_addresses a hostname", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_addresses"] = []any{"node1.example"} }, "network_sensor.node_addresses"},
+		{"node_addresses with a zone", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_addresses"] = []any{"fe80::1%eth0"} }, "network_sensor.node_addresses"},
+		{"node_addresses twice, once mapped", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["node_addresses"] = []any{"192.0.2.10", "::ffff:192.0.2.10"}
+		}, "network_sensor.node_addresses"},
+		{"node_macs absent", func(nc *nodeconfigtest.Config) { delete(nc.NetworkSensor, "node_macs") }, "network_sensor.node_macs"},
+		{"node_macs upper case", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_macs"] = []any{"02:00:5E:00:00:0A"} }, "network_sensor.node_macs"},
+		{"node_macs dashes", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_macs"] = []any{"02-00-5e-00-00-0a"} }, "network_sensor.node_macs"},
+		{"node_macs twice", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["node_macs"] = []any{"02:00:5e:00:00:0a", "02:00:5e:00:00:0a"}
+		}, "network_sensor.node_macs"},
+		{"node_vlans absent", func(nc *nodeconfigtest.Config) { delete(nc.NetworkSensor, "node_vlans") }, "network_sensor.node_vlans"},
+		{"node_vlans 0", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_vlans"] = []any{0} }, "network_sensor.node_vlans"},
+		{"node_vlans 4095", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_vlans"] = []any{4095} }, "network_sensor.node_vlans"},
+		{"node_vlans a word", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_vlans"] = []any{"native"} }, "network_sensor.node_vlans"},
+		{"node_vlans twice", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["node_vlans"] = []any{"untagged", "untagged"} }, "network_sensor.node_vlans"},
+		{"a forward target by hostname", func(nc *nodeconfigtest.Config) {
+			delete(nc.NetworkSensor, "alert_retention_days")
+			nc.AddRELPTarget("central", "collector.example", 6514, "test-ca", "test-client", "test/durable-ack", true)
+		}, "which is not an IP literal"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nc := nodeconfigtest.New("site-a-node1", t.TempDir()).AddSEL751(relayID, "127.0.0.1", 2323, 300)
@@ -242,5 +273,33 @@ func TestNetworkRetentionConsumer(t *testing.T) {
 	})
 	if c.NetRetentionOn() {
 		t.Fatal("a retention consumer beside a target")
+	}
+}
+
+// The node's identities load parsed, and the forward targets become exact
+// exclusions (D1 in D4-72). Desk only.
+func TestNetworkSensorNodeIdentities(t *testing.T) {
+	nc := nodeconfigtest.New("site-a-node1", t.TempDir()).AddSEL751(relayID, "127.0.0.1", 2323, 300)
+	sensorQuotas(nc)
+	nc.NetworkSensor = sensorSection()
+	delete(nc.NetworkSensor, "alert_retention_days")
+	nc.NetworkSensor["node_addresses"] = []any{"::ffff:192.0.2.10", "2001:db8::10"}
+	nc.AddRELPTarget("central", "198.51.100.7", 6514, "test-ca", "test-client", "test/durable-ack", true)
+	c, err := ParseConfig(nc.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []netip.Addr{netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10")}
+	if got := c.NetworkSensor.NodeAddrs(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("node addresses %v", got)
+	}
+	if v := c.NetworkSensor.NodeVLANs; len(v) != 2 || v[0] != 10 || v[1] != 0 {
+		t.Fatalf("node vlans %v", v)
+	}
+	if b, _ := json.Marshal(c.NetworkSensor.NodeVLANs); string(b) != `[10,"untagged"]` {
+		t.Fatalf("node vlans encode as %s", b)
+	}
+	if ex := c.NetExclusions(); len(ex) != 1 || ex[0] != (Exclusion{Addr: netip.MustParseAddr("198.51.100.7"), L4: "tcp", Port: 6514}) {
+		t.Fatalf("exclusions %+v", ex)
 	}
 }
