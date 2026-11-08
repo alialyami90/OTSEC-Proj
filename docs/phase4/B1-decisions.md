@@ -1341,12 +1341,13 @@ D1, on #579 to #586, with each owner's and reviewer's word through the coordinat
     - A header-only capture without the field is not allowed.
   - **Checkpoint cadence.** `netcheckpoint.detector` is written at each `Tick` where `through` moved, and at a clean stop. The cursor is confirmed only after that commit, and older checkpoints are removed, as `identity.read`'s are. Two conditions:
     - A write that fails keeps the old cursor and raises an alarm.
-    - A crash after an alert commits but before its checkpoint gives one alert on replay, not two. D5 chooses how, and adds a row.
+    - A crash after an alert commits but before its checkpoint gives one alert on replay, not two. The detector already does this: `RestoreDetector` matches regenerated alerts against the committed alerts after the checkpoint's `last_alert_seq` (`TestDetectorRestoreAtEveryCut`). B2 reads those from the alert stream and passes them in, and adds a node-level row (D4).
     - B2's body gives the checkpoint's size at the 2b bound and its writes per day.
   - **First start with no checkpoint.** The detector begins at the oldest retained observation and replays the retained `collection.run` sessions in seq order, interleaved by `after_seq`, under the handover barrier. A session whose observations may have been pruned is never judged `own-session-unseen`:
     - When the observation stream has been pruned, a connected session that is not `open_flow` is judged only if `started_at` − g is at or after the first observation read's capture time + g.
     - Any other connected session that is not `open_flow` is not judged, with the reason `before-retained`. An `open_flow` session counts as `OpenFlowSeen`, as now.
-    - Status shows not-judged by reason: `pending-full`, `before-retained` and `session-missing`.
+    - The node applies the guard: it skips such a session before calling `Session` and counts it itself, so the detector doesn't change (D4).
+    - Status shows not-judged by reason: `pending-full`, `tied-evicted` (a tied ID evicted past 256 whose session never came), `before-retained` and `session-missing`. D4 splits `NotJudged` into the first two in `netdetect` as a small PR before B2 merges.
     - D6's rows: on a pruned stream, a session whose flows were pruned raises no `own-session-unseen` and shows `before-retained` 1, and a session inside the retained range gets its verdict.
 - **Candidates for the sensor brief (D1, after ADR-0009)**, beside D4-73's list:
   - A sensor that keeps sending heartbeats but has gone blind shows as flat packet counters. `sensor-unreachable` can't see it.
