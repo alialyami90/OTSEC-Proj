@@ -34,7 +34,7 @@ The brief asks for a comparison of two ways to run the sensor: as its own SCM se
 
 Under this choice the node doesn't start, stop or restart the sensor. It doesn't have the SCM rights to, and it shouldn't get them. The node watches the sensor over the channel instead (§2):
 
-- **The heartbeat.** The sensor sends one every 10 s. The node raises `sensor-unreachable` after 60 s with no heartbeat, as it does for `forward-unreachable`.
+- **The heartbeat.** The sensor sends one every 10 s. The node raises `sensor-unreachable` after 60 s with no heartbeat accepted, as it does for `forward-unreachable`. It times this on its own monotonic clock from the later of the last accepted heartbeat and its start; a reconnect never resets it (D4-73). It is raised once per quiet stretch, status shows `unreachable` until the next accepted heartbeat clears it, and a step of the wall clock moves nothing.
 - **Restarts are counted.** Each time the channel reconnects after a gap, the node counts a sensor restart and shows the count in status. A decoder that crashes on the same packet every time restarts every 60 s indefinitely, and status shows that loop.
 - **Coverage gaps are records.** While the sensor isn't capturing, the network isn't watched. The node commits a `sensor.coverage-gap` health event when the channel drops, and closes it with the end time when the channel returns. The gap is forwarded like any other health event. A quiet alert stream therefore can't be read as a quiet network over a period when nothing was capturing (R6.1). It also holds at a node start: a gap is open until the first heartbeat arrives.
 
