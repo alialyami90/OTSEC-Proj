@@ -77,8 +77,14 @@ func pruneAll(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.PruneStep(bg, b, 100); err != nil {
-		t.Fatal(err)
+	for {
+		n, err := db.PruneStep(bg, b, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			return
+		}
 	}
 }
 
@@ -145,6 +151,54 @@ func TestNetworkFullV09(t *testing.T) {
 	}
 	if len(full) != 2 {
 		t.Fatalf("%d network-full alarms after a prune and a second fill, want 2", len(full))
+	}
+}
+
+// D6's F1 on #601 and D1's ruling: network-full is raised once per fill.
+// A prune elsewhere in the database leaves a full class full, though it
+// is below its quota by less than one record, so refused commits after
+// each of several observation prunes raise no second alarm. A prune that
+// frees at least MinRecordBytes of the class re-arms it, and the next fill
+// raises the second.
+func TestNetworkFullOncePerFill(t *testing.T) {
+	a := &alarms{}
+	db := open1(t, storeDir(t), networkDB(8<<20, c5.MinRecordBytes), a)
+	fills := func() (n int) {
+		for _, x := range a.got {
+			if x.Code == c5.AlarmNetworkFull {
+				n++
+			}
+		}
+		return n
+	}
+	n := 0
+	fill := func() {
+		t.Helper()
+		var refused error
+		for refused == nil && n < 100000 {
+			n++
+			_, refused = db.CommitBatch(bg, netAlert, []c5.Record{rec(netAlert, c5.ClassNetworkAlert, n)})
+		}
+		if !isCode(refused, c5.CodeQuotaReached) {
+			t.Fatalf("after %d alerts: %v, want CodeQuotaReached", n, refused)
+		}
+	}
+	fill()
+	for i := 1; i <= 5; i++ {
+		commit1(t, db, rec(netObs, c5.ClassNetworkObservation, i))
+		pruneAll(t, db, netObs, c5.ClassNetworkObservation)
+		n++
+		if _, err := db.CommitBatch(bg, netAlert, []c5.Record{rec(netAlert, c5.ClassNetworkAlert, n)}); !isCode(err, c5.CodeQuotaReached) {
+			t.Fatalf("after observation prune %d: %v, want CodeQuotaReached", i, err)
+		}
+	}
+	if f := fills(); f != 1 {
+		t.Fatalf("%d network-full alarms for one fill with prunes elsewhere, want 1", f)
+	}
+	pruneAll(t, db, netAlert, c5.ClassNetworkAlert)
+	fill()
+	if f := fills(); f != 2 {
+		t.Fatalf("%d network-full alarms after the class was pruned and filled again, want 2", f)
 	}
 }
 
