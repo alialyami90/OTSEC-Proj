@@ -550,8 +550,11 @@ func (r *Runtime) repairIntake(ctx context.Context) {
 	}
 }
 
-// healthNames reports whether the health stream has a record of the run
-// requestID after seq after.
+// healthNames reports whether the health stream has the record that ends
+// the run requestID after seq after: its collection.run, or the
+// collection.outcome-unknown of a result the node quarantined. A
+// collection.missed names a run too, the first of its series, but says
+// nothing of its result, so it doesn't count (D6's F3 on #584).
 func (r *Runtime) healthNames(ctx context.Context, after uint64, requestID string) (bool, error) {
 	db := r.Store(HealthStream)
 	if db == nil {
@@ -569,7 +572,8 @@ func (r *Runtime) healthNames(ctx context.Context, after uint64, requestID strin
 				continue
 			}
 			ev, err := event.Decode(st.Event)
-			if err == nil && ev.Health != nil && ev.Health.Details["request_id"] == requestID {
+			if err == nil && ev.Health != nil && ev.Health.Details["request_id"] == requestID &&
+				(ev.Health.Type == HealthCollectionRun || ev.Health.Type == HealthCollectionOutcomeUnknown) {
 				return true, nil
 			}
 		}

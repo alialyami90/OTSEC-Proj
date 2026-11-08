@@ -666,3 +666,43 @@ func TestIntakeResultNotStoredKeeps(t *testing.T) {
 		t.Fatalf("%d of the run's hold records kept", kept)
 	}
 }
+
+// D6's F3 on #584: two runs fail the same way, their releases committed
+// and their collection.run not stored. The collection.missed of the series
+// names the first, but it is not the run's record, so the restart repairs
+// both.
+func TestIntakeRepairPastMissed(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _, _ := start(t, c, dir)
+	result, transcript := figureOrderFrom(t, ok09Result)
+	var seq uint64
+	served := false
+	client := wireCollectorResult(t, result, transcript, func(*authz.CollectorRequest) {
+		if !served {
+			served = true
+			if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+				t.Error(err)
+			}
+		}
+	}, &seq)
+	s := newScheduler(t, r, client)
+	ser := SERStream(relayID)
+	if err := r.Store(ser).SaveSourceCursor(bg, ser, []byte("not a state")); err != nil {
+		t.Fatal(err)
+	}
+	first, second := s.RunOnce(bg, 0), s.RunOnce(bg, 0)
+	if missed, _ := missedRecords(t, r); len(missed) != 1 || len(healthRuns(t, r)) != 0 {
+		t.Fatalf("collection.missed %v, %d collection.run records", missed, len(healthRuns(t, r)))
+	}
+	r.Close()
+	r, _, _ = start(t, c, dir)
+	defer r.Close()
+	got := map[string]string{}
+	for _, st := range healthRuns(t, r) {
+		e, _ := event.Decode(st.Event)
+		got[e.Health.Details["request_id"]] = e.Health.Details["repaired_from"]
+	}
+	if len(got) != 2 || got[first.RequestID] != RepairedFromIntake || got[second.RequestID] != RepairedFromIntake {
+		t.Fatalf("repaired runs %v (first %s, second %s)", got, first.RequestID, second.RequestID)
+	}
+}
