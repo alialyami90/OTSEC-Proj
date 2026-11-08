@@ -2,6 +2,7 @@ package netobs
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 
@@ -19,9 +20,34 @@ const (
 	HalfDetector = "detector"
 )
 
+// MaxHeldStarts bounds the TCP starts a learner holds until its flow shows
+// it was not only a dial (baseline note §2.2, D1 in D4-71). A start that
+// can't be held counts in period.overflow.
+const MaxHeldStarts = 512
+
+// MaxHeldStartBytes bounds one held start as encoded, with its comma
+// (TestWorstHeldStartFits).
+const MaxHeldStartBytes = 384
+
 // MaxLearnerCheckpointBytes bounds a learner checkpoint: its draft, at
-// most MaxBaselineBytes, and an envelope of under 1 KiB.
-const MaxLearnerCheckpointBytes = MaxBaselineBytes + 1<<10
+// most MaxBaselineBytes, its held starts, and an envelope of under 1 KiB.
+const MaxLearnerCheckpointBytes = MaxBaselineBytes + MaxHeldStarts*MaxHeldStartBytes + 1<<10
+
+// HeldStart is a TCP client-server flow start whose pair the learner has
+// not learned yet: its flow (the client's address and port, and the
+// server's address with the pair's port) and the pair it would learn.
+type HeldStart struct {
+	Src   string `json:"src"`
+	Sport int    `json:"sport"`
+	Dst   string `json:"dst"`
+	Pair  Pair   `json:"pair"`
+}
+
+// CompareHeldStart orders held starts by flow: src, sport, dst, then the
+// server port.
+func CompareHeldStart(a, b HeldStart) int {
+	return cmp.Or(cmp.Compare(a.Src, b.Src), cmp.Compare(a.Sport, b.Sport), cmp.Compare(a.Dst, b.Dst), cmp.Compare(a.Pair.Port, b.Pair.Port))
+}
 
 // LearnerCheckpoint is the learner's checkpoint (C13 §8, baseline note
 // §2.2). The learner's whole state is its draft, so restoring is decoding
@@ -40,6 +66,10 @@ type LearnerCheckpoint struct {
 	// Draft is the draft baseline in C13 §8's canonical encoding, with no
 	// authorized writers. Until it is frozen, its end_utc is its start_utc.
 	Draft json.RawMessage `json:"draft"`
+	// Held are the starts held unproven, sorted by flow, one per flow, at
+	// most MaxHeldStarts, and none once frozen: a start unproven at the
+	// period's end is not learned.
+	Held []HeldStart `json:"held"`
 }
 
 // Validate checks the checkpoint: its schema and half, its sensor, and a
@@ -64,6 +94,28 @@ func (k *LearnerCheckpoint) Validate() error {
 	case len(b.AuthorizedWriters) != 0:
 		c.fail(CodeForm, "draft.authorized_writers", "a draft has none; a person adds them")
 	}
+	switch {
+	case len(k.Held) > MaxHeldStarts:
+		c.fail(CodeRange, "held", "%d starts, above %d", len(k.Held), MaxHeldStarts)
+	case k.Frozen && len(k.Held) != 0:
+		c.fail(CodeConflict, "held", "a frozen draft holds no starts")
+	}
+	for i := range k.Held {
+		h := &k.Held[i]
+		f := fmt.Sprintf("held[%d]", i)
+		c.addr(f+".src", h.Src)
+		c.addr(f+".dst", h.Dst)
+		if h.Sport < 0 || h.Sport > 65535 {
+			c.fail(CodeRange, f+".sport", "%d not in [0, 65535]", h.Sport)
+		}
+		h.Pair.check(c, f+".pair")
+		if h.Pair.L4 != "tcp" {
+			c.fail(CodeForm, f+".pair.l4", "%q: only a TCP start is held", h.Pair.L4)
+		}
+		if i > 0 && CompareHeldStart(k.Held[i-1], *h) >= 0 {
+			c.fail(CodeOrder, "held", "sorted by flow, one per flow")
+		}
+	}
 	return c.err()
 }
 
@@ -72,7 +124,11 @@ func (k *LearnerCheckpoint) Encode() ([]byte, error) {
 	if err := k.Validate(); err != nil {
 		return nil, err
 	}
-	out, err := json.Marshal(k)
+	e := *k
+	if e.Held == nil {
+		e.Held = []HeldStart{}
+	}
+	out, err := json.Marshal(&e)
 	if err != nil {
 		return nil, err
 	}

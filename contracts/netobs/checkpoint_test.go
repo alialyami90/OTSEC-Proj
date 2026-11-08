@@ -54,6 +54,30 @@ func TestLearnerCheckpointRules(t *testing.T) {
 		}},
 		{"draft not a baseline", CodeForm, func(k *LearnerCheckpoint) { k.Draft = []byte(`{"schema":"x"}`) }},
 		{"draft with writers", CodeForm, func(k *LearnerCheckpoint) { k.Draft = withWriters }},
+		{"held once frozen", CodeConflict, func(k *LearnerCheckpoint) { k.Held = []HeldStart{fxHeld(1)} }},
+		{"held unsorted", CodeOrder, func(k *LearnerCheckpoint) { k.Frozen, k.Held = false, []HeldStart{fxHeld(2), fxHeld(1)} }},
+		{"held twice", CodeOrder, func(k *LearnerCheckpoint) { k.Frozen, k.Held = false, []HeldStart{fxHeld(1), fxHeld(1)} }},
+		{"held over the bound", CodeRange, func(k *LearnerCheckpoint) {
+			k.Frozen = false
+			for i := range MaxHeldStarts + 1 {
+				k.Held = append(k.Held, fxHeld(i))
+			}
+		}},
+		{"held UDP", CodeForm, func(k *LearnerCheckpoint) {
+			h := fxHeld(1)
+			h.Pair.L4 = "udp"
+			k.Frozen, k.Held = false, []HeldStart{h}
+		}},
+		{"held address", CodeForm, func(k *LearnerCheckpoint) {
+			h := fxHeld(1)
+			h.Src = "::ffff:192.0.2.10"
+			k.Frozen, k.Held = false, []HeldStart{h}
+		}},
+		{"held sport", CodeRange, func(k *LearnerCheckpoint) {
+			h := fxHeld(1)
+			h.Sport = 65536
+			k.Frozen, k.Held = false, []HeldStart{h}
+		}},
 	}
 	for _, tc := range cases {
 		k := fxLearnerCheckpoint(t)
@@ -87,5 +111,31 @@ func TestLearnerCheckpointFits(t *testing.T) {
 	}
 	if envelope := len(b) - len(k.Draft); envelope > MaxLearnerCheckpointBytes-MaxBaselineBytes {
 		t.Fatalf("envelope %d bytes", envelope)
+	}
+}
+
+func fxHeld(sport int) HeldStart {
+	return HeldStart{Src: "192.0.2.10", Sport: sport, Dst: "192.0.2.20",
+		Pair: Pair{Client: fxMaster, Server: fxAsset, L4: "tcp", Port: 20000, Protocol: "dnp3"}}
+}
+
+// An unfrozen checkpoint with held starts round-trips; the worst held start
+// fits MaxHeldStartBytes with its comma, so MaxHeldStarts of them fit
+// MaxLearnerCheckpointBytes beside the largest draft.
+func TestWorstHeldStartFits(t *testing.T) {
+	k := fxLearnerCheckpoint(t)
+	k.Frozen, k.Held = false, []HeldStart{fxHeld(1), fxHeld(2)}
+	b, err := k.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, err := DecodeLearnerCheckpoint(b); err != nil || len(back.Held) != 2 {
+		t.Fatalf("round trip: %v", err)
+	}
+	v6 := "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fff1"
+	worst := HeldStart{Src: v6, Sport: 65535, Dst: v6, Pair: Pair{Client: "addr:" + v6, Server: "addr:" + v6, L4: "tcp", Port: 65535, Protocol: strings.Repeat("p", 64)}}
+	w, _ := json.Marshal(worst)
+	if len(w)+1 > MaxHeldStartBytes {
+		t.Fatalf("worst held start %d bytes with its comma, above %d", len(w)+1, MaxHeldStartBytes)
 	}
 }

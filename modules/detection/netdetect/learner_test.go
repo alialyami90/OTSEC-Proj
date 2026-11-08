@@ -79,6 +79,18 @@ func lxObs(t testing.TB, k netobs.Kind, src, dst string, dport int) *netobs.Obse
 	return o
 }
 
+// lxEnd is the end of the client-server TCP flow lxObs starts from src to
+// dst's dport, syn_only or not.
+func lxEnd(t testing.TB, src, dst string, dport int, synOnly bool) *netobs.Observation {
+	t.Helper()
+	o := lxObs(t, netobs.KindFlow, src, dst, dport)
+	o.Flow = &netobs.Flow{Phase: "end", End: "rst", Packets: 2, Bytes: 120, SynOnly: ptr(synOnly)}
+	if err := o.ValidateStored(); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return o
+}
+
 // The parts of §2.1, one observation each.
 func TestLearnerFolds(t *testing.T) {
 	l, err := NewLearner(lxConfig())
@@ -93,10 +105,11 @@ func TestLearnerFolds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	feed(lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000))     // a pair
+	feed(lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000))     // a start, held
 	feed(lxObs(t, netobs.KindService, "192.0.2.10", "192.0.2.20", 20000))  // a service
-	feed(lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000)) // a function
-	feed(lxObs(t, netobs.KindFlow, "198.51.100.7", "192.0.2.20", 502))     // an unresolved client
+	feed(lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000)) // a function, which proves the pair
+	feed(lxObs(t, netobs.KindFlow, "198.51.100.7", "192.0.2.20", 502))     // an unresolved client's start, held
+	feed(lxEnd(t, "198.51.100.7", "192.0.2.20", 502, false))               // and its end, which proves it
 	mid := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20001)    // midstream: no pair
 	mid.Direction = netobs.DirectionMidstream
 	feed(mid)
@@ -123,7 +136,7 @@ func TestLearnerFolds(t *testing.T) {
 	}
 	want := &netobs.Baseline{Schema: netobs.BaselineIdentifier, SensorID: lxSensor, Version: 1, FunctionTable: Table,
 		Period: netobs.Period{StartUTC: lxStart, EndUTC: "2026-11-08T00:00:00Z",
-			Observations: netobs.Counts{Flow: 5, Service: 1, Function: 1}, Degraded: 1, PlatformSession: 1},
+			Observations: netobs.Counts{Flow: 6, Service: 1, Function: 1}, Degraded: 1, PlatformSession: 1},
 		Params: lxConfig().Params,
 		Pairs: []netobs.Pair{
 			{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: 20000, Protocol: "dnp3"},
@@ -161,6 +174,9 @@ func lxStream(t testing.TB, n int) []*netobs.Observation {
 	var out []*netobs.Observation
 	for i := range n {
 		o := lxObs(t, kinds[i%len(kinds)], srcs[i%len(srcs)], dsts[(i/3)%len(dsts)], 20000+i%5)
+		if i%4 == 3 { // an end: some prove a held start, some show a dial only
+			o.Flow = &netobs.Flow{Phase: "end", End: "fin", Packets: 4, Bytes: 300, SynOnly: ptr(i%8 == 3)}
+		}
 		switch {
 		case i%11 == 0:
 			o.Node.PlatformSession = &netobs.PlatformSession{InvocationID: "inv-1", Tie: "window"}
@@ -199,6 +215,9 @@ func TestLearnerRestoreAtEveryCut(t *testing.T) {
 			t.Fatal(err)
 		}
 		marks = append(marks, checkpoint(t, whole))
+	}
+	if !slices.ContainsFunc(marks, func(b []byte) bool { return bytes.Contains(b, []byte(`"held":[{`)) }) {
+		t.Fatal("no checkpoint holds a start: the cuts don't cover the held state")
 	}
 	want, err := whole.Freeze("2026-11-08T00:00:00Z")
 	if err != nil {
@@ -271,15 +290,16 @@ func TestLearnerDeterministic(t *testing.T) {
 	}
 }
 
-// fill feeds new pairs, on new ports, until one doesn't fit, and returns
-// the learner just before that observation and the observation itself.
+// fill feeds new functions, on new ports, until one doesn't fit, and
+// returns the learner just before that observation and the observation
+// itself.
 func fill(t *testing.T) (*Learner, uint64, *netobs.Observation) {
 	t.Helper()
 	l, err := NewLearner(lxConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 1)
+	o := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 1)
 	near := 0
 	for port := 1; port <= 65535; port++ {
 		o.IP.Dport = ptr(port)
@@ -330,12 +350,12 @@ func TestLearnerOverflow(t *testing.T) {
 		t.Fatalf("overflow %d, lists changed %v", l.period.Overflow, !bytes.Equal(lists(), before))
 	}
 	refused := netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: *o.IP.Dport, Protocol: "dnp3"}
-	if l.pairs[refused] {
-		t.Fatal("the refused pair is in the draft")
+	if _, ok := l.functions[functionKey(functionOf(refused, o.Function))]; ok {
+		t.Fatal("the refused function is in the draft")
 	}
-	// Known entries still fold: a repeat of a held pair adds nothing and
-	// does not count.
-	held := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 1)
+	// Known entries still fold: a repeat of a held function adds nothing
+	// and does not count.
+	held := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 1)
 	if err := l.Observe(seq+1, held); err != nil || l.period.Overflow != 1 {
 		t.Fatalf("held pair: %v, overflow %d", err, l.period.Overflow)
 	}
@@ -346,7 +366,8 @@ func TestLearnerOverflow(t *testing.T) {
 	// once it doesn't, it is refused the same way and the entry is left
 	// as it was.
 	next := seq + 3
-	for v := 4094; ; v-- {
+	grew := false
+	for v := 4094; v >= 0 && !grew; v-- { // bounded, so a regression fails here and doesn't hang (D6's row 5)
 		vl := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 1)
 		vl.L2.VLAN = ptr(v)
 		over := l.period.Overflow
@@ -362,7 +383,8 @@ func TestLearnerOverflow(t *testing.T) {
 			if l.period.Overflow != 3 || (slices.Contains(src, v) && slices.Contains(dst, v)) {
 				t.Fatalf("vlan growth refused: overflow %d, src %v, dst %v", l.period.Overflow, src, dst)
 			}
-			break
+			grew = true
+			continue
 		}
 		// Not counted: both entries took the VLAN.
 		src := l.addresses[addrKey{"192.0.2.10", lxMaster}].VLANs
@@ -370,6 +392,9 @@ func TestLearnerOverflow(t *testing.T) {
 		if !slices.Contains(src, v) || !slices.Contains(dst, v) {
 			t.Fatalf("vlan %d refused and not counted: src %v, dst %v", v, src, dst)
 		}
+	}
+	if !grew {
+		t.Fatal("4095 VLANs on two held addresses and nothing overflowed")
 	}
 	// With the draft now within a few bytes of the bound, a new source
 	// address alone, on an observation that learns no pair and whose
@@ -380,10 +405,27 @@ func TestLearnerOverflow(t *testing.T) {
 	if err := l.Observe(next, end); err != nil || l.period.Overflow != 4 || !bytes.Equal(lists(), was) {
 		t.Fatalf("new source address: %v, overflow %d", err, l.period.Overflow)
 	}
-	// So are a new service and a new function between held addresses.
-	for i, k := range []netobs.Kind{netobs.KindService, netobs.KindFunction} {
-		if err := l.Observe(next+1+uint64(i), lxObs(t, k, "192.0.2.10", "192.0.2.20", 1)); err != nil || l.period.Overflow != int64(5+i) || !bytes.Equal(lists(), was) {
-			t.Fatalf("new %s: %v, overflow %d", k, err, l.period.Overflow)
+	// So are a new service and a new function between held addresses, and
+	// a pair once its flow proves it: its start is held, which takes no
+	// draft room, and its end is refused like any new entry.
+	read := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 1)
+	read.Function.Code, read.Function.Objects = 1, []string{"g60v1"}
+	read.Node.FunctionClass, read.Node.DNP3NoSA = Classify("dnp3", 1, nil, read.Function.Objects).Class, nil
+	start := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 2)
+	for i, step := range []struct {
+		o    *netobs.Observation
+		over int64
+	}{
+		{lxObs(t, netobs.KindService, "192.0.2.10", "192.0.2.20", 1), 5},
+		{read, 6},
+		{start, 6},
+		{lxEnd(t, "192.0.2.10", "192.0.2.20", 2, false), 7},
+	} {
+		if err := step.o.ValidateStored(); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Observe(next+1+uint64(i), step.o); err != nil || l.period.Overflow != step.over || !bytes.Equal(lists(), was) {
+			t.Fatalf("step %d: %v, overflow %d, want %d", i, err, l.period.Overflow, step.over)
 		}
 	}
 	d, err := l.Freeze("9999-12-31T23:59:59.999999999Z")
@@ -541,5 +583,161 @@ func TestLearnerNoEntryWithoutItsAddress(t *testing.T) {
 	_, held := l.addresses[addrKey{v6, lxRelay}]
 	if held || len(l.services) != 0 || l.period.Overflow != 1 {
 		t.Errorf("address held %v, services %d, overflow %d", held, len(l.services), l.period.Overflow)
+	}
+}
+
+// D1's ruling on A2 (D4-71): a TCP start is held until its flow shows it
+// was not only a dial. A SYN-only probe learns no pair, so a real session
+// on that pair after acknowledgement alerts as unknown-pair (the
+// detector's test); a completed session, or one with a decoded function,
+// is learned; a start still unproven at the period's end is not.
+func TestLearnerHoldsStarts(t *testing.T) {
+	master, relay := "192.0.2.10", "192.0.2.20"
+	pair := func(port int) netobs.Pair {
+		return netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: port, Protocol: "dnp3"}
+	}
+	l, _ := NewLearner(lxConfig())
+	feed := func(seq uint64, o *netobs.Observation) {
+		t.Helper()
+		if err := l.Observe(seq, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	feed(1, lxObs(t, netobs.KindFlow, master, relay, 23)) // a SYN probe
+	feed(2, lxEnd(t, master, relay, 23, true))
+	feed(3, lxObs(t, netobs.KindFlow, master, relay, 20000)) // a completed session
+	if l.pairs[pair(20000)] {
+		t.Fatal("a start learned before its flow proved it")
+	}
+	feed(4, lxEnd(t, master, relay, 20000, false))
+	feed(5, lxObs(t, netobs.KindFlow, master, relay, 502)) // a session with a decoded function
+	feed(6, lxObs(t, netobs.KindFunction, master, relay, 502))
+	feed(7, lxObs(t, netobs.KindFlow, master, relay, 102)) // unproven at the period's end
+	switch {
+	case l.pairs[pair(23)]:
+		t.Error("a SYN-only probe was learned")
+	case !l.pairs[pair(20000)] || !l.pairs[pair(502)]:
+		t.Errorf("a proven pair was not learned: %v", l.pairs)
+	case len(l.held) != 1 || l.period.Overflow != 0:
+		t.Errorf("held %d, overflow %d", len(l.held), l.period.Overflow)
+	}
+	cp := checkpoint(t, l)
+	if !bytes.Contains(cp, []byte(`"held":[{"src":"192.0.2.10","sport":51234,"dst":"192.0.2.20","pair":{`)) {
+		t.Errorf("the held start is not in the checkpoint: %s", cp[len(cp)-200:])
+	}
+	if _, err := l.Freeze("2026-11-08T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if l.pairs[pair(102)] || len(l.held) != 0 || !bytes.Contains(checkpoint(t, l), []byte(`"held":[]`)) {
+		t.Error("a start unproven at the period's end was learned or kept")
+	}
+}
+
+// A full hold refuses the next start, which counts in overflow and so
+// fails closed; the same flow started again takes no new slot, and an end
+// frees one.
+func TestLearnerHoldBound(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	start := func(sport int) *netobs.Observation {
+		o := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000)
+		o.IP.Sport = ptr(sport)
+		return o
+	}
+	seq := uint64(0)
+	feed := func(o *netobs.Observation, over int64) {
+		t.Helper()
+		seq++
+		if err := l.Observe(seq, o); err != nil || l.period.Overflow != over {
+			t.Fatalf("seq %d: %v, overflow %d, want %d", seq, err, l.period.Overflow, over)
+		}
+	}
+	for i := range netobs.MaxHeldStarts {
+		feed(start(1000+i), 0)
+	}
+	feed(start(1000+netobs.MaxHeldStarts), 1) // full
+	feed(start(1000), 1)                      // a flow held already
+	end := lxEnd(t, "192.0.2.10", "192.0.2.20", 20000, true)
+	end.IP.Sport = ptr(1000)
+	feed(end, 1)
+	feed(start(1000+netobs.MaxHeldStarts), 1) // a slot is free
+	if len(l.held) != netobs.MaxHeldStarts || len(l.pairs) != 0 {
+		t.Fatalf("held %d, pairs %d", len(l.held), len(l.pairs))
+	}
+	if b := checkpoint(t, l); len(b) > netobs.MaxLearnerCheckpointBytes {
+		t.Fatalf("checkpoint %d bytes", len(b))
+	}
+}
+
+// D6's row 1 (L2): an observation both tied to the node's own session and
+// seen while degraded counts as the node's own, first (§2.2).
+func TestLearnerExclusionOrder(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	o := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 22)
+	o.Node.PlatformSession = &netobs.PlatformSession{InvocationID: "inv-1", Tie: "connection"}
+	o.Coverage.Degraded = []string{"drops-driver"}
+	if err := l.Observe(1, o); err != nil || l.period.PlatformSession != 1 || l.period.Degraded != 0 {
+		t.Fatalf("%v: platform_session %d, degraded %d", err, l.period.PlatformSession, l.period.Degraded)
+	}
+}
+
+// D6's row 2 (L8): one function with its objects in two orders, or with a
+// duplicate, is one entry.
+func TestLearnerFunctionObjectsSorted(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	for i, objects := range [][]string{{"g12v1", "g1v2"}, {"g1v2", "g12v1"}, {"g1v2", "g12v1", "g1v2"}} {
+		o := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000)
+		o.Function.Objects = objects
+		if err := l.Observe(uint64(i+1), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(l.functions) != 1 {
+		t.Fatalf("%d entries", len(l.functions))
+	}
+}
+
+// D6's row 3 (L11): the bound is exact to the byte. With room for exactly
+// the first service, it is taken and the draft's accounting reaches
+// MaxBaselineBytes; with one byte less, it is refused.
+func TestLearnerBoundExact(t *testing.T) {
+	svc := encodedLen(netobs.BaselineService{Server: lxRelay, L4: "tcp", Port: 1, Protocol: "dnp3", Basis: "content"})
+	for _, short := range []int{0, 1} {
+		l, _ := NewLearner(lxConfig())
+		if err := l.Observe(1, lxEnd(t, "192.0.2.10", "192.0.2.20", 1, false)); err != nil { // both addresses, no pair
+			t.Fatal(err)
+		}
+		l.lists[listPairs].bytes, l.lists[listPairs].n = netobs.MaxBaselineBytes-l.size()-svc+short, 1
+		if err := l.Observe(2, lxObs(t, netobs.KindService, "192.0.2.10", "192.0.2.20", 1)); err != nil {
+			t.Fatal(err)
+		}
+		taken := len(l.services) == 1
+		if taken != (short == 0) || (taken && l.size() != netobs.MaxBaselineBytes) || l.period.Overflow != int64(short) {
+			t.Errorf("short %d: taken %v, size %d, overflow %d", short, taken, l.size(), l.period.Overflow)
+		}
+	}
+}
+
+// D6's row 4 (L13): with room for the destination's growth but not for the
+// source's new address, the destination still grows, and the observation
+// counts in overflow.
+func TestLearnerDestinationGrowsAlone(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	if err := l.Observe(1, lxEnd(t, "192.0.2.10", "192.0.2.20", 1, false)); err != nil {
+		t.Fatal(err)
+	}
+	src := addressLen(&netobs.Address{IP: "198.51.100.200", Endpoint: "addr:198.51.100.200", VLANs: []int{20}, LANs: []string{}})
+	grow := addressLen(&netobs.Address{IP: "192.0.2.20", Endpoint: lxRelay, VLANs: []int{10, 20}, LANs: []string{}}) - l.addrLen[addrKey{"192.0.2.20", lxRelay}]
+	if grow >= src+1 {
+		t.Fatalf("sizes: growth %d, new address %d", grow, src)
+	}
+	l.lists[listPairs].bytes, l.lists[listPairs].n = netobs.MaxBaselineBytes-l.size()-grow, 1
+	o := lxEnd(t, "198.51.100.200", "192.0.2.20", 1, false)
+	o.L2.VLAN = ptr(20)
+	if err := l.Observe(2, o); err != nil {
+		t.Fatal(err)
+	}
+	_, srcHeld := l.addresses[addrKey{"198.51.100.200", "addr:198.51.100.200"}]
+	if srcHeld || !slices.Contains(l.addresses[addrKey{"192.0.2.20", lxRelay}].VLANs, 20) || l.period.Overflow != 1 {
+		t.Errorf("source held %v, destination VLANs %v, overflow %d", srcHeld, l.addresses[addrKey{"192.0.2.20", lxRelay}].VLANs, l.period.Overflow)
 	}
 }

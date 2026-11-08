@@ -45,6 +45,9 @@ type Learner struct {
 	services  map[netobs.BaselineService]bool
 	functions map[string]netobs.BaselineFunction // keyed by its encoding
 	addresses map[addrKey]*netobs.Address
+	// held are the TCP starts whose pair waits for its flow to show it was
+	// not only a dial (§2.2, D1 in D4-71), keyed by flow.
+	held map[flowKey]netobs.Pair
 
 	// reserve is the encoded document with every list empty and the
 	// period at its largest; lists[i] is list i's item count and bytes.
@@ -54,6 +57,15 @@ type Learner struct {
 }
 
 type addrKey struct{ ip, endpoint string }
+
+// flowKey is a TCP flow as its client sent it: the client's address and
+// port, and the server's address and port.
+type flowKey struct {
+	src   string
+	sport int
+	dst   string
+	dport int
+}
 
 type listSize struct{ n, bytes int }
 
@@ -80,7 +92,8 @@ const worstEndUTC = "9999-12-31T23:59:59.999999999Z"
 func NewLearner(cfg LearnerConfig) (*Learner, error) {
 	l := &Learner{cfg: cfg, endUTC: cfg.StartUTC,
 		pairs: map[netobs.Pair]bool{}, services: map[netobs.BaselineService]bool{},
-		functions: map[string]netobs.BaselineFunction{}, addresses: map[addrKey]*netobs.Address{}, addrLen: map[addrKey]int{}}
+		functions: map[string]netobs.BaselineFunction{}, addresses: map[addrKey]*netobs.Address{}, addrLen: map[addrKey]int{},
+		held: map[flowKey]netobs.Pair{}}
 	worst := l.document()
 	worst.Period = netobs.Period{StartUTC: cfg.StartUTC, EndUTC: worstEndUTC,
 		Observations: netobs.Counts{Flow: math.MaxInt64, Service: math.MaxInt64, Function: math.MaxInt64, Insecure: math.MaxInt64,
@@ -156,19 +169,45 @@ func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
 	// An entry is learned only when both addresses it was seen at are
 	// held, so every end of every entry has its address in the draft
 	// (D3's S1 on #561; the acknowledgement view relies on it, D4-70).
+	//
+	// Each kind's IP header is oriented by C13, not by the flow: a
+	// service's server is ip.dst (C13 §4.3), and a function is a request,
+	// so its ip.src is the client and ip.dst the server, on a midstream
+	// flow too (C13 §4.3, §14 item 14). So the pair below is the client's
+	// to the server's port for both. A flow's own src is its first frame's
+	// sender only when midstream (C13 §4.1), and a midstream flow learns
+	// no pair.
 	if fits && (o.IP.L4 == "tcp" || o.IP.L4 == "udp") && o.IP.Dport != nil {
 		pair := netobs.Pair{Client: src, Server: dst, L4: o.IP.L4, Port: *o.IP.Dport, Protocol: o.Protocol}
+		var key flowKey
+		if o.IP.Sport != nil {
+			key = flowKey{o.IP.Src, *o.IP.Sport, o.IP.Dst, *o.IP.Dport}
+		}
 		switch {
-		// Midstream flows add nothing: a pair is learned only from a
-		// client-server start, never guessed (§2.1).
+		// A pair is learned from a client-server start only once its flow
+		// shows it was not only a dial: an end with syn_only false, or a
+		// decoded function, whichever comes first. Until then the start
+		// is held (§2.2, D1 in D4-71). Midstream flows add nothing: a pair
+		// is never guessed (§2.1).
 		case o.Kind == netobs.KindFlow && o.Flow != nil && o.Flow.Phase == "start" && o.Direction == netobs.DirectionClientServer:
-			fits = l.pair(pair) && fits
+			if !l.pairs[pair] {
+				fits = l.hold(key, pair) && fits
+			}
+		case o.Kind == netobs.KindFlow && o.Flow != nil && o.Flow.Phase == "end":
+			if p, ok := l.held[key]; ok {
+				delete(l.held, key)
+				if o.Flow.SynOnly != nil && !*o.Flow.SynOnly {
+					fits = l.pair(p) && fits
+				}
+			}
 		case o.Kind == netobs.KindService && o.Service != nil:
 			fits = l.service(netobs.BaselineService{Server: dst, L4: pair.L4, Port: pair.Port, Protocol: pair.Protocol, Basis: o.Service.Basis}) && fits
 		case o.Kind == netobs.KindFunction && o.Function != nil:
-			objects := slices.Clone(o.Function.Objects)
-			slices.Sort(objects)
-			fits = l.function(netobs.BaselineFunction{Pair: pair, Code: o.Function.Code, Sub: o.Function.Sub, Objects: slices.Compact(objects)}) && fits
+			if p, ok := l.held[key]; ok {
+				delete(l.held, key)
+				fits = l.pair(p) && fits
+			}
+			fits = l.function(functionOf(pair, o.Function)) && fits
 		}
 	}
 	if !fits && l.period.Overflow < netobs.MaxOverflow {
@@ -244,6 +283,20 @@ func (l *Learner) pair(p netobs.Pair) bool {
 	return true
 }
 
+// hold holds a start's pair until its flow proves it. A start with no
+// source port has no flow to prove it, and isn't held. One that can't be
+// held, with MaxHeldStarts held already, is refused and counts in overflow.
+func (l *Learner) hold(k flowKey, p netobs.Pair) bool {
+	if k == (flowKey{}) {
+		return true
+	}
+	if _, ok := l.held[k]; !ok && len(l.held) >= netobs.MaxHeldStarts {
+		return false
+	}
+	l.held[k] = p
+	return true
+}
+
 func (l *Learner) service(s netobs.BaselineService) bool {
 	if l.services[s] {
 		return true
@@ -253,6 +306,14 @@ func (l *Learner) service(s netobs.BaselineService) bool {
 	}
 	l.services[s] = true
 	return true
+}
+
+// functionOf is f's entry on pair as the baseline keeps it: objects sorted,
+// without duplicates.
+func functionOf(pair netobs.Pair, f *netobs.Function) netobs.BaselineFunction {
+	objects := slices.Clone(f.Objects)
+	slices.Sort(objects)
+	return netobs.BaselineFunction{Pair: pair, Code: f.Code, Sub: f.Sub, Objects: slices.Compact(objects)}
 }
 
 func functionKey(f netobs.BaselineFunction) string {
@@ -373,7 +434,11 @@ func (l *Learner) Freeze(endUTC string) ([]byte, error) {
 		l.endUTC = prev
 		return nil, err
 	}
+	// A start still unproven at the period's end is not learned (D1 in
+	// D4-71): its session alerts once if it reconnects after
+	// acknowledgement.
 	l.frozen = true
+	clear(l.held)
 	return b, nil
 }
 
@@ -385,6 +450,10 @@ func (l *Learner) Checkpoint() ([]byte, error) {
 	}
 	k := netobs.LearnerCheckpoint{Schema: netobs.CheckpointIdentifier, Half: netobs.HalfLearner, SensorID: l.cfg.SensorID,
 		Through: l.through, Frozen: l.frozen, Draft: d}
+	for f, p := range l.held {
+		k.Held = append(k.Held, netobs.HeldStart{Src: f.src, Sport: f.sport, Dst: f.dst, Pair: p})
+	}
+	slices.SortFunc(k.Held, netobs.CompareHeldStart)
 	return k.Encode()
 }
 
@@ -438,8 +507,11 @@ func RestoreLearner(cfg LearnerConfig, checkpoint []byte) (*Learner, error) {
 		l.lists[listAddresses].bytes += l.lists[listAddresses].cost(ln)
 		l.lists[listAddresses].n++
 	}
-	if again, err := l.Draft(); err != nil || !bytes.Equal(again, k.Draft) {
-		return nil, errors.New("netdetect: the checkpoint's draft does not restore to itself")
+	for _, h := range k.Held {
+		l.held[flowKey{h.Src, h.Sport, h.Dst, h.Pair.Port}] = h.Pair
+	}
+	if again, err := l.Checkpoint(); err != nil || !bytes.Equal(again, checkpoint) {
+		return nil, errors.New("netdetect: the checkpoint does not restore to itself")
 	}
 	return l, nil
 }
