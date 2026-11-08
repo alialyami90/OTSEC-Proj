@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -275,5 +276,113 @@ func TestSensorDropWriteFails(t *testing.T) {
 	r.tickSensor(bg, false)
 	if ev := dropEvents(t, r); failed() != 2 || len(ev) != 1 || ev[0]["count"] != "1" {
 		t.Fatalf("after the store recovered: %d alarms, %v", failed(), ev)
+	}
+}
+
+// Two refusal reasons raise two sensor-record-refused alarms, one each
+// (D6's M6 on #568). Desk only.
+func TestSensorRefusedAlarmPerReason(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID), sensorFlow(1, sensorID),
+		sensorFlow(2, "11111111-2222-4333-8444-555555555555"))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	s := st.Snapshot("x").Sensor
+	if n := alarms(st, AlarmSensorRecordRefused); n != 2 || s.Refused[sensorlink.RefusedSeq] != 1 || s.Refused[sensorlink.RefusedSensorID] != 1 {
+		t.Fatalf("%d refused alarms, refused %v", n, s.Refused)
+	}
+}
+
+// Status shows the link connected while ServeSensor reads, and not after
+// (D6's M7 on #568). Desk only.
+func TestSensorConnected(t *testing.T) {
+	g := newRetentionRig(t)
+	r, st := g.start()
+	defer r.Close()
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- r.ServeSensor(bg, pr) }()
+	b := sensorChannel(t, sensorFlow(1, sensorID)).Bytes()
+	if _, err := pw.Write(b); err != nil { // returns once Serve has read it
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if s := st.Snapshot("x").Sensor; !s.Connected {
+		t.Fatalf("not connected while serving: %+v", s)
+	}
+	pw.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if s := st.Snapshot("x").Sensor; s.Connected {
+		t.Fatalf("connected after the stream ended: %+v", s)
+	}
+}
+
+// The first write happens at once even at monotonic time 0, which the
+// minute gate alone would hold back (D6's M2 on #568). Desk only.
+func TestSensorFirstWriteAtMonoZero(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	defer r.Close()
+	g.mu.Lock()
+	g.mono = 0
+	g.mu.Unlock()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	if ev := dropEvents(t, r); len(ev) != 1 || ev[0]["count"] != "1" {
+		t.Fatalf("events %v", ev)
+	}
+}
+
+// A start finds the last drop counts behind more than one page of other
+// health records, and past sensorDropScanRecords starts from zero, with
+// since the start (D6's M10 and M11 on #568). Desk only.
+func TestSensorDropRestoreScan(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
+		t.Fatal(err)
+	}
+	r.tickSensor(bg, false)
+	fill := func(r *Runtime, n int) {
+		t.Helper()
+		for n > 0 {
+			k := min(n, 100)
+			recs := make([]c5.Record, k)
+			for i := range recs {
+				rec, err := r.healthRecord(HealthStream, "store.test", map[string]string{"i": strconv.Itoa(i)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				recs[i] = rec
+			}
+			if _, err := r.Log(HealthStream).AppendBatch(bg, recs); err != nil {
+				t.Fatal(err)
+			}
+			n -= k
+		}
+	}
+	fill(r, 600) // more than one 500-record page
+	r.Close()
+	g.advance(time.Hour)
+	r, st := g.start()
+	s := st.Snapshot("x").Sensor
+	if s.Dropped[sensorlink.DropUnresolvedBudget] != 1 || !s.DropsSince.Equal(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("behind 600 records: %+v", s)
+	}
+	fill(r, sensorDropScanRecords)
+	r.Close()
+	g.advance(time.Hour)
+	r, st = g.start()
+	defer r.Close()
+	if s := st.Snapshot("x").Sensor; s.Dropped[sensorlink.DropUnresolvedBudget] != 0 || !s.DropsSince.Equal(g.now()) {
+		t.Fatalf("behind %d records: %+v", sensorDropScanRecords+600, s)
 	}
 }
