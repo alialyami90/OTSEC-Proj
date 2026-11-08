@@ -42,6 +42,7 @@ func TestNetworkSensorLayout(t *testing.T) {
 	c, _ := schedConfig(t, func(nc *nodeconfigtest.Config) {
 		sensorQuotas(nc)
 		nc.NetworkSensor = sensorSection()
+		delete(nc.NetworkSensor, "alert_retention_days")
 		nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
 	})
 	if !c.NetworkSensorOn() || c.NetworkSensor.SensorID != sensorID || c.NetworkSensor.OutageHours != 72 {
@@ -163,10 +164,12 @@ func TestNetworkSensorRefusals(t *testing.T) {
 		{"alert_retention_days 3651", func(nc *nodeconfigtest.Config) {
 			nc.NetworkSensor["alert_retention_days"] = MaxAlertRetentionDays + 1
 		}, "network_sensor.alert_retention_days"},
-		{"alert_retention_days negative with a target", func(nc *nodeconfigtest.Config) {
-			nc.NetworkSensor["alert_retention_days"] = -1
-			nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
+		{"alert_retention_days 0 with no target", func(nc *nodeconfigtest.Config) {
+			nc.NetworkSensor["alert_retention_days"] = 0
 		}, "network_sensor.alert_retention_days"},
+		{"alert_retention_days with a target", func(nc *nodeconfigtest.Config) {
+			nc.AddRELPTarget("central", "127.0.0.1", 6514, "test-ca", "test-client", "test/durable-ack", true)
+		}, "network_sensor.alert_retention_days is set with a forwarding target"},
 		{"unknown field", func(nc *nodeconfigtest.Config) { nc.NetworkSensor["interfaces"] = []string{"eth1"} }, "interfaces"},
 		{"no observation quota", func(nc *nodeconfigtest.Config) {
 			delete(nc.Store.Quotas, "network-observation")
@@ -217,7 +220,7 @@ func TestNetworkSensorRefusals(t *testing.T) {
 
 // With no forward target the alert stream has the node's retention
 // consumer, required, and nothing else consumes it; with a target it
-// doesn't, and the section needs no retention (D5-c5-0.9.md section 3).
+// doesn't, and the section takes no retention (D5-c5-0.9.md section 3).
 func TestNetworkRetentionConsumer(t *testing.T) {
 	c, _ := schedConfig(t, func(nc *nodeconfigtest.Config) {
 		sensorQuotas(nc)

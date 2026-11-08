@@ -27,7 +27,9 @@ type NetworkSensor struct {
 	// AlertRetentionDays is how long the sensor's alerts are kept when no
 	// forward target consumes the alert stream: the node's retention
 	// consumer then moves past older alerts (D5-c5-0.9.md section 3,
-	// netretain). It is required with no target and unused with one.
+	// netretain). It is required with no target, and refused with one,
+	// where the target confirms alerts and nothing would read it (D1 in
+	// D4-70).
 	AlertRetentionDays int `json:"alert_retention_days,omitempty"`
 }
 
@@ -94,10 +96,10 @@ func (c *Config) checkNetworkSensor(fail func(format string, args ...any)) {
 		fail("network_sensor.outage_hours %d not in [1, %d]: the unresolved budget refills over it", s.OutageHours, MaxSyslogOutageHours)
 	}
 	switch d := s.AlertRetentionDays; {
+	case len(c.targets) > 0 && d != 0:
+		fail("network_sensor.alert_retention_days is set with a forwarding target: the target confirms the alert stream, so no retention applies; remove it")
 	case len(c.targets) == 0 && (d < 1 || d > MaxAlertRetentionDays):
-		fail("network_sensor.alert_retention_days %d not in [1, %d]: with no forward target, the retention consumer prunes the alert stream after it", d, MaxAlertRetentionDays)
-	case d < 0 || d > MaxAlertRetentionDays:
-		fail("network_sensor.alert_retention_days %d not in [1, %d]", d, MaxAlertRetentionDays)
+		fail("network_sensor.alert_retention_days %d not in [1, %d]: with no forwarding target, the retention consumer prunes the alert stream after it", d, MaxAlertRetentionDays)
 	}
 }
 
