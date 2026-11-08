@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.11: the audit record every module
+// Package audit is contract C8, otsec.audit/0.12: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -411,6 +411,47 @@
 // chain. VerifyConfig is unchanged: these actions are outside the
 // configuration chain's rules. A 0.10 reader refuses these actions as unknown,
 // so readers are upgraded before a node writes one.
+//
+// # Network baselines, retention moves and key sets (0.12)
+//
+// docs/phase4/D3-c7-0.10-c8-0.12.md §2 (D4-68), in network.go. This package
+// reads 0.12 in full (ReaderID), while writers still stamp 0.11
+// (ContractID): readers go first (D4-69), and the node's change that writes
+// these records moves the stamp.
+//
+//   - Target.SensorID names a C13 sensor. It is on the network records only:
+//     config.baseline_recorded and config.baseline_acknowledged of kind
+//     network, config.learner_retired and store.retention_moved, which name
+//     the sensor and no asset.
+//   - config.baseline_recorded of kind network is the learner's frozen
+//     draft. config.baseline_acknowledged of kind network carries the
+//     signed node.network_baseline_ack body: the accepted document as
+//     baseline_digest, and the draft it was built from as draft_digest.
+//   - config.learner_retired (info, reason acknowledged or stopped) is
+//     written before the learner leaves its stream's consumers. It names the
+//     run's baseline_version, its last confirmed cursor_seq and, when
+//     acknowledged, the acknowledged baseline_digest.
+//   - store.retention_moved (info) is written before the alert stream's
+//     retention consumer commits its cursor. Retention names the stream,
+//     the seqs before and after, the retention, the wall time used, the
+//     cutoff, the previous cutoff and which bound set it. A created record
+//     starts a chain and moves nothing.
+//   - policy.apply with reason_code admin_keys (info) records the key set an
+//     accepted C7 0.10 reply named (AdminKeys), before the node applies any
+//     decision from a reply whose keys_digest is new. verified.keys_digest
+//     is required on an accepted admin decision stamped 0.12 or later.
+//
+// VerifyConfigFrom checks the chain: an acknowledgement's draft is the
+// sensor's latest recorded draft; a retirement follows its acknowledgement,
+// once per run; retention moves are contiguous from each created record
+// and name the previous cutoff; key sets succeed one another; and a decision
+// accepted under a key set is applied only after that set's record, which is
+// the latest before it, lists the verified key as active and lets it sign
+// the verified kind. That a move advances the cutoff and stays behind the
+// wall time less the retention needs only the record, so Validate checks it. A view that
+// starts after seq 1 accepts as given what came before it. The chain can't
+// prove the retention's monotonic bound: bound is the node's own word, and
+// the evidence for it is the node's test with the clock stepped forward.
 //
 // # What it leaves out
 //

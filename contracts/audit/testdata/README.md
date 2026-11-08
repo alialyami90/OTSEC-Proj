@@ -96,3 +96,28 @@ The digests reuse the 0.7 test values.
 | `invalid/config-read-compared-with-difference-too-large.json` | The field on another action. |
 
 The chain case (a too-large detection, then reads of the same change that name it) is in `TestDifferenceTooLargeInAChain`.
+
+## 0.12: network baselines, retention moves and key sets
+
+These records are stamped 0.12, which this package reads, while writers still stamp 0.11 (D4-69). The sensor is C7's test sensor (`5a1f0c3e-…`). The draft and baseline digests are fixed strings (`sha256:aaaa…`, `bbbb…`, `cccc…`), not of any stored document. The key set is the test admin key, allowed `node.baseline_ack` and `node.network_baseline_ack`. Its digest is C7's `AdminKeysDigest` over that one entry.
+
+| File | What it shows |
+| --- | --- |
+| `valid/config-baseline-recorded-network-first.json`, `valid/config-baseline-recorded-network-relearn.json` | The learner's frozen draft recorded against the sensor, as version 1 and then as a re-learn. |
+| `valid/config-baseline-acknowledged-network.json` | A person accepted a document (`cccc…`) built from the draft (`aaaa…`). |
+| `valid/collector-request-admin-verified-keys-digest.json` | The acceptance it follows, with `verified.keys_digest`. |
+| `valid/config-learner-retired-acknowledged.json`, `valid/config-learner-retired-stopped.json` | The learner retired at acknowledgement, naming the baseline, or stopped, naming none. |
+| `valid/store-retention-moved-created.json` | The retention consumer created: nothing moves, and the cutoff is an alert's commit time, younger than the retention (D6). |
+| `valid/store-retention-moved-wall.json` | A move bounded by the wall clock. |
+| `valid/policy-apply-admin-keys.json` | The key set an accepted reply named, after an earlier one. |
+| `invalid/store-retention-moved-stamped-0.11.json`, `invalid/config-baseline-acknowledged-network-stamped-0.11.json` | A 0.12 record stamped 0.11. |
+| `invalid/verified-stamped-0.12-without-keys-digest.json` | An accepted admin decision stamped 0.12 without `keys_digest` (D6). |
+| `invalid/retention-on-service-start.json` | `retention` on another action. |
+| `invalid/sensor-id-on-change-detected.json` | `sensor_id` on a record that isn't a network record (D6, T4). |
+| `invalid/config-baseline-recorded-network-asset-and-sensor.json`, `invalid/config-baseline-recorded-network-without-sensor.json` | A network record with both an asset and a sensor, or with an asset in place of the sensor. |
+| `invalid/store-retention-moved-passes-nothing.json` | A move with `to_seq` equal to `from_seq` that isn't `created`. The schema can't compare the two, so this one passes the schema and fails `Validate`. |
+| `invalid/store-retention-moved-created-with-previous.json` | A `created` record with a previous cutoff. |
+| `invalid/policy-apply-admin-keys-digest-of-other-keys.json` | `digest` isn't the digest of `keys`. The schema can't compute it, so this one passes the schema and fails `Validate`. |
+| `invalid/config-learner-retired-acknowledged-without-digest.json` | An acknowledged retirement that names no baseline. |
+
+The chain rules are in `TestNetworkChainVerifies`, `TestNetworkChainBreaks` and `TestNetworkChainFromView`.

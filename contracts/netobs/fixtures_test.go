@@ -27,7 +27,7 @@ func fxCoverage() Coverage {
 		HSR:        HSRNotDecoded, VLANsSeen: []int{10}, UntaggedSeen: true,
 		Decodes:  []string{"dnp3", "modbus", "telnet"},
 		Degraded: []string{},
-		Settings: Settings{SAReplyTimeoutMS: DefaultSAReplyTimeoutMS, MaxPendingDNP3: DefaultMaxPendingDNP3},
+		Settings: Settings{SAReplyTimeoutMS: DefaultSAReplyTimeoutMS, MaxPendingDNP3: DefaultMaxPendingDNP3, FlowIdleS: DefaultFlowIdleS},
 		SinceUTC: "2026-11-07T08:00:00.000000Z",
 	}
 }

@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.7: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.10: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -272,6 +272,32 @@
 // acknowledgement for an asset it does not collect from with
 // asset_not_enrolled, so a node cannot use one to probe for assets: the
 // answer comes only after a valid signature by a key allowed the kind.
+//
+// # The network baseline acknowledgement (0.10)
+//
+// node.network_baseline_ack accepts one sensor's C13 network baseline
+// (NodeNetworkBaselineAckBody: sensor_id, draft_digest, baseline_digest;
+// D4-68 ruling 8). Through its authorized writers it decides which hosts
+// may write to relays without an alert, so it is its own kind: a key signs
+// it only when its list names it, and node.baseline_ack never takes kind
+// network. baseline_digest names the accepted document, the frozen draft
+// with the person's writers in C13's canonical encoding, and draft_digest
+// the draft it was built from; both are signed. The collector checks their
+// form only, and has no asset or sensor to check. The admin client writes
+// the accepted document's bytes to the node's admin folder unsigned, and
+// the node adopts them only after the collector accepts, when they hash to
+// baseline_digest, are canonical, and differ from the draft it recorded
+// only in authorized_writers (docs/phase4/D3-c7-0.10-c8-0.12.md §1.2).
+//
+// The keys. From 0.10, every accepted reply to an admin-signed request
+// stamped 0.10 or later names the collector's pinned administrator keys
+// (AdminAccepted.Keys, from AdminKeyEntries) and their digest
+// (AdminAccepted.KeysDigest, AdminKeysDigest), and Validate checks that the
+// digest is the one over the list. Before the node applies any decision
+// under a digest it has not recorded, it writes C8 policy.apply naming the
+// digest and the list, and does not apply the decision if that write
+// fails, so a key's grant of a kind is in the audit chain before its first
+// use (D4-68 ruling 9). The node takes both from the reply only.
 //
 // Not covered: the approver and the person who changed the relay may be
 // the same. Nothing observes who changed a relay until engineering access

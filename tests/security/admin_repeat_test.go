@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -299,7 +300,7 @@ func rptWantRepeat(t *testing.T, name string, req *authz.CollectorRequest, reply
 	}
 	sent := *req
 	sent.RequestID = first.RequestID // the first send's request_id
-	if want, _ := first.AdminAcceptance(&sent); want == nil || *got != *want {
+	if want, _ := first.AdminAcceptance(&sent); want == nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("%s: names %+v, first named %+v", name, got, want)
 	}
 	b, err := json.Marshal(reply)

@@ -25,8 +25,12 @@ import (
 // by the collector, with its secret the localized keys (D4-49 Q1 and Q2,
 // D4-50, D4-53). 0.9 refuses an snmpv3 credential whose engine ID is all
 // zeros or all 'ff'H, which RFC 3411 section 5 forbids, at install
-// (docs/phase4/D3-c7-0.9.md).
-const ContractID = "otsec.authz/0.9"
+// (docs/phase4/D3-c7-0.9.md). 0.10 adds the admin-signed kind
+// node.network_baseline_ack, and on an accepted admin-signed reply the
+// digest and list of the collector's pinned administrator keys
+// (AdminAccepted.KeysDigest and Keys) (D4-68,
+// docs/phase4/D3-c7-0.10-c8-0.12.md).
+const ContractID = "otsec.authz/0.10"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a
