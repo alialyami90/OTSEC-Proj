@@ -23,13 +23,16 @@ type rule struct {
 	explain func(d *Detector, o *netobs.Observation) (string, string)
 }
 
-// rules are the rules this version runs, in netobs.Rules order. Each one
-// is called only on an observation with an IP header.
+// rules are the rules that judge observations, in netobs.Rules order. Each
+// one is called only on an observation with an IP header. The tenth,
+// own-session-unseen, judges session records (Session).
 var rules = []rule{
 	{netobs.RuleUnknownPair, true, unknownPair, explainUnknownPair},
 	{netobs.RuleNewService, true, newService, explainNewService},
 	{netobs.RuleNewFunction, true, newFunction, explainNewFunction},
 	{netobs.RuleUnauthorizedWrite, true, unauthorizedWrite, explainUnauthorizedWrite},
+	{netobs.RuleOwnSessionOutsideRecord, false, ownSessionOutsideRecord, explainOwnSessionOutsideRecord},
+	{netobs.RuleNodeAddressSpoofed, false, nodeAddressSpoofed, explainNodeAddressSpoofed},
 	{netobs.RuleUnresolvedAddress, true, unresolvedAddress, explainUnresolvedAddress},
 	{netobs.RuleSAFailed, false, saFailed, explainSAFailed},
 }

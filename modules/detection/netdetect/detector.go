@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"time"
@@ -30,6 +31,34 @@ type DetectorConfig struct {
 	// Params are the rules' parameters while there is no baseline. With
 	// one, the baseline's own params are in force.
 	Params netobs.BaselineParams
+
+	// The node's own addresses, MACs and layer-2 segments, from the install
+	// configuration (network_sensor's node_addresses, node_macs and
+	// node_vlans), never from traffic (baseline note §5). Untagged is the
+	// "untagged" segment.
+	NodeAddresses []string
+	NodeMACs      []string
+	NodeVLANs     []int
+	NodeUntagged  bool
+	// Exclusions are the exact destinations the node derives from its
+	// forward targets: own-session-outside-record never judges a flow to
+	// one (§5, D1 in D4-72).
+	Exclusions []Destination
+	// Endpoints are the enrolled assets' run endpoints (C1).
+	Endpoints []Endpoint
+}
+
+// Destination is an exact destination: an address, a transport and a port.
+type Destination struct {
+	Addr string
+	L4   string
+	Port int
+}
+
+// Endpoint is an enrolled asset's run endpoint.
+type Endpoint struct {
+	AssetID string
+	Destination
 }
 
 // Key is an alert's coalescing key, which is also the key the node counts
@@ -58,13 +87,14 @@ type Committed struct {
 // empty; the node builds the capture from the cited frames and fills it
 // (C13 §7.1).
 //
-// This version runs the five rules that judge against the baseline and
-// sa-failed. The rules on the platform's own traffic come with the
-// session records' call shape.
+// It runs every rule of 0.1: the five that judge against the baseline,
+// sa-failed, and the three on the node's own traffic, which also take the
+// node's session records (Session).
 type Detector struct {
 	sensor  string
 	node    event.NodeID
 	stream  event.Stream
+	own     ownConfig
 	base    *netobs.Baseline
 	hash    string
 	version int64
@@ -88,6 +118,19 @@ type Detector struct {
 	mismatches int64
 
 	earlyCloses int64
+
+	// The own-session state (baseline note §5): the last coverage
+	// statement, the sessions taken and pending, the invocation IDs tied
+	// before their session, the endpoint record and the degraded intervals.
+	cov            *netobs.Coverage
+	sessionThrough uint64
+	sessions       []netobs.PendingSession
+	tied           []netobs.TiedSession
+	seen           map[netip.Addr]*netobs.EndpointSeen
+	degraded       []netobs.Interval
+	degradedOpen   bool
+
+	notJudged, orderingFaults, degradedDropped int64
 }
 
 // serviceKey is a service without its basis: new-service asks whether the
@@ -100,13 +143,19 @@ type serviceKey struct {
 
 // NewDetector starts a detector with no open windows.
 func NewDetector(cfg DetectorConfig) (*Detector, error) {
-	d := &Detector{sensor: cfg.SensorID, node: cfg.NodeID, stream: cfg.Stream, params: cfg.Params, windows: map[Key]*netobs.DetectorWindow{}}
+	d := &Detector{sensor: cfg.SensorID, node: cfg.NodeID, stream: cfg.Stream, params: cfg.Params, windows: map[Key]*netobs.DetectorWindow{},
+		seen: map[netip.Addr]*netobs.EndpointSeen{}}
 	switch {
 	case !netobs.ValidUUID(cfg.SensorID):
 		return nil, fmt.Errorf("netdetect: sensor %q is not a UUID", cfg.SensorID)
 	case !cfg.NodeID.Valid() || !cfg.Stream.Valid():
 		return nil, fmt.Errorf("netdetect: %q:%q is not an observation stream", cfg.NodeID, cfg.Stream)
 	}
+	own, err := newOwnConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	d.own = own
 	if cfg.Baseline == nil {
 		if err := checkParams(cfg.Params); err != nil {
 			return nil, err
@@ -204,6 +253,9 @@ func (d *Detector) Observe(id event.EventID, o *netobs.Observation) ([]netobs.Al
 	if d.clockUTC == "" || at.After(d.clock) {
 		d.clock, d.clockUTC = at, o.FirstUTC
 	}
+	cov := cloneCoverage(o.Coverage)
+	d.cov = &cov
+	d.track(o)
 	out := d.close()
 	for _, r := range rules {
 		if r.base && (d.base == nil || o.Node.PlatformSession != nil) {
@@ -213,9 +265,10 @@ func (d *Detector) Observe(id event.EventID, o *netobs.Observation) ([]netobs.Al
 			continue
 		}
 		bv, text := r.explain(d, o)
-		out = d.hit(out, id, o, r.rule, bv, text)
+		c := cite(o, r.rule)
+		out = d.raise(out, Key{r.rule, o.Node.DstAsset}, o.FirstUTC, bv, text, o.IP.Src, id.Seq, &c, o.Coverage)
 	}
-	return d.hold(out), nil
+	return d.hold(d.judge(out)), nil
 }
 
 // close ends every window whose time has passed on the capture clock, and
@@ -243,40 +296,46 @@ func compareWindow(a, b *netobs.DetectorWindow) int {
 	return cmp.Or(cmp.Compare(a.Rule, b.Rule), cmp.Compare(a.AssetID, b.AssetID))
 }
 
-// hit counts one hit of rule on o's key and appends what it raises to out.
-// The first hit of a window opens it and is raised at once; a later one is
+// raise counts one hit on key k, at capture time at, and appends what it
+// raises to out. src, seq and c are the hit's source address, observation
+// seq and citation; own-session-unseen has none of them ("", 0, nil). The
+// first hit of a window opens it and is raised at once; a later one is
 // counted for the summary. With MaxDetectorWindows open, the window that
 // started earliest closes first, with its summary if it had repeats (D1 in
 // D4-72), so the new key still alerts at once and the state stays bounded.
-func (d *Detector) hit(out []netobs.Alert, id event.EventID, o *netobs.Observation, rule netobs.Rule, bv, text string) []netobs.Alert {
-	k := Key{rule, o.Node.DstAsset}
-	c := cite(o, rule)
+func (d *Detector) raise(out []netobs.Alert, k Key, at, bv, text, src string, seq uint64, c *netobs.Cite, cov netobs.Coverage) []netobs.Alert {
 	w, ok := d.windows[k]
 	if !ok {
 		if len(d.windows) >= netobs.MaxDetectorWindows {
 			out = d.evict(out)
 		}
-		w = &netobs.DetectorWindow{Rule: rule, AssetID: k.AssetID, KeyText: string(rule) + " against " + k.AssetID,
-			BaselineValue: bv, Observation: text, AtUTC: o.FirstUTC, WindowStartUTC: o.FirstUTC, Hits: 1,
-			Sources: []string{o.IP.Src}, Related: []uint64{id.Seq}, Cites: []netobs.Cite{c}, Coverage: o.Coverage}
+		w = &netobs.DetectorWindow{Rule: k.Rule, AssetID: k.AssetID, KeyText: string(k.Rule) + " against " + k.AssetID,
+			BaselineValue: bv, Observation: text, AtUTC: at, WindowStartUTC: at, Hits: 1,
+			Sources: []string{}, Related: []uint64{}, Cites: []netobs.Cite{}, Coverage: cov}
+		if src != "" {
+			w.Sources, w.Related, w.Cites = []string{src}, []uint64{seq}, []netobs.Cite{*c}
+		}
 		d.windows[k] = w
 		return append(out, d.alert(w))
 	}
 	// A summary shows the latest hit's text and coverage, and the latest
 	// capture time among the hits, which is never before the window's start.
 	w.Hits++
-	w.BaselineValue, w.Observation, w.Coverage = bv, text, o.Coverage
-	if mustTime(o.FirstUTC).After(mustTime(w.AtUTC)) {
-		w.AtUTC = o.FirstUTC
+	w.BaselineValue, w.Observation, w.Coverage = bv, text, cov
+	if mustTime(at).After(mustTime(w.AtUTC)) {
+		w.AtUTC = at
 	}
-	if i, found := slices.BinarySearch(w.Sources, o.IP.Src); !found && len(w.Sources) < netobs.MaxRelated {
-		w.Sources = slices.Insert(w.Sources, i, o.IP.Src)
+	if src == "" {
+		return out
+	}
+	if i, found := slices.BinarySearch(w.Sources, src); !found && len(w.Sources) < netobs.MaxRelated {
+		w.Sources = slices.Insert(w.Sources, i, src)
 	}
 	if len(w.Related) < netobs.MaxRelated {
-		w.Related = append(w.Related, id.Seq)
+		w.Related = append(w.Related, seq)
 	}
 	if len(w.Cites) < netobs.MaxAlertFlows {
-		w.Cites = append(w.Cites, c)
+		w.Cites = append(w.Cites, *c)
 	}
 	return out
 }
@@ -407,7 +466,12 @@ func (d *Detector) Checkpoint(lastAlertSeq uint64) ([]byte, error) {
 	}
 	k := netobs.DetectorCheckpoint{Schema: netobs.CheckpointIdentifier, Half: netobs.HalfDetector, SensorID: d.sensor,
 		NodeID: d.node, Stream: d.stream, Baseline: d.hash, BaselineVersion: d.version, Through: d.through, LastAlertSeq: lastAlertSeq, ClockUTC: d.clockUTC,
-		Windows: []netobs.DetectorWindow{}}
+		Windows: []netobs.DetectorWindow{}, Coverage: d.cov, SessionThrough: d.sessionThrough, Sessions: d.sessions,
+		Tied: d.tied, Degraded: d.degraded, DegradedOpen: d.degradedOpen}
+	for _, e := range d.seen {
+		k.Endpoints = append(k.Endpoints, *e)
+	}
+	slices.SortFunc(k.Endpoints, func(a, b netobs.EndpointSeen) int { return cmp.Compare(a.IP, b.IP) })
 	for _, w := range d.windows {
 		k.Windows = append(k.Windows, *w)
 	}
@@ -455,8 +519,21 @@ func RestoreDetector(cfg DetectorConfig, checkpoint []byte, committed []Committe
 		w := k.Windows[i]
 		d.windows[Key{w.Rule, w.AssetID}] = &w
 	}
+	d.cov, d.sessionThrough, d.sessions, d.tied = k.Coverage, k.SessionThrough, k.Sessions, k.Tied
+	d.degraded, d.degradedOpen = k.Degraded, k.DegradedOpen
+	for i := range k.Endpoints {
+		e := k.Endpoints[i]
+		a, _ := parseAddr(e.IP)
+		d.seen[a] = &e
+	}
 	if again, err := d.Checkpoint(k.LastAlertSeq); err != nil || !bytes.Equal(again, checkpoint) {
 		return nil, errors.New("netdetect: the checkpoint does not restore to itself")
+	}
+	// An endpoint no longer enrolled is no longer recorded.
+	for a := range d.seen {
+		if !d.own.recorded[a] {
+			delete(d.seen, a)
+		}
 	}
 	d.pending, d.head = slices.Clone(committed), head
 	d.settle()

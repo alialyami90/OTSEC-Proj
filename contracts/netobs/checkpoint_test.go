@@ -155,8 +155,16 @@ func fxDetectorCheckpoint() *DetectorCheckpoint {
 		NodeID: a.Related[0].NodeID, Stream: a.Related[0].Stream, Baseline: a.Baseline, BaselineVersion: a.BaselineVersion, Through: 40, LastAlertSeq: 6, ClockUTC: a.AtUTC,
 		Windows: []DetectorWindow{{Rule: a.Rule, AssetID: a.AssetID, KeyText: a.KeyText, BaselineValue: a.BaselineValue,
 			Observation: a.Observation, AtUTC: a.AtUTC, WindowStartUTC: a.WindowStartUTC, Hits: a.Hits,
-			Sources: []string{"192.0.2.10", "198.51.100.7"}, Related: []uint64{7, 9, 12}, Cites: a.Cites, Coverage: a.Coverage}}}
+			Sources: []string{"192.0.2.10", "198.51.100.7"}, Related: []uint64{7, 9, 12}, Cites: a.Cites, Coverage: a.Coverage}},
+		Coverage: &a.Coverage, SessionThrough: 5,
+		Sessions: []PendingSession{{InvocationID: fxInv(1), AssetID: a.AssetID, IP: "192.0.2.20", L4: "tcp", Port: 23,
+			StartedUTC: "2026-11-07T10:00:00Z", EndedUTC: "2026-11-07T10:00:10Z", AfterSeq: 38}},
+		Tied:      []TiedSession{{InvocationID: fxInv(2), ClockUTC: a.AtUTC}},
+		Endpoints: []EndpointSeen{{IP: "192.0.2.10", VLANs: []int{10}, LANs: []string{}}, {IP: "192.0.2.20", VLANs: []int{0, 10}, LANs: []string{"a", "b"}}},
+		Degraded:  []Interval{{StartUTC: "2026-11-07T09:00:00Z", EndUTC: "2026-11-07T09:00:30Z"}}, DegradedOpen: true}
 }
+
+func fxInv(n int) string { return fmt.Sprintf("0b9a6e2c-5d4f-4e3a-9b1c-%012x", n) }
 
 // A detector checkpoint round-trips byte for byte, and each window gives
 // the summary alert it holds.
@@ -218,6 +226,53 @@ func TestDetectorCheckpointRules(t *testing.T) {
 		{"source form", CodeForm, func(k *DetectorCheckpoint) { k.Windows[0].Sources = []string{"::ffff:192.0.2.10"} }},
 		{"no source", CodeForm, func(k *DetectorCheckpoint) { k.Windows[0].Sources = nil }},
 		{"no cite", CodeForm, func(k *DetectorCheckpoint) { k.Windows[0].Cites = nil }},
+		{"own-session state with no clock", CodeConflict, func(k *DetectorCheckpoint) { k.ClockUTC, k.Windows = "", nil }},
+		{"coverage form", CodeForm, func(k *DetectorCheckpoint) { c := *k.Coverage; c.HSR = "decoded"; k.Coverage = &c }},
+		{"degraded open with no interval", CodeConflict, func(k *DetectorCheckpoint) { k.Degraded = nil }},
+		{"interval reversed", CodeOrder, func(k *DetectorCheckpoint) { k.Degraded[0].EndUTC = "2026-11-07T08:59:59Z" }},
+		{"intervals past the bound", CodeRange, func(k *DetectorCheckpoint) {
+			k.Degraded = slices.Repeat(k.Degraded, MaxDegradedIntervals+1)
+		}},
+		{"session pending, none taken", CodeConflict, func(k *DetectorCheckpoint) { k.SessionThrough = 0 }},
+		{"session invocation form", CodeForm, func(k *DetectorCheckpoint) { k.Sessions[0].InvocationID = "inv-1" }},
+		{"session asset form", CodeForm, func(k *DetectorCheckpoint) { k.Sessions[0].AssetID = AssetUnresolved }},
+		{"session address form", CodeForm, func(k *DetectorCheckpoint) { k.Sessions[0].IP = "::ffff:192.0.2.20" }},
+		{"session port", CodeForm, func(k *DetectorCheckpoint) { k.Sessions[0].Port = 0 }},
+		{"session transport", CodeForm, func(k *DetectorCheckpoint) { k.Sessions[0].L4 = "sctp" }},
+		{"session window reversed", CodeOrder, func(k *DetectorCheckpoint) { k.Sessions[0].EndedUTC = "2026-11-07T09:59:59Z" }},
+		{"session pending twice", CodeConflict, func(k *DetectorCheckpoint) { k.Sessions = append(k.Sessions, k.Sessions[0]) }},
+		{"sessions out of order", CodeOrder, func(k *DetectorCheckpoint) {
+			p := k.Sessions[0]
+			p.InvocationID, p.AfterSeq = fxInv(3), 37
+			k.Sessions = append(k.Sessions, p)
+		}},
+		{"sessions past the bound", CodeRange, func(k *DetectorCheckpoint) {
+			for i := range MaxPendingSessions {
+				p := k.Sessions[0]
+				p.InvocationID = fxInv(100 + i)
+				k.Sessions = append(k.Sessions, p)
+			}
+		}},
+		{"tied and pending", CodeConflict, func(k *DetectorCheckpoint) { k.Tied[0].InvocationID = fxInv(1) }},
+		{"tied clock form", CodeForm, func(k *DetectorCheckpoint) { k.Tied[0].ClockUTC = "now" }},
+		{"tied past the bound", CodeRange, func(k *DetectorCheckpoint) {
+			for i := range MaxTiedSessions {
+				k.Tied = append(k.Tied, TiedSession{InvocationID: fxInv(1000 + i), ClockUTC: k.ClockUTC})
+			}
+		}},
+		{"endpoints unsorted", CodeOrder, func(k *DetectorCheckpoint) { k.Endpoints[0], k.Endpoints[1] = k.Endpoints[1], k.Endpoints[0] }},
+		{"endpoint address form", CodeForm, func(k *DetectorCheckpoint) { k.Endpoints[0].IP = "192.0.2.010" }},
+		{"endpoint with no VLAN", CodeRange, func(k *DetectorCheckpoint) { k.Endpoints[0].VLANs = []int{} }},
+		{"endpoint overflow short", CodeRange, func(k *DetectorCheckpoint) { k.Endpoints[0].VLANsOverflow = true }},
+		{"endpoint VLAN 4095", CodeOrder, func(k *DetectorCheckpoint) { k.Endpoints[0].VLANs = []int{4095} }},
+		{"endpoint VLANs unsorted", CodeOrder, func(k *DetectorCheckpoint) { k.Endpoints[1].VLANs = []int{10, 0} }},
+		{"endpoint LAN", CodeForm, func(k *DetectorCheckpoint) { k.Endpoints[1].LANs = []string{"b", "a"} }},
+		{"endpoints past the bound", CodeRange, func(k *DetectorCheckpoint) {
+			k.Endpoints = nil
+			for i := range MaxDetectorEndpoints + 1 {
+				k.Endpoints = append(k.Endpoints, EndpointSeen{IP: fmt.Sprintf("2001:db8::%x", 0x1000+i), VLANs: []int{10}, LANs: []string{}})
+			}
+		}},
 	}
 	for _, tc := range cases {
 		k := fxDetectorCheckpoint()
@@ -239,11 +294,18 @@ func TestDetectorCheckpointRules(t *testing.T) {
 // window's worst encoding, and the checkpoint under the configuration
 // record cap less its headroom.
 func TestDetectorBounds(t *testing.T) {
-	if MaxDetectorWindows != 96 || MaxDetectorWindowBytes != 12288 || MaxDetectorCheckpointBytes != 1180672 {
+	if MaxDetectorWindows != 96 || MaxDetectorWindowBytes != 12288 || MaxDetectorCheckpointBytes != 1338368 {
 		t.Fatalf("bounds %d, %d, %d", MaxDetectorWindows, MaxDetectorWindowBytes, MaxDetectorCheckpointBytes)
 	}
-	if MaxDetectorCheckpointBytes > config.RecordCap-config.RecordHeadroom {
-		t.Fatalf("%d, above the configuration record cap less headroom %d", MaxDetectorCheckpointBytes, config.RecordCap-config.RecordHeadroom)
+	own := []int{MaxPendingSessions, MaxPendingSessionBytes, MaxTiedSessions, MaxTiedSessionBytes, MaxDetectorEndpoints,
+		MaxDetectorEndpointBytes, MaxEndpointVLANs, MaxDegradedIntervals, MaxDegradedIntervalBytes}
+	if !slices.Equal(own, []int{128, 512, 256, 128, 256, 192, 8, 64, 128}) {
+		t.Fatalf("own-session bounds %v", own)
+	}
+	// Strictly below the cap less headroom, with at least a tenth of it to
+	// spare (D1 in D4-72).
+	if limit := config.RecordCap - config.RecordHeadroom; MaxDetectorCheckpointBytes > limit-limit/10 {
+		t.Fatalf("%d, within a tenth of the configuration record cap less headroom %d", MaxDetectorCheckpointBytes, limit)
 	}
 }
 
@@ -286,9 +348,7 @@ func TestWorstDetectorCheckpointFits(t *testing.T) {
 		t.Fatalf("worst window %d bytes with its comma and coverage slack %d, above %d", len(w)+1, slack, MaxDetectorWindowBytes)
 	}
 	t.Logf("worst window %d bytes, slack %d", len(w)+1, slack)
-	if env := len(b) - len(w); env >= 1<<10 {
-		t.Fatalf("envelope %d bytes, not under 1 KiB", env)
-	}
+	worstOwn(t, k)
 	k.Windows = nil
 	for i := range MaxDetectorWindows {
 		k.Windows = append(k.Windows, worstWindow(fmt.Sprintf("%s%04d", fxAsset[:len(fxAsset)-4], i)))
@@ -297,7 +357,7 @@ func TestWorstDetectorCheckpointFits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(b) + MaxDetectorWindows*slack; n > MaxDetectorCheckpointBytes {
+	if n := len(b) + MaxDetectorWindows*slack + (MaxCoverageBytes - len(cv)); n > MaxDetectorCheckpointBytes {
 		t.Fatalf("worst checkpoint %d bytes with coverage slack, above %d", n, MaxDetectorCheckpointBytes)
 	}
 	if _, err := DecodeDetectorCheckpoint(b); err != nil {
@@ -306,4 +366,56 @@ func TestWorstDetectorCheckpointFits(t *testing.T) {
 	if _, err := DecodeDetectorCheckpoint(append(b, make([]byte, MaxDetectorCheckpointBytes)...)); !slices.Contains(Codes(err), CodeRange) {
 		t.Errorf("an oversized checkpoint: %v", err)
 	}
+}
+
+// worstOwn checks each own-session entry at its longest against its bound
+// with its comma, the envelope with every field at its longest and every
+// list empty under 1 KiB, and fills k's own-session state to every bound,
+// coverage aside, which the caller allows for.
+func worstOwn(t *testing.T, k *DetectorCheckpoint) {
+	t.Helper()
+	const utc = "2026-11-07T10:04:00.123456789Z"
+	ip := func(i int) string { return fmt.Sprintf("ffff:ffff:ffff:ffff:ffff:ffff:ffff:%04x", 0xf000+i) }
+	inv := func(i int) string { return fmt.Sprintf("0b9a6e2c-5d4f-4e3a-9b1c-%012x", i) }
+	fits := func(name string, v any, most int) {
+		b, _ := json.Marshal(v)
+		if len(b)+1 > most {
+			t.Fatalf("worst %s %d bytes with its comma, above %d", name, len(b)+1, most)
+		}
+		t.Logf("worst %s %d bytes", name, len(b)+1)
+	}
+	e := *k
+	e.Windows, e.Coverage, e.Sessions, e.Tied, e.Endpoints, e.Degraded = nil, nil, nil, nil, nil, nil
+	e.Baseline, e.BaselineVersion, e.LastAlertSeq, e.SessionThrough = "sha256:"+strings.Repeat("f", 64), 1<<63-1, 1<<64-1, 1<<64-1
+	e.ClockUTC, e.DegradedOpen = utc, false
+	env, err := e.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env) >= 1<<10 {
+		t.Fatalf("envelope %d bytes, not under 1 KiB", len(env))
+	}
+	t.Logf("envelope %d bytes", len(env))
+	k.Sessions, k.Tied, k.Endpoints, k.Degraded = nil, nil, nil, nil
+	for i := range MaxPendingSessions {
+		k.Sessions = append(k.Sessions, PendingSession{InvocationID: inv(i), AssetID: fxAsset, IP: ip(i), L4: "tcp", Port: 65535,
+			StartedUTC: utc, EndedUTC: utc, AfterSeq: 1<<64 - 1})
+	}
+	for i := range MaxTiedSessions {
+		k.Tied = append(k.Tied, TiedSession{InvocationID: inv(1000 + i), ClockUTC: utc})
+	}
+	for i := range MaxDetectorEndpoints {
+		k.Endpoints = append(k.Endpoints, EndpointSeen{IP: ip(i), VLANs: []int{4087, 4088, 4089, 4090, 4091, 4092, 4093, 4094},
+			VLANsOverflow: true, LANs: []string{"a", "b"}})
+	}
+	for range MaxDegradedIntervals {
+		k.Degraded = append(k.Degraded, Interval{StartUTC: utc, EndUTC: utc})
+	}
+	k.SessionThrough, k.DegradedOpen = 1<<64-1, true
+	fits("pending session", k.Sessions[0], MaxPendingSessionBytes)
+	fits("tied session", k.Tied[0], MaxTiedSessionBytes)
+	fits("endpoint", k.Endpoints[0], MaxDetectorEndpointBytes)
+	fits("interval", k.Degraded[0], MaxDegradedIntervalBytes)
+	cv := fxCoverage()
+	k.Coverage = &cv
 }

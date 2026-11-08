@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/internal/strictjson"
@@ -39,11 +40,36 @@ const MaxDetectorWindows = 96
 // (TestWorstDetectorWindowFits).
 const MaxDetectorWindowBytes = 12 << 10
 
-// MaxDetectorCheckpointBytes bounds a detector checkpoint: its windows and
-// an envelope of under 1 KiB, 1,180,672 bytes. It is under the
-// configuration record cap less its headroom (1,507,328), so a checkpoint
-// that fits is never refused there.
-const MaxDetectorCheckpointBytes = MaxDetectorWindows*MaxDetectorWindowBytes + 1<<10
+// The own-session state's bounds (D1 in D4-72). Past MaxPendingSessions
+// pending sessions or MaxTiedSessions tied invocation IDs, the extra
+// session is counted as not judged and the node raises the alarm. Past
+// MaxDegradedIntervals the oldest interval is dropped, never merged. Past
+// MaxDetectorEndpoints the extra endpoints are never recorded, so they show
+// as not yet seen. Each Max*Bytes bounds one entry as encoded, with its
+// comma (TestWorstDetectorCheckpointFits).
+const (
+	MaxPendingSessions       = 128
+	MaxPendingSessionBytes   = 512
+	MaxTiedSessions          = 256
+	MaxTiedSessionBytes      = 128
+	MaxDetectorEndpoints     = 256
+	MaxDetectorEndpointBytes = 192
+	MaxEndpointVLANs         = 8
+	MaxDegradedIntervals     = 64
+	MaxDegradedIntervalBytes = 128
+)
+
+// MaxDetectorCheckpointBytes bounds a detector checkpoint: the sum of its
+// parts at their worst (its windows, pending sessions, tied invocation IDs,
+// endpoint record, degraded intervals and coverage statement) and an
+// envelope of under 1 KiB, 1,338,368 bytes. It is strictly below the
+// configuration record cap less its headroom (1,507,328), with 168,960
+// bytes (11%) to spare, so a checkpoint that fits is never refused there
+// (C13 §14 item 17).
+const MaxDetectorCheckpointBytes = MaxDetectorWindows*MaxDetectorWindowBytes +
+	MaxPendingSessions*MaxPendingSessionBytes + MaxTiedSessions*MaxTiedSessionBytes +
+	MaxDetectorEndpoints*MaxDetectorEndpointBytes + MaxDegradedIntervals*MaxDegradedIntervalBytes +
+	MaxCoverageBytes + 1<<10
 
 // MaxLearnerCheckpointBytes bounds a learner checkpoint: its draft, at
 // most MaxBaselineBytes, its held starts, and an envelope of under 1 KiB.
@@ -198,6 +224,66 @@ type DetectorCheckpoint struct {
 	// Windows are the open coalescing windows, sorted by rule and then
 	// asset, one per key, at most MaxDetectorWindows (C13 §7.3).
 	Windows []DetectorWindow `json:"windows"`
+	// Coverage is the coverage statement of the last observation taken, or
+	// null when none has been. own-session-unseen judges against it.
+	Coverage *Coverage `json:"coverage"`
+	// SessionThrough is the health-stream seq of the last session record
+	// taken, or 0.
+	SessionThrough uint64 `json:"session_through"`
+	// Sessions are the connected sessions taken and not yet judged, in the
+	// order taken.
+	Sessions []PendingSession `json:"sessions"`
+	// Tied are the invocation IDs that observations were tied to and whose
+	// session record has not been taken yet, in the order first tied.
+	Tied []TiedSession `json:"tied"`
+	// Endpoints are the enrolled run endpoints' addresses seen in
+	// observations neither tied nor degraded, sorted by address: the
+	// coverage record before acknowledgement (D1 in D4-72).
+	Endpoints []EndpointSeen `json:"endpoints"`
+	// Degraded are the capture-time intervals of runs of observations whose
+	// coverage was degraded, oldest first. DegradedOpen says the last
+	// observation taken was degraded, so the next degraded one extends the
+	// last interval.
+	Degraded     []Interval `json:"degraded"`
+	DegradedOpen bool       `json:"degraded_open"`
+}
+
+// PendingSession is a connected session of the node's own whose flow has
+// not been seen yet (baseline note §5): its run's invocation ID, asset and
+// endpoint, its window on the collector host's clock, and the observation
+// seq it was handed over after.
+type PendingSession struct {
+	InvocationID string `json:"invocation_id"`
+	AssetID      string `json:"asset_id"`
+	IP           string `json:"ip"`
+	L4           string `json:"l4"`
+	Port         int    `json:"port"`
+	StartedUTC   string `json:"started_utc"`
+	EndedUTC     string `json:"ended_utc"`
+	AfterSeq     uint64 `json:"after_seq"`
+}
+
+// TiedSession is an invocation ID observations were tied to, and the
+// capture clock when one last was.
+type TiedSession struct {
+	InvocationID string `json:"invocation_id"`
+	ClockUTC     string `json:"clock_utc"`
+}
+
+// EndpointSeen is an enrolled run endpoint's address and the VLANs (0 for
+// untagged) and PRP LANs it was seen on, at most MaxEndpointVLANs VLANs;
+// VLANsOverflow says there were more.
+type EndpointSeen struct {
+	IP            string   `json:"ip"`
+	VLANs         []int    `json:"vlans"`
+	VLANsOverflow bool     `json:"vlans_overflow"`
+	LANs          []string `json:"lans"`
+}
+
+// Interval is a capture-time interval, both ends inclusive.
+type Interval struct {
+	StartUTC string `json:"start_utc"`
+	EndUTC   string `json:"end_utc"`
 }
 
 // DetectorWindow is one open coalescing window: what its summary alert
@@ -229,10 +315,14 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 	for i, seq := range w.Related {
 		related[i] = event.EventID{NodeID: k.NodeID, Stream: k.Stream, Seq: seq}
 	}
+	total := w.Hits
+	if w.Rule == RuleOwnSessionUnseen {
+		total = 0 // it names a session record, no traffic
+	}
 	return Alert{Schema: Identifier, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
 		KeyText: w.KeyText, Params: params, BaselineValue: w.BaselineValue, Observation: w.Observation, Clock: ClockCapture,
 		AtUTC: w.AtUTC, WindowStartUTC: w.WindowStartUTC, Hits: w.Hits, Sources: int64(len(w.Sources)),
-		Related: related, RelatedTotal: w.Hits, Cites: w.Cites, Coverage: w.Coverage}
+		Related: related, RelatedTotal: total, Cites: w.Cites, Coverage: w.Coverage}
 }
 
 // Validate checks the checkpoint: its schema, half and sensor, the baseline
@@ -283,7 +373,9 @@ func (k *DetectorCheckpoint) Validate() error {
 			params = append(params, Param{Name: name, Value: "1"}) // the values are the detector's
 		}
 		a := w.Alert(k, params)
-		a.Capture = fmt.Sprintf("%064x", 0)
+		if w.Rule != RuleOwnSessionUnseen {
+			a.Capture = fmt.Sprintf("%064x", 0)
+		}
 		if err := a.Validate(); err != nil {
 			c.fail(CodeForm, f, "%v", err)
 		}
@@ -309,7 +401,94 @@ func (k *DetectorCheckpoint) Validate() error {
 			c.fail(CodeRange, f+".sources", "%d, above %d", len(w.Sources), MaxRelated)
 		}
 	}
+	k.validateOwn(c)
 	return c.err()
+}
+
+// validateOwn checks the own-session state.
+func (k *DetectorCheckpoint) validateOwn(c *checker) {
+	if k.Coverage != nil {
+		k.Coverage.check(c, "coverage")
+	}
+	if k.ClockUTC == "" && (k.Coverage != nil || len(k.Sessions)+len(k.Tied)+len(k.Endpoints)+len(k.Degraded) != 0 || k.DegradedOpen) {
+		c.fail(CodeConflict, "clock_utc", "own-session state with no clock")
+	}
+	if k.DegradedOpen && len(k.Degraded) == 0 {
+		c.fail(CodeConflict, "degraded_open", "no interval to extend")
+	}
+	bound := func(f string, n, most, each int, v any) {
+		if n > most {
+			c.fail(CodeRange, f, "%d, above %d", n, most)
+		}
+		if b, err := json.Marshal(v); err != nil || len(b)+1 > each {
+			c.fail(CodeRange, f, "%d bytes encoded with its comma, above %d", len(b)+1, each)
+		}
+	}
+	ids := map[string]bool{}
+	for i, p := range k.Sessions {
+		f := fmt.Sprintf("sessions[%d]", i)
+		bound("sessions", len(k.Sessions), MaxPendingSessions, MaxPendingSessionBytes, p)
+		c.uuid(f+".invocation_id", p.InvocationID)
+		c.uuid(f+".asset_id", p.AssetID)
+		if ids[p.InvocationID] {
+			c.fail(CodeConflict, f+".invocation_id", "pending twice")
+		}
+		ids[p.InvocationID] = true
+		c.addr(f+".ip", p.IP)
+		if (p.L4 != "tcp" && p.L4 != "udp") || p.Port < 1 || p.Port > 65535 {
+			c.fail(CodeForm, f, "%s %d is not a transport and port", p.L4, p.Port)
+		}
+		s, ok1 := c.utc(f+".started_utc", p.StartedUTC)
+		e, ok2 := c.utc(f+".ended_utc", p.EndedUTC)
+		if ok1 && ok2 && e.Before(s) {
+			c.fail(CodeOrder, f+".ended_utc", "before started_utc")
+		}
+		if i > 0 && p.AfterSeq < k.Sessions[i-1].AfterSeq {
+			c.fail(CodeOrder, f+".after_seq", "sessions in the order taken, after_seq not falling")
+		}
+		if k.SessionThrough == 0 {
+			c.fail(CodeConflict, "session_through", "sessions pending, none taken")
+		}
+	}
+	for i, t := range k.Tied {
+		f := fmt.Sprintf("tied[%d]", i)
+		bound("tied", len(k.Tied), MaxTiedSessions, MaxTiedSessionBytes, t)
+		c.uuid(f+".invocation_id", t.InvocationID)
+		c.utc(f+".clock_utc", t.ClockUTC)
+		if ids[t.InvocationID] {
+			c.fail(CodeConflict, f+".invocation_id", "both pending and tied")
+		}
+		ids[t.InvocationID] = true
+	}
+	for i, e := range k.Endpoints {
+		f := fmt.Sprintf("endpoints[%d]", i)
+		bound("endpoints", len(k.Endpoints), MaxDetectorEndpoints, MaxDetectorEndpointBytes, e)
+		c.addr(f+".ip", e.IP)
+		if i > 0 && k.Endpoints[i-1].IP >= e.IP {
+			c.fail(CodeOrder, f, "sorted by address, without duplicates")
+		}
+		if len(e.VLANs) == 0 || len(e.VLANs) > MaxEndpointVLANs || (e.VLANsOverflow && len(e.VLANs) != MaxEndpointVLANs) {
+			c.fail(CodeRange, f+".vlans", "%d VLANs, from 1 to %d, all %d when overflowed", len(e.VLANs), MaxEndpointVLANs, MaxEndpointVLANs)
+		}
+		for j, v := range e.VLANs {
+			if v < 0 || v > 4094 || (j > 0 && e.VLANs[j-1] >= v) {
+				c.fail(CodeOrder, f+".vlans", "0 to 4094, ascending")
+				break
+			}
+		}
+		if !slices.Equal(e.LANs, []string{}) && !slices.Equal(e.LANs, []string{"a"}) && !slices.Equal(e.LANs, []string{"b"}) && !slices.Equal(e.LANs, []string{"a", "b"}) {
+			c.fail(CodeForm, f+".lans", "%q is not a sorted set of a and b", e.LANs)
+		}
+	}
+	for i, v := range k.Degraded {
+		f := fmt.Sprintf("degraded[%d]", i)
+		bound("degraded", len(k.Degraded), MaxDegradedIntervals, MaxDegradedIntervalBytes, v)
+		s, ok1 := c.utc(f+".start_utc", v.StartUTC)
+		e, ok2 := c.utc(f+".end_utc", v.EndUTC)
+		if ok1 && ok2 && e.Before(s) {
+			c.fail(CodeOrder, f+".end_utc", "before start_utc")
+		}
+	}
 }
 
 // Encode validates k and encodes it.
@@ -320,6 +499,18 @@ func (k *DetectorCheckpoint) Encode() ([]byte, error) {
 	e := *k
 	if e.Windows == nil {
 		e.Windows = []DetectorWindow{}
+	}
+	if e.Sessions == nil {
+		e.Sessions = []PendingSession{}
+	}
+	if e.Tied == nil {
+		e.Tied = []TiedSession{}
+	}
+	if e.Endpoints == nil {
+		e.Endpoints = []EndpointSeen{}
+	}
+	if e.Degraded == nil {
+		e.Degraded = []Interval{}
 	}
 	out, err := json.Marshal(&e)
 	if err != nil {
