@@ -167,11 +167,12 @@ Status gets a `sensor` section, written as the other sections are, and `otsec he
 - observations and alerts stored;
 - the restart count since the node started, and the open coverage gap, if any;
 - the oldest file in the capture ring;
-- the C-11 interface check (§7): `ok`, or what is bound.
+- the C-11 interface check (§7): `ok`, or what is bound;
+- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8).
 
 Status never shows packet bytes or device text, and banners are shown bounded and quoted (D3).
 
-The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
+The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`, and the intake hold's `intake-checkpoint-failed`, `intake-record-not-removed` and `intake-repair-refused`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
 
 ## 7. C-11 on Windows: the install side
 

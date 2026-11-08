@@ -42,7 +42,10 @@ import (
 //     capture (identity.go);
 //   - since C5 0.8, a C12 finding (otsec.finding, evidence, series
 //     finding), with no capture, that passes C12's Validate in the bytes
-//     the node's encoder writes (findings.go).
+//     the node's encoder writes (findings.go);
+//   - since C5 0.9, the intake hold's record (otsec.netcheckpoint.intake,
+//     working state, series netcheckpoint.intake), with no capture
+//     (netintake.go).
 //
 // It returns each document's C5 0.7 DocumentInfo. The first three are
 // evidence, in the series config.snapshot or config.difference (C9's own
@@ -118,6 +121,8 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return checkIdentityReadRecord(document, capture)
 	case finding.Known(head.Schema):
 		return checkFindingRecord(document, capture)
+	case head.Schema == IntakeSchema:
+		return checkIntakeRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record or a C12 finding", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record, a C12 finding or an intake hold record", head.Schema, head.Kind)
 }
