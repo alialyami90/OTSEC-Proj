@@ -1263,6 +1263,36 @@ func healthPosition(t *testing.T, bad bool) {
 	}
 }
 
+// D1's note 2 on #590: a restored detector's health read starts at its
+// SessionThrough, so a collection.run before the last session taken, one
+// that doesn't parse included, is not read or counted again after a
+// restart.
+func TestDetectorHealthReadRestored(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	s := newScheduler(t, r, &fakeCollector{})
+	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
+	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
+	r.Tick(bg)
+	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := detectorStatus(t, st); d.NotJudged["session-missing"] != 1 || r.detector.d.SessionThrough() != uint64(run) {
+		t.Fatalf("session through %d (run %d), status %+v", r.detector.d.SessionThrough(), run, d)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	if d := detectorStatus(t, st); !d.Restored || d.NotJudged["session-missing"] != 0 {
+		t.Fatalf("after the restart: status %+v", d)
+	}
+}
+
 // readerFunc is a health stream reader.
 type readerFunc func(c5.Seq) ([]c5.Stored, error)
 
