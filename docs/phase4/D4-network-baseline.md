@@ -52,7 +52,7 @@ The operator starts learning for a period (the default is 7 days, a parameter). 
 
 ### 2.3 Acknowledgement and the authorized writers
 
-The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked. It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
+The admin client shows the frozen draft: pairs, services and functions grouped by server asset, with every write-class or control-class function the learner saw marked, and each pair end named only through an inbound (Syslog sender) address marked too, derived from `addresses` and the current C1 (C13 §14 item 9). It also shows the authorized-writer list, which starts empty, and the person adds each authorized writer explicitly. Then the signed path is D3's (C7 0.10 and C8 0.12, for D4-68):
 
 1. **The client builds the accepted document.** It is the frozen draft with the person's `authorized_writers` filled in, in C13 §8's canonical encoding. The client shows it, and writes its exact bytes to the node's admin folder as `network-baseline-<sensor_id>.json` (D5). Those bytes are unsigned and have no effect on their own.
 2. **The client signs `node.network_baseline_ack`**, a separate admin kind (D1, D4-68). The body names the sensor and the accepted document's digest (`baseline_digest`). It also names the frozen draft it was built from (`draft_digest`), so the signature binds both. The client computes both digests over the bytes it shows (HR-14). The two digests are equal when the person adds no writers.
@@ -93,9 +93,9 @@ The class each code goes in is D4's call. D2 flagged only the codes where the ma
 | Code | Class | Status | Source |
 | --- | --- | --- | --- |
 | 1 | `read` | confirmed: Read | S33 Table F.2 p. F.2 |
-| 2 with only group 50 objects | `time-sync` | confirmed: Write | S33 Table F.2 p. F.2; g50v1 and g50v3 in S22 Table D.9 pp. D.17 to D.18 |
+| 2 with only g50v1 or g50v3 objects | `time-sync` | confirmed: Write | S33 Table F.2 p. F.2; g50v1 and g50v3 in S22 Table D.9 pp. D.17 to D.18. Any other group 50 variation is not a held time write, so it falls to the next row but one (D2, D1 on #549) |
 | 2 with only g80v1 objects | `session-setup` | confirmed: Write | S22 p. D.18 (index 7); S23 Table 2.30 p. 82 (indexes 4 and 7) |
-| 2 with any other object, or a mix | `write` | confirmed: Write | S33 Table F.2 p. F.2; g34 deadbands in S22 Table D.9 |
+| 2 with any other object, or a mix, including any group 50 variation other than 1 and 3 | `write` | confirmed: Write | S33 Table F.2 p. F.2; g34 deadbands in S22 Table D.9 |
 | 3, 4 | `control` | confirmed: Select, Operate | S33 Table F.2 p. F.2 |
 | 5, 6 | `control` | confirmed: Direct operate, and its no-reply form | S33 Table F.2 p. F.3; g12 and g41 in S22 p. D.15 and S23 pp. 80 to 82 |
 | 7 to 10 | `write` | number only: counter freezes | S22 Table D.9 p. D.15; S23 Table 2.30 p. 80 |

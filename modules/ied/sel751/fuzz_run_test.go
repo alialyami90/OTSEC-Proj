@@ -28,7 +28,7 @@ func FuzzRun(f *testing.F) {
 	in := load(f)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		chunks := bytes.Split(data, []byte{0xF7})
-		near, far := net.Pipe()
+		near, far := pipe()
 		go func() {
 			defer far.Close()
 			_ = far.SetDeadline(time.Now().Add(10 * time.Second))

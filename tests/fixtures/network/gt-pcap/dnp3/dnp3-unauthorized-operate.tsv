@@ -1,0 +1,15 @@
+# GT-PCAP labels for dnp3-unauthorized-operate.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.
+# fields: frame.number, frame.len, ip.src, ip.dst, tcp.srcport, tcp.dstport, tcp.flags.syn, tcp.flags.ack, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
+# sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.
+# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
+# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
+# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
+kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
+flow	192.0.2.11	192.0.2.20	41006	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1,2,3,4,5,6,7,8,9,10	9e0abf9534b4c578564056e0d67e78d7bf7a8e3e76d3f8340f8d84c3a15a892a,5a8eb32d9f40aa1e9832d5a46590bcf4223444c75bbcf72541a0ece9c4baa52b,134bb834536e3cf7edb3193fda561d0dcfd3b9568da9d419b50ebdf2327f5b9c,9d91cc9506eb1d49d817907223baf0facf8c68cd6bc066ef8e951bacf8c7c74c,dc69be3392f60e3660a163aa3f4ee10f1c52d3146a9ce8e79d71464dece2ac92,d883ac6bc10f3ea4efd894db2a4ac0530a3182a1ebcd9a35587c19d3b34ba6ef,86f0a132aa7533af462a2b7ec982c84253e0366a8f1379f30c9ba39f409d2f61,4aa2b14e1d121b4215e45a83f3c7a2ff6a3ddee8e2e9f3c7dabcb3c8a37ef941,0c87b77503b6ab4edc25ce838423b19d56da50870664042c83fbfc31785a9882,d753f047cce75788917aa6125d1ca2ef33c5699356b47abffc6213a3e031c016	10	660							
+service		192.0.2.20		20000	tcp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	1	9e0abf9534b4c578564056e0d67e78d7bf7a8e3e76d3f8340f8d84c3a15a892a									
+function	192.0.2.11	192.0.2.20	41006	20000	tcp	dnp3		client-server	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20	4,6	9d91cc9506eb1d49d817907223baf0facf8c68cd6bc066ef8e951bacf8c7c74c,d883ac6bc10f3ea4efd894db2a4ac0530a3182a1ebcd9a35587c19d3b34ba6ef			5	g12v1	none				
+counter						dnp3														dnp3_seq_reused=0
+case					tcp	dnp3				4,6	9d91cc9506eb1d49d817907223baf0facf8c68cd6bc066ef8e951bacf8c7c74c,d883ac6bc10f3ea4efd894db2a4ac0530a3182a1ebcd9a35587c19d3b34ba6ef					none		unauthorized-write	acknowledged	direct operate from a read-only master; dnp3_no_sa

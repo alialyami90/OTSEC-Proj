@@ -154,6 +154,12 @@ const (
 	// ScopedPDU does not decode. Only a key holder can send one. The session
 	// ends and the bytes are kept.
 	FailedSNMPScopedPDUUnreadable Code = "failed.snmp_scoped_pdu_unreadable"
+	// FailedSNMPVarbindsMismatch (0.9, D4-60, D1 on #541): an authenticated
+	// noError Response to a GetRequest or a GetNextRequest whose binding
+	// count differs from the request's (RFC 3416 §4.2.1, §4.2.2). The count
+	// is checked before any binding of that Response is kept, so none of
+	// them gives a value. The session ends and the bytes are kept.
+	FailedSNMPVarbindsMismatch Code = "failed.snmp_varbinds_mismatch"
 
 	PartialParseErrors Code = "partial.parse_errors" // some records failed to parse; all bytes kept (EP-1)
 	// PartialReadRowsExceeded: the read has more rows than the profile's
@@ -236,6 +242,7 @@ var codes = map[Code]codeInfo{
 	FailedSNMPFIDUnreadable:        {StageAfterAuth, 7, "", "", snmpOnly},
 	FailedSNMPUnexpectedReport:     {StageAny, 8, "", "", snmpOnly},
 	FailedSNMPScopedPDUUnreadable:  {StageAuth, 8, "", "", snmpOnly},
+	FailedSNMPVarbindsMismatch:     {StageAfterAuth, 9, "", "", snmpOnly},
 }
 
 // Codes lists every code in the taxonomy of this package's minor.

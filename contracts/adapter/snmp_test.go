@@ -46,6 +46,8 @@ var snmpWant = map[string]string{
 	"fid-unreadable-with-fid-item":                       "failed.snmp_fid_unreadable: the identity holds only the matching snmp_engine_id item",
 	"fid-unreadable-with-fid-observation":                "failed.snmp_fid_unreadable reports no firmware_id",
 	"scoped-pdu-unreadable-at-0.7":                       `error code "failed.snmp_scoped_pdu_unreadable" is new in 0.8`,
+	"varbinds-mismatch-at-0.8":                           `error code "failed.snmp_varbinds_mismatch" is new in 0.9`,
+	"connected-at-not-first-segment":                     "connected_at of an SNMP session is the at of its first segment, which is sent",
 	"scoped-pdu-unreadable-without-authenticated-answer": "answers an authenticated message, so a received auth or operate message carried a digest",
 	"unexpected-report-with-nothing-received":            "answers a Report, so a message was received",
 }
@@ -192,14 +194,15 @@ func TestCheckSNMP(t *testing.T) {
 }
 
 // The SEL-only and SNMP-only codes are the proposal's lists (§2.1), and every
-// SNMP code is new in 0.7.
+// SNMP code is new in 0.7, but for 0.8's two and 0.9's one.
 func TestSNMPCodes(t *testing.T) {
 	for c, info := range codes {
 		snmp := strings.Contains(string(c), "usm_") || strings.Contains(string(c), "snmp_") || c == RefusedEngineIDMismatch
 		if snmp != (info.session == snmpOnly) {
 			t.Errorf("%s: session kind %q", c, info.session)
 		}
-		if snmp && info.since != 7 && !(info.since == 8 && (c == FailedSNMPUnexpectedReport || c == FailedSNMPScopedPDUUnreadable)) {
+		if snmp && info.since != 7 && !(info.since == 8 && (c == FailedSNMPUnexpectedReport || c == FailedSNMPScopedPDUUnreadable)) &&
+			!(info.since == 9 && c == FailedSNMPVarbindsMismatch) {
 			t.Errorf("%s: since 0.%d", c, info.since)
 		}
 		if snmp && (info.suspends != "" || info.credential != "") {
@@ -262,7 +265,7 @@ func TestLineReads(t *testing.T) {
 	if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "is new in 0.7") {
 		t.Errorf("a read at 0.1: %v", err)
 	}
-	r.Schema = Contract
+	r.Schema = "otsec.adapter/0.7"
 	r.Observations[0].Read = nil
 	if err := r.Validate(); err == nil || !strings.Contains(err.Error(), "observations[0].read is required from 0.7") {
 		t.Errorf("no read at 0.7: %v", err)

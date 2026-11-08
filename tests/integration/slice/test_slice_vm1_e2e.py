@@ -38,8 +38,11 @@ CASES = {c["id"]: c for c in TABLE["cases"]}
 # Refused before any run: at load (U13, M1, M2) or at the credential's
 # install (U14). Each has its own test below.
 REFUSED_BEFORE = {"U13", "U14", "M1", "M2"}
-# M3 is a check over the ok runs, not a case of its own.
-NOT_RUN = REFUSED_BEFORE | {"M3"}
+# M3 is a check over the ok runs, not a case of its own. W11 and W12 need
+# the entity operation as a GetNext walk, which the signed test package
+# doesn't hold while D4-60's bar stands, so they run at the client
+# (tests/integration/gt_mib/client, C6-gt-mib-plan.md section 2.4).
+NOT_RUN = REFUSED_BEFORE | {"M3", "W11", "W12"}
 # U15's next run must succeed, so it runs every 60 s (the profile's
 # minimum) and the run waits for its second result.
 SECOND_RUN = {"U15": 60}

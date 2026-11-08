@@ -205,6 +205,18 @@ type outcome struct {
 	inputs inputs
 }
 
+// tcpPipe gives the pipe the local address a dialed TCP socket has, which
+// C2 0.9's session.local_addr needs (D2, ahead of the 0.9 code). A pipe has
+// no IP address of its own; the port differs per dial.
+type tcpPipe struct {
+	net.Conn
+	port int
+}
+
+func (p tcpPipe) LocalAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: p.port}
+}
+
 func run(t *testing.T, f inputs, rl *relay) outcome {
 	t.Helper()
 	var o outcome
@@ -219,7 +231,7 @@ func run(t *testing.T, f inputs, rl *relay) outcome {
 			mu.Unlock()
 			a, b := net.Pipe()
 			go rl.serve(b)
-			return a, nil
+			return tcpPipe{a, 40000 + o.dials}, nil
 		},
 		Now:   func() time.Time { clock = clock.Add(50 * time.Millisecond); return clock },
 		TIDLE: func(d time.Duration) { mu.Lock(); o.tidle = append(o.tidle, d); mu.Unlock() },

@@ -925,6 +925,73 @@
       }
     },
     {
+      "id": "W10",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "answers the first GetRequest of the system operation's two OIDs with a noError Response carrying sysDescr's binding alone",
+      "expect": {
+        "code": "failed.snmp_varbinds_mismatch",
+        "authenticated_requests": 2,
+        "bytes_kept": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "checks": [
+          "the run ends at that Response, which is kept in the transcript",
+          "no binding of that Response gives a value",
+          "no GetBulk or GetNext is sent after it"
+        ]
+      },
+      "time_window_first": true,
+      "code_from": "C2 0.9 (D4-60, D1 on #541): a Get's noError Response carries one binding per requested OID (RFC 3416 section 4.2.1)"
+    },
+    {
+      "id": "W11",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "the entity operation as a GetNext walk; the agent answers its second GetNextRequest with a noError Response carrying no binding",
+      "register": "getnext",
+      "expect": {
+        "code": "failed.snmp_varbinds_mismatch",
+        "bytes_kept": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "checks": [
+          "the walk is not read as complete",
+          "the values of the earlier Responses are kept, and none from the one that ends the run",
+          "no request follows it"
+        ]
+      },
+      "code_from": "C2 0.9: a GetNext's noError Response carries one binding per requested OID (RFC 3416 section 4.2.2)"
+    },
+    {
+      "id": "W12",
+      "section": "2.4",
+      "vm": "b",
+      "setup": "the entity operation as a GetNext walk; the agent answers its second GetNextRequest with a noError Response carrying two bindings",
+      "register": "getnext",
+      "expect": {
+        "code": "failed.snmp_varbinds_mismatch",
+        "bytes_kept": true,
+        "absent": [
+          "firmware_id",
+          "model",
+          "firmware_version"
+        ],
+        "checks": [
+          "neither binding of that Response gives a value",
+          "the values of the earlier Responses are kept",
+          "no request follows it"
+        ]
+      },
+      "code_from": "C2 0.9: a GetNext's noError Response carries one binding per requested OID (RFC 3416 section 4.2.2)"
+    },
+    {
       "id": "T1",
       "section": "2.5",
       "vm": "b",
