@@ -2,6 +2,7 @@ package sensorlink
 
 import (
 	"encoding/hex"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -45,5 +46,15 @@ func TestCaptureGolden(t *testing.T) {
 	}
 	if d := hashOf(got); d != goldenCaptureDigest {
 		t.Fatalf("digest %s, want %s", d, goldenCaptureDigest)
+	}
+}
+
+// A wire length below the captured bytes, or one the uint32 would wrap, is
+// refused (D3 on #553).
+func TestCaptureWireLenRange(t *testing.T) {
+	for _, n := range []int{1, math.MaxUint32 + 1} {
+		if _, err := buildPcap([]pcapFrame{{TS: time.Unix(0, 0), Data: []byte{1, 2}, WireLen: n}}); err == nil {
+			t.Errorf("wire length %d accepted", n)
+		}
 	}
 }

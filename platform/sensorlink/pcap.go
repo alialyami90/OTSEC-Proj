@@ -3,6 +3,7 @@ package sensorlink
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 
 	"otsec.local/otsec/contracts/netobs"
@@ -50,6 +51,10 @@ func buildPcap(frames []pcapFrame) ([]byte, error) {
 		sec := f.TS.Unix()
 		if sec < 0 || sec > 1<<32-1 {
 			return nil, fmt.Errorf("frame time %s is outside the pcap range", f.TS.UTC().Format(time.RFC3339Nano))
+		}
+		if f.WireLen < len(f.Data) || uint64(f.WireLen) > math.MaxUint32 {
+			// The uint32 would wrap and misstate the frame (D3 on #553).
+			return nil, fmt.Errorf("frame wire length %d is below its %d captured bytes or above the pcap range", f.WireLen, len(f.Data))
 		}
 		b = le.AppendUint32(b, uint32(sec))
 		b = le.AppendUint32(b, uint32(f.TS.Nanosecond()))

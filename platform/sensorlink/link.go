@@ -79,6 +79,10 @@ type Stats struct {
 	// seq it took in that run.
 	RunID   string
 	LastSeq uint64
+	// RunChanges counts the times the run changed after the first run the
+	// link read. Each resets the seq and heartbeat checks, so a sensor that
+	// rotates its run_id shows here (D3 on #553).
+	RunChanges uint64
 	// LastCommittedSeq is the last seq of the run whose observation is
 	// committed, so a restart shows where it resumes (D1 on #542).
 	LastCommittedSeq uint64
@@ -213,6 +217,9 @@ func (l *Link) takeSeq(run string, n uint64) bool {
 	defer l.mu.Unlock()
 	s := &l.stats
 	if run != s.RunID {
+		if s.RunID != "" {
+			s.RunChanges++
+		}
 		s.RunID, s.LastSeq, s.LastCommittedSeq, s.Heartbeat = run, 0, 0, nil
 	}
 	if n <= s.LastSeq {
@@ -324,18 +331,20 @@ func (l *Link) nodeObject(o *netobs.Observation) (*netobs.Node, bool) {
 	if o.IP != nil {
 		src, srcKnown := l.resolve(o.IP.Src)
 		dst, dstKnown := l.resolve(o.IP.Dst)
+		// Each end resolves on its own: an end on an address two assets
+		// share stays unresolved, and the other end keeps its asset (D3 on
+		// #553, D1's ruling (a)).
+		if srcKnown && src != "" {
+			nd.SrcAsset = src
+		}
+		if dstKnown && dst != "" {
+			nd.DstAsset = dst
+		}
 		switch {
 		case (srcKnown && src == "") || (dstKnown && dst == ""):
-			// Either end on an address two assets share: neither resolves.
 			nd.ResolvedBy = "ip-ambiguous"
 		case srcKnown || dstKnown:
 			nd.ResolvedBy = "ip"
-			if srcKnown {
-				nd.SrcAsset = src
-			}
-			if dstKnown {
-				nd.DstAsset = dst
-			}
 		}
 	}
 	if f := o.Function; o.Kind == netobs.KindFunction && f != nil {

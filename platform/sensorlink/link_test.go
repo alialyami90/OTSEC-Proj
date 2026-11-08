@@ -3,16 +3,19 @@ package sensorlink
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"slices"
 	"testing"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
+	c5 "otsec.local/otsec/contracts/store"
 )
 
 var bg = context.Background()
@@ -154,24 +157,33 @@ func TestDNP3NoSA(t *testing.T) {
 	}
 }
 
-// Ambiguity: an end on an address two assets share leaves both ends
-// unresolved, as ip-ambiguous, and the observation draws on the budget.
+// Ambiguity: an end on an address two assets share stays unresolved, as
+// ip-ambiguous, and the other end keeps its asset. Only an observation
+// with neither end named draws on the budget (D3 on #553, D1's ruling (a)).
 func TestAmbiguousEnd(t *testing.T) {
 	l := newLink(t, openNet(t, 64<<20), &clock{}, 64<<20)
-	assets := append(testAssets(), asset.Asset{AssetID: "9a8b7c6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d", NodeID: testNode,
-		Endpoints: []asset.Endpoint{ep("dup", asset.SyslogTCP, "192.0.2.20", "")}})
-	l.resolver = NewResolver(testNode, assets)
-	nd, unresolved := l.nodeObject(flow(1, "192.0.2.10", "192.0.2.20"))
-	if nd.ResolvedBy != "ip-ambiguous" || nd.SrcAsset != netobs.AssetUnresolved || nd.DstAsset != netobs.AssetUnresolved || !unresolved {
-		t.Fatalf("node %+v, unresolved %v", nd, unresolved)
+	dup := func(id, host string) asset.Asset {
+		return asset.Asset{AssetID: id, NodeID: testNode, Endpoints: []asset.Endpoint{ep("dup", asset.SyslogTCP, host, "")}}
 	}
-	nd, unresolved = l.nodeObject(flow(1, "198.51.100.1", "198.51.100.2"))
-	if nd.ResolvedBy != "none" || !unresolved {
-		t.Fatalf("node %+v", nd)
-	}
-	nd, unresolved = l.nodeObject(flow(1, "198.51.100.1", "192.0.2.10"))
-	if nd.ResolvedBy != "ip" || nd.DstAsset != master || nd.SrcAsset != netobs.AssetUnresolved || unresolved {
-		t.Fatalf("one end resolved: %+v, unresolved %v", nd, unresolved)
+	// .20, the relay's address, and .30 are each shared by two assets.
+	l.resolver = NewResolver(testNode, append(testAssets(), dup("9a8b7c6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d", "192.0.2.20"),
+		asset.Asset{AssetID: "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8", NodeID: testNode, Endpoints: []asset.Endpoint{ep("a", asset.SyslogUDP, "192.0.2.30", "")}},
+		dup("5f6a7b8c-9d0e-4f1a-b2c3-d4e5f6a7b8c9", "192.0.2.30")))
+	for _, tc := range []struct {
+		name, src, dst, by, srcAsset, dstAsset string
+		budgeted                               bool
+	}{
+		{"ambiguous dst", "192.0.2.10", "192.0.2.20", "ip-ambiguous", master, netobs.AssetUnresolved, false},
+		{"ambiguous src to a resolved dst", "192.0.2.30", "192.0.2.10", "ip-ambiguous", netobs.AssetUnresolved, master, false},
+		{"both ends ambiguous", "192.0.2.30", "192.0.2.20", "ip-ambiguous", netobs.AssetUnresolved, netobs.AssetUnresolved, true},
+		{"neither end known", "198.51.100.1", "198.51.100.2", "none", netobs.AssetUnresolved, netobs.AssetUnresolved, true},
+		{"resolved dst", "198.51.100.1", "192.0.2.10", "ip", netobs.AssetUnresolved, master, false},
+		{"resolved src", "192.0.2.10", "198.51.100.2", "ip", master, netobs.AssetUnresolved, false},
+	} {
+		nd, budgeted := l.nodeObject(flow(1, tc.src, tc.dst))
+		if nd.ResolvedBy != tc.by || nd.SrcAsset != tc.srcAsset || nd.DstAsset != tc.dstAsset || budgeted != tc.budgeted {
+			t.Errorf("%s: node %+v, budgeted %v", tc.name, nd, budgeted)
+		}
 	}
 }
 
@@ -285,27 +297,41 @@ func TestUnresolvedBudget(t *testing.T) {
 		t.Fatalf("at start: %+v", l.Stats())
 	}
 	send("192.0.2.10", "192.0.2.20") // resolved: never budgeted
+	// A resolved source to an unresolved destination isn't budgeted either,
+	// and its C4 event carries the flag, as source.asset is the destination
+	// (D6 on #553).
+	send("192.0.2.10", "198.51.100.2")
+	if committed() != 2 {
+		t.Fatalf("a resolved source was budgeted: %+v", l.Stats())
+	}
+	var e event.Event
+	if err := json.Unmarshal(stored(t, s)[1].Event, &e); err != nil {
+		t.Fatal(err)
+	}
+	if e.Source.Asset != nil || !slices.Equal(e.Flags, []string{"asset-unresolved"}) {
+		t.Fatalf("source %+v, flags %v", e.Source, e.Flags)
+	}
 	c.now += time.Hour
 	for range k + 1 {
 		unresolved()
 	}
-	if got := committed(); got != 1+k {
-		t.Fatalf("after H: %d committed, want %d", got, 1+k)
+	if got := committed(); got != 2+k {
+		t.Fatalf("after H: %d committed, want %d", got, 2+k)
 	}
 	// H/k seconds earn exactly one record; a nanosecond less earns none.
 	c.now += time.Hour/k - 1
 	unresolved()
-	if committed() != 1+k {
+	if committed() != 2+k {
 		t.Fatal("a record committed before its bytes were earned")
 	}
 	c.now++
 	unresolved()
 	unresolved()
-	if got := committed(); got != 2+k {
-		t.Fatalf("after H/k: %d committed, want %d", got, 2+k)
+	if got := committed(); got != 3+k {
+		t.Fatalf("after H/k: %d committed, want %d", got, 3+k)
 	}
 	send("192.0.2.10", "192.0.2.20")
-	if committed() != 3+k {
+	if committed() != 4+k {
 		t.Fatal("a resolved record was budgeted")
 	}
 	if d := l.Stats().Dropped; d[DropUnresolvedBudget] != 4 || len(d) != 1 {
@@ -362,6 +388,119 @@ func TestSettingsBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st := l.Stats(); st.Refused["range"] != 2 || st.Committed != 1 || st.Heartbeat != nil {
+		t.Fatalf("stats %+v", st)
+	}
+}
+
+// refusing is a store that refuses its first n appends as class-full.
+type refusing struct {
+	n   int
+	log Appender
+}
+
+func (r *refusing) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error) {
+	if r.n > 0 {
+		r.n--
+		return nil, &c5.Error{Code: c5.CodeQuotaReached}
+	}
+	return r.log.Append(ctx, rec)
+}
+
+// Bytes the store refuses go back to the bucket, so the earned records
+// still commit once the class has room (D6 on #553); and from empty, H/2
+// earns exactly half the bucket.
+func TestBudgetGiveBack(t *testing.T) {
+	s := openNet(t, 64<<20)
+	c := &clock{}
+	r := unresolvedBytes(t)
+	const k = 4
+	l := newLink(t, s, c, 4*k*r)
+	ref := &refusing{n: 3, log: s.log}
+	l.opt.Store = ref
+	seq := 100
+	send := func(n int) {
+		t.Helper()
+		for range n {
+			seq++
+			if err := l.Serve(bg, stream(t, flow(seq, "198.51.100.1", "198.51.100.2"))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	c.now += time.Hour // the bucket holds k records
+	send(3)            // refused by the store
+	send(k + 1)
+	st := l.Stats()
+	if st.Committed != k || st.Dropped[DropClassFull] != 3 || st.Dropped[DropUnresolvedBudget] != 1 {
+		t.Fatalf("stats %+v", st)
+	}
+
+	// From empty, H/2 earns floor((B/2)/r) records: 2 of k = 4.
+	l = newLink(t, s, c, 4*k*r)
+	c.now += time.Hour / 2
+	send(k)
+	if st := l.Stats(); st.Committed != k/2 || st.Dropped[DropUnresolvedBudget] != k/2 {
+		t.Fatalf("after H/2: %+v", st)
+	}
+}
+
+// unresolvedBytes is one unresolved flow record's bytes, for a three-digit
+// seq.
+func unresolvedBytes(t *testing.T) int64 {
+	t.Helper()
+	s := openNet(t, 64<<20)
+	l := newLink(t, s, &clock{}, 64<<20)
+	l.opt.Monotonic = (&clock{now: time.Hour}).mono
+	if err := l.Serve(bg, stream(t, flow(100, "198.51.100.1", "198.51.100.2"))); err != nil {
+		t.Fatal(err)
+	}
+	got := stored(t, s)
+	if len(got) != 1 {
+		t.Fatalf("probe: %+v", l.Stats())
+	}
+	return int64(len(got[0].Event))
+}
+
+// A frame cut at 2,048 bytes keeps its wire length as the record's
+// orig_len (D6 on #553).
+func TestCaptureWireLen(t *testing.T) {
+	s := openNet(t, 64<<20)
+	l := newLink(t, s, &clock{}, 64<<20)
+	o := firstSight(1, "192.0.2.10", "192.0.2.20", netobs.SAChallenged)
+	f2 := frameBytes(netobs.MaxFrameBytes, 60, 8)
+	cf := &o.Citation.Frames[1]
+	cf.CapturedLen, cf.WireLen, cf.SHA256 = len(f2), 3000, hashOf(f2)
+	o.Frames[1].Data = base64.StdEncoding.EncodeToString(f2)
+	if err := l.Serve(bg, stream(t, o)); err != nil {
+		t.Fatal(err)
+	}
+	got := stored(t, s)
+	if len(got) != 1 {
+		t.Fatalf("stats %+v", l.Stats())
+	}
+	c, err := s.db.ReadCapture(bg, got[0].EvidenceRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	le := binary.LittleEndian
+	rec2 := c.Bytes[24+16+len(frameBytes(74, 0, 0)):]
+	if incl, orig := le.Uint32(rec2[8:]), le.Uint32(rec2[12:]); incl != netobs.MaxFrameBytes || orig != 3000 {
+		t.Fatalf("incl_len %d, orig_len %d", incl, orig)
+	}
+}
+
+// A change of run is counted, the first run read not included (D3 on #553).
+func TestRunChanges(t *testing.T) {
+	l := newLink(t, openNet(t, 64<<20), &clock{}, 64<<20)
+	other := "1c2d3e4f-5a6b-4c7d-8e9f-a0b1c2d3e4f5"
+	h := heartbeat(1, 1)
+	f := flow(1, "192.0.2.10", "192.0.2.20")
+	f.RunID = other
+	f.Citation.CaptureID = "ring:" + other + ":3"
+	if err := l.Serve(bg, stream(t, heartbeat(2, 1), f, h)); err != nil {
+		t.Fatal(err)
+	}
+	if st := l.Stats(); st.RunChanges != 2 || st.RunID != testRun {
 		t.Fatalf("stats %+v", st)
 	}
 }
