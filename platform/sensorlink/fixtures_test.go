@@ -67,7 +67,7 @@ func coverage() netobs.Coverage {
 		Interfaces: []netobs.Interface{{Name: "eth1", Attachment: "span", LAN: "single"}},
 		PRP:        netobs.PRP{LANsSeen: []string{}}, HSR: netobs.HSRNotDecoded,
 		VLANsSeen: []int{10}, UntaggedSeen: true, Decodes: []string{"dnp3", "modbus"}, Degraded: []string{},
-		Settings: netobs.Settings{SAReplyTimeoutMS: netobs.DefaultSAReplyTimeoutMS, MaxPendingDNP3: netobs.DefaultMaxPendingDNP3},
+		Settings: netobs.Settings{SAReplyTimeoutMS: netobs.DefaultSAReplyTimeoutMS, MaxPendingDNP3: netobs.DefaultMaxPendingDNP3, FlowIdleS: netobs.DefaultFlowIdleS},
 		SinceUTC: "2026-11-07T08:00:00.000000Z",
 	}
 }

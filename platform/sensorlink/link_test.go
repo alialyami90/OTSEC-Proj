@@ -187,6 +187,47 @@ func TestAmbiguousEnd(t *testing.T) {
 	}
 }
 
+// End to end, the stored records carry what the node resolved and read back
+// under C13: an ambiguous end beside a resolved one, and a TCP flow end with
+// its syn_only.
+func TestStoredResolution(t *testing.T) {
+	s := openNet(t, 64<<20)
+	l := newLink(t, s, &clock{}, 64<<20)
+	l.resolver = NewResolver(testNode, append(testAssets(),
+		asset.Asset{AssetID: "9a8b7c6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d", NodeID: testNode, Endpoints: []asset.Endpoint{ep("dup", asset.SyslogTCP, "192.0.2.20", "")}}))
+	end := flow(2, "192.0.2.10", "192.0.2.20")
+	syn := true
+	end.Flow = &netobs.Flow{Phase: "end", End: "rst", Packets: 2, Bytes: 120, SynOnly: &syn}
+	if err := l.Serve(bg, stream(t, flow(1, "192.0.2.10", "192.0.2.20"), end)); err != nil {
+		t.Fatal(err)
+	}
+	got := stored(t, s)
+	if len(got) != 2 {
+		t.Fatalf("stats %+v", l.Stats())
+	}
+	var obs []*netobs.Observation
+	for i, st := range got {
+		var e event.Event
+		if err := json.Unmarshal(st.Event, &e); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Validate(); err != nil {
+			t.Fatalf("record %d C4: %v", i, err)
+		}
+		o, err := netobs.ObservationFromEvent(&e)
+		if err != nil {
+			t.Fatalf("record %d C13 stored: %v", i, err)
+		}
+		if o.Node.ResolvedBy != "ip-ambiguous" || o.Node.SrcAsset != master || o.Node.DstAsset != netobs.AssetUnresolved {
+			t.Fatalf("record %d node %+v", i, o.Node)
+		}
+		obs = append(obs, o)
+	}
+	if f := obs[1].Flow; f.Phase != "end" || f.SynOnly == nil || !*f.SynOnly {
+		t.Fatalf("flow %+v", f)
+	}
+}
+
 // Hostile records are refused and counted, and the channel stays up; only
 // an oversized frame closes it.
 func TestRefusals(t *testing.T) {
@@ -382,12 +423,15 @@ func TestSettingsBounds(t *testing.T) {
 	o.Coverage.Settings.SAReplyTimeoutMS = netobs.MinSAReplyTimeoutMS - 1
 	h := heartbeat(2, 1)
 	h.Coverage.Settings.MaxPendingDNP3 = netobs.MaxMaxPendingDNP3 + 1
-	ok := flow(3, "192.0.2.10", "192.0.2.20")
+	idle := flow(3, "192.0.2.10", "192.0.2.20")
+	idle.Coverage.Settings.FlowIdleS = netobs.MaxFlowIdleS + 1
+	ok := flow(4, "192.0.2.10", "192.0.2.20")
 	ok.Coverage.Settings.SAReplyTimeoutMS = netobs.MaxSAReplyTimeoutMS
-	if err := l.Serve(bg, stream(t, o, h, ok)); err != nil {
+	ok.Coverage.Settings.FlowIdleS = netobs.MinFlowIdleS
+	if err := l.Serve(bg, stream(t, o, h, idle, ok)); err != nil {
 		t.Fatal(err)
 	}
-	if st := l.Stats(); st.Refused["range"] != 2 || st.Committed != 1 || st.Heartbeat != nil {
+	if st := l.Stats(); st.Refused["range"] != 3 || st.Committed != 1 || st.Heartbeat != nil {
 		t.Fatalf("stats %+v", st)
 	}
 }
