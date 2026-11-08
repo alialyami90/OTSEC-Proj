@@ -779,3 +779,99 @@ func TestLearnerMidstreamOrientedByRole(t *testing.T) {
 		t.Error("an entry is keyed on the master's ephemeral port")
 	}
 }
+
+// lxUDP is a stored UDP flow start from src to dst's dport: no direction,
+// as C13 has it, and an undecoded protocol.
+func lxUDP(t testing.TB, src string, sport int, dst string, dport int) *netobs.Observation {
+	t.Helper()
+	o := lxObs(t, netobs.KindFlow, src, dst, dport)
+	o.IP.L4, o.IP.Sport, o.Direction, o.Protocol = "udp", ptr(sport), netobs.DirectionNone, "unknown"
+	if err := o.ValidateStored(); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return o
+}
+
+// D1 in D4-71: a UDP start learns its pair at once, from the first
+// datagram's sender, and is never held. In order, the client's pair is
+// learned. A capture that begins on the reply learns the reversed pair,
+// on the client's port, which is the stated limit (§2.2, §8). A UDP start
+// whose address is refused learns no pair (D3's S1).
+func TestLearnerUDPStart(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	for i, o := range []*netobs.Observation{
+		lxUDP(t, "192.0.2.10", 40000, "192.0.2.20", 123), // in order: the client's request
+		lxUDP(t, "192.0.2.20", 161, "192.0.2.10", 50000), // reply first: the server's datagram
+	} {
+		if err := l.Observe(uint64(i+1), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inOrder := netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "udp", Port: 123, Protocol: "unknown"}
+	reversed := netobs.Pair{Client: lxRelay, Server: lxMaster, L4: "udp", Port: 50000, Protocol: "unknown"}
+	if !l.pairs[inOrder] || !l.pairs[reversed] || len(l.pairs) != 2 || len(l.held) != 0 {
+		t.Fatalf("pairs %v, held %d", l.pairs, len(l.held))
+	}
+	if !bytes.Contains(checkpoint(t, l), []byte(`"held":[]`)) {
+		t.Fatal("a UDP start was held")
+	}
+	// The other half: a TCP start is still held, not learned.
+	if err := l.Observe(3, lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000)); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.held) != 1 || len(l.pairs) != 2 {
+		t.Fatalf("TCP start: held %d, pairs %d", len(l.held), len(l.pairs))
+	}
+	// With no room for its new address, a UDP start learns no pair.
+	full, _ := NewLearner(lxConfig())
+	full.lists[listPairs].bytes, full.lists[listPairs].n = netobs.MaxBaselineBytes-full.size(), 1
+	if err := full.Observe(1, lxUDP(t, "192.0.2.10", 40000, "192.0.2.20", 123)); err != nil {
+		t.Fatal(err)
+	}
+	if len(full.pairs) != 0 || full.period.Overflow != 1 {
+		t.Fatalf("pairs %d, overflow %d", len(full.pairs), full.period.Overflow)
+	}
+}
+
+// D6's rows on the hold: a start for a pair already learned holds nothing
+// (H8); a start with no source port has no flow to prove it, so it is
+// neither held nor counted (H11); and a function's pair is its request's,
+// client to server's port, whatever the ports' order (M1).
+func TestLearnerHoldEdges(t *testing.T) {
+	l, _ := NewLearner(lxConfig())
+	for i, o := range []*netobs.Observation{
+		lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000),
+		lxEnd(t, "192.0.2.10", "192.0.2.20", 20000, false),
+		lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20000), // known now
+	} {
+		if err := l.Observe(uint64(i+1), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(l.pairs) != 1 || len(l.held) != 0 {
+		t.Fatalf("a known pair's start: pairs %d, held %d", len(l.pairs), len(l.held))
+	}
+	bare := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 20001)
+	bare.IP.Sport = nil // not storable; the learner still neither holds nor counts it
+	if err := l.Observe(4, bare); err != nil || len(l.held) != 0 || l.period.Overflow != 0 {
+		t.Fatalf("no sport: %v, held %d, overflow %d", err, len(l.held), l.period.Overflow)
+	}
+	fn := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 20000)
+	fn.IP.Sport = ptr(1024) // the master on a port below the server's
+	if err := l.Observe(5, fn); err != nil {
+		t.Fatal(err)
+	}
+	want := netobs.Pair{Client: lxMaster, Server: lxRelay, L4: "tcp", Port: 20000, Protocol: "dnp3"}
+	if len(l.functions) != 1 || l.functions[functionKey(functionOf(want, fn.Function))].Pair != want {
+		t.Fatalf("functions %v", l.functions)
+	}
+	low := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 502)
+	low.IP.Sport = ptr(20000) // and above it
+	if err := l.Observe(6, low); err != nil {
+		t.Fatal(err)
+	}
+	want.Port = 502
+	if _, ok := l.functions[functionKey(functionOf(want, low.Function))]; !ok || len(l.functions) != 2 {
+		t.Fatalf("functions %v", l.functions)
+	}
+}

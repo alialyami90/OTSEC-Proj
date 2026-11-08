@@ -193,6 +193,12 @@ func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
 			if !l.pairs[pair] {
 				fits = l.hold(key, pair) && fits
 			}
+		// A UDP start has no handshake to wait for and no end that proves
+		// it, so its pair is learned at once, from the first datagram's
+		// sender to its receiver (C13 §4.1). A capture that begins on a
+		// reply learns the reversed pair (§2.2, §8; D1 in D4-71).
+		case o.Kind == netobs.KindFlow && o.Flow != nil && o.Flow.Phase == "start" && o.IP.L4 == "udp":
+			fits = l.pair(pair) && fits
 		case o.Kind == netobs.KindFlow && o.Flow != nil && o.Flow.Phase == "end":
 			if p, ok := l.held[key]; ok {
 				delete(l.held, key)
