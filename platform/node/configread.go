@@ -61,7 +61,7 @@ func (s *Scheduler) commitConfigRead(ctx context.Context, rep Report, col Collec
 	inv := adapter.Invocation{InvocationID: o.InvocationID, PrincipalRef: col.ID, AssetID: col.AssetID, EndpointID: col.Endpoint,
 		ProfileID: a.Profile.ID, OperationID: col.Operation, Params: col.Params, CredentialRef: col.CredentialRef}
 	tr := o.Result.Transcript
-	run := map[string]string{"status": string(o.Result.Status), "events": "0"}
+	run := withSession(map[string]string{"status": string(o.Result.Status), "events": "0"}, rep)
 	if o.Result.Status != adapter.StatusOK {
 		// A failed read has no snapshot. It is still a run of the operation
 		// that the next detection's unchanged_read_seq may name.

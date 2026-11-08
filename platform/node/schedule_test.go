@@ -113,7 +113,13 @@ func sessionRecordsFor(t *testing.T, first uint64, transcript string) []json.Raw
 // rebuilt. Constructed test data, after A4's withRows.
 func figureOrder(t *testing.T) (result []byte, transcript string) {
 	t.Helper()
-	res, err := adapter.DecodeResult(readFile(t, okResult))
+	return figureOrderFrom(t, okResult)
+}
+
+// figureOrderFrom is figureOrder of the valid result at path.
+func figureOrderFrom(t *testing.T, path string) (result []byte, transcript string) {
+	t.Helper()
+	res, err := adapter.DecodeResult(readFile(t, path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +172,12 @@ func figureOrder(t *testing.T) (result []byte, transcript string) {
 func wireCollector(t *testing.T, onRequest func(req *authz.CollectorRequest), seq *uint64) *collectorclient.Client {
 	t.Helper()
 	result, transcript := figureOrder(t)
+	return wireCollectorResult(t, result, transcript, onRequest, seq)
+}
+
+// wireCollectorResult is wireCollector answering with result.
+func wireCollectorResult(t *testing.T, result []byte, transcript string, onRequest func(req *authz.CollectorRequest), seq *uint64) *collectorclient.Client {
+	t.Helper()
 	return collectorclient.NewWithDialer(func(ctx context.Context) (net.Conn, error) {
 		c, s := net.Pipe()
 		go func() {

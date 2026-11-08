@@ -349,6 +349,15 @@ type Report struct {
 	// stored is true when the run stored its SER rows or one of the
 	// collection.* records above (missed.go).
 	stored bool
+	// session is the session details the run's collection.run carries
+	// when the intake hold watched it (netintake.go).
+	session map[string]string
+}
+
+// withSession adds rep's session details to a collection.run's.
+func withSession(d map[string]string, rep Report) map[string]string {
+	maps.Copy(d, rep.session)
+	return d
 }
 
 // RunOnce runs schedule entry i once. Calls must not overlap: the node
@@ -436,8 +445,10 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 	}
 	var resp collectorclient.Response
 	var doErr error
+	var held *heldRun
 	err = c5.AuditBeforeAct(ctx, s.rt.Log(AuditStream), sent, func(c5.Receipt) error {
 		rep.Sent = true
+		held = s.dispatchHold(ctx, col, rep.RequestID)
 		resp, doErr = s.c.Do(ctx, req)
 		return nil
 	})
@@ -445,6 +456,9 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		return s.alarm(ctx, rep, col.AssetID, AlarmAuditUnavailable, "run not sent: "+err.Error())
 	}
 	rep.Decision = resp.Reply.Status
+	if !resp.Reply.Accepted() || resp.Outcome == nil || resp.Quarantine != nil {
+		s.abandonHold(ctx, held) // no result to tie its flows by
+	}
 
 	switch {
 	case resp.Reply.Status == "":
@@ -522,6 +536,13 @@ func (s *Scheduler) runOnce(ctx context.Context, i int) Report {
 		return s.alarm(ctx, rep, col.AssetID, AlarmOutcomeUnknown, "no outcome arrived for the accepted run")
 	}
 	rep.Outcome = "ok"
+	// After the run's allowed record, which the start repair looks for,
+	// and before its collection.run, which carries the session (D1 in
+	// D4-72).
+	res := resp.Outcome.Result
+	rep.session = s.resultHold(ctx, held, resp.Outcome.InvocationID, sessionResult{Connected: res.Session.Connected,
+		StartedAt: res.StartedAt, EndedAt: res.EndedAt, LocalAddr: res.Session.LocalAddr, ConnectedAt: res.Session.ConnectedAt})
+	defer s.recordedRun(ctx, held)
 	switch {
 	case s.rt.cfg.snmpEntry(col):
 		rep = s.commitSNMP(ctx, rep, col, resp.Outcome)
@@ -585,9 +606,9 @@ func (s *Scheduler) commitResult(ctx context.Context, rep Report, col Collection
 	for _, r := range append(append([]c5.Record{}, ser...), hl...) {
 		carried = carried || r.Capture != nil
 	}
-	run, err := s.runRecord(HealthStream, HealthCollectionRun, col, rep.RequestID, o.InvocationID, map[string]string{
+	run, err := s.runRecord(HealthStream, HealthCollectionRun, col, rep.RequestID, o.InvocationID, withSession(map[string]string{
 		"status": string(o.Result.Status), "events": strconv.Itoa(len(ser)),
-	})
+	}, rep))
 	if err != nil {
 		return s.alarm(ctx, rep, col.AssetID, AlarmEvidenceNotStored, err.Error())
 	}
