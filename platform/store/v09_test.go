@@ -65,6 +65,12 @@ func payloadBytes(t *testing.T, db *DB, stream c5.StreamID) int64 {
 
 func pruneAll(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass) {
 	t.Helper()
+	pruneN(t, db, stream, class, 0)
+}
+
+// pruneN prunes stream's first n records, or all of them when n is 0.
+func pruneN(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass, n int) {
+	t.Helper()
 	last, err := db.LastCommitted(bg, stream)
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +82,12 @@ func pruneAll(t *testing.T, db *DB, stream c5.StreamID, class c5.StreamClass) {
 	b, err := c5.ComputeBoundary(bg, db, db, []c5.Consumer{c}, stream, class, time.Now())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if n > 0 {
+		if _, err := db.PruneStep(bg, b, n); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	for {
 		n, err := db.PruneStep(bg, b, 100)
@@ -199,6 +211,47 @@ func TestNetworkFullOncePerFill(t *testing.T) {
 	fill()
 	if f := fills(); f != 2 {
 		t.Fatalf("%d network-full alarms after the class was pruned and filled again, want 2", f)
+	}
+}
+
+// D1 on F1: a quota below MinRecordBytes, allowed for a class with no
+// record cap, re-arms its full alarm only once the class is empty, since
+// any record could fill it. A prune of one record leaves it full, and the
+// refill raises no second alarm; a prune of every record re-arms it.
+func TestSmallQuotaFullOncePerFill(t *testing.T) {
+	const stream c5.StreamID = "platform/health"
+	a := &alarms{}
+	db := open1(t, storeDir(t), withQuota(evidenceDB, c5.ClassPlatform, 4<<10), a)
+	fills := func() (n int) {
+		for _, x := range a.got {
+			if x.Code == c5.FullAlarm(c5.ClassPlatform) && x.Class == c5.ClassPlatform {
+				n++
+			}
+		}
+		return n
+	}
+	n := 0
+	fill := func() {
+		t.Helper()
+		var refused error
+		for refused == nil && n < 10000 {
+			n++
+			_, refused = db.CommitBatch(bg, stream, []c5.Record{rec(stream, c5.ClassPlatform, n)})
+		}
+		if !isCode(refused, c5.CodeQuotaReached) {
+			t.Fatalf("after %d records: %v, want CodeQuotaReached", n, refused)
+		}
+	}
+	fill()
+	pruneN(t, db, stream, c5.ClassPlatform, 1)
+	fill()
+	if f := fills(); f != 1 {
+		t.Fatalf("%d full alarms after a one-record prune and a refill, want 1", f)
+	}
+	pruneAll(t, db, stream, c5.ClassPlatform)
+	fill()
+	if f := fills(); f != 2 {
+		t.Fatalf("%d full alarms after the class was emptied and filled again, want 2", f)
 	}
 }
 
